@@ -1,0 +1,17 @@
+[package]
+name = "flexwm-ipc"
+description = "Wire protocol and client for controlling flexwm"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[features]
+# Conversions into flexwm-core types, for shells that host the protocol.
+core = ["dep:flexwm-core"]
+
+[dependencies]
+base64.workspace = true
+flexwm-core = { workspace = true, optional = true }
+serde.workspace = true
+serde_json.workspace = true
