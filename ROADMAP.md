@@ -559,18 +559,28 @@ review, and why.
      after 2 served / 198 refused in 48ms costing 2 jiffies. Per connection,
      so bypassable by reconnecting per capture — capping concurrent
      connections is the audit's separate finding and stayed out of scope.
-   - **Atomic publish instead of unlink-then-bind.** `listener::bind` binds at
-     `<path>.<pid>.tmp` in the same directory, chmods it, then `rename`s it
-     into place, cleaning the temporary up if any step fails. The Backlog
-     called this a symlink race; tracing it showed that is not the exposure —
-     `bind(2)` does not follow a symlink at the final component, confirmed
-     empirically (a dangling symlink at the path makes bind fail `EADDRINUSE`,
-     errno 98, rather than writing through it). What the old order really had
-     was a window where the socket existed at its published name with
-     whatever the umask allowed before the `chmod` could run, plus a window
-     where the name was missing and another process could claim it. Both are
-     gone, and there is no longer any moment where a client can connect to a
-     not-yet-tightened socket.
+   - **Atomic publish instead of unlink-then-bind.** `listener::bind` makes a
+     `0700` directory beside the socket path, binds and chmods inside it, then
+     `rename`s the socket into place, removing the directory either way. The
+     Backlog called this a symlink race; tracing it showed that is not the
+     exposure — `bind(2)` does not follow a symlink at the final component,
+     confirmed empirically (a dangling symlink at the path makes bind fail
+     `EADDRINUSE`, errno 98, rather than writing through it), and
+     `remove_file` unlinks a link rather than its target. What the old order
+     really had was a window where the socket existed at its published name
+     with whatever the umask allowed before the `chmod` could run, plus a
+     window where the name was missing and another process could claim it.
+     The staging directory is not decoration: the first shape of this fix
+     bound at a plain `<path>.<pid>.tmp` and chmodded that, which *is* a
+     symlink race — `set_permissions` takes a path and follows symlinks, so in
+     the very directory this item worries about, another user could swap the
+     staged socket for a symlink between the bind and the chmod and have the
+     compositor chmod a file of their choosing. Binding inside a directory
+     nobody else can write to removes the opportunity instead of narrowing it.
+     (The umask is an alternative way to get a `0600` socket with no chmod at
+     all, not taken: it is process-global, so it would only be sound while the
+     process is single-threaded — a caveat the staging directory does not
+     need, and one this crate's own parallel test runner would violate.)
 
    `ipc.rs` split into `ipc/line.rs`, `ipc/listener.rs` and `ipc/tests.rs`
    before it sprawled. 123 tests (20 new), clippy/fmt clean, `cargo test`

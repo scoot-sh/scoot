@@ -324,14 +324,14 @@ fn the_default_limit_is_generous_enough_for_a_real_request() {
 // --- the socket itself ---------------------------------------------------
 
 #[test]
-fn the_temporary_name_stays_in_the_same_directory() {
+fn the_staging_directory_stays_in_the_sockets_own_directory() {
     // `rename` cannot cross filesystems, and the socket has to be published
-    // where the caller asked -- so the name bound first has to share a
-    // directory with it.
+    // where the caller asked -- so the directory it is built in has to share
+    // a parent with it.
     let path = std::path::Path::new("/run/user/1000/flexwm.sock");
-    let temporary = listener::temporary_path(path);
-    assert_eq!(temporary.parent(), path.parent());
-    assert_ne!(temporary, path);
+    let staging = listener::staging_path(path);
+    assert_eq!(staging.parent(), path.parent());
+    assert_ne!(staging, path);
 }
 
 #[test]
@@ -349,7 +349,7 @@ fn a_bound_socket_is_owner_only_and_leaves_no_temporary_behind() {
          directory's own mode or this process's umask"
     );
 
-    // Nothing but the socket: the name it was bound at first is gone.
+    // Nothing but the socket: the directory it was built in is gone.
     let left: Vec<_> = std::fs::read_dir(dir.path())
         .expect("readable")
         .map(|entry| entry.expect("an entry").file_name())
@@ -365,6 +365,27 @@ fn a_bound_socket_is_owner_only_and_leaves_no_temporary_behind() {
         listener::own_uid()
     );
     drop(client);
+}
+
+#[test]
+fn the_socket_is_owner_only_even_in_a_world_writable_directory() {
+    // The configuration the whole item is about: `$FLEXWM_SOCKET` pointing
+    // somewhere anyone can write, where `$XDG_RUNTIME_DIR`'s own `0700` is
+    // not doing the work any more.
+    let dir = tempfile::tempdir().expect("a temp dir");
+    std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o777))
+        .expect("opens the directory up");
+    let path = dir.path().join("flexwm.sock");
+    let _socket = listener::bind(&path).expect("binds");
+    assert_eq!(
+        std::fs::metadata(&path)
+            .expect("the socket exists")
+            .permissions()
+            .mode()
+            & 0o777,
+        0o600
+    );
+    assert_eq!(entries(dir.path()), 1, "no staging directory left behind");
 }
 
 #[test]
@@ -409,20 +430,33 @@ fn binding_replaces_a_symlink_rather_than_writing_through_it() {
 
 #[test]
 fn a_bind_that_cannot_be_published_cleans_up_after_itself() {
-    // Publishing into a path whose parent does not exist fails at the
-    // `rename`, after the socket has already been bound at its temporary
-    // name -- the one window where a half-built socket could be left behind.
+    // A path whose parent does not exist fails at the staging directory, the
+    // first step that touches the filesystem, leaving nothing behind.
     let dir = tempfile::tempdir().expect("a temp dir");
     let path = dir.path().join("no-such-directory").join("flexwm.sock");
     assert!(listener::bind(&path).is_err());
+    assert_eq!(entries(dir.path()), 0);
+
+    // And a path that stages fine but cannot be published: `rename` onto an
+    // existing *directory* fails (`EISDIR`/`ENOTDIR`) after the socket is
+    // already bound, which is the window where a half-built socket could
+    // have been left behind.
+    let occupied = dir.path().join("flexwm.sock");
+    std::fs::create_dir(&occupied).expect("a directory in the way");
+    assert!(listener::bind(&occupied).is_err());
     assert_eq!(
-        std::fs::read_dir(dir.path())
-            .expect("readable")
-            .filter_map(Result::ok)
-            .count(),
-        0,
-        "the temporary socket must not outlive the failure"
+        entries(dir.path()),
+        1,
+        "only the directory that was in the way may be left"
     );
+    assert_eq!(entries(&occupied), 0, "and nothing may be left inside it");
+}
+
+fn entries(path: &std::path::Path) -> usize {
+    std::fs::read_dir(path)
+        .expect("readable")
+        .filter_map(Result::ok)
+        .count()
 }
 
 #[test]
