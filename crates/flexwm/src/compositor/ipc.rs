@@ -56,6 +56,7 @@ fn accept(state: &mut State, stream: UnixStream) -> std::io::Result<()> {
     let mut connection = Connection {
         reader: BufReader::new(stream.try_clone()?),
         writer: stream.try_clone()?,
+        line: String::new(),
     };
     let source = Generic::new(stream, Interest::READ, Mode::Level);
     state
@@ -78,16 +79,20 @@ enum Step {
 struct Connection {
     reader: BufReader<UnixStream>,
     writer: UnixStream,
+    /// Reused across requests on this connection instead of allocating a
+    /// fresh String per message -- an agent driving a session over one
+    /// connection can send many.
+    line: String,
 }
 
 impl Connection {
     fn step(&mut self, state: &mut State) -> Step {
-        let mut line = String::new();
-        match self.reader.read_line(&mut line) {
+        self.line.clear();
+        match self.reader.read_line(&mut self.line) {
             Ok(0) | Err(_) => return Step::Close,
             Ok(_) => {}
         }
-        let request: Request = match decode(&line) {
+        let request: Request = match decode(&self.line) {
             Ok(request) => request,
             Err(error) => {
                 let _ = self.reply(&Response::error(error.to_string()));
