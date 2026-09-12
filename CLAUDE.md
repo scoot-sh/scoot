@@ -196,3 +196,21 @@ as you work, and keep it short — anything durable belongs in `CLAUDE.md` or
   than assuming ownership of the process's lifecycle. (Exception: the user
   has occasionally asked directly, in which case be explicit that doing so
   makes the VM a child of that Claude Code session's process tree.)
+- **Never run `git checkout`/`git commit`/other branch-mutating commands in
+  the shared main checkout (`/Users/steveyackey/code/flexwm`) while a
+  background implementer agent might still be active there.** They're
+  instructed to work directly in that checkout, not a worktree (see
+  `flexwm-implementer.md` — the dev VM's 9p mount points at that exact
+  directory, which a worktree elsewhere can't reach without a manual
+  copy-over). A background agent's own `git checkout -b` can silently switch
+  the branch a concurrent orchestrator action lands on — this actually
+  happened once: an orchestrator-side wording fix landed on the
+  implementer's in-progress branch instead of the intended one, and
+  `gh pr merge --delete-branch`'s local cleanup step touches whatever branch
+  is checked out too. No work was lost (the stray commit was recovered via
+  `git reflog` and cherry-picked to the right place), but it was avoidable.
+  If the orchestrating session needs to touch the repo while any
+  implementer might still be running (fixing a small nit directly, updating
+  `ROADMAP.md`, merging a PR), do it from a throwaway `git worktree add
+  /tmp/<name> <branch>` instead of the shared checkout, and remove it after
+  pushing. Only skip the worktree once confirmed no implementer is active.
