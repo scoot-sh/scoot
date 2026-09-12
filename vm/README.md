@@ -92,8 +92,11 @@ cd /mnt/flexwm && cargo build          # CARGO_TARGET_DIR is /var/cargo-target,
                                        # i.e. on the guest disk, not over 9p
 ```
 
-Then run the binary from the QEMU window's tty1, not over ssh — a compositor
-needs a seat and a VT. `cargo build` works without `nix develop`: the
+Then run the binary from the QEMU window's tty1 to actually watch it on the
+virtual display, or over an ssh session (logind's PAM stack registers those
+with a real seat/session too, so `--tty` runs and takes real DRM/libseat
+ownership just fine headlessly over ssh — only *watching* it happen needs the
+QEMU window). `cargo build` works without `nix develop`: the
 wayland/libinput/libxkbcommon/gbm/udev/seatd `.pc` files are in the system
 profile and `PKG_CONFIG_PATH` points at it.
 

@@ -34,6 +34,17 @@ impl State {
             },
         );
         pointer.frame(self);
+        // Only `--tty` draws a visible cursor (see `cursor.rs`'s module
+        // doc), so only it needs a redraw on plain motion -- headless and
+        // nested have nothing on screen that changes when the pointer moves
+        // without also pressing/scrolling/committing, and marking them
+        // dirty here would cost a real render for no visible effect.
+        // libinput can report motion at 500-1000Hz while the display flips
+        // at ~60Hz; this only marks the frame dirty; `render()` still runs
+        // at most once per frame tick, not once per event.
+        if self.tty.is_some() {
+            self.request_render();
+        }
     }
 
     /// Moves the pointer by a relative delta, clamped to the current

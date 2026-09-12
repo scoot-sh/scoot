@@ -240,13 +240,35 @@ fn create_surface(
 }
 
 impl Tty {
-    /// Copies an already-rendered frame into a free dumb buffer and
-    /// scans it out. Same renderer-agnostic byte-slice signature as
-    /// `nested::Host::present` -- see that doc for the rationale.
+    /// The buffer age `headless::render` should pass `render_output` for
+    /// this frame -- see `buffers.rs`'s module doc on why it isn't always
+    /// the same value, and `BufferPool::next_age`'s doc for what it means.
+    /// A pure peek: pair every call with [`advance_generation`](Self::advance_generation)
+    /// once the render it was used for has actually happened.
+    pub fn next_buffer_age(&self) -> usize {
+        self.buffers.next_age()
+    }
+
+    /// Must be called exactly once per `render_output` call this backend's
+    /// [`next_buffer_age`](Self::next_buffer_age) was used for -- see
+    /// `BufferPool::advance_generation`'s doc for why this can't be folded
+    /// into `present` itself (it must run even when `present` isn't called
+    /// at all, i.e. when nothing was damaged this frame).
+    pub fn advance_generation(&mut self) {
+        self.buffers.advance_generation();
+    }
+
+    /// Copies an already-rendered frame's `region` into a free dumb buffer
+    /// and scans it out. `pixels` holds exactly that region's own pixels
+    /// (tightly packed, `region.size.w * region.size.h * 4` bytes), not the
+    /// full frame -- see `buffers.rs`'s module doc on why presenting less
+    /// than the whole output is the point. `frame_size` is the *output's*
+    /// total size, independent of how small `region` is, and is what's
+    /// checked against this backend's fixed mode size.
     ///
     /// Does nothing if the session is paused, or a reactivation attempt
     /// failed to reacquire the DRM device (`active` is `false` in either
-    /// case -- see `reactivate`), if the frame's dimensions don't match this
+    /// case -- see `reactivate`), if `frame_size` doesn't match this
     /// output's fixed mode size (this backend doesn't support resizing --
     /// the mode is chosen once, at startup), or if a previous flip hasn't
     /// been confirmed by a `VBlank` yet (`flip_pending`) -- flipping again
@@ -254,18 +276,23 @@ impl Tty {
     /// so a `VBlank` (or, for the
     /// paused case, a reactivation) re-triggers a render instead of leaving
     /// the screen stale.
-    pub fn present(&mut self, pixels: &[u8], width: i32, height: i32) {
+    pub fn present(
+        &mut self,
+        pixels: &[u8],
+        region: Rectangle<i32, Physical>,
+        frame_size: (i32, i32),
+    ) {
         if !self.active {
             return;
         }
-        if (width, height) != (self.width, self.height) {
+        if frame_size != (self.width, self.height) {
             return;
         }
         if self.flip_pending {
             self.present_skipped = true;
             return;
         }
-        let Some((index, fb)) = self.buffers.write_free(pixels) else {
+        let Some((index, fb)) = self.buffers.write_region(pixels, region) else {
             // Unlike the flip_pending skip above -- an ordinary, frequent,
             // harmless throttle; exactly one slot is always free whenever a
             // flip isn't in flight -- reaching here means neither slot was
@@ -273,8 +300,8 @@ impl Tty {
             // happen in normal operation. It means either a buffer-freeing
             // bug leaked a slot (this is the failure mode a prior review
             // flagged as running silently forever once both slots are
-            // stuck busy) or `write_free` failed to map a dumb buffer (see
-            // its own log line in buffers.rs). warn!, not debug!: this is a
+            // stuck busy) or `write_region` failed to map a dumb buffer
+            // (see its own log line in buffers.rs). warn!, not debug!: this is a
             // bug signal, not routine throttling, so it's fine for it to
             // repeat on every subsequent present() for as long as it lasts.
             tracing::warn!(
@@ -286,8 +313,8 @@ impl Tty {
         };
         self.present_skipped = false;
 
-        let src_size: Size<i32, BufferSpace> = (width, height).into();
-        let dst_size: Size<i32, Physical> = (width, height).into();
+        let src_size: Size<i32, BufferSpace> = frame_size.into();
+        let dst_size: Size<i32, Physical> = frame_size.into();
         let plane_state = PlaneState {
             handle: self.surface.plane(),
             config: Some(PlaneConfig {
@@ -417,8 +444,13 @@ impl Tty {
         // its state (or, if `drm.activate` failed, was never something we
         // can trust to begin with) -- either way both buffer slots are safe
         // to reuse. Unconditional: freeing slots is always safe, never
-        // harmful, regardless of what else above failed.
+        // harmful, regardless of what else above failed. Ages are
+        // invalidated for the same reason (see `BufferPool::invalidate_ages`'s
+        // doc): a slot's pre-pause content is real, but nothing here can
+        // vouch for what's actually on screen right now, so the next
+        // present must be a full redraw rather than trusting a stale age.
         self.buffers.mark_all_free();
+        self.buffers.invalidate_ages();
         self.showing = None;
         self.pending_free = None;
         drm_active
