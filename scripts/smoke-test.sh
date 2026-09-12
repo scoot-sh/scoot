@@ -1,8 +1,19 @@
 #!/usr/bin/env bash
-# Drives flexwm end to end with no display: start it, open a terminal inside it,
-# type into that terminal, and capture the screen.
+# Drives flexwm end to end over IPC only: start it, open a terminal inside it,
+# type into that terminal, and capture the screen. Backend-agnostic by design
+# -- IPC input/introspection works the same regardless of how the compositor
+# presents itself, so this is the regression net for every backend, not just
+# --headless.
+#
+# MODE selects the backend (default --headless). For --nested, run this
+# script itself inside a host compositor, e.g.:
+#   WLR_BACKENDS=headless WLR_RENDERER=pixman WLR_LIBINPUT_NO_DEVICES=1 \
+#     cage -- env MODE=--nested scripts/smoke-test.sh
+# so flexwm's own Connection::connect_to_env() (nested.rs) finds cage's
+# WAYLAND_DISPLAY when it starts, not this shell's.
 set -euo pipefail
 
+MODE=${MODE:---headless}
 FLEXWM=${FLEXWM:-/var/cargo-target/debug/flexwm}
 SOCKET=${SOCKET:-/run/user/$(id -u)/flexwm-smoke.sock}
 SHOT=${SHOT:-/tmp/flexwm-smoke.png}
@@ -11,7 +22,7 @@ export FLEXWM_SOCKET="$SOCKET"
 
 rm -f "$SOCKET" "$SHOT" "$LOG"
 
-"$FLEXWM" --headless --width 1200 --height 800 --socket "$SOCKET" >"$LOG" 2>&1 &
+"$FLEXWM" "$MODE" --width 1200 --height 800 --socket "$SOCKET" >"$LOG" 2>&1 &
 compositor=$!
 trap 'kill "$compositor" 2>/dev/null || true' EXIT
 
