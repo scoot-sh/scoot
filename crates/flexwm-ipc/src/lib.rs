@@ -20,7 +20,7 @@ mod socket;
 pub use action::{Action, Horizontal, Vertical};
 #[cfg(unix)]
 pub use client::Client;
-pub use codec::{decode, encode, read_message, write_message};
+pub use codec::{decode, encode, read_message, read_message_buffered, write_message};
 pub use key::{KeyCombo, Modifier, ParseKeyComboError};
 pub use request::{PointerButton, Request};
 pub use response::{OutputSnapshot, Rect, Response, Screenshot, WindowSnapshot};

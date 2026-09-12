@@ -56,6 +56,7 @@ fn accept(state: &mut State, stream: UnixStream) -> std::io::Result<()> {
     let mut connection = Connection {
         reader: BufReader::new(stream.try_clone()?),
         writer: stream.try_clone()?,
+        line: String::new(),
     };
     let source = Generic::new(stream, Interest::READ, Mode::Level);
     state
@@ -78,16 +79,20 @@ enum Step {
 struct Connection {
     reader: BufReader<UnixStream>,
     writer: UnixStream,
+    /// Reused across requests on this connection instead of allocating a
+    /// fresh String per message -- an agent driving a session over one
+    /// connection can send many.
+    line: String,
 }
 
 impl Connection {
     fn step(&mut self, state: &mut State) -> Step {
-        let mut line = String::new();
-        match self.reader.read_line(&mut line) {
+        self.line.clear();
+        match self.reader.read_line(&mut self.line) {
             Ok(0) | Err(_) => return Step::Close,
             Ok(_) => {}
         }
-        let request: Request = match decode(&line) {
+        let request: Request = match decode(&self.line) {
             Ok(request) => request,
             Err(error) => {
                 let _ = self.reply(&Response::error(error.to_string()));
@@ -112,6 +117,10 @@ impl Connection {
                 deadline: now + Duration::from_millis(timeout_ms),
                 started: now,
             });
+            // The frame timer answers this, but it drops itself when there's
+            // nothing to do -- if the compositor was already idle, it needs
+            // waking back up or this request would wait forever.
+            state.ensure_ticking();
             return Step::Close;
         }
 
@@ -183,7 +192,14 @@ impl State {
                 Ok(()) => Response::Ok,
                 Err(error) => Response::error(error),
             },
-            Request::WaitIdle { .. } => Response::error("wait-idle is answered by the render loop"),
+            // Connection::step() intercepts and answers this variant itself
+            // (see above) before handle_request is ever called, since a
+            // reply here has to wait on pending_idle instead of being
+            // returned immediately like every other request. If this ever
+            // fires, that interception was bypassed -- a bug worth a loud
+            // failure, not a request that quietly appears to work while
+            // answering wrong.
+            Request::WaitIdle { .. } => unreachable!("WaitIdle is answered by Connection::step"),
         }
     }
 

@@ -23,11 +23,23 @@ pub fn write_message<W: Write, T: Serialize>(writer: &mut W, message: &T) -> io:
 
 /// Reads one message; `Ok(None)` at a clean end of stream.
 pub fn read_message<R: BufRead, T: DeserializeOwned>(reader: &mut R) -> io::Result<Option<T>> {
-    let mut line = String::new();
-    if reader.read_line(&mut line)? == 0 {
+    read_message_buffered(reader, &mut String::new())
+}
+
+/// Reads one message into a caller-owned buffer instead of allocating a
+/// fresh `String` per call. `line` is cleared and refilled every call; a
+/// connection that reads many messages (an agent's `Client`, or the
+/// compositor's own per-connection loop) keeps one around across calls so
+/// its capacity is amortized instead of reallocated every request.
+pub fn read_message_buffered<R: BufRead, T: DeserializeOwned>(
+    reader: &mut R,
+    line: &mut String,
+) -> io::Result<Option<T>> {
+    line.clear();
+    if reader.read_line(line)? == 0 {
         return Ok(None);
     }
-    decode(&line)
+    decode(line)
         .map(Some)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
 }

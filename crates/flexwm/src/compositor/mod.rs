@@ -27,7 +27,7 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
     let display: Display<State> = Display::new()?;
     let mut state = State::new(&mut event_loop, display);
 
-    headless::init(&mut event_loop, &mut state, options.width, options.height)?;
+    headless::init(&mut state, options.width, options.height)?;
     ipc::init(&mut event_loop, &mut state, options.socket.clone())?;
 
     // Children reach both the compositor and its control socket through the
