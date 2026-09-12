@@ -82,6 +82,17 @@ the user runs the command themselves in their own terminal (not via the
 in-chat `!` prefix for anything multi-line — heredocs pasted that way don't
 reliably execute; a real terminal session is the reliable path).
 
+## Local scratch/handoff state
+
+`HANDOFF.md` at the repo root is gitignored — the standing convention for
+transient, session-specific state (open PRs awaiting merge, which VMs are up,
+what's in flight right now) that goes stale within hours and isn't meant to
+be shared or reviewed. It's distinct from this file (durable, shared,
+git-tracked doctrine) and from a user's own Claude memory (durable,
+user-specific preferences that persist across projects). Keep it current
+as you work, and keep it short — anything durable belongs in `CLAUDE.md` or
+`ROADMAP.md` instead, not duplicated here.
+
 ## Process notes
 
 - Delegate implementation to fork/subagents to keep the coordinating
