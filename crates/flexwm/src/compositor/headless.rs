@@ -10,6 +10,7 @@ use flexwm_core::{Event as CoreEvent, OutputId, Rect};
 use pixman::Image;
 use smithay::backend::allocator::Fourcc;
 use smithay::backend::renderer::damage::OutputDamageTracker;
+use smithay::backend::renderer::element::memory::MemoryRenderBufferRenderElement;
 use smithay::backend::renderer::element::render_elements;
 use smithay::backend::renderer::element::solid::SolidColorRenderElement;
 use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
@@ -19,9 +20,10 @@ use smithay::desktop::Window;
 use smithay::desktop::space::{self, SpaceRenderElements};
 use smithay::output::{Mode, Output, PhysicalProperties, Subpixel};
 use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
-use smithay::utils::{Rectangle, Transform};
+use smithay::utils::{Buffer, Physical, Rectangle, Transform};
 
 use super::State;
+use super::tty::Tty;
 
 // Everything `render()` can draw, front-to-back as Smithay's damage tracker
 // expects (see `render()`'s comment on that convention): window surfaces,
@@ -37,6 +39,7 @@ use super::State;
 // `SolidColorRenderElement`s this enum only wraps.
 render_elements! {
     Elements<=PixmanRenderer>;
+    Cursor = MemoryRenderBufferRenderElement<PixmanRenderer>,
     Space = SpaceRenderElements<PixmanRenderer, WaylandSurfaceRenderElement<PixmanRenderer>>,
     Decoration = SolidColorRenderElement,
 }
@@ -148,24 +151,49 @@ impl State {
                 .elements(&arrangement, &self.appearance, bounds);
             match renderer.bind(image) {
                 Ok(mut framebuffer) => {
-                    // Window surfaces first (topmost) and the ring after
-                    // (bottom-most of the two): Smithay's damage tracker
-                    // draws a `&[E]` back-to-front by walking it in reverse
-                    // (confirmed in `OutputDamageTracker::render_output_internal`,
-                    // which iterates `render_elements.iter().rev()`), so the
+                    // Only `--tty` ever draws a cursor -- see `cursor.rs`'s
+                    // module doc; headless has no display and `--nested`
+                    // already shows the host's own. Any failure building it
+                    // (the fixed embedded bitmap failing to import) just
+                    // means no cursor this frame, not a skipped render.
+                    let cursor_element = if self.tty.is_some() {
+                        self.seat.get_pointer().and_then(|pointer| {
+                            let location = pointer.current_location();
+                            match self.cursor.element(renderer, location) {
+                                Ok(element) => element,
+                                Err(error) => {
+                                    tracing::warn!(
+                                        %error,
+                                        "could not build the cursor render element"
+                                    );
+                                    None
+                                }
+                            }
+                        })
+                    } else {
+                        None
+                    };
+                    // Cursor first (topmost), then window surfaces, then the
+                    // ring (bottom-most of the three): Smithay's damage
+                    // tracker draws a `&[E]` back-to-front by walking it in
+                    // reverse (confirmed in
+                    // `OutputDamageTracker::render_output_internal`, which
+                    // iterates `render_elements.iter().rev()`), so the
                     // *first* entry here ends up drawn *last*, i.e. on top.
-                    // Windows must win that ordering: `shell.rs::apply()`
-                    // positions a window from the layout's rect but sizes it
-                    // from whatever the client actually committed, and a
-                    // client that's slow to shrink (or a `--nested` resize
-                    // still in flight) can briefly have a surface larger
-                    // than its placement rect, reaching into the gap the
-                    // ring is drawn in. Ring-on-top would paint over that
-                    // live content every such frame; windows-on-top instead
-                    // means the stale/oversized content can only ever cover
-                    // the ring, never the reverse -- the same direction niri
-                    // itself picks, and the only one of the two that can't
-                    // corrupt what a client is showing.
+                    // The cursor must win that ordering -- it's meaningless
+                    // hidden behind a window -- and windows must still win
+                    // over the ring: `shell.rs::apply()` positions a window
+                    // from the layout's rect but sizes it from whatever the
+                    // client actually committed, and a client that's slow to
+                    // shrink (or a `--nested` resize still in flight) can
+                    // briefly have a surface larger than its placement rect,
+                    // reaching into the gap the ring is drawn in.
+                    // Ring-on-top would paint over that live content every
+                    // such frame; windows-on-top instead means the
+                    // stale/oversized content can only ever cover the ring,
+                    // never the reverse -- the same direction niri itself
+                    // picks, and the only one of the two that can't corrupt
+                    // what a client is showing.
                     match space::space_render_elements::<_, Window, _>(
                         renderer,
                         [&self.space],
@@ -174,44 +202,99 @@ impl State {
                     ) {
                         Ok(space_elements) => {
                             let mut elements =
-                                Vec::with_capacity(space_elements.len() + ring_elements.len());
+                                Vec::with_capacity(space_elements.len() + ring_elements.len() + 1);
+                            elements.extend(cursor_element.map(Elements::Cursor));
                             elements.extend(space_elements.into_iter().map(Elements::Space));
                             elements.extend(ring_elements.into_iter().map(Elements::Decoration));
+
+                            // `0` (always-full-redraw, unchanged from
+                            // before this feature) for every presenter
+                            // except `--tty`: see `buffers.rs`'s module doc
+                            // on why that one specifically now needs a real
+                            // buffer age -- cursor motion can trigger a
+                            // render on every mouse-motion event, and a
+                            // naive full-frame copy at that rate is exactly
+                            // the multi-MB/s memcpy the roadmap calls out.
+                            // Neither `--headless` nor `--nested` draws a
+                            // cursor, so neither gained a new reason to
+                            // render more often than before.
+                            let age = self.tty.as_ref().map_or(0, Tty::next_buffer_age);
                             let result = damage.render_output(
                                 renderer,
                                 &mut framebuffer,
-                                0,
+                                age,
                                 &elements,
                                 self.appearance.background_color,
                             );
                             match result {
-                                Ok(_) => {
-                                    // Both presenters read back the same frame the
-                                    // same way; only what happens with the pixels
-                                    // afterward differs, so the read-back itself
-                                    // happens once for whichever (or both) are set.
-                                    if self.host.is_some() || self.tty.is_some() {
-                                        // Argb8888 here is the same little-endian BGRA
-                                        // layout wl_shm's own Argb8888 format uses
-                                        // (see screenshot.rs's comment on the same
-                                        // fact for the PNG path) -- unlike there, this
-                                        // is a straight memcpy into the presenter's
-                                        // own buffer, no channel reordering.
-                                        // (width, height) already bound above, from
-                                        // this same *size, for `bounds`.
-                                        let region = Rectangle::from_size((width, height).into());
+                                Ok(render_result) => {
+                                    // Must run unconditionally, even when
+                                    // there turns out to be nothing to
+                                    // present below -- see
+                                    // `BufferPool::advance_generation`'s doc
+                                    // for why this can't be skipped just
+                                    // because this frame is.
+                                    if let Some(tty) = &mut self.tty {
+                                        tty.advance_generation();
+                                    }
+                                    // Both presenters read back the same
+                                    // frame the same way; only what happens
+                                    // with the pixels afterward differs, so
+                                    // the read-back itself happens once for
+                                    // whichever (or both) are set -- and not
+                                    // at all with neither (plain
+                                    // `--headless`, e.g. under IPC-only
+                                    // control): that copy would be pure
+                                    // waste on every render with nothing to
+                                    // hand it to.
+                                    if (self.host.is_some() || self.tty.is_some())
+                                        && let Some(damaged) = render_result.damage
+                                    {
+                                        // Bounding box of every damaged
+                                        // rect, not the rects themselves:
+                                        // `copy_framebuffer` (and the
+                                        // dumb-buffer write behind it) only
+                                        // ever copies one contiguous region.
+                                        // For `--headless`/`--nested` (`age`
+                                        // always `0` above) this is always
+                                        // the full frame regardless, so nothing
+                                        // changes for them; for `--tty` a
+                                        // small, cheap bbox is the common
+                                        // case (see `buffers.rs`'s module
+                                        // doc), and only a large pointer jump
+                                        // or real content change grows it.
+                                        let region = union_bbox(damaged);
+                                        let buffer_region: Rectangle<i32, Buffer> = Rectangle::new(
+                                            (region.loc.x, region.loc.y).into(),
+                                            (region.size.w, region.size.h).into(),
+                                        );
+                                        // Argb8888 here is the same little-endian
+                                        // BGRA layout wl_shm's own Argb8888 format
+                                        // uses (see screenshot.rs's comment on the
+                                        // same fact for the PNG path) -- unlike
+                                        // there, this is a straight memcpy into the
+                                        // presenter's own buffer, no channel
+                                        // reordering.
                                         match renderer.copy_framebuffer(
                                             &framebuffer,
-                                            region,
+                                            buffer_region,
                                             Fourcc::Argb8888,
                                         ) {
                                             Ok(mapping) => match renderer.map_texture(&mapping) {
                                                 Ok(pixels) => {
                                                     if let Some(host) = &mut self.host {
-                                                        host.present(pixels, width, height);
+                                                        host.present(
+                                                            pixels,
+                                                            region.size.w,
+                                                            region.size.h,
+                                                        );
                                                     }
                                                     if let Some(tty) = &mut self.tty {
-                                                        tty.present(pixels, width, height);
+                                                        tty.present(
+                                                            pixels,
+                                                            region,
+                                                            (width, height),
+                                                        );
                                                     }
                                                 }
                                                 Err(error) => tracing::warn!(
@@ -225,6 +308,13 @@ impl State {
                                             ),
                                         }
                                     }
+                                    // else: no presenter is watching this
+                                    // frame, or (only possible when `age >
+                                    // 0`, i.e. only under `--tty`) nothing
+                                    // actually changed -- e.g. a redundant
+                                    // `request_render` with no real
+                                    // difference -- so there's nothing to
+                                    // read back or present either way.
                                 }
                                 Err(error) => tracing::warn!(%error, "could not render"),
                             }
@@ -320,5 +410,67 @@ fn frame_tick(_now: std::time::Instant, _metadata: &mut (), state: &mut State) -
     } else {
         state.timer_armed = false;
         TimeoutAction::Drop
+    }
+}
+
+/// The smallest rectangle containing every rect in `rects`. Pulled out of
+/// `render()` so it's testable without a live renderer, same rationale as
+/// `input.rs`'s `clamp_to_extent`. `rects` must be non-empty --
+/// `OutputDamageTracker::render_output` only ever returns `Some` damage
+/// when it has at least one rectangle to report; an empty list would have
+/// been `None` instead (confirmed against the pinned Smithay source).
+fn union_bbox(rects: &[Rectangle<i32, Physical>]) -> Rectangle<i32, Physical> {
+    let mut iter = rects.iter().copied();
+    let first = iter
+        .next()
+        .expect("render_output never returns an empty damage list");
+    iter.fold(first, |acc, rect| {
+        let x0 = acc.loc.x.min(rect.loc.x);
+        let y0 = acc.loc.y.min(rect.loc.y);
+        let x1 = (acc.loc.x + acc.size.w).max(rect.loc.x + rect.size.w);
+        let y1 = (acc.loc.y + acc.size.h).max(rect.loc.y + rect.size.h);
+        Rectangle::new((x0, y0).into(), (x1 - x0, y1 - y0).into())
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rect(x: i32, y: i32, w: i32, h: i32) -> Rectangle<i32, Physical> {
+        Rectangle::new((x, y).into(), (w, h).into())
+    }
+
+    #[test]
+    fn a_single_rect_is_its_own_bounding_box() {
+        assert_eq!(union_bbox(&[rect(10, 20, 30, 40)]), rect(10, 20, 30, 40));
+    }
+
+    #[test]
+    fn disjoint_rects_bound_the_gap_between_them() {
+        // An old cursor position and a new one some distance away: the
+        // bbox must cover both plus whatever's between them, since a
+        // single `copy_framebuffer`/dumb-buffer write can only ever copy
+        // one contiguous region.
+        let old_position = rect(0, 0, 16, 16);
+        let new_position = rect(100, 50, 16, 16);
+        assert_eq!(
+            union_bbox(&[old_position, new_position]),
+            rect(0, 0, 116, 66)
+        );
+    }
+
+    #[test]
+    fn an_overlapping_rect_does_not_grow_the_box_past_the_union() {
+        let a = rect(0, 0, 20, 20);
+        let b = rect(10, 10, 20, 20);
+        assert_eq!(union_bbox(&[a, b]), rect(0, 0, 30, 30));
+    }
+
+    #[test]
+    fn a_rect_fully_containing_another_wins_alone() {
+        let outer = rect(0, 0, 100, 100);
+        let inner = rect(40, 40, 10, 10);
+        assert_eq!(union_bbox(&[inner, outer]), outer);
     }
 }

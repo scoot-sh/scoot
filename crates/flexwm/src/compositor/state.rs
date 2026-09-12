@@ -27,6 +27,7 @@ use smithay::wayland::shell::xdg::decoration::XdgDecorationState;
 use smithay::wayland::shm::ShmState;
 use smithay::wayland::socket::ListeningSocketSource;
 
+use super::cursor::Cursor;
 use super::decorations::{Appearance, Decorations};
 use super::headless::Backend;
 use super::ipc::PendingIdle;
@@ -72,6 +73,9 @@ pub struct State {
     /// Per-window persistent ring buffers -- see `decorations.rs`'s module
     /// doc for why these live here rather than being rebuilt every frame.
     pub decorations: Decorations,
+    /// The pointer's render buffer and last-requested image, drawn only
+    /// under `--tty` -- see `cursor.rs`'s module doc.
+    pub cursor: Cursor,
 
     pub compositor_state: CompositorState,
     pub xdg_shell_state: XdgShellState,
@@ -159,6 +163,7 @@ impl State {
             tty: None,
             appearance,
             decorations: Decorations::default(),
+            cursor: Cursor::default(),
             compositor_state,
             xdg_shell_state,
             xdg_decoration_state,

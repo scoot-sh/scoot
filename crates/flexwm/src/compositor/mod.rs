@@ -5,6 +5,7 @@
 //! whatever [`Arrangement`](flexwm_core::Arrangement) the core produced.
 
 mod config;
+mod cursor;
 mod decorations;
 mod handlers;
 mod headless;

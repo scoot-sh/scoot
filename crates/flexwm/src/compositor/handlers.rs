@@ -209,8 +209,16 @@ impl SeatHandler for State {
     fn cursor_image(
         &mut self,
         _seat: &Seat<Self>,
-        _image: smithay::input::pointer::CursorImageStatus,
+        image: smithay::input::pointer::CursorImageStatus,
     ) {
+        self.cursor.set_status(image);
+        // Only `--tty` ever draws a cursor element (see `cursor.rs`'s module
+        // doc), so only it needs a redraw when the request changes -- a
+        // gratuitous render on every such event under headless/nested would
+        // do real work for a status this project never looks at there.
+        if self.tty.is_some() {
+            self.request_render();
+        }
     }
 
     fn focus_changed(&mut self, seat: &Seat<Self>, focused: Option<&WlSurface>) {

@@ -24,6 +24,23 @@
 //! wraps the mmap in a safe, `Drop`-unmapped `DumbMapping` -- unlike
 //! `nested/buffers.rs`'s `MappedMem`, there is no raw pointer or `unsafe`
 //! block in this file to write a safety comment for.
+//!
+//! # Per-slot buffer age (added for cursor rendering)
+//!
+//! Cursor motion redraws far more often than any other change this project
+//! makes (see `cursor.rs`'s module doc), so a naive "copy the whole frame
+//! every time" here would turn every mouse-motion event into a multi-MB/s
+//! memcpy. [`write_region`](BufferPool::write_region) instead copies only
+//! the caller-supplied damage rectangle, and [`next_age`](BufferPool::next_age)
+//! tells the caller (`headless::render`, via `Tty::next_buffer_age`) how
+//! many `render_output` calls out of date whichever slot is about to be
+//! written actually is -- not always 1, because the two slots alternate:
+//! if slot A was last written 2 renders ago (slot B took the render in
+//! between), the pixels currently in A are 2 renders stale, and
+//! `OutputDamageTracker` needs to be told exactly that or it hands back
+//! only last render's incremental damage, which isn't enough to bring A
+//! up to date. See `tty::Tty::next_buffer_age`/`advance_generation`'s docs
+//! for the call sequence this depends on.
 
 use std::error::Error;
 
@@ -33,6 +50,7 @@ use smithay::backend::drm::DrmDeviceFd;
 use smithay::backend::drm::dumb::{DumbFramebuffer, framebuffer_from_dumb_buffer};
 use smithay::reexports::drm::buffer::Buffer as DrmBuffer;
 use smithay::reexports::drm::control::{Device as ControlDevice, framebuffer};
+use smithay::utils::{Physical, Rectangle};
 
 const COUNT: usize = 2;
 
@@ -41,12 +59,21 @@ pub struct BufferPool {
     slots: [Slot; COUNT],
     width: i32,
     height: i32,
+    /// Advanced once per [`advance_generation`](Self::advance_generation)
+    /// call -- see the module doc's "per-slot buffer age" section.
+    generation: u64,
 }
 
 struct Slot {
     buffer: DumbBuffer,
     framebuffer: DumbFramebuffer,
     free: bool,
+    /// The pool's `generation` at the time this slot's pixels were last
+    /// written by [`write_region`](BufferPool::write_region), or `None` if
+    /// never written, or if [`invalidate_ages`](BufferPool::invalidate_ages)
+    /// has since run (forces a full redraw the next time this slot is
+    /// picked -- see [`next_age`](BufferPool::next_age)).
+    last_written: Option<u64>,
 }
 
 impl BufferPool {
@@ -61,22 +88,85 @@ impl BufferPool {
             slots,
             width,
             height,
+            generation: 0,
         })
     }
 
-    /// Writes `pixels` (tightly packed Argb8888/Xrgb8888, `width * height *
-    /// 4` bytes) into whichever slot is free, and returns that slot's index
-    /// (to pass back to [`mark_free`](Self::mark_free) once scanned out)
-    /// and framebuffer handle (to hand to `DrmSurface::commit`/`page_flip`).
-    /// `None` if no slot is currently free -- the previous flip hasn't been
-    /// confirmed by a `VBlank` yet -- or if `pixels` isn't sized for this
-    /// pool's `width`/`height`.
-    pub fn write_free(&mut self, pixels: &[u8]) -> Option<(usize, framebuffer::Handle)> {
-        let row_len = self.width as usize * 4;
-        if pixels.len() != row_len.checked_mul(self.height as usize)? {
+    /// The buffer age to pass `OutputDamageTracker::render_output` for
+    /// whichever slot [`write_region`](Self::write_region) would pick next
+    /// (the same first-free lookup) -- `0` (forcing a full redraw) if that
+    /// slot has no valid history to compute an age from.
+    ///
+    /// A pure peek: this alone doesn't advance `generation`, so it's safe to
+    /// call before deciding whether a render is even worth doing. The
+    /// caller must still call [`advance_generation`](Self::advance_generation)
+    /// exactly once for every `render_output` call this age was used for --
+    /// see that method's doc for why.
+    pub fn next_age(&self) -> usize {
+        let index = first_free(self.slots.iter().map(|slot| slot.free));
+        index.map_or(0, |index| {
+            age(self.generation, self.slots[index].last_written)
+        })
+    }
+
+    /// Must be called exactly once after every `render_output` call this
+    /// pool's [`next_age`](Self::next_age) was used for, whether or not that
+    /// render's damage ends up written anywhere by
+    /// [`write_region`](Self::write_region). `OutputDamageTracker`'s own
+    /// damage history advances unconditionally on every `render_output`
+    /// call (confirmed against the pinned Smithay source: the history push
+    /// happens before the "anything actually damaged?" check that might
+    /// skip drawing) -- so this generation counter must track it 1:1, or a
+    /// later `next_age` computes an age against the wrong baseline and the
+    /// tracker hands back damage for the wrong span of history.
+    pub fn advance_generation(&mut self) {
+        self.generation += 1;
+    }
+
+    /// Forces every slot's next pick to report age `0` (a full redraw).
+    /// Used after a session reactivation (`Tty::reactivate`): the dumb
+    /// buffers' pixel bytes themselves are untouched by a VT switch (they're
+    /// just host memory, not GPU state another VT could repurpose), but
+    /// what's actually on screen right now is not known to have come from
+    /// any generation this pool tracked -- another VT may have driven the
+    /// display differently in the meantime. Trusting a slot's pre-pause
+    /// `last_written` here would risk presenting only a small incremental
+    /// patch onto a screen whose real current content doesn't match what
+    /// the tracker assumes, which is exactly the class of bug (a display
+    /// left showing stale/wrong pixels with no error anywhere) this
+    /// project's standards call out as the worst kind.
+    pub fn invalidate_ages(&mut self) {
+        for slot in &mut self.slots {
+            slot.last_written = None;
+        }
+    }
+
+    /// Writes `pixels` (tightly packed Argb8888/Xrgb8888, exactly
+    /// `region.size.w * region.size.h * 4` bytes) into `region` of whichever
+    /// slot is free, leaving the rest of that slot's existing contents
+    /// alone, and returns that slot's index (to pass back to
+    /// [`mark_free`](Self::mark_free) once scanned out) and framebuffer
+    /// handle (to hand to `DrmSurface::commit`/`page_flip`). `None` if no
+    /// slot is currently free, if `pixels` isn't sized for `region`, or if
+    /// `region` doesn't fit within this pool's `width`/`height`.
+    pub fn write_region(
+        &mut self,
+        pixels: &[u8],
+        region: Rectangle<i32, Physical>,
+    ) -> Option<(usize, framebuffer::Handle)> {
+        let row_len = region.size.w as usize * 4;
+        if pixels.len() != row_len.checked_mul(region.size.h as usize)? {
+            return None;
+        }
+        if region.loc.x < 0
+            || region.loc.y < 0
+            || region.loc.x + region.size.w > self.width
+            || region.loc.y + region.size.h > self.height
+        {
             return None;
         }
         let index = first_free(self.slots.iter().map(|slot| slot.free))?;
+        let generation = self.generation;
         let slot = &mut self.slots[index];
         // `handle()` returns drm-rs's own `Copy` handle type, not the
         // `Send`-ineligible mapping itself -- this local copy is what
@@ -97,20 +187,18 @@ impl BufferPool {
         // Never assume `mapping.len() == pitch * height`: the kernel rounds
         // a dumb buffer's total allocation up to a page boundary, so the
         // mapping is typically a little *longer* than that even when
-        // `pitch == row_len` -- this bit real hardware in this VM (pitch
+        // `pitch == width * 4` -- this bit real hardware in this VM (pitch
         // exactly `width * 4`, mapping still padded to the next 4096) the
         // first time this ran, where nested's wl_shm buffers (self-sized,
-        // never padded like this) could never have caught it. Copying row
-        // by row via `chunks_exact_mut` sidesteps the whole question: it
-        // takes exactly `height` chunks of `pitch` bytes from the front of
-        // the mapping and ignores whatever, if anything, follows them.
-        for (src_row, dst_row) in pixels
-            .chunks_exact(row_len)
-            .zip(mapping.chunks_exact_mut(pitch))
-        {
-            dst_row[..row_len].copy_from_slice(src_row);
-        }
+        // never padded like this) could never have caught it. Indexing by
+        // an explicit byte offset (`y * pitch + x_offset`) rather than
+        // `chunks_exact_mut(pitch)` sidesteps the same question while also
+        // letting each row land at `region`'s offset instead of row 0.
+        let x_offset = region.loc.x as usize * 4;
+        let y0 = region.loc.y as usize;
+        copy_region_rows(&mut mapping, pitch, x_offset, y0, row_len, pixels);
         slot.free = false;
+        slot.last_written = Some(generation);
         Some((index, *slot.framebuffer.as_ref()))
     }
 
@@ -156,14 +244,67 @@ fn make_slot(
         buffer,
         framebuffer,
         free: true,
+        last_written: None,
     })
 }
 
-/// The index of the first `true`. Pulled out of `write_free` so it's
+/// The index of the first `true`. Pulled out of `write_region` so it's
 /// testable against plain bools, without needing a live DRM device to build
 /// real `Slot`s -- same rationale as `nested/buffers.rs`'s `first_free`.
 fn first_free(free: impl Iterator<Item = bool>) -> Option<usize> {
     free.enumerate().find(|&(_, free)| free).map(|(i, _)| i)
+}
+
+/// The age to report for a slot whose `last_written` generation is given,
+/// against the pool's current `generation` -- pulled out of `next_age` so
+/// this arithmetic is directly testable, same rationale as `first_free`.
+/// `None` (never written) is always age `0` (force a full redraw).
+///
+/// `last_written` is captured by `write_region` *after*
+/// [`advance_generation`](BufferPool::advance_generation) has already run
+/// for the render that performed that write (see this module's doc and
+/// `headless::render`'s call order: `advance_generation` runs before
+/// `present`/`write_region`) -- so it equals the total count of completed
+/// `render_output` calls through and including that write. The render this
+/// age is being computed for hasn't happened yet (this is a peek, taken
+/// before that render's own `advance_generation`), so it's one call further
+/// on than `generation` currently reads. The number of `render_output`
+/// calls whose damage must land in this slot to bring it up to date is
+/// therefore `(generation + 1) - last_written`, not `generation -
+/// last_written` -- the render about to happen counts too, since its own
+/// damage is what's being requested this age for in the first place.
+///
+/// Getting this wrong by one is silent and easy to miss: every check this
+/// project has run so far reads back the pixman intermediate image (which
+/// always recomposites correctly regardless of `age`), never the dumb
+/// buffer this age actually governs, so an off-by-one here would only ever
+/// show up as a stale sliver on real scanout hardware, not in any existing
+/// test or IPC screenshot.
+fn age(generation: u64, last_written: Option<u64>) -> usize {
+    last_written.map_or(0, |last| (generation - last + 1) as usize)
+}
+
+/// Copies `pixels` (tightly packed rows, `row_len` bytes each) into `dest`
+/// (a full mapped buffer with driver-chosen `pitch` bytes per row) starting
+/// at byte column `x_offset` and row `y0`, leaving every byte outside that
+/// region untouched. Pulled out of `write_region` so the pitch-aware,
+/// offset row-by-row copy math is directly testable against a plain
+/// in-memory buffer, without needing a live DRM device to map a real dumb
+/// buffer -- same rationale as `first_free`. See this module's doc for why
+/// `pitch` can differ from both `x_offset`'s own row width and from
+/// `dest`'s total length (kernel page rounding).
+fn copy_region_rows(
+    dest: &mut [u8],
+    pitch: usize,
+    x_offset: usize,
+    y0: usize,
+    row_len: usize,
+    pixels: &[u8],
+) {
+    for (row, src_row) in pixels.chunks_exact(row_len).enumerate() {
+        let start = (y0 + row) * pitch + x_offset;
+        dest[start..start + row_len].copy_from_slice(src_row);
+    }
 }
 
 #[cfg(test)]
@@ -177,5 +318,105 @@ mod tests {
         assert_eq!(first_free([false, true].into_iter()), Some(1));
         assert_eq!(first_free([true, true].into_iter()), Some(0));
         assert_eq!(first_free(std::iter::empty()), None);
+    }
+
+    #[test]
+    fn age_of_a_never_written_slot_is_zero() {
+        assert_eq!(age(0, None), 0);
+        assert_eq!(age(9, None), 0);
+    }
+
+    #[test]
+    fn age_of_a_slot_written_by_the_immediately_preceding_render_is_one() {
+        // Regression for the two-slot alternation this module's doc
+        // describes: slot0 is written during render 1 (generation becomes 1
+        // *before* the write, per `headless::render`'s call order, so
+        // `last_written = 1`). Peeking again immediately -- as if render 1
+        // were about to be repeated with no other render in between -- must
+        // report age 1 (this render's own fresh damage is enough), not 0
+        // (which would force a needless full redraw) or 2.
+        assert_eq!(age(1, Some(1)), 1);
+    }
+
+    #[test]
+    fn age_reflects_a_render_that_landed_on_the_other_slot_in_between() {
+        // The exact scenario from this module's doc: slot A was last
+        // written after render 1 (`last_written = 1`), slot B took render
+        // 2, and we're now peeking before render 3 (`generation = 2`, i.e.
+        // 2 renders completed so far). Slot A needs both render 2's damage
+        // (which it missed) and render 3's own (about to happen) -- age 2,
+        // not 1. Getting this wrong by one is exactly the silent
+        // stale-pixel bug this project's standards call out as the worst
+        // kind: `OutputDamageTracker` would hand back only render 3's own
+        // damage, leaving render 2's changes (e.g. the cursor's previous
+        // position, which must be erased) never copied into slot A.
+        assert_eq!(age(2, Some(1)), 2);
+    }
+
+    #[test]
+    fn age_grows_by_exactly_one_render_at_a_time() {
+        for generation in 0..10u64 {
+            assert_eq!(age(generation, Some(0)), (generation + 1) as usize);
+        }
+    }
+
+    #[test]
+    fn copy_region_rows_writes_exact_bytes_and_leaves_the_rest_of_the_buffer_untouched() {
+        // A pitch wider than the region's own row width (driver padding)
+        // and a `dest` longer than `pitch * height` (kernel page rounding)
+        // -- both real hazards this module's doc calls out as having bitten
+        // real hardware -- plus a region at a nonzero (x, y) offset, so a
+        // bug in either the pitch or the offset arithmetic would land bytes
+        // in the wrong place instead of merely failing to compile.
+        const PITCH: usize = 24; // wider than any row this test writes
+        const DEST_LEN: usize = PITCH * 4 + 37; // padded well past pitch * height
+        const SENTINEL: u8 = 0xAA;
+
+        let mut dest = vec![SENTINEL; DEST_LEN];
+        // A 2x2 region at byte-column 8 (x_offset), row 1 (y0): distinct,
+        // recognizable bytes per pixel so a transposed row/column or a
+        // wrong stride shows up as a mismatch, not a coincidental match.
+        let x_offset = 8;
+        let y0 = 1;
+        let row_len = 8; // two BGRA pixels
+        #[rustfmt::skip]
+        let pixels: [u8; 16] = [
+            0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+            0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
+        ];
+
+        copy_region_rows(&mut dest, PITCH, x_offset, y0, row_len, &pixels);
+
+        // Row 0 of the region lands at byte (y0 + 0) * pitch + x_offset.
+        let row0_start = y0 * PITCH + x_offset;
+        assert_eq!(&dest[row0_start..row0_start + row_len], &pixels[0..8]);
+        // Row 1 of the region lands one full pitch further on, not one
+        // `row_len` further on -- the bug this test exists to catch.
+        let row1_start = (y0 + 1) * PITCH + x_offset;
+        assert_eq!(&dest[row1_start..row1_start + row_len], &pixels[8..16]);
+
+        // Every byte outside the two written spans is still the sentinel:
+        // the padding to the left/right of each row, the padding row above
+        // and below the region, and the kernel's page-rounding tail past
+        // `pitch * height`.
+        for (index, &byte) in dest.iter().enumerate() {
+            let in_row0 = (row0_start..row0_start + row_len).contains(&index);
+            let in_row1 = (row1_start..row1_start + row_len).contains(&index);
+            if !in_row0 && !in_row1 {
+                assert_eq!(
+                    byte, SENTINEL,
+                    "byte {index} outside the region was overwritten"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn copy_region_rows_at_a_zero_offset_writes_from_the_start_of_each_row() {
+        let mut dest = vec![0u8; 16];
+        let pixels = [0xFFu8; 8];
+        copy_region_rows(&mut dest, 8, 0, 0, 8, &pixels);
+        assert_eq!(&dest[0..8], &[0xFF; 8]);
+        assert_eq!(&dest[8..16], &[0u8; 8]);
     }
 }

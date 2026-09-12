@@ -24,12 +24,16 @@ layout on a Mac, not just on Linux.
 
 ## Status
 
-Early and headless-first. Done so far: a working GPU-free Wayland compositor
-(pixman rendering, xdg-shell, seat/input, full IPC control surface) verified
-end-to-end — a real client maps, tiles, receives synthetic input, and a
-screenshot proves it. Not yet started: a nested backend (for running under an
-existing compositor, e.g. for webtop), a real `tty`/DRM backend, and the macOS
-adapter.
+Early, but all three Wayland backends are real and working: `--headless`
+(pixman rendering, xdg-shell, seat/input, full IPC control surface),
+`--nested` (runs as a window inside an existing compositor, e.g. for webtop),
+and `--tty` (a real DRM/KMS + libseat + libinput backend on actual hardware,
+including VT switching and a rendered pointer cursor). Also done: vim-style
+keybindings, a TOML config file (`--config`, `[layout]`/`[binds]`), and window
+decorations (a niri-style focus ring, background color, server-side
+`zxdg_decoration_manager_v1`). Verified end-to-end on every backend — a real
+client maps, tiles, receives synthetic input, and a screenshot proves it. Not
+yet started: a GPU rendering path and the macOS adapter.
 
 ## Layout
 
@@ -63,6 +67,8 @@ a seat — see `vm/README.md` for a Mac-native NixOS VM that provides one.
 
 ```sh
 flexwm --headless --width 1280 --height 800 -- foot   # start, spawn a terminal
+flexwm --nested --width 1280 --height 800 -- foot     # inside your existing compositor
+flexwm --tty -- foot                                  # on a real DRM/KMS seat
 flexwm msg windows                                     # in another shell
 flexwm msg action focus-column left
 flexwm msg screenshot --out /tmp/shot.png
@@ -70,7 +76,11 @@ flexwm msg type "hello"
 flexwm msg wait-idle --quiet-ms 200
 ```
 
-Run `flexwm --help` for the full request/action list.
+Add `--config PATH` to any of the three to load a TOML config (`[layout]` and
+`[binds]`); without it, flexwm looks for
+`$XDG_CONFIG_HOME/flexwm/config.toml` and falls back to built-in defaults if
+that's missing or malformed. Run `flexwm --help` for the full request/action
+list.
 
 ## License
 
