@@ -77,16 +77,23 @@ silently broke the project's one hardware recovery path. That class of bug is
 invisible to "does it compile and pass tests" and only shows up from reading
 what a field means across every site that touches it.
 
-**Merging needs an explicit user check-in, every time — not a one-time
-unblock.** `gh pr merge` run autonomously gets denied by Claude Code's own
-auto-mode classifier ("Merge Without Review") unless a Bash permission rule
-in `.claude/settings.json` allows it (`Bash(gh pr merge:*)`) — and even then,
-treat that as removing interactive friction for the *mechanical* merge
-action, not as standing authorization to merge without review. A verbal
-"you're approved to merge" in chat is a one-time approval for that specific
-PR, not a policy change: PR it, tell the user it's ready with the review
-findings summarized, and wait for either an explicit go-ahead or them
-merging it themselves.
+**Merge authority is delegated, standing on the review gate — not a
+per-PR ask.** (Confirmed explicitly by the user, 2026-09-12, after several
+PRs of per-PR check-ins: "Yes. For the last time. You get to be the final
+gate after reviewing the review agent's diagnosis." This supersedes any
+earlier "ask every time" framing.) The coordinating session is the final
+gate: once `flexwm-reviewer` (or an equivalently rigorous pass) has reported
+back and the coordinating session has actually read and weighed its
+diagnosis — not just seen "no blocking findings" and skipped straight past
+it — merge without asking again. `gh pr merge` is unblocked mechanically via
+the `Bash(gh pr merge:*)` rule in `.claude/settings.json` (the auto-mode
+classifier denies it by default otherwise, reason "Merge Without Review").
+The judgment that still matters, every time: did the review actually happen
+and come back clean (or did its findings get addressed and re-verified,
+not just noted)? A blocking finding, an unclean test run, or a review that
+couldn't actually verify something important (and said so) means don't
+merge and explain why — the gate is real, it's just no longer a chat
+round-trip when it passes.
 
 **Note on self-modification**: Claude Code refuses to let an agent write to
 its own `.claude/` config (settings, agent definitions) in normal auto-mode,
