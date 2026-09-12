@@ -124,7 +124,11 @@ impl State {
         Ok(())
     }
 
-    fn key(&mut self, keycode: Keycode, state: KeyState) {
+    /// `pub(super)` rather than private: `nested_dispatch.rs` forwards real
+    /// host keyboard events through this exact same path IPC-injected key
+    /// presses already use, rather than duplicating the `keyboard.input`
+    /// call.
+    pub(super) fn key(&mut self, keycode: Keycode, state: KeyState) {
         let Some(keyboard) = self.seat.get_keyboard() else {
             return;
         };

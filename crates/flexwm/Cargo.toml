@@ -18,6 +18,18 @@ pixman = "0.2"
 png = "0.18"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# For --nested: flexwm is itself a Wayland *client* of a host compositor,
+# alongside being a server to its own. Same wayland-client/wayland-protocols
+# versions Smithay itself already pins internally (for its own optional,
+# unused-by-us winit/x11 backends), so this can't create a resolver conflict.
+wayland-client = "0.31"
+wayland-protocols = { version = "0.32", features = ["client", "staging"] }
+calloop-wayland-source = "0.4"
+# For the memfd + mmap behind the host-side wl_shm buffers (nested/buffers.rs)
+# -- same version already resolved transitively via wayland-backend, so this
+# adds no new version to the tree, just a direct dependency on one already
+# there.
+rustix = { version = "1", features = ["fs", "mm"] }
 
 [target.'cfg(target_os = "linux")'.dependencies.smithay]
 git = "https://github.com/Smithay/smithay"

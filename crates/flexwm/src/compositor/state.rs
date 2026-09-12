@@ -27,6 +27,7 @@ use smithay::wayland::socket::ListeningSocketSource;
 
 use super::headless::Backend;
 use super::ipc::PendingIdle;
+use super::nested::Host;
 
 pub struct State {
     pub start_time: Instant,
@@ -49,6 +50,10 @@ pub struct State {
     pub popups: PopupManager,
     pub output: Option<Output>,
     pub backend: Option<Backend>,
+    /// Set only under `--nested`: the connection presenting `backend`'s
+    /// framebuffer as a window in a host compositor, and forwarding that
+    /// window's input back into this seat. `None` under `--headless`.
+    pub host: Option<Host>,
 
     pub compositor_state: CompositorState,
     pub xdg_shell_state: XdgShellState,
@@ -104,6 +109,7 @@ impl State {
             popups: PopupManager::default(),
             output: None,
             backend: None,
+            host: None,
             compositor_state,
             xdg_shell_state,
             shm_state,

@@ -8,6 +8,8 @@ mod handlers;
 mod headless;
 mod input;
 mod ipc;
+mod nested;
+mod nested_dispatch;
 mod screenshot;
 mod shell;
 mod state;
@@ -28,6 +30,25 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
     let mut state = State::new(&mut event_loop, display);
 
     headless::init(&mut state, options.width, options.height)?;
+
+    // Order matters, and it's load-bearing, not incidental: `--nested`
+    // connects to the *host* compositor via the caller's own WAYLAND_DISPLAY
+    // (nested::init reads it via Connection::connect_to_env). That has to
+    // happen before the set_var below replaces it with flexwm's own socket
+    // name for its own children -- reorder these and nested::init would
+    // silently connect flexwm to itself instead of its host, with no error
+    // anywhere (this project has a documented history of exactly this shape
+    // of bug: something quietly wrong because of missing flush or missing
+    // ordering, not a crash). ipc::init has no such constraint; it's grouped
+    // here only because it's the other one-time setup step.
+    if options.nested {
+        nested::init(
+            state.loop_handle.clone(),
+            &mut state,
+            options.width,
+            options.height,
+        )?;
+    }
     ipc::init(&mut event_loop, &mut state, options.socket.clone())?;
 
     // Children reach both the compositor and its control socket through the
