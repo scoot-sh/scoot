@@ -36,6 +36,20 @@ decorations, theming) second. If a visual feature would cost meaningful
 performance, correctness risk, or coupling, the engineering bar wins; polish
 waits or gets a cheaper implementation, not the other way around.
 
+**This is a compositor people depend on to get their actual work done — it
+must be snappy, always, and reliable, always.** Not aspirational: a concrete
+bar every change is held to. Avoid unnecessary heap allocation on any hot or
+per-event/per-frame path (input dispatch, the render loop, IPC dispatch) —
+reuse and pool (persistent buffers built once, updated in place) rather than
+allocating per frame or per event, the pattern this codebase already
+establishes for render buffers. Treat a plausible crash/hang/panic path with
+the same severity as data loss: a compositor crash takes every client
+application's unsaved state down with it. Explicitly consider edge cases on
+every feature (zero/one window, output-edge clamping, malformed input,
+hardware/session failures, events at their real maximum rate) rather than
+just the happy path, and benchmark before/after whenever a change touches a
+hot path, whether or not it was asked for.
+
 **Per-feature cycle**, repeated until stable before moving to the next thing:
 build → test → bug bash → optimize → benchmark → independent review → commit
 → PR → **stop for user merge approval** (see below) → merge. Not
