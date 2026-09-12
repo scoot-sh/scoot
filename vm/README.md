@@ -134,7 +134,15 @@ NIX_SSHOPTS="-p 2222" nixos-rebuild switch \
   virtio-gpu runs without virgl and Mesa falls back to llvmpipe. KMS, atomic
   commits, input and seats are all real; only the GPU is not.
 
-- **Passwords in the config.** Throwaway local VM, not reachable off-host.
+- **Passwords in the config.** Throwaway local VM, not reachable off-host --
+  enforced by `forwardPorts`' `host.address = "127.0.0.1"` (added after a
+  security audit found the port forward binding to every interface by
+  default, i.e. reachable from the whole LAN with these exact credentials).
+  This isn't just VM compromise: the shared `/mnt/flexwm` directory is a 9p
+  mount with no read-only option in this NixOS module's `sharedDirectories`
+  schema, so anyone who reached the VM over the network had write access to
+  the actual host checkout through it. Keep `host.address` set on every
+  forwarded port; don't remove it to "simplify" the config.
 
 ## Making it faster
 

@@ -43,6 +43,7 @@ in
     forwardPorts = [
       {
         from = "host";
+        host.address = "127.0.0.1";
         host.port = 2222;
         guest.port = 22;
       }
