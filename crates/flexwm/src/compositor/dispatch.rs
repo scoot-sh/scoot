@@ -55,6 +55,18 @@
 //!
 //! Delete the guard (and go back to `smithay::delegate_dispatch2!(State)`)
 //! once the pinned rev carries the missing `return`.
+//!
+//! ## Maintenance hazard this creates
+//!
+//! This is now a hand-maintained copy of a macro expansion, not the macro
+//! itself. If a future Smithay (or wayland-server) revision adds a method
+//! with a default body to `Dispatch2`/`GlobalDispatch2` (or `Dispatch`/
+//! `GlobalDispatch`), this file keeps compiling -- there's no trait-method
+//! count to mismatch -- and silently never calls it: no compile error, no
+//! test failure, just a protocol callback quietly dropped for every
+//! interface. Re-diff this file against `delegate_dispatch2!`'s expansion
+//! (`cargo expand`, or the macro's own source) on every Smithay version
+//! bump, not just when this bug is eventually fixed upstream.
 
 use std::any::{Any, TypeId};
 

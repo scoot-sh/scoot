@@ -356,8 +356,9 @@ review, and why.
 security pass separate from the usual correctness/performance review found
 one CRITICAL finding (any Wayland client can abort the whole compositor via
 `wl_shm_pool.resize(0)`, a missing `return` in the pinned Smithay revision —
-fixed as item 7 above, not listed here as backlog) and one HIGH finding (the dev VM's forwarded SSH port bound to
-every interface instead of loopback, exposing the documented hardcoded
+fixed as item 7 above, not listed here as backlog) and one HIGH finding
+(the dev VM's forwarded SSH port bound to every interface instead of
+loopback, exposing the documented hardcoded
 credentials — and, since the shared `/mnt/flexwm` 9p mount has no read-only
 option in this NixOS module, LAN write access to the actual host checkout —
 to the whole LAN; fixed same-day, `host.address = "127.0.0.1"` added to
@@ -427,6 +428,17 @@ data-loss/RCE in what was checked.
   only at the bottom (`.max(0)`); a very large configured gap can overflow
   plain `i32` arithmetic in `layout.rs`/`arrange.rs`. Config-only, same fix
   shape as the `min_size` finding above.
+- **No upper bound on shm pool size (LOW).** Found while verifying item 7's
+  fix, not by the original audit. `wl_shm_pool.resize(i32::MAX)` (or
+  `wl_shm.create_pool(fd, i32::MAX)` directly — reaches the same `mmap`,
+  not specific to `resize`) is accepted, reserving a ~2 GiB mapping per
+  pool, repeatable per pool and per connection, with no cap anywhere.
+  Verified live: no error, no crash — Smithay's own SIGBUS handler covers
+  reads/writes past the backing fd's real size, so this isn't the same
+  memory-safety class as item 7's bug, just unbounded address-space/fd
+  reservation. Same family as the IPC line-length and screenshot-throttling
+  findings above (resource exhaustion, not memory corruption) — a cap on
+  pool size at creation/resize time would close it.
 
 - **Suppress the same-VT no-op case of the IPC VT-switch warning (5c).**
   `change_vt`'s `VtSwitchOutcome::Requested` also fires — with a hedged
