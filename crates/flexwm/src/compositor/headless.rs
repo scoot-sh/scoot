@@ -48,7 +48,11 @@ render_elements! {
 }
 
 /// How often a changed screen is redrawn, while there's something to redraw.
-const FRAME_INTERVAL: Duration = Duration::from_millis(16);
+///
+/// Visible to the rest of the compositor because it is also the shortest
+/// interval in which the screen can have changed at all: `ipc.rs` uses it to
+/// refuse a second screenshot that could only return the same pixels.
+pub(super) const FRAME_INTERVAL: Duration = Duration::from_millis(16);
 
 /// The CPU renderer and the image it draws into.
 pub struct Backend {

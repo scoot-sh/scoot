@@ -305,6 +305,7 @@ dependencies = [
  "calloop-wayland-source",
  "flexwm-core",
  "flexwm-ipc",
+ "libc",
  "pixman",
  "pkg-config",
  "png",
