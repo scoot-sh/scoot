@@ -8,7 +8,16 @@ use flexwm_ipc::{Client, Request, Response};
 
 pub fn run(request: &Request, out: Option<&Path>) -> Result<(), Box<dyn Error>> {
     let mut client = Client::connect_default()?;
-    match client.request(request)? {
+    let response = client.request(request)?;
+    // A human-readable heads-up on stderr, independent of what goes to
+    // stdout below -- every non-error response's JSON goes to stdout the
+    // same way regardless of which variant it is (see the catch-all arm),
+    // so e.g. `flexwm msg key ... | jq .` keeps working and reflects what
+    // actually happened whether or not there's a warning attached to it.
+    if let Response::Warning { message } = &response {
+        eprintln!("warning: {message}");
+    }
+    match response {
         Response::Screenshot(shot) => {
             match out {
                 Some(path) => {

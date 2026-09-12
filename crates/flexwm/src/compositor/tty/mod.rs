@@ -602,6 +602,61 @@ fn linux_button(code: u32) -> Option<PointerButton> {
     }
 }
 
+/// What `State::change_vt` actually did. Exists so the IPC `key` request
+/// path (`ipc.rs`'s `Request::Key` handler, via `input.rs`'s `press`/`key`)
+/// can tell these cases apart to warn appropriately: a real hardware
+/// keybind has no reply channel to warn through and doesn't need one (the
+/// user is physically still at the console either way), but an agent whose
+/// only input *and output* is this one IPC connection needs to learn from
+/// the reply itself whenever this call didn't accomplish what a normal
+/// switch-back would -- see the backlog item this closes (`ROADMAP.md`) and
+/// `flexwm-vision`'s "IPC-first, an agent doing computer-use is a
+/// first-class client" goal.
+///
+/// Originally this collapsed "no `--tty` backend at all" and "session is
+/// currently paused" into one `Ignored` case -- both looked the same from
+/// `change_vt`'s point of view (an early return, nothing sent to libseat),
+/// but they mean very different things to an IPC caller: the first is
+/// simply "this request makes no sense on this backend," while the second
+/// is exactly the one-way-door scenario this item exists to fix -- an agent
+/// retrying its switch-back combo while paused needs to hear that clearly,
+/// not read it as indistinguishable from `Ok`. Split into `Ignored` and
+/// `IgnoredPaused` so `ipc.rs` can warn on the second and stay silent on
+/// the first.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VtSwitchOutcome {
+    /// `tty.session.change_vt` was actually called and returned `Ok(())` --
+    /// a real `VT_ACTIVATE` request went out. This is *not* a guarantee the
+    /// switch happens: libseat's own `libseat_switch_session` doc says
+    /// plainly that "a call ... does not imply that a switch will occur,"
+    /// and empirically (verified on the dev VM) requesting the VT this
+    /// session is *already* showing on returns `Ok(())` too, with no pause
+    /// and no VT change at all -- seatd just logs "requested session is
+    /// already active" and does nothing further. `Requested` therefore means
+    /// "asked, and the ask wasn't rejected outright," not "confirmed
+    /// switched" -- see `ipc.rs`'s `Request::Key` handler for how its
+    /// `Warning` message is worded to match that uncertainty rather than
+    /// overclaiming a pause that may not happen.
+    Requested,
+    /// No `--tty` backend at all -- there's no session for this request to
+    /// mean anything to. A deliberate no-op, already logged by `change_vt`
+    /// itself at its own call site. Nothing to warn an IPC caller about:
+    /// this isn't specific to `key`/IPC, and it can't be a one-way-door
+    /// symptom since there was never a door to begin with.
+    Ignored,
+    /// The session is currently paused, so `change_vt` deliberately didn't
+    /// even ask libseat (see its own doc for why: libseat can only refuse
+    /// with `EPERM`). Distinct from plain `Ignored` because this *is* the
+    /// one-way-door scenario -- an IPC caller retrying its switch-back combo
+    /// needs to hear "this can't work over IPC right now," not silence
+    /// indistinguishable from success.
+    IgnoredPaused,
+    /// `tty.session.change_vt` returned an error -- already logged by
+    /// `change_vt` itself via `tracing::warn!`. The request itself failed,
+    /// so this isn't a "success with a side effect" the way `Requested` is.
+    Failed,
+}
+
 impl State {
     /// Switches the kernel virtual terminal via the session -- a Linux-
     /// session concern, deliberately not routed through `State::act`/
@@ -626,10 +681,10 @@ impl State {
     /// [`Tty::active`]'s doc), and a failed DRM reactivation must not block
     /// a VT-switch retry -- that's the one recovery path a dead-DRM,
     /// working-keyboard state has.
-    pub fn change_vt(&mut self, vt: u32) {
+    pub fn change_vt(&mut self, vt: u32) -> VtSwitchOutcome {
         let Some(tty) = &mut self.tty else {
             tracing::debug!(vt, "change_vt requested with no tty session active");
-            return;
+            return VtSwitchOutcome::Ignored;
         };
         if tty.session_paused {
             // info!, not debug!: this is an explicitly requested action
@@ -643,10 +698,14 @@ impl State {
                 "change_vt requested while the session is paused; ignoring \
                  rather than issuing a VT_ACTIVATE libseat can only refuse"
             );
-            return;
+            return VtSwitchOutcome::IgnoredPaused;
         }
-        if let Err(error) = tty.session.change_vt(vt as i32) {
-            tracing::warn!(vt, %error, "could not change vt");
+        match tty.session.change_vt(vt as i32) {
+            Ok(()) => VtSwitchOutcome::Requested,
+            Err(error) => {
+                tracing::warn!(vt, %error, "could not change vt");
+                VtSwitchOutcome::Failed
+            }
         }
     }
 }

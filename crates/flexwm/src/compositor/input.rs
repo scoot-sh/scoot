@@ -9,11 +9,36 @@ use smithay::utils::{Logical, Point, SERIAL_COUNTER};
 
 use super::State;
 use super::keybindings::Bound;
+use super::tty::VtSwitchOutcome;
 
 // Linux input event codes, which is what Wayland carries.
 const BTN_LEFT: u32 = 0x110;
 const BTN_RIGHT: u32 = 0x111;
 const BTN_MIDDLE: u32 = 0x112;
+
+/// What handling one key press/release actually did. `Default` gives the
+/// right answer (`intercepted: false, vt_switch: None`) for the
+/// no-keyboard-yet early return in [`State::key`] and for `keyboard.input`'s
+/// own `None` case. Per the pinned Smithay rev's
+/// `KeyboardHandle::input_from_source` (`src/input/keyboard/mod.rs`), that
+/// `None` covers two things, neither of which is about focus: this exact
+/// keycode transition already being absorbed by another input source
+/// holding it (the `!is_transition` check -- avoids double-running the
+/// filter and forwarding a duplicate), or the filter closure below
+/// returning `FilterResult::Forward` (forwarded to the focused client via
+/// `input_forward`, nothing intercepted). Either way it's "nothing
+/// happened," not "something happened and nothing switched."
+#[derive(Clone, Copy, Debug, Default)]
+pub(super) struct KeyOutcome {
+    /// Whether this press or release was intercepted by a keybinding rather
+    /// than forwarded to the focused client.
+    pub intercepted: bool,
+    /// `Some` only when this exact call is the one that invoked
+    /// `change_vt` (the `Bound::ChangeVt` arm below, on a press) -- `None`
+    /// for a plain forwarded key, an `Action` binding, or any release, all
+    /// of which never touch VT switching.
+    pub vt_switch: Option<VtSwitchOutcome>,
+}
 
 impl State {
     pub fn pointer_move(&mut self, x: f64, y: f64) {
@@ -122,7 +147,24 @@ impl State {
     /// asking for input-level fidelity, and `Request::Action` already exists
     /// as the direct, binding-independent way to invoke a window-management
     /// action.
-    pub fn press(&mut self, combo: &KeyCombo) -> Result<(), String> {
+    ///
+    /// Returns whichever [`VtSwitchOutcome`] any press in this sequence
+    /// produced, if any. In practice only the *main* key's press can ever
+    /// carry one: every `ChangeVt` binding is keyed on an `F1`..`F12` keysym
+    /// (see `Keybindings::vt_switch_bindings`, the only place that
+    /// constructs one -- `tty::init` only applies it),
+    /// never on a modifier's own keysym (`Control_L`/`Shift_L`/`Alt_L`/
+    /// `Super_L`), so pressing one of this combo's modifiers on its own --
+    /// the loop below -- structurally cannot match one, no matter what's
+    /// configured in `[binds]`. Accumulated across *every* press below
+    /// (via `Option::or`, so the first hit wins) rather than read from just
+    /// the main key's call, so this stays correct even if that guarantee
+    /// ever stopped holding, instead of silently depending on it. `ipc.rs`'s
+    /// `Request::Key` handler uses the result to warn a caller whose only
+    /// input/output is this IPC connection when a switch-away request just
+    /// went out, since it may have just cost that connection the one
+    /// channel that could switch the session back.
+    pub fn press(&mut self, combo: &KeyCombo) -> Result<Option<VtSwitchOutcome>, String> {
         let keysym =
             keysym_named(&combo.key).ok_or_else(|| format!("unknown key `{}`", combo.key))?;
         // Resolve every keycode -- the main key and all modifiers -- before
@@ -144,16 +186,17 @@ impl State {
             modifier_codes.push(code);
         }
         let mut held = Vec::with_capacity(modifier_codes.len());
+        let mut vt_switch = None;
         for code in modifier_codes {
-            self.key(code, KeyState::Pressed);
+            vt_switch = vt_switch.or(self.key(code, KeyState::Pressed).vt_switch);
             held.push(code);
         }
-        self.key(code, KeyState::Pressed);
+        vt_switch = vt_switch.or(self.key(code, KeyState::Pressed).vt_switch);
         self.key(code, KeyState::Released);
         for code in held.into_iter().rev() {
             self.key(code, KeyState::Released);
         }
-        Ok(())
+        Ok(vt_switch)
     }
 
     /// Types text by pressing whichever keys produce those characters.
@@ -177,7 +220,7 @@ impl State {
             // modifiers at all, since every char here is sent with exactly
             // the modifiers (at most Shift) needed to produce it. Warn
             // rather than silently let it happen with no signal.
-            if self.key(code, KeyState::Pressed) {
+            if self.key(code, KeyState::Pressed).intercepted {
                 tracing::warn!(%character, "a keybinding intercepted a character from type_text");
             }
             self.key(code, KeyState::Released);
@@ -191,16 +234,15 @@ impl State {
     /// `pub(super)` rather than private: `nested_dispatch.rs` forwards real
     /// host keyboard events through this exact same path IPC-injected key
     /// presses already use, rather than duplicating the `keyboard.input`
-    /// call. Returns whether this press or release was intercepted by a
-    /// keybinding rather than forwarded to the focused client.
-    pub(super) fn key(&mut self, keycode: Keycode, state: KeyState) -> bool {
+    /// call.
+    pub(super) fn key(&mut self, keycode: Keycode, state: KeyState) -> KeyOutcome {
         let Some(keyboard) = self.seat.get_keyboard() else {
-            return false;
+            return KeyOutcome::default();
         };
         let serial = SERIAL_COUNTER.next_serial();
         let time = InputTime::from_millis(self.millis());
         keyboard
-            .input::<bool, _>(self, keycode, state, serial, time, |data, mods, handle| {
+            .input::<KeyOutcome, _>(self, keycode, state, serial, time, |data, mods, handle| {
                 match state {
                     KeyState::Pressed => {
                         // The unshifted (level 0) symbol: see the module
@@ -218,22 +260,31 @@ impl State {
                         // after this action closes the current focus) as a
                         // spurious lone release it never pressed.
                         data.suppressed_keys.insert(keycode);
-                        match bound {
-                            Bound::Action(action) => data.act(action),
-                            Bound::ChangeVt(vt) => data.change_vt(vt),
-                        }
-                        FilterResult::Intercept(true)
+                        let vt_switch = match bound {
+                            Bound::Action(action) => {
+                                data.act(action);
+                                None
+                            }
+                            Bound::ChangeVt(vt) => Some(data.change_vt(vt)),
+                        };
+                        FilterResult::Intercept(KeyOutcome {
+                            intercepted: true,
+                            vt_switch,
+                        })
                     }
                     KeyState::Released => {
                         if data.suppressed_keys.remove(&keycode) {
-                            FilterResult::Intercept(true)
+                            FilterResult::Intercept(KeyOutcome {
+                                intercepted: true,
+                                vt_switch: None,
+                            })
                         } else {
                             FilterResult::Forward
                         }
                     }
                 }
             })
-            .unwrap_or(false)
+            .unwrap_or_default()
     }
 
     fn keycode_for(&self, keysym: Keysym) -> Option<Keycode> {

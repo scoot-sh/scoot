@@ -41,12 +41,28 @@ pub struct Screenshot {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Response {
     Ok,
-    Version { version: String, protocol: u32 },
-    Outputs { outputs: Vec<OutputSnapshot> },
-    Windows { windows: Vec<WindowSnapshot> },
+    Version {
+        version: String,
+        protocol: u32,
+    },
+    Outputs {
+        outputs: Vec<OutputSnapshot>,
+    },
+    Windows {
+        windows: Vec<WindowSnapshot>,
+    },
     Screenshot(Screenshot),
-    Idle { waited_ms: u64 },
-    Error { message: String },
+    Idle {
+        waited_ms: u64,
+    },
+    /// Success, but with a side effect the caller should know about that
+    /// isn't implied by the request having been accepted.
+    Warning {
+        message: String,
+    },
+    Error {
+        message: String,
+    },
 }
 
 impl Response {
