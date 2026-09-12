@@ -82,6 +82,48 @@ echo "--- typing text with an embedded newline ---"
 "$FLEXWM" msg type "$(printf 'echo one\necho two')"
 "$FLEXWM" msg wait-idle --quiet-ms 500 --timeout-ms 10000
 
+focused_window() {
+    "$FLEXWM" msg windows | jq -r '.windows[] | select(.focused) | .id'
+}
+
+echo "--- opening a second terminal, to exercise keybindings ---"
+"$FLEXWM" msg action spawn foot
+mapped=0
+for _ in $(seq 1 100); do
+    if [ "$("$FLEXWM" msg windows | jq '.windows | length')" -eq 2 ]; then
+        mapped=1
+        break
+    fi
+    sleep 0.2
+done
+if [ "$mapped" -ne 1 ]; then
+    echo "the second foot never mapped a window; compositor log:"
+    tail -30 "$LOG"
+    exit 1
+fi
+# A new column opens to the right and takes focus (see world.rs's placement).
+second_id=$(focused_window)
+first_id=$("$FLEXWM" msg windows | jq -r --argjson id "$second_id" '.windows[] | select(.id != $id) | .id')
+
+echo "--- a bare 'h' has no binding: it types into the focused terminal, focus stays put ---"
+"$FLEXWM" msg key h
+"$FLEXWM" msg wait-idle --quiet-ms 300 --timeout-ms 10000
+if [ "$(focused_window)" != "$second_id" ]; then
+    echo "BUG: a bare 'h' (no modifier) moved focus -- keybindings must not fire without Super"
+    exit 1
+fi
+echo "ok: focus unchanged by a bare 'h'"
+
+echo "--- super+h moves focus to the column on the left (Action::FocusColumn) ---"
+"$FLEXWM" msg key super+h
+"$FLEXWM" msg wait-idle --quiet-ms 300 --timeout-ms 10000
+if [ "$(focused_window)" != "$first_id" ]; then
+    echo "BUG: super+h did not move focus to the other column; keybindings may be broken"
+    "$FLEXWM" msg windows
+    exit 1
+fi
+echo "ok: super+h moved focus from window $second_id to window $first_id"
+
 echo "--- screenshot ---"
 "$FLEXWM" msg screenshot --out "$SHOT"
 
