@@ -25,13 +25,18 @@ rm -f "$SOCKET" "$SHOT" "$LOG" "$CONFIG"
 
 # A deliberately distinctive, non-default [appearance] -- so the pixel checks
 # below can't pass by accident against whatever the built-in defaults happen
-# to be. gap stays at its own default (12): focus_ring_width=6 is exactly
-# half of that, right at the clamp boundary (see decorations.rs's
+# to be. gap stays at its own default (12): RING_WIDTH is exactly half of
+# that, right at the clamp boundary (see decorations.rs's
 # Appearance::clamped) without tripping it, so this also doubles as a check
 # that a legal, non-clamped width isn't clamped anyway.
-cat >"$CONFIG" <<'EOF'
+#
+# A single variable, not a literal repeated in the config below and again in
+# the pixel-sampling math further down -- two independent copies of "6" would
+# only need one of them edited to silently break the sampling geometry.
+RING_WIDTH=6
+cat >"$CONFIG" <<EOF
 [appearance]
-focus_ring_width = 6
+focus_ring_width = $RING_WIDTH
 focus_ring_active_color = "#ff00ff"
 focus_ring_inactive_color = "#00ffff"
 background_color = "#123456"
@@ -54,7 +59,12 @@ magick_cmd() {
 read_pixel() {
     local png="$1" x="$2" y="$3"
     local raw inner
-    raw=$(magick_cmd "$png" -format '%[pixel:p{'"$x"','"$y"'}]' info:)
+    # -depth 8 forces 0-255 integer channel output regardless of this
+    # ImageMagick build's own default quantum depth (some builds are Q16,
+    # which without this would print e.g. percentages or a 16-bit scale
+    # instead) -- our own PNGs (screenshot.rs) are already 8-bit, so this is
+    # a no-op for them and only guards against a differently-built magick.
+    raw=$(magick_cmd "$png" -depth 8 -format '%[pixel:p{'"$x"','"$y"'}]' info:)
     inner=${raw#*(}
     inner=${inner%)*}
     IFS=',' read -r -a channels <<<"$inner"
@@ -203,22 +213,23 @@ read -r unfocused_x unfocused_y unfocused_w < <(
     echo "$windows_json" | jq -r --argjson id "$second_id" \
         '.windows[] | select(.id == $id) | "\(.rect.x) \(.rect.y) \(.rect.width)"'
 )
-# Matches $CONFIG's focus_ring_width above; there's no `msg` introspection
-# for the running appearance config (out of scope here -- this is a smoke
-# test, not a config-echo feature), so this is kept in step with $CONFIG by
-# hand.
-ring_width=6
 ring_ok=1
 expect_pixel_color "$SHOT" \
-    "$((focused_x + focused_w / 2))" "$((focused_y - ring_width / 2))" \
+    "$((focused_x + focused_w / 2))" "$((focused_y - RING_WIDTH / 2))" \
     "ff00ff" "the focused window's ring" || ring_ok=0
 expect_pixel_color "$SHOT" \
-    "$((unfocused_x + unfocused_w / 2))" "$((unfocused_y - ring_width / 2))" \
+    "$((unfocused_x + unfocused_w / 2))" "$((unfocused_y - RING_WIDTH / 2))" \
     "00ffff" "the unfocused window's ring" || ring_ok=0
-# (1,1): inside the outer gap on every side (gap=12, ring_width=6 -> nothing
-# but background exists closer than 6px to any edge), so this is background
-# regardless of exactly where either window landed.
-expect_pixel_color "$SHOT" 1 1 "123456" "the background" || ring_ok=0
+# Halfway between the output's own corner and the *outer* edge of the
+# focused window's ring (not the window's own rect -- landing exactly on
+# that boundary would sample the ring itself, not the background past it).
+# $focused_x/$focused_y equal the layout's gap here (the leftmost/topmost
+# column sits exactly `gap` from the output's edge), so this stays clear of
+# both the top and left ring segments regardless of what gap or
+# focus_ring_width actually are, rather than assuming today's defaults.
+expect_pixel_color "$SHOT" \
+    "$(((focused_x - RING_WIDTH) / 2))" "$(((focused_y - RING_WIDTH) / 2))" \
+    "123456" "the background" || ring_ok=0
 if [ "$ring_ok" -ne 1 ]; then
     echo "BUG: one or more decoration pixel checks failed -- see above"
     exit 1

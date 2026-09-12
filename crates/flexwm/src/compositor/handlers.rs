@@ -172,14 +172,19 @@ impl XdgDecorationHandler for State {
         toplevel.send_configure();
     }
 
-    fn request_mode(&mut self, toplevel: ToplevelSurface, mode: Mode) {
-        let mode = if self.appearance.prefer_no_csd {
+    fn request_mode(&mut self, toplevel: ToplevelSurface, requested: Mode) {
+        let chosen = if self.appearance.prefer_no_csd {
             Mode::ServerSide
         } else {
-            mode
+            requested
         };
-        tracing::debug!(?mode, "client requested a decoration mode");
-        toplevel.with_pending_state(|state| state.decoration_mode = Some(mode));
+        // Logged as two separate fields, not one: when prefer_no_csd forces
+        // an override, `requested` and `chosen` differ, and collapsing them
+        // into a single "mode" field (as an earlier draft of this did) reads
+        // as "the client asked for ServerSide" even when it asked for the
+        // opposite and got overridden.
+        tracing::debug!(?requested, ?chosen, "client requested a decoration mode");
+        toplevel.with_pending_state(|state| state.decoration_mode = Some(chosen));
         toplevel.send_configure();
     }
 

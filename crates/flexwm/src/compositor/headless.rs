@@ -197,7 +197,8 @@ impl State {
                                         // fact for the PNG path) -- unlike there, this
                                         // is a straight memcpy into the presenter's
                                         // own buffer, no channel reordering.
-                                        let (width, height) = *size;
+                                        // (width, height) already bound above, from
+                                        // this same *size, for `bounds`.
                                         let region = Rectangle::from_size((width, height).into());
                                         match renderer.copy_framebuffer(
                                             &framebuffer,

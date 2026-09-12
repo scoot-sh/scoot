@@ -258,6 +258,12 @@ struct WindowRing {
 #[derive(Debug, Default)]
 pub struct Decorations {
     rings: HashMap<WindowId, WindowRing>,
+    /// Scratch space for `elements`'s "which windows are still around"
+    /// check, cleared and refilled in place every call instead of a fresh
+    /// `HashSet` collected from scratch each time -- this runs on every
+    /// actual render, so avoiding a per-call allocation here matters the
+    /// same way it does everywhere else in this project's render path.
+    live: HashSet<WindowId>,
 }
 
 impl Decorations {
@@ -279,7 +285,10 @@ impl Decorations {
         appearance: &Appearance,
         bounds: Rect,
     ) -> Vec<SolidColorRenderElement> {
-        let live: HashSet<WindowId> = arrangement.placements.iter().map(|p| p.id).collect();
+        self.live.clear();
+        self.live
+            .extend(arrangement.placements.iter().map(|p| p.id));
+        let live = &self.live;
         self.rings.retain(|id, _| live.contains(id));
 
         let mut elements = Vec::new();
@@ -384,6 +393,13 @@ mod tests {
 
     #[test]
     fn translucent_color_has_rgb_scaled_by_alpha() {
+        // Chosen as dyadic fractions (0.5, 0.25, 0.125) specifically so the
+        // f32 multiplication is exact and `assert_eq!` can compare it
+        // directly -- a color parsed from an arbitrary "#rrggbbaa" string
+        // (e.g. dividing by 255) will not generally multiply this cleanly,
+        // and a future test built that way should compare with a tolerance
+        // instead of `assert_eq!`, not treat a failure here as a sign this
+        // conversion itself is wrong.
         let translucent = Color::new(1.0, 0.5, 0.25, 0.5);
         let premultiplied: Color32F = translucent.into();
         assert_eq!(premultiplied.components(), [0.5, 0.25, 0.125, 0.5]);
