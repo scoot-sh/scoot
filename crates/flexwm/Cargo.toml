@@ -39,6 +39,13 @@ pixman = "0.2"
 png = "0.18"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# For the config file (compositor/config.rs), which is Linux-only along with
+# everything else that depends on `Keybindings`'s smithay `Keysym`s -- see
+# that module's doc. `serde` is already in the tree via flexwm-ipc, at the
+# same version pinned in workspace.dependencies, so this doesn't add a
+# second incompatible copy.
+serde.workspace = true
+toml = "1"
 # For --nested: flexwm is itself a Wayland *client* of a host compositor,
 # alongside being a server to its own. Same wayland-client/wayland-protocols
 # versions Smithay itself already pins internally (for its own optional,
@@ -51,6 +58,13 @@ calloop-wayland-source = "0.4"
 # adds no new version to the tree, just a direct dependency on one already
 # there.
 rustix = { version = "1", features = ["fs", "mm"] }
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+# For compositor/config.rs's tests, which write real temp files to exercise
+# `load`'s file-reading paths end to end. Already in the tree transitively
+# (smithay itself depends on it), so this adds no new version, just a
+# direct dev-dependency on one already resolved.
+tempfile = "3"
 
 [target.'cfg(target_os = "linux")'.dependencies.smithay]
 git = "https://github.com/Smithay/smithay"

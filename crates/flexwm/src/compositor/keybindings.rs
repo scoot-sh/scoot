@@ -20,7 +20,11 @@ use smithay::input::keyboard::{Keysym, ModifiersState};
 /// `num_lock`) aren't tracked -- a binding should still fire with Caps Lock
 /// on -- so this is a deliberate projection of `ModifiersState`, not a
 /// wrapper around it.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+///
+/// `Hash` is for `config.rs`'s bind loader, which groups parsed binds by
+/// combo to detect two different combo strings (aliases, modifier order,
+/// case) resolving to the same binding.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Modifiers {
     pub super_: bool,
     pub shift: bool,
@@ -72,12 +76,12 @@ pub enum Bound {
     ChangeVt(u32),
 }
 
-/// The default vim-motions-plus-Super table. `Vec` rather than a `HashMap`:
+/// The default vim-motions-plus-Super table, `Vec` rather than a `HashMap`:
 /// a couple dozen entries at most, checked once per keypress -- a linear
-/// scan is simpler and not measurably slower. Not wired to any string
-/// format (like `flexwm_ipc::KeyCombo`) yet -- that seam is for the future
-/// config-file loader, and building it before there's a loader to use it
-/// would be speculative.
+/// scan is simpler and not measurably slower. `config.rs` builds on this
+/// directly (via `insert`/`extend`) to layer a config file's `[binds]` on
+/// top, using `flexwm_ipc::KeyCombo` to parse the string form.
+#[derive(Debug)]
 pub struct Keybindings(Vec<(Modifiers, Keysym, Bound)>);
 
 impl Default for Keybindings {
@@ -155,8 +159,8 @@ impl Default for Keybindings {
             ),
             (SUPER, Keysym::r, Bound::Action(Action::CycleColumnWidth)),
             (SUPER, Keysym::q, Bound::Action(Action::CloseFocused)),
-            // A placeholder default terminal; becomes configurable once the
-            // config-file roadmap item lands.
+            // The default terminal; rebind this combo in `[binds]` (see
+            // config.rs) to launch something else instead.
             (
                 SUPER,
                 Keysym::Return,
@@ -179,13 +183,48 @@ impl Keybindings {
             .map(|(_, _, bound)| bound.clone())
     }
 
-    /// Adds bindings on top of the default table. Used only by `--tty`, to
-    /// add `Ctrl+Alt+F1`..`Ctrl+Alt+F12` VT-switch bindings (see
-    /// `tty::init`) without the headless/nested backends' tables gaining
-    /// them too -- `Keybindings::default()` alone must stay exactly what it
-    /// was before this existed.
-    pub fn extend(&mut self, more: impl IntoIterator<Item = (Modifiers, Keysym, Bound)>) {
-        self.0.extend(more);
+    /// Inserts a binding for this exact combo, in place of whatever (if
+    /// anything) was already there, and returns that previous binding.
+    ///
+    /// This one operation is what both the config loader's rules fall out
+    /// of: a user bind overriding a default is just `insert` called with
+    /// the table already at its defaults; `--tty`'s VT-switch bindings
+    /// overriding a colliding user bind (see `tty::init`) is the same
+    /// `insert`, called later. A linear scan, like `match_key`: this table
+    /// is too small for a `HashMap` index to be worth maintaining alongside
+    /// it.
+    pub fn insert(&mut self, mods: Modifiers, keysym: Keysym, bound: Bound) -> Option<Bound> {
+        if let Some(slot) = self
+            .0
+            .iter_mut()
+            .find(|(m, k, _)| *m == mods && *k == keysym)
+        {
+            Some(std::mem::replace(&mut slot.2, bound))
+        } else {
+            self.0.push((mods, keysym, bound));
+            None
+        }
+    }
+
+    /// Adds bindings on top of the table, each via `insert`. Used by
+    /// `--tty` to add `Ctrl+Alt+F1`..`Ctrl+Alt+F12` VT-switch bindings
+    /// without the headless/nested backends' tables gaining them too.
+    ///
+    /// Returns every binding that was displaced, as `(mods, keysym,
+    /// previous_bound)` -- `--tty`'s caller must know, since a config-file
+    /// bind landing on the same combo as a VT switch would otherwise
+    /// silently shadow the one recovery path this project has on real
+    /// hardware (see `config.rs`'s module doc).
+    pub fn extend(
+        &mut self,
+        more: impl IntoIterator<Item = (Modifiers, Keysym, Bound)>,
+    ) -> Vec<(Modifiers, Keysym, Bound)> {
+        more.into_iter()
+            .filter_map(|(mods, keysym, bound)| {
+                self.insert(mods, keysym, bound)
+                    .map(|previous| (mods, keysym, previous))
+            })
+            .collect()
     }
 
     /// `Ctrl+Alt+F1`..`Ctrl+Alt+F12`, bound to switching to VT 1..12.
@@ -230,8 +269,9 @@ mod tests {
     fn extend_adds_bindings_without_touching_the_defaults() {
         let mut table = Keybindings::default();
         let default_len = table.0.len();
-        table.extend(Keybindings::vt_switch_bindings());
+        let displaced = table.extend(Keybindings::vt_switch_bindings());
         assert_eq!(table.0.len(), default_len + 12);
+        assert!(displaced.is_empty(), "disjoint combos displace nothing");
         assert_eq!(
             table.match_key(Keysym::F2, CTRL_ALT),
             Some(Bound::ChangeVt(2))
@@ -240,6 +280,45 @@ mod tests {
         for (mods, keysym, bound) in Keybindings::default().0 {
             assert_eq!(table.match_key(keysym, mods), Some(bound));
         }
+    }
+
+    #[test]
+    fn insert_replaces_the_binding_for_the_same_combo_and_returns_the_old_one() {
+        let mut table = Keybindings::default();
+        let previous = table.insert(SUPER, Keysym::h, Bound::Action(Action::CloseFocused));
+        assert_eq!(
+            previous,
+            Some(Bound::Action(Action::FocusColumn(Horizontal::Left)))
+        );
+        assert_eq!(
+            table.match_key(Keysym::h, SUPER),
+            Some(Bound::Action(Action::CloseFocused))
+        );
+        // Nothing was appended -- the table grew by zero entries.
+        assert_eq!(table.0.len(), Keybindings::default().0.len());
+    }
+
+    #[test]
+    fn insert_on_a_fresh_combo_adds_it_and_returns_none() {
+        let mut table = Keybindings::default();
+        let default_len = table.0.len();
+        let previous = table.insert(CTRL_ALT, Keysym::F2, Bound::ChangeVt(2));
+        assert_eq!(previous, None);
+        assert_eq!(table.0.len(), default_len + 1);
+    }
+
+    #[test]
+    fn extend_reports_every_binding_it_displaced() {
+        let mut table = Keybindings::default();
+        let displaced = table.extend([(SUPER, Keysym::h, Bound::ChangeVt(9))]);
+        assert_eq!(
+            displaced,
+            vec![(
+                SUPER,
+                Keysym::h,
+                Bound::Action(Action::FocusColumn(Horizontal::Left))
+            )]
+        );
     }
 
     #[test]

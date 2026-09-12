@@ -100,7 +100,12 @@ pub struct State {
 }
 
 impl State {
-    pub fn new(event_loop: &mut EventLoop<'static, State>, display: Display<State>) -> Self {
+    pub fn new(
+        event_loop: &mut EventLoop<'static, State>,
+        display: Display<State>,
+        config: Config,
+        keybindings: Keybindings,
+    ) -> Self {
         let dh = display.handle();
         let compositor_state = CompositorState::new::<Self>(&dh);
         let xdg_shell_state = XdgShellState::new::<Self>(&dh);
@@ -123,7 +128,7 @@ impl State {
             loop_signal: event_loop.get_signal(),
             socket_name,
             ipc_path: None,
-            world: World::new(Config::default()),
+            world: World::new(config),
             windows: HashMap::new(),
             requested: HashMap::new(),
             next_id: 0,
@@ -141,7 +146,7 @@ impl State {
             seat_state,
             data_device_state,
             seat,
-            keybindings: Keybindings::default(),
+            keybindings,
             suppressed_keys: HashSet::new(),
             // true without going through request_render(), so nothing has
             // armed the frame timer yet. That's only safe because

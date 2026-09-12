@@ -172,9 +172,23 @@ pub fn init(
         .map_err(|error| format!("could not register libinput: {error}"))?;
 
     // `--tty`-only: Ctrl+Alt+F1..F12. Kept out of `Keybindings::default()`
-    // so the headless/nested tables stay exactly what they were before
-    // this backend existed -- see `Keybindings::extend`'s doc.
-    state.keybindings.extend(Keybindings::vt_switch_bindings());
+    // so the headless/nested tables stay exactly what they were before this
+    // backend existed -- see `Keybindings::extend`'s doc. Runs after the
+    // config file's binds are already loaded into `state.keybindings`, and
+    // deliberately overrides rather than defers to any of them: Ctrl+Alt+Fn
+    // is the one recovery path when the display is wedged on hardware with
+    // no other window manager and no easy remote access (see
+    // `config.rs`'s module doc), so it must always win, not silently lose
+    // to a config-file typo or a well-meaning-but-dangerous rebind.
+    for (mods, keysym, replaced) in state.keybindings.extend(Keybindings::vt_switch_bindings()) {
+        tracing::warn!(
+            ?mods,
+            keysym = keysym.raw(),
+            ?replaced,
+            "a config-file keybinding on this combo was overridden by --tty's \
+             VT-switch binding, which must always work as the recovery path"
+        );
+    }
 
     Ok((width, height))
 }

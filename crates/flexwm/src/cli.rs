@@ -10,9 +10,9 @@ pub const USAGE: &str = "\
 flexwm -- a scrolling-tiling Wayland window manager
 
 USAGE:
-    flexwm --headless [--width W] [--height H] [--socket PATH] [-- COMMAND...]
-    flexwm --nested [--width W] [--height H] [--socket PATH] [-- COMMAND...]
-    flexwm --tty [--socket PATH] [-- COMMAND...]
+    flexwm --headless [--width W] [--height H] [--socket PATH] [--config PATH] [-- COMMAND...]
+    flexwm --nested [--width W] [--height H] [--socket PATH] [--config PATH] [-- COMMAND...]
+    flexwm --tty [--socket PATH] [--config PATH] [-- COMMAND...]
     flexwm msg REQUEST
     flexwm --help
 
@@ -52,6 +52,11 @@ pub struct CompositorOptions {
     pub height: i32,
     /// Where to listen for IPC; the default path when `None`.
     pub socket: Option<PathBuf>,
+    /// Explicit config file path; the XDG default when `None`. See
+    /// `compositor::config::load`'s doc for the resolution and fallback
+    /// rules -- an explicit path here that can't be read is a hard startup
+    /// error, unlike the default path.
+    pub config: Option<PathBuf>,
     /// Launched once the compositor is up, with `WAYLAND_DISPLAY` set.
     pub command: Vec<String>,
     /// Present as a window inside the host compositor named by the *caller's*
@@ -73,6 +78,7 @@ impl Default for CompositorOptions {
             width: 1600,
             height: 1000,
             socket: None,
+            config: None,
             command: Vec::new(),
             nested: false,
             tty: false,
@@ -128,6 +134,10 @@ fn compositor(
             "--socket" => {
                 let path = args.next().ok_or(Error::Missing("a path after --socket"))?;
                 options.socket = Some(PathBuf::from(path));
+            }
+            "--config" => {
+                let path = args.next().ok_or(Error::Missing("a path after --config"))?;
+                options.config = Some(PathBuf::from(path));
             }
             "--" => {
                 options.command = args.by_ref().collect();
@@ -195,7 +205,11 @@ fn message(mut args: impl Iterator<Item = String>) -> Result<Command, Error> {
     Ok(Command::Msg { request, out })
 }
 
-fn action(args: &mut impl Iterator<Item = String>) -> Result<Action, Error> {
+/// Parses one action and its arguments (`"focus-column" "left"`, ...) the
+/// same way for both `flexwm msg action ...` and a config file's `[binds]`
+/// values (see `compositor::config::parse_bind`) -- one grammar, one
+/// parser, rather than a second copy for the config-file case.
+pub(crate) fn action(args: &mut impl Iterator<Item = String>) -> Result<Action, Error> {
     let name = args.next().ok_or(Error::Missing("an action"))?;
     let action = match name.as_str() {
         "focus-column" => Action::FocusColumn {
@@ -358,6 +372,30 @@ mod tests {
         assert_eq!(options.height, 600);
         assert_eq!(options.command, vec!["foot", "-e", "sh"]);
         assert!(!options.nested);
+    }
+
+    #[test]
+    fn config_and_socket_paths_are_none_by_default_and_settable() {
+        let Ok(Command::Compositor(options)) = parse_args(&["--headless"]) else {
+            panic!("expected compositor");
+        };
+        assert_eq!(options.config, None);
+        assert_eq!(options.socket, None);
+
+        let Ok(Command::Compositor(options)) = parse_args(&[
+            "--headless",
+            "--config",
+            "/etc/flexwm/config.toml",
+            "--socket",
+            "/tmp/flexwm.sock",
+        ]) else {
+            panic!("expected compositor");
+        };
+        assert_eq!(
+            options.config,
+            Some(PathBuf::from("/etc/flexwm/config.toml"))
+        );
+        assert_eq!(options.socket, Some(PathBuf::from("/tmp/flexwm.sock")));
     }
 
     #[test]

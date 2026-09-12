@@ -129,3 +129,157 @@ echo "--- screenshot ---"
 
 echo "--- compositor log (tail) ---"
 tail -20 "$LOG"
+
+# The two scenarios below each start their own, separate compositor (a fresh
+# --config only means anything at startup), always --headless -- config
+# loading is backend-agnostic, so there's no need to repeat these under
+# --nested/--tty too, the way the IPC-driven test above deliberately covers
+# every backend.
+
+echo "=== config file: a user bind actually takes effect ==="
+run_config_bind_test() {
+    local socket="/run/user/$(id -u)/flexwm-smoke-config.sock"
+    local log="/tmp/flexwm-smoke-config.log"
+    local cfg
+    cfg=$(mktemp /tmp/flexwm-smoke-config-XXXXXX.toml)
+    # super+n is bound to nothing by default (see keybindings.rs) -- an
+    # otherwise-unused combo, so this only passes if the config file's bind
+    # is what moved focus, not some default binding coincidentally doing it.
+    cat >"$cfg" <<'EOF'
+[binds]
+"super+n" = "focus-column right"
+EOF
+    rm -f "$socket" "$log"
+
+    "$FLEXWM" --headless --width 1200 --height 800 --socket "$socket" --config "$cfg" \
+        >"$log" 2>&1 &
+    # Not `local`: the EXIT trap below fires as this subshell itself exits,
+    # which is after this function has already returned -- by which point a
+    # `local` would already be out of scope, and `set -u` would fail the
+    # trap itself with "pid: unbound variable", silently skipping the kill
+    # it exists to do (this combination broke exactly that way during
+    # development). A plain assignment lives for the rest of this subshell
+    # (this function's only caller), exactly as long as the trap needs it.
+    pid=$!
+    # EXIT, not RETURN. This function's only caller wraps it as
+    # `( run_config_bind_test ) || exit 1`, and a subshell on the left side
+    # of `||` has errexit suppressed for everything it runs -- confirmed
+    # empirically -- so an unguarded command failing below doesn't actually
+    # abort the function early the way it would if this were called
+    # directly. RETURN would therefore already fire correctly as written
+    # here today. EXIT is used anyway, since it doesn't depend on that
+    # wrapping detail staying exactly as written -- a future edit to the
+    # call site could otherwise silently regress this cleanup with no
+    # signal that it happened. Same pattern as the top-level $compositor
+    # trap above.
+    trap 'kill "$pid" 2>/dev/null || true' EXIT
+    export FLEXWM_SOCKET="$socket"
+
+    for _ in $(seq 1 60); do
+        [ -S "$socket" ] && break
+        sleep 0.1
+    done
+    if [ ! -S "$socket" ]; then
+        echo "config-bind test: the control socket never appeared; compositor log:"
+        tail -20 "$log"
+        return 1
+    fi
+
+    "$FLEXWM" msg action spawn foot
+    "$FLEXWM" msg action spawn foot
+    local mapped=0
+    for _ in $(seq 1 100); do
+        if [ "$("$FLEXWM" msg windows | jq '.windows | length')" -eq 2 ]; then
+            mapped=1
+            break
+        fi
+        sleep 0.2
+    done
+    if [ "$mapped" -ne 1 ]; then
+        echo "config-bind test: the two windows never mapped; compositor log:"
+        tail -30 "$log"
+        return 1
+    fi
+
+    # The second window opens to the right and takes focus (same placement
+    # rule the main test above already relies on).
+    local right_id left_id
+    right_id=$("$FLEXWM" msg windows | jq -r '.windows[] | select(.focused) | .id')
+    left_id=$("$FLEXWM" msg windows | jq -r --argjson id "$right_id" '.windows[] | select(.id != $id) | .id')
+
+    # Move left with the default binding first, so the only way super+n can
+    # bring focus back to the right column is if it really is bound to
+    # focus-column right -- not e.g. a no-op at an already-rightmost column.
+    "$FLEXWM" msg key super+h
+    "$FLEXWM" msg wait-idle --quiet-ms 300 --timeout-ms 10000
+    if [ "$(focused_window)" != "$left_id" ]; then
+        echo "config-bind test: super+h did not move focus left; compositor log:"
+        tail -30 "$log"
+        return 1
+    fi
+
+    "$FLEXWM" msg key super+n
+    "$FLEXWM" msg wait-idle --quiet-ms 300 --timeout-ms 10000
+    if [ "$(focused_window)" != "$right_id" ]; then
+        echo "BUG: the config file's super+n -> focus-column right bind did not take effect"
+        "$FLEXWM" msg windows
+        return 1
+    fi
+    echo "ok: the config file's super+n bind (focus-column right) moved focus as configured"
+}
+( run_config_bind_test ) || exit 1
+
+echo "=== config file: a malformed file falls back to defaults instead of blocking startup ==="
+run_broken_config_test() {
+    local socket="/run/user/$(id -u)/flexwm-smoke-broken.sock"
+    local log="/tmp/flexwm-smoke-broken.log"
+    local cfg
+    cfg=$(mktemp /tmp/flexwm-smoke-broken-XXXXXX.toml)
+    printf 'this is not valid toml [[[\n' >"$cfg"
+    rm -f "$socket" "$log"
+
+    "$FLEXWM" --headless --width 1200 --height 800 --socket "$socket" --config "$cfg" \
+        >"$log" 2>&1 &
+    # Not `local` -- and EXIT, not RETURN -- see run_config_bind_test's
+    # identical trap for why.
+    pid=$!
+    trap 'kill "$pid" 2>/dev/null || true' EXIT
+    export FLEXWM_SOCKET="$socket"
+
+    for _ in $(seq 1 60); do
+        [ -S "$socket" ] && break
+        sleep 0.1
+    done
+    if [ ! -S "$socket" ]; then
+        echo "BUG: a malformed --config file prevented startup -- this is the lockout scenario"
+        echo "config.rs's failure-semantics rule exists specifically to prevent this"
+        tail -30 "$log"
+        return 1
+    fi
+    echo "ok: the compositor started despite a malformed config file"
+
+    if ! grep -qi "could not parse config file" "$log"; then
+        echo "BUG: no log message about the malformed config -- the fallback happened with no signal"
+        tail -30 "$log"
+        return 1
+    fi
+    echo "ok: the fallback to defaults was logged"
+
+    "$FLEXWM" msg version
+    "$FLEXWM" msg action spawn foot
+    local mapped=0
+    for _ in $(seq 1 100); do
+        if [ "$("$FLEXWM" msg windows | jq '.windows | length')" -eq 1 ]; then
+            mapped=1
+            break
+        fi
+        sleep 0.2
+    done
+    if [ "$mapped" -ne 1 ]; then
+        echo "BUG: normal operation did not proceed after falling back to defaults"
+        tail -30 "$log"
+        return 1
+    fi
+    echo "ok: normal operation (spawning a window) works after the fallback"
+}
+( run_broken_config_test ) || exit 1
