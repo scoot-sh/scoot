@@ -134,16 +134,41 @@ review, and why.
    never depend on whether that call's own `drm.activate` succeeds.
    `change_vt` gates on `session_paused`, not `active`. Re-verified on real
    hardware both ways: (1) the original IPC-while-paused repro still gets a
-   clean debug-level skip, no `EPERM`; (2) after a real reactivation cycle,
-   `change_vt` works normally again for a fresh switch-away/back over IPC.
-   93/93 tests pass, clippy/fmt clean, cross-platform build clean on macOS.
+   clean skip, no `EPERM`; (2) after a real reactivation cycle, `change_vt`
+   works normally again for a fresh switch-away/back over IPC. 93/93 tests
+   pass, clippy/fmt clean, cross-platform build clean on macOS.
 
-   General note, not a fix: every IPC input request (`pointer_move`/
-   `pointer_button`/`scroll`/`key`/`type`) bypasses `libinput`'s suspend the
-   same way `change_vt` did — `change_vt` was the only one that turns into a
-   hard `libseat` error, so it's the only one fixed here, but if IPC input
-   reaching a VT-switched-away client ever matters later, this is the known
-   cause, not a fresh investigation.
+   `flexwm-reviewer`'s first formal pass (PR #9): **no blocking findings** —
+   independently re-verified the whole test/clippy/fmt trio, traced every
+   read/write site of both `active` and `session_paused` and confirmed they
+   never conflate (the two write-site sets are structurally disjoint, not
+   just correct by current ordering), checked the fix's premise against the
+   pinned Smithay source (`Event`'s two variants are exhaustive, no third
+   path can move session state behind flexwm's back) and against the actual
+   `seatd` binary's own refusal strings on the dev VM. Two small
+   observations addressed before merge: the skip's log level was raised
+   `debug!` → `info!` (an explicitly requested action being silently
+   discarded needs a trace at the default log level, not just "no spurious
+   error"), and `session_paused: false` at `init` — which asserts a state
+   rather than observing an event, the same shape as the mistake that made
+   `active` wrong the first time — got a doc comment explaining why it's
+   actually safe (`init`'s own `session.open()` call already fails first if
+   the session isn't active). Two more were logged as backlog, not fixed
+   here: an existing pre-PR `warn!` on "already on that VT" that predates
+   this change, and the IPC-VT-switch note below, sharpened by this review.
+
+   General note, not a fix, sharpened by `flexwm-reviewer`'s pass: every IPC
+   input request (`pointer_move`/`pointer_button`/`scroll`/`key`/`type`)
+   bypasses `libinput`'s suspend the same way `change_vt` did — `change_vt`
+   was the only one that turned into a hard `libseat` error, so it's the
+   only one fixed here. The concrete, sharper version of why this matters
+   for `flexwm-vision`'s "an agent doing computer-use tasks in a VM is a
+   first-class client" goal: an agent that sends a VT-switch-away over IPC,
+   then a VT-switch-back over IPC, gets a clean skip instead of an error on
+   the second call — but the compositor is still off-screen, and IPC is the
+   agent's only input channel, so it cannot un-pause itself. An
+   IPC-initiated VT switch away is currently a one-way door for anything
+   whose only input is IPC. See the backlog entry below.
 
    Process note: a `pkill -f` self-match gotcha came up during this item's
    testing — a bare pattern that literally contains the invoking shell's own
@@ -161,6 +186,19 @@ review, and why.
    seam a GPU renderer slots into.
 
 ## Backlog (unordered — pick up whenever it fits)
+
+- **IPC-initiated VT switch is a one-way door for an IPC-only client.**
+  Found during `flexwm-reviewer`'s pass on PR #9 (item 5b). An agent (or any
+  client whose only input path is IPC, not real hardware) that sends a
+  VT-switch-away request over IPC has no way to switch back — the compositor
+  is paused and its own IPC socket has no route to real hardware input,
+  which is the only thing that can trigger the `ActivateSession` event that
+  reopens it. Contradicts `CLAUDE.md`'s "IPC-first... an agent doing simple
+  computer-use tasks in a VM is a first-class client" goal for this one
+  action specifically. Possible directions: reject/gate `ChangeVt` when it
+  arrives via the IPC `key` path rather than a real keybind, or make the IPC
+  reply for a switch-away carry an explicit warning about the one-way trip.
+  Only matters for `--tty`; no effect on `--headless`/`--nested`.
 
 - **Custom/client cursor support.** Item 5 shipped a fixed, procedurally-
   generated triangle for every `CursorImageStatus` variant — `Named` (a
