@@ -282,15 +282,83 @@ review, and why.
    render-target/presentation split from item 1 onward matters: it's the
    seam a GPU renderer slots into.
 
+7. ~~`wl_shm_pool.resize(0)` aborted the whole compositor~~ — DONE, PR #12.
+   Out of the order above on purpose: a live crash-DoS jumps the queue, so
+   this landed while item 6 hasn't started. Found by the security audit
+   recorded in the Backlog below (2026-09-12, against `main` at `2b92928`),
+   its one CRITICAL finding.
+
+   The bug is upstream, in the pinned Smithay rev (`0ff00983`,
+   `src/wayland/shm/handlers.rs:185-190`): the `wl_shm_pool.resize` handler
+   posts a protocol error for `size <= 0` but is **missing the `return`**
+   after it, so `size == 0` falls through into
+   `NonZeroUsize::try_from(0).unwrap()` and panics. `[profile.release]` sets
+   `panic = "abort"`, so this was not the contained single-client protocol
+   error `state.rs`'s dispatch-site comment assumes — it aborted the process
+   and every connected client's session with it. Trigger: any client,
+   `wl_shm.create_pool(fd, 1)` then `wl_shm_pool.resize(0)`. No crafted fd
+   contents, no privilege. Still present on Smithay `master` as of this
+   date, so there was no version bump to wait for.
+
+   Fixed inside flexwm, with no fork of Smithay — the fallback option, which
+   would have needed an externally-hosted one-line fork behind a Cargo
+   `[patch]`, turned out not to be necessary. What forced the shape:
+   (a) this rev has no `delegate_shm!` to partially override —
+   `delegate_dispatch2!` generates a single *blanket* `Dispatch` impl over
+   every interface, and without specialization any per-interface impl
+   overlaps it (E0119), so the blanket impl is the only seam flexwm owns;
+   (b) the valid-size path can't be reimplemented locally — `ShmPoolUserData`'s
+   only field is private and `shm::pool::Pool` isn't exported. So
+   `compositor/dispatch.rs` now holds a hand-written copy of what the macro
+   expanded to, plus one guard that rejects `size <= 0` before Smithay sees
+   it; `size > 0` still goes to Smithay untouched.
+
+   The guard is on the per-request path, so it's written to fold away:
+   `TypeId::of` is a `const fn`, so after monomorphization both sides of its
+   first comparison are compile-time constants and the body disappears for
+   every interface other than `wl_shm_pool`. Measured, not assumed — 1M
+   `wl_surface.damage` requests, compositor CPU in jiffies, 5 reps:
+   before 49/35/32/36/37, after 35/35/34/32/34 (~1.6-1.8M req/s either way).
+   Overlapping ranges, no measurable cost.
+
+   One documented claim was **wrong until hardware disproved it**: the first
+   draft said negative sizes would change error message from "mremap failed"
+   to "invalid wl_shm_pool size". They don't — upstream already posted
+   exactly that error before falling through, and only a client's *first*
+   protocol error is ever delivered, so negative sizes are byte-identical
+   before and after (verified on release builds both ways). What the guard
+   does drop for them is a pointless trip through `Pool::resize`, whose
+   `MemMap::remap` unmaps the existing mapping *before* discovering the new
+   one can't be made.
+
+   Verified on the dev VM against real `--headless` **release** binaries
+   (`panic = "abort"` is what makes the difference visible): before, the
+   compositor died with `Aborted (core dumped)`, exit 134/SIGABRT, and a
+   second client got "Connection refused"; after, it stays up, the offender
+   alone is disconnected, and a fresh client still sees all 9 globals. Nine
+   adversarial cases (0, -1, `i32::MIN`, `i32::MAX`, a legal no-op grow, the
+   ordinary grow, `create_pool` with 0 and -1, and a repeat from a second
+   connection) all leave it alive. Two regression tests drive a real
+   `wayland-client` connection through a real `State`'s real dispatch and
+   assert an innocent second client is still served; the zero case fails
+   against the unfixed tree with the upstream panic. 95 tests, clippy/fmt
+   clean, `scripts/smoke-test.sh` green (its `foot` windows exercise the
+   ordinary shm buffer path through the new dispatch), macOS cross-build
+   clean.
+
+   Delete `dispatch.rs`'s guard and go back to
+   `smithay::delegate_dispatch2!(State)` once a Smithay bump carries the
+   missing `return`.
+
 ## Backlog (unordered — pick up whenever it fits)
 
 **Security audit (2026-09-12, against `main` at `2b92928`).** A dedicated
 security pass separate from the usual correctness/performance review found
 one CRITICAL finding (any Wayland client can abort the whole compositor via
 `wl_shm_pool.resize(0)`, a missing `return` in the pinned Smithay revision —
-being fixed as its own item, not listed here as backlog since it's in
-progress) and one HIGH finding (the dev VM's forwarded SSH port bound to
-every interface instead of loopback, exposing the documented hardcoded
+fixed as item 7 above, not listed here as backlog) and one HIGH finding
+(the dev VM's forwarded SSH port bound to every interface instead of
+loopback, exposing the documented hardcoded
 credentials — and, since the shared `/mnt/flexwm` 9p mount has no read-only
 option in this NixOS module, LAN write access to the actual host checkout —
 to the whole LAN; fixed same-day, `host.address = "127.0.0.1"` added to
@@ -360,6 +428,17 @@ data-loss/RCE in what was checked.
   only at the bottom (`.max(0)`); a very large configured gap can overflow
   plain `i32` arithmetic in `layout.rs`/`arrange.rs`. Config-only, same fix
   shape as the `min_size` finding above.
+- **No upper bound on shm pool size (LOW).** Found while verifying item 7's
+  fix, not by the original audit. `wl_shm_pool.resize(i32::MAX)` (or
+  `wl_shm.create_pool(fd, i32::MAX)` directly — reaches the same `mmap`,
+  not specific to `resize`) is accepted, reserving a ~2 GiB mapping per
+  pool, repeatable per pool and per connection, with no cap anywhere.
+  Verified live: no error, no crash — Smithay's own SIGBUS handler covers
+  reads/writes past the backing fd's real size, so this isn't the same
+  memory-safety class as item 7's bug, just unbounded address-space/fd
+  reservation. Same family as the IPC line-length and screenshot-throttling
+  findings above (resource exhaustion, not memory corruption) — a cap on
+  pool size at creation/resize time would close it.
 
 - **Suppress the same-VT no-op case of the IPC VT-switch warning (5c).**
   `change_vt`'s `VtSwitchOutcome::Requested` also fires — with a hedged
