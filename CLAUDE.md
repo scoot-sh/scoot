@@ -89,12 +89,62 @@ findings summarized, and wait for either an explicit go-ahead or them
 merging it themselves.
 
 **Note on self-modification**: Claude Code refuses to let an agent write to
-its own `.claude/` config (settings, agent definitions) even on direct user
-instruction in chat — this is a deliberate guardrail, not a bug, and
-shouldn't be routed around via another tool. If `.claude/` needs a change,
-the user runs the command themselves in their own terminal (not via the
-in-chat `!` prefix for anything multi-line — heredocs pasted that way don't
-reliably execute; a real terminal session is the reliable path).
+its own `.claude/` config (settings, agent definitions) in normal auto-mode,
+even on direct user instruction in chat — a deliberate guardrail (confirmed:
+the protected-path check runs *before* `permissions.allow` is even
+evaluated, so no settings-file rule can lift it). Two real paths around it,
+neither a workaround of the guardrail's intent: (1) the user runs the
+command themselves, directly; (2) the user runs the session in
+`--dangerously-skip-permissions` (bypass) mode, which the Claude Code docs
+say is meant only for isolated/disposable environments, not routine use —
+treat write access gained this way as scoped to the specific task at hand,
+not a standing license, and keep the same care around destructive/hard-to-
+reverse actions regardless (the safety net just isn't there to catch a
+mistake). If asking the user to paste a multi-line heredoc themselves:
+this failed non-obviously once when the user was typing from a phone —
+long single-newline-dense text (like a YAML frontmatter block) got
+silently corrupted (lines merged, then later whole spans of body text lost)
+somewhere in the mobile input path. Prefer very short, single-line commands
+when the user is likely on mobile, and always ask them to verify the result
+(e.g. `cat -et` or a line count) rather than assuming a paste landed intact.
+
+## Verification and evidence (avoiding redundant hardware work)
+
+The standard verification set for any compositor change: `cargo test -p
+flexwm`, `cargo clippy -p flexwm --all-targets -- -D warnings`, `cargo fmt
+--check -p flexwm`, and `scripts/smoke-test.sh` (backend-agnostic IPC-driven
+end-to-end test; set `MODE=--nested` to run under a host compositor, real
+`--tty` hardware needs the actual binary launched there — see the script's
+own header comment).
+
+The first three are cheap to re-run in full, every time, no exceptions —
+`cargo`'s own incremental build cache means re-running them after a build
+that already succeeded costs almost nothing (a from-scratch 93-test run
+finishes in ~0.01s once compiled), and this is exactly where a fabricated or
+merely-wrong "it works" self-report gets caught cheaply. Independent review
+never skips these on the theory that the implementer already ran them.
+
+Real hardware bug-bash and benchmarking (VT-switch cycles, jiffies-delta
+sampling, IPC screenshot capture) is the genuinely expensive part — real
+wall-clock time, SSH round trips, and state that can't be cached by `cargo`.
+Treat this the way a task runner treats a cache: the implementer's report is
+the cache entry, keyed by the exact commit/tree state it was captured
+against, and it's only valid unmodified. Concretely:
+- **The implementer records, not narrates**: the exact commands run, the
+  exact commit SHA (or "uncommitted, working tree as of \<describe\>") the
+  verification was run against, and raw output/artifacts (real screenshot
+  file paths, raw sampled numbers) — not a paraphrased summary. A claim with
+  no reproducible evidence attached is treated as unverified.
+- **The reviewer checks the cache key first**: if the code has changed at
+  all since that SHA (including a review-driven fix), the recorded evidence
+  for whatever it touched is stale and must be redone — don't trust
+  hardware verification against code that no longer exists.
+- **If the key still matches, spot-check rather than fully redo**: re-run at
+  least one representative scenario live (ideally the one most central to
+  the diff's risk) to rule out fabrication, and audit the rest of the
+  recorded evidence for methodological soundness (did they actually wait for
+  idle before sampling? is the screenshot's content consistent with the
+  claim?) rather than mechanically repeating every scenario end to end.
 
 ## Local scratch/handoff state
 
