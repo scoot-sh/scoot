@@ -60,10 +60,20 @@ impl Dispatch<HostBuffer, ()> for State {
         _: &Connection,
         _: &QueueHandle<Self>,
     ) {
-        if let wayland_client::protocol::wl_buffer::Event::Release = event
-            && let Some(host) = &mut state.host
-        {
+        let wayland_client::protocol::wl_buffer::Event::Release = event else {
+            return;
+        };
+        // Scoped so the mutable borrow of `state.host` ends before the
+        // possible `state.request_render()` call below, which needs `state`
+        // whole again.
+        let should_retry = if let Some(host) = &mut state.host {
             host.buffers_mut().mark_released(buffer);
+            host.take_present_skipped()
+        } else {
+            false
+        };
+        if should_retry {
+            state.request_render();
         }
     }
 }
@@ -114,9 +124,22 @@ impl Dispatch<HostXdgSurface, ()> for State {
             return;
         }
         let (width, height) = host.take_pending_size();
-        Host::apply_size(state, width, height);
-        if let Some(host) = &mut state.host {
-            host.mark_configured();
+        match Host::apply_size(state, width, height) {
+            Ok(()) => {
+                if let Some(host) = &mut state.host {
+                    host.mark_configured();
+                }
+            }
+            Err(error) => {
+                // See apply_size's doc: this is a fatal startup condition
+                // for the nested backend, not something to silently retry
+                // frame after frame from a mismatched state.
+                tracing::error!(
+                    %error,
+                    "could not set up the nested backend's render target at the host's requested size; stopping"
+                );
+                state.loop_signal.stop();
+            }
         }
     }
 }
@@ -196,7 +219,20 @@ impl Dispatch<HostKeyboard, ()> for State {
         // themselves carry (fine for plain typing; a host-side modifier
         // held before flexwm's window gained focus wouldn't be reflected),
         // and the keyboard this compositor sets up (state.rs) always uses
-        // the default US layout rather than adopting the host's.
+        // the default US layout rather than adopting the host's (this
+        // `Keymap` event, ignored below, is how the host would offer one).
+        //
+        // That last point matters for how real input was bug-bashed: tools
+        // like `wtype` don't use the seat's regular keyboard at all -- they
+        // create a `zwp_virtual_keyboard_v1` and upload their own ad hoc xkb
+        // keymap, so the host relays a real `Keymap` event carrying keycodes
+        // that mean whatever that tool made up, not evdev positions. Since
+        // that event is ignored here, flexwm interprets the raw keycodes
+        // that follow against its own default US layout instead -- garbage
+        // in, garbage out, by design, not a bug in the forwarding below. A
+        // real physical keyboard never uploads a keymap, so this doesn't
+        // affect it; it only affects synthetic input tools until host
+        // keymap adoption is implemented (still out of scope).
         if let wl_keyboard::Event::Key {
             key,
             state: key_state,

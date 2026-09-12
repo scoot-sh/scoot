@@ -102,6 +102,16 @@ impl BufferPool {
             slot.free = true;
         }
     }
+
+    /// Destroys this pool's buffers on the host side. Call before dropping a
+    /// pool that's being replaced (a resize), so the old objects don't leak
+    /// host-side -- generated `wl_buffer` proxies have no destructor of
+    /// their own, they only stop being useful once dropped locally.
+    pub fn destroy(self) {
+        for slot in self.slots {
+            slot.buffer.destroy();
+        }
+    }
 }
 
 fn free_slot(slots: &[Slot; COUNT]) -> Option<usize> {
@@ -170,13 +180,6 @@ impl Drop for MappedMem {
         }
     }
 }
-
-// MappedMem's raw pointer is to memory this process exclusively owns via the
-// fd (not aliased with any other Rust reference), so sending it across
-// threads is sound; BufferPool itself is only ever touched from the
-// compositor's single-threaded event loop, but the auto-trait would
-// otherwise be blocked by the raw pointer alone.
-unsafe impl Send for MappedMem {}
 
 #[cfg(test)]
 mod tests {
