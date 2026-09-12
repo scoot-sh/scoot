@@ -24,6 +24,16 @@ window layout OmniWM-style through the Accessibility API.
   about its behavior against the pinned source, not general Smithay
   knowledge, since APIs and semantics shift across revs.
 - Prefer CPU-friendly rendering and damage-limited redraws throughout.
+- **Where an emerging or established Wayland protocol standard exists,
+  implement that rather than a bespoke/compositor-specific alternative,
+  unless there's a concrete reason it doesn't fit.** E.g. `ext-workspace-v1`
+  (compositor-agnostic) over the older one-off wlr workspace protocols it
+  supersedes. This is also why `flexwm-ipc`'s own protocol is scoped to
+  what genuinely needs to be flexwm-specific (agent-driven input injection,
+  screenshots, window/action queries) rather than reinventing something a
+  standard Wayland protocol already covers for external tools like bars —
+  see the `wlr-layer-shell-unstable-v1`/`ext-workspace-v1` backlog entries
+  in `ROADMAP.md` for where that line falls in practice.
 
 ## Engineering standards
 
