@@ -11,6 +11,7 @@ flexwm -- a scrolling-tiling Wayland window manager
 
 USAGE:
     flexwm --headless [--width W] [--height H] [--socket PATH] [-- COMMAND...]
+    flexwm --nested [--width W] [--height H] [--socket PATH] [-- COMMAND...]
     flexwm msg REQUEST
     flexwm --help
 
@@ -43,12 +44,18 @@ pub enum Command {
 
 #[derive(Debug, PartialEq)]
 pub struct CompositorOptions {
+    /// The requested size. Under `--nested`, the host's first configure can
+    /// override this; under `--headless` it's authoritative, there being no
+    /// host to negotiate with.
     pub width: i32,
     pub height: i32,
     /// Where to listen for IPC; the default path when `None`.
     pub socket: Option<PathBuf>,
     /// Launched once the compositor is up, with `WAYLAND_DISPLAY` set.
     pub command: Vec<String>,
+    /// Present as a window inside the host compositor named by the *caller's*
+    /// `WAYLAND_DISPLAY`, instead of running with no display at all.
+    pub nested: bool,
 }
 
 impl Default for CompositorOptions {
@@ -58,6 +65,7 @@ impl Default for CompositorOptions {
             height: 1000,
             socket: None,
             command: Vec::new(),
+            nested: false,
         }
     }
 }
@@ -85,14 +93,21 @@ pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Command, Error> 
     let mut args = args.into_iter();
     match args.next().as_deref() {
         None | Some("--help" | "-h" | "help") => Ok(Command::Help),
-        Some("--headless") => compositor(args).map(Command::Compositor),
+        Some("--headless") => compositor(args, false).map(Command::Compositor),
+        Some("--nested") => compositor(args, true).map(Command::Compositor),
         Some("msg") => message(args),
         Some(other) => Err(Error::Unknown(other.to_owned())),
     }
 }
 
-fn compositor(mut args: impl Iterator<Item = String>) -> Result<CompositorOptions, Error> {
-    let mut options = CompositorOptions::default();
+fn compositor(
+    mut args: impl Iterator<Item = String>,
+    nested: bool,
+) -> Result<CompositorOptions, Error> {
+    let mut options = CompositorOptions {
+        nested,
+        ..CompositorOptions::default()
+    };
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--width" => options.width = number("--width", args.next())?,
@@ -329,6 +344,20 @@ mod tests {
         assert_eq!(options.width, 800);
         assert_eq!(options.height, 600);
         assert_eq!(options.command, vec!["foot", "-e", "sh"]);
+        assert!(!options.nested);
+    }
+
+    #[test]
+    fn nested_sets_the_flag_headless_does_not() {
+        let Ok(Command::Compositor(options)) = parse_args(&["--nested"]) else {
+            panic!("expected compositor");
+        };
+        assert!(options.nested);
+
+        let Ok(Command::Compositor(options)) = parse_args(&["--headless"]) else {
+            panic!("expected compositor");
+        };
+        assert!(!options.nested);
     }
 
     #[test]

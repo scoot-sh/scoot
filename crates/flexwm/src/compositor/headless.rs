@@ -12,10 +12,10 @@ use smithay::backend::allocator::Fourcc;
 use smithay::backend::renderer::damage::OutputDamageTracker;
 use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
 use smithay::backend::renderer::pixman::PixmanRenderer;
-use smithay::backend::renderer::{Bind, Offscreen};
+use smithay::backend::renderer::{Bind, ExportMem, Offscreen};
 use smithay::output::{Mode, Output, PhysicalProperties, Subpixel};
 use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
-use smithay::utils::Transform;
+use smithay::utils::{Rectangle, Transform};
 
 use super::State;
 
@@ -31,10 +31,6 @@ pub struct Backend {
 }
 
 pub fn init(state: &mut State, width: i32, height: i32) -> Result<(), Box<dyn Error>> {
-    let mode = Mode {
-        size: (width, height).into(),
-        refresh: 60_000,
-    };
     let output = Output::new(
         "headless".to_string(),
         PhysicalProperties {
@@ -46,25 +42,10 @@ pub fn init(state: &mut State, width: i32, height: i32) -> Result<(), Box<dyn Er
         },
     );
     output.create_global::<State>(&state.display_handle);
-    output.change_current_state(
-        Some(mode),
-        Some(Transform::Normal),
-        None,
-        Some((0, 0).into()),
-    );
-    output.set_preferred(mode);
+    set_mode(&output, width, height, Some((0, 0).into()));
     state.space.map_output(&output, (0, 0));
 
-    let mut renderer = PixmanRenderer::new()?;
-    let image = renderer.create_buffer(Fourcc::Argb8888, (width, height).into())?;
-    let damage = OutputDamageTracker::from_output(&output);
-
-    state.backend = Some(Backend {
-        renderer,
-        image,
-        damage,
-        size: (width, height),
-    });
+    state.backend = Some(create_backend(&output, width, height)?);
     state.output = Some(output);
     state.world.handle_event(CoreEvent::OutputAdded {
         id: OutputId(1),
@@ -75,6 +56,38 @@ pub fn init(state: &mut State, width: i32, height: i32) -> Result<(), Box<dyn Er
     state.apply();
 
     Ok(())
+}
+
+/// Updates an already-created output's mode. `location` is only meaningful
+/// the first time (see `init`); later callers (`State::resize_output`) pass
+/// `None` to leave it where it is.
+fn set_mode(
+    output: &Output,
+    width: i32,
+    height: i32,
+    location: Option<smithay::utils::Point<i32, smithay::utils::Logical>>,
+) {
+    let mode = Mode {
+        size: (width, height).into(),
+        refresh: 60_000,
+    };
+    output.change_current_state(Some(mode), Some(Transform::Normal), None, location);
+    output.set_preferred(mode);
+}
+
+/// Builds the CPU render target at a given size: a pixman renderer, an
+/// offscreen image to draw into, and the damage tracker that pairs with it.
+/// Shared by `init` and `State::resize_output` so the two can't drift apart.
+fn create_backend(output: &Output, width: i32, height: i32) -> Result<Backend, Box<dyn Error>> {
+    let mut renderer = PixmanRenderer::new()?;
+    let image = renderer.create_buffer(Fourcc::Argb8888, (width, height).into())?;
+    let damage = OutputDamageTracker::from_output(output);
+    Ok(Backend {
+        renderer,
+        image,
+        damage,
+        size: (width, height),
+    })
 }
 
 impl State {
@@ -98,7 +111,7 @@ impl State {
                 renderer,
                 image,
                 damage,
-                ..
+                size,
             } = &mut backend;
             match renderer.bind(image) {
                 Ok(mut framebuffer) => {
@@ -118,8 +131,37 @@ impl State {
                         damage,
                         [0.05, 0.05, 0.06, 1.0],
                     );
-                    if let Err(error) = result {
-                        tracing::warn!(%error, "could not render");
+                    match result {
+                        Ok(_) => {
+                            if let Some(host) = &mut self.host {
+                                // Argb8888 here is the same little-endian BGRA
+                                // layout wl_shm's own Argb8888 format uses
+                                // (see screenshot.rs's comment on the same
+                                // fact for the PNG path) -- unlike there, this
+                                // is a straight memcpy into the host buffer,
+                                // no channel reordering.
+                                let (width, height) = *size;
+                                let region = Rectangle::from_size((width, height).into());
+                                match renderer.copy_framebuffer(
+                                    &framebuffer,
+                                    region,
+                                    Fourcc::Argb8888,
+                                ) {
+                                    Ok(mapping) => match renderer.map_texture(&mapping) {
+                                        Ok(pixels) => host.present(pixels, width, height),
+                                        Err(error) => tracing::warn!(
+                                            %error,
+                                            "could not read back the frame for the host"
+                                        ),
+                                    },
+                                    Err(error) => tracing::warn!(
+                                        %error,
+                                        "could not copy the framebuffer for the host"
+                                    ),
+                                }
+                            }
+                        }
+                        Err(error) => tracing::warn!(%error, "could not render"),
                     }
                 }
                 Err(error) => tracing::warn!(%error, "could not bind the framebuffer"),
@@ -137,6 +179,32 @@ impl State {
         self.space.refresh();
         self.popups.cleanup();
         let _ = self.display_handle.flush_clients();
+    }
+
+    /// Recreates the render target at a new size.
+    ///
+    /// Used only by `--nested`, when the host's first configure disagrees
+    /// with the size flexwm started at (see `nested::init`). This function
+    /// doesn't know `Host` exists -- it only touches the render target and
+    /// the core's notion of output geometry; the caller is responsible for
+    /// resizing `Host`'s own host-side buffers to match, separately.
+    pub fn resize_output(&mut self, width: i32, height: i32) {
+        let Some(output) = &self.output else {
+            return;
+        };
+        set_mode(output, width, height, None);
+        match create_backend(output, width, height) {
+            Ok(backend) => self.backend = Some(backend),
+            Err(error) => {
+                tracing::warn!(%error, "could not resize the render target");
+                return;
+            }
+        }
+        self.world.handle_event(CoreEvent::OutputChanged {
+            id: OutputId(1),
+            area: Rect::new(0, 0, width, height),
+        });
+        self.request_render();
     }
 
     /// Marks the screen dirty and makes sure the frame ticker is running to

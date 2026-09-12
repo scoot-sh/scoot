@@ -168,6 +168,7 @@ in
       wayland-utils
       wev
       wlr-randr
+      grim
       sway
       cage
       foot
