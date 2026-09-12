@@ -1,6 +1,6 @@
 [package]
 name = "flexwm"
-description = "A scrolling-tiling Wayland window manager that runs without a GPU"
+description = "A scrolling-tiling Wayland compositor that runs without a GPU"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

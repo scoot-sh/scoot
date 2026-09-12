@@ -607,6 +607,38 @@ review, and why.
 
 ## Backlog (unordered — pick up whenever it fits)
 
+- **`wlr-layer-shell-unstable-v1` protocol support.** Needed for *any*
+  bar/panel/launcher/notification-daemon (waybar, wofi, mako, rofi, etc.)
+  to attach a surface at all — flexwm implements none of it today (checked:
+  zero references anywhere in `crates/flexwm/src`). A real gap for a
+  niri-like compositor, where this whole ecosystem is part of the expected
+  workflow. The pinned Smithay rev already has a full helper module for
+  this (`smithay::wayland::shell::wlr_layer`, mirroring xdg-shell's own
+  shape), so the protocol plumbing itself isn't starting from scratch.
+  What's un-scoped: layer surfaces (top/bottom/background/overlay) need
+  their own place in the render stack (`headless.rs`'s `Elements` enum
+  currently has `Cursor`/`Space`/`Decoration`; this needs a fourth), and an
+  "exclusive zone" a layer surface reserves (e.g. a bar's height) has to
+  shrink the usable area `flexwm-core`'s workspace/column arrangement
+  places windows within — that's new plumbing between the Wayland-facing
+  layer-shell state and `flexwm-core`'s platform-independent output model,
+  not just a protocol handler. No design work done yet.
+- **`ext-workspace-v1` protocol support.** `flexwm-core` already has a real
+  workspace model (`Output::workspaces`, `active_workspace`,
+  `FocusWorkspace`/`MoveWindowToWorkspace` actions in `world/mod.rs` and
+  `world/actions.rs`) — it's just not exposed outside keybindings/IPC
+  actions today. This protocol (the modern, compositor-agnostic successor
+  to the various one-off wlr workspace protocols) would let external tools
+  (bars, workspace switchers/indicators) query and switch workspaces the
+  same way sway/Hyprland's bars do. Unlike layer-shell, the pinned Smithay
+  rev has **no existing helper for this protocol at all** (checked: no
+  `ext_workspace` reference anywhere in the pinned checkout) — the global,
+  object lifecycle, and event plumbing would need to be implemented
+  directly against `wayland-server`, not layered on a Smithay helper.
+  Depends on layer-shell landing first in practice, since the main
+  consumers (bars) need both to be useful together. No design work done
+  yet.
+
 **From `flexwm-reviewer`'s pass on PR #13 (item 8, client cursor surface
 rendering), all low priority, none blocking:**
 

@@ -1,6 +1,6 @@
 # flexwm
 
-A scrolling-tiling Wayland window manager, in the shape of [niri](https://github.com/YaLTeR/niri):
+A scrolling-tiling Wayland compositor, in the shape of [niri](https://github.com/YaLTeR/niri):
 lightweight, fast, GPU-optional, and built to be driven by a script or an agent
 as easily as by a keyboard.
 

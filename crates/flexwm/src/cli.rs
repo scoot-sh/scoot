@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use flexwm_ipc::{Action, Horizontal, PointerButton, Request, Vertical};
 
 pub const USAGE: &str = "\
-flexwm -- a scrolling-tiling Wayland window manager
+flexwm -- a scrolling-tiling Wayland compositor
 
 USAGE:
     flexwm --headless [--width W] [--height H] [--socket PATH] [--config PATH] [-- COMMAND...]
