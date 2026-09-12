@@ -75,9 +75,12 @@ pub struct Tty {
     libinput: Libinput,
     width: i32,
     height: i32,
-    /// `false` while the session is paused (VT-switched away). Gates
-    /// `present()` so nothing tries to flip a paused device -- see this
-    /// module's doc on pitfall #2 in the commit that introduced it.
+    /// `false` while the session is paused (VT-switched away), and also
+    /// `false` if a subsequent reactivation attempt's `drm.activate` itself
+    /// failed (see `reactivate`) -- either way, the DRM device isn't ours to
+    /// flip. Gates `present()` so nothing tries to flip a device we don't
+    /// hold -- see this module's doc on pitfall #2 in the commit that
+    /// introduced it.
     active: bool,
     /// Set right after a successful `commit`/`page_flip`, cleared on the
     /// matching `VBlank`. `present()` skips (setting `present_skipped`
@@ -227,12 +230,14 @@ impl Tty {
     /// scans it out. Same renderer-agnostic byte-slice signature as
     /// `nested::Host::present` -- see that doc for the rationale.
     ///
-    /// Does nothing if the session is paused (`active` is `false`), if the
-    /// frame's dimensions don't match this output's fixed mode size (this
-    /// backend doesn't support resizing -- the mode is chosen once, at
-    /// startup), or if a previous flip hasn't been confirmed by a `VBlank`
-    /// yet (`flip_pending`) -- flipping again before that would fail with
-    /// EBUSY. The last two set `present_skipped` so a `VBlank` (or, for the
+    /// Does nothing if the session is paused, or a reactivation attempt
+    /// failed to reacquire the DRM device (`active` is `false` in either
+    /// case -- see `reactivate`), if the frame's dimensions don't match this
+    /// output's fixed mode size (this backend doesn't support resizing --
+    /// the mode is chosen once, at startup), or if a previous flip hasn't
+    /// been confirmed by a `VBlank` yet (`flip_pending`) -- flipping again
+    /// before that would fail with EBUSY. The last two set `present_skipped`
+    /// so a `VBlank` (or, for the
     /// paused case, a reactivation) re-triggers a render instead of leaving
     /// the screen stale.
     pub fn present(&mut self, pixels: &[u8], width: i32, height: i32) {
@@ -247,6 +252,21 @@ impl Tty {
             return;
         }
         let Some((index, fb)) = self.buffers.write_free(pixels) else {
+            // Unlike the flip_pending skip above -- an ordinary, frequent,
+            // harmless throttle; exactly one slot is always free whenever a
+            // flip isn't in flight -- reaching here means neither slot was
+            // free even though no flip is pending, which should never
+            // happen in normal operation. It means either a buffer-freeing
+            // bug leaked a slot (this is the failure mode a prior review
+            // flagged as running silently forever once both slots are
+            // stuck busy) or `write_free` failed to map a dumb buffer (see
+            // its own log line in buffers.rs). warn!, not debug!: this is a
+            // bug signal, not routine throttling, so it's fine for it to
+            // repeat on every subsequent present() for as long as it lasts.
+            tracing::warn!(
+                "drm: present skipped, no free buffer slot (both slots busy \
+                 with no flip pending)"
+            );
             self.present_skipped = true;
             return;
         };
@@ -312,6 +332,22 @@ impl Tty {
         if crtc != self.surface.crtc() {
             return false;
         }
+        self.flip_settled()
+    }
+
+    /// The shared tail of `on_vblank` and `drm_event`'s `DrmEvent::Error`
+    /// arm: whatever flip was in flight is done -- one way (confirmed by a
+    /// `VBlank`) or another (its completion is now untrackable, reported as
+    /// an `Error` instead) -- so the buffer slot it was about to free
+    /// (`pending_free`) is safe, and necessary, to free either way; nothing
+    /// else in this module will ever free that slot on our behalf. Pulled
+    /// out into one method specifically so the two call sites can't drift
+    /// the way they did before (`on_vblank` freed `pending_free`, the
+    /// `Error` arm didn't, and the CRTC-mismatch check in `on_vblank` has no
+    /// equivalent need here -- a `DrmEvent::Error` isn't scoped to a crtc).
+    /// Returns whether a render should be re-triggered because a previous
+    /// `present()` had been skipped.
+    fn flip_settled(&mut self) -> bool {
         self.flip_pending = false;
         if let Some(index) = self.pending_free.take() {
             self.buffers.mark_free(index);
@@ -327,30 +363,51 @@ impl Tty {
     /// failure this project's standards call out as the worst kind (silent,
     /// no error anywhere). Returns whether reactivation succeeded well
     /// enough to ask for a fresh render.
+    ///
+    /// Every step below is attempted regardless of whether an earlier one
+    /// failed -- this used to return early the moment `drm.activate` failed,
+    /// which skipped `libinput.resume()` too. That left input dead on top of
+    /// DRM being dead: the user's only recovery mechanism (Ctrl+Alt+Fn, a
+    /// keybinding) depends on libinput being alive, so a failed reactivation
+    /// used to be unrecoverable without physical/remote access. `active`
+    /// still tracks `drm.activate` specifically -- that's the one thing that
+    /// gates whether `present()` may safely flip -- but a dead DRM device
+    /// with a working keyboard is recoverable (the user just retries the VT
+    /// switch); a dead DRM device *and* a dead keyboard is not.
     fn reactivate(&mut self) -> bool {
-        // `activate(true)` already resets state on the device (and every
-        // surface on it) if it had been inactive -- see `DrmDevice::
-        // activate`'s doc -- but resetting the surface again explicitly
-        // below is cheap belt-and-braces, not redundant work that matters.
-        if let Err(error) = self.drm.activate(true) {
-            tracing::error!(%error, "could not reactivate the drm device");
-            return false;
-        }
+        let drm_active = match self.drm.activate(true) {
+            Ok(()) => true,
+            Err(error) => {
+                tracing::error!(%error, "could not reactivate the drm device");
+                false
+            }
+        };
         if self.libinput.resume().is_err() {
             tracing::warn!("could not resume libinput after reactivation");
         }
+        // `activate(true)` already resets state on the device (and every
+        // surface on it) if it had been inactive -- see `DrmDevice::
+        // activate`'s doc -- so this is cheap belt-and-braces when
+        // `drm_active`, but still worth attempting even when it isn't:
+        // without DRM master this is a harmless no-op/read rather than
+        // something that needs gating, and if the device does come back on
+        // some later reactivation there's no reason for stale surface state
+        // to have gone unreset in the meantime.
         if let Err(error) = self.surface.reset_state() {
             tracing::warn!(%error, "could not reset drm surface state after reactivation");
         }
-        self.active = true;
+        self.active = drm_active;
         self.flip_pending = false;
         self.needs_modeset = true;
-        // The surface's own notion of what's scanned out is gone along
-        // with its state; both buffer slots are safe to reuse.
+        // The surface's own notion of what's scanned out is gone along with
+        // its state (or, if `drm.activate` failed, was never something we
+        // can trust to begin with) -- either way both buffer slots are safe
+        // to reuse. Unconditional: freeing slots is always safe, never
+        // harmful, regardless of what else above failed.
         self.buffers.mark_all_free();
         self.showing = None;
         self.pending_free = None;
-        true
+        drm_active
     }
 }
 
@@ -391,8 +448,22 @@ fn drm_event(event: DrmEvent, _: &mut Option<DrmEventMetadata>, state: &mut Stat
             DrmEvent::VBlank(crtc) => tty.on_vblank(crtc),
             DrmEvent::Error(error) => {
                 tracing::warn!(%error, "drm event error");
-                tty.flip_pending = false;
-                false
+                // Same buffer bookkeeping as a VBlank (see `flip_settled`):
+                // an error means this flip's completion is no longer
+                // trackable, but whatever slot it was about to free is
+                // still safe, and necessary, to free -- otherwise it leaks
+                // forever (there are only 2 slots total; see
+                // `Tty::present`'s own log for what happens once both are
+                // stuck busy). Not forcing `needs_modeset` here: a
+                // `DrmEvent::Error` is Smithay reporting a fault reading the
+                // DRM event fd itself, not evidence the CRTC was
+                // reconfigured behind us the way a VT switch is -- the
+                // surface's cached state is no more suspect than it was a
+                // moment ago, and a gratuitous modeset visibly blanks the
+                // screen. If the device really is wedged, the next
+                // page_flip fails synchronously and is already logged at
+                // its own call site.
+                tty.flip_settled()
             }
         }
     };

@@ -11,6 +11,27 @@ flexwm-core.workspace = true
 flexwm-ipc = { workspace = true, features = ["core"] }
 serde_json.workspace = true
 
+# libinput-sys (unlike libseat-sys/udev-sys/xkbcommon-sys, which all use
+# pkg-config internally) has no build.rs logic to locate libinput's shared
+# library, so on NixOS the final link step fails with "cannot find -linput"
+# even though `pkg-config --exists libinput` succeeds -- the .pc file points
+# at a real /nix/store path that's on no default linker search path. build.rs
+# adds that search path itself so `cargo build` keeps working with no extra
+# environment setup, matching every other dependency here. Same version
+# already resolved transitively (every pkg-config-based sys crate above pulls
+# it in), so this adds no new version to the tree.
+#
+# Deliberately *not* under a `[target.'cfg(target_os = "linux")']` table:
+# build-dependencies compile for the host doing the build, never the target
+# being built for, so gating one behind the target OS excludes it whenever
+# the host itself isn't Linux -- e.g. this crate's own dev machine -- no
+# matter what's being built. `pkg-config` itself is a portable Rust crate
+# that builds fine on any host (it just won't find a Linux system library to
+# probe when run elsewhere); the actual Linux-only behavior is already
+# correctly handled by build.rs's own runtime `CARGO_CFG_TARGET_OS` check.
+[build-dependencies]
+pkg-config = "0.3"
+
 # The compositor is Linux-only; `flexwm msg` builds everywhere, so the CLI can
 # drive a VM from a Mac.
 [target.'cfg(target_os = "linux")'.dependencies]
@@ -30,18 +51,6 @@ calloop-wayland-source = "0.4"
 # adds no new version to the tree, just a direct dependency on one already
 # there.
 rustix = { version = "1", features = ["fs", "mm"] }
-
-# libinput-sys (unlike libseat-sys/udev-sys/xkbcommon-sys, which all use
-# pkg-config internally) has no build.rs logic to locate libinput's shared
-# library, so on NixOS the final link step fails with "cannot find -linput"
-# even though `pkg-config --exists libinput` succeeds -- the .pc file points
-# at a real /nix/store path that's on no default linker search path. build.rs
-# adds that search path itself so `cargo build` keeps working with no extra
-# environment setup, matching every other dependency here. Same version
-# already resolved transitively (every pkg-config-based sys crate above pulls
-# it in), so this adds no new version to the tree.
-[target.'cfg(target_os = "linux")'.build-dependencies]
-pkg-config = "0.3"
 
 [target.'cfg(target_os = "linux")'.dependencies.smithay]
 git = "https://github.com/Smithay/smithay"

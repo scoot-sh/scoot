@@ -86,6 +86,12 @@ impl BufferPool {
         let mut handle = *slot.buffer.handle();
         let pitch = handle.pitch() as usize;
         let Ok(mut mapping) = self.fd.map_dumb_buffer(&mut handle) else {
+            // Logged here, not just left for the caller to infer from a
+            // bare `None`: `present()` treats every `None` from this
+            // function as "no free slot" for its own log line, but this
+            // particular cause (the slot *was* free, the mmap itself
+            // failed) is worth distinguishing at the source.
+            tracing::warn!("drm: could not map dumb buffer for writing");
             return None;
         };
         // Never assume `mapping.len() == pitch * height`: the kernel rounds
