@@ -150,7 +150,8 @@ impl State {
     /// match one, no matter what's configured in `[binds]`. `ipc.rs`'s
     /// `Request::Key` handler uses the main key's outcome to warn a caller
     /// whose only input/output is this IPC connection when a switch-away
-    /// just made the compositor unreachable.
+    /// request just went out, since it may have just cost that connection
+    /// the one channel that could switch the session back.
     pub fn press(&mut self, combo: &KeyCombo) -> Result<Option<VtSwitchOutcome>, String> {
         let keysym =
             keysym_named(&combo.key).ok_or_else(|| format!("unknown key `{}`", combo.key))?;

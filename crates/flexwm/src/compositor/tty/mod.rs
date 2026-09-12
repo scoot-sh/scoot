@@ -604,15 +604,18 @@ fn linux_button(code: u32) -> Option<PointerButton> {
 
 /// What `State::change_vt` actually did. Exists so the IPC `key` request
 /// path (`ipc.rs`'s `Request::Key` handler, via `input.rs`'s `press`/`key`)
-/// can tell a real switch-away apart from a no-op: a real hardware keybind
-/// has no reply channel to warn through and doesn't need one (the user is
-/// physically still at the console either way), but an agent whose only
-/// input *and output* is this one IPC connection needs to learn from the
-/// reply itself that it just made the compositor unreachable over IPC --
-/// see the backlog item this closes (`ROADMAP.md`) and `flexwm-vision`'s
-/// "IPC-first, an agent doing computer-use is a first-class client" goal.
-/// Only `Requested` should ever surface as a warning; `Ignored`/`Failed`
-/// mean nothing actually changed, so there's nothing new to warn about.
+/// can tell a request libseat accepted apart from one it rejected outright:
+/// a real hardware keybind has no reply channel to warn through and doesn't
+/// need one (the user is physically still at the console either way), but
+/// an agent whose only input *and output* is this one IPC connection needs
+/// to learn from the reply itself that it may just have lost the one
+/// channel that could switch the session back -- see the backlog item this
+/// closes (`ROADMAP.md`) and `flexwm-vision`'s "IPC-first, an agent doing
+/// computer-use is a first-class client" goal. Only `Requested` should ever
+/// surface as a warning -- and, per its own doc below, `Requested` doesn't
+/// itself guarantee a switch happened, only that libseat didn't refuse the
+/// request; `Ignored`/`Failed` mean the request itself went nowhere, so
+/// there's nothing new to warn about.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum VtSwitchOutcome {
     /// `tty.session.change_vt` was actually called and returned `Ok(())` --
