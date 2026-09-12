@@ -153,8 +153,26 @@ EOF
 
     "$FLEXWM" --headless --width 1200 --height 800 --socket "$socket" --config "$cfg" \
         >"$log" 2>&1 &
-    local pid=$!
-    trap 'kill "$pid" 2>/dev/null || true' RETURN
+    # Not `local`: the EXIT trap below fires as this subshell itself exits,
+    # which is after this function has already returned -- by which point a
+    # `local` would already be out of scope, and `set -u` would fail the
+    # trap itself with "pid: unbound variable", silently skipping the kill
+    # it exists to do (this combination broke exactly that way during
+    # development). A plain assignment lives for the rest of this subshell
+    # (this function's only caller), exactly as long as the trap needs it.
+    pid=$!
+    # EXIT, not RETURN. This function's only caller wraps it as
+    # `( run_config_bind_test ) || exit 1`, and a subshell on the left side
+    # of `||` has errexit suppressed for everything it runs -- confirmed
+    # empirically -- so an unguarded command failing below doesn't actually
+    # abort the function early the way it would if this were called
+    # directly. RETURN would therefore already fire correctly as written
+    # here today. EXIT is used anyway, since it doesn't depend on that
+    # wrapping detail staying exactly as written -- a future edit to the
+    # call site could otherwise silently regress this cleanup with no
+    # signal that it happened. Same pattern as the top-level $compositor
+    # trap above.
+    trap 'kill "$pid" 2>/dev/null || true' EXIT
     export FLEXWM_SOCKET="$socket"
 
     for _ in $(seq 1 60); do
@@ -222,8 +240,10 @@ run_broken_config_test() {
 
     "$FLEXWM" --headless --width 1200 --height 800 --socket "$socket" --config "$cfg" \
         >"$log" 2>&1 &
-    local pid=$!
-    trap 'kill "$pid" 2>/dev/null || true' RETURN
+    # Not `local` -- and EXIT, not RETURN -- see run_config_bind_test's
+    # identical trap for why.
+    pid=$!
+    trap 'kill "$pid" 2>/dev/null || true' EXIT
     export FLEXWM_SOCKET="$socket"
 
     for _ in $(seq 1 60); do
