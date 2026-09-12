@@ -63,6 +63,22 @@ impl CompositorHandler for State {
 
         self.popups.commit(surface);
     }
+
+    /// Smithay calls this for every `wl_surface` that goes away, whether the
+    /// client destroyed it explicitly or simply quit.
+    ///
+    /// The one thing this compositor keeps a `WlSurface` in outside
+    /// `self.space`/`self.windows` (both already driven by their own
+    /// xdg-shell destruction paths) is the cursor's image status, and
+    /// nothing upstream clears that when the surface behind it dies -- see
+    /// `Cursor::forget_surface`.
+    fn destroyed(&mut self, surface: &WlSurface) {
+        if self.cursor.forget_surface(surface) && self.tty.is_some() {
+            // The cursor's shape just changed to the fallback; only `--tty`
+            // draws one at all, same gate as `cursor_image` below.
+            self.request_render();
+        }
+    }
 }
 
 /// A toplevel needs one configure before it may attach a buffer.

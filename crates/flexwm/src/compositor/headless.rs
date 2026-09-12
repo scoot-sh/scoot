@@ -10,7 +10,6 @@ use flexwm_core::{Event as CoreEvent, OutputId, Rect};
 use pixman::Image;
 use smithay::backend::allocator::Fourcc;
 use smithay::backend::renderer::damage::OutputDamageTracker;
-use smithay::backend::renderer::element::memory::MemoryRenderBufferRenderElement;
 use smithay::backend::renderer::element::render_elements;
 use smithay::backend::renderer::element::solid::SolidColorRenderElement;
 use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
@@ -18,28 +17,32 @@ use smithay::backend::renderer::pixman::PixmanRenderer;
 use smithay::backend::renderer::{Bind, ExportMem, Offscreen};
 use smithay::desktop::Window;
 use smithay::desktop::space::{self, SpaceRenderElements};
+use smithay::desktop::utils::send_frames_surface_tree;
 use smithay::output::{Mode, Output, PhysicalProperties, Subpixel};
 use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
+use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{Buffer, Physical, Rectangle, Transform};
 
 use super::State;
+use super::cursor::CursorElement;
 use super::tty::Tty;
 
 // Everything `render()` can draw, front-to-back as Smithay's damage tracker
-// expects (see `render()`'s comment on that convention): window surfaces,
-// then this feature's focus-ring segments underneath them. The background
-// isn't a variant here at all -- it's the `render_output` call's
+// expects (see `render()`'s comment on that convention): the cursor, window
+// surfaces, then this feature's focus-ring segments underneath them. The
+// background isn't a variant here at all -- it's the `render_output` call's
 // `clear_color`, always the bottom-most thing on screen by construction; see
 // `decorations.rs`'s module doc for why that's simpler and safer than a
 // full-output element.
 //
 // Fixed to `PixmanRenderer` (this backend's only renderer) rather than
 // generic over `R`, which is why this lives here and not in
-// `decorations.rs` -- that module stays renderer-agnostic, returning plain
-// `SolidColorRenderElement`s this enum only wraps.
+// `decorations.rs`/`cursor.rs` -- those modules stay renderer-agnostic,
+// returning plain `SolidColorRenderElement`s and generic `CursorElement<R>`s
+// this enum only wraps.
 render_elements! {
     Elements<=PixmanRenderer>;
-    Cursor = MemoryRenderBufferRenderElement<PixmanRenderer>,
+    Cursor = CursorElement<PixmanRenderer>,
     Space = SpaceRenderElements<PixmanRenderer, WaylandSurfaceRenderElement<PixmanRenderer>>,
     Decoration = SolidColorRenderElement,
 }
@@ -131,6 +134,11 @@ impl State {
         let Some(mut backend) = self.backend.take() else {
             return;
         };
+        // The client-supplied cursor surface this frame drew from, if any --
+        // set only on the frames that actually went looking for one (`--tty`
+        // with a pointer). See the `send_frames_surface_tree` call at the
+        // end of this function.
+        let mut cursor_surface: Option<WlSurface> = None;
         {
             let Backend {
                 renderer,
@@ -153,25 +161,21 @@ impl State {
                 Ok(mut framebuffer) => {
                     // Only `--tty` ever draws a cursor -- see `cursor.rs`'s
                     // module doc; headless has no display and `--nested`
-                    // already shows the host's own. Any failure building it
-                    // (the fixed embedded bitmap failing to import) just
-                    // means no cursor this frame, not a skipped render.
-                    let cursor_element = if self.tty.is_some() {
-                        self.seat.get_pointer().and_then(|pointer| {
-                            let location = pointer.current_location();
-                            match self.cursor.element(renderer, location) {
-                                Ok(element) => element,
-                                Err(error) => {
-                                    tracing::warn!(
-                                        %error,
-                                        "could not build the cursor render element"
-                                    );
-                                    None
-                                }
+                    // already shows the host's own. The list is empty when
+                    // there's nothing to draw (hidden, or a client cursor
+                    // surface with no content yet) and can hold more than
+                    // one element when a client's cursor surface has
+                    // subsurfaces of its own.
+                    let cursor_elements = if self.tty.is_some() {
+                        match self.seat.get_pointer() {
+                            Some(pointer) => {
+                                cursor_surface = self.cursor.surface().cloned();
+                                self.cursor.element(renderer, pointer.current_location())
                             }
-                        })
+                            None => Vec::new(),
+                        }
                     } else {
-                        None
+                        Vec::new()
                     };
                     // Cursor first (topmost), then window surfaces, then the
                     // ring (bottom-most of the three): Smithay's damage
@@ -201,9 +205,10 @@ impl State {
                         1.0,
                     ) {
                         Ok(space_elements) => {
-                            let mut elements =
-                                Vec::with_capacity(space_elements.len() + ring_elements.len() + 1);
-                            elements.extend(cursor_element.map(Elements::Cursor));
+                            let mut elements = Vec::with_capacity(
+                                cursor_elements.len() + space_elements.len() + ring_elements.len(),
+                            );
+                            elements.extend(cursor_elements.into_iter().map(Elements::Cursor));
                             elements.extend(space_elements.into_iter().map(Elements::Space));
                             elements.extend(ring_elements.into_iter().map(Elements::Decoration));
 
@@ -334,6 +339,27 @@ impl State {
         let time = self.start_time.elapsed();
         for window in self.space.elements() {
             window.send_frame(&output, time, Some(Duration::ZERO), |_, _| {
+                Some(output.clone())
+            });
+        }
+        // A client cursor surface is never in `self.space`, so the loop
+        // above can't reach it -- and a well-behaved client with an animated
+        // cursor (a spinner, a throbber) attaches one frame, requests a
+        // callback, and waits for it before attaching the next. Without this
+        // it waits forever and the animation freezes on its first frame.
+        //
+        // Scoped to the frames that presented this cursor (`--tty`, pointer
+        // present, the status a live client surface) rather than sent
+        // unconditionally: waking a client to draw cursor frames that
+        // nothing on screen is showing is exactly the kind of pointless
+        // work this compositor's own render loop avoids. It is deliberately
+        // *not* narrowed further to "the surface produced at least one
+        // element" -- a surface with no buffer yet produces none, and a
+        // client that asks for a callback before its first attach (legal,
+        // if unusual) would then stall on the very frame that should unstick
+        // it.
+        if let Some(surface) = &cursor_surface {
+            send_frames_surface_tree(surface, &output, time, Some(Duration::ZERO), |_, _| {
                 Some(output.clone())
             });
         }

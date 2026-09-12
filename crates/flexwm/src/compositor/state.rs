@@ -73,8 +73,10 @@ pub struct State {
     /// Per-window persistent ring buffers -- see `decorations.rs`'s module
     /// doc for why these live here rather than being rebuilt every frame.
     pub decorations: Decorations,
-    /// The pointer's render buffer and last-requested image, drawn only
-    /// under `--tty` -- see `cursor.rs`'s module doc.
+    /// The pointer's last-requested image -- a client-supplied cursor
+    /// surface, a named shape, or hidden -- plus the render buffer behind
+    /// the fallback shape. Drawn only under `--tty`; see `cursor.rs`'s
+    /// module doc.
     pub cursor: Cursor,
 
     pub compositor_state: CompositorState,
