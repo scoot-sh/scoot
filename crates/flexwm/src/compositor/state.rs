@@ -1,7 +1,7 @@
 //! What the compositor owns: Smithay's protocol state, the Wayland windows, and
 //! the [`World`] that decides where they go.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::path::PathBuf;
 use std::process::Command;
@@ -10,6 +10,7 @@ use std::time::Instant;
 
 use flexwm_core::{Config, Size, WindowId, World};
 use smithay::desktop::{PopupManager, Space, Window, WindowSurfaceType};
+use smithay::input::keyboard::Keycode;
 use smithay::input::{Seat, SeatState};
 use smithay::output::Output;
 use smithay::reexports::calloop::generic::Generic;
@@ -27,6 +28,7 @@ use smithay::wayland::socket::ListeningSocketSource;
 
 use super::headless::Backend;
 use super::ipc::PendingIdle;
+use super::keybindings::Keybindings;
 use super::nested::Host;
 
 pub struct State {
@@ -64,6 +66,12 @@ pub struct State {
     pub seat_state: SeatState<State>,
     pub data_device_state: DataDeviceState,
     pub seat: Seat<State>,
+
+    pub keybindings: Keybindings,
+    /// Keycodes currently held that a keybinding intercepted on press, so
+    /// their matching release is intercepted too instead of forwarded to
+    /// whatever the focused client becomes in between. See `input::key`.
+    pub suppressed_keys: HashSet<Keycode>,
 
     /// Something changed that the framebuffer doesn't show yet.
     pub needs_render: bool,
@@ -117,6 +125,8 @@ impl State {
             seat_state,
             data_device_state,
             seat,
+            keybindings: Keybindings::default(),
+            suppressed_keys: HashSet::new(),
             // true without going through request_render(), so nothing has
             // armed the frame timer yet. That's only safe because
             // headless::init() unconditionally and synchronously calls

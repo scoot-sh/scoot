@@ -8,6 +8,7 @@ mod handlers;
 mod headless;
 mod input;
 mod ipc;
+mod keybindings;
 mod nested;
 mod nested_dispatch;
 mod screenshot;
