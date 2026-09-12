@@ -192,18 +192,33 @@ review, and why.
    String>` (replacing `Result<(), String>`) to `ipc.rs`'s `Request::Key`
    handler — `press()`'s one caller. A new `Response::Warning { message }`
    variant (purely additive to the wire format, no `PROTOCOL_VERSION` bump)
-   fires only for `Ok(Some(VtSwitchOutcome::Requested))`, i.e. a real
-   switch-away actually happened. `Ignored` (no `--tty`, or already paused —
-   5b's own skip) and `Failed` stay a plain `Ok`, matching pre-existing
-   behavior exactly: only a switch that actually left produces a warning: an
-   already-paused no-op still gets a clean `Ok`, not a nuisance re-warning.
-   `flexwm msg` prints a `Warning`'s message to stderr and still exits `0`
-   (it's not a failure).
+   fires for `Ok(Some(VtSwitchOutcome::Requested))`. `Ignored` (no `--tty`,
+   or already paused — 5b's own skip) and `Failed` stay a plain `Ok`,
+   matching pre-existing behavior exactly. `flexwm msg` prints a `Warning`'s
+   message to stderr and still exits `0` (it's not a failure).
+
+   `Requested` means "libseat accepted the request," not "a switch is
+   guaranteed" — found empirically on the dev VM, not assumed: requesting
+   the VT this session is *already showing* also returns `Ok(())`, with
+   `seatd`'s own log reading "Could not set next session: requested session
+   is already active" and no pause at all. `libseat_switch_session`'s own C
+   doc says the same thing plainly ("does not imply that a switch will
+   occur"). The warning's wording accounts for this directly ("requested...
+   if it takes effect...") rather than asserting a pause that may not
+   happen — deliberately still warning on this no-op case rather than
+   trying to suppress it (that would need tracking which VT this session
+   currently occupies, which nothing here does today, purely to silence a
+   warning whose failure mode if wrong is "an agent got told to be careful
+   for no reason," not "an agent got silently walled off" — the one-way-door
+   problem this item exists to fix in the first place).
 
    Verified on real `--tty` hardware on the dev VM (this VM's session is
    `seatd`-backed, not `logind`-backed, confirmed via its own journal):
-   `flexwm msg key ctrl+alt+f2` while active now replies with the warning
-   (`seatd` itself logs "Switching from VT 1 to VT 2", and flexwm logs
+   requesting the current VT while active produces the warning with no
+   actual pause (`seatd`: "requested session is already active"; flexwm:
+   active VT unchanged, no `session paused` log line, still IPC-responsive);
+   `flexwm msg key ctrl+alt+f2` while active produces the same warning, this
+   time for a real switch (`seatd`: "Switching from VT 1 to VT 2"; flexwm:
    "session paused; drm master released" the same moment); sending the
    switch-back combo over IPC while genuinely paused still gets a clean `Ok`
    with no `EPERM` — `Ignored`, not `Requested`, so no warning, exactly 5b's
@@ -212,7 +227,11 @@ review, and why.
    physical Ctrl+Alt+Fn press takes) reactivates the session normally (`drm:
    modeset (full commit)`), and a fresh switch-away/back over IPC afterward
    reproduces the same warning/clean-skip pair, confirming the gate reopens
-   rather than latching shut. 93/93 tests pass (including a new
+   rather than latching shut. `scripts/smoke-test.sh` (`--headless`) passes
+   in full, including its `key h`/`key super+h` calls, confirming
+   `Ok(None)` (no `ChangeVt` binding exists outside `--tty`) stays a plain
+   `Ok` with no spurious warning on the backends this doesn't apply to.
+   93/93 tests pass (including a new
    `flexwm-ipc` wire test for `Response::Warning`'s JSON shape and round
    trip), clippy/fmt clean on the dev VM guest, cross-platform build clean
    on macOS. No unit test constructs a live `Tty`/`State` to exercise

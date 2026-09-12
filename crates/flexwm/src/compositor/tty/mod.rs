@@ -616,9 +616,17 @@ fn linux_button(code: u32) -> Option<PointerButton> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum VtSwitchOutcome {
     /// `tty.session.change_vt` was actually called and returned `Ok(())` --
-    /// a real `VT_ACTIVATE` went out, so (barring some later failure on the
-    /// kernel/session side this call can't observe) this session is about
-    /// to be paused.
+    /// a real `VT_ACTIVATE` request went out. This is *not* a guarantee the
+    /// switch happens: libseat's own `libseat_switch_session` doc says
+    /// plainly that "a call ... does not imply that a switch will occur,"
+    /// and empirically (verified on the dev VM) requesting the VT this
+    /// session is *already* showing on returns `Ok(())` too, with no pause
+    /// and no VT change at all -- seatd just logs "requested session is
+    /// already active" and does nothing further. `Requested` therefore means
+    /// "asked, and the ask wasn't rejected outright," not "confirmed
+    /// switched" -- see `ipc.rs`'s `Request::Key` handler for how its
+    /// `Warning` message is worded to match that uncertainty rather than
+    /// overclaiming a pause that may not happen.
     Requested,
     /// No `--tty` backend, or the session is already paused -- a deliberate
     /// no-op, already logged by `change_vt` itself at its own call site.
