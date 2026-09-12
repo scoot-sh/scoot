@@ -52,6 +52,16 @@ use super::keybindings::Keybindings;
 /// pool frames get copied into. See the module doc for how this fits next
 /// to `nested::Host`.
 pub struct Tty {
+    /// `LibSeatSession` only holds a `Weak` reference to the underlying
+    /// libseat connection -- the one strong reference is owned by its
+    /// `LibSeatSessionNotifier`, registered with the event loop in `init`
+    /// and never referenced again by name after that. That's what actually
+    /// keeps the session alive for the process's lifetime; this field
+    /// merely lets `change_vt` reach it. If a future change ever drops
+    /// that notifier (e.g. deregistering it from the loop) before `Tty`
+    /// itself is dropped, every call through this field starts failing
+    /// with `SessionLost` -- silently from `change_vt`'s point of view,
+    /// since it only logs a warning on error (see its doc).
     session: LibSeatSession,
     drm: DrmDevice,
     surface: smithay::backend::drm::DrmSurface,
@@ -258,10 +268,21 @@ impl Tty {
         };
 
         let result = if self.needs_modeset {
+            // info!, not debug!: a modeset is rare (first frame, or right
+            // after a session reactivation) and is exactly the event
+            // pitfall #2's verification depends on being able to grep for
+            // at the default log level -- see the commit introducing this
+            // backend.
             tracing::info!("drm: modeset (full commit)");
             self.surface.commit([plane_state], true)
         } else {
-            tracing::info!("drm: page flip");
+            // debug!, not info!: an ordinary page flip happens on every
+            // redraw (a keystroke, a cursor blink) -- once cursor
+            // rendering exists this could be well over 100 times a second,
+            // and logging that at info! would drown out everything else at
+            // the default level for no benefit once the modeset/page-flip
+            // distinction above has already been proven to work.
+            tracing::debug!("drm: page flip");
             self.surface.page_flip([plane_state], true)
         };
         match result {
