@@ -88,17 +88,29 @@ impl State {
     pub fn press(&mut self, combo: &KeyCombo) -> Result<(), String> {
         let keysym =
             keysym_named(&combo.key).ok_or_else(|| format!("unknown key `{}`", combo.key))?;
-        let mut held = Vec::new();
+        // Resolve every keycode -- the main key and all modifiers -- before
+        // pressing anything. `keycode_for` is a pure lookup against the
+        // static keymap (no dependency on what's currently held), so doing
+        // this up front means a name that doesn't exist on this layout is
+        // rejected before any key state changes, rather than after some
+        // modifiers are already down. Otherwise a failure partway through
+        // would leave a modifier (e.g. Super) permanently held at the seat
+        // level, silently corrupting every keypress after it.
+        let code = self
+            .keycode_for(keysym)
+            .ok_or_else(|| format!("no key for `{}` in this layout", combo.key))?;
+        let mut modifier_codes = Vec::with_capacity(combo.modifiers.len());
         for modifier in &combo.modifiers {
             let code = self
                 .keycode_for(modifier_keysym(*modifier))
                 .ok_or_else(|| format!("no key for `{modifier:?}` in this layout"))?;
+            modifier_codes.push(code);
+        }
+        let mut held = Vec::with_capacity(modifier_codes.len());
+        for code in modifier_codes {
             self.key(code, KeyState::Pressed);
             held.push(code);
         }
-        let code = self
-            .keycode_for(keysym)
-            .ok_or_else(|| format!("no key for `{}` in this layout", combo.key))?;
         self.key(code, KeyState::Pressed);
         self.key(code, KeyState::Released);
         for code in held.into_iter().rev() {

@@ -71,6 +71,15 @@ pub struct State {
     /// Keycodes currently held that a keybinding intercepted on press, so
     /// their matching release is intercepted too instead of forwarded to
     /// whatever the focused client becomes in between. See `input::key`.
+    ///
+    /// Invariant: only `key()` inserts or removes entries here. If any
+    /// future code path ever forwards or intercepts a key release *without*
+    /// going through `key()` -- e.g. Smithay's `KeyboardHandle::release_source`,
+    /// used to tear down a virtual keyboard or a departing libinput device
+    /// by forwarding its releases directly -- it must also remove that
+    /// keycode from here, or the next real press+release of the same
+    /// keycode will have its legitimate release wrongly intercepted as a
+    /// stale stuck entry.
     pub suppressed_keys: HashSet<Keycode>,
 
     /// Something changed that the framebuffer doesn't show yet.
