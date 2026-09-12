@@ -103,7 +103,7 @@ impl State {
     /// Types text by pressing whichever keys produce those characters.
     pub fn type_text(&mut self, text: &str) -> Result<(), String> {
         for character in text.chars() {
-            let keysym = xkb::utf32_to_keysym(character as u32);
+            let keysym = keysym_for_char(character);
             let Some(code) = self.keycode_for(keysym) else {
                 return Err(format!("no key for `{character}` in this layout"));
             };
@@ -189,6 +189,20 @@ fn modifier_keysym(modifier: Modifier) -> Keysym {
     }
 }
 
+/// Maps a character to the keysym that types it. `xkb::utf32_to_keysym` only
+/// covers printable Latin-1 and a table of extra graphic Unicode mappings, so
+/// C0 controls like `\n` fall through it entirely -- not to `Return`, to
+/// nothing, which used to make `type_text("ls\n")` error out on the newline
+/// and silently drop the rest of the string. Handle the controls a caller
+/// would plausibly send before falling back to the general mapping.
+fn keysym_for_char(character: char) -> Keysym {
+    match character {
+        '\n' | '\r' => Keysym::Return,
+        '\t' => Keysym::Tab,
+        _ => xkb::utf32_to_keysym(character as u32),
+    }
+}
+
 fn keysym_named(name: &str) -> Option<Keysym> {
     let exact = xkb::keysym_from_name(name, xkb::KEYSYM_NO_FLAGS);
     let keysym = if exact.raw() == 0 {
@@ -197,4 +211,47 @@ fn keysym_named(name: &str) -> Option<Keysym> {
         exact
     };
     (keysym.raw() != 0).then_some(keysym)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn newline_and_friends_map_to_named_keys_not_utf32() {
+        assert_eq!(keysym_for_char('\n'), Keysym::Return);
+        assert_eq!(keysym_for_char('\r'), Keysym::Return);
+        assert_eq!(keysym_for_char('\t'), Keysym::Tab);
+    }
+
+    #[test]
+    fn printable_ascii_falls_back_to_utf32_to_keysym() {
+        // Untouched by the control-character special case, so this should
+        // still go through the general xkbcommon mapping.
+        assert_eq!(keysym_for_char('a'), xkb::utf32_to_keysym('a' as u32));
+        assert_eq!(keysym_for_char('!'), xkb::utf32_to_keysym('!' as u32));
+    }
+
+    #[test]
+    fn keysym_named_accepts_exact_and_case_insensitive_names() {
+        assert_eq!(keysym_named("Return"), Some(Keysym::Return));
+        assert_eq!(keysym_named("return"), Some(Keysym::Return));
+        assert_eq!(keysym_named("ctrl+shift+t"), None);
+        assert_eq!(keysym_named("not-a-real-key"), None);
+    }
+
+    #[test]
+    fn button_codes_match_linux_input_event_codes() {
+        assert_eq!(code(PointerButton::Left), BTN_LEFT);
+        assert_eq!(code(PointerButton::Right), BTN_RIGHT);
+        assert_eq!(code(PointerButton::Middle), BTN_MIDDLE);
+    }
+
+    #[test]
+    fn modifier_keysyms_are_the_left_variant() {
+        assert_eq!(modifier_keysym(Modifier::Ctrl), Keysym::Control_L);
+        assert_eq!(modifier_keysym(Modifier::Shift), Keysym::Shift_L);
+        assert_eq!(modifier_keysym(Modifier::Alt), Keysym::Alt_L);
+        assert_eq!(modifier_keysym(Modifier::Super), Keysym::Super_L);
+    }
 }

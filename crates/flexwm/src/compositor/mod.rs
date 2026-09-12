@@ -32,6 +32,12 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
 
     // Children reach both the compositor and its control socket through the
     // environment, so `flexwm msg` works from inside the session too.
+    //
+    // Safety: `set_var` is unsound only if another thread could be reading
+    // the environment concurrently. At this point in `run`, the event loop
+    // hasn't started and no child process has been spawned yet, so this
+    // process is still single-threaded and nothing else can observe a torn
+    // read.
     unsafe {
         std::env::set_var("WAYLAND_DISPLAY", &state.socket_name);
         if let Some(path) = &state.ipc_path {

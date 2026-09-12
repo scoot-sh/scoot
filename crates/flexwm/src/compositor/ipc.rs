@@ -193,18 +193,15 @@ impl State {
             return;
         }
         let now = Instant::now();
-        let quiet_for = now.duration_since(self.last_commit);
+        let last_commit = self.last_commit;
         let mut waiting = std::mem::take(&mut self.pending_idle);
         waiting.retain_mut(|wait| {
-            let idle = quiet_for >= wait.quiet;
-            if !idle && now < wait.deadline {
-                return true;
-            }
-            let waited_ms = now.duration_since(wait.started).as_millis() as u64;
-            let response = if idle {
-                Response::Idle { waited_ms }
-            } else {
-                Response::error("timed out waiting for the screen to settle")
+            let response = match idle_outcome(now, last_commit, wait) {
+                IdleOutcome::StillWaiting => return true,
+                IdleOutcome::Idle { waited_ms } => Response::Idle { waited_ms },
+                IdleOutcome::TimedOut => {
+                    Response::error("timed out waiting for the screen to settle")
+                }
             };
             if let Ok(line) = encode(&response) {
                 let _ = wait.stream.write_all(line.as_bytes());
@@ -263,5 +260,120 @@ fn wire(rect: flexwm_core::Rect) -> WireRect {
         y: rect.y,
         width: rect.w,
         height: rect.h,
+    }
+}
+
+enum IdleOutcome {
+    StillWaiting,
+    Idle { waited_ms: u64 },
+    TimedOut,
+}
+
+/// Whether a `wait-idle` request should be answered yet.
+///
+/// "Idle" means `quiet` has elapsed with no commit *since the request was
+/// made* -- not merely since whenever the last commit happened to be. Using
+/// `last_commit` alone would let a request reply idle on the very first tick
+/// whenever the client was already commit-idle when it arrived, before the
+/// client has had any chance to react to input sent moments earlier: the
+/// same "stale screenshot" race the flush bugs produced, but from a missing
+/// baseline instead of a missing flush. So the quiet window is measured from
+/// `last_commit.max(wait.started)`, which only equals `last_commit` once a
+/// commit has actually happened after the request began.
+fn idle_outcome(now: Instant, last_commit: Instant, wait: &PendingIdle) -> IdleOutcome {
+    let baseline = last_commit.max(wait.started);
+    if now.duration_since(baseline) >= wait.quiet {
+        let waited_ms = now.duration_since(wait.started).as_millis() as u64;
+        IdleOutcome::Idle { waited_ms }
+    } else if now >= wait.deadline {
+        IdleOutcome::TimedOut
+    } else {
+        IdleOutcome::StillWaiting
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pending(now: Instant, quiet_ms: u64, timeout_ms: u64) -> PendingIdle {
+        // A real stream is required by the struct but never touched by
+        // idle_outcome; a socket pair is a cheap, sandboxed stand-in.
+        let (a, _b) = UnixStream::pair().expect("socket pair");
+        PendingIdle {
+            stream: a,
+            quiet: Duration::from_millis(quiet_ms),
+            deadline: now + Duration::from_millis(timeout_ms),
+            started: now,
+        }
+    }
+
+    #[test]
+    fn already_quiet_client_still_waits_out_the_quiet_period() {
+        let started = Instant::now();
+        let wait = pending(started, 200, 5_000);
+        // last_commit is long before `started` -- the client was already
+        // idle when the request arrived. Immediately after registering,
+        // this must NOT report idle: that was the race.
+        let long_ago = started - Duration::from_secs(10);
+        assert!(matches!(
+            idle_outcome(started, long_ago, &wait),
+            IdleOutcome::StillWaiting
+        ));
+        // Not idle either, partway through the quiet window...
+        let mid = started + Duration::from_millis(100);
+        assert!(matches!(
+            idle_outcome(mid, long_ago, &wait),
+            IdleOutcome::StillWaiting
+        ));
+        // ...but idle once quiet_ms has actually elapsed since `started`.
+        let after = started + Duration::from_millis(201);
+        assert!(matches!(
+            idle_outcome(after, long_ago, &wait),
+            IdleOutcome::Idle { .. }
+        ));
+    }
+
+    #[test]
+    fn a_commit_during_the_wait_pushes_the_baseline_forward() {
+        let started = Instant::now();
+        let wait = pending(started, 200, 5_000);
+        let commit_at = started + Duration::from_millis(150);
+        // 200ms after start, but only 50ms after the commit: still waiting.
+        let now = started + Duration::from_millis(200);
+        assert!(matches!(
+            idle_outcome(now, commit_at, &wait),
+            IdleOutcome::StillWaiting
+        ));
+        let now = commit_at + Duration::from_millis(201);
+        assert!(matches!(
+            idle_outcome(now, commit_at, &wait),
+            IdleOutcome::Idle { .. }
+        ));
+    }
+
+    #[test]
+    fn times_out_when_never_idle_before_the_deadline() {
+        let started = Instant::now();
+        let wait = pending(started, 200, 500);
+        // A commit keeps landing just inside every quiet window, so it's
+        // never idle -- but the deadline still fires.
+        let now = started + Duration::from_millis(501);
+        let last_commit = now - Duration::from_millis(10);
+        assert!(matches!(
+            idle_outcome(now, last_commit, &wait),
+            IdleOutcome::TimedOut
+        ));
+    }
+
+    #[test]
+    fn waited_ms_is_measured_from_the_request_not_the_commit() {
+        let started = Instant::now();
+        let wait = pending(started, 50, 5_000);
+        let now = started + Duration::from_millis(123);
+        match idle_outcome(now, started, &wait) {
+            IdleOutcome::Idle { waited_ms } => assert_eq!(waited_ms, 123),
+            _ => panic!("expected idle"),
+        }
     }
 }

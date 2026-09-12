@@ -120,10 +120,15 @@ impl State {
         let handle = event_loop.handle();
         handle
             .insert_source(socket, |stream, _, state: &mut State| {
-                state
+                // A new connection can fail under fd/id exhaustion; that's the
+                // misbehaving-client's problem; a single bad file descriptor
+                // shouldn't take down every other client's session.
+                if let Err(error) = state
                     .display_handle
                     .insert_client(stream, Arc::new(ClientState::default()))
-                    .expect("a client slot");
+                {
+                    tracing::warn!(%error, "could not accept a new wayland client");
+                }
             })
             .expect("the wayland listener");
         handle
@@ -131,7 +136,18 @@ impl State {
                 Generic::new(display, Interest::READ, Mode::Level),
                 |_, display, state: &mut State| {
                     // Safety: the display outlives the event loop.
-                    unsafe { display.get_mut().dispatch_clients(state).expect("dispatch") };
+                    let dispatched = unsafe { display.get_mut().dispatch_clients(state) };
+                    if let Err(error) = dispatched {
+                        // wayland-backend catches a single client's protocol
+                        // errors internally and drops just that client;
+                        // this only surfaces when the underlying epoll/kevent
+                        // wait itself fails, which is process-fatal (there is
+                        // nothing left to dispatch to), so stop cleanly
+                        // rather than limp on or panic.
+                        tracing::error!(%error, "wayland client dispatch failed; stopping");
+                        state.loop_signal.stop();
+                        return Ok(PostAction::Continue);
+                    }
                     // Replies (e.g. the initial registry globals) must reach the
                     // socket now: nothing else flushes until a surface commits,
                     // and a client with no surface yet -- wayland-info, or foot

@@ -64,6 +64,13 @@ fi
 rm -f "$SHOT.check1" "$SHOT.check2"
 echo "ok: the screen changed after typing"
 
+echo "--- typing text with an embedded newline ---"
+# xkb::utf32_to_keysym has no mapping for control characters, so a literal
+# '\n' used to fail to find a key at all and abort the rest of the string
+# (the 2026-09-12 keysym_for_char bug, if it ever comes back).
+"$FLEXWM" msg type "$(printf 'echo one\necho two')"
+"$FLEXWM" msg wait-idle --quiet-ms 500 --timeout-ms 10000
+
 echo "--- screenshot ---"
 "$FLEXWM" msg screenshot --out "$SHOT"
 
