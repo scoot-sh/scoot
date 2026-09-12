@@ -111,9 +111,9 @@ fn a_second_screenshot_is_throttled_only_within_one_frame() {
         Some(first),
         first + FRAME_INTERVAL - Duration::from_micros(1)
     ));
-    // Exactly a frame later the screen may legitimately differ, so this is
-    // the first request that must be served -- the boundary is `<`, not
-    // `<=`, and a client polling at exactly the frame rate is not throttled.
+    // Exactly a frame later is the first request that must be served: the
+    // boundary is `<`, not `<=`, so a client polling at the compositor's own
+    // frame rate is never throttled.
     assert!(!screenshot_throttled(Some(first), first + FRAME_INTERVAL));
     assert!(!screenshot_throttled(
         Some(first),
@@ -324,14 +324,23 @@ fn the_default_limit_is_generous_enough_for_a_real_request() {
 // --- the socket itself ---------------------------------------------------
 
 #[test]
-fn the_staging_directory_stays_in_the_sockets_own_directory() {
-    // `rename` cannot cross filesystems, and the socket has to be published
-    // where the caller asked -- so the directory it is built in has to share
-    // a parent with it.
-    let path = std::path::Path::new("/run/user/1000/flexwm.sock");
-    let staging = listener::staging_path(path);
-    assert_eq!(staging.parent(), path.parent());
-    assert_ne!(staging, path);
+fn staging_names_are_marked_as_flexwms_and_do_not_repeat() {
+    // A name another user could work out in advance is a name they can
+    // occupy before flexwm starts, over and over.
+    let names: std::collections::HashSet<_> = (0..64)
+        .map(|_| listener::staging_name().expect("a staging name"))
+        .collect();
+    assert_eq!(names.len(), 64, "a repeat in 64 draws is not randomness");
+    for name in &names {
+        let name = name.to_str().expect("ascii");
+        assert!(name.starts_with(".flexwm-"), "{name} is unattributable");
+        assert_eq!(name.len(), ".flexwm-".len() + 12);
+        assert!(
+            name.bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'.' || byte == b'-'),
+            "{name} is not a plain name"
+        );
+    }
 }
 
 #[test]
@@ -349,7 +358,7 @@ fn a_bound_socket_is_owner_only_and_leaves_no_temporary_behind() {
          directory's own mode or this process's umask"
     );
 
-    // Nothing but the socket: the directory it was built in is gone.
+    // Nothing but the socket: the name it was staged at is gone.
     let left: Vec<_> = std::fs::read_dir(dir.path())
         .expect("readable")
         .map(|entry| entry.expect("an entry").file_name())
@@ -385,7 +394,7 @@ fn the_socket_is_owner_only_even_in_a_world_writable_directory() {
             & 0o777,
         0o600
     );
-    assert_eq!(entries(dir.path()), 1, "no staging directory left behind");
+    assert_eq!(entries(dir.path()), 1, "nothing staged left behind");
 }
 
 #[test]
@@ -428,19 +437,178 @@ fn binding_replaces_a_symlink_rather_than_writing_through_it() {
     assert!(UnixStream::connect(&path).is_ok());
 }
 
+/// Everything in `dir`, as names, sorted.
+fn listing(dir: &std::path::Path) -> Vec<std::ffi::OsString> {
+    let mut names: Vec<_> = std::fs::read_dir(dir)
+        .expect("readable")
+        .map(|entry| entry.expect("an entry").file_name())
+        .collect();
+    names.sort();
+    names
+}
+
+#[test]
+fn a_symlink_where_the_staging_directory_goes_is_refused_and_its_target_untouched() {
+    // The attack both earlier versions of `bind` lost to: the name flexwm is
+    // about to stage at, replaced with a symlink to something somebody else
+    // wants deleted, chmodded, or bound over. Nothing may follow it, nothing
+    // may be removed to get it out of the way, and nothing may be published.
+    //
+    // Driven through `publish` rather than `bind` deliberately: `bind`'s
+    // staging name is unpredictable, which is most of why this is hard to
+    // attack at all, and a test cannot plant a link at a name it cannot
+    // guess. So this exercises the defence that does not depend on the name
+    // being secret -- the `O_NOFOLLOW` open -- by handing it the name
+    // directly.
+    for target_is_a_directory in [false, true] {
+        let dir = tempfile::tempdir().expect("a temp dir");
+        let victim = dir.path().join("victim");
+        if target_is_a_directory {
+            std::fs::create_dir(&victim).expect("a victim directory");
+            std::fs::write(victim.join("s"), b"someone else's socket").expect("writes");
+        } else {
+            std::fs::write(&victim, b"someone else's file").expect("writes");
+        }
+        let before = std::fs::symlink_metadata(&victim)
+            .expect("exists")
+            .permissions();
+        let staging = dir.path().join("staging");
+        std::os::unix::fs::symlink(&victim, &staging).expect("plants a symlink");
+        let path = dir.path().join("flexwm.sock");
+
+        let error = listener::publish(&staging, &path).expect_err("must refuse the name");
+        assert_eq!(
+            error.kind(),
+            std::io::ErrorKind::NotADirectory,
+            "a symlink must be refused as what it is, not followed"
+        );
+
+        // The victim is untouched: still there, still its own kind, still its
+        // own mode, still its own contents.
+        let after = std::fs::symlink_metadata(&victim).expect("the victim still exists");
+        assert_eq!(after.is_dir(), target_is_a_directory);
+        assert_eq!(
+            after.permissions().mode(),
+            before.mode(),
+            "the victim's mode must not have been touched"
+        );
+        if target_is_a_directory {
+            assert_eq!(
+                std::fs::read(victim.join("s")).expect("readable"),
+                b"someone else's socket",
+                "nothing inside the victim may be unlinked or bound over"
+            );
+        } else {
+            assert_eq!(
+                std::fs::read(&victim).expect("readable"),
+                b"someone else's file"
+            );
+        }
+        // The planted link is left exactly as it was -- not cleared, not
+        // replaced -- and nothing was published.
+        assert!(
+            std::fs::symlink_metadata(&staging)
+                .expect("the link survives")
+                .file_type()
+                .is_symlink()
+        );
+        assert!(std::fs::symlink_metadata(&path).is_err());
+    }
+}
+
+#[test]
+fn a_plain_file_where_the_staging_directory_goes_is_refused_too() {
+    // Same defence, without a link involved: whatever is at that name, if it
+    // is not a directory this process just made, it is not used and not
+    // removed.
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let staging = dir.path().join("staging");
+    std::fs::write(&staging, b"in the way").expect("writes");
+    let error = listener::publish(&staging, &dir.path().join("flexwm.sock"))
+        .expect_err("must refuse the name");
+    assert_eq!(error.kind(), std::io::ErrorKind::NotADirectory);
+    assert_eq!(std::fs::read(&staging).expect("readable"), b"in the way");
+}
+
+#[test]
+fn binding_leaves_everything_else_in_the_directory_alone() {
+    // `bind` picks its own staging name and creates it with `mkdir`, which
+    // neither follows a symlink nor replaces an existing name -- so whatever
+    // else is in the directory, including a planted link, comes out the other
+    // side untouched.
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let victim = dir.path().join("victim");
+    std::fs::write(&victim, b"not flexwm's").expect("writes");
+    let planted = dir.path().join(".flexwm-aaaaaaaaaaaa");
+    std::os::unix::fs::symlink(&victim, &planted).expect("plants a symlink");
+    let path = dir.path().join("flexwm.sock");
+
+    let _socket = listener::bind(&path).expect("binds");
+
+    assert_eq!(
+        listing(dir.path()),
+        vec![
+            std::ffi::OsString::from(".flexwm-aaaaaaaaaaaa"),
+            std::ffi::OsString::from("flexwm.sock"),
+            std::ffi::OsString::from("victim"),
+        ],
+        "only the socket may be added, and nothing removed"
+    );
+    assert_eq!(std::fs::read(&victim).expect("readable"), b"not flexwm's");
+    assert!(
+        std::fs::symlink_metadata(&planted)
+            .expect("exists")
+            .file_type()
+            .is_symlink()
+    );
+}
+
+#[test]
+fn a_path_at_the_full_sun_path_length_still_binds() {
+    // The other regression this replaced: staging used to add 17 bytes to the
+    // path it bound at, so a path that fits `sun_path` on its own stopped
+    // fitting once staged. 107 bytes is the longest a unix socket path can
+    // be, so it is the one length that proves staging costs nothing.
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let room = 107 - (dir.path().as_os_str().len() + 1);
+    assert!(room > 0, "the temp directory is too long for this test");
+    let path = dir.path().join("s".repeat(room));
+    assert_eq!(path.as_os_str().len(), 107);
+
+    let _socket = listener::bind(&path).expect("binds at exactly 107 bytes");
+    assert_eq!(
+        std::fs::metadata(&path)
+            .expect("the socket exists")
+            .permissions()
+            .mode()
+            & 0o777,
+        0o600
+    );
+    assert!(UnixStream::connect(&path).is_ok());
+    assert_eq!(entries(dir.path()), 1, "and nothing staged is left behind");
+
+    // One byte further is past what any unix socket can hold. It has to fail
+    // at startup, the way it did before staging existed -- staging at a name
+    // *shorter* than the published one would otherwise bind and rename
+    // happily and leave a socket no client could ever connect to.
+    let too_long = dir.path().join("s".repeat(room + 1));
+    let error = listener::bind(&too_long).expect_err("107 bytes is the limit");
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+    assert_eq!(entries(dir.path()), 1, "with nothing left behind either");
+}
+
 #[test]
 fn a_bind_that_cannot_be_published_cleans_up_after_itself() {
-    // A path whose parent does not exist fails at the staging directory, the
-    // first step that touches the filesystem, leaving nothing behind.
+    // A directory that does not exist fails at the bind, the first step that
+    // touches the filesystem, leaving nothing behind.
     let dir = tempfile::tempdir().expect("a temp dir");
     let path = dir.path().join("no-such-directory").join("flexwm.sock");
     assert!(listener::bind(&path).is_err());
     assert_eq!(entries(dir.path()), 0);
 
     // And a path that stages fine but cannot be published: `rename` onto an
-    // existing *directory* fails (`EISDIR`/`ENOTDIR`) after the socket is
-    // already bound, which is the window where a half-built socket could
-    // have been left behind.
+    // existing *directory* fails after the socket is already bound, which is
+    // the one window where a staged socket could be left behind.
     let occupied = dir.path().join("flexwm.sock");
     std::fs::create_dir(&occupied).expect("a directory in the way");
     assert!(listener::bind(&occupied).is_err());

@@ -174,15 +174,17 @@ impl Connection {
         // A screenshot is the one request that costs a full render, a
         // framebuffer read-back and a PNG encode, all on the single thread
         // that also runs wayland dispatch, input and every other IPC
-        // connection (see `screenshot.rs`). Served back-to-back it stalls
-        // everything, so a connection that was handed one less than a frame
-        // ago is told to come back rather than served a second one at that
-        // price.
+        // connection (see `screenshot.rs`). Served back-to-back it starves
+        // everything else, so a connection that was handed one less than a
+        // frame ago is told to come back rather than served a second one at
+        // that price.
         let screenshot = matches!(request, Request::Screenshot { .. });
         if screenshot && screenshot_throttled(self.last_screenshot, Instant::now()) {
             let _ = self.reply(&Response::error(format!(
-                "screenshots are limited to one per connection per {}ms frame; \
-                 the compositor cannot have redrawn more than once since the last one",
+                "screenshots are limited to one per connection per {}ms, the \
+                 compositor's own frame interval: capturing costs a full \
+                 render and encode on the thread that serves every other \
+                 client. Retry after that long",
                 FRAME_INTERVAL.as_millis()
             )));
             return Step::Continue;
@@ -420,11 +422,17 @@ fn wire(rect: flexwm_core::Rect) -> WireRect {
 /// Whether a screenshot request arriving at `now` should be refused because
 /// this connection was already handed one less than a frame ago.
 ///
-/// `last` is when the previous capture *finished* (see the call site), and
-/// one [`FRAME_INTERVAL`] is how often a changed screen is redrawn at all --
-/// so a refusal costs the caller at most one frame it can have back 16ms
-/// later, and buys the event loop a frame's worth of room to serve every
-/// other client between two captures for the same one.
+/// `last` is when the previous capture *finished* (see the call site), so the
+/// window this enforces is a gap *between* captures: one connection can cost
+/// the event loop a capture no more often than the compositor already spends
+/// a frame, and everything else gets that gap to be served in. A refused
+/// caller waits at most one [`FRAME_INTERVAL`] and asks again.
+///
+/// Deliberately not justified as "the pixels cannot have changed yet" --
+/// that would be a stronger claim than the code makes good on. `render()`
+/// runs on demand (`needs_render`), not on frame boundaries, and this window
+/// starts whenever the last capture happened to finish, so two captures a
+/// frame apart can legitimately differ. Bounding the *cost* is the point.
 ///
 /// Deliberately not a sleep: this runs on the event-loop thread, so waiting
 /// here would block every other client in order to slow one down. A refusal

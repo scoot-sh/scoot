@@ -11,102 +11,213 @@
 //! then inject keystrokes through it). Those are the cases the two checks here
 //! cover, each of which holds on its own:
 //!
-//! - the socket file is `0600` from the moment it is reachable at all,
-//!   whatever the umask, so a weak directory mode alone is not enough to
+//! - the socket file is `0600` before it is reachable under its published
+//!   name, whatever the umask, so a weak directory mode alone is not enough to
 //!   reach it;
 //! - and a connection whose peer is not this compositor's own user is refused
 //!   before it can send anything, so a weak *file* mode alone is not enough
 //!   either -- which is also the only one of the two that stops root, since
 //!   root ignores file permissions entirely.
+//!
+//! [`bind`] is written for that same hostile directory throughout: one where
+//! another user may be creating, deleting and replacing names while it runs.
 
 use std::ffi::OsString;
+use std::fs::{DirBuilder, File, OpenOptions, Permissions};
 use std::io;
 use std::os::fd::AsRawFd;
-use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 
-/// The mode the socket file is given: owner read/write, nothing else.
+use rustix::rand::GetRandomFlags;
+
+/// The mode the socket is given before anyone can reach it: owner read/write.
 const SOCKET_MODE: u32 = 0o600;
 
 /// The mode of the directory the socket is built in: owner only, so nobody
 /// else can list it, never mind create anything inside it.
 const STAGING_MODE: u32 = 0o700;
 
-/// What the socket is called while it is still inside that directory.
-const STAGED_NAME: &str = "socket";
+/// What the socket is called while it is in there.
+const STAGED_NAME: &str = "s";
+
+/// Marks a staging directory as flexwm's, for whoever finds one left behind by
+/// a compositor that died mid-startup. Nothing removes those: telling a stale
+/// one from a live one is not possible, and removing another process's is the
+/// mistake this module is built around avoiding.
+const STAGING_PREFIX: &str = ".flexwm-";
+
+/// How many random bytes go in a staging directory's name, 36 choices each.
+const STAGING_RANDOM: usize = 12;
+
+/// How many staging names to try before giving up. Every one has to have been
+/// taken already to get that far.
+const STAGING_ATTEMPTS: usize = 16;
+
+/// `sockaddr_un.sun_path` holds 108 bytes including its terminating NUL, so
+/// 107 is the longest path a unix socket can be bound at. std rejects 108
+/// itself, with "path must be shorter than SUN_LEN".
+const SUN_PATH_MAX: usize = 107;
 
 /// Creates the listening socket at `path`, replacing whatever was there.
 ///
-/// Three steps, and the order is the whole point:
+/// The socket is built inside a `0700` directory this process creates beside
+/// `path`, and [renamed](std::fs::rename) onto `path` once it is `0600` --
+/// atomically, so a client only ever finds the previous socket or this one,
+/// never a half-built one, and never a missing name another process could
+/// claim in between.
 ///
-/// 1. make a `0700` directory beside `path` -- somewhere only this user can
-///    look inside, never mind write to;
-/// 2. bind the socket in there and chmod it `0600`;
-/// 3. [`rename`](std::fs::rename) it onto `path`.
+/// Three rules hold it up, each of which replaced a version of this function
+/// that was wrong in the hostile directory described in the module doc:
 ///
-/// Against the `remove_file`-then-`bind`-then-chmod this replaces, that closes
-/// three things:
-///
-/// - the socket used to exist at its published name, with whatever the umask
-///   allowed, for as long as it took to chmod it -- long enough for another
-///   process to connect and be served. Inside a `0700` directory it is
-///   unreachable until step 3 publishes it already tightened.
-/// - [`set_permissions`](std::fs::set_permissions) takes a *path*, and follows
-///   symlinks. Chmodding a socket that sits in a directory another user can
-///   write to means they can unlink it and leave a symlink in its place
-///   between the bind and the chmod, and have this process chmod a file of
-///   their choosing -- a worse version of the race being fixed. Nobody else
-///   can create anything inside step 1's directory, so that swap has nowhere
-///   to happen.
-/// - the published name used to be *missing* in between, so a process racing
-///   for the same path could claim it and leave this one failing
-///   `EADDRINUSE`. A rename replaces whatever is there in one step instead.
-///
-/// Neither old step was a symlink *follow*, despite the shape: `bind(2)` does
-/// not follow a symlink at the final component (a dangling one at the path
-/// makes it fail `EADDRINUSE` -- verified, errno 98 -- rather than creating
-/// the socket at the target), and `remove_file` unlinks a link rather than
-/// what it points at. The chmod above was the one that would have.
+/// - **Nothing is ever removed to make room.** `mkdir(2)` neither follows a
+///   symlink nor replaces an existing name: it fails `EEXIST`. That makes it
+///   the claim -- either this process created the directory, or it tries
+///   another name. A `remove_file`/`remove_dir` *before* creating, at a name
+///   another user may have replaced with a symlink, deletes a file of their
+///   choosing through it; two earlier versions of this did exactly that.
+/// - **Everything after the claim goes through a pinned directory fd**, opened
+///   `O_DIRECTORY | O_NOFOLLOW` so anything but a real directory at that name
+///   fails (`ENOTDIR`, verified) rather than being worked on by proxy. Naming
+///   the socket under `/proc/self/fd/<n>` means no component of its path can
+///   be swapped after that check -- and, just as usefully, that the staged
+///   name's length owes nothing to the published path's (see [`staged_path`]).
+/// - **The mode is set before the socket is reachable.** `set_permissions`
+///   follows symlinks, so chmodding a socket that sits in a directory another
+///   user can write to lets them swap it for a link and have the compositor
+///   chmod a file of their choosing. Inside a `0700` directory this process
+///   owns, reached through a pinned fd, there is nobody who could.
 pub(super) fn bind(path: &Path) -> io::Result<UnixListener> {
-    let staging = staging_path(path);
-    let staged = staging.join(STAGED_NAME);
-    // Anything already here can only be this pid's own, from a run that died
-    // between the bind and the cleanup below -- a `0700` directory owned by
-    // this user is not somewhere anyone else could have planted something.
-    let _ = std::fs::remove_file(&staged);
-    let _ = std::fs::remove_dir(&staging);
-    std::fs::DirBuilder::new()
-        .mode(STAGING_MODE)
-        .create(&staging)?;
+    // Checked up front because the bind no longer happens at this path: the
+    // staged name is short and unrelated, so a path too long for `sun_path`
+    // would otherwise bind and rename perfectly happily and leave a socket no
+    // client could ever connect to. Failing at startup is both what happened
+    // before any staging existed and the only useful answer.
+    if path.as_os_str().len() > SUN_PATH_MAX {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "the socket path is {} bytes; a unix socket path can be at most {SUN_PATH_MAX}",
+                path.as_os_str().len()
+            ),
+        ));
+    }
+    let parent = path.parent().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "the socket path names no directory to create it in",
+        )
+    })?;
 
-    // Everything that can fail once the directory exists, so one cleanup
-    // covers all of it.
-    let published = (|| {
-        let listener = UnixListener::bind(&staged)?;
-        std::fs::set_permissions(&staged, std::fs::Permissions::from_mode(SOCKET_MODE))?;
-        listener.set_nonblocking(true)?;
-        std::fs::rename(&staged, path)?;
-        Ok(listener)
-    })();
-    // Unconditional: on success the socket has already moved out and only the
-    // empty directory is left behind, on failure both are. Either way none of
-    // it should outlive this call.
-    let _ = std::fs::remove_file(&staged);
-    let _ = std::fs::remove_dir(&staging);
-    published
+    let mut attempts = STAGING_ATTEMPTS;
+    loop {
+        let staging = parent.join(staging_name()?);
+        let claimed = DirBuilder::new().mode(STAGING_MODE).create(&staging);
+        attempts -= 1;
+        match claimed {
+            Ok(()) => return publish(&staging, path),
+            // Taken -- by a file, a directory, a symlink, anything at all.
+            // Another name, never a removal.
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists && attempts > 0 => continue,
+            Err(error) => return Err(error),
+        }
+    }
 }
 
-/// The directory the socket is built in, always inside `path`'s own directory
-/// (`rename` cannot cross filesystems, and the socket has to end up where the
-/// caller asked).
+/// Builds the socket inside `staging` and publishes it at `path`, then removes
+/// `staging` again whether that worked or not.
 ///
-/// The pid keeps two flexwm instances racing for the same socket path from
-/// clobbering each other's half-built one.
-pub(super) fn staging_path(path: &Path) -> PathBuf {
-    let mut staging = OsString::from(path);
-    staging.push(format!(".{}.tmp", std::process::id()));
-    PathBuf::from(staging)
+/// `staging` is a directory [`bind`] has just created -- but that precondition
+/// is not what makes this safe: [`stage`]'s `O_NOFOLLOW` open rechecks it, so a
+/// `staging` that turns out to be a symlink, a file, or somebody else's
+/// directory is refused rather than used.
+pub(super) fn publish(staging: &Path, path: &Path) -> io::Result<UnixListener> {
+    let result = stage(staging, path);
+    // `rmdir` neither follows a symlink nor removes a non-empty directory, so
+    // this can remove the directory created above and very little else. It is
+    // also allowed to fail: if something replaced that name, whatever is there
+    // now is not flexwm's to clean up.
+    let _ = std::fs::remove_dir(staging);
+    result
+}
+
+/// Binds the socket inside `staging`, gives it [`SOCKET_MODE`] and renames it
+/// onto `path`.
+fn stage(staging: &Path, path: &Path) -> io::Result<UnixListener> {
+    let directory = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW)
+        .open(staging)?;
+    // `fchmod` through the fd rather than a chmod through the path: `mkdir`
+    // only ever gets `STAGING_MODE & !umask`, and an unusual umask could leave
+    // the directory too open or unusable. This pins it either way, without
+    // naming a path again.
+    directory.set_permissions(Permissions::from_mode(STAGING_MODE))?;
+
+    let staged = staged_path(&directory);
+    let listener = UnixListener::bind(&staged)?;
+    let published = (|| {
+        std::fs::set_permissions(&staged, Permissions::from_mode(SOCKET_MODE))?;
+        listener.set_nonblocking(true)?;
+        std::fs::rename(&staged, path)
+    })();
+    if let Err(error) = published {
+        // Inside the pinned directory, so this is the socket bound just above
+        // and cannot have become anything else.
+        let _ = std::fs::remove_file(&staged);
+        return Err(error);
+    }
+    Ok(listener)
+}
+
+/// Where the socket lives while it is being built: inside the directory
+/// `directory` holds open, named through that fd rather than by its own path.
+///
+/// `/proc/self/fd/<n>` resolves to the directory the fd is open on, so this
+/// reaches the same place the directory's own path does without re-resolving
+/// any of that path's components -- nothing along it can be swapped between
+/// [`stage`]'s `O_NOFOLLOW` check and the bind.
+///
+/// It is also short, and the same length whatever `path` is, which is the
+/// other half of why it is used: `sun_path` holds 107 bytes, and a staged name
+/// derived from the published path spends some of them on top of it. An earlier
+/// version of this function spent 17, which stopped a 93-byte path that binds
+/// fine on its own from binding at all.
+fn staged_path(directory: &File) -> PathBuf {
+    PathBuf::from(format!(
+        "/proc/self/fd/{}/{STAGED_NAME}",
+        directory.as_raw_fd()
+    ))
+}
+
+/// A name for the staging directory: [`STAGING_PREFIX`] plus
+/// [`STAGING_RANDOM`] lowercase-alphanumeric bytes from the kernel's random
+/// pool.
+///
+/// Unpredictable rather than merely unique (a pid is neither): a name another
+/// user can work out in advance is a name they can occupy before flexwm
+/// starts, over and over, which turns into a startup failure of their
+/// choosing. Nothing here *depends* on the name being secret -- [`bind`]
+/// treats a taken name as a taken name and moves on -- so the slight modulo
+/// bias below costs nothing; the name only has to be impractical to guess.
+pub(super) fn staging_name() -> io::Result<OsString> {
+    const ALPHABET: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789";
+
+    let mut bytes = [0u8; STAGING_RANDOM];
+    let mut filled = 0;
+    while filled < bytes.len() {
+        // Short only if a signal interrupts it, which is not an error here.
+        filled += rustix::rand::getrandom(&mut bytes[filled..], GetRandomFlags::empty())?;
+    }
+    let mut name = String::with_capacity(STAGING_PREFIX.len() + bytes.len());
+    name.push_str(STAGING_PREFIX);
+    name.extend(
+        bytes
+            .iter()
+            .map(|byte| char::from(ALPHABET[usize::from(*byte) % ALPHABET.len()])),
+    );
+    Ok(OsString::from(name))
 }
 
 /// The uid a connecting client has to match to be served.

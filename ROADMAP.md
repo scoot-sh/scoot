@@ -559,41 +559,86 @@ review, and why.
      after 2 served / 198 refused in 48ms costing 2 jiffies. Per connection,
      so bypassable by reconnecting per capture — capping concurrent
      connections is the audit's separate finding and stayed out of scope.
-   - **Atomic publish instead of unlink-then-bind.** `listener::bind` makes a
-     `0700` directory beside the socket path, binds and chmods inside it, then
-     `rename`s the socket into place, removing the directory either way. The
-     Backlog called this a symlink race; tracing it showed that is not the
-     exposure — `bind(2)` does not follow a symlink at the final component,
-     confirmed empirically (a dangling symlink at the path makes bind fail
-     `EADDRINUSE`, errno 98, rather than writing through it), and
-     `remove_file` unlinks a link rather than its target. What the old order
-     really had was a window where the socket existed at its published name
+   - **Atomic publish instead of unlink-then-bind.** `listener::bind` creates
+     a `0700` directory beside the socket path with `mkdir`, opens it
+     `O_DIRECTORY | O_NOFOLLOW`, binds the socket inside it as
+     `/proc/self/fd/<n>/s`, chmods it `0600` there, and `rename`s it onto the
+     published path, removing the directory either way. The Backlog called the
+     old order a symlink race; tracing it showed that is not the exposure —
+     `bind(2)` does not follow a symlink at the final component, confirmed
+     empirically (a dangling symlink at the path makes bind fail `EADDRINUSE`,
+     errno 98), and `remove_file` unlinks a link rather than its target. What
+     it really had was a window where the socket existed at its published name
      with whatever the umask allowed before the `chmod` could run, plus a
      window where the name was missing and another process could claim it.
-     The staging directory is not decoration: the first shape of this fix
-     bound at a plain `<path>.<pid>.tmp` and chmodded that, which *is* a
-     symlink race — `set_permissions` takes a path and follows symlinks, so in
-     the very directory this item worries about, another user could swap the
-     staged socket for a symlink between the bind and the chmod and have the
-     compositor chmod a file of their choosing. Binding inside a directory
-     nobody else can write to removes the opportunity instead of narrowing it.
-     (The umask is an alternative way to get a `0600` socket with no chmod at
-     all, not taken: it is process-global, so it would only be sound while the
-     process is single-threaded — a caveat the staging directory does not
-     need, and one this crate's own parallel test runner would violate.)
+
+     This took three attempts, the first two of which `flexwm-reviewer` and a
+     self-review caught as *worse* than what they replaced — worth recording,
+     because each one failed for the same reason: a path that another user can
+     write to cannot be re-resolved by name once it has been checked.
+     (a) Binding at `<path>.<pid>.tmp` and chmodding that path:
+     `set_permissions` follows symlinks, so they could swap the staged socket
+     for a link between the bind and the chmod and have the compositor chmod a
+     file of their choosing. (b) Staging inside `<path>.<pid>.tmp/` but
+     *pre-cleaning* that name first: `remove_file` on `<staging>/socket`
+     resolves `<staging>` as a non-final component, so a symlink planted there
+     — cheaply, per-pid, in advance — deleted a file of their choosing through
+     it, and then `mkdir` failed `EEXIST` against the surviving link on every
+     subsequent start. (b) also cost 17 path bytes, which broke binding for
+     any path over ~90 bytes, at a threshold that moved with the pid's digit
+     count. The third shape fixes both classes at once: `mkdir` *is* the claim
+     (it neither follows a symlink nor replaces a name, so nothing is ever
+     removed to make room), an unpredictable `.flexwm-<12 random>` name means
+     there is nothing to pre-plant at, everything after the claim goes through
+     the pinned fd rather than the name, and `/proc/self/fd/<n>/s` is both
+     unswappable and a fixed ~17 bytes regardless of the published path — so a
+     107-byte socket path, the longest `sun_path` allows, binds. All three
+     primitives were verified on the dev VM before the code was written, not
+     assumed: `O_DIRECTORY | O_NOFOLLOW` against a symlink-to-a-directory
+     fails `ENOTDIR`, `File::set_permissions` fchmods a read-only directory fd,
+     and `rename` out of `/proc/self/fd/<n>/` onto a 107-byte path works and
+     stays connectable.
+
+     The umask is the other way to get a `0600` socket with no chmod at all,
+     and was the second attempt's successor before being abandoned mid-flight:
+     it is process-global, and the test suite proved that is not academic —
+     `tempfile::tempdir()` in a *concurrent* test, created inside the umask
+     window, came out mode `0600`, which for a directory means untraversable,
+     and unrelated tests failed with `EACCES` in one run out of three. A
+     hazard that live in-process is not something to ship behind a comment.
+
+   **Owner-only socket, restated for the final shape:** the mode is set on
+   the socket while it is still inside the staging directory, so it is `0600`
+   before it is reachable under its published name at all — there is no window
+   at the published path, whatever the umask.
 
    `ipc.rs` split into `ipc/line.rs`, `ipc/listener.rs` and `ipc/tests.rs`
-   before it sprawled. 123 tests (20 new), clippy/fmt clean, `cargo test`
-   green workspace-wide, `scripts/smoke-test.sh` green under `--headless`, and
-   the whole bug-bash re-run against real `--tty` hardware (it is IPC-layer
-   code, so it is backend-agnostic by construction — but confirmed, not
-   assumed). Per-request cost of the bounded read, measured because it is on
-   the per-request path: release, 50,000 `version` round-trips, 6 interleaved
+   before it sprawled. 128 tests (25 new), clippy/fmt clean, `cargo test`
+   green workspace-wide, `scripts/smoke-test.sh` green under both `--headless`
+   and `--nested`, and the whole bug-bash re-run against real `--tty` hardware
+   (it is IPC-layer code, so it is backend-agnostic by construction — but
+   confirmed, not assumed). Per-request cost of the bounded read, measured
+   because it is on the per-request path: release, 50,000 `version`
+   round-trips, 6 interleaved
    reps per side — before mean 122.42us/66.5 jiffies, after mean
    122.03us/66.0 jiffies, fully overlapping. (Debug builds showed a consistent
    ~5% jiffies gap, which is a debug-build artifact: std's `read_line` uses
    `memchr` where this loop uses a plain byte scan, and only the unoptimized
    build can tell.)
+
+   **`flexwm-reviewer`'s pass found two blocking regressions, both in
+   `listener::bind`, both fixed as described above** — and both in the part of
+   the change that was *new* rather than in the four audit fixes themselves,
+   which it re-derived and confirmed (`geteuid` over `getuid`, `libc` over std
+   or rustix, completion-stamped throttling, the 1 MiB cap and the peer check
+   under adversarial testing, no measurable benchmark regression). It also
+   found three smaller things, all addressed: the throttle's justification
+   overclaimed in two places (`FRAME_INTERVAL`'s doc and the client-facing
+   error both said the screen "cannot have changed", which `render()`'s
+   on-demand scheduling does not guarantee — reworded to the claim that is
+   true, that it bounds what one connection can cost the event loop), this
+   entry and the PR description still described the superseded design, and the
+   deferred blocking-I/O finding below was under-rated at MEDIUM.
 
    **Three pre-existing defects found while bug-bashing this, deliberately not
    fixed here** — all verified identical on the pre-change binary, so none is a
@@ -740,9 +785,18 @@ data-loss/RCE in what was checked.
   losing the name to a racing process, both of which the rename closes.
 
 - **The IPC connection loop does blocking I/O, one line per readiness event
-  (MEDIUM, pre-existing).** Found while bug-bashing item 9; every symptom
-  below verified identical on the pre-item-9 binary, so none is a regression,
-  and all were explicitly left unfixed there. `accept()` puts the connection
+  (HIGH — do this next; pre-existing).** Found while bug-bashing item 9;
+  every symptom below verified identical on the pre-item-9 binary, so none is
+  a regression, and all were explicitly left unfixed there. Raised from MEDIUM
+  to HIGH by `flexwm-reviewer`'s pass on PR #14, which reproduced symptom (a)
+  more precisely than item 9's own bug bash did: a half-written request line
+  does not merely hang that one connection, it freezes the *entire* event loop
+  — `/proc/<pid>/wchan` reads `unix_stream_read_generic` and CPU time goes
+  completely flat, so no frame tick, no wayland dispatch and no input
+  processing happens for any client, for as long as one connection holds a
+  partial line. It needs no malice at all: a client killed mid-paste, or any
+  agent that writes a request in chunks, does it. That makes it the first
+  thing to pick up from this backlog rather than one more unordered entry. `accept()` puts the connection
   into *blocking* mode and `Connection::step` reads exactly one line per
   readiness event, which causes three distinct symptoms with one root cause:
   (a) a client that writes `{"type":"vers` and holds the connection open
