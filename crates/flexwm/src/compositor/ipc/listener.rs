@@ -150,9 +150,10 @@ fn stage(staging: &Path, path: &Path) -> io::Result<UnixListener> {
         .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW)
         .open(staging)?;
     // `fchmod` through the fd rather than a chmod through the path: `mkdir`
-    // only ever gets `STAGING_MODE & !umask`, and an unusual umask could leave
-    // the directory too open or unusable. This pins it either way, without
-    // naming a path again.
+    // only ever gets `STAGING_MODE & !umask`, which can only be *tighter* than
+    // asked for -- never more open -- but tighter includes unusable (a
+    // directory with no owner `x` cannot be written in at all). This pins the
+    // mode either way, without naming a path again.
     directory.set_permissions(Permissions::from_mode(STAGING_MODE))?;
 
     let staged = staged_path(&directory);
@@ -184,6 +185,14 @@ fn stage(staging: &Path, path: &Path) -> io::Result<UnixListener> {
 /// derived from the published path spends some of them on top of it. An earlier
 /// version of this function spent 17, which stopped a 93-byte path that binds
 /// fine on its own from binding at all.
+///
+/// This does make a mounted `/proc` a startup requirement, which nothing else
+/// in `--headless` startup needs (udev and libinput want `/sys` and `/dev`).
+/// Without one, [`bind`] fails with `ENOENT` naming this path, and the
+/// compositor refuses to start rather than starting with no control socket.
+/// Every environment flexwm targets mounts `/proc`, webtop containers
+/// included, so that is a statement of the dependency rather than a caveat
+/// about it.
 fn staged_path(directory: &File) -> PathBuf {
     PathBuf::from(format!(
         "/proc/self/fd/{}/{STAGED_NAME}",

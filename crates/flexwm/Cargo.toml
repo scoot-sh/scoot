@@ -56,9 +56,9 @@ calloop-wayland-source = "0.4"
 # For the memfd + mmap behind the host-side wl_shm buffers (nested/buffers.rs)
 # -- same version already resolved transitively via wayland-backend, so this
 # adds no new version to the tree, just a direct dependency on one already
-# there. "process" is for `geteuid`/`umask` and "rand" for `getrandom` in
+# there. "process" is for `geteuid` and "rand" for `getrandom` in
 # ipc/listener.rs, neither of which has a std equivalent; both add a feature to
-# a crate already here, not a crate ("rand" pulls in nothing of its own).
+# a crate already here, not a crate (neither pulls in anything of its own).
 rustix = { version = "1", features = ["fs", "mm", "process", "rand"] }
 # For `SO_PEERCRED` in ipc/listener.rs -- see `peer_uid`'s doc for why neither
 # std nor rustix can answer that one question today. Already in the tree
