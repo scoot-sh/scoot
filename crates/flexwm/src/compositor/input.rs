@@ -141,12 +141,16 @@ impl State {
     /// as the direct, binding-independent way to invoke a window-management
     /// action.
     ///
-    /// Returns whatever `key()` reports for the *main* key's press --
-    /// modifiers alone can never match a keybinding (every binding in this
-    /// table requires a non-modifier main key), so only that one call can
-    /// ever carry a [`VtSwitchOutcome`]. `ipc.rs`'s `Request::Key` handler
-    /// uses this to warn a caller whose only input/output is this IPC
-    /// connection when a switch-away just made the compositor unreachable.
+    /// Returns whatever `key()` reports for the *main* key's press -- only
+    /// that call can ever carry a [`VtSwitchOutcome`]. Every `ChangeVt`
+    /// binding is keyed on an `F1`..`F12` keysym (see `tty::vt_switch_bindings`,
+    /// the only place that constructs one), never on a modifier's own keysym
+    /// (`Control_L`/`Shift_L`/`Alt_L`/`Super_L`), so pressing one of this
+    /// combo's modifiers on its own -- the loop below -- structurally cannot
+    /// match one, no matter what's configured in `[binds]`. `ipc.rs`'s
+    /// `Request::Key` handler uses the main key's outcome to warn a caller
+    /// whose only input/output is this IPC connection when a switch-away
+    /// just made the compositor unreachable.
     pub fn press(&mut self, combo: &KeyCombo) -> Result<Option<VtSwitchOutcome>, String> {
         let keysym =
             keysym_named(&combo.key).ok_or_else(|| format!("unknown key `{}`", combo.key))?;
