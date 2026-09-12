@@ -7,6 +7,7 @@
 mod config;
 mod cursor;
 mod decorations;
+mod dispatch;
 mod handlers;
 mod headless;
 mod input;
