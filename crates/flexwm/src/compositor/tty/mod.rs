@@ -101,6 +101,15 @@ pub struct Tty {
     /// session-level request that only the currently active session may
     /// make, so issuing it while this is `true` is a call libseat can only
     /// refuse (`EPERM`) -- see `change_vt`'s doc.
+    ///
+    /// `init` asserts this `false` rather than observing an event to set it
+    /// -- the same shape as the mistake that made `active` wrong, so worth
+    /// justifying here rather than trusting it by inspection: `init`'s own
+    /// `session.open(...)` call (above) fails if the session isn't already
+    /// active (libseat refuses `open_device` for an inactive client), and
+    /// `init` returns that error before this struct is ever constructed --
+    /// so reaching this initializer at all already proves the session is
+    /// active.
     session_paused: bool,
     /// Set right after a successful `commit`/`page_flip`, cleared on the
     /// matching `VBlank`. `present()` skips (setting `present_skipped`
@@ -623,7 +632,13 @@ impl State {
             return;
         };
         if tty.session_paused {
-            tracing::debug!(
+            // info!, not debug!: this is an explicitly requested action
+            // (a real keybind or an IPC `key` request) being discarded, not
+            // routine internal bookkeeping -- at the default log level it
+            // must leave a trace, or a user/agent whose switch-back request
+            // silently does nothing has no way to tell "ignored" apart from
+            // "lost".
+            tracing::info!(
                 vt,
                 "change_vt requested while the session is paused; ignoring \
                  rather than issuing a VT_ACTIVATE libseat can only refuse"
