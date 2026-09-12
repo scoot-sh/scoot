@@ -241,7 +241,13 @@ impl State {
                     "requested a VT switch away from --tty, but libseat \
                      rejected the request (see the compositor log for why)",
                 ),
-                Ok(_) => Response::Ok,
+                // Spelled out rather than `Ok(_)`: a collapsed catch-all is
+                // exactly the shape of bug that made the paused-retry case
+                // silently indistinguishable from success above (see
+                // `VtSwitchOutcome::Ignored`'s doc) -- keeping this
+                // exhaustive means a future fifth `VtSwitchOutcome` variant
+                // fails to compile here instead of silently becoming `Ok`.
+                Ok(None) | Ok(Some(VtSwitchOutcome::Ignored)) => Response::Ok,
                 Err(error) => Response::error(error),
             },
             Request::Type { text } => match self.type_text(&text) {

@@ -263,9 +263,11 @@ review, and why.
    ("ignored: this session is already paused..."), not a bare `Ok`, and
    still no `EPERM` (5b's fix unregressed). Exact commands and raw
    command/output blocks for every scenario are recorded in PR #11's
-   description rather than narrated here. No unit test constructs a live
-   `Tty`/`State` to exercise `VtSwitchOutcome` variants directly beyond the
-   pure `KeyOutcome`/`Option::or` accumulation logic — same reasoning as 5b:
+   description rather than narrated here. `Failed → Response::error` is
+   code-traced, not hardware-exercised — there's no cheap way to force a
+   real libseat error on this VM, same caveat 5b made about forcing
+   `drm.activate` to fail. No unit test constructs a live `Tty`/`State` to
+   exercise any `VtSwitchOutcome` variant directly — same reasoning as 5b:
    no existing fixture for that, hardware bug-bash plus code tracing is this
    project's established way of verifying this class of session-state
    correctness.
