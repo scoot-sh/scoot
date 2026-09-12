@@ -156,6 +156,12 @@ fn stage(staging: &Path, path: &Path) -> io::Result<UnixListener> {
     // mode either way, without naming a path again.
     directory.set_permissions(Permissions::from_mode(STAGING_MODE))?;
 
+    // `staged` borrows `directory`'s fd number, not `directory` itself --
+    // correct only because `directory` stays alive for every use of `staged`
+    // below. A future refactor that drops `directory` early before `staged`
+    // is done with would resolve `/proc/self/fd/<n>` against whatever that
+    // fd number has since become (fds are reused), silently operating on the
+    // wrong file. Keep `directory` in scope through the end of this function.
     let staged = staged_path(&directory);
     let listener = UnixListener::bind(&staged)?;
     let published = (|| {
@@ -188,8 +194,10 @@ fn stage(staging: &Path, path: &Path) -> io::Result<UnixListener> {
 ///
 /// This does make a mounted `/proc` a startup requirement, which nothing else
 /// in `--headless` startup needs (udev and libinput want `/sys` and `/dev`).
-/// Without one, [`bind`] fails with `ENOENT` naming this path, and the
-/// compositor refuses to start rather than starting with no control socket.
+/// Without one, [`bind`] fails with a bare "No such file or directory" (the
+/// kernel's `ENOENT` resolving this path, with no path named in the message
+/// itself), and the compositor refuses to start rather than starting with no
+/// control socket.
 /// Every environment flexwm targets mounts `/proc`, webtop containers
 /// included, so that is a statement of the dependency rather than a caveat
 /// about it.

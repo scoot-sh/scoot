@@ -613,7 +613,8 @@ review, and why.
    at the published path, whatever the umask.
 
    `ipc.rs` split into `ipc/line.rs`, `ipc/listener.rs` and `ipc/tests.rs`
-   before it sprawled. 128 tests (25 new), clippy/fmt clean, `cargo test`
+   before it sprawled. 128 tests (26 new, against the 102 on the merge
+   base), clippy/fmt clean, `cargo test`
    green workspace-wide, `scripts/smoke-test.sh` green under both `--headless`
    and `--nested`, and the whole bug-bash re-run against real `--tty` hardware
    (it is IPC-layer code, so it is backend-agnostic by construction — but
@@ -651,6 +652,18 @@ review, and why.
    connection loop — its own item, not a rider on this one.
 
 ## Backlog (unordered — pick up whenever it fits)
+
+- **`State::listen` panics (aborts the process) if `$XDG_RUNTIME_DIR` is
+  unset, instead of a clean startup error (LOW).** Found incidentally by
+  `flexwm-reviewer` while reviewing PR #14, unrelated to that PR and left
+  untouched by it. `crates/flexwm/src/compositor/state.rs:196`:
+  `ListeningSocketSource::new_auto().expect("a free wayland socket")` — the
+  actual failure in this case is Smithay's `RuntimeDirNotSet`, which
+  `.expect()` turns into a panic and a core dump rather than a message
+  telling the operator what's actually wrong. Fix: match on the error and
+  print a clear startup error instead of panicking, same shape as this
+  project's other clean-startup-error paths (e.g. `ipc::init`'s "no socket
+  path" error).
 
 - **`wlr-layer-shell-unstable-v1` protocol support.** Needed for *any*
   bar/panel/launcher/notification-daemon (waybar, wofi, mako, rofi, etc.)
@@ -778,11 +791,20 @@ data-loss/RCE in what was checked.
   `grep flags /proc/<flexwm-pid>/fdinfo/<drm-fd-num>` (bit `02000000` =
   `O_CLOEXEC`) while `--tty` is running.
 - **~~IPC socket path is unlink-then-bind (LOW, non-default config only)~~ —
-  DONE as item 9**, by binding at a temporary name in the same directory and
-  `rename`ing it into place. The symlink-race framing here was wrong, and item
-  9 records why: `bind(2)` does not follow a trailing symlink (verified —
-  `EADDRINUSE`), so the real exposures were the chmod-after-publish window and
-  losing the name to a racing process, both of which the rename closes.
+  DONE as item 9.** The original framing here was wrong (`bind(2)` does not
+  follow a trailing symlink, verified — `EADDRINUSE`), so the real exposures
+  were the chmod-after-publish window and losing the name to a racing
+  process. The fix that shipped is not a simple bind-to-temp-name-then-
+  rename, though: two review rounds found that shape itself introduced two
+  more symlink/length bugs of its own (see item 9's own write-up for the
+  full history). The final design claims an unpredictable
+  (`getrandom`-sourced), short staging name via `mkdir` itself — never an
+  unlink or a name a pre-planted symlink could sit at — then does every
+  subsequent operation (chmod, bind, the rename's source side) through an
+  `O_DIRECTORY | O_NOFOLLOW` fd via `/proc/self/fd/<n>/...`, never
+  re-resolving the staging path by name again. Only the final rename's
+  *destination* (the published path itself) is still name-resolved, which
+  is inherent to what a published path is.
 
 - **The IPC connection loop does blocking I/O, one line per readiness event
   (HIGH — do this next; pre-existing).** Found while bug-bashing item 9;
@@ -796,9 +818,11 @@ data-loss/RCE in what was checked.
   processing happens for any client, for as long as one connection holds a
   partial line. It needs no malice at all: a client killed mid-paste, or any
   agent that writes a request in chunks, does it. That makes it the first
-  thing to pick up from this backlog rather than one more unordered entry. `accept()` puts the connection
-  into *blocking* mode and `Connection::step` reads exactly one line per
-  readiness event, which causes three distinct symptoms with one root cause:
+  thing to pick up from this backlog rather than one more unordered entry.
+
+  `accept()` puts the connection into *blocking* mode and `Connection::step`
+  reads exactly one line per readiness event, which causes three distinct
+  symptoms with one root cause:
   (a) a client that writes `{"type":"vers` and holds the connection open
   parks the single event-loop thread inside `fill_buf` — every other IPC
   client, wayland dispatch and input stop until it sends a newline or
