@@ -2,7 +2,7 @@
 
 ## Vision and fixed decisions
 
-flexwm is a Rust/Smithay Wayland window manager meant to be incredibly
+flexwm is a Rust/Smithay Wayland compositor meant to be incredibly
 lightweight, fast and beautiful; niri-like (scrolling columns); with full IPC
 so an agent can do simple computer use in a VM; and able to run without a GPU
 so it works inside linuxserver webtop (nested in pixelflux's Smithay
@@ -24,6 +24,16 @@ window layout OmniWM-style through the Accessibility API.
   about its behavior against the pinned source, not general Smithay
   knowledge, since APIs and semantics shift across revs.
 - Prefer CPU-friendly rendering and damage-limited redraws throughout.
+- **"Compositor," not "window manager," in anything user-facing** (`README.md`,
+  crate descriptions, `--help` text). Wayland has no separate window-manager
+  protocol the way X11 did — whatever composites client surfaces is also
+  whatever arranges them, so there's no such thing as a standalone Wayland
+  window manager process. Matches how niri/sway/Hyprland self-describe
+  ("compositor" first, "tiling window manager" as the behavior description).
+  Exception: `flexwm-core`'s own crate description genuinely is just
+  "window management state and layout" — it has no compositor concerns at
+  all (no Wayland, no I/O, per the platform-independence note above), so
+  that wording is accurate as-is and shouldn't change to match this rule.
 - **Where an emerging or established Wayland protocol standard exists,
   implement that rather than a bespoke/compositor-specific alternative,
   unless there's a concrete reason it doesn't fit.** E.g. `ext-workspace-v1`
