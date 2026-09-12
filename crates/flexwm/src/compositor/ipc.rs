@@ -14,6 +14,7 @@ use smithay::reexports::calloop::generic::Generic;
 use smithay::reexports::calloop::{EventLoop, Interest, Mode, PostAction};
 
 use super::State;
+use super::tty::VtSwitchOutcome;
 
 /// A `wait-idle` request that hasn't been answered yet.
 pub struct PendingIdle {
@@ -184,8 +185,25 @@ impl State {
                 self.scroll(dx, dy);
                 Response::Ok
             }
+            // `Ok(Some(VtSwitchOutcome::Requested))` is the one case where a
+            // successful request still needs a `Warning`, not a bare `Ok`:
+            // it means this exact call just issued a real VT_ACTIVATE, so
+            // the session is about to pause and this IPC connection -- if
+            // it's the caller's only input path -- is about to lose the one
+            // channel that could switch back (see `tty::VtSwitchOutcome`'s
+            // doc and the backlog item this closes in `ROADMAP.md`).
+            // `Ignored` (no `--tty`, or already paused) and `Failed` mean
+            // nothing actually changed, so they -- like `None` (no VT
+            // binding matched at all) -- stay a plain `Ok`.
             Request::Key { keys } => match self.press(&keys) {
-                Ok(()) => Response::Ok,
+                Ok(Some(VtSwitchOutcome::Requested)) => Response::Warning {
+                    message: "this switched the session away from --tty; the \
+                              compositor is now paused and unreachable until \
+                              a real hardware VT switch (not IPC) reactivates \
+                              it"
+                    .to_string(),
+                },
+                Ok(_) => Response::Ok,
                 Err(error) => Response::error(error),
             },
             Request::Type { text } => match self.type_text(&text) {

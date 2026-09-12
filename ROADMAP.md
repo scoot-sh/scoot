@@ -177,6 +177,50 @@ review, and why.
    command line kills the calling shell too; worked around with the bracket
    trick `pkill -f 'flexw[m]'`.
 
+   **5c. ~~IPC-initiated VT switch is a one-way door~~ — DONE**, PR #11.
+   Picked up from the Backlog, sharpened by `flexwm-reviewer`'s PR #9 pass
+   (see 5b above). Resolution chosen deliberately over gating/rejecting: 5b's
+   own hardware bug-bash relies on IPC being able to trigger `ChangeVt`, so
+   blocking it there would break that test path. Instead the *reply itself*
+   now tells an agent whose only input/output is IPC what just happened,
+   since IPC has no route to a log line the way a human at the console does.
+
+   `Tty::change_vt` (`tty/mod.rs`) now returns a new `VtSwitchOutcome`
+   (`Requested`/`Ignored`/`Failed`) instead of `()`, threaded up through
+   `input::key`'s new `KeyOutcome { intercepted, vt_switch }` (replacing its
+   old bare `bool`) and `press()`'s new `Result<Option<VtSwitchOutcome>,
+   String>` (replacing `Result<(), String>`) to `ipc.rs`'s `Request::Key`
+   handler — `press()`'s one caller. A new `Response::Warning { message }`
+   variant (purely additive to the wire format, no `PROTOCOL_VERSION` bump)
+   fires only for `Ok(Some(VtSwitchOutcome::Requested))`, i.e. a real
+   switch-away actually happened. `Ignored` (no `--tty`, or already paused —
+   5b's own skip) and `Failed` stay a plain `Ok`, matching pre-existing
+   behavior exactly: only a switch that actually left produces a warning: an
+   already-paused no-op still gets a clean `Ok`, not a nuisance re-warning.
+   `flexwm msg` prints a `Warning`'s message to stderr and still exits `0`
+   (it's not a failure).
+
+   Verified on real `--tty` hardware on the dev VM (this VM's session is
+   `seatd`-backed, not `logind`-backed, confirmed via its own journal):
+   `flexwm msg key ctrl+alt+f2` while active now replies with the warning
+   (`seatd` itself logs "Switching from VT 1 to VT 2", and flexwm logs
+   "session paused; drm master released" the same moment); sending the
+   switch-back combo over IPC while genuinely paused still gets a clean `Ok`
+   with no `EPERM` — `Ignored`, not `Requested`, so no warning, exactly 5b's
+   fix with no regression; a real hardware VT switch-back (`chvt 1`, issued
+   entirely outside IPC/libseat's own session — the same kernel-level path a
+   physical Ctrl+Alt+Fn press takes) reactivates the session normally (`drm:
+   modeset (full commit)`), and a fresh switch-away/back over IPC afterward
+   reproduces the same warning/clean-skip pair, confirming the gate reopens
+   rather than latching shut. 93/93 tests pass (including a new
+   `flexwm-ipc` wire test for `Response::Warning`'s JSON shape and round
+   trip), clippy/fmt clean on the dev VM guest, cross-platform build clean
+   on macOS. No unit test constructs a live `Tty`/`State` to exercise
+   `VtSwitchOutcome::Requested`/`Failed` directly — same reasoning as 5b:
+   there's no existing fixture for that, and hardware bug-bash plus code
+   tracing is this project's established way of verifying this class of
+   session-state correctness.
+
 6. A real GPU rendering pipeline, added at the end after everything above is
    stable — an actual goal, not just a "don't foreclose it" constraint.
    Likely a GLES/Vulkan Smithay renderer as an alternative to pixman,
@@ -188,19 +232,6 @@ review, and why.
    seam a GPU renderer slots into.
 
 ## Backlog (unordered — pick up whenever it fits)
-
-- **IPC-initiated VT switch is a one-way door for an IPC-only client.**
-  Found during `flexwm-reviewer`'s pass on PR #9 (item 5b). An agent (or any
-  client whose only input path is IPC, not real hardware) that sends a
-  VT-switch-away request over IPC has no way to switch back — the compositor
-  is paused and its own IPC socket has no route to real hardware input,
-  which is the only thing that can trigger the `ActivateSession` event that
-  reopens it. Contradicts `CLAUDE.md`'s "IPC-first... an agent doing simple
-  computer-use tasks in a VM is a first-class client" goal for this one
-  action specifically. Possible directions: reject/gate `ChangeVt` when it
-  arrives via the IPC `key` path rather than a real keybind, or make the IPC
-  reply for a switch-away carry an explicit warning about the one-way trip.
-  Only matters for `--tty`; no effect on `--headless`/`--nested`.
 
 - **Custom/client cursor support.** Item 5 shipped a fixed, procedurally-
   generated triangle for every `CursorImageStatus` variant — `Named` (a

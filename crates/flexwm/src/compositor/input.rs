@@ -9,11 +9,29 @@ use smithay::utils::{Logical, Point, SERIAL_COUNTER};
 
 use super::State;
 use super::keybindings::Bound;
+use super::tty::VtSwitchOutcome;
 
 // Linux input event codes, which is what Wayland carries.
 const BTN_LEFT: u32 = 0x110;
 const BTN_RIGHT: u32 = 0x111;
 const BTN_MIDDLE: u32 = 0x112;
+
+/// What handling one key press/release actually did. `Default` gives the
+/// right answer (`intercepted: false, vt_switch: None`) for the
+/// no-keyboard-yet early return in [`State::key`] and for `keyboard.input`'s
+/// own `None` case (no active keyboard focus target) -- both are "nothing
+/// happened," not "something happened and nothing switched."
+#[derive(Clone, Copy, Debug, Default)]
+pub(super) struct KeyOutcome {
+    /// Whether this press or release was intercepted by a keybinding rather
+    /// than forwarded to the focused client.
+    pub intercepted: bool,
+    /// `Some` only when this exact call is the one that invoked
+    /// `change_vt` (the `Bound::ChangeVt` arm below, on a press) -- `None`
+    /// for a plain forwarded key, an `Action` binding, or any release, all
+    /// of which never touch VT switching.
+    pub vt_switch: Option<VtSwitchOutcome>,
+}
 
 impl State {
     pub fn pointer_move(&mut self, x: f64, y: f64) {
@@ -122,7 +140,14 @@ impl State {
     /// asking for input-level fidelity, and `Request::Action` already exists
     /// as the direct, binding-independent way to invoke a window-management
     /// action.
-    pub fn press(&mut self, combo: &KeyCombo) -> Result<(), String> {
+    ///
+    /// Returns whatever `key()` reports for the *main* key's press --
+    /// modifiers alone can never match a keybinding (every binding in this
+    /// table requires a non-modifier main key), so only that one call can
+    /// ever carry a [`VtSwitchOutcome`]. `ipc.rs`'s `Request::Key` handler
+    /// uses this to warn a caller whose only input/output is this IPC
+    /// connection when a switch-away just made the compositor unreachable.
+    pub fn press(&mut self, combo: &KeyCombo) -> Result<Option<VtSwitchOutcome>, String> {
         let keysym =
             keysym_named(&combo.key).ok_or_else(|| format!("unknown key `{}`", combo.key))?;
         // Resolve every keycode -- the main key and all modifiers -- before
@@ -148,12 +173,12 @@ impl State {
             self.key(code, KeyState::Pressed);
             held.push(code);
         }
-        self.key(code, KeyState::Pressed);
+        let vt_switch = self.key(code, KeyState::Pressed).vt_switch;
         self.key(code, KeyState::Released);
         for code in held.into_iter().rev() {
             self.key(code, KeyState::Released);
         }
-        Ok(())
+        Ok(vt_switch)
     }
 
     /// Types text by pressing whichever keys produce those characters.
@@ -177,7 +202,7 @@ impl State {
             // modifiers at all, since every char here is sent with exactly
             // the modifiers (at most Shift) needed to produce it. Warn
             // rather than silently let it happen with no signal.
-            if self.key(code, KeyState::Pressed) {
+            if self.key(code, KeyState::Pressed).intercepted {
                 tracing::warn!(%character, "a keybinding intercepted a character from type_text");
             }
             self.key(code, KeyState::Released);
@@ -191,16 +216,15 @@ impl State {
     /// `pub(super)` rather than private: `nested_dispatch.rs` forwards real
     /// host keyboard events through this exact same path IPC-injected key
     /// presses already use, rather than duplicating the `keyboard.input`
-    /// call. Returns whether this press or release was intercepted by a
-    /// keybinding rather than forwarded to the focused client.
-    pub(super) fn key(&mut self, keycode: Keycode, state: KeyState) -> bool {
+    /// call.
+    pub(super) fn key(&mut self, keycode: Keycode, state: KeyState) -> KeyOutcome {
         let Some(keyboard) = self.seat.get_keyboard() else {
-            return false;
+            return KeyOutcome::default();
         };
         let serial = SERIAL_COUNTER.next_serial();
         let time = InputTime::from_millis(self.millis());
         keyboard
-            .input::<bool, _>(self, keycode, state, serial, time, |data, mods, handle| {
+            .input::<KeyOutcome, _>(self, keycode, state, serial, time, |data, mods, handle| {
                 match state {
                     KeyState::Pressed => {
                         // The unshifted (level 0) symbol: see the module
@@ -218,22 +242,31 @@ impl State {
                         // after this action closes the current focus) as a
                         // spurious lone release it never pressed.
                         data.suppressed_keys.insert(keycode);
-                        match bound {
-                            Bound::Action(action) => data.act(action),
-                            Bound::ChangeVt(vt) => data.change_vt(vt),
-                        }
-                        FilterResult::Intercept(true)
+                        let vt_switch = match bound {
+                            Bound::Action(action) => {
+                                data.act(action);
+                                None
+                            }
+                            Bound::ChangeVt(vt) => Some(data.change_vt(vt)),
+                        };
+                        FilterResult::Intercept(KeyOutcome {
+                            intercepted: true,
+                            vt_switch,
+                        })
                     }
                     KeyState::Released => {
                         if data.suppressed_keys.remove(&keycode) {
-                            FilterResult::Intercept(true)
+                            FilterResult::Intercept(KeyOutcome {
+                                intercepted: true,
+                                vt_switch: None,
+                            })
                         } else {
                             FilterResult::Forward
                         }
                     }
                 }
             })
-            .unwrap_or(false)
+            .unwrap_or_default()
     }
 
     fn keycode_for(&self, keysym: Keysym) -> Option<Keycode> {

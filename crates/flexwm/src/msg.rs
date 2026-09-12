@@ -26,6 +26,10 @@ pub fn run(request: &Request, out: Option<&Path>) -> Result<(), Box<dyn Error>> 
             }
             Ok(())
         }
+        Response::Warning { message } => {
+            eprintln!("warning: {message}");
+            Ok(())
+        }
         Response::Error { message } => Err(message.into()),
         other => {
             println!("{}", serde_json::to_string_pretty(&other)?);

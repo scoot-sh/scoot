@@ -68,6 +68,24 @@ fn screenshots_carry_png_bytes_as_base64() {
 }
 
 #[test]
+fn warnings_carry_a_message_and_round_trip() {
+    let response = Response::Warning {
+        message: "switched away from this session over IPC".into(),
+    };
+    assert_eq!(
+        json_of(&response),
+        json!({
+            "type": "warning",
+            "message": "switched away from this session over IPC",
+        })
+    );
+    assert_eq!(
+        decode::<Response>(&encode(&response).unwrap()).unwrap(),
+        response
+    );
+}
+
+#[test]
 fn every_request_round_trips_on_one_line() {
     let requests = [
         Request::Version,
