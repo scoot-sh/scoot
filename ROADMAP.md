@@ -418,7 +418,7 @@ review, and why.
    `with_states` closure: that guard is a plain non-reentrant `Mutex` and
    walking the tree to render re-locks the same one.
 
-   Six new integration-style tests in `cursor/tests.rs` drive a real
+   Seven new integration-style tests in `cursor/tests.rs` drive a real
    `wayland-client` connection through a real `State` (the harness
    `dispatch/tests.rs` introduced, extended with a step-at-a-time script
    channel so the client and compositor halves can interleave), then render
@@ -429,9 +429,16 @@ review, and why.
    surface with no buffer yet (draws nothing — deliberately *not* the
    fallback, which would flash a wrong shape between `set_cursor` and the
    client's first commit), destroy-while-active, 8 rounds of
-   hidden/visible alternation, and a cursor surface with a subsurface (two
-   elements). Each was confirmed non-vacuous by disabling the corresponding
-   production code and watching it fail — see the PR for the raw output.
+   hidden/visible alternation, a cursor surface with a subsurface (two
+   elements), and an `i32::MIN`/`i32::MAX` hotspot — the one
+   client-controlled integer that reaches element geometry, which
+   `wl_pointer.set_cursor` takes raw and unbounded. That one places a real
+   element at the saturated coordinate and asserts nothing is drawn and
+   nothing panics (a debug build is where the damage tracker's own
+   `loc + size` would blow up), then that an ordinary hotspot still works
+   afterwards. Each test was confirmed non-vacuous by disabling the
+   corresponding production code and watching it fail — see the PR for the
+   raw output.
 
    **Hardware verification** (dev VM, real `--tty` on its `virtio-gpu` KMS
    device at 1600x1000, all against `03cd51c` — the code has not changed

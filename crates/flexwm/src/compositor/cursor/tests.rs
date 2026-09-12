@@ -470,9 +470,16 @@ impl Canvas {
         self.pixels[idx..idx + 4].try_into().expect("four bytes")
     }
 
-    /// Asserts every pixel is the clear color, i.e. nothing was drawn.
+    /// Asserts no cursor element existed at all *and* nothing was drawn.
     fn assert_blank(&self) {
         assert_eq!(self.count, 0, "expected no cursor elements");
+        self.assert_nothing_drawn();
+    }
+
+    /// Asserts every pixel is the clear color. Unlike [`Canvas::assert_blank`]
+    /// this tolerates an element existing -- one positioned entirely off the
+    /// canvas draws nothing while still being in the list.
+    fn assert_nothing_drawn(&self) {
         for chunk in self.pixels.chunks_exact(4) {
             assert_eq!(chunk, CLEAR_BGRA, "something was drawn on a blank frame");
         }
@@ -598,6 +605,39 @@ fn hiding_and_restoring_a_cursor_leaves_no_stale_state() {
 
     fixture.run(Step::SetCursor { hotspot: (4, 6) });
     assert_eq!(fixture.render().at(46, 44), CLIENT_BGRA);
+}
+
+#[test]
+fn an_extreme_hotspot_neither_panics_nor_draws() {
+    let mut fixture = Fixture::new();
+    fixture.run(Step::CommitCursorBuffer {
+        size: 24,
+        color: CLIENT_BGRA,
+    });
+
+    // The hotspot is the one client-controlled `i32` that flows straight into
+    // element geometry, and `wl_pointer.set_cursor` takes it raw -- nothing
+    // in the protocol bounds it. `pointer - hotspot` is computed in `f64`
+    // (so it cannot wrap) and the cast back saturates, which puts the
+    // element far off-canvas in either direction rather than at a wrapped-
+    // around coordinate. What this test is really guarding is everything
+    // downstream of that: the damage tracker's own `loc + size` arithmetic
+    // on a saturated coordinate, in a debug build where a plain `+` would
+    // panic on overflow.
+    for hotspot in [(i32::MIN, i32::MIN), (i32::MAX, i32::MAX)] {
+        fixture.run(Step::SetCursor { hotspot });
+        let canvas = fixture.render();
+        // The element must really have been built and handed to the damage
+        // tracker at that coordinate -- an early bail-out would make the
+        // "nothing drawn" assertion below prove nothing.
+        assert_eq!(canvas.count, 1, "the element was skipped, not placed");
+        canvas.assert_nothing_drawn();
+    }
+
+    // ...and a sane hotspot afterwards still works, i.e. nothing was left
+    // wedged.
+    fixture.run(Step::SetCursor { hotspot: (4, 6) });
+    assert_eq!(fixture.render().at(50, 50), CLIENT_BGRA);
 }
 
 #[test]
