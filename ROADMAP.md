@@ -284,6 +284,83 @@ review, and why.
 
 ## Backlog (unordered — pick up whenever it fits)
 
+**Security audit (2026-09-12, against `main` at `2b92928`).** A dedicated
+security pass separate from the usual correctness/performance review found
+one CRITICAL finding (any Wayland client can abort the whole compositor via
+`wl_shm_pool.resize(0)`, a missing `return` in the pinned Smithay revision —
+being fixed as its own item, not listed here as backlog since it's in
+progress) and one HIGH finding (the dev VM's forwarded SSH port bound to
+every interface instead of loopback, exposing the documented hardcoded
+credentials — and, since the shared `/mnt/flexwm` 9p mount has no read-only
+option in this NixOS module, LAN write access to the actual host checkout —
+to the whole LAN; fixed same-day, `host.address = "127.0.0.1"` added to
+`vm/configuration.nix`, see its own commit and `vm/README.md`). The MEDIUM
+and LOW findings below are real but lower-urgency; none were exploitable
+data-loss/RCE in what was checked.
+
+- **Client-declared `min_size` isn't clamped where it's read (MEDIUM).**
+  `shell.rs`'s xdg_toplevel handling reads a client's `min_size` straight
+  from `SurfaceCachedState` with no clamp, unlike `learned_min` (already
+  capped to the output's usable area). Traced the full chain to
+  `decorations.rs`'s `ring_rects`, which does unchecked `i32` arithmetic on
+  it (`rect.w + 2 * width`) — overflows for a `min_size` near `i32::MAX`,
+  though `clip()` currently re-bounds against the real screen size
+  regardless, so this doesn't reach a bad write today. The gap is real
+  anyway: nothing stops a future consumer of `WindowState::min()` from
+  inheriting the unclamped value without `decorations.rs`'s defensive
+  re-clip. Fix: clamp at the read site in `shell.rs`, same shape as
+  `learned_min`'s existing clamp.
+- **IPC control socket has no line-length cap (MEDIUM).** `flexwm-ipc`'s
+  `read_message`/`read_message_buffered` and `ipc.rs`'s connection loop both
+  `read_line` into an unbounded `String`. A connected client streaming bytes
+  with no `\n` grows that buffer without bound — single-connection memory
+  exhaustion, no special access needed beyond opening the socket. Fix: wrap
+  the reader in a bounded `Read::take(N)` (or equivalent) and close/error
+  past a sane max line length.
+- **Screenshot capture runs synchronously on the sole event-loop thread with
+  no rate limit (MEDIUM).** flexwm is single-threaded throughout; a full
+  render + framebuffer copy + PNG encode blocks Wayland dispatch, input
+  processing, and every other IPC connection for its duration. A client
+  hammering `Screenshot` requests is a real "snappy, always" violation this
+  project explicitly cares about (`PointerMove`/`Key` at libinput rate is
+  fine by design — screenshot is the sharp edge). The IPC accept loop also
+  has no cap on concurrent connections, compounding with the line-length
+  finding above. Fix direction: rate-limit or de-bounce screenshot requests
+  per connection, and/or cap concurrent IPC connections.
+- **IPC socket has no explicit permissions or peer-credential check
+  (LOW/MEDIUM).** Safety today rests entirely on `$XDG_RUNTIME_DIR` being
+  the systemd-default `0700` per-user directory — no `chmod` or
+  `SO_PEERCRED` check exists in `flexwm-ipc`/the compositor itself, so an
+  explicit `FLEXWM_SOCKET` override into a shared directory, or a non-default
+  umask, silently degrades to any-local-user full input-injection +
+  screenshot access. Fix direction: explicit `chmod 0600` after bind, and/or
+  a peer-credential uid check given this channel's privilege level.
+- **`--tty`'s explicit `O_CLOEXEC` request on the DRM fd is a no-op at the
+  libseat layer (LOW, informational).** `tty/mod.rs` requests
+  `OFlags::CLOEXEC` when opening the DRM device, but the pinned Smithay's
+  `LibSeatSession::open` discards the flags parameter entirely and just
+  calls `libseat::Seat::open_device` — so whether an `Action::Spawn`-launched
+  child inherits DRM master or input-device fds depends entirely on
+  libseat's own (unverified from this machine) C-side behavior, not on
+  flexwm's request. Not independently confirmed either way; a one-command
+  check if this ever matters:
+  `grep flags /proc/<flexwm-pid>/fdinfo/<drm-fd-num>` (bit `02000000` =
+  `O_CLOEXEC`) while `--tty` is running.
+- **IPC socket path is unlink-then-bind (LOW, non-default config only).**
+  `ipc.rs` does `remove_file` then `bind` — a symlink-race pattern in
+  principle, only exploitable if `$FLEXWM_SOCKET` is overridden into a
+  directory writable by another user (the default `$XDG_RUNTIME_DIR` path
+  isn't).
+- **Config parsing has no recursion-depth guard (LOW).** The `toml` stack
+  has no explicit guard against deeply nested input; a maliciously deep
+  config could stack-overflow-abort the process rather than hit the
+  module's normal "log and fall back to defaults" path. Requires the user's
+  own config file, so low priority.
+- **`flexwm-core`'s `gap` config value has no upper bound (LOW).** Clamped
+  only at the bottom (`.max(0)`); a very large configured gap can overflow
+  plain `i32` arithmetic in `layout.rs`/`arrange.rs`. Config-only, same fix
+  shape as the `min_size` finding above.
+
 - **Suppress the same-VT no-op case of the IPC VT-switch warning (5c).**
   `change_vt`'s `VtSwitchOutcome::Requested` also fires — with a hedged
   warning, per 5c — when the requested VT is the one the session is already
