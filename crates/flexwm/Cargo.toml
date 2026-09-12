@@ -1,0 +1,26 @@
+[package]
+name = "flexwm"
+description = "A scrolling-tiling Wayland window manager that runs without a GPU"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+flexwm-core.workspace = true
+flexwm-ipc = { workspace = true, features = ["core"] }
+serde_json.workspace = true
+
+# The compositor is Linux-only; `flexwm msg` builds everywhere, so the CLI can
+# drive a VM from a Mac.
+[target.'cfg(target_os = "linux")'.dependencies]
+pixman = "0.2"
+png = "0.18"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[target.'cfg(target_os = "linux")'.dependencies.smithay]
+git = "https://github.com/Smithay/smithay"
+rev = "0ff00983b6007257a7a161a4fe8b14a778e2ac8f"
+default-features = false
+features = ["desktop", "wayland_frontend", "renderer_pixman"]

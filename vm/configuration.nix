@@ -7,30 +7,19 @@
 # to darwin pkgs (see flake.nix), `system.build.vm` is a *native Mac* launcher:
 # it packs the store into an erofs image on the host at launch and boots the
 # kernel directly. No bootloader, no disk image build, no nested VM.
-{ config, lib, pkgs, modulesPath, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  modulesPath,
+  ...
+}:
 
 let
-  # gbm moved out of the mesa attribute in newer nixpkgs; accept either.
-  gbm = pkgs.libgbm or pkgs.mesa;
-
   # Libraries a Smithay/wlroots-style compositor links against. Their `.dev`
   # outputs are installed too, so a plain `cargo build` finds the .pc files via
-  # PKG_CONFIG_PATH below -- no `nix develop` needed inside the VM.
-  compositorDeps = [
-    pkgs.wayland
-    pkgs.wayland-protocols
-    pkgs.wayland-scanner
-    pkgs.libxkbcommon
-    pkgs.libinput
-    pkgs.libdrm
-    pkgs.libdisplay-info
-    pkgs.seatd
-    pkgs.systemdLibs # libudev
-    pkgs.pixman
-    pkgs.libglvnd # EGL/GLES
-    pkgs.dbus
-    gbm
-  ];
+  # PKG_CONFIG_PATH below. Linking still wants the dev shell (../flake.nix).
+  compositorDeps = import ./compositor-deps.nix pkgs;
 in
 {
   imports = [ "${modulesPath}/virtualisation/qemu-vm.nix" ];
@@ -93,7 +82,13 @@ in
     isNormalUser = true;
     description = "flexwm developer";
     password = "dev";
-    extraGroups = [ "wheel" "video" "render" "input" "seat" ];
+    extraGroups = [
+      "wheel"
+      "video"
+      "render"
+      "input"
+      "seat"
+    ];
     openssh.authorizedKeys.keyFiles = lib.optional (builtins.pathExists ./authorized_keys) ./authorized_keys;
   };
   users.users.root = {
@@ -129,37 +124,94 @@ in
   time.timeZone = "UTC";
 
   nix.settings = {
-    experimental-features = [ "nix-command" "flakes" ];
-    trusted-users = [ "root" "dev" ];
+    experimental-features = [
+      "nix-command"
+      "flakes"
+    ];
+    trusted-users = [
+      "root"
+      "dev"
+    ];
+  };
+
+  # /mnt/flexwm is a 9p mount of the Mac checkout with no uid mapping, so it
+  # shows up owned by the Mac's uid. Without this, both `git` and `nix flake`
+  # (via its bundled libgit2) refuse to touch it: "not owned by current user".
+  # A single-user disposable VM has no one to protect it from, hence the "*".
+  programs.git = {
+    enable = true;
+    config = [ { safe.directory = "*"; } ];
   };
 
   # ---------------------------------------------------------- dev toolbox ---
   environment.systemPackages =
     (with pkgs; [
       # basics
-      git vim htop tmux curl wget file tree ripgrep fd jq pciutils usbutils
+      git
+      vim
+      htop
+      tmux
+      curl
+      wget
+      file
+      tree
+      ripgrep
+      fd
+      jq
+      pciutils
+      usbutils
 
       # wayland / drm smoke tests
-      kmscube drm_info libinput wayland-utils wev wlr-randr
-      sway cage foot
+      kmscube
+      drm_info
+      libinput
+      wayland-utils
+      wev
+      wlr-randr
+      sway
+      cage
+      foot
 
       # rust
-      rustc cargo clippy rustfmt gcc gnumake pkg-config
+      rustc
+      cargo
+      clippy
+      rustfmt
+      gcc
+      gnumake
+      pkg-config
     ])
     ++ compositorDeps
     ++ map (p: p.dev) (lib.filter (p: p ? dev) compositorDeps);
 
   # Make the system profile a usable pkg-config prefix, so `cargo build` works
   # in the VM without a dev shell.
-  environment.pathsToLink = [ "/lib/pkgconfig" "/share/pkgconfig" ];
+  environment.pathsToLink = [
+    "/lib/pkgconfig"
+    "/share/pkgconfig"
+  ];
   environment.variables = {
     PKG_CONFIG_PATH = "/run/current-system/sw/lib/pkgconfig:/run/current-system/sw/share/pkgconfig";
+    # A couple of the compositor's -sys crates (xkbcommon-sys, pixman-sys)
+    # probe via pkg-config for cflags but link with a bare -lfoo, which finds
+    # nothing without an explicit search path outside a Nix dev shell (which
+    # sets this itself). Everything in compositorDeps above is already in
+    # systemPackages, so its libs are on the system profile.
+    LIBRARY_PATH = "/run/current-system/sw/lib";
     EDITOR = "vim";
     # Keep build artifacts on the guest disk instead of writing them back
     # through 9p, which would be painfully slow.
     CARGO_TARGET_DIR = "/var/cargo-target";
   };
   systemd.tmpfiles.rules = [ "d /var/cargo-target 1777 root root -" ];
+
+  # foot's only font otherwise is DejaVu Sans, which isn't monospace and warns
+  # on every launch. This is the system default, not a per-invocation flag.
+  fonts.packages = [ pkgs.jetbrains-mono ];
+  environment.etc."xdg/foot/foot.ini".text = ''
+    [main]
+    font=JetBrains Mono:size=11
+  '';
 
   # Every megabyte here is repacked into the erofs image on each launch.
   documentation.nixos.enable = false;
