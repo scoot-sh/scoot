@@ -225,16 +225,17 @@ impl State {
                               it takes effect, the compositor will be paused, \
                               and only a VT switch from outside this \
                               compositor -- a physical Ctrl+Alt+Fn, or \
-                              `chvt N` from any shell on this machine -- not \
-                              IPC, can reactivate it"
+                              `sudo chvt N` from a shell on this machine -- \
+                              not IPC, can reactivate it"
                         .to_string(),
                 },
                 Ok(Some(VtSwitchOutcome::IgnoredPaused)) => Response::Warning {
                     message: "ignored: this session is already paused; a VT \
                               switch from outside this compositor -- a \
-                              physical Ctrl+Alt+Fn, or `chvt N` from any \
-                              shell on this machine -- is needed before IPC \
-                              can do anything more here"
+                              physical Ctrl+Alt+Fn, or `sudo chvt N` from a \
+                              shell on this machine -- is needed before a VT \
+                              switch can succeed from here; other IPC \
+                              requests still work"
                         .to_string(),
                 },
                 Ok(Some(VtSwitchOutcome::Failed)) => Response::error(

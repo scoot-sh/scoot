@@ -151,7 +151,8 @@ impl State {
     /// Returns whichever [`VtSwitchOutcome`] any press in this sequence
     /// produced, if any. In practice only the *main* key's press can ever
     /// carry one: every `ChangeVt` binding is keyed on an `F1`..`F12` keysym
-    /// (see `tty::vt_switch_bindings`, the only place that constructs one),
+    /// (see `Keybindings::vt_switch_bindings`, the only place that
+    /// constructs one -- `tty::init` only applies it),
     /// never on a modifier's own keysym (`Control_L`/`Shift_L`/`Alt_L`/
     /// `Super_L`), so pressing one of this combo's modifiers on its own --
     /// the loop below -- structurally cannot match one, no matter what's
