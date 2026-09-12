@@ -1,7 +1,12 @@
 //! The control socket: newline-delimited JSON, one connection per client.
 
-use std::io::{BufRead, BufReader, Write};
-use std::os::unix::net::{UnixListener, UnixStream};
+mod line;
+mod listener;
+#[cfg(test)]
+mod tests;
+
+use std::io::{BufReader, Write};
+use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -13,7 +18,9 @@ use flexwm_ipc::{
 use smithay::reexports::calloop::generic::Generic;
 use smithay::reexports::calloop::{EventLoop, Interest, Mode, PostAction};
 
+use self::line::{LineRead, MAX_REQUEST_BYTES, read_line_bounded};
 use super::State;
+use super::headless::FRAME_INTERVAL;
 use super::tty::VtSwitchOutcome;
 
 /// A `wait-idle` request that hasn't been answered yet.
@@ -32,9 +39,7 @@ pub fn init(
     let path = socket
         .or_else(socket_path)
         .ok_or("no socket path: set FLEXWM_SOCKET or XDG_RUNTIME_DIR")?;
-    let _ = std::fs::remove_file(&path);
-    let listener = UnixListener::bind(&path)?;
-    listener.set_nonblocking(true)?;
+    let listener = listener::bind(&path)?;
 
     event_loop.handle().insert_source(
         Generic::new(listener, Interest::READ, Mode::Level),
@@ -53,11 +58,32 @@ pub fn init(
 }
 
 fn accept(state: &mut State, stream: UnixStream) -> std::io::Result<()> {
+    // First, before this connection costs anything: an fd duplicated, a
+    // buffer allocated, a place in the event loop -- and long before any
+    // request of its own is read. A client that is not this compositor's own
+    // user gets nothing but a closed socket.
+    let peer = listener::peer_uid(&stream)?;
+    let own = listener::own_uid();
+    if !listener::peer_is_allowed(peer, own) {
+        // Loud on purpose. This channel injects keystrokes and hands back
+        // screenshots, so somebody else's process reaching it at all is
+        // worth a trace at the default log level, the same way a discarded
+        // VT switch is (see `tty::change_vt`) -- it is refused, not an
+        // error, but it is never routine.
+        tracing::warn!(
+            uid = peer,
+            expected_uid = own,
+            "refused an ipc connection from another user",
+        );
+        return Ok(());
+    }
+
     stream.set_nonblocking(false)?;
     let mut connection = Connection {
         reader: BufReader::new(stream.try_clone()?),
         writer: stream.try_clone()?,
-        line: String::new(),
+        line: Vec::new(),
+        last_screenshot: None,
     };
     let source = Generic::new(stream, Interest::READ, Mode::Level);
     state
@@ -81,22 +107,42 @@ struct Connection {
     reader: BufReader<UnixStream>,
     writer: UnixStream,
     /// Reused across requests on this connection instead of allocating a
-    /// fresh String per message -- an agent driving a session over one
+    /// fresh buffer per message -- an agent driving a session over one
     /// connection can send many.
-    line: String,
+    line: Vec<u8>,
+    /// When this connection last had a screenshot captured for it, or `None`
+    /// if it never has. Per connection, not global: one client hammering the
+    /// request must not make another client's first one fail.
+    last_screenshot: Option<Instant>,
 }
 
 impl Connection {
     fn step(&mut self, state: &mut State) -> Step {
-        self.line.clear();
-        match self.reader.read_line(&mut self.line) {
-            Ok(0) | Err(_) => return Step::Close,
-            Ok(_) => {}
+        match read_line_bounded(&mut self.reader, &mut self.line, MAX_REQUEST_BYTES) {
+            LineRead::Line => {}
+            LineRead::Eof | LineRead::Failed => return Step::Close,
+            LineRead::TooLong => {
+                // Nothing to resynchronize to: the rest of this line is
+                // still coming and there is no way to tell where it ends.
+                // Best-effort reply so a legitimately over-long request gets
+                // a reason rather than a bare disconnection, then done.
+                let _ = self.reply(&Response::error(format!(
+                    "request line exceeds the {MAX_REQUEST_BYTES}-byte limit; connection closed"
+                )));
+                tracing::debug!("closed an ipc connection whose request line ran past the limit");
+                return Step::Close;
+            }
         }
-        let request: Request = match decode(&self.line) {
+        // Borrowed only until the request (or an owned error message) is
+        // out; `self.line` is needed mutably again the moment either is.
+        let decoded = match std::str::from_utf8(&self.line) {
+            Ok(text) => decode::<Request>(text).map_err(|error| error.to_string()),
+            Err(error) => Err(error.to_string()),
+        };
+        let request = match decoded {
             Ok(request) => request,
-            Err(error) => {
-                let _ = self.reply(&Response::error(error.to_string()));
+            Err(message) => {
+                let _ = self.reply(&Response::error(message));
                 return Step::Continue;
             }
         };
@@ -125,7 +171,38 @@ impl Connection {
             return Step::Close;
         }
 
+        // A screenshot is the one request that costs a full render, a
+        // framebuffer read-back and a PNG encode, all on the single thread
+        // that also runs wayland dispatch, input and every other IPC
+        // connection (see `screenshot.rs`). Served back-to-back it starves
+        // everything else, so a connection that was handed one less than a
+        // frame ago is told to come back rather than served a second one at
+        // that price.
+        let screenshot = matches!(request, Request::Screenshot { .. });
+        if screenshot && screenshot_throttled(self.last_screenshot, Instant::now()) {
+            let _ = self.reply(&Response::error(format!(
+                "screenshots are limited to one per connection per {}ms, the \
+                 compositor's own frame interval: capturing costs a full \
+                 render and encode on the thread that serves every other \
+                 client. Retry after that long",
+                FRAME_INTERVAL.as_millis()
+            )));
+            return Step::Continue;
+        }
+
         let response = state.handle_request(request);
+        if screenshot {
+            // Stamped once the capture is done, not when the request
+            // arrived: the whole point is to leave the event loop a frame's
+            // worth of room for everything else *after* a capture, and a
+            // capture can easily take longer than a frame itself, which
+            // would leave a start-stamped window already expired by the time
+            // it mattered (measured: ~170ms for 800x600 in a debug build --
+            // the throttle never once fired that way). Recorded whether or
+            // not the capture succeeded: `screenshot()` renders before it
+            // can fail, so the expensive part was spent either way.
+            self.last_screenshot = Some(Instant::now());
+        }
         // Synthetic input (key/pointer) and action-driven configures queue
         // wayland messages on the client's connection; nothing else flushes
         // them until the next render tick, which only runs when something
@@ -342,6 +419,38 @@ fn wire(rect: flexwm_core::Rect) -> WireRect {
     }
 }
 
+/// Whether a screenshot request arriving at `now` should be refused because
+/// this connection was already handed one less than a frame ago.
+///
+/// `last` is when the previous capture *finished* (see the call site), so the
+/// window this enforces is a gap *between* captures: one connection can cost
+/// the event loop a capture no more often than the compositor already spends
+/// a frame, and everything else gets that gap to be served in. A refused
+/// caller waits at most one [`FRAME_INTERVAL`] and asks again.
+///
+/// Deliberately not justified as "the pixels cannot have changed yet" --
+/// that would be a stronger claim than the code makes good on. `render()`
+/// runs on demand (`needs_render`), not on frame boundaries, and this window
+/// starts whenever the last capture happened to finish, so two captures a
+/// frame apart can legitimately differ. Bounding the *cost* is the point.
+///
+/// Deliberately not a sleep: this runs on the event-loop thread, so waiting
+/// here would block every other client in order to slow one down. A refusal
+/// is answered in microseconds, so a client that ignores it and hammers
+/// anyway costs the compositor a JSON reply per attempt, not a render.
+///
+/// Per connection, not global, and so bypassable by reconnecting for every
+/// capture -- capping concurrent connections is the audit's separate finding
+/// and deliberately not in scope here. What this does close is the case the
+/// finding described: one connection issuing back-to-back captures.
+///
+/// `duration_since` saturates to zero rather than panicking when `last` is
+/// somehow later than `now`, so a clock that fails to be monotonic makes this
+/// throttle (harmlessly) rather than abort the compositor.
+fn screenshot_throttled(last: Option<Instant>, now: Instant) -> bool {
+    last.is_some_and(|last| now.duration_since(last) < FRAME_INTERVAL)
+}
+
 enum IdleOutcome {
     StillWaiting,
     Idle { waited_ms: u64 },
@@ -368,91 +477,5 @@ fn idle_outcome(now: Instant, last_commit: Instant, wait: &PendingIdle) -> IdleO
         IdleOutcome::TimedOut
     } else {
         IdleOutcome::StillWaiting
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn pending(now: Instant, quiet_ms: u64, timeout_ms: u64) -> PendingIdle {
-        // A real stream is required by the struct but never touched by
-        // idle_outcome; a socket pair is a cheap, sandboxed stand-in.
-        let (a, _b) = UnixStream::pair().expect("socket pair");
-        PendingIdle {
-            stream: a,
-            quiet: Duration::from_millis(quiet_ms),
-            deadline: now + Duration::from_millis(timeout_ms),
-            started: now,
-        }
-    }
-
-    #[test]
-    fn already_quiet_client_still_waits_out_the_quiet_period() {
-        let started = Instant::now();
-        let wait = pending(started, 200, 5_000);
-        // last_commit is long before `started` -- the client was already
-        // idle when the request arrived. Immediately after registering,
-        // this must NOT report idle: that was the race.
-        let long_ago = started - Duration::from_secs(10);
-        assert!(matches!(
-            idle_outcome(started, long_ago, &wait),
-            IdleOutcome::StillWaiting
-        ));
-        // Not idle either, partway through the quiet window...
-        let mid = started + Duration::from_millis(100);
-        assert!(matches!(
-            idle_outcome(mid, long_ago, &wait),
-            IdleOutcome::StillWaiting
-        ));
-        // ...but idle once quiet_ms has actually elapsed since `started`.
-        let after = started + Duration::from_millis(201);
-        assert!(matches!(
-            idle_outcome(after, long_ago, &wait),
-            IdleOutcome::Idle { .. }
-        ));
-    }
-
-    #[test]
-    fn a_commit_during_the_wait_pushes_the_baseline_forward() {
-        let started = Instant::now();
-        let wait = pending(started, 200, 5_000);
-        let commit_at = started + Duration::from_millis(150);
-        // 200ms after start, but only 50ms after the commit: still waiting.
-        let now = started + Duration::from_millis(200);
-        assert!(matches!(
-            idle_outcome(now, commit_at, &wait),
-            IdleOutcome::StillWaiting
-        ));
-        let now = commit_at + Duration::from_millis(201);
-        assert!(matches!(
-            idle_outcome(now, commit_at, &wait),
-            IdleOutcome::Idle { .. }
-        ));
-    }
-
-    #[test]
-    fn times_out_when_never_idle_before_the_deadline() {
-        let started = Instant::now();
-        let wait = pending(started, 200, 500);
-        // A commit keeps landing just inside every quiet window, so it's
-        // never idle -- but the deadline still fires.
-        let now = started + Duration::from_millis(501);
-        let last_commit = now - Duration::from_millis(10);
-        assert!(matches!(
-            idle_outcome(now, last_commit, &wait),
-            IdleOutcome::TimedOut
-        ));
-    }
-
-    #[test]
-    fn waited_ms_is_measured_from_the_request_not_the_commit() {
-        let started = Instant::now();
-        let wait = pending(started, 50, 5_000);
-        let now = started + Duration::from_millis(123);
-        match idle_outcome(now, started, &wait) {
-            IdleOutcome::Idle { waited_ms } => assert_eq!(waited_ms, 123),
-            _ => panic!("expected idle"),
-        }
     }
 }

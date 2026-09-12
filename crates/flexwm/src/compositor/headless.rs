@@ -48,7 +48,14 @@ render_elements! {
 }
 
 /// How often a changed screen is redrawn, while there's something to redraw.
-const FRAME_INTERVAL: Duration = Duration::from_millis(16);
+///
+/// Visible to the rest of the compositor because it is also the natural unit
+/// for "how much work may one client ask for": `ipc.rs` spaces a connection's
+/// screenshots by it, so a capture costs at most what a frame already does.
+/// Not a claim about the pixels -- `render()` runs on demand from
+/// `needs_render`, not on frame boundaries, so two captures a frame apart can
+/// legitimately differ.
+pub(super) const FRAME_INTERVAL: Duration = Duration::from_millis(16);
 
 /// The CPU renderer and the image it draws into.
 pub struct Backend {

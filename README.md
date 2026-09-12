@@ -15,7 +15,10 @@ Two things distinguish it from a typical compositor:
   screenshots and window/output introspection. The compositor itself is
   driven the same way in its own end-to-end test (see `scripts/smoke-test.sh`).
   The intent is that an agent doing simple computer-use tasks in a VM is a
-  first-class client, not an afterthought bolted on later.
+  first-class client, not an afterthought bolted on later. Because that socket
+  can inject any keystroke, it's treated as a privileged channel: it lives in
+  `$XDG_RUNTIME_DIR` (override with `$FLEXWM_SOCKET`), is created `0600`, and
+  serves only connections from the same user as the compositor.
 
 `flexwm-core`, the layout/state engine, is kept platform-independent on
 purpose: it knows nothing about Wayland. The plan is for the same engine to
@@ -30,9 +33,12 @@ Early, but all three Wayland backends are real and working: `--headless`
 and `--tty` (a real DRM/KMS + libseat + libinput backend on actual hardware,
 including VT switching and a rendered pointer cursor — a client's own cursor
 image when it supplies one, a built-in shape otherwise). Also done: vim-style
-keybindings, a TOML config file (`--config`, `[layout]`/`[binds]`), and window
+keybindings, a TOML config file (`--config`, `[layout]`/`[binds]`), window
 decorations (a niri-style focus ring, background color, server-side
-`zxdg_decoration_manager_v1`). Verified end-to-end on every backend — a real
+`zxdg_decoration_manager_v1`), and a hardened control socket (owner-only
+permissions, a same-user peer check, a 1 MiB cap on a single request, and
+screenshots rate-limited to one per connection per frame). Verified
+end-to-end on every backend — a real
 client maps, tiles, receives synthetic input, and a screenshot proves it. Not
 yet started: a GPU rendering path and the macOS adapter.
 
