@@ -5,6 +5,7 @@
 //! whatever [`Arrangement`](flexwm_core::Arrangement) the core produced.
 
 mod config;
+mod decorations;
 mod handlers;
 mod headless;
 mod input;
@@ -37,7 +38,13 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
 
     let mut event_loop: EventLoop<'static, State> = EventLoop::try_new()?;
     let display: Display<State> = Display::new()?;
-    let mut state = State::new(&mut event_loop, display, loaded.config, loaded.keybindings);
+    let mut state = State::new(
+        &mut event_loop,
+        display,
+        loaded.config,
+        loaded.keybindings,
+        loaded.appearance,
+    );
 
     // `--tty` picks its own size from the connector's preferred mode --
     // there's no host to negotiate a size with the way `--nested` does, and

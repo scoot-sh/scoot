@@ -19,6 +19,8 @@ use smithay::wayland::selection::SelectionHandler;
 use smithay::wayland::selection::data_device::{
     DataDeviceHandler, DataDeviceState, WaylandDndGrabHandler, set_data_device_focus,
 };
+use smithay::reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode;
+use smithay::wayland::shell::xdg::decoration::XdgDecorationHandler;
 use smithay::wayland::shell::xdg::{
     PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
     XdgToplevelSurfaceData,
@@ -138,6 +140,55 @@ impl XdgShellHandler for State {
             state.positioner = positioner;
         });
         surface.send_repositioned(token);
+    }
+}
+
+/// `zxdg_decoration_manager_v1`: lets a client ask the compositor whether it
+/// or the client itself should draw window decorations. This project draws
+/// none (see `decorations.rs`'s module doc) but always answers `ServerSide`
+/// when `appearance.prefer_no_csd` is set (niri's own default, and this
+/// project's), which is enough to stop a well-behaved client (e.g. foot)
+/// from drawing its own titlebar -- the actual protocol-correctness fix
+/// behind this feature, independent of the ring/background pixels.
+///
+/// The three methods share one policy: if `prefer_no_csd`, force
+/// `ServerSide` regardless of what the client asked for or asks again
+/// later; if not, do exactly what the client asked -- `request_mode` sets
+/// that exact mode, and `new_decoration`/`unset_mode` leave `decoration_mode`
+/// unset, which Smithay's own toplevel configure logic already treats as
+/// `ClientSide` (see `wayland::shell::xdg::mod.rs`'s
+/// `decoration_mode.unwrap_or(Mode::ClientSide)`) -- so "leave it unset" and
+/// "explicitly request ClientSide" are the same outcome here, and there's no
+/// need to set it explicitly to get that behavior.
+impl XdgDecorationHandler for State {
+    fn new_decoration(&mut self, toplevel: ToplevelSurface) {
+        tracing::debug!(
+            prefer_no_csd = self.appearance.prefer_no_csd,
+            "zxdg_toplevel_decoration_v1 created"
+        );
+        if self.appearance.prefer_no_csd {
+            toplevel.with_pending_state(|state| state.decoration_mode = Some(Mode::ServerSide));
+        }
+        toplevel.send_configure();
+    }
+
+    fn request_mode(&mut self, toplevel: ToplevelSurface, mode: Mode) {
+        let mode = if self.appearance.prefer_no_csd {
+            Mode::ServerSide
+        } else {
+            mode
+        };
+        tracing::debug!(?mode, "client requested a decoration mode");
+        toplevel.with_pending_state(|state| state.decoration_mode = Some(mode));
+        toplevel.send_configure();
+    }
+
+    fn unset_mode(&mut self, toplevel: ToplevelSurface) {
+        tracing::debug!("client unset its decoration mode preference");
+        toplevel.with_pending_state(|state| {
+            state.decoration_mode = self.appearance.prefer_no_csd.then_some(Mode::ServerSide);
+        });
+        toplevel.send_configure();
     }
 }
 

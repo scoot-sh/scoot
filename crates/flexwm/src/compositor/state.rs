@@ -23,9 +23,11 @@ use smithay::wayland::compositor::{CompositorClientState, CompositorState};
 use smithay::wayland::output::OutputManagerState;
 use smithay::wayland::selection::data_device::DataDeviceState;
 use smithay::wayland::shell::xdg::XdgShellState;
+use smithay::wayland::shell::xdg::decoration::XdgDecorationState;
 use smithay::wayland::shm::ShmState;
 use smithay::wayland::socket::ListeningSocketSource;
 
+use super::decorations::{Appearance, Decorations};
 use super::headless::Backend;
 use super::ipc::PendingIdle;
 use super::keybindings::Keybindings;
@@ -63,8 +65,22 @@ pub struct State {
     /// `None` under `--headless`/`--nested`.
     pub tty: Option<Tty>,
 
+    /// The ring/background palette and `prefer_no_csd` policy, resolved
+    /// from `[appearance]` (or its defaults) once at startup -- see
+    /// `config.rs` and `decorations.rs`'s module docs.
+    pub appearance: Appearance,
+    /// Per-window persistent ring buffers -- see `decorations.rs`'s module
+    /// doc for why these live here rather than being rebuilt every frame.
+    pub decorations: Decorations,
+
     pub compositor_state: CompositorState,
     pub xdg_shell_state: XdgShellState,
+    /// Held only to keep the `zxdg_decoration_manager_v1` global alive --
+    /// like `output_manager_state`, `XdgDecorationHandler` (see
+    /// `handlers.rs`) has no `&mut XdgDecorationState` accessor to route
+    /// dispatch through, so nothing reads this field again after `new`.
+    #[allow(dead_code)]
+    pub xdg_decoration_state: XdgDecorationState,
     pub shm_state: ShmState,
     /// Held only to keep the xdg-output global alive.
     #[allow(dead_code)]
@@ -105,10 +121,12 @@ impl State {
         display: Display<State>,
         config: Config,
         keybindings: Keybindings,
+        appearance: Appearance,
     ) -> Self {
         let dh = display.handle();
         let compositor_state = CompositorState::new::<Self>(&dh);
         let xdg_shell_state = XdgShellState::new::<Self>(&dh);
+        let xdg_decoration_state = XdgDecorationState::new::<Self>(&dh);
         let shm_state = ShmState::new::<Self>(&dh, vec![]);
         let output_manager_state = OutputManagerState::new_with_xdg_output::<Self>(&dh);
         let data_device_state = DataDeviceState::new::<Self>(&dh);
@@ -139,8 +157,11 @@ impl State {
             backend: None,
             host: None,
             tty: None,
+            appearance,
+            decorations: Decorations::default(),
             compositor_state,
             xdg_shell_state,
+            xdg_decoration_state,
             shm_state,
             output_manager_state,
             seat_state,

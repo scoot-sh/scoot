@@ -18,11 +18,71 @@ FLEXWM=${FLEXWM:-/var/cargo-target/debug/flexwm}
 SOCKET=${SOCKET:-/run/user/$(id -u)/flexwm-smoke.sock}
 SHOT=${SHOT:-/tmp/flexwm-smoke.png}
 LOG=${LOG:-/tmp/flexwm-smoke.log}
+CONFIG=${CONFIG:-/tmp/flexwm-smoke-appearance.toml}
 export FLEXWM_SOCKET="$SOCKET"
 
-rm -f "$SOCKET" "$SHOT" "$LOG"
+rm -f "$SOCKET" "$SHOT" "$LOG" "$CONFIG"
 
-"$FLEXWM" "$MODE" --width 1200 --height 800 --socket "$SOCKET" >"$LOG" 2>&1 &
+# A deliberately distinctive, non-default [appearance] -- so the pixel checks
+# below can't pass by accident against whatever the built-in defaults happen
+# to be. gap stays at its own default (12): focus_ring_width=6 is exactly
+# half of that, right at the clamp boundary (see decorations.rs's
+# Appearance::clamped) without tripping it, so this also doubles as a check
+# that a legal, non-clamped width isn't clamped anyway.
+cat >"$CONFIG" <<'EOF'
+[appearance]
+focus_ring_width = 6
+focus_ring_active_color = "#ff00ff"
+focus_ring_inactive_color = "#00ffff"
+background_color = "#123456"
+EOF
+
+# Reads one pixel out of a PNG as "R G B" (0-255), via whichever of
+# magick/convert is on PATH, falling back to a throwaway `nix shell` when
+# neither is (e.g. before vm/configuration.nix's `pkgs.imagemagick` addition
+# has been picked up by a VM rebuild -- see that file's comment on this).
+magick_cmd() {
+    if command -v magick >/dev/null 2>&1; then
+        magick "$@"
+    elif command -v convert >/dev/null 2>&1; then
+        convert "$@"
+    else
+        nix shell nixpkgs#imagemagick -c magick "$@"
+    fi
+}
+
+read_pixel() {
+    local png="$1" x="$2" y="$3"
+    local raw inner
+    raw=$(magick_cmd "$png" -format '%[pixel:p{'"$x"','"$y"'}]' info:)
+    inner=${raw#*(}
+    inner=${inner%)*}
+    IFS=',' read -r -a channels <<<"$inner"
+    echo "${channels[0]} ${channels[1]} ${channels[2]}"
+}
+
+# Asserts the pixel at ($x,$y) in $png is $want_hex ("#rrggbb"), within a
+# small tolerance (compositing/format round-tripping, not a hue difference)
+# -- a hard mismatch is a real bug, not compositor noise.
+expect_pixel_color() {
+    local png="$1" x="$2" y="$3" want_hex="$4" label="$5"
+    local want_r want_g want_b got_r got_g got_b
+    want_r=$((16#${want_hex:0:2}))
+    want_g=$((16#${want_hex:2:2}))
+    want_b=$((16#${want_hex:4:2}))
+    read -r got_r got_g got_b < <(read_pixel "$png" "$x" "$y")
+    local dr dg db
+    dr=$(( want_r > got_r ? want_r - got_r : got_r - want_r ))
+    dg=$(( want_g > got_g ? want_g - got_g : got_g - want_g ))
+    db=$(( want_b > got_b ? want_b - got_b : got_b - want_b ))
+    if [ "$dr" -gt 2 ] || [ "$dg" -gt 2 ] || [ "$db" -gt 2 ]; then
+        echo "BUG: $label pixel at ($x,$y) is rgb($got_r,$got_g,$got_b), expected #$want_hex (rgb($want_r,$want_g,$want_b))"
+        return 1
+    fi
+    echo "ok: $label pixel at ($x,$y) matches #$want_hex"
+}
+
+"$FLEXWM" "$MODE" --width 1200 --height 800 --socket "$SOCKET" --config "$CONFIG" >"$LOG" 2>&1 &
 compositor=$!
 trap 'kill "$compositor" 2>/dev/null || true' EXIT
 
@@ -126,6 +186,56 @@ echo "ok: super+h moved focus from window $second_id to window $first_id"
 
 echo "--- screenshot ---"
 "$FLEXWM" msg screenshot --out "$SHOT"
+
+echo "=== decorations: focus ring + background render the configured colors ==="
+# At this point (after the super+h test above) $first_id is focused and
+# $second_id is not. Sampling the *top* of each window's ring rather than a
+# side facing the other window sidesteps needing to reason about which side
+# has a neighbor nearby -- the layout always leaves a full gap above every
+# window on a single row, focused or not, regardless of how many columns
+# there are or which one is scrolled into view.
+windows_json=$("$FLEXWM" msg windows)
+read -r focused_x focused_y focused_w < <(
+    echo "$windows_json" | jq -r --argjson id "$first_id" \
+        '.windows[] | select(.id == $id) | "\(.rect.x) \(.rect.y) \(.rect.width)"'
+)
+read -r unfocused_x unfocused_y unfocused_w < <(
+    echo "$windows_json" | jq -r --argjson id "$second_id" \
+        '.windows[] | select(.id == $id) | "\(.rect.x) \(.rect.y) \(.rect.width)"'
+)
+# Matches $CONFIG's focus_ring_width above; there's no `msg` introspection
+# for the running appearance config (out of scope here -- this is a smoke
+# test, not a config-echo feature), so this is kept in step with $CONFIG by
+# hand.
+ring_width=6
+ring_ok=1
+expect_pixel_color "$SHOT" \
+    "$((focused_x + focused_w / 2))" "$((focused_y - ring_width / 2))" \
+    "ff00ff" "the focused window's ring" || ring_ok=0
+expect_pixel_color "$SHOT" \
+    "$((unfocused_x + unfocused_w / 2))" "$((unfocused_y - ring_width / 2))" \
+    "00ffff" "the unfocused window's ring" || ring_ok=0
+# (1,1): inside the outer gap on every side (gap=12, ring_width=6 -> nothing
+# but background exists closer than 6px to any edge), so this is background
+# regardless of exactly where either window landed.
+expect_pixel_color "$SHOT" 1 1 "123456" "the background" || ring_ok=0
+if [ "$ring_ok" -ne 1 ]; then
+    echo "BUG: one or more decoration pixel checks failed -- see above"
+    exit 1
+fi
+
+echo "--- checking foot no longer falls back to client-side decorations ---"
+# Every prior smoke-test run on this project has shown foot logging this on
+# startup (it's stderr, captured into $LOG along with everything else foot
+# prints) because nothing ever answered zxdg_decoration_manager_v1 before
+# this feature. Its absence now is the actual proof the protocol negotiation
+# succeeded -- not just that `XdgDecorationState::new` didn't panic.
+if grep -q "no decoration manager available" "$LOG"; then
+    echo "BUG: foot is still falling back to client-side decorations -- zxdg_decoration_manager_v1 negotiation did not take effect"
+    grep "no decoration manager available" "$LOG"
+    exit 1
+fi
+echo "ok: foot's CSD-fallback warning is gone -- server-side decoration was negotiated"
 
 echo "--- compositor log (tail) ---"
 tail -20 "$LOG"

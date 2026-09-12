@@ -172,6 +172,11 @@ in
       sway
       cage
       foot
+      # Reads specific pixels out of a `flexwm msg screenshot` PNG --
+      # scripts/smoke-test.sh's decoration checks need this to confirm the
+      # focus ring/background actually rendered the configured colors, not
+      # just that the compositor didn't crash.
+      imagemagick
 
       # rust
       rustc
