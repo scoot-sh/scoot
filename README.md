@@ -28,7 +28,8 @@ Early, but all three Wayland backends are real and working: `--headless`
 (pixman rendering, xdg-shell, seat/input, full IPC control surface),
 `--nested` (runs as a window inside an existing compositor, e.g. for webtop),
 and `--tty` (a real DRM/KMS + libseat + libinput backend on actual hardware,
-including VT switching and a rendered pointer cursor). Also done: vim-style
+including VT switching and a rendered pointer cursor — a client's own cursor
+image when it supplies one, a built-in shape otherwise). Also done: vim-style
 keybindings, a TOML config file (`--config`, `[layout]`/`[binds]`), and window
 decorations (a niri-style focus ring, background color, server-side
 `zxdg_decoration_manager_v1`). Verified end-to-end on every backend — a real
