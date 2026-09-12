@@ -166,13 +166,26 @@ as you work, and keep it short — anything durable belongs in `CLAUDE.md` or
 
 ## Process notes
 
-- Delegate implementation to fork/subagents to keep the coordinating
-  session's own context lean, per standing user preference. The coordinating
-  session is the orchestrator and the actual final gate — not a pass-through
-  for subagent self-reports.
-- A fork that returns near-instantly with zero tool calls and just restates
-  the task back as a status summary has not done the work — resume it with
-  an explicit instruction to actually use its tools, don't accept the report.
+- Three agent roles are documented in `.claude/agents/`:
+  `flexwm-orchestrator.md` (the coordinating session's own role — delegate,
+  gate on review, merge, repeat), `flexwm-implementer.md` (implements one
+  item per invocation, full per-feature cycle, never merges), and
+  `flexwm-reviewer.md` (independent review gate, never edits or merges).
+  Read the relevant one before acting in that role.
+- Delegate implementation to a **fresh, non-fork subagent**
+  (`flexwm-implementer`, or general-purpose if it doesn't fit) to keep the
+  coordinating session's own context lean, per standing user preference —
+  but prefer a fresh subagent over `subagent_type: fork` for this. A fork
+  inherits and re-sends the entire growing conversation transcript every
+  time it's spawned; fine occasionally, but it compounds into real token
+  cost across a long session working through many roadmap/backlog items.
+  Reserve fork for cases that genuinely need the parent's full context. The
+  coordinating session is the orchestrator and the actual final gate — not a
+  pass-through for subagent self-reports, implementer or reviewer.
+- A fork or agent that returns near-instantly with zero tool calls and just
+  restates the task back as a status summary has not done the work — resume
+  it with an explicit instruction to actually use its tools, don't accept
+  the report.
 - Both dev VMs (linux-builder on `:31022`, the flexwm dev VM on
   `ssh -p 2222 dev@localhost`) may already be running — check
   (`nc -z localhost 31022` / `nc -z localhost 2222`) before starting either.
