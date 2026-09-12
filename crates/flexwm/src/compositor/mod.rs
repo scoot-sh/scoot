@@ -14,6 +14,7 @@ mod nested_dispatch;
 mod screenshot;
 mod shell;
 mod state;
+mod tty;
 
 use std::error::Error;
 
@@ -30,7 +31,18 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
     let display: Display<State> = Display::new()?;
     let mut state = State::new(&mut event_loop, display);
 
-    headless::init(&mut state, options.width, options.height)?;
+    // `--tty` picks its own size from the connector's preferred mode --
+    // there's no host to negotiate a size with the way `--nested` does, and
+    // no `--width`/`--height` to honor the way `--headless` does -- so it
+    // has to run before `headless::init`, which needs a concrete size to
+    // create the render target at. Neither `--nested` nor plain
+    // `--headless` touch `options.width`/`options.height` here.
+    let (width, height) = if options.tty {
+        tty::init(state.loop_handle.clone(), &mut state)?
+    } else {
+        (options.width, options.height)
+    };
+    headless::init(&mut state, width, height)?;
 
     // Order matters, and it's load-bearing, not incidental: `--nested`
     // connects to the *host* compositor via the caller's own WAYLAND_DISPLAY

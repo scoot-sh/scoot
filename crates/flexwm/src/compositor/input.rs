@@ -8,6 +8,7 @@ use smithay::input::pointer::{AxisFrame, ButtonEvent, MotionEvent};
 use smithay::utils::{Logical, Point, SERIAL_COUNTER};
 
 use super::State;
+use super::keybindings::Bound;
 
 // Linux input event codes, which is what Wayland carries.
 const BTN_LEFT: u32 = 0x110;
@@ -33,6 +34,31 @@ impl State {
             },
         );
         pointer.frame(self);
+    }
+
+    /// Moves the pointer by a relative delta, clamped to the current
+    /// output's bounds. `--tty`'s only source of pointer motion: unlike
+    /// nested's host-forwarded motion (already absolute) or IPC's
+    /// `pointer move X Y`, libinput reports relative dx/dy for a plain
+    /// mouse, with no absolute position of its own -- this is what turns
+    /// that into the same absolute `pointer_move` every other input source
+    /// already uses. Kept backend-neutral like every other method here:
+    /// nothing about it is `--tty`-specific, it just happens to be the one
+    /// caller that needs it today.
+    pub fn pointer_move_relative(&mut self, dx: f64, dy: f64) {
+        let Some(pointer) = self.seat.get_pointer() else {
+            return;
+        };
+        let (width, height) = self
+            .output
+            .as_ref()
+            .and_then(|output| output.current_mode())
+            .map(|mode| (mode.size.w, mode.size.h))
+            .unwrap_or((0, 0));
+        let current = pointer.current_location();
+        let x = clamp_to_extent(current.x + dx, width);
+        let y = clamp_to_extent(current.y + dy, height);
+        self.pointer_move(x, y);
     }
 
     pub fn pointer_button(&mut self, button: PointerButton, pressed: bool) {
@@ -172,7 +198,7 @@ impl State {
                         let Some(&keysym) = handle.raw_syms().first() else {
                             return FilterResult::Forward;
                         };
-                        let Some(action) = data.keybindings.match_key(keysym, mods.into()) else {
+                        let Some(bound) = data.keybindings.match_key(keysym, mods.into()) else {
                             return FilterResult::Forward;
                         };
                         // Remember this keycode was intercepted so the
@@ -181,7 +207,10 @@ impl State {
                         // after this action closes the current focus) as a
                         // spurious lone release it never pressed.
                         data.suppressed_keys.insert(keycode);
-                        data.act(action);
+                        match bound {
+                            Bound::Action(action) => data.act(action),
+                            Bound::ChangeVt(vt) => data.change_vt(vt),
+                        }
                         FilterResult::Intercept(true)
                     }
                     KeyState::Released => {
@@ -231,6 +260,15 @@ impl State {
         };
         self.act(Action::FocusWindowId(id));
     }
+}
+
+/// Clamps a coordinate to `[0, extent)`, `extent` being a dimension in
+/// pixels (so `extent == 0` -- no output yet -- clamps everything to `0`,
+/// same as the pointer starting at the origin before any output exists).
+/// Pulled out of `pointer_move_relative` so it's testable without a live
+/// seat, same rationale as `first_free` in `nested/buffers.rs`.
+fn clamp_to_extent(value: f64, extent: i32) -> f64 {
+    value.clamp(0.0, (extent - 1).max(0) as f64)
 }
 
 fn code(button: PointerButton) -> u32 {
@@ -306,6 +344,15 @@ mod tests {
         assert_eq!(code(PointerButton::Left), BTN_LEFT);
         assert_eq!(code(PointerButton::Right), BTN_RIGHT);
         assert_eq!(code(PointerButton::Middle), BTN_MIDDLE);
+    }
+
+    #[test]
+    fn clamp_to_extent_keeps_values_inside_the_output() {
+        assert_eq!(clamp_to_extent(-5.0, 800), 0.0);
+        assert_eq!(clamp_to_extent(5.0, 800), 5.0);
+        assert_eq!(clamp_to_extent(900.0, 800), 799.0);
+        // No output yet: everything clamps to the origin.
+        assert_eq!(clamp_to_extent(50.0, 0), 0.0);
     }
 
     #[test]

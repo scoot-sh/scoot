@@ -12,6 +12,7 @@ flexwm -- a scrolling-tiling Wayland window manager
 USAGE:
     flexwm --headless [--width W] [--height H] [--socket PATH] [-- COMMAND...]
     flexwm --nested [--width W] [--height H] [--socket PATH] [-- COMMAND...]
+    flexwm --tty [--socket PATH] [-- COMMAND...]
     flexwm msg REQUEST
     flexwm --help
 
@@ -56,6 +57,14 @@ pub struct CompositorOptions {
     /// Present as a window inside the host compositor named by the *caller's*
     /// `WAYLAND_DISPLAY`, instead of running with no display at all.
     pub nested: bool,
+    /// Present on a real DRM/KMS display via a Linux session (libseat) --
+    /// the actual deployment target, rather than headless or nested inside
+    /// another compositor. Mutually exclusive with `nested` (`parse` only
+    /// ever sets one of the two). `width`/`height` are meaningless here and
+    /// silently ignored: the connector's preferred mode picks the output
+    /// size, and unlike `--nested` there's no host to negotiate a different
+    /// size with.
+    pub tty: bool,
 }
 
 impl Default for CompositorOptions {
@@ -66,6 +75,7 @@ impl Default for CompositorOptions {
             socket: None,
             command: Vec::new(),
             nested: false,
+            tty: false,
         }
     }
 }
@@ -93,8 +103,9 @@ pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Command, Error> 
     let mut args = args.into_iter();
     match args.next().as_deref() {
         None | Some("--help" | "-h" | "help") => Ok(Command::Help),
-        Some("--headless") => compositor(args, false).map(Command::Compositor),
-        Some("--nested") => compositor(args, true).map(Command::Compositor),
+        Some("--headless") => compositor(args, false, false).map(Command::Compositor),
+        Some("--nested") => compositor(args, true, false).map(Command::Compositor),
+        Some("--tty") => compositor(args, false, true).map(Command::Compositor),
         Some("msg") => message(args),
         Some(other) => Err(Error::Unknown(other.to_owned())),
     }
@@ -103,9 +114,11 @@ pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Command, Error> 
 fn compositor(
     mut args: impl Iterator<Item = String>,
     nested: bool,
+    tty: bool,
 ) -> Result<CompositorOptions, Error> {
     let mut options = CompositorOptions {
         nested,
+        tty,
         ..CompositorOptions::default()
     };
     while let Some(arg) = args.next() {
@@ -358,6 +371,25 @@ mod tests {
             panic!("expected compositor");
         };
         assert!(!options.nested);
+    }
+
+    #[test]
+    fn tty_sets_its_own_flag_and_nothing_else() {
+        let Ok(Command::Compositor(options)) = parse_args(&["--tty"]) else {
+            panic!("expected compositor");
+        };
+        assert!(options.tty);
+        assert!(!options.nested);
+
+        let Ok(Command::Compositor(options)) = parse_args(&["--headless"]) else {
+            panic!("expected compositor");
+        };
+        assert!(!options.tty);
+
+        let Ok(Command::Compositor(options)) = parse_args(&["--nested"]) else {
+            panic!("expected compositor");
+        };
+        assert!(!options.tty);
     }
 
     #[test]

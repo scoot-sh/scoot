@@ -30,6 +30,7 @@ use super::headless::Backend;
 use super::ipc::PendingIdle;
 use super::keybindings::Keybindings;
 use super::nested::Host;
+use super::tty::Tty;
 
 pub struct State {
     pub start_time: Instant,
@@ -56,6 +57,11 @@ pub struct State {
     /// framebuffer as a window in a host compositor, and forwarding that
     /// window's input back into this seat. `None` under `--headless`.
     pub host: Option<Host>,
+    /// Set only under `--tty`: the session, DRM device/surface and dumb
+    /// buffers presenting `backend`'s framebuffer on a real display, and
+    /// the libinput context feeding this seat from real input devices.
+    /// `None` under `--headless`/`--nested`.
+    pub tty: Option<Tty>,
 
     pub compositor_state: CompositorState,
     pub xdg_shell_state: XdgShellState,
@@ -127,6 +133,7 @@ impl State {
             output: None,
             backend: None,
             host: None,
+            tty: None,
             compositor_state,
             xdg_shell_state,
             shm_state,

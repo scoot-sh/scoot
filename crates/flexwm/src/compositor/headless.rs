@@ -133,13 +133,17 @@ impl State {
                     );
                     match result {
                         Ok(_) => {
-                            if let Some(host) = &mut self.host {
+                            // Both presenters read back the same frame the
+                            // same way; only what happens with the pixels
+                            // afterward differs, so the read-back itself
+                            // happens once for whichever (or both) are set.
+                            if self.host.is_some() || self.tty.is_some() {
                                 // Argb8888 here is the same little-endian BGRA
                                 // layout wl_shm's own Argb8888 format uses
                                 // (see screenshot.rs's comment on the same
                                 // fact for the PNG path) -- unlike there, this
-                                // is a straight memcpy into the host buffer,
-                                // no channel reordering.
+                                // is a straight memcpy into the presenter's
+                                // own buffer, no channel reordering.
                                 let (width, height) = *size;
                                 let region = Rectangle::from_size((width, height).into());
                                 match renderer.copy_framebuffer(
@@ -148,15 +152,22 @@ impl State {
                                     Fourcc::Argb8888,
                                 ) {
                                     Ok(mapping) => match renderer.map_texture(&mapping) {
-                                        Ok(pixels) => host.present(pixels, width, height),
+                                        Ok(pixels) => {
+                                            if let Some(host) = &mut self.host {
+                                                host.present(pixels, width, height);
+                                            }
+                                            if let Some(tty) = &mut self.tty {
+                                                tty.present(pixels, width, height);
+                                            }
+                                        }
                                         Err(error) => tracing::warn!(
                                             %error,
-                                            "could not read back the frame for the host"
+                                            "could not read back the frame for the presenter"
                                         ),
                                     },
                                     Err(error) => tracing::warn!(
                                         %error,
-                                        "could not copy the framebuffer for the host"
+                                        "could not copy the framebuffer for the presenter"
                                     ),
                                 }
                             }
