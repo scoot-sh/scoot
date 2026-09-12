@@ -186,16 +186,27 @@ review, and why.
    since IPC has no route to a log line the way a human at the console does.
 
    `Tty::change_vt` (`tty/mod.rs`) now returns a new `VtSwitchOutcome`
-   (`Requested`/`Ignored`/`Failed`) instead of `()`, threaded up through
-   `input::key`'s new `KeyOutcome { intercepted, vt_switch }` (replacing its
-   old bare `bool`) and `press()`'s new `Result<Option<VtSwitchOutcome>,
-   String>` (replacing `Result<(), String>`) to `ipc.rs`'s `Request::Key`
-   handler — `press()`'s one caller. A new `Response::Warning { message }`
-   variant (purely additive to the wire format, no `PROTOCOL_VERSION` bump)
-   fires for `Ok(Some(VtSwitchOutcome::Requested))`. `Ignored` (no `--tty`,
-   or already paused — 5b's own skip) and `Failed` stay a plain `Ok`,
-   matching pre-existing behavior exactly. `flexwm msg` prints a `Warning`'s
-   message to stderr and still exits `0` (it's not a failure).
+   (`Requested`/`Ignored`/`IgnoredPaused`/`Failed`) instead of `()`, threaded
+   up through `input::key`'s new `KeyOutcome { intercepted, vt_switch }`
+   (replacing its old bare `bool`) and `press()`'s new
+   `Result<Option<VtSwitchOutcome>, String>` (replacing `Result<(), String>`,
+   accumulated with `Option::or` across every press in the combo, not just
+   read from the main key, so it stays correct even if a future binding
+   changed which key can carry one) to `ipc.rs`'s `Request::Key` handler —
+   `press()`'s one caller. A new `Response::Warning { message }` variant
+   fires for `Requested` and `IgnoredPaused`; `Failed` gets `Response::error`
+   (libseat itself refused the request — not "success with a side effect,"
+   an actual failure); plain `Ignored` (no `--tty` backend at all) and no VT
+   binding matched stay a plain `Ok`. `PROTOCOL_VERSION` bumped 1 → 2:
+   `Response` is internally tagged, and this project's own
+   `unknown_request_types_are_rejected` test proves an unrecognized tag is a
+   hard decode error for an older client, not something it can shrug off —
+   so this addition does break old clients' decoding, contrary to the first
+   pass's assumption that it was purely additive. `flexwm msg` prints a
+   `Warning`'s JSON to stdout the same way every other response does (so
+   `flexwm msg key ... | jq .` still works and reflects what happened) plus
+   a human-readable line on stderr; exits `0` either way (a warning isn't a
+   failure, `Response::error` still is).
 
    `Requested` means "libseat accepted the request," not "a switch is
    guaranteed" — found empirically on the dev VM, not assumed: requesting
@@ -207,38 +218,57 @@ review, and why.
    if it takes effect...") rather than asserting a pause that may not
    happen — deliberately still warning on this no-op case rather than
    trying to suppress it (that would need tracking which VT this session
-   currently occupies, which nothing here does today, purely to silence a
-   warning whose failure mode if wrong is "an agent got told to be careful
-   for no reason," not "an agent got silently walled off" — the one-way-door
-   problem this item exists to fix in the first place).
+   currently occupies, which nothing here does today — see the Backlog entry
+   below).
 
-   Verified on real `--tty` hardware on the dev VM (this VM's session is
-   `seatd`-backed, not `logind`-backed, confirmed via its own journal):
-   requesting the current VT while active produces the warning with no
-   actual pause (`seatd`: "requested session is already active"; flexwm:
-   active VT unchanged, no `session paused` log line, still IPC-responsive);
-   `flexwm msg key ctrl+alt+f2` while active produces the same warning, this
-   time for a real switch (`seatd`: "Switching from VT 1 to VT 2"; flexwm:
-   "session paused; drm master released" the same moment); sending the
-   switch-back combo over IPC while genuinely paused still gets a clean `Ok`
-   with no `EPERM` — `Ignored`, not `Requested`, so no warning, exactly 5b's
-   fix with no regression; a real hardware VT switch-back (`chvt 1`, issued
-   entirely outside IPC/libseat's own session — the same kernel-level path a
-   physical Ctrl+Alt+Fn press takes) reactivates the session normally (`drm:
-   modeset (full commit)`), and a fresh switch-away/back over IPC afterward
-   reproduces the same warning/clean-skip pair, confirming the gate reopens
-   rather than latching shut. `scripts/smoke-test.sh` (`--headless`) passes
-   in full, including its `key h`/`key super+h` calls, confirming
-   `Ok(None)` (no `ChangeVt` binding exists outside `--tty`) stays a plain
-   `Ok` with no spurious warning on the backends this doesn't apply to.
-   93/93 tests pass (including a new
-   `flexwm-ipc` wire test for `Response::Warning`'s JSON shape and round
-   trip), clippy/fmt clean on the dev VM guest, cross-platform build clean
-   on macOS. No unit test constructs a live `Tty`/`State` to exercise
-   `VtSwitchOutcome::Requested`/`Failed` directly — same reasoning as 5b:
-   there's no existing fixture for that, and hardware bug-bash plus code
-   tracing is this project's established way of verifying this class of
-   session-state correctness.
+   **`flexwm-reviewer`'s first pass on this item (against the pre-fix
+   version) found real issues, all fixed before this write-up**: (1) the
+   actual ticket gap — the switch-*back*-while-paused retry over IPC still
+   replied with a bare `Ok`, with the "why nothing happened" explanation
+   only in the compositor log, i.e. exactly the ambiguity 5b's own problem
+   statement calls out. Root cause: the original single `Ignored` variant
+   collapsed "no `--tty` backend" and "session is paused" into one case,
+   so `ipc.rs` couldn't warn on the second without also (wrongly) warning
+   on the first. Fixed by splitting `Ignored`/`IgnoredPaused` as described
+   above. (2) `Failed` silently read as success (`Response::Ok`) — fixed to
+   `Response::error`. (3) the warning text claimed "only real hardware
+   input... can reactivate it," which the review's own hardware repro
+   disproved (`chvt 1` from an ordinary ssh shell reactivated it, no
+   physical keyboard involved) — reworded to "a VT switch from outside this
+   compositor — a physical Ctrl+Alt+Fn, or `chvt N` from any shell on this
+   machine." (4) the `PROTOCOL_VERSION` bump above, confirmed necessary by
+   the project's own decode-error test rather than left unbumped on a
+   "probably fine" assumption. (5) two doc-comment inaccuracies: `KeyOutcome`
+   claimed `keyboard.input`'s `None` case meant "no active keyboard focus
+   target," but the pinned Smithay rev's `input_from_source` (`src/input/
+   keyboard/mod.rs`) shows `None` actually comes from either a keycode
+   already held by another input source, or the filter returning `Forward`
+   — focus isn't involved; and `VtSwitchOutcome`/`press()`'s docs said a
+   switch-away makes the compositor "unreachable over IPC," which this same
+   PR's own hardware evidence disproves (`flexwm msg key`/`flexwm msg
+   windows` both work fine while paused) — narrowed to what's actually true:
+   the one channel that could switch the session *back* is what's lost, not
+   IPC reachability generally. (6) `press()` read `vt_switch` from only the
+   main key's press, correct today only because nothing but the hardcoded
+   VT bindings constructs a `ChangeVt` — made robust instead of
+   documentation-dependent via the `Option::or` accumulation described
+   above. Re-verified in full afterward: 93/93 tests, clippy/fmt clean on
+   the dev VM guest, cross-platform build clean on macOS,
+   `scripts/smoke-test.sh` full pass under `--headless` (confirming
+   `Ok(None)` — no `ChangeVt` binding outside `--tty` — stays a plain `Ok`
+   with no spurious warning where this doesn't apply), and all five
+   `--tty` hardware scenarios re-run on the dev VM's real `seatd`-backed
+   session, including the previously-missing one: retrying the switch-back
+   combo over IPC while genuinely paused now gets `Response::Warning`
+   ("ignored: this session is already paused..."), not a bare `Ok`, and
+   still no `EPERM` (5b's fix unregressed). Exact commands and raw
+   command/output blocks for every scenario are recorded in PR #11's
+   description rather than narrated here. No unit test constructs a live
+   `Tty`/`State` to exercise `VtSwitchOutcome` variants directly beyond the
+   pure `KeyOutcome`/`Option::or` accumulation logic — same reasoning as 5b:
+   no existing fixture for that, hardware bug-bash plus code tracing is this
+   project's established way of verifying this class of session-state
+   correctness.
 
 6. A real GPU rendering pipeline, added at the end after everything above is
    stable — an actual goal, not just a "don't foreclose it" constraint.

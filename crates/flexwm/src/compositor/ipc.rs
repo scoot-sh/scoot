@@ -185,32 +185,62 @@ impl State {
                 self.scroll(dx, dy);
                 Response::Ok
             }
-            // `Ok(Some(VtSwitchOutcome::Requested))` is the one case where a
-            // successful request still needs a `Warning`, not a bare `Ok`:
-            // it means this exact call just issued a real VT_ACTIVATE that
-            // libseat didn't reject outright, so this IPC connection -- if
-            // it's the caller's only input path -- may be about to lose the
-            // one channel that could switch back (see `tty::VtSwitchOutcome`'s
-            // doc and the backlog item this closes in `ROADMAP.md`). Worded
-            // as "requested"/"if it takes effect," not "this switched" --
-            // libseat's own docs say a successful switch_session call
-            // doesn't guarantee a switch happens (confirmed on real
-            // hardware: requesting the VT already showing is also `Ok(())`,
-            // with no pause at all), so claiming a definite pause here would
-            // overclaim on that no-op case. `Ignored` (no `--tty`, or
-            // already paused) and `Failed` mean the request itself didn't
-            // go anywhere, so they -- like `None` (no VT binding matched at
-            // all) -- stay a plain `Ok`.
+            // Three of `press()`'s `Ok(Some(VtSwitchOutcome))` cases need
+            // something other than a bare `Ok` -- each for a different
+            // reason, so each gets its own arm rather than folding them
+            // together:
+            //
+            // - `Requested`: this exact call just issued a real VT_ACTIVATE
+            //   that libseat didn't reject outright, so this IPC connection
+            //   -- if it's the caller's only input path -- may be about to
+            //   lose the one channel that could switch back (see
+            //   `tty::VtSwitchOutcome`'s doc and the backlog item this
+            //   closes in `ROADMAP.md`). Worded as "requested"/"if it takes
+            //   effect," not "this switched" -- libseat's own docs say a
+            //   successful switch_session call doesn't guarantee a switch
+            //   happens (confirmed on real hardware: requesting the VT
+            //   already showing is also `Ok(())`, with no pause at all), so
+            //   claiming a definite pause here would overclaim on that
+            //   no-op case.
+            // - `IgnoredPaused`: the request went nowhere (libseat was never
+            //   asked), but *why* matters to an IPC caller specifically --
+            //   this is the one-way-door scenario itself: an agent retrying
+            //   its switch-back combo over IPC while paused needs to hear
+            //   "this can't work from here," not a bare `Ok` indistinguishable
+            //   from a real switch-back actually working (see 5b/5c in
+            //   `ROADMAP.md` for why that ambiguity is exactly the defect).
+            // - `Failed`: libseat itself returned an error -- a request that
+            //   did not succeed, so unlike `Requested` this isn't "success
+            //   with a side effect," it's a plain failure and gets
+            //   `Response::error` rather than `Warning`.
+            //
+            // Plain `Ignored` (no `--tty` backend at all -- this request
+            // means nothing on this backend, nothing to warn about) and
+            // `None` (no VT binding matched at all) stay a plain `Ok`.
             Request::Key { keys } => match self.press(&keys) {
                 Ok(Some(VtSwitchOutcome::Requested)) => Response::Warning {
                     message: "requested a VT switch away from --tty (libseat \
                               does not guarantee this actually happens, e.g. \
                               it is a no-op if already on the target VT); if \
-                              it takes effect, the compositor will be paused \
-                              and only real hardware input, not IPC, can \
-                              reactivate it"
+                              it takes effect, the compositor will be paused, \
+                              and only a VT switch from outside this \
+                              compositor -- a physical Ctrl+Alt+Fn, or \
+                              `chvt N` from any shell on this machine -- not \
+                              IPC, can reactivate it"
                         .to_string(),
                 },
+                Ok(Some(VtSwitchOutcome::IgnoredPaused)) => Response::Warning {
+                    message: "ignored: this session is already paused; a VT \
+                              switch from outside this compositor -- a \
+                              physical Ctrl+Alt+Fn, or `chvt N` from any \
+                              shell on this machine -- is needed before IPC \
+                              can do anything more here"
+                        .to_string(),
+                },
+                Ok(Some(VtSwitchOutcome::Failed)) => Response::error(
+                    "requested a VT switch away from --tty, but libseat \
+                     rejected the request (see the compositor log for why)",
+                ),
                 Ok(_) => Response::Ok,
                 Err(error) => Response::error(error),
             },
