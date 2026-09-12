@@ -433,6 +433,40 @@ review, and why.
    elements). Each was confirmed non-vacuous by disabling the corresponding
    production code and watching it fail — see the PR for the raw output.
 
+   **Hardware verification** (dev VM, real `--tty` on its `virtio-gpu` KMS
+   device at 1600x1000, all against `03cd51c` — the code has not changed
+   since; only this paragraph and the PR text were added afterwards). Driven
+   by a throwaway raw-protocol client (built in `/tmp` on the VM, nothing
+   committed, no image asset involved — the pixels come from the client over
+   the wire) that maps a toplevel and hands over a flat-coloured cursor
+   surface of a chosen size and hotspot. Exact commands and raw
+   pixel/jiffies output are in the PR description. Summary:
+   a 24x24 magenta cursor with hotspot `(4,6)` lands pixel-exact around the
+   pointer; a 128x128 one does too, including clipped against the output's
+   top-left corner; leaving the client's surface falls back to the built-in
+   shape (Smithay resets to `default_named()` on focus leave,
+   `input/pointer/mod.rs:823`); an `--animate` client's frame-callback
+   counter sat at **0 for 187s** while its cursor wasn't presented, then
+   climbed at ~46/s the moment the pointer entered, and **froze again**
+   (1156 → 1156 over 3s) when the pointer left — the callback gating works
+   in both directions; screenshots caught both animation colours. Destroying
+   the cursor surface while active, and `kill -9` on the client while
+   active, both leave the compositor up and drawing the fallback, with no
+   panic or error in its log.
+
+   **Benchmarked** (same jiffies-delta method as item 5), because the render
+   path changed shape: the fallback now goes through an enum wrapper and
+   `element()` returns a `Vec`. 12 interleaved reps per side of the
+   expensive case (150 corner-to-corner pointer jumps, near-full-frame
+   damage), alternating the pre-change `a1693e4` binary and this one so VM
+   drift hits both: **before mean 53.58 (42–59), after mean 52.58 (44–62)**
+   — no measurable difference. A static client cursor parked under the
+   pointer costs **5 jiffies over 10s**, i.e. no render-loop spin was
+   introduced (a frame callback only goes to a client that asked for one).
+   An animated one costs 80 jiffies over 10s while it animates, which is
+   just what drawing an animation at frame rate costs; `wait-idle` never
+   settles while one is running, expected and worth knowing.
+
 ## Backlog (unordered — pick up whenever it fits)
 
 **Security audit (2026-09-12, against `main` at `2b92928`).** A dedicated
