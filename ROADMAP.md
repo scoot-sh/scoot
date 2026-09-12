@@ -585,13 +585,15 @@ review, and why.
    `memchr` where this loop uses a plain byte scan, and only the unoptimized
    build can tell.)
 
-   **Two pre-existing defects found while bug-bashing this, deliberately not
-   fixed here** — both verified identical on the pre-change binary, so
-   neither is a regression, and both are in the Backlog below: a half-written
-   request line blocks the entire event loop for as long as the client holds
-   it (every other client included), and a second request pipelined into the
-   same write is never answered. Same root cause, same fix, and that fix
-   restructures the connection loop — its own item, not a rider on this one.
+   **Three pre-existing defects found while bug-bashing this, deliberately not
+   fixed here** — all verified identical on the pre-change binary, so none is a
+   regression, and all are one Backlog entry below: a half-written request line
+   blocks the entire event loop for as long as the client holds it (every other
+   client included), a second request pipelined into the same write is never
+   answered, and a client that never reads its replies deadlocks the loop from
+   the write side. One root cause (the connection does blocking I/O and reads
+   one line per readiness event), one fix, and that fix restructures the
+   connection loop — its own item, not a rider on this one.
 
 ## Backlog (unordered — pick up whenever it fits)
 
@@ -695,13 +697,12 @@ data-loss/RCE in what was checked.
   `EADDRINUSE`), so the real exposures were the chmod-after-publish window and
   losing the name to a racing process, both of which the rename closes.
 
-- **A half-written IPC request line blocks the whole event loop, and a
-  pipelined second request is never answered (MEDIUM, pre-existing).** Found
-  while bug-bashing item 9; verified identical on the pre-item-9 binary, so
-  not a regression, and explicitly left unfixed there. `accept()` puts the
-  connection into *blocking* mode and `Connection::step` reads exactly one
-  line per readiness event, which causes two distinct symptoms with one root
-  cause:
+- **The IPC connection loop does blocking I/O, one line per readiness event
+  (MEDIUM, pre-existing).** Found while bug-bashing item 9; every symptom
+  below verified identical on the pre-item-9 binary, so none is a regression,
+  and all were explicitly left unfixed there. `accept()` puts the connection
+  into *blocking* mode and `Connection::step` reads exactly one line per
+  readiness event, which causes three distinct symptoms with one root cause:
   (a) a client that writes `{"type":"vers` and holds the connection open
   parks the single event-loop thread inside `fill_buf` — every other IPC
   client, wayland dispatch and input stop until it sends a newline or
@@ -717,14 +718,23 @@ data-loss/RCE in what was checked.
   wakes the connection. Nothing in-tree pipelines (both `flexwm msg` and
   `flexwm_ipc::Client` are strict request/response), so this is latent, but it
   is a protocol surprise for any agent that batches.
-  Fix direction, one change for both: leave the stream non-blocking, have the
-  bounded reader return "incomplete, keep what you have" on `WouldBlock`
+  (c) `reply()` writes blocking too, so a client that keeps sending requests
+  and never reads the answers fills its own receive buffer and deadlocks the
+  compositor inside `write_all` (confirmed: the probe's own `write_all` blocked
+  in turn, before it could even open a second connection to test with, and the
+  compositor was answering again 61us after that client was killed). Same
+  one-byte-of-effort shape as (a), from the other direction.
+  Fix direction, one change for all three: leave the stream non-blocking, have
+  the bounded reader return "incomplete, keep what you have" on `WouldBlock`
   (clearing the buffer only once a line has been consumed, so the 1 MiB cap
-  still applies across however many reads a line takes), and loop `step` over
-  every complete line already buffered before returning to the event loop.
-  That restructures the connection loop and wants its own test matrix
-  (partial lines interleaved with `WaitIdle`'s hand-off and the screenshot
-  limiter), which is why it is its own item.
+  still applies across however many reads a line takes), loop `step` over
+  every complete line already buffered before returning to the event loop, and
+  give each connection an outbound buffer plus `Interest::WRITE` when a reply
+  cannot go out in one go — with a cap on that buffer, since it is the same
+  unbounded-growth shape item 9 just closed on the read side. That restructures
+  the connection loop and wants its own test matrix (partial lines interleaved
+  with `WaitIdle`'s hand-off and the screenshot limiter), which is why it is
+  its own item rather than a rider on item 9.
 - **Config parsing has no recursion-depth guard (LOW).** The `toml` stack
   has no explicit guard against deeply nested input; a maliciously deep
   config could stack-overflow-abort the process rather than hit the
