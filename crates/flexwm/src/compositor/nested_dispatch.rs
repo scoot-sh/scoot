@@ -172,6 +172,7 @@ impl Dispatch<HostSeat, ()> for State {
         };
         let wants_keyboard = capabilities.contains(wl_seat::Capability::Keyboard);
         let wants_pointer = capabilities.contains(wl_seat::Capability::Pointer);
+        tracing::debug!(wants_keyboard, wants_pointer, "host seat capabilities");
         if wants_keyboard && host.keyboard().is_none() {
             host.set_keyboard(seat.get_keyboard(qh, ()));
         }
