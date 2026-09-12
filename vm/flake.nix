@@ -30,12 +30,11 @@
       runVm = hostPkgs.writeShellApplication {
         name = "flexwm-vm";
         runtimeInputs = [ hostPkgs.qemu ];
-        text =
-          ''
-            FLEXWM_VM_RUNNER=${nixpkgs.lib.getExe runner}
-            export FLEXWM_VM_RUNNER
-          ''
-          + builtins.readFile ./run-vm.sh;
+        text = ''
+          FLEXWM_VM_RUNNER=${nixpkgs.lib.getExe runner}
+          export FLEXWM_VM_RUNNER
+        ''
+        + builtins.readFile ./run-vm.sh;
       };
     in
     {
