@@ -10,14 +10,36 @@ use flexwm_core::{Event as CoreEvent, OutputId, Rect};
 use pixman::Image;
 use smithay::backend::allocator::Fourcc;
 use smithay::backend::renderer::damage::OutputDamageTracker;
+use smithay::backend::renderer::element::render_elements;
+use smithay::backend::renderer::element::solid::SolidColorRenderElement;
 use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
 use smithay::backend::renderer::pixman::PixmanRenderer;
 use smithay::backend::renderer::{Bind, ExportMem, Offscreen};
+use smithay::desktop::Window;
+use smithay::desktop::space::{self, SpaceRenderElements};
 use smithay::output::{Mode, Output, PhysicalProperties, Subpixel};
 use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
 use smithay::utils::{Rectangle, Transform};
 
 use super::State;
+
+// Everything `render()` can draw, front-to-back as Smithay's damage tracker
+// expects (see `render()`'s comment on that convention): window surfaces,
+// then this feature's focus-ring segments underneath them. The background
+// isn't a variant here at all -- it's the `render_output` call's
+// `clear_color`, always the bottom-most thing on screen by construction; see
+// `decorations.rs`'s module doc for why that's simpler and safer than a
+// full-output element.
+//
+// Fixed to `PixmanRenderer` (this backend's only renderer) rather than
+// generic over `R`, which is why this lives here and not in
+// `decorations.rs` -- that module stays renderer-agnostic, returning plain
+// `SolidColorRenderElement`s this enum only wraps.
+render_elements! {
+    Elements<=PixmanRenderer>;
+    Space = SpaceRenderElements<PixmanRenderer, WaylandSurfaceRenderElement<PixmanRenderer>>,
+    Decoration = SolidColorRenderElement,
+}
 
 /// How often a changed screen is redrawn, while there's something to redraw.
 const FRAME_INTERVAL: Duration = Duration::from_millis(16);
@@ -113,66 +135,104 @@ impl State {
                 damage,
                 size,
             } = &mut backend;
+            // The core's arrangement, and this frame's ring segments built
+            // from it -- computed once here rather than inside the match
+            // below so a `space_render_elements` failure still logs without
+            // having done this for nothing. See `decorations.rs`'s module
+            // doc for why the background isn't part of this list.
+            let arrangement = self.world.arrange();
+            let (width, height) = *size;
+            let bounds = Rect::new(0, 0, width, height);
+            let ring_elements = self
+                .decorations
+                .elements(&arrangement, &self.appearance, bounds);
             match renderer.bind(image) {
                 Ok(mut framebuffer) => {
-                    let result = smithay::desktop::space::render_output::<
-                        _,
-                        WaylandSurfaceRenderElement<PixmanRenderer>,
-                        _,
-                        _,
-                    >(
-                        &output,
+                    // Window surfaces first (topmost) and the ring after
+                    // (bottom-most of the two): Smithay's damage tracker
+                    // draws a `&[E]` back-to-front by walking it in reverse
+                    // (confirmed in `OutputDamageTracker::render_output_internal`,
+                    // which iterates `render_elements.iter().rev()`), so the
+                    // *first* entry here ends up drawn *last*, i.e. on top.
+                    // Windows must win that ordering: `shell.rs::apply()`
+                    // positions a window from the layout's rect but sizes it
+                    // from whatever the client actually committed, and a
+                    // client that's slow to shrink (or a `--nested` resize
+                    // still in flight) can briefly have a surface larger
+                    // than its placement rect, reaching into the gap the
+                    // ring is drawn in. Ring-on-top would paint over that
+                    // live content every such frame; windows-on-top instead
+                    // means the stale/oversized content can only ever cover
+                    // the ring, never the reverse -- the same direction niri
+                    // itself picks, and the only one of the two that can't
+                    // corrupt what a client is showing.
+                    match space::space_render_elements::<_, Window, _>(
                         renderer,
-                        &mut framebuffer,
-                        1.0,
-                        0,
                         [&self.space],
-                        &[],
-                        damage,
-                        [0.05, 0.05, 0.06, 1.0],
-                    );
-                    match result {
-                        Ok(_) => {
-                            // Both presenters read back the same frame the
-                            // same way; only what happens with the pixels
-                            // afterward differs, so the read-back itself
-                            // happens once for whichever (or both) are set.
-                            if self.host.is_some() || self.tty.is_some() {
-                                // Argb8888 here is the same little-endian BGRA
-                                // layout wl_shm's own Argb8888 format uses
-                                // (see screenshot.rs's comment on the same
-                                // fact for the PNG path) -- unlike there, this
-                                // is a straight memcpy into the presenter's
-                                // own buffer, no channel reordering.
-                                let (width, height) = *size;
-                                let region = Rectangle::from_size((width, height).into());
-                                match renderer.copy_framebuffer(
-                                    &framebuffer,
-                                    region,
-                                    Fourcc::Argb8888,
-                                ) {
-                                    Ok(mapping) => match renderer.map_texture(&mapping) {
-                                        Ok(pixels) => {
-                                            if let Some(host) = &mut self.host {
-                                                host.present(pixels, width, height);
-                                            }
-                                            if let Some(tty) = &mut self.tty {
-                                                tty.present(pixels, width, height);
-                                            }
+                        &output,
+                        1.0,
+                    ) {
+                        Ok(space_elements) => {
+                            let mut elements =
+                                Vec::with_capacity(space_elements.len() + ring_elements.len());
+                            elements.extend(space_elements.into_iter().map(Elements::Space));
+                            elements.extend(ring_elements.into_iter().map(Elements::Decoration));
+                            let result = damage.render_output(
+                                renderer,
+                                &mut framebuffer,
+                                0,
+                                &elements,
+                                self.appearance.background_color,
+                            );
+                            match result {
+                                Ok(_) => {
+                                    // Both presenters read back the same frame the
+                                    // same way; only what happens with the pixels
+                                    // afterward differs, so the read-back itself
+                                    // happens once for whichever (or both) are set.
+                                    if self.host.is_some() || self.tty.is_some() {
+                                        // Argb8888 here is the same little-endian BGRA
+                                        // layout wl_shm's own Argb8888 format uses
+                                        // (see screenshot.rs's comment on the same
+                                        // fact for the PNG path) -- unlike there, this
+                                        // is a straight memcpy into the presenter's
+                                        // own buffer, no channel reordering.
+                                        // (width, height) already bound above, from
+                                        // this same *size, for `bounds`.
+                                        let region = Rectangle::from_size((width, height).into());
+                                        match renderer.copy_framebuffer(
+                                            &framebuffer,
+                                            region,
+                                            Fourcc::Argb8888,
+                                        ) {
+                                            Ok(mapping) => match renderer.map_texture(&mapping) {
+                                                Ok(pixels) => {
+                                                    if let Some(host) = &mut self.host {
+                                                        host.present(pixels, width, height);
+                                                    }
+                                                    if let Some(tty) = &mut self.tty {
+                                                        tty.present(pixels, width, height);
+                                                    }
+                                                }
+                                                Err(error) => tracing::warn!(
+                                                    %error,
+                                                    "could not read back the frame for the presenter"
+                                                ),
+                                            },
+                                            Err(error) => tracing::warn!(
+                                                %error,
+                                                "could not copy the framebuffer for the presenter"
+                                            ),
                                         }
-                                        Err(error) => tracing::warn!(
-                                            %error,
-                                            "could not read back the frame for the presenter"
-                                        ),
-                                    },
-                                    Err(error) => tracing::warn!(
-                                        %error,
-                                        "could not copy the framebuffer for the presenter"
-                                    ),
+                                    }
                                 }
+                                Err(error) => tracing::warn!(%error, "could not render"),
                             }
                         }
-                        Err(error) => tracing::warn!(%error, "could not render"),
+                        Err(error) => tracing::warn!(
+                            %error,
+                            "could not gather window render elements"
+                        ),
                     }
                 }
                 Err(error) => tracing::warn!(%error, "could not bind the framebuffer"),

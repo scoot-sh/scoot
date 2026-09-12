@@ -32,6 +32,7 @@ use flexwm_core::Config;
 use serde::Deserialize;
 use smithay::input::keyboard::Keysym;
 
+use super::decorations::{Appearance, Color};
 use super::input::keysym_named;
 use super::keybindings::{Bound, Keybindings, Modifiers};
 
@@ -62,6 +63,66 @@ impl LayoutConfig {
     }
 }
 
+/// `[appearance]`. Mirrors [`Appearance`] field for field, the same
+/// `Option`-everything pattern [`LayoutConfig`] uses -- except each color
+/// field is a raw `"#rrggbb"`/`"#rrggbbaa"` string here, parsed one at a
+/// time in [`AppearanceConfig::into_appearance`] rather than by `serde`
+/// directly, so one malformed color string degrades gracefully instead of
+/// invalidating the whole `[appearance]` table -- see that function's doc
+/// and `apply_binds`'s identical philosophy for `[binds]`.
+#[derive(Debug, Default, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+struct AppearanceConfig {
+    focus_ring_width: Option<i32>,
+    focus_ring_active_color: Option<String>,
+    focus_ring_inactive_color: Option<String>,
+    background_color: Option<String>,
+    prefer_no_csd: Option<bool>,
+}
+
+impl AppearanceConfig {
+    /// `gap` is the (not-yet-`validated`, possibly out-of-range) `[layout]`
+    /// gap this same file resolved to -- used to clamp `focus_ring_width` at
+    /// load time (see [`Appearance::clamped`]). `Appearance::clamped`
+    /// treats a negative gap as zero, so an invalid gap just zeroes the ring
+    /// rather than panicking or needing `flexwm_core::Config::validated` to
+    /// run first.
+    fn into_appearance(self, gap: i32) -> Appearance {
+        let defaults = Appearance::default();
+        let color = |field: Option<String>, name: &'static str, default: Color| match field {
+            None => default,
+            Some(raw) => Color::parse(&raw).unwrap_or_else(|| {
+                tracing::warn!(
+                    field = name,
+                    value = %raw,
+                    "invalid color in config file; using the default for this field only"
+                );
+                default
+            }),
+        };
+        Appearance {
+            focus_ring_width: self.focus_ring_width.unwrap_or(defaults.focus_ring_width),
+            focus_ring_active_color: color(
+                self.focus_ring_active_color,
+                "focus_ring_active_color",
+                defaults.focus_ring_active_color,
+            ),
+            focus_ring_inactive_color: color(
+                self.focus_ring_inactive_color,
+                "focus_ring_inactive_color",
+                defaults.focus_ring_inactive_color,
+            ),
+            background_color: color(
+                self.background_color,
+                "background_color",
+                defaults.background_color,
+            ),
+            prefer_no_csd: self.prefer_no_csd.unwrap_or(defaults.prefer_no_csd),
+        }
+        .clamped(gap)
+    }
+}
+
 /// The whole file. `binds`' values are parsed lazily, one at a time (see
 /// [`apply_binds`]), so one bad bind can't take the rest down with it.
 #[derive(Debug, Default, Deserialize, PartialEq)]
@@ -70,15 +131,18 @@ struct FileConfig {
     #[serde(default)]
     layout: Option<LayoutConfig>,
     #[serde(default)]
+    appearance: Option<AppearanceConfig>,
+    #[serde(default)]
     binds: HashMap<String, String>,
 }
 
 /// What loading a config file (or using defaults) produces: always a
-/// complete, usable pair, never a partial state -- see the module doc.
+/// complete, usable triple, never a partial state -- see the module doc.
 #[derive(Debug)]
 pub struct LoadedConfig {
     pub config: Config,
     pub keybindings: Keybindings,
+    pub appearance: Appearance,
 }
 
 impl LoadedConfig {
@@ -86,16 +150,22 @@ impl LoadedConfig {
         Self {
             config: Config::default(),
             keybindings: Keybindings::default(),
+            appearance: Appearance::default(),
         }
     }
 
     fn from_file(file: FileConfig) -> Self {
         let config = file.layout.unwrap_or_default().into_config();
+        let appearance = file
+            .appearance
+            .unwrap_or_default()
+            .into_appearance(config.gap);
         let mut keybindings = Keybindings::default();
         apply_binds(&mut keybindings, file.binds);
         Self {
             config,
             keybindings,
+            appearance,
         }
     }
 }
@@ -594,5 +664,86 @@ mod tests {
     #[test]
     fn default_path_is_none_with_neither_var_set() {
         assert_eq!(default_path(None, None), None);
+    }
+
+    // -- [appearance] -----------------------------------------------------
+
+    #[test]
+    fn a_full_appearance_table_round_trips() {
+        let toml = r##"
+            [appearance]
+            focus_ring_width = 5
+            focus_ring_active_color = "#ff0000"
+            focus_ring_inactive_color = "#00ff0080"
+            background_color = "#101010"
+            prefer_no_csd = false
+        "##;
+        let file: FileConfig = toml::from_str(toml).expect("valid toml");
+        let loaded = LoadedConfig::from_file(file);
+        assert_eq!(loaded.appearance.focus_ring_width, 5);
+        assert_eq!(
+            loaded.appearance.focus_ring_active_color,
+            Color::new(1.0, 0.0, 0.0, 1.0)
+        );
+        assert_eq!(
+            loaded.appearance.focus_ring_inactive_color,
+            Color::new(0.0, 1.0, 0.0, 128.0 / 255.0)
+        );
+        assert_eq!(
+            loaded.appearance.background_color,
+            Color::new(16.0 / 255.0, 16.0 / 255.0, 16.0 / 255.0, 1.0)
+        );
+        assert!(!loaded.appearance.prefer_no_csd);
+    }
+
+    #[test]
+    fn a_missing_appearance_table_uses_defaults() {
+        let file: FileConfig = toml::from_str("").unwrap();
+        let loaded = LoadedConfig::from_file(file);
+        assert_eq!(loaded.appearance, Appearance::default());
+    }
+
+    #[test]
+    fn deny_unknown_fields_rejects_an_appearance_typo() {
+        let toml = "[appearance]\nfocus_ring_wdith = 5\n";
+        assert!(toml::from_str::<FileConfig>(toml).is_err());
+    }
+
+    #[test]
+    fn a_malformed_color_falls_back_to_just_that_fields_default() {
+        let toml = r##"
+            [appearance]
+            focus_ring_active_color = "not-a-color"
+            focus_ring_inactive_color = "#00ff00"
+        "##;
+        let file: FileConfig = toml::from_str(toml).expect("valid toml");
+        let loaded = LoadedConfig::from_file(file);
+        assert_eq!(
+            loaded.appearance.focus_ring_active_color,
+            Appearance::default().focus_ring_active_color,
+            "the bad field falls back to its own default"
+        );
+        assert_eq!(
+            loaded.appearance.focus_ring_inactive_color,
+            Color::new(0.0, 1.0, 0.0, 1.0),
+            "a bad neighboring field must not affect a valid one"
+        );
+    }
+
+    #[test]
+    fn a_ring_width_wider_than_half_the_configured_gap_is_clamped() {
+        let toml = r#"
+            [layout]
+            gap = 6
+
+            [appearance]
+            focus_ring_width = 20
+        "#;
+        let file: FileConfig = toml::from_str(toml).expect("valid toml");
+        let loaded = LoadedConfig::from_file(file);
+        assert_eq!(
+            loaded.appearance.focus_ring_width, 3,
+            "clamped to half of gap=6"
+        );
     }
 }
