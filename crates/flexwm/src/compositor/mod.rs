@@ -4,6 +4,7 @@
 //! keybindings say what should happen, and after either the compositor applies
 //! whatever [`Arrangement`](flexwm_core::Arrangement) the core produced.
 
+mod config;
 mod handlers;
 mod headless;
 mod input;
@@ -27,9 +28,16 @@ pub use state::State;
 pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
     init_logging();
 
+    // Loaded before `State::new` so its `Config`/`Keybindings` can be handed
+    // in directly rather than built as defaults and patched after the fact.
+    // The only error this can return is an explicit `--config PATH` that
+    // couldn't be read -- every other config problem already resolved
+    // itself to defaults inside `load` (see `config`'s module doc).
+    let loaded = config::load(options.config.as_deref())?;
+
     let mut event_loop: EventLoop<'static, State> = EventLoop::try_new()?;
     let display: Display<State> = Display::new()?;
-    let mut state = State::new(&mut event_loop, display);
+    let mut state = State::new(&mut event_loop, display, loaded.config, loaded.keybindings);
 
     // `--tty` picks its own size from the connector's preferred mode --
     // there's no host to negotiate a size with the way `--nested` does, and

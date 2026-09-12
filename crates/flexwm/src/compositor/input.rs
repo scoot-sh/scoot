@@ -302,7 +302,9 @@ fn keysym_for_char(character: char) -> Keysym {
     }
 }
 
-fn keysym_named(name: &str) -> Option<Keysym> {
+/// `pub(super)`: also used by `config.rs` to resolve a `[binds]` combo's key
+/// name.
+pub(super) fn keysym_named(name: &str) -> Option<Keysym> {
     let exact = xkb::keysym_from_name(name, xkb::KEYSYM_NO_FLAGS);
     let keysym = if exact.raw() == 0 {
         xkb::keysym_from_name(name, xkb::KEYSYM_CASE_INSENSITIVE)
