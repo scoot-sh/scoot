@@ -75,13 +75,42 @@ pub struct Tty {
     libinput: Libinput,
     width: i32,
     height: i32,
-    /// `false` while the session is paused (VT-switched away), and also
-    /// `false` if a subsequent reactivation attempt's `drm.activate` itself
-    /// failed (see `reactivate`) -- either way, the DRM device isn't ours to
-    /// flip. Gates `present()` so nothing tries to flip a device we don't
-    /// hold -- see this module's doc on pitfall #2 in the commit that
-    /// introduced it.
+    /// Whether this process currently holds DRM master -- `false` while the
+    /// session is paused (VT-switched away), and also `false` if a
+    /// subsequent reactivation attempt's `drm.activate` itself failed (see
+    /// `reactivate`) -- either way, the DRM device isn't ours to flip. Gates
+    /// `present()` so nothing tries to flip a device we don't hold -- see
+    /// this module's doc on pitfall #2 in the commit that introduced it.
+    ///
+    /// This is *not* the same question as "is the session active" --
+    /// `reactivate()` can leave this `false` (a failed `drm.activate`) in a
+    /// state where the session itself is already active again (libseat's
+    /// `ActivateSession` already fired; only DRM master reacquisition
+    /// failed). See [`session_paused`](Self::session_paused) for that
+    /// question -- confusing the two turns the "dead DRM device, working
+    /// keyboard, retry the VT switch" recovery path `reactivate`'s own doc
+    /// describes into a silent no-op, since a VT switch is a session-level
+    /// operation that doesn't depend on holding DRM master.
     active: bool,
+    /// Whether libseat considers this session paused (VT-switched away) --
+    /// `true` for the duration between a `PauseSession` and the next
+    /// `ActivateSession`, regardless of whether that `ActivateSession`'s own
+    /// `reactivate()` call manages to reacquire DRM master (see
+    /// [`active`](Self::active)'s doc for why those are different
+    /// questions). Gates `change_vt`: `libseat`'s `VT_ACTIVATE` is a
+    /// session-level request that only the currently active session may
+    /// make, so issuing it while this is `true` is a call libseat can only
+    /// refuse (`EPERM`) -- see `change_vt`'s doc.
+    ///
+    /// `init` asserts this `false` rather than observing an event to set it
+    /// -- the same shape as the mistake that made `active` wrong, so worth
+    /// justifying here rather than trusting it by inspection: `init`'s own
+    /// `session.open(...)` call (above) fails if the session isn't already
+    /// active (libseat refuses `open_device` for an inactive client), and
+    /// `init` returns that error before this struct is ever constructed --
+    /// so reaching this initializer at all already proves the session is
+    /// active.
+    session_paused: bool,
     /// Set right after a successful `commit`/`page_flip`, cleared on the
     /// matching `VBlank`. `present()` skips (setting `present_skipped`
     /// instead of blocking) rather than flip again while this is set --
@@ -154,6 +183,7 @@ pub fn init(
         width,
         height,
         active: true,
+        session_paused: false,
         flip_pending: false,
         needs_modeset: true,
         showing: None,
@@ -469,6 +499,7 @@ fn session_event(event: SessionEvent, _: &mut (), state: &mut State) {
             SessionEvent::PauseSession => {
                 tracing::info!("session paused; drm master released");
                 tty.active = false;
+                tty.session_paused = true;
                 tty.drm.pause();
                 tty.libinput.suspend();
                 tty.flip_pending = false;
@@ -476,6 +507,15 @@ fn session_event(event: SessionEvent, _: &mut (), state: &mut State) {
             }
             SessionEvent::ActivateSession => {
                 tracing::info!("session activated");
+                // Cleared here, unconditionally, before `reactivate()` runs
+                // -- not folded into its result. The session *is* active
+                // again the moment this event fires, regardless of whether
+                // `reactivate`'s own `drm.activate` call goes on to succeed;
+                // tying this to that outcome would leave `change_vt` gated
+                // shut by a DRM-only failure, exactly the "dead DRM device,
+                // working keyboard, retry the VT switch" case `reactivate`'s
+                // doc calls out as the one meant to stay recoverable.
+                tty.session_paused = false;
                 tty.reactivate()
             }
         }
@@ -567,12 +607,44 @@ impl State {
     /// session concern, deliberately not routed through `State::act`/
     /// `flexwm_core::Action`. See `keybindings::Bound::ChangeVt`'s doc for
     /// why. A no-op (with a debug log) under any backend but `--tty`, since
-    /// there's no session to switch.
+    /// there's no session to switch, and also while this session is paused
+    /// (VT-switched away, [`Tty::session_paused`]) -- `libseat`'s
+    /// `VT_ACTIVATE` is a request to switch *from* the currently active
+    /// session, and a paused session has no more standing to make that
+    /// request than any other backgrounded process; the kernel/`libseat`
+    /// correctly refuses it with `EPERM`. Real keyboard input never reaches
+    /// here while paused (`session_event`'s `PauseSession` arm suspends
+    /// `libinput` first), but this project's IPC `key` request is a second,
+    /// independent input path that bypasses `libinput` entirely (see
+    /// `flexwm-vision`'s "IPC-first" design) and so isn't gated by that
+    /// suspension -- reproduced by pausing the session (a real switch-away)
+    /// and then sending the switch-back combo over IPC rather than a real
+    /// keypress, which hit exactly this `EPERM` before this check existed.
+    ///
+    /// Gated on `session_paused`, deliberately *not* `active` (whether DRM
+    /// master is held): those go false independently (see
+    /// [`Tty::active`]'s doc), and a failed DRM reactivation must not block
+    /// a VT-switch retry -- that's the one recovery path a dead-DRM,
+    /// working-keyboard state has.
     pub fn change_vt(&mut self, vt: u32) {
         let Some(tty) = &mut self.tty else {
             tracing::debug!(vt, "change_vt requested with no tty session active");
             return;
         };
+        if tty.session_paused {
+            // info!, not debug!: this is an explicitly requested action
+            // (a real keybind or an IPC `key` request) being discarded, not
+            // routine internal bookkeeping -- at the default log level it
+            // must leave a trace, or a user/agent whose switch-back request
+            // silently does nothing has no way to tell "ignored" apart from
+            // "lost".
+            tracing::info!(
+                vt,
+                "change_vt requested while the session is paused; ignoring \
+                 rather than issuing a VT_ACTIVATE libseat can only refuse"
+            );
+            return;
+        }
         if let Err(error) = tty.session.change_vt(vt as i32) {
             tracing::warn!(vt, %error, "could not change vt");
         }
