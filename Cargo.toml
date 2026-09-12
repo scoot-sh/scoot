@@ -15,3 +15,13 @@ flexwm-ipc = { path = "crates/flexwm-ipc" }
 base64 = "0.22"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+# There was no release profile at all before this -- every build and every
+# resource measurement so far was a debug build. "Lightweight" is a project
+# goal (see the vision in memory), so release is where it has to be checked.
+[profile.release]
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true
+opt-level = 3

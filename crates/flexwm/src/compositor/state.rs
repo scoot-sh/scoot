@@ -62,6 +62,10 @@ pub struct State {
 
     /// Something changed that the framebuffer doesn't show yet.
     pub needs_render: bool,
+    /// Whether the frame timer (see `headless::ensure_ticking`) is currently
+    /// running. It drops itself when there's nothing to do rather than
+    /// polling forever, so this is how callers know whether to re-arm it.
+    pub timer_armed: bool,
     /// When a client last committed, which is what `wait-idle` waits on.
     pub last_commit: Instant,
     pub pending_idle: Vec<PendingIdle>,
@@ -107,7 +111,16 @@ impl State {
             seat_state,
             data_device_state,
             seat,
+            // true without going through request_render(), so nothing has
+            // armed the frame timer yet. That's only safe because
+            // headless::init() unconditionally and synchronously calls
+            // state.apply() -- which does call request_render() -- before
+            // the event loop ever runs. If init ever stopped doing that
+            // unconditionally, this would silently reintroduce "first frame
+            // never draws, timer never arms" with no test failure pointing
+            // here.
             needs_render: true,
+            timer_armed: false,
             last_commit: Instant::now(),
             pending_idle: Vec::new(),
         }

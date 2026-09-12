@@ -112,6 +112,10 @@ impl Connection {
                 deadline: now + Duration::from_millis(timeout_ms),
                 started: now,
             });
+            // The frame timer answers this, but it drops itself when there's
+            // nothing to do -- if the compositor was already idle, it needs
+            // waking back up or this request would wait forever.
+            state.ensure_ticking();
             return Step::Close;
         }
 
@@ -183,7 +187,14 @@ impl State {
                 Ok(()) => Response::Ok,
                 Err(error) => Response::error(error),
             },
-            Request::WaitIdle { .. } => Response::error("wait-idle is answered by the render loop"),
+            // Connection::step() intercepts and answers this variant itself
+            // (see above) before handle_request is ever called, since a
+            // reply here has to wait on pending_idle instead of being
+            // returned immediately like every other request. If this ever
+            // fires, that interception was bypassed -- a bug worth a loud
+            // failure, not a request that quietly appears to work while
+            // answering wrong.
+            Request::WaitIdle { .. } => unreachable!("WaitIdle is answered by Connection::step"),
         }
     }
 

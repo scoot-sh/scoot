@@ -14,13 +14,12 @@ use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
 use smithay::backend::renderer::pixman::PixmanRenderer;
 use smithay::backend::renderer::{Bind, Offscreen};
 use smithay::output::{Mode, Output, PhysicalProperties, Subpixel};
-use smithay::reexports::calloop::EventLoop;
 use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
 use smithay::utils::Transform;
 
 use super::State;
 
-/// How often a changed screen is redrawn.
+/// How often a changed screen is redrawn, while there's something to redraw.
 const FRAME_INTERVAL: Duration = Duration::from_millis(16);
 
 /// The CPU renderer and the image it draws into.
@@ -31,12 +30,7 @@ pub struct Backend {
     pub size: (i32, i32),
 }
 
-pub fn init(
-    event_loop: &mut EventLoop<'static, State>,
-    state: &mut State,
-    width: i32,
-    height: i32,
-) -> Result<(), Box<dyn Error>> {
+pub fn init(state: &mut State, width: i32, height: i32) -> Result<(), Box<dyn Error>> {
     let mode = Mode {
         size: (width, height).into(),
         refresh: 60_000,
@@ -76,16 +70,10 @@ pub fn init(
         id: OutputId(1),
         area: Rect::new(0, 0, width, height),
     });
+    // apply() ends in request_render(), which arms the frame timer via
+    // ensure_ticking() -- this is what puts the very first frame on it.
     state.apply();
 
-    event_loop.handle().insert_source(
-        Timer::from_duration(FRAME_INTERVAL),
-        |_, _, state: &mut State| {
-            state.render();
-            state.settle_idle_waiters();
-            TimeoutAction::ToDuration(FRAME_INTERVAL)
-        },
-    )?;
     Ok(())
 }
 
@@ -95,7 +83,14 @@ impl State {
         if !self.needs_render {
             return;
         }
-        let (Some(output), Some(mut backend)) = (self.output.clone(), self.backend.take()) else {
+        // Order matters: `backend.take()` must not run unless `output` is
+        // also present, or a None output would leave it taken and never put
+        // back -- silently and permanently losing the backend on the next
+        // render attempt.
+        let Some(output) = self.output.clone() else {
+            return;
+        };
+        let Some(mut backend) = self.backend.take() else {
             return;
         };
         {
@@ -142,5 +137,49 @@ impl State {
         self.space.refresh();
         self.popups.cleanup();
         let _ = self.display_handle.flush_clients();
+    }
+
+    /// Marks the screen dirty and makes sure the frame ticker is running to
+    /// actually redraw it.
+    pub fn request_render(&mut self) {
+        self.needs_render = true;
+        self.ensure_ticking();
+    }
+
+    /// Arms the frame timer if it isn't already running.
+    ///
+    /// At idle -- nothing to redraw, no `wait-idle` outstanding -- the timer
+    /// drops itself (see `frame_tick`) instead of polling 60-odd times a
+    /// second forever, which is what this compositor did before: every tick
+    /// woke the process just to find `needs_render` false and go back to
+    /// sleep. This is the other half of that: whatever sets `needs_render` or
+    /// registers a `PendingIdle` calls this to wake it back up.
+    pub fn ensure_ticking(&mut self) {
+        if self.timer_armed {
+            return;
+        }
+        self.timer_armed = true;
+        if let Err(error) = self
+            .loop_handle
+            .insert_source(Timer::from_duration(FRAME_INTERVAL), frame_tick)
+        {
+            // Rendering and wait-idle both depend on this timer; if it can't
+            // be armed, both are now silently dead until something restarts
+            // the process. That's worth a loud log even though there's no
+            // Result to propagate up from here.
+            tracing::error!(%error, "could not arm the frame timer");
+            self.timer_armed = false;
+        }
+    }
+}
+
+fn frame_tick(_now: std::time::Instant, _metadata: &mut (), state: &mut State) -> TimeoutAction {
+    state.render();
+    state.settle_idle_waiters();
+    if state.needs_render || !state.pending_idle.is_empty() {
+        TimeoutAction::ToDuration(FRAME_INTERVAL)
+    } else {
+        state.timer_armed = false;
+        TimeoutAction::Drop
     }
 }

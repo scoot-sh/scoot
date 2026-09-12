@@ -97,7 +97,7 @@ impl State {
             }
         }
         self.set_focus(arrangement.focused);
-        self.needs_render = true;
+        self.request_render();
     }
 
     fn set_focus(&mut self, focus: Option<WindowId>) {
