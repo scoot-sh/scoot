@@ -33,7 +33,9 @@ Early, but all three Wayland backends are real and working: `--headless`
 and `--tty` (a real DRM/KMS + libseat + libinput backend on actual hardware,
 including VT switching and a rendered pointer cursor — a client's own cursor
 image when it supplies one, a built-in shape otherwise, whose size and color
-the config file can override). Also done: vim-style
+the config file can override — which tries every DRM device on the seat
+rather than trusting the first guess, and takes `--gpu PATH` when even that
+picks wrong; see Which DRM device `--tty` drives below). Also done: vim-style
 keybindings, a TOML config file (`--config`, `[layout]`/`[appearance]`/
 `[binds]`, see Configuration below), window decorations (a niri-style focus
 ring, background color, server-side `zxdg_decoration_manager_v1`),
@@ -111,6 +113,7 @@ a seat — see `vm/README.md` for a Mac-native NixOS VM that provides one.
 flexwm --headless --width 1280 --height 800 -- foot   # start, spawn a terminal
 flexwm --nested --width 1280 --height 800 -- foot     # inside your existing compositor
 flexwm --tty -- foot                                  # on a real DRM/KMS seat
+flexwm --tty --gpu /dev/dri/card1 -- foot             # ...naming the DRM device yourself
 flexwm msg windows                                     # in another shell
 flexwm msg action focus-column left
 flexwm msg screenshot --out /tmp/shot.png
@@ -166,6 +169,48 @@ flexwm's behalf, and flexwm simply isn't permitted to call `SET_MASTER`
 itself on a file another process opened. `vm/README.md`'s troubleshooting
 section has the kernel-level reason and two commands that check whether
 master really is held, rather than assuming the log line alone settles it.
+
+### Which DRM device `--tty` drives
+
+Normally: whichever one works. flexwm asks Smithay for the seat's primary
+GPU, and if that device turns out not to be able to drive a display, it
+tries every other DRM device on the seat in turn before giving up. On an
+ordinary PC the first pick is right and nothing else is ever opened; the
+log line worth grepping for either way is `drm: driving this device`, with
+the device path on it (`RUST_LOG=info`, the default level, is enough — a
+rejected device gets a `drm: device unusable` warning naming it and saying
+what it said).
+
+The fallback exists because the usual heuristic — "the GPU whose PCI parent
+has `boot_vga=1`, else the first one with a render node" — assumes the 3D
+GPU and the display controller are the same DRM device. On Apple Silicon
+under Asahi Linux they are not: `asahi`/AGX has the render node, `apple,dcp`
+owns the CRTCs and connectors, and there is no PCI GPU or VGA BIOS for the
+first rule to match. Picking the render-only device there fails with
+`Operation not supported (os error 95)` loading its KMS resources. (That
+specific machine is where the bug was reported from; the fallback is built
+and tested, but no one has yet confirmed it end to end on Apple Silicon —
+`--gpu` is the certain workaround there until someone does.)
+
+If the automatic search still picks wrong, name the device:
+
+```sh
+flexwm --tty --gpu /dev/dri/card1 -- foot
+```
+
+`--gpu PATH` replaces the search entirely — exactly that device, no
+fallback — so a wrong path is a clean startup error naming the device and
+what failed, not a silent fall back to something else. It only means
+anything under `--tty`; on `--headless` or `--nested` it is ignored with a
+warning. To see what the seat has, and which driver is behind each device:
+
+```sh
+ls /dev/dri/card*
+for c in /sys/class/drm/card*/device/driver; do echo "$c -> $(readlink -f "$c")"; done
+```
+
+When nothing works, the startup error lists every device that was tried and
+why each one was rejected, rather than naming only the first.
 
 ## Layer-shell clients (bars, wallpapers, launchers)
 
