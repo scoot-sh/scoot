@@ -2080,11 +2080,79 @@ data-loss/RCE in what was checked.
   real); and `Rect::inset`'s `self.x + by`/`self.y + by` are unguarded even
   though its `w`/`h` arms already floor at 0 — the same function, only half
   hardened.
-- **Config parsing has no recursion-depth guard (LOW).** The `toml` stack
-  has no explicit guard against deeply nested input; a maliciously deep
-  config could stack-overflow-abort the process rather than hit the
-  module's normal "log and fall back to defaults" path. Requires the user's
-  own config file, so low priority.
+- **~~Config parsing has no recursion-depth guard (LOW)~~ — RESOLVED
+  2026-09-13 (investigation + regression tests, PR #21): the premise is wrong
+  at `toml` 1.1.6 — the crate guards nesting itself, at 80 levels, and
+  anything deeper lands in exactly the "log and fall back to defaults" path
+  the entry worried it would bypass. No production code change; a guard of
+  flexwm's own would be a second, worse bound on top of a precise one.**
+  Original diagnosis, left as written: the `toml` stack has no explicit guard
+  against deeply nested input; a maliciously deep config could
+  stack-overflow-abort the process rather than hit the module's normal "log
+  and fall back to defaults" path. Requires the user's own config file, so low
+  priority.
+
+  **What the crate actually does.** `toml` 1.1.6 (over `toml_parser` 1.1.3 and
+  `winnow` 1.0.4) bounds depth in two independent places, both hard-coded at
+  80: a `RecursionGuard` around combined inline-table/array nesting
+  (`toml/src/de/parser/mod.rs:37,58,71`), which the parser consults — it
+  returns `false` past the limit and `on_array_open`/`on_inline_table_open`
+  switch to the iterative `ignore_to_value_close` skip instead of recursing
+  (`toml_parser/src/parser/document.rs:796,962,1480`) — and a separate cap on
+  dotted-key/table-header path segments (`toml/src/de/parser/key.rs:66`). Both
+  are active unless the crate's `unbounded` feature is on; it is not —
+  `cargo tree -p flexwm --target all -e features` lists only `default`,
+  `display`, `parse`, `serde`, `std`.
+
+  **Evidence.** Scratch harness (kept out of the tree; the cases that matter
+  are now tests in `crates/flexwm/src/compositor/config.rs`), aarch64 on both
+  macOS 26 and the Linux dev VM, `ulimit -s` 8192 KiB on both:
+  - *Boundary*, through flexwm's real `toml::from_str::<FileConfig>` path: 80
+    levels parse and are then rejected by `deny_unknown_fields` ("unknown
+    field a"); 81 are refused by the crate (`cannot recurse further; max
+    recursion depth met` for inline tables and arrays, `recursion limit` for
+    dotted keys, `[a.a…]` headers and `[[a.a…]]` headers). Identical on both
+    platforms. A 1,000,000-level file (4 MB) returns the same clean error in
+    milliseconds, no crash.
+  - *Counterfactual*, the same harness built with `toml/unbounded` (Linux,
+    release, main thread): 5,000 levels fine, 10,000 aborts with `fatal
+    runtime error: stack overflow` (SIGABRT) for every nesting form. The
+    crate's guard is load-bearing, not incidental.
+  - *Composition ceiling*, the one genuinely surprising result: the two limits
+    **multiply** rather than add, because a dotted key can sit at every level
+    of nesting. 80 nested inline tables, each keyed by an 80-segment dotted
+    key, under an 80-segment table header is ~6,560 levels of real tree depth
+    out of a 13,288-byte file — and nothing a config file can express goes
+    deeper.
+  - *Where the stack goes*: not the parse — the recursive **drop** of the
+    parsed `DeTable`. Minimum surviving thread stack for that worst case at
+    flexwm's `FileConfig` target (Linux): 1,135 KiB release / 6,604 KiB debug;
+    leaking the tree with `mem::forget` instead of dropping it takes the same
+    parse down to 79 KiB / 479 KiB. macOS agrees within 16 KiB. flexwm parses
+    on the main thread (`main` → `compositor::run` → `config::load`), so it
+    has 8 MiB: ~7× headroom in release, ~1.4 MiB in debug.
+  - *End to end* at `e6a983a` with the real debug binary on the dev VM
+    (`/var/cargo-target/debug/flexwm --headless --config …`): all three 13 KB
+    worst-case files (under an unknown key, under `[binds]`, under `[layout]`)
+    plus the 4 MB 1,000,000-level file started normally, logged `ERROR … could
+    not parse config file; using defaults`, answered `msg version` over IPC,
+    and quit with exit 0. A legitimate config alongside them loaded normally.
+  - *The committed test's own margin*, measured inside flexwm's debug test
+    binary by temporarily shrinking its thread: aborts at 6 MiB, passes at
+    7 MiB — consistent with the 6,604 KiB above, and why the test runs on an
+    8 MiB thread (what production gets) rather than `cargo test`'s 2 MiB.
+
+  **Recorded rather than fixed**, in `parse_or_defaults`' doc, because it is
+  invisible at the site that would break it: moving config parsing to a
+  spawned thread would get the Rust default 2 MiB and abort a debug build on
+  that 13 KB file, and deserializing the same bytes into a `toml::Table` (a
+  passthrough config section, say) descends the whole tree instead of stopping
+  at the first unknown key — 6,700 KiB release / 31,712 KiB debug, over budget
+  even on the main thread.
+
+  **Caveat:** every measurement above is aarch64 (macOS + the dev VM); nothing
+  was run on x86_64, and this repo has no CI, so the debug-build margin is
+  only exercised where someone runs `cargo test`.
 - **~~`flexwm-core`'s `gap` config value has no upper bound (LOW)~~ — DONE as
   item 12(c)**, `Config::MAX_GAP` = 10,000 with `clamp_gap` shared between the
   core's `validated()` and the compositor's focus-ring sizing. Original
