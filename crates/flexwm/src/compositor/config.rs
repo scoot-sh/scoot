@@ -277,8 +277,11 @@ fn load_from(path: &Path, explicit: bool) -> Result<LoadedConfig, ConfigFileErro
 ///
 /// `toml` 1.1.6 bounds nesting itself, in two places, both hard-coded at 80
 /// and both active unless the crate's `unbounded` feature is on (it is not;
-/// `cargo tree -p flexwm --target all -e features` lists only `default`,
-/// `display`, `parse`, `serde`, `std`): a `RecursionGuard` over combined
+/// `unbounded` is a zero-dependency flag so `-e features` can't see it either
+/// way -- `cargo tree -p flexwm --target all -f "{p} | {f}"` is the command
+/// that actually shows it, and prints `toml v1.1.6+spec-1.1.0 | default,
+/// display,parse,serde,std` with no `unbounded` suffix): a `RecursionGuard`
+/// over combined
 /// inline-table/array nesting, and a separate cap on dotted-key and table-header
 /// path segments. Past either, parsing stops and reports an error, which lands
 /// in the arm below like any other malformed config -- so at the stack budget
@@ -308,7 +311,7 @@ fn load_from(path: &Path, explicit: bool) -> Result<LoadedConfig, ConfigFileErro
 ///   any thread stack here, which is as precise as that one gets. The recursive
 ///   *drop* of the parsed tree is the real cost: 932 KiB release (flexwm's
 ///   `panic = "abort"` profile; ~1,140 KiB if built to unwind, which is what
-///   `cargo test --release` produces) and 6,684 KiB debug.
+///   `cargo test --release` produces) and 6,680 KiB debug.
 /// - **The deserialization target.** The cost is a function of the target, not
 ///   just the input: `FileConfig` is shallow and `deny_unknown_fields` stops
 ///   serde at the first key, but deserializing the same bytes into a

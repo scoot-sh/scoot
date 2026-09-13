@@ -2104,13 +2104,21 @@ data-loss/RCE in what was checked.
   switch to the iterative `ignore_to_value_close` skip instead of recursing
   (`toml_parser/src/parser/document.rs:796,962,1480`) — and a separate cap on
   dotted-key/table-header path segments (`toml/src/de/parser/key.rs:66`). Both
-  are active unless the crate's `unbounded` feature is on; it is not —
-  `cargo tree -p flexwm --target all -e features` lists only `default`,
-  `display`, `parse`, `serde`, `std`.
+  are active unless the crate's `unbounded` feature is on; it is not, but the
+  command matters: `unbounded = []` enables nothing else, so `cargo tree
+  -e features` prints the identical `default, display, parse, serde, std`
+  whether it's on or off and can't be used to check this. `cargo tree -p
+  flexwm --target all -f "{p} | {f}"` is the one that actually shows it —
+  `toml v1.1.6+spec-1.1.0 | default,display,parse,serde,std`, no `unbounded`
+  suffix — confirmed by building a probe with the feature on and watching the
+  suffix appear.
 
   **Evidence.** Scratch harness (kept out of the tree; the cases that matter
   are now tests in `crates/flexwm/src/compositor/config.rs`), aarch64 on both
-  macOS 26 and the Linux dev VM, `ulimit -s` 8192 KiB on both:
+  macOS 26 and the Linux dev VM, `ulimit -s` 8192 KiB on the Linux dev VM and
+  8176 KiB on macOS (the actual default there, not 8192 -- doesn't move any
+  number below, since every macOS figure was measured on an explicitly-sized
+  spawned thread rather than against the main-thread rlimit):
   - *Boundary*, through flexwm's real `toml::from_str::<FileConfig>` path: 80
     levels parse and are then rejected by `deny_unknown_fields` ("unknown
     field a"); 81 are refused by the crate (`cannot recurse further; max
@@ -2179,13 +2187,14 @@ data-loss/RCE in what was checked.
     number, but a reviewer re-measuring via `cargo test --release` should
     expect 6,468, not something above 7,288.
 
-    Release "parse only" has no point value on Linux: glibc floors a
-    thread stack at 137,120 bytes here and the parse survives that floor, so
-    all that can be said is "< 134 KiB". macOS *is* measurable there (84 KiB) —
-    the old "79 KiB" attributed to Linux was a macOS number. macOS tracks Linux
-    16–336 KiB lower (0.3–5%) on every one of these, never higher — as
-    parse+drop / `toml::Table` / parse-only: release 916 / 7,268 / 84 KiB,
-    debug 6,660 / 31,764 / 452 KiB.
+    Release "parse only" has no point value on Linux via a thread-stack sweep:
+    glibc floors a thread stack at 137,120 bytes here and the parse survives
+    that floor, so all that can be said is "< 134 KiB". macOS *is* measurable
+    there (84 KiB) — the old "79 KiB" attributed to Linux was a macOS number.
+    Of the five rows with a Linux point value to compare against, macOS tracks
+    Linux 16–336 KiB lower (0.3–5%) on all five, never higher — as parse+drop
+    / `toml::Table` / parse-only: release 916 / 7,268 / 84 KiB, debug 6,660 /
+    31,764 / 452 KiB.
 
     flexwm parses on the main thread (`main` → `compositor::run` →
     `config::load`), so it has 8 MiB: over 7 MiB spare in release, 8,192 −
