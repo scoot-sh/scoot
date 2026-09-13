@@ -177,6 +177,15 @@ impl State {
         // with a pointer). See the `send_frames_surface_tree` call at the
         // end of this function.
         let mut cursor_surface: Option<WlSurface> = None;
+        // Whether this frame actually reached the renderer. Only a frame that
+        // did may confirm a pending session lock: the protocol forbids
+        // sending `locked` before a blanked frame exists (see
+        // `session_lock.rs`).
+        let mut drew_a_frame = false;
+        // Read once, here, so every branch below -- elements, clear colour,
+        // frame callbacks -- is answering the same question about the same
+        // frame.
+        let locked = self.session_lock.is_locked();
         {
             let Backend {
                 renderer,
@@ -189,12 +198,20 @@ impl State {
             // below so a failure to bind the framebuffer still logs without
             // having done this for nothing. See `decorations.rs`'s module
             // doc for why the background isn't part of this list.
-            let arrangement = self.world.arrange();
+            //
+            // Not computed at all while locked: no window and no ring is
+            // drawn then, so laying the windows out would be work for a frame
+            // that cannot show it. `apply()` still runs the layout on every
+            // change underneath, so nothing is lost by the time it unlocks.
             let (width, height) = *size;
             let bounds = Rect::new(0, 0, width, height);
-            let ring_elements = self
-                .decorations
-                .elements(&arrangement, &self.appearance, bounds);
+            let ring_elements = if locked {
+                Vec::new()
+            } else {
+                let arrangement = self.world.arrange();
+                self.decorations
+                    .elements(&arrangement, &self.appearance, bounds)
+            };
             // What every element's own coordinates are built at. Always 1.0
             // today (nothing sets an output scale), read from the output
             // rather than hardcoded so windows and layer surfaces can never
@@ -258,45 +275,76 @@ impl State {
                     // `Space::render_elements_for_region` (windows only, by
                     // construction -- see its own doc) and the layers are
                     // gathered here, around the ring.
-                    let window_elements = match self.space.output_geometry(&output) {
-                        Some(region) => self
+                    //
+                    // ...unless the session is locked, in which case this
+                    // whole list is replaced -- not reordered -- by the lock
+                    // screen's own (see `session_lock.rs`). Everything above
+                    // is skipped outright rather than pushed behind an opaque
+                    // backdrop, because "drawn behind something opaque" is a
+                    // weaker guarantee than "never gathered": it would rest on
+                    // element ordering, on no client surface ever being larger
+                    // than the rect it was placed at, and on the damage
+                    // tracker never surprising us. The cursor is the one thing
+                    // still drawn in front, and it is this compositor's own
+                    // shape (`SessionLockHandler::lock` resets it at lock
+                    // time) -- a lock screen with a password field needs a
+                    // pointer.
+                    let elements = if locked {
+                        let origin = self
                             .space
-                            .render_elements_for_region(renderer, &region, scale, 1.0),
-                        // Unreachable while `self.output` is the output
-                        // `headless::init` mapped into the space; an output
-                        // that isn't in the space has no region to render.
-                        None => Vec::new(),
+                            .output_geometry(&output)
+                            .map(|geometry| geometry.loc.to_physical_precise_round(scale))
+                            .unwrap_or_default();
+                        let (lock_surfaces, backdrop) =
+                            self.lock_elements(renderer, origin, scale, (width, height));
+                        let mut elements =
+                            Vec::with_capacity(cursor_elements.len() + lock_surfaces.len() + 1);
+                        elements.extend(cursor_elements.into_iter().map(Elements::Cursor));
+                        elements.extend(lock_surfaces.into_iter().map(Elements::Surface));
+                        elements.push(Elements::Decoration(backdrop));
+                        elements
+                    } else {
+                        let window_elements = match self.space.output_geometry(&output) {
+                            Some(region) => self
+                                .space
+                                .render_elements_for_region(renderer, &region, scale, 1.0),
+                            // Unreachable while `self.output` is the output
+                            // `headless::init` mapped into the space; an output
+                            // that isn't in the space has no region to render.
+                            None => Vec::new(),
+                        };
+                        let layers = layer_map_for_output(&output);
+                        let mut elements = Vec::with_capacity(
+                            cursor_elements.len()
+                                + window_elements.len()
+                                + ring_elements.len()
+                                + layers.len(),
+                        );
+                        elements.extend(cursor_elements.into_iter().map(Elements::Cursor));
+                        layer_elements(
+                            &layers,
+                            &layer_shell::ABOVE_WINDOWS,
+                            renderer,
+                            scale,
+                            &mut elements,
+                        );
+                        elements.extend(window_elements.into_iter().map(Elements::Surface));
+                        elements.extend(ring_elements.into_iter().map(Elements::Decoration));
+                        layer_elements(
+                            &layers,
+                            &layer_shell::BELOW_WINDOWS,
+                            renderer,
+                            scale,
+                            &mut elements,
+                        );
+                        // Nothing below this point needs the layer map, and the
+                        // frame-callback pass at the end of `render()` takes the
+                        // same per-output lock again -- holding this one across
+                        // the render would deadlock the compositor against
+                        // itself.
+                        drop(layers);
+                        elements
                     };
-                    let layers = layer_map_for_output(&output);
-                    let mut elements = Vec::with_capacity(
-                        cursor_elements.len()
-                            + window_elements.len()
-                            + ring_elements.len()
-                            + layers.len(),
-                    );
-                    elements.extend(cursor_elements.into_iter().map(Elements::Cursor));
-                    layer_elements(
-                        &layers,
-                        &layer_shell::ABOVE_WINDOWS,
-                        renderer,
-                        scale,
-                        &mut elements,
-                    );
-                    elements.extend(window_elements.into_iter().map(Elements::Surface));
-                    elements.extend(ring_elements.into_iter().map(Elements::Decoration));
-                    layer_elements(
-                        &layers,
-                        &layer_shell::BELOW_WINDOWS,
-                        renderer,
-                        scale,
-                        &mut elements,
-                    );
-                    // Nothing below this point needs the layer map, and the
-                    // frame-callback pass at the end of `render()` takes the
-                    // same per-output lock again -- holding this one across
-                    // the render would deadlock the compositor against
-                    // itself.
-                    drop(layers);
 
                     // `0` (always-full-redraw) for every presenter except
                     // `--tty`: see `buffers.rs`'s module doc on why that one
@@ -307,15 +355,28 @@ impl State {
                     // `--headless` nor `--nested` draws a cursor, so neither
                     // has a new reason to render more often than before.
                     let age = self.tty.as_ref().map_or(0, Tty::next_buffer_age);
+                    // The backdrop element already covers the output opaquely
+                    // while locked; this is the second line of defence behind
+                    // it, so that even a frame whose elements somehow produced
+                    // nothing clears to the lock colour rather than to the
+                    // configured desktop background -- which a user may have
+                    // given an alpha, and which is the colour the unlocked
+                    // session is showing.
+                    let clear_color = if locked {
+                        self.lock_clear_color()
+                    } else {
+                        self.appearance.background_color.into()
+                    };
                     let result = damage.render_output(
                         renderer,
                         &mut framebuffer,
                         age,
                         &elements,
-                        self.appearance.background_color,
+                        clear_color,
                     );
                     match result {
                         Ok(render_result) => {
+                            drew_a_frame = true;
                             // Must run unconditionally, even when there
                             // turns out to be nothing to present below --
                             // see `BufferPool::advance_generation`'s doc for
@@ -399,17 +460,24 @@ impl State {
         self.backend = Some(backend);
         self.needs_render = false;
 
-        let time = self.start_time.elapsed();
-        for window in self.space.elements() {
-            window.send_frame(&output, time, Some(Duration::ZERO), |_, _| {
-                Some(output.clone())
-            });
+        // The frame a pending session lock has been waiting for. Only after
+        // one has actually been drawn -- never after a failed bind or a
+        // failed render, which would leave whatever was on screen before the
+        // lock exactly where it was -- may the client be told `locked`. A
+        // lock that could not be confirmed stays pending and stays *locked*;
+        // the alternative, giving up and unlocking, would turn a renderer
+        // failure into an unrequested unlock (see `session_lock.rs`).
+        if drew_a_frame {
+            self.confirm_lock();
         }
-        // A client cursor surface is never in `self.space`, so the loop
-        // above can't reach it -- and a well-behaved client with an animated
-        // cursor (a spinner, a throbber) attaches one frame, requests a
-        // callback, and waits for it before attaching the next. Without this
-        // it waits forever and the animation freezes on its first frame.
+
+        let time = self.start_time.elapsed();
+        // A client cursor surface is never in `self.space`, so the window
+        // loop below can't reach it -- and a well-behaved client with an
+        // animated cursor (a spinner, a throbber) attaches one frame,
+        // requests a callback, and waits for it before attaching the next.
+        // Without this it waits forever and the animation freezes on its
+        // first frame.
         //
         // Scoped to the frames that presented this cursor (`--tty`, pointer
         // present, the status a live client surface) rather than sent
@@ -421,43 +489,71 @@ impl State {
         // client that asks for a callback before its first attach (legal,
         // if unusual) would then stall on the very frame that should unstick
         // it.
+        //
+        // Outside the lock branch below because the cursor is drawn either
+        // way, and while locked that surface can only belong to the lock
+        // client: `wl_pointer.set_cursor` is refused unless the asking client
+        // holds pointer focus or a pointer grab (Smithay's
+        // `allow_setting_cursor`), and locking resets the image, drops grabs
+        // and moves pointer focus onto the lock surface.
         if let Some(surface) = &cursor_surface {
             send_frames_surface_tree(surface, &output, time, Some(Duration::ZERO), |_, _| {
                 Some(output.clone())
             });
         }
-        // Layer surfaces aren't in `self.space` either, and a bar's clock
-        // stops at whatever second it first drew without this -- the same
-        // frame-callback starvation the cursor surface had. Sent to every
-        // mapped layer surface rather than only the ones that produced an
-        // element, matching both the window loop above and the cursor's own
-        // reasoning: a client may legitimately ask for a callback before its
-        // first attach, and withholding it would stall the very frame that
-        // unsticks it.
-        let dropped_dead_layers = {
-            let mut layers = layer_map_for_output(&output);
-            for layer in layers.layers() {
-                layer.send_frame(&output, time, Some(Duration::ZERO), |_, _| {
+        if locked {
+            // Lock surfaces are the only clients told to draw: "the
+            // compositor must stop rendering and providing input to normal
+            // clients". A client with no frame callback stops drawing by
+            // itself, so this is both what the protocol asks for and what
+            // keeps every window and bar in the session from burning CPU
+            // behind a lock screen. They get one again on the first frame
+            // after unlocking.
+            if self.lock_post_frame(&output, time) {
+                // A dead lock surface was dropped, and it may have been the
+                // one holding the keyboard -- and what is drawn just changed.
+                self.refresh_keyboard_focus();
+                self.request_render();
+            }
+        } else {
+            for window in self.space.elements() {
+                window.send_frame(&output, time, Some(Duration::ZERO), |_, _| {
                     Some(output.clone())
                 });
             }
-            // Second line of defence behind `layer_destroyed` (see
-            // `layer_shell.rs`), for a client whose implicit teardown ran in
-            // an order that left a dead surface mapped. `cleanup` only walks
-            // the list -- no work at all with no layer surfaces -- and
-            // re-arranges if it removed one, which is why the zone is
-            // re-derived below when it did.
-            let before = layers.len();
-            layers.cleanup();
-            before != layers.len()
-        };
-        if dropped_dead_layers {
-            self.refresh_layer_zone();
-            // One of those dead surfaces may have been holding the keyboard
-            // (`layer_destroyed` is the usual path back, but this branch
-            // exists precisely for the teardown orders it misses), and
-            // `refresh_layer_zone` returns early when the zone didn't move.
-            self.refresh_keyboard_focus();
+            // Layer surfaces aren't in `self.space` either, and a bar's clock
+            // stops at whatever second it first drew without this -- the same
+            // frame-callback starvation the cursor surface had. Sent to every
+            // mapped layer surface rather than only the ones that produced an
+            // element, matching both the window loop above and the cursor's own
+            // reasoning: a client may legitimately ask for a callback before its
+            // first attach, and withholding it would stall the very frame that
+            // unsticks it.
+            let dropped_dead_layers = {
+                let mut layers = layer_map_for_output(&output);
+                for layer in layers.layers() {
+                    layer.send_frame(&output, time, Some(Duration::ZERO), |_, _| {
+                        Some(output.clone())
+                    });
+                }
+                // Second line of defence behind `layer_destroyed` (see
+                // `layer_shell.rs`), for a client whose implicit teardown ran in
+                // an order that left a dead surface mapped. `cleanup` only walks
+                // the list -- no work at all with no layer surfaces -- and
+                // re-arranges if it removed one, which is why the zone is
+                // re-derived below when it did.
+                let before = layers.len();
+                layers.cleanup();
+                before != layers.len()
+            };
+            if dropped_dead_layers {
+                self.refresh_layer_zone();
+                // One of those dead surfaces may have been holding the keyboard
+                // (`layer_destroyed` is the usual path back, but this branch
+                // exists precisely for the teardown orders it misses), and
+                // `refresh_layer_zone` returns early when the zone didn't move.
+                self.refresh_keyboard_focus();
+            }
         }
         self.space.refresh();
         self.popups.cleanup();
@@ -483,6 +579,12 @@ impl State {
                 return;
             }
         }
+        // A lock surface's configured size is an *exact* requirement -- the
+        // next buffer that doesn't match it is a `dimensions_mismatch`
+        // protocol error, i.e. a killed lock client on a locked session -- so
+        // a resized output has to reconfigure them. A no-op when the session
+        // isn't locked (there are none).
+        self.resize_lock_surfaces((width, height));
         // Layer surfaces are anchored to the output's edges, so every one of
         // them has moved or resized -- `LayerMap::arrange` recomputes their
         // rectangles against the new mode and configures whoever needs a new

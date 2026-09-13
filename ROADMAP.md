@@ -2309,6 +2309,149 @@ review, and why.
     map of the corner shows the 16x16 arrow). Identical on the merge base
     `e2c7971`, so not a regression — see the Backlog entry below.
 
+16. ~~`ext-session-lock-v1`: a real screen lock the compositor enforces~~ —
+    DONE, PR #25. Picked up from the Backlog (entry struck below) as the
+    highest-priority protocol gap, and tied to a safety finding already on
+    record: item 14's third review round established that a layer-shell
+    "lock screen" is the wrong mechanism, because everything behind it is
+    still drawn, still capturable and still reachable by a keybinding.
+
+    **Smithay has a helper for this one** (unlike `ext-workspace-v1`):
+    `wayland::session_lock` owns the three interfaces, the surface role, the
+    configure/ack cycle and the "is this the object that holds the lock"
+    check behind `unlock_and_destroy`. What flexwm owns is the policy —
+    when to accept a lock, what a locked frame contains, where input goes,
+    and what happens when the lock client dies. That lives in
+    `compositor/session_lock.rs`.
+
+    **The lock state is one field, deliberately.**
+    `SessionLock::owner: Option<ExtSessionLockV1>` — `is_some()` *is* "the
+    session is locked", so there is no second boolean to disagree with it.
+    `abandoned()` (locked, owner not alive) is derived from the same field.
+    Written `Some` in exactly one place (the `lock` handler) and `None` in
+    exactly one (the `unlock` handler); a VT switch, a session pause, a
+    failed render and a dying client all leave it untouched, which is what
+    makes the lock survive them. This shape was chosen against item 5b's
+    worked example: a `locked: bool` beside the owner would have been two
+    fields that can mean different things at different sites.
+
+    **What locking changes, each as a branch taken *before* the unlocked
+    path rather than an ordering tweak on top of it:** the render element
+    list is built from the lock module alone (an opaque backdrop plus the
+    mapped lock surfaces — a window, a bar, a wallpaper and the ring are
+    never gathered); frame callbacks go only to lock surfaces; keyboard
+    focus is a lock surface or nobody; pointer hit-testing sees only lock
+    surfaces, *and* pointer focus is explicitly re-derived at every lock
+    transition (`State::refresh_pointer_focus`) because `wl_pointer.button`
+    goes to whatever the pointer last *entered* — without that the first
+    click after a lock still lands in the window underneath; `Bound::Action`
+    keybindings are forwarded to the lock client instead of firing; and
+    `State::act` itself refuses while locked, which is the backstop that
+    covers the IPC `action` request, `ext-workspace-v1`'s `activate`, and
+    any caller added later.
+
+    **The backdrop is a real element, not just `render_output`'s
+    `clear_color`.** A clear colour is not part of any element's damage, so
+    under `--tty` (the one backend that passes a real buffer age) a frame
+    whose elements did not change can report no damage and leave the
+    previous pixels on the scanout buffer. A persistent `SolidColorBuffer`
+    (the pattern `decorations.rs` already establishes) makes locking,
+    unlocking and the switch to the abandoned colour real damage. The clear
+    colour is set to the same colour anyway, as a second line of defence.
+
+    **Crash recovery, the most safety-critical decision here:** the session
+    stays locked (the protocol's own rule), the screen turns **solid red**
+    so a user can tell a crashed locker from one drawing black, and a new
+    client may **take the lock over** — confirmed immediately, since the
+    outputs are already blank — and unlock after authenticating. Not
+    guessed: sway's `lock.c` (`handle_abandon` paints exactly this red,
+    `handle_session_lock` replaces an abandoned lock) and niri's
+    `Niri::lock` (replaces a lock whose client `is_alive()` is false) both
+    do the same, checked against their actual sources. The honest cost is in
+    `README.md`: while a lock is abandoned, any client that can reach the
+    wayland socket can take it over and unlock — the same-uid boundary the
+    IPC socket already has, and the price of having a recovery path at all.
+
+    **IPC while locked:** injected keyboard and pointer input is *not*
+    refused, because it goes through the same focus paths a real keyboard
+    does and so can only reach the lock surface — which is what lets an
+    agent drive a lock screen. `Request::Action` is refused with an error
+    saying so. `windows`/`outputs`/`screenshot` still answer; a screenshot
+    reads the same framebuffer, so it shows the lock screen and nothing
+    behind it. All four stated plainly in `README.md` rather than left to be
+    discovered.
+
+    **One real bug found by hardware bug-bashing, not by any test:**
+    `kill -9` on a lock client that had already destroyed its lock surface
+    left the screen **black instead of red**. A disconnecting client
+    destroys protocol objects; it does not commit a surface or press a key,
+    so nothing marked the screen dirty and the last frame drawn stayed up.
+    The same case *with* a live lock surface happened to work, because that
+    surface's destruction goes through `handlers.rs`'s `destroyed` hook —
+    i.e. the signal was correct only by accident of teardown order. Fixed
+    with `State::refresh_lock_backdrop`, called from the one place a
+    disconnect is observed (the wayland display source), comparing the
+    backdrop buffer's *own* colour against what the lock state says it
+    should be, so there is no remembered flag to fall out of step. The
+    regression test for it needed two clients — written with one first, and
+    the negative control passed, because a single client owning both the
+    window and the lock has `remove_window` request a redraw as a side
+    effect.
+
+    **Deliberately deferred, each with a Backlog entry below:** an IPC way
+    to *ask* whether the session is locked (needs a `PROTOCOL_VERSION` bump,
+    so it bundles with the two already waiting); waiting for lock surfaces
+    before blanking (niri waits up to 1s to avoid a black flash, at the cost
+    of rendering the unlocked session for that second — flexwm blanks
+    immediately, which is the conservative half of that trade); confirming
+    `locked` on a real vblank rather than on a queued page flip;
+    security-context filtering of the global; per-output lock surfaces once
+    multi-output exists; and `ext-idle-notify-v1`, without which nothing
+    locks the session automatically.
+
+    **Tests: 21 new (340 total, against 320 on the merge base)**, in
+    `session_lock/tests.rs`, driving real `wayland-client` connections
+    (including a second one, for the takeover) through a real `State` and a
+    real `PixmanRenderer`. Every "nothing is visible" assertion checks
+    *every pixel of the frame*, not samples, and every "nothing received
+    input" assertion is made from what the client was actually sent
+    (`wl_keyboard.enter`, `wl_pointer.button`, `xdg_toplevel.close`) rather
+    than from a field inside the compositor. Covered: a window blanked off
+    the screen, an `overlay` layer surface blanked too, the lock surface's
+    own pixels, a lock surface with no buffer yet, a destroyed lock surface
+    falling back to a solid colour, unlock restoring the session, `locked`
+    withheld until a frame is drawn (driven by taking the render target
+    away, so no timing luck is involved), a second lock refused with
+    `finished`, keyboard and pointer reaching only the lock surface, a
+    `Super+Q` bind not closing a window, `State::act` and the IPC `action`
+    both refused, the session staying locked when the client dies, the
+    abandoned colour appearing with nobody asking for a redraw, takeover +
+    unlock, a replacement locker after one died unconfirmed, an empty
+    session locking and unlocking three times (the damage case), and an
+    output resize reconfiguring the lock surface.
+
+    **Hardware verification** and **benchmarks**: see PR #25's description
+    for the exact commands, raw histograms and jiffies figures, all captured
+    on the dev VM's real `--tty` `virtio-gpu` device at 1600x1000. In
+    summary: a locked frame contains exactly the lock surface's colour plus
+    the 136-pixel cursor and nothing else; 44 keystrokes typed over IPC
+    while locked reached the lock client and left no trace in the terminal
+    behind it; a VT switch away and back left the lock screen
+    pixel-identical (`magick compare -metric AE` = 0); `kill -9` turned the
+    screen red and kept refusing actions; a second locker took over and
+    unlocked cleanly. Balanced interleaved benchmark, 12 reps per side
+    across two batches, the order of the two binaries alternated between
+    reps — because item 10 measured a real run-position effect, and an
+    unbalanced first attempt here duly produced a phantom 11% regression:
+    150 corner-to-corner pointer jumps, `c93a100` mean **36.5** jiffies
+    (20–44) against this branch's **36.5** (28–45), i.e. the same number to
+    the tenth; idle 0 jiffies/10s both ways. The frame-callback suppression
+    is worth a real number of its own: a terminal running `while true; do
+    date; done` costs the compositor **230 jiffies/10s** unlocked and
+    **3 jiffies/10s** with that same client still running behind a lock
+    (225 again the moment it unlocks), which is why `handlers.rs`'s
+    per-commit `request_render` needed no extra gate while locked.
+
 ## Backlog (unordered — pick up whenever it fits)
 
 - **~~Open question: does `--tty` over SSH on the dev VM actually hold real
@@ -2819,24 +2962,51 @@ review, and why.
   worth naming while the memory of writing it is fresh: the fix belongs
   with those, as per-client accounting, not as a one-off limit here.
 
-- **`ext-session-lock-v1` protocol support — the highest-priority protocol
-  gap, and directly tied to a real safety finding already on record in
-  this file (item 14's third review round, the `keyboard_interactivity`
-  discussion).** That review flagged that a layer-shell client trying to
-  act as a screen locker (`gtklock`, `swaylock-effects`, pre-1.7
-  `swaylock`) is inherently the wrong mechanism: it depends on
-  `exclusive` keyboard interactivity, a layer surface can be closed or
-  covered, and nothing stops another client from drawing over or under
-  it or a screenshot tool from capturing what's behind it. `ext-session-
-  lock-v1` exists specifically to replace that pattern: the compositor
-  itself blanks every output, refuses input to anything but the lock
-  client's own surfaces, and the client only regains normal behavior once
-  it explicitly unlocks — a fundamentally different trust model than "a
-  layer surface asked nicely for exclusive focus." User request,
-  2026-09-13. No design work done yet; check whether the pinned Smithay
-  rev has a helper for this one (unclear without checking — it's newer
-  than layer-shell but has seen wider compositor adoption, so it may or
-  may not be present the way `wlr_layer` was).
+- **~~`ext-session-lock-v1` protocol support~~ — DONE as item 16**, PR #25.
+  The entry as written asked whether the pinned Smithay rev had a helper: it
+  does (`wayland::session_lock`), so the protocol plumbing came from there
+  and flexwm wrote the policy. See item 16 for what shipped, what was
+  deliberately deferred, and the crash-recovery decision.
+
+- **No IPC way to ask whether the session is locked** (item 16). An agent
+  driving flexwm can tell indirectly — `flexwm msg action ...` answers
+  `refused: the session is locked ...`, and a screenshot shows the lock
+  screen — but there is no request that says so directly. Deferred because
+  a new `Response` variant (or a field on an existing one) breaks older
+  clients' decoding, so it needs a `PROTOCOL_VERSION` bump: bundle it with
+  the "focus workspace N" action and the `OutputSnapshot` `usable` rect,
+  which are waiting on the same bump.
+
+- **flexwm blanks the screen immediately on a lock request rather than
+  waiting for the lock client's first surface** (item 16, deliberate). niri
+  waits up to a second for lock surfaces so the transition doesn't flash
+  black; the cost of that is rendering the *unlocked* session for that whole
+  second, which is the wrong half of the trade to take first. Worth
+  revisiting as a comfort feature if the black flash proves annoying in
+  daily use — with a hard deadline, as the protocol requires.
+
+- **`locked` is sent once a blanked frame has been drawn and handed to the
+  presenter, not once a vblank has confirmed it** (item 16). Under `--tty`
+  the frame has been copied into the scanout buffer and a page flip
+  requested by then, so a client that suspends the machine on `locked` races
+  the flip rather than the render. Closing that fully means confirming from
+  the DRM vblank handler (`tty/mod.rs`'s `DrmEvent::VBlank`), i.e. carrying
+  the pending confirmation through the flip — small, but it touches the
+  presentation path and was not worth bundling into the protocol's first
+  landing.
+
+- **The `ext_session_lock_manager_v1` global is offered to every client**
+  (item 16). The protocol explicitly allows restricting it ("the compositor
+  may choose to restrict this protocol to a special client"), and Smithay's
+  helper takes a client filter flexwm passes `|_| true` to. There is nothing
+  to filter *on* today — flexwm has no `wp_security_context_v1` support, so
+  every client is equally privileged — so this belongs with that protocol,
+  not as a bespoke allow-list.
+
+- **Lock surfaces are per-output and flexwm has one output** (item 16).
+  `new_surface` honours the `wl_output` the client named but falls back to
+  the single output; `configure_all` resizes them all together. One more
+  site for the multi-output list `headless.rs`'s `OUTPUT_ID` doc keeps.
 
 - **`ext-idle-notify-v1` and `idle-inhibit-unstable-v1` — pairs naturally
   with session-lock.** User request, 2026-09-13. `ext-idle-notify-v1` is
@@ -2847,7 +3017,10 @@ review, and why.
   lets a client (a video player, a presentation app) tell the compositor
   not to consider the session idle while it's active. Neither has design
   work done; natural to scope alongside session-lock since they're the
-  same feature area (idle/lock lifecycle), not before it.
+  same feature area (idle/lock lifecycle), not before it. **Now the obvious
+  next pick in that area**: item 16 landed the lock itself, and without an
+  idle notification nothing can trigger it automatically — locking is
+  whatever the user runs by hand.
 
 - **Foreign-toplevel management (window enumeration for external tools).**
   User request, 2026-09-13. `ext-workspace-v1` above covers workspaces;

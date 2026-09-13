@@ -64,7 +64,31 @@ impl State {
         });
     }
 
+    /// Runs a window-management action: the one path every *requested*
+    /// action goes through, whichever of the three asked for it (a
+    /// keybinding, an IPC `action` request, or an `ext-workspace-v1` client
+    /// activating a workspace).
+    ///
+    /// Which is why the session-lock gate is here as well as at each of
+    /// those: `Spawn` would put a new client's window on a locked screen,
+    /// `Quit` would tear the session down, `Close` would reach a window the
+    /// user cannot see, and every layout action would rearrange a session
+    /// behind the lock screen. Each caller still has its own check where it
+    /// needs to *report* the refusal (`ipc.rs` answers an error;
+    /// `input.rs::key` forwards the keystroke to the lock client instead of
+    /// swallowing it), and this is the backstop that makes a caller added
+    /// later safe by default rather than by remembering.
+    ///
+    /// Deliberately *not* a gate on the compositor's own window lifecycle:
+    /// `add_window`/`remove_window`/`refresh_window` drive the core directly
+    /// through `handle_event`, never through here, so a client mapping or
+    /// closing a window while locked is still tracked (it is simply not
+    /// drawn) and the session is intact when it unlocks.
     pub fn act(&mut self, action: Action) {
+        if self.session_lock.is_locked() {
+            tracing::debug!(?action, "ignoring an action: the session is locked");
+            return;
+        }
         for effect in self.world.handle_action(action) {
             match effect {
                 Effect::Close(id) => {
@@ -129,9 +153,14 @@ impl State {
         self.refresh_keyboard_focus();
     }
 
-    /// Hands the keyboard to whatever should have it: a layer surface if the
-    /// layer-shell policy says so (see `layer_shell.rs`), otherwise the
-    /// focused window's toplevel, otherwise nobody.
+    /// Hands the keyboard to whatever should have it: a lock surface if the
+    /// session is locked, otherwise a layer surface if the layer-shell policy
+    /// says so (see `layer_shell.rs`), otherwise the focused window's
+    /// toplevel, otherwise nobody.
+    ///
+    /// The lock branch is a replacement for the rest, not a first entry in
+    /// it: while the session is locked, "nobody" is a correct answer and a
+    /// window or a layer surface never is (see `session_lock.rs`).
     ///
     /// Safe to call as often as anything might have changed. Smithay's own
     /// `set_focus` compares against the current focus and does nothing when
@@ -146,14 +175,22 @@ impl State {
             return;
         };
         self.forget_dead_clicked_layer();
-        let layer = self.layer_keyboard_focus();
-        self.keyboard_on_layer = layer.is_some();
-        let surface = layer.or_else(|| {
-            self.focus
-                .and_then(|id| self.windows.get(&id))
-                .and_then(Window::toplevel)
-                .map(|toplevel| toplevel.wl_surface().clone())
-        });
+        let surface = if self.session_lock.is_locked() {
+            // Not a layer surface, whatever the layer map says -- so the
+            // gate `commit_layer_surface` reads must say so too, or a bar
+            // committing while locked would re-derive focus for nothing.
+            self.keyboard_on_layer = false;
+            self.lock_keyboard_focus()
+        } else {
+            let layer = self.layer_keyboard_focus();
+            self.keyboard_on_layer = layer.is_some();
+            layer.or_else(|| {
+                self.focus
+                    .and_then(|id| self.windows.get(&id))
+                    .and_then(Window::toplevel)
+                    .map(|toplevel| toplevel.wl_surface().clone())
+            })
+        };
         let serial = SERIAL_COUNTER.next_serial();
         keyboard.set_focus(self, surface, serial);
     }

@@ -18,6 +18,7 @@ mod layer_shell;
 mod nested;
 mod nested_dispatch;
 mod screenshot;
+mod session_lock;
 mod shell;
 mod state;
 mod tty;
