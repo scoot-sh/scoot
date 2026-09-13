@@ -2633,6 +2633,117 @@ review, and why.
   consumers (bars) need both to be useful together. No design work done
   yet.
 
+- **`ext-session-lock-v1` protocol support — the highest-priority protocol
+  gap, and directly tied to a real safety finding already on record in
+  this file (item 14's third review round, the `keyboard_interactivity`
+  discussion).** That review flagged that a layer-shell client trying to
+  act as a screen locker (`gtklock`, `swaylock-effects`, pre-1.7
+  `swaylock`) is inherently the wrong mechanism: it depends on
+  `exclusive` keyboard interactivity, a layer surface can be closed or
+  covered, and nothing stops another client from drawing over or under
+  it or a screenshot tool from capturing what's behind it. `ext-session-
+  lock-v1` exists specifically to replace that pattern: the compositor
+  itself blanks every output, refuses input to anything but the lock
+  client's own surfaces, and the client only regains normal behavior once
+  it explicitly unlocks — a fundamentally different trust model than "a
+  layer surface asked nicely for exclusive focus." User request,
+  2026-09-13. No design work done yet; check whether the pinned Smithay
+  rev has a helper for this one (unclear without checking — it's newer
+  than layer-shell but has seen wider compositor adoption, so it may or
+  may not be present the way `wlr_layer` was).
+
+- **`ext-idle-notify-v1` and `idle-inhibit-unstable-v1` — pairs naturally
+  with session-lock.** User request, 2026-09-13. `ext-idle-notify-v1` is
+  what lets an external tool (a `swayidle`-style daemon) learn "the user
+  has been idle N seconds" so it can dim the screen, lock it, or suspend
+  the machine — without it, `ext-session-lock-v1` above has no automatic
+  trigger, only a manual one. `idle-inhibit-unstable-v1` is the reverse:
+  lets a client (a video player, a presentation app) tell the compositor
+  not to consider the session idle while it's active. Neither has design
+  work done; natural to scope alongside session-lock since they're the
+  same feature area (idle/lock lifecycle), not before it.
+
+- **Foreign-toplevel management (window enumeration for external tools).**
+  User request, 2026-09-13. `ext-workspace-v1` above covers workspaces;
+  nothing today gives an external client (a taskbar, an alt-tab switcher
+  applet) the equivalent view of *windows* — only flexwm's own IPC
+  (`flexwm msg windows`) has that. Check which protocol is actually
+  current before implementing: `wlr-foreign-toplevel-management-unstable-v1`
+  is the older, widely-supported one; there may be a newer `ext-` successor
+  by the time this is picked up, and per `CLAUDE.md`'s standing preference
+  for the compositor-agnostic successor where one exists, that should win
+  if it does. No design work done.
+
+- **`xdg-activation-v1`.** User request, 2026-09-13. Lets one client
+  politely request that another be raised/focused — e.g. clicking a
+  notification should focus the app it's from, or a taskbar's "flash to
+  focus" behavior. Without it, the only way to change focus is flexwm's
+  own keybindings/IPC; a client has no standard way to ask. Real
+  daily-drivability gap, no design work done, presumably a small,
+  well-scoped protocol relative to layer-shell/workspace/session-lock.
+
+- **`cursor-shape-v1`.** User request, 2026-09-13. Lets a client (modern
+  GTK4/Qt6 toolkits increasingly prefer this) request a named cursor
+  shape (e.g. "text", "grab", "not-allowed") without needing to load an
+  xcursor theme client-side. Worth noting alongside the still-open
+  custom-cursor-theme-name backlog entry above: this protocol is a
+  parallel path to that problem, not a duplicate of it — a client using
+  `cursor-shape-v1` doesn't need flexwm to have loaded a real xcursor
+  theme at all, since the compositor can map the requested shape name to
+  its own procedurally-drawn cursor (as items 5/13 already do) rather
+  than needing theme assets. Might reduce how much the theme-name gap
+  above actually matters in practice, for clients that adopt this
+  protocol. No design work done.
+
+- **Smaller/general-client-compatibility protocol gaps, lower urgency,
+  bundled here as one entry since none has design work done and none is
+  blocking anything else on this list.** User request, 2026-09-13,
+  recorded so they don't get lost rather than because any is scheduled:
+  - **`wp_presentation`** (presentation-time) — precise frame-timing
+    feedback, mainly useful for smooth video/animation clients.
+  - **`wp_viewporter`** — lets a client crop/scale its own buffer;some
+    clients assume this exists.
+  - **`single-pixel-buffer-v1`** — a trivial protocol for a client to get
+    a solid-color 1x1 buffer without allocating a real one; some toolkits
+    use it for cheap fills.
+  - **`relative-pointer-unstable-v1`** — raw, unaccelerated pointer deltas;
+    pairs with the `pointer_constraints` support already present, and
+    games/3D apps expect both together, not just pointer lock/confinement
+    alone.
+  - **`fractional-scale-v1`** — crisp non-integer output scaling. Not
+    urgent while flexwm has exactly one output and no real scale
+    configuration story yet, but relevant once multi-output/HiDPI does.
+  - **`text-input-v3`/`input-method-v2`** — IME support for non-Latin
+    script input, and on-screen keyboards. A real gap for non-US-keyboard
+    daily use; unrelated to item 14's `flexwm msg type`/`msg key` work,
+    which is about agent-driven synthetic input, not live IME composition
+    from a real input method.
+
+- **Niche protocol gaps, lowest priority for this project's current scope,
+  bundled for the same reason as the entry above.** User request,
+  2026-09-13:
+  - **`tablet-v2`** — drawing-tablet (Wacom-style) input support.
+  - **`wlr-screencopy-unstable-v1`/a newer `ext-image-copy-capture-v1`** —
+    lets third-party tools (`grim`, `wf-recorder`, screen-sharing in video
+    conferencing apps) capture the screen directly, rather than going
+    through flexwm's own bespoke `flexwm msg screenshot` IPC action. Worth
+    revisiting against `CLAUDE.md`'s "prefer the standard protocol over a
+    bespoke one" rule at some point — flexwm's own screenshot action
+    exists because computer-use automation needs it under flexwm's own
+    control/auth model, but that doesn't mean third-party tools shouldn't
+    also have the standard path available to them.
+  - **`wlr-output-management-unstable-v1`** (or a newer successor) — lets
+    tools like `wlr-randr`/`kanshi` query and reconfigure output mode,
+    position and scale. Moot while flexwm has exactly one `Output` and no
+    real multi-monitor support; relevant once that lands.
+  - **`security-context-v1`** — lets a compositor scope what a sandboxed
+    client (e.g. a Flatpak) is allowed to do. Relevant for hardened setups,
+    not a natural fit with this project's current minimalist scope.
+  - **`content-type-v1`, `alpha-modifier-v1`** — minor rendering hints (a
+    client declaring "I'm showing video/a game," or setting whole-surface
+    opacity without compositing it itself). Low value on a CPU/pixman-only
+    renderer with no adaptive-sync or GPU compositing story.
+
 **From `flexwm-reviewer`'s pass on PR #13 (item 8, client cursor surface
 rendering), all low priority, none blocking:**
 
