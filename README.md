@@ -114,8 +114,8 @@ things worth knowing:
   key for `é` in this layout``). Dead keys and compose sequences aren't
   driven, so a character that needs one counts as "no key" too — which is
   layout-dependent and worth checking before assuming ASCII is safe: `^`
-  and `` ` `` are dead on `de` and `es`, and `~` is dead as well on `pt`,
-  `se`, `no` and `dk`. A character that sits on a level the layout only
+  and `` ` `` are dead on `de`, `es`, `pt`, `se`, `no` and `dk`, and on the
+  last four `~` is dead too. A character that sits on a level the layout only
   reaches through a *locking or latching* modifier gets its own, different
   message (``[character] needs a modifier this layout only locks or
   latches``) — flexwm will not press Caps Lock to type a capital, since

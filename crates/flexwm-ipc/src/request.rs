@@ -49,11 +49,17 @@ pub enum Request {
         dx: f64,
         dy: f64,
     },
-    /// Press and release a key combination.
+    /// Press and release a key combination, holding exactly the modifiers it
+    /// names and no others. The key is named as it is with *nothing* held --
+    /// `shift+1`, not `exclam` -- because a compositor holding only what was
+    /// asked for would otherwise press a key that types a different
+    /// character. A name the active layout only carries above its unmodified
+    /// level is an error rather than a guess. Use [`Request::Type`] for text.
     Key {
         keys: KeyCombo,
     },
-    /// Type text as a sequence of key presses.
+    /// Type text as a sequence of key presses, with each character's own
+    /// modifiers worked out from the active layout.
     Type {
         text: String,
     },
