@@ -1,5 +1,5 @@
 {
-  description = "flexwm: a scrolling-tiling Wayland window manager that runs without a GPU";
+  description = "flexwm: a scrolling-tiling Wayland compositor that runs without a GPU";
 
   # Pinned to the same nixpkgs revision as vm/, so the dev shell and the VM
   # agree on every library and nothing is downloaded twice.
@@ -17,6 +17,89 @@
       forEach = f: nixpkgs.lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
     in
     {
+      # `nix build` / `nix run`, for getting the binary without a dev shell.
+      # On Linux this is the whole compositor; on Darwin the compositor is
+      # cfg'd out of the crate and what builds is `flexwm msg`, the client
+      # that drives a compositor running elsewhere (a VM) over its socket.
+      # `flexwm --headless` there exits with a message saying exactly that,
+      # so the same package is honest on both -- see README's Building.
+      packages = forEach (pkgs: {
+        default = pkgs.rustPlatform.buildRustPackage {
+          pname = "flexwm";
+          # Read from where the version already lives, so the two can't drift.
+          version = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).workspace.package.version;
+          src = self;
+
+          cargoLock = {
+            lockFile = ./Cargo.lock;
+            # Smithay is a git dependency pinned by rev (see
+            # crates/flexwm/Cargo.toml), and a git source carries no
+            # crates.io checksum to vendor against, so its tree hash has to
+            # be recorded here. Bumping that rev changes the hash and fails
+            # the build loudly, printing the one it got -- it cannot drift
+            # out of sync quietly. Nothing else in Cargo.lock comes from git.
+            outputHashes = {
+              "smithay-0.7.0" = "sha256-fptVzfBHApVohO2yvTxbsXGxKHiJ5Brk84x4YkHtp6k=";
+            };
+          };
+
+          nativeBuildInputs = [ pkgs.pkg-config ];
+          # The same list the dev shell uses, Linux-only for the same reason:
+          # nothing outside the compositor links against them. The dev shell's
+          # LIBRARY_PATH hook below needs no counterpart here -- in a
+          # derivation the stdenv cc wrapper puts every buildInput on the link
+          # path through NIX_LDFLAGS, which is what those -sys crates' bare
+          # -lfoo resolves against. Checked by building, not by assuming.
+          buildInputs = pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux (
+            import ./vm/compositor-deps.nix pkgs
+          );
+
+          # The workspace's release profile sets `strip = true`, but nixpkgs'
+          # cargoBuildHook exports CARGO_PROFILE_RELEASE_STRIP=false to hand
+          # stripping to stdenv -- which by default takes debug info only and
+          # leaves the symbol table, so the binary would ship 1,224,312 bytes
+          # of `.symtab`/`.strtab` the profile asks it not to (4,843,776
+          # against 3,619,464, measured here). This puts the profile back.
+          # `cargo-auditable`'s non-allocated `.dep-v0` section survives
+          # `strip -s`, checked on the built binary, so the dependency
+          # manifest `nix build` embeds is not lost with it.
+          stripAllList = [ "bin" ];
+
+          # No test run here, deliberately, for two measured reasons. This
+          # workspace's release profile sets `panic = "abort"`, which cargo
+          # ignores for test targets (a test harness has to unwind), so
+          # `cargo test --release` rebuilds the whole dependency tree a
+          # second time: on Darwin, where that tree is smallest, 10 crates
+          # recompile after a complete `cargo build --release` against 3 (the
+          # workspace's own) with `panic = "abort"` removed -- and on Linux
+          # the tree it would rebuild includes Smithay. On top of that the
+          # compositor's tests bind a real wayland socket and so need a
+          # writable `$XDG_RUNTIME_DIR`, which the build sandbox has no
+          # reason to provide. `nix build` is the path to a binary; `cargo
+          # test` in `nix develop` is where the suite runs.
+          doCheck = false;
+
+          meta = {
+            description = "A scrolling-tiling Wayland compositor that runs without a GPU";
+            homepage = "https://github.com/yackey-labs/flexwm";
+            license = pkgs.lib.licenses.mit;
+            mainProgram = "flexwm";
+            platforms = pkgs.lib.platforms.linux ++ pkgs.lib.platforms.darwin;
+          };
+        };
+      });
+
+      # So `nix run . -- --headless -- foot` and `nix run . -- msg windows`
+      # work. `flexwm` is the package's mainProgram, so `nix run` would find
+      # it either way; naming it here keeps that explicit rather than
+      # implied.
+      apps = forEach (pkgs: {
+        default = {
+          type = "app";
+          program = pkgs.lib.getExe self.packages.${pkgs.stdenv.hostPlatform.system}.default;
+        };
+      });
+
       devShells = forEach (pkgs: {
         default = pkgs.mkShell {
           nativeBuildInputs = [

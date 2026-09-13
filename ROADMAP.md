@@ -2309,6 +2309,55 @@ review, and why.
     map of the corner shows the 16x16 arrow). Identical on the merge base
     `e2c7971`, so not a regression — see the Backlog entry below.
 
+16. ~~`nix build` / `nix run`: the flake builds the binary, not just a dev
+    shell~~ — DONE, PR #26. Asked for directly by the user, who wants to
+    clone this onto a NixOS machine and build it from the flake. The flake
+    had exactly one output that produced anything — `devShells` — so getting
+    a binary meant `nix develop` plus `cargo build` by hand.
+
+    `packages.<system>.default` is a real `rustPlatform.buildRustPackage`
+    derivation (no shelling out to cargo inside a shell), `apps.<system>.
+    default` points at its `flexwm` binary. Still one flake input; `cargoLock.
+    lockFile` needs no new machinery for a workspace, and `nativeBuildInputs`/
+    `buildInputs` reuse `vm/compositor-deps.nix` exactly as the dev shell
+    already does, so the package and the shell cannot drift apart.
+
+    **Three decisions worth the words:** (a) *the same package on macOS, not
+    a skipped output.* The crate already cfg's the compositor out on
+    non-Linux and `flexwm --headless` there exits with "the compositor only
+    runs on Linux", so the Darwin build is the `flexwm msg` client — exactly
+    what the dev shell's own Linux/Darwin split already assumes, and what
+    the README documents driving a VM with from a Mac. (b) *`doCheck =
+    false`.* The release profile sets `panic = "abort"`, which cargo ignores
+    for test targets, so `cargo test --release` rebuilds the whole dependency
+    tree unwinding — measured on Darwin (smallest tree): 10 crates recompile
+    after a complete `cargo build --release`, against 3 with `panic = "abort"`
+    removed; on Linux that second build would include Smithay. The
+    compositor's tests also need a writable `$XDG_RUNTIME_DIR` the sandbox
+    has no reason to provide. (c) *Smithay's git rev needs an
+    `outputHashes` entry* (a git source carries no crates.io checksum); a rev
+    bump fails the build loudly with the hash it got, so it can't drift.
+
+    No `LIBRARY_PATH` workaround is needed in the derivation, unlike the dev
+    shell's `shellHook`: the `-sys` crates' bare `-lfoo` resolves through
+    `NIX_LDFLAGS`, which the stdenv cc wrapper sets from `buildInputs`.
+
+    **Found while bug-bashing: the binary came out 1,224,312 bytes bigger
+    than this workspace's release profile asks for** — 4,843,776 against
+    3,619,464.
+    Cause, from nixpkgs' own source: `cargoBuildHook` exports
+    `CARGO_PROFILE_RELEASE_STRIP=false` ("let stdenv handle stripping"), and
+    stdenv's default takes debug info only, leaving `.symtab`/`.strtab` —
+    silently overriding the workspace profile's `strip = true`. Fixed with
+    `stripAllList = [ "bin" ]`. Measured, not assumed: `strip --strip-all` on
+    the unfixed binary reproduced exactly 3,619,464 bytes, kept
+    `cargo-auditable`'s non-allocated `.dep-v0` section (1,871 bytes, the
+    dependency manifest `nix build` embeds by default), and still ran.
+    Verified by building and running on the dev VM, not by inspection —
+    `scripts/smoke-test.sh` passes end to end against the Nix-built binary.
+    `flake.lock` is untouched (no new input), and the flake's `description`
+    lost its last "window manager" while it was open.
+
 ## Backlog (unordered — pick up whenever it fits)
 
 - **~~Open question: does `--tty` over SSH on the dev VM actually hold real
@@ -3621,3 +3670,63 @@ data-loss/RCE in what was checked.
   character position, and the fix is now a short reach: have `resolve_combo`
   go through `modifiers::ModifierKeys` (or equivalent) the same way
   `type_text` already does, instead of a hard-coded keysym table.
+
+- **The flake's `systems` list still names `x86_64-darwin`, which the pinned
+  nixpkgs refuses to evaluate at all (LOW, pre-existing).** Found while
+  adding item 16's `packages` output: `nix flake check --all-systems` fails
+  on `packages.x86_64-darwin.default` — and equally on
+  `devShells.x86_64-darwin.default`, i.e. it predates the new outputs rather
+  than being introduced by them. Verified against `main` itself, not just by
+  reading: `nix eval
+  'git+file:///Users/steveyackey/code/flexwm?ref=main#devShells.x86_64-darwin.default.name'`
+  throws out of `nixpkgs.legacyPackages.x86_64-darwin`, nixpkgs having
+  dropped that platform after the 26.05 branch. Plain `nix flake check`
+  (current system only) passes, on both macOS and the dev VM. The fix is a
+  one-line choice — drop `x86_64-darwin` from `systems`, or repin nixpkgs to
+  a branch that still carries it — and it only matters if an Intel Mac ever
+  has to build this; left alone to keep item 16 to its own scope.
+
+- **The Nix package's `src = self` invalidates the whole build on any
+  doc-only edit (LOW, non-blocking).** Found by `flexwm-reviewer` reviewing
+  item 16: `src` is the whole flake tree — `CLAUDE.md`, `README.md`,
+  `ROADMAP.md`, `vm/`, `scripts/` included — none of which the compiler
+  reads, but a change to any of them still busts the derivation's cache and
+  forces a full ~3.5 minute rebuild. Demonstrated directly: appending one
+  newline to `README.md` changed the output path entirely. Since this repo
+  edits `ROADMAP.md` on essentially every PR, that's a real recurring cost
+  once this lands. Fix direction: a `lib.fileset` filter scoped to
+  `Cargo.toml`/`Cargo.lock`/`crates/` — but first confirm nothing the build
+  actually needs lives outside that set (a `build.rs`, an `include_str!` of
+  a root-level file, a license file read at build time). Two reads were
+  checked and are safe (`vm/compositor-deps.nix`'s import, and
+  `builtins.readFile ./Cargo.toml` for the version string, both of which
+  resolve against the flake tree rather than `src`), but that check should
+  be redone against whatever the tree looks like when this is picked up,
+  not assumed still true.
+
+- **`scripts/smoke-test.sh` hardcodes some of its temp paths, so two
+  concurrent runs (e.g. two agents verifying different branches on the same
+  VM at once) can collide (LOW, pre-existing).** Found by `flexwm-reviewer`
+  reviewing item 16, whose own PR body overstated its run's isolation: the
+  `SOCKET`/`LOG` environment overrides the script does honor don't cover
+  every path it uses — `/tmp/flexwm-smoke-config.log`/`-config.sock` and
+  `-broken.*` are hardcoded (`scripts/smoke-test.sh` around lines 299-300
+  and 392-393) regardless of what `SOCKET`/`LOG` are set to. Low priority —
+  this session's own practice of using distinctly-named scratch scripts and
+  checking for other active agents before running concurrent hardware
+  verification has avoided hitting it so far — but worth closing so two
+  agents' hardware bug-bashes can't silently corrupt each other's evidence
+  if they ever do overlap. Fix direction: derive every temp path in the
+  script from the same overridable prefix, not just the two that happen to
+  have env vars today.
+
+- **`flake.nix`'s top-level `description` and its package's
+  `meta.description` are two independently hand-copied strings that can
+  drift (NIT).** Found by `flexwm-reviewer` reviewing item 16. Also, on
+  Darwin, `meta.description` still advertises "a scrolling-tiling Wayland
+  compositor that runs without a GPU" when the Darwin build is actually
+  just the `flexwm msg` client (`README.md` explains this correctly, but
+  `nix search`/`nix flake show` metadata would not). Cheap to fix whenever
+  `flake.nix` is next touched for another reason (e.g. the `src` filesetting
+  above) — bundling it there avoids paying for a second full evaluation/
+  rebuild cycle just for a string.
