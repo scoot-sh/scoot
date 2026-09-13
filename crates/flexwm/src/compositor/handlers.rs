@@ -58,6 +58,14 @@ impl CompositorHandler for State {
                 }
                 send_initial_configure(self, &root);
                 self.observe_frame(id);
+            } else {
+                // Not a window, so it may be a layer surface: its first
+                // commit is what earns it a configure, and any later one may
+                // have changed the area it reserves. Checked only after
+                // `id_of` fails, so an ordinary window's commit never pays
+                // for the layer-map lookup. `commit_layer_surface` reports
+                // whether it was one; nothing else needs to know yet.
+                let _ = self.commit_layer_surface(&root);
             }
         }
 

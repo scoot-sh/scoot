@@ -37,6 +37,8 @@ the config file can override). Also done: vim-style
 keybindings, a TOML config file (`--config`, `[layout]`/`[appearance]`/
 `[binds]`, see Configuration below), window decorations (a niri-style focus
 ring, background color, server-side `zxdg_decoration_manager_v1`), and a
+`wlr-layer-shell-unstable-v1`, so bars, docks, wallpapers and notification
+daemons work (see Layer-shell clients below), and a
 hardened control socket (owner-only
 permissions, a same-user peer check, a 1 MiB cap on a single request, and
 screenshots rate-limited to one per connection per frame) whose connections
@@ -107,6 +109,51 @@ flexwm's behalf, and flexwm simply isn't permitted to call `SET_MASTER`
 itself on a file another process opened. `vm/README.md`'s troubleshooting
 section has the kernel-level reason and two commands that check whether
 master really is held, rather than assuming the log line alone settles it.
+
+## Layer-shell clients (bars, wallpapers, launchers)
+
+flexwm implements `wlr-layer-shell-unstable-v1` (version 5), the protocol
+every panel, dock, wallpaper setter and notification daemon in the
+wlroots-adjacent ecosystem uses — `waybar`, `swaybg`, `mako`, `wofi`,
+`fuzzel`, `yambar` and friends. Start one the same way you start anything
+else inside the session:
+
+```sh
+flexwm --tty -- foot              # ...then, in a shell inside the session:
+swaybg -c '#123456' &             # a wallpaper, on the background layer
+waybar &                          # a bar, on the top layer
+```
+
+What works:
+
+- **All four layers.** `background` and `bottom` draw behind windows (and
+  behind the focus ring, so a wallpaper never hides it); `top` and `overlay`
+  draw in front of them.
+- **Anchors, margins and sizing**, including the protocol's rules for a
+  surface anchored to opposite edges or given a zero dimension.
+- **Exclusive zones.** A bar that reserves its own height shrinks the area
+  windows are tiled within, so nothing is ever laid out underneath it — and
+  gives that space back the moment it exits or its client dies. Several
+  surfaces reserving on the same edge stack. `-1` ("don't push me around")
+  reserves nothing, which is what a full-screen wallpaper wants.
+- **Pointer input.** A click, scroll or motion over a layer surface goes to
+  that surface, not to whatever window is behind it, and clicking a bar does
+  not move window focus.
+
+What doesn't, yet:
+
+- **Keyboard focus.** `keyboard_interactivity` is accepted and currently
+  ignored: keys always go to the focused window, so a launcher (`wofi`,
+  `fuzzel`, `rofi`) draws and can be clicked, but cannot be typed into. A bar,
+  wallpaper or notification daemon doesn't need it. See `ROADMAP.md`'s backlog
+  entry for the focus model being implemented next.
+- **Popups from a layer surface** (a bar's own dropdown menu or tooltip) are
+  not tracked yet, for a reason that predates this: flexwm doesn't send the
+  initial configure for *any* `xdg_popup` yet, so no popup maps, from a window
+  or a layer surface. Also in the backlog.
+- **`flexwm msg outputs`** reports each output's *full* rectangle. The
+  reserved area a bar takes isn't exposed over IPC yet; an agent asking "how
+  big is the screen" gets the screen.
 
 ## Configuration
 

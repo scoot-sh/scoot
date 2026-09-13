@@ -58,7 +58,11 @@ impl World {
         placements: &mut Vec<Placement>,
     ) {
         let gap = self.config.gap;
-        let usable = output.area.inset(gap);
+        // The output minus whatever the platform reserved (a bar's exclusive
+        // zone), then minus the layout gap -- never `output.area`, which is
+        // the whole screen and includes the reserved strip. See
+        // `tree::Output::usable`.
+        let usable = output.usable.inset(gap);
         let widths = self.column_widths(ws, usable.w);
         let (starts, _) = layout::starts(&widths, gap);
         for ((column, start), width) in ws.columns.iter().zip(starts).zip(widths) {
@@ -114,7 +118,7 @@ impl World {
         let Some(output) = self.outputs.get(o) else {
             return;
         };
-        let available = output.area.inset(self.config.gap).w;
+        let available = output.usable.inset(self.config.gap).w;
         let ws = output.active_workspace();
         let view = if ws.is_empty() {
             0

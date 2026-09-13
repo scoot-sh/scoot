@@ -76,8 +76,22 @@ impl World {
         all
     }
 
+    /// Every output and its *whole* area, reserved edges included -- this is
+    /// the screen as a platform or an agent describes it. What windows are
+    /// actually laid out within is [`World::usable_areas`].
     pub fn outputs(&self) -> Vec<(OutputId, Rect)> {
         self.outputs.iter().map(|o| (o.id, o.area)).collect()
+    }
+
+    /// Every output's usable area -- its whole area minus whatever the
+    /// platform reserved at the edges (see
+    /// [`Event::OutputUsableAreaChanged`](crate::Event::OutputUsableAreaChanged))
+    /// -- in the same order as [`World::outputs`].
+    ///
+    /// This is the bound a shell should measure a window against; identical
+    /// to `outputs`'s rectangles until something reserves space.
+    pub fn usable_areas(&self) -> Vec<Rect> {
+        self.outputs.iter().map(|o| o.usable).collect()
     }
 
     fn output_index(&self, id: OutputId) -> Option<usize> {

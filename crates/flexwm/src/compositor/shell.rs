@@ -137,7 +137,7 @@ impl State {
         // runs it), so it is in `0..=Config::MAX_GAP` and `Rect::inset`'s
         // `2 * gap` cannot overflow.
         let limit = hint_limit(
-            self.world.outputs().into_iter().map(|(_, area)| area),
+            self.world.usable_areas().into_iter(),
             self.world.config().gap,
         );
         with_states(toplevel.wl_surface(), |states| {
@@ -162,8 +162,9 @@ impl State {
 }
 
 /// The largest minimum size a client's own `min_size` may declare, per axis:
-/// the usable area (an output's area inset by the layout gap) of the largest
-/// output the core knows about.
+/// the usable area (an output's area, minus anything a layer-shell surface
+/// reserved, inset by the layout gap) of the largest output the core knows
+/// about.
 ///
 /// `xdg_toplevel.set_min_size` takes two raw, unvalidated `i32`s -- the
 /// pinned Smithay rev stores them verbatim in `SurfaceCachedState`

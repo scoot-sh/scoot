@@ -22,6 +22,7 @@ use smithay::utils::{Logical, Point};
 use smithay::wayland::compositor::{CompositorClientState, CompositorState};
 use smithay::wayland::output::OutputManagerState;
 use smithay::wayland::selection::data_device::DataDeviceState;
+use smithay::wayland::shell::wlr_layer::WlrLayerShellState;
 use smithay::wayland::shell::xdg::XdgShellState;
 use smithay::wayland::shell::xdg::decoration::XdgDecorationState;
 use smithay::wayland::shm::ShmState;
@@ -32,6 +33,7 @@ use super::decorations::{Appearance, Decorations};
 use super::headless::Backend;
 use super::ipc::PendingIdle;
 use super::keybindings::Keybindings;
+use super::layer_shell;
 use super::nested::Host;
 use super::tty::Tty;
 
@@ -91,6 +93,12 @@ pub struct State {
 
     pub compositor_state: CompositorState,
     pub xdg_shell_state: XdgShellState,
+    /// `zwlr_layer_shell_v1`: bars, docks, wallpapers and notification
+    /// daemons. Unlike the two `#[allow(dead_code)]` states below this one is
+    /// read again -- `WlrLayerShellHandler::shell_state` (see
+    /// `layer_shell.rs`) routes every layer-shell request through it. The
+    /// surfaces themselves live in Smithay's per-output `LayerMap`, not here.
+    pub layer_shell_state: WlrLayerShellState,
     /// Held only to keep the `zxdg_decoration_manager_v1` global alive --
     /// like `output_manager_state`, `XdgDecorationHandler` (see
     /// `handlers.rs`) has no `&mut XdgDecorationState` accessor to route
@@ -150,6 +158,7 @@ impl State {
         let compositor_state = CompositorState::new::<Self>(&dh);
         let xdg_shell_state = XdgShellState::new::<Self>(&dh);
         let xdg_decoration_state = XdgDecorationState::new::<Self>(&dh);
+        let layer_shell_state = WlrLayerShellState::new::<Self>(&dh);
         let shm_state = ShmState::new::<Self>(&dh, vec![]);
         let output_manager_state = OutputManagerState::new_with_xdg_output::<Self>(&dh);
         let data_device_state = DataDeviceState::new::<Self>(&dh);
@@ -191,6 +200,7 @@ impl State {
             cursor,
             compositor_state,
             xdg_shell_state,
+            layer_shell_state,
             xdg_decoration_state,
             shm_state,
             output_manager_state,
@@ -300,7 +310,27 @@ impl State {
             .map(|(&id, _)| id)
     }
 
+    /// What the pointer is over: the top-most surface at `pos` and where that
+    /// surface sits, in the same global coordinates the pointer moves in.
+    ///
+    /// The search order is the render order read from the front: a bar or an
+    /// overlay wins over any window, and a wallpaper loses to every one of
+    /// them. A layer surface that draws nothing at `pos` (an unmapped one, or
+    /// a transparent region of a mapped one) falls through to whatever is
+    /// behind it rather than swallowing the pointer, because
+    /// `layer_surface_under` asks the surface tree rather than the layer's
+    /// bounding box.
     pub fn surface_under(
+        &self,
+        pos: Point<f64, Logical>,
+    ) -> Option<(WlSurface, Point<f64, Logical>)> {
+        self.layer_surface_under(&layer_shell::ABOVE_WINDOWS, pos)
+            .or_else(|| self.window_under(pos))
+            .or_else(|| self.layer_surface_under(&layer_shell::BELOW_WINDOWS, pos))
+    }
+
+    /// The window surface at `pos`, ignoring layer surfaces entirely.
+    pub(super) fn window_under(
         &self,
         pos: Point<f64, Logical>,
     ) -> Option<(WlSurface, Point<f64, Logical>)> {

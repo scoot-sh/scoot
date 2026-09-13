@@ -9,6 +9,7 @@ use smithay::utils::{Logical, Point, SERIAL_COUNTER};
 
 use super::State;
 use super::keybindings::Bound;
+use super::layer_shell;
 use super::tty::VtSwitchOutcome;
 
 // Linux input event codes, which is what Wayland carries.
@@ -305,11 +306,26 @@ impl State {
     }
 
     /// Clicking focuses what is under the pointer, which the core then tracks.
+    ///
+    /// A click that landed on a layer-shell surface drawn *in front of*
+    /// windows -- a bar, a launcher, a notification -- deliberately changes
+    /// nothing: the window under a bar is not what the user clicked, and
+    /// activating it would both move the focus ring and steal keyboard focus
+    /// from wherever it was for a click that never reached a window at all.
+    /// The layer surface itself still gets the click; it just cannot take
+    /// keyboard focus yet (see `layer_shell.rs`'s module doc).
     fn focus_under_pointer(&mut self) {
         let Some(pointer) = self.seat.get_pointer() else {
             return;
         };
-        let Some((window, _)) = self.space.element_under(pointer.current_location()) else {
+        let location = pointer.current_location();
+        if self
+            .layer_surface_under(&layer_shell::ABOVE_WINDOWS, location)
+            .is_some()
+        {
+            return;
+        }
+        let Some((window, _)) = self.space.element_under(location) else {
             return;
         };
         let window = window.clone();

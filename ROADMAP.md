@@ -1565,6 +1565,134 @@ review, and why.
     the README's example `config.toml` — now including the two new fields —
     loaded by a real compositor with no warning or error in its log.
 
+14. ~~`wlr-layer-shell-unstable-v1`: bars, docks, wallpapers and notification
+    daemons~~ — DONE, PR #22. Picked up from the Backlog (entry struck
+    below), explicitly ahead of item 6 at the user's request: before this,
+    *no* panel, launcher or notification daemon could attach a surface to
+    flexwm at all, which is the single biggest gap between "works" and
+    "daily-drivable."
+
+    **Scope, and what was deliberately deferred.** This PR covers the
+    protocol (global at version 5, surface lifecycle, configure/ack, close),
+    all four layers rendering in the right order, anchors/margins/sizing,
+    exclusive zones shrinking the tiling area, and pointer input. It does
+    **not** implement `keyboard_interactivity` — see the backlog entry below
+    for the model to build, which is written out rather than left as "TODO
+    keyboard". The split is the opposite of the one suggested when this was
+    scoped (zone first, keyboard later, rather than protocol first, zone
+    later), for a measured reason: the zone is nearly free because Smithay's
+    `LayerMap` already computes it, while keyboard focus means an override
+    inside `shell.rs`'s `set_focus`, the compositor's most safety-critical
+    path. Bars, docks, wallpapers and notification daemons are fully usable
+    today; a launcher draws and clicks but cannot yet be typed into.
+
+    **Smithay does the geometry, flexwm does the placement.**
+    `smithay::desktop::LayerMap` (one per `Output`) already implements the
+    protocol's anchor/margin/exclusive-zone rules, including the `-1`
+    "don't push me around" sentinel and the implied exclusive edge for a
+    surface anchored to three sides, and exposes `non_exclusive_zone()`.
+    `compositor/layer_shell.rs` owns the rest: when to re-arrange (creation,
+    every commit, output resize, teardown), where the results sit in the
+    render stack, and how the zone reaches the core.
+
+    **The render stack changed shape, and had to.** `headless.rs`'s
+    `render()` used `space::space_render_elements`, which gathers layer
+    surfaces itself in one fixed order: upper layers, windows, lower layers.
+    That cannot express where flexwm's focus ring goes — *between* windows
+    and the background layer — so a full-screen wallpaper would have been
+    drawn on top of the ring, hiding it entirely for anyone running `swaybg`.
+    `render()` now calls `Space::render_elements_for_region` (windows only,
+    by construction) and gathers the layers itself around the ring, giving
+    front-to-back: cursor, overlay, top, windows, ring, bottom, background.
+    `Elements`'s `Space` variant became `Surface` — windows and layer
+    surfaces are the same element type, so a variant each would need two
+    `From<WaylandSurfaceRenderElement<_>>` impls, which cannot coexist; what
+    orders them is insertion order, which a variant could not have expressed
+    anyway. The `Err` arm that logged "could not gather window render
+    elements" is gone with the call: at this rev `space_render_elements`
+    returns `Ok` unconditionally, so it was dead.
+
+    Layer surfaces also get frame callbacks (`LayerSurface::send_frame` for
+    every mapped one, per frame) — without them a bar's clock freezes on the
+    second it first drew, the same starvation item 8 fixed for cursor
+    surfaces — and `LayerMap::cleanup` runs in the same pass as a second line
+    of defence behind `layer_destroyed`.
+
+    **The core's change is one field, and its two meanings are kept apart.**
+    `flexwm_core`'s `tree::Output` gains `usable: Rect` beside `area: Rect`.
+    `area` stays the whole screen — it is what `World::outputs()` and
+    `flexwm msg outputs` report, and reporting a bar-shrunken rectangle there
+    would have told an agent the display is smaller than it is. `usable` is
+    what *every* layout read uses (`place_workspace`, `fix_view`,
+    `learn_from_frame`, and `shell.rs`'s `hint_limit` via the new
+    `World::usable_areas()`). The new `Event::OutputUsableAreaChanged`
+    intersects with `area` on the way in, and an area change re-clamps rather
+    than resets, so `usable` can never describe space the output doesn't
+    have. One subtlety found by the randomized invariant test rather than by
+    inspection: `Rect::intersection` reports a *non*-overlap at the later of
+    the two starting corners, which is a client's number — a layer surface
+    whose exclusive zone and margins put it at `i32::MAX` left an empty
+    usable area *there*, and `Rect::inset`'s `x + by` then overflowed on the
+    next `arrange`. An empty axis is now pinned back to the output's origin
+    (`tree::clamp_usable`).
+
+    **A client-triggerable compositor panic, found by these tests and fixed
+    here.** `zwlr_layer_surface_v1.set_size` takes two **`uint`**s, and the
+    pinned Smithay rev converts them with a bare `as i32`
+    (`wlr_layer/handlers.rs:189-193`) into a `Size` whose constructor holds
+    `debug_assert!(w.non_negative() && h.non_negative())`. So
+    `set_size(u32::MAX, u32::MAX)` — one request, any client, no privilege,
+    no buffer — **panics a debug build of the compositor**, taking every
+    connected client down with it: the same family as item 7's
+    `wl_shm_pool.resize(0)`, and it would have shipped *with* this feature
+    rather than despite it. `dispatch.rs` gained a third guard,
+    `reject_unrepresentable_layer_size`, in the same monomorphization-folded
+    shape as the two shm ones; it posts the protocol's own `invalid_size` and
+    refuses rather than clamping (a clamp leaves client and compositor
+    disagreeing about a size the client is about to draw at). In release the
+    assertion compiles out and the negative size instead reaches
+    `LayerMap::arrange`, which saturates its way to a nonsense geometry —
+    worth refusing either way. Found only because the tests are debug builds
+    and one of them sent `u32::MAX`; not by reading the handler.
+
+    **Tests**: 15 new integration tests (`layer_shell/tests.rs`) driving a
+    real `wayland-client` connection — binding `zwlr_layer_shell_v1` and
+    `xdg_wm_base` the way `waybar` does — through a real `State` with a real
+    headless backend, asserting on **read-back pixels** and on the core's own
+    arrangement, not on enum variants: the ordering bug above looks correct
+    at the type level. Covered: no layer surfaces at all (today's behavior,
+    unchanged); top-layer-over-window and background-under-ring ordering;
+    exclusive zone moving windows (rect *and* pixels); two bars stacking on
+    one edge; `-1` reserving nothing; a surface that never commits reserving
+    nothing; the deliberate "reserved from the initial commit, not the first
+    buffer" behavior; destroy and client-disconnect both giving the space
+    back; `i32::MAX` geometry not overflowing anything; the `u32::MAX` size
+    refusal leaving the compositor serving; pointer hit-testing above and
+    below windows; clicking a bar not refocusing the window behind it (with
+    the control half — clicking the window *does* focus it); and an output
+    resize re-arranging both bar and zone. 8 new `flexwm-core` tests plus
+    `Event::OutputUsableAreaChanged` (including degenerate and `i32`-extreme
+    rectangles) added to the randomized invariant test, which now also
+    asserts `usable ⊆ area` after every step.
+
+    The ordering test was confirmed non-vacuous against a negative control:
+    moving the background-layer elements to the other side of the ring (i.e.
+    back to what `space_render_elements` would have produced) fails it with
+    "the focus ring over the wallpaper: wrong pixel at (9, 12)".
+
+    **A harness bug worth recording, because it failed intermittently rather
+    than immediately**: the test client kept one `pending_ack` slot for all
+    its `xdg_surface`s, so with two windows mapped the compositor's
+    re-configure of the *first* could be acked against the second, and
+    Smithay rightly answered "must ack the initial configure before attaching
+    buffer" and killed the client — roughly one run in three. Configures are
+    now tracked per surface, and the fixture reports a dead client's own
+    error instead of a ten-second timeout (which is what hid it at first).
+    `Fixture::drop` also no longer joins the client thread while unwinding: a
+    compositor-side panic leaves that thread blocked on an answer that will
+    never come, which turned the `set_size` crash above into a hang with no
+    diagnosis.
+
 ## Backlog (unordered — pick up whenever it fits)
 
 - **~~Open question: does `--tty` over SSH on the dev VM actually hold real
@@ -1794,22 +1922,76 @@ review, and why.
   project's other clean-startup-error paths (e.g. `ipc::init`'s "no socket
   path" error).
 
-- **`wlr-layer-shell-unstable-v1` protocol support.** Needed for *any*
-  bar/panel/launcher/notification-daemon (waybar, wofi, mako, rofi, etc.)
-  to attach a surface at all — flexwm implements none of it today (checked:
-  zero references anywhere in `crates/flexwm/src`). A real gap for a
-  niri-like compositor, where this whole ecosystem is part of the expected
-  workflow. The pinned Smithay rev already has a full helper module for
-  this (`smithay::wayland::shell::wlr_layer`, mirroring xdg-shell's own
-  shape), so the protocol plumbing itself isn't starting from scratch.
-  What's un-scoped: layer surfaces (top/bottom/background/overlay) need
-  their own place in the render stack (`headless.rs`'s `Elements` enum
-  currently has `Cursor`/`Space`/`Decoration`; this needs a fourth), and an
-  "exclusive zone" a layer surface reserves (e.g. a bar's height) has to
-  shrink the usable area `flexwm-core`'s workspace/column arrangement
-  places windows within — that's new plumbing between the Wayland-facing
-  layer-shell state and `flexwm-core`'s platform-independent output model,
-  not just a protocol handler. No design work done yet.
+- **~~`wlr-layer-shell-unstable-v1` protocol support~~ — DONE as item 14**,
+  except for keyboard interactivity and layer popups, which are the two
+  entries below. The original entry's guess about the shape turned out half
+  right: the `Elements` enum did need changing, but into *one* `Surface`
+  variant rather than a fourth, and the exclusive-zone plumbing into
+  `flexwm-core` was one new field plus one new event, not a restructure.
+
+- **Layer-shell keyboard interactivity (`keyboard_interactivity`) — the one
+  piece item 14 deferred.** Today a layer surface never takes keyboard
+  focus: the mode is parsed by Smithay and ignored by flexwm, so `wofi`,
+  `fuzzel` or `rofi` draws and can be clicked but cannot be typed into,
+  while bars, docks, wallpapers and notification daemons (which ask for
+  `none`) are unaffected. The model to implement, decided while scoping item
+  14 rather than left open:
+  - `exclusive` on `top`/`overlay`: the surface takes keyboard focus while
+    it is mapped, top-most layer wins, and focus returns to
+    `arrangement.focused` when it unmaps or dies. This is the mode a lock
+    screen and a launcher use, and the protocol is close to normative about
+    it ("the seat will always give exclusive keyboard focus to the top-most
+    layer which has keyboard interactivity set to exclusive").
+  - `on_demand`, on any layer: click-to-focus, and clicking a window (or the
+    surface unmapping) takes it away again. `input.rs`'s
+    `focus_under_pointer` already declines to move *window* focus for a
+    click on a layer surface above windows — that is the hook.
+  - `exclusive` on `bottom`/`background`: treated as `on_demand`, which the
+    protocol explicitly permits ("for the bottom and background layers, the
+    compositor is allowed to use normal focus semantics").
+  - `none`: never, in any case.
+  The work is not the policy, it is the mechanism: `shell.rs`'s `set_focus`
+  currently derives keyboard focus straight from the core's arrangement on
+  every `apply()`, so a layer surface holding focus needs an explicit
+  override that `apply()` respects, plus teardown on unmap/destroy/VT
+  switch. That is the compositor's most safety-critical path (a wrong move
+  there means keys going to the wrong client, or nowhere), which is why it
+  is its own item rather than a rider on item 14.
+
+- **No `xdg_popup` ever receives its initial configure, so no popup maps at
+  all** (found while implementing item 14; pre-existing and unrelated to
+  layer shell). `handlers.rs`'s `new_popup` tracks the popup in
+  `PopupManager` and `commit` calls `PopupManager::commit`, but nothing
+  calls `PopupSurface::send_configure` — and the pinned rev's
+  `PopupManager::commit` only moves a popup from unmapped to mapped, it does
+  not configure (checked: `desktop/wayland/popup/manager.rs:38-52`). Anvil
+  does this in its own `ensure_initial_configure`. Consequence: a client
+  menu, dropdown or tooltip never appears, from a window *or* a layer
+  surface — which is why item 14 deliberately does not implement
+  `WlrLayerShellHandler::new_popup` either: tracking a popup that can never
+  map would be dead code. Fix is small (configure on first commit, the same
+  shape `send_initial_configure` already has for toplevels) but wants its
+  own tests, since it makes popups appear for the first time and nothing in
+  the render path has ever drawn one.
+
+- **A layer surface that commits but never attaches a buffer holds its
+  exclusive zone** (item 14, deliberate, documented in
+  `a_bar_reserves_its_zone_from_its_initial_commit_not_its_first_buffer`).
+  Smithay's `LayerMap::arrange` arranges every surface mapped into the map,
+  buffer or not, so the reservation starts at the initial (buffer-less)
+  commit the protocol requires. For a healthy bar that window is a frame or
+  two; for a client that commits and then hangs, the space stays reserved
+  until it disconnects. Fixing it means filtering on mapped-ness while
+  computing the zone, which today would mean reimplementing `arrange`
+  locally — worth doing only if a real client is seen to hit it, or if
+  upstream grows the distinction.
+
+- **`flexwm msg outputs` reports only an output's full rectangle**, so an
+  agent cannot see what a bar reserved (item 14 gave the core a `usable`
+  area but did not extend the IPC surface). Adding a `usable` rect to
+  `OutputSnapshot` is a one-field, version-bumping change to `flexwm-ipc`;
+  it is worth doing alongside whatever else next changes that wire format
+  rather than bumping `PROTOCOL_VERSION` on its own.
 - **`ext-workspace-v1` protocol support.** `flexwm-core` already has a real
   workspace model (`Output::workspaces`, `active_workspace`,
   `FocusWorkspace`/`MoveWindowToWorkspace` actions in `world/mod.rs` and

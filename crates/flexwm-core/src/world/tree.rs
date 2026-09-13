@@ -190,7 +190,30 @@ impl Workspace {
 #[derive(Debug)]
 pub(super) struct Output {
     pub(super) id: OutputId,
+    /// The whole output, in global coordinates. This is what
+    /// [`World::outputs`](super::World::outputs) reports and what a platform
+    /// describes as "the screen" -- a bar reserving part of it doesn't change
+    /// this, only [`Output::usable`]. Nothing places a window from it
+    /// directly.
     pub(super) area: Rect,
+    /// The part of [`Output::area`] ordinary windows are arranged within:
+    /// the whole output, minus whatever the platform reported as reserved at
+    /// its edges (on Wayland, layer-shell exclusive zones -- a bar's height).
+    ///
+    /// **This, not `area`, is what every layout read uses**
+    /// ([`World::arrange`](super::World::arrange)'s `place_workspace`,
+    /// `fix_view` and `learn_from_frame`); `area` is reported outward and
+    /// never laid out within. Kept as a sub-rectangle of `area` by
+    /// construction: both write sites
+    /// ([`Event::OutputUsableAreaChanged`](crate::Event::OutputUsableAreaChanged)
+    /// and an area change) intersect with `area` first, so it can never
+    /// describe space the output doesn't have -- including after a resize
+    /// makes the output smaller than the reservation was measured against.
+    ///
+    /// Equal to `area` until a platform says otherwise, which is what makes
+    /// a platform that never reports one (the macOS adapter, or Wayland with
+    /// no layer-shell client) behave exactly as it did before this existed.
+    pub(super) usable: Rect,
     /// Always ends in one empty workspace, as in niri.
     pub(super) workspaces: Vec<Workspace>,
     pub(super) active: usize,
@@ -201,9 +224,36 @@ impl Output {
         Self {
             id,
             area,
+            usable: area,
             workspaces: vec![Workspace::default()],
             active: 0,
         }
+    }
+
+    /// Moves or resizes the output, keeping whatever the platform reserved
+    /// that still fits.
+    ///
+    /// Re-clamping rather than resetting `usable` to the new `area` is the
+    /// conservative direction: a reservation that still fits (a top bar on an
+    /// output that grew or shrank) survives, and one that no longer does
+    /// shrinks instead of silently handing windows space a bar is still
+    /// drawing over. A platform that tracks reservations is expected to
+    /// re-report its usable area after changing an output's geometry anyway --
+    /// this only decides what holds in between.
+    pub(super) fn set_area(&mut self, area: Rect) {
+        self.usable = clamp_usable(self.usable, area);
+        self.area = area;
+    }
+
+    /// Reports what the platform reserved, as the sub-rectangle left over.
+    /// Returns whether it changed -- callers re-scroll only when it did, so a
+    /// bar repeating the same zone on every one of its own frames costs
+    /// nothing.
+    pub(super) fn set_usable(&mut self, usable: Rect) -> bool {
+        let clamped = clamp_usable(usable, self.area);
+        let changed = clamped != self.usable;
+        self.usable = clamped;
+        changed
     }
 
     pub(super) fn active_workspace(&self) -> &Workspace {
@@ -273,6 +323,28 @@ impl Output {
         self.workspaces = kept;
         self.active = active;
     }
+}
+
+/// What an output's usable area becomes given a reported `usable` and the
+/// output's own `area`: their overlap, with an empty axis pinned back to the
+/// output's own origin.
+///
+/// That last part is not cosmetic. [`Rect::intersection`] reports a
+/// *non*-overlap at the later of the two starting corners, and one of those
+/// corners is ultimately a client's number -- a layer surface whose exclusive
+/// zone and margins put it at `i32::MAX` leaves an empty usable area *there*,
+/// and `Rect::inset`'s `x + by` then overflows on the next `arrange`. Windows
+/// cannot be placed in an empty area whatever its coordinates, so pinning it
+/// keeps every coordinate the layout ever sees inside the output that
+/// produced it. Found by the randomized invariant test, not by inspection.
+fn clamp_usable(usable: Rect, area: Rect) -> Rect {
+    let clamped = usable.intersection(area);
+    Rect::new(
+        if clamped.w == 0 { area.x } else { clamped.x },
+        if clamped.h == 0 { area.y } else { clamped.y },
+        clamped.w,
+        clamped.h,
+    )
 }
 
 /// Moves `current` one step through `0..len`, stopping at either end.
