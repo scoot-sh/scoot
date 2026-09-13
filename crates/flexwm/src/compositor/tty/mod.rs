@@ -18,15 +18,19 @@
 //!
 //! Out of scope for this backend (see the commit introducing it for why):
 //! cursor rendering, DRM hotplug, multi-GPU, multi-output, DPMS, output
-//! scale, key repeat.
+//! scale, key repeat. "Multi-GPU" there means driving more than one at
+//! once -- *choosing* between several is `gpu.rs`'s job, and `init` below
+//! walks its list until a device works.
 
 mod buffers;
+mod gpu;
 
 use std::error::Error;
+use std::path::Path;
 
 use flexwm_ipc::PointerButton;
 use smithay::backend::drm::{
-    DrmDevice, DrmDeviceFd, DrmEvent, DrmEventMetadata, PlaneConfig, PlaneState,
+    DrmDevice, DrmDeviceFd, DrmDeviceNotifier, DrmEvent, DrmEventMetadata, PlaneConfig, PlaneState,
 };
 use smithay::backend::input::{
     Axis, ButtonState, InputEvent, KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent,
@@ -35,13 +39,9 @@ use smithay::backend::input::{
 use smithay::backend::libinput::{LibinputInputBackend, LibinputSessionInterface};
 use smithay::backend::session::libseat::LibSeatSession;
 use smithay::backend::session::{Event as SessionEvent, Session};
-use smithay::backend::udev::primary_gpu;
 use smithay::reexports::calloop::LoopHandle;
-use smithay::reexports::drm::control::{
-    Device as ControlDevice, Mode, ModeTypeFlags, connector, crtc,
-};
+use smithay::reexports::drm::control::{Mode, connector, crtc};
 use smithay::reexports::input::Libinput;
-use smithay::reexports::rustix::fs::OFlags;
 use smithay::utils::{Buffer as BufferSpace, DeviceFd, Physical, Rectangle, Size, Transform};
 
 use self::buffers::BufferPool;
@@ -142,53 +142,40 @@ pub struct Tty {
 /// initializing `headless::init`'s render target -- under `--tty` the mode
 /// picks the size, there being no host to negotiate one with the way
 /// `--nested` does.
+///
+/// `gpu` is `--gpu PATH`: `None` (the normal case) means try every device
+/// on the seat, best guess first, until one works; `Some` means try
+/// exactly that one. See `gpu.rs` for the ordering and for what "works"
+/// means.
 pub fn init(
     loop_handle: LoopHandle<'static, State>,
     state: &mut State,
+    gpu: Option<&Path>,
 ) -> Result<(i32, i32), Box<dyn Error>> {
     let (mut session, notifier) = LibSeatSession::new()?;
     let seat_name = session.seat();
 
-    let gpu_path = primary_gpu(&seat_name)?.ok_or("no primary GPU found on this seat")?;
-    // Session::open, never a bare `std::fs::File::open` -- that would
-    // compile and even run, right up until the modeset call, which then
-    // fails with EACCES with no obvious link back to "forgot the session".
-    let fd = session.open(&gpu_path, OFlags::RDWR | OFlags::CLOEXEC)?;
-    // Smithay logs `Unable to become drm master, assuming unprivileged mode`
-    // from inside `DrmDeviceFd::new` on every run here. It is expected, and it
-    // does *not* mean master wasn't acquired: master goes to whichever open
-    // file is first to open the device while nothing else holds it (root has
-    // nothing to do with the grant itself -- it's what lets seatd open the
-    // node and manage VTs at all), and seatd's own explicit `SET_MASTER` call
-    // secures it. Master is per-open-file, not per-process, and we inherit
-    // that already-master file along with the fd seatd hands us. Our own
-    // `SET_MASTER` is refused with `EACCES` because the kernel only permits it
-    // from the process that owns the file -- `drm_master_check_perm` wants
-    // `was_master && file->pid == current->tgid`, and `drm_file_update_pid`
-    // deliberately never re-owns a file that was master. Smithay's resulting
-    // `privileged = false` is the state this backend wants: it stops Smithay
-    // issuing `SET_MASTER`/`DROP_MASTER` itself on pause/activate, which seatd
-    // already does as root on every VT switch. (The identical warning also
-    // fires when master genuinely isn't held -- if something else already
-    // has it, seatd's own `SET_MASTER` gets `EBUSY` too, only logs it, and
-    // hands the fd over anyway; that case fails loudly at modeset instead.
-    // "Opened by seatd" doesn't distinguish the two; being first to open does.)
-    // Measured end to end on the dev
-    // VM (clients/state debugfs, a root `SET_MASTER` probe, a full VT-switch
-    // cycle) -- see `vm/README.md`'s DRM-master troubleshooting entry and the
-    // resolved backlog entry in `ROADMAP.md`.
-    let drm_fd = DrmDeviceFd::new(DeviceFd::from(fd));
-    let (mut drm, drm_notifier) = DrmDevice::new(drm_fd.clone(), true)?;
-
-    let (connector, mode) =
-        find_connector_and_mode(&drm).ok_or("no connected connector with a usable mode")?;
-    let surface = create_surface(&mut drm, connector, mode)
-        .ok_or("no crtc on this device is usable with the chosen connector")?;
-
-    let (mode_width, mode_height) = mode.size();
-    let (width, height) = (mode_width as i32, mode_height as i32);
-
-    let buffers = BufferPool::new(&drm_fd, width, height)?;
+    // Every candidate is tried before giving up, and *why* each one failed
+    // is carried into the error rather than counted -- the whole point of
+    // the fallback is that the first device is sometimes the wrong one, and
+    // a user staring at a black screen needs to know which devices exist
+    // and what each of them said, not just that something went wrong.
+    let candidates = gpu::candidates(&seat_name, gpu)?;
+    let (path, device) = gpu::first_usable(candidates, |path| open_device(&mut session, path))
+        .map_err(|failures| gpu::unusable_device_error(&seat_name, gpu, &failures))?;
+    let Device {
+        drm,
+        notifier: drm_notifier,
+        surface,
+        buffers,
+        width,
+        height,
+    } = device;
+    // info!, not debug!: which device `--tty` ended up on is the first
+    // question to ask when a screen stays black, and on hardware where the
+    // automatic pick is wrong it is the only thing separating "the fallback
+    // worked" from "it happened to work anyway".
+    tracing::info!(path = %path.display(), width, height, "drm: driving this device");
 
     let interface = LibinputSessionInterface::from(session.clone());
     let mut libinput_context = Libinput::new_with_udev(interface);
@@ -246,30 +233,88 @@ pub fn init(
     Ok((width, height))
 }
 
-/// The first `Connected` connector with at least one mode, and that mode
-/// (its `PREFERRED`-flagged one if any, else its first). One output only
-/// (multi-output is out of scope for this backend), so the first match
-/// wins.
-fn find_connector_and_mode(drm: &DrmDevice) -> Option<(connector::Handle, Mode)> {
-    let resources = drm.resource_handles().ok()?;
-    for &conn in resources.connectors() {
-        let Ok(info) = drm.get_connector(conn, false) else {
-            continue;
-        };
-        if info.state() != connector::State::Connected {
-            continue;
-        }
-        let mode = info
-            .modes()
-            .iter()
-            .find(|mode| mode.mode_type().contains(ModeTypeFlags::PREFERRED))
-            .or_else(|| info.modes().first())
-            .copied();
-        if let Some(mode) = mode {
-            return Some((conn, mode));
-        }
-    }
-    None
+/// Everything `init` needs from one DRM device, once that device has
+/// proven it can actually drive a display. Exists so a candidate can be
+/// built and then thrown away wholesale if it turns out not to work,
+/// without `init` half-assigning `state.tty`.
+struct Device {
+    drm: DrmDevice,
+    notifier: DrmDeviceNotifier,
+    surface: smithay::backend::drm::DrmSurface,
+    buffers: BufferPool,
+    width: i32,
+    height: i32,
+}
+
+/// Opens one candidate and builds everything on it, or says why it can't.
+/// `Err` is a phrase completing "this device ...", matching `gpu::open`'s
+/// own convention, because `gpu::unusable_device_error` lists them all
+/// under the device path they belong to.
+///
+/// `gpu::open` has already rejected -- and handed back to the session --
+/// any device with no KMS resources or no connected connector, which is
+/// every failure real hardware has actually reported. The three steps
+/// below can still fail (a device whose KMS pipeline exists but whose
+/// CRTCs all refuse the connector, or that cannot allocate dumb buffers),
+/// and each one falls through to the next candidate just the same. The
+/// one difference: past `DeviceFd::from`, the fd belongs to an
+/// `Arc<OwnedFd>` with no way back out, so such a device is closed by
+/// being dropped rather than returned to libseat -- it stays in seatd's
+/// open set until the process exits. Harmless, bounded by the number of
+/// GPUs on the seat, and not worth an fd-juggling workaround.
+fn open_device(session: &mut LibSeatSession, path: &Path) -> Result<Device, String> {
+    // `gpu::open` goes through `Session::open`, never a bare
+    // `std::fs::File::open` -- that would compile and even run, right up
+    // until the modeset call, which then fails with EACCES with no obvious
+    // link back to "forgot the session".
+    let gpu::OpenGpu {
+        fd,
+        connector,
+        mode,
+    } = gpu::open(session, path)?;
+    // Smithay logs `Unable to become drm master, assuming unprivileged mode`
+    // from inside `DrmDeviceFd::new` on every run here. It is expected, and it
+    // does *not* mean master wasn't acquired: master goes to whichever open
+    // file is first to open the device while nothing else holds it (root has
+    // nothing to do with the grant itself -- it's what lets seatd open the
+    // node and manage VTs at all), and seatd's own explicit `SET_MASTER` call
+    // secures it. Master is per-open-file, not per-process, and we inherit
+    // that already-master file along with the fd seatd hands us. Our own
+    // `SET_MASTER` is refused with `EACCES` because the kernel only permits it
+    // from the process that owns the file -- `drm_master_check_perm` wants
+    // `was_master && file->pid == current->tgid`, and `drm_file_update_pid`
+    // deliberately never re-owns a file that was master. Smithay's resulting
+    // `privileged = false` is the state this backend wants: it stops Smithay
+    // issuing `SET_MASTER`/`DROP_MASTER` itself on pause/activate, which seatd
+    // already does as root on every VT switch. (The identical warning also
+    // fires when master genuinely isn't held -- if something else already
+    // has it, seatd's own `SET_MASTER` gets `EBUSY` too, only logs it, and
+    // hands the fd over anyway; that case fails loudly at modeset instead.
+    // "Opened by seatd" doesn't distinguish the two; being first to open does.)
+    // Measured end to end on the dev
+    // VM (clients/state debugfs, a root `SET_MASTER` probe, a full VT-switch
+    // cycle) -- see `vm/README.md`'s DRM-master troubleshooting entry and the
+    // resolved backlog entry in `ROADMAP.md`.
+    let drm_fd = DrmDeviceFd::new(DeviceFd::from(fd));
+    let (mut drm, notifier) = DrmDevice::new(drm_fd.clone(), true)
+        .map_err(|error| format!("could not be initialized as a DRM device ({error})"))?;
+
+    let surface = create_surface(&mut drm, connector, mode)
+        .ok_or("has no crtc usable with the chosen connector")?;
+
+    let (mode_width, mode_height) = mode.size();
+    let (width, height) = (i32::from(mode_width), i32::from(mode_height));
+    let buffers = BufferPool::new(&drm_fd, width, height)
+        .map_err(|error| format!("could not allocate scanout buffers ({error})"))?;
+
+    Ok(Device {
+        drm,
+        notifier,
+        surface,
+        buffers,
+        width,
+        height,
+    })
 }
 
 /// Tries every CRTC on the device against `conn`/`mode` until one accepts
