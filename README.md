@@ -36,10 +36,12 @@ image when it supplies one, a built-in shape otherwise, whose size and color
 the config file can override). Also done: vim-style
 keybindings, a TOML config file (`--config`, `[layout]`/`[appearance]`/
 `[binds]`, see Configuration below), window decorations (a niri-style focus
-ring, background color, server-side `zxdg_decoration_manager_v1`), and a
+ring, background color, server-side `zxdg_decoration_manager_v1`),
 `wlr-layer-shell-unstable-v1`, so bars, docks, wallpapers, launchers and
 notification daemons work — including keyboard focus for the ones that ask
-for it (see Layer-shell clients below) — and a
+for it (see Layer-shell clients below) — plus `ext-workspace-v1`, so those
+bars can also list, follow and switch workspaces (see Workspaces for bars
+below), and a
 hardened control socket (owner-only
 permissions, a same-user peer check, a 1 MiB cap on a single request, and
 screenshots rate-limited to one per connection per frame) whose connections
@@ -249,6 +251,60 @@ Measured on real hardware with a `waybar` clock ticking once a second,
 `--quiet-ms 200` still settles normally (204 ms) while `--quiet-ms 1500`
 never does and times out. Keep `--quiet-ms` below whatever your bar's own
 redraw interval is — the same caveat an animated cursor already carried.
+
+## Workspaces for bars (`ext-workspace-v1`)
+
+flexwm implements `ext-workspace-v1` (version 1), the compositor-agnostic
+successor to the one-off wlr workspace protocols, so a panel's workspace
+module, a workspace switcher or an indicator can list workspaces, follow which
+one is active, and switch between them. Together with layer shell above,
+that's everything a bar needs. The global is `ext_workspace_manager_v1`,
+available to every client, no privilege or allow-list.
+
+What a client sees:
+
+- **One workspace group**, carrying flexwm's single output. A client that
+  binds `wl_output` after the manager still gets an `output_enter` for it, so
+  registry order doesn't matter.
+- **One `ext_workspace_handle_v1` per workspace**, named `"1"`, `"2"`, … in
+  layout order, with matching one-dimensional `coordinates` (sort by those,
+  not by name — `"10"` sorts before `"2"` as a string). The active one carries
+  the `active` state bit; nothing else is ever set.
+- **`activate` is the only capability advertised**, on workspaces. The group
+  advertises none.
+- **Changes arrive in batches closed by `done`**, one per change, and none at
+  all when the workspaces didn't change. Draw on `done`, not on each event: a
+  switch is one `state` event turning the old workspace off and another
+  turning the new one on, and the list is momentarily inconsistent between
+  them.
+
+To switch a workspace, send `activate` on its handle **and then `commit` on
+the manager** — the protocol batches requests, so an `activate` with no
+`commit` after it does nothing, deliberately.
+
+Worth knowing before you write against it:
+
+- **Workspaces are positions, not identities, and flexwm sends no `id`
+  event.** The list grows as you use the trailing empty workspace and shrinks
+  when a workspace empties out, which renumbers everything after it: handle 2
+  means "the third workspace", not "that workspace". Redraw from what the last
+  `done` said rather than remembering a handle as a particular user's
+  workspace.
+- **`deactivate`, `remove`, `assign` and `create_workspace` are ignored**, and
+  no capability is advertised for them, because none of them exists in
+  flexwm's layout model: an output always has exactly one active workspace,
+  workspaces are created and dropped by the layout itself rather than by the
+  user, and there is only one group.
+- **`activate` is a request, not a guarantee** (as the protocol says): one
+  naming a workspace that vanished between the client reading the list and the
+  `commit` arriving is dropped, and one for the workspace that is already
+  active does nothing.
+- **There is no IPC equivalent yet.** `flexwm msg action focus-workspace
+  up|down` still only steps one workspace at a time; switching to a workspace
+  *by number* is reachable over this protocol only. See `ROADMAP.md`.
+- **Multiple outputs will change the shape of this** — a group per output is
+  what the protocol is built for — but flexwm has exactly one output today, so
+  there is exactly one group.
 
 ## Configuration
 

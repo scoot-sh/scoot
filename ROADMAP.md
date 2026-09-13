@@ -2152,6 +2152,139 @@ review, and why.
     under both backends — `--headless` (11 `ok:`, exit 0) and `--nested`
     under `cage` (11 `ok:`, exit 0, `/tmp/smoke-nested-round4.png` 1280x720).
 
+15. ~~`ext-workspace-v1`: a bar can list and switch workspaces~~ — PR open,
+    branch `ext-workspace-v1`. Picked up from the Backlog (entry struck
+    below), the other half of what item 14 started: layer shell gets a bar
+    onto the screen, this tells it what to draw there and lets a click on it
+    switch workspaces. `flexwm_core` already had real workspaces; nothing
+    outside keybindings and IPC actions could see them.
+
+    **No Smithay helper exists for this protocol** at the pinned rev (checked
+    again: no `ext_workspace` anywhere in `0ff0098`), so
+    `compositor/ext_workspace.rs` implements the global, the object lifecycle
+    and the event plumbing directly. The seam is *not* `wayland_server::
+    Dispatch`: `dispatch.rs` owns a blanket `Dispatch`/`GlobalDispatch` impl
+    for `State` (item 7's `wl_shm` guard forced it), so a per-interface impl
+    would overlap it (E0119). The user-data types implement Smithay's
+    `Dispatch2`/`GlobalDispatch2` instead, which is exactly what that blanket
+    impl forwards through. Bindings come from `wayland-protocols`' staging
+    set via Smithay's own re-export — no new dependency, not even a new
+    feature (Smithay already enables `staging` + `server`).
+
+    **A workspace here is a position, not an identity**, because that is what
+    the core has: an output holds a `Vec` of workspaces, always ending in one
+    empty one, and leaving an emptied workspace drops it and renumbers
+    everything after. So the `n`-th handle *is* the `n`-th workspace, named
+    `"1".."N"` with matching 1-D `coordinates` (a bar sorting by name alone
+    puts "10" before "2"), and **no `id` event** — the protocol reserves ids
+    for workspaces stable enough to store preferences against, which these
+    are not. Worked example of why that is honest rather than a compromise:
+    with `[A][empty]` active 0, `move-window-to-workspace down` collapses back
+    to `[A][empty]` active 0, so nothing is published — and that is correct,
+    because positionally the user is still on the first workspace.
+
+    **Capabilities: `activate`, and nothing else.** `deactivate` (an output
+    always has exactly one active workspace), `remove`/`create_workspace`
+    (the layout creates and drops workspaces itself; a user cannot) and
+    `assign` (one group, because one output) have no meaning in this model,
+    so none is advertised and each is ignored, which is what the protocol
+    itself prescribes for an unadvertised request. Group capabilities are
+    therefore the empty set — still sent, since the event is mandatory once
+    per object.
+
+    **Batching is the protocol's whole point, so it is a pure function.**
+    `ext_workspace/diff.rs` turns (what clients have been told, what the core
+    says now) into a change list — `Added`/`Restated`/`Removed` — which the
+    wire layer executes and closes with exactly one `done`. No `done` at all
+    when nothing changed, which matters because `State::apply()` runs for far
+    more than workspace changes (every window open, retitle and layout
+    action); the cost there is one `Option<Workspaces>` compare. A workspace
+    leaves its group (`workspace_leave`) before it is `removed`, as the
+    protocol requires, and a newly active workspace that is also newly
+    created carries `active` in its first `state` event rather than being
+    created inactive and immediately restated.
+
+    Two exhaustive model tests over the diff (all snapshot pairs up to 6
+    workspaces) found a real inconsistency that hand-written cases had
+    missed: from a `published` of `{count: 2, active: 1}` to a `current` of
+    `{count: 0, active: 0}` — the shape `Workspaces::default()` has before an
+    output exists — the "new active gains the bit" guard restated a handle
+    that the same batch was also removing. Fixed by gating it on the
+    surviving prefix rather than on the old count.
+
+    **Requests go the other way with the same batching:** `activate` is
+    staged and applied on `commit` ("the compositor must process a series of
+    requests preceding a commit request atomically"), bounds-checked *then*
+    rather than when it arrived, since the list can change in between — a
+    client acts on what it last saw, the compositor decides against what it
+    has. One `Option<usize>` per manager, not a queue: `activate` is the only
+    staged request and an output has one active workspace, so replaying a
+    batch in order ends wherever the last one pointed. Activating the
+    already-active workspace is skipped outright, which is both a no-op in
+    the core and the thing that stops a client driving a full `apply` (arrange,
+    a configure per window, a render) as fast as it can write.
+
+    **Inertness is derived, not stored.** A handle is live exactly while some
+    registered manager still lists it; a `removed` one has been truncated out,
+    one whose manager was `stop`ped or whose client left has no list to be in,
+    and a destroyed-then-reused object id compares unequal because a
+    `Weak`'s id carries a serial. All three fall out as "ignore", which is
+    what the protocol requires of an inert object, with no flag to keep in
+    sync. Handles and the group are held as `Weak`, so a client destroying
+    one of its own handles cannot make the compositor address a dead object,
+    and the slot stays in place rather than being compacted out (compacting
+    would silently renumber every later workspace).
+
+    **One panic path, guarded deliberately:** wayland-backend *panics* when an
+    event carries an object belonging to a different client
+    (`rs/server_impl/client.rs`), so the `output_bound` hook — which answers
+    the protocol's "or a new `wl_output` object is bound by the client" half,
+    without which a bar that binds the manager before the output sees a group
+    with no outputs forever — compares `Resource::client()` before sending.
+    Covered by a two-client test.
+
+    **Core changes, both minimal:** `World::workspaces` (count + active read
+    from one borrow, so the two cannot disagree) and
+    `Action::FocusWorkspaceIndex`. Activation needs the latter: stepping
+    cannot express "go to workspace N" when leaving an emptied workspace
+    renumbers the list. Out of range is ignored rather than clamped —
+    silently activating the *last* workspace instead would be a switch the
+    user never asked for. The randomized invariant test now generates that
+    action too, including `usize::MAX` (it comes off a wire).
+
+    **Deliberately deferred, and why:** no IPC action for "focus workspace
+    N". It would be a `PROTOCOL_VERSION` bump for `flexwm-ipc` on its own;
+    the backlog already wants one for `OutputSnapshot`'s `usable` rect, and
+    the two should land together. Also deferred: per-output workspace groups
+    (one output exists), `urgent`/`hidden` states (nothing in flexwm marks a
+    window urgent, and every workspace here is one a user can switch to).
+
+    **Verified on the dev VM's real `--tty` seat at 1600x1000** against
+    `b1ecae7` (release build for the benchmark, debug for the functional
+    runs), driven by a throwaway `wayland-client` probe in `/tmp` (nothing
+    committed): `wayland-info` advertises `ext_workspace_manager_v1 v1`; a
+    client that binds the manager before `wl_output` gets its `output_enter`
+    in a second `done` batch; a client-driven `activate`+`commit` on the
+    empty workspace changed **36,336** screenshot pixels and switching back
+    reproduced the original frame exactly (**0** different); 20,000 rounds of
+    `activate`+`deactivate`+`remove`+two `commit`s took the compositor 184
+    jiffies over 2.15s and left it answering IPC normally. Benchmarked with a
+    map/destroy churn client (400 rounds, every one changing the workspace
+    list twice), 6 interleaved reps of each arm: pre-change binary **2.83**
+    jiffies mean (1–5), this branch with no client bound **3.0** (2–4), and
+    with a bar actually bound **5.0** (4–6) — i.e. no measurable cost when
+    nothing is listening, and the cost with a listener is the events
+    themselves.
+
+    **Pre-existing, found while bug-bashing, not fixed here:**
+    `scripts/smoke-test.sh` under `MODE=--tty` fails its background-colour
+    check (`the background pixel at (3,3) is rgb(0,0,0)`). It is the *cursor*:
+    under `--tty` the pointer starts at (0,0) and the built-in arrow is drawn
+    there, so the sample point lands on the cursor's black outline (a pixel
+    map of the corner shows the 16x16 arrow; (800,500) and (1590,990) both
+    read the configured background). Identical on the merge base `e2c7971`,
+    so not a regression — see the Backlog entry below.
+
 ## Backlog (unordered — pick up whenever it fits)
 
 - **~~Open question: does `--tty` over SSH on the dev VM actually hold real
@@ -2617,7 +2750,8 @@ review, and why.
   `OutputSnapshot` is a one-field, version-bumping change to `flexwm-ipc`;
   it is worth doing alongside whatever else next changes that wire format
   rather than bumping `PROTOCOL_VERSION` on its own.
-- **`ext-workspace-v1` protocol support.** `flexwm-core` already has a real
+- **~~`ext-workspace-v1` protocol support~~ — DONE as item 15.** Original
+  entry, left as written: `flexwm-core` already has a real
   workspace model (`Output::workspaces`, `active_workspace`,
   `FocusWorkspace`/`MoveWindowToWorkspace` actions in `world/mod.rs` and
   `world/actions.rs`) — it's just not exposed outside keybindings/IPC
@@ -2632,6 +2766,26 @@ review, and why.
   Depends on layer-shell landing first in practice, since the main
   consumers (bars) need both to be useful together. No design work done
   yet.
+- **`scripts/smoke-test.sh`'s background-colour check samples the cursor
+  under `MODE=--tty`.** The check reads the pixel at (3,3) and expects the
+  configured background; under `--tty` the pointer starts at (0,0) and the
+  built-in arrow cursor is drawn there, so it reads the arrow's black
+  outline and the script ends in `BUG: one or more decoration pixel checks
+  failed`. Pre-existing and backend-specific (`--headless`/`--nested` draw
+  no cursor, and both pass), confirmed identical on `e2c7971` and on item
+  15's branch — a flaw in the test's sample point, not in the compositor: a
+  pixel map of that corner shows the 16x16 arrow, and (800,500)/(1590,990)
+  both read the configured colour. Fix is a line: sample somewhere the
+  cursor isn't, or move the pointer over IPC before capturing. Left out of
+  item 15 to keep that diff to its own ticket.
+- **Nothing bounds how many `ext_workspace_manager_v1` objects one client
+  may bind.** Each costs a registry entry and a handle per workspace, and
+  every workspace change walks them all. Not specific to this protocol —
+  the same is true of layer surfaces, `wl_shm` pools (item 7's cap is
+  per-pool, and its own entry already asks for per-client accounting) and
+  IPC connections (see the screenshot/connection-cap entry below) — but
+  worth naming while the memory of writing it is fresh: the fix belongs
+  with those, as per-client accounting, not as a one-off limit here.
 
 **From `flexwm-reviewer`'s pass on PR #13 (item 8, client cursor surface
 rendering), all low priority, none blocking:**
