@@ -27,6 +27,7 @@
 
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use flexwm_core::Config;
@@ -38,6 +39,7 @@ use super::*;
 use crate::compositor::decorations::Appearance;
 use crate::compositor::ipc::tests::set_sndbuf;
 use crate::compositor::keybindings::Keybindings;
+use crate::compositor::state::ClientState;
 use crate::compositor::{State, headless};
 
 /// How long any "pump until something happens" loop waits before declaring the
@@ -283,6 +285,107 @@ impl TestClient {
         }
         replies
     }
+}
+
+/// A wayland client that exists only to be flushed.
+///
+/// Deliberately not a `wayland-client` connection (which `cursor/tests.rs`
+/// needs, at the price of a second thread): the only question asked of it is
+/// whether bytes the compositor *queued* for it have reached its socket, and a
+/// raw fd answers that without a protocol implementation at either end. One
+/// request is written by hand for the handshake, and after that it only reads.
+struct WaylandProbe {
+    socket: UnixStream,
+}
+
+impl WaylandProbe {
+    /// Connects, asks for a registry, and drains the globals that answer --
+    /// leaving the compositor with nothing queued for this client.
+    fn connect(harness: &mut Harness) -> Self {
+        let (server, client) = UnixStream::pair().expect("a socket pair");
+        harness
+            .state
+            .display_handle
+            .insert_client(server, Arc::new(ClientState::default()))
+            .expect("an inserted wayland client");
+        client
+            .set_nonblocking(true)
+            .expect("a non-blocking wayland probe");
+        let mut probe = Self { socket: client };
+
+        // `wl_display.get_registry(new_id)`, on the wire: the object the
+        // request is for, then the message's length and opcode packed into one
+        // word, then the one argument. Native byte order, as wayland's wire
+        // format is defined.
+        const WL_DISPLAY: u32 = 1;
+        const GET_REGISTRY: u32 = 1;
+        const REGISTRY_ID: u32 = 2;
+        const LENGTH: u32 = 12;
+        let mut request = [0u8; LENGTH as usize];
+        request[..4].copy_from_slice(&WL_DISPLAY.to_ne_bytes());
+        request[4..8].copy_from_slice(&((LENGTH << 16) | GET_REGISTRY).to_ne_bytes());
+        request[8..].copy_from_slice(&REGISTRY_ID.to_ne_bytes());
+        (&probe.socket)
+            .write_all(&request)
+            .expect("the probe's handshake is written");
+
+        // The globals come back through the display's own event source, which
+        // flushes after dispatching for exactly this reason (see `State::new`).
+        let deadline = Instant::now() + PATIENCE;
+        while probe.drain() == 0 {
+            assert!(
+                Instant::now() < deadline,
+                "the compositor never answered the probe's get_registry"
+            );
+            harness.pump();
+        }
+        // Everything the handshake produced, and then the loop settled, so
+        // anything this probe sees later was flushed by the wakeup under test.
+        for _ in 0..SILENCE_ROUNDS {
+            harness.pump();
+            probe.drain();
+        }
+        probe
+    }
+
+    /// Reads and discards whatever has arrived, returning how much that was.
+    fn drain(&mut self) -> usize {
+        let mut chunk = [0u8; 4096];
+        let mut total = 0;
+        loop {
+            match self.socket.read(&mut chunk) {
+                Ok(0) => panic!("the compositor disconnected the wayland probe"),
+                Ok(count) => total += count,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return total,
+                Err(error) => panic!("the wayland probe could not read: {error}"),
+            }
+        }
+    }
+}
+
+/// Queues one wayland message for every connected client, without flushing it.
+///
+/// A new global sends `wl_registry.global` to every registry already bound,
+/// which wayland-server buffers until something flushes -- the same position a
+/// keystroke injected by `Request::Key` is in when its request has been served.
+/// Used rather than a keystroke because that needs a focused surface, i.e. a
+/// mapped toplevel and a real toolkit client; what is under test is the flush,
+/// not what filled the buffer.
+fn queue_a_wayland_message(harness: &Harness) -> smithay::output::Output {
+    let output = smithay::output::Output::new(
+        "flush-probe".to_string(),
+        smithay::output::PhysicalProperties {
+            size: (0, 0).into(),
+            subpixel: smithay::output::Subpixel::Unknown,
+            make: "flexwm".into(),
+            model: "flush-probe".into(),
+            serial_number: "0".into(),
+        },
+    );
+    output.create_global::<State>(&harness.state.display_handle);
+    // Returned, not dropped: dropping the `Output` would take its global with
+    // it, and the point is to leave something queued.
+    output
 }
 
 fn request_line(request: &Request) -> String {
@@ -840,6 +943,58 @@ fn an_idle_reply_does_not_overtake_a_reply_still_going_out() {
         other => panic!("the idle answer was not last: {other:?}"),
     }
     client.expect_closed(&mut harness);
+}
+
+#[test]
+fn the_wayland_side_is_flushed_even_when_the_request_served_ends_the_connection() {
+    // The flush that used to happen per request now happens once per wakeup,
+    // which is only equivalent if *every* way out of the serve loop goes
+    // through it. `wait-idle` is the exit that makes that load-bearing: it is
+    // answered later, from the frame timer, and the frame timer's own
+    // `render()` does nothing when nothing marked the screen dirty -- which
+    // injected input does not. So a skipped flush here is not a latency bug: a
+    // pipelined `key` + `wait-idle` would leave the keystroke in the client's
+    // buffer, the client could not have redrawn for a key it never saw, and the
+    // wait would answer `idle` immediately. (See `idle_outcome`, whose own doc
+    // names that race as the reason it exists.)
+    //
+    // One `wait-idle` and nothing else, so the only line served this wakeup is
+    // the one that closes the connection: a test with a preceding request would
+    // still pass if the flush were merely moved to after `serve`.
+    let mut harness = Harness::new();
+    let mut probe = WaylandProbe::connect(&mut harness);
+    let mut client = harness.connect(None);
+    let _output = queue_a_wayland_message(&harness);
+    assert_eq!(
+        probe.drain(),
+        0,
+        "something flushed the probe before the wakeup under test; this test \
+         can no longer tell who flushed it"
+    );
+
+    client.send(
+        request_line(&Request::WaitIdle {
+            quiet_ms: 10,
+            timeout_ms: 5_000,
+        })
+        .as_bytes(),
+    );
+    // Exactly one turn: the connection's readable wakeup. Nothing else is ready
+    // -- the probe sent nothing, and the frame timer `wait-idle` arms is only
+    // inserted during this very callback, so it cannot run until the next turn.
+    harness.pump();
+    assert!(
+        probe.drain() > 0,
+        "the wakeup served a request and returned without flushing the wayland \
+         clients"
+    );
+
+    // ...and the hand-off itself still works, so this is not passing because
+    // the request was mishandled.
+    match client.expect_reply(&mut harness) {
+        Response::Idle { .. } => {}
+        other => panic!("expected an idle reply, got {other:?}"),
+    }
 }
 
 // --- the screenshot limiter, across a pipelined write ---------------------

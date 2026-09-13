@@ -141,7 +141,8 @@ impl<R: Read> Lines<R> {
     /// ordinary request there is (`{"type":"version"}`, 19 bytes), which is
     /// tens of milliseconds of frozen input and rendering per wakeup. Counting
     /// reads is exact because `BufReader::fill_buf` only touches the socket
-    /// when its buffer is empty, so `reads` counts syscalls, not attempts.
+    /// when its buffer is empty, so `reads` counts reads of the socket rather
+    /// than calls to this function.
     ///
     /// Running out is [`LineRead::Incomplete`]: the prefix stays, and whatever
     /// is left in the kernel is what a level-triggered source reports again on
@@ -167,8 +168,14 @@ impl<R: Read> Lines<R> {
             }
             let available = match self.reader.fill_buf() {
                 Ok(available) => available,
-                // Same retry `read_line` itself does: a signal interrupting
-                // the read is not the client's doing and is not an error.
+                // Retried rather than reported, like `read_line` does: a signal
+                // interrupting the read is not the client's doing and is not an
+                // error. The retry goes back through the budget check above,
+                // which has already charged for this attempt -- so a storm of
+                // signals spends the budget and yields instead of spinning
+                // here, at the cost of a wakeup that read nothing. That costs
+                // nothing to correct: readiness is level-triggered, so the same
+                // bytes are reported again.
                 Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
                 // The socket is non-blocking, so this is the ordinary "that
                 // is all there is for now" answer, not a failure. Whatever

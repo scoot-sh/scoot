@@ -229,6 +229,9 @@ impl Connection {
         // `READS_PER_WAKEUP`; running out is what ends the loop on a flood.
         let mut reads = READS_PER_WAKEUP;
         let mut served = false;
+        // Set instead of returning, so the one flush below is not skipped on the
+        // way out. See there.
+        let mut closed = false;
         loop {
             // Back-pressure, not a refusal: this connection stops being read
             // until its client catches up, and nothing is dropped or closed.
@@ -251,7 +254,10 @@ impl Connection {
                     self.closing = true;
                     break;
                 }
-                LineRead::Failed => return Step::Close,
+                LineRead::Failed => {
+                    closed = true;
+                    break;
+                }
                 LineRead::TooLong => {
                     // Nothing to resynchronize to: the rest of this line is
                     // still coming and there is no way to tell where it ends.
@@ -268,10 +274,16 @@ impl Connection {
                     break;
                 }
             }
-            if let Step::Close = self.serve(state) {
-                return Step::Close;
-            }
+            // Marked before serving, not after: by the time `serve` returns,
+            // this request's wayland-side messages are already queued, so the
+            // exits that close the connection (a `wait-idle` hand-off, a reply
+            // that could not be written) have to flush them too -- and one of
+            // them is a request whose only effect is wayland-side.
             served = true;
+            if let Step::Close = self.serve(state) {
+                closed = true;
+                break;
+            }
             // Everything already read has to be answered before yielding: it
             // has left the kernel, so a level-triggered source will never
             // report it again, and leaving one line here is the pipelining bug
@@ -289,15 +301,28 @@ impl Connection {
             // Synthetic input (key/pointer) and action-driven configures queue
             // wayland messages on the clients' connections; nothing else
             // flushes them until the next render tick, which only runs when
-            // something already marked the screen dirty. Flush explicitly so an
-            // injected keystroke reaches the client the moment it is sent, not
-            // whenever a later, unrelated redraw happens to piggyback it out.
+            // something already marked the screen dirty -- a keystroke does
+            // not. Flush explicitly so an injected keystroke reaches the client
+            // the moment it is sent, not whenever a later, unrelated redraw
+            // happens to piggyback it out. `wait-idle` makes that a correctness
+            // bug and not just a latency one: an unflushed keystroke is one the
+            // client cannot have redrawn for, so the wait would see a quiet
+            // compositor and answer `idle` immediately.
             //
-            // Once per wakeup, not once per request: no client can observe the
-            // difference, since the compositor has not returned to the event
-            // loop in between, and a pipelined batch would otherwise flush
-            // every client once per line in it.
+            // The invariant, which every exit above is written to preserve (by
+            // breaking rather than returning): if this wakeup served any
+            // request at all, the wayland side is flushed before it returns --
+            // no exception for the exits that close the connection.
+            //
+            // Once per wakeup rather than once per served request: the IPC
+            // client can see its own reply land microseconds before this runs,
+            // but nothing it does in response can reach the compositor until
+            // this returns to the event loop, while a pipelined batch would
+            // otherwise flush every wayland client once per line in it.
             let _ = state.display_handle.flush_clients();
+        }
+        if closed {
+            return Step::Close;
         }
         if self.closing {
             self.close_when_drained()
