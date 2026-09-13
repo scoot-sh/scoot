@@ -283,17 +283,14 @@ impl State {
                     // itself.
                     drop(layers);
 
-                    // `0` (always-full-redraw, unchanged from
-                    // before this feature) for every presenter
-                    // except `--tty`: see `buffers.rs`'s module doc
-                    // on why that one specifically now needs a real
-                    // buffer age -- cursor motion can trigger a
-                    // render on every mouse-motion event, and a
-                    // naive full-frame copy at that rate is exactly
-                    // the multi-MB/s memcpy the roadmap calls out.
-                    // Neither `--headless` nor `--nested` draws a
-                    // cursor, so neither gained a new reason to
-                    // render more often than before.
+                    // `0` (always-full-redraw) for every presenter except
+                    // `--tty`: see `buffers.rs`'s module doc on why that one
+                    // specifically needs a real buffer age -- cursor motion
+                    // can trigger a render on every mouse-motion event, and a
+                    // naive full-frame copy at that rate is exactly the
+                    // multi-MB/s memcpy the roadmap calls out. Neither
+                    // `--headless` nor `--nested` draws a cursor, so neither
+                    // has a new reason to render more often than before.
                     let age = self.tty.as_ref().map_or(0, Tty::next_buffer_age);
                     let result = damage.render_output(
                         renderer,
@@ -304,41 +301,36 @@ impl State {
                     );
                     match result {
                         Ok(render_result) => {
-                            // Must run unconditionally, even when
-                            // there turns out to be nothing to
-                            // present below -- see
-                            // `BufferPool::advance_generation`'s doc
-                            // for why this can't be skipped just
-                            // because this frame is.
+                            // Must run unconditionally, even when there
+                            // turns out to be nothing to present below --
+                            // see `BufferPool::advance_generation`'s doc for
+                            // why this can't be skipped just because this
+                            // frame is.
                             if let Some(tty) = &mut self.tty {
                                 tty.advance_generation();
                             }
-                            // Both presenters read back the same
-                            // frame the same way; only what happens
-                            // with the pixels afterward differs, so
-                            // the read-back itself happens once for
-                            // whichever (or both) are set -- and not
-                            // at all with neither (plain
-                            // `--headless`, e.g. under IPC-only
-                            // control): that copy would be pure
-                            // waste on every render with nothing to
-                            // hand it to.
+                            // Both presenters read back the same frame the
+                            // same way; only what happens with the pixels
+                            // afterward differs, so the read-back itself
+                            // happens once for whichever (or both) are set --
+                            // and not at all with neither (plain
+                            // `--headless`, e.g. under IPC-only control):
+                            // that copy would be pure waste on every render
+                            // with nothing to hand it to.
                             if (self.host.is_some() || self.tty.is_some())
                                 && let Some(damaged) = render_result.damage
                             {
-                                // Bounding box of every damaged
-                                // rect, not the rects themselves:
-                                // `copy_framebuffer` (and the
-                                // dumb-buffer write behind it) only
-                                // ever copies one contiguous region.
-                                // For `--headless`/`--nested` (`age`
-                                // always `0` above) this is always
-                                // the full frame regardless, so nothing
-                                // changes for them; for `--tty` a
-                                // small, cheap bbox is the common
-                                // case (see `buffers.rs`'s module
-                                // doc), and only a large pointer jump
-                                // or real content change grows it.
+                                // Bounding box of every damaged rect, not
+                                // the rects themselves: `copy_framebuffer`
+                                // (and the dumb-buffer write behind it) only
+                                // ever copies one contiguous region. For
+                                // `--headless`/`--nested` (`age` always `0`
+                                // above) this is always the full frame
+                                // regardless, so nothing changes for them;
+                                // for `--tty` a small, cheap bbox is the
+                                // common case (see `buffers.rs`'s module
+                                // doc), and only a large pointer jump or a
+                                // real content change grows it.
                                 let region = union_bbox(damaged);
                                 let buffer_region: Rectangle<i32, Buffer> = Rectangle::new(
                                     (region.loc.x, region.loc.y).into(),
@@ -376,13 +368,12 @@ impl State {
                                     ),
                                 }
                             }
-                            // else: no presenter is watching this
-                            // frame, or (only possible when `age >
-                            // 0`, i.e. only under `--tty`) nothing
-                            // actually changed -- e.g. a redundant
-                            // `request_render` with no real
-                            // difference -- so there's nothing to
-                            // read back or present either way.
+                            // else: no presenter is watching this frame,
+                            // or (only possible when `age > 0`, i.e. only
+                            // under `--tty`) nothing actually changed -- e.g.
+                            // a redundant `request_render` with no real
+                            // difference -- so there's nothing to read back
+                            // or present either way.
                         }
                         Err(error) => tracing::warn!(%error, "could not render"),
                     }
