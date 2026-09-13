@@ -1544,6 +1544,35 @@ review, and why.
 
 ## Backlog (unordered — pick up whenever it fits)
 
+- **Open question: does `--tty` over SSH on the dev VM actually hold real
+  DRM master, or is it running in "unprivileged mode" the whole time
+  (HIGH-ish priority — this affects how much to trust prior hardware
+  claims, not a bug in flexwm itself)?** Found by `flexwm-reviewer` while
+  reviewing item 13, confirmed by independently reproducing it: every
+  `--tty` run over SSH on this project's dev VM logs Smithay's own `Unable
+  to become drm master, assuming unprivileged mode` at device-open time —
+  in direct tension with `vm/README.md`'s claim that a `--tty` session over
+  SSH "takes real DRM/libseat ownership just fine." The warning fires once,
+  at `session.open()`/DRM device open time, with no commit/flip errors
+  following it, so it's genuinely unclear whether: (a) master gets acquired
+  moments later via a separate libseat call this project doesn't currently
+  log, and the warning is stale/misleading; or (b) every `--tty` hardware
+  verification this project has done over SSH this whole time — VT
+  switching, scanout, cursor rendering, all of it — has actually been
+  running without real DRM master, which could mean some of what "verified
+  on real `--tty` hardware" claims throughout `ROADMAP.md` actually
+  demonstrated is narrower than believed (screenshot/pixel-sampling claims
+  read back through the pixman intermediate buffer regardless of master
+  state, so those likely still hold; anything that specifically depends on
+  *holding* master — real scanout to the physical display, VT-switch
+  semantics — is the part actually in question). Investigate before trusting
+  the next claim that depends on it: check what libseat/`seatd` actually
+  report for this session's master state after open (not just at open
+  time), check whether running directly on the QEMU window's console
+  (tty1) rather than over SSH changes the log line, and either fix
+  `vm/README.md`'s claim or fix whatever's preventing real master
+  acquisition over SSH.
+
 - **Input injection targeted at a specific window, without moving seat
   focus (research-backed idea, 2026-09-12 — a major goal per `CLAUDE.md`,
   not automatically ahead of daily-drivability items like layer-shell; see
