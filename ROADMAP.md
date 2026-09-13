@@ -1572,19 +1572,25 @@ review, and why.
     flexwm at all, which is the single biggest gap between "works" and
     "daily-drivable."
 
-    **Scope, and what was deliberately deferred.** This PR covers the
-    protocol (global at version 5, surface lifecycle, configure/ack, close),
-    all four layers rendering in the right order, anchors/margins/sizing,
-    exclusive zones shrinking the tiling area, and pointer input. It does
-    **not** implement `keyboard_interactivity` — see the backlog entry below
-    for the model to build, which is written out rather than left as "TODO
-    keyboard". The split is the opposite of the one suggested when this was
-    scoped (zone first, keyboard later, rather than protocol first, zone
-    later), for a measured reason: the zone is nearly free because Smithay's
-    `LayerMap` already computes it, while keyboard focus means an override
-    inside `shell.rs`'s `set_focus`, the compositor's most safety-critical
-    path. Bars, docks, wallpapers and notification daemons are fully usable
-    today; a launcher draws and clicks but cannot yet be typed into.
+    **Scope.** This PR covers the protocol (global at version 5, surface
+    lifecycle, configure/ack, close), all four layers rendering in the right
+    order, anchors/margins/sizing, exclusive zones shrinking the tiling area,
+    pointer input, and — added in the second round, see
+    **Keyboard interactivity** below — `keyboard_interactivity`. Bars, docks,
+    wallpapers, notification daemons *and* launchers are usable. What is
+    still missing is popups from a layer surface, which is blocked on a
+    pre-existing bug (no `xdg_popup` gets its initial configure at all; see
+    the backlog entry).
+
+    The first round deliberately deferred keyboard focus, on the reasoning
+    that the zone is nearly free (Smithay's `LayerMap` computes it) while
+    keyboard focus means an override inside `shell.rs`'s `set_focus`, the
+    compositor's most safety-critical path. Review rightly pushed back on
+    shipping that gap: the failure mode wasn't "a launcher can't be typed
+    into," it was "a launcher, or a layer-shell lock screen, maps and draws
+    convincingly while every keystroke goes to the window behind it" — worse
+    than not supporting the protocol at all, because before this branch such
+    a client failed loudly at bind time. So it is implemented here.
 
     **Smithay does the geometry, flexwm does the placement.**
     `smithay::desktop::LayerMap` (one per `Output`) already implements the
@@ -1636,6 +1642,57 @@ review, and why.
     next `arrange`. An empty axis is now pinned back to the output's origin
     (`tree::clamp_usable`).
 
+    **Keyboard interactivity, and why the policy is derived rather than
+    stored.** `layer_shell.rs`'s `LayerFocus` is the whole policy —
+    `exclusive` on `top`/`overlay` takes the keyboard when the surface maps
+    and holds it until it unmaps; `on_demand` anywhere, and `exclusive` on
+    `bottom`/`background` (which the spec explicitly hands back to the
+    compositor: "for the bottom and background layers, the compositor is
+    allowed to use normal focus semantics"), is click-to-focus like a window;
+    `none` never. `State::layer_keyboard_focus` re-reads the layer map on
+    every focus refresh instead of remembering a holder, which is what makes
+    "front-most exclusive wins", "the keyboard comes back on unmap" and "it
+    falls to the next exclusive surface when this one dies" fall out for free
+    rather than each needing its own teardown path. The one thing stored is
+    `State::clicked_layer`, because nothing else records that a click
+    happened.
+
+    Three decisions inside that are worth their own line:
+
+    - **Mapped-ness is `LayerSurfaceCachedState::last_acked`, not layer-map
+      membership.** Smithay's `pre_commit_hook` maintains that field as
+      exactly "has a buffer" (set from the acked configure when one is
+      attached, cleared when one is removed — its own doc says "Reset to
+      `None` when the surface unmaps"). Membership would have let a surface
+      that commits and never draws, or that unmaps itself with a null buffer,
+      sit on every keystroke with nothing of it on screen. The equivalent
+      hazard for *exclusive zones* is still open (see the backlog entry) —
+      there Smithay gives no such hook, here it does, and keyboard capture is
+      worth being stricter about than reserved space.
+    - **Window focus deliberately does not move.** `arrangement.focused`, the
+      ring, `set_activated` and `flexwm msg windows`' `focused` flag all keep
+      naming the window — which is the one focus returns to, and is what an
+      agent is asking about. Only the keyboard is overridden. This is in the
+      README's agent-facing section too, because `flexwm msg type` going to a
+      launcher while `flexwm msg windows` names the window behind it is
+      surprising if you haven't been told.
+    - **Keybindings keep working**, because `input.rs`'s `key()` matches them
+      before forwarding anything. That is what makes it safe to hand a
+      full-screen client every keystroke: `Super+Shift+E` and the `--tty`
+      `Ctrl+Alt+F<n>` VT switches are still reachable if it wedges. It is
+      also why a layer-shell *lock screen* on flexwm is a screen blanker you
+      can type into, not a security boundary — said plainly in the README
+      rather than left to be discovered.
+
+    The hot path was kept honest: `commit_layer_surface` gates the focus
+    refresh on `layer_focus(&layer) != Never || self.keyboard_on_layer`, so a
+    `none` bar redrawing its clock at its own frame rate pays one `Copy`
+    snapshot and a bool rather than a second walk of the layer map. The
+    second half of that condition is the one that is easy to get wrong: a
+    surface that *stops* wanting the keyboard reads as `Never`, and without
+    it nothing would ever take the focus back off it. There is a test for
+    exactly that transition.
+
     **A client-triggerable compositor panic, found by these tests and fixed
     here.** `zwlr_layer_surface_v1.set_size` takes two **`uint`**s, and the
     pinned Smithay rev converts them with a bare `as i32`
@@ -1655,12 +1712,17 @@ review, and why.
     worth refusing either way. Found only because the tests are debug builds
     and one of them sent `u32::MAX`; not by reading the handler.
 
-    **Tests**: 15 new integration tests (`layer_shell/tests.rs`) driving a
-    real `wayland-client` connection — binding `zwlr_layer_shell_v1` and
-    `xdg_wm_base` the way `waybar` does — through a real `State` with a real
-    headless backend, asserting on **read-back pixels** and on the core's own
-    arrangement, not on enum variants: the ordering bug above looks correct
-    at the type level. Covered: no layer surfaces at all (today's behavior,
+    **Tests**: 29 integration tests (`layer_shell/tests.rs`, all new — the
+    file does not exist on `main`) driving a real `wayland-client`
+    connection — binding `zwlr_layer_shell_v1`, `xdg_wm_base` and `wl_seat`
+    the way `waybar` and `fuzzel` do — through a real `State` with a real
+    headless backend, asserting on **read-back pixels**, on the core's own
+    arrangement, and on **what the client's own `wl_keyboard` was told**, not
+    on enum variants or compositor-side fields: the ordering bug above looks
+    correct at the type level, and "who has keyboard focus" is a claim about
+    what reached a client.
+
+    Geometry and input (16): no layer surfaces at all (today's behavior,
     unchanged); top-layer-over-window and background-under-ring ordering;
     exclusive zone moving windows (rect *and* pixels); two bars stacking on
     one edge; `-1` reserving nothing; a surface that never commits reserving
@@ -1669,16 +1731,40 @@ review, and why.
     back; `i32::MAX` geometry not overflowing anything; the `u32::MAX` size
     refusal leaving the compositor serving; pointer hit-testing above and
     below windows; clicking a bar not refocusing the window behind it (with
-    the control half — clicking the window *does* focus it); and an output
-    resize re-arranging both bar and zone. 8 new `flexwm-core` tests plus
+    the control half — clicking the window *does* focus it); an output resize
+    re-arranging both bar and zone; and the pinned `xdg_popup` gap.
+
+    Keyboard interactivity (13): an `exclusive` overlay surface taking the
+    keyboard on map, the window getting its `leave`, and typed characters
+    arriving as `wl_keyboard.key`; a `none` bar never moving focus at all,
+    by mapping *or* by being clicked; a buffer-less surface not holding the
+    keyboard however loudly it asks; `exclusive` on `background` needing a
+    click; `on_demand` click-to-focus and all three ways back out (window,
+    bar, bare desktop); destroy, null-buffer unmap, and a later `none`
+    commit each returning it; front-most-wins across `overlay`/`top` with
+    fallback when the winner dies; a keybinding still firing (and the bound
+    key *not* reaching the client) while an exclusive surface holds the
+    keyboard; the zero-window case; and a client disconnecting mid-hold
+    leaving nothing behind.
+
+    15 new `flexwm-core` tests (5 in `geometry.rs`, 10 in
+    `world/tests/outputs.rs`; 60 total, up from 45 on `main`) plus
     `Event::OutputUsableAreaChanged` (including degenerate and `i32`-extreme
     rectangles) added to the randomized invariant test, which now also
     asserts `usable ⊆ area` after every step.
 
-    The ordering test was confirmed non-vacuous against a negative control:
-    moving the background-layer elements to the other side of the ring (i.e.
-    back to what `space_render_elements` would have produced) fails it with
-    "the focus ring over the wallpaper: wrong pixel at (9, 12)".
+    Two negative controls, because a test that passes for the wrong reason is
+    worth less than no test:
+    - Moving the background-layer elements to the other side of the ring
+      (i.e. back to what `space_render_elements` would have produced) fails
+      the ordering test with "the focus ring over the wallpaper: wrong pixel
+      at (9, 12)".
+    - Stubbing `layer_keyboard_focus` to `return None` fails **11 of the 13**
+      keyboard tests; the two that still pass are exactly the two that assert
+      nothing may change (`a_bar_that_wants_no_keyboard_never_takes_it`,
+      `a_layer_surface_with_no_buffer_cannot_hold_the_keyboard`). Removing
+      just the `last_acked.is_none()` mapped-ness check fails both
+      buffer-less ones and nothing else.
 
     **A harness bug worth recording, because it failed intermittently rather
     than immediately**: the test client kept one `pending_ack` slot for all
@@ -1747,12 +1833,16 @@ review, and why.
     - **150 corner-to-corner pointer jumps** (near-full-frame damage per
       jump), alternating binaries per rep so VM drift hits both arms:
       before `60348a5` 25/26/34 (mean 28.3), after `d4fc476` 24/21/25 (mean
-      23.3), and 18/36/39 (mean 31.0) re-measured at `a958633`. Overlapping
-      ranges, no regression — and no per-frame allocation was added for a
-      session with no layer surfaces, which is what those two arms compare.
+      23.3), and 18/36/39 (mean 31.0) re-measured at `a958633`. **Read as
+      overlapping ranges, not as a measured equivalence**: at n=3 per arm
+      with an 18–39 spread inside a single arm, this rules out a large
+      regression and nothing finer. What it does establish structurally, and
+      the reason this arm exists at all, is that no per-frame allocation was
+      added for a session with no layer surfaces — which is what those two
+      binaries differ in.
     - **A mapped bar costs nothing measurable on that workload**: same
       process, 150 jumps with waybar mapped 38/34/28, then with it gone
-      18/36/39.
+      18/36/39 — same n=3 caveat, same reading.
     - **A bar's own redraws are close to free**: 3 jiffies over 20s with
       waybar's clock ticking once a second (1 jiffy in an earlier run), with
       the clock region provably changing over that window.
@@ -1762,11 +1852,12 @@ review, and why.
     had never connected. Every number above comes from a run that screenshots
     the bar and prints the windows' `y` first.
 
-    Also at `a958633`: `cargo test` 240/240 for `flexwm` (15 new) and 60/60
-    for `flexwm-core` (8 new) on the dev VM, `cargo clippy --workspace
-    --all-targets -D warnings` and `cargo fmt --all --check` clean on both
-    the VM and macOS, `cargo check --workspace --all-targets` clean on macOS
-    (the cross-platform build), and `scripts/smoke-test.sh` green under
+    Also at `a958633`: `cargo test` 240/240 for `flexwm` (15 layer-shell
+    tests at that commit) and 60/60 for `flexwm-core` (15 new, up from
+    `main`'s 45) on the dev VM, `cargo clippy --workspace --all-targets -D
+    warnings` and `cargo fmt --all --check` clean on both the VM and macOS,
+    `cargo check --workspace --all-targets` clean on macOS (the
+    cross-platform build), and `scripts/smoke-test.sh` green under
     `--headless` against a release build of this branch (all 11 `ok:`
     checks, exit 0).
 
@@ -2015,40 +2106,22 @@ review, and why.
   path" error).
 
 - **~~`wlr-layer-shell-unstable-v1` protocol support~~ — DONE as item 14**,
-  except for keyboard interactivity and layer popups, which are the two
-  entries below. The original entry's guess about the shape turned out half
+  except for layer popups (the entry two below). The original entry's guess about the shape turned out half
   right: the `Elements` enum did need changing, but into *one* `Surface`
   variant rather than a fourth, and the exclusive-zone plumbing into
   `flexwm-core` was one new field plus one new event, not a restructure.
 
-- **Layer-shell keyboard interactivity (`keyboard_interactivity`) — the one
-  piece item 14 deferred.** Today a layer surface never takes keyboard
-  focus: the mode is parsed by Smithay and ignored by flexwm, so `wofi`,
-  `fuzzel` or `rofi` draws and can be clicked but cannot be typed into,
-  while bars, docks, wallpapers and notification daemons (which ask for
-  `none`) are unaffected. The model to implement, decided while scoping item
-  14 rather than left open:
-  - `exclusive` on `top`/`overlay`: the surface takes keyboard focus while
-    it is mapped, top-most layer wins, and focus returns to
-    `arrangement.focused` when it unmaps or dies. This is the mode a lock
-    screen and a launcher use, and the protocol is close to normative about
-    it ("the seat will always give exclusive keyboard focus to the top-most
-    layer which has keyboard interactivity set to exclusive").
-  - `on_demand`, on any layer: click-to-focus, and clicking a window (or the
-    surface unmapping) takes it away again. `input.rs`'s
-    `focus_under_pointer` already declines to move *window* focus for a
-    click on a layer surface above windows — that is the hook.
-  - `exclusive` on `bottom`/`background`: treated as `on_demand`, which the
-    protocol explicitly permits ("for the bottom and background layers, the
-    compositor is allowed to use normal focus semantics").
-  - `none`: never, in any case.
-  The work is not the policy, it is the mechanism: `shell.rs`'s `set_focus`
-  currently derives keyboard focus straight from the core's arrangement on
-  every `apply()`, so a layer surface holding focus needs an explicit
-  override that `apply()` respects, plus teardown on unmap/destroy/VT
-  switch. That is the compositor's most safety-critical path (a wrong move
-  there means keys going to the wrong client, or nowhere), which is why it
-  is its own item rather than a rider on item 14.
+- **~~Layer-shell keyboard interactivity (`keyboard_interactivity`)~~ — DONE,
+  folded back into item 14** after review pushed back on shipping the gap.
+  The model this entry laid out (exclusive on top/overlay takes focus while
+  mapped and front-most wins; `on_demand` anywhere and `exclusive` on
+  bottom/background are click-to-focus; `none` never) is what was built,
+  unchanged. Two things the entry did not anticipate: keyboard focus is
+  *derived* from the layer map on every refresh rather than stored as an
+  override `apply()` respects, which removed most of the teardown surface it
+  worried about; and "while it is mapped" needed to mean "has a buffer"
+  (`LayerSurfaceCachedState::last_acked`), not "is in the layer map", or a
+  surface that draws nothing could hold every keystroke. See item 14.
 
 - **No `xdg_popup` ever receives its initial configure, so no popup maps at
   all** (found while implementing item 14; pre-existing and unrelated to
