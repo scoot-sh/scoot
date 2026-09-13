@@ -108,7 +108,12 @@ impl Outbound {
             // Something is still queued, so this reply has to go behind it --
             // writing it now would interleave two responses on the wire. Drop
             // the part already sent first, so a connection that queues reply
-            // after reply doesn't carry a growing dead prefix around.
+            // after reply doesn't carry a growing dead prefix around. The
+            // memmove that costs is proportional to what is still *owed*
+            // (bounded by `HIGH_WATER_BYTES`), never to what has already gone
+            // out, and it only happens at all once the kernel has taken part
+            // of the queue -- never on the common path, where the queue is
+            // empty and this branch is not taken.
             self.buffer.drain(..self.sent);
             self.sent = 0;
             self.buffer.extend_from_slice(line.as_bytes());

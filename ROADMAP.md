@@ -728,7 +728,13 @@ review, and why.
       flags, verified), retried per frame tick, given up on only after the
       client's own `timeout_ms` has passed with *no write progress at all*
       rather than after a fixed deadline — a client draining a multi-megabyte
-      reply slowly is making progress and is never given up on.
+      reply slowly is making progress and is never given up on. The cost of
+      that retry, named because this project benchmarks idle CPU: while such a
+      reply cannot drain, `frame_tick` keeps rescheduling at 16ms (`render()`
+      early-returns on `!needs_render`; the retry is one `EAGAIN` write per
+      tick) for up to that `timeout_ms`. Not a regression — a `wait-idle` with
+      a huge timeout over a never-settling screen already held the timer
+      exactly the same way — and bounded by what the client itself asked for.
     - **`ConnectionSource`**, a small `EventSource` wrapping `Generic`, exists
       because `Generic`'s callback cannot reach the `Generic`'s own `interest`
       field, and switching interest from inside the connection's own callback
