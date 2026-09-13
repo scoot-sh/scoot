@@ -92,7 +92,7 @@ Configuration below for the full schema and default keybindings. Run
 
 `--config PATH` loads a TOML file explicitly. Without it, flexwm looks for
 `$XDG_CONFIG_HOME/flexwm/config.toml`, falling back to
-`~/.config/flexwm/config.toml` if `$XDG_CONFIG_HOME` is unset, and runs on
+`~/.config/flexwm/config.toml` if `$XDG_CONFIG_HOME` is unset or empty, and runs on
 built-in defaults if neither exists. Three optional tables: `[layout]`,
 `[appearance]`, `[binds]`. Every field in every table is itself optional and
 defaults independently, so a config that only sets `gap` leaves everything
@@ -106,13 +106,16 @@ instead of blocking startup:
 
 - No file at the *default* path: silent, not even a log line (a fresh
   install, not a mistake).
-- The default path exists but can't be read (permissions, a broken symlink):
-  logged as an error, full defaults.
-- Malformed TOML, or an unknown/misspelled field name **anywhere in the
-  file** (`[layout]`, `[appearance]`, or the top level): logged as an error,
-  and the *entire* file is discarded for full built-in defaults — a typo in
-  `[layout]` also throws away an otherwise-valid `[binds]` table elsewhere in
-  the same file.
+- The default path exists but can't be read (permissions): logged as an
+  error, full defaults. (A broken symlink at that path resolves to "no such
+  file," which is the silent case above, not this one.)
+- Malformed TOML, an unknown/misspelled field name, or a field given the
+  wrong type (a string where a number is expected, a negative number for a
+  field that's unsigned) **anywhere in the file** (`[layout]`,
+  `[appearance]`, `[binds]`, or the top level): logged as an error, and the
+  *entire* file is discarded for full built-in defaults — a single bad field
+  in `[layout]` also throws away an otherwise-valid `[binds]` table
+  elsewhere in the same file.
 - One bad `[appearance]` color string, or one bad `[binds]` entry: logged as
   a warning, and only that field/bind falls back — every other field and
   bind in the file still applies.
@@ -129,7 +132,7 @@ says what's wrong in the log instead.
 |---|---|---|---|
 | `gap` | integer (pixels) | `12` | Gap between columns, between windows stacked in a column, and at output edges. Negative values are clamped to `0`. |
 | `column_widths` | array of floats | `[0.333…, 0.5, 0.666…]` (i.e. `1/3`, `1/2`, `2/3`) | Column widths as fractions of the output width, in the order `cycle-column-width` steps through. Non-finite or non-positive entries are dropped; an empty list falls back to the built-in three. |
-| `default_column_width` | integer | `1` | Index into `column_widths` used for newly created columns (`1` selects `0.5`, i.e. half the output). Out-of-range values are clamped to the last valid index. |
+| `default_column_width` | integer (unsigned) | `1` | Index into `column_widths` used for newly created columns (`1` selects `0.5`, i.e. half the output). Too large is clamped to the last valid index; negative isn't a valid value for this field at all, so it's a whole-file parse error (see Failure semantics above), not a clamp. |
 
 ### `[appearance]`
 
@@ -142,25 +145,29 @@ controls the ring and the background.
 | Field | Type | Default | Meaning |
 |---|---|---|---|
 | `focus_ring_width` | integer (pixels) | `3` | Ring thickness. Clamped at load time to at most half of `gap`, so it can never visually reach a neighboring window. |
-| `focus_ring_active_color` | `"#rrggbb"` / `"#rrggbbaa"` | ≈ `#6ba6fa` (accent blue) | Ring color around the focused window. |
-| `focus_ring_inactive_color` | `"#rrggbb"` / `"#rrggbbaa"` | ≈ `#595961` (muted gray) | Ring color around every other window. |
-| `background_color` | `"#rrggbb"` / `"#rrggbbaa"` | ≈ `#14141a` (near-black) | Cleared behind all window content — there's no separate background render element, this is the frame clear color. |
+| `focus_ring_active_color` | `"#rrggbb"` / `"#rrggbbaa"` | `#6ba6fa` (accent blue) | Ring color around the focused window. |
+| `focus_ring_inactive_color` | `"#rrggbb"` / `"#rrggbbaa"` | `#595961` (muted gray) | Ring color around every other window. |
+| `background_color` | `"#rrggbb"` / `"#rrggbbaa"` | `#141419` (near-black) | Cleared behind all window content — there's no separate background render element, this is the frame clear color. |
 | `prefer_no_csd` | boolean | `true` | Whether to answer a client's `zxdg_toplevel_decoration_v1` request with `ServerSide`, so a well-behaved client stops drawing its own titlebar (which would otherwise double up with the ring). |
 
-The three colors above are marked "≈" on purpose: the built-in defaults are
-stored internally as raw RGBA floats (`0.42, 0.65, 0.98`, `0.35, 0.35, 0.38`,
-and `0.08, 0.08, 0.1`, each `1.0` alpha), and none of them is exactly
-representable as an 8-bit `"#rrggbb"` string — the hex above is the nearest
-value, not what the compositor actually renders. Leave a color field unset
-to get the real built-in default; only set it to a hex string if you want to
-*change* it.
+The three hex values above are the actual rendered colors (pixel-sampled
+from a real screenshot, and pasting any of them back into the matching
+config field reproduces the default exactly). Internally the built-in
+defaults are stored as raw RGBA floats (`0.42, 0.65, 0.98`,
+`0.35, 0.35, 0.38`, and `0.08, 0.08, 0.1`, each `1.0` alpha), and none of
+those floats is exactly representable as an 8-bit `"#rrggbb"` string — that's
+a storage detail, not a reason to distrust the hex above. Leave a color
+field unset to get the real built-in default; only set it to a hex string if
+you want to *change* it.
 
 ### `[binds]`
 
 A table of `"key combination" = "action string"`. A combo is
 `modifier+modifier+...+key` (e.g. `"super+shift+h"`), or a bare key with no
 modifier at all (e.g. `"Return" = "close"` — legal, and it intercepts every
-press of that key). Whitespace around `+` is ignored. Modifier names are
+press of that key with none of Super/Shift/Ctrl/Alt held; `Shift+Return`,
+for instance, still reaches the focused client normally). Whitespace around
+`+` is ignored. Modifier names are
 case-insensitive: `ctrl`/`control`, `shift`, `alt`, and `super`/`logo`/
 `meta`/`cmd` (all four spellings mean the same modifier — flexwm's own
 tables and this doc call it "Super"). The key is an xkb keysym name (`h`,

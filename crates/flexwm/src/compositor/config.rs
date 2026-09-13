@@ -244,9 +244,11 @@ fn load_from(path: &Path, explicit: bool) -> Result<LoadedConfig, ConfigFileErro
             return Ok(LoadedConfig::defaults());
         }
         Err(source) => {
-            // The default path exists in some sense but couldn't be read
-            // (permissions, a broken symlink, ...) -- same "never block
-            // startup" rule as a parse failure below.
+            // Not `NotFound` (that's the arm above, including a broken
+            // symlink -- it resolves to ENOENT too) -- something like a
+            // permissions error, where the path exists but couldn't be
+            // read. Same "never block startup" rule as a parse failure
+            // below.
             tracing::error!(
                 path = %path.display(), %source,
                 "could not read the default config file; using defaults"
