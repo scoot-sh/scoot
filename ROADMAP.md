@@ -2471,10 +2471,13 @@ review, and why.
   for, in its own harness rather than by extending the layer-shell one);
   and a new `scripts/smoke-test.sh` step that types a shell command
   containing every broken character class into a real `foot`, redirects it
-  to a file and diffs it byte for byte — on `--headless` and on real
-  `--tty` hardware. Deliberately left out of scope and split out as its own
-  entry below: dead keys, compose sequences, and characters that are only
-  on a layout other than the active one.
+  to a file and diffs it byte for byte. The script itself ran on
+  `--headless`; the same round trip, run by hand, ran on real `--tty`
+  hardware in the dev VM (`/home/dev/tty-evidence.sh` there, screenshot
+  artifact `/home/dev/tty-shift-evidence.png`) — byte-for-byte identical
+  both times, `od -c` output in PR #23. Deliberately left out of scope and
+  split out as its own entry below: dead keys, compose sequences, and
+  characters that are only on a layout other than the active one.
 
   **Where.** `input.rs`'s `needs_shift` decides whether to hold `Shift_L`
   around a character, and asks Smithay `xkb.raw_syms_for_key_in_layout(...)
@@ -2533,6 +2536,14 @@ review, and why.
     purpose, see the resolved entry above; a layout that puts a character
     *only* behind Caps Lock would need it pressed and un-pressed around the
     character, and nothing in xkbcommon promises that round-trips cleanly.
+
+  Adjacent and deliberately unchanged: `flexwm msg key A` presses the `a`
+  key with nothing held and so types `a` (verified on `--headless`, same
+  binary; `flexwm msg key shift+a` types `A`). That is `press`'s documented
+  contract — it presses exactly the combo it is given, and `Shift` is a
+  modifier the caller names — not the same bug. It shares the trait that
+  `keycode_for_keysym` finds a key at any level, which is why it looks
+  similar when reading `keycode_for`'s remaining call site.
 
 - **`flexwm msg outputs` reports only an output's full rectangle**, so an
   agent cannot see what a bar reserved (item 14 gave the core a `usable`

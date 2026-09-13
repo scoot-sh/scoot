@@ -107,11 +107,11 @@ keyboard layout the session is running: for each character it finds the key
 that carries it and holds down whatever modifiers that key's level needs —
 Shift for `A` or `!`, AltGr for a German layout's `@` — so a client receives
 the same key *and* modifier events it would see from a real keyboard, not
-just a bare keysym. `\n` and `\t` are sent as `Return` and `Tab`. Two limits
-worth knowing:
+just a bare keysym. `\n` and `\t` are sent as `Return` and `Tab`. Three
+things worth knowing:
 
-- A character the active layout can't produce is an error naming it
-  (`no key for 'é' in this layout`), and so is one that sits on a level the
+- A character the active layout can't produce is an error naming it (`no key
+  for ... in this layout`), and so is one that sits on a level the
   layout only reaches through a locking or latching modifier — flexwm will
   not press Caps Lock to type a capital, since that would leave it on for
   everything afterwards. Dead keys and compose sequences aren't driven
@@ -123,6 +123,11 @@ worth knowing:
   keypress. That only matters for a bind with no modifiers, or one on
   Shift plus a key; if a character does hit a bind, the compositor logs a
   warning naming it rather than swallowing it silently.
+- `flexwm msg key` is the other one, and it is *not* the same: it presses
+  exactly the combination named, so `flexwm msg key A` presses the `a` key
+  with nothing held and types `a`. Ask for `shift+a` when you want `A` — or
+  use `flexwm msg type`, which is the one that works out the modifiers for
+  you.
 
 `--tty` needs a seat (`seatd` or logind) with a DRM device on it. On a modern
 kernel, on every non-root `--tty` run, Smithay logs `Unable to become drm
