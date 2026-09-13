@@ -324,12 +324,14 @@ impl State {
                         state.loop_signal.stop();
                         return Ok(PostAction::Continue);
                     }
-                    // A disconnecting client is seen *here* and nowhere else,
-                    // which matters for exactly one thing: the client that
-                    // disconnected may have been holding the session lock, and
-                    // nothing about a destroyed protocol object marks the
-                    // screen dirty. See `session_lock.rs`.
-                    state.refresh_lock_backdrop();
+                    // A disconnecting client -- or one destroying its lock
+                    // object without disconnecting -- is seen *here* and
+                    // nowhere else, which matters for exactly one thing: it
+                    // may have been holding the session lock, and nothing
+                    // about a destroyed protocol object marks the screen
+                    // dirty, drops the surfaces it left behind or moves the
+                    // focus off them. See `session_lock.rs`.
+                    state.refresh_lock_state();
                     // Replies (e.g. the initial registry globals) should reach
                     // the socket now rather than wait for `mod.rs`'s
                     // `post_dispatch` (which also flushes every client, once

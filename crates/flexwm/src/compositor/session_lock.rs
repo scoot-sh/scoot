@@ -9,20 +9,39 @@
 //!
 //! ## One field says whether the session is locked
 //!
-//! [`SessionLock::owner`] is that field, and it is deliberately the *only*
-//! one: `owner.is_some()` **is** "the session is locked", so there is no
-//! second boolean that could disagree with it (see `ROADMAP.md` item 5b for
-//! why this project treats a field with two meanings as a bug class of its
-//! own). It is written `Some` in exactly one place -- [`SessionLockHandler::lock`],
-//! when a lock is accepted -- and `None` in exactly one place --
-//! [`SessionLockHandler::unlock`], when the owning client unlocks. Nothing
-//! else, in any backend, in any error path, may write it; in particular a
-//! VT switch, a session pause, a failed render and a dying client all leave
-//! it exactly as it was, which is what makes the lock survive them.
+//! [`SessionLock::owner`] is that field: `owner.is_some()` **is** "the session
+//! is locked", and this module keeps no second boolean beside it that could
+//! disagree (see `ROADMAP.md` item 5b for why this project treats a field with
+//! two meanings as a bug class of its own). It is written `Some` in exactly one
+//! place -- [`SessionLockHandler::lock`], when a lock is accepted -- and `None`
+//! in exactly one place -- [`SessionLockHandler::unlock`], when the owning
+//! client unlocks. Nothing else, in any backend, in any error path, may write
+//! it; in particular a VT switch, a session pause, a failed render and a dying
+//! client all leave it exactly as it was, which is what makes the lock survive
+//! them.
 //!
 //! Two derived questions come off that same field, so they cannot drift:
 //! [`SessionLock::is_locked`] (`owner.is_some()`) and
 //! [`SessionLock::abandoned`] (`owner` is `Some` but its client is gone).
+//!
+//! **That claim is about this module's own state, and does not extend to
+//! Smithay's.** An earlier version of this doc said there was "no second
+//! boolean that could disagree", full stop; there is one, it just is not
+//! flexwm's. Smithay keeps a `LockStatus` (`Unlocked` / `Locked(lock)` /
+//! `Defunct`) inside the [`SessionLockManagerState`] held by
+//! [`SessionLock::manager`], and it has *different timing on purpose*: it
+//! becomes `Locked` only when [`SessionLocker::lock`] runs -- i.e. when the
+//! `locked` event goes out -- whereas `owner` is set the moment a lock is
+//! *accepted*. Closing that gap is not an option: the protocol forbids sending
+//! `locked` before a blanked frame exists. It is load-bearing rather than
+//! harmless, because `LockStatus` is what Smithay gates
+//! `ext_session_lock_v1.destroy` on (`lock.rs`: the request is refused only
+//! while `lock_status.is_locked_by(lock)`). In the accepted-but-not-yet-
+//! confirmed window it still reads `Unlocked`, so that `destroy` is accepted,
+//! and a client can therefore give up a lock it has already been granted. See
+//! "Which lock surfaces count" for what that does to the surfaces it leaves
+//! behind, and why filtering them is a correctness requirement rather than
+//! tidiness.
 //!
 //! ## What "locked" changes, and where
 //!
@@ -65,14 +84,25 @@
 //!
 //! The screen turns solid red, so a user can tell "my locker crashed" from
 //! "my locker is showing a black screen", and a new client may take the lock
-//! over -- run a lock client again and it gets `locked` immediately (the
-//! outputs are already blanked) and can unlock after authenticating. Both
-//! behaviors match sway (`sway/lock.c`'s `handle_abandon` paints the same
+//! over -- run a lock client again and it can unlock after authenticating.
+//! Both behaviors match sway (`sway/lock.c`'s `handle_abandon` paints the same
 //! red and `handle_session_lock` replaces an abandoned lock) and niri
 //! (`Niri::lock` replaces a lock whose client is not alive). The alternative
 //! -- no takeover at all -- would make a crashed locker a permanently
 //! unusable session with only a compositor restart as the way out, which is
 //! its own kind of failure.
+//!
+//! A takeover is confirmed *immediately* only when the lock it replaces had
+//! already been confirmed, i.e. when a blanked frame has genuinely been drawn
+//! ([`SessionLock::pending`] is `None`). "The outputs are already blanked" is
+//! true then and only then: a lock that was accepted but never confirmed --
+//! because its client died, or gave it up, in the window before the first
+//! frame -- leaves the *unlocked* desktop on screen, and telling the
+//! replacement `locked` there would hand it exactly the guarantee the event
+//! exists to provide while the user's windows are still displayed. Such a
+//! takeover goes through the same [`SessionLock::pending`] path a fresh lock
+//! uses instead. niri's `Niri::lock` draws the same line (it fast-confirms
+//! only from an already-`Locked` state, never from `Locking(_)`).
 //!
 //! The honest consequence, which `README.md` states too: while a lock is
 //! abandoned, any client that can reach this compositor's wayland socket can
@@ -81,13 +111,50 @@
 //!
 //! One more way to reach the same state, legally and without dying: a client
 //! may `destroy` its lock object *before* `locked` arrives (only
-//! `unlock_and_destroy` is forbidden that early), which a locker that gives
-//! up waiting could do. The session is already locked by then, so it stays
-//! locked and reads as abandoned -- a red screen, recovered by running a lock
-//! client again. That is the safe direction, and deliberately not special-
-//! cased into an unlock: "the client changed its mind" and "the client was
-//! killed" are indistinguishable from here, and only one of them is safe to
-//! guess at.
+//! `unlock_and_destroy` is forbidden that early -- see the `LockStatus` note
+//! above), which a locker that gives up waiting could do. The session is
+//! already locked by then, so it stays locked and reads as abandoned -- a red
+//! screen, recovered by running a lock client again. That is the safe
+//! direction, and deliberately not special-cased into an unlock: "the client
+//! changed its mind" and "the client was killed" are indistinguishable from
+//! here, and only one of them is safe to guess at.
+//!
+//! ## Which lock surfaces count
+//!
+//! Unlike a dying client, a client that merely destroys its *lock* keeps
+//! everything else: its connection, and the `wl_surface` under each lock
+//! surface it created. So [`SessionLock::surfaces`] can hold a surface whose
+//! `wl_surface.alive()` is perfectly true and which no longer belongs to any
+//! lock at all. Liveness is therefore not the question a reader may ask.
+//!
+//! [`is_current`] is, and every read goes through [`SessionLock::current`],
+//! which applies it. A surface counts only if all three hold: its own
+//! `wl_surface` is alive, the lock that created it is the one in `owner`, and
+//! that lock still exists. Dropping any one of them is exploitable rather than
+//! untidy:
+//!
+//! - `== owner` alone still admits the surfaces of an *abandoned* lock, which
+//!   is what the red backdrop is supposed to be replacing on screen.
+//! - `owner.is_alive()` alone still admits a surface left over from a lock
+//!   that has since been taken over by someone else.
+//!
+//! Together they close the one attack this module has to care about: `lock`,
+//! `get_lock_surface`, `destroy`, sent as a single batch by any client that
+//! can reach the wayland socket. It needs no race and no crash, and before
+//! this filter existed its surface stayed registered forever -- so the *next*
+//! locker's screen would be drawn from the attacker's pixels and every
+//! keystroke the user typed into it, password included, went to the attacker's
+//! still-connected surface while the real locker could never authenticate.
+//!
+//! Filtering is the guarantee; dropping is the follow-through. A surface that
+//! has stopped counting is also removed, and both focuses re-derived, at the
+//! first of [`State::refresh_lock_state`] (the dispatch that observed the
+//! disconnect or the `destroy`), [`SessionLock::cleanup`] (the next locked
+//! frame) and the `surfaces.clear()` in [`SessionLockHandler::lock`] (a
+//! takeover). Re-deriving is not optional there: `wl_pointer.button` goes to
+//! whatever the pointer last *entered*, so a filter that hid a zombie from the
+//! hit test while leaving it holding pointer focus would still deliver it
+//! every click.
 
 use std::time::Duration;
 
@@ -149,10 +216,19 @@ pub struct SessionLock {
     /// Dropping a [`SessionLocker`] sends `finished` instead, which is how
     /// every refusal below tells a client its lock did not take.
     pending: Option<SessionLocker>,
-    /// The lock surfaces of the owning lock, in creation order -- the first
-    /// live one holds the keyboard, which is the focus rule the protocol
-    /// itself suggests. One per output; flexwm has one output today (see
-    /// `headless.rs`'s `OUTPUT_ID`).
+    /// Every lock surface this compositor has been handed and not yet dropped,
+    /// in creation order -- the first *current* one holds the keyboard, which
+    /// is the focus rule the protocol itself suggests. One per output per
+    /// lock; flexwm has one output today (see `headless.rs`'s `OUTPUT_ID`).
+    ///
+    /// Not every entry is necessarily current: see this module's "Which lock
+    /// surfaces count". Nothing may read this field directly -- reads go
+    /// through [`SessionLock::current`], which is what applies [`is_current`].
+    /// The complete set of writers, so that rule can be audited in one grep:
+    /// the `push` in [`SessionLockHandler::new_surface`] (itself gated on the
+    /// same predicate), the `clear` in [`SessionLockHandler::lock`] and
+    /// [`SessionLockHandler::unlock`], and the `retain` in
+    /// [`SessionLock::cleanup`] and [`State::forget_lock_surface`].
     surfaces: Vec<LockSurface>,
     /// The opaque full-output rectangle drawn behind the lock surfaces.
     ///
@@ -199,8 +275,26 @@ impl SessionLock {
         self.owner.as_ref().is_some_and(|lock| !lock.is_alive())
     }
 
-    /// The surface the keyboard goes to while locked: the first lock surface
-    /// still alive, or nobody.
+    /// The lock surfaces that may be drawn, focused and hit-tested right now:
+    /// the current lock's own, in creation order.
+    ///
+    /// The single reader of [`SessionLock::surfaces`], so that a reader added
+    /// to this module later cannot accidentally ask the weaker question (see
+    /// this module's "Which lock surfaces count" for what the weaker questions
+    /// let through).
+    ///
+    /// Costs one `is_alive` and one object-id comparison per surface per read,
+    /// allocates nothing, and only runs at all while the session is locked --
+    /// where the list is one surface per output.
+    fn current(&self) -> impl Iterator<Item = &LockSurface> {
+        let owner = self.owner.as_ref();
+        self.surfaces
+            .iter()
+            .filter(move |surface| is_current(owner, surface))
+    }
+
+    /// The surface the keyboard goes to while locked: the current lock's first
+    /// surface, or nobody.
     ///
     /// Liveness, not mapped-ness, deliberately -- the opposite of
     /// `layer_shell.rs`'s rule, and for the opposite reason. There, a surface
@@ -208,11 +302,14 @@ impl SessionLock {
     /// *nothing else may have the keyboard at all*, so handing it to a lock
     /// surface that has not drawn yet is strictly better than handing it to
     /// nobody: the client is mid-startup and its first keystrokes are the
-    /// user's password.
+    /// user's password. That argument only holds for a surface whose lock is
+    /// the live one, which is why this asks [`SessionLock::current`] rather
+    /// than `alive()`: handing the keyboard to a *former* locker's surface is
+    /// not "better than nobody", it is the whole password going to whoever
+    /// left it there.
     fn keyboard_focus(&self) -> Option<WlSurface> {
-        self.surfaces
-            .iter()
-            .find(|surface| surface.alive())
+        self.current()
+            .next()
             .map(|surface| surface.wl_surface().clone())
     }
 
@@ -259,8 +356,8 @@ impl SessionLock {
         R::TextureId: Texture + Send + Clone + 'static,
     {
         let mut elements = Vec::new();
-        for surface in &self.surfaces {
-            if !surface.alive() || !is_mapped(surface) {
+        for surface in self.current() {
+            if !is_mapped(surface) {
                 continue;
             }
             elements.extend(render_elements_from_surface_tree(
@@ -275,7 +372,7 @@ impl SessionLock {
         elements
     }
 
-    /// Sends this frame's callbacks to every live lock surface.
+    /// Sends this frame's callbacks to every current lock surface.
     ///
     /// Sent to all of them rather than only the ones that produced an
     /// element, matching `render()`'s window, cursor and layer-surface loops
@@ -283,10 +380,7 @@ impl SessionLock {
     /// before its first attach, and withholding it would stall the very frame
     /// that unsticks it -- here, the first frame of the lock screen itself.
     fn send_frames(&self, output: &Output, time: Duration) {
-        for surface in &self.surfaces {
-            if !surface.alive() {
-                continue;
-            }
+        for surface in self.current() {
             send_frames_surface_tree(
                 surface.wl_surface(),
                 output,
@@ -297,7 +391,14 @@ impl SessionLock {
         }
     }
 
-    /// Drops lock surfaces whose client has gone, reporting whether any went.
+    /// Drops every lock surface that has stopped counting, reporting whether
+    /// any went.
+    ///
+    /// The same predicate the readers use, so this can only ever remove
+    /// surfaces they were already ignoring -- it exists to stop this
+    /// compositor *holding* them (a `wl_surface` handle, and through it an
+    /// `Arc` on client state), and so that the callers can re-derive focus off
+    /// its return value.
     ///
     /// The second line of defence behind `handlers.rs`'s `destroyed` hook, in
     /// the same spirit as `LayerMap::cleanup` in the render loop: a client
@@ -306,24 +407,60 @@ impl SessionLock {
     /// state.
     fn cleanup(&mut self) -> bool {
         let before = self.surfaces.len();
-        self.surfaces.retain(LockSurface::alive);
+        // Split borrow: `owner` is read, `surfaces` is written, and they are
+        // different fields of the same struct.
+        let owner = self.owner.as_ref();
+        self.surfaces.retain(|surface| is_current(owner, surface));
         before != self.surfaces.len()
     }
 
-    /// Configures every lock surface to `size`.
+    /// Configures every current lock surface to `size`.
     ///
     /// Called when the output's mode changes: a lock surface's size is an
     /// exact requirement (committing a buffer of any other size is a protocol
     /// error), so a resized output has to reconfigure them or the next commit
     /// kills the lock client.
     fn configure_all(&self, size: (i32, i32)) {
-        for surface in &self.surfaces {
-            if !surface.alive() {
-                continue;
-            }
+        for surface in self.current() {
             configure(surface, size);
         }
     }
+
+    /// The current lock surface under `position`, if any.
+    fn surface_under(
+        &self,
+        position: Point<f64, Logical>,
+        origin: Point<i32, Logical>,
+    ) -> Option<(WlSurface, Point<f64, Logical>)> {
+        self.current()
+            .find_map(|surface| {
+                under_from_surface_tree(
+                    surface.wl_surface(),
+                    position,
+                    origin,
+                    WindowSurfaceType::ALL,
+                )
+            })
+            .map(|(surface, location)| (surface, location.to_f64()))
+    }
+}
+
+/// Whether `surface` is one of the surfaces the session's *current* lock put
+/// up: all three of "its `wl_surface` still exists", "the lock that created it
+/// is the one that owns the session" and "that lock still exists".
+///
+/// The one definition of what counts, taken as a free function rather than a
+/// method so [`SessionLock::cleanup`] can apply it while holding `surfaces`
+/// mutably. See this module's "Which lock surfaces count" for why each of the
+/// three is load-bearing.
+///
+/// The `is_alive` is asked of `owner` rather than of `surface.ext_session_lock()`
+/// only because it reads as the question being asked ("is this session
+/// abandoned"); the equality above it means they are the same object, so the
+/// two spellings cannot disagree.
+fn is_current(owner: Option<&ExtSessionLockV1>, surface: &LockSurface) -> bool {
+    surface.alive()
+        && owner.is_some_and(|owner| owner.is_alive() && owner == surface.ext_session_lock())
 }
 
 /// Sets a lock surface's pending size and sends the configure carrying it.
@@ -357,16 +494,32 @@ impl SessionLockHandler for State {
     /// 2. The session is already locked by a client that is still alive:
     ///    refused. This is the ordinary "swaylock is already running" case.
     /// 3. Otherwise accepted -- either a fresh lock, or a takeover of a lock
-    ///    whose client died (see this module's doc). A takeover is confirmed
-    ///    immediately, because the outputs are already blanked and the
-    ///    protocol's reason for waiting is satisfied by construction; a fresh
-    ///    lock waits for the first blanked frame ([`State::confirm_lock`]).
+    ///    whose client is gone (see this module's doc). Confirmation is
+    ///    immediate only when a blanked frame has genuinely already been drawn
+    ///    (`already_blanked` below); otherwise, fresh lock or takeover alike,
+    ///    it waits for one ([`State::confirm_lock`]).
     ///
     /// A refusal is a `finished` event, which is what dropping the
     /// [`SessionLocker`] sends. It is never a protocol error: asking to lock
     /// an already-locked session is legal, and `finished` is the protocol's
     /// own answer for "the compositor decided not to".
     fn lock(&mut self, confirmation: SessionLocker) {
+        // Whether the screen this lock is arriving onto is *already* blanked,
+        // which is the entire justification for confirming a takeover without
+        // drawing a frame first. `pending` is cleared by `confirm_lock` when a
+        // locked frame has actually been drawn, so "locked, with nothing
+        // pending" is exactly that state -- and "locked, still pending" means
+        // the previous lock never got its blanked frame, so the user's own
+        // desktop is still what is on the display.
+        //
+        // Read here, before the dead-`pending` sweep below clears the evidence:
+        // that sweep exists to stop a dead locker blocking a replacement, and
+        // reading after it would make the never-confirmed case indistinguishable
+        // from the confirmed one -- i.e. would hand the replacement `locked`
+        // with the unlocked session still on screen, the precise race the event
+        // exists to prevent.
+        let already_blanked = self.session_lock.is_locked() && self.session_lock.pending.is_none();
+
         // A confirmation whose own client died before its first frame can
         // never be confirmed into anything meaningful, and must not block a
         // replacement locker from starting. Dropping it sends `finished` to
@@ -394,19 +547,26 @@ impl SessionLockHandler for State {
         }
 
         if self.session_lock.is_locked() {
-            // Takeover of an abandoned lock. Nothing about what is on screen
-            // changes -- it is already blanked -- so this needs no frame
-            // before `locked` goes out, and the new client can put its own
-            // surfaces up straight away.
-            tracing::info!("a new client is taking over an abandoned session lock");
-            self.session_lock.owner = Some(confirmation.ext_session_lock().clone());
-            // The previous client's surfaces died with it; anything still
-            // here would be drawn from a destroyed client's state.
-            self.session_lock.surfaces.retain(LockSurface::alive);
-            confirmation.lock();
+            tracing::info!(
+                already_blanked,
+                "a new client is taking over an abandoned session lock"
+            );
         } else {
             tracing::info!("locking the session");
-            self.session_lock.owner = Some(confirmation.ext_session_lock().clone());
+        }
+        self.session_lock.owner = Some(confirmation.ext_session_lock().clone());
+        // Whatever is left belongs to the lock just replaced -- and the
+        // replaced client may still be connected, holding a live `wl_surface`,
+        // if it gave its lock up rather than died. None of it may be drawn or
+        // focused again, so it goes now rather than being filtered forever.
+        // (Empty already on the fresh-lock path: `unlock` clears it too.)
+        self.session_lock.surfaces.clear();
+        if already_blanked {
+            // The outputs are blank and stay blank across this handover, so
+            // the protocol's reason for waiting is satisfied by construction
+            // and the new client can put its own surfaces up straight away.
+            confirmation.lock();
+        } else {
             self.session_lock.pending = Some(confirmation);
         }
 
@@ -459,17 +619,15 @@ impl SessionLockHandler for State {
         // match surfaces to lockers by their `ext_session_lock_v1`. Anything
         // else must not end up on screen or holding the keyboard.
         //
-        // `owner` alone is the right thing to compare against, including
-        // while a lock is still pending confirmation: it is set the moment a
-        // lock is *accepted*, not when it is confirmed (see `lock` above), so
-        // there is no window in which an accepted lock's surfaces would fail
-        // this check.
-        let owns = self
-            .session_lock
-            .owner
-            .as_ref()
-            .is_some_and(|lock| lock == surface.ext_session_lock());
-        if !owns {
+        // `owner` is the right thing to compare against, including while a
+        // lock is still pending confirmation: it is set the moment a lock is
+        // *accepted*, not when it is confirmed (see `lock` above), so there is
+        // no window in which an accepted lock's surfaces would fail this check.
+        //
+        // Asked through the same [`is_current`] every reader uses, so the set
+        // of surfaces that may enter this list is exactly the set that may be
+        // read out of it -- one predicate, not two that could drift.
+        if !is_current(self.session_lock.owner.as_ref(), &surface) {
             tracing::warn!("ignoring a lock surface from a lock this compositor did not accept");
             return;
         }
@@ -499,11 +657,26 @@ impl State {
     ///
     /// Called from `headless.rs::render` after a successful frame, which is
     /// the closest this compositor gets to the protocol's "presented on all
-    /// outputs": under `--tty` that frame has been copied into the dumb
-    /// buffer and a page flip asked for, so the very next scanout shows it;
-    /// under `--headless`/`--nested` there is no scanout at all and the
-    /// framebuffer a screenshot reads is already this frame. See `README.md`,
-    /// which states the difference rather than claiming vblank accuracy.
+    /// outputs" -- and closer on some backends than others:
+    ///
+    /// - `--headless`/`--nested` have no scanout at all, and the framebuffer a
+    ///   screenshot reads *is* this frame, so this is exact.
+    /// - `--tty` renders into the pixman image here; `Tty::present` then copies
+    ///   it into a dumb buffer and asks for a page flip -- but only if it can.
+    ///   It returns without doing either when the session is paused/inactive,
+    ///   or when a previous flip has not been confirmed by a `VBlank` yet
+    ///   (`flip_pending`, which its own comment describes as an ordinary,
+    ///   frequent, harmless throttle, not an edge case). So under contention
+    ///   the previous -- possibly unlocked -- frame can still be on the scanout
+    ///   buffer for up to one more vblank after `locked` has gone out.
+    ///
+    /// `README.md` states that weaker guarantee in those terms rather than
+    /// claiming vblank accuracy, and `ROADMAP.md`'s backlog carries closing it
+    /// (confirming from the `DrmEvent::VBlank` handler instead) as its own
+    /// item -- it means tracking which in-flight flip carries the blanked frame
+    /// through a path that also has to not hang a locker when the session is
+    /// switched away, which is more than a doc fix's worth of presentation-path
+    /// change.
     ///
     /// Costs one `Option` check on every frame that is not locking.
     pub(super) fn confirm_lock(&mut self) {
@@ -517,35 +690,52 @@ impl State {
         }
     }
 
-    /// Marks the screen dirty if the backdrop's colour no longer matches what
-    /// the lock's state says it should be -- i.e. if the lock client has died
-    /// since the last frame was drawn.
+    /// Catches up the two things that change when a lock stops being the
+    /// current one and *nothing else notices*: the lock surfaces it left
+    /// behind, and the backdrop's colour.
     ///
-    /// This exists because *nothing else notices*. A client disconnecting
-    /// destroys protocol objects; it does not commit a surface, move a
-    /// pointer or press a key, so no existing path marks the screen dirty,
-    /// and the last frame drawn stays on the display. Found on real `--tty`
-    /// hardware rather than by inspection: `kill -9` on a lock client that
-    /// had already destroyed its lock surface left a black screen (the
-    /// previous frame) instead of the red one that tells a user their locker
-    /// crashed. The same-looking case where a lock surface *was* still up
-    /// happened to work, because destroying that surface goes through
-    /// `handlers.rs`'s `destroyed` hook -- i.e. the signal was correct only
-    /// by accident of teardown order, which is exactly the kind of implicit
-    /// dependency worth removing rather than documenting.
+    /// A client disconnecting -- or destroying its lock object while keeping
+    /// the connection -- destroys protocol objects; it does not commit a
+    /// surface, move a pointer or press a key, so no existing path marks the
+    /// screen dirty or re-derives focus, and the last frame drawn stays on the
+    /// display with the last focus still pointing wherever it pointed.
     ///
-    /// Called from the one place a disconnect is observed: the wayland
-    /// display source in `state.rs`. Costs one `Option::is_some` on every
-    /// wayland dispatch cycle with the session unlocked, which is every cycle
-    /// in ordinary use; while locked it costs one liveness check on an object
-    /// id, on a connection carrying only the lock client's own traffic.
+    /// **Surfaces.** [`SessionLock::cleanup`] drops whatever has stopped
+    /// counting, and both focuses are re-derived if anything did. Both halves
+    /// matter, and pointer focus is the one that is easy to miss:
+    /// `wl_pointer.button` goes to whatever the pointer last *entered*, never
+    /// to whatever the hit test would return now, so a former locker's surface
+    /// that keeps pointer focus keeps receiving clicks no matter what the hit
+    /// test says. Doing it here rather than only at the next frame means it
+    /// happens in the same dispatch cycle that observed the disconnect -- i.e.
+    /// before any later cycle could route input.
     ///
-    /// Compares against the backdrop buffer's *own* colour rather than a
-    /// remembered flag, so there is no second piece of state to fall out of
-    /// step with what was actually drawn.
-    pub(super) fn refresh_lock_backdrop(&mut self) {
+    /// **Backdrop.** Found on real `--tty` hardware rather than by inspection:
+    /// `kill -9` on a lock client that had already destroyed its lock surface
+    /// left a black screen (the previous frame) instead of the red one that
+    /// tells a user their locker crashed. The same-looking case where a lock
+    /// surface *was* still up happened to work, because destroying that surface
+    /// goes through `handlers.rs`'s `destroyed` hook -- i.e. the signal was
+    /// correct only by accident of teardown order, which is exactly the kind of
+    /// implicit dependency worth removing rather than documenting. Compares
+    /// against the backdrop buffer's *own* colour rather than a remembered
+    /// flag, so there is no second piece of state to fall out of step with what
+    /// was actually drawn.
+    ///
+    /// Called from the one place a disconnect is observed: the wayland display
+    /// source in `state.rs`. Costs one `Option::is_some` on every wayland
+    /// dispatch cycle with the session unlocked, which is every cycle in
+    /// ordinary use; while locked it adds a `retain` over one surface per
+    /// output and one colour compare, on a connection carrying only the lock
+    /// client's own traffic. No allocation either way.
+    pub(super) fn refresh_lock_state(&mut self) {
         if !self.session_lock.is_locked() {
             return;
+        }
+        if self.session_lock.cleanup() {
+            self.refresh_keyboard_focus();
+            self.refresh_pointer_focus();
+            self.request_render();
         }
         if self.session_lock.backdrop.color() != self.session_lock.backdrop_color() {
             self.request_render();
@@ -581,10 +771,10 @@ impl State {
         self.session_lock.backdrop_color()
     }
 
-    /// Frame callbacks and dead-surface cleanup for a locked frame.
+    /// Frame callbacks and stale-surface cleanup for a locked frame.
     ///
-    /// Returns whether a dead lock surface was dropped, which is a reason to
-    /// re-derive keyboard focus: the surface that died may have held it.
+    /// Returns whether a lock surface was dropped, which is a reason to
+    /// re-derive both focuses: the surface that went may have held either.
     pub(super) fn lock_post_frame(&mut self, output: &Output, time: Duration) -> bool {
         self.session_lock.send_frames(output, time);
         self.session_lock.cleanup()
@@ -612,19 +802,7 @@ impl State {
             .and_then(|output| self.space.output_geometry(output))
             .map(|geometry| geometry.loc)
             .unwrap_or_default();
-        self.session_lock
-            .surfaces
-            .iter()
-            .filter(|surface| surface.alive())
-            .find_map(|surface| {
-                under_from_surface_tree(
-                    surface.wl_surface(),
-                    position,
-                    origin,
-                    WindowSurfaceType::ALL,
-                )
-            })
-            .map(|(surface, location)| (surface, location.to_f64()))
+        self.session_lock.surface_under(position, origin)
     }
 
     /// Drops `surface` if it is one of the lock surfaces, reporting whether

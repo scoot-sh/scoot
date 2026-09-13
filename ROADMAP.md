@@ -2362,8 +2362,9 @@ review, and why.
     **Crash recovery, the most safety-critical decision here:** the session
     stays locked (the protocol's own rule), the screen turns **solid red**
     so a user can tell a crashed locker from one drawing black, and a new
-    client may **take the lock over** — confirmed immediately, since the
-    outputs are already blank — and unlock after authenticating. Not
+    client may **take the lock over** — confirmed immediately when the lock
+    it replaces had already drawn its blanked frame, and made to wait for one
+    otherwise (see round two) — and unlock after authenticating. Not
     guessed: sway's `lock.c` (`handle_abandon` paints exactly this red,
     `handle_session_lock` replaces an abandoned lock) and niri's
     `Niri::lock` (replaces a lock whose client `is_alive()` is false) both
@@ -2409,7 +2410,8 @@ review, and why.
     multi-output exists; and `ext-idle-notify-v1`, without which nothing
     locks the session automatically.
 
-    **Tests: 20 new (340 total, against 320 on the merge base)**, in
+    **Tests: 26 new (346 total, against 320 on the merge base)** — 20 with
+    the protocol's first landing, six more from round two below — in
     `session_lock/tests.rs`, driving real `wayland-client` connections
     (including a second one, for the takeover) through a real `State` and a
     real `PixmanRenderer`. Every "nothing is visible" assertion checks
@@ -2452,6 +2454,61 @@ review, and why.
     behind a lock (225 again the moment it unlocks), which is why
     `handlers.rs`'s per-commit `request_render` needed no extra gate while
     locked.
+
+    **Round two: any client could permanently steal every future lock
+    screen's keyboard.** The most severe finding of the session, and it needed
+    no race, no crash and no privilege. `ext_session_lock_v1.destroy` is legal
+    *before* `locked` has been sent — Smithay's `lock.rs` refuses it only
+    while its own `LockStatus` says that object holds the lock, and that
+    status stays `Unlocked` until the confirmation actually runs. So a client
+    could send `lock`, `get_lock_surface` and `destroy` as one batch, and
+    unlike a dying client it kept both its connection and the `wl_surface`
+    under that lock surface. Every reader here filtered on
+    `LockSurface::alive()`, which asks about the `wl_surface` and nothing
+    about the lock, so the surface stayed registered forever: when the user's
+    real locker ran later, the zombie was still first in the list, so it drew
+    in front and it held the keyboard. The user's password went to the
+    attacker keystroke by keystroke while the locker that never saw them could
+    never authenticate and so could never unlock. Reproduced end to end before
+    it was fixed: on the unfixed tree the attacking client's report reads
+    `keys: 16` against the real locker's `keys: 0`.
+
+    The obvious fix — compare against `owner` — closes the takeover half and
+    not the other one: during the abandoned-but-not-yet-replaced phase the
+    stale surface's lock *is* still `owner`. The predicate has to be all three
+    of alive, `== owner`, and `owner` itself still existing, and it is now one
+    free function (`is_current`) behind one accessor (`SessionLock::current`)
+    that is the only reader of `surfaces` — so a reader added later cannot ask
+    the weaker question by forgetting the rest. Filtering is the guarantee;
+    a stale surface is also *dropped*, with both focuses re-derived, at the
+    dispatch that observed the `destroy` (`refresh_lock_state`, renamed from
+    `refresh_lock_backdrop`), at the next locked frame, and at a takeover.
+    Re-deriving pointer focus is not optional: `wl_pointer.button` goes to
+    whatever the pointer last *entered*, so filtering the hit test alone would
+    have left the zombie receiving every click — which it did, measured, two
+    buttons' worth.
+
+    Two more findings from the same round. **A takeover could confirm
+    `locked` with an unlocked frame on screen**: the fast path reasoned "the
+    outputs are already blanked", true only if the *previous* lock had ever
+    been confirmed. It now fast-confirms only when the state it replaces had
+    `pending == None` on entry, read before the dead-`pending` sweep that
+    would otherwise erase the distinction; everything else routes through the
+    same `pending` mechanism a fresh lock uses. (niri's `Niri::lock` draws the
+    same line — it fast-confirms from `Locked`, never from `Locking(_)`.)
+    And **the `README` overstated the `--tty` `locked` guarantee**: it claimed
+    the frame had been copied to the scanout buffer with a flip requested,
+    but `Tty::present` returns without doing either whenever the session is
+    inactive or a previous flip is still pending — the latter being, in the
+    code's own words, an ordinary frequent throttle. Corrected to the real,
+    weaker guarantee rather than closed, because closing it means carrying the
+    confirmation through the flip; see the backlog entry, which now says that
+    precisely.
+
+    Six new tests, all red on `ace80a1` first and green after (the four
+    reproductions review wrote, incorporated rather than discarded, plus the
+    pointer/click half of the attack and a control proving the fast-confirm
+    path still exists for a takeover that has genuinely earned it).
 
 ## Backlog (unordered — pick up whenever it fits)
 
@@ -2986,15 +3043,25 @@ review, and why.
   revisiting as a comfort feature if the black flash proves annoying in
   daily use — with a hard deadline, as the protocol requires.
 
-- **`locked` is sent once a blanked frame has been drawn and handed to the
-  presenter, not once a vblank has confirmed it** (item 16). Under `--tty`
-  the frame has been copied into the scanout buffer and a page flip
-  requested by then, so a client that suspends the machine on `locked` races
-  the flip rather than the render. Closing that fully means confirming from
-  the DRM vblank handler (`tty/mod.rs`'s `DrmEvent::VBlank`), i.e. carrying
-  the pending confirmation through the flip — small, but it touches the
-  presentation path and was not worth bundling into the protocol's first
-  landing.
+- **`locked` is sent once a blanked frame has been *rendered*, not once a
+  vblank has confirmed it** (item 16, restated precisely in round two after
+  review traced the original wording against the code and found it too
+  strong). `confirm_lock` fires on `drew_a_frame`, which `headless.rs` sets
+  when `render_output` succeeds on the pixman image — before, and independent
+  of, presentation. `Tty::present` then early-returns without copying anything
+  or asking for a flip whenever `!self.active` (session paused / VT switched
+  away) or `self.flip_pending`, and the code's own comment calls that second
+  skip "an ordinary, frequent, harmless throttle". So the real guarantee is
+  "rendered, and handed to the presenter if the presenter could take it": up
+  to one further vblank of the previous — possibly unlocked — frame can stay
+  on scanout after the client has been told `locked`. Closing it means
+  confirming from the DRM vblank handler (`tty/mod.rs`'s `DrmEvent::VBlank`),
+  which is more than it sounds: because `present` skips while a flip is in
+  flight, the next completion is for the *previous* frame, so this needs to
+  track which in-flight flip actually carries the blanked frame — and it must
+  not leave a locker waiting forever for a vblank that cannot arrive while the
+  session is switched away. Touches the presentation path, so it stays its own
+  item rather than riding along with a fix round.
 
 - **The `ext_session_lock_manager_v1` global is offered to every client**
   (item 16). The protocol explicitly allows restricting it ("the compositor

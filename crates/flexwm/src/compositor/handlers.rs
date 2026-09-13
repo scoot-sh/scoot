@@ -95,9 +95,12 @@ impl CompositorHandler for State {
         }
         if self.forget_lock_surface(surface) {
             // Unconditional, unlike the cursor above: what the lock screen
-            // shows just changed on every backend, and the keyboard may have
-            // been on this surface.
+            // shows just changed on every backend, and either focus may have
+            // been on this surface. Both are re-derived for the same reason
+            // every other lock transition does it -- see `session_lock.rs`:
+            // `wl_pointer.button` follows the last `enter`, not the hit test.
             self.refresh_keyboard_focus();
+            self.refresh_pointer_focus();
             self.request_render();
         }
     }

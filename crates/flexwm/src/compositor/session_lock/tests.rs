@@ -140,6 +140,19 @@ enum Step {
     DestroyLockSurface { index: usize },
     /// `unlock_and_destroy` on the `index`-th lock object.
     Unlock { lock: usize },
+    /// `ext_session_lock_manager_v1.lock` without waiting for the compositor's
+    /// answer -- the only way to hold the state a real locker is in *before*
+    /// `locked` arrives, which is where both this module's ugliest cases live.
+    LockNoWait,
+    /// The whole hostile sequence as one client-side batch: `lock`,
+    /// `get_lock_surface` (never mapped -- no ack, no buffer), then
+    /// `ext_session_lock_v1.destroy`. Deliberately one batch: no compositor
+    /// frame can interleave, so nothing about this needs a race to win.
+    AttackLock,
+    /// `ext_session_lock_v1.destroy` on the `lock`-th lock object -- legal
+    /// before `locked` has been sent, and it leaves the `wl_surface` under any
+    /// lock surface alive and the connection up.
+    DestroyLock { lock: usize },
     /// Hand back everything this client has seen.
     Report,
 }
@@ -577,6 +590,25 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                     lock_surfaces.get(index).ok_or("no such lock surface")?;
                 lock_surface.destroy();
                 surface.destroy();
+            }
+            Step::LockNoWait => {
+                let lock = manager.lock(&qh, ());
+                locks.push(lock);
+            }
+            Step::AttackLock => {
+                let lock = manager.lock(&qh, ());
+                let surface = compositor.create_surface(&qh, ());
+                let index = lock_surfaces.len();
+                client.lock_configures.push(None);
+                let lock_surface =
+                    lock.get_lock_surface(&surface, &output, &qh, SurfaceIndex(index));
+                lock.destroy();
+                lock_surfaces.push((surface, lock_surface));
+                locks.push(lock);
+            }
+            Step::DestroyLock { lock } => {
+                let lock = locks.get(lock).ok_or("no such lock")?;
+                lock.destroy();
             }
             Step::Unlock { lock } => {
                 let lock = locks.get(lock).ok_or("no such lock")?;
@@ -1412,4 +1444,293 @@ fn the_manager_global_is_advertised() {
     // all proves it -- asserted explicitly so a regression names itself.
     fixture.run(Step::MapWindow);
     assert!(!fixture.state.session_lock.is_locked());
+}
+// -- a lock its own client gave up ----------------------------------------
+//
+// The nastiest state this module has, and the one independent review found a
+// critical hole in: `ext_session_lock_v1.destroy` is *legal* before `locked`
+// has been sent (Smithay's `lock.rs` refuses it only while its own
+// `LockStatus` says this object holds the lock, and that stays `Unlocked`
+// until the confirmation actually runs). A client that uses it keeps
+// everything a dying client loses -- its connection, and the `wl_surface`
+// under every lock surface it made -- so "is the surface alive" stops being
+// the same question as "does this surface still belong to the lock that owns
+// the session". Every test below was a live reproduction before it was a
+// regression test; see this module's "Which lock surfaces count".
+
+/// The lock is given up with a *mapped* surface still up. The abandoned screen
+/// has to be the red indicator, not the former locker's own pixels -- showing
+/// those is worse than useless: a user looking at what appears to be a working
+/// lock screen has no way to tell that their real locker never took effect.
+#[test]
+fn a_lock_given_up_with_a_surface_up_still_shows_the_abandoned_screen() {
+    let mut fixture = Fixture::new();
+    // No render target, so the lock is accepted but never confirmed -- which
+    // is exactly (and only) the window in which `destroy` is legal.
+    let backend = fixture.state.backend.take().expect("a backend");
+    fixture.run(Step::LockNoWait);
+    fixture.run(Step::map_lock_surface(0));
+    fixture.run(Step::DestroyLock { lock: 0 });
+    fixture.state.backend = Some(backend);
+    let pixels = fixture.render();
+    assert!(
+        fixture.state.session_lock.abandoned(),
+        "the lock reads as abandoned"
+    );
+    assert_whole_screen_is(&pixels, RED_BGRA, "the documented abandoned screen");
+}
+
+/// ...and the same client stops receiving input the moment it gives the lock
+/// up, without waiting for anyone to replace it.
+///
+/// Both halves are asserted from the wire, and the pointer half is the one
+/// that a hit-test-only fix would miss: `wl_pointer.button` goes to whatever
+/// the pointer last *entered*, so a surface that keeps pointer focus keeps
+/// receiving clicks however the hit test answers.
+#[test]
+fn a_lock_given_up_takes_the_keyboard_and_the_pointer_with_it() {
+    let mut fixture = Fixture::new();
+    let backend = fixture.state.backend.take().expect("a backend");
+    fixture.run(Step::LockNoWait);
+    fixture.run(Step::map_lock_surface(0));
+    fixture.state.pointer_move(30.0, 30.0);
+    fixture.settle();
+    let held = fixture.report();
+    assert_eq!(
+        held.keyboard_focus,
+        Some(Which::Lock(0)),
+        "the locker holds the keyboard while its lock is live"
+    );
+    assert_eq!(held.pointer_focus, Some(Which::Lock(0)), "and the pointer");
+
+    fixture.run(Step::DestroyLock { lock: 0 });
+    fixture.state.backend = Some(backend);
+    fixture.state.type_text("password").expect("typed text");
+    fixture.state.pointer_move(30.0, 30.0);
+    fixture.state.pointer_button(PointerButton::Left, true);
+    fixture.state.pointer_button(PointerButton::Left, false);
+    fixture.settle();
+    let after = fixture.report();
+    assert_eq!(
+        after.keyboard_focus, None,
+        "a client that gave up its lock must not still hold the keyboard \
+         (before={held:?} after={after:?})"
+    );
+    assert_eq!(after.pointer_focus, None, "nor the pointer");
+    assert_eq!(
+        after.keys, held.keys,
+        "and no keystroke may reach it (before={held:?} after={after:?})"
+    );
+    assert_eq!(after.buttons, held.buttons, "nor any click");
+}
+
+/// The surface must not survive a takeover either: the replacement locker's
+/// screen is its own, and so is the keyboard.
+///
+/// Distinct from the test above rather than a stronger version of it, because
+/// the two fail to different fixes. During the abandoned-but-not-yet-replaced
+/// phase above, the stale surface's lock *is* still `owner`, so an ownership
+/// check alone passes it; here it is not, so a liveness check alone passes it.
+/// Only asking both questions closes both.
+#[test]
+fn a_surface_from_a_given_up_lock_does_not_survive_a_takeover() {
+    let mut fixture = Fixture::new();
+    let backend = fixture.state.backend.take().expect("a backend");
+    fixture.run(Step::LockNoWait);
+    fixture.run(Step::map_lock_surface(0));
+    fixture.run(Step::DestroyLock { lock: 0 });
+    fixture.state.backend = Some(backend);
+    fixture.render();
+    assert!(fixture.state.session_lock.abandoned());
+
+    let b = fixture.connect();
+    fixture.run_on(b, Step::Lock);
+    fixture.run_on(b, Step::map_lock_surface(0));
+    let pixels = fixture.render();
+    let report_b = fixture.report_of(b);
+    let report_a = fixture.report();
+    assert_eq!(
+        report_b.locked, 1,
+        "the new locker was told it holds the lock"
+    );
+    assert_eq!(
+        report_a.keyboard_focus, None,
+        "the client that gave up its lock must not still hold the keyboard \
+         (A={report_a:?} B={report_b:?})"
+    );
+    assert_eq!(
+        report_a.pointer_focus, None,
+        "nor the pointer (A={report_a:?} B={report_b:?})"
+    );
+    assert_eq!(
+        report_b.keyboard_focus,
+        Some(Which::Lock(0)),
+        "the new locker must hold the keyboard (A={report_a:?} B={report_b:?})"
+    );
+    assert_whole_screen_is(&pixels, LOCK_BGRA, "the new locker's own surface");
+}
+
+/// The whole attack, from a client that needs no race, no crash and no
+/// test-only surgery: `lock`, `get_lock_surface`, `destroy`, in one batch.
+///
+/// Before the ownership filter existed, that left a surface registered
+/// forever, and the *next* locker to run -- the user's real one -- put its
+/// screen up while this client kept the keyboard. Every key of the password
+/// went to the attacker, and the locker that never saw them could never
+/// authenticate and so could never unlock.
+#[test]
+fn no_client_can_steal_the_lock_screen_by_giving_up_a_lock() {
+    let mut fixture = Fixture::new();
+    fixture.run(Step::AttackLock);
+    assert!(
+        fixture.state.session_lock.is_locked(),
+        "the hostile client locked the session"
+    );
+    assert!(
+        fixture.state.session_lock.abandoned(),
+        "...and immediately gave the lock up"
+    );
+    // Its lock surface was never acked and never drew, so this is also the
+    // unmapped half of the abandoned-screen check.
+    assert_whole_screen_is(
+        &fixture.render(),
+        RED_BGRA,
+        "an abandoned lock whose surface never drew",
+    );
+
+    // The user's real locker comes along and takes over.
+    let real = fixture.connect();
+    fixture.run_on(real, Step::Lock);
+    fixture.run_on(real, Step::map_lock_surface(0));
+    let pixels = fixture.render();
+    assert_whole_screen_is(&pixels, LOCK_BGRA, "the real locker's screen");
+
+    // Typed *after* the real lock screen is up: this is the password.
+    fixture.state.type_text("password").expect("typed text");
+    fixture.settle();
+    let attacker = fixture.report();
+    let locker = fixture.report_of(real);
+    assert_eq!(
+        attacker.keyboard_focus, None,
+        "a client that holds no lock must not hold the lock screen's keyboard \
+         (attacker={attacker:?} locker={locker:?})"
+    );
+    assert_eq!(
+        attacker.keys, 0,
+        "and must not have been sent a single keystroke \
+         (attacker={attacker:?} locker={locker:?})"
+    );
+    assert_eq!(
+        locker.keyboard_focus,
+        Some(Which::Lock(0)),
+        "the real locker must hold the keyboard (attacker={attacker:?} locker={locker:?})"
+    );
+    assert!(
+        locker.keys > 0,
+        "and must be the one that received the keystrokes \
+         (attacker={attacker:?} locker={locker:?})"
+    );
+}
+
+/// A takeover may only be confirmed without drawing a frame when the lock it
+/// replaces had actually drawn one. Replace a lock that never did, and the
+/// unlocked session is still on the display -- telling the new client `locked`
+/// there hands it exactly the guarantee the event exists to provide at exactly
+/// the moment it is false.
+///
+/// The first lock is left unconfirmed by taking the render target away, so no
+/// timing luck is involved: with no backend no frame can be drawn at all.
+#[test]
+fn a_takeover_waits_for_the_blanked_frame_the_replaced_lock_never_drew() {
+    let mut fixture = Fixture::new();
+    fixture.run(Step::MapWindow);
+    assert!(
+        contains(&fixture.render(), WINDOW_BGRA),
+        "the window is on screen before any lock"
+    );
+
+    let backend = fixture.state.backend.take().expect("a backend");
+    fixture.run(Step::LockNoWait);
+    fixture.disconnect(0);
+    assert!(
+        fixture.state.session_lock.is_locked(),
+        "the session is locked, by a client that is now gone"
+    );
+    assert!(
+        fixture.state.session_lock.pending.is_some(),
+        "...and its lock was never confirmed"
+    );
+
+    // The replacement's own `Lock` step blocks until the compositor answers,
+    // and it must not answer yet, so it is sent by hand -- the same pattern
+    // `the_locked_event_waits_for_a_blanked_frame` uses.
+    let second = fixture.connect();
+    fixture.clients[second]
+        .steps
+        .as_ref()
+        .expect("the step channel")
+        .send(Step::Lock)
+        .expect("the client thread is still running");
+    let deadline = Instant::now() + Duration::from_millis(200);
+    while Instant::now() < deadline {
+        fixture
+            .event_loop
+            .dispatch(Some(Duration::from_millis(5)), &mut fixture.state)
+            .expect("a compositor dispatch");
+    }
+    assert!(
+        fixture.state.session_lock.pending.is_some(),
+        "a takeover of a lock that never drew a blanked frame must wait for one"
+    );
+    // Which is the entire point, stated in pixels: reading the framebuffer
+    // without rendering first shows what a client told `locked` here would
+    // have been told about.
+    fixture.state.backend = Some(backend);
+    assert!(
+        contains(&fixture.pixels(), WINDOW_BGRA),
+        "the unlocked session is still the last frame drawn"
+    );
+
+    // Now let the frame happen; only then may the confirmation go out.
+    assert_whole_screen_is(&fixture.render(), BLACK_BGRA, "the blanked frame");
+    assert!(fixture.state.session_lock.pending.is_none());
+    let ack = fixture.wait_for_ack(second);
+    assert!(matches!(ack, Ack::Done));
+    let report = fixture.report_of(second);
+    assert_eq!(
+        report.locked, 1,
+        "the takeover is confirmed, once it is true"
+    );
+    assert_eq!(report.finished, 0);
+}
+
+/// The other half of that rule, so the fix above cannot have been "never
+/// fast-confirm": replacing a lock that *had* drawn its blanked frame is still
+/// confirmed with no further frame, because the screen genuinely is blank and
+/// stays blank across the handover.
+///
+/// Driven the same way round as the test above -- the render target is taken
+/// away *before* the second lock, so the only way this client can be told
+/// `locked` at all is without a frame.
+#[test]
+fn a_takeover_of_a_confirmed_lock_is_still_confirmed_immediately() {
+    let mut fixture = Fixture::new();
+    fixture.run(Step::Lock);
+    assert_whole_screen_is(&fixture.render(), BLACK_BGRA, "the blanked frame");
+    assert!(
+        fixture.state.session_lock.pending.is_none(),
+        "the first lock was confirmed by that frame"
+    );
+    let backend = fixture.state.backend.take().expect("a backend");
+    fixture.disconnect(0);
+
+    let second = fixture.connect();
+    fixture.run_on(second, Step::Lock);
+    assert!(
+        fixture.state.session_lock.pending.is_none(),
+        "no frame is owed: the outputs were blank before this lock and are \
+         blank after it"
+    );
+    assert_eq!(fixture.report_of(second).locked, 1);
+    fixture.state.backend = Some(backend);
 }

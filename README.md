@@ -334,6 +334,13 @@ real `--tty` hardware by screenshot and by what clients were actually sent:
   window that happened to be under the pointer. Any pointer grab in flight —
   a drag-and-drop, say — is dropped as well; that last part is code-traced
   rather than exercised, since there is no drag-and-drop fixture here.
+- **"The lock surface" means the *current* lock's.** A lock object can be
+  destroyed while the client that made it stays connected and keeps the
+  `wl_surface` underneath alive, so "is this surface alive" is not the same
+  question as "does this surface still belong to the lock that owns the
+  session". flexwm asks the second one everywhere: a surface from a lock that
+  was given up, or replaced, stops being drawn and stops receiving keyboard
+  and pointer input immediately, without waiting for anything to replace it.
 - **Keybindings that run an action don't fire.** `Super+Q`, a `spawn` bind,
   every layout motion: suppressed, and forwarded to the lock client as
   ordinary keystrokes instead. The one exception is deliberate: the `--tty`
@@ -356,10 +363,23 @@ screen unlocked. flexwm's recovery story, so a crashed locker isn't a dead
 session:
 
 - the screen turns **solid red**, so you can tell "my locker crashed" from "my
-  locker is showing a black screen";
-- **run a lock client again and it takes over** — it is told `locked`
-  immediately (the outputs are already blank), puts its own surface up, and
-  can unlock once you authenticate. Both behaviors match what sway does.
+  locker is showing a black screen" — including when the locker had a surface
+  up and drawing at the moment it went, which is the case where showing its
+  last pixels instead would leave you with no way to tell;
+- **run a lock client again and it takes over** — it puts its own surface up
+  and can unlock once you authenticate. It is told `locked` immediately when
+  the lock it replaces had already blanked the screen; if that lock went in
+  the window *before* its first blanked frame, the replacement waits for one
+  exactly like a fresh lock does, because until then your actual desktop is
+  still what's on the display. Both behaviors match what sway does.
+
+The same applies to a lock client that gives up without dying: destroying an
+`ext_session_lock_v1` before `locked` arrives is legal (only
+`unlock_and_destroy` is forbidden that early), and a locker that times out
+waiting may well do it. The session stays locked and reads as abandoned — the
+red screen, recovered by running a locker again — and the surfaces that client
+had up stop being drawn and stop receiving input at that moment, even though
+its connection and its `wl_surface`s are still perfectly alive.
 
 **What is *not* guaranteed — read this before trusting it:**
 
@@ -373,13 +393,20 @@ session:
 - **`flexwm msg windows` still lists your windows while locked**, titles
   included, and `flexwm msg outputs` still answers. Nothing is drawn from
   them, but the IPC surface is not blanked.
-- **The `locked` event is sent once a blanked frame has been drawn and handed
-  to the display, not once a vblank has confirmed it on screen.** Under
-  `--tty` that means the frame has been copied into the scanout buffer and a
-  page flip requested. A client that suspends the machine the instant it sees
-  `locked` is therefore racing the flip, not the render — a much smaller
-  window than no gating at all, but not the vblank-exact guarantee the
-  protocol describes.
+- **The `locked` event is sent once a blanked frame has been *rendered*, not
+  once a vblank has confirmed it on screen.** Under `--headless`/`--nested`
+  that is exact — there is no scanout at all, and the framebuffer a screenshot
+  reads *is* that frame. Under `--tty` it is weaker than this section used to
+  claim: the frame is rendered, and then copied into a scanout buffer with a
+  page flip requested *only if the presenter can take it right then*. It takes
+  neither step while the session is inactive (you switched VT away) or while a
+  previous page flip hasn't been confirmed by a vblank yet — and that second
+  case is ordinary, frequent throttling, not a rare edge. So under real
+  contention the previous, possibly unlocked, frame can remain on the scanout
+  buffer for up to one more vblank after `locked` has gone out. A client that
+  suspends the machine the instant it sees `locked` is racing that. Closing it
+  properly means confirming from the vblank handler instead; it's on the
+  backlog rather than done.
 - **Up to one frame of the unlocked screen can still be on the display**
   between the lock request and the first blanked frame. That is inherent (the
   protocol's `locked` ordering exists precisely because of it), not something

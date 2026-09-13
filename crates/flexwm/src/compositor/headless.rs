@@ -510,9 +510,13 @@ impl State {
             // behind a lock screen. They get one again on the first frame
             // after unlocking.
             if self.lock_post_frame(&output, time) {
-                // A dead lock surface was dropped, and it may have been the
-                // one holding the keyboard -- and what is drawn just changed.
+                // A lock surface was dropped, and it may have been the one
+                // holding the keyboard or the pointer -- and what is drawn
+                // just changed. Pointer focus has to be re-derived explicitly
+                // and not just hit-tested: `wl_pointer.button` goes to
+                // whatever the pointer last entered (see `session_lock.rs`).
                 self.refresh_keyboard_focus();
+                self.refresh_pointer_focus();
                 self.request_render();
             }
         } else {
