@@ -153,7 +153,12 @@ What works:
     to give it the keyboard, click a window, a bar or bare desktop to take it
     back. `exclusive` on the `bottom` or `background` layer is treated the
     same way — the spec allows normal focus semantics there, and nothing
-    should be typing into a wallpaper unasked.
+    should be typing into a wallpaper unasked. Note that *only a click*
+    releases an `on_demand` surface: a keybinding or a `flexwm msg action
+    focus-*` moves window focus but leaves the keyboard where it is. The spec
+    leaves this implementation-defined, and click-only is the deliberate
+    choice — the alternative silently steals a launcher's keyboard whenever a
+    script re-focuses a window.
   - A surface that has committed but never attached a buffer, or that
     unmapped itself, can't hold the keyboard however it asks: there is
     nothing of it on screen to type into.

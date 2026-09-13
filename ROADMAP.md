@@ -1693,6 +1693,16 @@ review, and why.
     it nothing would ever take the focus back off it. There is a test for
     exactly that transition.
 
+    Be precise about what that gate buys, though, because the code comment
+    reads more absolute than it is: the cheap path is "a `none` bar commits
+    **while nothing holds the keyboard**". Once a launcher is up,
+    `keyboard_on_layer` is true, so every bar commit takes the second branch
+    and re-derives focus — which is the most likely source of the one extra
+    jiffy in the "ticking bar + focused launcher: 2" row below (bar alone: 1).
+    Tightening it to "this surface is the current holder" would recover that;
+    it was not done here because it is one jiffy per twenty seconds and it
+    would mean re-running the whole hardware capture (see the Backlog).
+
     **A client-triggerable compositor panic, found by these tests and fixed
     here.** `zwlr_layer_surface_v1.set_size` takes two **`uint`**s, and the
     pinned Smithay rev converts them with a bare `as i32`
@@ -1886,11 +1896,13 @@ review, and why.
     is the exact client class this work exists for), `swaybg` 1.2.2 and
     `Waybar` 0.15.0, all from `nixpkgs`. Scripts and raw output are on the VM
     at `/tmp/hw-evidence/` (`hw-out.txt`, `hw2-out.txt`, `hw3-out.txt`, and
-    the `hwshots*/` PNGs); the numbers here are copied from them verbatim.
-    The pointer is parked at (1590, 990) before every capture, for the same
-    reason round one recorded. **The evidence's cache key still matches**:
-    the only commit after `9ddc295` on this branch is this section itself —
-    `git diff --stat 9ddc295 HEAD -- crates/ scripts/` is empty.
+    the `hwshots*/` PNGs, which do not survive a VM reboot — everything
+    needed to reproduce them is in PR #22's "Reproducing" block instead); the
+    numbers here are copied from them verbatim. The pointer is parked at
+    (1590, 990) before every capture, for the same reason round one recorded.
+    **The evidence's cache key still matches**: every commit after `9ddc295`
+    on this branch is documentation — `git diff --stat 9ddc295 HEAD --
+    crates/ scripts/` is empty.
 
     **Correctness, on hardware.**
     - **Keystrokes reach the launcher, not the window behind it.** With
@@ -1986,8 +1998,14 @@ review, and why.
         cycle 5..15: 42112 kB      (+4 kB total across eleven cycles)
         after:  42112 kB, and 37272 kB by the end of the run
 
-    One step up on the first cycle (allocator/page growth, not per-cycle),
-    then flat to within 4 kB over fourteen more. No leak.
+    One step up on the first cycle (+4,856 kB), then flat to within 4 kB over
+    fourteen more — and the run ends back at 37,272 kB, so nothing accumulates
+    per cycle. The step's most likely mechanism, not instrumented further: a
+    layer-shell client's `wl_shm` pools are mmap'd into the compositor and
+    stay mapped until the dead surface is dropped, which for an implicit
+    teardown is the next `render()`'s `LayerMap::cleanup` — so "RSS right
+    after a cycle" includes whatever the last client left mapped. The thing
+    being tested here is whether that number *grows*, and it doesn't.
 
     **Per-frame render cost is unchanged by holding focus.** 150
     corner-to-corner pointer jumps (near-full-frame damage per jump), 3 reps
@@ -2004,18 +2022,28 @@ review, and why.
     to the launcher's own redraw. It feels instant on the VM's software
     renderer, and the numbers say why.
 
-    **What was not verified on hardware, and why.** `on_demand`
-    click-to-focus (and `exclusive` degraded to `on_demand` on the background
-    layer) has no convenient real client — `fuzzel` is `exclusive`, `waybar`
-    and `swaybg` are `none`, and nothing in `nixpkgs` on this VM asks for
-    `on_demand`. Both are covered by the integration tests, which drive a
-    real `wayland-client` connection and assert on `wl_keyboard` events, but
-    "a real `on_demand` client on real hardware" is an untested combination.
-    Likewise a real layer-shell **lock screen** (`gtklock`,
-    `swaylock-effects`): the keyboard model is what one needs, and this PR is
-    what makes one stop leaking keystrokes, but none was run — see the
-    README's explicit note that a layer-shell locker here is a blanker you
-    can type into, not a security boundary.
+    **What was not verified on hardware, and why.**
+    - **`on_demand` click-to-focus** (and `exclusive` degraded to `on_demand`
+      on the background layer) has no convenient real client — `fuzzel` is
+      `exclusive`, `waybar` and `swaybg` are `none`, and nothing in `nixpkgs`
+      on this VM asks for `on_demand`. Both are covered by the integration
+      tests, which drive a real `wayland-client` connection and assert on
+      `wl_keyboard` events, but "a real `on_demand` client on real hardware"
+      is an untested combination.
+    - **A real VT switch while a layer surface holds the keyboard.** The
+      `super+h` check above is the closest proxy — same `key()` filter, same
+      "intercepted before anything is forwarded" property — but
+      `Ctrl+Alt+F<n>` itself was not pressed with `fuzzel` up. The structural
+      argument is that `Bound::ChangeVt` and `Bound::Action` are both matched
+      in the same filter before any forward, and that `session_event`'s
+      pause/activate arms never touched keyboard focus for toplevels either
+      (so nothing new is needed on the way back). That is an argument, not a
+      measurement; it is listed here rather than claimed above.
+    - **A real layer-shell lock screen** (`gtklock`, `swaylock-effects`): the
+      keyboard model is what one needs, and this PR is what stops one leaking
+      keystrokes, but none was run — see the README's explicit note that a
+      layer-shell locker here is a blanker you can type into, not a security
+      boundary.
 
     **Also at `9ddc295`**: `cargo test -p flexwm` **254/254** (241 → 254, the
     13 new keyboard tests), `cargo test -p flexwm-core` **60/60**, `cargo
