@@ -281,27 +281,40 @@ fn load_from(path: &Path, explicit: bool) -> Result<LoadedConfig, ConfigFileErro
 /// `display`, `parse`, `serde`, `std`): a `RecursionGuard` over combined
 /// inline-table/array nesting, and a separate cap on dotted-key and table-header
 /// path segments. Past either, parsing stops and reports an error, which lands
-/// in the arm below like any other malformed config -- so no config file, however
-/// deep, reaches the "recurse until the stack is gone" failure this module's
-/// no-hard-failure promise could not otherwise survive.
+/// in the arm below like any other malformed config -- so at the stack budget
+/// this actually runs with, no config file reaches the "recurse until the stack
+/// is gone" failure this module's no-hard-failure promise could not otherwise
+/// survive.
 ///
-/// Two measured constraints on *how* this is called, because they are invisible
-/// at the site that would break them (aarch64 Linux + macOS, `toml` 1.1.6,
-/// 2026-09-13; see `ROADMAP.md`'s resolved recursion-depth entry for the raw
-/// numbers):
+/// That budget is an assumption, not a guarantee, and so are two other things
+/// about *how* this is called; all three are invisible at the site that would
+/// break them (measured on aarch64 Linux + macOS, `toml` 1.1.6, 2026-09-13 --
+/// see `ROADMAP.md`'s resolved recursion-depth entry for the raw numbers and the
+/// commands that produced them):
 ///
-/// - Those two limits multiply rather than add: a dotted key can sit at every
-///   level of nesting, so the deepest tree they allow is ~6,560 levels from a
-///   ~13 KB file. Building it is cheap (<80 KiB of stack); *dropping* it is
-///   recursive and costs ~1.1 MiB in a release build, ~6.5 MiB in a debug one.
-///   [`load`] runs on the main thread (8 MiB) via `compositor::run`, which
-///   absorbs that; moving it to a spawned thread would get the Rust default of
-///   2 MiB and abort a debug build on a config a user could paste by accident.
-/// - The cost is a function of the *deserialization target*, not just the input:
-///   `FileConfig` is shallow and `deny_unknown_fields` stops serde at the first
-///   key, but deserializing the same bytes into a `toml::Table` (a passthrough
-///   section, say) descends the whole tree -- ~6.7 MiB release, ~31 MiB debug,
-///   i.e. over budget even on the main thread.
+/// - **The 8 MiB main-thread stack.** [`load`] runs on the process's main thread
+///   via `compositor::run`, so it gets `RLIMIT_STACK`, which is 8 MiB by default
+///   on Linux and macOS. Two ways to lose that: moving config parsing to a
+///   spawned thread, which gets Rust's 2 MiB default instead, or launching
+///   flexwm under a reduced `ulimit -s`. A *debug* build has no margin for
+///   either -- under `ulimit -s 2048` it aborts with `fatal runtime error: stack
+///   overflow` on a 13 KB file a user could paste by accident. A release build
+///   needs 932 KiB and survives both.
+/// - **How deep a file can get.** The two limits multiply rather than add: a
+///   dotted key can sit at every level of nesting, so the deepest tree they
+///   allow is 6,561 nested tables/arrays (counting the document root) out of a
+///   13,448-byte file. *Parsing* it is cheap -- 476 KiB of stack in a debug
+///   build, and in a release build under the ~134 KiB floor glibc puts beneath
+///   any thread stack here, which is as precise as that one gets. The recursive
+///   *drop* of the parsed tree is the real cost: 932 KiB release (flexwm's
+///   `panic = "abort"` profile; ~1,140 KiB if built to unwind, which is what
+///   `cargo test --release` produces) and 6,684 KiB debug.
+/// - **The deserialization target.** The cost is a function of the target, not
+///   just the input: `FileConfig` is shallow and `deny_unknown_fields` stops
+///   serde at the first key, but deserializing the same bytes into a
+///   `toml::Table` (a passthrough section, say) descends the whole tree --
+///   7,288 KiB release, which still fits in 8 MiB but with under 1 MiB to spare
+///   rather than over 7, and 32,100 KiB debug, which does not fit at all.
 fn parse_or_defaults(text: &str, path: &Path) -> LoadedConfig {
     match toml::from_str::<FileConfig>(text) {
         Ok(file) => LoadedConfig::from_file(file),
@@ -1028,31 +1041,43 @@ mod tests {
 
     /// The deepest *tree* `toml`'s two limits allow between them: its 80-level
     /// nesting guard and its 80-segment key-path limit multiply rather than
-    /// add, because a dotted key can sit at every level of nesting. 80 nested
-    /// inline tables, each keyed by an 80-segment dotted key, under an
-    /// 80-segment table header: ~6,560 levels of real tree depth out of 13 KB
-    /// of file, and nothing a config file can express goes deeper.
+    /// add, because a dotted key can sit at every level of nesting. Each of the
+    /// three parts below is at its own cap, so nothing a config file can
+    /// express goes deeper:
+    ///
+    /// - an 80-segment *array-of-tables* header, worth 81 levels -- its last
+    ///   segment is an array holding a table, one level more than the plain
+    ///   `[a.a...]` header spends there;
+    /// - 80 nested inline tables (all the `RecursionGuard` allows), each keyed
+    ///   by a fresh 80-segment dotted key, worth 80 levels apiece;
+    /// - an 80-segment dotted key for the leaf, worth 79 more.
+    ///
+    /// 13,448 bytes, 6,561 nested tables/arrays counting the document root,
+    /// with the scalar at the bottom as the 6,562nd node on that path.
     ///
     /// Dropping that tree is recursive, which is what actually costs stack
-    /// here -- parsing it needs under 80 KiB. Measured 2026-09-13 on aarch64
-    /// (macOS and the Linux dev VM), `toml` 1.1.6: it completes on a
-    /// ~1.12 MiB stack in a release build, ~6.5 MiB in a debug one. So this
-    /// test runs on an 8 MiB thread, matching the main thread `compositor::run`
-    /// -- and therefore `load` -- actually gets, rather than the 2 MiB
-    /// `cargo test` would otherwise hand it. If this ever overflows, that is a
-    /// real finding about production, not test flakiness: the margin in a
-    /// debug build is only ~1.4 MiB.
+    /// here -- parsing it needs 476 KiB in a debug build and less than a thread
+    /// stack's ~134 KiB floor in a release one. Measured 2026-09-13 on aarch64
+    /// (macOS and the Linux dev VM), `toml` 1.1.6: this test's body completes
+    /// on a 6,684 KiB stack in a debug build, 1,140 KiB in a release one. So it
+    /// runs on an 8 MiB thread, matching the main thread `compositor::run` --
+    /// and therefore `load` -- actually gets, rather than the 2 MiB `cargo
+    /// test` would otherwise hand it. If this ever overflows, that is a real
+    /// finding about production, not test flakiness: the margin in a debug
+    /// build is only ~1.5 MiB. Note the symptom to expect, since the overflow
+    /// would happen on the spawned thread: it aborts the whole test binary, so
+    /// every test reports nothing rather than this one failing an assertion.
     #[test]
     fn the_deepest_tree_tomls_limits_allow_falls_back_to_defaults_too() {
         let segments = "a.".repeat(79);
         let text = format!(
-            "[{segments}a]\n{}a = 1{}\n",
+            "[[{segments}a]]\n{}{segments}a = 1{}\n",
             format!("{segments}a = {{").repeat(80),
             "}".repeat(80)
         );
         assert_eq!(
             text.len(),
-            13_288,
+            13_448,
             "the worst case this test means to build"
         );
 
