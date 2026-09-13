@@ -313,15 +313,19 @@ impl Connection {
         }
         if served {
             // Synthetic input (key/pointer) and action-driven configures queue
-            // wayland messages on the clients' connections; nothing else
-            // flushes them until the next render tick, which only runs when
-            // something already marked the screen dirty -- a keystroke does
-            // not. Flush explicitly so an injected keystroke reaches the client
-            // the moment it is sent, not whenever a later, unrelated redraw
-            // happens to piggyback it out. `wait-idle` makes that a correctness
-            // bug and not just a latency one: an unflushed keystroke is one the
+            // wayland messages on the clients' connections. `mod.rs`'s
+            // `post_dispatch` also flushes every client once per dispatch
+            // cycle now, strictly after this runs, so this flush is no longer
+            // the only thing standing between a queued message and the wire --
+            // but flushing here too costs nothing when there's nothing left to
+            // flush (see `post_dispatch`'s doc), and doing it here as well
+            // means an injected keystroke reaches the client the instant it's
+            // sent rather than waiting for this wakeup to fully unwind first.
+            // `wait-idle` is why this can't just be left to `post_dispatch`
+            // alone without re-checking: an unflushed keystroke is one the
             // client cannot have redrawn for, so the wait would see a quiet
-            // compositor and answer `idle` immediately.
+            // compositor and answer `idle` immediately if anything here ever
+            // skipped it.
             //
             // The invariant, which every exit above is written to preserve (by
             // breaking rather than returning): if this wakeup served any

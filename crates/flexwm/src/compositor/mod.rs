@@ -150,6 +150,13 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
 /// (`loop_logic.rs`: `while !stop { dispatch(timeout)?; cb(data); }`), so an
 /// idle compositor has no wakeups and therefore no flushes.
 ///
+/// With something actually queued, the cost is one `send()` per client that
+/// has data waiting, once per wakeup rather than once per frame tick -- e.g.
+/// a real pointer-motion flood measures as ~5.8x more wakeups on the client
+/// side and a real, small, accepted compositor-side cost (~0.6% of one core
+/// at realistic mouse rates); see `ROADMAP.md` item 11 for the measured
+/// numbers and methodology, not the paraphrase.
+///
 /// Errors are dropped deliberately, matching every other flush site here: the
 /// only thing this can report is one client's socket refusing its bytes, which
 /// is that client's problem -- wayland-backend already swallows the per-client

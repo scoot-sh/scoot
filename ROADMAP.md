@@ -1051,30 +1051,60 @@ review, and why.
       binaries, twice each**, with a mapped `foot` and a settled screen. `run`
       blocks in `dispatch(None)` at idle, so there is nothing to flush and
       nothing to wake for.
-    - **A real 1000 Hz-class pointer-motion flood** (20,000 uinput motion
-      events, ~470/s as delivered, each queueing a `wl_pointer` message for the
-      client under the pointer). This is the one path where the new flush does
-      real work rather than nothing: motion used to batch into the frame tick's
-      flush -- up to ~16 events' worth per `sendmsg` at 1000 Hz -- and now each
-      wakeup's events go out at the end of it. **Two independent sets disagree
-      in sign, so the cost is below this VM's noise floor**: six balanced reps
-      (three in each order) gave before 167/161/163/156/154/164 (mean 160.8)
-      versus after 174/163/170/176/157/152 (mean 165.3), and four later reps
-      with the pointer parked inside the client's surface gave before
-      176/171/158/161 (mean 166.5) versus after 162/146/139/153 (mean 150.0).
-      Worst case either way is a few jiffies over 43s.
+    - **A real 1000 Hz-class pointer-motion flood — corrected by
+      `flexwm-reviewer` after the original benchmark below turned out to
+      measure nothing.** The output is 1600x1000 and the original run parked
+      the pointer at the *output* centre, `800,500` -- 6px outside the
+      single test window's actual bounds (`x ∈ [12,794]`). `strace -c -f` on
+      the client during a 3000-event flood at that position recorded **zero
+      syscalls in 12s**: the compositor queued it nothing, so `post_dispatch`'s
+      flush was an empty-client-list walk in *both* builds, and the "two
+      independent sets disagree in sign" result below was an artifact of
+      whichever binary happened to run first in a group being slower --
+      not a real before/after difference. Re-run with the pointer verifiably
+      inside the window (`400,500`), untraced, balanced run order, 10,000
+      events, measuring on-CPU time directly (`/proc/<pid>/task/*/schedstat`,
+      nanosecond resolution, not 10ms jiffies): compositor on-CPU **before
+      mean 884.0ms (sd 59.6, n=7), after mean 1023.3ms (sd 63.9, n=7) -- a
+      +139.3ms/10k-events (+13.9us/event, +15.8%) increase, Welch t=4.22,
+      p≈0.001**. Client on-CPU rose ~21.7% (p≈0.02) over the same runs.
+      **This is real, not noise, and it's real for exactly the reason the
+      original bullet named**: motion used to batch into the frame tick's
+      flush; now every wakeup's events go out at the end of it. Client
+      wakeups confirm the mechanism directly (`strace -c` on `foot`, 3000
+      events): `epoll_pwait` 465 → 2696 (5.8x), `recvmsg` 930 → 5424.
+      **In absolute terms this is small**: at the ~435 events/s this flood
+      actually delivered, that's +6.0ms compositor CPU per second of
+      sustained flooding, ≈0.6% of one core -- roughly +1.4% extrapolated to
+      a real 1000Hz mouse. Verdict: an accepted, real cost in exchange for
+      lower per-event latency, matching Smithay's own `anvil` reference
+      compositor's pattern (verified directly against the pinned checkout:
+      `anvil/src/udev.rs:537-546` and `winit.rs:449-456` both hand-roll
+      `dispatch(...)` → `flush_clients()` once per loop iteration, same
+      shape as this fix). Caveats worth keeping in mind before citing these
+      numbers elsewhere: this VM's syscalls are more expensive than real
+      hardware's, so 13.9us/event is likely a ceiling, not what real
+      hardware would show; the 5.8x client-wakeup multiplier is
+      hardware-independent and won't shrink; and "after" runs finished ~5%
+      faster in wall time across the whole benchmark (an unexplained VM
+      scheduling artifact) in a direction that would bias the measured
+      *increase* downward, so +15.8% is if anything an underestimate, not
+      an overestimate. (The `libwayland`/`wl_display_run` comparison in the
+      original bullet was not independently verified -- treat it as
+      unconfirmed, not as corroborating evidence.)
     - **What that costs the client, since the compositor's own jiffies cannot
-      show it**: per-wakeup flushing also wakes the client once per wakeup
-      instead of once per frame. Measured on `foot` (the same floods, sampling
-      its `/proc/<pid>/stat`): **0 jiffies over 20,000 motion events in both
-      builds** with the pointer parked over its surface, and 17/11 before
-      versus 9/2 in the two earlier reps where it was not. So unmeasurable, and
-      this is the universal compositor behavior anyway -- libwayland's own
-      `wl_display_run` flushes every loop iteration, as does anvil.
+      show it**: see the wakeup-multiplier numbers just above (5.8x more
+      `epoll_pwait`/`recvmsg` calls under flood) -- the original "0 jiffies
+      over 20,000 motion events in both builds" claim here shared the same
+      out-of-window fixture bug and measured the same empty-client-list
+      walk, not real client-side cost.
     - **The same flood at maximum rate** (50,000 events in ~300ms, ~160k/s):
-      before 7/10 jiffies, after 6/11. Indistinguishable, because libinput
-      hands many events to one callback when they arrive faster than the loop
-      turns, so the flush amortizes.
+      before 7/10 jiffies, after 6/11, from the same original benchmark run
+      as the corrected bullet above -- likely shares its out-of-window
+      fixture bug and has **not** been independently re-verified. Treat this
+      specific number as unconfirmed rather than as evidence the cost
+      vanishes at high rates; the corrected, verified numbers are the ones
+      above.
     - **IPC round-trips** (50,000 `version` requests, one wakeup each), with
       three `foot` clients connected so the flush actually walks a client list:
       before mean 126.22us/71.3 jiffies, after 125.01us/69.8 -- after slightly
