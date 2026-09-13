@@ -29,6 +29,17 @@
 //!   already. It also settles the question a name table cannot: whether a
 //!   key *holds* its modifier or latches/locks it, which is the difference
 //!   between typing one capital letter and turning Caps Lock on for good.
+//! - [`named_key`] answers the *other* question `flexwm msg key` asks --
+//!   which key types this keysym with nothing held -- and says so plainly
+//!   when the answer is "none", rather than offering a key that types
+//!   something else.
+//!
+//! Every one of them takes the layout (the xkb *group*) to answer for, and
+//! answers for exactly that one. A keymap with two groups carries two of
+//! everything -- keysyms, levels *and* key actions -- so "which key holds
+//! Mod5" has a different answer per group, and mixing groups between the two
+//! halves of one question produces a key plan that is individually
+//! defensible and jointly wrong.
 //!
 //! Nothing here allocates: the probe walks the keymap in place and every
 //! result is a fixed-size, `Copy` value, so typing a string costs no heap
@@ -75,7 +86,9 @@ pub(super) struct KeyPlan {
 /// [`Untypable::NoKey`] is "this layout has no such character at all" (pick
 /// another layout, or another character), while
 /// [`Untypable::NoModifiers`] is "it's there, but only behind something
-/// flexwm won't press."
+/// flexwm won't press." Both are answers *about the keymap* -- a seat with
+/// no keyboard at all is not one of them, and is rejected by
+/// [`super::State::type_text`] before anything here is asked.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Untypable {
     /// No key in the layout carries the keysym at any level.
@@ -87,7 +100,10 @@ pub(super) enum Untypable {
 }
 
 /// The modifier keys to hold around one keypress. At most one per real
-/// modifier, so the array is sized by construction and can never overflow.
+/// modifier, so the array is sized by construction and can never overflow:
+/// [`ModifierKeys::hold`] pushes one key per set bit of an eight-bit mask,
+/// and [`super::State::press`] one per distinct [`flexwm_ipc::Modifier`], of
+/// which there are four.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct HeldKeys {
     codes: [Keycode; REAL_MODIFIERS],
@@ -110,11 +126,10 @@ impl HeldKeys {
         &self.codes[..self.len]
     }
 
-    fn push(&mut self, code: Keycode) {
-        // Unreachable by construction -- `hold` pushes at most one key per
-        // real modifier, and there are exactly `REAL_MODIFIERS` of those --
-        // but a silent overwrite would be a wrong-modifier bug, so drop the
-        // key instead and let the caller's own check fail loudly.
+    pub(super) fn push(&mut self, code: Keycode) {
+        // Unreachable by construction -- see the type's own doc -- but a
+        // silent overwrite would be a wrong-modifier bug, so drop the key
+        // instead and let the caller's own check fail loudly.
         if let Some(slot) = self.codes.get_mut(self.len) {
             *slot = code;
             self.len += 1;
@@ -122,7 +137,7 @@ impl HeldKeys {
     }
 }
 
-/// Which key, if any, holds each real modifier down.
+/// Which key, if any, holds each real modifier down, on one layout.
 ///
 /// Built by pressing every key in a throwaway xkb state and watching what it
 /// does to the modifier mask -- the keymap's own answer to "what do I press
@@ -135,18 +150,41 @@ impl HeldKeys {
 /// for everything typed afterwards, which is a far worse outcome than
 /// failing to type one character.
 pub(super) struct ModifierKeys {
+    /// The layout every answer here is about. Not decoration: a keymap's
+    /// key *actions* are per-group exactly like its keysyms are, so this
+    /// table is only valid for the group it was probed in, and [`plan`]
+    /// checks it against the group it is resolving before reusing one.
+    layout: xkb::LayoutIndex,
     /// Indexed by real modifier index (`Shift` = 0, `Lock` = 1, ...).
     keys: [Option<Keycode>; REAL_MODIFIERS],
 }
 
 impl ModifierKeys {
-    /// Walks the whole keymap once. Costs a few hundred FFI calls, which is
-    /// why [`plan`] builds this lazily and at most once per string typed,
-    /// rather than once per character.
-    pub(super) fn probe(keymap: &xkb::Keymap) -> Self {
+    /// Walks the whole keymap once, in `layout`. Costs a few hundred FFI
+    /// calls, which is why [`plan`] builds this lazily and at most once per
+    /// string typed, rather than once per character.
+    pub(super) fn probe(keymap: &xkb::Keymap, layout: xkb::LayoutIndex) -> Self {
         let mut keys = [None; REAL_MODIFIERS];
         let mut state = xkb::State::new(keymap);
         for code in (keymap.min_keycode().raw()..=keymap.max_keycode().raw()).map(Keycode::new) {
+            // A fresh `xkb::State` starts in group 0, and a key's *actions*
+            // are per-group just as its keysyms are: on a two-group keymap
+            // the key that holds Mod5 in one group is an ordinary character
+            // key in the other. Without this the walk answers for group 0
+            // while `plan` resolves levels in the active group, and typing
+            // `@` presses whatever sits where group 0 keeps its AltGr --
+            // some unrelated character, with the modifier never set.
+            //
+            // Mixing `update_mask` with `update_key` is only coherent while
+            // no key is down and no filter is live, which is exactly where
+            // this sits: each iteration presses and releases one key, and
+            // the guard below throws the state away rather than carrying a
+            // dirty one (a latch leaves a live filter behind, which
+            // `update_mask` does not clear) into the next iteration. On the
+            // clean path this is a no-op that costs one FFI call; on a
+            // group-locking key it is what puts the walk back where it
+            // belongs.
+            state.update_mask(0, 0, 0, 0, 0, layout);
             let _ = state.update_key(code, xkb::KeyDirection::Down);
             let depressed = state.serialize_mods(xkb::STATE_MODS_DEPRESSED);
             let held_only = state.serialize_mods(xkb::STATE_MODS_LATCHED) == 0
@@ -155,9 +193,23 @@ impl ModifierKeys {
             // Caps Lock sets its modifier in the *depressed* mask too while
             // it's down, so "did anything survive the release" is the only
             // reliable way to tell a plain modifier from a latch or a lock.
-            // A key that failed it also left this state dirty, so start the
-            // rest of the walk from a clean one.
-            if state.serialize_mods(xkb::STATE_MODS_EFFECTIVE) != 0 {
+            // A key that failed that also left this state dirty, so start
+            // the rest of the walk from a clean one.
+            //
+            // The group is checked because a `grp:` option puts a
+            // group-changing action on an ordinary key (Caps Lock, Scroll
+            // Lock, Menu), and a key that changed it is a key that may have
+            // left a *filter* behind -- something `update_mask` does not
+            // clear, and the one kind of dirt the re-pin above cannot wash
+            // out. Discarding the state is what does. On the stock `grp:`
+            // options this is belt and braces (measured: with the re-pin in
+            // place, removing this clause changes no test's answer), but a
+            // latching group key is expressible in xkb -- `iso9995`'s compat
+            // defines `ISO_Group_Latch` -- and silently recording another
+            // group's keys is the exact failure this module exists to stop.
+            if state.serialize_mods(xkb::STATE_MODS_EFFECTIVE) != 0
+                || state.serialize_layout(xkb::STATE_LAYOUT_EFFECTIVE) != layout
+            {
                 state = xkb::State::new(keymap);
                 continue;
             }
@@ -175,7 +227,7 @@ impl ModifierKeys {
                 *slot = Some(code);
             }
         }
-        Self { keys }
+        Self { layout, keys }
     }
 
     /// The keys to hold to produce exactly `mask`, or `None` if any modifier
@@ -206,7 +258,10 @@ impl ModifierKeys {
 /// `modifier_keys` is the caller's own one-string cache for
 /// [`ModifierKeys::probe`]: it is filled in on the first character that
 /// needs a modifier and reused for the rest, so a lowercase string never
-/// pays for the walk at all and a mixed-case one pays once.
+/// pays for the walk at all and a mixed-case one pays once. The cache is
+/// keyed on the layout it was probed in, since the caller re-reads the
+/// session's active layout per character and a probe from another group
+/// answers a different question than the one being asked.
 pub(super) fn plan(
     keymap: &xkb::Keymap,
     layout: xkb::LayoutIndex,
@@ -230,7 +285,10 @@ pub(super) fn plan(
             modifiers: HeldKeys::default(),
         });
     }
-    let modifier_keys = modifier_keys.get_or_insert_with(|| ModifierKeys::probe(keymap));
+    let modifier_keys = match modifier_keys {
+        Some(probed) if probed.layout == layout => probed,
+        slot => slot.insert(ModifierKeys::probe(keymap, layout)),
+    };
     // Several combinations can reach one level -- an alphabetic key's upper
     // level is reached by Shift *or* by Caps Lock -- so take the cheapest
     // one that can actually be held down, which is what drops Caps Lock in
@@ -241,6 +299,57 @@ pub(super) fn plan(
         .min_by_key(|held| held.len)
         .ok_or(Untypable::NoModifiers)?;
     Ok(KeyPlan { code, modifiers })
+}
+
+/// Where a *named* keysym sits on a layout -- the question
+/// [`super::State::press`] asks, which is not the one [`plan`] answers.
+///
+/// `press` holds exactly the modifiers its caller named and nothing else, so
+/// the only key it can honestly press for a name is one that carries that
+/// keysym with nothing held. Anything higher up is a key that types a
+/// *different* character when pressed bare.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum NamedKey {
+    /// A key carries the keysym at level 0: press this, hold nothing.
+    Unmodified(Keycode),
+    /// No key carries it unmodified, but at least one does further up. The
+    /// key is deliberately not reported: pressing it is the silent
+    /// wrong-character bug, not the fix.
+    OnlyModified,
+    /// No key in the layout carries it at any level.
+    Absent,
+}
+
+/// Which key types `keysym` on `layout` with nothing held, if any.
+///
+/// Prefers a level-0 carrier over a lower keycode that only reaches the
+/// keysym further up -- unlike Smithay's `keycode_for_keysym`, which takes
+/// the lowest keycode carrying it at *any* level and so hands back a key
+/// whose bare press types something else entirely.
+pub(super) fn named_key(
+    keymap: &xkb::Keymap,
+    layout: xkb::LayoutIndex,
+    keysym: Keysym,
+) -> NamedKey {
+    let mut found_above = false;
+    for code in (keymap.min_keycode().raw()..=keymap.max_keycode().raw()).map(Keycode::new) {
+        let Some(level) = (0..keymap.num_levels_for_key(code, layout)).find(|&level| {
+            keymap
+                .key_get_syms_by_level(code, layout, level)
+                .contains(&keysym)
+        }) else {
+            continue;
+        };
+        if level == 0 {
+            return NamedKey::Unmodified(code);
+        }
+        found_above = true;
+    }
+    if found_above {
+        NamedKey::OnlyModified
+    } else {
+        NamedKey::Absent
+    }
 }
 
 /// The key carrying `keysym` on `layout`, and the level it sits at.

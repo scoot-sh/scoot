@@ -444,6 +444,17 @@ impl Fixture {
         self.settle();
         self.run(Step::Report)
     }
+
+    /// Presses a combination the way `flexwm msg key` does, then reports
+    /// what the client made of it. A refusal is returned rather than
+    /// asserted away: half these tests are about exactly which names get
+    /// refused.
+    fn press(&mut self, combo: &str) -> Result<Typed, String> {
+        let combo: KeyCombo = combo.parse().expect("a parsable key combination");
+        self.state.press(&combo)?;
+        self.settle();
+        Ok(self.run(Step::Report))
+    }
 }
 
 impl Drop for Fixture {
@@ -552,4 +563,108 @@ fn an_untypable_character_errors_and_leaves_the_text_before_it_typed() {
     fixture.settle();
     let typed = fixture.run(Step::Report);
     assert_eq!(typed.text, "Hi ");
+}
+
+// -------------------------------------------------------------------------
+// `press`: exactly the combination named, or a refusal
+// -------------------------------------------------------------------------
+
+/// The same bug class as the one above, at `type_text`'s neighbour:
+/// `flexwm msg key exclam` used to press the `1` key with nothing held and
+/// deliver `1`, because the key lookup scanned every level while `press`
+/// holds only what its caller named. Measured on a real client: `exclam`,
+/// `at`, `asciitilde`, `underscore`, `question`, `colon`, `bar` and
+/// `braceleft` all arrived as the character *below* the one named.
+#[test]
+fn a_key_named_above_the_unmodified_level_is_refused_instead_of_typing_another() {
+    let mut fixture = Fixture::new();
+    for name in [
+        "exclam",
+        "at",
+        "asciitilde",
+        "underscore",
+        "question",
+        "colon",
+        "bar",
+        "braceleft",
+        "A",
+    ] {
+        let error = fixture
+            .press(name)
+            .expect_err("this name is only above level 0 on a US layout");
+        assert!(
+            error.contains(name),
+            "the refusal should name the key asked for: {error}"
+        );
+        assert!(
+            error.contains("type"),
+            "the refusal should point at the call that can type it: {error}"
+        );
+    }
+    let typed = fixture.run(Step::Report);
+    assert_eq!(
+        (typed.text.as_str(), typed.keys),
+        ("", 0),
+        "a refused combination must not send any key at all"
+    );
+}
+
+/// The other half: what the refusal tells the caller to write instead
+/// really does deliver the character, as four key events -- the modifier's
+/// own press and release around the key's.
+#[test]
+fn naming_the_modifier_explicitly_delivers_the_character_the_refusal_named() {
+    let mut fixture = Fixture::new();
+    let typed = fixture
+        .press("shift+1")
+        .expect("`shift+1` is pressable on a US layout");
+    assert_eq!(typed.text, "!");
+    assert_eq!(typed.keys, 4, "Shift down, `1` down, `1` up, Shift up");
+}
+
+/// Ordinary names are untouched by the stricter lookup -- the level-0 scan
+/// finds the same keys the old one did for everything an agent actually
+/// sends.
+#[test]
+fn an_unmodified_name_still_presses_its_own_key() {
+    let mut fixture = Fixture::new();
+    let typed = fixture.press("h").expect("`h` is on a US layout");
+    assert_eq!((typed.text.as_str(), typed.keys), ("h", 2));
+    let typed = fixture.press("Return").expect("`Return` is on a US layout");
+    assert_eq!((typed.text.as_str(), typed.keys), ("h\r", 4));
+}
+
+/// A name no key carries at any level is a different failure from one
+/// that's out of reach, and says so -- the fix for each is different.
+#[test]
+fn a_name_absent_from_the_layout_is_refused_as_absent() {
+    let mut fixture = Fixture::new();
+    let error = fixture
+        .press("ssharp")
+        .expect_err("`ssharp` is not on a US layout");
+    assert!(
+        error.contains("no key for `ssharp`"),
+        "an absent key should say so plainly: {error}"
+    );
+    let error = fixture
+        .press("not-a-real-key")
+        .expect_err("that is not a keysym name at all");
+    assert!(
+        error.contains("unknown key"),
+        "an unknown name should say so plainly: {error}"
+    );
+}
+
+/// `KeyCombo`'s modifiers are a list, so a client that builds one by
+/// concatenation can legally repeat a modifier any number of times. Each
+/// distinct one is pressed once: repeats neither reach the keymap again nor
+/// overrun the fixed-size buffer the resolved keys live in.
+#[test]
+fn a_repeated_modifier_is_resolved_and_pressed_once() {
+    let mut fixture = Fixture::new();
+    let mut combo = "shift+".repeat(1000);
+    combo.push('1');
+    let typed = fixture.press(&combo).expect("a repeated modifier is legal");
+    assert_eq!(typed.text, "!");
+    assert_eq!(typed.keys, 4, "one Shift press, not a thousand");
 }
