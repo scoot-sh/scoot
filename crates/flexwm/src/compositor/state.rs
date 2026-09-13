@@ -226,10 +226,15 @@ impl State {
                         state.loop_signal.stop();
                         return Ok(PostAction::Continue);
                     }
-                    // Replies (e.g. the initial registry globals) must reach the
-                    // socket now: nothing else flushes until a surface commits,
-                    // and a client with no surface yet -- wayland-info, or foot
-                    // before its first frame -- would otherwise hang forever.
+                    // Replies (e.g. the initial registry globals) should reach
+                    // the socket now rather than wait for `mod.rs`'s
+                    // `post_dispatch` (which also flushes every client, once
+                    // per dispatch cycle, strictly after this source runs) --
+                    // a client with no surface yet, like `wayland-info` or
+                    // `foot` before its first frame, has nothing else that
+                    // would prompt a flush before its own next read, and this
+                    // one costs nothing extra when there's nothing queued (see
+                    // `post_dispatch`'s doc).
                     let _ = state.display_handle.flush_clients();
                     Ok(PostAction::Continue)
                 },
