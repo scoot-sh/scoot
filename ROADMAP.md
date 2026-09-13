@@ -2114,17 +2114,19 @@ review, and why.
 
     - **The escape hatch still works and still doesn't leak.** Two `foot`
       windows, `fuzzel` 1.14.1 mapped and holding the keyboard.
-      `flexwm msg type "flexwmkeyboard"` changed **1329.08** pixels, whose
-      bounding box is `326x151+637+324` — entirely inside fuzzel's own box
-      (380x365 centred at (800,500)), so nothing reached either terminal.
-      Two captures with nothing in between differ by **0** pixels over that
-      region, which is what makes the next number mean something: after
-      `flexwm msg key super+h` the same region differs by **0** — no `h`
-      reached fuzzel — while window focus moved (`{1: false, 2: true}` →
-      `{1: true, 2: false}`), the whole frame differs by **4606.72** (the
-      ring really moved) and fuzzel is still up (`srgba(253,246,227,1)` at
-      (800,500)). The prompt region is *derived* from the typing diff rather
-      than guessed at, so it cannot be a crop that happens to miss the text.
+      `flexwm msg type "flexwmkeyboard"` changed **1329.08** pixels, and
+      `-trim` on the difference mask puts *all* of them inside
+      `326x151+637+324` — a patch in the middle of a 1600x1000 screen, which
+      is where fuzzel is drawn (its body pixel at (800,500) reads
+      `srgba(253,246,227,1)`). Neither terminal's text area is in that patch,
+      so none of it reached them. Two captures with nothing in between differ
+      by **0** pixels over that region, which is what makes the next number
+      mean something: after `flexwm msg key super+h` the same region differs
+      by **0** — no `h` reached fuzzel — while window focus moved
+      (`{1: false, 2: true}` → `{1: true, 2: false}`) and the whole frame
+      differs by **4606.72**, i.e. the ring really moved. The region is
+      *derived* from the typing diff rather than guessed at, so it cannot be
+      a crop that happens to miss the text.
     - **No RSS growth across 15 fuzzel map/unmap cycles.** `VmRSS` 35,652 kB
       before; 35,660 / 35,840 / 35,844 for cycles 1–3, then 35,844 flat
       through cycle 10, 35,848 from cycle 11 through 15; 35,848 kB after.

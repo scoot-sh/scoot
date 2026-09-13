@@ -162,14 +162,16 @@ What works:
   - A surface that has committed but never attached a buffer, or that
     unmapped itself, can't hold the keyboard however it asks: there is
     nothing of it on screen to type into.
-  - The surface can also hand the keyboard back itself, by committing
-    `keyboard_interactivity: none` or by unmapping — and the click that
-    focused it is spent when it does. Asking for `on_demand` again, or
+  - A click-focused surface can also hand the keyboard back itself, by
+    committing `keyboard_interactivity: none` or by unmapping — and the click
+    that focused it is spent when it does. Asking for `on_demand` again, or
     mapping again, gets it drawn again but not focused again: it waits for a
     fresh click, the same as the first time. So a bar that collapses and
     re-opens a search field, or a notification daemon that closes and
     re-opens an inline reply, never gets the keyboard back without the user
-    actually clicking it.
+    actually clicking it. (An `exclusive` surface on `top`/`overlay` is the
+    exception, per the rule above: it takes the keyboard whenever it is
+    mapped, clicked or not.)
 
   **Keybindings always win.** They are matched before anything is forwarded
   to the focused client, so `Super+Shift+E` (quit) and, on `--tty`,
