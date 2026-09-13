@@ -17,7 +17,7 @@ use smithay::reexports::calloop::generic::Generic;
 use smithay::reexports::calloop::{EventLoop, Interest, LoopHandle, LoopSignal, Mode, PostAction};
 use smithay::reexports::wayland_server::backend::{ClientData, ClientId, DisconnectReason};
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-use smithay::reexports::wayland_server::{Display, DisplayHandle};
+use smithay::reexports::wayland_server::{BindError, Display, DisplayHandle};
 use smithay::utils::{Logical, Point};
 use smithay::wayland::compositor::{CompositorClientState, CompositorState};
 use smithay::wayland::output::OutputManagerState;
@@ -34,6 +34,9 @@ use super::ipc::PendingIdle;
 use super::keybindings::Keybindings;
 use super::nested::Host;
 use super::tty::Tty;
+
+#[cfg(test)]
+mod tests;
 
 pub struct State {
     pub start_time: Instant,
@@ -122,13 +125,20 @@ pub struct State {
 }
 
 impl State {
+    /// Builds the compositor's state and opens its wayland socket.
+    ///
+    /// Fallible because that socket is: `$XDG_RUNTIME_DIR` may be unset (the
+    /// common case -- a bare `ssh` or `su` shell has none), unwritable, or
+    /// already full of other compositors' sockets. None of those is a bug to
+    /// panic on, they are an operator's environment to report back to them
+    /// (see [`Self::listen`]).
     pub fn new(
         event_loop: &mut EventLoop<'static, State>,
         display: Display<State>,
         config: Config,
         keybindings: Keybindings,
         appearance: Appearance,
-    ) -> Self {
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         let dh = display.handle();
         let compositor_state = CompositorState::new::<Self>(&dh);
         let xdg_shell_state = XdgShellState::new::<Self>(&dh);
@@ -143,9 +153,9 @@ impl State {
             .expect("a keymap for the default layout");
         seat.add_pointer();
 
-        let socket_name = Self::listen(display, event_loop);
+        let socket_name = Self::listen(display, event_loop)?;
 
-        Self {
+        Ok(Self {
             start_time: Instant::now(),
             display_handle: dh,
             loop_handle: event_loop.handle(),
@@ -188,12 +198,26 @@ impl State {
             timer_armed: false,
             last_commit: Instant::now(),
             pending_idle: Vec::new(),
-        }
+        })
     }
 
     /// Opens the Wayland socket and wires it into the event loop.
-    fn listen(display: Display<State>, event_loop: &mut EventLoop<'static, State>) -> OsString {
-        let socket = ListeningSocketSource::new_auto().expect("a free wayland socket");
+    ///
+    /// Every failure here is a startup error the caller reports and exits on
+    /// (`main` prints it and returns `FAILURE`), never a panic: this used to
+    /// be `.expect("a free wayland socket")`, which turned the most ordinary
+    /// misconfiguration there is -- no `$XDG_RUNTIME_DIR`, i.e.
+    /// [`BindError::RuntimeDirNotSet`] -- into a panic and, under this
+    /// workspace's `panic = "abort"` release profile, a core dump, with
+    /// nothing in it to tell an operator what to fix.
+    fn listen(
+        display: Display<State>,
+        event_loop: &mut EventLoop<'static, State>,
+    ) -> Result<OsString, Box<dyn std::error::Error>> {
+        // First, before `display` moves into the `Generic` below: this is the
+        // failure that actually happens, and nothing else should have been
+        // set up by the time it is reported.
+        let socket = ListeningSocketSource::new_auto().map_err(socket_error)?;
         let name = socket.socket_name().to_os_string();
         let handle = event_loop.handle();
         handle
@@ -208,7 +232,11 @@ impl State {
                     tracing::warn!(%error, "could not accept a new wayland client");
                 }
             })
-            .expect("the wayland listener");
+            // `InsertError`'s own payload is the source that could not be
+            // inserted, which is of no use to an operator and would force
+            // this function's error type to carry a `ListeningSocketSource`;
+            // only the reason is kept.
+            .map_err(|error| error.error)?;
         handle
             .insert_source(
                 Generic::new(display, Interest::READ, Mode::Level),
@@ -239,8 +267,8 @@ impl State {
                     Ok(PostAction::Continue)
                 },
             )
-            .expect("the wayland display");
-        name
+            .map_err(|error| error.error)?;
+        Ok(name)
     }
 
     /// Milliseconds since start, which is what Wayland input events carry.
@@ -286,6 +314,43 @@ impl State {
             Ok(_) => tracing::info!(?command, "spawned"),
             Err(error) => tracing::warn!(?command, %error, "could not spawn"),
         }
+    }
+}
+
+/// What to tell the operator when the wayland socket cannot be created.
+///
+/// `BindError`'s own `Display` names the cause; each message here adds what to
+/// do about it, in the shape this project's other startup errors already have
+/// (`ipc::init`'s "no socket path: set FLEXWM_SOCKET or XDG_RUNTIME_DIR",
+/// `config.rs`'s `ConfigFileError`). Printed by `main` as
+/// `flexwm: <this message>`.
+///
+/// Pure, and a function rather than inline `match` arms, because that is what
+/// makes it testable: the variant that matters is
+/// [`BindError::RuntimeDirNotSet`], and provoking it for real means unsetting
+/// a process-global environment variable that every other test in this binary
+/// needs (`State::new` binds a real socket) -- the same hazard item 9's umask
+/// attempt hit and abandoned. The end-to-end behavior is verified against a
+/// real release binary instead; see this item's entry in `ROADMAP.md`.
+fn socket_error(error: BindError) -> String {
+    match error {
+        BindError::RuntimeDirNotSet => {
+            "no wayland socket: $XDG_RUNTIME_DIR is not set or invalid; \
+             set it to a writable directory (a login session normally provides one)"
+                .to_string()
+        }
+        BindError::PermissionDenied => {
+            "no wayland socket: $XDG_RUNTIME_DIR is not writable".to_string()
+        }
+        // `ListeningSocketSource::new_auto` tries `wayland-1` through
+        // `wayland-32` (1..33, verified in the pinned rev's
+        // `wayland/socket.rs`), so reaching this means all 32 are taken.
+        BindError::AlreadyInUse => {
+            "no wayland socket: wayland-1 through wayland-32 are all in use \
+             in $XDG_RUNTIME_DIR; stop another compositor, or remove a stale socket and its .lock"
+                .to_string()
+        }
+        BindError::Io(source) => format!("no wayland socket: {source}"),
     }
 }
 

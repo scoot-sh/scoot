@@ -1,6 +1,6 @@
 //! Keeping Wayland and the core in step: events in, arrangement out.
 
-use flexwm_core::{Action, Effect, Event, Size, SizeHints, WindowId, WindowInfo};
+use flexwm_core::{Action, Effect, Event, Rect, Size, SizeHints, WindowId, WindowInfo};
 use smithay::desktop::Window;
 use smithay::utils::SERIAL_COUNTER;
 use smithay::wayland::compositor::with_states;
@@ -8,6 +8,9 @@ use smithay::wayland::shell::xdg::SurfaceCachedState;
 use smithay::wayland::shell::xdg::{ToplevelSurface, XdgToplevelSurfaceData};
 
 use super::State;
+
+#[cfg(test)]
+mod tests;
 
 impl State {
     /// Registers a new toplevel with the core, which decides where it goes.
@@ -125,6 +128,18 @@ impl State {
         let Some(toplevel) = self.window(id).and_then(Window::toplevel) else {
             return WindowInfo::default();
         };
+        // Computed before the `with_states` closure rather than inside it:
+        // that guard is a plain non-reentrant mutex (see `cursor.rs`'s
+        // hotspot lookup for the same rule), and there is no reason to hold
+        // it while walking the core's outputs.
+        //
+        // The gap read here is already `Config::validated`'s (`World::new`
+        // runs it), so it is in `0..=Config::MAX_GAP` and `Rect::inset`'s
+        // `2 * gap` cannot overflow.
+        let limit = hint_limit(
+            self.world.outputs().into_iter().map(|(_, area)| area),
+            self.world.config().gap,
+        );
         with_states(toplevel.wl_surface(), |states| {
             let Some(data) = states.data_map.get::<XdgToplevelSurfaceData>() else {
                 return WindowInfo::default();
@@ -139,9 +154,61 @@ impl State {
                 app_id: attributes.app_id.clone().unwrap_or_default(),
                 title: attributes.title.clone().unwrap_or_default(),
                 hints: SizeHints {
-                    min: Size::new(min.w, min.h),
+                    min: clamp_hint(Size::new(min.w, min.h), limit),
                 },
             }
         })
     }
+}
+
+/// The largest minimum size a client's own `min_size` may declare, per axis:
+/// the usable area (an output's area inset by the layout gap) of the largest
+/// output the core knows about.
+///
+/// `xdg_toplevel.set_min_size` takes two raw, unvalidated `i32`s -- the
+/// pinned Smithay rev stores them verbatim in `SurfaceCachedState`
+/// (`handlers/surface/toplevel.rs`: `toplevel_data.min_size = (width,
+/// height).into()`, no range check) -- so without this, a client can put
+/// `i32::MAX` into `WindowState::min()` and from there into
+/// `layout::column_width`'s `width.max(min)`, i.e. into a column that wide.
+/// Two unchecked `i32` adds downstream of that overflow on it, both proven by
+/// deliberately disabling this clamp and watching the tests below fail
+/// (debug builds panic; release wraps):
+///
+/// - `flexwm_core`'s own `World::place_workspace`, `x + width` in the
+///   on-screen test -- reached first, during `arrange`, before any rendering;
+/// - `decorations::ring_rects`'s `rect.w + 2 * width`, whose wrapped result
+///   `clip` happens to discard in release.
+///
+/// This is the same bound `flexwm_core`'s `learn_from_frame` already applies
+/// to a *learned* minimum, with one deliberate difference: that one caps to
+/// the usable area of the output the window is on, and this takes the largest
+/// of every output instead. Nothing in `World`'s public surface says which
+/// output a given window is on, and `info_of` runs for a brand-new toplevel
+/// before it has been placed on one at all -- so a bound no tighter than any
+/// single output's is the honest version: it can never wrongly shrink a hint
+/// a window could legitimately fill its own screen with. With the one output
+/// this compositor creates today the two bounds are identical.
+///
+/// With no outputs at all the limit is zero, which drops the hint entirely.
+/// That is unreachable today (`headless::init` adds the output before the
+/// event loop starts, and nothing removes one), and if output removal ever
+/// lands the consequence is a hint lost until the client's next
+/// `app_id`/`title` change re-reads it -- not a bad size: a window the core
+/// has no output for is `unplaced`, so it is neither arranged nor rendered.
+fn hint_limit(areas: impl Iterator<Item = Rect>, gap: i32) -> Size {
+    areas.fold(Size::new(0, 0), |limit, area| {
+        let usable = area.inset(gap);
+        Size::new(limit.w.max(usable.w), limit.h.max(usable.h))
+    })
+}
+
+/// Caps a client-declared minimum size to `limit`, and to zero from below
+/// (`set_min_size` accepts negatives too, and a negative minimum is not a
+/// minimum).
+fn clamp_hint(min: Size, limit: Size) -> Size {
+    // Deliberately not `i32::clamp`, which panics when its own `min > max`:
+    // `hint_limit` cannot return a negative limit today, but a clamp with a
+    // panic in it is not worth the symmetry inside a compositor.
+    Size::new(min.w.max(0).min(limit.w), min.h.max(0).min(limit.h))
 }
