@@ -32,8 +32,10 @@ use tree::{Output, WindowState};
 /// client has to re-read them rather than remember them.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Workspaces {
-    /// How many workspaces the output has. Always at least one: an output
-    /// always ends in exactly one empty workspace.
+    /// How many workspaces the output has. At least one for any output
+    /// [`World::workspaces`] reports, since an output always ends in exactly
+    /// one empty workspace -- only [`Workspaces::default`], which stands for
+    /// "before there was an output at all", has none.
     pub count: usize,
     /// Which of them is active, always `< count`.
     pub active: usize,

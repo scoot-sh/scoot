@@ -297,6 +297,16 @@ impl WaylandDndGrabHandler for State {
 /// `ext-workspace-v1`'s `output_enter` rule: a workspace group has to name
 /// the outputs it covers, including ones the client only binds *after* it
 /// bound the workspace manager. See `ext_workspace.rs`.
+///
+/// Checked rather than assumed, because it decides what this hook may do:
+/// the pinned Smithay rev calls it with the output's own lock **released**
+/// (`wayland/output/handlers.rs` ends its `bind` with `drop(inner);
+/// state.output_bound(..)`), so reading the output back -- `client_outputs`,
+/// `current_mode`, anything on `Output::inner` -- is safe here. That is a
+/// fact about this rev, not a guarantee: if a future one ever calls this
+/// while holding that guard, any such call from inside this hook deadlocks
+/// the compositor against itself, the same hazard `layer_shell.rs`'s
+/// guard-discipline note describes for layer maps.
 impl OutputHandler for State {
     fn output_bound(&mut self, output: Output, wl_output: WlOutput) {
         self.workspace_group_output_bound(&output, &wl_output);

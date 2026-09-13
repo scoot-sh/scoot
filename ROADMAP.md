@@ -2152,8 +2152,8 @@ review, and why.
     under both backends — `--headless` (11 `ok:`, exit 0) and `--nested`
     under `cage` (11 `ok:`, exit 0, `/tmp/smoke-nested-round4.png` 1280x720).
 
-15. ~~`ext-workspace-v1`: a bar can list and switch workspaces~~ — PR open,
-    branch `ext-workspace-v1`. Picked up from the Backlog (entry struck
+15. ~~`ext-workspace-v1`: a bar can list and switch workspaces~~ — DONE,
+    PR #24. Picked up from the Backlog (entry struck
     below), the other half of what item 14 started: layer shell gets a bar
     onto the screen, this tells it what to draw there and lets a click on it
     switch workspaces. `flexwm_core` already had real workspaces; nothing
