@@ -31,7 +31,9 @@
 //!   stable across multiple sessions"; these are not stable across the next
 //!   window closing.
 //! - **`name` is the 1-based position** ("1", "2", ...), which is what a bar
-//!   displays and what `flexwm msg action focus-workspace` counts in.
+//!   displays. There is no IPC action that takes the same number yet --
+//!   `flexwm msg action focus-workspace` only steps `up`/`down` -- see
+//!   `ROADMAP.md`'s backlog entry on the next `flexwm-ipc` version bump.
 //! - **`coordinates` is that same 1-based position**, as a one-element array
 //!   (`"1"` is `[1]`), which the protocol explicitly allows for compositors
 //!   that simply number their workspaces -- it requires only that coordinates
