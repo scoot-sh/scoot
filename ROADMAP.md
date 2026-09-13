@@ -1498,9 +1498,15 @@ review, and why.
     below. Master *is* held, over SSH and from a real VT alike; the warning
     means "this process may not call `SET_MASTER` itself", and the fd seatd
     passes is already the master. One correction to the framing above, for the
-    record: master isn't acquired later either — it is held from open time
-    onward, by the open file itself. `vm/README.md`'s conclusion was right and
-    only its stated mechanism (logind/PAM) was wrong; both are fixed.
+    record: master isn't acquired later by flexwm *making a successful call*
+    either — flexwm never itself issues a working `SET_MASTER` at all (its own
+    attempt always gets `EACCES`, by design, see the Backlog entry). It's
+    seatd's open-and-set that establishes it, and seatd's own pause/activate
+    logic that releases and re-establishes it across a VT switch (confirmed
+    live: master genuinely toggles `y → n → y` in step with a `chvt` cycle,
+    not held uninterrupted the whole time the process runs). `vm/README.md`'s
+    conclusion was right and only its stated mechanism (logind/PAM) was wrong;
+    both are fixed.
 
     The item-8 client-cursor behavior is unchanged and is covered by its seven
     tests passing untouched (they drive a real client and assert read-back
@@ -1572,20 +1578,34 @@ review, and why.
   live measurement on the dev VM at `0678765`:
 
   **Mechanism.** "Unprivileged mode" is Smithay's name for "this process may
-  not call `SET_MASTER` itself", not "this process is not master". seatd opens
-  the DRM device as root, so that *open file* becomes the master at open
-  (`seatd/seat.c` also calls `DRM_IOCTL_SET_MASTER` on it explicitly), and
-  passes the fd over its socket. Master is a property of the open file, so
-  flexwm inherits it. flexwm's own `SET_MASTER` inside Smithay's
-  `DrmDeviceFd::new` is then refused with `EACCES` because kernel 6.18's
-  `drm_master_check_perm` (`drivers/gpu/drm/drm_auth.c`) requires
-  `was_master && file->pid == current->tgid` (or `CAP_SYS_ADMIN`), and
-  `drm_file_update_pid` (`drm_file.c`) deliberately never re-owns a file that
-  was master — so the fd's recorded owner stays seatd forever. Smithay's
-  resulting `privileged = false` is the *correct* state for the libseat path:
-  it is what stops `DrmDevice::pause`/`activate` (`device/mod.rs:417`/`431`)
-  from issuing `SET_MASTER`/`DROP_MASTER` themselves, which seatd already does
-  as root on every VT switch.
+  not call `SET_MASTER` itself", not "this process is not master". Master
+  goes to whichever open file is *first* to open the device while nothing
+  else already holds it, plus seatd's own explicit `DRM_IOCTL_SET_MASTER`
+  call on that file right after (`seatd/seat.c`) — root is not what grants
+  master (`drm_master_open`, `drivers/gpu/drm/drm_auth.c`, hands it to the
+  first opener regardless of uid, and root can't take it from an existing
+  holder either: `drm_setmaster_ioctl` returns `EBUSY`); root is what lets
+  seatd open the device node and manage VTs at all. Since seatd is normally
+  the only thing that ever opens the GPU node on this VM, in practice it *is*
+  first, and passes that already-master fd over its socket to flexwm, which
+  inherits it (master is a property of the open file, not the process) — but
+  that is a fact about this VM's setup, not something "opened by seatd"
+  guarantees in general, and the caveat below is exactly why. flexwm's own
+  `SET_MASTER` inside Smithay's `DrmDeviceFd::new` is then refused with
+  `EACCES` because kernel 6.18's `drm_master_check_perm`
+  (`drivers/gpu/drm/drm_auth.c`) requires `was_master && file->pid ==
+  current->tgid` (or `CAP_SYS_ADMIN`), and `drm_file_update_pid`
+  (`drm_file.c`) deliberately never re-owns a file that was master — so the
+  fd's recorded owner stays seatd forever. Smithay's resulting `privileged =
+  false` is the *correct* state for the libseat path: it is what stops
+  `DrmDevice::pause`/`activate` (`device/mod.rs:417`/`431`) from issuing
+  `SET_MASTER`/`DROP_MASTER` themselves, which seatd already does as root on
+  every VT switch. **The identical warning also fires when master genuinely
+  isn't held**: if something else already has it when seatd opens the device,
+  seatd's own `SET_MASTER` gets `EBUSY` too, only logs it, and hands the fd
+  over anyway — that case fails loudly at modeset instead of at open, which is
+  exactly why the evidence below checks the actual kernel state rather than
+  trusting the log line alone.
 
   **Evidence** (commands and raw output in PR #20's description). While an
   SSH-started `--tty` runs: `/sys/kernel/debug/dri/0/clients` shows exactly one
@@ -1951,14 +1971,26 @@ data-loss/RCE in what was checked.
   2026-09-13** with exactly the check this entry suggested, while an
   SSH-started `--tty` ran on the dev VM at `0678765`: every one of flexwm's
   seatd-obtained fds (`/dev/dri/card0` and all four `/dev/input/event*`)
-  reports `flags: 02504002`, which has the `02000000` `O_CLOEXEC` bit set —
-  identical to seatd's own fd for the same device, since it is the same open
-  file. So the outcome flexwm asked for does hold (an `Action::Spawn`ed child
-  inherits neither DRM master nor input fds), just for seatd's reasons rather
-  than flexwm's: seatd opens with `O_RDWR | O_NOCTTY | O_NOFOLLOW | O_CLOEXEC
-  | O_NONBLOCK` (`seatd/seat.c`) and the flag survives the socket handoff.
-  Still informational, still no code change: flexwm's `OFlags::CLOEXEC`
-  argument remains a no-op that is currently right by luck, not by contract.
+  reports `flags: 02504002`, which has the `02000000` `O_CLOEXEC` bit set. So
+  the outcome flexwm asked for does hold (an `Action::Spawn`ed child inherits
+  neither DRM master nor input fds), just for a different reason than
+  flexwm's own argument. Correction, caught by `flexwm-reviewer`: close-on-
+  exec is a property of the *receiving process's own fd table*, not of the
+  open file, and `SCM_RIGHTS` (how the fd crosses the seatd-flexwm socket)
+  never transfers it, so "identical to seatd's fd, since it's the same open
+  file" is the wrong reason for this one bit -- the rest of `02504002`
+  genuinely is shared `f_flags` from that open file
+  (`O_RDWR|O_NONBLOCK|O_NOFOLLOW|O_LARGEFILE`), just not this one. The actual
+  guarantor is libseat's own receive call:
+  `recvmsg(..., MSG_DONTWAIT | MSG_CMSG_CLOEXEC)`
+  (`libseat/common/connection.c:202`) sets close-on-exec the moment libseat
+  receives the fd into flexwm's own process, unconditionally, for every fd it
+  hands over. A real, deliberate contract -- just libseat's, not flexwm's
+  `OFlags::CLOEXEC` argument, which remains the no-op this entry originally
+  found. Still informational, still no code change: if a future libseat
+  version ever dropped `MSG_CMSG_CLOEXEC`, every `Action::Spawn`ed child
+  would silently inherit DRM master and every input device fd, and nothing
+  in flexwm's own code would catch or even notice it.
 - **~~IPC socket path is unlink-then-bind (LOW, non-default config only)~~ —
   DONE as item 9.** The original framing here was wrong (`bind(2)` does not
   follow a trailing symlink, verified — `EADDRINUSE`), so the real exposures

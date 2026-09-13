@@ -210,17 +210,27 @@ framebuffer only lights up once something drives KMS. Log in on tty1 in the
 window and run `kmscube`.
 
 **`--tty` logs `Unable to become drm master, assuming unprivileged mode`. Is it
-really DRM master?** Yes — that warning is a red herring, and it is not
-specific to ssh. It is Smithay's own (`backend/drm/device/fd.rs`), and on a
-modern kernel it fires for *every* non-root compositor whose DRM fd was opened
-for it by a session daemon (seatd or logind), over ssh and from a real VT
-alike. It means "this process may not call `SET_MASTER` itself", not "this
-process is not master":
+really DRM master?** Usually yes — that warning is a red herring on its own,
+and it is not specific to ssh. It is Smithay's own (`backend/drm/device/fd.rs`),
+and on a modern kernel it fires for *every* non-root compositor whose DRM fd
+was opened for it by a session daemon (seatd, and by the same mechanism
+presumably logind, though this project has only measured seatd), over ssh and
+from a real VT alike. It means "this process may not call `SET_MASTER` itself",
+not "this process is not master" -- but it does **not** by itself distinguish
+"master, held by someone else's open" from "master, held by ours", so verify
+it rather than trust the log alone (recipe below):
 
-- seatd opens the device as root, so the open itself makes that *open file*
-  the DRM master (and seatd calls `DRM_IOCTL_SET_MASTER` on it too), then
-  passes the fd over its socket. Master is a property of the open file, so
-  flexwm gets it.
+- Master goes to whichever open file is *first* to open the device while
+  nothing else already holds it, plus seatd's own explicit
+  `DRM_IOCTL_SET_MASTER` call on that file right after. Root is not what
+  grants master -- `drm_master_open` (`drivers/gpu/drm/drm_auth.c`) hands it
+  to the first opener regardless of uid, and root cannot take master away
+  from an existing holder either (`drm_setmaster_ioctl` returns `EBUSY`).
+  Root is what lets seatd open the device node and manage VTs at all. Since
+  seatd is normally the only thing that ever opens the GPU node on this VM,
+  in practice it *is* first, and flexwm inherits that already-master file
+  along with the fd seatd hands over its socket -- but that is a fact about
+  this VM's setup, not a property of "opened by seatd" in general.
 - flexwm's own `SET_MASTER` is then refused with `EACCES`, because the kernel
   only permits it from the process that owns the file:
   `drm_master_check_perm` (`drivers/gpu/drm/drm_auth.c`) wants
@@ -229,6 +239,11 @@ process is not master":
 - Smithay's resulting `privileged = false` is the correct state here: it stops
   it issuing its own `SET_MASTER`/`DROP_MASTER` on session pause/resume, which
   seatd already does as root on every VT switch.
+- **The identical warning also fires when master genuinely isn't held**: if
+  something else already has it when seatd opens the device, seatd's own
+  `SET_MASTER` gets `EBUSY` too, only logs it, and hands the fd over anyway --
+  that case fails loudly at modeset instead of at open. "The fd was opened by
+  seatd" doesn't tell the two cases apart; the verification below does.
 
 To check it for real rather than trusting the log, while `--tty` is running:
 
@@ -241,8 +256,9 @@ sudo cat /sys/kernel/debug/dri/0/state    # plane fb=N, "allocated by = flexwm"
 scanout proof: the CRTC's plane points at a flexwm-allocated framebuffer
 (`[fbcon]`'s own fb is what it points at when nothing is driving KMS).
 `DRM_IOCTL_MODE_ATOMIC` is master-gated by the kernel, so a `drm: modeset
-(full commit)` line in flexwm's log with no error after it is itself proof
-master was held at that moment.
+(full commit)` line in flexwm's log with no immediately-following `WARN …
+drm commit/page flip failed` (its own error path, not a generic "error") is
+itself proof master was held at that moment.
 
 **`nix run ./vm` wants to build aarch64-linux paths and fails.** The builder is
 not running or the daemon cannot reach it: `./vm/linux-builder.sh status`.
