@@ -2065,6 +2065,91 @@ review, and why.
     config (`hw2.sh`), it maps and reserves exactly as before. The numbers
     above are all from the re-run.
 
+    **Round four: a click outliving the state it was made against.** The
+    third review round reproduced a real focus bug (everything else it
+    checked held: VT-switch handling live, the negative-control tests exactly,
+    the fuzzel keystroke-leak capture independently). `clicked_layer` was
+    cleared by a click elsewhere, by `layer_destroyed` and by
+    `forget_dead_clicked_layer`'s liveness check — but by nothing when the
+    surface's own `layer_focus` became `Never`. So an `on_demand` surface
+    that was clicked, committed `keyboard_interactivity: none` (keyboard
+    correctly returned to the window) and then committed `on_demand` again
+    got the keyboard handed straight back with no new click, while the focus
+    ring, `set_activated` and `flexwm msg windows` all still named the
+    window. Same failure class as the screen-locker gap this item exists to
+    close, narrower in scope — and `none` ↔ `on_demand` is the normal
+    lifecycle for such a client, not an edge case. Fixed in `391529c` by
+    forgetting the click in `commit_layer_surface`, which is the only place
+    that transition can be observed (`layer_focus` reads committed state) and
+    which already had the `layer_focus` call, so the added cost is one
+    comparison against `None` on a `none` bar's redraw.
+
+    Four new tests (258 total, from 254). Red/green against the same tree
+    with only the fix reverted (`git stash push -- ...layer_shell.rs`):
+
+        an_on_demand_surface_does_not_recapture_the_keyboard_after_committing_none ... FAILED
+        an_on_demand_surface_does_not_recapture_the_keyboard_when_it_maps_again ... FAILED
+          left: Some(Layer(0))   right: Some(Window(0))
+        an_exclusive_surface_that_relaxes_to_on_demand_keeps_a_click ... ok
+        an_exclusive_surface_that_relaxes_to_on_demand_unclicked_gives_the_keyboard_back ... ok
+
+    i.e. both regression tests really do reproduce the bug, and the
+    `Exclusive` → `OnDemand` path the fix must not disturb passes on *both*
+    sides of it. The unmap/re-map variant needed a new `Step::RemapLayer`:
+    `UnmapLayer` could only ever be terminal before, because Smithay's
+    `got_unmapped` resets the cached state to `Default`, so a client has to
+    re-send its size, anchors *and* layer before committing again, and the
+    re-map must wait for a configure by count — the unmap's own commit
+    already provokes one, measured at 100x100 for a 60x60 launcher.
+
+    **Cache key, and what was re-run.** Everything above this section was
+    captured at `9ddc295`; `391529c` changes `crates/`, so that key no longer
+    matches for anything the fix touches. Per the review's own scoping — a
+    `clicked_layer` clear cannot plausibly move idle CPU or RSS — the full
+    benchmark suite was *not* re-captured; the two checks that could
+    regress were, on the same real `--tty` seat at 1600x1000, release build
+    of **`391529c`** (clean tree), script and raw output at
+    `/tmp/hw-evidence/round4.sh` and `round4-out.txt`, captures in
+    `/tmp/hw-evidence/hwshots4/`:
+
+    - **The escape hatch still works and still doesn't leak.** Two `foot`
+      windows, `fuzzel` 1.14.1 mapped and holding the keyboard.
+      `flexwm msg type "flexwmkeyboard"` changed **1329.08** pixels, whose
+      bounding box is `326x151+637+324` — entirely inside fuzzel's own box
+      (380x365 centred at (800,500)), so nothing reached either terminal.
+      Two captures with nothing in between differ by **0** pixels over that
+      region, which is what makes the next number mean something: after
+      `flexwm msg key super+h` the same region differs by **0** — no `h`
+      reached fuzzel — while window focus moved (`{1: false, 2: true}` →
+      `{1: true, 2: false}`), the whole frame differs by **4606.72** (the
+      ring really moved) and fuzzel is still up (`srgba(253,246,227,1)` at
+      (800,500)). The prompt region is *derived* from the typing diff rather
+      than guessed at, so it cannot be a crop that happens to miss the text.
+    - **No RSS growth across 15 fuzzel map/unmap cycles.** `VmRSS` 35,652 kB
+      before; 35,660 / 35,840 / 35,844 for cycles 1–3, then 35,844 flat
+      through cycle 10, 35,848 from cycle 11 through 15; 35,848 kB after.
+      **+196 kB total, +4 kB across the last thirteen cycles** — the same
+      shape round three recorded (a small step early, then flat), on a run
+      that happens to start lower.
+    - **No `ERROR`/`WARN` from flexwm itself** (the `smithay::backend::drm`
+      master line every `--tty` run logs is filtered).
+
+    Not re-run, deliberately: idle jiffies, the keystroke-burst comparison,
+    the pointer-jump render timings and the transition screenshots. Nothing
+    in the fix is on a per-frame path — it is one comparison inside a commit
+    handler that already read the same value — and review's own assessment
+    was that a full hardware re-capture is not warranted for it. The fix's
+    own behaviour also cannot be hardware-tested here for the reason already
+    listed above: no `on_demand` layer-shell client exists on this VM.
+
+    **Also at `391529c`**: `cargo test -p flexwm` **258/258**, `cargo test -p
+    flexwm-core` **60/60**, `cargo clippy --workspace --all-targets -- -D
+    warnings` clean and `cargo fmt --all --check` clean on the dev VM;
+    `cargo fmt --all --check` and `cargo check --workspace --all-targets`
+    clean on macOS. `scripts/smoke-test.sh` green against the release build
+    under both backends — `--headless` (11 `ok:`, exit 0) and `--nested`
+    under `cage` (11 `ok:`, exit 0, `/tmp/smoke-nested-round4.png` 1280x720).
+
 ## Backlog (unordered — pick up whenever it fits)
 
 - **~~Open question: does `--tty` over SSH on the dev VM actually hold real
