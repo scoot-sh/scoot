@@ -1,7 +1,11 @@
-//! Tests for the control socket: who may connect, how much one request may
-//! cost, and when a request is answered rather than served.
+//! Tests for the control socket itself: where it comes from, who may connect,
+//! and the two pure policies `ipc.rs` applies to a request -- when a
+//! `wait-idle` is answered, and when a screenshot is refused.
+//!
+//! The pieces each have their own: `line/tests.rs` for request lines,
+//! `outbound/tests.rs` for replies on their way out, and
+//! `connection/tests.rs` for the event-loop machinery driving both.
 
-use std::io::{BufReader, Cursor, Read};
 use std::os::unix::fs::{FileTypeExt, PermissionsExt};
 use std::os::unix::net::UnixStream;
 
@@ -17,8 +21,11 @@ fn pending(now: Instant, quiet_ms: u64, timeout_ms: u64) -> PendingIdle {
     PendingIdle {
         stream: a,
         quiet: Duration::from_millis(quiet_ms),
-        deadline: now + Duration::from_millis(timeout_ms),
+        timeout: Duration::from_millis(timeout_ms),
         started: now,
+        last_progress: now,
+        answered: false,
+        outbound: Outbound::default(),
     }
 }
 
@@ -138,187 +145,6 @@ fn throttling_never_outlives_a_frame_however_long_the_gap() {
     // served, not refused: the window is one frame, not a budget.
     let long_ago = Instant::now() - Duration::from_secs(3600);
     assert!(!screenshot_throttled(Some(long_ago), Instant::now()));
-}
-
-// --- bounded request lines -----------------------------------------------
-
-/// Reads with a deliberately tiny buffer, so every line of any length
-/// crosses several `fill_buf`/`consume` rounds.
-fn tiny_reader(bytes: &[u8]) -> BufReader<Cursor<Vec<u8>>> {
-    BufReader::with_capacity(4, Cursor::new(bytes.to_vec()))
-}
-
-#[test]
-fn reads_one_line_at_a_time_leaving_the_rest() {
-    let mut reader = tiny_reader(b"{\"type\":\"version\"}\n{\"type\":\"windows\"}\n");
-    let mut line = Vec::new();
-    assert_eq!(
-        read_line_bounded(&mut reader, &mut line, MAX_REQUEST_BYTES),
-        LineRead::Line
-    );
-    assert_eq!(line, b"{\"type\":\"version\"}\n");
-    assert_eq!(
-        read_line_bounded(&mut reader, &mut line, MAX_REQUEST_BYTES),
-        LineRead::Line
-    );
-    assert_eq!(line, b"{\"type\":\"windows\"}\n");
-    assert_eq!(
-        read_line_bounded(&mut reader, &mut line, MAX_REQUEST_BYTES),
-        LineRead::Eof
-    );
-    assert!(line.is_empty());
-}
-
-#[test]
-fn a_last_line_without_a_newline_is_still_a_request() {
-    // What `read_line` does (`Ok(n > 0)`), kept: a client that writes one
-    // request and shuts its write half down still gets an answer.
-    let mut reader = tiny_reader(b"{\"type\":\"version\"}");
-    let mut line = Vec::new();
-    assert_eq!(
-        read_line_bounded(&mut reader, &mut line, MAX_REQUEST_BYTES),
-        LineRead::Line
-    );
-    assert_eq!(line, b"{\"type\":\"version\"}");
-    assert_eq!(
-        read_line_bounded(&mut reader, &mut line, MAX_REQUEST_BYTES),
-        LineRead::Eof
-    );
-}
-
-#[test]
-fn a_client_that_says_nothing_at_all_is_just_eof() {
-    // Connect and disconnect without a byte: not an error, nothing to reply
-    // to, close the connection.
-    let mut reader = tiny_reader(b"");
-    let mut line = Vec::new();
-    assert_eq!(
-        read_line_bounded(&mut reader, &mut line, MAX_REQUEST_BYTES),
-        LineRead::Eof
-    );
-    assert!(line.is_empty());
-}
-
-#[test]
-fn an_empty_line_is_read_rather_than_mistaken_for_eof() {
-    let mut reader = tiny_reader(b"\n\n");
-    let mut line = Vec::new();
-    for _ in 0..2 {
-        assert_eq!(
-            read_line_bounded(&mut reader, &mut line, MAX_REQUEST_BYTES),
-            LineRead::Line
-        );
-        assert_eq!(line, b"\n");
-    }
-    assert_eq!(
-        read_line_bounded(&mut reader, &mut line, MAX_REQUEST_BYTES),
-        LineRead::Eof
-    );
-}
-
-#[test]
-fn the_limit_is_the_whole_line_newline_included() {
-    let mut line = Vec::new();
-    // One under: 8 bytes plus the newline is exactly 9.
-    let mut reader = tiny_reader(b"aaaaaaaa\n");
-    assert_eq!(
-        read_line_bounded(&mut reader, &mut line, 10),
-        LineRead::Line
-    );
-    assert_eq!(line.len(), 9);
-    // Exactly at the limit: accepted.
-    let mut reader = tiny_reader(b"aaaaaaaaa\n");
-    assert_eq!(
-        read_line_bounded(&mut reader, &mut line, 10),
-        LineRead::Line
-    );
-    assert_eq!(line.len(), 10);
-    // One over: refused, and the buffer never grew past the limit.
-    let mut reader = tiny_reader(b"aaaaaaaaaa\n");
-    assert_eq!(
-        read_line_bounded(&mut reader, &mut line, 10),
-        LineRead::TooLong
-    );
-    assert!(line.len() <= 10, "buffer grew to {}", line.len());
-}
-
-#[test]
-fn the_limit_applies_to_each_line_not_to_the_connection() {
-    // Three maximum-length requests in a row are three valid requests, not
-    // one connection that has used up a budget.
-    let mut reader = tiny_reader(b"aaaaa\naaaaa\naaaaa\n");
-    let mut line = Vec::new();
-    for _ in 0..3 {
-        assert_eq!(read_line_bounded(&mut reader, &mut line, 6), LineRead::Line);
-        assert_eq!(line, b"aaaaa\n");
-    }
-}
-
-#[test]
-fn a_shorter_line_after_a_longer_one_leaves_no_leftovers() {
-    // The buffer is reused across requests; if it were not cleared, the tail
-    // of the previous line would corrupt the next one's JSON.
-    let mut reader = tiny_reader(b"aaaaaaaaaaaa\nbb\n");
-    let mut line = Vec::new();
-    assert_eq!(
-        read_line_bounded(&mut reader, &mut line, MAX_REQUEST_BYTES),
-        LineRead::Line
-    );
-    assert_eq!(
-        read_line_bounded(&mut reader, &mut line, MAX_REQUEST_BYTES),
-        LineRead::Line
-    );
-    assert_eq!(line, b"bb\n");
-}
-
-#[test]
-fn an_endless_stream_with_no_newline_stops_at_the_limit() {
-    // The finding itself: before the cap this read never returned and the
-    // buffer grew until the machine gave out. `io::repeat` is an infinite
-    // source with no newline in it, so this test hangs forever if the bound
-    // is ever lost.
-    let mut reader = BufReader::new(std::io::repeat(b'x'));
-    let mut line = Vec::new();
-    assert_eq!(
-        read_line_bounded(&mut reader, &mut line, 4096),
-        LineRead::TooLong
-    );
-    assert!(line.len() <= 4096, "buffer grew to {}", line.len());
-}
-
-#[test]
-fn a_failing_read_closes_rather_than_looping() {
-    struct Broken;
-    impl Read for Broken {
-        fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
-            Err(std::io::Error::other("gone"))
-        }
-    }
-    let mut reader = BufReader::new(Broken);
-    let mut line = Vec::new();
-    assert_eq!(
-        read_line_bounded(&mut reader, &mut line, MAX_REQUEST_BYTES),
-        LineRead::Failed
-    );
-}
-
-#[test]
-fn the_default_limit_is_generous_enough_for_a_real_request() {
-    // A `Request::Type` carrying a big paste has to keep working; the cap is
-    // there for a client with no newline in sight, not for a large one.
-    let text = "x".repeat(200_000);
-    let encoded = encode(&Request::Type { text }).expect("encodes");
-    assert!(encoded.len() < MAX_REQUEST_BYTES);
-    let mut reader = tiny_reader(encoded.as_bytes());
-    let mut line = Vec::new();
-    assert_eq!(
-        read_line_bounded(&mut reader, &mut line, MAX_REQUEST_BYTES),
-        LineRead::Line
-    );
-    assert!(matches!(
-        decode::<Request>(std::str::from_utf8(&line).expect("utf-8")),
-        Ok(Request::Type { .. })
-    ));
 }
 
 // --- the socket itself ---------------------------------------------------
