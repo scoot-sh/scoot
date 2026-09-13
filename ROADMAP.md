@@ -1436,9 +1436,14 @@ review, and why.
     device at 1600x1000, debug build — i.e. with integer overflow checks on —
     all against `34514a9`, which is the whole of this item's executable code:
     every later commit on the branch changes only prose and doc comments, which
-    `git diff 34514a9..HEAD -- '*.rs' | grep -vE '^[-+]\s*(///|//!|//)'`
-    returning nothing confirms mechanically — so the evidence key still
-    matches). Six scenarios, each a fresh compositor with its
+    `git diff 34514a9..HEAD -- '*.rs' | grep -E '^[-+]' | grep -vE '^(\+\+\+|---)' \
+    | grep -vE '^[-+]\s*(///|//!|//)'`
+    returning nothing confirms mechanically (the shorter, `grep -v`-only form
+    a first draft of this note used does *not* actually confirm this — it
+    still emits context lines and hunk headers, so seeing output from it is
+    not a sign the cache key is stale, only a sign of using the wrong
+    command; `flexwm-reviewer` caught this while reviewing item 13) — so the
+    evidence key still matches. Six scenarios, each a fresh compositor with its
     own config, the pointer parked over the background by IPC and the frame
     captured by IPC; exact commands and every raw sampled pixel are in PR
     #19's description. Summary: `cursor_size = 48` + `cursor_color =
@@ -1465,6 +1470,21 @@ review, and why.
     each still capture a frame, leave the compositor alive with no panic or
     error in its log, and an ordinary position still draws afterwards.
 
+    **Caveat on these logs, worth recording precisely rather than glossing
+    over**: every one of these runs, over SSH, logged smithay's own `Unable
+    to become drm master, assuming unprivileged mode` at device-open time —
+    `flexwm-reviewer` reproduced this independently and confirmed it isn't
+    specific to this item. This doesn't touch any claim above (the composited
+    frame is read back and pixel-sampled the same way regardless of DRM
+    master state, so the cursor-rendering claims hold either way), but it's
+    in real tension with `vm/README.md`'s claim that a `--tty` session over
+    SSH "takes real DRM/libseat ownership just fine." Nothing here confirms
+    or refutes whether master gets acquired later via libseat, only that it
+    isn't held at open time — an open question for whoever next needs to
+    trust a claim in this project that specifically depends on holding real
+    DRM master (VT-switch/scanout behavior, not pixel content), not
+    something this item's own evidence needed to resolve.
+
     The item-8 client-cursor behavior is unchanged and is covered by its seven
     tests passing untouched (they drive a real client and assert read-back
     pixels, so "the client's image still wins over the configured fallback" is
@@ -1485,11 +1505,20 @@ review, and why.
     | far: `(0,0)`↔`(1344,744)` | 29.67 (25-36) | 30.50 (27-36) | **42.00 (36-54)** |
     | near: `(4,4)`↔`(8,8)` | 8.83 (7-11) | 9.50 (8-12) | **14.17 (12-16)** |
 
-    The default is unchanged either way (overlapping ranges, base vs new). The
-    largest cursor a config can ask for costs about +12 jiffies per 200
-    far moves and +5 per 200 near ones — real, paid only by someone who asked
-    for it, and bounded by `MAX_CURSOR_SIZE`, which is the practical argument
-    for having an upper bound at all beyond the overflow one.
+    The default is unchanged either way (overlapping ranges, base vs new) —
+    also true analytically, not just by measurement: no per-frame allocation
+    was added, `element()` is untouched, and the persistent render buffer and
+    stable element `Id` are preserved. The largest cursor a config can ask for
+    costs *something* real: `flexwm-reviewer`'s own re-run (fixed arm order,
+    unrotated, so drift can load onto whichever arm runs last) found one
+    `new256` sample at 17 — inside `new`'s own range and below every reported
+    `new256` value — so the specific "+12 far / +5 near jiffies" figures above
+    are order-of-magnitude, not a tight measured delta; read them as "a
+    256px cursor costs single-digit-to-low-double-digit jiffies more per 200
+    moves," not as exact numbers. The direction and the reason (more pixels
+    composited per frame) are solid regardless, and bounded by
+    `MAX_CURSOR_SIZE`, which is the practical argument for having an upper
+    bound at all beyond the overflow one.
 
     **A correction worth recording, because the first version of this
     measurement was a no-op.** It drove the pointer with

@@ -135,6 +135,15 @@ impl Color {
     /// For `a == 1.0` -- every color default this project ships, including
     /// the cursor's -- premultiplying changes nothing; it only matters once a
     /// translucent color is configured. See the unit tests below for both.
+    ///
+    /// Assumes `r`/`g`/`b`/`a` are each in `0.0..=1.0`, which every value
+    /// `Color::parse` can produce is -- a `"#rrggbbaa"` string can't encode
+    /// anything outside that range. A `Color` built directly (in-process,
+    /// bypassing `parse`) with a channel `> 1.0` and `a < 1.0` can produce a
+    /// channel byte greater than the alpha byte, which is not a valid
+    /// premultiplied pixel and would over-brighten under `Operation::Over`
+    /// rather than saturate -- `Color`'s fields are `pub`, so this is
+    /// reachable in Rust, just not from any config a user can write.
     pub fn to_argb8888(self) -> [u8; 4] {
         let channel = |v: f32| (v * self.a * 255.0).round().clamp(0.0, 255.0) as u8;
         [
