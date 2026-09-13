@@ -654,10 +654,11 @@ review, and why.
 ## Backlog (unordered — pick up whenever it fits)
 
 - **Input injection targeted at a specific window, without moving seat
-  focus (research-backed idea, 2026-09-12 — computer use is this project's
-  primary goal, see `CLAUDE.md`, so weigh this above general-purpose items
-  below unless something more directly serves that goal).** The single
-  most concrete gap identified while researching related projects: an agent
+  focus (research-backed idea, 2026-09-12 — a major goal per `CLAUDE.md`,
+  not automatically ahead of daily-drivability items like layer-shell; see
+  that file's current framing before assuming either wins by default).**
+  The single most concrete gap identified while researching related
+  projects: an agent
   driving a real desktop needs to act on a window that is not the one
   currently focused, without stealing focus away from whatever a human (or
   another agent) has in the foreground. A recent deep-dive on Linux

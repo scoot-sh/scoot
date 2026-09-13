@@ -9,21 +9,31 @@ so it works inside linuxserver webtop (nested in pixelflux's Smithay
 compositor via `/defaults/startwm.sh`). Later it should also drive macOS
 window layout OmniWM-style through the Accessibility API.
 
-- **Computer use is the whole game here, not one goal among several.**
-  (Explicit user statement, 2026-09-12.) flexwm exists to be lightweight,
-  fast, and GPU-optional *in service of* being the best possible target for
-  an agent doing computer use — not as independent goals of equal weight.
-  When prioritizing what to work on next, weigh a candidate item by whether
-  it actually serves agent-driven automation (IPC richness, reliability,
-  ergonomics, targeting fidelity) before weighing it as general compositor
-  completeness (visual polish, protocol coverage for its own sake). This
-  doesn't override the engineering-standards priority order below
-  (correctness and architecture still come before beauty on any given
-  change) — it's about which *feature* to pick up next, not how carefully
-  to build it once chosen. Concretely: the background/off-focus window
-  input backlog item below is a direct example of a computer-use-serving
-  feature that should be weighed accordingly against general-purpose items
-  like layer-shell or GPU rendering, which don't serve this goal directly.
+- **Computer use is a major goal, not *the* goal — flexwm also has to be
+  real enough to daily-drive.** (User statement 2026-09-12, correcting an
+  earlier, too-absolute framing of the same day: computer use is "the
+  whole mission for a part of things," not the entire mission.) Two real
+  priorities coexist, and picking what to work on next means weighing
+  both: agent-driven automation (IPC richness, reliability, targeting
+  fidelity) *and* general desktop completeness (bars, launchers,
+  notifications, workspace switching — the things daily use actually
+  needs). Neither one silently wins by default; a candidate roadmap item's
+  case should say which of these it serves, and both are legitimate
+  reasons to prioritize something. This doesn't override the
+  engineering-standards priority order below (correctness and architecture
+  still come before beauty on any given change) — it's about which
+  *feature* to pick up next, not how carefully to build it once chosen.
+- **Daily-drivability includes not putting the user's own working setup at
+  risk.** Trying flexwm on real hardware (as opposed to the disposable dev
+  VM this project's own testing already uses) needs an explicit, low-risk
+  path — e.g. `--nested` inside an existing session first, a real `--tty`
+  session reachable by a VT switch back to whatever the user normally
+  runs — not a change that could strand them out of their own daily
+  desktop environment. Treat any request to actually deploy flexwm onto a
+  user's real, primary machine (as opposed to developing/testing it in the
+  dev VM) as exactly the kind of consequential, hard-to-reverse action this
+  session's own standing instructions already ask for care and explicit
+  confirmation around, scoped to what was actually asked.
 - **License: MIT.** niri (GPL-3.0) and OmniWM (GPL-2.0-only) may inspire
   design, but their code — including cursor-theme assets — must not be
   copied. Check licenses before borrowing anything from either.
