@@ -51,6 +51,25 @@ fn random_area(rng: &mut Rng) -> Rect {
     )
 }
 
+/// A usable area as a platform might report one: usually a plausible strip
+/// taken off an edge, sometimes a degenerate or i32-extreme rectangle, since
+/// the numbers behind it are a client's own (a layer surface's exclusive zone
+/// and margins are raw `i32`s off the wire).
+fn random_usable_area(rng: &mut Rng) -> Rect {
+    match rng.below(10) {
+        0 => Rect::new(i32::MIN, i32::MIN, i32::MAX, i32::MAX),
+        1 => Rect::new(i32::MAX, i32::MAX, i32::MAX, i32::MAX),
+        2 => Rect::new(0, 0, 0, 0),
+        3 => Rect::new(rng.size(2000), rng.size(2000), -1, -1),
+        _ => Rect::new(
+            rng.size(4000),
+            rng.size(1000),
+            rng.size(4000),
+            rng.size(1500),
+        ),
+    }
+}
+
 fn random_action(rng: &mut Rng, windows: &[WindowId]) -> Action {
     let horizontal = if rng.chance(50) {
         Horizontal::Left
@@ -80,7 +99,7 @@ fn random_step(world: &mut World, rng: &mut Rng, next_id: &mut u64) {
     let windows: Vec<WindowId> = world.windows().into_iter().map(|(id, _)| id).collect();
     let outputs: Vec<OutputId> = world.outputs().into_iter().map(|(id, _)| id).collect();
     *next_id += 1;
-    let event = match rng.below(12) {
+    let event = match rng.below(13) {
         0 | 1 => Event::WindowOpened {
             id: WindowId(*next_id),
             info: random_info(rng),
@@ -113,6 +132,10 @@ fn random_step(world: &mut World, rng: &mut Rng, next_id: &mut u64) {
             id: windows[rng.below(windows.len())],
             info: random_info(rng),
         },
+        9 if !outputs.is_empty() => Event::OutputUsableAreaChanged {
+            id: outputs[rng.below(outputs.len())],
+            area: random_usable_area(rng),
+        },
         _ => {
             world.handle_action(random_action(rng, &windows));
             return;
@@ -124,6 +147,14 @@ fn random_step(world: &mut World, rng: &mut Rng, next_id: &mut u64) {
 fn assert_invariants(world: &World) {
     let mut placed = world.unplaced.clone();
     for output in &world.outputs {
+        // Whatever a platform reported, an output's usable area is always a
+        // sub-rectangle of the output itself -- otherwise the layout would be
+        // placing windows off the screen it thinks it is filling.
+        assert_eq!(
+            output.usable,
+            output.usable.intersection(output.area),
+            "usable area escaped its output"
+        );
         let count = output.workspaces.len();
         assert!(output.active < count, "active workspace out of range");
         assert!(

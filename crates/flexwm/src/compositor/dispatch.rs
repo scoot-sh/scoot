@@ -3,9 +3,9 @@
 //! This is a hand-written copy of what `smithay::delegate_dispatch2!(State)`
 //! expands to -- the blanket `Dispatch`/`GlobalDispatch` impls that forward
 //! every request to whichever `Dispatch2` impl the object's user data
-//! carries -- plus two guards on `wl_shm`'s pool sizes,
-//! [`reject_invalid_shm_pool_resize`] and
-//! [`reject_oversized_shm_pool_creation`].
+//! carries -- plus three guards on sizes a client chooses:
+//! [`reject_invalid_shm_pool_resize`], [`reject_oversized_shm_pool_creation`]
+//! and [`reject_unrepresentable_layer_size`].
 //!
 //! ## Why the first guard exists
 //!
@@ -108,6 +108,40 @@
 //! touches the `DisplayHandle` (directly or through `State`) would deadlock
 //! the compositor from inside every `post_error` call, not just this one.
 //!
+//! ## Why the third guard exists
+//!
+//! Same family, different protocol. `zwlr_layer_surface_v1.set_size` takes
+//! two **`uint`**s, and this rev's handler
+//! (`src/wayland/shell/wlr_layer/handlers.rs:189-193`) converts them with no
+//! range check at all:
+//!
+//! ```ignore
+//! Request::SetSize { width, height } => {
+//!     let _ = with_surface_pending_state(layer_surface, |data| {
+//!         data.size = (width as i32, height as i32).into();
+//!     });
+//! }
+//! ```
+//!
+//! Every value above `i32::MAX` becomes negative, and
+//! `Size::new` (`src/utils/geometry.rs:777`) holds a
+//! `debug_assert!(w.non_negative() && h.non_negative())`. So one request --
+//! `set_size(u32::MAX, u32::MAX)` from any client, no privilege, no buffer
+//! -- **panics a debug build of the compositor**, taking every other
+//! client's session with it, exactly like item 7's `wl_shm_pool.resize(0)`.
+//! Found by this project's own layer-shell tests, which are debug builds; a
+//! release build instead compiles the assertion out and carries the negative
+//! size into `LayerMap::arrange`, which saturates and clamps its way to a
+//! nonsense (but non-crashing) geometry for that surface.
+//!
+//! Refused rather than clamped, for the same reason the pool-size cap is:
+//! a clamp would leave the client and the compositor disagreeing about a
+//! size the client is about to draw at. `invalid_size` is the protocol's own
+//! error for a size a compositor will not accept, and the rest of the
+//! interface's numbers need no guard -- margins and the exclusive zone are
+//! already `int`, and anchor/layer/keyboard-interactivity/exclusive-edge are
+//! all validated by Smithay before use.
+//!
 //! ## Why it's shaped this way
 //!
 //! - **Not a `Dispatch<WlShmPool, ShmPoolUserData> for State` override.**
@@ -121,9 +155,10 @@
 //!   Smithay untouched.
 //!
 //! Delete the *first* guard (and the `size <= 0` half of this file's reason to
-//! exist) once the pinned rev carries the missing `return`. The size cap is
-//! flexwm's own policy, not a workaround, so it stays -- and with it this
-//! file, unless Smithay grows a `delegate_shm!` to override instead.
+//! exist) once the pinned rev carries the missing `return`, and the *third*
+//! once its `set_size` handler range-checks its own `uint`s. The pool size
+//! cap is flexwm's own policy, not a workaround, so it stays -- and with it
+//! this file, unless Smithay grows a `delegate_shm!` to override instead.
 //!
 //! ## Maintenance hazard this creates
 //!
@@ -139,6 +174,7 @@
 
 use std::any::{Any, TypeId};
 
+use smithay::reexports::wayland_protocols_wlr::layer_shell::v1::server::zwlr_layer_surface_v1;
 use smithay::reexports::wayland_server::backend::ClientId;
 use smithay::reexports::wayland_server::protocol::{wl_shm, wl_shm_pool};
 use smithay::reexports::wayland_server::{
@@ -193,6 +229,7 @@ where
     ) {
         if reject_invalid_shm_pool_resize(resource, &request)
             || reject_oversized_shm_pool_creation(resource, &request)
+            || reject_unrepresentable_layer_size(resource, &request)
         {
             return;
         }
@@ -302,6 +339,42 @@ where
     // same principle as the resize guard's `InvalidFd`: match whichever code
     // the client would already have got for a size this handler refused.
     resource.post_error(wl_shm::Error::InvalidStride, too_large(*size));
+    true
+}
+
+/// Posts a protocol error and returns `true` when `request` is a
+/// `zwlr_layer_surface_v1.set_size` whose `uint` dimensions don't fit the
+/// `i32` every surface-local coordinate in Wayland is measured in. See the
+/// module doc for the compositor-wide panic that reaches.
+///
+/// Folds away for every interface other than `zwlr_layer_surface_v1`, for
+/// the same monomorphization reason as the two guards above -- which matters
+/// here in the same way: this runs on every request of every interface,
+/// including a bar's own per-frame traffic.
+fn reject_unrepresentable_layer_size<I>(resource: &I, request: &I::Request) -> bool
+where
+    I: Resource,
+    I::Request: 'static,
+{
+    if TypeId::of::<I::Request>() != TypeId::of::<zwlr_layer_surface_v1::Request>() {
+        return false;
+    }
+    let Some(zwlr_layer_surface_v1::Request::SetSize { width, height }) =
+        (request as &dyn Any).downcast_ref::<zwlr_layer_surface_v1::Request>()
+    else {
+        return false;
+    };
+    const LIMIT: u32 = i32::MAX as u32;
+    if *width <= LIMIT && *height <= LIMIT {
+        return false;
+    }
+    resource.post_error(
+        zwlr_layer_surface_v1::Error::InvalidSize,
+        format!(
+            "layer surface size {width}x{height} does not fit in the i32 \
+             surface-local coordinates wayland uses (maximum {LIMIT})"
+        ),
+    );
     true
 }
 

@@ -37,6 +37,9 @@ the config file can override). Also done: vim-style
 keybindings, a TOML config file (`--config`, `[layout]`/`[appearance]`/
 `[binds]`, see Configuration below), window decorations (a niri-style focus
 ring, background color, server-side `zxdg_decoration_manager_v1`), and a
+`wlr-layer-shell-unstable-v1`, so bars, docks, wallpapers, launchers and
+notification daemons work — including keyboard focus for the ones that ask
+for it (see Layer-shell clients below) — and a
 hardened control socket (owner-only
 permissions, a same-user peer check, a 1 MiB cap on a single request, and
 screenshots rate-limited to one per connection per frame) whose connections
@@ -107,6 +110,109 @@ flexwm's behalf, and flexwm simply isn't permitted to call `SET_MASTER`
 itself on a file another process opened. `vm/README.md`'s troubleshooting
 section has the kernel-level reason and two commands that check whether
 master really is held, rather than assuming the log line alone settles it.
+
+## Layer-shell clients (bars, wallpapers, launchers)
+
+flexwm implements `wlr-layer-shell-unstable-v1` (version 5), the protocol
+every panel, dock, wallpaper setter and notification daemon in the
+wlroots-adjacent ecosystem uses — `waybar`, `swaybg`, `mako`, `wofi`,
+`fuzzel`, `yambar` and friends. Start one the same way you start anything
+else inside the session:
+
+```sh
+flexwm --tty -- foot              # ...then, in a shell inside the session:
+swaybg -c '#123456' &             # a wallpaper, on the background layer
+waybar &                          # a bar, on the top layer
+fuzzel                            # a launcher, on the overlay layer
+```
+
+What works:
+
+- **All four layers.** `background` and `bottom` draw behind windows (and
+  behind the focus ring, so a wallpaper never hides it); `top` and `overlay`
+  draw in front of them.
+- **Anchors, margins and sizing**, including the protocol's rules for a
+  surface anchored to opposite edges or given a zero dimension.
+- **Exclusive zones.** A bar that reserves its own height shrinks the area
+  windows are tiled within, so nothing is ever laid out underneath it — and
+  gives that space back the moment it exits or its client dies. Several
+  surfaces reserving on the same edge stack. `-1` ("don't push me around")
+  reserves nothing, which is what a full-screen wallpaper wants.
+- **Pointer input.** A click, scroll or motion over a layer surface goes to
+  that surface, not to whatever window is behind it, and clicking a bar does
+  not move window focus.
+- **Keyboard focus**, following the protocol's `keyboard_interactivity`:
+  - `none` (the default, and what a bar, wallpaper or notification daemon
+    asks for) never takes the keyboard. Nothing changes for those clients.
+  - `exclusive` on the `top` or `overlay` layer takes the keyboard as soon as
+    the surface maps and holds it until it unmaps — what a launcher
+    (`fuzzel`, `wofi`, `rofi`) and a layer-shell lock screen need. If several
+    ask at once, the front-most one wins, and the keyboard falls back to the
+    next one down when it goes away.
+  - `on_demand` is click-to-focus, exactly like a window: click the surface
+    to give it the keyboard, click a window, a bar or bare desktop to take it
+    back. `exclusive` on the `bottom` or `background` layer is treated the
+    same way — the spec allows normal focus semantics there, and nothing
+    should be typing into a wallpaper unasked. Note that no *input* other
+    than a click releases an `on_demand` surface: a keybinding or a `flexwm
+    msg action focus-*` moves window focus but leaves the keyboard where it
+    is. The spec leaves this implementation-defined, and click-only is the
+    deliberate choice — the alternative silently steals a launcher's keyboard
+    whenever a script re-focuses a window.
+  - A surface that has committed but never attached a buffer, or that
+    unmapped itself, can't hold the keyboard however it asks: there is
+    nothing of it on screen to type into.
+  - A click-focused surface can also hand the keyboard back itself, by
+    committing `keyboard_interactivity: none` or by unmapping — and the click
+    that focused it is spent when it does. Asking for `on_demand` again, or
+    mapping again, gets it drawn again but not focused again: it waits for a
+    fresh click, the same as the first time. So a bar that collapses and
+    re-opens a search field, or a notification daemon that closes and
+    re-opens an inline reply, never gets the keyboard back without the user
+    actually clicking it. (An `exclusive` surface on `top`/`overlay` is the
+    exception, per the rule above: it takes the keyboard whenever it is
+    mapped, clicked or not.)
+
+  **Keybindings always win.** They are matched before anything is forwarded
+  to the focused client, so `Super+Shift+E` (quit) and, on `--tty`,
+  `Ctrl+Alt+F1`..`F12` (VT switch) still work while a full-screen layer
+  surface is holding every keystroke. That is the escape hatch if one wedges.
+
+What doesn't, yet:
+
+- **Screen locking is not a security boundary here.** The keyboard model
+  above is what a layer-shell locker (`gtklock`, `swaylock-effects`) needs to
+  function, and one will now actually receive what you type instead of
+  leaking it to the window behind — but flexwm implements no
+  `ext-session-lock-v1`, and the escape hatch that makes exclusive focus safe
+  is also a way around a lock: the quit binding and the `--tty` VT switches
+  keep working while the locker is up. Treat it as a screen *blanker* you can
+  type a password into, not as something that keeps anyone out.
+- **Popups from a layer surface** (a bar's own dropdown menu or tooltip) are
+  not tracked yet, for a reason that predates this: flexwm doesn't send the
+  initial configure for *any* `xdg_popup` yet, so no popup maps, from a window
+  or a layer surface. Also in the backlog.
+- **`flexwm msg outputs`** reports each output's *full* rectangle. The
+  reserved area a bar takes isn't exposed over IPC yet; an agent asking "how
+  big is the screen" gets the screen.
+
+Two things for agents to know about layer surfaces:
+
+**Window focus and keyboard focus are separate now.** `flexwm msg windows`'
+`focused` flag, the focus ring and `flexwm msg action focus-*` all still mean
+the *window*, and a layer surface holding the keyboard never appears there —
+what it reports is where focus returns to once that surface goes away. So if
+a launcher is up, `flexwm msg type "..."` and `flexwm msg key` go to the
+launcher (which is usually what you want), while `flexwm msg windows` still
+names the window behind it. There is no IPC request that reports a layer
+surface yet.
+
+The other: a bar redraws on its own schedule, and
+`flexwm msg wait-idle` waits for *nothing on screen* to have redrawn.
+Measured on real hardware with a `waybar` clock ticking once a second,
+`--quiet-ms 200` still settles normally (204 ms) while `--quiet-ms 1500`
+never does and times out. Keep `--quiet-ms` below whatever your bar's own
+redraw interval is — the same caveat an animated cursor already carried.
 
 ## Configuration
 

@@ -13,6 +13,7 @@ mod headless;
 mod input;
 mod ipc;
 mod keybindings;
+mod layer_shell;
 mod nested;
 mod nested_dispatch;
 mod screenshot;

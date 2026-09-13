@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use flexwm_core::{Config, Size, WindowId, World};
-use smithay::desktop::{PopupManager, Space, Window, WindowSurfaceType};
+use smithay::desktop::{LayerSurface, PopupManager, Space, Window, WindowSurfaceType};
 use smithay::input::keyboard::Keycode;
 use smithay::input::{Seat, SeatState};
 use smithay::output::Output;
@@ -22,6 +22,7 @@ use smithay::utils::{Logical, Point};
 use smithay::wayland::compositor::{CompositorClientState, CompositorState};
 use smithay::wayland::output::OutputManagerState;
 use smithay::wayland::selection::data_device::DataDeviceState;
+use smithay::wayland::shell::wlr_layer::WlrLayerShellState;
 use smithay::wayland::shell::xdg::XdgShellState;
 use smithay::wayland::shell::xdg::decoration::XdgDecorationState;
 use smithay::wayland::shm::ShmState;
@@ -32,6 +33,7 @@ use super::decorations::{Appearance, Decorations};
 use super::headless::Backend;
 use super::ipc::PendingIdle;
 use super::keybindings::Keybindings;
+use super::layer_shell;
 use super::nested::Host;
 use super::tty::Tty;
 
@@ -52,8 +54,35 @@ pub struct State {
     /// The size each window was last asked for, to pair with what it becomes.
     pub requested: HashMap<WindowId, Size>,
     pub next_id: u64,
-    /// What holds keyboard focus, so focus is only moved when it changes.
+    /// The focused *window*, so activation and the focus ring are only moved
+    /// when they change. Not necessarily what holds the keyboard: a layer
+    /// surface can (see `clicked_layer` and `layer_shell.rs`), and this stays
+    /// pointing at the window focus will come back to when it doesn't.
     pub focus: Option<WindowId>,
+    /// The layer surface a click gave keyboard focus to, if any -- the one
+    /// piece of the layer-shell focus policy that cannot be re-derived from
+    /// the layer map, because nothing else records that a click happened.
+    ///
+    /// Holding a `LayerSurface` here holds an `Arc` to a client's surface, so
+    /// it is cleared as soon as it stops meaning anything: on that surface's
+    /// destruction (`layer_destroyed`), on the next click elsewhere, on the
+    /// commit where that surface stops wanting the keyboard at all
+    /// (`commit_layer_surface` -- a click is spent once the thing it focused
+    /// asks for `none` or unmaps itself), and defensively on every focus
+    /// refresh if the client vanished without any of those
+    /// (`forget_dead_clicked_layer`).
+    pub clicked_layer: Option<LayerSurface>,
+    /// Whether the keyboard focus `refresh_keyboard_focus` last handed out
+    /// went to a layer surface rather than a window's toplevel.
+    ///
+    /// Written *only* there, read *only* by `commit_layer_surface`'s gate,
+    /// and it means exactly that -- not "a layer surface wants the keyboard"
+    /// and not "`clicked_layer` is set". It exists so a bar with
+    /// `keyboard_interactivity: none` (i.e. nearly every layer surface that
+    /// will ever run) skips focus resolution entirely on each of its
+    /// redraws, while a surface that *stops* wanting the keyboard still gets
+    /// it taken away.
+    pub keyboard_on_layer: bool,
 
     pub space: Space<Window>,
     pub popups: PopupManager,
@@ -91,6 +120,12 @@ pub struct State {
 
     pub compositor_state: CompositorState,
     pub xdg_shell_state: XdgShellState,
+    /// `zwlr_layer_shell_v1`: bars, docks, wallpapers and notification
+    /// daemons. Unlike the two `#[allow(dead_code)]` states below this one is
+    /// read again -- `WlrLayerShellHandler::shell_state` (see
+    /// `layer_shell.rs`) routes every layer-shell request through it. The
+    /// surfaces themselves live in Smithay's per-output `LayerMap`, not here.
+    pub layer_shell_state: WlrLayerShellState,
     /// Held only to keep the `zxdg_decoration_manager_v1` global alive --
     /// like `output_manager_state`, `XdgDecorationHandler` (see
     /// `handlers.rs`) has no `&mut XdgDecorationState` accessor to route
@@ -150,6 +185,7 @@ impl State {
         let compositor_state = CompositorState::new::<Self>(&dh);
         let xdg_shell_state = XdgShellState::new::<Self>(&dh);
         let xdg_decoration_state = XdgDecorationState::new::<Self>(&dh);
+        let layer_shell_state = WlrLayerShellState::new::<Self>(&dh);
         let shm_state = ShmState::new::<Self>(&dh, vec![]);
         let output_manager_state = OutputManagerState::new_with_xdg_output::<Self>(&dh);
         let data_device_state = DataDeviceState::new::<Self>(&dh);
@@ -180,6 +216,8 @@ impl State {
             requested: HashMap::new(),
             next_id: 0,
             focus: None,
+            clicked_layer: None,
+            keyboard_on_layer: false,
             space: Space::default(),
             popups: PopupManager::default(),
             output: None,
@@ -191,6 +229,7 @@ impl State {
             cursor,
             compositor_state,
             xdg_shell_state,
+            layer_shell_state,
             xdg_decoration_state,
             shm_state,
             output_manager_state,
@@ -300,7 +339,40 @@ impl State {
             .map(|(&id, _)| id)
     }
 
+    /// What the pointer is over: the top-most surface at `pos` and where that
+    /// surface sits, in the same global coordinates the pointer moves in.
+    ///
+    /// The search order is the render order read from the front: a bar or an
+    /// overlay wins over any window, and a wallpaper loses to every one of
+    /// them. A layer surface that declines `pos` -- an unmapped one, or one
+    /// whose client set an input region that excludes the point -- falls
+    /// through to whatever is behind it rather than swallowing the pointer,
+    /// because `layer_surface_under` asks the surface tree (which honours
+    /// `wl_surface.set_input_region`) rather than the layer's bounding box.
+    /// Note this is the *input* region, not opacity: a bar drawn fully
+    /// transparent but leaving its input region at the default takes the
+    /// pointer, which is the protocol's answer and what a click-through bar
+    /// has to opt out of explicitly.
+    ///
+    /// One caveat on "falls through": it falls through to the next *layer*
+    /// (overlay, then top), not to another surface on the same layer --
+    /// `LayerMap::layer_under` hands back a single layer surface rather than
+    /// an iterator, so if the front-most one on a layer declines the point,
+    /// a second surface overlapping it on that same layer is not asked.
+    /// Overlapping surfaces on one layer are already drawn on top of each
+    /// other, so this costs nothing in practice; anvil has the same
+    /// limitation.
     pub fn surface_under(
+        &self,
+        pos: Point<f64, Logical>,
+    ) -> Option<(WlSurface, Point<f64, Logical>)> {
+        self.layer_surface_under(&layer_shell::ABOVE_WINDOWS, pos)
+            .or_else(|| self.window_under(pos))
+            .or_else(|| self.layer_surface_under(&layer_shell::BELOW_WINDOWS, pos))
+    }
+
+    /// The window surface at `pos`, ignoring layer surfaces entirely.
+    pub(super) fn window_under(
         &self,
         pos: Point<f64, Logical>,
     ) -> Option<(WlSurface, Point<f64, Logical>)> {

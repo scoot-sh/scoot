@@ -103,25 +103,54 @@ impl State {
         self.request_render();
     }
 
+    /// Moves *window* focus -- activation, and with it the focus ring -- and
+    /// then re-derives who actually gets the keys.
+    ///
+    /// The two are no longer the same question, and the second half runs
+    /// unconditionally for a reason worth spelling out: clicking away from an
+    /// `on_demand` layer surface onto the window that was already focused
+    /// arrives here with `focus` unchanged, and that unconditional refresh is
+    /// the only thing that takes the keyboard back off the layer surface.
     fn set_focus(&mut self, focus: Option<WindowId>) {
-        if self.focus == focus {
-            return;
-        }
-        self.focus = focus;
-        for (id, window) in &self.windows {
-            window.set_activated(Some(*id) == focus);
-            if let Some(toplevel) = window.toplevel() {
-                toplevel.send_pending_configure();
+        if self.focus != focus {
+            self.focus = focus;
+            for (id, window) in &self.windows {
+                window.set_activated(Some(*id) == focus);
+                if let Some(toplevel) = window.toplevel() {
+                    toplevel.send_pending_configure();
+                }
             }
         }
-        let surface = focus
-            .and_then(|id| self.windows.get(&id))
-            .and_then(Window::toplevel)
-            .map(|toplevel| toplevel.wl_surface().clone());
-        if let Some(keyboard) = self.seat.get_keyboard() {
-            let serial = SERIAL_COUNTER.next_serial();
-            keyboard.set_focus(self, surface, serial);
-        }
+        self.refresh_keyboard_focus();
+    }
+
+    /// Hands the keyboard to whatever should have it: a layer surface if the
+    /// layer-shell policy says so (see `layer_shell.rs`), otherwise the
+    /// focused window's toplevel, otherwise nobody.
+    ///
+    /// Safe to call as often as anything might have changed. Smithay's own
+    /// `set_focus` compares against the current focus and does nothing when
+    /// it matches, so a redundant call costs a serial and two locks rather
+    /// than a spurious `leave`/`enter` pair to two clients.
+    ///
+    /// Callers must not be holding a layer-map guard: this takes one (via
+    /// `layer_keyboard_focus`) and then re-enters Smithay through
+    /// `set_focus`. See `layer_shell.rs`'s guard-discipline note.
+    pub(super) fn refresh_keyboard_focus(&mut self) {
+        let Some(keyboard) = self.seat.get_keyboard() else {
+            return;
+        };
+        self.forget_dead_clicked_layer();
+        let layer = self.layer_keyboard_focus();
+        self.keyboard_on_layer = layer.is_some();
+        let surface = layer.or_else(|| {
+            self.focus
+                .and_then(|id| self.windows.get(&id))
+                .and_then(Window::toplevel)
+                .map(|toplevel| toplevel.wl_surface().clone())
+        });
+        let serial = SERIAL_COUNTER.next_serial();
+        keyboard.set_focus(self, surface, serial);
     }
 
     fn info_of(&self, id: WindowId) -> WindowInfo {
@@ -137,7 +166,7 @@ impl State {
         // runs it), so it is in `0..=Config::MAX_GAP` and `Rect::inset`'s
         // `2 * gap` cannot overflow.
         let limit = hint_limit(
-            self.world.outputs().into_iter().map(|(_, area)| area),
+            self.world.usable_areas().into_iter(),
             self.world.config().gap,
         );
         with_states(toplevel.wl_surface(), |states| {
@@ -162,8 +191,9 @@ impl State {
 }
 
 /// The largest minimum size a client's own `min_size` may declare, per axis:
-/// the usable area (an output's area inset by the layout gap) of the largest
-/// output the core knows about.
+/// the usable area (an output's area, minus anything a layer-shell surface
+/// reserved, inset by the layout gap) of the largest output the core knows
+/// about.
 ///
 /// `xdg_toplevel.set_min_size` takes two raw, unvalidated `i32`s -- the
 /// pinned Smithay rev stores them verbatim in `SurfaceCachedState`

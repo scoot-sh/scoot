@@ -18,6 +18,21 @@ pub enum Event {
         id: OutputId,
         area: Rect,
     },
+    /// The part of an output that ordinary windows may be arranged within,
+    /// after whatever the platform reserved at its edges -- on Wayland, the
+    /// exclusive zones layer-shell surfaces (bars, docks) asked for.
+    ///
+    /// In the same coordinate space as [`Event::OutputAdded`]'s `area`, and
+    /// intersected with it on the way in, so a stale or oversized rectangle
+    /// can only ever describe *less* space than the output has, never more.
+    /// Unknown outputs are ignored. A platform that reserves nothing never
+    /// needs to send this; one that does should re-send it after changing an
+    /// output's geometry, since a reservation measured against the old size
+    /// is only re-clamped, not recomputed, by [`Event::OutputChanged`].
+    OutputUsableAreaChanged {
+        id: OutputId,
+        area: Rect,
+    },
     /// The output's workspaces move to the focused output; focus stays put.
     OutputRemoved {
         id: OutputId,

@@ -17,6 +17,7 @@ impl World {
             Event::OutputAdded { id, area } | Event::OutputChanged { id, area } => {
                 self.upsert_output(id, area);
             }
+            Event::OutputUsableAreaChanged { id, area } => self.set_usable_area(id, area),
             Event::OutputRemoved { id } => self.remove_output(id),
             Event::WindowOpened {
                 id,
@@ -55,7 +56,7 @@ impl World {
     /// Adds an output, or updates its area if it is already known.
     fn upsert_output(&mut self, id: OutputId, area: Rect) {
         if let Some(o) = self.output_index(id) {
-            self.outputs[o].area = area;
+            self.outputs[o].set_area(area);
             self.fix_view(o);
             return;
         }
@@ -63,6 +64,20 @@ impl World {
         let o = self.outputs.len() - 1;
         for window in std::mem::take(&mut self.unplaced) {
             self.place_window(window, o, false);
+        }
+    }
+
+    /// Narrows an output's usable area to what the platform left over.
+    ///
+    /// Only re-scrolls when the area really changed: a bar that repeats its
+    /// exclusive zone on every frame it draws (the common case -- a clock
+    /// redraws once a second) must not cost a re-layout each time.
+    fn set_usable_area(&mut self, id: OutputId, area: Rect) {
+        let Some(o) = self.output_index(id) else {
+            return;
+        };
+        if self.outputs[o].set_usable(area) {
+            self.fix_view(o);
         }
     }
 
@@ -116,7 +131,13 @@ impl World {
         let Some(loc) = self.locate(id) else {
             return;
         };
-        let limit = self.outputs[loc.output].area.inset(self.config.gap).size();
+        // `usable`, not `area`: the cap is "as large as this window could
+        // legitimately be", and a window can never legitimately fill the
+        // strip a bar reserved.
+        let limit = self.outputs[loc.output]
+            .usable
+            .inset(self.config.gap)
+            .size();
         let Some(window) = self.windows.get_mut(&id) else {
             return;
         };
