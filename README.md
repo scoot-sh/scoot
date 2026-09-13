@@ -99,6 +99,14 @@ Add `--config PATH` to any of the three to load a TOML config; see
 Configuration below for the full schema and default keybindings. Run
 `flexwm --help` for the full request/action list.
 
+`--tty` needs a seat (`seatd` or logind) with a DRM device on it. On every
+non-root `--tty` run, Smithay logs `Unable to become drm master, assuming
+unprivileged mode` at startup — expected, not a failure: the session manager
+opens the device and holds DRM master on flexwm's behalf, and flexwm simply
+isn't permitted to call `SET_MASTER` itself on a file another process opened.
+`vm/README.md`'s troubleshooting section has the kernel-level reason and two
+commands that check whether master really is held.
+
 ## Configuration
 
 `--config PATH` loads a TOML file explicitly. Without it, flexwm looks for

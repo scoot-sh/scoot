@@ -154,6 +154,21 @@ pub fn init(
     // compile and even run, right up until the modeset call, which then
     // fails with EACCES with no obvious link back to "forgot the session".
     let fd = session.open(&gpu_path, OFlags::RDWR | OFlags::CLOEXEC)?;
+    // Smithay logs `Unable to become drm master, assuming unprivileged mode`
+    // from inside `DrmDeviceFd::new` on every run here. It is expected, and it
+    // does *not* mean master wasn't acquired: seatd opened the device as root,
+    // so that *open file* is already the master (master is per-open-file, not
+    // per-process) and we inherit it along with the fd. Our own `SET_MASTER`
+    // is refused with `EACCES` because the kernel only permits it from the
+    // process that owns the file -- `drm_master_check_perm` wants
+    // `was_master && file->pid == current->tgid`, and `drm_file_update_pid`
+    // deliberately never re-owns a file that was master. Smithay's resulting
+    // `privileged = false` is the state this backend wants: it stops Smithay
+    // issuing `SET_MASTER`/`DROP_MASTER` itself on pause/activate, which seatd
+    // already does as root on every VT switch. Measured end to end on the dev
+    // VM (clients/state debugfs, a root `SET_MASTER` probe, a full VT-switch
+    // cycle) -- see `vm/README.md`'s DRM-master troubleshooting entry and the
+    // resolved backlog entry in `ROADMAP.md`.
     let drm_fd = DrmDeviceFd::new(DeviceFd::from(fd));
     let (mut drm, drm_notifier) = DrmDevice::new(drm_fd.clone(), true)?;
 

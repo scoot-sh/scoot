@@ -48,6 +48,12 @@ review, and why.
    on the dev VM's real `virtio-gpu` KMS device: real scanout, VT-switch
    round trip (pause/reactivate + forced full modeset on the way back), idle
    CPU ~0, a real `/dev/uinput`-injected keystroke proven to reach a client.
+   The "real scanout" and VT-switch claims here were the ones later called
+   into question by Smithay's `unprivileged mode` warning; both were
+   re-confirmed directly on 2026-09-13 (the CRTC's plane really does scan out
+   a flexwm-allocated framebuffer, and master really is dropped and
+   reacquired across a VT switch) — see the resolved DRM-master entry in the
+   Backlog.
    Out of scope, stated: cursor rendering, DRM hotplug, multi-GPU/output,
    DPMS, output scale, key-repeat.
 
@@ -141,7 +147,11 @@ review, and why.
    hardware both ways: (1) the original IPC-while-paused repro still gets a
    clean skip, no `EPERM`; (2) after a real reactivation cycle, `change_vt`
    works normally again for a fresh switch-away/back over IPC. 93/93 tests
-   pass, clippy/fmt clean, cross-platform build clean on macOS.
+   pass, clippy/fmt clean, cross-platform build clean on macOS. Those
+   pause/reactivate cycles were real in the strongest sense, not just
+   libseat-event-level: confirmed 2026-09-13 that a `--tty` session over SSH
+   holds real DRM master and really does lose and reacquire it across a VT
+   switch (see the resolved DRM-master entry in the Backlog).
 
    `flexwm-reviewer`'s first formal pass (PR #9): **no blocking findings** —
    independently re-verified the whole test/clippy/fmt trio, traced every
@@ -1484,6 +1494,13 @@ review, and why.
     trust a claim in this project that specifically depends on holding real
     DRM master (VT-switch/scanout behavior, not pixel content), not
     something this item's own evidence needed to resolve.
+    **Resolved 2026-09-13** — see the resolved DRM-master entry in the Backlog
+    below. Master *is* held, over SSH and from a real VT alike; the warning
+    means "this process may not call `SET_MASTER` itself", and the fd seatd
+    passes is already the master. One correction to the framing above, for the
+    record: master isn't acquired later either — it is held from open time
+    onward, by the open file itself. `vm/README.md`'s conclusion was right and
+    only its stated mechanism (logind/PAM) was wrong; both are fixed.
 
     The item-8 client-cursor behavior is unchanged and is covered by its seven
     tests passing untouched (they drive a real client and assert read-back
@@ -1544,34 +1561,83 @@ review, and why.
 
 ## Backlog (unordered — pick up whenever it fits)
 
-- **Open question: does `--tty` over SSH on the dev VM actually hold real
-  DRM master, or is it running in "unprivileged mode" the whole time
-  (HIGH-ish priority — this affects how much to trust prior hardware
-  claims, not a bug in flexwm itself)?** Found by `flexwm-reviewer` while
-  reviewing item 13, confirmed by independently reproducing it: every
-  `--tty` run over SSH on this project's dev VM logs Smithay's own `Unable
-  to become drm master, assuming unprivileged mode` at device-open time —
-  in direct tension with `vm/README.md`'s claim that a `--tty` session over
-  SSH "takes real DRM/libseat ownership just fine." The warning fires once,
-  at `session.open()`/DRM device open time, with no commit/flip errors
-  following it, so it's genuinely unclear whether: (a) master gets acquired
-  moments later via a separate libseat call this project doesn't currently
-  log, and the warning is stale/misleading; or (b) every `--tty` hardware
-  verification this project has done over SSH this whole time — VT
-  switching, scanout, cursor rendering, all of it — has actually been
-  running without real DRM master, which could mean some of what "verified
-  on real `--tty` hardware" claims throughout `ROADMAP.md` actually
-  demonstrated is narrower than believed (screenshot/pixel-sampling claims
-  read back through the pixman intermediate buffer regardless of master
-  state, so those likely still hold; anything that specifically depends on
-  *holding* master — real scanout to the physical display, VT-switch
-  semantics — is the part actually in question). Investigate before trusting
-  the next claim that depends on it: check what libseat/`seatd` actually
-  report for this session's master state after open (not just at open
-  time), check whether running directly on the QEMU window's console
-  (tty1) rather than over SSH changes the log line, and either fix
-  `vm/README.md`'s claim or fix whatever's preventing real master
-  acquisition over SSH.
+- **~~Open question: does `--tty` over SSH on the dev VM actually hold real
+  DRM master, or is it running in "unprivileged mode" the whole time?~~ —
+  RESOLVED 2026-09-13 (investigation + docs fix, PR #20). It holds real DRM
+  master. The warning is a red herring, it is not SSH-specific, and no
+  flexwm code change is warranted.** Raised by `flexwm-reviewer` while
+  reviewing item 13: every `--tty` run over SSH logs Smithay's own `Unable to
+  become drm master, assuming unprivileged mode` at device-open time, in
+  apparent tension with `vm/README.md`. Answer, from primary sources plus
+  live measurement on the dev VM at `0678765`:
+
+  **Mechanism.** "Unprivileged mode" is Smithay's name for "this process may
+  not call `SET_MASTER` itself", not "this process is not master". seatd opens
+  the DRM device as root, so that *open file* becomes the master at open
+  (`seatd/seat.c` also calls `DRM_IOCTL_SET_MASTER` on it explicitly), and
+  passes the fd over its socket. Master is a property of the open file, so
+  flexwm inherits it. flexwm's own `SET_MASTER` inside Smithay's
+  `DrmDeviceFd::new` is then refused with `EACCES` because kernel 6.18's
+  `drm_master_check_perm` (`drivers/gpu/drm/drm_auth.c`) requires
+  `was_master && file->pid == current->tgid` (or `CAP_SYS_ADMIN`), and
+  `drm_file_update_pid` (`drm_file.c`) deliberately never re-owns a file that
+  was master — so the fd's recorded owner stays seatd forever. Smithay's
+  resulting `privileged = false` is the *correct* state for the libseat path:
+  it is what stops `DrmDevice::pause`/`activate` (`device/mod.rs:417`/`431`)
+  from issuing `SET_MASTER`/`DROP_MASTER` themselves, which seatd already does
+  as root on every VT switch.
+
+  **Evidence** (commands and raw output in PR #20's description). While an
+  SSH-started `--tty` runs: `/sys/kernel/debug/dri/0/clients` shows exactly one
+  client, `seatd 460 ... master y`; a root `drmSetMaster` probe gets `EBUSY`
+  (root cannot take master, i.e. someone holds it) and `drmIsMaster` reads 0;
+  `/sys/kernel/debug/dri/0/state` shows `crtc-0 enable=1 active=1`, mode
+  `1600x1000`, with the plane's `fb=42` *allocated by flexwm* — real scanout,
+  not the pixman intermediate. A `chvt 2`/`chvt 1` cycle moves all of it in
+  lockstep: `master n` + plane back to `[fbcon]`'s fb + probe acquires master
+  freely while paused, then `master y` + plane back to flexwm's fb + `EBUSY`
+  again after the switch back. The `EACCES`-despite-master condition was also
+  reproduced in isolation with no seatd involved at all (a process opens
+  card0, `drmIsMaster=1`; its forked child, same open file, different tgid,
+  also reads `drmIsMaster=1` but gets `EACCES` from `drmSetMaster`) — which is
+  what makes "the warning does not mean what it looks like" a fact rather than
+  an inference. The same warning appears verbatim when started from a real VT
+  (`openvt -c 3 -s`, tty3 as controlling terminal and foreground VT) with
+  master equally held, so it was never about SSH.
+
+  **Why SSH works at all — `vm/README.md`'s stated reason was wrong, its
+  conclusion was right.** It credited "logind's PAM stack registers those with
+  a real seat/session too." It doesn't: `loginctl` reports `Seat=`, `VTNr=0`,
+  `Remote=yes` for an SSH session, and `LIBSEAT_BACKEND=logind flexwm --tty`
+  over SSH fails immediately with `Failed to open session: No data available`.
+  What actually happens is that libseat uses its **seatd** backend, and
+  seatd's `seat0` is VT-bound: `seat_add_client` assigns every client
+  `seat->cur_vt`, the VT in the foreground at connect time, regardless of how
+  the process was started. Confirmed by the session number in seatd's own log
+  tracking the foreground VT: `Added client 1 to seat0` over SSH with tty1
+  foreground, `Added client 3 to seat0` for the `openvt -c 3 -s` run. Fixed in
+  `vm/README.md` (mechanism, a "is it really DRM master" troubleshooting entry
+  with the two debugfs checks, and the two consequences of VT binding: one
+  libseat client at a time on a VT-bound seat, and `XDG_RUNTIME_DIR` must
+  exist) and in `vm/configuration.nix`'s `services.seatd.enable` comment,
+  which carried the same wrong claim.
+
+  **What this means for prior hardware claims: they stand, and now have a
+  mechanism behind them.** Items 3 and 5b are the ones that specifically
+  depended on *holding* master (real scanout; VT-switch pause/reactivate
+  semantics), and the cycle above re-demonstrates both directly. The
+  historical runs are covered too, without re-running them: seatd logs
+  `Could not make device fd drm master: ...` whenever its own root-side
+  `drm_set_master` fails, and `journalctl -u seatd` contains no such line for
+  any run on this VM — while those same runs logged `drm: modeset (full
+  commit)` with no error, and `DRM_IOCTL_MODE_ATOMIC` is `DRM_MASTER`-gated by
+  `drm_ioctl.c`, so the kernel would have returned `EACCES` had master not
+  been held. One limit, stated rather than papered over: nothing here is a
+  *photograph* of the QEMU window — host `screencapture` is blocked by macOS
+  Screen Recording permission in this environment ("could not create image
+  from display"). The scanout evidence is the kernel's own atomic state plus
+  the master-gating of the ioctl that set it, which is strictly more specific
+  than a photo, but if a future claim wants a visual, look at the window.
 
 - **Input injection targeted at a specific window, without moving seat
   focus (research-backed idea, 2026-09-12 — a major goal per `CLAUDE.md`,
@@ -1878,11 +1944,18 @@ data-loss/RCE in what was checked.
   `LibSeatSession::open` discards the flags parameter entirely and just
   calls `libseat::Seat::open_device` — so whether an `Action::Spawn`-launched
   child inherits DRM master or input-device fds depends entirely on
-  libseat's own (unverified from this machine) C-side behavior, not on
-  flexwm's request. Not independently confirmed either way; a one-command
-  check if this ever matters:
-  `grep flags /proc/<flexwm-pid>/fdinfo/<drm-fd-num>` (bit `02000000` =
-  `O_CLOEXEC`) while `--tty` is running.
+  libseat's own C-side behavior, not on flexwm's request. **Measured
+  2026-09-13** with exactly the check this entry suggested, while an
+  SSH-started `--tty` ran on the dev VM at `0678765`: every one of flexwm's
+  seatd-obtained fds (`/dev/dri/card0` and all four `/dev/input/event*`)
+  reports `flags: 02504002`, which has the `02000000` `O_CLOEXEC` bit set —
+  identical to seatd's own fd for the same device, since it is the same open
+  file. So the outcome flexwm asked for does hold (an `Action::Spawn`ed child
+  inherits neither DRM master nor input fds), just for seatd's reasons rather
+  than flexwm's: seatd opens with `O_RDWR | O_NOCTTY | O_NOFOLLOW | O_CLOEXEC
+  | O_NONBLOCK` (`seatd/seat.c`) and the flag survives the socket handoff.
+  Still informational, still no code change: flexwm's `OFlags::CLOEXEC`
+  argument remains a no-op that is currently right by luck, not by contract.
 - **~~IPC socket path is unlink-then-bind (LOW, non-default config only)~~ —
   DONE as item 9.** The original framing here was wrong (`bind(2)` does not
   follow a trailing symlink, verified — `EADDRINUSE`), so the real exposures

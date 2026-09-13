@@ -69,8 +69,13 @@ in
   # ------------------------------------------------------------- graphics ---
   hardware.graphics.enable = true;
 
-  # seatd hands a non-root compositor DRM master and input devices.
-  # (logind can do the same; both are present, libseat picks one.)
+  # seatd hands a non-root compositor DRM master and input devices. libseat
+  # picks this over its logind backend here, and that is load-bearing, not
+  # incidental: logind gives an ssh login no seat at all (`Seat=`, `VTNr=0`),
+  # so `LIBSEAT_BACKEND=logind flexwm --tty` over ssh fails outright, while
+  # seatd's VT-bound seat0 binds any client to the foreground VT regardless of
+  # how its process was started. That is what makes the ssh `--tty` workflow
+  # in vm/README.md work.
   services.seatd.enable = true;
 
   # Nothing owns the display by default -- flexwm is meant to. sway and cage are
