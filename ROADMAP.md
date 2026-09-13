@@ -1876,6 +1876,165 @@ review, and why.
     mode, i.e. `resize_output` really did run and re-arrange against a size
     that is not flexwm's built-in default) on the dev VM.
 
+    ### Round two: keyboard interactivity — verification and benchmarks
+
+    Everything below was captured against **commit `9ddc295`** (working tree
+    clean), a **release** build (`/var/cargo-target/release/flexwm`,
+    3,551,816 bytes), on the dev VM's real `--tty` `virtio-gpu` KMS device at
+    1600x1000, driven by **real layer-shell clients**: `fuzzel` 1.14.1
+    (overlay layer, `keyboard_interactivity: exclusive` — a launcher, which
+    is the exact client class this work exists for), `swaybg` 1.2.2 and
+    `Waybar` 0.15.0, all from `nixpkgs`. Scripts and raw output are on the VM
+    at `/tmp/hw-evidence/` (`hw-out.txt`, `hw2-out.txt`, `hw3-out.txt`, and
+    the `hwshots*/` PNGs); the numbers here are copied from them verbatim.
+    The pointer is parked at (1590, 990) before every capture, for the same
+    reason round one recorded. **The evidence's cache key still matches**:
+    the only commit after `9ddc295` on this branch is this section itself —
+    `git diff --stat 9ddc295 HEAD -- crates/ scripts/` is empty.
+
+    **Correctness, on hardware.**
+    - **Keystrokes reach the launcher, not the window behind it.** With
+      `foot` focused and `fuzzel` mapped, `flexwm msg type "flexwmkeyboard"`
+      leaves `> flexwmkeyboard` in fuzzel's prompt and **both terminals'
+      prompts empty** (`hwshots/f-after-keybinding.png`). This is the bug
+      that was shipping without it.
+    - **Keybindings still win, and the bound key is not leaked.** In the same
+      screenshot, `flexwm msg key super+h` moved window focus (`focused: 2` →
+      `focused: 1`, from `flexwm msg windows`) and fuzzel's prompt still
+      reads exactly `flexwmkeyboard` — no trailing `h`. That is the VT-switch
+      escape hatch working through the identical code path.
+    - **Keyboard returns when the launcher goes.** Typing
+      `typedintoterminal` with only a bar mapped, then `intothelauncher` with
+      fuzzel up, then `backtotheterminal` after `pkill fuzzel`, leaves the
+      terminal reading `typedintoterminalbacktotheterminal` and nothing else
+      (`hwshots2/r-bar-and-launcher.png`, `hwshots2/s-after-launcher.png`).
+      The launcher's text never reached the terminal, and the terminal's text
+      never reached the launcher.
+    - **A `none` bar is untouched.** `waybar` (clock module, red background)
+      still moves the window from `y=12` to `y=42` when it maps and back to
+      `y=12` when it exits, its own row reads `srgba(255,0,0)`, the wallpaper
+      below reads `srgba(0,255,0)` and the focus ring at (9,500) still reads
+      `srgba(107,166,250)` — i.e. the round-one render ordering and exclusive
+      zone both still hold. With fuzzel mapped *over* the bar, the bar keeps
+      its zone (`y=42`) and its pixels.
+    - **`swaybg` unchanged**: `(1500,500)` reads `srgba(0,255,0)` and
+      `(9,500)` still reads the ring's `srgba(107,166,250)`.
+    - **No `ERROR` or `WARN` from flexwm itself** across any of the three
+      runs (the `smithay::backend::drm` lines every `--tty` run logs are
+      filtered).
+
+    **CPU at idle — the new focus path does not poll or spin.** Jiffies from
+    `/proc/<pid>/stat` (`utime+stime`), 20s windows, after `wait-idle`:
+
+    | state | jiffies / 20s |
+    | --- | --- |
+    | no layer surfaces | 0 |
+    | `swaybg` mapped, idle | 0 |
+    | `fuzzel` mapped and **holding exclusive keyboard focus**, idle | 0 |
+    | ticking bar (1Hz clock) only | 1 |
+    | ticking bar **+** focused launcher | 2 |
+    | focused launcher, no bar | 0 |
+
+    The bar's clock was *proved* to be redrawing rather than assumed:
+    `magick compare -metric AE -crop 120x30+0+0` between two captures 4s
+    apart reports **38.98** differing pixels, against **0** for a capture
+    compared with itself.
+
+    **CPU while typing — 200 characters, layer surface vs toplevel**,
+    3 reps alternating (`abcdefghij` × 20 via `flexwm msg type`, then
+    `wait-idle --quiet-ms 200`):
+
+        rep1 layer_surface 3   toplevel 0
+        rep2 layer_surface 1   toplevel 0
+        rep3 layer_surface 0   toplevel 1
+
+    Both arms are within a few jiffies of zero for 400 key events, and the
+    ranges overlap. **Reported honestly rather than as "identical":** the
+    layer arm's mean is a jiffy or two higher, and the likely reason is not
+    the delivery path but the client — fuzzel redraws a 380x365 rounded box
+    per keystroke, where `foot` redraws a character cell. The compositor-side
+    work is the same `keyboard.input` → filter → forward either way.
+
+    **Latency.** `flexwm msg type "x"` → `wait-idle --quiet-ms 50`, wall
+    clock, 5 reps each:
+
+        layer surface focused: 83 82 83 81 82 ms
+        toplevel focused:      79 79 82 80 80 ms
+
+    A ~2ms difference on a measurement whose floor is the 50ms quiet window
+    plus two `flexwm msg` process spawns. Focus transfer itself is
+    synchronous inside the commit/destroy handler — there is no timer and
+    nothing deferred — so there is no separate "focus transfer latency" to
+    measure; what a user can feel is this number, and it doesn't move.
+
+    **No visible hitch across a focus transition.** Six screenshots taken
+    ~50ms apart while the launcher is killed: frame 0 reads
+    `srgba(253,246,227)` (fuzzel's body) at (800,500) and frames 1–5 all read
+    `srgba(0,255,0)` (the wallpaper behind it). The launcher is gone by the
+    *first* frame after the kill; nothing is stale, nothing is half-drawn.
+    Polling a pixel for the same transition gave 135/171/170ms across three
+    reps, but that number is floored by how long a `flexwm msg screenshot`
+    takes (PNG-encoding 1600x1000), not by the compositor — the frame
+    sequence above is the better evidence.
+
+    **Memory.** `VmRSS` from `/proc/<pid>/status`: 23,336 kB at startup with
+    one window; 29,604 kB with `swaybg` mapped; 30,804 kB with `fuzzel` also
+    mapped. Across **15 map/unmap cycles** of the exclusive layer surface:
+
+        before: 37252 kB
+        cycle 1..4:  42108 kB
+        cycle 5..15: 42112 kB      (+4 kB total across eleven cycles)
+        after:  42112 kB, and 37272 kB by the end of the run
+
+    One step up on the first cycle (allocator/page growth, not per-cycle),
+    then flat to within 4 kB over fourteen more. No leak.
+
+    **Per-frame render cost is unchanged by holding focus.** 150
+    corner-to-corner pointer jumps (near-full-frame damage per jump), 3 reps
+    alternating: with a focused layer surface **36/35/47**, without
+    **36/39/36**. Same n=3 caveat as round one's numbers — overlapping
+    ranges, which rules out a large regression and nothing finer. Structurally
+    it should be zero: nothing was added to `render()` except one
+    `refresh_keyboard_focus()` inside the branch that already only runs when
+    `LayerMap::cleanup` dropped a dead surface.
+
+    **Fluidity, plainly.** Nothing in this feature is on a per-frame path,
+    idle cost stays at 0, and the only measurable difference anywhere is
+    ~2ms of type-to-settle and a jiffy or two of typing CPU, both attributable
+    to the launcher's own redraw. It feels instant on the VM's software
+    renderer, and the numbers say why.
+
+    **What was not verified on hardware, and why.** `on_demand`
+    click-to-focus (and `exclusive` degraded to `on_demand` on the background
+    layer) has no convenient real client — `fuzzel` is `exclusive`, `waybar`
+    and `swaybg` are `none`, and nothing in `nixpkgs` on this VM asks for
+    `on_demand`. Both are covered by the integration tests, which drive a
+    real `wayland-client` connection and assert on `wl_keyboard` events, but
+    "a real `on_demand` client on real hardware" is an untested combination.
+    Likewise a real layer-shell **lock screen** (`gtklock`,
+    `swaylock-effects`): the keyboard model is what one needs, and this PR is
+    what makes one stop leaking keystrokes, but none was run — see the
+    README's explicit note that a layer-shell locker here is a blanker you
+    can type into, not a security boundary.
+
+    **Also at `9ddc295`**: `cargo test -p flexwm` **254/254** (241 → 254, the
+    13 new keyboard tests), `cargo test -p flexwm-core` **60/60**, `cargo
+    clippy --workspace --all-targets -- -D warnings` clean and `cargo fmt
+    --all --check` clean on the dev VM; `cargo fmt --all --check` and `cargo
+    check --workspace --all-targets` clean on macOS. `scripts/smoke-test.sh`
+    green against the release build under **both** backends — `--headless`
+    (11 `ok:` checks, exit 0) and `--nested` under `cage` (11 `ok:` checks,
+    exit 0, `/tmp/smoke-nested.png` 1280x720, i.e. `resize_output` ran
+    against a size that is not flexwm's default).
+
+    One methodological miss worth recording rather than hiding: the first
+    hardware run spawned `waybar` with no config, so it fell back to its
+    packaged default, whose `sway/*` modules mean it never maps a surface at
+    all — the run duly reported "the window did not move," which would have
+    read as a regression in the exclusive zone. Re-run with a two-module
+    config (`hw2.sh`), it maps and reserves exactly as before. The numbers
+    above are all from the re-run.
+
 ## Backlog (unordered — pick up whenever it fits)
 
 - **~~Open question: does `--tty` over SSH on the dev VM actually hold real
