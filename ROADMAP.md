@@ -672,14 +672,14 @@ review, and why.
       however many reads a line arrives in — the test for that is the one
       that would have caught preserving the prefix as a way around the cap.
     - **(b) a pipelined second request.** `Connection::step` answers every
-      line already in its read buffer before handing the thread back, and
-      then stops. Both halves are load-bearing and for opposite reasons:
-      lines already pulled into userspace will never be reported again by a
-      level-triggered source (leaving one is the bug), while bytes still in
-      the kernel *will* be, so stopping there is free and lets every other
-      source have its turn. One read buffer (`line::DEFAULT_CAPACITY`, 8 KiB)
-      is therefore the bound on how long one connection can hold the only
-      thread the compositor has.
+      line already in its read buffer before handing the thread back. That half
+      is forced: lines already pulled into userspace are never reported again by
+      a level-triggered source, so leaving one there is the bug itself. What
+      bounds the other side -- how long one connection may hold the only thread
+      the compositor has -- is a budget of *reads off the socket* per wakeup
+      (`READS_PER_WAKEUP`, one), which is the only thing that can. See the
+      blocking correction below for why, and for the 32ms stall two earlier
+      versions of this shipped with.
     - **(c) a client that never reads its replies.** `ipc/outbound.rs` queues
       whatever of a reply the socket would not take and finishes it when the
       event loop reports the socket writable. A connection with anything
@@ -745,14 +745,58 @@ review, and why.
       `reregister`, and `token.rs` for the fact that the re-derived token is
       identical, so no event can be lost to the switch.
 
-    **Two corrections to the diagnosis below**, both found while fixing it:
-    symptom (b)'s "the second line sits in the buffer unanswered until
-    unrelated traffic wakes the connection" is right, but the accidental bound
-    it describes was also the only thing bounding how long a connection could
-    hold the thread, which is why the replacement needed a bound of its own
-    rather than just a loop; and the entry's "with a cap on that buffer, since
-    it is the same unbounded-growth shape item 9 just closed" reads as a hard
-    cap, which would have been wrong for screenshots — see above.
+    **One correction to the diagnosis below:** its "with a cap on that buffer,
+    since it is the same unbounded-growth shape item 9 just closed" reads as a
+    hard cap, which would have been wrong for screenshots -- see above.
+
+    **And one correction to two earlier versions of this entry, which
+    `flexwm-reviewer` caught as a blocking finding.** They claimed "one read
+    buffer is the bound on how long one connection can hold the thread", and
+    justified deleting an explicit per-request counter on the grounds that the
+    read buffer had been bounding a wakeup all along. **Both were false, and the
+    second is why the first went unnoticed.** `Lines::next` has its own loop
+    around `fill_buf`, because a line that ends mid-chunk can only be finished
+    by reading again -- so a serve loop that continues "while something is still
+    buffered" runs until a chunk boundary happens to land on a line boundary,
+    i.e. for `lcm(chunk, line length)` bytes, which for a line length coprime
+    with the chunk is the whole flood. Neither lines served, nor bytes served,
+    nor the buffer's size bounds that; only counting reads does, which is what
+    `READS_PER_WAKEUP` is.
+
+    Measured, because the first write-up reasoned where it should have
+    measured. One ordinary client doing strict request/response round-trips
+    while another floods with 160 KB batches of 101-byte requests; release
+    build, 6s samples:
+
+    | | p50 | p90 | p99 | max | round-trips |
+    |---|---|---|---|---|---|
+    | quiet (either way) | ~126us | ~155us | ~242us | 1.8ms | 23,608 |
+    | flooded, no read budget | **31,975us** | 34,768us | 35,988us | 38.6ms | 195 |
+    | flooded, one read per wakeup | **358us** | 390us | 553us | 5.6ms | 17,462 |
+
+    Two frames of frozen input, dispatch and rendering per wakeup, repeating
+    for as long as the flood lasts -- a materially weaker version of "only the
+    offending client is affected", which is the whole point of this item. The
+    bound costs the flooding client about 9% of its own throughput (423 MB vs
+    386 MB of requests pushed in 8s) and gives the innocent one 90x the
+    round-trips at 65x better p99. Reproduced on real `--tty` hardware to the
+    same figures (p50 355us, p99 546us), so it owes nothing to the backend.
+
+    The test that covers this had to be written at that scale *and* with that
+    line length: at 600 19-byte `version` requests it passes either way,
+    because this kernel hands out 2641-byte socket chunks and 19 divides 2641
+    exactly, so even the unbounded loop yields at the first boundary. That is
+    also why two rounds of review missed it -- every earlier test used 19-byte
+    requests.
+
+    A third claim was **confounded rather than false**: the "+2 jiffies per
+    50,000 round-trips" attributed to the read-until-`Incomplete` shape was
+    measured with a biased design (the same binary always first in a rep), and
+    a balanced one shows the run *position* is worth about that much on its own
+    (whichever binary runs second in a rep averages +1.15us and +1.36 jiffies).
+    The extra `EAGAIN` syscall per request was real and provable by inspection,
+    and removing it was right, but its cost was never measured apart from the
+    artifact.
 
     **Deliberately out of scope, named because they are adjacent:**
     `wait-idle` is still terminal for its connection, so a request pipelined
@@ -763,73 +807,95 @@ review, and why.
     first (the kernel reports the error only once the receive queue is empty),
     and a client mid-`write_all` past 1 MiB sees the write fail rather than
     the refusal. Both pre-existing and both unchanged here. Capping concurrent
-    connections is still its own Backlog entry.
+    connections is still its own Backlog entry -- and one new lifecycle case
+    belongs next to it, found by `flexwm-reviewer`: a client that half-closes
+    (`shutdown(SHUT_WR)`) and then never reads pins its connection slot and two
+    fds for good. A half-close raises `EPOLLIN`/`EPOLLRDHUP`, not `EPOLLHUP`,
+    and a connection with a queue is registered for writability only, so
+    nothing wakes it again. Deliberately not fixed: registering for reads there
+    would spin the loop at full speed on an end-of-stream that can never be
+    acted on (the queue cannot drain), which is worse. Strictly better than the
+    old behaviour, where that same case froze the whole compositor.
 
-    **Tests: 35 new (163 total, against 128 on the merge base).** Split
-    per module: `line/tests.rs` (partial lines, the cap across reads, the
-    three end-of-stream cases), `outbound/tests.rs` (partial writes, reply
-    ordering, what the mark measures, a drained queue freeing its buffer), and
+    **Tests: 46 new (174 total, against 128 on the merge base).** Split per
+    module: `line/tests.rs` (partial lines, the cap across reads, the three
+    end-of-stream cases, the read budget), `outbound/tests.rs` (partial writes,
+    reply ordering, what the mark measures, a drained queue freeing its
+    buffer), `tests.rs` (the `wait-idle` answer's retry-and-give-up logic,
+    which nothing outside the compositor can observe: it is driven directly,
+    with a deliberately tiny `SO_SNDBUF` so the answer cannot go out), and
     `connection/tests.rs`, which drives a real `State` through a real
-    `EventLoop` for all three symptoms plus the `wait-idle` hand-off, the
-    screenshot limiter across a pipelined write, the graceful close, and the
-    interest registration. Those hand `accept()` one end of a socket pair
-    rather than going through the listener — the peer is then this process
-    (so the uid check passes) and, the reason that matters, `SO_SNDBUF` can be
-    shrunk on the compositor's end before it is handed over, which is the only
-    way a test makes a reply not fit in one write without pushing megabytes
-    through a debug build. The client and compositor share one thread, so a
-    test that *would* block hangs rather than fails — which is the correct
-    outcome, and is what the negative controls below exercise.
+    `EventLoop` for all three symptoms plus the per-wakeup bound, the
+    `wait-idle` hand-off, the screenshot limiter across a pipelined write, the
+    graceful close and the interest registration. Those hand `accept()` one end
+    of a socket pair rather than going through the listener -- the peer is then
+    this process (so the uid check passes) and, the reason that matters,
+    `SO_SNDBUF` can be shrunk on the compositor's end before it is handed over,
+    which is the only way a test makes a reply not fit in one write without
+    pushing megabytes through a debug build. The client and compositor share
+    one thread, so a test that *would* block hangs rather than fails -- which
+    is the correct outcome, and is what the negative controls below exercise.
 
-    **Six negative controls, each a one-line mutation, run on the dev VM;
-    every one of them failed a test that passes against the real code**, which
-    is what makes the suite non-vacuous rather than merely green: leaving the
-    accepted socket blocking hangs the partial-line test (and, separately, the
-    never-reads test) past 60s instead of failing — exactly symptoms (a) and
-    (c); clearing the line buffer on `WouldBlock` fails five tests; serving one
+    **Eleven negative controls, each a one-line mutation, run on the dev VM;
+    every one failed a test that passes against the real code**, which is what
+    makes the suite non-vacuous rather than merely green. Leaving the accepted
+    socket blocking hangs the partial-line test, and separately the
+    never-reads test, past 60s instead of failing -- exactly symptoms (a) and
+    (c). Clearing the line buffer on `WouldBlock` fails five tests. Serving one
     line per wakeup fails the pipelining and screenshot-limiter tests with
-    "only 1 of 2 replies arrived" — exactly symptom (b); handing `wait-idle` an
+    "only 1 of 2 replies arrived" -- exactly symptom (b). Handing `wait-idle` an
     empty queue instead of the connection's fails the framing test at 7 of 301
-    replies; and closing on end-of-stream without draining loses 305 of 400
-    queued replies. Raw output in PR #15.
+    replies. Closing on end-of-stream without draining loses 305 of 400 queued
+    replies. Removing the read budget answers 278 of 1,622 pipelined requests
+    in one wakeup, against a bound of 82. Keeping a big line buffer instead of
+    freeing it leaves 131,072 bytes alive after the line that needed them. And
+    each of three independent ways of breaking the `wait-idle` write-progress
+    logic -- give up on the first stalled tick, never record progress, never
+    start the clock when the answer is queued -- fails between one and three of
+    the four tests written for it, including both mutations the review found
+    passing everything. Raw output in PR #15.
+
+    One change is deliberately **not** covered by a test, and says so in its
+    comment: resetting `sent` alongside emptying the buffer in
+    `Outbound::send` guards an invariant that holds today, so nothing can
+    distinguish it behaviourally -- the `debug_assert` in `pending()` is what
+    would catch a future violation.
 
     **Hardware-verified on real `--tty`** (dev VM, virtio-gpu KMS at
-    1600x1000, release binary, all against `1d9ac7a`): `/proc/<pid>/wchan`
-    read `do_epoll_wait` throughout — never `unix_stream_read_generic`, the
+    1600x1000, release binary, re-run in full against `511ff8d` after the
+    fairness fix changed the serve loop again): `/proc/<pid>/wchan` read
+    `do_epoll_wait` throughout -- never `unix_stream_read_generic`, the
     observable this item was diagnosed by. While one client held
-    `{"type":"vers` for 20 seconds: three round-trips served (299/395/165us),
-    `flexwm msg windows`, a full 33 KB screenshot and a `wait-idle` all
-    answered, and the compositor burned 0 jiffies over the whole window. Four
-    clients holding partial lines simultaneously were each answered their own
-    reply. A client that wrote 16,530 bytes of requests and read none
-    (back-pressure engaged — its own writes stopped being accepted) did not
-    delay anyone else, and when it finally read: 870 reply lines, **0
-    damaged**, exactly the 870 expected, so an interleaved write never
-    corrupted the framing. Idle CPU 0 jiffies over 10s both before and after,
-    so the interest switching introduced no spin. The 1 MiB cap re-verified
-    against a release binary over a real socket: the flood dies at 1,179,648
-    bytes, the refusal message arrives intact first, RSS stays at 10,672 kB
-    (VmPeak 21,520 kB — item 9's figures), the compositor survives and a fresh
-    connection still works.
+    `{"type":"vers` for 20 seconds: three round-trips served (307/147/133us),
+    `flexwm msg windows`, a full 33 KB screenshot and a `wait-idle`
+    (`waited_ms: 206`) all answered, and the compositor burned 0 jiffies over
+    the whole window. Four clients holding partial lines simultaneously were
+    each answered their own reply. A client that wrote 10,887 bytes of requests
+    and read none (back-pressure engaged -- its own writes stopped being
+    accepted) delayed nobody, and when it finally read: 573 reply lines, **0
+    damaged**, exactly the 573 expected, so an interleaved write never
+    corrupted the framing. The flood-versus-round-trip figures above were taken
+    here too, to the same numbers as headless. Idle CPU 0 jiffies over 10s both
+    before and after everything, so neither the interest switching nor the read
+    budget introduced a spin. The 1 MiB request cap re-verified against a
+    release binary over a real socket: the flood dies at 1,245,184 bytes, the
+    refusal arrives intact first, RSS stays at 10,676 kB (VmPeak 21,520 kB --
+    item 9's figures), the compositor survives and a fresh connection still
+    works.
 
     **Benchmarked** (item 9's method: release, 50,000 `version` round-trips
-    over one connection, compositor jiffies plus us/round-trip, interleaved
-    reps so VM drift hits both sides). The first shape of the loop kept reading
-    until `Incomplete`, which on the common path meant a second `read`
-    returning `EAGAIN` per request: a consistent **+2 jiffies per 50,000
-    round-trips** over 10 reps. Stopping once nothing already-read is left
-    removes that syscall and is also the tighter fairness bound, so it
-    replaced the explicit per-wakeup request counter outright (that counter
-    could only act after a whole read buffer had been served anyway — the read
-    buffer was bounding a wakeup all along). Final figures over 24 interleaved
-    reps per side: median **124.47us/69 jiffies after** versus **125.15us/69
-    before**, means 120.53 vs 121.60us — no measurable difference, medians
-    rather than means because this VM occasionally drops into a much faster
-    state for a whole rep (it did so once on one side and twice on the other).
+    over one connection, compositor jiffies plus us/round-trip) **with the run
+    order balanced** -- 28 reps per side, 14 with the pre-change binary first
+    and 14 with it second, because position within a rep turned out to be worth
+    more than the change being measured. Pooled: **median 126.10us/70 jiffies
+    after versus 126.70us/69 before**, means 127.10 vs 126.61us and 69.54 vs
+    69.18 jiffies. No measurable difference on the uncontended round-trip path,
+    which is the path the fairness budget adds a comparison to.
+
     `scripts/smoke-test.sh` green under `--headless` and `--nested` (under
-    `cage`), 163/163 tests, clippy and fmt clean. Note that the whole
-    compositor is `#[cfg(target_os = "linux")]`, so none of this can be
-    verified from the Mac host — every figure here is from the dev VM guest.
+    `cage`), 174/174 tests, clippy and fmt clean. The whole compositor is
+    `#[cfg(target_os = "linux")]`, so none of this can be verified from the Mac
+    host -- every figure here is from the dev VM guest.
 
 ## Backlog (unordered — pick up whenever it fits)
 
