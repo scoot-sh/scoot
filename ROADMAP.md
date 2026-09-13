@@ -1434,9 +1434,11 @@ review, and why.
 
     **Hardware verification** (dev VM, real `--tty` on its `virtio-gpu` KMS
     device at 1600x1000, debug build — i.e. with integer overflow checks on —
-    all against `34514a9`, which is the whole of this item's production code:
-    the only later commit on the branch adds this write-up and nothing else,
-    so the evidence key still matches). Six scenarios, each a fresh compositor with its
+    all against `34514a9`, which is the whole of this item's executable code:
+    every later commit on the branch changes only prose and doc comments, which
+    `git diff 34514a9..HEAD -- '*.rs' | grep -vE '^[-+]\s*(///|//!|//)'`
+    returning nothing confirms mechanically — so the evidence key still
+    matches). Six scenarios, each a fresh compositor with its
     own config, the pointer parked over the background by IPC and the frame
     captured by IPC; exact commands and every raw sampled pixel are in PR
     #19's description. Summary: `cursor_size = 48` + `cursor_color =

@@ -165,6 +165,13 @@ impl From<Color> for Color32F {
 /// same relationship [`flexwm_core::Config`] has to that module's
 /// `LayoutConfig`. Colors are already parsed and clamps already applied by
 /// the time one of these exists; nothing downstream needs to re-check either.
+///
+/// It mirrors the `[appearance]` *table*, not this module's own scope, so two
+/// of its fields (`cursor_size`/`cursor_color`) are consumed by `cursor.rs`
+/// rather than by anything here -- the alternative, a second config struct
+/// for one pair of fields, would split one TOML table across two types for no
+/// benefit. Everything this module's [`Color`] knows about pixel formats is
+/// shared by both consumers anyway (see [`Color::to_argb8888`]).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Appearance {
     pub focus_ring_width: i32,
