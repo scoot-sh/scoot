@@ -69,9 +69,16 @@ pub struct State {
     /// `None` under `--headless`/`--nested`.
     pub tty: Option<Tty>,
 
-    /// The ring/background palette and `prefer_no_csd` policy, resolved
-    /// from `[appearance]` (or its defaults) once at startup -- see
-    /// `config.rs` and `decorations.rs`'s module docs.
+    /// The ring/background palette, the fallback cursor's size/color and the
+    /// `prefer_no_csd` policy, resolved from `[appearance]` (or its defaults)
+    /// once at startup -- see `config.rs` and `decorations.rs`'s module docs.
+    ///
+    /// Read live wherever it is used -- the render path for the ring and
+    /// background, `handlers.rs`'s `XdgDecorationHandler` for
+    /// `prefer_no_csd` -- with one exception: the two cursor fields, which
+    /// `Cursor::new` consumes once below to build a bitmap, so a later write
+    /// to those two here would change nothing. Nothing writes to this field
+    /// at all today.
     pub appearance: Appearance,
     /// Per-window persistent ring buffers -- see `decorations.rs`'s module
     /// doc for why these live here rather than being rebuilt every frame.
@@ -155,6 +162,12 @@ impl State {
 
         let socket_name = Self::listen(display, event_loop)?;
 
+        // Built here rather than in the struct literal below, which moves
+        // `appearance` before `cursor`'s own field initializer could read it.
+        // The fallback bitmap is built exactly once, from the config this
+        // process started with -- see `Cursor::new`.
+        let cursor = Cursor::new(appearance.cursor_size, appearance.cursor_color);
+
         Ok(Self {
             start_time: Instant::now(),
             display_handle: dh,
@@ -175,7 +188,7 @@ impl State {
             tty: None,
             appearance,
             decorations: Decorations::default(),
-            cursor: Cursor::default(),
+            cursor,
             compositor_state,
             xdg_shell_state,
             xdg_decoration_state,

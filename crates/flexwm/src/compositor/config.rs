@@ -77,6 +77,8 @@ struct AppearanceConfig {
     focus_ring_active_color: Option<String>,
     focus_ring_inactive_color: Option<String>,
     background_color: Option<String>,
+    cursor_size: Option<i32>,
+    cursor_color: Option<String>,
     prefer_no_csd: Option<bool>,
 }
 
@@ -89,7 +91,9 @@ impl AppearanceConfig {
     /// with, so measuring the ring against a larger raw number would let a
     /// ring through that is wider than half the gap the layout really uses.
     /// `Appearance::clamped` treats a negative gap as zero anyway, so the
-    /// lower half of that clamp changes nothing here.
+    /// lower half of that clamp changes nothing here. That same call also
+    /// bounds `cursor_size`, which has nothing to do with `gap` -- see
+    /// [`Appearance::clamped`].
     fn into_appearance(self, gap: i32) -> Appearance {
         let defaults = Appearance::default();
         let color = |field: Option<String>, name: &'static str, default: Color| match field {
@@ -120,6 +124,8 @@ impl AppearanceConfig {
                 "background_color",
                 defaults.background_color,
             ),
+            cursor_size: self.cursor_size.unwrap_or(defaults.cursor_size),
+            cursor_color: color(self.cursor_color, "cursor_color", defaults.cursor_color),
             prefer_no_csd: self.prefer_no_csd.unwrap_or(defaults.prefer_no_csd),
         }
         .clamped(gap)
@@ -681,11 +687,18 @@ mod tests {
             focus_ring_active_color = "#ff0000"
             focus_ring_inactive_color = "#00ff0080"
             background_color = "#101010"
+            cursor_size = 32
+            cursor_color = "#ff8000"
             prefer_no_csd = false
         "##;
         let file: FileConfig = toml::from_str(toml).expect("valid toml");
         let loaded = LoadedConfig::from_file(file);
         assert_eq!(loaded.appearance.focus_ring_width, 5);
+        assert_eq!(loaded.appearance.cursor_size, 32);
+        assert_eq!(
+            loaded.appearance.cursor_color,
+            Color::new(1.0, 128.0 / 255.0, 0.0, 1.0)
+        );
         assert_eq!(
             loaded.appearance.focus_ring_active_color,
             Color::new(1.0, 0.0, 0.0, 1.0)
@@ -770,6 +783,118 @@ mod tests {
             Config::MAX_GAP / 2,
             "clamped to half of the capped gap"
         );
+    }
+
+    // -- [appearance] cursor fields ---------------------------------------
+
+    /// A config file sets just the cursor fields: they apply, and nothing
+    /// else in `[appearance]` moves off its default.
+    #[test]
+    fn a_partial_appearance_table_can_set_only_the_cursor_fields() {
+        let (_dir, path) = write_temp(
+            r##"
+            [appearance]
+            cursor_size = 48
+            cursor_color = "#0080ff"
+        "##,
+        );
+        let loaded = load_from(&path, true).expect("valid config");
+        assert_eq!(loaded.appearance.cursor_size, 48);
+        assert_eq!(
+            loaded.appearance.cursor_color,
+            Color::new(0.0, 128.0 / 255.0, 1.0, 1.0)
+        );
+        assert_eq!(
+            loaded.appearance.focus_ring_active_color,
+            Appearance::default().focus_ring_active_color
+        );
+        assert_eq!(
+            loaded.appearance.background_color,
+            Appearance::default().background_color
+        );
+    }
+
+    /// The same graceful-degradation rule every other `[appearance]` color
+    /// follows: one unparseable string costs that field its value, not the
+    /// file.
+    #[test]
+    fn a_malformed_cursor_color_falls_back_to_just_that_field() {
+        let (_dir, path) = write_temp(
+            r##"
+            [appearance]
+            cursor_size = 24
+            cursor_color = "ff8000"
+        "##,
+        );
+        let loaded = load_from(&path, true).expect("a bad color must not fail startup");
+        assert_eq!(
+            loaded.appearance.cursor_color,
+            Appearance::default().cursor_color,
+            "the bad color falls back to its own default"
+        );
+        assert_eq!(
+            loaded.appearance.cursor_size, 24,
+            "a bad color must not cost a valid neighboring field"
+        );
+    }
+
+    /// Both ends of the clamp, from a real file: a size a config file can
+    /// spell but the bitmap path must never see (see
+    /// `Appearance::MAX_CURSOR_SIZE` for why the upper bound is about an
+    /// allocation, not taste).
+    #[test]
+    fn an_out_of_range_cursor_size_is_clamped_at_load_time() {
+        for (configured, expected) in [
+            (i32::MAX, Appearance::MAX_CURSOR_SIZE),
+            (Appearance::MAX_CURSOR_SIZE + 1, Appearance::MAX_CURSOR_SIZE),
+            (0, Appearance::MIN_CURSOR_SIZE),
+            (-16, Appearance::MIN_CURSOR_SIZE),
+            (i32::MIN, Appearance::MIN_CURSOR_SIZE),
+        ] {
+            let (_dir, path) = write_temp(&format!("[appearance]\ncursor_size = {configured}\n"));
+            let loaded = load_from(&path, true).expect("a bad size must not fail startup");
+            assert_eq!(
+                loaded.appearance.cursor_size, expected,
+                "cursor_size {configured} was not clamped"
+            );
+        }
+    }
+
+    /// A size outside `i32` entirely is a *parse* failure, not a clamp -- the
+    /// field's type decides that, and the whole file falls back to defaults
+    /// (same rule as any other type mismatch; see the module doc). 3e9 is a
+    /// legal TOML integer (they are 64-bit) but not a legal `i32`, so this is
+    /// serde's range check, not the TOML parser's.
+    #[test]
+    fn a_cursor_size_too_large_for_i32_is_a_whole_file_fallback() {
+        let (_dir, path) =
+            write_temp("[layout]\ngap = 20\n\n[appearance]\ncursor_size = 3000000000\n");
+        let loaded = load_from(&path, true).expect("a parse failure must never fail startup");
+        assert_eq!(loaded.appearance, Appearance::default());
+        assert_eq!(
+            loaded.config.gap,
+            Config::default().gap,
+            "the whole file is discarded, including a valid [layout]"
+        );
+    }
+
+    /// The cursor clamp and the ring clamp are independent: `cursor_size` has
+    /// nothing to do with the gap, and must survive a gap small enough to
+    /// clamp the ring to nothing.
+    #[test]
+    fn a_tiny_gap_clamps_the_ring_but_not_the_cursor() {
+        let toml = r#"
+            [layout]
+            gap = 0
+
+            [appearance]
+            focus_ring_width = 9
+            cursor_size = 64
+        "#;
+        let file: FileConfig = toml::from_str(toml).expect("valid toml");
+        let loaded = LoadedConfig::from_file(file);
+        assert_eq!(loaded.appearance.focus_ring_width, 0);
+        assert_eq!(loaded.appearance.cursor_size, 64);
     }
 
     /// The actual overflow-risking input, not just the visual-consistency

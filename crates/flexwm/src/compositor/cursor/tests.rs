@@ -30,6 +30,7 @@ use std::time::{Duration, Instant};
 use flexwm_core::Config;
 use smithay::backend::input::InputTime;
 use smithay::backend::renderer::damage::OutputDamageTracker;
+use smithay::backend::renderer::element::Element;
 use smithay::backend::renderer::pixman::PixmanRenderer;
 use smithay::backend::renderer::{Bind, ExportMem, Offscreen};
 use smithay::input::pointer::MotionEvent;
@@ -53,26 +54,148 @@ use crate::compositor::state::ClientState;
 // Pure arithmetic
 // -------------------------------------------------------------------------
 
+/// The default size and colors `Appearance::default()` resolves to, spelled
+/// out as `generate_bitmap`'s own parameters -- they are config values now,
+/// not compile-time constants, so the pure tests pass them explicitly and
+/// `the_default_appearance_still_describes_the_original_shape` below is what
+/// ties these literals back to the real defaults.
+const DEFAULT_SIZE: i32 = 16;
+const WHITE: [u8; 4] = [255, 255, 255, 255];
+const BLACK: [u8; 4] = [0, 0, 0, 255];
+const TRANSPARENT: [u8; 4] = [0, 0, 0, 0];
+
+/// Reads pixel `(x, y)` out of a `size`-square bitmap.
+fn pixel(pixels: &[u8], size: i32, x: i32, y: i32) -> [u8; 4] {
+    let idx = ((y * size + x) * 4) as usize;
+    pixels[idx..idx + 4].try_into().expect("four bytes")
+}
+
 #[test]
-fn bitmap_hotspot_pixel_is_opaque_black() {
-    let pixels = generate_bitmap();
-    assert_eq!(&pixels[0..4], &[0, 0, 0, 255]);
+fn bitmap_hotspot_pixel_is_the_outline_color() {
+    let pixels = generate_bitmap(DEFAULT_SIZE, WHITE, BLACK);
+    assert_eq!(pixel(&pixels, DEFAULT_SIZE, 0, 0), BLACK);
 }
 
 #[test]
 fn bitmap_is_fully_transparent_above_the_diagonal() {
-    let pixels = generate_bitmap();
-    // (SIZE - 1, 0): far right of the top row, well outside the triangle.
-    let idx = ((SIZE - 1) * 4) as usize;
-    assert_eq!(&pixels[idx..idx + 4], &[0, 0, 0, 0]);
+    let pixels = generate_bitmap(DEFAULT_SIZE, WHITE, BLACK);
+    // (size - 1, 0): far right of the top row, well outside the triangle.
+    assert_eq!(
+        pixel(&pixels, DEFAULT_SIZE, DEFAULT_SIZE - 1, 0),
+        TRANSPARENT
+    );
 }
 
 #[test]
-fn bitmap_interior_is_opaque_white() {
-    let pixels = generate_bitmap();
+fn bitmap_interior_is_the_fill_color() {
+    let pixels = generate_bitmap(DEFAULT_SIZE, WHITE, BLACK);
     // (1, 3): strictly inside the triangle (0 < x < y).
-    let idx = ((3 * SIZE + 1) * 4) as usize;
-    assert_eq!(&pixels[idx..idx + 4], &[255, 255, 255, 255]);
+    assert_eq!(pixel(&pixels, DEFAULT_SIZE, 1, 3), WHITE);
+}
+
+/// The built-in defaults are what an unconfigured flexwm draws, and they must
+/// stay the 16x16 white-on-black triangle this module shipped with -- the
+/// literals the three tests above use.
+#[test]
+fn the_default_appearance_still_describes_the_original_shape() {
+    let defaults = Appearance::default();
+    assert_eq!(defaults.cursor_size, DEFAULT_SIZE);
+    assert_eq!(defaults.cursor_color.to_argb8888(), WHITE);
+    // The outline `Cursor::new` derives from that fill color.
+    assert_eq!(
+        Color::new(0.0, 0.0, 0.0, defaults.cursor_color.a).to_argb8888(),
+        BLACK
+    );
+}
+
+/// A non-default size produces exactly that many pixels, and the shape scales
+/// with it rather than staying 16x16 inside a bigger buffer. Runs the whole
+/// configurable range, including both clamp bounds.
+#[test]
+fn bitmap_honors_the_requested_size() {
+    for size in [
+        Appearance::MIN_CURSOR_SIZE,
+        DEFAULT_SIZE,
+        48,
+        Appearance::MAX_CURSOR_SIZE,
+    ] {
+        let pixels = generate_bitmap(size, WHITE, BLACK);
+        assert_eq!(
+            pixels.len(),
+            (size * size * 4) as usize,
+            "wrong buffer length for size {size}"
+        );
+        // The bottom-left corner is inside the triangle at every size >= 3,
+        // which is what proves the shape grew with the buffer.
+        assert_eq!(
+            pixel(&pixels, size, 1, size - 1),
+            WHITE,
+            "size {size}'s bottom row should be filled"
+        );
+        // ...and the bottom-right corner is on the diagonal, i.e. outline.
+        assert_eq!(
+            pixel(&pixels, size, size - 1, size - 1),
+            BLACK,
+            "size {size}'s diagonal should reach the far corner"
+        );
+    }
+}
+
+/// Both colors are written through verbatim, with no channel reordering and
+/// no fallback to the old hardcoded white/black. Uses colors whose four bytes
+/// are all distinct, so a swap anywhere would change the assertion.
+#[test]
+fn bitmap_honors_the_requested_colors() {
+    let fill = [0x11, 0x22, 0x33, 0xff];
+    let outline = [0x44, 0x55, 0x66, 0x80];
+    let pixels = generate_bitmap(8, fill, outline);
+    assert_eq!(pixel(&pixels, 8, 1, 3), fill, "the interior");
+    assert_eq!(pixel(&pixels, 8, 0, 0), outline, "the hotspot corner");
+    assert_eq!(pixel(&pixels, 8, 0, 5), outline, "the left edge");
+    assert_eq!(pixel(&pixels, 8, 5, 5), outline, "the diagonal");
+    assert_eq!(
+        pixel(&pixels, 8, 7, 0),
+        TRANSPARENT,
+        "outside the triangle stays transparent whatever the colors are"
+    );
+}
+
+/// `Cursor::new` re-applies the size clamp at the allocation itself, so a
+/// degenerate or absurd value that somehow reached it (neither is reachable
+/// through a config file -- `Appearance::clamped` has already clamped and
+/// warned -- but `Appearance`'s fields are public) can neither build a
+/// zero-sized buffer nor an allocation whose own length overflows `i32`
+/// (which `size * size * 4` does from `size = 23171` up). Needs only a
+/// renderer, not a
+/// whole compositor: the element's geometry is the built buffer's real size.
+#[test]
+fn cursor_new_clamps_a_degenerate_or_absurd_size() {
+    let mut renderer = PixmanRenderer::new().expect("a pixman renderer");
+    for size in [
+        i32::MIN,
+        -1,
+        0,
+        1,
+        Appearance::MIN_CURSOR_SIZE,
+        48,
+        Appearance::MAX_CURSOR_SIZE,
+        i32::MAX,
+    ] {
+        let cursor = Cursor::new(size, Color::new(1.0, 1.0, 1.0, 1.0));
+        let elements = cursor.element(&mut renderer, (0.0, 0.0).into());
+        assert_eq!(
+            elements.len(),
+            1,
+            "size {size} produced no fallback element"
+        );
+        let geometry = elements[0].geometry(1.0.into());
+        let expected = Appearance::clamp_cursor_size(size);
+        assert_eq!(
+            (geometry.size.w, geometry.size.h),
+            (expected, expected),
+            "size {size} should have been clamped"
+        );
+    }
 }
 
 #[test]
@@ -321,6 +444,13 @@ struct Fixture {
 
 impl Fixture {
     fn new() -> Self {
+        Self::with_appearance(Appearance::default())
+    }
+
+    /// Like [`Fixture::new`], but with the `[appearance]` values a config file
+    /// would have resolved to -- which is all `Cursor::new` ever sees, since
+    /// the fallback bitmap is built once in `State::new` and never rebuilt.
+    fn with_appearance(appearance: Appearance) -> Self {
         let mut event_loop: EventLoop<'static, State> =
             EventLoop::try_new().expect("an event loop");
         let display: Display<State> = Display::new().expect("a wayland display");
@@ -329,7 +459,7 @@ impl Fixture {
             display,
             Config::default(),
             Keybindings::default(),
-            Appearance::default(),
+            appearance,
         )
         .expect("a compositor state with a wayland socket");
 
@@ -581,10 +711,99 @@ fn destroying_the_cursor_surface_falls_back_to_the_builtin_shape() {
         "its white interior"
     );
     assert_eq!(
-        canvas.at(50 + SIZE, 50),
+        canvas.at(50 + DEFAULT_SIZE, 50),
         CLEAR_BGRA,
         "just past the 16x16 fallback"
     );
+}
+
+/// The whole point of the `[appearance]` override, end to end: a configured
+/// size and fill color reach the pixels that actually get drawn.
+///
+/// This is the test that can catch a byte-order mistake in
+/// `Color::to_argb8888`, which no pure test of the bitmap can: white and
+/// black are symmetric under a B<->R swap, so the colors here deliberately
+/// are not. It also proves premultiplication survives a real pixman import
+/// rather than only the unit conversion.
+#[test]
+fn a_configured_cursor_size_and_color_reach_the_rendered_pixels() {
+    const SIZE: i32 = 48;
+    // #ff8040: R=255, G=128, B=64 -- distinct in all three channels, so the
+    // BGRA bytes below could not come out right under any reordering. Also
+    // deliberately *not* `#ff8000`, whose BGRA bytes reversed would be
+    // `CLEAR_BGRA` exactly: a swap would then draw the cursor in the
+    // background's own color, and the failure could not tell "wrong color"
+    // from "nothing drawn".
+    let fill = Color::parse("#ff8040").expect("a valid color");
+    let fill_bgra = [0x40, 0x80, 0xff, 0xff];
+
+    let fixture = Fixture::with_appearance(Appearance {
+        cursor_size: SIZE,
+        cursor_color: fill,
+        ..Appearance::default()
+    });
+    // No client cursor is ever set, so this is the fallback shape: the status
+    // `State::new` starts with is `default_named()`.
+    let canvas = fixture.render();
+    assert_eq!(canvas.count, 1, "the fallback element");
+
+    let (px, py) = (POINTER.0 as i32, POINTER.1 as i32);
+    assert_eq!(canvas.at(px, py), BLACK, "the hotspot is still the outline");
+    assert_eq!(canvas.at(px, py + 10), BLACK, "the left edge");
+    assert_eq!(canvas.at(px + 10, py + 10), BLACK, "the diagonal");
+    assert_eq!(canvas.at(px + 2, py + 20), fill_bgra, "the configured fill");
+    assert_eq!(
+        canvas.at(px + 40, py + 2),
+        CLEAR_BGRA,
+        "outside the triangle, still the clear color"
+    );
+    // The size took: the last row of a 48px shape is filled, the row after it
+    // is off the bitmap entirely. This is what a still-16x16 buffer (or a
+    // 48px buffer with a 16px shape in it) would fail.
+    assert_eq!(
+        canvas.at(px + 1, py + SIZE - 1),
+        fill_bgra,
+        "the bottom row of the configured size"
+    );
+    assert_eq!(
+        canvas.at(px + 1, py + SIZE),
+        CLEAR_BGRA,
+        "one row past the configured size"
+    );
+}
+
+/// A translucent `cursor_color` composites over what is behind it instead of
+/// replacing it -- the case premultiplied alpha exists for, and the reason
+/// `Cursor::new` gives the outline the fill's alpha rather than full opacity.
+#[test]
+fn a_translucent_cursor_color_blends_with_the_background() {
+    // 50% white over the clear color: pixman's OVER on premultiplied
+    // components gives dst * (1 - a) + src, i.e. (255 + 128) / 2 rounded for
+    // each channel of CLEAR_BGRA = [255, 128, 0, 255].
+    let fixture = Fixture::with_appearance(Appearance {
+        cursor_size: 16,
+        cursor_color: Color::parse("#ffffff80").expect("a valid color"),
+        ..Appearance::default()
+    });
+    let canvas = fixture.render();
+    let (px, py) = (POINTER.0 as i32, POINTER.1 as i32);
+
+    let blended = canvas.at(px + 1, py + 3);
+    assert_ne!(blended, WHITE, "a translucent fill must not draw as opaque");
+    assert_ne!(blended, CLEAR_BGRA, "...but must still draw something");
+    // Half of the fill plus half of the background, within one unit of
+    // rounding on each channel.
+    for (channel, (got, (src, dst))) in blended
+        .iter()
+        .zip([255u8, 255, 255, 255].iter().zip(CLEAR_BGRA.iter()))
+        .enumerate()
+    {
+        let expected = (i32::from(*src) + i32::from(*dst)) / 2;
+        assert!(
+            (i32::from(*got) - expected).abs() <= 1,
+            "channel {channel}: {got} is not about halfway between {src} and {dst}"
+        );
+    }
 }
 
 #[test]
