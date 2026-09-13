@@ -110,6 +110,40 @@ impl Color {
             _ => None,
         }
     }
+
+    /// This color as one `Fourcc::Argb8888` pixel, in the byte order that
+    /// format has in memory on a little-endian machine: `[B, G, R, A]`, with
+    /// R/G/B premultiplied by A.
+    ///
+    /// Both halves of that matter and neither is guesswork:
+    ///
+    /// - **Byte order.** `Argb8888` names the channels from the *most*
+    ///   significant bit of a 32-bit little-endian word down, so the lowest
+    ///   address holds B -- the same layout `cursor.rs::generate_bitmap`
+    ///   writes, `headless.rs` renders into and `tty/buffers.rs` scans out
+    ///   (see their module docs on the same fact), which is why nothing
+    ///   downstream converts.
+    /// - **Premultiplied.** The pinned Smithay rev hands an `Argb8888` memory
+    ///   buffer to pixman as `a8r8g8b8` and composites it with
+    ///   `Operation::Over` (`backend/renderer/pixman/mod.rs`, lines 389 and
+    ///   605) -- Porter-Duff source-over, which is defined over premultiplied
+    ///   components. That is the same assumption Smithay states for the
+    ///   solid-color path in `backend::renderer::color`, and the reason
+    ///   [`From<Color> for Color32F`] exists right below; this is the
+    ///   byte-per-channel equivalent of it for an image buffer.
+    ///
+    /// For `a == 1.0` -- every color default this project ships, including
+    /// the cursor's -- premultiplying changes nothing; it only matters once a
+    /// translucent color is configured. See the unit tests below for both.
+    pub fn to_argb8888(self) -> [u8; 4] {
+        let channel = |v: f32| (v * self.a * 255.0).round().clamp(0.0, 255.0) as u8;
+        [
+            channel(self.b),
+            channel(self.g),
+            channel(self.r),
+            (self.a * 255.0).round().clamp(0.0, 255.0) as u8,
+        ]
+    }
 }
 
 impl From<Color> for Color32F {
@@ -137,6 +171,15 @@ pub struct Appearance {
     pub focus_ring_active_color: Color,
     pub focus_ring_inactive_color: Color,
     pub background_color: Color,
+    /// Both dimensions of the square fallback cursor bitmap, in pixels --
+    /// always within [`Appearance::MIN_CURSOR_SIZE`]`..=`[`Appearance::MAX_CURSOR_SIZE`]
+    /// once [`Appearance::clamped`] has run. Only the *fallback* shape
+    /// `cursor.rs` draws procedurally; a client that supplies its own cursor
+    /// surface sizes that itself.
+    pub cursor_size: i32,
+    /// The fallback cursor shape's fill color. Its 1px outline is always
+    /// black (at this color's own alpha) -- see `cursor::generate_bitmap`.
+    pub cursor_color: Color,
     /// Whether to answer a client's `zxdg_toplevel_decoration_v1` request
     /// with `ServerSide` -- see `handlers.rs`'s `XdgDecorationHandler` impl.
     /// niri's own default is `true`; this project uses the same default for
@@ -156,21 +199,76 @@ impl Default for Appearance {
             // values.
             focus_ring_inactive_color: Color::new(0.35, 0.35, 0.38, 1.0),
             background_color: Color::new(0.08, 0.08, 0.1, 1.0),
+            // The shape `cursor.rs` has drawn since it existed: a 16x16
+            // triangle with a white fill. Unchanged defaults, so an existing
+            // config file (or none) looks exactly as it did before this was
+            // configurable.
+            cursor_size: 16,
+            cursor_color: Color::new(1.0, 1.0, 1.0, 1.0),
             prefer_no_csd: true,
         }
     }
 }
 
 impl Appearance {
-    /// Clamps `focus_ring_width` to at most half the layout's gap, warning
-    /// if it had to. A ring wider than half the gap could reach past the
-    /// midpoint between two adjacent windows and visually collide with the
-    /// neighbor's own ring or window content -- a real visual bug, not a
-    /// preference, so this clamps rather than trusting a config value. Takes
-    /// `gap` rather than reading `flexwm_core::Config` directly to keep this
-    /// module independent of that crate's config type -- see the module
-    /// doc's broader point about this crate, not `flexwm_core`, owning
-    /// decorations.
+    /// The smallest [`cursor_size`](Self::cursor_size) a config may ask for.
+    ///
+    /// `cursor.rs`'s shape is a triangle whose 1px outline takes the left
+    /// column and the diagonal, so the fill only appears where `0 < x < y`:
+    /// at size 3 that is the single pixel `(1, 2)`, at size 2 and 1 there is
+    /// no fill pixel at all. 4 is therefore the smallest size that draws the
+    /// shape this module actually describes rather than a couple of stray
+    /// dark pixels -- and a pointer that small is indistinguishable from a
+    /// dead pixel on any real display, which on `--tty` (where flexwm *is*
+    /// the session) leaves a user with no visible pointer and no other window
+    /// manager to fix it from.
+    pub const MIN_CURSOR_SIZE: i32 = 4;
+
+    /// The largest [`cursor_size`](Self::cursor_size) a config may ask for.
+    ///
+    /// Two reasons for this exact number, both arithmetic rather than taste,
+    /// in the same spirit as [`flexwm_core::Config::MAX_GAP`]:
+    ///
+    /// - **Nothing real can use more.** 256px is a quarter of a 1080p
+    ///   display's height; a pointer that size covers 3.2% of such a screen
+    ///   and hides whatever it is pointing at. A config asking past it is a
+    ///   typo or a probe, not a preference.
+    /// - **It keeps the one allocation this value drives small and far from
+    ///   overflow.** The bitmap is `size * size * 4` bytes, built once at
+    ///   startup and copied once more by `MemoryRenderBuffer::from_slice`:
+    ///   256 KiB at this cap, against 17.2 GB at `i32::MAX` -- where the
+    ///   product does not merely allocate absurdly but overflows `i32`
+    ///   outright (a debug panic, a wrapped and therefore wrong length in
+    ///   release), both inside `generate_bitmap` and inside Smithay's own
+    ///   `stride * size.h` length assertion.
+    pub const MAX_CURSOR_SIZE: i32 = 256;
+
+    /// Brings a configured cursor size into the range the bitmap path is safe
+    /// for -- see the two constants above. Pure and separately tested, like
+    /// [`flexwm_core::Config::clamp_gap`]; [`Self::clamped`] is what applies
+    /// it (and warns) for a real config file, and `cursor::Cursor::new`
+    /// applies it again at the allocation itself.
+    pub fn clamp_cursor_size(size: i32) -> i32 {
+        size.clamp(Self::MIN_CURSOR_SIZE, Self::MAX_CURSOR_SIZE)
+    }
+
+    /// The load-time clamp every config-derived [`Appearance`] goes through:
+    ///
+    /// - `focus_ring_width` to at most half the layout's gap. A ring wider
+    ///   than half the gap could reach past the midpoint between two adjacent
+    ///   windows and visually collide with the neighbor's own ring or window
+    ///   content -- a real visual bug, not a preference, so this clamps
+    ///   rather than trusting a config value. Takes `gap` rather than reading
+    ///   `flexwm_core::Config` directly to keep this module independent of
+    ///   that crate's config type -- see the module doc's broader point about
+    ///   this crate, not `flexwm_core`, owning decorations.
+    /// - `cursor_size` into [`Self::MIN_CURSOR_SIZE`]`..=`[`Self::MAX_CURSOR_SIZE`],
+    ///   which is about the bitmap allocation it drives, not just how it
+    ///   looks -- see those constants.
+    ///
+    /// Each warns if it had to, naming the one field it changed: a clamped
+    /// value is a config the user wrote that is not the config they are
+    /// getting, and on `--tty` the log is the only place that can be said.
     pub fn clamped(mut self, gap: i32) -> Self {
         let max = (gap.max(0)) / 2;
         if self.focus_ring_width > max {
@@ -180,6 +278,16 @@ impl Appearance {
                 "focus_ring_width is wider than half the layout gap; clamping"
             );
             self.focus_ring_width = max;
+        }
+        let cursor_size = Self::clamp_cursor_size(self.cursor_size);
+        if cursor_size != self.cursor_size {
+            tracing::warn!(
+                configured = self.cursor_size,
+                min = Self::MIN_CURSOR_SIZE,
+                max = Self::MAX_CURSOR_SIZE,
+                "cursor_size is out of range; clamping"
+            );
+            self.cursor_size = cursor_size;
         }
         self
     }
@@ -412,7 +520,116 @@ mod tests {
         assert_eq!(premultiplied.components(), [0.0, 0.0, 0.0, 0.0]);
     }
 
+    // -- Color::to_argb8888 --------------------------------------------------
+
+    /// The byte order, with a color whose channels are all different -- the
+    /// only kind that can tell `[B, G, R, A]` from `[R, G, B, A]`. (White,
+    /// black and any other gray are symmetric under that swap, which is why
+    /// no existing test of the cursor bitmap could have caught a swap.)
+    #[test]
+    fn an_opaque_color_becomes_bgra_bytes_unscaled() {
+        let orange = Color::parse("#ff8000").expect("a valid color");
+        assert_eq!(orange.to_argb8888(), [0x00, 0x80, 0xff, 0xff]);
+    }
+
+    /// Premultiplication, and the round trip through the same `/255` scaling
+    /// `Color::parse` applies: `#ff800080` is R=255, G=128, B=0 at A=128, so
+    /// R premultiplies to 255 * (128/255) = 128 and G to 128 * (128/255) =
+    /// 64.25, which rounds to 64.
+    #[test]
+    fn a_translucent_color_has_its_channels_premultiplied() {
+        let orange = Color::parse("#ff800080").expect("a valid color");
+        assert_eq!(orange.to_argb8888(), [0x00, 64, 0x80, 0x80]);
+    }
+
+    #[test]
+    fn a_fully_transparent_color_becomes_four_zero_bytes() {
+        assert_eq!(Color::new(1.0, 1.0, 1.0, 0.0).to_argb8888(), [0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn white_and_black_are_exactly_the_bytes_the_cursor_has_always_used() {
+        assert_eq!(
+            Color::new(1.0, 1.0, 1.0, 1.0).to_argb8888(),
+            [255, 255, 255, 255]
+        );
+        assert_eq!(Color::new(0.0, 0.0, 0.0, 1.0).to_argb8888(), [0, 0, 0, 255]);
+    }
+
+    /// `Color`'s fields are plain public floats, so a value outside `0.0..=1.0`
+    /// is constructible even though `Color::parse` cannot produce one. The
+    /// cast must saturate rather than wrap or panic.
+    #[test]
+    fn out_of_range_components_saturate_instead_of_wrapping() {
+        assert_eq!(
+            Color::new(2.0, -1.0, f32::NAN, 1.0).to_argb8888(),
+            [0, 0, 255, 255]
+        );
+    }
+
+    // -- Appearance::clamp_cursor_size ---------------------------------------
+
+    #[test]
+    fn cursor_size_clamps_at_both_bounds() {
+        // One under the minimum, exactly at it, the default, exactly at the
+        // maximum, one over it, and the two extremes a config can spell.
+        for (configured, expected) in [
+            (Appearance::MIN_CURSOR_SIZE - 1, Appearance::MIN_CURSOR_SIZE),
+            (Appearance::MIN_CURSOR_SIZE, Appearance::MIN_CURSOR_SIZE),
+            (16, 16),
+            (Appearance::MAX_CURSOR_SIZE, Appearance::MAX_CURSOR_SIZE),
+            (Appearance::MAX_CURSOR_SIZE + 1, Appearance::MAX_CURSOR_SIZE),
+            (i32::MAX, Appearance::MAX_CURSOR_SIZE),
+            (i32::MIN, Appearance::MIN_CURSOR_SIZE),
+            (0, Appearance::MIN_CURSOR_SIZE),
+            (-1, Appearance::MIN_CURSOR_SIZE),
+        ] {
+            assert_eq!(
+                Appearance::clamp_cursor_size(configured),
+                expected,
+                "cursor_size {configured} clamped wrongly"
+            );
+        }
+    }
+
+    /// The reason the bound exists at all: `size * size * 4` is the bitmap's
+    /// length in bytes, and at `i32::MAX` that product overflows `i32` (a
+    /// debug panic inside `cursor::generate_bitmap`, a wrapped length in
+    /// release). Clamping first keeps it at 256 KiB.
+    #[test]
+    fn the_clamped_cursor_size_cannot_overflow_the_bitmap_length() {
+        let size = Appearance::clamp_cursor_size(i32::MAX);
+        assert_eq!(size * size * 4, 262_144);
+    }
+
     // -- Appearance::clamped -------------------------------------------------
+
+    #[test]
+    fn an_out_of_range_cursor_size_is_clamped_by_clamped() {
+        let appearance = Appearance {
+            cursor_size: i32::MAX,
+            ..Appearance::default()
+        }
+        .clamped(10);
+        assert_eq!(appearance.cursor_size, Appearance::MAX_CURSOR_SIZE);
+
+        let appearance = Appearance {
+            cursor_size: 0,
+            ..Appearance::default()
+        }
+        .clamped(10);
+        assert_eq!(appearance.cursor_size, Appearance::MIN_CURSOR_SIZE);
+    }
+
+    #[test]
+    fn an_in_range_cursor_size_survives_clamped_untouched() {
+        let appearance = Appearance {
+            cursor_size: 48,
+            ..Appearance::default()
+        }
+        .clamped(10);
+        assert_eq!(appearance.cursor_size, 48);
+    }
 
     #[test]
     fn a_ring_width_within_half_the_gap_is_left_alone() {

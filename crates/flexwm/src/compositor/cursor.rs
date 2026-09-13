@@ -18,16 +18,21 @@
 //! - [`CursorImageStatus::Named`] -- the client named an xcursor theme shape
 //!   but supplied no pixels, so there is nothing of the client's to draw.
 //!   This module's own procedurally-generated fallback bitmap is used
-//!   instead; picking a real themed shape per name is backlog item (b), not
-//!   this one.
+//!   instead. Drawing a *different* shape per requested name is still out of
+//!   reach for the license reason below; its size and fill color are
+//!   configurable (`[appearance]`'s `cursor_size`/`cursor_color`, resolved
+//!   once at startup -- see [`Cursor::new`]).
 //! - [`CursorImageStatus::Hidden`] -- nothing is drawn.
 //!
 //! The fallback bitmap is procedurally generated, not an embedded image file
 //! or a copy of any cursor theme's actual pixel data -- niri's own cursor
 //! assets are GPL, Adwaita's aren't MIT-clean, and `CLAUDE.md`'s license note
 //! says not to borrow either. It's a plain filled triangle, not a
-//! pixel-accurate arrow. Nothing here loads or ships a theme asset; a client
-//! surface's pixels come from the client, over the wire.
+//! pixel-accurate arrow, and no config option can make it one: there is no
+//! `cursor_theme` field here, because honoring a theme name means loading a
+//! real xcursor asset, and this project has no MIT-clean one to load. Nothing
+//! here loads or ships a theme asset; a client surface's pixels come from the
+//! client, over the wire.
 //!
 //! # Renderer-generic, like `decorations.rs`
 //!
@@ -51,11 +56,10 @@ use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{IsAlive, Logical, Physical, Point, Transform};
 use smithay::wayland::compositor::with_states;
 
+use super::decorations::{Appearance, Color};
+
 #[cfg(test)]
 mod tests;
-
-/// Both dimensions of the square bitmap [`generate_bitmap`] draws.
-const SIZE: i32 = 16;
 
 // Either source of cursor pixels, in one type. `Surface` is one node of a
 // client cursor surface's subsurface tree -- a tree is spec-legal and rare,
@@ -66,23 +70,36 @@ render_elements! {
     Surface = WaylandSurfaceRenderElement<R>,
 }
 
-/// A filled right triangle, point at the top-left corner (which is also the
-/// hotspot -- see [`Cursor::default`]): a 1px black outline on the left edge
-/// and the diagonal, white fill between them, transparent everywhere else.
-/// Argb8888, little-endian BGRA byte order -- the same layout `headless.rs`
-/// renders into and `tty/buffers.rs` scans out (see their module docs on the
-/// same fact), so this needs no conversion anywhere downstream.
-fn generate_bitmap() -> Vec<u8> {
-    let mut pixels = vec![0u8; (SIZE * SIZE * 4) as usize];
-    for y in 0..SIZE {
-        for x in 0..SIZE {
-            let idx = ((y * SIZE + x) * 4) as usize;
+/// A filled right triangle `size` x `size`, point at the top-left corner
+/// (which is also the hotspot -- see [`Cursor::new`]): a 1px `outline` on the
+/// left edge and the diagonal, `fill` between them, transparent everywhere
+/// else.
+///
+/// Both colors are single `Argb8888` pixels in little-endian memory order
+/// (`[B, G, R, A]`, premultiplied) -- the same layout `headless.rs` renders
+/// into and `tty/buffers.rs` scans out (see their module docs on the same
+/// fact), so this needs no conversion anywhere downstream.
+/// [`Color::to_argb8888`] is what produces one from a config color; this
+/// function stays pure and takes whatever it is given, so it is testable
+/// without a renderer and its tests can assert exact bytes.
+///
+/// `size` is expected in
+/// [`Appearance::MIN_CURSOR_SIZE`]`..=`[`Appearance::MAX_CURSOR_SIZE`] --
+/// [`Cursor::new`], the only non-test caller, clamps it there, which is what
+/// keeps `size * size * 4` both a small allocation and nowhere near
+/// overflowing `i32` (see [`Appearance::MAX_CURSOR_SIZE`]).
+fn generate_bitmap(size: i32, fill: [u8; 4], outline: [u8; 4]) -> Vec<u8> {
+    let transparent = [0u8; 4];
+    let mut pixels = vec![0u8; (size * size * 4) as usize];
+    for y in 0..size {
+        for x in 0..size {
+            let idx = ((y * size + x) * 4) as usize;
             let pixel: [u8; 4] = if x == 0 || x == y {
-                [0, 0, 0, 255]
+                outline
             } else if x < y {
-                [255, 255, 255, 255]
+                fill
             } else {
-                [0, 0, 0, 0]
+                transparent
             };
             pixels[idx..idx + 4].copy_from_slice(&pixel);
         }
@@ -91,8 +108,8 @@ fn generate_bitmap() -> Vec<u8> {
 }
 
 /// The cursor's current image request and the one persistent render buffer
-/// behind its fallback shape. That buffer is built once (see `Default`) and
-/// never rebuilt -- same stable-`Id` reasoning as `decorations.rs`'s
+/// behind its fallback shape. That buffer is built once (see [`Cursor::new`])
+/// and never rebuilt -- same stable-`Id` reasoning as `decorations.rs`'s
 /// persistent per-window buffers, so a static cursor doesn't read as "new
 /// content" to the damage tracker on every frame it happens to still be
 /// visible. A client-supplied cursor surface needs no equivalent here: its
@@ -110,13 +127,40 @@ pub struct Cursor {
     status: CursorImageStatus,
 }
 
-impl Default for Cursor {
-    fn default() -> Self {
+impl Cursor {
+    /// Builds the fallback bitmap from the resolved `[appearance]` values and
+    /// keeps it for the process's lifetime.
+    ///
+    /// Called once, from `State::new`, with `appearance.cursor_size` and
+    /// `appearance.cursor_color`. There is deliberately no way to rebuild it
+    /// afterwards: nothing in this project reloads config after startup, and
+    /// inventing a path for it here would be an abstraction with no caller.
+    ///
+    /// `size` is put through [`Appearance::clamp_cursor_size`] again rather
+    /// than trusted. `Appearance::clamped` is the load-time gate (and the
+    /// place a config value out of range gets its warning), but
+    /// [`Appearance`]'s fields are public and *this* is where `size * size *
+    /// 4` bytes are actually allocated and where Smithay asserts the slice is
+    /// long enough for the size it was told -- so the bound is re-applied at
+    /// the allocation, the same way `decorations::ring_rects` re-checks
+    /// `width <= 0` at its own arithmetic rather than trusting its caller.
+    ///
+    /// The outline is always black, at the fill's own alpha, rather than a
+    /// second config field: its whole job is to keep the shape's edges legible
+    /// against content of a similar color, which a configurable outline could
+    /// only undo, and at the default opaque fill this is byte-identical to the
+    /// fixed black outline this shape has always had. Matching the fill's
+    /// alpha is what makes a translucent `cursor_color` actually look
+    /// translucent instead of an opaque black triangle outline around a
+    /// see-through middle.
+    pub fn new(size: i32, color: Color) -> Self {
+        let size = Appearance::clamp_cursor_size(size);
+        let outline = Color::new(0.0, 0.0, 0.0, color.a);
         Self {
             fallback: MemoryRenderBuffer::from_slice(
-                &generate_bitmap(),
+                &generate_bitmap(size, color.to_argb8888(), outline.to_argb8888()),
                 Fourcc::Argb8888,
-                (SIZE, SIZE),
+                (size, size),
                 1,
                 Transform::Normal,
                 None,
@@ -125,9 +169,7 @@ impl Default for Cursor {
             status: CursorImageStatus::default_named(),
         }
     }
-}
 
-impl Cursor {
     pub fn set_status(&mut self, status: CursorImageStatus) {
         self.status = status;
     }

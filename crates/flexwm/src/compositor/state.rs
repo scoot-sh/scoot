@@ -155,6 +155,12 @@ impl State {
 
         let socket_name = Self::listen(display, event_loop)?;
 
+        // Built here rather than in the struct literal below, which moves
+        // `appearance` before `cursor`'s own field initializer could read it.
+        // The fallback bitmap is built exactly once, from the config this
+        // process started with -- see `Cursor::new`.
+        let cursor = Cursor::new(appearance.cursor_size, appearance.cursor_color);
+
         Ok(Self {
             start_time: Instant::now(),
             display_handle: dh,
@@ -175,7 +181,7 @@ impl State {
             tty: None,
             appearance,
             decorations: Decorations::default(),
-            cursor: Cursor::default(),
+            cursor,
             compositor_state,
             xdg_shell_state,
             xdg_decoration_state,

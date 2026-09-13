@@ -102,7 +102,10 @@ review, and why.
    unchanged at 0, ~7 jiffies/150 small local moves vs ~42/150 near-full-frame
    corner jumps (the latter ≈ pre-fix cost) — confirms the scoping fix is
    real. `CursorImageStatus::Named`/`::Surface` both drew the same fallback
-   shape; `::Surface` was fixed in item 8, `::Named` is still Backlog (b).
+   shape; `::Surface` was fixed in item 8. `::Named` still draws the fallback
+   and always will (there is no client buffer behind a name) — item 13 made
+   that shape's size and color configurable; a *per-name* shape is still
+   Backlog (b) and needs a licensed asset source first.
 
    **5a. Merge authority history.** `gh pr merge` was denied by the
    auto-mode classifier ("Merge Without Review") when attempted autonomously
@@ -352,8 +355,9 @@ review, and why.
 
 8. ~~Client-supplied cursor images (`CursorImageStatus::Surface`)~~ — piece
    (a) of the Backlog's "Custom/client cursor support" entry. Piece (b) (a
-   config-level override for the *fallback* shape's theme/size/color) is
-   still open and deliberately untouched here. Like item 7, this landed
+   config-level override for the *fallback* shape) was untouched here and
+   landed later as item 13, for size and color only — a theme *name* is still
+   open, for the license reason that entry gives. Like item 7, this landed
    ahead of item 6: it's small, self-contained, and item 5 shipped knowing
    it was wrong.
 
@@ -1339,6 +1343,88 @@ review, and why.
     Out of this ticket's scope, and a CLI flag rather than a client- or
     config-supplied value, but it is the same family.
 
+13. ~~A config override for the fallback cursor's size and color~~ — DONE,
+    PR #19. Piece (b) of the Backlog's "Custom/client cursor support" entry,
+    **for size and color only** — theme name stays open and is explicitly
+    *not* what this shipped; see that entry, which now says so. Ahead of item
+    6 for the same reason items 7-12 were: small and self-contained.
+
+    `[appearance]` gained `cursor_size` (integer, default `16`) and
+    `cursor_color` (`"#rrggbb"`/`"#rrggbbaa"`, default `#ffffff`), resolved
+    through the existing `AppearanceConfig`/`into_appearance` path — so a
+    malformed color degrades to that one field's default with a warning,
+    exactly like the three ring/background colors, rather than invalidating
+    `[appearance]`. `cursor.rs`'s `const SIZE` and its hardcoded
+    white/black pixels are gone: `generate_bitmap(size, fill, outline)` is
+    still pure and still returns the same bytes for the defaults, and
+    `Cursor::default()` became `Cursor::new(size, color)`, called once from
+    `State::new`. Built once at startup, never rebuilt — nothing in this
+    project reloads config, and this ticket deliberately did not invent a path
+    for it.
+
+    **No theme name, by decision, not omission.** Honoring
+    `CursorImageStatus::Named` properly needs a real xcursor asset or real
+    xcursor-file loading; niri's assets are GPL and Adwaita's aren't MIT-clean
+    (`CLAUDE.md`), so there is nothing in this repo to load and sourcing one is
+    its own concern. `cursor.rs`'s module doc now says that at the point
+    someone would look for the option.
+
+    Three decisions worth the reviewer's attention:
+
+    - **The outline is black at the fill's own alpha, not a second config
+      field.** Its job is to keep the shape legible against similar-colored
+      content, which a configurable outline could only undo; at the default
+      opaque fill it is byte-identical to the fixed black outline this shape
+      always had, and matching the alpha is what stops a translucent
+      `cursor_color` from rendering as a solid black triangle outline around a
+      see-through middle.
+    - **`MIN_CURSOR_SIZE = 4`, `MAX_CURSOR_SIZE = 256`, justified
+      arithmetically** the way `Config::MAX_GAP` is, not by taste. Below 4 the
+      shape has no interior pixels at all (the outline owns the left column and
+      the diagonal, so the fill only exists where `0 < x < y`: one pixel at
+      size 3, none below). The upper bound is about the allocation, not looks:
+      the bitmap is `size * size * 4` bytes, which is 256 KiB at the cap but
+      **overflows `i32` outright at `i32::MAX`** — a debug panic inside
+      `generate_bitmap`, a wrapped length in release, and the same product
+      appears again in Smithay's own `assert!(mem.len() >= stride * size.h)`
+      in `MemoryBuffer::from_slice`. `Appearance::clamp_cursor_size` is the
+      pure, separately-tested clamp (`Config::clamp_gap`'s shape);
+      `Appearance::clamped` applies it and warns, and `Cursor::new` applies it
+      again at the allocation itself, the way `ring_rects` re-checks
+      `width <= 0` rather than trusting its caller.
+    - **`Color::to_argb8888` is a new single boundary for straight-alpha →
+      premultiplied BGRA bytes**, next to the existing `From<Color> for
+      Color32F` that does the same job for solid-color elements. Premultiplied
+      because the pinned rev hands an `Argb8888` memory buffer to pixman as
+      `a8r8g8b8` and composites with `Operation::Over`
+      (`backend/renderer/pixman/mod.rs:389,605`), which is defined over
+      premultiplied components.
+
+    **The test gap this closed, found while writing the tests rather than
+    after**: every pre-existing assertion about the cursor bitmap used white,
+    black or the clear color, and **white and black are symmetric under a
+    B↔R swap**, so nothing in the suite could have caught a byte-order
+    mistake in a color conversion. The new live read-back test uses `#ff8040`
+    (all three channels distinct) and deliberately *not* `#ff8000`, whose
+    reversed bytes are this harness's own `CLEAR_BGRA` exactly — a swap would
+    then draw the cursor in the background's color and the failure could not
+    tell "wrong color" from "nothing drawn".
+
+    **Tests: 20 new (221 total, against 201 on the merge base).**
+    `Color::to_argb8888`'s
+    byte order/premultiplication/saturation, the clamp at both bounds and at
+    `i32::MIN`/`i32::MAX`, `generate_bitmap` at a non-default size and with
+    non-default colors, a check that the defaults still describe the original
+    16x16 white-on-black shape, `Cursor::new`'s re-clamp measured through the
+    built element's real geometry, the config-file round trip (both fields
+    set, only the cursor fields set, a malformed color, an out-of-range size,
+    a size outside `i32`, and a gap small enough to clamp the ring but not the
+    cursor), and two live read-back tests through a real `State` and a real
+    `PixmanRenderer` — a 48px `#ff8040` cursor sampled at its outline,
+    diagonal, interior, last filled row, the row past it and outside the
+    triangle, plus a translucent `#ffffff80` one proving it blends with what
+    is behind it instead of replacing it.
+
 ## Backlog (unordered — pick up whenever it fits)
 
 - **Input injection targeted at a specific window, without moving seat
@@ -1807,17 +1893,27 @@ data-loss/RCE in what was checked.
   5c on. Low priority: cosmetic (an agent gets told to be careful once for
   no reason), not correctness-affecting.
 
-- **Custom/client cursor support — (a) DONE as item 8, (b) still open.**
+- **Custom/client cursor support — (a) DONE as item 8; (b) DONE for size and
+  color as item 13; a theme *name* remains open and needs a real licensed
+  asset source first.**
   Item 5 shipped a fixed, procedurally-generated triangle for every
   `CursorImageStatus` variant — `Named` (a requested xcursor theme name) and
   `Surface` (a client-supplied cursor image, e.g. a text-input I-beam or a
   resize arrow) both drew the exact same shape, ignoring what was actually
   requested. ~~(a) honor `CursorImageStatus::Surface` by rendering the
   client's actual supplied buffer as the cursor element~~ — landed as item 8
-  above. Still open: **(b) a user/config-level override (cursor theme name,
-  size, or color in `config.toml`'s `[appearance]`-shaped section) for the
-  fallback shape itself**, which is what `Named` will always fall back to —
-  there is no client buffer behind a `Named` request, only a theme name, so
-  (b) is the only thing that can ever make it look right. Keep the license
-  constraint from `CLAUDE.md` in mind if (b) ever means loading a real
-  xcursor theme (niri's assets are GPL, Adwaita's aren't MIT-clean).
+  above. ~~(b) a user/config-level override for the fallback shape's size and
+  color (`[appearance]`'s `cursor_size`/`cursor_color`)~~ — landed as item 13
+  above, which is what `Named` will always fall back to: there is no client
+  buffer behind a `Named` request, only a theme name.
+
+  **Still open, and deliberately scoped out of item 13: drawing a different
+  shape per requested theme name.** That needs either an actual cursor-theme
+  asset this project is allowed to ship (niri's are GPL, Adwaita's aren't
+  MIT-clean per `CLAUDE.md`, and nothing MIT-clean has been found or vetted
+  yet) or real xcursor-file loading infrastructure — a much larger feature
+  than a config knob, and one that is pointless without an asset to load. So
+  this stays blocked on sourcing a license-clean theme, not on code. Until
+  then `Named` draws item 13's configurable triangle whatever shape was
+  asked for, which is at least a visible, user-tunable pointer rather than a
+  wrong-shaped fixed one.

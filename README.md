@@ -32,7 +32,8 @@ Early, but all three Wayland backends are real and working: `--headless`
 `--nested` (runs as a window inside an existing compositor, e.g. for webtop),
 and `--tty` (a real DRM/KMS + libseat + libinput backend on actual hardware,
 including VT switching and a rendered pointer cursor — a client's own cursor
-image when it supplies one, a built-in shape otherwise). Also done: vim-style
+image when it supplies one, a built-in shape otherwise, whose size and color
+the config file can override). Also done: vim-style
 keybindings, a TOML config file (`--config`, `[layout]`/`[appearance]`/
 `[binds]`, see Configuration below), window decorations (a niri-style focus
 ring, background color, server-side `zxdg_decoration_manager_v1`), and a
@@ -46,9 +47,9 @@ config supplies are bounded too: each individual `wl_shm` pool is capped at
 protocol error rather than a multi-gigabyte mapping for that pool; the total
 across many pools from one client isn't bounded yet, see `ROADMAP.md`'s
 Backlog), a client's declared minimum window size can't exceed the largest
-output's usable area on each axis, and `gap` has an upper bound as well as a
-lower one. A missing `$XDG_RUNTIME_DIR` is a one-line startup error, not a
-crash. Verified
+output's usable area on each axis, and `gap` and `cursor_size` each have an
+upper bound as well as a lower one. A missing `$XDG_RUNTIME_DIR` is a one-line
+startup error, not a crash. Verified
 end-to-end on every backend — a real
 client maps, tiles, receives synthetic input, and a screenshot proves it. Not
 yet started: a GPU rendering path and the macOS adapter.
@@ -149,8 +150,8 @@ says what's wrong in the log instead.
 flexwm draws no titlebars by design — a focused window gets a colored ring
 drawn *around* it (in the layout's own gap), and there's a solid background
 behind everything, instead of a per-window title bar with text or buttons.
-That's why there's no titlebar-color/font option below: this table only
-controls the ring and the background.
+That's why there's no titlebar-color/font option below: this table controls
+the ring, the background, and the built-in pointer cursor — nothing else.
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
@@ -158,17 +159,32 @@ controls the ring and the background.
 | `focus_ring_active_color` | `"#rrggbb"` / `"#rrggbbaa"` | `#6ba6fa` (accent blue) | Ring color around the focused window. |
 | `focus_ring_inactive_color` | `"#rrggbb"` / `"#rrggbbaa"` | `#595961` (muted gray) | Ring color around every other window. |
 | `background_color` | `"#rrggbb"` / `"#rrggbbaa"` | `#141419` (near-black) | Cleared behind all window content — there's no separate background render element, this is the frame clear color. |
+| `cursor_size` | integer (pixels) | `16` | Both dimensions of the built-in pointer cursor (see below). Clamped into `4..=256`: under `4` the shape has no interior pixels left and a pointer that small is indistinguishable from a dead pixel; over `256` it covers a quarter of a 1080p display's height and the bitmap it allocates stops being small. A value outside `i32` altogether (or a float) isn't a valid value for this field at all, so it's a whole-file parse error (see Failure semantics above), not a clamp. |
+| `cursor_color` | `"#rrggbb"` / `"#rrggbbaa"` | `#ffffff` (white) | Fill color of the built-in pointer cursor. Its 1px outline is always black, at this color's own alpha, and isn't separately configurable — the outline exists to keep the shape's edges visible against similarly-colored content. An alpha of `00` makes the built-in cursor invisible; that's your call, not a clamped value. |
 | `prefer_no_csd` | boolean | `true` | Whether to answer a client's `zxdg_toplevel_decoration_v1` request with `ServerSide`, so a well-behaved client stops drawing its own titlebar (which would otherwise double up with the ring). |
 
-The three hex values above are the actual rendered colors (pixel-sampled
+The two `cursor_*` fields apply to flexwm's own procedurally-drawn fallback
+shape — a filled triangle whose point is the hotspot, drawn only under
+`--tty` (`--headless` has no display and `--nested` already shows the host's
+cursor). They do **not** affect a client that supplies its own cursor image
+(a text I-beam, a resize arrow, a spinner): those pixels come from the client
+over the wire, and flexwm draws them at the size and hotspot the client
+chose. There is deliberately no `cursor_theme` option: honoring a named
+xcursor shape means loading a real theme asset, and flexwm has no MIT-clean
+one to load (see `ROADMAP.md`'s Backlog). Both values are read once at
+startup, like every other setting here — there's no config reload.
+
+The first three hex values above are the actual rendered colors (pixel-sampled
 from a real screenshot, and pasting any of them back into the matching
-config field reproduces the default exactly). Internally the built-in
+config field reproduces the default exactly). Internally those three built-in
 defaults are stored as raw RGBA floats (`0.42, 0.65, 0.98`,
 `0.35, 0.35, 0.38`, and `0.08, 0.08, 0.1`, each `1.0` alpha), and none of
 those floats is exactly representable as an 8-bit `"#rrggbb"` string — that's
 a storage detail, not a reason to distrust the hex above. Leave a color
 field unset to get the real built-in default; only set it to a hex string if
-you want to *change* it.
+you want to *change* it. (`cursor_color`'s `#ffffff` is the one exception:
+pure white *is* exactly representable, so writing it out changes nothing at
+all.)
 
 ### `[binds]`
 
@@ -270,6 +286,8 @@ focus_ring_width = 4
 focus_ring_active_color = "#ffaa00"
 focus_ring_inactive_color = "#333333"
 background_color = "#101014"
+cursor_size = 24
+cursor_color = "#ffcc66"
 prefer_no_csd = true
 
 [binds]
