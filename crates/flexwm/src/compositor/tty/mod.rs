@@ -154,6 +154,29 @@ pub fn init(
     // compile and even run, right up until the modeset call, which then
     // fails with EACCES with no obvious link back to "forgot the session".
     let fd = session.open(&gpu_path, OFlags::RDWR | OFlags::CLOEXEC)?;
+    // Smithay logs `Unable to become drm master, assuming unprivileged mode`
+    // from inside `DrmDeviceFd::new` on every run here. It is expected, and it
+    // does *not* mean master wasn't acquired: master goes to whichever open
+    // file is first to open the device while nothing else holds it (root has
+    // nothing to do with the grant itself -- it's what lets seatd open the
+    // node and manage VTs at all), and seatd's own explicit `SET_MASTER` call
+    // secures it. Master is per-open-file, not per-process, and we inherit
+    // that already-master file along with the fd seatd hands us. Our own
+    // `SET_MASTER` is refused with `EACCES` because the kernel only permits it
+    // from the process that owns the file -- `drm_master_check_perm` wants
+    // `was_master && file->pid == current->tgid`, and `drm_file_update_pid`
+    // deliberately never re-owns a file that was master. Smithay's resulting
+    // `privileged = false` is the state this backend wants: it stops Smithay
+    // issuing `SET_MASTER`/`DROP_MASTER` itself on pause/activate, which seatd
+    // already does as root on every VT switch. (The identical warning also
+    // fires when master genuinely isn't held -- if something else already
+    // has it, seatd's own `SET_MASTER` gets `EBUSY` too, only logs it, and
+    // hands the fd over anyway; that case fails loudly at modeset instead.
+    // "Opened by seatd" doesn't distinguish the two; being first to open does.)
+    // Measured end to end on the dev
+    // VM (clients/state debugfs, a root `SET_MASTER` probe, a full VT-switch
+    // cycle) -- see `vm/README.md`'s DRM-master troubleshooting entry and the
+    // resolved backlog entry in `ROADMAP.md`.
     let drm_fd = DrmDeviceFd::new(DeviceFd::from(fd));
     let (mut drm, drm_notifier) = DrmDevice::new(drm_fd.clone(), true)?;
 

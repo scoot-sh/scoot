@@ -93,10 +93,34 @@ cd /mnt/flexwm && cargo build          # CARGO_TARGET_DIR is /var/cargo-target,
 ```
 
 Then run the binary from the QEMU window's tty1 to actually watch it on the
-virtual display, or over an ssh session (logind's PAM stack registers those
-with a real seat/session too, so `--tty` runs and takes real DRM/libseat
-ownership just fine headlessly over ssh — only *watching* it happen needs the
-QEMU window). `cargo build` works without `nix develop`: the
+virtual display, or over an ssh session — an ssh-started `--tty` run does take
+real DRM master and does really scan out to the QEMU window, so only
+*watching* it happen needs that window.
+
+The mechanism is **seatd, not logind** (an earlier version of this file
+credited "logind's PAM stack", which is wrong — see the DRM-master entry under
+Troubleshooting for how that was measured). libseat picks its seatd backend
+here, and seatd's `seat0` is VT-bound: it binds any client that connects to
+whichever VT is in the *foreground at that moment* — normally tty1's autologin
+console — no matter how that client's own process was started. The ssh session
+itself has no seat at all (`loginctl show-session $XDG_SESSION_ID` reports
+`Seat=`, `VTNr=0`, `Remote=yes`), and forcing the logind backend instead fails
+on the spot: `LIBSEAT_BACKEND=logind flexwm --tty` over ssh dies with
+`Failed to open session: No data available`.
+
+Two consequences of that VT binding, worth knowing before you debug the
+symptom instead of the cause:
+
+- The run takes over the foreground VT's display, and seatd allows exactly one
+  client on a VT-bound seat at a time. Start a second `--tty` (or sway, or
+  anything else on libseat) while one is up and it exits with
+  `flexwm: Failed to open device: Operation not permitted`, with
+  `seat is VT-bound and has an active client` in `journalctl -u seatd`.
+- It needs `XDG_RUNTIME_DIR` for the wayland socket, which a login session
+  provides — ssh and tty1's autologin both do, a bare `su dev -c ...` does
+  not (`no wayland socket: $XDG_RUNTIME_DIR is not set or invalid`).
+
+`cargo build` works without `nix develop`: the
 wayland/libinput/libxkbcommon/gbm/udev/seatd `.pc` files are in the system
 profile and `PKG_CONFIG_PATH` points at it.
 
@@ -184,6 +208,57 @@ applies when the disk is created: stop the builder, delete
 **The VM window is black but the serial console shows a login prompt.** The
 framebuffer only lights up once something drives KMS. Log in on tty1 in the
 window and run `kmscube`.
+
+**`--tty` logs `Unable to become drm master, assuming unprivileged mode`. Is it
+really DRM master?** Usually yes — that warning is a red herring on its own,
+and it is not specific to ssh. It is Smithay's own (`backend/drm/device/fd.rs`),
+and on a modern kernel it fires for *every* non-root compositor whose DRM fd
+was opened for it by a session daemon (seatd, and by the same mechanism
+presumably logind, though this project has only measured seatd), over ssh and
+from a real VT alike. It means "this process may not call `SET_MASTER` itself",
+not "this process is not master" -- but it does **not** by itself distinguish
+"master, held by someone else's open" from "master, held by ours", so verify
+it rather than trust the log alone (recipe below):
+
+- Master goes to whichever open file is *first* to open the device while
+  nothing else already holds it, plus seatd's own explicit
+  `DRM_IOCTL_SET_MASTER` call on that file right after. Root is not what
+  grants master -- `drm_master_open` (`drivers/gpu/drm/drm_auth.c`) hands it
+  to the first opener regardless of uid, and root cannot take master away
+  from an existing holder either (`drm_setmaster_ioctl` returns `EBUSY`).
+  Root is what lets seatd open the device node and manage VTs at all. Since
+  seatd is normally the only thing that ever opens the GPU node on this VM,
+  in practice it *is* first, and flexwm inherits that already-master file
+  along with the fd seatd hands over its socket -- but that is a fact about
+  this VM's setup, not a property of "opened by seatd" in general.
+- flexwm's own `SET_MASTER` is then refused with `EACCES`, because the kernel
+  only permits it from the process that owns the file:
+  `drm_master_check_perm` (`drivers/gpu/drm/drm_auth.c`) wants
+  `was_master && file->pid == current->tgid`, and `drm_file_update_pid`
+  (`drm_file.c`) deliberately never re-owns a file that *was* master.
+- Smithay's resulting `privileged = false` is the correct state here: it stops
+  it issuing its own `SET_MASTER`/`DROP_MASTER` on session pause/resume, which
+  seatd already does as root on every VT switch.
+- **The identical warning also fires when master genuinely isn't held**: if
+  something else already has it when seatd opens the device, seatd's own
+  `SET_MASTER` gets `EBUSY` too, only logs it, and hands the fd over anyway --
+  that case fails loudly at modeset instead of at open. "The fd was opened by
+  seatd" doesn't tell the two cases apart; the verification below does.
+
+To check it for real rather than trusting the log, while `--tty` is running:
+
+```sh
+sudo cat /sys/kernel/debug/dri/0/clients  # master=y, on the seatd-opened fd
+sudo cat /sys/kernel/debug/dri/0/state    # plane fb=N, "allocated by = flexwm"
+```
+`clients` lists the fd under `seatd`'s pid, not flexwm's, for the same
+`drm_file_update_pid` reason — one open file, two processes. `state` is the
+scanout proof: the CRTC's plane points at a flexwm-allocated framebuffer
+(`[fbcon]`'s own fb is what it points at when nothing is driving KMS).
+`DRM_IOCTL_MODE_ATOMIC` is master-gated by the kernel, so a `drm: modeset
+(full commit)` line in flexwm's log with no immediately-following `WARN …
+drm commit/page flip failed` (its own error path, not a generic "error") is
+itself proof master was held at that moment.
 
 **`nix run ./vm` wants to build aarch64-linux paths and fails.** The builder is
 not running or the daemon cannot reach it: `./vm/linux-builder.sh status`.
