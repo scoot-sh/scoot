@@ -383,6 +383,57 @@ fn one_connections_partial_line_does_not_hold_up_many_others() {
     stalled.expect_silence(&mut harness);
 }
 
+#[test]
+fn several_connections_each_holding_a_partial_line_are_each_answered_their_own() {
+    // Not just "one stuck client does not stop the others": several clients
+    // stuck at once, finished in an order unrelated to how they started, each
+    // answered for the request *it* sent. A connection's half-read line lives
+    // on that connection, so mixing two up would show here as the wrong
+    // response variant coming back.
+    let mut harness = Harness::new();
+    let requests = [
+        Request::Version,
+        Request::Windows,
+        Request::Outputs,
+        Request::Type {
+            text: "hi".to_string(),
+        },
+    ];
+    let mut clients: Vec<TestClient> = Vec::new();
+    let mut tails: Vec<String> = Vec::new();
+    for request in &requests {
+        let line = request_line(request);
+        // Split somewhere inside the JSON, at a different point for each.
+        let cut = 4 + clients.len();
+        let mut client = harness.connect(None);
+        client.send(&line.as_bytes()[..cut]);
+        tails.push(line[cut..].to_string());
+        clients.push(client);
+    }
+    // Every one of them is mid-request, and none of them has been answered.
+    for client in &mut clients {
+        client.expect_silence(&mut harness);
+    }
+
+    // Finished in an order unrelated to the order they arrived in.
+    for index in [2usize, 0, 3, 1] {
+        clients[index].send(tails[index].as_bytes());
+        let reply = clients[index].expect_reply(&mut harness);
+        let matched = matches!(
+            (&requests[index], &reply),
+            (Request::Version, Response::Version { .. })
+                | (Request::Windows, Response::Windows { .. })
+                | (Request::Outputs, Response::Outputs { .. })
+                | (Request::Type { .. }, Response::Ok)
+        );
+        assert!(
+            matched,
+            "connection {index} asked for {:?} and got {reply:?}",
+            requests[index]
+        );
+    }
+}
+
 // --- symptom (b): more than one request in a single write -----------------
 
 #[test]
@@ -630,12 +681,13 @@ fn a_large_but_legal_request_split_across_writes_still_works() {
     });
     assert!(request.len() < MAX_REQUEST_BYTES);
     client.send_all(request.as_bytes(), &mut harness);
-    // No keyboard focus in this test, so `type_text` reports that rather than
-    // typing -- which is fine: what is under test is that the whole line was
-    // reassembled and decoded, not what typing does.
+    // `Response::Ok` exactly, not "anything but a crash": a reassembly that
+    // lost or duplicated a chunk decodes as a *different* failure
+    // (`Response::Error` carrying a serde message), so accepting an error here
+    // would pass against the very bug this is for.
     match client.expect_reply(&mut harness) {
-        Response::Ok | Response::Error { .. } => {}
-        other => panic!("the request did not decode: {other:?}"),
+        Response::Ok => {}
+        other => panic!("the request did not survive being split up: {other:?}"),
     }
 }
 
@@ -697,6 +749,14 @@ fn an_idle_reply_does_not_overtake_a_reply_still_going_out() {
             quiet_ms: 10,
             timeout_ms: 20_000,
         })
+    );
+    // Asserted, not assumed: the whole batch has to fit one read buffer, so
+    // that every one of those replies is queued up behind a send buffer that
+    // cannot take them *before* the `wait-idle` line is reached. Without that
+    // this test would quietly stop exercising the hand-off rather than fail.
+    assert!(
+        batch.len() < super::super::line::DEFAULT_CAPACITY,
+        "the batch no longer arrives in one read"
     );
     client.send_all(batch.as_bytes(), &mut harness);
 

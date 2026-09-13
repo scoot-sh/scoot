@@ -456,10 +456,14 @@ enum IdleOutcome {
 /// `last_commit.max(wait.started)`, which only equals `last_commit` once a
 /// commit has actually happened after the request began.
 ///
-/// The timeout is a duration since `started` rather than a precomputed
-/// deadline `Instant`: `Instant + Duration` panics on overflow, and
-/// `timeout_ms` is a client-chosen `u64` that goes straight into a `Duration`.
-/// Comparing durations instead means there is no addition to overflow.
+/// The timeout is kept as a duration since `started` rather than a precomputed
+/// deadline `Instant`, which is overflow-free by construction: `Instant +
+/// Duration` panics if it overflows, and `timeout_ms` is a client-chosen `u64`
+/// that goes straight into a `Duration`. Nothing was actually reachable there
+/// (Linux's `Instant` is a `timespec` whose `tv_sec` is an `i64`, which
+/// `u64::MAX` milliseconds fits inside with room to spare), so this is not a
+/// fixed bug -- it is one fewer client-controlled value feeding arithmetic that
+/// can panic at all.
 fn idle_outcome(now: Instant, last_commit: Instant, wait: &PendingIdle) -> IdleOutcome {
     let baseline = last_commit.max(wait.started);
     if now.duration_since(baseline) >= wait.quiet {

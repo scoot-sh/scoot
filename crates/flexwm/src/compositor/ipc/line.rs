@@ -191,7 +191,8 @@ impl<R: Read> Lines<R> {
     }
 }
 
-/// What `BufReader::new` itself uses. Named here only so [`Lines::new`] and
+/// What `BufReader::new` itself uses. Named here so [`Lines::new`] and
 /// [`Lines::with_capacity`] are visibly the same function with one argument
-/// defaulted.
-const DEFAULT_CAPACITY: usize = 8 * 1024;
+/// defaulted -- and because one test asserts against it, to keep itself from
+/// quietly stopping to exercise what it is for if this ever changes.
+pub(super) const DEFAULT_CAPACITY: usize = 8 * 1024;
