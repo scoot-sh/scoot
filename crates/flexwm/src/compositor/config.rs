@@ -81,12 +81,15 @@ struct AppearanceConfig {
 }
 
 impl AppearanceConfig {
-    /// `gap` is the (not-yet-`validated`, possibly out-of-range) `[layout]`
-    /// gap this same file resolved to -- used to clamp `focus_ring_width` at
-    /// load time (see [`Appearance::clamped`]). `Appearance::clamped`
-    /// treats a negative gap as zero, so an invalid gap just zeroes the ring
-    /// rather than panicking or needing `flexwm_core::Config::validated` to
-    /// run first.
+    /// `gap` is the `[layout]` gap this same file resolved to, already put
+    /// through [`Config::clamp_gap`] by the caller -- used to clamp
+    /// `focus_ring_width` at load time (see [`Appearance::clamped`]). It has
+    /// to be the clamped value, not the raw one: the ring is sized against
+    /// half the gap, and `World::new` clamps the gap it actually lays out
+    /// with, so measuring the ring against a larger raw number would let a
+    /// ring through that is wider than half the gap the layout really uses.
+    /// `Appearance::clamped` treats a negative gap as zero anyway, so the
+    /// lower half of that clamp changes nothing here.
     fn into_appearance(self, gap: i32) -> Appearance {
         let defaults = Appearance::default();
         let color = |field: Option<String>, name: &'static str, default: Color| match field {
@@ -159,7 +162,7 @@ impl LoadedConfig {
         let appearance = file
             .appearance
             .unwrap_or_default()
-            .into_appearance(config.gap);
+            .into_appearance(Config::clamp_gap(config.gap));
         let mut keybindings = Keybindings::default();
         apply_binds(&mut keybindings, file.binds);
         Self {
@@ -746,6 +749,49 @@ mod tests {
         assert_eq!(
             loaded.appearance.focus_ring_width, 3,
             "clamped to half of gap=6"
+        );
+    }
+
+    /// The ring is measured against the gap the layout will actually use, not
+    /// the raw number in the file: `flexwm_core::Config::validated` caps the
+    /// gap at `MAX_GAP`, so a ring sized against an out-of-range gap would
+    /// otherwise end up wider than half of the real one.
+    #[test]
+    fn a_ring_is_clamped_against_the_capped_gap_not_the_configured_one() {
+        let toml = format!(
+            "[layout]\ngap = {}\n\n[appearance]\nfocus_ring_width = {}\n",
+            i32::MAX,
+            Config::MAX_GAP
+        );
+        let file: FileConfig = toml::from_str(&toml).expect("valid toml");
+        let loaded = LoadedConfig::from_file(file);
+        assert_eq!(
+            loaded.appearance.focus_ring_width,
+            Config::MAX_GAP / 2,
+            "clamped to half of the capped gap"
+        );
+    }
+
+    /// The actual overflow-risking input, not just the visual-consistency
+    /// case above: with an unclamped gap, `focus_ring_width = i32::MAX` at
+    /// `gap = i32::MAX` would clamp to `gap.max(0) / 2 = 1073741823`, and
+    /// `decorations::ring_rects`'s `rect.w + 2 * width` overflows for any
+    /// `rect.w >= 2` -- a debug panic or a release wraparound on every
+    /// render, from a config file alone. Clamping the gap first closes this,
+    /// not just the proportion between the ring and the gap.
+    #[test]
+    fn an_out_of_range_ring_width_is_also_clamped_against_the_capped_gap() {
+        let toml = format!(
+            "[layout]\ngap = {}\n\n[appearance]\nfocus_ring_width = {}\n",
+            i32::MAX,
+            i32::MAX
+        );
+        let file: FileConfig = toml::from_str(&toml).expect("valid toml");
+        let loaded = LoadedConfig::from_file(file);
+        assert_eq!(
+            loaded.appearance.focus_ring_width,
+            Config::MAX_GAP / 2,
+            "clamped to half of the capped gap, not half of i32::MAX"
         );
     }
 }

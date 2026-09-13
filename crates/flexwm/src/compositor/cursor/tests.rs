@@ -330,7 +330,8 @@ impl Fixture {
             Config::default(),
             Keybindings::default(),
             Appearance::default(),
-        );
+        )
+        .expect("a compositor state with a wayland socket");
 
         // A socket pair rather than the listening socket: identical
         // per-client dispatch, no dependence on which socket name it got.

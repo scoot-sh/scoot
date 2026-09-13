@@ -101,7 +101,8 @@ impl Probe {
             Config::default(),
             Keybindings::default(),
             Appearance::default(),
-        );
+        )
+        .expect("a compositor state with a wayland socket");
 
         // A socket pair rather than the real listening socket: it skips any
         // dependence on which name that got, while still going through the

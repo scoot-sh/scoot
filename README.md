@@ -40,7 +40,15 @@ hardened control socket (owner-only
 permissions, a same-user peer check, a 1 MiB cap on a single request, and
 screenshots rate-limited to one per connection per frame) whose connections
 are non-blocking end to end, so no client — however slow, chunked or
-unresponsive — can stall the compositor for anyone else. Verified
+unresponsive — can stall the compositor for anyone else. Sizes a client or a
+config supplies are bounded too: each individual `wl_shm` pool is capped at
+512 MiB (four full-screen 8K frames' worth — a request past it gets a
+protocol error rather than a multi-gigabyte mapping for that pool; the total
+across many pools from one client isn't bounded yet, see `ROADMAP.md`'s
+Backlog), a client's declared minimum window size can't exceed the largest
+output's usable area on each axis, and `gap` has an upper bound as well as a
+lower one. A missing `$XDG_RUNTIME_DIR` is a one-line startup error, not a
+crash. Verified
 end-to-end on every backend — a real
 client maps, tiles, receives synthetic input, and a screenshot proves it. Not
 yet started: a GPU rendering path and the macOS adapter.
@@ -132,7 +140,7 @@ says what's wrong in the log instead.
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
-| `gap` | integer (pixels) | `12` | Gap between columns, between windows stacked in a column, and at output edges. Negative values are clamped to `0`. |
+| `gap` | integer (pixels) | `12` | Gap between columns, between windows stacked in a column, and at output edges. Clamped into `0..=10000`: negatives become `0`, and anything above `10000` becomes `10000` — that is already wider than the long edge of an 8K display (so it insets any real output to nothing), and it keeps the layout's own integer arithmetic well away from overflow. A gap that large leaves no usable area, so windows end up 1x1; it's a guard against a typo or a probe, not a usable setting. |
 | `column_widths` | array of floats | `[0.333…, 0.5, 0.666…]` (i.e. `1/3`, `1/2`, `2/3`) | Column widths as fractions of the output width, in the order `cycle-column-width` steps through. Non-finite or non-positive entries are dropped; an empty list falls back to the built-in three. |
 | `default_column_width` | integer (unsigned) | `1` | Index into `column_widths` used for newly created columns (`1` selects `0.5`, i.e. half the output). Too large is clamped to the last valid index; negative isn't a valid value for this field at all, so it's a whole-file parse error (see Failure semantics above), not a clamp. |
 

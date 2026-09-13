@@ -78,7 +78,8 @@ impl Harness {
             Config::default(),
             Keybindings::default(),
             Appearance::default(),
-        );
+        )
+        .expect("a compositor state with a wayland socket");
         Self { event_loop, state }
     }
 

@@ -49,7 +49,7 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
         loaded.config,
         loaded.keybindings,
         loaded.appearance,
-    );
+    )?;
 
     // `--tty` picks its own size from the connector's preferred mode --
     // there's no host to negotiate a size with the way `--nested` does, and
