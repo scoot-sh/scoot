@@ -1770,6 +1770,21 @@ review, and why.
     `--headless` against a release build of this branch (all 11 `ok:`
     checks, exit 0).
 
+    Re-verified after the review-driven test additions (working tree at
+    `d816501` plus the `no_xdg_popup_is_configured_yet` / `Protocol error 1`
+    / doc changes, committed as the branch head): `cargo test -p flexwm`
+    241/241, `cargo test -p flexwm-core` 60/60, `cargo clippy --workspace
+    --all-targets -- -D warnings` clean, `cargo fmt --all --check` clean,
+    all on the dev VM. `resize_output` — the one changed function whose only
+    production caller is `nested.rs`'s `apply_size` — was covered by running
+    the smoke test under the **`--nested`** backend too, not just
+    `--headless`: `WLR_BACKENDS=headless WLR_RENDERER=pixman
+    WLR_LIBINPUT_NO_DEVICES=1 cage -- env MODE=--nested
+    SHOT=/tmp/flexwm-smoke-nested.png ... scripts/smoke-test.sh` → all 11
+    `ok:` checks, exit 0, `/tmp/flexwm-smoke-nested.png` 1280x720 (cage's
+    mode, i.e. `resize_output` really did run and re-arrange against a size
+    that is not flexwm's built-in default) on the dev VM.
+
 ## Backlog (unordered — pick up whenever it fits)
 
 - **~~Open question: does `--tty` over SSH on the dev VM actually hold real
@@ -2050,6 +2065,13 @@ review, and why.
   shape `send_initial_configure` already has for toplevels) but wants its
   own tests, since it makes popups appear for the first time and nothing in
   the render path has ever drawn one.
+
+  Reproduced, not just traced: `no_xdg_popup_is_configured_yet` (in
+  `layer_shell/tests.rs`) has a real client create an `xdg_popup` on a
+  mapped toplevel with a valid positioner and round-trip ten times — no
+  `xdg_surface.configure` ever arrives, and the compositor stays up. Turning
+  that assertion around is what the fix should do; delete the test and this
+  entry together.
 
 - **A layer surface that commits but never attaches a buffer holds its
   exclusive zone** (item 14, deliberate, documented in

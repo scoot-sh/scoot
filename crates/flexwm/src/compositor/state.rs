@@ -315,11 +315,24 @@ impl State {
     ///
     /// The search order is the render order read from the front: a bar or an
     /// overlay wins over any window, and a wallpaper loses to every one of
-    /// them. A layer surface that draws nothing at `pos` (an unmapped one, or
-    /// a transparent region of a mapped one) falls through to whatever is
-    /// behind it rather than swallowing the pointer, because
-    /// `layer_surface_under` asks the surface tree rather than the layer's
-    /// bounding box.
+    /// them. A layer surface that declines `pos` -- an unmapped one, or one
+    /// whose client set an input region that excludes the point -- falls
+    /// through to whatever is behind it rather than swallowing the pointer,
+    /// because `layer_surface_under` asks the surface tree (which honours
+    /// `wl_surface.set_input_region`) rather than the layer's bounding box.
+    /// Note this is the *input* region, not opacity: a bar drawn fully
+    /// transparent but leaving its input region at the default takes the
+    /// pointer, which is the protocol's answer and what a click-through bar
+    /// has to opt out of explicitly.
+    ///
+    /// One caveat on "falls through": it falls through to the next *layer*
+    /// (overlay, then top), not to another surface on the same layer --
+    /// `LayerMap::layer_under` hands back a single layer surface rather than
+    /// an iterator, so if the front-most one on a layer declines the point,
+    /// a second surface overlapping it on that same layer is not asked.
+    /// Overlapping surfaces on one layer are already drawn on top of each
+    /// other, so this costs nothing in practice; anvil has the same
+    /// limitation.
     pub fn surface_under(
         &self,
         pos: Point<f64, Logical>,

@@ -38,7 +38,9 @@ use wayland_client::protocol::{
     wl_buffer, wl_compositor, wl_output, wl_registry, wl_shm, wl_shm_pool, wl_surface,
 };
 use wayland_client::{Connection, Dispatch, QueueHandle};
-use wayland_protocols::xdg::shell::client::{xdg_surface, xdg_toplevel, xdg_wm_base};
+use wayland_protocols::xdg::shell::client::{
+    xdg_popup, xdg_positioner, xdg_surface, xdg_toplevel, xdg_wm_base,
+};
 use wayland_protocols_wlr::layer_shell::v1::client::{zwlr_layer_shell_v1, zwlr_layer_surface_v1};
 
 use crate::compositor::State;
@@ -146,6 +148,18 @@ enum Step {
     MapLayer { index: usize, color: [u8; 4] },
     /// `zwlr_layer_surface_v1.destroy` on the `index`-th layer surface.
     DestroyLayer { index: usize },
+    /// Create an `xdg_popup` on the first mapped toplevel and report whether
+    /// the compositor ever configures it. See
+    /// [`no_xdg_popup_is_configured_yet`].
+    ProbePopup,
+}
+
+/// What the client reports back once a step is done.
+enum Ack {
+    Done,
+    /// [`Step::ProbePopup`]'s answer: did an `xdg_surface.configure` arrive
+    /// for the popup?
+    PopupConfigured(bool),
 }
 
 /// How big a window's buffer is. Deliberately smaller than any placement
@@ -277,6 +291,8 @@ wayland_client::delegate_noop!(TestClient: ignore wl_shm_pool::WlShmPool);
 wayland_client::delegate_noop!(TestClient: ignore wl_buffer::WlBuffer);
 wayland_client::delegate_noop!(TestClient: ignore wl_output::WlOutput);
 wayland_client::delegate_noop!(TestClient: ignore xdg_toplevel::XdgToplevel);
+wayland_client::delegate_noop!(TestClient: ignore xdg_positioner::XdgPositioner);
+wayland_client::delegate_noop!(TestClient: ignore xdg_popup::XdgPopup);
 wayland_client::delegate_noop!(TestClient: ignore zwlr_layer_shell_v1::ZwlrLayerShellV1);
 
 /// A `width`x`height` `wl_buffer` filled with `color`, over a real memfd --
@@ -324,7 +340,7 @@ fn wait_for_configure<T>(
 
 /// Runs the client half: binds the globals, then executes whatever steps the
 /// test sends, acknowledging each one once the compositor has seen it.
-fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<()>) -> Result<(), String> {
+fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> Result<(), String> {
     let conn = Connection::from_socket(stream).map_err(|e| e.to_string())?;
     let mut queue = conn.new_event_queue();
     let qh = queue.handle();
@@ -344,9 +360,13 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<()>) -> Re
         wl_surface::WlSurface,
         zwlr_layer_surface_v1::ZwlrLayerSurfaceV1,
     )> = Vec::new();
+    // Kept so a popup can name its parent; a popup's parent is an
+    // `xdg_surface`, not a `wl_surface`.
+    let mut toplevels: Vec<xdg_surface::XdgSurface> = Vec::new();
 
     while let Ok(step) = steps.recv() {
         queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+        let mut outcome = Ack::Done;
         match &step {
             Step::MapWindow => {
                 let surface = compositor.create_surface(&qh, ());
@@ -366,6 +386,7 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<()>) -> Re
                 surface.attach(Some(&buffer), 0, 0);
                 surface.damage(0, 0, WINDOW_BUFFER, WINDOW_BUFFER);
                 surface.commit();
+                toplevels.push(xdg.clone());
                 // Later configures (a re-layout after a bar appears) are
                 // acked but not redrawn: these tests assert on where the
                 // window's own pixels land, and a fixed buffer size is what
@@ -416,9 +437,38 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<()>) -> Re
                 layer.destroy();
                 surface.destroy();
             }
+            Step::ProbePopup => {
+                let parent = toplevels.first().ok_or("no toplevel to hang a popup on")?;
+                let surface = compositor.create_surface(&qh, ());
+                let index = client.window_serials.len();
+                client.window_serials.push(None);
+                let xdg = wm_base.get_xdg_surface(&surface, &qh, SurfaceIndex(index));
+                let positioner = wm_base.create_positioner(&qh, ());
+                // Both are required before `get_popup`, or the compositor
+                // rightly answers with `invalid_positioner`.
+                positioner.set_size(50, 50);
+                positioner.set_anchor_rect(0, 0, 10, 10);
+                let popup = xdg.get_popup(Some(parent), &positioner, &qh, ());
+                surface.commit();
+                // Ten round trips is far more than the one a configure needs
+                // when a compositor sends it: `MapWindow` above gets its
+                // toplevel's configure inside `wait_for_configure`'s first
+                // few.
+                for _ in 0..10 {
+                    queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                    if client.window_serials[index].is_some() {
+                        break;
+                    }
+                }
+                outcome = Ack::PopupConfigured(client.window_serials[index].is_some());
+                popup.destroy();
+                xdg.destroy();
+                surface.destroy();
+                positioner.destroy();
+            }
         }
         queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
-        acks.send(()).map_err(|e| e.to_string())?;
+        acks.send(outcome).map_err(|e| e.to_string())?;
     }
     Ok(())
 }
@@ -429,7 +479,7 @@ struct Fixture {
     event_loop: EventLoop<'static, State>,
     state: State,
     steps: Option<Sender<Step>>,
-    acks: Receiver<()>,
+    acks: Receiver<Ack>,
     client: Option<JoinHandle<Result<(), String>>>,
 }
 
@@ -470,16 +520,17 @@ impl Fixture {
     /// Runs one client step to completion, then lets the compositor settle so
     /// anything the step provoked (a configure, a re-layout) has happened
     /// before the test looks.
-    fn run(&mut self, step: Step) {
+    fn run(&mut self, step: Step) -> Ack {
         self.steps
             .as_ref()
             .expect("the step channel")
             .send(step)
             .expect("the client thread is still running");
         let acks = std::mem::replace(&mut self.acks, channel().1);
-        self.wait_for(&acks, "a client step acknowledgement");
+        let ack = self.wait_for(&acks, "a client step acknowledgement");
         self.acks = acks;
         self.settle();
+        ack
     }
 
     /// Dispatches until `channel` produces a value.
@@ -521,7 +572,7 @@ impl Fixture {
     /// The signal is the ack channel's sender dropping: [`run_client`]
     /// returns its error instead of acknowledging the step, which
     /// disconnects the receiver here.
-    fn run_expecting_disconnect(&mut self, step: Step) {
+    fn run_expecting_disconnect(&mut self, step: Step) -> String {
         self.steps
             .as_ref()
             .expect("the step channel")
@@ -530,7 +581,7 @@ impl Fixture {
         let deadline = Instant::now() + Duration::from_secs(10);
         loop {
             match self.acks.try_recv() {
-                Ok(()) => panic!("the client survived a request that should have been refused"),
+                Ok(_) => panic!("the client survived a request that should have been refused"),
                 Err(TryRecvError::Disconnected) => break,
                 Err(TryRecvError::Empty) => {}
             }
@@ -542,8 +593,14 @@ impl Fixture {
                 .dispatch(Some(Duration::from_millis(5)), &mut self.state)
                 .expect("a compositor dispatch");
         }
-        self.client.take();
+        let error = self
+            .client
+            .take()
+            .map(|handle| handle.join().expect("the client thread"))
+            .and_then(Result::err)
+            .expect("the client should have stopped with the protocol error it provoked");
         self.settle();
+        error
     }
 
     /// A few dispatch cycles with nothing outstanding, so in-flight protocol
@@ -1004,10 +1061,24 @@ fn a_size_that_does_not_fit_i32_is_refused_without_taking_the_compositor_down() 
     fixture.run(Step::MapWindow);
     let before = fixture.window_rect();
 
-    fixture.run_expecting_disconnect(Step::CreateLayer(LayerSpec {
+    let error = fixture.run_expecting_disconnect(Step::CreateLayer(LayerSpec {
         size: (u32::MAX, u32::MAX),
         ..LayerSpec::bar(30)
     }));
+
+    // Refused with the protocol's own vocabulary -- `invalid_size` (code 1)
+    // on the object that asked -- rather than by dropping the connection.
+    // wayland-backend renders a protocol error as "Protocol error {code} on
+    // object {interface}@{id}: {message}", so both halves are in the string
+    // the client thread returned.
+    assert!(
+        error.contains("Protocol error 1 "),
+        "the error should be invalid_size (1): {error}"
+    );
+    assert!(
+        error.contains("zwlr_layer_surface_v1"),
+        "the error should name the offending object: {error}"
+    );
 
     // The compositor is still here, still laying out, still drawing. The
     // dead client's window went with it, so `before` is only used to prove
@@ -1174,4 +1245,39 @@ fn resizing_the_output_re_arranges_bars_and_the_zone() {
         rect.right() <= smaller,
         "the window should fit the new mode: {rect:?}"
     );
+}
+
+// -------------------------------------------------------------------------
+// Known gaps, pinned so the fix has a failing test to turn green
+// -------------------------------------------------------------------------
+
+/// Pins a *pre-existing* bug this feature did not introduce and deliberately
+/// did not fix: nothing in the compositor ever sends an `xdg_popup` its
+/// initial `xdg_surface.configure`, so no popup may legally attach a buffer
+/// and none ever maps -- not a layer surface's tooltip, and not an ordinary
+/// window's menu either.
+///
+/// It lives with the layer-shell tests because it is the reason this PR
+/// tracks no popups for layer surfaces (`LayerSurface::surface_under` is
+/// already asked for `WindowSurfaceType::ALL`, so the input side is ready;
+/// the mapping side is what is missing). Deleting this test is part of
+/// fixing it -- see `ROADMAP.md`'s backlog entry -- and inverting the
+/// assertion is how the fix proves itself.
+#[test]
+fn no_xdg_popup_is_configured_yet() {
+    let mut fixture = Fixture::new();
+    fixture.run(Step::MapWindow);
+
+    let Ack::PopupConfigured(configured) = fixture.run(Step::ProbePopup) else {
+        panic!("the popup probe should report whether a configure arrived");
+    };
+    assert!(
+        !configured,
+        "a popup was configured -- if that is the popup fix landing, delete \
+         this test and its backlog entry"
+    );
+    // ...and the compositor survived being asked, which is the part that
+    // would otherwise be a crash rather than a missing feature.
+    assert_eq!(fixture.usable(), WHOLE);
+    assert_eq!(fixture.render().len(), (CANVAS * CANVAS * 4) as usize);
 }
