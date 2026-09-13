@@ -2509,7 +2509,12 @@ review, and why.
   0 *is* the active group, which is why this shipped unnoticed — so the
   regression tests are multi-group and assert on what a client decodes.
   Reproduced on the dev VM before the fix and re-run after
-  (`/home/dev/fix-multilayout.sh`).
+  (`/home/dev/fix-multilayout.sh`), and the real `--tty` round trip above
+  was re-run against the corrected code rather than carried forward.
+
+  The same review round found the identical bug class still live in
+  `flexwm msg key` — see the entry below for what it did and what replaced
+  it.
 
   **Where.** `input.rs`'s `needs_shift` decides whether to hold `Shift_L`
   around a character, and asks Smithay `xkb.raw_syms_for_key_in_layout(...)
