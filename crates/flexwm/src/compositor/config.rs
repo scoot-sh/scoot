@@ -771,4 +771,27 @@ mod tests {
             "clamped to half of the capped gap"
         );
     }
+
+    /// The actual overflow-risking input, not just the visual-consistency
+    /// case above: with an unclamped gap, `focus_ring_width = i32::MAX` at
+    /// `gap = i32::MAX` would clamp to `gap.max(0) / 2 = 1073741823`, and
+    /// `decorations::ring_rects`'s `rect.w + 2 * width` overflows for any
+    /// `rect.w >= 2` -- a debug panic or a release wraparound on every
+    /// render, from a config file alone. Clamping the gap first closes this,
+    /// not just the proportion between the ring and the gap.
+    #[test]
+    fn an_out_of_range_ring_width_is_also_clamped_against_the_capped_gap() {
+        let toml = format!(
+            "[layout]\ngap = {}\n\n[appearance]\nfocus_ring_width = {}\n",
+            i32::MAX,
+            i32::MAX
+        );
+        let file: FileConfig = toml::from_str(&toml).expect("valid toml");
+        let loaded = LoadedConfig::from_file(file);
+        assert_eq!(
+            loaded.appearance.focus_ring_width,
+            Config::MAX_GAP / 2,
+            "clamped to half of the capped gap, not half of i32::MAX"
+        );
+    }
 }

@@ -55,7 +55,12 @@
 //! SIGBUS handler for reads and writes past the backing fd's real size, so a
 //! sparse pool is merely sparse), just unbounded reservation: the same
 //! resource-exhaustion family as the IPC line-length cap and the screenshot
-//! throttle.
+//! throttle. [`MAX_SHM_POOL_BYTES`] bounds this **per pool, not in total** --
+//! nothing here stops one client from opening many pools each just under the
+//! cap (measured: 40 pools at exactly the cap reserve ~20 GiB from a single
+//! connection). Bounding the sum needs per-client accounting this module
+//! doesn't have yet; see `ROADMAP.md`'s Backlog entry for it rather than
+//! treating this fix as closing that case too.
 //!
 //! [`MAX_SHM_POOL_BYTES`] is the bound, and a request past it is **rejected,
 //! not clamped**: a clamp would leave the client and the compositor
@@ -67,18 +72,41 @@
 //! also what upstream itself does for every other bad size.
 //!
 //! Rejecting `wl_shm.create_pool` means returning without initializing the
-//! `New<WlShmPool>` it carries, which is safe for exactly one reason worth
-//! recording rather than re-deriving: an uninitialized object keeps
-//! wayland-backend's `UninitObjectData`, whose `request` is a `panic!`
-//! ("Received a message on an uninitialized object") -- but `post_error`
-//! calls `kill` synchronously, and `Client::next_request` returns `EPIPE` as
-//! soon as `killed` is set, so no further request from that client is ever
-//! dispatched, including one already buffered in the same `write()`. Its
-//! `destroyed` is an empty no-op, so the later `cleanup`/`queue_all_destructors`
-//! pass over that never-initialized object does nothing either, and
-//! `wayland-server`'s `New` has no `Drop` impl to assert on. (All four
-//! checked in wayland-backend 0.3.17 `rs/server_impl/{client,mod}.rs` and
-//! wayland-server 0.31.14 `dispatch.rs`.)
+//! `New<WlShmPool>` it carries, which is safe for reasons worth recording
+//! rather than re-deriving. This isn't a novel pattern -- Smithay's own
+//! `create_pool` handler already does exactly this for `size <= 0`, posting
+//! `InvalidStride` and returning without ever initializing its own `New`
+//! (`0ff0098/src/wayland/shm/handlers.rs:68-70`) -- but two things can go
+//! wrong with it, and both are covered:
+//!
+//! - An uninitialized object keeps wayland-backend's `UninitObjectData`,
+//!   whose `request` is a `panic!` ("Received a message on an uninitialized
+//!   object") -- but `post_error` calls `kill` synchronously, and
+//!   `Client::next_request` returns `EPIPE` as soon as `killed` is set, so no
+//!   further request from that client is ever dispatched, including one
+//!   already buffered in the same `write()`.
+//! - Less obviously: `common_poll.rs`'s dispatch loop has its *own* panic for
+//!   exactly this shape, in the arm that runs right after a request handler
+//!   returns without providing object data for a `New` it was given --
+//!   `dispatch_events_for`'s `(Some(child_id), None)` arm panics unless the
+//!   client is already `killed`. Same synchronous-`kill` fact covers this
+//!   one too, but it's a second, independent panic site with the same
+//!   precondition, not a detail of the first.
+//!
+//! `UninitObjectData::destroyed` is an empty no-op, so the later
+//! `cleanup`/`queue_all_destructors` pass over that never-initialized object
+//! does nothing either, and `wayland-server`'s `New` has no `Drop` impl to
+//! assert on. (All five checked in wayland-backend 0.3.17
+//! `rs/server_impl/{client,mod,common_poll}.rs` and wayland-server 0.31.14
+//! `dispatch.rs`, plus Smithay's own pinned-rev source for the precedent.)
+//!
+//! One more precondition this whole argument leans on, generic to *every*
+//! `post_error` call in this codebase, not just this one: `Client::kill`
+//! runs `ClientData::disconnected` while still holding wayland-backend's
+//! internal state mutex. `ClientState::disconnected` (`state.rs`) is an
+//! empty no-op today, so this is safe -- but a future version of it that
+//! touches the `DisplayHandle` (directly or through `State`) would deadlock
+//! the compositor from inside every `post_error` call, not just this one.
 //!
 //! ## Why it's shaped this way
 //!

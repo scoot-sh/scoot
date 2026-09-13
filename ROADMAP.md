@@ -1203,9 +1203,16 @@ review, and why.
     so no real output has usable area left at it; `Config::clamp_gap` is public
     because two places must agree on it — `validated()`, and `flexwm`'s config
     loader, which sizes the focus ring against half the gap *before* a `World`
-    exists to validate one (sizing it against the raw number would let a ring
-    through that is wider than half the gap the layout actually uses). The doc
-    comment deliberately does **not** claim the cap bounds
+    exists to validate one. This is not just a visual-proportionality fix:
+    sizing the ring against the raw, unclamped gap means `focus_ring_width =
+    i32::MAX` at `gap = i32::MAX` clamps to `gap.max(0) / 2 = 1073741823`
+    (`Appearance::clamped`, unaware the gap itself is out of range), and
+    `decorations::ring_rects`'s `rect.w + 2 * width` then overflows for any
+    `rect.w >= 2` on every single render — a debug panic or a release
+    wraparound, from a config file alone, found by `flexwm-reviewer` while
+    checking this fix and covered by a dedicated test
+    (`an_out_of_range_ring_width_is_also_clamped_against_the_capped_gap`).
+    The doc comment deliberately does **not** claim the cap bounds
     `gap * (windows - 1)` in `column_heights`: that product is bounded by
     window count, not by this.
 
@@ -1224,9 +1231,16 @@ review, and why.
     hand-written blanket `Dispatch` impl (item 7's seam — the pinned rev has no
     `delegate_shm!`). 512 MiB is four full-screen 8K ARGB frames (126.6 MiB
     each) or sixteen 4K ones in a single pool; it is a per-pool bound, not a
-    total, and the entry says so rather than overclaiming (bounding the sum
-    needs per-client accounting, which is the separate connection-cap entry's
-    territory).
+    total, and the entry says so rather than overclaiming. `flexwm-reviewer`
+    confirmed the total is still genuinely unbounded, live: 40 pools at
+    exactly the cap (well within it individually) reserve ~20 GiB from one
+    connection, more than the pre-fix 8-pool/16.1 GiB finding this item was
+    written to close, just needing more requests to get there. Bounding the
+    sum needs per-client accounting this module doesn't have — **not**, as an
+    earlier version of this note said, "the separate connection-cap entry's
+    territory" (that entry is about the IPC control socket's own connection
+    count, unrelated to wayland client accounting). Tracked as its own
+    Backlog entry instead.
 
     **Refused, not clamped**, deliberately: a clamp would leave client and
     compositor disagreeing about the pool's size, so the client would go on
@@ -1280,24 +1294,35 @@ review, and why.
     reach the pool object.
 
     **Benchmarked, because the pool cap adds a second `TypeId` check to the
-    per-request path** (same method as item 7: 1M `wl_surface.damage` requests,
-    compositor `utime+stime` in jiffies, one discarded warm-up rep). Three
-    binaries interleaved — `a7ffef3` (before), this commit, and a probe built
-    from this commit with *only* the new `create_pool` guard call removed —
-    16 reps each: **37.50 / 37.19 / 37.12 jiffies** and **1.595 / 1.596 / 1.607
-    M req/s** (before / after / probe). No measurable cost, as expected from
-    `TypeId::of` being a `const fn` whose comparison folds away after
-    monomorphization.
+    per-request path** — but the real proof `flexwm-reviewer` found is in the
+    object code, not the jiffies: built the release profile with
+    `strip=false` and counted `DisplayHandle::post_error`'s monomorphizations.
+    It exists for exactly **3** concrete types: `WlShmPool` (this guard's
+    resize check), `WlShm` (this guard's `create_pool` check), and
+    `XdgWmBase` (Smithay's own, unrelated). If the `TypeId` comparison this
+    guard adds had *not* folded away after monomorphization, that call would
+    have been instantiated for every interface flexwm dispatches at all
+    (`WlSurface`, `WlPointer`, `WlKeyboard`, `XdgSurface`, `XdgToplevel`,
+    `WlBuffer`, ...) — it isn't. The guard body is compiled out of every
+    interface's dispatch path except the two it actually checks, so a
+    regression on an unrelated request type (like the `wl_surface.damage`
+    flood this item benchmarks) was never possible in the first place. This
+    is the finding; the jiffies below are corroboration, not the proof.
 
-    One methodology note worth keeping, because the first pass got it wrong:
-    a *two*-binary interleave (12 reps each, both orders) showed before 35.33
-    vs after 38.50 jiffies and looked like a real ~9% regression. It did not
-    survive adding the third binary to the rotation, and it cannot be the guard
-    anyway — the probe, which differs from `after` by exactly that one call,
-    measured the same as both. Item 10's recorded "run position is worth about a
-    jiffie on its own" confound is the nearest explanation; either way the
-    controlled three-way numbers are the ones to trust, and a two-way A/B on
-    this VM is not sensitive enough to resolve a 1% effect.
+    Jiffies, for the record (same method as item 7: 1M `wl_surface.damage`
+    requests, compositor `utime+stime`, one discarded warm-up rep, one
+    discarded run of 16 balanced interleaved reps each of `a7ffef3` before
+    and this commit after): before mean 36.19 (sd 4.21), after mean 35.69 (sd
+    2.44) — a difference of 0.41 standard errors, indistinguishable from
+    noise, nominally in the *faster* direction. An earlier, smaller two-binary
+    run (12 reps) had shown before 35.33 vs after 38.50 and looked like a real
+    ~9% regression; it was not reproducible at 16 reps and could not have been
+    the guard regardless, once the object-code argument above is the actual
+    basis for the conclusion rather than this measurement. Recorded as a
+    caution: on this VM, a benchmark below roughly 16 balanced reps is not
+    powerful enough to trust for a single-digit-percent effect, and jiffies
+    alone should not be the only evidence for a hot-path change when a
+    compile-time argument is available instead.
 
     Also verified at the same commit: `cargo test -p flexwm` 200/200 and
     `-p flexwm-core` 45/45 on the dev VM, clippy `-D warnings` clean for both
@@ -1707,7 +1732,15 @@ data-loss/RCE in what was checked.
   the same family of fix (clamp at the read site, with a documented bound)
   and would close the last unbounded input to the layout's arithmetic. A
   realistic bound is whatever DRM itself can report for a mode, with room to
-  spare.
+  spare. Two more facts `flexwm-reviewer` found while reviewing item 12,
+  worth fixing alongside this rather than separately: an absurd `--width`
+  doesn't just overflow directly — since 12(b)'s `min_size` limit is
+  *derived from* the output's usable area, a huge enough output makes that
+  clamp effectively vacuous (the limit becomes ~2×10⁹, which bounds nothing
+  real); and `Rect::inset`'s `self.x + by`/`self.y + by` are unguarded even
+  though its `w`/`h` arms already floor at 0 — the same function, only half
+  hardened.
+- **Config parsing has no recursion-depth guard (LOW).** The `toml` stack
 - **Config parsing has no recursion-depth guard (LOW).** The `toml` stack
   has no explicit guard against deeply nested input; a maliciously deep
   config could stack-overflow-abort the process rather than hit the
@@ -1720,12 +1753,17 @@ data-loss/RCE in what was checked.
   only at the bottom (`.max(0)`); a very large configured gap can overflow
   plain `i32` arithmetic in `layout.rs`/`arrange.rs`. Config-only, same fix
   shape as the `min_size` finding above.
-- **~~No upper bound on shm pool size (LOW)~~ — DONE as item 12(d)**, 512 MiB
-  at both `create_pool` and `resize`, refused rather than clamped. The entry's
-  "a cap on pool size at creation/resize time would close it" is exactly what
-  shipped; what it did not anticipate is that refusing `create_pool` leaves an
-  uninitialized object whose `request` is a `panic!`, which is only safe
-  because `post_error` kills the client synchronously — see item 12(d).
+- **~~No upper bound on *per-pool* shm size (LOW)~~ — DONE as item 12(d)**,
+  512 MiB at both `create_pool` and `resize`, refused rather than clamped.
+  The entry's "a cap on pool size at creation/resize time would close it" is
+  exactly what shipped for one pool; what it did not anticipate is that
+  refusing `create_pool` leaves an uninitialized object whose `request` is a
+  `panic!` (safe, because `post_error` kills the client synchronously — see
+  item 12(d) for the full argument, including a second, independent panic
+  site `flexwm-reviewer` found and confirmed is covered by the same fact).
+  **This closes the per-pool case only — the *total* across many pools from
+  one client is still unbounded, see the new entry directly below**, found
+  by `flexwm-reviewer` while confirming this one.
   Original diagnosis, left as written: found while verifying item 7's
   fix, not by the original audit. `wl_shm_pool.resize(i32::MAX)` (or
   `wl_shm.create_pool(fd, i32::MAX)` directly — reaches the same `mmap`,
@@ -1737,6 +1775,22 @@ data-loss/RCE in what was checked.
   reservation. Same family as the IPC line-length and screenshot-throttling
   findings above (resource exhaustion, not memory corruption) — a cap on
   pool size at creation/resize time would close it.
+
+- **No upper bound on *total* shm reservation per client (LOW/MEDIUM).**
+  Found by `flexwm-reviewer` while confirming item 12(d)'s per-pool cap
+  actually closed the original finding — it doesn't, fully. `dispatch.rs`'s
+  `MAX_SHM_POOL_BYTES` (512 MiB) bounds one pool, but nothing bounds how many
+  pools one client opens: 40 pools each at exactly the cap reserve ~20 GiB
+  from a single connection, more address space than the pre-fix 8-pool/16.1
+  GiB finding item 12(d) was written to close, just needing more requests to
+  get there. Not the separate IPC-connection-cap Backlog entry's territory
+  (that one is about the control socket's own connection count, unrelated to
+  wayland client accounting). Fix direction: per-client cumulative tracking
+  in the same `dispatch.rs` interception point, with its own cap — needs
+  deciding what identifies "one client" for accounting purposes (the
+  `ClientId` `dispatch.rs` already has access to) and where to hang the
+  running total (`ClientState`, most likely, alongside the existing
+  per-client data already tracked there).
 
 - **Suppress the same-VT no-op case of the IPC VT-switch warning (5c).**
   `change_vt`'s `VtSwitchOutcome::Requested` also fires — with a hedged

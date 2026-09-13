@@ -41,11 +41,13 @@ permissions, a same-user peer check, a 1 MiB cap on a single request, and
 screenshots rate-limited to one per connection per frame) whose connections
 are non-blocking end to end, so no client — however slow, chunked or
 unresponsive — can stall the compositor for anyone else. Sizes a client or a
-config supplies are bounded too: `wl_shm` pools are capped at 512 MiB each
-(four full-screen 8K frames' worth — a request past it gets a protocol error
-rather than a multi-gigabyte mapping), a client's declared minimum window size
-can't exceed its output's usable area, and `gap` has an upper bound as well as
-a lower one. A missing `$XDG_RUNTIME_DIR` is a one-line startup error, not a
+config supplies are bounded too: each individual `wl_shm` pool is capped at
+512 MiB (four full-screen 8K frames' worth — a request past it gets a
+protocol error rather than a multi-gigabyte mapping for that pool; the total
+across many pools from one client isn't bounded yet, see `ROADMAP.md`'s
+Backlog), a client's declared minimum window size can't exceed the largest
+output's usable area on each axis, and `gap` has an upper bound as well as a
+lower one. A missing `$XDG_RUNTIME_DIR` is a one-line startup error, not a
 crash. Verified
 end-to-end on every backend — a real
 client maps, tiles, receives synthetic input, and a screenshot proves it. Not
