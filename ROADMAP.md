@@ -2175,10 +2175,12 @@ review, and why.
     the core has: an output holds a `Vec` of workspaces, always ending in one
     empty one, and leaving an emptied workspace drops it and renumbers
     everything after. So the `n`-th handle *is* the `n`-th workspace, named
-    `"1".."N"` with matching 1-D `coordinates` (a bar sorting by name alone
-    puts "10" before "2"), and **no `id` event** — the protocol reserves ids
-    for workspaces stable enough to store preferences against, which these
-    are not. Worked example of why that is honest rather than a compromise:
+    `"1".."N"` with matching 1-D `coordinates` — `[1]..[N]`, the same 1-based
+    number, derived once in `describe` so the two cannot drift (a bar sorting
+    by name alone puts "10" before "2") — and **no `id` event**: the protocol
+    reserves ids for workspaces stable enough to store preferences against,
+    which these are not. Worked example of why that is honest rather than a
+    compromise:
     with `[A][empty]` active 0, `move-window-to-workspace down` collapses back
     to `[A][empty]` active 0, so nothing is published — and that is correct,
     because positionally the user is still on the first workspace.
@@ -2255,9 +2257,11 @@ review, and why.
     **Deliberately deferred, and why:** no IPC action for "focus workspace
     N". It would be a `PROTOCOL_VERSION` bump for `flexwm-ipc` on its own;
     the backlog already wants one for `OutputSnapshot`'s `usable` rect, and
-    the two should land together. Also deferred: per-output workspace groups
-    (one output exists), `urgent`/`hidden` states (nothing in flexwm marks a
-    window urgent, and every workspace here is one a user can switch to).
+    the two should land together — that backlog entry now carries this as a
+    clause, so it is picked up from there rather than from here. Also
+    deferred: per-output workspace groups (one output exists),
+    `urgent`/`hidden` states (nothing in flexwm marks a window urgent, and
+    every workspace here is one a user can switch to).
 
     **Verified on the dev VM's real `--tty` seat at 1600x1000** against
     `2671b4d` with a clean tree (debug binary for the functional runs,
@@ -2293,9 +2297,8 @@ review, and why.
     check (`the background pixel at (3,3) is rgb(0,0,0)`). It is the *cursor*:
     under `--tty` the pointer starts at (0,0) and the built-in arrow is drawn
     there, so the sample point lands on the cursor's black outline (a pixel
-    map of the corner shows the 16x16 arrow; (800,500) and (1590,990) both
-    read the configured background). Identical on the merge base `e2c7971`,
-    so not a regression — see the Backlog entry below.
+    map of the corner shows the 16x16 arrow). Identical on the merge base
+    `e2c7971`, so not a regression — see the Backlog entry below.
 
 ## Backlog (unordered — pick up whenever it fits)
 
@@ -2761,7 +2764,16 @@ review, and why.
   area but did not extend the IPC surface). Adding a `usable` rect to
   `OutputSnapshot` is a one-field, version-bumping change to `flexwm-ipc`;
   it is worth doing alongside whatever else next changes that wire format
-  rather than bumping `PROTOCOL_VERSION` on its own.
+  rather than bumping `PROTOCOL_VERSION` on its own. **Bundle it with an
+  IPC action for "focus workspace N"**, which item 15 deferred for exactly
+  the same reason: `flexwm_core::Action::FocusWorkspaceIndex` already exists
+  (it is what `ext-workspace-v1`'s `activate` drives), so all that is
+  missing is the wire half — a variant on `flexwm-ipc`'s own `Action` mirror
+  carrying the index, its `convert.rs` arm, its `msg action` spelling in
+  `cli.rs`, and its `README.md` row. Until then an agent can only step
+  workspaces one at a time (`focus-workspace up|down`) while a bar speaking
+  `ext-workspace-v1` can jump straight to one. Whoever bumps
+  `PROTOCOL_VERSION` for either should land both.
 - **~~`ext-workspace-v1` protocol support~~ — DONE as item 15.** Original
   entry, left as written: `flexwm-core` already has a real
   workspace model (`Output::workspaces`, `active_workspace`,
@@ -2786,10 +2798,9 @@ review, and why.
   failed`. Pre-existing and backend-specific (`--headless`/`--nested` draw
   no cursor, and both pass), confirmed identical on `e2c7971` and on item
   15's branch — a flaw in the test's sample point, not in the compositor: a
-  pixel map of that corner shows the 16x16 arrow, and (800,500)/(1590,990)
-  both read the configured colour. Fix is a line: sample somewhere the
-  cursor isn't, or move the pointer over IPC before capturing. Left out of
-  item 15 to keep that diff to its own ticket.
+  pixel map of that corner shows the 16x16 arrow. Fix is a line: sample
+  somewhere the cursor isn't, or move the pointer over IPC before capturing.
+  Left out of item 15 to keep that diff to its own ticket.
 - **Nothing bounds how many `ext_workspace_manager_v1` objects one client
   may bind.** Each costs a registry entry and a handle per workspace, and
   every workspace change walks them all. Not specific to this protocol —

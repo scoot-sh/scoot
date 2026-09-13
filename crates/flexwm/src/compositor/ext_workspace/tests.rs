@@ -92,11 +92,16 @@ enum Seen {
 
 /// The full burst for one workspace being created, in the order this
 /// compositor sends it.
-fn created(key: u32, group: u32, name: &str, coordinate: u32, active: bool) -> Vec<Seen> {
+///
+/// `position` is the workspace's 1-based position, and one argument rather
+/// than two on purpose: `name` and `coordinates` are documented as the same
+/// number, and taking them separately is how these tests came to encode an
+/// off-by-one between them without anything failing.
+fn created(key: u32, group: u32, position: u32, active: bool) -> Vec<Seen> {
     vec![
         Seen::Workspace(key),
-        Seen::Name(key, name.to_string()),
-        Seen::Coordinates(key, vec![coordinate]),
+        Seen::Name(key, position.to_string()),
+        Seen::Coordinates(key, vec![position]),
         // `activate` and nothing else: see the module doc on capabilities.
         Seen::Capabilities(key, 1),
         Seen::State(key, if active { ACTIVE } else { INACTIVE }),
@@ -664,7 +669,7 @@ fn binding_describes_every_workspace_and_ends_in_one_done() {
         Seen::OutputEnter(0),
     ];
     // One workspace on a fresh compositor: the trailing empty one, active.
-    expected.extend(created(0, 0, "1", 0, true));
+    expected.extend(created(0, 0, 1, true));
     expected.push(Seen::Done(0));
     assert_eq!(fixture.take_log(), expected);
 }
@@ -712,7 +717,7 @@ fn opening_a_window_adds_the_next_workspace_in_one_batch() {
     // The window landed on workspace 1, which was the trailing empty one, so
     // a new trailing empty one appears behind it. Nothing about workspace 1
     // changed, so it is not restated.
-    let mut expected = created(1, 0, "2", 1, false);
+    let mut expected = created(1, 0, 2, false);
     expected.push(Seen::Done(0));
     assert_eq!(fixture.take_log(), expected);
 }
@@ -796,7 +801,7 @@ fn a_removed_workspace_never_gets_another_event() {
         )),
         "the removed handle was spoken to again: {log:?}"
     );
-    let mut expected = created(2, 0, "2", 1, false);
+    let mut expected = created(2, 0, 2, false);
     expected.push(Seen::Done(0));
     assert_eq!(log, expected);
 }
@@ -831,8 +836,8 @@ fn a_second_manager_on_the_same_client_is_told_the_same_state() {
         Seen::GroupCapabilities(1, 0),
         Seen::OutputEnter(1),
     ];
-    expected.extend(created(2, 1, "1", 0, false));
-    expected.extend(created(3, 1, "2", 1, true));
+    expected.extend(created(2, 1, 1, false));
+    expected.extend(created(3, 1, 2, true));
     expected.push(Seen::Done(1));
     assert_eq!(fixture.take_log(), expected);
     assert_eq!(fixture.registered_managers(), 2);
@@ -1050,10 +1055,10 @@ fn two_clients_are_kept_in_step_independently() {
     let second_log = fixture.take_log_on(second);
     // Same change, same events, each against its own handle numbering -- the
     // second client's first workspace handle is its key 0, not 1.
-    let mut expected_first = created(1, 0, "2", 1, false);
+    let mut expected_first = created(1, 0, 2, false);
     expected_first.push(Seen::Done(0));
     assert_eq!(first_log, expected_first);
-    let mut expected_second = created(1, 0, "2", 1, false);
+    let mut expected_second = created(1, 0, 2, false);
     expected_second.push(Seen::Done(0));
     assert_eq!(second_log, expected_second);
 

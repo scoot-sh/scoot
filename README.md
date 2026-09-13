@@ -267,7 +267,8 @@ What a client sees:
   binds `wl_output` after the manager still gets an `output_enter` for it, so
   registry order doesn't matter.
 - **One `ext_workspace_handle_v1` per workspace**, named `"1"`, `"2"`, … in
-  layout order, with matching one-dimensional `coordinates` (sort by those,
+  layout order, with matching one-dimensional `coordinates` — the workspace
+  named `"1"` reports `[1]`, `"2"` reports `[2]`, and so on (sort by those,
   not by name — `"10"` sorts before `"2"` as a string). The active one carries
   the `active` state bit; nothing else is ever set.
 - **`activate` is the only capability advertised**, on workspaces. The group

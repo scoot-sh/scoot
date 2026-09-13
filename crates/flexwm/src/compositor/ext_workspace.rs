@@ -32,8 +32,10 @@
 //!   window closing.
 //! - **`name` is the 1-based position** ("1", "2", ...), which is what a bar
 //!   displays and what `flexwm msg action focus-workspace` counts in.
-//! - **`coordinates` is that same position, 1-D**, which the protocol
-//!   explicitly allows for compositors that simply number their workspaces.
+//! - **`coordinates` is that same 1-based position**, as a one-element array
+//!   (`"1"` is `[1]`), which the protocol explicitly allows for compositors
+//!   that simply number their workspaces -- it requires only that coordinates
+//!   be unique within a group, not that they start anywhere in particular.
 //!   It is sent because a bar sorting by `name` alone sorts "10" before "2".
 //! - **A workspace disappearing is the list getting shorter**, never a hole
 //!   in the middle: the tail handles are `removed`, and what was at index 2
@@ -248,8 +250,19 @@ impl Manager {
                         );
                         // Closed even though the batch is incomplete, so a
                         // client waiting for `done` before it redraws is left
-                        // out of date rather than waiting forever.
+                        // out of date rather than waiting forever, then
+                        // `finished` so it knows nothing more is coming --
+                        // dropping the entry below only stops *this* side
+                        // tracking it, the client's object would otherwise
+                        // dangle with no events for the rest of its life.
+                        // `finished` is a destructor event, so nothing may be
+                        // sent on the manager after it; the `destroyed`
+                        // callback it queues runs later (wayland-backend
+                        // defers destructors to its next cleanup, never
+                        // re-entrantly through this `retain_mut`) and re-runs
+                        // the same idempotent `retain`.
                         self.manager.done();
+                        self.manager.finished();
                         return false;
                     };
                     debug_assert_eq!(
@@ -408,8 +421,13 @@ impl State {
         let Ok(group) = created else {
             tracing::warn!("could not create an ext_workspace_group_handle_v1");
             // Still closed with a `done`: a client that waits for one before
-            // drawing would otherwise wait forever.
+            // drawing would otherwise wait forever. `finished` for the same
+            // reason as in `Manager::apply`: this manager is never registered,
+            // so it would never be sent anything again, and `finished` is the
+            // protocol's only way to say so. Destructor event -- nothing may
+            // be sent on `manager` after it, hence the immediate return.
             manager.done();
+            manager.finished();
             return;
         };
         manager.workspace_group(&group);
@@ -431,9 +449,12 @@ impl State {
             );
             let Ok(handle) = created else {
                 tracing::warn!(index, "could not create an ext_workspace_handle_v1");
-                manager.done();
                 // Deliberately not registered: a manager holding a short list
-                // would address every later workspace by the wrong index.
+                // would address every later workspace by the wrong index. So,
+                // as above, the incomplete batch is closed and then the object
+                // is finished rather than left silent forever.
+                manager.done();
+                manager.finished();
                 return;
             };
             manager.workspace(&handle);
@@ -455,22 +476,26 @@ impl State {
 /// where it sits, what may be asked of it, and whether it is active.
 fn describe(handle: &ExtWorkspaceHandleV1, index: usize, active: bool) {
     // 1-based, matching how a bar labels workspaces and how a user counts
-    // them. No `id` event: see this module's doc.
-    handle.name(index.saturating_add(1).to_string());
-    handle.coordinates(coordinates(index));
+    // them. No `id` event: see this module's doc. Derived once and used for
+    // both events on purpose: `name` and `coordinates` are documented as the
+    // same number, and two independent expressions of "1-based index" is how
+    // they silently drifted apart once already.
+    let position = index.saturating_add(1);
+    handle.name(position.to_string());
+    handle.coordinates(coordinates(position));
     handle.capabilities(WorkspaceCapabilities::Activate);
     handle.state(workspace_state(active));
 }
 
-/// A workspace's position as this protocol's `coordinates` array: one
+/// A workspace's 1-based position as this protocol's `coordinates` array: one
 /// dimension, native byte order, which is how a Wayland `array` of `uint`s is
 /// carried.
-fn coordinates(index: usize) -> Vec<u8> {
+fn coordinates(position: usize) -> Vec<u8> {
     // Saturating rather than `as`: the cast is on a number the core owns, so
     // it cannot realistically reach `u32::MAX` workspaces, but a silent wrap
     // would put two workspaces at the same coordinate, which the protocol
     // forbids within a group.
-    let position = u32::try_from(index).unwrap_or(u32::MAX);
+    let position = u32::try_from(position).unwrap_or(u32::MAX);
     position.to_ne_bytes().to_vec()
 }
 
