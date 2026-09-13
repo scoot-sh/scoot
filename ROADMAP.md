@@ -1628,8 +1628,11 @@ review, and why.
   semantics), and the cycle above re-demonstrates both directly. The
   historical runs are covered too, without re-running them: seatd logs
   `Could not make device fd drm master: ...` whenever its own root-side
-  `drm_set_master` fails, and `journalctl -u seatd` contains no such line for
-  any run on this VM — while those same runs logged `drm: modeset (full
+  `drm_set_master` fails, and
+  `journalctl -u seatd | grep -c 'Could not make device fd drm master'`
+  returns **0** across this VM's entire persistent journal — 2072 seatd lines
+  and 323 `Opened client` events, reaching back to its first boot at
+  2026-09-11 15:16:57 — while those same runs logged `drm: modeset (full
   commit)` with no error, and `DRM_IOCTL_MODE_ATOMIC` is `DRM_MASTER`-gated by
   `drm_ioctl.c`, so the kernel would have returned `EACCES` had master not
   been held. One limit, stated rather than papered over: nothing here is a
