@@ -780,7 +780,7 @@ review, and why.
     bound costs the flooding client about 9% of its own throughput (423 MB vs
     386 MB of requests pushed in 8s) and gives the innocent one 90x the
     round-trips at 65x better p99. Reproduced on real `--tty` hardware to the
-    same figures (p50 355us, p99 546us), so it owes nothing to the backend.
+    same figures (p50 358us, p99 560us), so it owes nothing to the backend.
 
     The test that covers this had to be written at that scale *and* with that
     line length: at 600 19-byte `version` requests it passes either way,
@@ -797,6 +797,33 @@ review, and why.
     The extra `EAGAIN` syscall per request was real and provable by inspection,
     and removing it was right, but its cost was never measured apart from the
     artifact.
+
+    **And one more finding, introduced by that very fix.** Hoisting
+    `flush_clients()` out of the per-line loop left two exits that skipped it:
+    `serve` returning `Step::Close` -- the `wait-idle` hand-off, or a reply that
+    could not be written -- and a failed read, both of which returned straight
+    out of `step`. `wait-idle` makes that a correctness bug rather than a
+    latency one, on exactly the pipeline an agent writes: `type` and `wait-idle`
+    in one write. The keystroke's wayland messages are queued by the time
+    `serve` returns, the early return skipped the flush, and nothing else
+    flushes them -- the frame timer's `render()` returns immediately unless
+    something marked the screen dirty, and injected input does not. So the
+    client could not have redrawn for a key it never received, and
+    `idle_outcome` answered `idle` over a screen that had not changed yet: the
+    stale-idle race its own doc comment is about. Every exit now breaks rather
+    than returns, `served` is set *before* `serve` runs (a lone `wait-idle`
+    serves one request and then closes), and the flush is the single point they
+    all pass through.
+
+    Shown on hardware rather than argued, against a release build of the same
+    tree with that one exit returning early again: spawn `foot`, let it settle,
+    capture, then one 106-byte `write()` of `type 'echo
+    pipelined-flush-probe'` + `wait_idle quiet_ms=300`, then capture again the
+    moment the idle answer comes back. `magick compare -metric AE` between the
+    two captures: **586 pixels changed with the fix, 0 without it** -- and 586
+    either way once the screen had settled, so the keystroke was never lost,
+    only late. `waited_ms` was 305 in both runs: the clock cannot tell the two
+    apart, which is why this is measured on the screen.
 
     **Deliberately out of scope, named because they are adjacent:**
     `wait-idle` is still terminal for its connection, so a request pipelined
@@ -817,7 +844,7 @@ review, and why.
     acted on (the queue cannot drain), which is worse. Strictly better than the
     old behaviour, where that same case froze the whole compositor.
 
-    **Tests: 46 new (174 total, against 128 on the merge base).** Split per
+    **Tests: 47 new (175 total, against 128 on the merge base).** Split per
     module: `line/tests.rs` (partial lines, the cap across reads, the three
     end-of-stream cases, the read budget), `outbound/tests.rs` (partial writes,
     reply ordering, what the mark measures, a drained queue freeing its
@@ -827,7 +854,17 @@ review, and why.
     `connection/tests.rs`, which drives a real `State` through a real
     `EventLoop` for all three symptoms plus the per-wakeup bound, the
     `wait-idle` hand-off, the screenshot limiter across a pipelined write, the
-    graceful close and the interest registration. Those hand `accept()` one end
+    graceful close, the interest registration and the per-wakeup wayland flush.
+    That last one needs a wayland client to observe, and uses the cheapest thing
+    that can be one: a raw socket handed to `insert_client`, one `get_registry`
+    written by hand, and then a new global created to queue a
+    `wl_registry.global` for it -- which nothing flushes until something
+    chooses to. A single `wait-idle`, with nothing pipelined ahead of it, is
+    then the only thing that can have flushed it. (A keystroke would be the
+    more literal fixture, but it needs keyboard focus, i.e. a mapped toplevel
+    and a real toolkit client; what is under test is the flush, not what filled
+    the buffer, and the hardware run above covers the literal case.) Those hand
+    `accept()` one end
     of a socket pair rather than going through the listener -- the peer is then
     this process (so the uid check passes) and, the reason that matters,
     `SO_SNDBUF` can be shrunk on the compositor's end before it is handed over,
@@ -836,7 +873,7 @@ review, and why.
     one thread, so a test that *would* block hangs rather than fails -- which
     is the correct outcome, and is what the negative controls below exercise.
 
-    **Eleven negative controls, each a one-line mutation, run on the dev VM;
+    **Thirteen negative controls, each a one-line mutation, run on the dev VM;
     every one failed a test that passes against the real code**, which is what
     makes the suite non-vacuous rather than merely green. Leaving the accepted
     socket blocking hangs the partial-line test, and separately the
@@ -853,7 +890,11 @@ review, and why.
     logic -- give up on the first stalled tick, never record progress, never
     start the clock when the answer is queued -- fails between one and three of
     the four tests written for it, including both mutations the review found
-    passing everything. Raw output in PR #15.
+    passing everything. And the two ways of losing the per-wakeup flush --
+    returning from the serve loop instead of breaking out of it, and marking a
+    request served only after `serve` returns -- each fail the flush test,
+    which is what makes both halves of that fix load-bearing rather than one
+    half plus a tidy-up. Raw output in PR #15.
 
     One change is deliberately **not** covered by a test, and says so in its
     comment: resetting `sent` alongside emptying the buffer in
@@ -862,38 +903,45 @@ review, and why.
     would catch a future violation.
 
     **Hardware-verified on real `--tty`** (dev VM, virtio-gpu KMS at
-    1600x1000, release binary, re-run in full against `511ff8d` after the
-    fairness fix changed the serve loop again): `/proc/<pid>/wchan` read
+    1600x1000, release binary, re-run in full at `526f212` -- both review
+    rounds changed the serve loop, so the earlier runs' cache keys are stale and
+    every figure here is from the last one): `/proc/<pid>/wchan` read
     `do_epoll_wait` throughout -- never `unix_stream_read_generic`, the
     observable this item was diagnosed by. While one client held
-    `{"type":"vers` for 20 seconds: three round-trips served (307/147/133us),
-    `flexwm msg windows`, a full 33 KB screenshot and a `wait-idle`
-    (`waited_ms: 206`) all answered, and the compositor burned 0 jiffies over
+    `{"type":"vers` for 20 seconds: three round-trips served (411/264/421us),
+    `flexwm msg windows`, a full 33,476-byte screenshot and a `wait-idle`
+    (`waited_ms: 201`) all answered, and the compositor burned 0 jiffies over
     the whole window. Four clients holding partial lines simultaneously were
-    each answered their own reply. A client that wrote 10,887 bytes of requests
+    each answered their own reply. A client that wrote 17,157 bytes of requests
     and read none (back-pressure engaged -- its own writes stopped being
-    accepted) delayed nobody, and when it finally read: 573 reply lines, **0
-    damaged**, exactly the 573 expected, so an interleaved write never
-    corrupted the framing. The flood-versus-round-trip figures above were taken
-    here too, to the same numbers as headless. Idle CPU 0 jiffies over 10s both
-    before and after everything, so neither the interest switching nor the read
-    budget introduced a spin. The 1 MiB request cap re-verified against a
-    release binary over a real socket: the flood dies at 1,245,184 bytes, the
-    refusal arrives intact first, RSS stays at 10,676 kB (VmPeak 21,520 kB --
-    item 9's figures), the compositor survives and a fresh connection still
-    works.
+    accepted) delayed nobody, and when it finally read: 45,150 bytes, 903 reply
+    lines, **0 damaged**, exactly the 903 expected, so an interleaved write
+    never corrupted the framing. The flood-versus-round-trip figures above hold
+    here too (re-measured at this SHA: quiet p50 119us/p99 238us over 25,149
+    round-trips, flooded p50 358us/p90 402us/p99 560us over 16,502 while the
+    flooder pushed 379.6 MB in 8s). Idle CPU 0 jiffies over 10s both before and
+    after everything, so neither the interest switching nor the read budget
+    introduced a spin; one WARN in the whole log, smithay's own
+    `Failed to destroy old mode property blob` at modeset. The 1 MiB request cap
+    re-verified against a release binary over a real socket: the flood dies at
+    1,245,184 bytes, the refusal arrives intact first, RSS stays at 10,676 kB
+    (VmPeak 21,520 kB -- item 9's figures), the compositor survives and a fresh
+    connection still works.
 
     **Benchmarked** (item 9's method: release, 50,000 `version` round-trips
     over one connection, compositor jiffies plus us/round-trip) **with the run
-    order balanced** -- 28 reps per side, 14 with the pre-change binary first
-    and 14 with it second, because position within a rep turned out to be worth
-    more than the change being measured. Pooled: **median 126.10us/70 jiffies
-    after versus 126.70us/69 before**, means 127.10 vs 126.61us and 69.54 vs
-    69.18 jiffies. No measurable difference on the uncontended round-trip path,
-    which is the path the fairness budget adds a comparison to.
+    order balanced**, because position within a rep turned out to be worth more
+    than the change being measured. Re-run at `526f212`: 20 reps per side, 10
+    with the pre-change binary first and 10 with it second. Pooled medians:
+    **126.84us/69 jiffies after versus 126.52us/69.5 before** (means 123.08 vs
+    127.66us, pulled by two outlying fast runs on the after side -- 79.2 and
+    92.3us -- which is why medians). No measurable difference on the
+    uncontended round-trip path, which is the path the fairness budget adds a
+    comparison to, and the same answer the first round's 28-reps-per-side run
+    gave.
 
     `scripts/smoke-test.sh` green under `--headless` and `--nested` (under
-    `cage`), 174/174 tests, clippy and fmt clean. The whole compositor is
+    `cage`), 175/175 tests, clippy and fmt clean. The whole compositor is
     `#[cfg(target_os = "linux")]`, so none of this can be verified from the Mac
     host -- every figure here is from the dev VM guest.
 
