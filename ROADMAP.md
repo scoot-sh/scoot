@@ -2260,21 +2260,33 @@ review, and why.
     window urgent, and every workspace here is one a user can switch to).
 
     **Verified on the dev VM's real `--tty` seat at 1600x1000** against
-    `b1ecae7` (release build for the benchmark, debug for the functional
-    runs), driven by a throwaway `wayland-client` probe in `/tmp` (nothing
+    `2671b4d` with a clean tree (debug binary for the functional runs,
+    release for the benchmark; an earlier identical pass ran at `b1ecae7`
+    and was re-captured after each later commit rather than carried over),
+    driven by a throwaway `wayland-client` probe in `/tmp` (nothing
     committed): `wayland-info` advertises `ext_workspace_manager_v1 v1`; a
     client that binds the manager before `wl_output` gets its `output_enter`
     in a second `done` batch; a client-driven `activate`+`commit` on the
-    empty workspace changed **36,336** screenshot pixels and switching back
+    empty workspace changed **36,336.8** screenshot pixels and switching back
     reproduced the original frame exactly (**0** different); 20,000 rounds of
-    `activate`+`deactivate`+`remove`+two `commit`s took the compositor 184
-    jiffies over 2.15s and left it answering IPC normally. Benchmarked with a
-    map/destroy churn client (400 rounds, every one changing the workspace
-    list twice), 6 interleaved reps of each arm: pre-change binary **2.83**
-    jiffies mean (1–5), this branch with no client bound **3.0** (2–4), and
-    with a bar actually bound **5.0** (4–6) — i.e. no measurable cost when
-    nothing is listening, and the cost with a listener is the events
-    themselves.
+    `activate`+`deactivate`+`remove`+two `commit`s took the compositor **191
+    jiffies over 2.24s** and left it answering IPC normally; `kill -9` on one
+    of two bound clients left the survivor receiving both subsequent
+    switches, with no error or panic in the log. Raw output for all of it is
+    in PR #24's description.
+
+    Benchmarked with a map/destroy churn client (400 rounds, every one
+    changing the workspace list twice — the worst case for this code, not the
+    quiet one), release builds, `--headless` 1600x1000, compositor CPU in
+    jiffies. **12 reps with the arm order reversed halfway**, because the
+    first six showed what looked like a ~5% wall-clock gap and the reversal
+    proved it was run position: the one 55ms outlier moved to whichever
+    binary ran first. Pre-change (`e2c7971`) **2.83** jiffies mean /
+    **115.2ms**, this branch with no client bound **2.75** / **114.8ms** —
+    indistinguishable. With a bar actually bound (6 reps): **5.67** jiffies /
+    **178.1ms**, which is the protocol events themselves (an object created
+    and six events sent per workspace appearing, and a client woken per
+    batch), not overhead on the quiet path.
 
     **Pre-existing, found while bug-bashing, not fixed here:**
     `scripts/smoke-test.sh` under `MODE=--tty` fails its background-colour
