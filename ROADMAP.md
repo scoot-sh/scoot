@@ -780,7 +780,7 @@ review, and why.
     bound costs the flooding client about 9% of its own throughput (423 MB vs
     386 MB of requests pushed in 8s) and gives the innocent one 90x the
     round-trips at 65x better p99. Reproduced on real `--tty` hardware to the
-    same figures (p50 358us, p99 560us), so it owes nothing to the backend.
+    same figures (p50 353us, p99 553us), so it owes nothing to the backend.
 
     The test that covers this had to be written at that scale *and* with that
     line length: at 600 19-byte `version` requests it passes either way,
@@ -822,7 +822,7 @@ review, and why.
     moment the idle answer comes back. `magick compare -metric AE` between the
     two captures: **586 pixels changed with the fix, 0 without it** -- and 586
     either way once the screen had settled, so the keystroke was never lost,
-    only late. `waited_ms` was 305 in both runs: the clock cannot tell the two
+    only late. `waited_ms` was ~305 in both runs: the clock cannot tell the two
     apart, which is why this is measured on the screen.
 
     **Deliberately out of scope, named because they are adjacent:**
@@ -892,9 +892,10 @@ review, and why.
     the four tests written for it, including both mutations the review found
     passing everything. And the two ways of losing the per-wakeup flush --
     returning from the serve loop instead of breaking out of it, and marking a
-    request served only after `serve` returns -- each fail the flush test,
-    which is what makes both halves of that fix load-bearing rather than one
-    half plus a tidy-up. Raw output in PR #15.
+    request served only after `serve` returns -- each fail the flush test and,
+    run against the whole suite, only that test (174 passed, 1 failed, both
+    times), which is what makes both halves of that fix load-bearing rather than
+    one half plus a tidy-up. Raw output in PR #15.
 
     One change is deliberately **not** covered by a test, and says so in its
     comment: resetting `sent` alongside emptying the buffer in
@@ -903,42 +904,43 @@ review, and why.
     would catch a future violation.
 
     **Hardware-verified on real `--tty`** (dev VM, virtio-gpu KMS at
-    1600x1000, release binary, re-run in full at `526f212` -- both review
-    rounds changed the serve loop, so the earlier runs' cache keys are stale and
-    every figure here is from the last one): `/proc/<pid>/wchan` read
+    1600x1000, release binary, **re-run in full at `41b7a50`** -- both review
+    rounds changed the serve loop, so every earlier run's cache key is stale and
+    every figure in this entry is from the last one): `/proc/<pid>/wchan` read
     `do_epoll_wait` throughout -- never `unix_stream_read_generic`, the
     observable this item was diagnosed by. While one client held
-    `{"type":"vers` for 20 seconds: three round-trips served (411/264/421us),
+    `{"type":"vers` for 20 seconds: three round-trips served (361/189/196us),
     `flexwm msg windows`, a full 33,476-byte screenshot and a `wait-idle`
-    (`waited_ms: 201`) all answered, and the compositor burned 0 jiffies over
+    (`waited_ms: 203`) all answered, and the compositor burned 0 jiffies over
     the whole window. Four clients holding partial lines simultaneously were
-    each answered their own reply. A client that wrote 17,157 bytes of requests
+    each answered their own reply. A client that wrote 14,136 bytes of requests
     and read none (back-pressure engaged -- its own writes stopped being
-    accepted) delayed nobody, and when it finally read: 45,150 bytes, 903 reply
-    lines, **0 damaged**, exactly the 903 expected, so an interleaved write
+    accepted) delayed nobody, and when it finally read: 37,200 bytes, 744 reply
+    lines, **0 damaged**, exactly the 744 expected, so an interleaved write
     never corrupted the framing. The flood-versus-round-trip figures above hold
-    here too (re-measured at this SHA: quiet p50 119us/p99 238us over 25,149
-    round-trips, flooded p50 358us/p90 402us/p99 560us over 16,502 while the
-    flooder pushed 379.6 MB in 8s). Idle CPU 0 jiffies over 10s both before and
+    here too (re-measured at this SHA: quiet p50 125us/p99 244us over 23,180
+    round-trips, flooded p50 353us/p90 384us/p99 553us over 17,943 while the
+    flooder pushed 390.6 MB in 8s). Idle CPU 0 jiffies over 10s both before and
     after everything, so neither the interest switching nor the read budget
     introduced a spin; one WARN in the whole log, smithay's own
     `Failed to destroy old mode property blob` at modeset. The 1 MiB request cap
-    re-verified against a release binary over a real socket: the flood dies at
-    1,245,184 bytes, the refusal arrives intact first, RSS stays at 10,676 kB
-    (VmPeak 21,520 kB -- item 9's figures), the compositor survives and a fresh
-    connection still works.
+    re-verified against the same release binary over a real socket: the flood
+    dies at 1,114,112 bytes, the refusal arrives intact first, RSS stays at
+    10,668 kB (VmPeak 21,520 kB -- item 9's figures), the compositor survives
+    and a fresh connection still works (195us).
 
     **Benchmarked** (item 9's method: release, 50,000 `version` round-trips
     over one connection, compositor jiffies plus us/round-trip) **with the run
     order balanced**, because position within a rep turned out to be worth more
-    than the change being measured. Re-run at `526f212`: 20 reps per side, 10
+    than the change being measured. Re-run at `41b7a50`: 20 reps per side, 10
     with the pre-change binary first and 10 with it second. Pooled medians:
-    **126.84us/69 jiffies after versus 126.52us/69.5 before** (means 123.08 vs
-    127.66us, pulled by two outlying fast runs on the after side -- 79.2 and
-    92.3us -- which is why medians). No measurable difference on the
-    uncontended round-trip path, which is the path the fairness budget adds a
-    comparison to, and the same answer the first round's 28-reps-per-side run
-    gave.
+    **126.03us/71 jiffies after versus 127.57us/71 before**. Three of the 40
+    runs came in under 110us (79.7, 81.5, 88.3) -- one on the pre-change side,
+    two on the other, which is what makes them VM scheduling noise rather than
+    a property of either binary, and why this is reported as medians. No
+    measurable difference on the uncontended round-trip path, which is the path
+    the fairness budget adds a comparison to; the same answer the first round's
+    28-reps-per-side run gave, with the sign flipped.
 
     `scripts/smoke-test.sh` green under `--headless` and `--nested` (under
     `cage`), 175/175 tests, clippy and fmt clean. The whole compositor is
