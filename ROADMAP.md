@@ -2994,3 +2994,45 @@ data-loss/RCE in what was checked.
   then `Named` draws item 13's configurable triangle whatever shape was
   asked for, which is at least a visible, user-tunable pointer rather than a
   wrong-shaped fixed one.
+
+- **Rename the project from `flexwm` to `flex`** (crates, binary, GitHub
+  repo). User request, 2026-09-13 — not scoped or scheduled yet, recorded
+  here so it doesn't get lost. This touches more than a find-and-replace:
+
+  - **Crates.** All three workspace members are named for it:
+    `crates/flexwm` (binary, package `flexwm`), `crates/flexwm-core`
+    (platform-independent state/layout), `crates/flexwm-ipc` (the IPC
+    protocol crate). Renaming the packages means every internal
+    `flexwm-core = { path = ... }`/`flexwm-ipc = { path = ... }` dependency
+    line, every `use flexwm_core::...`/`use flexwm_ipc::...` import, and the
+    binary target name (`cargo build -p flexwm` → whatever the new package
+    is called) all move together — a mechanical but wide-reaching change,
+    not a one-line edit.
+  - **The GitHub repo** is `yackey-labs/flexwm`. A GitHub rename leaves a
+    redirect from the old URL, but every local clone's `origin` remote
+    still points at the old name until updated by hand (`git remote
+    set-url`), and anything that hardcodes the URL (this repo's own
+    `Cargo-Session`/attribution lines in past commits, any external bookmark
+    or CI config) won't follow the redirect automatically. Coordinate the
+    repo rename with updating local remotes in the same sitting, not as an
+    afterthought.
+  - **Everything textual**: `README.md`, `ROADMAP.md` itself (including
+    every historical entry that names `flexwm` — decide whether history
+    gets rewritten or just new entries use the new name), `vm/README.md`,
+    `vm/configuration.nix` (service/user names, paths), `HANDOFF.md`,
+    `scripts/smoke-test.sh` and any other script that invokes the binary by
+    name, and the `flexwm msg`/`flexwm --tty`/etc. CLI surface itself (which
+    is also user-facing documentation, per this project's "compositor, not
+    window manager"-style naming rules in `CLAUDE.md`).
+  - **Open question, not yet decided**: do the `.claude/agents/*.md` role
+    files (`flexwm-implementer.md`, `flexwm-reviewer.md`,
+    `flexwm-orchestrator.md`) and the subagent names they're invoked under
+    rename too, for consistency? They're project tooling rather than
+    product surface, so this could reasonably go either way — flag it for a
+    decision when this is actually scoped, don't assume either answer here.
+  - **Worth a quick check before committing to `flex`**: whether that name
+    collides with anything relevant (an existing crates.io crate, if this
+    is ever meant to be published; an existing well-known `flex` CLI tool
+    a user might have on `$PATH`, e.g. GNU flex the lexer generator, which
+    is a real, extremely common collision to be aware of before locking in
+    a bare `flex` binary name).
