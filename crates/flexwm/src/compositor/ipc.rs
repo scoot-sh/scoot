@@ -13,7 +13,8 @@
 //!   wakeup ([`line::LineRead::Incomplete`]);
 //! - one wakeup answers *every* request already buffered, not just the first,
 //!   because a level-triggered readiness source will not fire again for bytes
-//!   that have already left the kernel;
+//!   that have already left the kernel -- and stops there, so whatever is still
+//!   in the kernel waits its turn behind every other source;
 //! - a reply the socket will not take in one go waits in [`outbound::Outbound`]
 //!   and goes out when the event loop reports the socket writable, with the
 //!   connection's read interest dropped while too much is queued so it cannot

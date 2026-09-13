@@ -24,23 +24,6 @@ use crate::compositor::headless::FRAME_INTERVAL;
 #[cfg(test)]
 mod tests;
 
-/// How many requests one connection may be answered in a single wakeup before
-/// the event loop gets its thread back.
-///
-/// Without a bound, a client that pipelines tens of thousands of requests into
-/// one write is answered all of them in one callback -- each an action, a
-/// layout recompute or a snapshot -- while wayland dispatch, input and the
-/// frame timer wait. The old code's accidental bound was one line per wakeup,
-/// which is what made a pipelined second request go unanswered at all.
-///
-/// This is deliberately a *soft* bound: it only takes effect once the
-/// connection's read buffer is empty (see [`Lines::buffered`]), because
-/// stopping with bytes still in that userspace buffer would strand them -- a
-/// level-triggered source only refires for what is still in the kernel. So the
-/// real bound is "64 requests, then the rest of whatever read chunk is already
-/// in hand".
-const MAX_REQUESTS_PER_WAKEUP: usize = 64;
-
 /// Wraps an accepted socket up as an event source ready to be inserted.
 ///
 /// The socket must already be non-blocking; [`super::accept`] does that, and
@@ -221,7 +204,6 @@ impl Connection {
         if self.closing {
             return self.close_when_drained();
         }
-        let mut served = 0usize;
         loop {
             // Back-pressure, not a refusal: this connection stops being read
             // until its client catches up, and nothing is dropped or closed.
@@ -231,12 +213,6 @@ impl Connection {
             // can bound how much one wakeup queues up. See
             // `outbound::HIGH_WATER_BYTES`.
             if self.outbound.over_high_water() {
-                break;
-            }
-            // Fairness, once this connection has had its turn -- but only when
-            // stopping is safe, i.e. when nothing it has already read is left
-            // sitting in userspace. See `MAX_REQUESTS_PER_WAKEUP`.
-            if served >= MAX_REQUESTS_PER_WAKEUP && self.lines.buffered().is_empty() {
                 break;
             }
             match self.lines.next(MAX_REQUEST_BYTES) {
@@ -265,9 +241,28 @@ impl Connection {
                     break;
                 }
             }
-            served += 1;
             if let Step::Close = self.serve(state) {
                 return Step::Close;
+            }
+            // One read buffer's worth per wakeup, and not a byte more. Both
+            // halves of that are deliberate:
+            //
+            // - Requests already in *this* buffer have to be answered now.
+            //   They have left the kernel, so a level-triggered source will
+            //   never report them again; leaving one here is the pipelining bug
+            //   this module exists to fix.
+            // - Requests still in the *kernel* are better left there. They will
+            //   be reported again on the next turn of the loop, and stopping
+            //   lets every other source -- input, the frame timer, wayland --
+            //   have its turn in between, which is what bounds how long one
+            //   connection can hold the only thread the compositor has.
+            //
+            // It also keeps the common case (one request, one reply) at one
+            // `read` per wakeup rather than two: reading again to discover that
+            // nothing is buffered costs an `EAGAIN` syscall per request, which
+            // is measurable (~2 jiffies per 50,000 round-trips).
+            if self.lines.buffered().is_empty() {
+                break;
             }
         }
         if self.closing {

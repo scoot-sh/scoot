@@ -193,6 +193,8 @@ impl<R: Read> Lines<R> {
 
 /// What `BufReader::new` itself uses. Named here so [`Lines::new`] and
 /// [`Lines::with_capacity`] are visibly the same function with one argument
-/// defaulted -- and because one test asserts against it, to keep itself from
-/// quietly stopping to exercise what it is for if this ever changes.
+/// defaulted -- and because it is load-bearing elsewhere: it is how much one
+/// connection can be served in a single event-loop wakeup (see
+/// `Connection::step`), and one test asserts against it so it cannot quietly
+/// stop exercising what it is for.
 pub(super) const DEFAULT_CAPACITY: usize = 8 * 1024;
