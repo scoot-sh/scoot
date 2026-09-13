@@ -243,11 +243,13 @@ impl Appearance {
     /// - **It keeps the one allocation this value drives small and far from
     ///   overflow.** The bitmap is `size * size * 4` bytes, built once at
     ///   startup and copied once more by `MemoryRenderBuffer::from_slice`:
-    ///   256 KiB at this cap, against 17.2 GB at `i32::MAX` -- where the
-    ///   product does not merely allocate absurdly but overflows `i32`
-    ///   outright (a debug panic, a wrapped and therefore wrong length in
-    ///   release), both inside `generate_bitmap` and inside Smithay's own
-    ///   `stride * size.h` length assertion.
+    ///   256 KiB at this cap. Without a cap that product is not merely an
+    ///   absurd allocation but **overflows `i32` outright** -- it already does
+    ///   at `size = 23171` (`23171 * 23171 * 4` is past `i32::MAX`), long
+    ///   before anything a config could plausibly spell -- which is a debug
+    ///   panic and a wrapped, therefore wrong, length in release, both inside
+    ///   `generate_bitmap` and inside Smithay's own `stride * size.h` length
+    ///   assertion.
     pub const MAX_CURSOR_SIZE: i32 = 256;
 
     /// Brings a configured cursor size into the range the bitmap path is safe

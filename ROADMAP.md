@@ -1473,20 +1473,36 @@ review, and why.
     state is shared between the two paths.
 
     **Benchmarked** (same jiffies-delta method as items 5/8; release builds of
-    `8446758` (base) and `34514a9` (new), interleaved per rep so VM drift hits
-    every arm). The change cannot cost anything per frame in principle — the
-    bitmap is built once at startup and `element()` is untouched — but a
-    *bigger* bitmap composites more pixels, so both cases were measured.
-    200 corner-to-corner pointer jumps (near-full-frame damage), 6 reps:
-    base mean 21.17 (19 27 22 21 18 20), new mean 21.33 (22 16 22 19 28 21),
-    new at `cursor_size = 256` mean 21.33 (20 20 27 22 20 19) — the present
-    memcpy dominates, so even the cap is free here. 200 small 4px local moves
-    (damage scoped to the cursor's own box, where a big cursor actually
-    shows), 10 reps: base mean 9.00 (8-11), new mean 9.00 (7-13), new at
-    `cursor_size = 256` mean 13.50 (11-16). So the default is unchanged, and
-    the worst size a config can ask for costs about +4.5 jiffies per 200
-    moves — real, bounded by the cap, and only paid by someone who asked for
-    it.
+    `8446758` (base) and `34514a9` (new), three arms interleaved per rep so VM
+    drift hits all of them). The change cannot cost anything per frame in
+    principle — the bitmap is built once at startup and `element()` is
+    untouched — but a *bigger* bitmap composites more pixels every frame it is
+    drawn, so the cap's own cost was measured too, not just the default's.
+    200 pointer moves per rep, 6 reps:
+
+    | arm | base (16px) | new (16px) | new, `cursor_size = 256` |
+    |---|---|---|---|
+    | far: `(0,0)`↔`(1344,744)` | 29.67 (25-36) | 30.50 (27-36) | **42.00 (36-54)** |
+    | near: `(4,4)`↔`(8,8)` | 8.83 (7-11) | 9.50 (8-12) | **14.17 (12-16)** |
+
+    The default is unchanged either way (overlapping ranges, base vs new). The
+    largest cursor a config can ask for costs about +12 jiffies per 200
+    far moves and +5 per 200 near ones — real, paid only by someone who asked
+    for it, and bounded by `MAX_CURSOR_SIZE`, which is the practical argument
+    for having an upper bound at all beyond the overflow one.
+
+    **A correction worth recording, because the first version of this
+    measurement was a no-op.** It drove the pointer with
+    `pointer move 100000 100000` / `-100000 -100000`, on the assumption that
+    IPC's `pointer move` takes a relative delta. It does not — it is absolute
+    and is *not* clamped to the output (that clamp belongs to
+    `pointer_move_relative`, libinput's path), so both endpoints were
+    off-screen, no cursor was composited in any arm, and all three came out
+    identical at ~21 jiffies. The numbers above use endpoints chosen so that
+    even a 256px shape is fully on screen at both (1344 + 255 = 1599 on a
+    1600x1000 output), and the script now screenshots both endpoints first and
+    prints the hotspot, an interior pixel and the pixel 255 rows down as a
+    witness that the thing being measured is actually being drawn.
 
     Also at the same commit: `cargo test -p flexwm` 221/221 and
     `-p flexwm-core` 45/45 on the dev VM, clippy `--workspace --all-targets

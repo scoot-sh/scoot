@@ -73,10 +73,12 @@ pub struct State {
     /// `prefer_no_csd` policy, resolved from `[appearance]` (or its defaults)
     /// once at startup -- see `config.rs` and `decorations.rs`'s module docs.
     ///
-    /// Read live by the render path for everything except the two cursor
-    /// fields, which `Cursor::new` consumes once below to build a bitmap; a
-    /// later write to those two here would therefore change nothing, and
-    /// nothing writes to this field at all today.
+    /// Read live wherever it is used -- the render path for the ring and
+    /// background, `handlers.rs`'s `XdgDecorationHandler` for
+    /// `prefer_no_csd` -- with one exception: the two cursor fields, which
+    /// `Cursor::new` consumes once below to build a bitmap, so a later write
+    /// to those two here would change nothing. Nothing writes to this field
+    /// at all today.
     pub appearance: Appearance,
     /// Per-window persistent ring buffers -- see `decorations.rs`'s module
     /// doc for why these live here rather than being rebuilt every frame.

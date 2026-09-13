@@ -164,7 +164,9 @@ fn bitmap_honors_the_requested_colors() {
 /// degenerate or absurd value that somehow reached it (neither is reachable
 /// through a config file -- `Appearance::clamped` has already clamped and
 /// warned -- but `Appearance`'s fields are public) can neither build a
-/// zero-sized buffer nor attempt a 17 GB one. Needs only a renderer, not a
+/// zero-sized buffer nor an allocation whose own length overflows `i32`
+/// (which `size * size * 4` does from `size = 23171` up). Needs only a
+/// renderer, not a
 /// whole compositor: the element's geometry is the built buffer's real size.
 #[test]
 fn cursor_new_clamps_a_degenerate_or_absurd_size() {
