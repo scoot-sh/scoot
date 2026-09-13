@@ -1693,6 +1693,65 @@ review, and why.
     never come, which turned the `set_size` crash above into a hang with no
     diagnosis.
 
+    **Hardware verification** — real `--tty` on the dev VM's `virtio-gpu` KMS
+    device at 1600x1000, driven by **real layer-shell clients**, `swaybg`
+    1.2.2 and `Waybar` 0.15.0 (both from `nixpkgs`, nothing written for the
+    occasion), all against `d4fc476`. Raw commands and output are in PR #22's
+    description; the pointer is parked at (1590, 990) before every capture,
+    because the `--tty` cursor is drawn at the sample point otherwise (an
+    earlier run read the cursor's own black outline pixel as a missing
+    repaint). Summary, with `flexwm msg screenshot` pixels:
+    - `swaybg -c '#00FF00'` on the background layer: `(1500,500)` reads
+      `srgba(0,255,0)` where it read the compositor's own background
+      `srgba(20,20,25)` before, and `(9,500)` still reads the focus ring's
+      `srgba(107,166,250)` — **the ring draws over the wallpaper on real
+      hardware**, which is the ordering `space_render_elements` could not
+      have produced.
+    - `waybar` on the top layer, height 30, default exclusive zone: both
+      windows move from `y=12,h=976` to `y=42,h=946` and back when it exits;
+      bar pixels read `srgba(255,0,0)` (its configured background) at
+      `(800,15)` and `(100,29)`, with the wallpaper still visible below it.
+    - **Frame callbacks**: the clock region (600x30+500+0) differs by 29-31
+      pixels between captures 4s apart, against exactly 0 for a capture
+      compared with itself — the bar keeps redrawing rather than freezing on
+      its first frame.
+    - **Pointer input reaches the layer surface**: with a `#clock:hover`
+      rule in waybar's stylesheet, moving the pointer onto the clock turns
+      that cell from `srgba(255,0,0)` to `srgba(0,0,255)`, and it turns back
+      when the pointer leaves — so `enter`, `motion` and `leave` all arrive.
+    - **Clicking the bar does not move window focus**: with window 2 focused,
+      a click at (400,15) leaves `[{"id":1,"focused":false},{"id":2,"focused":true}]`
+      unchanged; the control click at (400,500) moves focus to window 1.
+
+    **Benchmarked** (release builds, jiffies from `/proc/pid/stat`, the same
+    method items 5/8/13 used), because the render path changed shape:
+    `space_render_elements` was replaced, a per-frame layer-map lock added,
+    and a per-frame frame-callback pass over the layer list.
+    - **Idle is still exactly 0**: 0 jiffies over 10s before and after with
+      no layer surfaces, and 0 over 20s in a second run.
+    - **150 corner-to-corner pointer jumps** (near-full-frame damage per
+      jump), alternating binaries per rep so VM drift hits both:
+      before `60348a5` 25/26/34, after `d4fc476` 24/21/25. No regression.
+    - **A mapped bar costs nothing measurable on that workload**: same
+      process, 150 jumps with waybar mapped 26/39/33, then with it gone
+      23/35/34.
+    - **A bar's own redraws are close to free**: 1 jiffy over 20s with
+      waybar's clock ticking once a second (and the clock region provably
+      changing over that window).
+    One measurement was thrown away rather than reported: the first "with a
+    bar" run read the wayland socket name out of a log line whose fields
+    `tracing` colorizes, got an empty string, and measured a waybar that had
+    never connected. The numbers above come from a run that screenshots the
+    bar and prints the windows' `y` first.
+
+    Also at `d4fc476`: `cargo test` 240/240 for `flexwm` (15 new) and 60/60
+    for `flexwm-core` (8 new) on the dev VM, `cargo clippy --workspace
+    --all-targets -D warnings` and `cargo fmt --all --check` clean on both
+    the VM and macOS, `cargo check --workspace --all-targets` clean on macOS
+    (the cross-platform build), and `scripts/smoke-test.sh` green under
+    `--headless` against a release build of this branch (all 11 `ok:`
+    checks, exit 0).
+
 ## Backlog (unordered — pick up whenever it fits)
 
 - **~~Open question: does `--tty` over SSH on the dev VM actually hold real
