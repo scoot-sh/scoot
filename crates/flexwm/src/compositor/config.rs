@@ -8,7 +8,8 @@
 //!   hard startup error (see [`load`]) -- the caller pointed at this file on
 //!   purpose, so silently ignoring it would be worse than failing loud.
 //! - Every other failure -- no file at the default path, malformed TOML, an
-//!   unknown field (`deny_unknown_fields`), a bad individual bind -- logs a
+//!   unknown field (`deny_unknown_fields`), a bad individual bind, input
+//!   nested past the `toml` crate's own depth limits -- logs a
 //!   `tracing::error!`/`tracing::warn!` and falls back to defaults. It never
 //!   fails startup.
 //!
@@ -271,6 +272,52 @@ fn load_from(path: &Path, explicit: bool) -> Result<LoadedConfig, ConfigFileErro
 /// Parses `text`; a parse failure (malformed TOML, or a `deny_unknown_fields`
 /// rejection) logs why and falls back to full defaults instead of failing
 /// startup -- see the module doc.
+///
+/// # Why deeply nested input can't abort the process here
+///
+/// `toml` 1.1.6 bounds nesting itself, in two places, both hard-coded at 80
+/// and both active unless the crate's `unbounded` feature is on (it is not;
+/// `unbounded` is a zero-dependency flag so `-e features` can't see it either
+/// way -- `cargo tree -p flexwm --target all -f "{p} | {f}"` is the command
+/// that actually shows it, and prints `toml v1.1.6+spec-1.1.0 | default,
+/// display,parse,serde,std` with no `unbounded` suffix): a `RecursionGuard`
+/// over combined
+/// inline-table/array nesting, and a separate cap on dotted-key and table-header
+/// path segments. Past either, parsing stops and reports an error, which lands
+/// in the arm below like any other malformed config -- so at the stack budget
+/// this actually runs with, no config file reaches the "recurse until the stack
+/// is gone" failure this module's no-hard-failure promise could not otherwise
+/// survive.
+///
+/// That budget is an assumption, not a guarantee, and so are two other things
+/// about *how* this is called; all three are invisible at the site that would
+/// break them (measured on aarch64 Linux + macOS, `toml` 1.1.6, 2026-09-13 --
+/// see `ROADMAP.md`'s resolved recursion-depth entry for the raw numbers and the
+/// commands that produced them):
+///
+/// - **The 8 MiB main-thread stack.** [`load`] runs on the process's main thread
+///   via `compositor::run`, so it gets `RLIMIT_STACK`, which is 8 MiB by default
+///   on Linux and macOS. Two ways to lose that: moving config parsing to a
+///   spawned thread, which gets Rust's 2 MiB default instead, or launching
+///   flexwm under a reduced `ulimit -s`. A *debug* build has no margin for
+///   either -- under `ulimit -s 2048` it aborts with `fatal runtime error: stack
+///   overflow` on a 13 KB file a user could paste by accident. A release build
+///   needs 932 KiB and survives both.
+/// - **How deep a file can get.** The two limits multiply rather than add: a
+///   dotted key can sit at every level of nesting, so the deepest tree they
+///   allow is 6,561 nested tables/arrays (counting the document root) out of a
+///   13,448-byte file. *Parsing* it is cheap -- 476 KiB of stack in a debug
+///   build, and in a release build under the ~134 KiB floor glibc puts beneath
+///   any thread stack here, which is as precise as that one gets. The recursive
+///   *drop* of the parsed tree is the real cost: 932 KiB release (flexwm's
+///   `panic = "abort"` profile; ~1,140 KiB if built to unwind, which is what
+///   `cargo test --release` produces) and 6,680 KiB debug.
+/// - **The deserialization target.** The cost is a function of the target, not
+///   just the input: `FileConfig` is shallow and `deny_unknown_fields` stops
+///   serde at the first key, but deserializing the same bytes into a
+///   `toml::Table` (a passthrough section, say) descends the whole tree --
+///   7,288 KiB release, which still fits in 8 MiB but with under 1 MiB to spare
+///   rather than over 7, and 32,100 KiB debug, which does not fit at all.
 fn parse_or_defaults(text: &str, path: &Path) -> LoadedConfig {
     match toml::from_str::<FileConfig>(text) {
         Ok(file) => LoadedConfig::from_file(file),
@@ -918,5 +965,152 @@ mod tests {
             Config::MAX_GAP / 2,
             "clamped to half of the capped gap, not half of i32::MAX"
         );
+    }
+
+    /// Every way TOML can nest, each built to exactly `depth` levels, always
+    /// as (or under) one top-level key `a` so `deny_unknown_fields` gives the
+    /// same "unknown field" rejection for all five whenever the *parse* got
+    /// that far. The first two are bounded by `toml`'s `RecursionGuard`, the
+    /// last three by its separate key-path limit -- see `parse_or_defaults`'
+    /// doc.
+    const NESTING_FORMS: [&str; 5] = [
+        "inline table",
+        "array",
+        "dotted key",
+        "table header",
+        "array-of-tables header",
+    ];
+
+    fn nested_toml(form: &str, depth: usize) -> String {
+        let segments = "a.".repeat(depth.saturating_sub(1));
+        match form {
+            "inline table" => format!("a = {}1{}", "{a=".repeat(depth), "}".repeat(depth)),
+            "array" => format!("a = {}{}", "[".repeat(depth), "]".repeat(depth)),
+            "dotted key" => format!("{segments}a = 1"),
+            "table header" => format!("[{segments}a]\n"),
+            "array-of-tables header" => format!("[[{segments}a]]\n"),
+            other => unreachable!("unknown nesting form `{other}`"),
+        }
+    }
+
+    /// Pins where `toml` 1.1.6 stops recursing, through this module's real
+    /// parse path. Depth 80 parses (and is then rejected by
+    /// `deny_unknown_fields`, which is how we know the parser got all the way
+    /// through); 81 is refused by the crate itself.
+    ///
+    /// This is the regression test that matters if the `toml` dependency
+    /// moves: `toml = "1"` accepts any 1.x, and the limits are only active
+    /// while the crate's `unbounded` feature is off, which feature unification
+    /// from some future dependency could silently flip. Either change fails
+    /// this test by assertion -- long before it can fail as an unbounded
+    /// recursion on a user's config file.
+    #[test]
+    fn tomls_own_depth_limits_stop_at_80_levels_of_every_nesting_form() {
+        for form in NESTING_FORMS {
+            let at_limit = toml::from_str::<FileConfig>(&nested_toml(form, 80))
+                .expect_err("the top-level key is not a known field");
+            assert!(
+                at_limit.message().contains("unknown field"),
+                "80 levels of {form} must still parse, leaving only the \
+                 unknown-field rejection; got: {}",
+                at_limit.message()
+            );
+
+            let past_limit = toml::from_str::<FileConfig>(&nested_toml(form, 81))
+                .expect_err("81 levels is past toml's limit");
+            assert!(
+                past_limit.message().contains("recurs"),
+                "81 levels of {form} must be refused by toml's own depth \
+                 limit; got: {}",
+                past_limit.message()
+            );
+        }
+    }
+
+    /// The module's promise under the input the backlog entry worried about:
+    /// 100,000 levels of nesting is a logged parse error and full defaults,
+    /// not a stack overflow. `toml` stops at level 81, so the remaining
+    /// ~400 KB of the file is skipped iteratively and never becomes stack
+    /// frames.
+    #[test]
+    fn an_absurdly_deep_config_file_falls_back_to_defaults_not_a_crash() {
+        for form in NESTING_FORMS {
+            let (_dir, path) = write_temp(&nested_toml(form, 100_000));
+            let loaded =
+                load_from(&path, true).expect("deep nesting must never fail startup either");
+            assert_eq!(loaded.config, Config::default(), "{form}");
+        }
+    }
+
+    /// The deepest *tree* `toml`'s two limits allow between them: its 80-level
+    /// nesting guard and its 80-segment key-path limit multiply rather than
+    /// add, because a dotted key can sit at every level of nesting. Each of the
+    /// three parts below is at its own cap, so nothing a config file can
+    /// express goes deeper:
+    ///
+    /// - an 80-segment *array-of-tables* header, worth 81 levels -- its last
+    ///   segment is an array holding a table, one level more than the plain
+    ///   `[a.a...]` header spends there;
+    /// - 80 nested inline tables (all the `RecursionGuard` allows), each keyed
+    ///   by a fresh 80-segment dotted key, worth 80 levels apiece;
+    /// - an 80-segment dotted key for the leaf, worth 79 more.
+    ///
+    /// 13,448 bytes, 6,561 nested tables/arrays counting the document root,
+    /// with the scalar at the bottom as the 6,562nd node on that path.
+    ///
+    /// Dropping that tree is recursive, which is what actually costs stack
+    /// here -- parsing it needs 476 KiB in a debug build and less than a thread
+    /// stack's ~134 KiB floor in a release one. Measured 2026-09-13 on aarch64
+    /// (macOS and the Linux dev VM), `toml` 1.1.6: this test's body completes
+    /// on a 6,684 KiB stack in a debug build, 1,140 KiB in a release one. So it
+    /// runs on an 8 MiB thread, matching the main thread `compositor::run` --
+    /// and therefore `load` -- actually gets, rather than the 2 MiB `cargo
+    /// test` would otherwise hand it. If this ever overflows, that is a real
+    /// finding about production, not test flakiness: the margin in a debug
+    /// build is only ~1.5 MiB. Note the symptom to expect, since the overflow
+    /// would happen on the spawned thread: it aborts the whole test binary, so
+    /// every test reports nothing rather than this one failing an assertion.
+    #[test]
+    fn the_deepest_tree_tomls_limits_allow_falls_back_to_defaults_too() {
+        let segments = "a.".repeat(79);
+        let text = format!(
+            "[[{segments}a]]\n{}{segments}a = 1{}\n",
+            format!("{segments}a = {{").repeat(80),
+            "}".repeat(80)
+        );
+        assert_eq!(
+            text.len(),
+            13_448,
+            "the worst case this test means to build"
+        );
+
+        let config = std::thread::Builder::new()
+            .stack_size(8 * 1024 * 1024)
+            .spawn(move || {
+                let (_dir, path) = write_temp(&text);
+                load_from(&path, true)
+                    .expect("the deepest possible file must never fail startup")
+                    .config
+            })
+            .expect("spawn the 8 MiB parse thread")
+            .join()
+            .expect("parsing the deepest possible config must not panic or abort");
+        assert_eq!(config, Config::default());
+    }
+
+    /// The other half of that: a real config is nowhere near any of it. The
+    /// deepest shape flexwm's own schema can produce is a table holding an
+    /// array (3 levels), so the 80-level limits cost a legitimate config
+    /// nothing, whichever TOML spelling it uses.
+    #[test]
+    fn a_realistic_config_nests_far_below_tomls_limits() {
+        let inline = "layout = { gap = 7, column_widths = [0.3, 0.7] }\n";
+        let dotted = "layout.gap = 7\nlayout.column_widths = [0.3, 0.7]\n";
+        for text in [inline, dotted] {
+            let (_dir, path) = write_temp(text);
+            let loaded = load_from(&path, true).expect("valid toml");
+            assert_eq!(loaded.config.gap, 7, "{text}");
+            assert_eq!(loaded.config.column_widths, vec![0.3, 0.7], "{text}");
+        }
     }
 }
