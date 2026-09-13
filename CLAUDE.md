@@ -102,9 +102,15 @@ build → test → bug bash → optimize → benchmark → independent review �
 the full cycle. Split modules before they sprawl (tests in their own file),
 run `cargo test`, `clippy -D warnings` and `fmt --check` after each step.
 Beyond "does it work": actively look for bugs, not just the happy path;
-measure performance with real before/after numbers; update `README.md`'s
-Status/Running sections the same PR a feature lands in, not later — it drifts
-stale fast otherwise.
+measure performance with real before/after numbers; update `README.md`
+the same PR a feature lands in, not later — it drifts stale fast otherwise.
+This means more than the Status/Running sections: any new/changed config
+option, default keybinding, CLI flag, or IPC request/action a user or
+integrating agent would need to know about. This project let real
+documentation (the config file and keybinding reference) go stale across
+several merged PRs before anyone noticed — `flexwm-implementer`'s and
+`flexwm-reviewer`'s own instructions now both call this out explicitly so
+it doesn't happen again.
 
 **Independent review is mandatory, and it's a real gate, not a formality.**
 Use the `flexwm-reviewer` subagent (`.claude/agents/flexwm-reviewer.md`) —
