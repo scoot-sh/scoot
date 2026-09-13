@@ -1040,7 +1040,8 @@ review, and why.
     real DRM device, with the host forwarding the injected key, which is the
     other input path the Backlog entry names; it is the same event loop
     (`nested.rs` inserts `WaylandSource` into the same `loop_handle`, and
-    `mod.rs:105` is the crate's only `run`/`dispatch` call site), so no separate
+    `mod.rs`'s `run` is the compositor's only *production* `run`/`dispatch`
+    call site -- the test modules have their own, deliberately), so no separate
     render loop can bypass this.
 
     **Benchmarked**, because this runs on every wakeup. Raw numbers, all
@@ -1052,14 +1053,24 @@ review, and why.
       nothing to wake for.
     - **A real 1000 Hz-class pointer-motion flood** (20,000 uinput motion
       events, ~470/s as delivered, each queueing a `wl_pointer` message for the
-      focused client): before 167/161/163/156/154/164 jiffies (mean 160.8),
-      after 174/163/170/176/157/152 (mean 165.3), six reps per side, three in
-      each order. Overlapping ranges; the +4.5 mean is an upper bound of ~2.3us
-      per event, about what one extra `sendmsg` costs in this VM. This is the
-      one place the change does real work rather than nothing: motion used to
-      batch into the frame tick's flush, and now each event's messages go out
-      immediately -- a latency improvement the client sees, paid for in
-      syscalls.
+      client under the pointer). This is the one path where the new flush does
+      real work rather than nothing: motion used to batch into the frame tick's
+      flush -- up to ~16 events' worth per `sendmsg` at 1000 Hz -- and now each
+      wakeup's events go out at the end of it. **Two independent sets disagree
+      in sign, so the cost is below this VM's noise floor**: six balanced reps
+      (three in each order) gave before 167/161/163/156/154/164 (mean 160.8)
+      versus after 174/163/170/176/157/152 (mean 165.3), and four later reps
+      with the pointer parked inside the client's surface gave before
+      176/171/158/161 (mean 166.5) versus after 162/146/139/153 (mean 150.0).
+      Worst case either way is a few jiffies over 43s.
+    - **What that costs the client, since the compositor's own jiffies cannot
+      show it**: per-wakeup flushing also wakes the client once per wakeup
+      instead of once per frame. Measured on `foot` (the same floods, sampling
+      its `/proc/<pid>/stat`): **0 jiffies over 20,000 motion events in both
+      builds** with the pointer parked over its surface, and 17/11 before
+      versus 9/2 in the two earlier reps where it was not. So unmeasurable, and
+      this is the universal compositor behavior anyway -- libwayland's own
+      `wl_display_run` flushes every loop iteration, as does anvil.
     - **The same flood at maximum rate** (50,000 events in ~300ms, ~160k/s):
       before 7/10 jiffies, after 6/11. Indistinguishable, because libinput
       hands many events to one callback when they arrive faster than the loop
