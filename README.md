@@ -37,7 +37,9 @@ keybindings, a TOML config file (`--config`, `[layout]`/`[binds]`), window
 decorations (a niri-style focus ring, background color, server-side
 `zxdg_decoration_manager_v1`), and a hardened control socket (owner-only
 permissions, a same-user peer check, a 1 MiB cap on a single request, and
-screenshots rate-limited to one per connection per frame). Verified
+screenshots rate-limited to one per connection per frame) whose connections
+are non-blocking end to end, so no client — however slow, chunked or
+unresponsive — can stall the compositor for anyone else. Verified
 end-to-end on every backend — a real
 client maps, tiles, receives synthetic input, and a screenshot proves it. Not
 yet started: a GPU rendering path and the macOS adapter.
