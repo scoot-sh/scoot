@@ -307,36 +307,56 @@ impl State {
 
     /// Clicking focuses what is under the pointer, which the core then tracks.
     ///
-    /// A click that landed on a layer-shell surface drawn *in front of*
-    /// windows -- a bar, a launcher, a notification -- deliberately changes
-    /// nothing: the window under a bar is not what the user clicked, and
-    /// activating it would both move the focus ring and steal keyboard focus
-    /// from wherever it was for a click that never reached a window at all.
-    /// The layer surface itself still gets the click; it just cannot take
-    /// keyboard focus yet (see `layer_shell.rs`'s module doc).
+    /// Walks the same front-to-back order `surface_under` does, because
+    /// "what did the user click" has exactly one answer and it is whatever is
+    /// drawn on top. Two rules come out of that:
+    ///
+    /// - A click on a layer-shell surface never moves *window* focus. The
+    ///   window under a bar is not what the user clicked, and activating it
+    ///   would move the focus ring for a click that never reached a window.
+    /// - A click is also how keyboard focus leaves an `on_demand` layer
+    ///   surface again -- on a window, on a bar that doesn't want keys, or on
+    ///   bare desktop. The one thing it cannot do is take the keyboard off an
+    ///   `exclusive` surface, which by protocol keeps it until it unmaps;
+    ///   `layer_keyboard_focus` answers that before `clicked_layer` is ever
+    ///   consulted, so nothing here has to special-case it.
     fn focus_under_pointer(&mut self) {
         let Some(pointer) = self.seat.get_pointer() else {
             return;
         };
         let location = pointer.current_location();
-        if self
-            .layer_surface_under(&layer_shell::ABOVE_WINDOWS, location)
-            .is_some()
-        {
+        if let Some(layer) = self.layer_under(&layer_shell::ABOVE_WINDOWS, location) {
+            self.click_layer(&layer);
             return;
         }
-        let Some((window, _)) = self.space.element_under(location) else {
+        if let Some(window) = self.space.element_under(location).map(|(w, _)| w.clone()) {
+            let found = self
+                .windows
+                .iter()
+                .find(|(_, candidate)| **candidate == window)
+                .map(|(&id, _)| id);
+            if let Some(id) = found {
+                self.clicked_layer = None;
+                // Ends in `apply()`, and so in `refresh_keyboard_focus()`,
+                // which is what hands the keyboard back to this window even
+                // when it was already the focused one.
+                self.act(Action::FocusWindowId(id));
+                return;
+            }
+            // A `Space` element this compositor doesn't know as a window is
+            // not something to focus, but it is still a click on a window
+            // rather than on the desktop: leave everything as it was, the
+            // same as before layer-shell focus existed.
             return;
-        };
-        let window = window.clone();
-        let Some((&id, _)) = self
-            .windows
-            .iter()
-            .find(|(_, candidate)| **candidate == window)
-        else {
+        }
+        if let Some(layer) = self.layer_under(&layer_shell::BELOW_WINDOWS, location) {
+            self.click_layer(&layer);
             return;
-        };
-        self.act(Action::FocusWindowId(id));
+        }
+        // Bare desktop: nothing to focus, but clicking it is a legitimate way
+        // to dismiss an `on_demand` layer surface.
+        self.clicked_layer = None;
+        self.refresh_keyboard_focus();
     }
 }
 

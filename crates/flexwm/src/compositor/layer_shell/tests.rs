@@ -35,12 +35,14 @@ use smithay::reexports::calloop::EventLoop;
 use smithay::reexports::wayland_server::Display;
 use smithay::utils::Rectangle;
 use wayland_client::protocol::{
-    wl_buffer, wl_compositor, wl_output, wl_registry, wl_shm, wl_shm_pool, wl_surface,
+    wl_buffer, wl_compositor, wl_keyboard, wl_output, wl_registry, wl_seat, wl_shm, wl_shm_pool,
+    wl_surface,
 };
-use wayland_client::{Connection, Dispatch, QueueHandle};
+use wayland_client::{Connection, Dispatch, QueueHandle, WEnum};
 use wayland_protocols::xdg::shell::client::{
     xdg_popup, xdg_positioner, xdg_surface, xdg_toplevel, xdg_wm_base,
 };
+use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_surface_v1::KeyboardInteractivity;
 use wayland_protocols_wlr::layer_shell::v1::client::{zwlr_layer_shell_v1, zwlr_layer_surface_v1};
 
 use crate::compositor::State;
@@ -92,6 +94,10 @@ struct LayerSpec {
     exclusive_zone: i32,
     /// `top`, `right`, `bottom`, `left`, in the protocol's own order.
     margin: (i32, i32, i32, i32),
+    /// What the surface asks to do with the keyboard. The protocol's default
+    /// is `None`, and so is every constructor's below -- a bar, a wallpaper
+    /// and a notification popup all want exactly that.
+    keyboard: KeyboardInteractivity,
 }
 
 impl LayerSpec {
@@ -106,6 +112,7 @@ impl LayerSpec {
             size: (0, height),
             exclusive_zone: height as i32,
             margin: (0, 0, 0, 0),
+            keyboard: KeyboardInteractivity::None,
         }
     }
 
@@ -122,7 +129,36 @@ impl LayerSpec {
             size: (0, 0),
             exclusive_zone: -1,
             margin: (0, 0, 0, 0),
+            keyboard: KeyboardInteractivity::None,
         }
+    }
+
+    /// A launcher: a box in the top-left corner that reserves nothing and
+    /// asks for every keystroke -- the shape `wofi`, `fuzzel` and a
+    /// layer-shell lock screen all have.
+    ///
+    /// Anchored to the bottom-right corner rather than centred, because
+    /// these tests click at specific coordinates: that corner is the one
+    /// place on this canvas that never overlaps a window's own buffer (which
+    /// is [`WINDOW_BUFFER`] square at the top-left), so "click the launcher"
+    /// and "click the window" stay unambiguous.
+    fn launcher(size: u32) -> Self {
+        Self {
+            layer: zwlr_layer_shell_v1::Layer::Overlay,
+            anchor: zwlr_layer_surface_v1::Anchor::Bottom | zwlr_layer_surface_v1::Anchor::Right,
+            size: (size, size),
+            exclusive_zone: 0,
+            margin: (0, 0, 0, 0),
+            keyboard: KeyboardInteractivity::Exclusive,
+        }
+    }
+
+    fn with_keyboard(self, keyboard: KeyboardInteractivity) -> Self {
+        Self { keyboard, ..self }
+    }
+
+    fn on_layer(self, layer: zwlr_layer_shell_v1::Layer) -> Self {
+        Self { layer, ..self }
     }
 }
 
@@ -148,6 +184,19 @@ enum Step {
     MapLayer { index: usize, color: [u8; 4] },
     /// `zwlr_layer_surface_v1.destroy` on the `index`-th layer surface.
     DestroyLayer { index: usize },
+    /// Attach a null buffer to the `index`-th layer surface and commit: the
+    /// protocol's own way for a surface to unmap itself without destroying
+    /// the object, which a launcher does when it is dismissed and re-shown.
+    UnmapLayer { index: usize },
+    /// `set_keyboard_interactivity` on an already-mapped layer surface,
+    /// followed by a commit (the setting is double-buffered, so the commit
+    /// is what makes it real).
+    SetLayerKeyboard {
+        index: usize,
+        keyboard: KeyboardInteractivity,
+    },
+    /// Report what the client's own `wl_keyboard` has seen so far.
+    ReportKeyboard,
     /// Create an `xdg_popup` on the first mapped toplevel and report whether
     /// the compositor ever configures it. See
     /// [`no_xdg_popup_is_configured_yet`].
@@ -160,6 +209,35 @@ enum Ack {
     /// [`Step::ProbePopup`]'s answer: did an `xdg_surface.configure` arrive
     /// for the popup?
     PopupConfigured(bool),
+    /// [`Step::ReportKeyboard`]'s answer.
+    Keyboard(KeyboardReport),
+}
+
+/// Which of the client's own surfaces a `wl_keyboard.enter` named, by the
+/// creation order the test script already addresses them in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Focused {
+    Layer(usize),
+    Window(usize),
+    /// A surface this client made but the script doesn't track (nothing
+    /// produces one today; it exists so a mismatch reads as a mismatch
+    /// rather than as "no focus").
+    Other,
+}
+
+/// What the client's `wl_keyboard` has actually been told -- the only
+/// evidence that matters here, since "who holds keyboard focus" is a claim
+/// about what reached a client, not about a field in the compositor.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct KeyboardReport {
+    /// Whose `enter` is outstanding, if any.
+    focused: Option<Focused>,
+    /// `wl_keyboard.key` events received, cumulative.
+    keys: u32,
+    /// `enter`/`leave` events received, cumulative -- so a test can tell
+    /// "focus never moved" apart from "it left and came straight back".
+    enters: u32,
+    leaves: u32,
 }
 
 /// How big a window's buffer is. Deliberately smaller than any placement
@@ -174,6 +252,17 @@ struct TestClient {
     shm: Option<wl_shm::WlShm>,
     wm_base: Option<xdg_wm_base::XdgWmBase>,
     layer_shell: Option<zwlr_layer_shell_v1::ZwlrLayerShellV1>,
+    seat: Option<wl_seat::WlSeat>,
+    /// Created from the seat's `Capabilities` event, so the client never
+    /// asks for a keyboard the compositor didn't advertise.
+    keyboard: Option<wl_keyboard::WlKeyboard>,
+    /// The surface the outstanding `wl_keyboard.enter` named. Stored as the
+    /// raw `wl_surface` because this handler has no idea which of the
+    /// script's surfaces it is; [`run_client`] resolves it at report time.
+    keyboard_focus: Option<wl_surface::WlSurface>,
+    keys: u32,
+    enters: u32,
+    leaves: u32,
     /// The size the compositor last configured each layer surface to, by
     /// creation order -- `None` until its first configure arrives.
     layer_sizes: Vec<Option<(u32, u32)>>,
@@ -213,8 +302,57 @@ impl Dispatch<wl_registry::WlRegistry, ()> for TestClient {
             "wl_shm" => client.shm = Some(registry.bind(name, version.min(1), qh, ())),
             "xdg_wm_base" => client.wm_base = Some(registry.bind(name, version.min(3), qh, ())),
             "zwlr_layer_shell_v1" => {
+                // 4, not 5: `on_demand` keyboard interactivity arrived in 4,
+                // and nothing here needs 5's `set_exclusive_edge`.
                 client.layer_shell = Some(registry.bind(name, version.min(4), qh, ()));
             }
+            "wl_seat" => client.seat = Some(registry.bind(name, version.min(5), qh, ())),
+            _ => {}
+        }
+    }
+}
+
+impl Dispatch<wl_seat::WlSeat, ()> for TestClient {
+    fn event(
+        client: &mut Self,
+        seat: &wl_seat::WlSeat,
+        event: wl_seat::Event,
+        _: &(),
+        _: &Connection,
+        qh: &QueueHandle<Self>,
+    ) {
+        if let wl_seat::Event::Capabilities {
+            capabilities: WEnum::Value(capabilities),
+        } = event
+            && capabilities.contains(wl_seat::Capability::Keyboard)
+            && client.keyboard.is_none()
+        {
+            client.keyboard = Some(seat.get_keyboard(qh, ()));
+        }
+    }
+}
+
+impl Dispatch<wl_keyboard::WlKeyboard, ()> for TestClient {
+    fn event(
+        client: &mut Self,
+        _: &wl_keyboard::WlKeyboard,
+        event: wl_keyboard::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        match event {
+            wl_keyboard::Event::Enter { surface, .. } => {
+                client.keyboard_focus = Some(surface);
+                client.enters += 1;
+            }
+            wl_keyboard::Event::Leave { .. } => {
+                client.keyboard_focus = None;
+                client.leaves += 1;
+            }
+            wl_keyboard::Event::Key { .. } => client.keys += 1,
+            // Keymap (whose fd is simply dropped), modifiers and repeat info
+            // all arrive too; none of them says anything about focus.
             _ => {}
         }
     }
@@ -363,6 +501,9 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
     // Kept so a popup can name its parent; a popup's parent is an
     // `xdg_surface`, not a `wl_surface`.
     let mut toplevels: Vec<xdg_surface::XdgSurface> = Vec::new();
+    // ...and the `wl_surface`s under them, which is what a
+    // `wl_keyboard.enter` names.
+    let mut windows: Vec<wl_surface::WlSurface> = Vec::new();
 
     while let Ok(step) = steps.recv() {
         queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
@@ -387,6 +528,7 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 surface.damage(0, 0, WINDOW_BUFFER, WINDOW_BUFFER);
                 surface.commit();
                 toplevels.push(xdg.clone());
+                windows.push(surface);
                 // Later configures (a re-layout after a bar appears) are
                 // acked but not redrawn: these tests assert on where the
                 // window's own pixels land, and a fixed buffer size is what
@@ -408,6 +550,7 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 layer.set_anchor(spec.anchor);
                 layer.set_size(spec.size.0, spec.size.1);
                 layer.set_exclusive_zone(spec.exclusive_zone);
+                layer.set_keyboard_interactivity(spec.keyboard);
                 let (top, right, bottom, left) = spec.margin;
                 layer.set_margin(top, right, bottom, left);
                 // The initial commit: no buffer, which is what the protocol
@@ -436,6 +579,35 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 let (surface, layer) = layers.get(*index).ok_or("no such layer surface")?;
                 layer.destroy();
                 surface.destroy();
+            }
+            Step::UnmapLayer { index } => {
+                let (surface, _) = layers.get(*index).ok_or("no such layer surface")?;
+                surface.attach(None, 0, 0);
+                surface.commit();
+            }
+            Step::SetLayerKeyboard { index, keyboard } => {
+                let (surface, layer) = layers.get(*index).ok_or("no such layer surface")?;
+                layer.set_keyboard_interactivity(*keyboard);
+                // Double-buffered like everything else the surface asks for:
+                // without this commit the compositor has heard nothing.
+                surface.commit();
+            }
+            Step::ReportKeyboard => {
+                let focused = client.keyboard_focus.as_ref().map(|focused| {
+                    if let Some(index) = layers.iter().position(|(s, _)| s == focused) {
+                        Focused::Layer(index)
+                    } else if let Some(index) = windows.iter().position(|s| s == focused) {
+                        Focused::Window(index)
+                    } else {
+                        Focused::Other
+                    }
+                });
+                outcome = Ack::Keyboard(KeyboardReport {
+                    focused,
+                    keys: client.keys,
+                    enters: client.enters,
+                    leaves: client.leaves,
+                });
             }
             Step::ProbePopup => {
                 let parent = toplevels.first().ok_or("no toplevel to hang a popup on")?;
@@ -653,6 +825,24 @@ impl Fixture {
             .usable_areas()
             .first()
             .expect("the one output")
+    }
+
+    /// What the client's own `wl_keyboard` has been told so far.
+    fn keyboard(&mut self) -> KeyboardReport {
+        let Ack::Keyboard(report) = self.run(Step::ReportKeyboard) else {
+            panic!("the keyboard probe should report what the client saw");
+        };
+        report
+    }
+
+    /// A left click at a point, press and release, the way a user makes one.
+    fn click(&mut self, x: f64, y: f64) {
+        self.state.pointer_move(x, y);
+        self.state
+            .pointer_button(flexwm_ipc::PointerButton::Left, true);
+        self.state
+            .pointer_button(flexwm_ipc::PointerButton::Left, false);
+        self.settle();
     }
 
     /// Where the core says the first window goes.
@@ -1014,6 +1204,10 @@ fn extreme_geometry_from_a_client_cannot_break_the_compositor() {
         size: (i32::MAX as u32, i32::MAX as u32),
         exclusive_zone: i32::MAX,
         margin: (i32::MAX, i32::MAX, i32::MAX, i32::MAX),
+        // Absurd geometry *and* a demand for every keystroke, so the focus
+        // path is exercised by this one too -- it must not take the keyboard,
+        // because it never attaches a buffer (see `layer_focus`).
+        keyboard: KeyboardInteractivity::Exclusive,
     }));
 
     // Deliberately never given a buffer: an `i32::MAX`-square one cannot be
@@ -1211,6 +1405,454 @@ fn clicking_a_bar_does_not_refocus_the_window_behind_it() {
         Some(first.id),
         "a click on the window should have focused it"
     );
+}
+
+// -------------------------------------------------------------------------
+// Keyboard interactivity
+//
+// Every assertion below is on what the *client's* `wl_keyboard` was told --
+// `enter`, `leave`, `key` -- rather than on a compositor-side field. "Who
+// holds keyboard focus" is a claim about what reached a client, and a test
+// that reads `State::clicked_layer` would pass just as happily with nothing
+// ever sent over the wire.
+//
+// The coordinates: the launcher is [`LayerSpec::launcher`]'s 60-square box in
+// the bottom-right corner (140..200 on both axes), a window's own buffer is
+// [`WINDOW_BUFFER`] square at (12, 12), and (100, 100) is bare desktop --
+// no window, no layer surface, nothing.
+// -------------------------------------------------------------------------
+
+/// A 60-square launcher's own corner, and a point in the middle of the first
+/// window's buffer.
+const ON_LAUNCHER: (f64, f64) = (170.0, 170.0);
+const ON_WINDOW: (f64, f64) = (17.0, 37.0);
+const ON_DESKTOP: (f64, f64) = (100.0, 100.0);
+
+/// The headline: an `exclusive` surface on `overlay` takes the keyboard the
+/// moment it maps, the window is told it lost it, and typed keys really
+/// arrive at the layer surface.
+///
+/// This is the case a launcher and a layer-shell lock screen both need, and
+/// the one that was actively dangerous before: the surface used to map and
+/// draw over everything while every keystroke went to the window behind it.
+#[test]
+fn an_exclusive_overlay_surface_takes_the_keyboard_when_it_maps() {
+    let mut fixture = Fixture::new();
+    fixture.run(Step::MapWindow);
+    let before = fixture.keyboard();
+    assert_eq!(
+        before.focused,
+        Some(Focused::Window(0)),
+        "the window should start with the keyboard"
+    );
+
+    fixture.run(Step::CreateLayer(LayerSpec::launcher(60)));
+    assert_eq!(
+        fixture.keyboard().focused,
+        Some(Focused::Window(0)),
+        "a layer surface with no buffer yet must not take the keyboard"
+    );
+
+    fixture.run(Step::MapLayer {
+        index: 0,
+        color: BAR_BGRA,
+    });
+    let mapped = fixture.keyboard();
+    assert_eq!(
+        mapped.focused,
+        Some(Focused::Layer(0)),
+        "an exclusive overlay surface should hold the keyboard once mapped"
+    );
+    assert_eq!(
+        mapped.leaves,
+        before.leaves + 1,
+        "the window should have been told it lost the keyboard"
+    );
+
+    fixture.state.type_text("hi").expect("two typed characters");
+    fixture.settle();
+    let typed = fixture.keyboard();
+    assert_eq!(
+        typed.keys,
+        mapped.keys + 4,
+        "two characters, pressed and released, should have reached the launcher"
+    );
+    assert_eq!(typed.focused, Some(Focused::Layer(0)));
+    // Window focus -- the ring, `set_activated`, `flexwm msg windows` --
+    // deliberately does not move: it tracks where focus returns to.
+    assert!(fixture.state.focus.is_some(), "the window is still focused");
+}
+
+/// The other half of the same guarantee, and the one that must not regress:
+/// a bar, a wallpaper or a notification daemon asks for `none`, and nothing
+/// about the keyboard changes for it -- ever.
+#[test]
+fn a_bar_that_wants_no_keyboard_never_takes_it() {
+    let mut fixture = Fixture::new();
+    fixture.run(Step::MapWindow);
+    let before = fixture.keyboard();
+
+    fixture.run(Step::CreateLayer(LayerSpec::bar(30)));
+    fixture.run(Step::MapLayer {
+        index: 0,
+        color: BAR_BGRA,
+    });
+    let after = fixture.keyboard();
+    assert_eq!(after.focused, Some(Focused::Window(0)));
+    assert_eq!(
+        (after.enters, after.leaves),
+        (before.enters, before.leaves),
+        "a `none` bar mapping must not move keyboard focus at all"
+    );
+
+    fixture.state.type_text("a").expect("a typed character");
+    fixture.settle();
+    let typed = fixture.keyboard();
+    assert_eq!(typed.keys, before.keys + 2, "keys should reach the window");
+    assert_eq!(typed.focused, Some(Focused::Window(0)));
+
+    // ...and clicking it still doesn't, which is the pointer-side half.
+    fixture.click(100.0, 15.0);
+    assert_eq!(fixture.keyboard().focused, Some(Focused::Window(0)));
+}
+
+/// A surface that commits but never attaches a buffer has nothing on screen,
+/// so it cannot have the keyboard however loudly it asks -- otherwise any
+/// client could swallow every keystroke while drawing nothing at all.
+#[test]
+fn a_layer_surface_with_no_buffer_cannot_hold_the_keyboard() {
+    let mut fixture = Fixture::new();
+    fixture.run(Step::MapWindow);
+    let before = fixture.keyboard();
+    fixture.run(Step::CreateLayer(LayerSpec::launcher(60)));
+
+    fixture.state.type_text("a").expect("a typed character");
+    fixture.settle();
+    let typed = fixture.keyboard();
+    assert_eq!(typed.focused, Some(Focused::Window(0)));
+    assert_eq!(
+        typed.keys,
+        before.keys + 2,
+        "the keystroke should have gone to the window, not the empty surface"
+    );
+    assert!(!fixture.state.keyboard_on_layer);
+}
+
+/// `exclusive` on `background` is where the spec hands the decision back
+/// ("for the bottom and background layers, the compositor is allowed to use
+/// normal focus semantics"), and flexwm's answer is click-to-focus: nothing
+/// should be typing into a wallpaper by default.
+#[test]
+fn an_exclusive_background_surface_only_gets_the_keyboard_by_being_clicked() {
+    let mut fixture = Fixture::new();
+    fixture.run(Step::MapWindow);
+    fixture.run(Step::CreateLayer(
+        LayerSpec::wallpaper().with_keyboard(KeyboardInteractivity::Exclusive),
+    ));
+    fixture.run(Step::MapLayer {
+        index: 0,
+        color: WALLPAPER_BGRA,
+    });
+    assert_eq!(
+        fixture.keyboard().focused,
+        Some(Focused::Window(0)),
+        "a wallpaper must not take the keyboard just by asking"
+    );
+
+    fixture.click(ON_DESKTOP.0, ON_DESKTOP.1);
+    let clicked = fixture.keyboard();
+    assert_eq!(
+        clicked.focused,
+        Some(Focused::Layer(0)),
+        "clicking it should focus it, like any other window"
+    );
+    fixture.state.type_text("a").expect("a typed character");
+    fixture.settle();
+    assert_eq!(fixture.keyboard().keys, clicked.keys + 2);
+
+    fixture.click(ON_WINDOW.0, ON_WINDOW.1);
+    assert_eq!(
+        fixture.keyboard().focused,
+        Some(Focused::Window(0)),
+        "clicking the window should take it back"
+    );
+}
+
+/// `on_demand` is click-to-focus on any layer, and -- the half the spec is
+/// explicit about -- the user has to be able to click *out* of it again.
+#[test]
+fn an_on_demand_surface_is_focused_and_unfocused_by_clicking() {
+    let mut fixture = Fixture::new();
+    fixture.run(Step::MapWindow);
+    fixture.run(Step::CreateLayer(
+        LayerSpec::launcher(60).with_keyboard(KeyboardInteractivity::OnDemand),
+    ));
+    fixture.run(Step::MapLayer {
+        index: 0,
+        color: BAR_BGRA,
+    });
+    assert_eq!(
+        fixture.keyboard().focused,
+        Some(Focused::Window(0)),
+        "on_demand must wait to be clicked"
+    );
+
+    fixture.click(ON_LAUNCHER.0, ON_LAUNCHER.1);
+    assert_eq!(fixture.keyboard().focused, Some(Focused::Layer(0)));
+
+    // Bare desktop: no window, no layer surface. Still a way out.
+    fixture.click(ON_DESKTOP.0, ON_DESKTOP.1);
+    assert_eq!(
+        fixture.keyboard().focused,
+        Some(Focused::Window(0)),
+        "clicking bare desktop should release an on_demand surface"
+    );
+
+    // ...and so is a window.
+    fixture.click(ON_LAUNCHER.0, ON_LAUNCHER.1);
+    assert_eq!(fixture.keyboard().focused, Some(Focused::Layer(0)));
+    fixture.click(ON_WINDOW.0, ON_WINDOW.1);
+    assert_eq!(fixture.keyboard().focused, Some(Focused::Window(0)));
+}
+
+/// Clicking a bar that wants no keyboard is also a way out of an `on_demand`
+/// surface: the click is a deliberate act somewhere else, and the surface
+/// the user left should not keep the keys.
+#[test]
+fn clicking_a_bar_releases_an_on_demand_surface() {
+    let mut fixture = Fixture::new();
+    fixture.run(Step::MapWindow);
+    fixture.run(Step::CreateLayer(
+        LayerSpec::launcher(60).with_keyboard(KeyboardInteractivity::OnDemand),
+    ));
+    fixture.run(Step::MapLayer {
+        index: 0,
+        color: BAR_BGRA,
+    });
+    fixture.run(Step::CreateLayer(LayerSpec::bar(30)));
+    fixture.run(Step::MapLayer {
+        index: 1,
+        color: BAR_BGRA,
+    });
+
+    fixture.click(ON_LAUNCHER.0, ON_LAUNCHER.1);
+    assert_eq!(fixture.keyboard().focused, Some(Focused::Layer(0)));
+    fixture.click(100.0, 15.0);
+    assert_eq!(
+        fixture.keyboard().focused,
+        Some(Focused::Window(0)),
+        "a click on the bar should have released the launcher"
+    );
+}
+
+/// The keyboard comes back when the surface holding it goes away -- the one
+/// thing a launcher's whole lifecycle depends on.
+#[test]
+fn destroying_an_exclusive_surface_returns_the_keyboard_to_the_window() {
+    let mut fixture = Fixture::new();
+    fixture.run(Step::MapWindow);
+    fixture.run(Step::CreateLayer(LayerSpec::launcher(60)));
+    fixture.run(Step::MapLayer {
+        index: 0,
+        color: BAR_BGRA,
+    });
+    assert_eq!(fixture.keyboard().focused, Some(Focused::Layer(0)));
+
+    fixture.run(Step::DestroyLayer { index: 0 });
+    let after = fixture.keyboard();
+    assert_eq!(after.focused, Some(Focused::Window(0)));
+    assert!(!fixture.state.keyboard_on_layer);
+
+    fixture.state.type_text("a").expect("a typed character");
+    fixture.settle();
+    assert_eq!(
+        fixture.keyboard().keys,
+        after.keys + 2,
+        "typing should reach the window again"
+    );
+}
+
+/// ...and when it unmaps itself with a null buffer, which is how a
+/// layer-shell client hides without destroying its surface. The surface is
+/// still in the layer map at this point, so nothing but the buffer test in
+/// `layer_focus` catches this.
+#[test]
+fn unmapping_an_exclusive_surface_returns_the_keyboard() {
+    let mut fixture = Fixture::new();
+    fixture.run(Step::MapWindow);
+    fixture.run(Step::CreateLayer(LayerSpec::launcher(60)));
+    fixture.run(Step::MapLayer {
+        index: 0,
+        color: BAR_BGRA,
+    });
+    assert_eq!(fixture.keyboard().focused, Some(Focused::Layer(0)));
+
+    fixture.run(Step::UnmapLayer { index: 0 });
+    assert_eq!(fixture.keyboard().focused, Some(Focused::Window(0)));
+    assert!(!fixture.state.keyboard_on_layer);
+}
+
+/// A surface that *stops* asking for the keyboard has to lose it, which is
+/// the transition a gate on "does this surface want keys" would silently
+/// miss -- there is nothing left asking, so nothing would trigger a refresh.
+#[test]
+fn a_surface_that_commits_none_gives_the_keyboard_back() {
+    let mut fixture = Fixture::new();
+    fixture.run(Step::MapWindow);
+    fixture.run(Step::CreateLayer(LayerSpec::launcher(60)));
+    fixture.run(Step::MapLayer {
+        index: 0,
+        color: BAR_BGRA,
+    });
+    assert_eq!(fixture.keyboard().focused, Some(Focused::Layer(0)));
+
+    fixture.run(Step::SetLayerKeyboard {
+        index: 0,
+        keyboard: KeyboardInteractivity::None,
+    });
+    assert_eq!(
+        fixture.keyboard().focused,
+        Some(Focused::Window(0)),
+        "a surface that commits `none` must give the keyboard back"
+    );
+}
+
+/// Two surfaces both demanding exclusive focus: `overlay` beats `top`, the
+/// same order everything else in this compositor stacks them in, and the
+/// keyboard falls to the next one down when the winner goes away rather than
+/// to the window.
+#[test]
+fn the_front_most_exclusive_surface_wins_and_focus_falls_back_when_it_goes() {
+    let mut fixture = Fixture::new();
+    fixture.run(Step::MapWindow);
+    fixture.run(Step::CreateLayer(
+        LayerSpec::launcher(60).on_layer(zwlr_layer_shell_v1::Layer::Top),
+    ));
+    fixture.run(Step::MapLayer {
+        index: 0,
+        color: BAR_BGRA,
+    });
+    assert_eq!(fixture.keyboard().focused, Some(Focused::Layer(0)));
+
+    fixture.run(Step::CreateLayer(LayerSpec::launcher(60)));
+    fixture.run(Step::MapLayer {
+        index: 1,
+        color: WALLPAPER_BGRA,
+    });
+    assert_eq!(
+        fixture.keyboard().focused,
+        Some(Focused::Layer(1)),
+        "the overlay surface should win over the top one"
+    );
+
+    fixture.run(Step::DestroyLayer { index: 1 });
+    assert_eq!(
+        fixture.keyboard().focused,
+        Some(Focused::Layer(0)),
+        "the remaining exclusive surface should take the keyboard"
+    );
+    fixture.run(Step::DestroyLayer { index: 0 });
+    assert_eq!(fixture.keyboard().focused, Some(Focused::Window(0)));
+}
+
+/// The escape hatch, and the reason it is safe to let a full-screen client
+/// take every keystroke: keybindings are matched before anything is
+/// forwarded, so `Super+h` still works -- and so, on `--tty`, do the
+/// `Ctrl+Alt+F<n>` VT switches that use the identical path.
+#[test]
+fn a_keybinding_still_fires_while_a_layer_surface_holds_the_keyboard() {
+    let mut fixture = Fixture::new();
+    fixture.run(Step::MapWindow);
+    fixture.run(Step::MapWindow);
+    fixture.run(Step::CreateLayer(LayerSpec::launcher(60)));
+    fixture.run(Step::MapLayer {
+        index: 0,
+        color: BAR_BGRA,
+    });
+    let before = fixture.keyboard();
+    assert_eq!(before.focused, Some(Focused::Layer(0)));
+
+    let first = fixture.state.world.arrange().placements[0].id;
+    assert_ne!(
+        fixture.state.focus,
+        Some(first),
+        "the second window should hold window focus"
+    );
+    fixture
+        .state
+        .press(&flexwm_ipc::KeyCombo {
+            key: "h".into(),
+            modifiers: vec![flexwm_ipc::Modifier::Super],
+        })
+        .expect("a pressable combo");
+    fixture.settle();
+
+    assert_eq!(
+        fixture.state.focus,
+        Some(first),
+        "Super+h should still move window focus"
+    );
+    let after = fixture.keyboard();
+    assert_eq!(
+        after.focused,
+        Some(Focused::Layer(0)),
+        "the layer surface should still hold the keyboard"
+    );
+    assert_eq!(
+        after.keys,
+        before.keys + 2,
+        "only the Super modifier's own press and release should have been \
+         forwarded; the bound `h` must have been intercepted"
+    );
+}
+
+/// No windows at all: the surface takes the keyboard, and when it goes the
+/// keyboard goes nowhere rather than to a window that doesn't exist.
+#[test]
+fn an_exclusive_surface_with_no_windows_at_all_is_handled() {
+    let mut fixture = Fixture::new();
+    fixture.run(Step::CreateLayer(LayerSpec::launcher(60)));
+    fixture.run(Step::MapLayer {
+        index: 0,
+        color: BAR_BGRA,
+    });
+    assert_eq!(fixture.keyboard().focused, Some(Focused::Layer(0)));
+
+    fixture.run(Step::DestroyLayer { index: 0 });
+    let after = fixture.keyboard();
+    assert_eq!(after.focused, None, "nothing left to hold the keyboard");
+    assert!(!fixture.state.keyboard_on_layer);
+    assert!(fixture.state.clicked_layer.is_none());
+    // The frame after all that still renders.
+    assert_eq!(fixture.render().len(), (CANVAS * CANVAS * 4) as usize);
+}
+
+/// A client that simply dies while its layer surface holds the keyboard --
+/// the crash-mid-operation case. Nothing is left pointing at it, and the
+/// compositor keeps serving.
+#[test]
+fn a_client_that_disconnects_while_holding_the_keyboard_leaves_nothing_behind() {
+    let mut fixture = Fixture::new();
+    fixture.run(Step::MapWindow);
+    fixture.run(Step::CreateLayer(
+        LayerSpec::launcher(60).with_keyboard(KeyboardInteractivity::OnDemand),
+    ));
+    fixture.run(Step::MapLayer {
+        index: 0,
+        color: BAR_BGRA,
+    });
+    fixture.click(ON_LAUNCHER.0, ON_LAUNCHER.1);
+    assert_eq!(fixture.keyboard().focused, Some(Focused::Layer(0)));
+    assert!(fixture.state.clicked_layer.is_some());
+
+    fixture.disconnect_client();
+    assert!(
+        fixture.state.clicked_layer.is_none(),
+        "a dead client's surface must not be held here"
+    );
+    assert!(!fixture.state.keyboard_on_layer);
+    assert_eq!(fixture.usable(), WHOLE);
+    assert_eq!(fixture.render().len(), (CANVAS * CANVAS * 4) as usize);
 }
 
 // -------------------------------------------------------------------------

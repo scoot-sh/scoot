@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use flexwm_core::{Config, Size, WindowId, World};
-use smithay::desktop::{PopupManager, Space, Window, WindowSurfaceType};
+use smithay::desktop::{LayerSurface, PopupManager, Space, Window, WindowSurfaceType};
 use smithay::input::keyboard::Keycode;
 use smithay::input::{Seat, SeatState};
 use smithay::output::Output;
@@ -54,8 +54,32 @@ pub struct State {
     /// The size each window was last asked for, to pair with what it becomes.
     pub requested: HashMap<WindowId, Size>,
     pub next_id: u64,
-    /// What holds keyboard focus, so focus is only moved when it changes.
+    /// The focused *window*, so activation and the focus ring are only moved
+    /// when they change. Not necessarily what holds the keyboard: a layer
+    /// surface can (see `clicked_layer` and `layer_shell.rs`), and this stays
+    /// pointing at the window focus will come back to when it doesn't.
     pub focus: Option<WindowId>,
+    /// The layer surface a click gave keyboard focus to, if any -- the one
+    /// piece of the layer-shell focus policy that cannot be re-derived from
+    /// the layer map, because nothing else records that a click happened.
+    ///
+    /// Holding a `LayerSurface` here holds an `Arc` to a client's surface, so
+    /// it is cleared as soon as it stops meaning anything: on that surface's
+    /// destruction (`layer_destroyed`), on the next click elsewhere, and
+    /// defensively on every focus refresh if the client vanished without
+    /// either (`forget_dead_clicked_layer`).
+    pub clicked_layer: Option<LayerSurface>,
+    /// Whether the keyboard focus `refresh_keyboard_focus` last handed out
+    /// went to a layer surface rather than a window's toplevel.
+    ///
+    /// Written *only* there, read *only* by `commit_layer_surface`'s gate,
+    /// and it means exactly that -- not "a layer surface wants the keyboard"
+    /// and not "`clicked_layer` is set". It exists so a bar with
+    /// `keyboard_interactivity: none` (i.e. nearly every layer surface that
+    /// will ever run) skips focus resolution entirely on each of its
+    /// redraws, while a surface that *stops* wanting the keyboard still gets
+    /// it taken away.
+    pub keyboard_on_layer: bool,
 
     pub space: Space<Window>,
     pub popups: PopupManager,
@@ -189,6 +213,8 @@ impl State {
             requested: HashMap::new(),
             next_id: 0,
             focus: None,
+            clicked_layer: None,
+            keyboard_on_layer: false,
             space: Space::default(),
             popups: PopupManager::default(),
             output: None,

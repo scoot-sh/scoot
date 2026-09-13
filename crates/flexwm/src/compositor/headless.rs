@@ -59,8 +59,19 @@ render_elements! {
 /// Every site that reports output geometry to [`flexwm_core`] uses it, so the
 /// "there is exactly one output" assumption lives in one named place rather
 /// than as a bare `OutputId(1)` repeated at each of them. Multi-output
-/// support replaces this with a real per-output id; nothing else about these
-/// call sites changes.
+/// support replaces this with a real per-output id.
+///
+/// It is not the only thing multi-output has to touch, though, so this is not
+/// a "change the constant and you're done" marker. `layer_shell.rs`'s
+/// `new_layer_surface` already honours a client's requested `wl_output`
+/// (`layer_map_for_output(requested.or(self.output))`), while six sites
+/// unconditionally reach for `self.output` instead: `layer_destroyed`,
+/// `commit_layer_surface`, `refresh_layer_zone`, `layer_hit`,
+/// `layer_keyboard_focus` and `render()`'s frame-callback/cleanup pass.
+/// Unreachable today -- exactly one `Output`
+/// exists, so "the one the client asked for" and "the one we have" are the
+/// same object -- but each of those five needs the surface's *own* output
+/// once there is more than one.
 pub(super) const OUTPUT_ID: OutputId = OutputId(1);
 
 /// How often a changed screen is redrawn, while there's something to redraw.
@@ -438,6 +449,11 @@ impl State {
         };
         if dropped_dead_layers {
             self.refresh_layer_zone();
+            // One of those dead surfaces may have been holding the keyboard
+            // (`layer_destroyed` is the usual path back, but this branch
+            // exists precisely for the teardown orders it misses), and
+            // `refresh_layer_zone` returns early when the zone didn't move.
+            self.refresh_keyboard_focus();
         }
         self.space.refresh();
         self.popups.cleanup();
@@ -477,8 +493,17 @@ impl State {
         // The core re-clamps its old usable area into the new one on
         // `OutputChanged` (see `flexwm_core`'s `Output::set_area`), which is
         // the right thing to do with a reservation nobody has re-reported
-        // yet -- this is that re-report, and it ends in `apply()`, which is
-        // what puts the resized arrangement onto the windows.
+        // yet -- this is that re-report. *When the zone actually moved* (a
+        // bar is mapped, so the new mode leaves a different usable
+        // rectangle) it ends in `apply()`, which is what puts the resized
+        // arrangement onto the windows. With nothing reserving anything it
+        // returns early instead: `OutputChanged`'s own re-clamp has already
+        // left the core's usable area equal to the zone this recomputes.
+        // That is not a regression -- before layer shell this function never
+        // called `apply()` at all -- and it is harmless for the one caller
+        // there is (`nested::apply_size`, on the host's configure, which
+        // arrives before any window has mapped). Anything that makes
+        // `--nested` resize *dynamically* has to revisit it.
         self.refresh_layer_zone();
         self.request_render();
     }
