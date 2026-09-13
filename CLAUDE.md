@@ -9,6 +9,21 @@ so it works inside linuxserver webtop (nested in pixelflux's Smithay
 compositor via `/defaults/startwm.sh`). Later it should also drive macOS
 window layout OmniWM-style through the Accessibility API.
 
+- **Computer use is the whole game here, not one goal among several.**
+  (Explicit user statement, 2026-09-12.) flexwm exists to be lightweight,
+  fast, and GPU-optional *in service of* being the best possible target for
+  an agent doing computer use — not as independent goals of equal weight.
+  When prioritizing what to work on next, weigh a candidate item by whether
+  it actually serves agent-driven automation (IPC richness, reliability,
+  ergonomics, targeting fidelity) before weighing it as general compositor
+  completeness (visual polish, protocol coverage for its own sake). This
+  doesn't override the engineering-standards priority order below
+  (correctness and architecture still come before beauty on any given
+  change) — it's about which *feature* to pick up next, not how carefully
+  to build it once chosen. Concretely: the background/off-focus window
+  input backlog item below is a direct example of a computer-use-serving
+  feature that should be weighed accordingly against general-purpose items
+  like layer-shell or GPU rendering, which don't serve this goal directly.
 - **License: MIT.** niri (GPL-3.0) and OmniWM (GPL-2.0-only) may inspire
   design, but their code — including cursor-theme assets — must not be
   copied. Check licenses before borrowing anything from either.
