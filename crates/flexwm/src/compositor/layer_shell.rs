@@ -49,7 +49,10 @@
 //!   exclusive surface wins", "focus comes back when it unmaps", and "focus
 //!   falls to the next exclusive surface when this one dies" all fall out
 //!   rather than needing their own bookkeeping. The one thing stored is
-//!   which surface a *click* focused, because nothing else records that.
+//!   which surface a *click* focused, because nothing else records that --
+//!   and it is forgotten again the moment that surface stops wanting the
+//!   keyboard, so a click focuses a surface exactly once rather than
+//!   outliving the state it was made against.
 //! - It overrides **only the keyboard**. `arrangement.focused`, the focus
 //!   ring, `set_activated` and `flexwm msg windows`' `focused` flag all keep
 //!   tracking the window -- which is the one focus will return to, and is
@@ -262,15 +265,38 @@ impl State {
                 // rate does not get configured on every frame.
                 layer.layer_surface().send_pending_configure();
             }
+            let focus = layer_focus(&layer);
+            // A click is spent the moment the surface it landed on stops
+            // wanting the keyboard -- it committed `none`, or attached a
+            // null buffer to unmap itself. Forgotten here rather than left
+            // for [`State::layer_keyboard_focus`] to keep ignoring, because
+            // that check is re-derived on every refresh while this field is
+            // remembered: a surface going `on_demand` -> `none` ->
+            // `on_demand` (a bar collapsing and re-opening a search field, a
+            // notification daemon closing and re-opening an inline reply)
+            // would otherwise take the keyboard straight back on the second
+            // transition, with no new click, while the focus ring and
+            // `flexwm msg windows` still name the window.
+            //
+            // This commit is the only place that transition can be seen:
+            // `layer_focus` reads committed state, so it changes only when
+            // this surface commits -- destruction is `layer_destroyed`'s job
+            // and a dead client is `forget_dead_clicked_layer`'s. The
+            // `Exclusive` -> `OnDemand` relaxation deliberately *keeps* the
+            // click (see [`State::click_layer`]); it never passes through
+            // `Never`, so it does not come through here.
+            if focus == LayerFocus::Never && self.clicked_layer.as_ref() == Some(&layer) {
+                self.clicked_layer = None;
+            }
             // Both halves are needed, and the second is the easy one to
-            // miss: a surface that *stops* wanting the keyboard -- it
-            // committed `none`, or attached a null buffer to unmap itself --
-            // reads as `Never` here, and without `keyboard_on_layer` nothing
-            // would ever take the focus back off it.
-            (
-                true,
-                layer_focus(&layer) != LayerFocus::Never || self.keyboard_on_layer,
-            )
+            // miss: a surface that *stops* wanting the keyboard reads as
+            // `Never` here, and without `keyboard_on_layer` nothing would
+            // ever take the focus back off it. That second half is also what
+            // makes the clear above reach a refresh: whenever
+            // `clicked_layer` is set, the last refresh found *something* on
+            // a layer (that surface, or an exclusive one in front of it), so
+            // `keyboard_on_layer` is true.
+            (true, focus != LayerFocus::Never || self.keyboard_on_layer)
         };
         self.refresh_layer_zone();
         if touches_keyboard {
@@ -419,6 +445,13 @@ impl State {
         // Membership in the map, not just liveness: `layer_destroyed`
         // unmaps, and a surface that is no longer arranged is no longer on
         // screen to be typed into.
+        //
+        // The `Never` half is the derived safety net, not the mechanism:
+        // `commit_layer_surface` forgets the click on the commit that stops
+        // wanting the keyboard, so this only has to answer for the window
+        // between that commit and this call. Keeping it means this function
+        // still states the whole policy on its own rather than depending on
+        // that clear having run first.
         let still_mapped = map.layers().any(|found| found == clicked);
         (still_mapped && layer_focus(clicked) != LayerFocus::Never)
             .then(|| clicked.wl_surface().clone())

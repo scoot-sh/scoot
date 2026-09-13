@@ -65,9 +65,12 @@ pub struct State {
     ///
     /// Holding a `LayerSurface` here holds an `Arc` to a client's surface, so
     /// it is cleared as soon as it stops meaning anything: on that surface's
-    /// destruction (`layer_destroyed`), on the next click elsewhere, and
-    /// defensively on every focus refresh if the client vanished without
-    /// either (`forget_dead_clicked_layer`).
+    /// destruction (`layer_destroyed`), on the next click elsewhere, on the
+    /// commit where that surface stops wanting the keyboard at all
+    /// (`commit_layer_surface` -- a click is spent once the thing it focused
+    /// asks for `none` or unmaps itself), and defensively on every focus
+    /// refresh if the client vanished without any of those
+    /// (`forget_dead_clicked_layer`).
     pub clicked_layer: Option<LayerSurface>,
     /// Whether the keyboard focus `refresh_keyboard_focus` last handed out
     /// went to a layer surface rather than a window's toplevel.

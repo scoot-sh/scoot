@@ -188,6 +188,17 @@ enum Step {
     /// protocol's own way for a surface to unmap itself without destroying
     /// the object, which a launcher does when it is dismissed and re-shown.
     UnmapLayer { index: usize },
+    /// The other half of [`Step::UnmapLayer`]: show that same surface again.
+    ///
+    /// Not just "attach a buffer" -- Smithay's own `pre_commit_hook` resets a
+    /// layer surface's cached state to `Default` when it unmaps
+    /// (`got_unmapped` in `wlr_layer/mod.rs`), which is what the protocol
+    /// asks for ("the surface returns to the state it had right after
+    /// `get_layer_surface`"). So everything it was created with has to be
+    /// said again, layer included, before it may be committed: a bare commit
+    /// is answered with `invalid_size` rather than a configure, and a bare
+    /// re-attach would come back on the `background` layer.
+    RemapLayer { index: usize, color: [u8; 4] },
     /// `set_keyboard_interactivity` on an already-mapped layer surface,
     /// followed by a commit (the setting is double-buffered, so the commit
     /// is what makes it real).
@@ -266,6 +277,10 @@ struct TestClient {
     /// The size the compositor last configured each layer surface to, by
     /// creation order -- `None` until its first configure arrives.
     layer_sizes: Vec<Option<(u32, u32)>>,
+    /// How many configures each of those has received, so a re-map can wait
+    /// for a *new* one rather than for "a size", which it already has from
+    /// before it unmapped. See [`Step::RemapLayer`].
+    layer_configures: Vec<u32>,
     /// The serial of each toplevel's latest unacked `xdg_surface.configure`,
     /// by creation order, `None` until its first one arrives.
     ///
@@ -415,6 +430,9 @@ impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, SurfaceIndex> for TestC
                 if let Some(slot) = client.layer_sizes.get_mut(index.0) {
                     *slot = Some((width, height));
                 }
+                if let Some(seen) = client.layer_configures.get_mut(index.0) {
+                    *seen = seen.saturating_add(1);
+                }
             }
             zwlr_layer_surface_v1::Event::Closed => {}
             _ => {}
@@ -453,6 +471,25 @@ fn solid_buffer(
     let buffer = pool.create_buffer(0, width, height, stride, wl_shm::Format::Argb8888, qh, ());
     pool.destroy();
     buffer
+}
+
+/// Sends everything a [`LayerSpec`] describes, none of which takes effect
+/// until the next commit.
+///
+/// Shared by [`Step::CreateLayer`] and [`Step::RemapLayer`] rather than
+/// written out twice, because they have to say exactly the same things: the
+/// protocol puts an unmapped surface back in its just-created state, so a
+/// re-map is a second first-commit. `set_layer` is in here for that reason
+/// too, even though `get_layer_surface` already carried it -- the reset
+/// takes the layer back to `background` with everything else.
+fn describe_layer(layer: &zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, spec: LayerSpec) {
+    layer.set_layer(spec.layer);
+    layer.set_anchor(spec.anchor);
+    layer.set_size(spec.size.0, spec.size.1);
+    layer.set_exclusive_zone(spec.exclusive_zone);
+    layer.set_keyboard_interactivity(spec.keyboard);
+    let (top, right, bottom, left) = spec.margin;
+    layer.set_margin(top, right, bottom, left);
 }
 
 /// Round-trips until `configure` reports that the compositor has configured
@@ -494,9 +531,12 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
         .clone()
         .ok_or("no zwlr_layer_shell_v1 -- the global is missing")?;
 
+    // The spec is kept beside each surface because a re-map has to say all
+    // of it again (see [`Step::RemapLayer`]).
     let mut layers: Vec<(
         wl_surface::WlSurface,
         zwlr_layer_surface_v1::ZwlrLayerSurfaceV1,
+        LayerSpec,
     )> = Vec::new();
     // Kept so a popup can name its parent; a popup's parent is an
     // `xdg_surface`, not a `wl_surface`.
@@ -539,6 +579,7 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 let surface = compositor.create_surface(&qh, ());
                 let index = layers.len();
                 client.layer_sizes.push(None);
+                client.layer_configures.push(0);
                 let layer = layer_shell.get_layer_surface(
                     &surface,
                     None,
@@ -547,22 +588,17 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                     &qh,
                     SurfaceIndex(index),
                 );
-                layer.set_anchor(spec.anchor);
-                layer.set_size(spec.size.0, spec.size.1);
-                layer.set_exclusive_zone(spec.exclusive_zone);
-                layer.set_keyboard_interactivity(spec.keyboard);
-                let (top, right, bottom, left) = spec.margin;
-                layer.set_margin(top, right, bottom, left);
+                describe_layer(&layer, spec);
                 // The initial commit: no buffer, which is what the protocol
                 // requires before the first configure.
                 if !matches!(step, Step::CreateLayerWithoutCommit(_)) {
                     surface.commit();
                 }
-                layers.push((surface, layer));
+                layers.push((surface, layer, spec));
             }
             Step::MapLayer { index, color } => {
                 let (index, color) = (*index, *color);
-                let (surface, _) = layers.get(index).cloned().ok_or("no such layer surface")?;
+                let (surface, ..) = layers.get(index).cloned().ok_or("no such layer surface")?;
                 // A layer surface may only attach a buffer once it has acked
                 // a configure, and it must draw at the size that configure
                 // carried -- which may take more than one round trip to
@@ -576,17 +612,45 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 surface.commit();
             }
             Step::DestroyLayer { index } => {
-                let (surface, layer) = layers.get(*index).ok_or("no such layer surface")?;
+                let (surface, layer, _) = layers.get(*index).ok_or("no such layer surface")?;
                 layer.destroy();
                 surface.destroy();
             }
             Step::UnmapLayer { index } => {
-                let (surface, _) = layers.get(*index).ok_or("no such layer surface")?;
+                let (surface, ..) = layers.get(*index).ok_or("no such layer surface")?;
                 surface.attach(None, 0, 0);
                 surface.commit();
             }
+            Step::RemapLayer { index, color } => {
+                let (index, color) = (*index, *color);
+                let (surface, layer, spec) =
+                    layers.get(index).cloned().ok_or("no such layer surface")?;
+                describe_layer(&layer, spec);
+                // Unmapping put the surface back in the initial-configure
+                // stage, so this buffer-less commit earns a fresh configure
+                // exactly like the first one did -- and it must be waited
+                // for by *count*, not by "a size has arrived". The unmap's
+                // own commit already provoked one (Smithay clears
+                // `initial_configure_sent` when it resets the role), carrying
+                // whatever `arrange` made of the reset, anchorless state:
+                // measured at 2 configures and 100x100 for a 60x60 launcher
+                // on this 200-square canvas, i.e. waiting for a size would
+                // return the stale one instantly and draw at the wrong size.
+                let seen = client.layer_configures.get(index).copied().unwrap_or(0);
+                surface.commit();
+                let (width, height) = wait_for_configure(&mut queue, &mut client, |client| {
+                    let fresh = client.layer_configures.get(index).copied().unwrap_or(0) > seen;
+                    fresh
+                        .then(|| client.layer_sizes.get(index).copied().flatten())
+                        .flatten()
+                })?;
+                let buffer = solid_buffer(&shm, &qh, width as i32, height as i32, color);
+                surface.attach(Some(&buffer), 0, 0);
+                surface.damage(0, 0, width as i32, height as i32);
+                surface.commit();
+            }
             Step::SetLayerKeyboard { index, keyboard } => {
-                let (surface, layer) = layers.get(*index).ok_or("no such layer surface")?;
+                let (surface, layer, _) = layers.get(*index).ok_or("no such layer surface")?;
                 layer.set_keyboard_interactivity(*keyboard);
                 // Double-buffered like everything else the surface asks for:
                 // without this commit the compositor has heard nothing.
@@ -594,7 +658,7 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
             }
             Step::ReportKeyboard => {
                 let focused = client.keyboard_focus.as_ref().map(|focused| {
-                    if let Some(index) = layers.iter().position(|(s, _)| s == focused) {
+                    if let Some(index) = layers.iter().position(|(s, ..)| s == focused) {
                         Focused::Layer(index)
                     } else if let Some(index) = windows.iter().position(|s| s == focused) {
                         Focused::Window(index)
@@ -1715,6 +1779,181 @@ fn a_surface_that_commits_none_gives_the_keyboard_back() {
         Some(Focused::Window(0)),
         "a surface that commits `none` must give the keyboard back"
     );
+}
+
+/// A click is *spent*, not stored forever. An `on_demand` surface that gave
+/// the keyboard back by committing `none` must not take it again the next
+/// time it asks for `on_demand` -- there has been no new click, and the
+/// focus ring, `set_activated` and `flexwm msg windows` all still name the
+/// window, so the keystrokes would go somewhere nothing on screen points at.
+///
+/// `none` <-> `on_demand` is the normal lifecycle for such a client (a bar
+/// collapsing and re-opening a search field, a notification daemon closing
+/// and re-opening an inline reply), not an edge case.
+#[test]
+fn an_on_demand_surface_does_not_recapture_the_keyboard_after_committing_none() {
+    let mut fixture = Fixture::new();
+    fixture.run(Step::MapWindow);
+    fixture.run(Step::CreateLayer(
+        LayerSpec::launcher(60).with_keyboard(KeyboardInteractivity::OnDemand),
+    ));
+    fixture.run(Step::MapLayer {
+        index: 0,
+        color: BAR_BGRA,
+    });
+    fixture.click(ON_LAUNCHER.0, ON_LAUNCHER.1);
+    assert_eq!(fixture.keyboard().focused, Some(Focused::Layer(0)));
+
+    fixture.run(Step::SetLayerKeyboard {
+        index: 0,
+        keyboard: KeyboardInteractivity::None,
+    });
+    assert_eq!(fixture.keyboard().focused, Some(Focused::Window(0)));
+
+    fixture.run(Step::SetLayerKeyboard {
+        index: 0,
+        keyboard: KeyboardInteractivity::OnDemand,
+    });
+    let back = fixture.keyboard();
+    assert_eq!(
+        back.focused,
+        Some(Focused::Window(0)),
+        "asking for `on_demand` again must not re-focus the surface: the \
+         click that focused it was spent when it committed `none`"
+    );
+    assert!(
+        fixture.state.clicked_layer.is_none(),
+        "the spent click should have been forgotten"
+    );
+    assert!(!fixture.state.keyboard_on_layer);
+
+    // ...and the keys really follow, not just the `enter`.
+    fixture.state.type_text("a").expect("a typed character");
+    fixture.settle();
+    let typed = fixture.keyboard();
+    assert_eq!(typed.keys, back.keys + 2, "typing should reach the window");
+    assert_eq!(typed.focused, Some(Focused::Window(0)));
+
+    // The surface is not broken, just no longer focused for free: a real
+    // click still gives it the keyboard.
+    fixture.click(ON_LAUNCHER.0, ON_LAUNCHER.1);
+    assert_eq!(fixture.keyboard().focused, Some(Focused::Layer(0)));
+}
+
+/// The same rule by the other route a client takes: unmapping with a null
+/// buffer and showing itself again -- exactly what a launcher does when it
+/// is dismissed and re-shown. `layer_focus` reads `Never` for the unmapped
+/// surface, so the click is spent there too.
+#[test]
+fn an_on_demand_surface_does_not_recapture_the_keyboard_when_it_maps_again() {
+    let mut fixture = Fixture::new();
+    fixture.run(Step::MapWindow);
+    fixture.run(Step::CreateLayer(
+        LayerSpec::launcher(60).with_keyboard(KeyboardInteractivity::OnDemand),
+    ));
+    fixture.run(Step::MapLayer {
+        index: 0,
+        color: BAR_BGRA,
+    });
+    fixture.click(ON_LAUNCHER.0, ON_LAUNCHER.1);
+    assert_eq!(fixture.keyboard().focused, Some(Focused::Layer(0)));
+
+    fixture.run(Step::UnmapLayer { index: 0 });
+    assert_eq!(fixture.keyboard().focused, Some(Focused::Window(0)));
+
+    fixture.run(Step::RemapLayer {
+        index: 0,
+        color: BAR_BGRA,
+    });
+    let back = fixture.keyboard();
+    assert_eq!(
+        back.focused,
+        Some(Focused::Window(0)),
+        "mapping again must not re-focus the surface without a new click"
+    );
+    assert!(fixture.state.clicked_layer.is_none());
+    assert!(!fixture.state.keyboard_on_layer);
+    fixture.state.type_text("a").expect("a typed character");
+    fixture.settle();
+    assert_eq!(fixture.keyboard().keys, back.keys + 2);
+
+    // It really did map again -- its pixels are back in the corner, so the
+    // assertion above is about focus, not about a surface that never
+    // returned.
+    let pixels = fixture.render();
+    assert_pixel(
+        &pixels,
+        CANVAS - 1,
+        CANVAS - 1,
+        BAR_BGRA,
+        "the re-mapped launcher",
+    );
+    fixture.click(ON_LAUNCHER.0, ON_LAUNCHER.1);
+    assert_eq!(fixture.keyboard().focused, Some(Focused::Layer(0)));
+}
+
+/// The transition that must *not* change: `exclusive` relaxing to
+/// `on_demand` keeps the keyboard when the surface was clicked while it held
+/// it. That path never passes through `Never`, so forgetting a spent click
+/// must not touch it -- the click is what carries the focus over, which is
+/// what `click_layer` records an `exclusive` surface's click for.
+#[test]
+fn an_exclusive_surface_that_relaxes_to_on_demand_keeps_a_click() {
+    let mut fixture = Fixture::new();
+    fixture.run(Step::MapWindow);
+    fixture.run(Step::CreateLayer(LayerSpec::launcher(60)));
+    fixture.run(Step::MapLayer {
+        index: 0,
+        color: BAR_BGRA,
+    });
+    assert_eq!(fixture.keyboard().focused, Some(Focused::Layer(0)));
+    fixture.click(ON_LAUNCHER.0, ON_LAUNCHER.1);
+
+    fixture.run(Step::SetLayerKeyboard {
+        index: 0,
+        keyboard: KeyboardInteractivity::OnDemand,
+    });
+    let relaxed = fixture.keyboard();
+    assert_eq!(
+        relaxed.focused,
+        Some(Focused::Layer(0)),
+        "a clicked surface that relaxes to `on_demand` should keep the keyboard"
+    );
+    fixture.state.type_text("a").expect("a typed character");
+    fixture.settle();
+    assert_eq!(fixture.keyboard().keys, relaxed.keys + 2);
+
+    // ...and it is genuinely `on_demand` now, not stuck: a click elsewhere
+    // takes the keyboard back, which `exclusive` would have refused.
+    fixture.click(ON_WINDOW.0, ON_WINDOW.1);
+    assert_eq!(fixture.keyboard().focused, Some(Focused::Window(0)));
+}
+
+/// The control for the test above: without a click there is nothing to carry
+/// over, so the same relaxation gives the keyboard back to the window. This
+/// is what makes that test a statement about the click rather than about
+/// `on_demand` surfaces keeping focus in general.
+#[test]
+fn an_exclusive_surface_that_relaxes_to_on_demand_unclicked_gives_the_keyboard_back() {
+    let mut fixture = Fixture::new();
+    fixture.run(Step::MapWindow);
+    fixture.run(Step::CreateLayer(LayerSpec::launcher(60)));
+    fixture.run(Step::MapLayer {
+        index: 0,
+        color: BAR_BGRA,
+    });
+    assert_eq!(fixture.keyboard().focused, Some(Focused::Layer(0)));
+
+    fixture.run(Step::SetLayerKeyboard {
+        index: 0,
+        keyboard: KeyboardInteractivity::OnDemand,
+    });
+    assert_eq!(
+        fixture.keyboard().focused,
+        Some(Focused::Window(0)),
+        "nothing clicked it, so `on_demand` has no focus to hold on to"
+    );
+    assert!(fixture.state.clicked_layer.is_none());
 }
 
 /// Two surfaces both demanding exclusive focus: `overlay` beats `top`, the

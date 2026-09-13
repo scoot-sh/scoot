@@ -68,10 +68,11 @@ render_elements! {
 /// unconditionally reach for `self.output` instead: `layer_destroyed`,
 /// `commit_layer_surface`, `refresh_layer_zone`, `layer_hit`,
 /// `layer_keyboard_focus` and `render()`'s frame-callback/cleanup pass.
-/// Unreachable today -- exactly one `Output`
-/// exists, so "the one the client asked for" and "the one we have" are the
-/// same object -- but each of those five needs the surface's *own* output
-/// once there is more than one.
+/// Unreachable today -- exactly one `Output` exists, so "the one the client
+/// asked for" and "the one we have" are the same object -- but every one of
+/// them has to become per-output once there is more than one: the first five
+/// need the surface's *own* output, and `render()`'s pass needs each output
+/// it drew.
 pub(super) const OUTPUT_ID: OutputId = OutputId(1);
 
 /// How often a changed screen is redrawn, while there's something to redraw.

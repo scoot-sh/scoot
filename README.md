@@ -153,15 +153,23 @@ What works:
     to give it the keyboard, click a window, a bar or bare desktop to take it
     back. `exclusive` on the `bottom` or `background` layer is treated the
     same way — the spec allows normal focus semantics there, and nothing
-    should be typing into a wallpaper unasked. Note that *only a click*
-    releases an `on_demand` surface: a keybinding or a `flexwm msg action
-    focus-*` moves window focus but leaves the keyboard where it is. The spec
-    leaves this implementation-defined, and click-only is the deliberate
-    choice — the alternative silently steals a launcher's keyboard whenever a
-    script re-focuses a window.
+    should be typing into a wallpaper unasked. Note that no *input* other
+    than a click releases an `on_demand` surface: a keybinding or a `flexwm
+    msg action focus-*` moves window focus but leaves the keyboard where it
+    is. The spec leaves this implementation-defined, and click-only is the
+    deliberate choice — the alternative silently steals a launcher's keyboard
+    whenever a script re-focuses a window.
   - A surface that has committed but never attached a buffer, or that
     unmapped itself, can't hold the keyboard however it asks: there is
     nothing of it on screen to type into.
+  - The surface can also hand the keyboard back itself, by committing
+    `keyboard_interactivity: none` or by unmapping — and the click that
+    focused it is spent when it does. Asking for `on_demand` again, or
+    mapping again, gets it drawn again but not focused again: it waits for a
+    fresh click, the same as the first time. So a bar that collapses and
+    re-opens a search field, or a notification daemon that closes and
+    re-opens an inline reply, never gets the keyboard back without the user
+    actually clicking it.
 
   **Keybindings always win.** They are matched before anything is forwarded
   to the focused client, so `Super+Shift+E` (quit) and, on `--tty`,

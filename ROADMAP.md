@@ -1900,9 +1900,11 @@ review, and why.
     needed to reproduce them is in PR #22's "Reproducing" block instead); the
     numbers here are copied from them verbatim. The pointer is parked at
     (1590, 990) before every capture, for the same reason round one recorded.
-    **The evidence's cache key still matches**: every commit after `9ddc295`
-    on this branch is documentation — `git diff --stat 9ddc295 HEAD --
-    crates/ scripts/` is empty.
+    **Cache key: this capture is no longer against `HEAD`.** It held through
+    the third review round (every commit after `9ddc295` up to `d5e673c` was
+    documentation), but that review then found a real focus bug, and the fix
+    for it changes `crates/`. See **Round four** at the end of this item for
+    what was re-verified against the new tree, what carries over, and why.
 
     **Correctness, on hardware.**
     - **Keystrokes reach the launcher, not the window behind it.** With
@@ -2344,6 +2346,48 @@ review, and why.
   computing the zone, which today would mean reimplementing `arrange`
   locally — worth doing only if a real client is seen to hit it, or if
   upstream grows the distinction.
+
+- **`flexwm msg type` silently drops every shifted character, so an agent
+  cannot type a capital letter (MEDIUM, and squarely against the
+  computer-use goal).** `type_text "AbC xyz"` delivers `abc xyz` — no error,
+  no warning, just quietly the wrong text. Reproduced by `flexwm-reviewer`
+  on both `--headless` and `--tty` while reviewing item 14's third round;
+  pre-existing and untouched by that PR's diff.
+
+  **Where.** `input.rs`'s `needs_shift` decides whether to hold `Shift_L`
+  around a character, and asks Smithay `xkb.raw_syms_for_key_in_layout(...)
+  .contains(&keysym)`. That helper is hard-coded to **level 0**
+  (`input/keyboard/mod.rs:187-189` in the pinned rev:
+  `key_get_syms_by_level(keycode, layout.0, 0)`), i.e. it returns exactly
+  the syms that need *no* modifier — so `contains` is false for every
+  keysym that does need one, and `needs_shift` can only ever answer
+  "false". `'A'`, `'!'`, `'_'`, `'?'`, `'~'`, `':'` and `'|'` all come out
+  as their unshifted twin.
+
+  **Why it is silent rather than an error.** `keycode_for_keysym`
+  (`mod.rs:1240-1253`) scans *every* level, so the lookup for `'A'`
+  succeeds and returns the `a` key; only the shift decision fails. That
+  asymmetry between the two Smithay calls is the whole bug, and it is also
+  why three rounds of hardware testing missed it: every test string anyone
+  happened to type was lowercase.
+
+  **Why it matters.** Driving a computer through `flexwm msg type` is a
+  stated goal of this project, and an agent that cannot produce a capital
+  letter cannot type a password, a `Dockerfile`, a URL with a query string,
+  a shell pipeline, or most identifiers in most languages. It is a bigger
+  practical hole in agent-driven use than anything currently above it in
+  this backlog.
+
+  **Fix shape.** Find the level the keysym actually sits at
+  (`num_levels_for_key` + `key_get_syms_by_level`, the same walk
+  `keycode_for_keysym` does) and press the modifiers that level needs —
+  `xkb_keymap_key_get_mods_for_level` rather than an assumption that level
+  1 means Shift, since AltGr levels exist on plenty of layouts and `press`
+  already has a `Modifier` → keysym mapping to reuse. Wants a test that
+  asserts on what a real client *received* (keysym plus modifier state),
+  not just that keys arrived: the layer-shell harness is the only one with
+  a real `wl_keyboard`, and it currently counts events without decoding
+  them, so it needs extending first.
 
 - **`flexwm msg outputs` reports only an output's full rectangle**, so an
   agent cannot see what a bar reserved (item 14 gave the core a `usable`
