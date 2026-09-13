@@ -81,7 +81,7 @@ fn random_action(rng: &mut Rng, windows: &[WindowId]) -> Action {
     } else {
         Vertical::Down
     };
-    match rng.below(10) {
+    match rng.below(11) {
         0 => Action::FocusColumn(horizontal),
         1 => Action::FocusWindow(vertical),
         2 => Action::MoveColumn(horizontal),
@@ -91,6 +91,14 @@ fn random_action(rng: &mut Rng, windows: &[WindowId]) -> Action {
         6 => Action::FocusWorkspace(vertical),
         7 => Action::MoveWindowToWorkspace(vertical),
         8 if !windows.is_empty() => Action::FocusWindowId(windows[rng.below(windows.len())]),
+        // Usually a plausible position, sometimes a wild one: this index
+        // comes off a wire (`ext-workspace-v1`'s `activate`), so "a client
+        // asked for workspace 2^63" has to be as ordinary as "workspace 1".
+        9 => Action::FocusWorkspaceIndex(match rng.below(8) {
+            0 => usize::MAX,
+            1 => usize::MAX / 2,
+            other => other,
+        }),
         _ => Action::CloseFocused,
     }
 }
