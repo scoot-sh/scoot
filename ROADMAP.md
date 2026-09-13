@@ -1726,6 +1726,16 @@ review, and why.
       the control click at (400,500) moves focus to window 1.
     - No `ERROR` or `WARN` from flexwm itself across the whole run (the two
       `smithay::backend::drm` lines every `--tty` run logs are filtered).
+    - **`wait-idle` now has a bar's redraw rate as its floor**, measured
+      rather than assumed: with no layer surfaces, `--quiet-ms 200` settles
+      in 203ms and `--quiet-ms 1500` in 1515ms; with waybar's clock ticking
+      once a second, `--quiet-ms 200` still settles (204ms) and
+      `--quiet-ms 1500` times out. A layer surface's commits count as screen
+      activity like any other client's (`handlers.rs`'s `commit` sets
+      `last_commit` for every surface), which is correct -- the screen really
+      is changing -- but it is new agent-facing behavior, so it is in the
+      README's layer-shell section too. Same shape as the caveat item 8
+      recorded for an animated cursor.
 
     **Benchmarked** (release builds, jiffies from `/proc/pid/stat`, the same
     method items 5/8/13 used), because the render path changed shape:

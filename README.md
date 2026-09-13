@@ -155,6 +155,13 @@ What doesn't, yet:
   reserved area a bar takes isn't exposed over IPC yet; an agent asking "how
   big is the screen" gets the screen.
 
+One thing for agents to know: a bar redraws on its own schedule, and
+`flexwm msg wait-idle` waits for *nothing on screen* to have redrawn.
+Measured on real hardware with a `waybar` clock ticking once a second,
+`--quiet-ms 200` still settles normally (204 ms) while `--quiet-ms 1500`
+never does and times out. Keep `--quiet-ms` below whatever your bar's own
+redraw interval is — the same caveat an animated cursor already carried.
+
 ## Configuration
 
 `--config PATH` loads a TOML file explicitly. Without it, flexwm looks for
