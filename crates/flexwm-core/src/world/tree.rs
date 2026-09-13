@@ -275,6 +275,27 @@ impl Output {
         self.normalize();
     }
 
+    /// Activates the workspace at `index`, ignoring one this output doesn't
+    /// have.
+    ///
+    /// Ignoring rather than clamping: an index past the end is a caller
+    /// working from a stale list (a bar that asked for workspace 4 as the
+    /// third one was being dropped), and silently activating the *last*
+    /// workspace instead would be a switch the user never asked for. Doing
+    /// nothing is what the one protocol that can produce this already
+    /// promises its clients ("there is no guarantee the workspace will be
+    /// actually activated").
+    pub(super) fn focus_workspace_index(&mut self, index: usize) {
+        if index >= self.workspaces.len() {
+            return;
+        }
+        self.active = index;
+        // As in `focus_workspace`: leaving an empty workspace behind drops
+        // it, which renumbers everything after it. That is why an index only
+        // means anything against the list it was read from.
+        self.normalize();
+    }
+
     /// Carries the focused window to the neighbouring workspace, and follows it.
     pub(super) fn move_focused_window_to_workspace(&mut self, dir: Vertical) {
         let target = step(self.active, self.workspaces.len(), dir == Vertical::Down);

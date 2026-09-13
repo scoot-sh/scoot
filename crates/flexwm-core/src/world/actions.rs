@@ -27,6 +27,12 @@ impl World {
                 self.reshape(|o| o.active_workspace_mut().cycle_preset(presets));
             }
             Action::FocusWorkspace(dir) => self.reshape(|o| o.focus_workspace(dir)),
+            // The focused output's workspaces, like every other `reshape`
+            // action here. With more than one output this needs to say
+            // *which* output's workspace list the index counts within -- see
+            // `World::workspaces`, which has the same caveat from the reading
+            // side.
+            Action::FocusWorkspaceIndex(index) => self.reshape(|o| o.focus_workspace_index(index)),
             Action::MoveWindowToWorkspace(dir) => {
                 self.reshape(|o| o.move_focused_window_to_workspace(dir));
             }

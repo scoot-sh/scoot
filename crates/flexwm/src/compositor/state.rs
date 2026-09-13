@@ -30,6 +30,7 @@ use smithay::wayland::socket::ListeningSocketSource;
 
 use super::cursor::Cursor;
 use super::decorations::{Appearance, Decorations};
+use super::ext_workspace::ExtWorkspaceState;
 use super::headless::Backend;
 use super::ipc::PendingIdle;
 use super::keybindings::Keybindings;
@@ -126,6 +127,12 @@ pub struct State {
     /// `layer_shell.rs`) routes every layer-shell request through it. The
     /// surfaces themselves live in Smithay's per-output `LayerMap`, not here.
     pub layer_shell_state: WlrLayerShellState,
+    /// `ext_workspace_manager_v1`: what a bar reads workspaces from and
+    /// switches them through. Unlike the two `#[allow(dead_code)]` states
+    /// below, this is read on every `apply` -- see `ext_workspace.rs`, which
+    /// owns both the protocol objects and the "what have clients been told"
+    /// snapshot behind them.
+    pub ext_workspace: ExtWorkspaceState,
     /// Held only to keep the `zxdg_decoration_manager_v1` global alive --
     /// like `output_manager_state`, `XdgDecorationHandler` (see
     /// `handlers.rs`) has no `&mut XdgDecorationState` accessor to route
@@ -186,6 +193,7 @@ impl State {
         let xdg_shell_state = XdgShellState::new::<Self>(&dh);
         let xdg_decoration_state = XdgDecorationState::new::<Self>(&dh);
         let layer_shell_state = WlrLayerShellState::new::<Self>(&dh);
+        let ext_workspace = ExtWorkspaceState::new(&dh);
         let shm_state = ShmState::new::<Self>(&dh, vec![]);
         let output_manager_state = OutputManagerState::new_with_xdg_output::<Self>(&dh);
         let data_device_state = DataDeviceState::new::<Self>(&dh);
@@ -230,6 +238,7 @@ impl State {
             compositor_state,
             xdg_shell_state,
             layer_shell_state,
+            ext_workspace,
             xdg_decoration_state,
             shm_state,
             output_manager_state,

@@ -100,6 +100,11 @@ impl State {
             }
         }
         self.set_focus(arrangement.focused);
+        // The one place workspace changes reach `ext-workspace-v1` clients:
+        // every event and action that can add, drop or switch a workspace
+        // ends here (see `ext_workspace.rs`). Costs two `usize` compares when
+        // nothing about the workspaces changed, which is the common case.
+        self.refresh_workspaces();
         self.request_render();
     }
 

@@ -22,6 +22,25 @@ use crate::geometry::Rect;
 use crate::types::{OutputId, WindowId, WindowInfo};
 use tree::{Output, WindowState};
 
+/// What one output's workspace list looks like right now, as
+/// [`World::workspaces`] reports it.
+///
+/// Positions, not identities. A workspace has no name and no stable id in
+/// this core: it is the `n`-th workspace of an output for exactly as long as
+/// the list keeps that shape, and leaving an emptied workspace drops it,
+/// which renumbers every one after it. Anything that hands these numbers to a
+/// client has to re-read them rather than remember them.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Workspaces {
+    /// How many workspaces the output has. At least one for any output
+    /// [`World::workspaces`] reports, since an output always ends in exactly
+    /// one empty workspace -- only [`Workspaces::default`], which stands for
+    /// "before there was an output at all", has none.
+    pub count: usize,
+    /// Which of them is active, always `< count`.
+    pub active: usize,
+}
+
 /// Where a window sits in the tree.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Location {
@@ -104,6 +123,23 @@ impl World {
     /// allocation per bar frame.
     pub fn usable_area(&self, id: OutputId) -> Option<Rect> {
         self.outputs.iter().find(|o| o.id == id).map(|o| o.usable)
+    }
+
+    /// One output's workspaces: how many it has and which one is active.
+    ///
+    /// Both numbers are read from the same borrow, so they cannot disagree
+    /// with each other the way two separate accessors could -- a caller
+    /// publishing them (flexwm's `ext-workspace-v1` support does) would
+    /// otherwise be able to observe an active index that belongs to a
+    /// different count than the one it just read.
+    ///
+    /// `None` for an output this core doesn't know about.
+    pub fn workspaces(&self, id: OutputId) -> Option<Workspaces> {
+        let output = self.outputs.iter().find(|o| o.id == id)?;
+        Some(Workspaces {
+            count: output.workspaces.len(),
+            active: output.active,
+        })
     }
 
     fn output_index(&self, id: OutputId) -> Option<usize> {

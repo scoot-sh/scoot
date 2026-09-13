@@ -8,6 +8,7 @@ mod config;
 mod cursor;
 mod decorations;
 mod dispatch;
+mod ext_workspace;
 mod handlers;
 mod headless;
 mod input;

@@ -94,6 +94,19 @@ pub enum Action {
     ConsumeOrExpel(Horizontal),
     CycleColumnWidth,
     FocusWorkspace(Vertical),
+    /// Activate one specific workspace of the focused output, by its position
+    /// in [`World::workspaces`](crate::World::workspaces)' list. Out of range
+    /// does nothing.
+    ///
+    /// Beside [`Action::FocusWorkspace`] rather than replacing it: stepping
+    /// and naming a position are different intents, and stepping cannot
+    /// express this one -- workspaces are renumbered whenever an empty one is
+    /// dropped, so "step down N times" is not "go to workspace N".
+    ///
+    /// A position, not an identity: nothing in this core gives a workspace a
+    /// stable id, and an index only means what it means against the same
+    /// [`World::workspaces`](crate::World::workspaces) read it came from.
+    FocusWorkspaceIndex(usize),
     MoveWindowToWorkspace(Vertical),
     CloseFocused,
     Spawn(Vec<String>),
