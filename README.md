@@ -346,8 +346,8 @@ real `--tty` hardware by screenshot and by what clients were actually sent:
 - **Ordinary clients stop drawing.** They get no frame callbacks while
   locked, which is what the protocol asks for and also what keeps them from
   burning CPU behind a lock screen: measured on real hardware, a terminal
-  running `while true; do date; done` costs the compositor 230 jiffies/10s
-  unlocked and **3 jiffies/10s** with the same client still running behind a
+  running `while true; do date; done` costs the compositor 229 jiffies/10s
+  unlocked and **2 jiffies/10s** with the same client still running behind a
   lock.
 
 **If the lock client dies, the session stays locked.** That is the protocol's

@@ -2439,18 +2439,19 @@ review, and why.
     behind it; a VT switch away and back left the lock screen
     pixel-identical (`magick compare -metric AE` = 0); `kill -9` turned the
     screen red and kept refusing actions; a second locker took over and
-    unlocked cleanly. Balanced interleaved benchmark, 12 reps per side
-    across two batches, the order of the two binaries alternated between
+    unlocked cleanly. Balanced interleaved benchmark, 18 reps per side
+    across three batches, the order of the two binaries alternated between
     reps — because item 10 measured a real run-position effect, and an
     unbalanced first attempt here duly produced a phantom 11% regression:
-    150 corner-to-corner pointer jumps, `c93a100` mean **36.5** jiffies
-    (20–44) against this branch's **36.5** (28–45), i.e. the same number to
-    the tenth; idle 0 jiffies/10s both ways. The frame-callback suppression
-    is worth a real number of its own: a terminal running `while true; do
-    date; done` costs the compositor **230 jiffies/10s** unlocked and
-    **3 jiffies/10s** with that same client still running behind a lock
-    (225 again the moment it unlocks), which is why `handlers.rs`'s
-    per-commit `request_render` needed no extra gate while locked.
+    150 corner-to-corner pointer jumps, `c93a100` mean **37.6** jiffies
+    (20–44) against this branch's **37.2** (28–45) — fully overlapping, no
+    measurable difference; idle 0 jiffies/10s both ways. The frame-callback
+    suppression is worth a real number of its own: a terminal running
+    `while true; do date; done` costs the compositor **229 jiffies/10s**
+    unlocked and **2 jiffies/10s** with that same client still running
+    behind a lock (225 again the moment it unlocks), which is why
+    `handlers.rs`'s per-commit `request_render` needed no extra gate while
+    locked.
 
 ## Backlog (unordered — pick up whenever it fits)
 
