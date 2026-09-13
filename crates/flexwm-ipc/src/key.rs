@@ -25,7 +25,10 @@ impl Modifier {
         }
     }
 
-    fn name(self) -> &'static str {
+    /// The spelling `parse` accepts and [`KeyCombo`]'s `Display` writes --
+    /// also what a compositor should name in an error about this modifier,
+    /// so the message quotes back what the caller wrote.
+    pub fn name(self) -> &'static str {
         match self {
             Self::Ctrl => "ctrl",
             Self::Shift => "shift",

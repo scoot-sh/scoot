@@ -152,6 +152,43 @@ echo "--- typing text with an embedded newline ---"
 "$FLEXWM" msg type "$(printf 'echo one\necho two')"
 "$FLEXWM" msg wait-idle --quiet-ms 500 --timeout-ms 10000
 
+echo "--- typing shifted characters, round-tripped back out of the terminal ---"
+# Every category the level-0 shift bug got wrong (2026-09-13): capitals and
+# shifted punctuation each arrived as their unshifted twin -- `AbC` as `abc`,
+# `!` as `1` -- with no error, because the shift decision asked a Smithay
+# helper that only ever reports level 0. A screenshot can't catch that (the
+# wrong text is still text), so this reads the characters back out of the
+# shell running in the terminal and compares them byte for byte. The `>`
+# redirect is itself a shifted character, so the check could not even be
+# written without the fix.
+NEWLINE=$'\n'
+SHIFTED='AbC_xyz !?~:|@#$%^&*()+{}<>"'
+TYPED=${TYPED:-/tmp/flexwm-smoke-typed.txt}
+rm -f "$TYPED"
+# The steps above left `echo two` sitting at the prompt unexecuted; run it so
+# this one starts on an empty command line.
+"$FLEXWM" msg type "$NEWLINE"
+"$FLEXWM" msg wait-idle --quiet-ms 300 --timeout-ms 10000
+"$FLEXWM" msg type "printf '%s' '$SHIFTED' > $TYPED$NEWLINE"
+"$FLEXWM" msg wait-idle --quiet-ms 500 --timeout-ms 10000
+for _ in $(seq 1 50); do
+    [ -s "$TYPED" ] && break
+    sleep 0.2
+done
+if [ ! -s "$TYPED" ]; then
+    echo "BUG: the command typed into the terminal never wrote $TYPED"
+    echo "(the shell in the terminal saw something other than what was typed)"
+    exit 1
+fi
+if [ "$(cat "$TYPED")" != "$SHIFTED" ]; then
+    echo "BUG: typed text came back wrong"
+    echo "  typed:    $SHIFTED"
+    echo "  received: $(cat "$TYPED")"
+    exit 1
+fi
+echo "ok: every shifted character arrived exactly as typed"
+rm -f "$TYPED"
+
 focused_window() {
     "$FLEXWM" msg windows | jq -r '.windows[] | select(.focused) | .id'
 }

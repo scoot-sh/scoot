@@ -2434,12 +2434,87 @@ review, and why.
   locally — worth doing only if a real client is seen to hit it, or if
   upstream grows the distinction.
 
-- **`flexwm msg type` silently drops every shifted character, so an agent
+- **~~`flexwm msg type` silently drops every shifted character, so an agent
   cannot type a capital letter (MEDIUM, and squarely against the
-  computer-use goal).** `type_text "AbC xyz"` delivers `abc xyz` — no error,
-  no warning, just quietly the wrong text. Reproduced by `flexwm-reviewer`
-  on both `--headless` and `--tty` while reviewing item 14's third round;
-  pre-existing and untouched by that PR's diff.
+  computer-use goal).~~ — RESOLVED 2026-09-13 (fix + tests, PR #23).**
+  `needs_shift` is gone. `crates/flexwm/src/compositor/input/modifiers.rs`
+  answers both halves of the question in one keymap walk: which key carries
+  the keysym *and* which level it sits at (the old code asked two different
+  Smithay helpers and only one of them looked past level 0). It then asks
+  `xkb_keymap_key_get_mods_for_level` which modifier combinations reach that
+  level and holds the keys for the cheapest one it can actually produce.
+  *Which* keys those are also comes out of the keymap rather than a
+  modifier-name-to-keysym table: every keycode is pressed once in a
+  throwaway `xkb::State` and watched, so AltGr levels work on layouts that
+  put AltGr somewhere else (checked against `de` and `de(neo)`), a modifier
+  key with no keysym of its own is still usable, and — the reason the probe
+  earns its keep — a key that *locks* or *latches* its modifier (Caps Lock,
+  Num Lock, `ISO_Level3_Latch`) is never pressed. `key_get_mods_for_level`
+  really does offer Caps Lock as an alternative to Shift for a capital
+  letter, and pressing it would type one capital and leave the keyboard
+  shifted for everything typed afterwards. A level only such a key can reach
+  is an error instead (`Untypable::NoModifiers`), as is a character no key
+  carries at all (`Untypable::NoKey`) — both loud, where the old behaviour
+  was silent and wrong. The resolution pass allocates nothing (fixed-size
+  `Copy` results, and the keymap probe runs at most once per request, only
+  once a character actually needs a modifier).
+
+  **Cost, corrected** (an earlier draft of this entry claimed "one keymap
+  scan per character instead of two", which the benchmark does not support
+  and which review caught): the shapes are the same either way. The old
+  path was one scan (`keycode_for_keysym`) plus one O(1) level-0 lookup;
+  the new one is one scan (`key_for`) plus one O(1)
+  `key_get_mods_for_level`. That is exactly why the benchmark shows
+  lowercase typing unchanged within noise (median 114 ms → 112 ms per
+  50,000 characters). The real cost is confined to characters that were
+  previously typed *wrongly*: they now send four key events instead of two
+  (the modifier's own press and release), which is the whole point, and it
+  takes the all-shifted median from 108 ms to 188 ms per 50,000.
+
+  **Verified** three ways, all red/green (the fix disabled, the tests fail
+  with exactly the reported symptom; restored, they pass): 10 unit tests
+  against real `us`/`de`/`de(neo)` keymaps
+  (`input/modifiers/tests.rs`); 7 live-client tests that decode what a real
+  `wayland-client` toplevel received through its own `xkb::State`, built
+  from the keymap fd the compositor sent it (`input/tests.rs` — the
+  "assert on what the client actually got" test the fix shape below asked
+  for, in its own harness rather than by extending the layer-shell one);
+  and a new `scripts/smoke-test.sh` step that types a shell command
+  containing every broken character class into a real `foot`, redirects it
+  to a file and diffs it byte for byte. The script itself ran on
+  `--headless`; the same round trip, run by hand, ran on real `--tty`
+  hardware in the dev VM (`/home/dev/tty-evidence.sh` there, screenshot
+  artifact `/home/dev/tty-shift-evidence.png`) — byte-for-byte identical
+  both times, `od -c` output in PR #23. Deliberately left out of scope and
+  split out as its own entry below: dead keys, compose sequences, and
+  characters that are only on a layout other than the active one.
+
+  **`flexwm-reviewer` found a blocking bug in the fix itself, fixed in the
+  same PR (second round).** The first version asked the keymap two
+  questions in two different xkb *groups*: `ModifierKeys::probe` built a
+  scratch `xkb::State`, which starts in group 0 and was never pinned, while
+  `plan` resolved the character's level against the *active* group. Key
+  actions are per-group exactly as keysyms are, so with `XKB_DEFAULT_LAYOUT=de,de
+  XKB_DEFAULT_VARIANT=neo, XKB_DEFAULT_OPTIONS=grp:menu_toggle` and the
+  session toggled into group 1, `flexwm msg type '@'` typed **`#q`** — the
+  probe had recorded group 0's third-level key (`de(neo)`'s, in the `#`
+  position), which is an ordinary `#` key in group 1, so the modifier was
+  never set and `@`'s key fell through to `q`. Silent, and exactly the
+  failure mode this whole entry exists to close, one level up. `probe` now
+  takes the layout, pins the state to it (`update_mask`) before every key
+  it presses, and discards a state that comes back with either the modifier
+  state or the group changed; `ModifierKeys` carries the layout it answered
+  for, so `plan`'s per-string cache can't hand a group-0 table to a group-1
+  character. Every earlier test compiled a single-group keymap, where group
+  0 *is* the active group, which is why this shipped unnoticed — so the
+  regression tests are multi-group and assert on what a client decodes.
+  Reproduced on the dev VM before the fix and re-run after
+  (`/home/dev/fix-multilayout.sh`), and the real `--tty` round trip above
+  was re-run against the corrected code rather than carried forward.
+
+  The same review round found the identical bug class still live in
+  `flexwm msg key` — see the entry below for what it did and what replaced
+  it.
 
   **Where.** `input.rs`'s `needs_shift` decides whether to hold `Shift_L`
   around a character, and asks Smithay `xkb.raw_syms_for_key_in_layout(...)
@@ -2475,6 +2550,66 @@ review, and why.
   not just that keys arrived: the layer-shell harness is the only one with
   a real `wl_keyboard`, and it currently counts events without decoding
   them, so it needs extending first.
+
+- **`flexwm msg type` still can't produce a character that needs a dead key,
+  a compose sequence, or a layout the session isn't currently on (LOW).**
+  The shifted-character fix above covers every character that is *on* the
+  active layout at some shift level. That is *not* "all of ASCII on any
+  Latin layout", as an earlier draft of this entry claimed (review caught
+  it; the numbers below come from
+  `every_planned_character_decodes_back_to_itself_on_every_latin_layout`
+  and its sibling, which sweep printable ASCII across fourteen real
+  layouts and record exactly what each refuses). Coverage is
+  layout-dependent: `us`, `us(intl)`, `gb`, `de(neo)`, `fr`, `fr(oss)`,
+  `it` and `pl` produce all 95 printable ASCII characters, while `de` and
+  `es` refuse `^` and `` ` ``, and `pt`, `se`, `no` and `dk` refuse `~` as
+  well — those keys carry `dead_circumflex`/`dead_grave`/`dead_tilde`, not
+  the plain character. `~` is the one that bites in practice: shell paths,
+  globs and regexes are full of it.
+
+  Three things are still out of reach, all of them refused loudly rather
+  than typed wrong — the first two with ``no key for `X` in this layout``,
+  the third with its own message (``[X] needs a modifier this layout only
+  locks or latches``, `input.rs`), since "your layout doesn't have this"
+  and "your layout has it but only behind Caps Lock" call for different
+  responses:
+  - **Dead keys and compose sequences.** `é` on a plain `us` layout is two
+    or three keypresses with a state machine in between (`Compose`, `'`,
+    `e`), not a key with a level. Driving it needs an `xkb::Compose` table
+    and a second resolution path when the single-key lookup fails; the
+    payoff is accented Latin text an agent might paste, so this is worth
+    doing if that ever comes up, not before.
+  - **Characters on an inactive layout group.** Resolution uses the
+    keymap's active layout only. With `us,de` configured, `ü` is one group
+    switch away, and nothing here switches groups — deliberately: the
+    session's own layout is user state, and silently changing it to type
+    one character (or failing to change it back if the request errors
+    partway) is worse than saying no.
+  - **Levels only a locking or latching modifier reaches.** Refused on
+    purpose, see the resolved entry above; a layout that puts a character
+    *only* behind Caps Lock would need it pressed and un-pressed around the
+    character, and nothing in xkbcommon promises that round-trips cleanly.
+
+  Adjacent, and **not** unchanged — an earlier draft of this entry said
+  `flexwm msg key A` typing `a` was `press`'s documented contract rather
+  than the same bug, and review measured that it was the same bug, still
+  live and wider than one name. `key exclam` typed `1`, `key at` typed `2`,
+  and `asciitilde`, `underscore`, `question`, `colon`, `bar` and
+  `braceleft` were all off by one level the same way, because
+  `keycode_for_keysym` returns the lowest keycode carrying a keysym at
+  *any* level while `press` holds only the modifiers its caller names.
+  Fixed in the same PR: those names are now refused with a message saying
+  what to write instead, `modifiers::named_key` resolves names by looking
+  for a level-0 carrier, and `keycode_for` — the last caller of
+  `keycode_for_keysym` — is gone. `flexwm msg key shift+1` types `!` and
+  `shift+a` types `A`, as before.
+
+  Note what that refusal does *not* buy: some characters cannot be named as
+  a combination at all. `@` on a German layout needs AltGr, and `Modifier`
+  has no name for it (`ctrl`/`shift`/`alt`/`super` only), so `msg type` is
+  the only way to produce it. Giving `key` a name for the third-level
+  modifier is a plausible small follow-up if an agent ever needs to chord
+  with AltGr; nothing needs it today.
 
 - **`flexwm msg outputs` reports only an output's full rectangle**, so an
   agent cannot see what a bar reserved (item 14 gave the core a `usable`
@@ -2567,6 +2702,45 @@ data-loss/RCE in what was checked.
   uncapped: the same codec reads `Response::Screenshot`, which is legitimately
   several MB of base64 PNG, so a cap there would break real screenshots. A
   future `Client`-side cap would have to be per-message-type, not global.
+- **A `[binds]` entry naming a capital letter parses, loads, and can never
+  fire (LOW, pre-existing).** `"A" = "close"` is accepted without a
+  warning, but `input.rs`'s `keysym_named` tries the name *exactly* first,
+  which for a single letter always succeeds and yields the distinct `A`
+  keysym — while `keybindings::match_key` is fed `handle.raw_syms().first()`,
+  the key's unshifted symbol, which is `a`. The two never meet. Found while
+  correcting this branch's documentation (the README claimed letters
+  "always resolve to their lowercase keysym", which is only true when the
+  exact lookup *fails*); reproduced on `--headless` in
+  `/home/dev/bindcase.sh` on the dev VM: with `"A" = "close"` the window
+  survives `flexwm msg key shift+a`, with `"shift+a" = "close"` it closes.
+  The README now says to write `"shift+a"`. Fixing it properly means
+  lowercasing a single-letter key name at *config parse* time only —
+  deliberately not in `keysym_named` itself, since `flexwm msg key A` must
+  keep refusing rather than silently becoming `a` (see the resolved entry
+  above) — plus a test per direction. Worth doing next time `config.rs` is
+  open; nothing silently misbehaves in the meantime, the bind simply does
+  nothing.
+- **A large `flexwm msg type` blocks the whole event loop for its whole
+  duration (LOW, pre-existing).** `ipc.rs` runs `Request::Type` to
+  completion synchronously on the sole event-loop thread, so a request at
+  the 1 MiB inbound cap (item 9's `ipc/line.rs` limit, which is what bounds
+  how big this can get) stalls wayland dispatch, input and rendering until
+  every character has been sent. Pre-existing — `type_text` has always been
+  synchronous, and `git blame` puts it well before the shifted-character
+  work — but PR #23's own benchmark numbers put a figure on it and roughly
+  doubled the worst case: ~2.3 s per MiB before, ~2.4 s if the text is all
+  lowercase, ~3.9 s if it is all shifted (extrapolated from the measured
+  medians of 112 ms and 188 ms per 50,000 characters, release build,
+  `--headless`), because a shifted character correctly costs four key
+  events instead of two. Nothing an agent does deliberately gets near this
+  — a shell command line is a few hundred characters, i.e. under a
+  millisecond — so this is a hostile-input/accident bound, not an everyday
+  cost. Fixing it properly means chunking the request across event-loop
+  iterations (send N characters, yield, resume), which needs per-connection
+  progress state of the kind item 10 deliberately avoided; a much cheaper
+  partial answer is a separate, smaller cap on `Request::Type`'s text
+  specifically, refused rather than delayed, the same shape the screenshot
+  rate limit took.
 - **Screenshot capture runs synchronously on the sole event-loop thread with
   no rate limit (MEDIUM)** — **the rate limit is DONE as item 9** (one
   capture per connection per 16ms frame, refused rather than delayed). Still
@@ -3067,3 +3241,29 @@ data-loss/RCE in what was checked.
   Should probably be scoped as its own separate roadmap item once the
   rename (and the `flexctl` split, if that's the direction) land, rather
   than being designed as a rider on this entry.
+
+- **`flexwm msg key`'s modifier resolution hard-codes `Shift_L`/`Control_L`/
+  `Alt_L`/`Super_L` and requires each at level 0, so a layout that moves a
+  real modifier off its `_L` key breaks `msg key` combos entirely (LOW,
+  pre-existing).** Found by `flexwm-reviewer` while re-verifying item 14's
+  shifted-character fix (that PR's own `ModifierKeys::probe` — which asks
+  the keymap which key *actually* holds a given real modifier on the active
+  layout/group, rather than assuming a fixed keysym — sits one function away
+  from this bug and already knows how to answer it correctly). `input.rs`'s
+  `resolve_combo` maps `Modifier::{Ctrl,Shift,Alt,Super}` to a hard-coded
+  `_L` keysym and then demands it be reachable at level 0.
+
+  Concrete failure: `XKB_DEFAULT_LAYOUT=us,de XKB_DEFAULT_OPTIONS=grp:lshift_toggle`
+  (or `grp:lctrl_toggle`) is a real xkeyboard-config option that removes
+  `Shift_L`/`Control_L` from the keymap entirely, leaving `Shift_R`/
+  `Control_R` as the only key carrying that real modifier. `flexwm msg type
+  "A"` still works (the probe finds `Shift_R`), but `flexwm msg key
+  shift+a` and `flexwm msg key ctrl+c` are refused with ``no key for `shift`
+  in this layout`` — an agent on such a session cannot send Ctrl+C, or any
+  other modifier combo, at all. Verified pre-existing against the release
+  binary from before item 14's fix landed, so this isn't a regression from
+  that work — but it's the identical bug class (assuming a fixed keysym
+  instead of asking the keymap) in the modifier position rather than the
+  character position, and the fix is now a short reach: have `resolve_combo`
+  go through `modifiers::ModifierKeys` (or equivalent) the same way
+  `type_text` already does, instead of a hard-coded keysym table.

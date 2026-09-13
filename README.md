@@ -102,6 +102,42 @@ Add `--config PATH` to any of the three to load a TOML config; see
 Configuration below for the full schema and default keybindings. Run
 `flexwm --help` for the full request/action list.
 
+`flexwm msg type TEXT` types text the way a person would, on whatever
+keyboard layout the session is running: for each character it finds the key
+that carries it and holds down whatever modifiers that key's level needs —
+Shift for `A` or `!`, AltGr for a German layout's `@` — so a client receives
+the same key *and* modifier events it would see from a real keyboard, not
+just a bare keysym. `\n` and `\t` are sent as `Return` and `Tab`. Three
+things worth knowing:
+
+- A character the active layout can't produce is an error naming it (``no
+  key for `é` in this layout``). Dead keys and compose sequences aren't
+  driven, so a character that needs one counts as "no key" too — which is
+  layout-dependent and worth checking before assuming ASCII is safe: `^`
+  and `` ` `` are dead on `de`, `es`, `pt`, `se`, `no` and `dk`, and on the
+  last four `~` is dead too. A character that sits on a level the layout only
+  reaches through a *locking or latching* modifier gets its own, different
+  message (``[character] needs a modifier this layout only locks or
+  latches``) — flexwm will not press Caps Lock to type a capital, since
+  that would leave it on for everything afterwards. In every case the
+  characters *before* it in the string have already been typed: the request
+  stops at the first character it can't type rather than rolling back.
+- Keybindings still apply to what it types, exactly as they would to a real
+  keypress. That only matters for a bind with no modifiers, or one on
+  Shift plus a key; if a character does hit a bind, the compositor logs a
+  warning naming it rather than swallowing it silently.
+- `flexwm msg key COMBO` is the other one, and it is *not* the same: it
+  presses exactly the combination named and holds exactly the modifiers
+  named, nothing more. So name the key as it is with nothing held, plus the
+  modifiers: `shift+1`, not `exclam`; `shift+a`, not `A`. A name that this
+  layout only carries above its unmodified level is refused, because the
+  key that carries it types a *different* character when pressed bare —
+  `flexwm msg key exclam` would press the `1` key and deliver `1`. Some
+  characters can't be named as a combination at all (`@` on a German layout
+  needs AltGr, which `key` has no name for); `flexwm msg type` is the one
+  that works the modifiers out from the layout, and the one to reach for
+  when the goal is text rather than a chord.
+
 `--tty` needs a seat (`seatd` or logind) with a DRM device on it. On a modern
 kernel, on every non-root `--tty` run, Smithay logs `Unable to become drm
 master, assuming unprivileged mode` at startup — expected, not a failure: the
@@ -312,9 +348,17 @@ for instance, still reaches the focused client normally). Whitespace around
 case-insensitive: `ctrl`/`control`, `shift`, `alt`, and `super`/`logo`/
 `meta`/`cmd` (all four spellings mean the same modifier — flexwm's own
 tables and this doc call it "Super"). The key is an xkb keysym name (`h`,
-`Return`, `F5`, ...), matched case-insensitively against its *unshifted*
-form — letters always resolve to their lowercase keysym, with Shift tracked
-as an ordinary modifier rather than changing which name you write.
+`Return`, `F5`, ...), resolved by trying the name exactly as written first
+and then case-insensitively — so `"return"` and `"RETURN"` both find
+`Return`.
+
+Binds are matched against a key's *unshifted* symbol, with Shift tracked as
+an ordinary modifier, so **write the lowercase letter and name Shift
+separately**: `"shift+a"`, not `"A"`. A single capital resolves exactly, to
+the distinct `A` keysym, which is not what any keypress reports at the level
+binds match on — so `"A" = "close"` parses and loads but can never fire
+(verified on `--headless`; `"shift+a" = "close"` fires as expected). See the
+`ROADMAP.md` backlog entry for the accept-it-anyway fix.
 
 Action strings use exactly the grammar `flexwm --help`'s ACTIONS section
 documents — one parser handles both `flexwm msg action ...` and a config

@@ -22,8 +22,11 @@ REQUESTS:
     screenshot [--output ID] [--out FILE]
     pointer move X Y | pointer click X Y [left|right|middle]
     pointer button left|right|middle press|release | pointer scroll DX DY
-    key COMBO                       e.g. Return, ctrl+shift+t
-    type TEXT
+    key COMBO                       e.g. Return, ctrl+shift+t -- name the key
+                                    as it is unmodified plus the modifiers to
+                                    hold (shift+1, not exclam)
+    type TEXT                       types text, working out each character's
+                                    own modifiers from the active layout
     wait-idle [--quiet-ms N] [--timeout-ms N]
 
 ACTIONS:

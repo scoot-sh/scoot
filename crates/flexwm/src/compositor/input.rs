@@ -3,7 +3,7 @@
 use flexwm_core::Action;
 use flexwm_ipc::{KeyCombo, Modifier, PointerButton};
 use smithay::backend::input::{Axis, AxisSource, ButtonState, InputTime, KeyState};
-use smithay::input::keyboard::{FilterResult, Keycode, Keysym, xkb};
+use smithay::input::keyboard::{FilterResult, KeyboardHandle, Keycode, Keysym, xkb};
 use smithay::input::pointer::{AxisFrame, ButtonEvent, MotionEvent};
 use smithay::utils::{Logical, Point, SERIAL_COUNTER};
 
@@ -11,11 +11,24 @@ use super::State;
 use super::keybindings::Bound;
 use super::layer_shell;
 use super::tty::VtSwitchOutcome;
+use modifiers::{HeldKeys, NamedKey, Untypable};
+
+mod modifiers;
+#[cfg(test)]
+mod tests;
 
 // Linux input event codes, which is what Wayland carries.
 const BTN_LEFT: u32 = 0x110;
 const BTN_RIGHT: u32 = 0x111;
 const BTN_MIDDLE: u32 = 0x112;
+
+/// Every injected-input entry point needs the seat's keyboard, both to send
+/// keys and to read the keymap. `State::new` always adds one and nothing
+/// removes it, so this is a guard rather than an expected outcome -- but it
+/// is a distinct answer from anything the *keymap* could say, and saying so
+/// is what keeps "this layout has no `é`" from also meaning "there is no
+/// keyboard".
+const NO_KEYBOARD: &str = "this seat has no keyboard";
 
 /// What handling one key press/release actually did. `Default` gives the
 /// right answer (`intercepted: false, vt_switch: None`) for the
@@ -142,6 +155,17 @@ impl State {
 
     /// Presses and releases a combination, holding its modifiers around it.
     ///
+    /// *Exactly* the combination named, and nothing else: the key pressed is
+    /// the one carrying `combo.key`'s keysym with nothing held, and the only
+    /// modifiers held are the ones `combo` lists. A name this layout only
+    /// carries further up (`exclam`, `at`, `A`) is refused rather than
+    /// pressed, because the key carrying it types a *different* character
+    /// when pressed bare -- `flexwm msg key exclam` typed `1` for as long as
+    /// it resolved names the way Smithay's `keycode_for_keysym` does, which
+    /// takes the lowest keycode carrying a keysym at any level. Working out
+    /// which modifiers a character needs is [`State::type_text`]'s job; this
+    /// one does what it is told.
+    ///
     /// If `combo` matches a keybinding, `key` runs it exactly as a real
     /// keypress would -- this doesn't bypass keybindings the way
     /// `Request::Action` does. That's deliberate: an agent using `press` is
@@ -166,67 +190,129 @@ impl State {
     /// went out, since it may have just cost that connection the one
     /// channel that could switch the session back.
     pub fn press(&mut self, combo: &KeyCombo) -> Result<Option<VtSwitchOutcome>, String> {
-        let keysym =
-            keysym_named(&combo.key).ok_or_else(|| format!("unknown key `{}`", combo.key))?;
-        // Resolve every keycode -- the main key and all modifiers -- before
-        // pressing anything. `keycode_for` is a pure lookup against the
-        // static keymap (no dependency on what's currently held), so doing
-        // this up front means a name that doesn't exist on this layout is
-        // rejected before any key state changes, rather than after some
-        // modifiers are already down. Otherwise a failure partway through
-        // would leave a modifier (e.g. Super) permanently held at the seat
-        // level, silently corrupting every keypress after it.
-        let code = self
-            .keycode_for(keysym)
-            .ok_or_else(|| format!("no key for `{}` in this layout", combo.key))?;
-        let mut modifier_codes = Vec::with_capacity(combo.modifiers.len());
-        for modifier in &combo.modifiers {
-            let code = self
-                .keycode_for(modifier_keysym(*modifier))
-                .ok_or_else(|| format!("no key for `{modifier:?}` in this layout"))?;
-            modifier_codes.push(code);
-        }
-        let mut held = Vec::with_capacity(modifier_codes.len());
+        let (code, held) = self.resolve_combo(combo)?;
         let mut vt_switch = None;
-        for code in modifier_codes {
-            vt_switch = vt_switch.or(self.key(code, KeyState::Pressed).vt_switch);
-            held.push(code);
+        for &modifier in held.as_slice() {
+            vt_switch = vt_switch.or(self.key(modifier, KeyState::Pressed).vt_switch);
         }
         vt_switch = vt_switch.or(self.key(code, KeyState::Pressed).vt_switch);
         self.key(code, KeyState::Released);
-        for code in held.into_iter().rev() {
-            self.key(code, KeyState::Released);
+        for &modifier in held.as_slice().iter().rev() {
+            self.key(modifier, KeyState::Released);
         }
         Ok(vt_switch)
     }
 
-    /// Types text by pressing whichever keys produce those characters.
+    /// The key [`State::press`] will press for `combo`, and the modifier
+    /// keys to hold around it -- or why this layout can press neither.
+    ///
+    /// Resolved in one pass, before anything is pressed: these are pure
+    /// lookups against the static keymap (no dependency on what's currently
+    /// held), so doing it up front means a name this layout can't press is
+    /// rejected before any key state changes, rather than after some
+    /// modifiers are already down. Otherwise a failure partway through would
+    /// leave a modifier (e.g. Super) permanently held at the seat level,
+    /// silently corrupting every keypress after it.
+    fn resolve_combo(&mut self, combo: &KeyCombo) -> Result<(Keycode, HeldKeys), String> {
+        let keysym =
+            keysym_named(&combo.key).ok_or_else(|| format!("unknown key `{}`", combo.key))?;
+        let keyboard = self
+            .seat
+            .get_keyboard()
+            .ok_or_else(|| NO_KEYBOARD.to_owned())?;
+        self.with_keymap(&keyboard, |keymap, layout| {
+            let code = unmodified_key(keymap, layout, keysym, &combo.key)?;
+            let mut held = HeldKeys::default();
+            // One press per *distinct* modifier. The wire format is a list,
+            // so `shift+shift+...+a` is a legal (if pointless) request from
+            // a client that builds one by concatenation; without this, a
+            // long enough one would walk the keymap once per repeat and
+            // overrun `HeldKeys`' fixed buffer. Matched exhaustively rather
+            // than cast from the enum's discriminant, so adding a modifier
+            // is a compile error here instead of a bit that silently
+            // aliases another one's.
+            let mut seen = 0u8;
+            for &modifier in &combo.modifiers {
+                let bit = match modifier {
+                    Modifier::Ctrl => 1 << 0,
+                    Modifier::Shift => 1 << 1,
+                    Modifier::Alt => 1 << 2,
+                    Modifier::Super => 1 << 3,
+                };
+                if seen & bit != 0 {
+                    continue;
+                }
+                seen |= bit;
+                let keysym = modifier_keysym(modifier);
+                held.push(unmodified_key(keymap, layout, keysym, modifier.name())?);
+            }
+            Ok((code, held))
+        })
+    }
+
+    /// Types text by pressing whichever keys produce those characters, with
+    /// whatever the active layout needs held down around each one -- Shift
+    /// for `A` and `!`, AltGr for a German layout's `@`, nothing at all for
+    /// the level-0 characters that make up most text.
+    ///
+    /// Errors on the first character the layout cannot produce, leaving
+    /// everything before it typed. That is deliberate, and the same trade
+    /// this function has always made: the alternative is resolving the whole
+    /// string up front so it is all-or-nothing, which buys atomicity for a
+    /// case an agent hits by mistyping a request, at the cost of a per-call
+    /// buffer on the IPC path. Loud and partial beats silent and wrong,
+    /// which is what this used to be: every shifted character came out as
+    /// its unshifted twin, with no error at all.
     pub fn type_text(&mut self, text: &str) -> Result<(), String> {
+        // Answered once, up front, rather than folded into the per-character
+        // keymap lookup: "there is no keyboard" is not something the layout
+        // could ever say, and reporting it as `Untypable::NoKey` would make
+        // it indistinguishable from "this layout has no `é`".
+        let keyboard = self
+            .seat
+            .get_keyboard()
+            .ok_or_else(|| NO_KEYBOARD.to_owned())?;
+        // Filled in by the first character that needs a modifier held (see
+        // `modifiers::plan`), so a lowercase string never pays for the
+        // keymap walk and a mixed one pays for it once, not per character.
+        let mut modifier_keys = None;
         for character in text.chars() {
             let keysym = keysym_for_char(character);
-            let Some(code) = self.keycode_for(keysym) else {
-                return Err(format!("no key for `{character}` in this layout"));
-            };
-            let shift = if self.needs_shift(code, keysym) {
-                self.keycode_for(Keysym::Shift_L)
-            } else {
-                None
-            };
-            if let Some(shift) = shift {
-                self.key(shift, KeyState::Pressed);
-            }
+            let plan = self
+                .with_keymap(&keyboard, |keymap, layout| {
+                    modifiers::plan(keymap, layout, keysym, &mut modifier_keys)
+                })
+                .map_err(|reason| match reason {
+                    Untypable::NoKey => format!("no key for `{character}` in this layout"),
+                    Untypable::NoModifiers => {
+                        format!("`{character}` needs a modifier this layout only locks or latches")
+                    }
+                })?;
             // A keybinding firing mid-string here would be surprising --
             // `type_text` is meant to simulate typed characters, not chords
-            // -- but it's only ever possible if a future binding needs no
-            // modifiers at all, since every char here is sent with exactly
-            // the modifiers (at most Shift) needed to produce it. Warn
-            // rather than silently let it happen with no signal.
-            if self.key(code, KeyState::Pressed).intercepted {
+            // -- but every character is sent with exactly the modifiers its
+            // own level needs and no others, so this only happens when a
+            // binding really is on that combination. The modifier presses
+            // are checked too, not just the character's own: Smithay updates
+            // the xkb state before running this filter, so a modifier's own
+            // press already carries itself in `mods` by the time the binding
+            // table sees it -- which means a bind written `shift+shift_l`
+            // matches it (a *bare* `shift_l` bind, by the same token, never
+            // can). Such a bind swallows the press the *client* needs to see
+            // to decode this character as a capital, which is the same
+            // silently-wrong-text failure this whole path exists to stop.
+            // Warn rather than let any of it happen with no signal.
+            let mut intercepted = false;
+            for &code in plan.modifiers.as_slice() {
+                intercepted |= self.key(code, KeyState::Pressed).intercepted;
+            }
+            intercepted |= self.key(plan.code, KeyState::Pressed).intercepted;
+            if intercepted {
                 tracing::warn!(%character, "a keybinding intercepted a character from type_text");
             }
-            self.key(code, KeyState::Released);
-            if let Some(shift) = shift {
-                self.key(shift, KeyState::Released);
+            self.key(plan.code, KeyState::Released);
+            for &code in plan.modifiers.as_slice().iter().rev() {
+                self.key(code, KeyState::Released);
             }
         }
         Ok(())
@@ -288,20 +374,39 @@ impl State {
             .unwrap_or_default()
     }
 
-    fn keycode_for(&self, keysym: Keysym) -> Option<Keycode> {
-        self.seat.get_keyboard()?.keycode_for_keysym(keysym)
-    }
-
-    /// Whether a keysym sits above the first level of its key, i.e. needs Shift.
-    fn needs_shift(&mut self, keycode: Keycode, keysym: Keysym) -> bool {
-        let Some(keyboard) = self.seat.get_keyboard() else {
-            return false;
-        };
+    /// Runs `read` against the seat keyboard's keymap and the layout (xkb
+    /// group) currently in effect.
+    ///
+    /// Everything read through here is static keymap data, not live keyboard
+    /// state: the answer is "what does this layout say", not "what is held
+    /// right now". The active *layout* is the one exception, and it is read
+    /// here rather than passed in precisely so every question about the
+    /// keymap is asked of the same group -- the group the client will decode
+    /// the resulting keypress in.
+    ///
+    /// The single place the raw keymap is borrowed, so the reasoning for
+    /// that lives here once rather than at each call site.
+    fn with_keymap<T>(
+        &mut self,
+        keyboard: &KeyboardHandle<Self>,
+        // `FnMut`, not `FnOnce`, only because Smithay's `with_xkb_state`
+        // asks for one; every caller here is run exactly once.
+        mut read: impl FnMut(&xkb::Keymap, xkb::LayoutIndex) -> T,
+    ) -> T {
         keyboard.with_xkb_state(self, |context| {
             let xkb = context.xkb().lock().expect("xkb state");
-            let layout = xkb.active_layout();
-            let symbols = xkb.raw_syms_for_key_in_layout(keycode, layout);
-            symbols.first() != Some(&keysym) && symbols.contains(&keysym)
+            let layout = xkb.active_layout().0;
+            // SAFETY: the pinned Smithay rev's contract on `Xkb::keymap` is
+            // that no ref-count on the keymap may outlive the `Xkb`. This
+            // borrow is confined to the call below: `read` returns an owned
+            // value that borrows nothing from the keymap, and the scratch
+            // `xkb::State` `modifiers::plan` may build from it is dropped
+            // before this closure returns. The keymap is only read, and the
+            // keyboard's own state is left untouched (nothing here reports
+            // `mods_changed`, so Smithay has nothing to broadcast on the way
+            // out).
+            let keymap = unsafe { xkb.keymap() };
+            read(keymap, layout)
         })
     }
 
@@ -377,6 +482,34 @@ fn code(button: PointerButton) -> u32 {
     }
 }
 
+/// The key [`State::press`] may press for a name, or the message explaining
+/// why this layout has none it may press.
+///
+/// The refusal is the point. `press` holds only the modifiers its caller
+/// named, so a keysym that lives above the unmodified level has no honest
+/// answer here: the key carrying it types something else when pressed bare,
+/// and guessing which modifiers to add would be `type_text`'s job done
+/// badly. `at` on a German layout isn't even expressible as a combo -- its
+/// modifier is AltGr, which `Modifier` has no name for -- which is why the
+/// message points at `type` rather than promising a spelling that works.
+fn unmodified_key(
+    keymap: &xkb::Keymap,
+    layout: xkb::LayoutIndex,
+    keysym: Keysym,
+    name: &str,
+) -> Result<Keycode, String> {
+    match modifiers::named_key(keymap, layout, keysym) {
+        NamedKey::Unmodified(code) => Ok(code),
+        NamedKey::OnlyModified => Err(format!(
+            "`{name}` is not on this layout's unmodified level, and `key` holds only the \
+             modifiers you name, so pressing it would type a different character; name the \
+             unmodified key and its modifiers instead (`shift+1`, not `exclam`), or use `type`, \
+             which works the modifiers out from the layout"
+        )),
+        NamedKey::Absent => Err(format!("no key for `{name}` in this layout")),
+    }
+}
+
 fn modifier_keysym(modifier: Modifier) -> Keysym {
     match modifier {
         Modifier::Ctrl => Keysym::Control_L,
@@ -410,56 +543,4 @@ pub(super) fn keysym_named(name: &str) -> Option<Keysym> {
         exact
     };
     (keysym.raw() != 0).then_some(keysym)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn newline_and_friends_map_to_named_keys_not_utf32() {
-        assert_eq!(keysym_for_char('\n'), Keysym::Return);
-        assert_eq!(keysym_for_char('\r'), Keysym::Return);
-        assert_eq!(keysym_for_char('\t'), Keysym::Tab);
-    }
-
-    #[test]
-    fn printable_ascii_falls_back_to_utf32_to_keysym() {
-        // Untouched by the control-character special case, so this should
-        // still go through the general xkbcommon mapping.
-        assert_eq!(keysym_for_char('a'), xkb::utf32_to_keysym('a' as u32));
-        assert_eq!(keysym_for_char('!'), xkb::utf32_to_keysym('!' as u32));
-    }
-
-    #[test]
-    fn keysym_named_accepts_exact_and_case_insensitive_names() {
-        assert_eq!(keysym_named("Return"), Some(Keysym::Return));
-        assert_eq!(keysym_named("return"), Some(Keysym::Return));
-        assert_eq!(keysym_named("ctrl+shift+t"), None);
-        assert_eq!(keysym_named("not-a-real-key"), None);
-    }
-
-    #[test]
-    fn button_codes_match_linux_input_event_codes() {
-        assert_eq!(code(PointerButton::Left), BTN_LEFT);
-        assert_eq!(code(PointerButton::Right), BTN_RIGHT);
-        assert_eq!(code(PointerButton::Middle), BTN_MIDDLE);
-    }
-
-    #[test]
-    fn clamp_to_extent_keeps_values_inside_the_output() {
-        assert_eq!(clamp_to_extent(-5.0, 800), 0.0);
-        assert_eq!(clamp_to_extent(5.0, 800), 5.0);
-        assert_eq!(clamp_to_extent(900.0, 800), 799.0);
-        // No output yet: everything clamps to the origin.
-        assert_eq!(clamp_to_extent(50.0, 0), 0.0);
-    }
-
-    #[test]
-    fn modifier_keysyms_are_the_left_variant() {
-        assert_eq!(modifier_keysym(Modifier::Ctrl), Keysym::Control_L);
-        assert_eq!(modifier_keysym(Modifier::Shift), Keysym::Shift_L);
-        assert_eq!(modifier_keysym(Modifier::Alt), Keysym::Alt_L);
-        assert_eq!(modifier_keysym(Modifier::Super), Keysym::Super_L);
-    }
 }
