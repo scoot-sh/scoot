@@ -33,9 +33,10 @@ Early, but all three Wayland backends are real and working: `--headless`
 and `--tty` (a real DRM/KMS + libseat + libinput backend on actual hardware,
 including VT switching and a rendered pointer cursor — a client's own cursor
 image when it supplies one, a built-in shape otherwise). Also done: vim-style
-keybindings, a TOML config file (`--config`, `[layout]`/`[binds]`), window
-decorations (a niri-style focus ring, background color, server-side
-`zxdg_decoration_manager_v1`), and a hardened control socket (owner-only
+keybindings, a TOML config file (`--config`, `[layout]`/`[appearance]`/
+`[binds]`, see Configuration below), window decorations (a niri-style focus
+ring, background color, server-side `zxdg_decoration_manager_v1`), and a
+hardened control socket (owner-only
 permissions, a same-user peer check, a 1 MiB cap on a single request, and
 screenshots rate-limited to one per connection per frame). Verified
 end-to-end on every backend — a real
@@ -83,11 +84,184 @@ flexwm msg type "hello"
 flexwm msg wait-idle --quiet-ms 200
 ```
 
-Add `--config PATH` to any of the three to load a TOML config (`[layout]` and
-`[binds]`); without it, flexwm looks for
-`$XDG_CONFIG_HOME/flexwm/config.toml` and falls back to built-in defaults if
-that's missing or malformed. Run `flexwm --help` for the full request/action
-list.
+Add `--config PATH` to any of the three to load a TOML config; see
+Configuration below for the full schema and default keybindings. Run
+`flexwm --help` for the full request/action list.
+
+## Configuration
+
+`--config PATH` loads a TOML file explicitly. Without it, flexwm looks for
+`$XDG_CONFIG_HOME/flexwm/config.toml`, falling back to
+`~/.config/flexwm/config.toml` if `$XDG_CONFIG_HOME` is unset, and runs on
+built-in defaults if neither exists. Three optional tables: `[layout]`,
+`[appearance]`, `[binds]`. Every field in every table is itself optional and
+defaults independently, so a config that only sets `gap` leaves everything
+else — including the rest of `[layout]` — at its built-in default.
+
+**Failure semantics are deliberate, not an oversight.** An explicit
+`--config PATH` that doesn't exist or can't be read is a hard startup
+error — you pointed at it on purpose, so silently ignoring it would be worse
+than failing loud. Every other problem falls back to defaults and logs
+instead of blocking startup:
+
+- No file at the *default* path: silent, not even a log line (a fresh
+  install, not a mistake).
+- The default path exists but can't be read (permissions, a broken symlink):
+  logged as an error, full defaults.
+- Malformed TOML, or an unknown/misspelled field name **anywhere in the
+  file** (`[layout]`, `[appearance]`, or the top level): logged as an error,
+  and the *entire* file is discarded for full built-in defaults — a typo in
+  `[layout]` also throws away an otherwise-valid `[binds]` table elsewhere in
+  the same file.
+- One bad `[appearance]` color string, or one bad `[binds]` entry: logged as
+  a warning, and only that field/bind falls back — every other field and
+  bind in the file still applies.
+
+This is deliberate: on `--tty`, the real deployment target, flexwm *is* the
+session — there's no other window manager to fall back to and often no easy
+remote access. A compositor that refuses to boot over a config typo is a
+hard lockout with no recovery, so it always starts with something usable and
+says what's wrong in the log instead.
+
+### `[layout]`
+
+| Field | Type | Default | Meaning |
+|---|---|---|---|
+| `gap` | integer (pixels) | `12` | Gap between columns, between windows stacked in a column, and at output edges. Negative values are clamped to `0`. |
+| `column_widths` | array of floats | `[0.333…, 0.5, 0.666…]` (i.e. `1/3`, `1/2`, `2/3`) | Column widths as fractions of the output width, in the order `cycle-column-width` steps through. Non-finite or non-positive entries are dropped; an empty list falls back to the built-in three. |
+| `default_column_width` | integer | `1` | Index into `column_widths` used for newly created columns (`1` selects `0.5`, i.e. half the output). Out-of-range values are clamped to the last valid index. |
+
+### `[appearance]`
+
+flexwm draws no titlebars by design — a focused window gets a colored ring
+drawn *around* it (in the layout's own gap), and there's a solid background
+behind everything, instead of a per-window title bar with text or buttons.
+That's why there's no titlebar-color/font option below: this table only
+controls the ring and the background.
+
+| Field | Type | Default | Meaning |
+|---|---|---|---|
+| `focus_ring_width` | integer (pixels) | `3` | Ring thickness. Clamped at load time to at most half of `gap`, so it can never visually reach a neighboring window. |
+| `focus_ring_active_color` | `"#rrggbb"` / `"#rrggbbaa"` | ≈ `#6ba6fa` (accent blue) | Ring color around the focused window. |
+| `focus_ring_inactive_color` | `"#rrggbb"` / `"#rrggbbaa"` | ≈ `#595961` (muted gray) | Ring color around every other window. |
+| `background_color` | `"#rrggbb"` / `"#rrggbbaa"` | ≈ `#14141a` (near-black) | Cleared behind all window content — there's no separate background render element, this is the frame clear color. |
+| `prefer_no_csd` | boolean | `true` | Whether to answer a client's `zxdg_toplevel_decoration_v1` request with `ServerSide`, so a well-behaved client stops drawing its own titlebar (which would otherwise double up with the ring). |
+
+The three colors above are marked "≈" on purpose: the built-in defaults are
+stored internally as raw RGBA floats (`0.42, 0.65, 0.98`, `0.35, 0.35, 0.38`,
+and `0.08, 0.08, 0.1`, each `1.0` alpha), and none of them is exactly
+representable as an 8-bit `"#rrggbb"` string — the hex above is the nearest
+value, not what the compositor actually renders. Leave a color field unset
+to get the real built-in default; only set it to a hex string if you want to
+*change* it.
+
+### `[binds]`
+
+A table of `"key combination" = "action string"`. A combo is
+`modifier+modifier+...+key` (e.g. `"super+shift+h"`), or a bare key with no
+modifier at all (e.g. `"Return" = "close"` — legal, and it intercepts every
+press of that key). Whitespace around `+` is ignored. Modifier names are
+case-insensitive: `ctrl`/`control`, `shift`, `alt`, and `super`/`logo`/
+`meta`/`cmd` (all four spellings mean the same modifier — flexwm's own
+tables and this doc call it "Super"). The key is an xkb keysym name (`h`,
+`Return`, `F5`, ...), matched case-insensitively against its *unshifted*
+form — letters always resolve to their lowercase keysym, with Shift tracked
+as an ordinary modifier rather than changing which name you write.
+
+Action strings use exactly the grammar `flexwm --help`'s ACTIONS section
+documents — one parser handles both `flexwm msg action ...` and a config
+file's `[binds]` values:
+
+```
+focus-column|move-column|consume-or-expel   left|right
+focus-window|move-window                    up|down
+focus-workspace|move-window-to-workspace    up|down
+focus-window-id ID | cycle-column-width | close | spawn COMMAND... | quit
+```
+
+e.g. `"focus-column left"`, `"close"`, or `"spawn foot -e htop"` (split on
+whitespace, not run through a shell, so a path or argument containing a
+space can't be expressed this way).
+
+Two failure behaviors specific to `[binds]`, both worth knowing since they
+fail silently rather than as a startup error:
+
+- **A bind that doesn't parse** (unknown modifier, unknown key name, an
+  invalid action string, or trailing text after the action) is skipped with
+  a warning naming just that bind; every other bind in the file still loads.
+- **Two different combo strings that resolve to the same actual key
+  combination** — different modifier aliases, different modifier order, or
+  different case (`"Super+H"` vs `"super+h"`) — are **both** skipped, with
+  one warning naming all of them. `[binds]` is read into a `HashMap`, whose
+  iteration order has no relationship to the order the keys were written in
+  the file, so "the last one wins" isn't something this code can honor
+  truthfully; rather than pick an arbitrary, run-to-run-unstable winner, the
+  whole colliding group is dropped and whatever was bound to that combo
+  before the file loaded (a default, or nothing) is left in place.
+
+A user bind on a combo that already has a default simply replaces it; there
+is no "unbind" action.
+
+### Default keybindings
+
+| Combo | Action |
+|---|---|
+| `Super+h` | Focus column left |
+| `Super+l` | Focus column right |
+| `Super+j` | Focus window down |
+| `Super+k` | Focus window up |
+| `Super+Shift+h` | Move column left |
+| `Super+Shift+l` | Move column right |
+| `Super+Shift+j` | Move window down |
+| `Super+Shift+k` | Move window up |
+| `Super+Alt+h` | Consume or expel column left |
+| `Super+Alt+l` | Consume or expel column right |
+| `Super+Ctrl+j` | Focus workspace down |
+| `Super+Ctrl+k` | Focus workspace up |
+| `Super+Ctrl+Shift+j` | Move window to workspace down |
+| `Super+Ctrl+Shift+k` | Move window to workspace up |
+| `Super+r` | Cycle column width |
+| `Super+q` | Close focused window |
+| `Super+Return` | Spawn `foot` |
+| `Super+Shift+e` | Quit |
+
+That's all 18 default bindings — vim motions (`h`/`j`/`k`/`l`) for direction,
+Super as flexwm's own modifier throughout. Quit is deliberately
+`Super+Shift+e`, not `Super+Shift+q`: that combo is one slipped Shift away
+from `Super+q` (close focused window), and a slip of the finger shouldn't be
+able to end the whole session.
+
+`--tty` additionally binds `Ctrl+Alt+F1` through `Ctrl+Alt+F12` to switching
+to VT 1 through 12 — not present under `--headless`/`--nested`, since VT
+switching is a Linux-session concept with no meaning there. These are added
+*after* the config file loads and always win over a colliding config-file
+bind (logging a warning naming whatever they displaced): on real hardware,
+with no other window manager and often no easy remote access, Ctrl+Alt+Fn is
+the one recovery path if the display ever gets wedged, so it can't be
+allowed to silently lose to a config-file typo or a well-meaning rebind.
+
+### Example `config.toml`
+
+```toml
+[layout]
+gap = 8
+column_widths = [0.25, 0.5, 0.75, 1.0]
+default_column_width = 1
+
+[appearance]
+focus_ring_width = 4
+focus_ring_active_color = "#ffaa00"
+focus_ring_inactive_color = "#333333"
+background_color = "#101014"
+prefer_no_csd = true
+
+[binds]
+"super+n" = "focus-column right"
+"super+shift+n" = "move-column right"
+"super+t" = "spawn foot"
+"super+shift+t" = "spawn foot -e htop"
+"ctrl+alt+space" = "spawn wofi --show drun"
+```
 
 ## License
 
