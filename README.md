@@ -102,6 +102,28 @@ Add `--config PATH` to any of the three to load a TOML config; see
 Configuration below for the full schema and default keybindings. Run
 `flexwm --help` for the full request/action list.
 
+`flexwm msg type TEXT` types text the way a person would, on whatever
+keyboard layout the session is running: for each character it finds the key
+that carries it and holds down whatever modifiers that key's level needs —
+Shift for `A` or `!`, AltGr for a German layout's `@` — so a client receives
+the same key *and* modifier events it would see from a real keyboard, not
+just a bare keysym. `\n` and `\t` are sent as `Return` and `Tab`. Two limits
+worth knowing:
+
+- A character the active layout can't produce is an error naming it
+  (`no key for 'é' in this layout`), and so is one that sits on a level the
+  layout only reaches through a locking or latching modifier — flexwm will
+  not press Caps Lock to type a capital, since that would leave it on for
+  everything afterwards. Dead keys and compose sequences aren't driven
+  either, so a character that needs one counts as "no key" too. In every
+  case the characters *before* it in the string have already been typed:
+  the request stops at the first character it can't type rather than
+  rolling back.
+- Keybindings still apply to what it types, exactly as they would to a real
+  keypress. That only matters for a bind with no modifiers, or one on
+  Shift plus a key; if a character does hit a bind, the compositor logs a
+  warning naming it rather than swallowing it silently.
+
 `--tty` needs a seat (`seatd` or logind) with a DRM device on it. On a modern
 kernel, on every non-root `--tty` run, Smithay logs `Unable to become drm
 master, assuming unprivileged mode` at startup — expected, not a failure: the

@@ -11,6 +11,11 @@ use super::State;
 use super::keybindings::Bound;
 use super::layer_shell;
 use super::tty::VtSwitchOutcome;
+use modifiers::{KeyPlan, ModifierKeys, Untypable};
+
+mod modifiers;
+#[cfg(test)]
+mod tests;
 
 // Linux input event codes, which is what Wayland carries.
 const BTN_LEFT: u32 = 0x110;
@@ -200,33 +205,54 @@ impl State {
         Ok(vt_switch)
     }
 
-    /// Types text by pressing whichever keys produce those characters.
+    /// Types text by pressing whichever keys produce those characters, with
+    /// whatever the active layout needs held down around each one -- Shift
+    /// for `A` and `!`, AltGr for a German layout's `@`, nothing at all for
+    /// the level-0 characters that make up most text.
+    ///
+    /// Errors on the first character the layout cannot produce, leaving
+    /// everything before it typed. That is deliberate, and the same trade
+    /// this function has always made: the alternative is resolving the whole
+    /// string up front so it is all-or-nothing, which buys atomicity for a
+    /// case an agent hits by mistyping a request, at the cost of a per-call
+    /// buffer on the IPC path. Loud and partial beats silent and wrong,
+    /// which is what this used to be: every shifted character came out as
+    /// its unshifted twin, with no error at all.
     pub fn type_text(&mut self, text: &str) -> Result<(), String> {
+        // Filled in by the first character that needs a modifier held (see
+        // `modifiers::plan`), so a lowercase string never pays for the
+        // keymap walk and a mixed one pays for it once, not per character.
+        let mut modifier_keys = None;
         for character in text.chars() {
-            let keysym = keysym_for_char(character);
-            let Some(code) = self.keycode_for(keysym) else {
-                return Err(format!("no key for `{character}` in this layout"));
-            };
-            let shift = if self.needs_shift(code, keysym) {
-                self.keycode_for(Keysym::Shift_L)
-            } else {
-                None
-            };
-            if let Some(shift) = shift {
-                self.key(shift, KeyState::Pressed);
-            }
+            let plan = self
+                .plan_key(keysym_for_char(character), &mut modifier_keys)
+                .map_err(|reason| match reason {
+                    Untypable::NoKey => format!("no key for `{character}` in this layout"),
+                    Untypable::NoModifiers => {
+                        format!("`{character}` needs a modifier this layout only locks or latches")
+                    }
+                })?;
             // A keybinding firing mid-string here would be surprising --
             // `type_text` is meant to simulate typed characters, not chords
-            // -- but it's only ever possible if a future binding needs no
-            // modifiers at all, since every char here is sent with exactly
-            // the modifiers (at most Shift) needed to produce it. Warn
-            // rather than silently let it happen with no signal.
-            if self.key(code, KeyState::Pressed).intercepted {
+            // -- but every character is sent with exactly the modifiers its
+            // own level needs and no others, so this only happens when a
+            // binding really is on that combination. The modifier presses
+            // are checked too, not just the character's own: a binding on a
+            // bare `Shift_L` would swallow the press that the *client* needs
+            // to see to decode this character as a capital, which is the
+            // same silently-wrong-text failure this whole path exists to
+            // stop. Warn rather than let any of it happen with no signal.
+            let mut intercepted = false;
+            for &code in plan.modifiers.as_slice() {
+                intercepted |= self.key(code, KeyState::Pressed).intercepted;
+            }
+            intercepted |= self.key(plan.code, KeyState::Pressed).intercepted;
+            if intercepted {
                 tracing::warn!(%character, "a keybinding intercepted a character from type_text");
             }
-            self.key(code, KeyState::Released);
-            if let Some(shift) = shift {
-                self.key(shift, KeyState::Released);
+            self.key(plan.code, KeyState::Released);
+            for &code in plan.modifiers.as_slice().iter().rev() {
+                self.key(code, KeyState::Released);
             }
         }
         Ok(())
@@ -292,16 +318,35 @@ impl State {
         self.seat.get_keyboard()?.keycode_for_keysym(keysym)
     }
 
-    /// Whether a keysym sits above the first level of its key, i.e. needs Shift.
-    fn needs_shift(&mut self, keycode: Keycode, keysym: Keysym) -> bool {
+    /// Which key to press, and what to hold around it, to type `keysym` on
+    /// the layout currently in effect.
+    ///
+    /// Everything it reads is static keymap data, not live keyboard state:
+    /// the answer is "what does this layout say", not "what is held right
+    /// now". `modifier_keys` is threaded through from [`State::type_text`]
+    /// as its one-string cache; see [`modifiers::plan`].
+    fn plan_key(
+        &mut self,
+        keysym: Keysym,
+        modifier_keys: &mut Option<ModifierKeys>,
+    ) -> Result<KeyPlan, Untypable> {
         let Some(keyboard) = self.seat.get_keyboard() else {
-            return false;
+            // No seat keyboard means nothing could receive the keys anyway.
+            return Err(Untypable::NoKey);
         };
         keyboard.with_xkb_state(self, |context| {
             let xkb = context.xkb().lock().expect("xkb state");
-            let layout = xkb.active_layout();
-            let symbols = xkb.raw_syms_for_key_in_layout(keycode, layout);
-            symbols.first() != Some(&keysym) && symbols.contains(&keysym)
+            let layout = xkb.active_layout().0;
+            // SAFETY: the pinned Smithay rev's contract on `Xkb::keymap` is
+            // that no ref-count on the keymap may outlive the `Xkb`. This
+            // borrow is confined to the call below, which neither clones it
+            // nor stores it -- the scratch `xkb::State` `plan` may build
+            // from it is dropped before this closure returns. The keymap is
+            // only read, and the keyboard's own state is left untouched
+            // (nothing here reports `mods_changed`, so Smithay has nothing
+            // to broadcast on the way out).
+            let keymap = unsafe { xkb.keymap() };
+            modifiers::plan(keymap, layout, keysym, modifier_keys)
         })
     }
 
@@ -410,56 +455,4 @@ pub(super) fn keysym_named(name: &str) -> Option<Keysym> {
         exact
     };
     (keysym.raw() != 0).then_some(keysym)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn newline_and_friends_map_to_named_keys_not_utf32() {
-        assert_eq!(keysym_for_char('\n'), Keysym::Return);
-        assert_eq!(keysym_for_char('\r'), Keysym::Return);
-        assert_eq!(keysym_for_char('\t'), Keysym::Tab);
-    }
-
-    #[test]
-    fn printable_ascii_falls_back_to_utf32_to_keysym() {
-        // Untouched by the control-character special case, so this should
-        // still go through the general xkbcommon mapping.
-        assert_eq!(keysym_for_char('a'), xkb::utf32_to_keysym('a' as u32));
-        assert_eq!(keysym_for_char('!'), xkb::utf32_to_keysym('!' as u32));
-    }
-
-    #[test]
-    fn keysym_named_accepts_exact_and_case_insensitive_names() {
-        assert_eq!(keysym_named("Return"), Some(Keysym::Return));
-        assert_eq!(keysym_named("return"), Some(Keysym::Return));
-        assert_eq!(keysym_named("ctrl+shift+t"), None);
-        assert_eq!(keysym_named("not-a-real-key"), None);
-    }
-
-    #[test]
-    fn button_codes_match_linux_input_event_codes() {
-        assert_eq!(code(PointerButton::Left), BTN_LEFT);
-        assert_eq!(code(PointerButton::Right), BTN_RIGHT);
-        assert_eq!(code(PointerButton::Middle), BTN_MIDDLE);
-    }
-
-    #[test]
-    fn clamp_to_extent_keeps_values_inside_the_output() {
-        assert_eq!(clamp_to_extent(-5.0, 800), 0.0);
-        assert_eq!(clamp_to_extent(5.0, 800), 5.0);
-        assert_eq!(clamp_to_extent(900.0, 800), 799.0);
-        // No output yet: everything clamps to the origin.
-        assert_eq!(clamp_to_extent(50.0, 0), 0.0);
-    }
-
-    #[test]
-    fn modifier_keysyms_are_the_left_variant() {
-        assert_eq!(modifier_keysym(Modifier::Ctrl), Keysym::Control_L);
-        assert_eq!(modifier_keysym(Modifier::Shift), Keysym::Shift_L);
-        assert_eq!(modifier_keysym(Modifier::Alt), Keysym::Alt_L);
-        assert_eq!(modifier_keysym(Modifier::Super), Keysym::Super_L);
-    }
 }

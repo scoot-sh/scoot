@@ -2434,12 +2434,47 @@ review, and why.
   locally — worth doing only if a real client is seen to hit it, or if
   upstream grows the distinction.
 
-- **`flexwm msg type` silently drops every shifted character, so an agent
+- **~~`flexwm msg type` silently drops every shifted character, so an agent
   cannot type a capital letter (MEDIUM, and squarely against the
-  computer-use goal).** `type_text "AbC xyz"` delivers `abc xyz` — no error,
-  no warning, just quietly the wrong text. Reproduced by `flexwm-reviewer`
-  on both `--headless` and `--tty` while reviewing item 14's third round;
-  pre-existing and untouched by that PR's diff.
+  computer-use goal).~~ — RESOLVED 2026-09-13 (fix + tests, PR #23).**
+  `needs_shift` is gone. `crates/flexwm/src/compositor/input/modifiers.rs`
+  answers both halves of the question in one keymap walk: which key carries
+  the keysym *and* which level it sits at (the old code asked two different
+  Smithay helpers and only one of them looked past level 0). It then asks
+  `xkb_keymap_key_get_mods_for_level` which modifier combinations reach that
+  level and holds the keys for the cheapest one it can actually produce.
+  *Which* keys those are also comes out of the keymap rather than a
+  modifier-name-to-keysym table: every keycode is pressed once in a
+  throwaway `xkb::State` and watched, so AltGr levels work on layouts that
+  put AltGr somewhere else (checked against `de` and `de(neo)`), a modifier
+  key with no keysym of its own is still usable, and — the reason the probe
+  earns its keep — a key that *locks* or *latches* its modifier (Caps Lock,
+  Num Lock, `ISO_Level3_Latch`) is never pressed. `key_get_mods_for_level`
+  really does offer Caps Lock as an alternative to Shift for a capital
+  letter, and pressing it would type one capital and leave the keyboard
+  shifted for everything typed afterwards. A level only such a key can reach
+  is an error instead (`Untypable::NoModifiers`), as is a character no key
+  carries at all (`Untypable::NoKey`) — both loud, where the old behaviour
+  was silent and wrong. The resolution pass allocates nothing (fixed-size
+  `Copy` results, and the keymap probe runs at most once per request, only
+  once a character actually needs a modifier), so a lowercase string does
+  strictly less work than it did before: one keymap scan per character
+  instead of two.
+
+  **Verified** three ways, all red/green (the fix disabled, the tests fail
+  with exactly the reported symptom; restored, they pass): 10 unit tests
+  against real `us`/`de`/`de(neo)` keymaps
+  (`input/modifiers/tests.rs`); 7 live-client tests that decode what a real
+  `wayland-client` toplevel received through its own `xkb::State`, built
+  from the keymap fd the compositor sent it (`input/tests.rs` — the
+  "assert on what the client actually got" test the fix shape below asked
+  for, in its own harness rather than by extending the layer-shell one);
+  and a new `scripts/smoke-test.sh` step that types a shell command
+  containing every broken character class into a real `foot`, redirects it
+  to a file and diffs it byte for byte — on `--headless` and on real
+  `--tty` hardware. Deliberately left out of scope and split out as its own
+  entry below: dead keys, compose sequences, and characters that are only
+  on a layout other than the active one.
 
   **Where.** `input.rs`'s `needs_shift` decides whether to hold `Shift_L`
   around a character, and asks Smithay `xkb.raw_syms_for_key_in_layout(...)
@@ -2475,6 +2510,29 @@ review, and why.
   not just that keys arrived: the layer-shell harness is the only one with
   a real `wl_keyboard`, and it currently counts events without decoding
   them, so it needs extending first.
+
+- **`flexwm msg type` still can't produce a character that needs a dead key,
+  a compose sequence, or a layout the session isn't currently on (LOW).**
+  The shifted-character fix above covers every character that is *on* the
+  active layout at some shift level, which is all of ASCII on any Latin
+  layout. Three things are still out of reach, all of them refused loudly
+  (`no key for 'X' in this layout`) rather than typed wrong:
+  - **Dead keys and compose sequences.** `é` on a plain `us` layout is two
+    or three keypresses with a state machine in between (`Compose`, `'`,
+    `e`), not a key with a level. Driving it needs an `xkb::Compose` table
+    and a second resolution path when the single-key lookup fails; the
+    payoff is accented Latin text an agent might paste, so this is worth
+    doing if that ever comes up, not before.
+  - **Characters on an inactive layout group.** Resolution uses the
+    keymap's active layout only. With `us,de` configured, `ü` is one group
+    switch away, and nothing here switches groups — deliberately: the
+    session's own layout is user state, and silently changing it to type
+    one character (or failing to change it back if the request errors
+    partway) is worse than saying no.
+  - **Levels only a locking or latching modifier reaches.** Refused on
+    purpose, see the resolved entry above; a layout that puts a character
+    *only* behind Caps Lock would need it pressed and un-pressed around the
+    character, and nothing in xkbcommon promises that round-trips cleanly.
 
 - **`flexwm msg outputs` reports only an output's full rectangle**, so an
   agent cannot see what a bar reserved (item 14 gave the core a `usable`
