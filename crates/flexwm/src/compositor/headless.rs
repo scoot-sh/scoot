@@ -70,9 +70,12 @@ render_elements! {
 /// `layer_keyboard_focus` and `render()`'s frame-callback/cleanup pass.
 /// Unreachable today -- exactly one `Output` exists, so "the one the client
 /// asked for" and "the one we have" are the same object -- but every one of
-/// them has to become per-output once there is more than one: the first five
-/// need the surface's *own* output, and `render()`'s pass needs each output
-/// it drew.
+/// them has to become per-output once there is more than one, and not all in
+/// the same way: `layer_destroyed` and `commit_layer_surface` want the
+/// surface's *own* output, `layer_hit` the one under the pointer,
+/// `refresh_layer_zone` a zone per output rather than one, and
+/// `layer_keyboard_focus` and `render()`'s pass have to walk more than one
+/// map.
 pub(super) const OUTPUT_ID: OutputId = OutputId(1);
 
 /// How often a changed screen is redrawn, while there's something to redraw.
