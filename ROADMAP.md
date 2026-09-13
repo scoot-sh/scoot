@@ -2457,9 +2457,19 @@ review, and why.
   carries at all (`Untypable::NoKey`) — both loud, where the old behaviour
   was silent and wrong. The resolution pass allocates nothing (fixed-size
   `Copy` results, and the keymap probe runs at most once per request, only
-  once a character actually needs a modifier), so a lowercase string does
-  strictly less work than it did before: one keymap scan per character
-  instead of two.
+  once a character actually needs a modifier).
+
+  **Cost, corrected** (an earlier draft of this entry claimed "one keymap
+  scan per character instead of two", which the benchmark does not support
+  and which review caught): the shapes are the same either way. The old
+  path was one scan (`keycode_for_keysym`) plus one O(1) level-0 lookup;
+  the new one is one scan (`key_for`) plus one O(1)
+  `key_get_mods_for_level`. That is exactly why the benchmark shows
+  lowercase typing unchanged within noise (median 114 ms → 112 ms per
+  50,000 characters). The real cost is confined to characters that were
+  previously typed *wrongly*: they now send four key events instead of two
+  (the modifier's own press and release), which is the whole point, and it
+  takes the all-shifted median from 108 ms to 188 ms per 50,000.
 
   **Verified** three ways, all red/green (the fix disabled, the tests fail
   with exactly the reported symptom; restored, they pass): 10 unit tests
@@ -2478,6 +2488,28 @@ review, and why.
   both times, `od -c` output in PR #23. Deliberately left out of scope and
   split out as its own entry below: dead keys, compose sequences, and
   characters that are only on a layout other than the active one.
+
+  **`flexwm-reviewer` found a blocking bug in the fix itself, fixed in the
+  same PR (second round).** The first version asked the keymap two
+  questions in two different xkb *groups*: `ModifierKeys::probe` built a
+  scratch `xkb::State`, which starts in group 0 and was never pinned, while
+  `plan` resolved the character's level against the *active* group. Key
+  actions are per-group exactly as keysyms are, so with `XKB_DEFAULT_LAYOUT=de,de
+  XKB_DEFAULT_VARIANT=neo, XKB_DEFAULT_OPTIONS=grp:menu_toggle` and the
+  session toggled into group 1, `flexwm msg type '@'` typed **`#q`** — the
+  probe had recorded group 0's third-level key (`de(neo)`'s, in the `#`
+  position), which is an ordinary `#` key in group 1, so the modifier was
+  never set and `@`'s key fell through to `q`. Silent, and exactly the
+  failure mode this whole entry exists to close, one level up. `probe` now
+  takes the layout, pins the state to it (`update_mask`) before every key
+  it presses, and discards a state that comes back with either the modifier
+  state or the group changed; `ModifierKeys` carries the layout it answered
+  for, so `plan`'s per-string cache can't hand a group-0 table to a group-1
+  character. Every earlier test compiled a single-group keymap, where group
+  0 *is* the active group, which is why this shipped unnoticed — so the
+  regression tests are multi-group and assert on what a client decodes.
+  Reproduced on the dev VM before the fix and re-run after
+  (`/home/dev/fix-multilayout.sh`).
 
   **Where.** `input.rs`'s `needs_shift` decides whether to hold `Shift_L`
   around a character, and asks Smithay `xkb.raw_syms_for_key_in_layout(...)
@@ -2517,9 +2549,25 @@ review, and why.
 - **`flexwm msg type` still can't produce a character that needs a dead key,
   a compose sequence, or a layout the session isn't currently on (LOW).**
   The shifted-character fix above covers every character that is *on* the
-  active layout at some shift level, which is all of ASCII on any Latin
-  layout. Three things are still out of reach, all of them refused loudly
-  (`no key for 'X' in this layout`) rather than typed wrong:
+  active layout at some shift level. That is *not* "all of ASCII on any
+  Latin layout", as an earlier draft of this entry claimed (review caught
+  it; the numbers below come from
+  `every_planned_character_decodes_back_to_itself_on_every_latin_layout`
+  and its sibling, which sweep printable ASCII across fourteen real
+  layouts and record exactly what each refuses). Coverage is
+  layout-dependent: `us`, `us(intl)`, `gb`, `de(neo)`, `fr`, `fr(oss)`,
+  `it` and `pl` produce all 95 printable ASCII characters, while `de` and
+  `es` refuse `^` and `` ` ``, and `pt`, `se`, `no` and `dk` refuse `~` as
+  well — those keys carry `dead_circumflex`/`dead_grave`/`dead_tilde`, not
+  the plain character. `~` is the one that bites in practice: shell paths,
+  globs and regexes are full of it.
+
+  Three things are still out of reach, all of them refused loudly rather
+  than typed wrong — the first two with ``no key for `X` in this layout``,
+  the third with its own message (``[X] needs a modifier this layout only
+  locks or latches``, `input.rs`), since "your layout doesn't have this"
+  and "your layout has it but only behind Caps Lock" call for different
+  responses:
   - **Dead keys and compose sequences.** `é` on a plain `us` layout is two
     or three keypresses with a state machine in between (`Compose`, `'`,
     `e`), not a key with a level. Driving it needs an `xkb::Compose` table
@@ -2537,13 +2585,26 @@ review, and why.
     *only* behind Caps Lock would need it pressed and un-pressed around the
     character, and nothing in xkbcommon promises that round-trips cleanly.
 
-  Adjacent and deliberately unchanged: `flexwm msg key A` presses the `a`
-  key with nothing held and so types `a` (verified on `--headless`, same
-  binary; `flexwm msg key shift+a` types `A`). That is `press`'s documented
-  contract — it presses exactly the combo it is given, and `Shift` is a
-  modifier the caller names — not the same bug. It shares the trait that
-  `keycode_for_keysym` finds a key at any level, which is why it looks
-  similar when reading `keycode_for`'s remaining call site.
+  Adjacent, and **not** unchanged — an earlier draft of this entry said
+  `flexwm msg key A` typing `a` was `press`'s documented contract rather
+  than the same bug, and review measured that it was the same bug, still
+  live and wider than one name. `key exclam` typed `1`, `key at` typed `2`,
+  and `asciitilde`, `underscore`, `question`, `colon`, `bar` and
+  `braceleft` were all off by one level the same way, because
+  `keycode_for_keysym` returns the lowest keycode carrying a keysym at
+  *any* level while `press` holds only the modifiers its caller names.
+  Fixed in the same PR: those names are now refused with a message saying
+  what to write instead, `modifiers::named_key` resolves names by looking
+  for a level-0 carrier, and `keycode_for` — the last caller of
+  `keycode_for_keysym` — is gone. `flexwm msg key shift+1` types `!` and
+  `shift+a` types `A`, as before.
+
+  Note what that refusal does *not* buy: some characters cannot be named as
+  a combination at all. `@` on a German layout needs AltGr, and `Modifier`
+  has no name for it (`ctrl`/`shift`/`alt`/`super` only), so `msg type` is
+  the only way to produce it. Giving `key` a name for the third-level
+  modifier is a plausible small follow-up if an agent ever needs to chord
+  with AltGr; nothing needs it today.
 
 - **`flexwm msg outputs` reports only an output's full rectangle**, so an
   agent cannot see what a bar reserved (item 14 gave the core a `usable`
@@ -2636,6 +2697,45 @@ data-loss/RCE in what was checked.
   uncapped: the same codec reads `Response::Screenshot`, which is legitimately
   several MB of base64 PNG, so a cap there would break real screenshots. A
   future `Client`-side cap would have to be per-message-type, not global.
+- **A `[binds]` entry naming a capital letter parses, loads, and can never
+  fire (LOW, pre-existing).** `"A" = "close"` is accepted without a
+  warning, but `input.rs`'s `keysym_named` tries the name *exactly* first,
+  which for a single letter always succeeds and yields the distinct `A`
+  keysym — while `keybindings::match_key` is fed `handle.raw_syms().first()`,
+  the key's unshifted symbol, which is `a`. The two never meet. Found while
+  correcting this branch's documentation (the README claimed letters
+  "always resolve to their lowercase keysym", which is only true when the
+  exact lookup *fails*); reproduced on `--headless` in
+  `/home/dev/bindcase.sh` on the dev VM: with `"A" = "close"` the window
+  survives `flexwm msg key shift+a`, with `"shift+a" = "close"` it closes.
+  The README now says to write `"shift+a"`. Fixing it properly means
+  lowercasing a single-letter key name at *config parse* time only —
+  deliberately not in `keysym_named` itself, since `flexwm msg key A` must
+  keep refusing rather than silently becoming `a` (see the resolved entry
+  above) — plus a test per direction. Worth doing next time `config.rs` is
+  open; nothing silently misbehaves in the meantime, the bind simply does
+  nothing.
+- **A large `flexwm msg type` blocks the whole event loop for its whole
+  duration (LOW, pre-existing).** `ipc.rs` runs `Request::Type` to
+  completion synchronously on the sole event-loop thread, so a request at
+  the 1 MiB inbound cap (item 9's `ipc/line.rs` limit, which is what bounds
+  how big this can get) stalls wayland dispatch, input and rendering until
+  every character has been sent. Pre-existing — `type_text` has always been
+  synchronous, and `git blame` puts it well before the shifted-character
+  work — but PR #23's own benchmark numbers put a figure on it and roughly
+  doubled the worst case: ~2.3 s per MiB before, ~2.4 s if the text is all
+  lowercase, ~3.9 s if it is all shifted (extrapolated from the measured
+  medians of 112 ms and 188 ms per 50,000 characters, release build,
+  `--headless`), because a shifted character correctly costs four key
+  events instead of two. Nothing an agent does deliberately gets near this
+  — a shell command line is a few hundred characters, i.e. under a
+  millisecond — so this is a hostile-input/accident bound, not an everyday
+  cost. Fixing it properly means chunking the request across event-loop
+  iterations (send N characters, yield, resume), which needs per-connection
+  progress state of the kind item 10 deliberately avoided; a much cheaper
+  partial answer is a separate, smaller cap on `Request::Type`'s text
+  specifically, refused rather than delayed, the same shape the screenshot
+  rate limit took.
 - **Screenshot capture runs synchronously on the sole event-loop thread with
   no rate limit (MEDIUM)** — **the rate limit is DONE as item 9** (one
   capture per connection per 16ms frame, refused rather than delayed). Still
