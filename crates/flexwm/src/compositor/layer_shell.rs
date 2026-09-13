@@ -217,7 +217,10 @@ impl State {
             zone.size.w,
             zone.size.h,
         );
-        if self.world.usable_areas().first() == Some(&area) {
+        // Nothing to do when it hasn't moved -- and this is the common case,
+        // since every commit a bar makes comes through here while its
+        // exclusive zone stays exactly the same.
+        if self.world.usable_area(OUTPUT_ID) == Some(area) {
             return;
         }
         self.world.handle_event(CoreEvent::OutputUsableAreaChanged {

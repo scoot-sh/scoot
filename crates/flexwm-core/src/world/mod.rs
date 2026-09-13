@@ -94,6 +94,18 @@ impl World {
         self.outputs.iter().map(|o| o.usable).collect()
     }
 
+    /// One output's usable area, or `None` if it isn't known.
+    ///
+    /// Beside [`World::usable_areas`] rather than folded into it because the
+    /// callers differ in how often they run: this one answers "did the
+    /// reserved area actually change?" on every commit a bar makes, which is
+    /// once a second for a clock and once a frame for anything animated, and
+    /// allocating a `Vec` of every output to answer it would be an
+    /// allocation per bar frame.
+    pub fn usable_area(&self, id: OutputId) -> Option<Rect> {
+        self.outputs.iter().find(|o| o.id == id).map(|o| o.usable)
+    }
+
     fn output_index(&self, id: OutputId) -> Option<usize> {
         self.outputs.iter().position(|o| o.id == id)
     }

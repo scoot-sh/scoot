@@ -972,6 +972,15 @@ fn extreme_geometry_from_a_client_cannot_break_the_compositor() {
     assert!(rect.w >= 1 && rect.h >= 1, "{rect:?}");
     let pixels = fixture.render();
     assert_eq!(pixels.len(), (CANVAS * CANVAS * 4) as usize);
+    // Pointer hit-testing walks the same geometry, adding the layer's own
+    // location to a surface-local point: with the location saturated near
+    // `i32::MAX`, a plain `i32` add there would panic in this build.
+    for (x, y) in [(0.0, 0.0), (1.0, 1.0), (99.0, 99.0), (199.0, 199.0)] {
+        let _ = fixture.state.surface_under((x, y).into());
+        let _ = fixture
+            .state
+            .layer_surface_under(&ABOVE_WINDOWS, (x, y).into());
+    }
     // Still serving afterwards: another layer surface is created, arranged
     // and configured normally, and the zone stays inside the output. (It is
     // deliberately left without a buffer: the extreme surface above has
