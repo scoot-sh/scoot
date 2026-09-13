@@ -229,9 +229,17 @@ impl Connection {
         // `READS_PER_WAKEUP`; running out is what ends the loop on a flood.
         let mut reads = READS_PER_WAKEUP;
         let mut served = false;
-        // Set instead of returning, so the one flush below is not skipped on the
-        // way out. See there.
-        let mut closed = false;
+        // Set instead of returning, so the one flush below is not skipped on
+        // the way out. See there.
+        //
+        // Distinct from `self.closing`, which is this connection's own state:
+        // "read no further requests, then close once the queue has drained".
+        // This one is local to the wakeup and means "this call returns
+        // `Step::Close`, as soon as it has flushed" -- no draining, because
+        // these are the two cases where there is nothing left to drain to (a
+        // read that failed, and the `wait-idle` hand-off, which takes the queue
+        // with it).
+        let mut leaving = false;
         loop {
             // Back-pressure, not a refusal: this connection stops being read
             // until its client catches up, and nothing is dropped or closed.
@@ -255,7 +263,7 @@ impl Connection {
                     break;
                 }
                 LineRead::Failed => {
-                    closed = true;
+                    leaving = true;
                     break;
                 }
                 LineRead::TooLong => {
@@ -281,7 +289,7 @@ impl Connection {
             // them is a request whose only effect is wayland-side.
             served = true;
             if let Step::Close = self.serve(state) {
-                closed = true;
+                leaving = true;
                 break;
             }
             // Everything already read has to be answered before yielding: it
@@ -321,7 +329,7 @@ impl Connection {
             // otherwise flush every wayland client once per line in it.
             let _ = state.display_handle.flush_clients();
         }
-        if closed {
+        if leaving {
             return Step::Close;
         }
         if self.closing {
