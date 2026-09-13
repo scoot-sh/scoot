@@ -1262,7 +1262,8 @@ review, and why.
     to **16,864,580 kB (~16.1 GiB)** of reserved address space from one client
     in one batch — which is the finding, stated in numbers.
 
-    **Tests: 22 new (200 in `-p flexwm`, 45 in `-p flexwm-core`).** The clamps
+    **Tests: 24 new against the merge base** -- 22 in `-p flexwm` (200 total,
+    from 178) and 2 in `-p flexwm-core` (45 total, from 43). The clamps
     are pure functions tested one under each bound, at it, and one over; the
     pool cap and the `min_size` read site are driven through a real
     `wayland-client` connection and a real `State`, the pattern
