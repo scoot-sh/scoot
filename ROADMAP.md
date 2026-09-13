@@ -1139,6 +1139,180 @@ review, and why.
     or documented behavior -- and the Status section describes capabilities, not
     latency bugs it no longer has.
 
+12. ~~Four missing bounds: a panicking startup path, an unclamped client
+    `min_size`, an unbounded `gap`, and an unbounded `wl_shm` pool~~ — DONE,
+    PR #18. Four Backlog entries (one MEDIUM, three LOW — all struck below)
+    landed together because they are the same shape of fix in four small
+    places: a bound, a clamp, or a clean error path instead of a panic. Ahead
+    of item 6 for the same reason items 7-11 were.
+
+    **(a) `State::listen` no longer panics when the wayland socket cannot be
+    created.** `State::new` and `listen` return
+    `Result<_, Box<dyn Error>>` (the two `insert_source().expect()`s inside
+    `listen` became `?` with them, via `.map_err(|e| e.error)` — `InsertError`'s
+    own payload is the source that could not be inserted, which is no use to an
+    operator and would force the error type to carry a
+    `ListeningSocketSource`), and a new pure `socket_error` maps every
+    `BindError` variant to an operator-facing message. Five call sites traced
+    and updated: `compositor::run` (propagates, so `main` prints
+    `flexwm: <message>` and exits `FAILURE`) plus the four live-`State` test
+    harnesses. `seat.add_keyboard`'s own `expect` in `State::new` was left
+    alone deliberately — a different failure (no xkb keymap for the default
+    layout), not this ticket.
+
+    Before/after on the dev VM, **release** builds both ways (what makes the
+    difference visible: `panic = "abort"`), `env -u XDG_RUNTIME_DIR flexwm
+    --headless` — before: `panicked at state.rs:196: a free wayland socket:
+    RuntimeDirNotSet`, `Aborted (core dumped)`, exit 134, and a real
+    174.2K coredump recorded by `systemd-coredump`; after: `flexwm: no wayland
+    socket: $XDG_RUNTIME_DIR is not set or invalid; set it to a writable
+    directory (a login session normally provides one)`, exit 1, no coredump. A
+    second scenario (`XDG_RUNTIME_DIR=/proc`, i.e. set but unwritable) prints
+    the `PermissionDenied` message — traced to wayland-server's
+    `bind_absolute`, where a lockfile it cannot create is mapped to that
+    variant, and where `bind_auto` returns it immediately instead of trying the
+    other 31 names.
+
+    **(b) A client's `min_size` is clamped where `shell.rs` reads it**, to the
+    usable area (`area.inset(gap)`) of the largest output the core knows —
+    `learned_min`'s existing bound, widened from "the window's own output" to
+    "any output" because nothing in `World`'s public surface says which output
+    an unplaced toplevel will land on, and narrowing it further could wrongly
+    shrink a hint a window could legitimately fill its own screen with. With
+    the one output this compositor creates the two bounds coincide.
+
+    **The backlog entry's diagnosis was one step off, found by disabling the
+    clamp and watching the tests fail**: `ring_rects`'s `rect.w + 2 * width` is
+    not the first unchecked add an `i32::MAX` minimum reaches.
+    `flexwm_core`'s own `World::place_workspace` (`arrange.rs`, `x + width` in
+    the on-screen test) overflows first, during `arrange`, before anything
+    renders — a debug-build panic, a silently wrong `visible` flag in release.
+    Both are closed by clamping at the read site.
+
+    Two further facts the fix turned on: `xdg_toplevel.set_min_size` is
+    unvalidated at the pinned rev (`handlers/surface/toplevel.rs` stores
+    `(width, height)` verbatim, negatives included), and it is
+    double-buffered — so it only becomes the `current()` value `info_of` reads
+    on commit, and `info_of` itself only runs from `add_window` (on
+    `get_toplevel`, before any commit) and `refresh_window`
+    (`app_id_changed`/`title_changed`). The live test drives exactly that
+    sequence, which is also what a real toolkit produces.
+
+    **(c) `flexwm_core::Config`'s `gap` is bounded above as well as below.**
+    `Config::MAX_GAP` = 10,000 px, past the long edge of an 8K display (7680),
+    so no real output has usable area left at it; `Config::clamp_gap` is public
+    because two places must agree on it — `validated()`, and `flexwm`'s config
+    loader, which sizes the focus ring against half the gap *before* a `World`
+    exists to validate one (sizing it against the raw number would let a ring
+    through that is wider than half the gap the layout actually uses). The doc
+    comment deliberately does **not** claim the cap bounds
+    `gap * (windows - 1)` in `column_heights`: that product is bounded by
+    window count, not by this.
+
+    Live on the dev VM, release binaries both ways, `gap = 2147483647` with
+    one `foot` window on a 640x480 output, read back over IPC — before:
+    `rect {x: 2147483647, y: 2147483647, width: 1073742145, height: 482}`
+    (wrapped garbage; `2 * gap` in `Rect::inset` wraps, and that `x + width`
+    then overflows too); after: `{x: 10000, y: 10000, width: 1, height: 1}` —
+    degenerate, as a 10,000px gap on a 640px output should be, but coherent.
+    `gap = 12` on the same binary still gives `{12, 12, 302, 456}`, so ordinary
+    configs are untouched.
+
+    **(d) `wl_shm` pools are capped at `MAX_SHM_POOL_BYTES` = 512 MiB**, at
+    *both* requests that reach the same `mmap`: `wl_shm.create_pool`'s initial
+    size and `wl_shm_pool.resize`'s target. Extends `dispatch.rs`'s existing
+    hand-written blanket `Dispatch` impl (item 7's seam — the pinned rev has no
+    `delegate_shm!`). 512 MiB is four full-screen 8K ARGB frames (126.6 MiB
+    each) or sixteen 4K ones in a single pool; it is a per-pool bound, not a
+    total, and the entry says so rather than overclaiming (bounding the sum
+    needs per-client accounting, which is the separate connection-cap entry's
+    territory).
+
+    **Refused, not clamped**, deliberately: a clamp would leave client and
+    compositor disagreeing about the pool's size, so the client would go on
+    placing buffers at offsets it believes are inside its own mapping and
+    collect confusing `invalid offset` errors from `create_buffer` later,
+    somewhere other than the request that was wrong. Each refusal uses the code
+    upstream itself uses for a bad size on *that* request — `InvalidStride` on
+    `wl_shm` for `create_pool`, `InvalidFd` on `wl_shm_pool` for `resize` — so
+    a client sees one consistent code whichever side decided.
+
+    Refusing `create_pool` means returning without initializing the
+    `New<WlShmPool>` it carries, and an uninitialized object's
+    `UninitObjectData::request` is a `panic!`. That is safe for a specific
+    reason, checked in wayland-backend 0.3.17 rather than assumed and recorded
+    in the module doc so it needn't be re-derived: `post_error` calls `kill`
+    synchronously, and `Client::next_request` returns `EPIPE` once `killed` is
+    set, so no later request from that client is dispatched — *including one
+    already buffered in the same `write()`*. `UninitObjectData::destroyed` is an
+    empty no-op (so the `cleanup`/`queue_all_destructors` pass over that object
+    does nothing) and `wayland-server`'s `New` has no `Drop` impl. A test
+    pipelines `create_pool(i32::MAX)` + `resize(4096)` in one write for exactly
+    this case.
+
+    Bug-bashed on the dev VM against release binaries both ways, ten scenarios
+    each (one under the cap, exactly at it, one over, and `i32::MAX`, for both
+    requests; the pipelined pair; eight oversized pools in one batch; three
+    oversized attempts from three fresh connections; an ordinary 4096-byte pool
+    afterwards). After: in-range sizes accepted (`VmPeak` 677,168 kB confirms
+    the 512 MiB mapping is really made), everything over refused with the
+    message naming both numbers, the compositor alive and answering IPC
+    throughout, the innocent client still served. Before: *every* oversized
+    request accepted, and the eight-pool batch took the compositor's `VmPeak`
+    to **16,864,580 kB (~16.1 GiB)** of reserved address space from one client
+    in one batch — which is the finding, stated in numbers.
+
+    **Tests: 22 new (200 in `-p flexwm`, 45 in `-p flexwm-core`).** The clamps
+    are pure functions tested one under each bound, at it, and one over; the
+    pool cap and the `min_size` read site are driven through a real
+    `wayland-client` connection and a real `State`, the pattern
+    `dispatch/tests.rs` established (extended here so the offending client is a
+    closure, which is what let `create_pool` and `resize` share one harness).
+    `shell/tests.rs` and `state/tests.rs` are new modules, split out rather
+    than appended to their parents. Three **negative controls**, each run and
+    recorded: reverting the gap clamp fails both new core tests (one with
+    `attempt to multiply with overflow` inside `Rect::inset`); making
+    `clamp_hint` the identity fails 6 shell tests (two with `attempt to add
+    with overflow` inside `arrange.rs` — the finding in (b)); and disabling the
+    `create_pool` guard fails the two tests that cover it, one with "the pool
+    size was accepted" and one showing the pipelined `resize` then really does
+    reach the pool object.
+
+    **Benchmarked, because the pool cap adds a second `TypeId` check to the
+    per-request path** (same method as item 7: 1M `wl_surface.damage` requests,
+    compositor `utime+stime` in jiffies, one discarded warm-up rep). Three
+    binaries interleaved — `a7ffef3` (before), this commit, and a probe built
+    from this commit with *only* the new `create_pool` guard call removed —
+    16 reps each: **37.50 / 37.19 / 37.12 jiffies** and **1.595 / 1.596 / 1.607
+    M req/s** (before / after / probe). No measurable cost, as expected from
+    `TypeId::of` being a `const fn` whose comparison folds away after
+    monomorphization.
+
+    One methodology note worth keeping, because the first pass got it wrong:
+    a *two*-binary interleave (12 reps each, both orders) showed before 35.33
+    vs after 38.50 jiffies and looked like a real ~9% regression. It did not
+    survive adding the third binary to the rotation, and it cannot be the guard
+    anyway — the probe, which differs from `after` by exactly that one call,
+    measured the same as both. Item 10's recorded "run position is worth about a
+    jiffie on its own" confound is the nearest explanation; either way the
+    controlled three-way numbers are the ones to trust, and a two-way A/B on
+    this VM is not sensitive enough to resolve a 1% effect.
+
+    Also verified at the same commit: `cargo test -p flexwm` 200/200 and
+    `-p flexwm-core` 45/45 on the dev VM, clippy `-D warnings` clean for both
+    crates there and `--workspace --all-targets` clean on macOS, `cargo fmt
+    --all --check` clean on both hosts, `cargo check --workspace` clean on
+    macOS (the cross-platform build), and `scripts/smoke-test.sh` green under
+    `--headless` (11 `ok:` checks, exit 0) — which exercises the ordinary
+    `wl_shm` buffer path through the new dispatch with a real `foot` window.
+
+    **Found while bug-bashing, deliberately not fixed here** (see the new
+    Backlog entry): `--width`/`--height` are raw unbounded `i32`s, so an
+    operator's own `--width 2000000000` can still overflow the same
+    `x + width` in `arrange.rs` that (b) closes for client-declared minimums.
+    Out of this ticket's scope, and a CLI flag rather than a client- or
+    config-supplied value, but it is the same family.
+
 ## Backlog (unordered — pick up whenever it fits)
 
 - **Input injection targeted at a specific window, without moving seat
@@ -1259,8 +1433,10 @@ review, and why.
   instead of always needing a live VM session — but real setup cost); WLCS
   as a longer-term, larger investment worth knowing exists.
 
-- **`State::listen` panics (aborts the process) if `$XDG_RUNTIME_DIR` is
-  unset, instead of a clean startup error (LOW).** Found incidentally by
+- **~~`State::listen` panics (aborts the process) if `$XDG_RUNTIME_DIR` is
+  unset, instead of a clean startup error (LOW)~~ — DONE as item 12(a)**, with
+  the before/after release-binary evidence (core dump vs one-line error)
+  recorded there. Original diagnosis, left as written: found incidentally by
   `flexwm-reviewer` while reviewing PR #14, unrelated to that PR and left
   untouched by it. `crates/flexwm/src/compositor/state.rs:196`:
   `ListeningSocketSource::new_auto().expect("a free wayland socket")` — the
@@ -1347,7 +1523,14 @@ to the whole LAN; fixed same-day, `host.address = "127.0.0.1"` added to
 and LOW findings below are real but lower-urgency; none were exploitable
 data-loss/RCE in what was checked.
 
-- **Client-declared `min_size` isn't clamped where it's read (MEDIUM).**
+- **~~Client-declared `min_size` isn't clamped where it's read (MEDIUM)~~ —
+  DONE as item 12(b).** One correction to the diagnosis below, found by
+  disabling the clamp: `ring_rects` is not the first unchecked add an
+  `i32::MAX` minimum reaches — `flexwm_core`'s own `World::place_workspace`
+  (`x + width`) overflows first, inside `arrange`, before anything renders. So
+  "this doesn't reach a bad write today" was true of the *write* but not of the
+  arithmetic: a debug build panics in the core. Original diagnosis, left as
+  written:
   `shell.rs`'s xdg_toplevel handling reads a client's `min_size` straight
   from `SurfaceCachedState` with no clamp, unlike `learned_min` (already
   capped to the output's usable area). Traced the full chain to
@@ -1510,16 +1693,39 @@ data-loss/RCE in what was checked.
   the connection loop and wants its own test matrix (partial lines interleaved
   with `WaitIdle`'s hand-off and the screenshot limiter), which is why it is
   its own item rather than a rider on item 9.
+- **`--width`/`--height` are unbounded `i32`s (LOW, operator-supplied).**
+  Found while bug-bashing item 12 and deliberately left out of it. Item 12(b)
+  bounds a *client's* `min_size` to the output's usable area, and 12(c) bounds
+  the gap, but the output's own size still comes straight from
+  `cli.rs`'s `number("--width", ..)` with no range check — so
+  `--width 2000000000` can overflow the same `x + width` in `arrange.rs`'s
+  on-screen test that 12(b) closes for minimums, plus `Rect::right()`/
+  `bottom()` wherever those are read. Lower priority than the four in item 12
+  because it needs the operator to pass an absurd flag to their own
+  compositor rather than a client or a config file to declare one, but it is
+  the same family of fix (clamp at the read site, with a documented bound)
+  and would close the last unbounded input to the layout's arithmetic. A
+  realistic bound is whatever DRM itself can report for a mode, with room to
+  spare.
 - **Config parsing has no recursion-depth guard (LOW).** The `toml` stack
   has no explicit guard against deeply nested input; a maliciously deep
   config could stack-overflow-abort the process rather than hit the
   module's normal "log and fall back to defaults" path. Requires the user's
   own config file, so low priority.
-- **`flexwm-core`'s `gap` config value has no upper bound (LOW).** Clamped
+- **~~`flexwm-core`'s `gap` config value has no upper bound (LOW)~~ — DONE as
+  item 12(c)**, `Config::MAX_GAP` = 10,000 with `clamp_gap` shared between the
+  core's `validated()` and the compositor's focus-ring sizing. Original
+  diagnosis, left as written: clamped
   only at the bottom (`.max(0)`); a very large configured gap can overflow
   plain `i32` arithmetic in `layout.rs`/`arrange.rs`. Config-only, same fix
   shape as the `min_size` finding above.
-- **No upper bound on shm pool size (LOW).** Found while verifying item 7's
+- **~~No upper bound on shm pool size (LOW)~~ — DONE as item 12(d)**, 512 MiB
+  at both `create_pool` and `resize`, refused rather than clamped. The entry's
+  "a cap on pool size at creation/resize time would close it" is exactly what
+  shipped; what it did not anticipate is that refusing `create_pool` leaves an
+  uninitialized object whose `request` is a `panic!`, which is only safe
+  because `post_error` kills the client synchronously — see item 12(d).
+  Original diagnosis, left as written: found while verifying item 7's
   fix, not by the original audit. `wl_shm_pool.resize(i32::MAX)` (or
   `wl_shm.create_pool(fd, i32::MAX)` directly — reaches the same `mmap`,
   not specific to `resize`) is accepted, reserving a ~2 GiB mapping per
