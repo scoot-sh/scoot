@@ -1,34 +1,80 @@
 //! The control socket: newline-delimited JSON, one connection per client.
+//!
+//! Every byte in and out of here moves on the compositor's *only* thread, the
+//! one that also runs wayland dispatch, input and the render loop -- so
+//! nothing in this module may block, ever. A blocking read of half a request
+//! line, or a blocking write to a client that has stopped reading, does not
+//! stall one connection: it stalls the whole compositor, for every client, for
+//! as long as the offender likes. Both used to happen (see `ROADMAP.md`'s
+//! entry for this item). The shape that replaces them:
+//!
+//! - the accepted socket is non-blocking, and a line that has only half
+//!   arrived leaves its bytes in [`line::Lines`] to be finished on a later
+//!   wakeup ([`line::LineRead::Incomplete`]);
+//! - one wakeup answers *every* request already buffered, not just the first,
+//!   because a level-triggered readiness source will not fire again for bytes
+//!   that have already left the kernel -- and stops there, so whatever is still
+//!   in the kernel waits its turn behind every other source;
+//! - a reply the socket will not take in one go waits in [`outbound::Outbound`]
+//!   and goes out when the event loop reports the socket writable, with the
+//!   connection's read interest dropped while too much is queued so it cannot
+//!   be made to buffer without bound.
+//!
+//! This file holds the socket's setup and what a request *means*
+//! ([`State::handle_request`]); [`connection`] holds the event-loop machinery
+//! that gets requests in and replies out.
 
+mod connection;
 mod line;
 mod listener;
+mod outbound;
 #[cfg(test)]
 mod tests;
 
-use std::io::{BufReader, Write};
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use flexwm_core::Action;
 use flexwm_ipc::{
-    OutputSnapshot, PROTOCOL_VERSION, Rect as WireRect, Request, Response, WindowSnapshot, decode,
-    encode, socket_path,
+    OutputSnapshot, PROTOCOL_VERSION, Rect as WireRect, Request, Response, WindowSnapshot, encode,
+    socket_path,
 };
 use smithay::reexports::calloop::generic::Generic;
 use smithay::reexports::calloop::{EventLoop, Interest, Mode, PostAction};
 
-use self::line::{LineRead, MAX_REQUEST_BYTES, read_line_bounded};
+use self::outbound::Outbound;
 use super::State;
 use super::headless::FRAME_INTERVAL;
 use super::tty::VtSwitchOutcome;
 
 /// A `wait-idle` request that hasn't been answered yet.
+///
+/// Its connection has already left the event loop (see the `WaitIdle` arm of
+/// `Connection::serve`), so this carries everything needed to finish with it
+/// from the render loop: the socket, when the request started and how long it
+/// may run, and the outbound queue it inherited.
 pub struct PendingIdle {
-    pub stream: UnixStream,
-    pub quiet: Duration,
-    pub deadline: Instant,
-    pub started: Instant,
+    stream: UnixStream,
+    /// How long the screen must stay unchanged before this is answered.
+    quiet: Duration,
+    /// How long the client is prepared to wait in total -- both for the screen
+    /// to settle and, afterwards, for its answer to be written (see
+    /// [`PendingIdle::push`]).
+    timeout: Duration,
+    started: Instant,
+    /// When a byte of this waiter's queue last went out -- or, if none has,
+    /// when its answer was queued. `started` until one of those happens.
+    last_progress: Instant,
+    /// Whether this request's own answer has been decided and queued.
+    ///
+    /// Not derivable from `outbound`: that is also non-empty *before* the
+    /// answer exists, when it holds a tail inherited from the connection, and
+    /// empty again once the answer has gone out.
+    answered: bool,
+    /// This request's answer on its way out, plus -- ahead of it -- whatever
+    /// the connection had not finished writing when it handed over.
+    outbound: Outbound,
 }
 
 pub fn init(
@@ -78,149 +124,22 @@ fn accept(state: &mut State, stream: UnixStream) -> std::io::Result<()> {
         return Ok(());
     }
 
-    stream.set_nonblocking(false)?;
-    let mut connection = Connection {
-        reader: BufReader::new(stream.try_clone()?),
-        writer: stream.try_clone()?,
-        line: Vec::new(),
-        last_screenshot: None,
-    };
-    let source = Generic::new(stream, Interest::READ, Mode::Level);
+    // Non-blocking is what every read and write in `connection` is written
+    // for, and it is not inherited: on Linux `accept(2)` gives a fresh socket
+    // its own file status flags, and std asks for `SOCK_CLOEXEC` only.
+    // Verified on the dev VM rather than assumed -- with the listener itself
+    // already non-blocking, `fcntl(F_GETFL) & O_NONBLOCK` on the accepted fd
+    // reads false. Set explicitly either way: this is load-bearing enough that
+    // it should not depend on what the listener happens to be.
+    stream.set_nonblocking(true)?;
     state
         .loop_handle
-        .insert_source(source, move |_, _, state: &mut State| {
-            Ok(match connection.step(state) {
-                Step::Continue => PostAction::Continue,
-                Step::Close => PostAction::Remove,
-            })
-        })
+        .insert_source(
+            connection::source(stream)?,
+            |_readiness, connection, state: &mut State| connection.step(state),
+        )
         .map_err(std::io::Error::other)?;
     Ok(())
-}
-
-enum Step {
-    Continue,
-    Close,
-}
-
-struct Connection {
-    reader: BufReader<UnixStream>,
-    writer: UnixStream,
-    /// Reused across requests on this connection instead of allocating a
-    /// fresh buffer per message -- an agent driving a session over one
-    /// connection can send many.
-    line: Vec<u8>,
-    /// When this connection last had a screenshot captured for it, or `None`
-    /// if it never has. Per connection, not global: one client hammering the
-    /// request must not make another client's first one fail.
-    last_screenshot: Option<Instant>,
-}
-
-impl Connection {
-    fn step(&mut self, state: &mut State) -> Step {
-        match read_line_bounded(&mut self.reader, &mut self.line, MAX_REQUEST_BYTES) {
-            LineRead::Line => {}
-            LineRead::Eof | LineRead::Failed => return Step::Close,
-            LineRead::TooLong => {
-                // Nothing to resynchronize to: the rest of this line is
-                // still coming and there is no way to tell where it ends.
-                // Best-effort reply so a legitimately over-long request gets
-                // a reason rather than a bare disconnection, then done.
-                let _ = self.reply(&Response::error(format!(
-                    "request line exceeds the {MAX_REQUEST_BYTES}-byte limit; connection closed"
-                )));
-                tracing::debug!("closed an ipc connection whose request line ran past the limit");
-                return Step::Close;
-            }
-        }
-        // Borrowed only until the request (or an owned error message) is
-        // out; `self.line` is needed mutably again the moment either is.
-        let decoded = match std::str::from_utf8(&self.line) {
-            Ok(text) => decode::<Request>(text).map_err(|error| error.to_string()),
-            Err(error) => Err(error.to_string()),
-        };
-        let request = match decoded {
-            Ok(request) => request,
-            Err(message) => {
-                let _ = self.reply(&Response::error(message));
-                return Step::Continue;
-            }
-        };
-
-        // Waiting is answered later, from the render loop, so the connection
-        // leaves this source and lives on in `pending_idle`.
-        if let Request::WaitIdle {
-            quiet_ms,
-            timeout_ms,
-        } = request
-        {
-            let Ok(stream) = self.writer.try_clone() else {
-                return Step::Close;
-            };
-            let now = Instant::now();
-            state.pending_idle.push(PendingIdle {
-                stream,
-                quiet: Duration::from_millis(quiet_ms),
-                deadline: now + Duration::from_millis(timeout_ms),
-                started: now,
-            });
-            // The frame timer answers this, but it drops itself when there's
-            // nothing to do -- if the compositor was already idle, it needs
-            // waking back up or this request would wait forever.
-            state.ensure_ticking();
-            return Step::Close;
-        }
-
-        // A screenshot is the one request that costs a full render, a
-        // framebuffer read-back and a PNG encode, all on the single thread
-        // that also runs wayland dispatch, input and every other IPC
-        // connection (see `screenshot.rs`). Served back-to-back it starves
-        // everything else, so a connection that was handed one less than a
-        // frame ago is told to come back rather than served a second one at
-        // that price.
-        let screenshot = matches!(request, Request::Screenshot { .. });
-        if screenshot && screenshot_throttled(self.last_screenshot, Instant::now()) {
-            let _ = self.reply(&Response::error(format!(
-                "screenshots are limited to one per connection per {}ms, the \
-                 compositor's own frame interval: capturing costs a full \
-                 render and encode on the thread that serves every other \
-                 client. Retry after that long",
-                FRAME_INTERVAL.as_millis()
-            )));
-            return Step::Continue;
-        }
-
-        let response = state.handle_request(request);
-        if screenshot {
-            // Stamped once the capture is done, not when the request
-            // arrived: the whole point is to leave the event loop a frame's
-            // worth of room for everything else *after* a capture, and a
-            // capture can easily take longer than a frame itself, which
-            // would leave a start-stamped window already expired by the time
-            // it mattered (measured: ~170ms for 800x600 in a debug build --
-            // the throttle never once fired that way). Recorded whether or
-            // not the capture succeeded: `screenshot()` renders before it
-            // can fail, so the expensive part was spent either way.
-            self.last_screenshot = Some(Instant::now());
-        }
-        // Synthetic input (key/pointer) and action-driven configures queue
-        // wayland messages on the client's connection; nothing else flushes
-        // them until the next render tick, which only runs when something
-        // already marked the screen dirty. Flush explicitly so an injected
-        // keystroke reaches the client the moment it's sent, not whenever a
-        // later, unrelated redraw happens to piggyback it out.
-        let _ = state.display_handle.flush_clients();
-        if self.reply(&response).is_err() {
-            Step::Close
-        } else {
-            Step::Continue
-        }
-    }
-
-    fn reply(&mut self, response: &Response) -> std::io::Result<()> {
-        self.writer.write_all(encode(response)?.as_bytes())?;
-        self.writer.flush()
-    }
 }
 
 impl State {
@@ -343,7 +262,8 @@ impl State {
         }
     }
 
-    /// Answers `wait-idle` requests whose quiet period has passed, or timed out.
+    /// Answers `wait-idle` requests whose quiet period has passed, or timed
+    /// out, and pushes out the ones whose answer didn't fit in one write.
     pub fn settle_idle_waiters(&mut self) {
         if self.pending_idle.is_empty() {
             return;
@@ -351,20 +271,7 @@ impl State {
         let now = Instant::now();
         let last_commit = self.last_commit;
         let mut waiting = std::mem::take(&mut self.pending_idle);
-        waiting.retain_mut(|wait| {
-            let response = match idle_outcome(now, last_commit, wait) {
-                IdleOutcome::StillWaiting => return true,
-                IdleOutcome::Idle { waited_ms } => Response::Idle { waited_ms },
-                IdleOutcome::TimedOut => {
-                    Response::error("timed out waiting for the screen to settle")
-                }
-            };
-            if let Ok(line) = encode(&response) {
-                let _ = wait.stream.write_all(line.as_bytes());
-                let _ = wait.stream.flush();
-            }
-            false
-        });
+        waiting.retain_mut(|wait| wait.advance(now, last_commit));
         self.pending_idle = waiting;
     }
 
@@ -451,6 +358,96 @@ fn screenshot_throttled(last: Option<Instant>, now: Instant) -> bool {
     last.is_some_and(|last| now.duration_since(last) < FRAME_INTERVAL)
 }
 
+impl PendingIdle {
+    /// Moves this waiter along by one frame tick: `true` to keep waiting,
+    /// `false` once it is finished with (answered and written, or given up on).
+    fn advance(&mut self, now: Instant, last_commit: Instant) -> bool {
+        // Anything queued goes first, for the same reason the connection did
+        // it first: this waiter may have inherited the tail of an earlier
+        // reply, and the answer below must not overtake it.
+        if !self.push(now) {
+            return false;
+        }
+        if !self.answered {
+            let response = match idle_outcome(now, last_commit, self) {
+                IdleOutcome::StillWaiting => return true,
+                IdleOutcome::Idle { waited_ms } => Response::Idle { waited_ms },
+                IdleOutcome::TimedOut => {
+                    Response::error("timed out waiting for the screen to settle")
+                }
+            };
+            let Ok(line) = encode(&response) else {
+                // `Response::Idle` and `Response::Error` are a `u64` and a
+                // `String`; serde cannot fail on either. Nothing to answer
+                // with if it somehow did.
+                return false;
+            };
+            self.answered = true;
+            // The no-progress window starts here, not when the request arrived.
+            // Without this the window for a *timed out* waiter would be zero by
+            // construction -- `last_progress` would still be `started`, and
+            // `idle_outcome` only reports `TimedOut` once `timeout` has already
+            // elapsed since then -- so the first tick that could not write it
+            // would also be the one that gave up on it.
+            self.last_progress = now;
+            let PendingIdle {
+                stream, outbound, ..
+            } = self;
+            if outbound.send(&mut &*stream, line).is_err() {
+                return false;
+            }
+        }
+        // Kept only while there is still something to write.
+        !self.outbound.is_empty()
+    }
+
+    /// Pushes out as much of the queue as the socket will take. `false` when
+    /// this waiter is finished with: the peer is gone, or it has stopped making
+    /// room for long enough to count as gone.
+    ///
+    /// The socket is non-blocking (it is a `try_clone` of the connection's,
+    /// which shares its file status flags -- verified, not assumed), so a
+    /// write here can come up short even for an answer this small: a client
+    /// that pipelined requests and never read the replies has its own receive
+    /// buffer full. Retried on the next frame tick instead of dropped, because
+    /// dropping it would leave the client waiting on an answer that was
+    /// decided and then thrown away -- and, when there is an inherited tail
+    /// ahead of it, would truncate a response mid-way.
+    ///
+    /// Giving up is bounded by lack of *progress*, not by total time: a client
+    /// draining a multi-megabyte screenshot reply slowly is making progress and
+    /// is never given up on, however long it takes. The window is as long as the
+    /// `timeout_ms` the client itself asked for, measured from the last byte
+    /// that went out -- or, if none ever has, from when the answer was queued
+    /// (see [`PendingIdle::advance`], which is where that clock starts, and
+    /// why). The client said how long it was prepared to wait on this request,
+    /// and a peer that has not taken a single byte in that long is not reading.
+    fn push(&mut self, now: Instant) -> bool {
+        if self.outbound.is_empty() {
+            return true;
+        }
+        let before = self.outbound.pending();
+        let PendingIdle {
+            stream, outbound, ..
+        } = self;
+        if outbound.flush(&mut &*stream).is_err() {
+            return false;
+        }
+        if self.outbound.pending() < before {
+            self.last_progress = now;
+            return true;
+        }
+        if now.duration_since(self.last_progress) >= self.timeout {
+            tracing::warn!(
+                pending = self.outbound.pending(),
+                "gave up writing a wait-idle reply: the client stopped reading"
+            );
+            return false;
+        }
+        true
+    }
+}
+
 enum IdleOutcome {
     StillWaiting,
     Idle { waited_ms: u64 },
@@ -468,12 +465,21 @@ enum IdleOutcome {
 /// baseline instead of a missing flush. So the quiet window is measured from
 /// `last_commit.max(wait.started)`, which only equals `last_commit` once a
 /// commit has actually happened after the request began.
+///
+/// The timeout is kept as a duration since `started` rather than a precomputed
+/// deadline `Instant`, which is overflow-free by construction: `Instant +
+/// Duration` panics if it overflows, and `timeout_ms` is a client-chosen `u64`
+/// that goes straight into a `Duration`. Nothing was actually reachable there
+/// (Linux's `Instant` is a `timespec` whose `tv_sec` is an `i64`, which
+/// `u64::MAX` milliseconds fits inside with room to spare), so this is not a
+/// fixed bug -- it is one fewer client-controlled value feeding arithmetic that
+/// can panic at all.
 fn idle_outcome(now: Instant, last_commit: Instant, wait: &PendingIdle) -> IdleOutcome {
     let baseline = last_commit.max(wait.started);
     if now.duration_since(baseline) >= wait.quiet {
         let waited_ms = now.duration_since(wait.started).as_millis() as u64;
         IdleOutcome::Idle { waited_ms }
-    } else if now >= wait.deadline {
+    } else if now.duration_since(wait.started) >= wait.timeout {
         IdleOutcome::TimedOut
     } else {
         IdleOutcome::StillWaiting

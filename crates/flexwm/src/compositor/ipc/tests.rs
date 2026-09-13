@@ -1,12 +1,61 @@
-//! Tests for the control socket: who may connect, how much one request may
-//! cost, and when a request is answered rather than served.
+//! Tests for the control socket itself: where it comes from, who may connect,
+//! and the two pure policies `ipc.rs` applies to a request -- when a
+//! `wait-idle` is answered, and when a screenshot is refused.
+//!
+//! The pieces each have their own: `line/tests.rs` for request lines,
+//! `outbound/tests.rs` for replies on their way out, and
+//! `connection/tests.rs` for the event-loop machinery driving both.
 
-use std::io::{BufReader, Cursor, Read};
+use std::io::{BufRead, BufReader, Read, Write};
+use std::os::fd::AsRawFd;
 use std::os::unix::fs::{FileTypeExt, PermissionsExt};
 use std::os::unix::net::UnixStream;
 
+use flexwm_ipc::decode;
+
 use super::listener;
 use super::*;
+
+/// Shrinks how much unread data the kernel will hold for writes to `stream`.
+///
+/// Lives here rather than beside its busiest caller (`connection/tests.rs`)
+/// because the wait-idle tests below need it too: a reply that does not fit is
+/// the only interesting case on the write side, and a few-kilobyte send buffer
+/// is how a test gets one without pushing megabytes through a debug build.
+pub(super) fn set_sndbuf(stream: &UnixStream, bytes: usize) {
+    let size = bytes as libc::c_int;
+    // SAFETY: a live fd, a `c_int` of exactly the length claimed, nothing
+    // borrowed past the call.
+    let result = unsafe {
+        libc::setsockopt(
+            stream.as_raw_fd(),
+            libc::SOL_SOCKET,
+            libc::SO_SNDBUF,
+            std::ptr::from_ref(&size).cast::<libc::c_void>(),
+            size_of::<libc::c_int>() as libc::socklen_t,
+        )
+    };
+    assert_eq!(result, 0, "could not shrink the send buffer");
+}
+
+fn ms(millis: u64) -> Duration {
+    Duration::from_millis(millis)
+}
+
+/// Reads everything `stream` has right now, returning how much that was.
+/// `stream` must be non-blocking.
+fn drain(stream: &UnixStream) -> usize {
+    let mut source = stream;
+    let mut chunk = [0u8; 16 * 1024];
+    let mut total = 0;
+    while let Ok(count) = source.read(&mut chunk) {
+        if count == 0 {
+            break;
+        }
+        total += count;
+    }
+    total
+}
 
 // --- wait-idle -----------------------------------------------------------
 
@@ -17,8 +66,11 @@ fn pending(now: Instant, quiet_ms: u64, timeout_ms: u64) -> PendingIdle {
     PendingIdle {
         stream: a,
         quiet: Duration::from_millis(quiet_ms),
-        deadline: now + Duration::from_millis(timeout_ms),
+        timeout: Duration::from_millis(timeout_ms),
         started: now,
+        last_progress: now,
+        answered: false,
+        outbound: Outbound::default(),
     }
 }
 
@@ -91,6 +143,191 @@ fn waited_ms_is_measured_from_the_request_not_the_commit() {
     }
 }
 
+// --- wait-idle: getting the answer out -----------------------------------
+//
+// The happy path (an answer the socket takes straight away) is covered by
+// `connection/tests.rs` end to end. What needs exercising here is the part that
+// only happens when it *doesn't*: the answer is retried per frame tick, and
+// given up on only after the client's own `timeout_ms` has passed with no write
+// progress at all. Both halves of that are load-bearing and neither is
+// observable from outside, so these drive `PendingIdle` directly.
+
+/// A waiter whose socket is already stuffed full, so nothing it queues can go
+/// out -- the state a client that pipelined requests and never read the replies
+/// leaves behind, carried over from the connection (see `Connection::serve`'s
+/// `WaitIdle` arm).
+fn stalled(now: Instant, quiet_ms: u64, timeout_ms: u64) -> (PendingIdle, UnixStream) {
+    let (server, client) = UnixStream::pair().expect("socket pair");
+    set_sndbuf(&server, 1024);
+    server.set_nonblocking(true).expect("non-blocking");
+    let mut wait = PendingIdle {
+        stream: server,
+        quiet: ms(quiet_ms),
+        timeout: ms(timeout_ms),
+        started: now,
+        last_progress: now,
+        answered: false,
+        outbound: Outbound::default(),
+    };
+    let PendingIdle {
+        stream, outbound, ..
+    } = &mut wait;
+    outbound
+        .send(&mut &*stream, "x".repeat(512 * 1024))
+        .expect("queues an inherited tail");
+    assert!(
+        !wait.outbound.is_empty(),
+        "the socket took the whole tail; this test needs one that cannot"
+    );
+    (wait, client)
+}
+
+#[test]
+fn a_stalled_wait_idle_reply_is_given_up_on_only_after_the_clients_own_timeout() {
+    let started = Instant::now();
+    let (mut wait, _client) = stalled(started, 10, 500);
+    // Before the quiet period: still waiting, and the stuck queue is no reason
+    // to abandon it.
+    assert!(wait.advance(started + ms(5), started));
+    // Quiet has passed, so the answer is queued -- behind a tail that cannot go
+    // out. This is where the no-progress clock starts.
+    assert!(wait.advance(started + ms(20), started));
+    assert!(
+        wait.advance(started + ms(510), started),
+        "given up on 490ms into a 500ms window: the clock has to start when the \
+         answer was queued, not when the request arrived"
+    );
+    assert!(
+        !wait.advance(started + ms(530), started),
+        "510ms with not one byte written is a client that is not reading"
+    );
+}
+
+#[test]
+fn a_wait_idle_reply_that_is_still_draining_is_never_given_up_on() {
+    // The distinction the whole mechanism turns on: slow is not dead. A client
+    // taking a multi-megabyte reply a little at a time keeps its answer for as
+    // long as it needs, however far past its own timeout that goes.
+    let started = Instant::now();
+    let (mut wait, client) = stalled(started, 10, 100);
+    client.set_nonblocking(true).expect("non-blocking");
+    assert!(wait.advance(started + ms(20), started));
+    for tick in 1..=12u64 {
+        // Everything available, not a fixed slice: on a unix socket the sender
+        // only gets room back once whole queued buffers are consumed, so a
+        // partial read can leave it still refusing writes -- which would make
+        // this test about kernel accounting rather than about progress.
+        let read = drain(&client);
+        assert!(read > 0, "nothing to read on tick {tick}");
+        // Every tick is more than a whole timeout window apart, so a mechanism
+        // that measured total time rather than progress would give up at once.
+        assert!(
+            wait.advance(started + ms(20 + 150 * tick), started),
+            "given up on at tick {tick} despite the client making progress"
+        );
+    }
+}
+
+#[test]
+fn the_no_progress_window_runs_from_the_last_byte_written_not_from_the_answer() {
+    // What separates "tracks progress" from "has a deadline": a client that
+    // drains part of its reply and *then* stops has to get a fresh window from
+    // the last byte that went out. Measuring from when the answer was queued
+    // instead would drop a client that was reading steadily right up until the
+    // window expired -- mid-reply, with no way for it to tell why.
+    let started = Instant::now();
+    let (mut wait, client) = stalled(started, 10, 100);
+    client.set_nonblocking(true).expect("non-blocking");
+    // The answer is queued at +20, so a window measured from *there* ends +120.
+    assert!(wait.advance(started + ms(20), started));
+    // A real read at +90 lets some of it out, which is what restarts the window.
+    assert!(drain(&client) > 0);
+    assert!(wait.advance(started + ms(90), started));
+    assert!(
+        wait.advance(started + ms(150), started),
+        "given up on 60ms after the last byte went out, inside a 100ms window"
+    );
+    assert!(
+        !wait.advance(started + ms(200), started),
+        "110ms after the last byte went out is past the window"
+    );
+}
+
+#[test]
+fn a_timed_out_answer_gets_its_own_window_rather_than_none() {
+    // `TimedOut` is the branch where the window used to be zero by
+    // construction: `idle_outcome` only reports it once `timeout` has already
+    // elapsed since the request arrived, so a window measured from *there* was
+    // spent before the answer existed. Reachable only with an empty queue -- a
+    // waiter carrying a tail that cannot drain is given up on by `push` first --
+    // so the socket is stuffed from outside instead.
+    let started = Instant::now();
+    let (server, _client) = UnixStream::pair().expect("socket pair");
+    set_sndbuf(&server, 1024);
+    server.set_nonblocking(true).expect("non-blocking");
+    let mut stuffing = &server;
+    while stuffing.write(&[b'x'; 4096]).is_ok_and(|count| count > 0) {}
+    let mut wait = PendingIdle {
+        stream: server,
+        quiet: ms(60_000),
+        timeout: ms(100),
+        started,
+        last_progress: started,
+        answered: false,
+        outbound: Outbound::default(),
+    };
+    assert!(
+        wait.advance(started + ms(150), started),
+        "the timeout answer was dropped instead of queued"
+    );
+    assert!(!wait.outbound.is_empty(), "it went out after all");
+    assert!(
+        wait.advance(started + ms(200), started),
+        "given up on 50ms into a 100ms window"
+    );
+    assert!(!wait.advance(started + ms(260), started));
+}
+
+#[test]
+fn a_waiter_is_finished_with_once_its_answer_has_gone_out() {
+    let started = Instant::now();
+    let (server, client) = UnixStream::pair().expect("socket pair");
+    server.set_nonblocking(true).expect("non-blocking");
+    let mut wait = PendingIdle {
+        stream: server,
+        quiet: ms(10),
+        timeout: ms(5_000),
+        started,
+        last_progress: started,
+        answered: false,
+        outbound: Outbound::default(),
+    };
+    assert!(wait.advance(started + ms(5), started), "not quiet yet");
+    assert!(
+        !wait.advance(started + ms(20), started),
+        "an answer that went out in one write leaves nothing to come back for"
+    );
+    let mut line = String::new();
+    BufReader::new(client)
+        .read_line(&mut line)
+        .expect("the answer arrived");
+    assert!(
+        matches!(decode::<Response>(&line), Ok(Response::Idle { .. })),
+        "the client got {line:?}"
+    );
+}
+
+#[test]
+fn a_waiter_whose_peer_is_gone_is_dropped_rather_than_retried_forever() {
+    let started = Instant::now();
+    let (mut wait, client) = stalled(started, 10, 60_000);
+    drop(client);
+    assert!(
+        !wait.advance(started + ms(20), started),
+        "a write to a closed peer has to end the waiter, whatever its timeout"
+    );
+}
+
 // --- screenshot rate limiting --------------------------------------------
 
 #[test]
@@ -138,187 +375,6 @@ fn throttling_never_outlives_a_frame_however_long_the_gap() {
     // served, not refused: the window is one frame, not a budget.
     let long_ago = Instant::now() - Duration::from_secs(3600);
     assert!(!screenshot_throttled(Some(long_ago), Instant::now()));
-}
-
-// --- bounded request lines -----------------------------------------------
-
-/// Reads with a deliberately tiny buffer, so every line of any length
-/// crosses several `fill_buf`/`consume` rounds.
-fn tiny_reader(bytes: &[u8]) -> BufReader<Cursor<Vec<u8>>> {
-    BufReader::with_capacity(4, Cursor::new(bytes.to_vec()))
-}
-
-#[test]
-fn reads_one_line_at_a_time_leaving_the_rest() {
-    let mut reader = tiny_reader(b"{\"type\":\"version\"}\n{\"type\":\"windows\"}\n");
-    let mut line = Vec::new();
-    assert_eq!(
-        read_line_bounded(&mut reader, &mut line, MAX_REQUEST_BYTES),
-        LineRead::Line
-    );
-    assert_eq!(line, b"{\"type\":\"version\"}\n");
-    assert_eq!(
-        read_line_bounded(&mut reader, &mut line, MAX_REQUEST_BYTES),
-        LineRead::Line
-    );
-    assert_eq!(line, b"{\"type\":\"windows\"}\n");
-    assert_eq!(
-        read_line_bounded(&mut reader, &mut line, MAX_REQUEST_BYTES),
-        LineRead::Eof
-    );
-    assert!(line.is_empty());
-}
-
-#[test]
-fn a_last_line_without_a_newline_is_still_a_request() {
-    // What `read_line` does (`Ok(n > 0)`), kept: a client that writes one
-    // request and shuts its write half down still gets an answer.
-    let mut reader = tiny_reader(b"{\"type\":\"version\"}");
-    let mut line = Vec::new();
-    assert_eq!(
-        read_line_bounded(&mut reader, &mut line, MAX_REQUEST_BYTES),
-        LineRead::Line
-    );
-    assert_eq!(line, b"{\"type\":\"version\"}");
-    assert_eq!(
-        read_line_bounded(&mut reader, &mut line, MAX_REQUEST_BYTES),
-        LineRead::Eof
-    );
-}
-
-#[test]
-fn a_client_that_says_nothing_at_all_is_just_eof() {
-    // Connect and disconnect without a byte: not an error, nothing to reply
-    // to, close the connection.
-    let mut reader = tiny_reader(b"");
-    let mut line = Vec::new();
-    assert_eq!(
-        read_line_bounded(&mut reader, &mut line, MAX_REQUEST_BYTES),
-        LineRead::Eof
-    );
-    assert!(line.is_empty());
-}
-
-#[test]
-fn an_empty_line_is_read_rather_than_mistaken_for_eof() {
-    let mut reader = tiny_reader(b"\n\n");
-    let mut line = Vec::new();
-    for _ in 0..2 {
-        assert_eq!(
-            read_line_bounded(&mut reader, &mut line, MAX_REQUEST_BYTES),
-            LineRead::Line
-        );
-        assert_eq!(line, b"\n");
-    }
-    assert_eq!(
-        read_line_bounded(&mut reader, &mut line, MAX_REQUEST_BYTES),
-        LineRead::Eof
-    );
-}
-
-#[test]
-fn the_limit_is_the_whole_line_newline_included() {
-    let mut line = Vec::new();
-    // One under: 8 bytes plus the newline is exactly 9.
-    let mut reader = tiny_reader(b"aaaaaaaa\n");
-    assert_eq!(
-        read_line_bounded(&mut reader, &mut line, 10),
-        LineRead::Line
-    );
-    assert_eq!(line.len(), 9);
-    // Exactly at the limit: accepted.
-    let mut reader = tiny_reader(b"aaaaaaaaa\n");
-    assert_eq!(
-        read_line_bounded(&mut reader, &mut line, 10),
-        LineRead::Line
-    );
-    assert_eq!(line.len(), 10);
-    // One over: refused, and the buffer never grew past the limit.
-    let mut reader = tiny_reader(b"aaaaaaaaaa\n");
-    assert_eq!(
-        read_line_bounded(&mut reader, &mut line, 10),
-        LineRead::TooLong
-    );
-    assert!(line.len() <= 10, "buffer grew to {}", line.len());
-}
-
-#[test]
-fn the_limit_applies_to_each_line_not_to_the_connection() {
-    // Three maximum-length requests in a row are three valid requests, not
-    // one connection that has used up a budget.
-    let mut reader = tiny_reader(b"aaaaa\naaaaa\naaaaa\n");
-    let mut line = Vec::new();
-    for _ in 0..3 {
-        assert_eq!(read_line_bounded(&mut reader, &mut line, 6), LineRead::Line);
-        assert_eq!(line, b"aaaaa\n");
-    }
-}
-
-#[test]
-fn a_shorter_line_after_a_longer_one_leaves_no_leftovers() {
-    // The buffer is reused across requests; if it were not cleared, the tail
-    // of the previous line would corrupt the next one's JSON.
-    let mut reader = tiny_reader(b"aaaaaaaaaaaa\nbb\n");
-    let mut line = Vec::new();
-    assert_eq!(
-        read_line_bounded(&mut reader, &mut line, MAX_REQUEST_BYTES),
-        LineRead::Line
-    );
-    assert_eq!(
-        read_line_bounded(&mut reader, &mut line, MAX_REQUEST_BYTES),
-        LineRead::Line
-    );
-    assert_eq!(line, b"bb\n");
-}
-
-#[test]
-fn an_endless_stream_with_no_newline_stops_at_the_limit() {
-    // The finding itself: before the cap this read never returned and the
-    // buffer grew until the machine gave out. `io::repeat` is an infinite
-    // source with no newline in it, so this test hangs forever if the bound
-    // is ever lost.
-    let mut reader = BufReader::new(std::io::repeat(b'x'));
-    let mut line = Vec::new();
-    assert_eq!(
-        read_line_bounded(&mut reader, &mut line, 4096),
-        LineRead::TooLong
-    );
-    assert!(line.len() <= 4096, "buffer grew to {}", line.len());
-}
-
-#[test]
-fn a_failing_read_closes_rather_than_looping() {
-    struct Broken;
-    impl Read for Broken {
-        fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
-            Err(std::io::Error::other("gone"))
-        }
-    }
-    let mut reader = BufReader::new(Broken);
-    let mut line = Vec::new();
-    assert_eq!(
-        read_line_bounded(&mut reader, &mut line, MAX_REQUEST_BYTES),
-        LineRead::Failed
-    );
-}
-
-#[test]
-fn the_default_limit_is_generous_enough_for_a_real_request() {
-    // A `Request::Type` carrying a big paste has to keep working; the cap is
-    // there for a client with no newline in sight, not for a large one.
-    let text = "x".repeat(200_000);
-    let encoded = encode(&Request::Type { text }).expect("encodes");
-    assert!(encoded.len() < MAX_REQUEST_BYTES);
-    let mut reader = tiny_reader(encoded.as_bytes());
-    let mut line = Vec::new();
-    assert_eq!(
-        read_line_bounded(&mut reader, &mut line, MAX_REQUEST_BYTES),
-        LineRead::Line
-    );
-    assert!(matches!(
-        decode::<Request>(std::str::from_utf8(&line).expect("utf-8")),
-        Ok(Request::Type { .. })
-    ));
 }
 
 // --- the socket itself ---------------------------------------------------
