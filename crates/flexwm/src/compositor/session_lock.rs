@@ -78,6 +78,16 @@
 //! abandoned, any client that can reach this compositor's wayland socket can
 //! take it over and unlock. That is the same-uid trust boundary flexwm's IPC
 //! socket already has, and it is the price of having a recovery path at all.
+//!
+//! One more way to reach the same state, legally and without dying: a client
+//! may `destroy` its lock object *before* `locked` arrives (only
+//! `unlock_and_destroy` is forbidden that early), which a locker that gives
+//! up waiting could do. The session is already locked by then, so it stays
+//! locked and reads as abandoned -- a red screen, recovered by running a lock
+//! client again. That is the safe direction, and deliberately not special-
+//! cased into an unlock: "the client changed its mind" and "the client was
+//! killed" are indistinguishable from here, and only one of them is safe to
+//! guess at.
 
 use std::time::Duration;
 

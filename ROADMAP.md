@@ -2409,7 +2409,7 @@ review, and why.
     multi-output exists; and `ext-idle-notify-v1`, without which nothing
     locks the session automatically.
 
-    **Tests: 21 new (340 total, against 320 on the merge base)**, in
+    **Tests: 20 new (340 total, against 320 on the merge base)**, in
     `session_lock/tests.rs`, driving real `wayland-client` connections
     (including a second one, for the takeover) through a real `State` and a
     real `PixmanRenderer`. Every "nothing is visible" assertion checks

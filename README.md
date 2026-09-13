@@ -332,7 +332,8 @@ real `--tty` hardware by screenshot and by what clients were actually sent:
   nobody, if the client hasn't created one yet) the instant the lock request
   arrives, and pointer focus is moved with it, so a click can't land in the
   window that happened to be under the pointer. Any pointer grab in flight —
-  a drag-and-drop, say — is dropped.
+  a drag-and-drop, say — is dropped as well; that last part is code-traced
+  rather than exercised, since there is no drag-and-drop fixture here.
 - **Keybindings that run an action don't fire.** `Super+Q`, a `spawn` bind,
   every layout motion: suppressed, and forwarded to the lock client as
   ordinary keystrokes instead. The one exception is deliberate: the `--tty`
