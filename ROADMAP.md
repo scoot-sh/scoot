@@ -2081,7 +2081,6 @@ data-loss/RCE in what was checked.
   though its `w`/`h` arms already floor at 0 — the same function, only half
   hardened.
 - **Config parsing has no recursion-depth guard (LOW).** The `toml` stack
-- **Config parsing has no recursion-depth guard (LOW).** The `toml` stack
   has no explicit guard against deeply nested input; a maliciously deep
   config could stack-overflow-abort the process rather than hit the
   module's normal "log and fall back to defaults" path. Requires the user's
