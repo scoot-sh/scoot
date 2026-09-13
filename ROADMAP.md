@@ -2995,9 +2995,13 @@ data-loss/RCE in what was checked.
   asked for, which is at least a visible, user-tunable pointer rather than a
   wrong-shaped fixed one.
 
-- **Rename the project from `flexwm` to `flex`** (crates, binary, GitHub
-  repo). User request, 2026-09-13 — not scoped or scheduled yet, recorded
-  here so it doesn't get lost. This touches more than a find-and-replace:
+- **Rename the project from `flexwm` to `flex`, as part of a small family of
+  tools: `flex` (the compositor), `flexctl` (a CLI/IPC client), `flexbar` (a
+  companion status bar).** User request, 2026-09-13 — not scoped or
+  scheduled yet, recorded here so it doesn't get lost. This is bigger than a
+  find-and-replace, in two separable ways:
+
+  **1. The rename itself.**
 
   - **Crates.** All three workspace members are named for it:
     `crates/flexwm` (binary, package `flexwm`), `crates/flexwm-core`
@@ -3036,3 +3040,30 @@ data-loss/RCE in what was checked.
     a user might have on `$PATH`, e.g. GNU flex the lexer generator, which
     is a real, extremely common collision to be aware of before locking in
     a bare `flex` binary name).
+
+  **2. `flexctl` implies splitting the CLI out of the compositor binary,
+  not just renaming it.** Today `flexwm msg ...` (and `type`/`key`/etc.) is
+  one `Command` variant of the single `flexwm` binary (`crates/flexwm/src/
+  cli.rs`) — the same executable that starts the compositor also sends it
+  IPC requests, distinguished by argv. A separate `flexctl` binary is a real
+  design decision, not a rename: does the compositor crate stop exporting a
+  CLI at all and become `flex --tty`/`flex --nested`/`flex --headless`
+  only, with everything under `msg` moving to a new crate/binary that talks
+  the same Unix-socket protocol from the outside? That would cleanly
+  separate "the compositor" from "a client of the compositor" (useful for
+  the computer-use goal specifically — an agent shells out to `flexctl`,
+  not to the compositor's own binary) but is a real crate-boundary change,
+  probably wanting its own design pass rather than riding along with a
+  find-and-replace rename.
+
+  **3. `flexbar` would be a new project**, not a rename of anything that
+  exists: a status bar built as a `wlr-layer-shell-unstable-v1` client
+  (item 14, PR #22), presumably filling the same niche as `waybar` but
+  purpose-built for this compositor. Worth doing at some point — flexwm/flex
+  has no bar of its own today, and every hardware screenshot/demo of the
+  layer-shell work so far uses `waybar`, a third-party dependency, to prove
+  the protocol works — but it is a whole new binary/crate with its own
+  scope, feature set and release cycle, not a line item inside the rename.
+  Should probably be scoped as its own separate roadmap item once the
+  rename (and the `flexctl` split, if that's the direction) land, rather
+  than being designed as a rider on this entry.
