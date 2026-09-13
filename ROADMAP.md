@@ -2279,6 +2279,15 @@ review, and why.
     switches, with no error or panic in the log. Raw output for all of it is
     in PR #24's description.
 
+    **Re-verified on the same seat against `0273b15`**, after review found
+    `coordinates` was 0-based while `name` was 1-based and the fix made them
+    match: the probe reads `name "1"`/`coordinates [1]`, `"2"`/`[2]` and,
+    with a third workspace open, `"3"`/`[3]`; `activate`+`commit` still
+    switches (the window goes `visible: false` and the screenshot changes,
+    `/tmp/ws-fix-empty.png` 33,476 bytes vs `/tmp/ws-fix-back.png` 36,361);
+    no panic in the compositor log. Nothing else in the protocol behaviour
+    changed, so the rest of the evidence above still keys to `2671b4d`.
+
     Benchmarked with a map/destroy churn client (400 rounds, every one
     changing the workspace list twice — the worst case for this code, not the
     quiet one), release builds, `--headless` 1600x1000, compositor CPU in
