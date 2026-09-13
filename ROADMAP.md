@@ -3628,3 +3628,48 @@ data-loss/RCE in what was checked.
   one-line choice — drop `x86_64-darwin` from `systems`, or repin nixpkgs to
   a branch that still carries it — and it only matters if an Intel Mac ever
   has to build this; left alone to keep item 16 to its own scope.
+
+- **The Nix package's `src = self` invalidates the whole build on any
+  doc-only edit (LOW, non-blocking).** Found by `flexwm-reviewer` reviewing
+  item 16: `src` is the whole flake tree — `CLAUDE.md`, `README.md`,
+  `ROADMAP.md`, `vm/`, `scripts/` included — none of which the compiler
+  reads, but a change to any of them still busts the derivation's cache and
+  forces a full ~3.5 minute rebuild. Demonstrated directly: appending one
+  newline to `README.md` changed the output path entirely. Since this repo
+  edits `ROADMAP.md` on essentially every PR, that's a real recurring cost
+  once this lands. Fix direction: a `lib.fileset` filter scoped to
+  `Cargo.toml`/`Cargo.lock`/`crates/` — but first confirm nothing the build
+  actually needs lives outside that set (a `build.rs`, an `include_str!` of
+  a root-level file, a license file read at build time). Two reads were
+  checked and are safe (`vm/compositor-deps.nix`'s import, and
+  `builtins.readFile ./Cargo.toml` for the version string, both of which
+  resolve against the flake tree rather than `src`), but that check should
+  be redone against whatever the tree looks like when this is picked up,
+  not assumed still true.
+
+- **`scripts/smoke-test.sh` hardcodes some of its temp paths, so two
+  concurrent runs (e.g. two agents verifying different branches on the same
+  VM at once) can collide (LOW, pre-existing).** Found by `flexwm-reviewer`
+  reviewing item 16, whose own PR body overstated its run's isolation: the
+  `SOCKET`/`LOG` environment overrides the script does honor don't cover
+  every path it uses — `/tmp/flexwm-smoke-config.log`/`-config.sock` and
+  `-broken.*` are hardcoded (`scripts/smoke-test.sh` around lines 299-300
+  and 392-393) regardless of what `SOCKET`/`LOG` are set to. Low priority —
+  this session's own practice of using distinctly-named scratch scripts and
+  checking for other active agents before running concurrent hardware
+  verification has avoided hitting it so far — but worth closing so two
+  agents' hardware bug-bashes can't silently corrupt each other's evidence
+  if they ever do overlap. Fix direction: derive every temp path in the
+  script from the same overridable prefix, not just the two that happen to
+  have env vars today.
+
+- **`flake.nix`'s top-level `description` and its package's
+  `meta.description` are two independently hand-copied strings that can
+  drift (NIT).** Found by `flexwm-reviewer` reviewing item 16. Also, on
+  Darwin, `meta.description` still advertises "a scrolling-tiling Wayland
+  compositor that runs without a GPU" when the Darwin build is actually
+  just the `flexwm msg` client (`README.md` explains this correctly, but
+  `nix search`/`nix flake show` metadata would not). Cheap to fix whenever
+  `flake.nix` is next touched for another reason (e.g. the `src` filesetting
+  above) — bundling it there avoids paying for a second full evaluation/
+  rebuild cycle just for a string.
