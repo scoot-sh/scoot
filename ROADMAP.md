@@ -1425,6 +1425,76 @@ review, and why.
     triangle, plus a translucent `#ffffff80` one proving it blends with what
     is behind it instead of replacing it.
 
+    Each of the three new live/clamp tests was confirmed non-vacuous against
+    two negative controls (raw output in PR #19): `Cursor::new` stubbed to
+    ignore the config entirely (all three fail), and `Color::to_argb8888`
+    returning `[R, G, B, A]` instead of `[B, G, R, A]` (the live pixel test
+    and the three byte-order unit tests fail, the rest pass — which is the
+    exact blind spot described above).
+
+    **Hardware verification** (dev VM, real `--tty` on its `virtio-gpu` KMS
+    device at 1600x1000, debug build — i.e. with integer overflow checks on —
+    all against `34514a9`, which is the whole of this item's production code:
+    the only later commit on the branch adds this write-up and nothing else,
+    so the evidence key still matches). Six scenarios, each a fresh compositor with its
+    own config, the pointer parked over the background by IPC and the frame
+    captured by IPC; exact commands and every raw sampled pixel are in PR
+    #19's description. Summary: `cursor_size = 48` + `cursor_color =
+    "#ff8040"` draws `rgb(255,128,64)` at its interior and black at its
+    hotspot/left edge/diagonal, with the last filled row at `+47` and
+    background at `+48`; the same binary with no cursor fields draws the
+    original 16x16 white shape with its boundary at `+15`/`+16`;
+    `cursor_size = 100000` logs the clamp warning and draws a 256px shape
+    (fill at `+255`, background at `+256`); `cursor_size = 0` logs it too and
+    draws a 4px one (its single interior pixel at `(1,3)`, background at
+    `+4`); `cursor_color = "not-a-color"` logs the per-field warning, draws
+    white, and still honors `cursor_size = 32`; and `#ffffff80` over a
+    `#203040` background reads `rgb(144,152,160)` at the fill and
+    `rgb(16,24,32)` at the outline — both exactly halfway, which is what makes
+    the premultiplication right rather than merely non-crashing.
+
+    Edge cases on the same hardware, same build: a 256px cursor with its
+    hotspot on the output's very last pixel `(1599,999)` draws its outline
+    there and nothing is cut wrong; at `(1500,900)` it is clipped against both
+    edges and still draws its interior and the diagonal that reaches the
+    corner; clipped against the right edge alone it fills out to column 1599.
+    Six adversarial absolute pointer positions (`-1`, `-100000`, `1e300`,
+    `-1e300`, `2147483647`, and a fractional `1599.9 999.9`) each return `Ok`,
+    each still capture a frame, leave the compositor alive with no panic or
+    error in its log, and an ordinary position still draws afterwards.
+
+    The item-8 client-cursor behavior is unchanged and is covered by its seven
+    tests passing untouched (they drive a real client and assert read-back
+    pixels, so "the client's image still wins over the configured fallback" is
+    a real assertion, not an inference): `element()` returns before it ever
+    touches the fallback buffer when a live cursor surface exists, and no
+    state is shared between the two paths.
+
+    **Benchmarked** (same jiffies-delta method as items 5/8; release builds of
+    `8446758` (base) and `34514a9` (new), interleaved per rep so VM drift hits
+    every arm). The change cannot cost anything per frame in principle — the
+    bitmap is built once at startup and `element()` is untouched — but a
+    *bigger* bitmap composites more pixels, so both cases were measured.
+    200 corner-to-corner pointer jumps (near-full-frame damage), 6 reps:
+    base mean 21.17 (19 27 22 21 18 20), new mean 21.33 (22 16 22 19 28 21),
+    new at `cursor_size = 256` mean 21.33 (20 20 27 22 20 19) — the present
+    memcpy dominates, so even the cap is free here. 200 small 4px local moves
+    (damage scoped to the cursor's own box, where a big cursor actually
+    shows), 10 reps: base mean 9.00 (8-11), new mean 9.00 (7-13), new at
+    `cursor_size = 256` mean 13.50 (11-16). So the default is unchanged, and
+    the worst size a config can ask for costs about +4.5 jiffies per 200
+    moves — real, bounded by the cap, and only paid by someone who asked for
+    it.
+
+    Also at the same commit: `cargo test -p flexwm` 221/221 and
+    `-p flexwm-core` 45/45 on the dev VM, clippy `--workspace --all-targets
+    -D warnings` and `cargo fmt --all --check` clean on both the VM and
+    macOS, `cargo check --workspace --all-targets` clean on macOS (the
+    cross-platform build), `scripts/smoke-test.sh` green under `--headless`
+    (all 11 `ok:` checks, exit 0) against a release build of this branch, and
+    the README's example `config.toml` — now including the two new fields —
+    loaded by a real compositor with no warning or error in its log.
+
 ## Backlog (unordered — pick up whenever it fits)
 
 - **Input injection targeted at a specific window, without moving seat
