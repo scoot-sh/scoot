@@ -246,6 +246,10 @@ impl Manager {
                             "could not create an ext_workspace_handle_v1; \
                              dropping this workspace manager"
                         );
+                        // Closed even though the batch is incomplete, so a
+                        // client waiting for `done` before it redraws is left
+                        // out of date rather than waiting forever.
+                        self.manager.done();
                         return false;
                     };
                     debug_assert_eq!(
