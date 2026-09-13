@@ -26,7 +26,6 @@
 //! which nothing here uses but which is created either way.
 
 use std::io::{Read, Write};
-use std::os::fd::AsRawFd;
 use std::os::unix::net::UnixStream;
 use std::time::{Duration, Instant};
 
@@ -37,6 +36,7 @@ use smithay::reexports::wayland_server::Display;
 
 use super::*;
 use crate::compositor::decorations::Appearance;
+use crate::compositor::ipc::tests::set_sndbuf;
 use crate::compositor::keybindings::Keybindings;
 use crate::compositor::{State, headless};
 
@@ -285,23 +285,6 @@ impl TestClient {
     }
 }
 
-/// Shrinks how much unread data the kernel will hold for writes to `stream`.
-fn set_sndbuf(stream: &UnixStream, bytes: usize) {
-    let size = bytes as libc::c_int;
-    // SAFETY: a live fd, a `c_int` of exactly the length claimed, nothing
-    // borrowed past the call.
-    let result = unsafe {
-        libc::setsockopt(
-            stream.as_raw_fd(),
-            libc::SOL_SOCKET,
-            libc::SO_SNDBUF,
-            std::ptr::from_ref(&size).cast::<libc::c_void>(),
-            size_of::<libc::c_int>() as libc::socklen_t,
-        )
-    };
-    assert_eq!(result, 0, "could not shrink the send buffer");
-}
-
 fn request_line(request: &Request) -> String {
     encode(request).expect("a request encodes")
 }
@@ -457,9 +440,10 @@ fn every_request_in_one_write_is_answered_not_just_the_first() {
 
 #[test]
 fn a_long_pipeline_in_one_write_is_answered_in_order() {
-    // More requests than one wakeup may serve (`MAX_REQUESTS_PER_WAKEUP`) and
-    // more than the read buffer holds, so this also covers the soft fairness
-    // bound handing the thread back and picking up where it left off.
+    // Enough requests to cross several read chunks, so the answers have to
+    // survive the connection being picked up and put down repeatedly. Whether
+    // it is actually put down mid-batch is the *next* test's job -- this one
+    // only cares that nothing is lost or reordered along the way.
     const REQUESTS: usize = 500;
     let mut harness = Harness::new();
     let mut client = harness.connect(None);
@@ -472,6 +456,90 @@ fn a_long_pipeline_in_one_write_is_answered_in_order() {
             .iter()
             .all(|reply| matches!(reply, Response::Version { .. })),
         "a reply came back damaged or out of order"
+    );
+}
+
+/// A `version` request padded with spaces to exactly `bytes` on the wire.
+///
+/// `decode` trims the line before parsing, so this is still an ordinary
+/// `Request::Version` -- the padding only controls where line boundaries fall
+/// relative to the chunks a socket read comes back in, which is the whole point
+/// of [`one_wakeup_serves_at_most_one_read_off_the_socket`]. Cheap to answer,
+/// unlike a `Request::Type` of the same length.
+fn padded_version(bytes: usize) -> String {
+    let body = r#"{"type":"version"}"#;
+    assert!(bytes > body.len());
+    let line = format!("{body:<width$}\n", width = bytes - 1);
+    assert_eq!(line.len(), bytes);
+    assert!(
+        matches!(decode::<Request>(&line), Ok(Request::Version),),
+        "padding must not change what the request is"
+    );
+    line
+}
+
+#[test]
+fn one_wakeup_serves_at_most_one_read_off_the_socket() {
+    // The fairness bound, observed rather than reasoned about: a client that
+    // pipelines a large batch in a single `write` must *not* have all of it
+    // answered in one callback, because nothing else -- input, the frame timer,
+    // wayland dispatch, any other connection -- runs until that callback
+    // returns. This is the test that fails against the first version of this
+    // PR, which looped on "keep going while something is still buffered".
+    //
+    // Two things about its shape are load-bearing, both found by measuring
+    // rather than by reasoning:
+    //
+    // - **The batch is large** (160 KB of requests, the scale this PR's
+    //   reviewer measured a 48ms stall at). At a few kilobytes, even the
+    //   unbounded loop stops soon enough to look fine.
+    // - **The request length is an odd prime, not the 19 bytes of a plain
+    //   `version` request.** Reads off a real unix socket come back a sender
+    //   buffer at a time -- 2641 bytes on the dev VM's kernel -- and the
+    //   unbounded loop stops the first time one of those boundaries lands on a
+    //   line boundary, i.e. after `lcm(chunk, line)` bytes. 19 divides 2641
+    //   exactly, so with `version` requests that is the *first* chunk and the
+    //   bug is invisible; with a length coprime to the chunk it is 260 KB away,
+    //   i.e. past the end of this batch. 101 is coprime with any chunk size
+    //   that is not a multiple of it, so this does not quietly lose its teeth on
+    //   a kernel that buffers differently.
+    const BYTES: usize = 160 * 1024;
+    const LINE: usize = 101;
+    let mut harness = Harness::new();
+    let mut client = harness.connect(None);
+    let request = padded_version(LINE);
+    let chunk = super::super::line::DEFAULT_CAPACITY;
+    let batch = request.repeat(BYTES / LINE);
+    // One `write`, as much of it as the client's own send buffer takes.
+    let pipelined = client.send_some(batch.as_bytes()) / LINE;
+    assert!(
+        pipelined * LINE > 8 * chunk,
+        "only {pipelined} requests went out; the batch has to span many read \
+         chunks for this to test anything"
+    );
+
+    // Exactly one turn of the event loop.
+    harness.pump();
+    client.collect();
+    let mut served = 0usize;
+    while client.take_line().is_some() {
+        served += 1;
+    }
+    assert!(served > 0, "one wakeup served nothing at all");
+    assert!(
+        served <= chunk / LINE + 1,
+        "one wakeup answered {served} of {pipelined} pipelined requests -- more \
+         than the one read off the socket it is allowed, so every other source \
+         waited for all of them (the +1 is the line straddling the end of that \
+         read, which the same read paid for)"
+    );
+
+    // The rest still arrive, in order, across the wakeups that follow.
+    let rest = client.expect_replies(&mut harness, pipelined - served);
+    assert!(
+        rest.iter()
+            .all(|reply| matches!(reply, Response::Version { .. })),
+        "a reply came back damaged after the yield"
     );
 }
 

@@ -24,6 +24,25 @@ use crate::compositor::headless::FRAME_INTERVAL;
 #[cfg(test)]
 mod tests;
 
+/// How many times one wakeup may read from one connection's socket.
+///
+/// This is the per-wakeup fairness bound, and it has to be counted in *reads*
+/// rather than in requests or bytes served — see [`Lines::next`] for why
+/// neither of those bounds anything, and why stopping with complete lines still
+/// in the read buffer is not an option either (it strands them: a
+/// level-triggered source does not report what has already left the kernel).
+/// Stopping when the budget runs out is safe for the opposite reason: the
+/// budget can only run out with the read buffer empty, so whatever is left is
+/// still in the kernel, and the kernel reports it again.
+///
+/// One, so a connection serves roughly one [`line::DEFAULT_CAPACITY`] chunk
+/// and then lets input, the frame timer, wayland dispatch and every other
+/// connection have their turn. A flooding client therefore costs a few hundred
+/// microseconds of other sources' latency per wakeup instead of tens of
+/// milliseconds, at the price of one extra `epoll_wait` round trip per 8 KiB of
+/// pipelined requests, which is not a cost anything can measure.
+const READS_PER_WAKEUP: u32 = 1;
+
 /// Wraps an accepted socket up as an event source ready to be inserted.
 ///
 /// The socket must already be non-blocking; [`super::accept`] does that, and
@@ -178,13 +197,15 @@ impl Connection {
     /// is level-triggered, so unread bytes are reported again on every turn) or
     /// reading requests this connection is already behind on answering.
     ///
-    /// The consequence worth being explicit about: a client that has stopped
-    /// reading its replies also stops having its requests read, which is what
-    /// keeps the queue bounded (see `outbound::HIGH_WATER_BYTES` for the bound
-    /// that applies *within* a wakeup, where this one cannot). A client that
-    /// writes far more requests than it ever reads answers to will therefore
-    /// stall -- itself only, which is the point, and exactly as it already
-    /// would have against the blocking write this replaced.
+    /// Precisely: this drops *wakeups for readability*, not reading. A wakeup
+    /// that does arrive -- for writability -- still runs the whole serve loop
+    /// after flushing, which is deliberate: lines already pulled into the read
+    /// buffer have to be answered wherever that wakeup came from, or they are
+    /// stranded. What a client with a full queue loses is only the readable
+    /// wakeup, so if it never reads its replies the socket never becomes
+    /// writable, it is never woken, and its requests are never read. It stalls
+    /// -- itself only, which is the point, and exactly as it already would have
+    /// against the blocking write this replaced.
     fn interest(&self) -> Interest {
         if self.outbound.is_empty() {
             Interest::READ
@@ -204,6 +225,10 @@ impl Connection {
         if self.closing {
             return self.close_when_drained();
         }
+        // How much of the socket this wakeup may still take. See
+        // `READS_PER_WAKEUP`; running out is what ends the loop on a flood.
+        let mut reads = READS_PER_WAKEUP;
+        let mut served = false;
         loop {
             // Back-pressure, not a refusal: this connection stops being read
             // until its client catches up, and nothing is dropped or closed.
@@ -215,10 +240,12 @@ impl Connection {
             if self.outbound.over_high_water() {
                 break;
             }
-            match self.lines.next(MAX_REQUEST_BYTES) {
+            match self.lines.next(MAX_REQUEST_BYTES, &mut reads) {
                 LineRead::Line => {}
-                // Half a request line, and nothing more has arrived yet. The
-                // thread goes back to the event loop; the bytes stay put.
+                // Either half a request line with nothing more arrived yet, or
+                // this wakeup's read budget spent mid-flood. Both mean the same
+                // thing here: the thread goes back to the event loop, the bytes
+                // stay put, and what is still in the kernel is reported again.
                 LineRead::Incomplete => break,
                 LineRead::Eof => {
                     self.closing = true;
@@ -244,26 +271,33 @@ impl Connection {
             if let Step::Close = self.serve(state) {
                 return Step::Close;
             }
-            // One read buffer's worth per wakeup, and not a byte more. Both
-            // halves of that are deliberate:
-            //
-            // - Requests already in *this* buffer have to be answered now.
-            //   They have left the kernel, so a level-triggered source will
-            //   never report them again; leaving one here is the pipelining bug
-            //   this module exists to fix.
-            // - Requests still in the *kernel* are better left there. They will
-            //   be reported again on the next turn of the loop, and stopping
-            //   lets every other source -- input, the frame timer, wayland --
-            //   have its turn in between, which is what bounds how long one
-            //   connection can hold the only thread the compositor has.
-            //
-            // It also keeps the common case (one request, one reply) at one
-            // `read` per wakeup rather than two: reading again to discover that
-            // nothing is buffered costs an `EAGAIN` syscall per request, which
-            // is measurable (~2 jiffies per 50,000 round-trips).
+            served = true;
+            // Everything already read has to be answered before yielding: it
+            // has left the kernel, so a level-triggered source will never
+            // report it again, and leaving one line here is the pipelining bug
+            // this module exists to fix. So this is not a fairness bound (that
+            // is `reads`, above) -- it is the common-path exit, and the reason
+            // the common case (one request, one reply) costs one `read` per
+            // wakeup rather than two. Reading again only to discover nothing is
+            // buffered is an `EAGAIN` syscall per request, which is measurable:
+            // ~2 jiffies per 50,000 round-trips.
             if self.lines.buffered().is_empty() {
                 break;
             }
+        }
+        if served {
+            // Synthetic input (key/pointer) and action-driven configures queue
+            // wayland messages on the clients' connections; nothing else
+            // flushes them until the next render tick, which only runs when
+            // something already marked the screen dirty. Flush explicitly so an
+            // injected keystroke reaches the client the moment it is sent, not
+            // whenever a later, unrelated redraw happens to piggyback it out.
+            //
+            // Once per wakeup, not once per request: no client can observe the
+            // difference, since the compositor has not returned to the event
+            // loop in between, and a pipelined batch would otherwise flush
+            // every client once per line in it.
+            let _ = state.display_handle.flush_clients();
         }
         if self.closing {
             self.close_when_drained()
@@ -365,13 +399,8 @@ impl Connection {
             // can fail, so the expensive part was spent either way.
             self.last_screenshot = Some(Instant::now());
         }
-        // Synthetic input (key/pointer) and action-driven configures queue
-        // wayland messages on the client's connection; nothing else flushes
-        // them until the next render tick, which only runs when something
-        // already marked the screen dirty. Flush explicitly so an injected
-        // keystroke reaches the client the moment it's sent, not whenever a
-        // later, unrelated redraw happens to piggyback it out.
-        let _ = state.display_handle.flush_clients();
+        // The wayland-side flush this used to do per request is now done once
+        // per wakeup, by `step`, for every request it served.
         self.answer(&response)
     }
 

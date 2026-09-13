@@ -17,8 +17,11 @@
 //! - **The queue cannot grow without bound.** Not by refusing to buffer, and
 //!   not by closing the connection -- see [`HIGH_WATER_BYTES`] for why both of
 //!   those are the wrong answer here -- but by back-pressure: a connection with
-//!   anything queued stops being read at all until it drains, so a client
-//!   cannot queue work faster than it reads the answers.
+//!   anything queued is not *woken for readability* until it drains, so a
+//!   client that stops reading stops being asked what it wants next. (It is not
+//!   that reading stops: a wakeup that does arrive, for writability, still
+//!   serves whatever is in the read buffer, because nothing else can -- see
+//!   `Connection::interest`.)
 
 use std::io::{self, Write};
 
@@ -43,9 +46,9 @@ mod tests;
 /// about because neither is sufficient alone:
 ///
 /// - **Between wakeups**, a connection with anything queued is registered for
-///   writability only, so it is not read again until it has drained (see
-///   `Connection::interest`). That alone stops a client queueing more work
-///   while it is behind.
+///   writability only, so nothing wakes it to ask for more work until it has
+///   drained (see `Connection::interest`). That alone stops a client that has
+///   stopped reading from queueing more.
 /// - **Within one wakeup**, requests the connection has *already* read into its
 ///   own buffer must still be answered -- a level-triggered readiness source
 ///   will not report them again -- so replies can keep queueing after one has
@@ -76,9 +79,16 @@ pub(super) struct Outbound {
 impl Outbound {
     /// How many bytes are still waiting to go out.
     pub(super) fn pending(&self) -> usize {
-        // `sent <= buffer.len()` by construction -- both sites that advance
-        // it clamp to what was actually written into `buffer`.
-        self.buffer.len() - self.sent
+        // Saturating, not a plain subtraction, even though `sent` is never
+        // greater than `buffer.len()` at any of the three sites that touch
+        // either. That is an invariant spread across methods, and the cost of
+        // it being broken by some future edit is not a wrong number: it is a
+        // wrapped `usize` here, a `self.buffer[self.sent..]` slice panic in
+        // `flush`, and -- because `panic = "abort"` -- every connected client's
+        // unsaved work. A `debug_assert` keeps the tests honest about it
+        // without making release builds crash over it.
+        debug_assert!(self.sent <= self.buffer.len());
+        self.buffer.len().saturating_sub(self.sent)
     }
 
     pub(super) fn is_empty(&self) -> bool {
@@ -125,7 +135,14 @@ impl Outbound {
         // the rest of its life, and the only thing reuse would save is the
         // one allocation a *newly blocked* reply needs -- which the move
         // below hands over for free anyway.
+        //
+        // `sent` goes with it. Emptying the buffer without it would be correct
+        // only as long as nothing can reach here with `sent > 0` -- true today
+        // (`is_empty()` means `sent == buffer.len()`, and `flush` clears both
+        // together), but an invariant held in another method is not one to lean
+        // on for memory safety: it would make `pending()` underflow.
         self.buffer = Vec::new();
+        self.sent = 0;
         let written = write_some(socket, line.as_bytes())?;
         if written < line.len() {
             self.sent = written;

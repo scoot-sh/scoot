@@ -6,11 +6,56 @@
 //! `outbound/tests.rs` for replies on their way out, and
 //! `connection/tests.rs` for the event-loop machinery driving both.
 
+use std::io::{BufRead, BufReader, Read, Write};
+use std::os::fd::AsRawFd;
 use std::os::unix::fs::{FileTypeExt, PermissionsExt};
 use std::os::unix::net::UnixStream;
 
+use flexwm_ipc::decode;
+
 use super::listener;
 use super::*;
+
+/// Shrinks how much unread data the kernel will hold for writes to `stream`.
+///
+/// Lives here rather than beside its busiest caller (`connection/tests.rs`)
+/// because the wait-idle tests below need it too: a reply that does not fit is
+/// the only interesting case on the write side, and a few-kilobyte send buffer
+/// is how a test gets one without pushing megabytes through a debug build.
+pub(super) fn set_sndbuf(stream: &UnixStream, bytes: usize) {
+    let size = bytes as libc::c_int;
+    // SAFETY: a live fd, a `c_int` of exactly the length claimed, nothing
+    // borrowed past the call.
+    let result = unsafe {
+        libc::setsockopt(
+            stream.as_raw_fd(),
+            libc::SOL_SOCKET,
+            libc::SO_SNDBUF,
+            std::ptr::from_ref(&size).cast::<libc::c_void>(),
+            size_of::<libc::c_int>() as libc::socklen_t,
+        )
+    };
+    assert_eq!(result, 0, "could not shrink the send buffer");
+}
+
+fn ms(millis: u64) -> Duration {
+    Duration::from_millis(millis)
+}
+
+/// Reads everything `stream` has right now, returning how much that was.
+/// `stream` must be non-blocking.
+fn drain(stream: &UnixStream) -> usize {
+    let mut source = stream;
+    let mut chunk = [0u8; 16 * 1024];
+    let mut total = 0;
+    while let Ok(count) = source.read(&mut chunk) {
+        if count == 0 {
+            break;
+        }
+        total += count;
+    }
+    total
+}
 
 // --- wait-idle -----------------------------------------------------------
 
@@ -96,6 +141,191 @@ fn waited_ms_is_measured_from_the_request_not_the_commit() {
         IdleOutcome::Idle { waited_ms } => assert_eq!(waited_ms, 123),
         _ => panic!("expected idle"),
     }
+}
+
+// --- wait-idle: getting the answer out -----------------------------------
+//
+// The happy path (an answer the socket takes straight away) is covered by
+// `connection/tests.rs` end to end. What needs exercising here is the part that
+// only happens when it *doesn't*: the answer is retried per frame tick, and
+// given up on only after the client's own `timeout_ms` has passed with no write
+// progress at all. Both halves of that are load-bearing and neither is
+// observable from outside, so these drive `PendingIdle` directly.
+
+/// A waiter whose socket is already stuffed full, so nothing it queues can go
+/// out -- the state a client that pipelined requests and never read the replies
+/// leaves behind, carried over from the connection (see `Connection::serve`'s
+/// `WaitIdle` arm).
+fn stalled(now: Instant, quiet_ms: u64, timeout_ms: u64) -> (PendingIdle, UnixStream) {
+    let (server, client) = UnixStream::pair().expect("socket pair");
+    set_sndbuf(&server, 1024);
+    server.set_nonblocking(true).expect("non-blocking");
+    let mut wait = PendingIdle {
+        stream: server,
+        quiet: ms(quiet_ms),
+        timeout: ms(timeout_ms),
+        started: now,
+        last_progress: now,
+        answered: false,
+        outbound: Outbound::default(),
+    };
+    let PendingIdle {
+        stream, outbound, ..
+    } = &mut wait;
+    outbound
+        .send(&mut &*stream, "x".repeat(512 * 1024))
+        .expect("queues an inherited tail");
+    assert!(
+        !wait.outbound.is_empty(),
+        "the socket took the whole tail; this test needs one that cannot"
+    );
+    (wait, client)
+}
+
+#[test]
+fn a_stalled_wait_idle_reply_is_given_up_on_only_after_the_clients_own_timeout() {
+    let started = Instant::now();
+    let (mut wait, _client) = stalled(started, 10, 500);
+    // Before the quiet period: still waiting, and the stuck queue is no reason
+    // to abandon it.
+    assert!(wait.advance(started + ms(5), started));
+    // Quiet has passed, so the answer is queued -- behind a tail that cannot go
+    // out. This is where the no-progress clock starts.
+    assert!(wait.advance(started + ms(20), started));
+    assert!(
+        wait.advance(started + ms(510), started),
+        "given up on 490ms into a 500ms window: the clock has to start when the \
+         answer was queued, not when the request arrived"
+    );
+    assert!(
+        !wait.advance(started + ms(530), started),
+        "510ms with not one byte written is a client that is not reading"
+    );
+}
+
+#[test]
+fn a_wait_idle_reply_that_is_still_draining_is_never_given_up_on() {
+    // The distinction the whole mechanism turns on: slow is not dead. A client
+    // taking a multi-megabyte reply a little at a time keeps its answer for as
+    // long as it needs, however far past its own timeout that goes.
+    let started = Instant::now();
+    let (mut wait, client) = stalled(started, 10, 100);
+    client.set_nonblocking(true).expect("non-blocking");
+    assert!(wait.advance(started + ms(20), started));
+    for tick in 1..=12u64 {
+        // Everything available, not a fixed slice: on a unix socket the sender
+        // only gets room back once whole queued buffers are consumed, so a
+        // partial read can leave it still refusing writes -- which would make
+        // this test about kernel accounting rather than about progress.
+        let read = drain(&client);
+        assert!(read > 0, "nothing to read on tick {tick}");
+        // Every tick is more than a whole timeout window apart, so a mechanism
+        // that measured total time rather than progress would give up at once.
+        assert!(
+            wait.advance(started + ms(20 + 150 * tick), started),
+            "given up on at tick {tick} despite the client making progress"
+        );
+    }
+}
+
+#[test]
+fn the_no_progress_window_runs_from_the_last_byte_written_not_from_the_answer() {
+    // What separates "tracks progress" from "has a deadline": a client that
+    // drains part of its reply and *then* stops has to get a fresh window from
+    // the last byte that went out. Measuring from when the answer was queued
+    // instead would drop a client that was reading steadily right up until the
+    // window expired -- mid-reply, with no way for it to tell why.
+    let started = Instant::now();
+    let (mut wait, client) = stalled(started, 10, 100);
+    client.set_nonblocking(true).expect("non-blocking");
+    // The answer is queued at +20, so a window measured from *there* ends +120.
+    assert!(wait.advance(started + ms(20), started));
+    // A real read at +90 lets some of it out, which is what restarts the window.
+    assert!(drain(&client) > 0);
+    assert!(wait.advance(started + ms(90), started));
+    assert!(
+        wait.advance(started + ms(150), started),
+        "given up on 60ms after the last byte went out, inside a 100ms window"
+    );
+    assert!(
+        !wait.advance(started + ms(200), started),
+        "110ms after the last byte went out is past the window"
+    );
+}
+
+#[test]
+fn a_timed_out_answer_gets_its_own_window_rather_than_none() {
+    // `TimedOut` is the branch where the window used to be zero by
+    // construction: `idle_outcome` only reports it once `timeout` has already
+    // elapsed since the request arrived, so a window measured from *there* was
+    // spent before the answer existed. Reachable only with an empty queue -- a
+    // waiter carrying a tail that cannot drain is given up on by `push` first --
+    // so the socket is stuffed from outside instead.
+    let started = Instant::now();
+    let (server, _client) = UnixStream::pair().expect("socket pair");
+    set_sndbuf(&server, 1024);
+    server.set_nonblocking(true).expect("non-blocking");
+    let mut stuffing = &server;
+    while stuffing.write(&[b'x'; 4096]).is_ok_and(|count| count > 0) {}
+    let mut wait = PendingIdle {
+        stream: server,
+        quiet: ms(60_000),
+        timeout: ms(100),
+        started,
+        last_progress: started,
+        answered: false,
+        outbound: Outbound::default(),
+    };
+    assert!(
+        wait.advance(started + ms(150), started),
+        "the timeout answer was dropped instead of queued"
+    );
+    assert!(!wait.outbound.is_empty(), "it went out after all");
+    assert!(
+        wait.advance(started + ms(200), started),
+        "given up on 50ms into a 100ms window"
+    );
+    assert!(!wait.advance(started + ms(260), started));
+}
+
+#[test]
+fn a_waiter_is_finished_with_once_its_answer_has_gone_out() {
+    let started = Instant::now();
+    let (server, client) = UnixStream::pair().expect("socket pair");
+    server.set_nonblocking(true).expect("non-blocking");
+    let mut wait = PendingIdle {
+        stream: server,
+        quiet: ms(10),
+        timeout: ms(5_000),
+        started,
+        last_progress: started,
+        answered: false,
+        outbound: Outbound::default(),
+    };
+    assert!(wait.advance(started + ms(5), started), "not quiet yet");
+    assert!(
+        !wait.advance(started + ms(20), started),
+        "an answer that went out in one write leaves nothing to come back for"
+    );
+    let mut line = String::new();
+    BufReader::new(client)
+        .read_line(&mut line)
+        .expect("the answer arrived");
+    assert!(
+        matches!(decode::<Response>(&line), Ok(Response::Idle { .. })),
+        "the client got {line:?}"
+    );
+}
+
+#[test]
+fn a_waiter_whose_peer_is_gone_is_dropped_rather_than_retried_forever() {
+    let started = Instant::now();
+    let (mut wait, client) = stalled(started, 10, 60_000);
+    drop(client);
+    assert!(
+        !wait.advance(started + ms(20), started),
+        "a write to a closed peer has to end the waiter, whatever its timeout"
+    );
 }
 
 // --- screenshot rate limiting --------------------------------------------

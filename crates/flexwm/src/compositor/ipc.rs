@@ -63,8 +63,8 @@ pub struct PendingIdle {
     /// [`PendingIdle::push`]).
     timeout: Duration,
     started: Instant,
-    /// When this waiter's queue last got smaller. Only meaningful once
-    /// something has been queued; until then it is just `started`.
+    /// When a byte of this waiter's queue last went out -- or, if none has,
+    /// when its answer was queued. `started` until one of those happens.
     last_progress: Instant,
     /// Whether this request's own answer has been decided and queued.
     ///
@@ -383,6 +383,13 @@ impl PendingIdle {
                 return false;
             };
             self.answered = true;
+            // The no-progress window starts here, not when the request arrived.
+            // Without this the window for a *timed out* waiter would be zero by
+            // construction -- `last_progress` would still be `started`, and
+            // `idle_outcome` only reports `TimedOut` once `timeout` has already
+            // elapsed since then -- so the first tick that could not write it
+            // would also be the one that gave up on it.
+            self.last_progress = now;
             let PendingIdle {
                 stream, outbound, ..
             } = self;
@@ -409,10 +416,12 @@ impl PendingIdle {
     ///
     /// Giving up is bounded by lack of *progress*, not by total time: a client
     /// draining a multi-megabyte screenshot reply slowly is making progress and
-    /// is never given up on, however long it takes. The window is the same
-    /// `timeout_ms` the client itself asked for -- it said how long it was
-    /// prepared to wait on this request, and a peer that has not taken a single
-    /// byte in that long is not reading at all.
+    /// is never given up on, however long it takes. The window is as long as the
+    /// `timeout_ms` the client itself asked for, measured from the last byte
+    /// that went out -- or, if none ever has, from when the answer was queued
+    /// (see [`PendingIdle::advance`], which is where that clock starts, and
+    /// why). The client said how long it was prepared to wait on this request,
+    /// and a peer that has not taken a single byte in that long is not reading.
     fn push(&mut self, now: Instant) -> bool {
         if self.outbound.is_empty() {
             return true;

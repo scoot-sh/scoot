@@ -109,6 +109,13 @@ impl<R: Read> Lines<R> {
         self.reader.get_ref()
     }
 
+    /// How much the line buffer is holding on to. Only a test cares: the point
+    /// it checks is that a very large line's buffer does not outlive it.
+    #[cfg(test)]
+    pub(super) fn line_capacity(&self) -> usize {
+        self.line.capacity()
+    }
+
     /// Bytes already pulled out of the socket but not yet consumed as lines.
     ///
     /// The caller needs this to know whether it may stop reading: data sitting
@@ -120,18 +127,44 @@ impl<R: Read> Lines<R> {
         self.reader.buffer()
     }
 
-    /// Reads the next line, refusing to grow the buffer past `limit` bytes.
+    /// Reads the next line, refusing to grow the buffer past `limit` bytes and
+    /// to take more than `reads` more chunks off the socket.
+    ///
+    /// **`reads` is how a caller bounds one event-loop wakeup, and it is the
+    /// only thing that can.** Neither the number of lines served nor the size
+    /// of the read buffer bounds this function: a line that ends mid-chunk
+    /// leaves a partial tail, which this has to refill to finish, so a caller
+    /// looping on "keep going while something is still buffered" runs until a
+    /// chunk boundary happens to land on a line boundary -- every
+    /// `lcm(capacity, line length)` bytes, i.e. never, for any line length
+    /// coprime with the capacity. That is 8192 lines in a row for the most
+    /// ordinary request there is (`{"type":"version"}`, 19 bytes), which is
+    /// tens of milliseconds of frozen input and rendering per wakeup. Counting
+    /// reads is exact because `BufReader::fill_buf` only touches the socket
+    /// when its buffer is empty, so `reads` counts syscalls, not attempts.
+    ///
+    /// Running out is [`LineRead::Incomplete`]: the prefix stays, and whatever
+    /// is left in the kernel is what a level-triggered source reports again on
+    /// the next turn -- so yielding here cannot lose a request, which is *not*
+    /// true of yielding with complete lines still in this buffer.
     ///
     /// Bytes, not `String`: a line is only checked for UTF-8 once it is
     /// whole. Validating incrementally is not possible here anyway, since a
     /// multi-byte character can straddle two `fill_buf` chunks -- let alone
     /// two `read` calls seconds apart.
-    pub(super) fn next(&mut self, limit: usize) -> LineRead {
+    pub(super) fn next(&mut self, limit: usize, reads: &mut u32) -> LineRead {
         if self.finished {
-            self.line.clear();
-            self.finished = false;
+            self.take_line();
         }
         loop {
+            // `fill_buf` reads only when its own buffer is empty, so this is
+            // exactly the test for "the call below would go to the socket".
+            if self.reader.buffer().is_empty() {
+                if *reads == 0 {
+                    return LineRead::Incomplete;
+                }
+                *reads -= 1;
+            }
             let available = match self.reader.fill_buf() {
                 Ok(available) => available,
                 // Same retry `read_line` itself does: a signal interrupting
@@ -189,12 +222,34 @@ impl<R: Read> Lines<R> {
         self.finished = true;
         LineRead::Line
     }
+
+    /// Drops the line the caller has finished with, so the next one starts
+    /// empty.
+    ///
+    /// A line that grew past one read chunk gives its allocation up rather than
+    /// keeping the capacity, matching what `Outbound` does with a drained reply
+    /// and for the same reason: a client may send one near-mebibyte
+    /// `Request::Type` and then nothing large ever again, and connections are
+    /// not capped (see `ROADMAP.md`'s backlog), so that is a megabyte per
+    /// connection held for the rest of its life. Anything within one chunk
+    /// keeps its buffer, which is every real request.
+    fn take_line(&mut self) {
+        if self.line.capacity() > DEFAULT_CAPACITY {
+            self.line = Vec::new();
+        } else {
+            self.line.clear();
+        }
+        self.finished = false;
+    }
 }
 
 /// What `BufReader::new` itself uses. Named here so [`Lines::new`] and
 /// [`Lines::with_capacity`] are visibly the same function with one argument
-/// defaulted -- and because it is load-bearing elsewhere: it is how much one
-/// connection can be served in a single event-loop wakeup (see
-/// `Connection::step`), and one test asserts against it so it cannot quietly
-/// stop exercising what it is for.
+/// defaulted, and because two other things are expressed in terms of it: how
+/// much one read off the socket can bring in (so, with `Connection`'s one-read
+/// budget, roughly how much one wakeup serves), and how big a line buffer has
+/// to get before [`Lines::take_line`] frees it instead of keeping it.
+///
+/// It is deliberately *not* described as a bound on a wakeup: see
+/// [`Lines::next`] for why no buffer size bounds anything here.
 pub(super) const DEFAULT_CAPACITY: usize = 8 * 1024;
