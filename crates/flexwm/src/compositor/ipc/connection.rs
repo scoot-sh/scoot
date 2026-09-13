@@ -283,10 +283,16 @@ impl Connection {
                 }
             }
             // Marked before serving, not after: by the time `serve` returns,
-            // this request's wayland-side messages are already queued, so the
-            // exits that close the connection (a `wait-idle` hand-off, a reply
-            // that could not be written) have to flush them too -- and one of
-            // them is a request whose only effect is wayland-side.
+            // this request's wayland-side messages are already queued, and
+            // that's true even on the exits that close the connection right
+            // after -- e.g. a Type/Key/Click/Scroll request queues its
+            // synthetic input, then `reply()` fails to write back (the
+            // client already closed its read side) and this loop exits via
+            // `Step::Close`. If `served` were set after `serve` instead,
+            // that request's queued input would never reach the flush below.
+            // (A `wait-idle` hand-off queues nothing wayland-side in
+            // production and doesn't depend on this ordering itself, but the
+            // test harness's synthetic case does, which is what caught this.)
             served = true;
             if let Step::Close = self.serve(state) {
                 leaving = true;

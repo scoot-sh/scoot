@@ -834,15 +834,12 @@ review, and why.
     first (the kernel reports the error only once the receive queue is empty),
     and a client mid-`write_all` past 1 MiB sees the write fail rather than
     the refusal. Both pre-existing and both unchanged here. Capping concurrent
-    connections is still its own Backlog entry -- and one new lifecycle case
-    belongs next to it, found by `flexwm-reviewer`: a client that half-closes
-    (`shutdown(SHUT_WR)`) and then never reads pins its connection slot and two
-    fds for good. A half-close raises `EPOLLIN`/`EPOLLRDHUP`, not `EPOLLHUP`,
-    and a connection with a queue is registered for writability only, so
-    nothing wakes it again. Deliberately not fixed: registering for reads there
-    would spin the loop at full speed on an end-of-stream that can never be
-    acted on (the queue cannot drain), which is worse. Strictly better than the
-    old behaviour, where that same case froze the whole compositor.
+    connections is still its own Backlog entry, now with a new lifecycle case
+    recorded next to it (found by `flexwm-reviewer` reviewing this item): a
+    half-closed, never-reading client pins a connection slot and two fds for
+    good -- strictly better than the pre-item-10 behavior, where that same
+    case froze the whole compositor, but still a live leak. See that Backlog
+    entry for the mechanism.
 
     **Tests: 47 new (175 total, against 128 on the merge base).** Split per
     module: `line/tests.rs` (partial lines, the cap across reads, the three
@@ -1065,7 +1062,43 @@ data-loss/RCE in what was checked.
   capture itself is synchronous on the event-loop thread, so each one stalls
   wayland dispatch and input for its duration (~12ms at 1600x1000 in a
   release build, measured in item 9). Moving the encode off-thread is a much
-  larger change than the limit was.
+  larger change than the limit was. **One more lifecycle case belongs here,
+  found by `flexwm-reviewer` while reviewing item 10**: a client that
+  half-closes (`shutdown(SHUT_WR)`) and then never reads pins its connection
+  slot and two fds for good. A half-close raises `EPOLLIN`/`EPOLLRDHUP`, not
+  `EPOLLHUP`, and a connection with a queue is registered for writability
+  only, so nothing wakes it again. Deliberately not fixed in item 10:
+  registering for reads there would spin the loop at full speed on an
+  end-of-stream that can never be acted on (the queue cannot drain), which is
+  worse. Strictly better than the pre-item-10 behavior, where that same case
+  froze the whole compositor — but still a live resource leak a connection
+  cap would need to account for.
+- **A real keystroke (libinput, or nested host-forwarded input) can sit
+  unflushed to the client for seconds on a quiet screen (MEDIUM).** Found by
+  `flexwm-reviewer` while reviewing item 10, unrelated to and not caused by
+  that PR (confirmed identical on `main` before it). Reproduced twice on
+  real `--tty` with a genuine `/dev/uinput`-injected key: after the press,
+  total IPC silence for 6s, then the very next screenshot's own end-of-
+  wakeup flush is what finally delivers the character to the client — one
+  screenshot shows the key hasn't visibly arrived yet (pixel-identical to
+  before the press), the next one 1.5s later shows it has, with no new input
+  or IPC traffic in between other than the screenshots themselves. Chain:
+  `tty/mod.rs`'s `libinput_event` queues the client's `wl_keyboard` message,
+  but nothing in the keyboard path calls `request_render()` (only pointer
+  motion does, and only under `--tty`) or flushes on its own; `render()`
+  early-returns before its own flush when `!needs_render`; the frame timer
+  drops itself when idle. So on an otherwise-quiet screen, a keystroke is
+  invisible until something else (mouse motion, another IPC request)
+  happens to trigger a flush. Item 10's fix closed this exact shape for the
+  IPC-injected-input path specifically; this is the same root cause on the
+  real-hardware-input path, which item 10 doesn't touch. The idiomatic fix:
+  a single `let _ = state.display_handle.flush_clients();` in the
+  post-dispatch callback of `event_loop.run` (`compositor/mod.rs`, currently
+  a no-op `|_| {}`) — matching Smithay's own `anvil` reference compositor's
+  pattern — would make "every dispatched event eventually gets flushed"
+  structural instead of a per-call-site discipline to remember, and would
+  likely let item 10's own hand-maintained "every exit reaches the flush"
+  invariant in `ipc/connection.rs` be simplified too.
 - **~~IPC socket has no explicit permissions or peer-credential check
   (LOW/MEDIUM)~~ — DONE as item 9.** Both halves: `0600` on the socket file
   and a same-uid `SO_PEERCRED` check at accept time, proven independent of
