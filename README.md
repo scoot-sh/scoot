@@ -570,9 +570,11 @@ Notes, because they are real limits rather than polish:
 - **Screenshots are physical pixels; layout coordinates are logical.**
   `flexwm msg screenshot` captures the framebuffer at full physical
   resolution, while `flexwm msg windows`/`outputs` report logical rectangles.
-  An agent converts with `physical = logical * scale`; `flexwm msg outputs`
-  reports each output's `scale` for exactly that (older servers omit it, which
-  decodes as `1.0`).
+  An agent converts with `physical = logical * scale`, rounded down where a
+  rectangle's edge lands mid-pixel (the logical size is `ceil(physical /
+  scale)`, so a full-output `logical * scale` can overshoot by under one
+  pixel). `flexwm msg outputs` reports each output's `scale` for exactly that
+  (older servers omit it, which decodes as `1.0`).
 
 ## Configuration
 
@@ -781,7 +783,9 @@ cursor_color = "#ffcc66"
 prefer_no_csd = true
 
 [output]
-scale = 1.5
+# 1.0 is correct for a non-HiDPI display; raise it (e.g. 2.0) on a HiDPI
+# panel, or text and widgets render far too small. See the reference above.
+scale = 1.0
 
 [binds]
 "super+n" = "focus-column right"

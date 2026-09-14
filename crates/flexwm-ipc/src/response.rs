@@ -17,7 +17,9 @@ pub struct OutputSnapshot {
     pub rect: Rect,
     /// The output's scale: its `rect` is in logical pixels, while
     /// [`Screenshot`] pixels are physical, so an agent needs this to convert
-    /// between the two (`physical = logical * scale`).
+    /// between the two (`physical = logical * scale`, rounded down where an
+    /// edge lands mid-pixel -- `logical` is `ceil(physical / scale)`, so a
+    /// full-output product can overshoot by under one pixel).
     ///
     /// Defaulted rather than required, deliberately: adding a field does not
     /// change the internally-tagged `Response` discriminant an older client

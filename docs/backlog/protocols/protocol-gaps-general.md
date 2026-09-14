@@ -14,8 +14,10 @@ blocking anything else on this list. User request, 2026-09-13,
 recorded so they don't get lost rather than because any is scheduled:
 - `wp_presentation` (presentation-time) — precise frame-timing
   feedback, mainly useful for smooth video/animation clients.
-- `wp_viewporter` — lets a client crop/scale its own buffer;some
-  clients assume this exists.
+- `wp_viewporter` — ~~lets a client crop/scale its own buffer; some
+  clients assume this exists~~ — **DONE**, implemented with output scaling
+  (`docs/backlog/resolved/output-scaling-done.md`); the render path reads
+  each surface's viewport destination.
 - `single-pixel-buffer-v1` — a trivial protocol for a client to get
   a solid-color 1x1 buffer without allocating a real one; some toolkits
   use it for cheap fills.
@@ -23,9 +25,11 @@ recorded so they don't get lost rather than because any is scheduled:
   pairs with the `pointer_constraints` support already present, and
   games/3D apps expect both together, not just pointer lock/confinement
   alone.
-- `fractional-scale-v1` — crisp non-integer output scaling. Not
+- `fractional-scale-v1` — ~~crisp non-integer output scaling. Not
   urgent while flexwm has exactly one output and no real scale
-  configuration story yet, but relevant once multi-output/HiDPI does.
+  configuration story yet, but relevant once multi-output/HiDPI does.~~
+  **DONE**, implemented with `[output] scale`
+  (`docs/backlog/resolved/output-scaling-done.md`).
 - `text-input-v3`/`input-method-v2` — IME support for non-Latin
   script input, and on-screen keyboards. A real gap for non-US-keyboard
   daily use; unrelated to item 14's `flexwm msg type`/`msg key` work,

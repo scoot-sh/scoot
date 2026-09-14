@@ -94,10 +94,14 @@ pub struct State {
     /// The output scale resolved from `[output] scale` (see
     /// `output_scale.rs`), fixed for the process's lifetime. Read by
     /// `headless`'s `set_mode` (which applies it to the `Output`), by the
-    /// `wp_fractional_scale_v1` handler (which advertises it per surface) and
-    /// by the input clamp (which needs the logical output extent, not the
-    /// physical one `current_mode()` gives). `compositor::run` forces this to
-    /// 1.0 under `--nested`, where the host compositor owns the scale.
+    /// `wp_fractional_scale_v1` handler (which advertises it per surface), and
+    /// by `ipc.rs` (which reports it to an agent that must convert between
+    /// logical rects and physical screenshot pixels). It is *not* the source
+    /// the input clamp reads: that goes through `output_scale::logical_size`,
+    /// which derives the logical extent from the `Output` itself, so a site
+    /// handling input can never disagree with what the `Space` laid out.
+    /// `compositor::run` forces this to 1.0 under `--nested`, where the host
+    /// compositor owns the scale.
     pub output_scale: f64,
     pub backend: Option<Backend>,
     /// Set only under `--nested`: the connection presenting `backend`'s
