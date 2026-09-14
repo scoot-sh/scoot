@@ -182,7 +182,7 @@ fn cursor_new_clamps_a_degenerate_or_absurd_size() {
         i32::MAX,
     ] {
         let cursor = Cursor::new(size, Color::new(1.0, 1.0, 1.0, 1.0));
-        let elements = cursor.element(&mut renderer, (0.0, 0.0).into());
+        let elements = cursor.element(&mut renderer, (0.0, 0.0).into(), 1.0);
         assert_eq!(
             elements.len(),
             1,
@@ -202,7 +202,7 @@ fn cursor_new_clamps_a_degenerate_or_absurd_size() {
 fn a_zero_hotspot_leaves_the_pointer_location_unchanged() {
     let pointer = Point::<f64, Logical>::from((12.5, 30.0));
     let hotspot = Point::<i32, Logical>::from((0, 0));
-    let location = element_location(pointer, hotspot);
+    let location = element_location(pointer, hotspot, 1.0);
     assert_eq!((location.x, location.y), (12.5, 30.0));
 }
 
@@ -210,8 +210,31 @@ fn a_zero_hotspot_leaves_the_pointer_location_unchanged() {
 fn a_nonzero_hotspot_offsets_the_pointer_location() {
     let pointer = Point::<f64, Logical>::from((100.0, 100.0));
     let hotspot = Point::<i32, Logical>::from((4, 6));
-    let location = element_location(pointer, hotspot);
+    let location = element_location(pointer, hotspot, 1.0);
     assert_eq!((location.x, location.y), (96.0, 94.0));
+}
+
+/// At a scale other than 1 both the pointer and the hotspot are in logical
+/// space, so both scale -- the hotspot offset must not stay at its logical
+/// size while the pointer moves to physical coordinates, or the cursor's tip
+/// drifts away from what it is pointing at by `hotspot * (scale - 1)`.
+#[test]
+fn a_nonzero_hotspot_scales_with_the_output() {
+    let pointer = Point::<f64, Logical>::from((50.0, 50.0));
+    let hotspot = Point::<i32, Logical>::from((4, 6));
+    let location = element_location(pointer, hotspot, 2.0);
+    assert_eq!((location.x, location.y), (92.0, 88.0));
+}
+
+/// A fractional scale keeps the subtraction exact rather than rounding the
+/// pointer and the hotspot separately: subtracting first is what makes the
+/// cursor tip land on the same physical subpixel the pointer is over.
+#[test]
+fn a_fractional_scale_keeps_the_hotspot_offset_exact() {
+    let pointer = Point::<f64, Logical>::from((10.0, 20.0));
+    let hotspot = Point::<i32, Logical>::from((1, 2));
+    let location = element_location(pointer, hotspot, 1.5);
+    assert_eq!((location.x, location.y), (13.5, 27.0));
 }
 
 // -------------------------------------------------------------------------
@@ -460,6 +483,7 @@ impl Fixture {
             Config::default(),
             Keybindings::default(),
             appearance,
+            1.0,
         )
         .expect("a compositor state with a wayland socket");
 
@@ -546,7 +570,10 @@ impl Fixture {
         let mut image = renderer
             .create_buffer(Fourcc::Argb8888, (CANVAS, CANVAS).into())
             .expect("an offscreen buffer");
-        let elements = self.state.cursor.element(&mut renderer, POINTER.into());
+        let elements =
+            self.state
+                .cursor
+                .element(&mut renderer, POINTER.into(), self.state.output_scale);
         let count = elements.len();
         let mut framebuffer = renderer.bind(&mut image).expect("a framebuffer");
         let mut damage = OutputDamageTracker::new((CANVAS, CANVAS), 1.0, Transform::Normal);

@@ -512,6 +512,7 @@ impl Fixture {
             Config::default(),
             Keybindings::default(),
             Appearance::default(),
+            1.0,
         )
         .expect("a compositor state with a wayland socket");
         headless::init(&mut state, CANVAS, CANVAS).expect("a headless backend");

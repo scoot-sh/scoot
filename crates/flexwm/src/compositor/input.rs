@@ -10,6 +10,7 @@ use smithay::utils::{Logical, Point, SERIAL_COUNTER};
 use super::State;
 use super::keybindings::Bound;
 use super::layer_shell;
+use super::output_scale::logical_size;
 use super::tty::VtSwitchOutcome;
 use modifiers::{HeldKeys, NamedKey, Untypable};
 
@@ -117,12 +118,15 @@ impl State {
         let Some(pointer) = self.seat.get_pointer() else {
             return;
         };
-        let (width, height) = self
-            .output
-            .as_ref()
-            .and_then(|output| output.current_mode())
-            .map(|mode| (mode.size.w, mode.size.h))
-            .unwrap_or((0, 0));
+        // The *logical* output extent, not the physical one: the pointer
+        // lives in logical coordinates (`pointer_move`, the core and every
+        // surface all use them), while `current_mode()` is the physical
+        // framebuffer size. Clamping against the physical size at a scale != 1
+        // lets the pointer be driven past the last logical pixel -- off the
+        // real desktop and, under `--tty`, onto a coordinate no output
+        // contains. `logical_size` is the same rectangle the core and the
+        // `Space` use, so the clamp can never disagree with what is on screen.
+        let (width, height) = self.output.as_ref().map(logical_size).unwrap_or((0, 0));
         let current = pointer.current_location();
         let x = clamp_to_extent(current.x + dx, width);
         let y = clamp_to_extent(current.y + dy, height);
@@ -510,8 +514,10 @@ impl State {
 }
 
 /// Clamps a coordinate to `[0, extent)`, `extent` being a dimension in
-/// pixels (so `extent == 0` -- no output yet -- clamps everything to `0`,
-/// same as the pointer starting at the origin before any output exists).
+/// logical pixels (so `extent == 0` -- no output yet -- clamps everything to
+/// `0`, same as the pointer starting at the origin before any output exists).
+/// Logical, not physical: see `pointer_move_relative`'s comment on why the two
+/// differ once an output scale is set.
 /// Pulled out of `pointer_move_relative` so it's testable without a live
 /// seat, same rationale as `first_free` in `nested/buffers.rs`.
 fn clamp_to_extent(value: f64, extent: i32) -> f64 {

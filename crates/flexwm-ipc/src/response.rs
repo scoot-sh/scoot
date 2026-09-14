@@ -10,11 +10,30 @@ pub struct Rect {
     pub height: i32,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct OutputSnapshot {
     pub id: u64,
     pub name: String,
     pub rect: Rect,
+    /// The output's scale: its `rect` is in logical pixels, while
+    /// [`Screenshot`] pixels are physical, so an agent needs this to convert
+    /// between the two (`physical = logical * scale`).
+    ///
+    /// Defaulted rather than required, deliberately: adding a field does not
+    /// change the internally-tagged `Response` discriminant an older client
+    /// keys on, and serde ignores an unknown field, so a new client talking to
+    /// an older server gets 1.0 (the only scale that existed before output
+    /// scaling) instead of a decode failure. That is why this does *not* bump
+    /// `PROTOCOL_VERSION` -- see this crate's `PROTOCOL_VERSION` doc, which
+    /// reserves a bump for a change that *breaks* existing clients.
+    #[serde(default = "default_scale")]
+    pub scale: f64,
+}
+
+/// The `scale` an [`OutputSnapshot`] carries when the server predates the
+/// field. `1.0` because it is the only scale such a server could have run at.
+fn default_scale() -> f64 {
+    1.0
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -37,7 +56,7 @@ pub struct Screenshot {
     pub png: Vec<u8>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Response {
     Ok,

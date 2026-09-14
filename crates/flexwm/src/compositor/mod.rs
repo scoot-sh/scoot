@@ -17,6 +17,7 @@ mod keybindings;
 mod layer_shell;
 mod nested;
 mod nested_dispatch;
+mod output_scale;
 mod screenshot;
 mod session_lock;
 mod shell;
@@ -44,6 +45,25 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
     // itself to defaults inside `load` (see `config`'s module doc).
     let loaded = config::load(options.config.as_deref())?;
 
+    // `--nested` cannot honour a non-1.0 output scale: the host compositor
+    // owns the scale of the window flexwm is drawn in, so a scaled output
+    // here would double-count it (render at 2x, then the host scales the
+    // 2x-sized window again), and host-forwarded pointer coordinates arrive
+    // in the host's logical space, which this compositor would then divide by
+    // the configured scale a second time. Warn rather than silently accept a
+    // broken session -- and rather than fail startup, which this project never
+    // does over config (see `config.rs`'s module doc).
+    let scale = if options.nested && loaded.scale != 1.0 {
+        tracing::warn!(
+            configured = loaded.scale,
+            "output scaling is not supported under --nested (the host compositor owns \
+             the window's scale); using 1.0"
+        );
+        1.0
+    } else {
+        loaded.scale
+    };
+
     let mut event_loop: EventLoop<'static, State> = EventLoop::try_new()?;
     let display: Display<State> = Display::new()?;
     let mut state = State::new(
@@ -52,6 +72,7 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
         loaded.config,
         loaded.keybindings,
         loaded.appearance,
+        scale,
     )?;
 
     // `--tty` picks its own size from the connector's preferred mode --
