@@ -265,3 +265,34 @@ as you work, and keep it short — anything durable belongs in `CLAUDE.md` or
   `ROADMAP.md`, merging a PR), do it from a throwaway `git worktree add
   /tmp/<name> <branch>` instead of the shared checkout, and remove it after
   pushing. Only skip the worktree once confirmed no implementer is active.
+- **The same collision can happen between two implementers, not just between
+  the orchestrator and one implementer — this also actually happened once.**
+  Two `flexwm-implementer` agents were dispatched close together, reasoned
+  to be safe because their file sets didn't overlap (one touched
+  `session_lock.rs`/`headless.rs`/`shell.rs`, the other `tty/mod.rs`/
+  `cli.rs`) — but file-level non-overlap doesn't prevent branch-level
+  collision: both still needed `git checkout -b <their-branch>` in the same
+  shared checkout, since that's the standing convention (see above). The
+  second implementer's checkout silently moved the first one's `HEAD` out
+  from under it mid-session. The first implementer caught this itself via
+  `git reflog` (seeing an unexpected `checkout: moving from <its-branch> to
+  <the-other-branch>` entry) and recovered by finishing its own work in a
+  throwaway worktree, shipping to the dev VM by `tar` over ssh instead of
+  relying on the 9p mount (which by then reflected the other branch) — no
+  work was lost, but it required the implementer to notice and adapt
+  mid-task rather than the orchestrator preventing it. The same overlap
+  separately caused a dev-VM **hardware** collision too, on the same pair of
+  tasks: a `--tty` VT-bound seat can be held by only one process, and a
+  reviewer's own `--gpu` verification runs failed with a *different* errno
+  (`EPERM`, seat busy) than the one it was trying to test, because another
+  agent's benchmark script happened to be running `--tty` at the same
+  moment — caught only because the errno didn't match the expected
+  mechanism, and fixed by re-running once the other agent's VM work had
+  finished. **When dispatching more than one implementer (or an implementer
+  and a reviewer) to run concurrently, tell at least one of them explicitly
+  to work in its own `git worktree`** (with the same manual
+  ship-to-VM-over-ssh fallback if it needs dev-VM hardware verification and
+  the 9p mount is committed to a different branch) **and to check for other
+  active agents before claiming the `--tty` seat or trusting a benchmark
+  number**, rather than assuming disjoint file sets make concurrent
+  dispatch safe.
