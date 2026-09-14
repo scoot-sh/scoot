@@ -159,6 +159,10 @@ enum Step {
     /// before `locked` has been sent, and it leaves the `wl_surface` under any
     /// lock surface alive and the connection up.
     DestroyLock { lock: usize },
+    /// A bare commit on the `index`-th lock surface's `wl_surface` -- what a
+    /// locker teardown does after destroying the role object when it keeps
+    /// the surface (and the connection) alive.
+    CommitLockSurface { index: usize },
     /// Hand back everything this client has seen.
     Report,
 }
@@ -601,6 +605,10 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 let (_, lock_surface) = lock_surfaces.get(index).ok_or("no such lock surface")?;
                 lock_surface.destroy();
             }
+            Step::CommitLockSurface { index } => {
+                let (surface, _) = lock_surfaces.get(index).ok_or("no such lock surface")?;
+                surface.commit();
+            }
             Step::LockNoWait => {
                 let lock = manager.lock(&qh, ());
                 locks.push(lock);
@@ -758,6 +766,41 @@ impl Fixture {
                 .dispatch(Some(Duration::from_millis(5)), &mut self.state)
                 .expect("a compositor dispatch");
         }
+    }
+
+    /// Sends a step the client is expected *not* to survive -- a request the
+    /// compositor answers with a protocol error -- and dispatches until the
+    /// client thread has gone, handing back its own error.
+    fn run_expecting_disconnect(&mut self, step: Step) -> String {
+        self.clients[0]
+            .steps
+            .as_ref()
+            .expect("the step channel")
+            .send(step)
+            .expect("the client thread is still running");
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            match self.clients[0].acks.try_recv() {
+                Ok(_) => panic!("the client survived a request that should have been refused"),
+                Err(TryRecvError::Disconnected) => break,
+                Err(TryRecvError::Empty) => {}
+            }
+            assert!(
+                Instant::now() < deadline,
+                "timed out waiting for client 0 to be disconnected"
+            );
+            self.event_loop
+                .dispatch(Some(Duration::from_millis(5)), &mut self.state)
+                .expect("a compositor dispatch");
+        }
+        let error = self.clients[0]
+            .thread
+            .take()
+            .map(|handle| handle.join().expect("the client thread"))
+            .and_then(Result::err)
+            .expect("the client should have stopped with the protocol error it provoked");
+        self.settle();
+        error
     }
 
     /// A few dispatch cycles with nothing outstanding, so in-flight protocol
@@ -999,6 +1042,52 @@ fn destroying_only_the_lock_surfaces_role_falls_back_without_waiting_for_damage(
         BLACK_BGRA,
         "the frame the compositor drew by itself after the role object was destroyed",
     );
+}
+
+/// Pins a *pre-existing* gap this fix deliberately does not close: a commit
+/// on the surviving `wl_surface` after its lock role was destroyed kills
+/// the client with `CommitBeforeFirstAck` -- the lock-surface half of the
+/// DMS post-unlock kill (see `docs/backlog/protocols/dms-enablement-gaps.md`,
+/// gap 1, and `docs/backlog/protocols/session-lock-post-destroy-commit.md`).
+///
+/// Same bug family as the layer-surface dismissal kill fixed alongside it
+/// (Smithay's destruction handler resets the role state, the next commit
+/// validates against the reset), but not the same fix: the layer neutralize
+/// cannot transfer, because `unlock` clears `SessionLock::surfaces` (so a
+/// post-unlock role destruction arrives with no role-to-surface mapping left
+/// to neutralize with) and because a null commit is a *by-design* error for
+/// lock surfaces (`NullBuffer`) no public API can waive. Deleting this test
+/// is part of fixing that entry -- and inverting the assertion is how the
+/// fix proves itself.
+#[test]
+fn committing_a_lock_surface_after_its_role_was_destroyed_is_refused() {
+    let mut fixture = Fixture::new();
+    fixture.run(Step::MapWindow);
+    fixture.run(Step::Lock);
+    fixture.run(Step::map_lock_surface(0));
+    fixture.render();
+
+    fixture.run(Step::DestroyLockRoleOnly { index: 0 });
+    // The commit a teardown sends on the surface it kept alive.
+    //
+    // The client observes this as a bare broken pipe, not as the protocol
+    // error it provoked: the error is posted on a role object the server
+    // has already destroyed, so no message is ever delivered. The exact
+    // code -- `CommitBeforeFirstAck` (0) -- was captured with
+    // `WAYLAND_DEBUG=1` and is recorded in the backlog entry, not here.
+    let error = fixture.run_expecting_disconnect(Step::CommitLockSurface { index: 0 });
+    assert!(
+        error.contains("Broken pipe") || error.contains("Protocol error"),
+        "the client should be dead: {error}"
+    );
+    // ...and only the client: the session stays locked and the compositor
+    // keeps serving, which is what makes this a client kill rather than a
+    // compositor crash.
+    assert!(
+        fixture.state.session_lock.is_locked(),
+        "a dead locker must not unlock the session"
+    );
+    fixture.render();
 }
 
 /// ...and the lock is still a real lock afterwards: the client that destroyed

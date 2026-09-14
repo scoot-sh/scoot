@@ -81,9 +81,10 @@ use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::wl_output::WlOutput;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{IsAlive, Logical, Point};
+use smithay::wayland::compositor::with_states;
 use smithay::wayland::shell::wlr_layer::{
-    KeyboardInteractivity, Layer, LayerSurface as WlrLayerSurface, WlrLayerShellHandler,
-    WlrLayerShellState,
+    Anchor, KeyboardInteractivity, Layer, LayerSurface as WlrLayerSurface, LayerSurfaceCachedState,
+    WlrLayerShellHandler, WlrLayerShellState,
 };
 
 use super::State;
@@ -204,6 +205,14 @@ impl WlrLayerShellHandler for State {
     /// implicit destruction whose callback order leaves the `wl_surface`
     /// already dead.
     fn layer_destroyed(&mut self, surface: WlrLayerSurface) {
+        // First, before anything that can return early: the surface outlives
+        // its role (the client keeps the `wl_surface` -- it may even commit
+        // to it again), and Smithay answers that later commit from the reset
+        // state its own destruction handler leaves behind. See
+        // [`State::neutralize_destroyed_layers`].
+        self.layers_awaiting_neutralize
+            .push(surface.wl_surface().clone());
+        self.mapped_layers.remove(surface.wl_surface());
         let Some(output) = self.output.clone() else {
             return;
         };
@@ -248,7 +257,7 @@ impl State {
         let Some(output) = self.output.clone() else {
             return false;
         };
-        let (found, touches_keyboard) = {
+        let (found, touches_keyboard, mapped) = {
             let mut map = layer_map_for_output(&output);
             let Some(layer) = map
                 .layer_for_surface(surface, WindowSurfaceType::TOPLEVEL)
@@ -296,8 +305,26 @@ impl State {
             // `clicked_layer` is set, the last refresh found *something* on
             // a layer (that surface, or an exclusive one in front of it), so
             // `keyboard_on_layer` is true.
-            (true, focus != LayerFocus::Never || self.keyboard_on_layer)
+            let mapped = layer.cached_state().last_acked.is_some();
+            (
+                true,
+                focus != LayerFocus::Never || self.keyboard_on_layer,
+                mapped,
+            )
         };
+        if mapped {
+            self.mapped_layers.insert(surface.clone());
+        } else if self.mapped_layers.remove(surface) {
+            // Was mapped, now isn't: Smithay's unmap reset has just put the
+            // default back into pending, and whatever commits next -- a
+            // second null commit on an already-hidden surface, which wlroots
+            // treats as a no-op -- would trip the size validation on it.
+            // Neutralized now, while this commit's own validation already
+            // passed on the real description. Never fires for a surface that
+            // was never mapped, so an initial commit with no description at
+            // all still fails loudly with `invalid_size`.
+            neutralize_pending_anchor(surface);
+        }
         self.refresh_layer_zone();
         if touches_keyboard {
             // Gated so the overwhelmingly common commit -- a bar with
@@ -307,6 +334,35 @@ impl State {
             self.refresh_keyboard_focus();
         }
         found
+    }
+
+    /// Neutralizes every surface whose layer role has just been destroyed.
+    ///
+    /// Runs from `dispatch.rs`'s post-destruction hook, which is the only
+    /// thing that runs *after* Smithay's own destruction handler -- and the
+    /// neutralize has to run after it, because that handler resets the
+    /// surface's layer state to its default (no anchors, zero size) once
+    /// [`WlrLayerShellHandler::layer_destroyed`] has already returned.
+    ///
+    /// Without this, the client's next commit on the surviving `wl_surface`
+    /// trips the role's commit-time size validation on that default ("width
+    /// 0 requested without setting left and right anchors") and the client
+    /// is killed with `invalid_size`. That is exactly what a launcher does
+    /// when it is dismissed -- destroy the role, attach a null buffer,
+    /// commit -- so every overlay dismissal killed its whole client
+    /// (measured 4/4 with DankMaterialShell; see
+    /// `docs/backlog/protocols/dms-enablement-gaps.md`, gap 1).
+    ///
+    /// Anchoring everything is the neutral choice, not a lie about geometry:
+    /// a zero size with both anchors set is the protocol's own "the
+    /// compositor chooses" shape, so validation passes, and nothing reads
+    /// this state again afterwards -- the surface is in no layer map, so no
+    /// `arrange` and no configure ever consults it. Dead surfaces (a client
+    /// that died with its role) are skipped: there is no one left to commit.
+    pub(super) fn neutralize_destroyed_layers(&mut self) {
+        for surface in std::mem::take(&mut self.layers_awaiting_neutralize) {
+            neutralize_pending_anchor(&surface);
+        }
     }
 
     /// Recomputes what layer surfaces have left for windows and tells the
@@ -495,4 +551,28 @@ struct LayerHit {
     layer: LayerSurface,
     surface: WlSurface,
     location: Point<f64, Logical>,
+}
+
+/// Rewrites a surface's pending layer anchors to all four edges, so a later
+/// commit with no new role requests passes the role's commit-time size
+/// validation instead of tripping it on the anchorless default Smithay
+/// leaves behind (on role destruction, and on unmapping).
+///
+/// A zero size with both anchors set is the protocol's own "the compositor
+/// chooses" shape, so validation passes, and the write is neutral: the
+/// surface is unmapped or role-less, in no arrange or configure path, so
+/// nothing reads these anchors again until the client describes the surface
+/// afresh (which overwrites them) or destroys it. Skips dead surfaces, for
+/// the teardown orders where the `wl_surface` is already gone too.
+fn neutralize_pending_anchor(surface: &WlSurface) {
+    if !surface.alive() {
+        return;
+    }
+    with_states(surface, |states| {
+        states
+            .cached_state
+            .get::<LayerSurfaceCachedState>()
+            .pending()
+            .anchor = Anchor::TOP | Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT;
+    });
 }

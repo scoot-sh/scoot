@@ -35,8 +35,8 @@ use smithay::reexports::calloop::EventLoop;
 use smithay::reexports::wayland_server::Display;
 use smithay::utils::Rectangle;
 use wayland_client::protocol::{
-    wl_buffer, wl_compositor, wl_keyboard, wl_output, wl_registry, wl_seat, wl_shm, wl_shm_pool,
-    wl_surface,
+    wl_buffer, wl_callback, wl_compositor, wl_keyboard, wl_output, wl_registry, wl_seat, wl_shm,
+    wl_shm_pool, wl_surface,
 };
 use wayland_client::{Connection, Dispatch, QueueHandle, WEnum};
 use wayland_protocols::xdg::shell::client::{
@@ -184,6 +184,18 @@ enum Step {
     MapLayer { index: usize, color: [u8; 4] },
     /// `zwlr_layer_surface_v1.destroy` on the `index`-th layer surface.
     DestroyLayer { index: usize },
+    /// `wl_surface.frame` on the `index`-th layer surface, followed by a
+    /// commit so the callback moves from pending to current server-side.
+    /// The client keeps the `wl_callback` proxy alive -- a careful client
+    /// that only drops it when its own `done` arrives.
+    RequestLayerFrame { index: usize },
+    /// The DMS dismissal sequence on the `index`-th layer surface: destroy
+    /// the layer role, attach a null buffer, commit -- and then keep the
+    /// `wl_surface`, the frame-callback proxies and the whole connection
+    /// alive. What a compositor sends afterwards is the entire question.
+    DismissLayer { index: usize },
+    /// Report how many `done` events each requested frame callback has seen.
+    ReportFrames,
     /// Attach a null buffer to the `index`-th layer surface and commit: the
     /// protocol's own way for a surface to unmap itself without destroying
     /// the object, which a launcher does when it is dismissed and re-shown.
@@ -222,6 +234,9 @@ enum Ack {
     PopupConfigured(bool),
     /// [`Step::ReportKeyboard`]'s answer.
     Keyboard(KeyboardReport),
+    /// [`Step::ReportFrames`]'s answer: per requested callback, how many
+    /// `done` events arrived.
+    Frames(Vec<u32>),
 }
 
 /// Which of the client's own surfaces a `wl_keyboard.enter` named, by the
@@ -291,6 +306,9 @@ struct TestClient {
     /// configure before attaching buffer", killing the client at random.
     /// (Found by this harness failing intermittently, not by inspection.)
     window_serials: Vec<Option<u32>>,
+    /// How many `done` events each frame callback requested by
+    /// [`Step::RequestLayerFrame`] has received, by request order.
+    frame_dones: Vec<u32>,
 }
 
 impl Dispatch<wl_registry::WlRegistry, ()> for TestClient {
@@ -440,6 +458,26 @@ impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, SurfaceIndex> for TestC
     }
 }
 
+/// Which requested frame callback a `done` belongs to, by request order.
+struct FrameTag(usize);
+
+impl Dispatch<wl_callback::WlCallback, FrameTag> for TestClient {
+    fn event(
+        client: &mut Self,
+        _: &wl_callback::WlCallback,
+        event: wl_callback::Event,
+        tag: &FrameTag,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let wl_callback::Event::Done { .. } = event
+            && let Some(slot) = client.frame_dones.get_mut(tag.0)
+        {
+            *slot = slot.saturating_add(1);
+        }
+    }
+}
+
 wayland_client::delegate_noop!(TestClient: ignore wl_compositor::WlCompositor);
 wayland_client::delegate_noop!(TestClient: ignore wl_surface::WlSurface);
 wayland_client::delegate_noop!(TestClient: ignore wl_shm::WlShm);
@@ -544,6 +582,10 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
     // ...and the `wl_surface`s under them, which is what a
     // `wl_keyboard.enter` names.
     let mut windows: Vec<wl_surface::WlSurface> = Vec::new();
+    // Requested frame callbacks, kept alive so a `done` that arrives late
+    // lands on a live proxy and is counted rather than killing the
+    // connection outright.
+    let mut frames: Vec<wl_callback::WlCallback> = Vec::new();
 
     while let Ok(step) = steps.recv() {
         queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
@@ -615,6 +657,27 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 let (surface, layer, _) = layers.get(*index).ok_or("no such layer surface")?;
                 layer.destroy();
                 surface.destroy();
+            }
+            Step::RequestLayerFrame { index } => {
+                let (surface, ..) = layers.get(*index).ok_or("no such layer surface")?;
+                let tag = FrameTag(client.frame_dones.len());
+                client.frame_dones.push(0);
+                // Kept alive in `frames`: dropping the proxy is what turns
+                // a late `done` into a dead connection, and this client is
+                // deliberately the careful kind -- the compositor must not
+                // send one late in the first place.
+                let callback = surface.frame(&qh, tag);
+                surface.commit();
+                frames.push(callback);
+            }
+            Step::DismissLayer { index } => {
+                let (surface, layer, _) = layers.get(*index).ok_or("no such layer surface")?;
+                layer.destroy();
+                surface.attach(None, 0, 0);
+                surface.commit();
+            }
+            Step::ReportFrames => {
+                outcome = Ack::Frames(client.frame_dones.clone());
             }
             Step::UnmapLayer { index } => {
                 let (surface, ..) = layers.get(*index).ok_or("no such layer surface")?;
@@ -898,6 +961,14 @@ impl Fixture {
             panic!("the keyboard probe should report what the client saw");
         };
         report
+    }
+
+    /// Per requested frame callback, how many `done` events arrived.
+    fn frames(&mut self) -> Vec<u32> {
+        let Ack::Frames(dones) = self.run(Step::ReportFrames) else {
+            panic!("the frame probe should report what the client saw");
+        };
+        dones
     }
 
     /// A left click at a point, press and release, the way a user makes one.
@@ -1245,6 +1316,156 @@ fn a_client_that_disconnects_returns_its_bars_space() {
     assert_eq!(fixture.usable(), WHOLE);
     let pixels = fixture.render();
     assert_pixel(&pixels, CANVAS / 2, 15, BACKGROUND_BGRA, "the bar is gone");
+}
+
+// -------------------------------------------------------------------------
+// Frame callbacks across layer-surface teardown
+// -------------------------------------------------------------------------
+
+/// The control the test below is read against: a frame callback requested
+/// on a mapped layer surface is completed by the next frame. Without this,
+/// "no `done` arrived" below could pass because `done` never works at all
+/// rather than because the teardown path is clean.
+#[test]
+fn a_frame_callback_on_a_mapped_layer_surface_is_completed() {
+    let mut fixture = Fixture::new();
+    fixture.run(Step::CreateLayer(LayerSpec::launcher(60)));
+    fixture.run(Step::MapLayer {
+        index: 0,
+        color: BAR_BGRA,
+    });
+    fixture.run(Step::RequestLayerFrame { index: 0 });
+    fixture.render();
+    assert_eq!(
+        fixture.frames(),
+        vec![1],
+        "one frame should complete one requested callback"
+    );
+    fixture.disconnect_client();
+}
+
+/// Dismissing a layer surface with a frame callback in flight must not
+/// complete that callback afterwards: the client has torn the surface down
+/// (`zwlr_layer_surface_v1.destroy` + null attach + commit, the exact
+/// sequence DankMaterialShell sends when an overlay is dismissed), and a
+/// `done` arriving for an object it no longer knows kills its whole
+/// connection (measured 4/4 with Quickshell, exit 255 -- see
+/// `docs/backlog/protocols/dms-enablement-gaps.md`, gap 1).
+///
+/// Read as a delta, not an absolute: whatever frames were already sent
+/// before the teardown was dispatched are legitimate and counted in both
+/// probes, so only a *new* `done` after the destroy fails this.
+#[test]
+fn dismissing_a_layer_surface_with_a_frame_callback_in_flight_sends_no_done() {
+    let mut fixture = Fixture::new();
+    fixture.run(Step::MapWindow);
+    fixture.run(Step::CreateLayer(LayerSpec::launcher(60)));
+    fixture.run(Step::MapLayer {
+        index: 0,
+        color: BAR_BGRA,
+    });
+    fixture.run(Step::RequestLayerFrame { index: 0 });
+    fixture.run(Step::DismissLayer { index: 0 });
+    let before = fixture.frames();
+    // Several frames after the teardown was dispatched: none of them may
+    // complete the dead surface's callback.
+    fixture.render();
+    fixture.render();
+    fixture.render();
+    assert_eq!(
+        fixture.frames(),
+        before,
+        "no frame after the teardown may complete the dead callback"
+    );
+    fixture.disconnect_client();
+}
+
+/// More than one callback outstanding when the surface is dismissed: none
+/// of them may complete afterwards either.
+#[test]
+fn dismissing_with_several_frame_callbacks_in_flight_sends_none() {
+    let mut fixture = Fixture::new();
+    fixture.run(Step::MapWindow);
+    fixture.run(Step::CreateLayer(LayerSpec::launcher(60)));
+    fixture.run(Step::MapLayer {
+        index: 0,
+        color: BAR_BGRA,
+    });
+    fixture.run(Step::RequestLayerFrame { index: 0 });
+    fixture.run(Step::RequestLayerFrame { index: 0 });
+    fixture.run(Step::RequestLayerFrame { index: 0 });
+    fixture.run(Step::DismissLayer { index: 0 });
+    let before = fixture.frames();
+    assert_eq!(before.len(), 3);
+    fixture.render();
+    fixture.render();
+    fixture.render();
+    assert_eq!(
+        fixture.frames(),
+        before,
+        "no frame after the teardown may complete any dead callback"
+    );
+    fixture.disconnect_client();
+}
+
+/// Hiding an already-hidden surface (a null commit on one that is already
+/// unmapped) is meaningless but legal -- wlroots treats it as a no-op -- so
+/// it must not kill the client either.
+#[test]
+fn unmapping_twice_without_remap_does_not_kill_the_client() {
+    let mut fixture = Fixture::new();
+    fixture.run(Step::MapWindow);
+    fixture.run(Step::CreateLayer(LayerSpec::launcher(60)));
+    fixture.run(Step::MapLayer {
+        index: 0,
+        color: BAR_BGRA,
+    });
+    assert_eq!(fixture.keyboard().focused, Some(Focused::Layer(0)));
+
+    fixture.run(Step::UnmapLayer { index: 0 });
+    assert_eq!(fixture.keyboard().focused, Some(Focused::Window(0)));
+    // Already hidden: a second null commit must be a silent no-op.
+    fixture.run(Step::UnmapLayer { index: 0 });
+    assert_eq!(fixture.keyboard().focused, Some(Focused::Window(0)));
+
+    // ...and the surface still works afterwards: re-showing it maps again.
+    fixture.run(Step::RemapLayer {
+        index: 0,
+        color: BAR_BGRA,
+    });
+    assert_eq!(fixture.keyboard().focused, Some(Focused::Layer(0)));
+    fixture.disconnect_client();
+}
+
+/// Rapid map/destroy churn: every destruction arms the neutralize path, and
+/// the compositor must keep serving through all of it.
+#[test]
+fn rapid_map_and_destroy_cycles_leave_the_compositor_serving() {
+    let mut fixture = Fixture::new();
+    fixture.run(Step::MapWindow);
+    for _ in 0..5 {
+        let Ack::Done = fixture.run(Step::CreateLayer(LayerSpec::bar(10))) else {
+            panic!("every step should acknowledge");
+        };
+    }
+    // Map and destroy each of them in turn (indices 0..5 in creation order).
+    for index in 0..5 {
+        fixture.run(Step::MapLayer {
+            index,
+            color: BAR_BGRA,
+        });
+        fixture.run(Step::DestroyLayer { index });
+    }
+    assert_eq!(fixture.usable(), WHOLE);
+    let pixels = fixture.render();
+    assert_pixel(
+        &pixels,
+        CANVAS / 2,
+        CANVAS / 2,
+        BACKGROUND_BGRA,
+        "nothing left drawn",
+    );
+    fixture.disconnect_client();
 }
 
 // -------------------------------------------------------------------------
