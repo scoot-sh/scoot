@@ -26,6 +26,18 @@ forces scale 1.0 with a warning. IPC's `OutputSnapshot` carries `scale`
 (additive, serde-defaulted to 1.0, so it did **not** need a `PROTOCOL_VERSION`
 bump — the planned `usable`-rect/focus-workspace bundle is untouched).
 
+**Follow-up (2026-09-14):** this landed the fractional path but created the
+`wl_compositor` global at version 5, so clients never received the integer
+`wl_surface.preferred_buffer_scale` (a v6 event) that accompanies the
+fractional `preferred_scale`. That gap is fixed in
+[`fractional-scale-integer-companion-done.md`](fractional-scale-integer-companion-done.md)
+(global now v6; `send_surface_state` called from `new_surface`). Note the
+reported symptom that surfaced it — Ghostty failing to load at
+`[output] scale = 1.5` — is **not** confirmed fixed by this, and review found
+GTK4 ignores that event while a fractional object exists; it is tracked
+separately and still open in
+[`../protocols/ghostty-fails-at-1-5.md`](../protocols/ghostty-fails-at-1-5.md).
+
 The original diagnosis is kept below for history.
 
 ---

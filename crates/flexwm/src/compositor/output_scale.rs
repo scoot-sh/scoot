@@ -45,8 +45,8 @@
 use smithay::output::{Output, Scale};
 use smithay::reexports::wayland_server::DisplayHandle;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-use smithay::utils::{Logical, Size};
-use smithay::wayland::compositor::with_states;
+use smithay::utils::{Logical, Size, Transform};
+use smithay::wayland::compositor::{send_surface_state, with_states};
 use smithay::wayland::fractional_scale::{FractionalScaleHandler, with_fractional_scale};
 use smithay::wayland::viewporter::ViewporterState;
 
@@ -106,6 +106,20 @@ pub(super) fn smithay_scale(scale: f64) -> Scale {
     }
 }
 
+/// The integer scale flexwm advertises where only an integer fits:
+/// `ceil(scale)`, matching [`Scale::integer_scale`] -- which is what Smithay
+/// puts on `wl_output.scale` for the same configured value (verified against
+/// the pinned rev's `output.rs`). `1.5` and `2.0` therefore both resolve to
+/// `2`, and `1.0` to `1`.
+///
+/// `scale` is already clamped and finite by the time it reaches here (see
+/// [`clamp_scale`]), so the cast cannot see `NaN`/`inf`. Pure and tested so the
+/// value sent on `wl_surface.preferred_buffer_scale` and the one Smithay sends
+/// on `wl_output.scale` can be proved to agree.
+pub(super) fn integer_scale(scale: f64) -> i32 {
+    scale.ceil() as i32
+}
+
 /// The output's size in logical pixels: physical mode size divided by the
 /// output's scale, rounded *up* -- exactly what Smithay's
 /// `Space::output_geometry` returns (verified against the pinned rev's
@@ -144,6 +158,30 @@ fn set_preferred_scale(surface: &WlSurface, scale: f64) {
         with_fractional_scale(states, |fractional_scale| {
             fractional_scale.set_preferred_scale(scale);
         });
+    });
+}
+
+/// Sends `surface` the integer `preferred_buffer_scale` (and the default
+/// `preferred_buffer_transform`) that accompanies [`set_preferred_scale`],
+/// through Smithay's own `send_surface_state`.
+///
+/// This is for protocol completeness, matching wlroots: a v6 client that binds
+/// `wp_fractional_scale_v1` is entitled to the integer companion too, and
+/// sending it is what a client is otherwise left to infer. It is **not**
+/// established that this fixes the reported Ghostty-at-`1.5` symptom — see
+/// `docs/backlog/protocols/ghostty-fails-at-1-5.md`, which keeps that
+/// confirmation open, and the finding that GTK4 does not act on this event
+/// while a fractional object exists.
+///
+/// `send_surface_state` caches the last `(scale, transform)` per surface in
+/// that surface's own state and only emits when either differs, so a surface
+/// at the fixed scale emits nothing after its first call. It also
+/// early-returns for a surface below `wl_compositor` v6, so a client that never
+/// opted into the event pays only a version check. The first call on a v6
+/// surface allocates the cache entry; every later call does not.
+pub(super) fn send_preferred_buffer_scale(surface: &WlSurface, integer_scale: i32) {
+    with_states(surface, |states| {
+        send_surface_state(surface, states, integer_scale, Transform::Normal);
     });
 }
 

@@ -30,6 +30,7 @@ use smithay::wayland::shell::xdg::{
 use smithay::wayland::shm::{ShmHandler, ShmState};
 
 use super::State;
+use super::output_scale::send_preferred_buffer_scale;
 use super::state::ClientState;
 
 impl CompositorHandler for State {
@@ -42,6 +43,17 @@ impl CompositorHandler for State {
             .get_data::<ClientState>()
             .expect("client state")
             .compositor_state
+    }
+
+    /// A new `wl_surface` exists: tell it the integer `preferred_buffer_scale`.
+    ///
+    /// This is the only call site. Smithay runs `new_surface` for every
+    /// surface `wl_compositor.create_surface` makes (subsurfaces included), and
+    /// the scale is fixed for the process's life, so this always fires before
+    /// any commit -- a per-commit call would be a no-op cache hit on the hot
+    /// path, not defence in depth. See `send_preferred_buffer_scale`'s doc.
+    fn new_surface(&mut self, surface: &WlSurface) {
+        send_preferred_buffer_scale(surface, self.integer_scale);
     }
 
     fn commit(&mut self, surface: &WlSurface) {
