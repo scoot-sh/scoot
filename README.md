@@ -42,9 +42,10 @@ niri-style focus ring, background color, server-side
 `zxdg_decoration_manager_v1`),
 `wlr-layer-shell-unstable-v1`, so bars, docks, wallpapers, launchers and
 notification daemons work — including keyboard focus for the ones that ask
-for it (see Layer-shell clients below) — plus `ext-workspace-v1`, so those
+for it (see Layer-shell clients below), `ext-workspace-v1`, so those
 bars can also list, follow and switch workspaces (see Workspaces for bars
-below), and a
+below), `ext-session-lock-v1`, so a real screen locker can lock the session
+with the compositor itself enforcing it (see Screen locking below), and a
 hardened control socket (owner-only
 permissions, a same-user peer check, a 1 MiB cap on a single request, and
 screenshots rate-limited to one per connection per frame) whose connections
@@ -292,14 +293,15 @@ What works:
 
 What doesn't, yet:
 
-- **Screen locking is not a security boundary here.** The keyboard model
-  above is what a layer-shell locker (`gtklock`, `swaylock-effects`) needs to
-  function, and one will now actually receive what you type instead of
-  leaking it to the window behind — but flexwm implements no
-  `ext-session-lock-v1`, and the escape hatch that makes exclusive focus safe
-  is also a way around a lock: the quit binding and the `--tty` VT switches
-  keep working while the locker is up. Treat it as a screen *blanker* you can
-  type a password into, not as something that keeps anyone out.
+- **A layer-shell "lock screen" is still not a security boundary** — use a
+  real `ext-session-lock-v1` locker instead (see Screen locking below).
+  A layer surface with `exclusive` keyboard interactivity will now actually
+  receive what you type instead of leaking it to the window behind, but the
+  escape hatch that makes exclusive focus safe is also a way around such a
+  lock: the quit binding and the `--tty` VT switches keep working while it is
+  up, and everything behind it is still drawn and still capturable. Treat one
+  as a screen *blanker* you can type a password into, not as something that
+  keeps anyone out.
 - **Popups from a layer surface** (a bar's own dropdown menu or tooltip) are
   not tracked yet, for a reason that predates this: flexwm doesn't send the
   initial configure for *any* `xdg_popup` yet, so no popup maps, from a window
@@ -380,6 +382,143 @@ Worth knowing before you write against it:
 - **Multiple outputs will change the shape of this** — a group per output is
   what the protocol is built for — but flexwm has exactly one output today, so
   there is exactly one group.
+
+## Screen locking (`ext-session-lock-v1`)
+
+flexwm implements `ext-session-lock-v1` (version 1), so a real locker
+(`swaylock` 1.7+, `gtklock`, `hyprlock`, `waylock`) can lock the session with
+the compositor enforcing it, rather than a layer surface asking politely. The
+global is `ext_session_lock_manager_v1`, available to every client (flexwm has
+no security-context support to distinguish a privileged client from any
+other, so an allow-list would be theatre — see the trust note below).
+
+**What is guaranteed while the session is locked**, each of these verified on
+real `--tty` hardware by screenshot and by what clients were actually sent:
+
+- **Nothing but the lock client's own surfaces is drawn.** Not "drawn behind
+  an opaque backdrop" — windows, layer surfaces (bars, wallpapers, launchers,
+  on every layer including `overlay`) and the focus ring are not gathered into
+  the frame at all. The screen is the lock surface, an opaque backdrop where
+  it doesn't cover, and the pointer cursor. A `flexwm msg screenshot` reads
+  that same framebuffer, so a capture taken while locked shows the lock screen
+  and nothing behind it.
+- **Only the lock surface receives input.** Keyboard focus moves to it (or to
+  nobody, if the client hasn't created one yet) the instant the lock request
+  arrives, and pointer focus is moved with it, so a click can't land in the
+  window that happened to be under the pointer. Any pointer grab in flight is
+  dropped as well — not only when the lock is taken, but at every transition
+  that changes which lock surfaces count (a lock surface destroyed, a lock
+  given up, a locker that died), because a grab outlives focus changes by
+  design and would otherwise keep steering the pointer to whoever holds it.
+  A held-button grab is exercised by a test; the drag-and-drop case is still
+  code-traced rather than exercised, since there is no drag-and-drop fixture
+  here.
+- **"The lock surface" means the *current* lock's.** A lock object can be
+  destroyed while the client that made it stays connected and keeps the
+  `wl_surface` underneath alive, so "is this surface alive" is not the same
+  question as "does this surface still belong to the lock that owns the
+  session". flexwm asks the second one everywhere: a surface from a lock that
+  was given up, or replaced, stops being drawn and stops receiving keyboard
+  and pointer input immediately, without waiting for anything to replace it.
+- **A destroyed lock surface falls back to the backdrop straight away.** The
+  protocol's own rule ("the compositor must fall back to rendering a solid
+  color"), and "straight away" means without waiting for anything else to
+  change on screen — including when the client destroys only the
+  `ext_session_lock_surface_v1` and keeps the `wl_surface` under it alive,
+  which is what a locker does when an output is removed under it.
+- **Keybindings that run an action don't fire.** `Super+Q`, a `spawn` bind,
+  every layout motion: suppressed, and forwarded to the lock client as
+  ordinary keystrokes instead. The one exception is deliberate: the `--tty`
+  `Ctrl+Alt+F1`..`F12` VT switches still work. That is a session-level escape
+  hatch, not a way in — the VT it switches to has its own login, and this
+  session stays locked behind it (verified: switch away, switch back, the lock
+  screen is pixel-identical).
+- **`flexwm msg action ...` is refused**, with an error saying why, for the
+  same reason. So is an `ext-workspace-v1` client's `activate`.
+- **Ordinary clients stop drawing.** They get no frame callbacks while
+  locked, which is what the protocol asks for and also what keeps them from
+  burning CPU behind a lock screen: measured on real hardware, a terminal
+  running `while true; do date; done` costs the compositor 229 jiffies/10s
+  unlocked and **2 jiffies/10s** with the same client still running behind a
+  lock.
+
+**If the lock client dies, the session stays locked.** That is the protocol's
+rule and the point of it: a dead locker is not evidence that you want your
+screen unlocked. flexwm's recovery story, so a crashed locker isn't a dead
+session:
+
+- the screen turns **solid red**, so you can tell "my locker crashed" from "my
+  locker is showing a black screen" — including when the locker had a surface
+  up and drawing at the moment it went, which is the case where showing its
+  last pixels instead would leave you with no way to tell;
+- **run a lock client again and it takes over** — it puts its own surface up
+  and can unlock once you authenticate. It is told `locked` immediately when
+  the lock it replaces had already blanked the screen; if that lock went in
+  the window *before* its first blanked frame, the replacement waits for one
+  exactly like a fresh lock does, because until then your actual desktop is
+  still what's on the display. Taking the lock over at all rather than
+  refusing is what sway does too (`lock.c`'s `handle_session_lock` replaces an
+  abandoned lock and refuses a live one, exactly as flexwm does); the
+  *conditional* confirmation is niri's (`Niri::lock` confirms immediately only
+  from an already-locked state, never from a lock still waiting for its first
+  frame). sway confirms unconditionally, fresh lock or takeover alike, so that
+  half is deliberately not sway's behavior.
+
+The same applies to a lock client that gives up without dying: destroying an
+`ext_session_lock_v1` before `locked` arrives is legal (only
+`unlock_and_destroy` is forbidden that early), and a locker that times out
+waiting may well do it. The session stays locked and reads as abandoned — the
+red screen, recovered by running a locker again — and the surfaces that client
+had up stop being drawn and stop receiving input at that moment, even though
+its connection and its `wl_surface`s are still perfectly alive.
+
+**What is *not* guaranteed — read this before trusting it:**
+
+- **A same-uid process is inside the boundary, and always was.** Anything that
+  can reach flexwm's wayland socket can take over a lock whose client has died
+  and then unlock the session; anything that can reach its IPC socket can
+  screenshot the lock screen and inject keystrokes into it (that is how an
+  agent drives a lock screen, and it is refused for `action` requests only).
+  Both sockets are owner-only. This lock keeps *someone at the keyboard* out,
+  not a process already running as you — which could read your files anyway.
+- **`flexwm msg windows` still lists your windows while locked**, titles
+  included, and `flexwm msg outputs` still answers. Nothing is drawn from
+  them, but the IPC surface is not blanked.
+- **The `locked` event is sent once a blanked frame has been *rendered*, not
+  once a vblank has confirmed it on screen.** Under `--headless`/`--nested`
+  that is exact — there is no scanout at all, and the framebuffer a screenshot
+  reads *is* that frame. Under `--tty` it is weaker than this section used to
+  claim: the frame is rendered, and then copied into a scanout buffer with a
+  page flip requested *only if the presenter can take it right then*. It takes
+  neither step while the session is inactive (you switched VT away) or while a
+  previous page flip hasn't been confirmed by a vblank yet — and that second
+  case is ordinary, frequent throttling, not a rare edge. So under real
+  contention the previous, possibly unlocked, frame can remain on the scanout
+  buffer for up to one more vblank after `locked` has gone out. A client that
+  suspends the machine the instant it sees `locked` is racing that. Closing it
+  properly means confirming from the vblank handler instead; it's on the
+  backlog rather than done.
+- **Up to one frame of the unlocked screen can still be on the display**
+  between the lock request and the first blanked frame. That is inherent (the
+  protocol's `locked` ordering exists precisely because of it), not something
+  flexwm defers.
+- **The first click on a fresh lock screen, before the mouse has moved,
+  reaches nobody.** Pointer focus is re-derived when the lock surface is
+  created, which is before it has drawn anything, so the hit test finds
+  nothing and the click goes nowhere; one pointer motion fixes it for the rest
+  of the session. It fails safe — "nobody" is nobody, never the window that
+  was under the pointer before the lock — and a locker is a keyboard-first
+  thing, so it's a papercut rather than a hole, but it is on the backlog
+  rather than fixed.
+- **flexwm blanks immediately rather than waiting for the lock client to
+  draw.** Some compositors wait up to a second for lock surfaces so the
+  transition doesn't flash black; flexwm doesn't, deliberately — waiting means
+  rendering the unlocked session for that whole second.
+- **One output.** A lock surface is configured per `wl_output` and flexwm has
+  exactly one; multi-output support has to revisit this.
+- **No idle trigger.** Nothing locks the session automatically — there is no
+  `ext-idle-notify-v1` yet, so a `swayidle`-style daemon has nothing to watch.
+  Locking is whatever you run (from a keybinding's `spawn`, say).
 
 ## Configuration
 

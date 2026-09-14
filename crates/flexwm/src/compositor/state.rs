@@ -36,6 +36,7 @@ use super::ipc::PendingIdle;
 use super::keybindings::Keybindings;
 use super::layer_shell;
 use super::nested::Host;
+use super::session_lock::SessionLock;
 use super::tty::Tty;
 
 #[cfg(test)]
@@ -133,6 +134,12 @@ pub struct State {
     /// owns both the protocol objects and the "what have clients been told"
     /// snapshot behind them.
     pub ext_workspace: ExtWorkspaceState,
+    /// `ext_session_lock_manager_v1`: the compositor-enforced screen lock.
+    /// Unlike the two `#[allow(dead_code)]` states below, this is read on
+    /// every render, every focus refresh and every pointer hit test -- see
+    /// `session_lock.rs`, which owns both the protocol objects and the one
+    /// field that says whether the session is locked at all.
+    pub session_lock: SessionLock,
     /// Held only to keep the `zxdg_decoration_manager_v1` global alive --
     /// like `output_manager_state`, `XdgDecorationHandler` (see
     /// `handlers.rs`) has no `&mut XdgDecorationState` accessor to route
@@ -194,6 +201,7 @@ impl State {
         let xdg_decoration_state = XdgDecorationState::new::<Self>(&dh);
         let layer_shell_state = WlrLayerShellState::new::<Self>(&dh);
         let ext_workspace = ExtWorkspaceState::new(&dh);
+        let session_lock = SessionLock::new(&dh);
         let shm_state = ShmState::new::<Self>(&dh, vec![]);
         let output_manager_state = OutputManagerState::new_with_xdg_output::<Self>(&dh);
         let data_device_state = DataDeviceState::new::<Self>(&dh);
@@ -239,6 +247,7 @@ impl State {
             xdg_shell_state,
             layer_shell_state,
             ext_workspace,
+            session_lock,
             xdg_decoration_state,
             shm_state,
             output_manager_state,
@@ -315,6 +324,14 @@ impl State {
                         state.loop_signal.stop();
                         return Ok(PostAction::Continue);
                     }
+                    // A disconnecting client -- or one destroying its lock
+                    // object without disconnecting -- is seen *here* and
+                    // nowhere else, which matters for exactly one thing: it
+                    // may have been holding the session lock, and nothing
+                    // about a destroyed protocol object marks the screen
+                    // dirty, drops the surfaces it left behind or moves the
+                    // focus off them. See `session_lock.rs`.
+                    state.refresh_lock_state();
                     // Replies (e.g. the initial registry globals) should reach
                     // the socket now rather than wait for `mod.rs`'s
                     // `post_dispatch` (which also flushes every client, once
@@ -375,6 +392,13 @@ impl State {
         &self,
         pos: Point<f64, Logical>,
     ) -> Option<(WlSurface, Point<f64, Logical>)> {
+        // Before every other candidate, and returning whatever it finds --
+        // including `None`. While the session is locked nothing but a lock
+        // surface may be pointed at, so this is a replacement for the search
+        // below, never a first entry in it (see `session_lock.rs`).
+        if self.session_lock.is_locked() {
+            return self.lock_surface_under(pos);
+        }
         self.layer_surface_under(&layer_shell::ABOVE_WINDOWS, pos)
             .or_else(|| self.window_under(pos))
             .or_else(|| self.layer_surface_under(&layer_shell::BELOW_WINDOWS, pos))

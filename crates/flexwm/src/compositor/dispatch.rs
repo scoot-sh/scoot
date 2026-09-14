@@ -3,9 +3,10 @@
 //! This is a hand-written copy of what `smithay::delegate_dispatch2!(State)`
 //! expands to -- the blanket `Dispatch`/`GlobalDispatch` impls that forward
 //! every request to whichever `Dispatch2` impl the object's user data
-//! carries -- plus three guards on sizes a client chooses:
-//! [`reject_invalid_shm_pool_resize`], [`reject_oversized_shm_pool_creation`]
-//! and [`reject_unrepresentable_layer_size`].
+//! carries -- plus three guards on sizes a client chooses
+//! ([`reject_invalid_shm_pool_resize`], [`reject_oversized_shm_pool_creation`]
+//! and [`reject_unrepresentable_layer_size`]) and one post-destruction hook
+//! ([`redraw_after_lock_surface_destroyed`]).
 //!
 //! ## Why the first guard exists
 //!
@@ -142,6 +143,23 @@
 //! already `int`, and anchor/layer/keyboard-interactivity/exclusive-edge are
 //! all validated by Smithay before use.
 //!
+//! ## Why the hook exists
+//!
+//! Not a guard at all, and not a workaround for a Smithay bug: a callback
+//! this compositor needs and the protocol implementation does not offer.
+//! `SessionLockHandler` has `lock`, `unlock` and `new_surface`, but nothing
+//! for a lock surface *going away* -- so when a client destroys only its
+//! `ext_session_lock_surface_v1`, keeping its `wl_surface`, its lock and its
+//! connection (legal, and what a well-behaved locker does when an output is
+//! removed), Smithay quietly unmaps the surface and no flexwm code runs at
+//! all. The surface stops producing render elements, but nothing asks for the
+//! frame that would show it gone, so its last pixels stay on the display
+//! until something unrelated marks the screen dirty -- against the protocol's
+//! own "the compositor must fall back to rendering a solid color". The
+//! `destroyed` arm of the blanket impl is the only place that destruction is
+//! visible, for the same reason the guards live here: it is the one seam
+//! flexwm owns (see below). `session_lock.rs` holds what to do about it.
+//!
 //! ## Why it's shaped this way
 //!
 //! - **Not a `Dispatch<WlShmPool, ShmPoolUserData> for State` override.**
@@ -157,8 +175,11 @@
 //! Delete the *first* guard (and the `size <= 0` half of this file's reason to
 //! exist) once the pinned rev carries the missing `return`, and the *third*
 //! once its `set_size` handler range-checks its own `uint`s. The pool size
-//! cap is flexwm's own policy, not a workaround, so it stays -- and with it
-//! this file, unless Smithay grows a `delegate_shm!` to override instead.
+//! cap is flexwm's own policy, not a workaround, so it stays -- and so does
+//! the lock-surface hook, until `SessionLockHandler` grows a callback of its
+//! own for it. Either one keeps this file alive on its own, whatever happens
+//! to the guards, unless Smithay also grows a `delegate_shm!` to override
+//! instead.
 //!
 //! ## Maintenance hazard this creates
 //!
@@ -174,6 +195,7 @@
 
 use std::any::{Any, TypeId};
 
+use smithay::reexports::wayland_protocols::ext::session_lock::v1::server::ext_session_lock_surface_v1;
 use smithay::reexports::wayland_protocols_wlr::layer_shell::v1::server::zwlr_layer_surface_v1;
 use smithay::reexports::wayland_server::backend::ClientId;
 use smithay::reexports::wayland_server::protocol::{wl_shm, wl_shm_pool};
@@ -238,6 +260,10 @@ where
 
     fn destroyed(state: &mut Self, client: ClientId, resource: &I, data: &UserData) {
         data.destroyed(state, client, resource);
+        // *After* the delegate, not before: Smithay's own
+        // `ExtLockSurfaceUserData::destroyed` is what unmaps the surface, and
+        // this is the redraw that shows the result.
+        redraw_after_lock_surface_destroyed::<I>(state);
     }
 }
 
@@ -376,6 +402,29 @@ where
         ),
     );
     true
+}
+
+/// Tells the session-lock module that an `ext_session_lock_surface_v1` has
+/// just been destroyed, which is the one protocol object destruction this
+/// compositor would otherwise never hear about. See the module doc's "Why the
+/// hook exists", and `session_lock.rs`'s [`State::lock_surface_destroyed`]
+/// for what it has to catch up.
+///
+/// Folds away for every interface other than `ext_session_lock_surface_v1`,
+/// for the same monomorphization reason as the three guards above: both sides
+/// of the comparison are compile-time constants once this is monomorphized,
+/// so every other interface's destruction pays nothing -- which matters,
+/// because this sits on the destruction path of every object of every
+/// interface, including a client's per-frame `wl_buffer`s.
+fn redraw_after_lock_surface_destroyed<I>(state: &mut State)
+where
+    I: Resource,
+    I::Request: 'static,
+{
+    if TypeId::of::<I::Request>() != TypeId::of::<ext_session_lock_surface_v1::Request>() {
+        return;
+    }
+    state.lock_surface_destroyed();
 }
 
 /// The message both size-cap refusals carry. Allocating is fine here and

@@ -77,16 +77,30 @@ impl CompositorHandler for State {
     /// Smithay calls this for every `wl_surface` that goes away, whether the
     /// client destroyed it explicitly or simply quit.
     ///
-    /// The one thing this compositor keeps a `WlSurface` in outside
+    /// Two things this compositor keeps a `WlSurface` in outside
     /// `self.space`/`self.windows` (both already driven by their own
-    /// xdg-shell destruction paths) is the cursor's image status, and
-    /// nothing upstream clears that when the surface behind it dies -- see
-    /// `Cursor::forget_surface`.
+    /// xdg-shell destruction paths) need clearing here:
+    ///
+    /// - the cursor's image status, which nothing upstream clears when the
+    ///   surface behind it dies -- see `Cursor::forget_surface`;
+    /// - a session-lock surface, so a lock client tearing one down (or
+    ///   disconnecting) stops it being drawn and stops it holding the
+    ///   keyboard on the very next frame rather than at the render loop's
+    ///   own cleanup pass -- see `session_lock.rs`.
     fn destroyed(&mut self, surface: &WlSurface) {
         if self.cursor.forget_surface(surface) && self.tty.is_some() {
             // The cursor's shape just changed to the fallback; only `--tty`
             // draws one at all, same gate as `cursor_image` below.
             self.request_render();
+        }
+        if self.forget_lock_surface(surface) {
+            // Unconditional, unlike the cursor above: what the lock screen
+            // shows just changed on every backend, and either focus -- or a
+            // grab -- may have been on this surface. All three are handled
+            // for the same reason every other lock transition does it -- see
+            // `session_lock.rs`: `wl_pointer.button` follows the last
+            // `enter`, not the hit test, and a grab follows neither.
+            self.lock_transition();
         }
     }
 }

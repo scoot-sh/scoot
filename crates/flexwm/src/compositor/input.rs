@@ -86,6 +86,24 @@ impl State {
         }
     }
 
+    /// Re-runs the hit test where the pointer already is, so pointer focus
+    /// follows a change in *what is on screen* rather than waiting for the
+    /// user to move the mouse.
+    ///
+    /// Called at every session-lock transition, and that is not a nicety:
+    /// `wl_pointer.button` and `wl_pointer.axis` go to whatever surface the
+    /// pointer last *entered*, never to whatever is under it now. Without
+    /// this, the first click after a lock would still land in the window
+    /// underneath -- the hit test in [`State::surface_under`] would never be
+    /// consulted, because nothing moved.
+    pub(super) fn refresh_pointer_focus(&mut self) {
+        let Some(pointer) = self.seat.get_pointer() else {
+            return;
+        };
+        let location = pointer.current_location();
+        self.pointer_move(location.x, location.y);
+    }
+
     /// Moves the pointer by a relative delta, clamped to the current
     /// output's bounds. `--tty`'s only source of pointer motion: unlike
     /// nested's host-forwarded motion (already absolute) or IPC's
@@ -341,6 +359,25 @@ impl State {
                         let Some(bound) = data.keybindings.match_key(keysym, mods.into()) else {
                             return FilterResult::Forward;
                         };
+                        // While the session is locked, a keybinding that runs
+                        // an `Action` must not fire: `spawn` would put a
+                        // terminal on top of the lock screen, `close`/`quit`
+                        // would reach through it, and every layout action
+                        // would move windows the user cannot see. Forwarded
+                        // rather than swallowed, so the combination is just a
+                        // keystroke the lock client receives like any other
+                        // -- and deliberately *before* `suppressed_keys`, so
+                        // the matching release is forwarded too rather than
+                        // eaten as a stale entry.
+                        //
+                        // `ChangeVt` is the one exception, on purpose: it is
+                        // a session-level escape hatch, not a way into this
+                        // session (the VT it switches to has its own login),
+                        // and it is the recovery path when a lock client
+                        // wedges. See `session_lock.rs`.
+                        if data.session_lock.is_locked() && !matches!(bound, Bound::ChangeVt(_)) {
+                            return FilterResult::Forward;
+                        }
                         // Remember this keycode was intercepted so the
                         // matching release is intercepted too, rather than
                         // forwarded to whatever gains focus in between (e.g.
@@ -426,6 +463,13 @@ impl State {
     ///   `layer_keyboard_focus` answers that before `clicked_layer` is ever
     ///   consulted, so nothing here has to special-case it.
     fn focus_under_pointer(&mut self) {
+        // Nothing a click can focus exists while the session is locked:
+        // window focus must not move behind the lock screen, and the lock
+        // surface already holds the keyboard. Clicking it is how a password
+        // field gets typed into, and that needs no focus change at all.
+        if self.session_lock.is_locked() {
+            return;
+        }
         let Some(pointer) = self.seat.get_pointer() else {
             return;
         };

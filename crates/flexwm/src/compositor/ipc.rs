@@ -155,7 +155,24 @@ impl State {
             Request::Windows => Response::Windows {
                 windows: self.window_snapshots(),
             },
+            // Refused while the session is locked, and it is the only
+            // request here that is. `Action` is the one that bypasses input
+            // entirely -- `Spawn` would put a new client's window on a locked
+            // screen, `Quit` would tear the session down, and every layout
+            // action would move windows the user cannot see. The injected
+            // *input* requests below are deliberately still served: they go
+            // through the same focus and hit-test paths a real keyboard and
+            // mouse do, so while locked they can only reach the lock surface
+            // (see `session_lock.rs`), which is what lets an agent drive a
+            // lock screen exactly as a person would.
             Request::Action(action) => {
+                if self.session_lock.is_locked() {
+                    return Response::error(
+                        "refused: the session is locked; window-management actions are not \
+                         available until the lock client unlocks it (injected keyboard and \
+                         pointer input still works, and reaches only the lock screen)",
+                    );
+                }
                 self.act(Action::from(action));
                 Response::Ok
             }
