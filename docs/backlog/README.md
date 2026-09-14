@@ -28,7 +28,7 @@ actionable.
 - [`xdg-activation-v1`](./protocols/xdg-activation.md) — clients asking each other to be focused
 - [Foreign-toplevel management](./protocols/foreign-toplevel-management.md) — window enumeration for taskbars/switchers
 - [`cursor-shape-v1`](./protocols/cursor-shape.md) — named cursor shapes without client-side themes
-- [No `xdg_popup` ever receives its initial configure](./protocols/xdg-popup-never-configured.md) — no menus/popups map at all
+- [Popup input](./protocols/xdg-popup-input.md) — popups map/draw (initial-configure fix, resolved), but keyboard focus/grabs and layer-parented popups still missing
 - [Layer surface with no buffer still holds its exclusive zone](./protocols/layer-surface-bufferless-exclusive-zone.md)
 - [Unbounded `ext_workspace_manager_v1` binds per client](./protocols/ext-workspace-object-binding-cap.md)
 - [Lock surfaces are per-output; flexwm has one output](./protocols/lock-surfaces-per-output.md)

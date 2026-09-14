@@ -311,10 +311,12 @@ What doesn't, yet:
   up, and everything behind it is still drawn and still capturable. Treat one
   as a screen *blanker* you can type a password into, not as something that
   keeps anyone out.
-- **Popups from a layer surface** (a bar's own dropdown menu or tooltip) are
-  not tracked yet, for a reason that predates this: flexwm doesn't send the
-  initial configure for *any* `xdg_popup` yet, so no popup maps, from a window
-  or a layer surface. Also in the backlog.
+- **Popup input** (keyboard focus, grabs, layer-parented popups): popups
+  *map and draw* since the initial-configure fix — an ordinary window's
+  menus render — but keyboard focus never moves onto one, popup grabs
+  are still a no-op, and a bar's own dropdown menus/tooltips (popups
+  parented to a *layer* surface) are still untracked. Also in the
+  backlog (`xdg-popup-input.md`).
 - **`flexwm msg outputs`** reports each output's *full* rectangle (in logical
   pixels, along with the output's `scale`). The reserved area a bar takes
   isn't exposed over IPC yet; an agent asking "how big is the screen" gets the

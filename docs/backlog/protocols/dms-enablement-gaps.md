@@ -124,8 +124,12 @@ list behind that.
   so the shell reads as working — but the true-popup paths have nowhere to
   go. Dynamic tooltip check (hover bell 4s) was negative but weak (may be
   DMS config); the backlog entry's "no popups map at all" stands.
-- Rough size: M. Already filed as
-  `docs/backlog/protocols/xdg-popup-never-configured.md`.
+- Rough size: M. The mapping half (no initial configure, so no popup
+  maps) resolved 2026-09-14:
+  `docs/backlog/resolved/xdg-popup-initial-configure-resolved.md`. What
+  remains is the input half, filed as
+  `docs/backlog/protocols/xdg-popup-input.md` (grabs, keyboard focus,
+  layer-parented popups).
 
 ### 6. No screencopy / image-capture (`wlr-screencopy`, `ext-image-capture-source`)
 
@@ -173,12 +177,36 @@ bus, all logged by DMS/quickshell as unavailable, none compositor-related.
 The weather widget still showed 24°C and notifications/audio-adjacent UI
 rendered; these only limit live data, not protocol conclusions.
 
+## Re-probe 2026-09-14 (evening, post-#34 + post-#36) — gap 1 closed for DMS
+
+- flexwm at `7f937bd` (current `main`), rebuilt in the dev VM
+  (`/var/cargo-target/debug/flexwm`, incremental, 8s).
+  DMS 1.5.3 + quickshell 0.3.1 from nixpkgs, ephemeral, no VM mutation.
+- **Unlock path: fixed.** `dms ipc call lock lock` → lock screen renders
+  (clock, password field focused); `msg type "dev"` + `msg key Return` →
+  PAM auth OK → server log shows clean `locking the session` →
+  `unlocking the session` with no protocol-error kill; dms/quickshell
+  pids unchanged; post-unlock screenshot is the live desktop (bar +
+  wallpaper, 70407 bytes — not the 30046-byte all-black kill frame).
+  The "inferred fixed, proven only for Noctalia" caveat is closed.
+- **Overlay dismissal: survives.** `dms ipc call spotlight toggle` →
+  `SPOTLIGHT_TOGGLE_SUCCESS`, overlay renders (search box, real VM
+  .desktop entries, Applications only — still no Windows section, gap 2
+  stands); `msg key Escape` dismisses; shell survives. This is the exact
+  spotlight teardown that killed DMS 4/4 in the original probe.
+- Side notes: fresh DMS config shows a first-run wizard (xdg-toplevel
+  "Welcome" window); pointer clicks reach it (dismissed via its ✕).
+  `flexwm msg` needs `FLEXWM_SOCKET=<ipc socket>` — `--socket` sets the
+  IPC socket, the Wayland display stays `wayland-1`.
+- Screenshots: local `/tmp/dms-reprobe-*.png` on the Mac, not committed.
+
 ## Recommended build order
 
 1. **Gap 1 (destroy kill)** — P0; the shell cannot survive normal use, and
    any Qt layer-shell client likely trips the same path.
-2. **Gap 5 (`xdg_popup`)** — already filed; unlocks menus/tooltips once the
-   shell survives.
+2. **Gap 5 (`xdg_popup`)** — input half filed
+   (`xdg-popup-input.md`; the mapping half resolved); unlocks
+   menus/tooltips once the shell survives.
 3. **Gap 3 (idle)** — already roadmap-next; unlocks auto-lock, pairing with
    the now-proven session lock.
 4. **Gap 2 (foreign-toplevel)** — already filed; unlocks window lists.

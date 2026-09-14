@@ -189,11 +189,13 @@ anything.
 
 ### 5. `xdg_popup` never configured — reproduces (untested live, same standing as DMS)
 
-- Zero `xdg_popup` wire traffic across the whole session. Noctalia
-  routes its panels through layer-shell like DMS does, so everything
+- Zero `xdg_popup` wire traffic across the whole session. Noctalia routes
+  its panels through layer-shell like DMS does, so everything
   exercised works — but context menus/tooltips on the true-popup path
   have nowhere to go. Same entry:
-  `docs/backlog/protocols/xdg-popup-never-configured.md`.
+  `docs/backlog/protocols/xdg-popup-input.md`. (The mapping half — no
+  initial configure, so no popup maps — resolved 2026-09-14; see
+  `docs/backlog/resolved/xdg-popup-initial-configure-resolved.md`.)
 
 ### 6. No screencopy / image-capture — reproduces
 
