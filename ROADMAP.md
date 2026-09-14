@@ -58,6 +58,35 @@ read of it, not a commitment:
    [`--width/--height`
    bounds](docs/backlog/core/width-height-unbounded.md).
 
+## Shell enablement (DMS / Noctalia probes, 2026-09-14)
+
+Two Quickshell shells were probed end to end
+([DMS gaps](docs/backlog/protocols/dms-enablement-gaps.md),
+[Noctalia results](docs/backlog/protocols/noctalia-probe.md)) after
+landing gamma-control, both data-controls and primary selection
+(PR #32) plus two destroy-teardown kill fixes (PRs #34, #36). Both
+shells render fully; Noctalia is the better target (generic
+`ext-workspace-v1` backend, richer IPC). Remaining gaps, in the
+probes' recommended order:
+
+1. [`xdg_popup`](docs/backlog/protocols/xdg-popup-never-configured.md)
+   — menus/tooltips (no popup maps at all today).
+2. Item 2 above (idle) — auto-lock, pairing with the proven session
+   lock; first real clients now confirmed.
+3. [`foreign-toplevel`](docs/backlog/protocols/foreign-toplevel-management.md)
+   — window lists (check for an `ext-` successor first).
+4. [`output-management`](docs/backlog/protocols/output-management.md)
+   — shell display/settings pages.
+5. [`screencopy / image-capture`](docs/backlog/protocols/screencopy-capture.md)
+   — thumbnails/overview previews (filed 2026-09-14; IPC screenshots
+   stay regardless).
+6. DMS unlock-path re-probe — inferred fixed by PRs #34+#36, proven
+   only for Noctalia; ~10 minutes in the dev VM.
+
+Small follow-ups already filed alongside:
+[`gamma-control`](docs/backlog/protocols/gamma-control-followups.md),
+[`layer-destroy`](docs/backlog/protocols/layer-destroy-review-followup.md).
+
 Item 6 (the GPU pipeline) remains the one *ordered* milestone still open; it
 has never been ahead of the daily-drivability and correctness work the backlog
 keeps producing, and that trade can be revisited at any time.
