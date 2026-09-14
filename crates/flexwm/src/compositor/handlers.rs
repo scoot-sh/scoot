@@ -21,6 +21,15 @@ use smithay::wayland::selection::SelectionHandler;
 use smithay::wayland::selection::data_device::{
     DataDeviceHandler, DataDeviceState, WaylandDndGrabHandler, set_data_device_focus,
 };
+use smithay::wayland::selection::ext_data_control::{
+    DataControlHandler as ExtDataControlHandler, DataControlState as ExtDataControlState,
+};
+use smithay::wayland::selection::primary_selection::{
+    PrimarySelectionHandler, PrimarySelectionState, set_primary_focus,
+};
+use smithay::wayland::selection::wlr_data_control::{
+    DataControlHandler as WlrDataControlHandler, DataControlState as WlrDataControlState,
+};
 use smithay::reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode;
 use smithay::wayland::shell::xdg::decoration::XdgDecorationHandler;
 use smithay::wayland::shell::xdg::{
@@ -276,7 +285,13 @@ impl SeatHandler for State {
     fn focus_changed(&mut self, seat: &Seat<Self>, focused: Option<&WlSurface>) {
         let handle = &self.display_handle;
         let client = focused.and_then(|surface| handle.get_client(surface.id()).ok());
-        set_data_device_focus(handle, seat, client);
+        set_data_device_focus(handle, seat, client.clone());
+        // Without this, no regular primary-selection device is ever offered
+        // anything: Smithay only sends the primary selection to a device
+        // whose client holds the primary focus, and nothing else sets it.
+        // (Data-control devices bypass focus, which is why the clipboard
+        // protocols worked without it.) Same pair anvil calls.
+        set_primary_focus(handle, seat, client);
     }
 }
 
@@ -289,6 +304,31 @@ impl SelectionHandler for State {
 impl DataDeviceHandler for State {
     fn data_device_state(&mut self) -> &mut DataDeviceState {
         &mut self.data_device_state
+    }
+}
+
+/// `zwlr_data_control_manager_v1` (clipboard managers) and
+/// `ext_data_control_manager_v1` (its successor): both Smithay states, both
+/// routed here. The two `DataControlHandler` traits share a name across
+/// modules -- hence the aliases on import -- but route to different fields,
+/// so there is no ambiguity about which clipboard generation a request came
+/// through.
+impl WlrDataControlHandler for State {
+    fn data_control_state(&mut self) -> &mut WlrDataControlState {
+        &mut self.wlr_data_control_state
+    }
+}
+
+impl ExtDataControlHandler for State {
+    fn data_control_state(&mut self) -> &mut ExtDataControlState {
+        &mut self.ext_data_control_state
+    }
+}
+
+/// `zwp_primary_selection_device_manager_v1` (middle-click paste).
+impl PrimarySelectionHandler for State {
+    fn primary_selection_state(&mut self) -> &mut PrimarySelectionState {
+        &mut self.primary_selection_state
     }
 }
 

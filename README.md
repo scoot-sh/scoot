@@ -45,7 +45,10 @@ notification daemons work — including keyboard focus for the ones that ask
 for it (see Layer-shell clients below), `ext-workspace-v1`, so those
 bars can also list, follow and switch workspaces (see Workspaces for bars
 below), `ext-session-lock-v1`, so a real screen locker can lock the session
-with the compositor itself enforcing it (see Screen locking below), and
+with the compositor itself enforcing it (see Screen locking below), the
+clipboard/primary-selection globals and `zwlr_gamma_control_manager_v1`, so
+clipboard managers, middle-click paste and night-light tools work (see
+Clipboard managers and Night light below), and
 output scaling (`[output] scale` over `wl_output.scale`,
 `wp_fractional_scale_v1`, `wl_surface.preferred_buffer_scale` and
 `wp_viewporter`, so a HiDPI panel gets
@@ -528,6 +531,57 @@ its connection and its `wl_surface`s are still perfectly alive.
 - **No idle trigger.** Nothing locks the session automatically — there is no
   `ext-idle-notify-v1` yet, so a `swayidle`-style daemon has nothing to watch.
   Locking is whatever you run (from a keybinding's `spawn`, say).
+
+## Clipboard managers and primary selection
+
+flexwm exposes all three selection globals, on every backend, available to
+every client (no security-context support here, so an allow-list would be
+theatre — same trust model as the session-lock global: a same-uid process is
+inside the boundary, see Screen locking above):
+
+- **`zwlr_data_control_manager_v1`** (version 2): clipboard managers
+  (`cliphist`, `clipman`). Set the clipboard without needing focus, read
+  anything any client copies.
+- **`ext_data_control_manager_v1`** (version 1): the successor protocol.
+  Both generations are exposed side by side, as current compositors do, so a
+  manager speaks whichever one it was written for.
+- **`zwp_primary_selection_device_manager_v1`** (version 1): middle-click
+  paste. Unlike the clipboard, this one is focus-gated — the compositor only
+  accepts a `set_selection` from the client holding the keyboard, and only
+  offers the selection to devices whose client holds it. A background client
+  setting the primary selection is silently denied, not queued.
+
+## Night light (`zwlr_gamma_control_manager_v1`)
+
+flexwm implements `zwlr_gamma_control_manager_v1` (version 1), so
+`gammastep` and `wlsunset` work, on every backend, available to every client
+(same trust note as above — there is no privileged seat to reserve this
+for). One control per output, and flexwm has exactly one output: a second
+`get_gamma_control` transfers control, the old control gets `failed` and
+stops affecting anything, and destroying the live control (or disconnecting
+with one held) restores the default linear ramp.
+
+What actually happens to the ramp depends on the backend:
+
+- **Under `--tty`**, the ramp is pushed to the CRTC gamma LUT, so the screen
+  really warms. The advertised `gamma_size` is the CRTC's own (256 on the
+  hardware measured so far); anything the DRM device refuses retires the
+  control with `failed` and the session keeps running.
+- **Under `--headless`/`--nested`** there is no hardware LUT, so the ramp is
+  accepted and stored but changes nothing on screen — and a `flexwm msg
+  screenshot` reads the framebuffer, which is pre-LUT, so captures show the
+  unmodified frame either way. `gamma_size` is 256 there.
+
+A `set_gamma` fd must hold exactly three ramps of `gamma_size`
+little-endian `u16` entries (red, green, blue); anything else — short, long,
+empty, unreadable — is an `invalid_gamma` protocol error. Gamma control keeps
+working while the session is locked: it changes no pixel's content, only the
+output's color temperature, so a daemon warming the screen over a lock screen
+is the ordinary case.
+
+No config option, keybinding, CLI flag or IPC surface comes with any of
+this: clipboard, primary selection and gamma are pure Wayland protocols, used
+by existing clients as-is.
 
 ## Output scaling
 
