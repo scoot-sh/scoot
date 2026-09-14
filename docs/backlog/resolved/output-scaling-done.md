@@ -28,12 +28,15 @@ bump — the planned `usable`-rect/focus-workspace bundle is untouched).
 
 **Follow-up (2026-09-14):** this landed the fractional path but created the
 `wl_compositor` global at version 5, so clients never received the integer
-`wl_surface.preferred_buffer_scale` (a v6 event) that backs the fractional
-`preferred_scale` up. Ghostty failed to load at `[output] scale = 1.5` for
-exactly that reason. Fixed in
-[`fractional-scale-preferred-buffer-scale-done.md`](fractional-scale-preferred-buffer-scale-done.md)
-(global now v6; `send_surface_state` called from `new_surface`/`commit`);
-real-hardware confirmation on the reporting Asahi M2 is still pending.
+`wl_surface.preferred_buffer_scale` (a v6 event) that accompanies the
+fractional `preferred_scale`. That gap is fixed in
+[`fractional-scale-integer-companion-done.md`](fractional-scale-integer-companion-done.md)
+(global now v6; `send_surface_state` called from `new_surface`). Note the
+reported symptom that surfaced it — Ghostty failing to load at
+`[output] scale = 1.5` — is **not** confirmed fixed by this, and review found
+GTK4 ignores that event while a fractional object exists; it is tracked
+separately and still open in
+[`../protocols/ghostty-fails-at-1-5.md`](../protocols/ghostty-fails-at-1-5.md).
 
 The original diagnosis is kept below for history.
 

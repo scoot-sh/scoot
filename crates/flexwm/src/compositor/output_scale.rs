@@ -162,24 +162,23 @@ fn set_preferred_scale(surface: &WlSurface, scale: f64) {
 }
 
 /// Sends `surface` the integer `preferred_buffer_scale` (and the default
-/// `preferred_buffer_transform`) that backs up [`set_preferred_scale`], through
-/// Smithay's own `send_surface_state`.
+/// `preferred_buffer_transform`) that accompanies [`set_preferred_scale`],
+/// through Smithay's own `send_surface_state`.
 ///
-/// Both are needed, and a client may receive both: `wp_fractional_scale_v1`
-/// carries the exact `1.5`, but a client that opts into it still expects the
-/// integer preference `wl_surface.preferred_buffer_scale` carries (it is a
-/// different protocol object, so one does not imply the other). Without it a
-/// fractional client has a `preferred_scale` it cannot act on -- the gap that
-/// made Ghostty fail to render at `1.5` while `foot` (which does not rely on
-/// the integer companion) worked. See
-/// `docs/backlog/resolved/fractional-scale-preferred-buffer-scale-done.md`.
+/// This is for protocol completeness, matching wlroots: a v6 client that binds
+/// `wp_fractional_scale_v1` is entitled to the integer companion too, and
+/// sending it is what a client is otherwise left to infer. It is **not**
+/// established that this fixes the reported Ghostty-at-`1.5` symptom — see
+/// `docs/backlog/protocols/ghostty-fails-at-1-5.md`, which keeps that
+/// confirmation open, and the finding that GTK4 does not act on this event
+/// while a fractional object exists.
 ///
 /// `send_surface_state` caches the last `(scale, transform)` per surface in
 /// that surface's own state and only emits when either differs, so a surface
-/// that commits at the same fixed scale emits nothing after its first call.
-/// It also early-returns for a surface below `wl_compositor` v6, so a client
-/// that never opted into the event pays only a version check. Neither path
-/// allocates.
+/// at the fixed scale emits nothing after its first call. It also
+/// early-returns for a surface below `wl_compositor` v6, so a client that never
+/// opted into the event pays only a version check. The first call on a v6
+/// surface allocates the cache entry; every later call does not.
 pub(super) fn send_preferred_buffer_scale(surface: &WlSurface, integer_scale: i32) {
     with_states(surface, |states| {
         send_surface_state(surface, states, integer_scale, Transform::Normal);

@@ -554,13 +554,12 @@ It is advertised three ways, matching what clients actually support:
   buffer (it sets the surface's logical destination size and flexwm scales the
   buffer into it) — without it, a fractional client has no way to render.
 - **`wl_surface.preferred_buffer_scale`** (needs client `wl_compositor` v6) —
-  the integer preference that backs the fractional value up, sent with the
+  the integer preference that accompanies the fractional value, sent with the
   default `preferred_buffer_transform` (`normal`). It is a separate event on a
   separate object from the fractional one, so a client that opts into
   fractional scaling receives **both**: the exact `1.5` *and* the integer `2`.
-  Some toolkits (GTK4/Ghostty among them) act on the fractional value only when
-  the integer companion is also present; without it, a fractional session
-  silently fails to render where an integer one works. A client below
+  This is protocol completeness (it is what wlroots sends); it is not claimed
+  to be what makes any particular toolkit render. A client below
   `wl_compositor` v6 is not sent the event and keeps the implicit default of 1,
   exactly as before.
 
@@ -679,7 +678,7 @@ all.)
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
-| `scale` | float | `1.0` | Output scale advertised to clients and rendered at. `1.0` is byte-identical to no setting at all; anything else advertises `ceil(scale)` on `wl_output` and `wl_surface.preferred_buffer_scale`, and the exact value through `wp_fractional_scale_v1`/`wp_viewporter` (see Output scaling above). Clamped into `0.5..=4.0` with a warning, and a non-finite value falls back to `1.0`; startup-only. `--nested` ignores a non-1.0 value with a warning. |
+| `scale` | float | `1.0` | Output scale advertised to clients and rendered at. `1.0` renders identically to no setting at all; anything else advertises `ceil(scale)` on `wl_output` and `wl_surface.preferred_buffer_scale`, and the exact value through `wp_fractional_scale_v1`/`wp_viewporter` (see Output scaling above). Clamped into `0.5..=4.0` with a warning, and a non-finite value falls back to `1.0`; startup-only. `--nested` ignores a non-1.0 value with a warning. |
 
 ### `[binds]`
 

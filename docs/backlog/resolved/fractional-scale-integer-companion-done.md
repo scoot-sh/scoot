@@ -1,12 +1,18 @@
 ---
-title: "A fractional-scale client was sent `wp_fractional_scale_v1.preferred_scale` but never the integer `wl_surface.preferred_buffer_scale` that backs it up, so `[output] scale = 1.5` clients (Ghostty) failed to load while `1.0`/`2.0` and integer-only clients (foot) worked — DONE; protocol gap fixed and regression-tested on the dev VM, real-hardware confirmation on the reporter's Asahi M2 still pending."
+title: "A `wp_fractional_scale_v1` client was sent the fractional `preferred_scale` but never the integer `wl_surface.preferred_buffer_scale` (a v6 event) — DONE; the protocol gap is fixed and regression-tested"
 status: "resolved"
 area: "resolved"
 priority: null
 blocked: null
 ---
 
-# Fractional scaling sent the fractional value but not its integer companion — DONE
+# The integer `preferred_buffer_scale` companion was never sent — DONE
+
+**Scope, stated up front:** this fixes a real, independently verified protocol
+gap (a v6 client received the fractional value but not its integer companion).
+It is **not** a confirmed fix for the Ghostty-at-`1.5` symptom that surfaced it
+— review found GTK4 ignores this event while a fractional object exists. See
+`../protocols/ghostty-fails-at-1-5.md`, which stays open for that symptom.
 
 Reported by the user on their Asahi Linux (M2) laptop, 2026-09-14, right after
 `[output] scale` (PR #30) landed:
@@ -34,24 +40,28 @@ In the pinned Smithay rev (`~/.cargo/git/checkouts/smithay-*/0ff0098/`):
 - flexwm's `CompositorHandler::commit` called `on_commit_buffer_handler` but
   never `send_surface_state`, and `new_surface` was the trait default (a no-op).
 
-Consequence: a client that opts into `wp_fractional_scale_v1` (Ghostty) was sent
-the exact fractional `preferred_scale` but no integer
-`preferred_buffer_scale`. `foot` does not rely on that integer companion and
-worked at both scales (live-checked below); the client-side need for it is
-what differed, not the compositor's fractional advertisement. At `2.0` the
-fractional and integer values coincide, masking the gap; at `1.5` they diverge
-and the client's fractional path was unbacked.
+Consequence: a client that opts into `wp_fractional_scale_v1` was sent the exact
+fractional `preferred_scale` but no integer `preferred_buffer_scale`. That is a
+genuine protocol gap regardless of which client tripped over it: the two are
+separate objects and one does not imply the other. (The original theory — that
+foot is an integer-only client and Ghostty a fractional one, and that this
+difference explains the symptom — was wrong: live capture showed foot binds
+`wp_fractional_scale_v1` and `wp_viewporter` too. foot simply tolerates the
+missing companion; the client-side need for it is not established, see the open
+entry.)
 
 ## Fix
 
 1. `state.rs` now builds the global with `CompositorState::new_v6::<Self>`, so
    clients may bind `wl_compositor` v6 and receive the event.
-2. `CompositorHandler::new_surface` and `::commit` call a new
+2. `CompositorHandler::new_surface` calls a new
    `output_scale::send_preferred_buffer_scale`, which forwards to Smithay's
    `send_surface_state` with `integer_scale = ceil(output_scale)` (the same
-   integer `wl_output.scale` advertises, cached on `State` so the per-commit
-   path only reads an `i32`) and `Transform::Normal` (what `headless::set_mode`
-   uses).
+   integer `wl_output.scale` advertises, cached on `State`) and
+   `Transform::Normal` (what `headless::set_mode` uses). Only `new_surface`
+   calls it: Smithay runs that hook for every surface `create_surface` makes,
+   and the scale is fixed, so a per-commit call would just be a no-op cache hit
+   on the hot path.
 3. The fractional `preferred_scale` path is unchanged; a client that opts into
    it now receives **both** events, which is the intended, protocol-correct
    behavior — each covers clients that speak only one.
@@ -97,10 +107,12 @@ and is emitted.
   (~34–46 ms both ways on the dev VM), consistent with a non-allocating
   per-surface-cached lookup.
 
-**Still pending real hardware.** Ghostty is not installed on the dev VM and the
-dev VM's virtual display cannot stand in for the reporter's Asahi M2 panel, so
-this fix was **not** confirmed to resolve the Ghostty `1.5` symptom on real
-hardware. The confirmed part is that a v6 client now actually receives the
-integer `preferred_buffer_scale`, which is the diagnosed gap. If real-hardware
-confirmation shows Ghostty's `1.5` failure has a different cause, this entry
-should be reopened.
+**Real hardware did not confirm the symptom is fixed, and review suggests it
+may not be.** Ghostty is not installed on the dev VM and the dev VM's virtual
+display cannot stand in for the reporter's Asahi M2 panel. Worse, GTK4's own
+`surface_preferred_buffer_scale` (`gdk/wayland/gdksurface-wayland.c`) returns
+early whenever a `wp_fractional_scale_v1` object exists — which it always does
+now — so a GTK4/Ghostty client likely ignores the event this fix adds. The
+confirmed part is that a v6 client now actually receives the integer
+`preferred_buffer_scale`, closing the diagnosed protocol gap. The Ghostty `1.5`
+failure itself remains open: `../protocols/ghostty-fails-at-1-5.md`.
