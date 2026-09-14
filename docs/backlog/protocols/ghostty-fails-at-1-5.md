@@ -46,23 +46,68 @@ What that means:
 - It is **not established** that sending it makes Ghostty load at `1.5`. The
   root cause of the reported failure is therefore **unknown** as of this entry.
 
+## Local reproduction attempt (2026-09-14) — did NOT reproduce
+
+Attempted on the dev VM rather than guessing, per step 3 above. Ghostty **is**
+installable there (`nix-shell -p ghostty` → 1.3.1). With `main` at `6cf1106`
+(includes #30 and #31), under `--headless` at a virtual output:
+
+| client | scale 1.5 | scale 2.0 |
+| --- | --- | --- |
+| `ghostty --gtk-single-instance=false` 1.3.1, kept alive | **maps** (logical 409×510) | maps (360×376) |
+| `gtk4-demo` (GTK 4.22.4) | maps | maps |
+| `foot` | maps | maps |
+
+Ghostty rendered real content at 1.5 (a 1280×800 screenshot at scale 1.5 was
+35,623 bytes of drawn frame, not a blank backdrop). The logical rects shrinking
+as scale rises (409×510 at 1.5 vs 360×376 at 2.0; a fresh run gave 302×376 at
+2.0 with a different window title/decoration) shows GTK4/Ghostty are honoring
+the fractional scale — flexwm's protocol side is delivering.
+
+**So this is not reproducible on the dev VM, and the earlier theory that it is
+output-scaling's fault is unsupported.** Three harness artifacts during this
+investigation each looked like the bug and were not:
+
+- A fixed 4–5 s wait was too short for GTK4/Ghostty to map under software GL
+  (they need ~7 s; foot needs ~0.5 s) — "no windows mapped" was timing.
+- A first binary tested predated the output-scaling feature — an apples-to-
+  oranges comparison that briefly suggested a pre-existing GTK4 bug.
+- `ghostty -e true` exits immediately, so the window opens and closes in a
+  fraction of a second; polling after it was gone read as "doesn't load" at
+  both scales. Keeping the process alive (`-e sh -c "sleep 60"`) makes it
+  deterministic.
+
+Anyone re-running this must **poll for the window** and **keep the client
+alive**; a fixed sleep plus a command that exits will produce a false failure.
+
+## What this narrows it to
+
+The failure is specific to the reporter's machine, so the distinguishing
+variable is not "GTK4 at 1.5" in general. Candidates, roughly:
+
+1. **Ghostty version.** Dev VM has 1.3.1. An older or newer Ghostty may have
+   different fractional-scale behavior; the reporter's version is unknown.
+2. **The GPU/GL path.** The dev VM falls back to software (Mesa `swrast`/
+   `zink` failures are all over its logs); the Asahi M2 runs a real
+   GPU-accelerated GL/EGL path. A fractional buffer allocation failure in
+   Ghostty's GPU renderer would not reproduce under software rendering —
+   this is the leading hypothesis, and it is the one thing the VM structurally
+   cannot exercise.
+3. **`wl_output` version or other global differences** the VM's flexwm also has,
+   so less likely.
+
 ## What to do next
 
-The only way to settle it is the reporter's hardware:
-
-1. Pull `main` (after #31) and retry `[output] scale = 1.5` with Ghostty. If it
-   now loads, the integer companion mattered despite the GTK4 source; if it
-   still fails, the cause is elsewhere.
-2. If it still fails, gather Ghostty's own stderr/`WAYLAND_DEBUG=1` output at
-   1.5 specifically, and compare against foot's at the same scale. Candidates
-   worth checking next: whether Ghostty's fractional buffer sizing trips the
-   viewport destination path (a buffer the compositor then rejects or draws
-   zero-sized), or whether it needs `wp_viewporter` on a surface flexwm does
-   not yet wire, or a specific `wl_output` version it does not get.
-3. A local reproduction is preferable to guessing: Ghostty is a GTK4 client,
-   so a minimal GTK4 app (or even `gtk4-demo`/`gtk4-widget-factory`) run under
-   `--headless` at scale 1.5 on the dev VM may reproduce the same class of
-   failure and give a debuggable stack without the reporter's panel.
+1. **Ask the reporter for their Ghostty version** (`ghostty --version`) and,
+   at 1.5, `WAYLAND_DEBUG=1 ghostty` stderr — specifically the lines after the
+   first `wl_surface.commit`, and any EGL/GL error. That distinguishes (1)
+   from (2) immediately.
+2. If it is the GPU path, the tell will be a Ghostty-side EGL/GL error rather
+   than a Wayland protocol error — in which case flexwm's scaling is not the
+   defect and the fix (if any) is Ghostty-side or a workaround
+   (`scale = 2.0`, or Ghostty's own `window-scale`/font-size setting).
+3. Do not ship a compositor change for this until the stderr names a flexwm
+   defect. The protocol work (#30, #31) stands on its own merits regardless.
 
 ## Related
 
