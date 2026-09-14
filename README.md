@@ -31,14 +31,15 @@ Early, but all three Wayland backends are real and working: `--headless`
 (pixman rendering, xdg-shell, seat/input, full IPC control surface),
 `--nested` (runs as a window inside an existing compositor, e.g. for webtop),
 and `--tty` (a real DRM/KMS + libseat + libinput backend on actual hardware,
-including VT switching; it tries every DRM device on the seat rather than
-trusting the first guess, and takes `--gpu PATH` when even that picks wrong,
-see Which DRM device `--tty` drives below; and it draws a pointer cursor —
-a client's own cursor image when it supplies one, a built-in shape
-otherwise, whose size and color the config file can override). Also done: vim-style
-keybindings, a TOML config file (`--config`, `[layout]`/`[appearance]`/
-`[binds]`, see Configuration below), window decorations (a niri-style focus
-ring, background color, server-side `zxdg_decoration_manager_v1`),
+including VT switching; it picks its DRM device by trying every one on the
+seat rather than trusting the first guess, and takes `--gpu PATH` when even
+that picks wrong — see Which DRM device `--tty` drives below; and it renders
+a pointer cursor, a client's own image when it supplies one, a built-in shape
+otherwise, whose size and color the config file can override). Also done:
+vim-style keybindings, a TOML config file (`--config`, `[layout]`/
+`[appearance]`/`[binds]`, see Configuration below), window decorations (a
+niri-style focus ring, background color, server-side
+`zxdg_decoration_manager_v1`),
 `wlr-layer-shell-unstable-v1`, so bars, docks, wallpapers, launchers and
 notification daemons work — including keyboard focus for the ones that ask
 for it (see Layer-shell clients below) — plus `ext-workspace-v1`, so those
