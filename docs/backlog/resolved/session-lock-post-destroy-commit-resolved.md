@@ -11,7 +11,7 @@ blocked: null
 ## Resolution (2026-09-14)
 
 Fixed flexwm-side; the pinned test is inverted (the client now survives)
-with eight sibling tests covering both teardown orders, both by-design
+with nine sibling tests covering both teardown orders, both by-design
 kills, and the takeover/abandoned paths.
 
 - **Resolution (a) is closed as confirmed fatal.** The Noctalia probe
@@ -39,13 +39,17 @@ kills, and the takeover/abandoned paths.
   because the real teardown commits after it).
 - **The `NullBuffer` facet turned out fixable after all** -- not by
   waiving the error through any public API (still impossible), but by not
-  reaching it: the interception clears the pending `Removed` (public
-  `SurfaceAttributes.buffer`) on destroyed-role surfaces, turning the
-  null commit into the bare commit the unmapped surface means. A live
-  role's mapped-surface null commit still dies with `NullBuffer`, and a
-  never-acked content commit still dies with `CommitBeforeFirstAck` --
-  both pinned by tests, since the carve-out keys off "acked plus
-  reset-observed", which only a destroyed role satisfies.
+  reaching it. Check order matters here: `pre_commit_hook` demands the ack
+  first, so a post-destroy null commit posts `CommitBeforeFirstAck`, not
+  `NullBuffer` -- the `NullBuffer` facet is latent, biting only once
+  `last_acked` is restored. The interception therefore also clears the
+  pending `Removed` (public `SurfaceAttributes.buffer`) on
+  destroyed-role surfaces, turning the null commit into the bare commit
+  the unmapped surface means. A live role's mapped-surface null commit
+  still dies with `NullBuffer`, and a never-acked content commit still
+  dies with `CommitBeforeFirstAck` -- both pinned by tests, since the
+  carve-out keys off "acked plus reset-observed", which only a destroyed
+  role satisfies.
 - **Not (b):** no upstream Smithay change was needed, so none was made.
 
 Original entry, left as written:

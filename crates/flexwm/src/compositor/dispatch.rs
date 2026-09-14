@@ -203,7 +203,11 @@
 //! Quickshell client proved, on every unlock) makes Smithay reset that
 //! surface's role state, and the client's next commit on the surviving
 //! `wl_surface` then trips the role's commit-time validation on the reset:
-//! a bare commit posts `CommitBeforeFirstAck`, a null commit `NullBuffer`.
+//! `pre_commit_hook` demands the ack first, so any post-destroy commit --
+//! bare or null -- posts `CommitBeforeFirstAck`. Restoring the ack alone
+//! would only promote a null commit to the next check, `NullBuffer`, which
+//! is why the interception also clears the pending `Removed`, turning the
+//! null commit into the bare commit the now-unmapped surface means.
 //! Either kills the client -- on unlock, its entire shell. See
 //! `docs/backlog/resolved/session-lock-post-destroy-commit-resolved.md`, and
 //! [`State::prepare_post_destroy_lock_commit`](super::session_lock) for what
