@@ -113,9 +113,13 @@ symptom instead of the cause:
 
 - The run takes over the foreground VT's display, and seatd allows exactly one
   client on a VT-bound seat at a time. Start a second `--tty` (or sway, or
-  anything else on libseat) while one is up and it exits with
-  `flexwm: Failed to open device: Operation not permitted`, with
-  `seat is VT-bound and has an active client` in `journalctl -u seatd`.
+  anything else on libseat) while one is up and it exits 1 with
+  ``flexwm: the session refused every DRM device on seat `seat0`: the seat is
+  what failed here, not the choice of device …`` and, under it, the device it
+  tried and `Failed to open device: Operation not permitted (os error 1)`.
+  `journalctl -u seatd` says `seat is VT-bound and has an active client`. See
+  the concurrent-agents entry under Troubleshooting for why this is easy to
+  misread as a bug in whatever you were testing.
 - It needs `XDG_RUNTIME_DIR` for the wayland socket, which a login session
   provides — ssh and tty1's autologin both do, a bare `su dev -c ...` does
   not (`no wayland socket: $XDG_RUNTIME_DIR is not set or invalid`).
@@ -259,6 +263,41 @@ scanout proof: the CRTC's plane points at a flexwm-allocated framebuffer
 (full commit)` line in flexwm's log with no immediately-following `WARN …
 drm commit/page flip failed` (its own error path, not a generic "error") is
 itself proof master was held at that moment.
+
+**Two agents (or two shells) verifying `--tty` at once, and one of them gets an
+errno that has nothing to do with what it was testing.** The seat takes one
+client at a time (see The flexwm loop above), so *anything* holding it — a
+benchmark script, a `timeout 30 flexwm --tty` left running, sway — makes every
+other `--tty` start fail at `Session::open` with `Operation not permitted`,
+whatever that other run was actually exercising. This has really happened here:
+a benchmark from an unrelated task held the seat while PR #27's `--gpu` cases
+were being reproduced, and the EPERM read as a `--gpu` bug until the holder was
+noticed. Check before you start, and again if an errno surprises you:
+
+```sh
+pgrep -a flexwm; pgrep -a sway            # nothing should be holding it
+sudo journalctl -u seatd -n 5 --no-pager  # "Removed client N" = seat free now
+```
+
+Either wait for the other run to finish or coordinate — do not "fix" the
+symptom. (flexwm's own error says the seat is what failed rather than blaming
+device choice, but only when *every* candidate failed that way.)
+
+**A change you just made doesn't show up in the binary you just ran.**
+`CARGO_TARGET_DIR` is set to `/var/cargo-target` globally on this VM (guest
+disk, not the 9p mount — that's deliberate, it's much faster), which means
+every checkout built here writes to the *same* `debug/flexwm`. Build two trees
+concurrently, or build in one ssh session while running from another, and the
+binary you run can be the other tree's. Symptom: a log line or error message
+that matches neither the code you edited nor the code you reverted to. Check
+the binary is newer than the edit before trusting any run:
+
+```sh
+ls -l --time-style=full-iso /var/cargo-target/debug/flexwm
+```
+
+Same applies to `cargo test` output when two builds race — rerun it once the
+other build has finished rather than debugging the result.
 
 **`nix run ./vm` wants to build aarch64-linux paths and fails.** The builder is
 not running or the daemon cannot reach it: `./vm/linux-builder.sh status`.

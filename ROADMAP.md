@@ -2358,7 +2358,126 @@ review, and why.
     `flake.lock` is untouched (no new input), and the flake's `description`
     lost its last "window manager" while it was open.
 
+17. ~~`--tty` picked one GPU and gave up if it couldn't drive a display~~ —
+    BUILT, PR #27; **verified on the dev VM, still awaiting confirmation on
+    the Apple Silicon machine that reported it.** Picked up from the Backlog
+    (entry struck through there). `flexwm --tty` on the user's M2 laptop
+    under Asahi Linux died at startup with `Error loading resource handles
+    on device Some("/dev/dri/card1")`, reproduced twice.
+
+    **The fault is in the heuristic, not the hardware** — niri drives the
+    same machine's display. `tty/mod.rs` called
+    `smithay::backend::udev::primary_gpu` and trusted the answer, and that
+    function ranks (1) a PCI parent with `boot_vga=1`, (2) the
+    alphabetically first device with a DRM *render* node, (3)
+    alphabetically first. Apple Silicon has no PCI GPU and no VGA BIOS, so
+    (1) never matches; (2) then picks `asahi`/AGX, the 3D GPU, over
+    `apple,dcp`, which is a *separate* DRM device and the one that owns the
+    CRTCs and connectors. `ENOTSUP` from `resource_handles` is what a
+    device with no mode-setting pipeline returns.
+
+    **Both halves of the Backlog entry's fix direction shipped.** A new
+    `tty/gpu.rs` builds a candidate list — `primary_gpu()`'s pick first, so
+    ordinary hardware keeps today's answer and opens exactly one device,
+    then every other device on the seat in `all_gpus()`'s sorted order —
+    and `init` walks it until one works, reporting every device it tried
+    and what each said if none does. `--gpu PATH` replaces the search
+    outright (one candidate, no fallback), as both the immediate workaround
+    and the documented escape hatch. It is ignored, with a warning, outside
+    `--tty`.
+
+    **Two decisions worth the words.** (a) *A candidate is checked on a
+    borrowed fd, before anything owns it.* `Session::close` — which is how
+    a rejected device goes back to libseat instead of leaving seatd holding
+    it open for the process's life — needs the `OwnedFd`, and Smithay's
+    `DeviceFd` is an `Arc<OwnedFd>` with no way back out. So `gpu::probe`
+    reads the KMS resources and the connector list through a tiny
+    `Probe(BorrowedFd)` (three empty trait impls) first. It also stops a
+    hopeless candidate from ever constructing a `DrmDeviceFd`, whose
+    "Unable to become drm master" logging would otherwise fire once per
+    device and read like the cause. The three steps *after* that
+    (`DrmDevice::new`, surface, buffers) still fall through to the next
+    candidate; they just close by dropping. (b) *No env-var counterpart.*
+    `FLEXWM_SOCKET` exists because child processes must inherit the socket
+    path; nothing inherits `--gpu`, and `--config` — the closest analogue —
+    has no env var either.
+
+    **What the dev VM can and cannot prove.** Its `virtio-gpu` is a single
+    unified render+display device, so the split topology this fixes cannot
+    exist there. Verified there instead: the working `--tty` path is
+    unchanged and still opens exactly one device (`drm: driving this device
+    path=/dev/dri/card0`, no `device unusable` warning — the loop never
+    iterates); `--gpu /dev/dri/card0` behaves identically to the automatic
+    path; `--gpu` pointed at a render node, a nonexistent path, `/dev/null`,
+    a directory and the empty string each exit 1 with a clear message
+    naming the device, no hang and no panic; a plain `--tty` still starts
+    after six consecutive failed starts, so a rejected device doesn't leak
+    the VT-bound seat. The fallback *iterating* is covered by unit tests
+    against `first_usable`, which is why the loop takes its opener as a
+    parameter. Whether this actually fixes Asahi Linux needs that machine.
+
+    **One real fix and five accuracy fixes from review**, all on the same
+    branch. The fix: `candidates` `?`-ed *both* udev calls, so a machine
+    whose primary device was found and would have worked could fail to
+    start because the fallback's own `all_gpus` enumeration hiccuped —
+    contradicting this item's "no behavior change on ordinary hardware".
+    It now degrades to "primary only, with a warning"; only a failure with
+    no primary to fall back to is still fatal (`gpu::assemble`, unit-tested
+    both ways). The rest: the all-candidates-failed error no longer
+    recommends `--gpu` when *every* candidate was refused at
+    `Session::open` (a busy seat, which is the likeliest real failure —
+    naming a device cannot help), which needed the per-candidate reason to
+    become a typed `gpu::Rejection` rather than a bare string; the
+    probe-rejection message dropped its "a device that only computes …"
+    trailing clause, which was asserted for every cause (an evdev path
+    typo included); `cli.rs`'s `gpu` doc said "silently ignored" where the
+    code warns; `OpenGpu`'s doc claimed the probe used a *different* file
+    description when it borrows the same one (and the same-fd property is
+    load-bearing — libseat keys its device table by raw fd); and two
+    README wordings ("the certain workaround", a dangling clause).
+
+    **Found while bug-bashing, not caused by this change:
+    `MODE=--tty scripts/smoke-test.sh` fails its background-pixel check**
+    (`the background pixel at (3,3) is rgb(0,0,0), expected #123456`).
+    Reproduced identically against a binary built from `main` at `868dd83`
+    on the same VM, with the assertion lines diffing clean between the two
+    — see the Backlog entry.
+
 ## Backlog (unordered — pick up whenever it fits)
+
+- **A config-file key for `--tty`'s DRM device, so `--gpu` doesn't have to be
+  retyped on every launch.** Suggested by the review of PR #27, 2026-09-13;
+  deliberately *not* in that PR. On hardware where the automatic search picks
+  wrong (the Apple Silicon case item 17 exists for), `--gpu PATH` is the fix,
+  and a fix you must remember to type is not the daily-drive form of one — a
+  display manager, a `.desktop` entry or a shell alias each have to carry it
+  separately. Shape: a new `[tty]` section (the config file has
+  `[layout]`/`[appearance]`/`[binds]` today, none of which fits a backend
+  device path) with a `gpu = "/dev/dri/card1"` key, and `--gpu` overriding it
+  the way an explicit flag should. Small: `config.rs` already has the
+  parse-and-warn-per-key machinery, and `tty::init` already takes the path as
+  an `Option<&Path>` argument, so nothing below `compositor::run` changes.
+  **Gate on the user confirming `--gpu` actually fixes their Asahi machine
+  first** — if it doesn't, the right shape of the persistent setting may not
+  be a device path at all, and this would be a config key shipped for a
+  workaround that didn't work.
+
+- **Under `--tty`, the background color is not painted where no window
+  covers it — the uncovered area stays black.** Found while bug-bashing
+  item 17, 2026-09-13; *not* caused by it. `MODE=--tty
+  scripts/smoke-test.sh` fails one assertion: `the background pixel at
+  (3,3) is rgb(0,0,0), expected #123456 (rgb(18,52,86))`. The same
+  script's default `--headless` run passes all 12 assertions, and the
+  `--tty` run's focus-ring pixel checks at (403,9) and (1197,9) both pass
+  — so windows, decorations and the screenshot path are all fine; it is
+  specifically the area no client covers. Reproduced identically against a
+  binary built from `main` at `868dd83` (`diff` of the two runs'
+  assertion lines is empty), so it predates item 17 and is a real `--tty`
+  bug rather than a smoke-test artifact. No diagnosis done: the obvious
+  place to look first is the damage/buffer-age path, which `--tty` engages
+  (`Tty::next_buffer_age`/`advance_generation`) and `--headless` does not,
+  so a never-damaged region on the first frame would keep whatever the
+  render target was initialized to.
 
 - **~~Open question: does `--tty` over SSH on the dev VM actually hold real
   DRM master, or is it running in "unprivileged mode" the whole time?~~ —
@@ -2887,10 +3006,13 @@ review, and why.
   than layer-shell but has seen wider compositor adoption, so it may or
   may not be present the way `wlr_layer` was).
 
-- **`--tty` can pick a GPU that can't drive a display at all, and gives up
-  outright instead of trying another one — real, reported from the user's
-  own Apple Silicon (Asahi Linux, M2) laptop, 2026-09-13. Scheduled right
-  after the item above.** `flexwm --tty` there failed immediately:
+- **~~`--tty` can pick a GPU that can't drive a display at all, and gives up
+  outright instead of trying another one~~ — DONE as item 17, PR #27;
+  built and verified on the dev VM, and still awaiting confirmation on the
+  Apple Silicon machine it was reported from (which no dev-VM test can
+  stand in for — see item 17).** Real, reported from the user's own Apple
+  Silicon (Asahi Linux, M2) laptop, 2026-09-13. `flexwm --tty` there failed
+  immediately:
 
   ```
   WARN smithay::backend::drm::device::fd: Unable to become drm master, assuming unprivileged mode
