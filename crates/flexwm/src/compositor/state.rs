@@ -91,6 +91,36 @@ pub struct State {
     /// redraws, while a surface that *stops* wanting the keyboard still gets
     /// it taken away.
     pub keyboard_on_layer: bool,
+    /// `wl_surface`s whose `zwlr_layer_surface_v1` role object has just been
+    /// destroyed while the surface itself is still alive.
+    ///
+    /// Smithay's own destruction handler resets the surface's layer state to
+    /// its default (no anchors, zero size) *after* calling back into
+    /// [`WlrLayerShellHandler::layer_destroyed`](super::layer_shell) -- so a
+    /// client that commits afterwards (destroying the role, attaching a null
+    /// buffer and committing is exactly how a launcher dismisses itself)
+    /// would trip the role's commit-time size validation on that default and
+    /// be killed with `invalid_size`. [`State::neutralize_destroyed_layers`]
+    /// rewrites those surfaces' pending anchors once Smithay's reset has run
+    /// (from `dispatch.rs`'s post-destruction hook, which is the only thing
+    /// that runs after it), so the commit is the harmless no-op wlroots
+    /// treats it as. Drained on every layer-surface destruction, so it never
+    /// holds more than the destructions of one dispatch.
+    pub layers_awaiting_neutralize: Vec<WlSurface>,
+    /// Layer surfaces that have committed a buffer (`last_acked` is `Some`,
+    /// the same "mapped" `layer_focus` in `layer_shell.rs` means -- *not*
+    /// LayerMap membership, which a null-unmapped surface keeps).
+    ///
+    /// The only reader is `commit_layer_surface`'s unmap transition: a
+    /// surface that was mapped and now isn't gets its pending anchors
+    /// neutralized for the *next* commit (see `neutralize_destroyed_layers`
+    /// for what that write is), because Smithay's unmap reset leaves the
+    /// default behind and a second null commit would otherwise trip the
+    /// role's size validation exactly like a post-destroy one does. A
+    /// surface that was never mapped is left alone, so committing with no
+    /// description at all still fails loudly with `invalid_size`.
+    /// Removed on `layer_destroyed`, so this never outlives the surface.
+    pub mapped_layers: HashSet<WlSurface>,
 
     pub space: Space<Window>,
     pub popups: PopupManager,
@@ -306,6 +336,8 @@ impl State {
             focus: None,
             clicked_layer: None,
             keyboard_on_layer: false,
+            layers_awaiting_neutralize: Vec::new(),
+            mapped_layers: HashSet::new(),
             space: Space::default(),
             popups: PopupManager::default(),
             output: None,
@@ -561,5 +593,24 @@ pub struct ClientState {
 
 impl ClientData for ClientState {
     fn initialized(&self, _id: ClientId) {}
-    fn disconnected(&self, _id: ClientId, _reason: DisconnectReason) {}
+    /// A client is gone -- cleanly, crashed, or killed by a protocol error.
+    ///
+    /// Logging-only, deliberately: `dispatch.rs`'s module doc records that
+    /// this runs while wayland-backend still holds its internal state mutex,
+    /// so anything here that touched the `DisplayHandle` (directly or through
+    /// `State`) would deadlock the compositor from inside every `post_error`
+    /// call. A protocol error used to leave no trace at all in flexwm's log,
+    /// which is how a compositor-side kill of a layer-shell client stayed
+    /// undiagnosed; the `ProtocolError` reason names the code, the object and
+    /// the message.
+    fn disconnected(&self, id: ClientId, reason: DisconnectReason) {
+        match &reason {
+            DisconnectReason::ConnectionClosed => {
+                tracing::info!(?id, "wayland client disconnected");
+            }
+            DisconnectReason::ProtocolError(error) => {
+                tracing::warn!(?id, ?error, "wayland client killed by a protocol error");
+            }
+        }
+    }
 }

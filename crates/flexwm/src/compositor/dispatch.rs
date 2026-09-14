@@ -105,8 +105,8 @@
 //! One more precondition this whole argument leans on, generic to *every*
 //! `post_error` call in this codebase, not just this one: `Client::kill`
 //! runs `ClientData::disconnected` while still holding wayland-backend's
-//! internal state mutex. `ClientState::disconnected` (`state.rs`) is an
-//! empty no-op today, so this is safe -- but a future version of it that
+//! internal state mutex. `ClientState::disconnected` (`state.rs`) is
+//! logging-only, so this is safe -- but a future version of it that
 //! touches the `DisplayHandle` (directly or through `State`) would deadlock
 //! the compositor from inside every `post_error` call, not just this one.
 //!
@@ -263,8 +263,12 @@ where
         data.destroyed(state, client, resource);
         // *After* the delegate, not before: Smithay's own
         // `ExtLockSurfaceUserData::destroyed` is what unmaps the surface, and
-        // this is the redraw that shows the result.
+        // this is the redraw that shows the result. Same ordering reason for
+        // the layer neutralize below: Smithay's layer destruction handler
+        // resets the surface's layer state after flexwm's `layer_destroyed`
+        // has run, so only something here can prepare its next commit.
         redraw_after_lock_surface_destroyed::<I>(state);
+        neutralize_destroyed_layer_surface::<I>(state);
     }
 }
 
@@ -403,6 +407,28 @@ where
         ),
     );
     true
+}
+
+/// Neutralizes the pending layer state of every surface whose
+/// `zwlr_layer_surface_v1` role has just been destroyed, so its next commit
+/// cannot trip the role's commit-time size validation on the default state
+/// Smithay's own destruction handler leaves behind. See `layer_shell.rs`'s
+/// [`State::neutralize_destroyed_layers`] for why this has to run here
+/// rather than in `layer_destroyed`, and what it writes.
+///
+/// Folds away for every interface other than `zwlr_layer_surface_v1`, for
+/// the same monomorphization reason as the guards above -- which matters in
+/// the same way: this sits on the destruction path of every object of every
+/// interface.
+fn neutralize_destroyed_layer_surface<I>(state: &mut State)
+where
+    I: Resource,
+    I::Request: 'static,
+{
+    if TypeId::of::<I::Request>() != TypeId::of::<zwlr_layer_surface_v1::Request>() {
+        return;
+    }
+    state.neutralize_destroyed_layers();
 }
 
 /// Tells the session-lock module that an `ext_session_lock_surface_v1` has
