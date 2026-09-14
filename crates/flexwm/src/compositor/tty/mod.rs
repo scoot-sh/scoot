@@ -200,6 +200,17 @@ pub fn init(
         present_skipped: false,
     });
 
+    // The gamma protocol's `gamma_size` is per-CRTC hardware state, and the
+    // CRTC only exists once the surface above does -- so the manager is
+    // constructed with the fallback in `State::new` and corrected here, still
+    // before any client can bind it (the event loop hasn't started). A query
+    // failure keeps the fallback; see `Tty::gamma_size`.
+    if let Some(tty) = state.tty.as_ref() {
+        let size = tty.gamma_size();
+        state.gamma_control.set_size(size);
+        tracing::info!(size, "drm: crtc gamma size");
+    }
+
     loop_handle
         .insert_source(notifier, session_event)
         .map_err(|error| format!("could not register the session notifier: {error}"))?;
@@ -346,6 +357,65 @@ fn create_surface(
 }
 
 impl Tty {
+    /// Entries per gamma ramp on this backend's CRTC, for
+    /// `zwlr_gamma_control_v1`'s `gamma_size`.
+    ///
+    /// Falls back to [`FALLBACK_GAMMA_SIZE`](super::gamma_control::FALLBACK_GAMMA_SIZE)
+    /// when the query fails or reports something unusable (zero -- no LUT --
+    /// or absurdly large, which would turn every `set_gamma` allocation into
+    /// a memory hog). A wrong-but-sane size degrades to a `failed` event on
+    /// the first `set_gamma` the hardware refuses, which is the protocol's
+    /// own answer for an output that doesn't support gamma tables.
+    pub(super) fn gamma_size(&self) -> u32 {
+        use smithay::reexports::drm::control::Device as ControlDevice;
+
+        const MAX_SANE_GAMMA_SIZE: u32 = 4096;
+        match self.drm.get_crtc(self.surface.crtc()) {
+            Ok(info) => {
+                let size = info.gamma_length();
+                if (2..=MAX_SANE_GAMMA_SIZE).contains(&size) {
+                    size
+                } else {
+                    tracing::warn!(
+                        size,
+                        "crtc reports an unusable gamma size; advertising \
+                         {FALLBACK} instead",
+                        FALLBACK = super::gamma_control::FALLBACK_GAMMA_SIZE,
+                    );
+                    super::gamma_control::FALLBACK_GAMMA_SIZE
+                }
+            }
+            Err(error) => {
+                tracing::warn!(
+                    %error,
+                    "could not query the crtc gamma size; advertising \
+                     {FALLBACK} instead",
+                    FALLBACK = super::gamma_control::FALLBACK_GAMMA_SIZE,
+                );
+                super::gamma_control::FALLBACK_GAMMA_SIZE
+            }
+        }
+    }
+
+    /// Pushes one `set_gamma` ramp to the CRTC gamma LUT: three slices of
+    /// [`gamma_size`](Self::gamma_size) `u16` entries (red, green, blue).
+    ///
+    /// There is no Smithay helper for this -- `drm`'s own `set_gamma` ioctl
+    /// wrapper, on the already-open device, addressed at the surface's own
+    /// CRTC (found once at init, not re-enumerated). Any failure (no DRM
+    /// master after a VT switch, a driver that refuses the size) is the
+    /// caller's to turn into a `failed` event; the session keeps running.
+    pub(super) fn set_gamma_ramp(
+        &self,
+        red: &[u16],
+        green: &[u16],
+        blue: &[u16],
+    ) -> std::io::Result<()> {
+        use smithay::reexports::drm::control::Device as ControlDevice;
+
+        self.drm.set_gamma(self.surface.crtc(), red, green, blue)
+    }
+
     /// The buffer age `headless::render` should pass `render_output` for
     /// this frame -- see `buffers.rs`'s module doc on why it isn't always
     /// the same value, and `BufferPool::next_age`'s doc for what it means.

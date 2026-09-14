@@ -23,6 +23,9 @@ use smithay::wayland::compositor::{CompositorClientState, CompositorState};
 use smithay::wayland::fractional_scale::FractionalScaleManagerState;
 use smithay::wayland::output::OutputManagerState;
 use smithay::wayland::selection::data_device::DataDeviceState;
+use smithay::wayland::selection::ext_data_control::DataControlState as ExtDataControlState;
+use smithay::wayland::selection::primary_selection::PrimarySelectionState;
+use smithay::wayland::selection::wlr_data_control::DataControlState as WlrDataControlState;
 use smithay::wayland::shell::wlr_layer::WlrLayerShellState;
 use smithay::wayland::shell::xdg::XdgShellState;
 use smithay::wayland::shell::xdg::decoration::XdgDecorationState;
@@ -33,6 +36,7 @@ use smithay::wayland::viewporter::ViewporterState;
 use super::cursor::Cursor;
 use super::decorations::{Appearance, Decorations};
 use super::ext_workspace::ExtWorkspaceState;
+use super::gamma_control::GammaControlState;
 use super::headless::Backend;
 use super::ipc::PendingIdle;
 use super::keybindings::Keybindings;
@@ -186,6 +190,29 @@ pub struct State {
     pub output_manager_state: OutputManagerState,
     pub seat_state: SeatState<State>,
     pub data_device_state: DataDeviceState,
+    /// `zwlr_data_control_manager_v1` (version 2): clipboard managers
+    /// (`cliphist`, `clipman`). Held only to keep the global alive -- the
+    /// handler (`DataControlHandler`, see `handlers.rs`) routes through it.
+    /// No client filter: like the session-lock global, an allow-list would be
+    /// theatre without security-context support (see `README.md`'s trust
+    /// note). Constructed after `primary_selection_state` because it borrows
+    /// it, so data-control clients can also touch the primary selection.
+    #[allow(dead_code)]
+    pub wlr_data_control_state: WlrDataControlState,
+    /// `ext_data_control_manager_v1` (version 1): the successor to the wlr
+    /// clipboard protocol, exposed alongside it the way current compositors
+    /// do. Same allow-list rationale and same borrow of
+    /// `primary_selection_state` as above.
+    #[allow(dead_code)]
+    pub ext_data_control_state: ExtDataControlState,
+    /// `zwp_primary_selection_device_manager_v1` (version 1): middle-click
+    /// paste. Held only to keep the global alive, same rationale as above.
+    #[allow(dead_code)]
+    pub primary_selection_state: PrimarySelectionState,
+    /// `zwlr_gamma_control_manager_v1`: night-light tools. Unlike the three
+    /// above this is read again -- every `get_gamma_control`/`set_gamma`
+    /// goes through it (see `gamma_control.rs`).
+    pub gamma_control: GammaControlState,
     pub seat: Seat<State>,
 
     pub keybindings: Keybindings,
@@ -242,6 +269,14 @@ impl State {
         let shm_state = ShmState::new::<Self>(&dh, vec![]);
         let output_manager_state = OutputManagerState::new_with_xdg_output::<Self>(&dh);
         let data_device_state = DataDeviceState::new::<Self>(&dh);
+        // Construction order is load-bearing: both data-control states borrow
+        // the primary-selection state, so it must exist first.
+        let primary_selection_state = PrimarySelectionState::new::<Self>(&dh);
+        let wlr_data_control_state =
+            WlrDataControlState::new::<Self, _>(&dh, Some(&primary_selection_state), |_| true);
+        let ext_data_control_state =
+            ExtDataControlState::new::<Self, _>(&dh, Some(&primary_selection_state), |_| true);
+        let gamma_control = GammaControlState::new(&dh);
 
         let mut seat_state = SeatState::new();
         let mut seat = seat_state.new_wl_seat(&dh, "flexwm");
@@ -294,6 +329,10 @@ impl State {
             output_manager_state,
             seat_state,
             data_device_state,
+            wlr_data_control_state,
+            ext_data_control_state,
+            primary_selection_state,
+            gamma_control,
             seat,
             keybindings,
             suppressed_keys: HashSet::new(),

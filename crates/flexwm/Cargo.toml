@@ -50,8 +50,12 @@ toml = "1"
 # alongside being a server to its own. Same wayland-client/wayland-protocols
 # versions Smithay itself already pins internally (for its own optional,
 # unused-by-us winit/x11 backends), so this can't create a resolver conflict.
+# "staging" is for the ext-data-control-v1 client bindings the selection
+# tests drive; "unstable" is for the primary-selection ones. Smithay already
+# enables both (plus "server") for its own protocol states, so this adds no
+# new version to the tree, just names the features this crate uses directly.
 wayland-client = "0.31"
-wayland-protocols = { version = "0.32", features = ["client", "staging"] }
+wayland-protocols = { version = "0.32", features = ["client", "staging", "unstable"] }
 calloop-wayland-source = "0.4"
 # For the memfd + mmap behind the host-side wl_shm buffers (nested/buffers.rs)
 # -- same version already resolved transitively via wayland-backend, so this
