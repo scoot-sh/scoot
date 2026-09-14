@@ -169,7 +169,7 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
 /// has data waiting, once per wakeup rather than once per frame tick -- e.g.
 /// a real pointer-motion flood measures as ~5.8x more wakeups on the client
 /// side and a real, small, accepted compositor-side cost (~0.6% of one core
-/// at realistic mouse rates); see `ROADMAP.md` item 11 for the measured
+/// at realistic mouse rates); see `docs/roadmap/11-keystroke-flush.md` for the measured
 /// numbers and methodology, not the paraphrase.
 ///
 /// Errors are dropped deliberately, matching every other flush site here: the

@@ -67,8 +67,8 @@ window layout OmniWM-style through the Accessibility API.
   what genuinely needs to be flexwm-specific (agent-driven input injection,
   screenshots, window/action queries) rather than reinventing something a
   standard Wayland protocol already covers for external tools like bars —
-  see the `wlr-layer-shell-unstable-v1`/`ext-workspace-v1` backlog entries
-  in `ROADMAP.md` for where that line falls in practice.
+  see the `wlr-layer-shell-unstable-v1`/`ext-workspace-v1` inventory in
+  `docs/backlog/protocols/` for where that line falls in practice.
 
 ## Engineering standards
 
@@ -120,7 +120,8 @@ code. A subagent's "tests pass" self-report is a claim to independently
 re-derive, not a verdict to relay: re-run build/test/clippy/fmt yourself
 against real hardware where relevant, and trace what any new or changed
 field/flag actually means everywhere it's read or written, not just at its
-introduction site. Concrete worked example (see `ROADMAP.md` item 5b): a fix
+introduction site. Concrete worked example (see
+`docs/roadmap/05b-vt-switch-eperm.md`): a fix
 gated `change_vt` on `Tty::active`, which passed every test and looked clean
 on a surface read — but `active` meant two different things at its two write
 sites (DRM master lost vs. session genuinely paused), and conflating them
@@ -213,7 +214,7 @@ be shared or reviewed. It's distinct from this file (durable, shared,
 git-tracked doctrine) and from a user's own Claude memory (durable,
 user-specific preferences that persist across projects). Keep it current
 as you work, and keep it short — anything durable belongs in `CLAUDE.md` or
-`ROADMAP.md` instead, not duplicated here.
+`ROADMAP.md`/`docs/` instead, not duplicated here.
 
 ## Process notes
 

@@ -6,7 +6,8 @@
 //! whole process, which every other test in this binary that builds a
 //! [`State`](super::State) depends on -- so the end-to-end behavior (a real
 //! release binary, the message on stderr, exit 1, no core dump) is verified on
-//! the dev VM and recorded in `ROADMAP.md` instead of faked here.
+//! the dev VM and recorded in `docs/roadmap/12-four-bounds.md` instead of
+//! faked here.
 
 use std::io;
 

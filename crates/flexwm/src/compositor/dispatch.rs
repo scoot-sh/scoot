@@ -60,7 +60,8 @@
 //! nothing here stops one client from opening many pools each just under the
 //! cap (measured: 40 pools at exactly the cap reserve ~20 GiB from a single
 //! connection). Bounding the sum needs per-client accounting this module
-//! doesn't have yet; see `ROADMAP.md`'s Backlog entry for it rather than
+//! doesn't have yet; see
+//! `docs/backlog/security/shm-total-per-client-unbounded.md` for it rather than
 //! treating this fix as closing that case too.
 //!
 //! [`MAX_SHM_POOL_BYTES`] is the bound, and a request past it is **rejected,

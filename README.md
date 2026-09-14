@@ -54,8 +54,9 @@ unresponsive — can stall the compositor for anyone else. Sizes a client or a
 config supplies are bounded too: each individual `wl_shm` pool is capped at
 512 MiB (four full-screen 8K frames' worth — a request past it gets a
 protocol error rather than a multi-gigabyte mapping for that pool; the total
-across many pools from one client isn't bounded yet, see `ROADMAP.md`'s
-Backlog), a client's declared minimum window size can't exceed the largest
+across many pools from one client isn't bounded yet, see
+`docs/backlog/security/shm-total-per-client-unbounded.md`), a client's
+declared minimum window size can't exceed the largest
 output's usable area on each axis, and `gap` and `cursor_size` each have an
 upper bound as well as a lower one. A missing `$XDG_RUNTIME_DIR` is a one-line
 startup error, not a crash. Verified
@@ -378,7 +379,8 @@ Worth knowing before you write against it:
   active does nothing.
 - **There is no IPC equivalent yet.** `flexwm msg action focus-workspace
   up|down` still only steps one workspace at a time; switching to a workspace
-  *by number* is reachable over this protocol only. See `ROADMAP.md`.
+  *by number* is reachable over this protocol only. See
+  `docs/backlog/ipc/msg-outputs-usable-rect.md`.
 - **Multiple outputs will change the shape of this** — a group per output is
   what the protocol is built for — but flexwm has exactly one output today, so
   there is exactly one group.
@@ -592,7 +594,8 @@ cursor). They do **not** affect a client that supplies its own cursor image
 over the wire, and flexwm draws them at the size and hotspot the client
 chose. There is deliberately no `cursor_theme` option: honoring a named
 xcursor shape means loading a real theme asset, and flexwm has no MIT-clean
-one to load (see `ROADMAP.md`'s Backlog). Both values are read once at
+one to load (see `docs/backlog/rendering/cursor-theme-name.md`). Both values
+are read once at
 startup, like every other setting here — there's no config reload.
 
 The first three hex values above are the actual rendered colors (pixel-sampled
@@ -628,7 +631,7 @@ separately**: `"shift+a"`, not `"A"`. A single capital resolves exactly, to
 the distinct `A` keysym, which is not what any keypress reports at the level
 binds match on — so `"A" = "close"` parses and loads but can never fire
 (verified on `--headless`; `"shift+a" = "close"` fires as expected). See the
-`ROADMAP.md` backlog entry for the accept-it-anyway fix.
+`docs/backlog/config/binds-capital-letter.md` for the accept-it-anyway fix.
 
 Action strings use exactly the grammar `flexwm --help`'s ACTIONS section
 documents — one parser handles both `flexwm msg action ...` and a config

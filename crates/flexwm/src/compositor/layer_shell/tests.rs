@@ -1173,7 +1173,8 @@ fn a_layer_surface_that_never_commits_reserves_nothing() {
 /// reimplementing `arrange` to filter on mapped-ness. It self-heals in both
 /// directions that matter: a client that unmaps has its cached state reset
 /// by Smithay's own pre-commit hook, and one that dies has its surface
-/// unmapped by `layer_destroyed`. See `ROADMAP.md`'s backlog entry for the
+/// unmapped by `layer_destroyed`. See
+/// `docs/backlog/protocols/layer-surface-bufferless-exclusive-zone.md` for the
 /// case this does leave open -- a client that commits and then never attaches
 /// anything holds the space for as long as it stays connected.
 #[test]
@@ -2142,7 +2143,8 @@ fn resizing_the_output_re_arranges_bars_and_the_zone() {
 /// tracks no popups for layer surfaces (`LayerSurface::surface_under` is
 /// already asked for `WindowSurfaceType::ALL`, so the input side is ready;
 /// the mapping side is what is missing). Deleting this test is part of
-/// fixing it -- see `ROADMAP.md`'s backlog entry -- and inverting the
+/// fixing it -- see
+/// `docs/backlog/protocols/xdg-popup-never-configured.md` -- and inverting the
 /// assertion is how the fix proves itself.
 #[test]
 fn no_xdg_popup_is_configured_yet() {
