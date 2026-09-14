@@ -2510,6 +2510,55 @@ review, and why.
     pointer/click half of the attack and a control proving the fast-confirm
     path still exists for a takeover that has genuinely earned it).
 
+    **Round two hardware verification**, all captured on the dev VM's real
+    `--tty` `virtio-gpu` at 1600x1000 against `e1af444`, driving the attack
+    from a purpose-built wayland client (no off-the-shelf locker will destroy
+    a lock object it has just been granted):
+
+    - The attack, both shapes — surface never mapped, and surface mapped with
+      a full-screen magenta buffer *after* its lock was already destroyed,
+      which is stronger than anything the unit tests do. In both, the screen
+      is the abandoned red: 1,599,864 of 1,600,000 pixels `#FF0000`, the other
+      105 being the cursor, and **zero** `#FF00FF` pixels in any frame of the
+      run. The attacker is handed `KB_ENTER` and then `KB_LEAVE` 0ms later —
+      the compositor takes the keyboard back in the same dispatch cycle that
+      observed the `destroy`.
+    - With the real locker then up and drawing green: `flexwm msg type
+      hunter2` plus a click gives **attacker KEY=0 BTN=0, locker KEY=14
+      BTN=2**. On `ace80a1` the same shape of test reads attacker `keys: 16`
+      and locker `keys: 0`.
+    - Finding 2, deterministically: one client sending `lock(A)`,
+      `get_lock_surface`, `destroy(A)`, `lock(B)` as a single batch — so B
+      necessarily arrives while A is unconfirmed and the desktop is still on
+      screen. Log reads `already_blanked=false`, the confirmation is deferred
+      to the next drawn frame (`session lock confirmed` 24ms later; the client
+      sees `LOCKED` at +28ms against +2ms on the fast path), and it is not a
+      hang. The fast path still exists: both ordinary takeovers in the same
+      runs log `already_blanked=true` and confirm in 1–2ms.
+    - VT switch away and back while locked: AE = 0 outside the two 16x16
+      cursor boxes, i.e. the lock screen is pixel-identical. (The raw AE of
+      120.5 is entirely the cursor, which the script itself had moved between
+      the two shots — connected-component analysis shows exactly two 16x16
+      regions, 136 px each, at the two pointer positions.)
+    - `kill -9` on the real locker still turns the screen red and keeps
+      refusing IPC actions; a third locker takes over that red screen and
+      draws its own.
+
+    **Benchmark**, same commit, on the one path this adds per-event work to:
+    the locked pointer hit test. 4000 `pointer_move` requests over a *single*
+    IPC connection (a first attempt at 150 requests spawned 150 `flexwm msg`
+    processes, whose noise swamped the signal — 33–65 jiffies within one
+    side), 10 balanced reps per side with the order alternated: `ace80a1`
+    mean **27.2** jiffies (25–30), this fix **28.4** (26–31), fully
+    overlapping, Welch p ≈ 0.13. Locked-idle is **0 jiffies/10s** on both.
+    The difference is at or under this rig's noise floor and there is no
+    mechanism for more: the filter is one `alive()` and one object-id compare
+    per lock surface per read, of which there is one per output, with no
+    allocation anywhere. The *unlocked* paths are untouched by construction —
+    every change sits behind an `is_locked()` check or inside an
+    `if self.forget_lock_surface(..)` that is false while unlocked — so item
+    16's existing unlocked numbers still stand.
+
 ## Backlog (unordered — pick up whenever it fits)
 
 - **~~Open question: does `--tty` over SSH on the dev VM actually hold real
