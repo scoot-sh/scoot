@@ -2754,9 +2754,10 @@ review, and why.
       the *next* lock fast-confirmed over a visible desktop.
 
     **Round-three verification, all against `166210b`.** Nothing executable
-    changed after that commit: the only later diff to a `.rs` file is the
-    six-line doc comment on `State::lock_surface_destroyed` recording the
-    pointer-enter observation below, alongside this record itself.
+    changed after that commit: every later diff to a `.rs` file is a doc
+    comment (on `State::lock_surface_destroyed`, recording the pointer-enter
+    observation below and what the `is_locked` gate does *not* ask),
+    alongside this record itself.
 
     - Dev VM: `cargo test -p flexwm` **372 passed** (346 at `4d6799e`, plus
       22 from item 17's merge and 4 new), `cargo clippy -p flexwm

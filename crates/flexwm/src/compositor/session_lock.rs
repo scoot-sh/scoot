@@ -800,6 +800,13 @@ impl State {
     /// lock surface is drawn, focused or hit-tested at all, so a late
     /// teardown after an unlock has nothing to catch up (and
     /// [`SessionLockHandler::unlock`] has already asked for its own redraw).
+    /// That is the only question asked, deliberately -- the destroyed role
+    /// object carries no handle this side can read back to a `LockSurface`
+    /// (see above), so a role object belonging to a lock this compositor
+    /// *refused* costs one redundant redraw while someone else holds the
+    /// lock. That is bounded by the frame timer and is no more than the
+    /// `request_render` any client's own `wl_surface.commit` already asks
+    /// for, so it does not need a guard of its own.
     pub(super) fn lock_surface_destroyed(&mut self) {
         if !self.session_lock.is_locked() {
             return;
