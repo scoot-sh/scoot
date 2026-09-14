@@ -78,6 +78,24 @@ scripts/         smoke-test.sh: an end-to-end test driven entirely over IPC.
 
 ## Building
 
+Two paths, both from the flake at the repo root. To just get the binary
+(clone, then):
+
+```sh
+nix build                            # ./result/bin/flexwm
+nix run . -- --headless -- foot      # build and run it in one step
+nix run . -- msg windows             # the client, same binary
+```
+
+On Linux that builds the compositor. On macOS the compositor is compiled out
+of the crate and the same package gives you `flexwm msg`, the client — useful
+for driving a compositor running in a VM, but `flexwm --headless` there exits
+with `the compositor only runs on Linux`. `nix build` deliberately does not
+run the test suite (`flake.nix` says why); `cargo test` below is where that
+runs.
+
+To work on the code:
+
 ```sh
 nix develop        # every dependency, on Linux or macOS
 cargo build         # flexwm-core, flexwm-ipc, and the CLI build anywhere;

@@ -2309,7 +2309,55 @@ review, and why.
     map of the corner shows the 16x16 arrow). Identical on the merge base
     `e2c7971`, so not a regression — see the Backlog entry below.
 
-16. ~~`ext-session-lock-v1`: a real screen lock the compositor enforces~~ —
+16. ~~`nix build` / `nix run`: the flake builds the binary, not just a dev
+    shell~~ — DONE, PR #26. Asked for directly by the user, who wants to
+    clone this onto a NixOS machine and build it from the flake. The flake
+    had exactly one output that produced anything — `devShells` — so getting
+    a binary meant `nix develop` plus `cargo build` by hand.
+
+    `packages.<system>.default` is a real `rustPlatform.buildRustPackage`
+    derivation (no shelling out to cargo inside a shell), `apps.<system>.
+    default` points at its `flexwm` binary. Still one flake input; `cargoLock.
+    lockFile` needs no new machinery for a workspace, and `nativeBuildInputs`/
+    `buildInputs` reuse `vm/compositor-deps.nix` exactly as the dev shell
+    already does, so the package and the shell cannot drift apart.
+
+    **Three decisions worth the words:** (a) *the same package on macOS, not
+    a skipped output.* The crate already cfg's the compositor out on
+    non-Linux and `flexwm --headless` there exits with "the compositor only
+    runs on Linux", so the Darwin build is the `flexwm msg` client — exactly
+    what the dev shell's own Linux/Darwin split already assumes, and what
+    the README documents driving a VM with from a Mac. (b) *`doCheck =
+    false`.* The release profile sets `panic = "abort"`, which cargo ignores
+    for test targets, so `cargo test --release` rebuilds the whole dependency
+    tree unwinding — measured on Darwin (smallest tree): 10 crates recompile
+    after a complete `cargo build --release`, against 3 with `panic = "abort"`
+    removed; on Linux that second build would include Smithay. The
+    compositor's tests also need a writable `$XDG_RUNTIME_DIR` the sandbox
+    has no reason to provide. (c) *Smithay's git rev needs an
+    `outputHashes` entry* (a git source carries no crates.io checksum); a rev
+    bump fails the build loudly with the hash it got, so it can't drift.
+
+    No `LIBRARY_PATH` workaround is needed in the derivation, unlike the dev
+    shell's `shellHook`: the `-sys` crates' bare `-lfoo` resolves through
+    `NIX_LDFLAGS`, which the stdenv cc wrapper sets from `buildInputs`.
+
+    **Found while bug-bashing: the binary came out 1,224,312 bytes bigger
+    than this workspace's release profile asks for** — 4,843,776 against
+    3,619,464.
+    Cause, from nixpkgs' own source: `cargoBuildHook` exports
+    `CARGO_PROFILE_RELEASE_STRIP=false` ("let stdenv handle stripping"), and
+    stdenv's default takes debug info only, leaving `.symtab`/`.strtab` —
+    silently overriding the workspace profile's `strip = true`. Fixed with
+    `stripAllList = [ "bin" ]`. Measured, not assumed: `strip --strip-all` on
+    the unfixed binary reproduced exactly 3,619,464 bytes, kept
+    `cargo-auditable`'s non-allocated `.dep-v0` section (1,871 bytes, the
+    dependency manifest `nix build` embeds by default), and still ran.
+    Verified by building and running on the dev VM, not by inspection —
+    `scripts/smoke-test.sh` passes end to end against the Nix-built binary.
+    `flake.lock` is untouched (no new input), and the flake's `description`
+    lost its last "window manager" while it was open.
+17. ~~`ext-session-lock-v1`: a real screen lock the compositor enforces~~ —
     DONE, PR #25. Picked up from the Backlog (entry struck below) as the
     highest-priority protocol gap, and tied to a safety finding already on
     record: item 14's third review round established that a layer-shell
@@ -3069,13 +3117,13 @@ review, and why.
   worth naming while the memory of writing it is fresh: the fix belongs
   with those, as per-client accounting, not as a one-off limit here.
 
-- **~~`ext-session-lock-v1` protocol support~~ — DONE as item 16**, PR #25.
+- **~~`ext-session-lock-v1` protocol support~~ — DONE as item 17**, PR #25.
   The entry as written asked whether the pinned Smithay rev had a helper: it
   does (`wayland::session_lock`), so the protocol plumbing came from there
-  and flexwm wrote the policy. See item 16 for what shipped, what was
+  and flexwm wrote the policy. See item 17 for what shipped, what was
   deliberately deferred, and the crash-recovery decision.
 
-- **No IPC way to ask whether the session is locked** (item 16). An agent
+- **No IPC way to ask whether the session is locked** (item 17). An agent
   driving flexwm can tell indirectly — `flexwm msg action ...` answers
   `refused: the session is locked ...`, and a screenshot shows the lock
   screen — but there is no request that says so directly. Deferred because
@@ -3085,7 +3133,7 @@ review, and why.
   which are waiting on the same bump.
 
 - **flexwm blanks the screen immediately on a lock request rather than
-  waiting for the lock client's first surface** (item 16, deliberate). niri
+  waiting for the lock client's first surface** (item 17, deliberate). niri
   waits up to a second for lock surfaces so the transition doesn't flash
   black; the cost of that is rendering the *unlocked* session for that whole
   second, which is the wrong half of the trade to take first. Worth
@@ -3093,7 +3141,7 @@ review, and why.
   daily use — with a hard deadline, as the protocol requires.
 
 - **`locked` is sent once a blanked frame has been *rendered*, not once a
-  vblank has confirmed it** (item 16, restated precisely in round two after
+  vblank has confirmed it** (item 17, restated precisely in round two after
   review traced the original wording against the code and found it too
   strong). `confirm_lock` fires on `drew_a_frame`, which `headless.rs` sets
   when `render_output` succeeds on the pixman image — before, and independent
@@ -3113,7 +3161,7 @@ review, and why.
   item rather than riding along with a fix round.
 
 - **The `ext_session_lock_manager_v1` global is offered to every client**
-  (item 16). The protocol explicitly allows restricting it ("the compositor
+  (item 17). The protocol explicitly allows restricting it ("the compositor
   may choose to restrict this protocol to a special client"), and Smithay's
   helper takes a client filter flexwm passes `|_| true` to. There is nothing
   to filter *on* today — flexwm has no `wp_security_context_v1` support, so
@@ -3121,7 +3169,7 @@ review, and why.
   not as a bespoke allow-list.
 
 - **The first click on a fresh lock screen, before the mouse has moved,
-  reaches nobody** (item 16, found by round two's hardware bug-bash rather
+  reaches nobody** (item 17, found by round two's hardware bug-bash rather
   than by any test). `new_surface` does re-derive pointer focus, but it runs
   while the lock surface is still *unmapped*, so the hit test finds nothing;
   the commit that maps it asks for a render and nothing else
@@ -3136,10 +3184,67 @@ review, and why.
   recognise one in `commit` without making every ordinary window's commit pay
   for the lookup.
 
-- **Lock surfaces are per-output and flexwm has one output** (item 16).
+- **Lock surfaces are per-output and flexwm has one output** (item 17).
   `new_surface` honours the `wl_output` the client named but falls back to
   the single output; `configure_all` resizes them all together. One more
   site for the multi-output list `headless.rs`'s `OUTPUT_ID` doc keeps.
+
+- **`--tty` can pick a GPU that can't drive a display at all, and gives up
+  outright instead of trying another one — real, reported from the user's
+  own Apple Silicon (Asahi Linux, M2) laptop, 2026-09-13. Scheduled right
+  after the item above.** `flexwm --tty` there failed immediately:
+
+  ```
+  WARN smithay::backend::drm::device::fd: Unable to become drm master, assuming unprivileged mode
+  INFO smithay::backend::drm::device: DrmDevice initializing
+  INFO smithay::backend::drm::device::fd: Dropping device: Some("/dev/dri/card1") (Operation not supported (os error 95))
+  flexwm: DRM access error: Error loading resource handles on device `Some("/dev/dri/card1")`
+  ```
+
+  **Root cause, traced to Smithay's own heuristic, not flexwm's code**:
+  `tty/mod.rs`'s `run` calls `smithay::backend::udev::primary_gpu(&seat_name)`
+  and trusts whatever it returns, with no fallback. That function's own
+  priority order (`backend/udev.rs`, pinned rev): (1) a PCI parent device
+  with `boot_vga=1`, (2) the first device (of those sorted alphabetically)
+  that has a DRM *render* node, (3) alphabetically first otherwise. Apple
+  Silicon has no PCI GPU and no legacy VGA BIOS concept, so (1) never
+  matches anywhere on this class of hardware. (2) then wins, and on a
+  split GPU/display-controller SoC like this — the 3D GPU (`asahi`/AGX,
+  which does have a render node) is a *separate* DRM device from the
+  actual display controller (`apple,dcp`, which owns the CRTCs/connectors
+  but likely has no render node at all) — the heuristic picks the
+  render-capable compute GPU over the device that can actually drive a
+  screen. `ENOTSUP` loading resource handles is exactly what a render-only
+  DRM node with no KMS/mode-setting pipeline would return. flexwm has no
+  `--gpu`/override flag and no fallback to `smithay::backend::udev::
+  all_gpus()` if the chosen device doesn't work, so this is a hard failure
+  rather than a recoverable one — though it **did** fail safely: a clean
+  error message, process exit, back to the shell, nothing stranded.
+
+  **Confirms the hardware itself isn't the blocker**: the user's default
+  compositor on this same machine before trying flexwm was niri, which
+  they report drives the display fine (GPU-accelerated) — so whatever niri
+  does to pick or use the display device works on this hardware; flexwm's
+  gap is Smithay's PC-centric heuristic, not something unfixable about
+  Asahi Linux.
+
+  **Fix direction**: (a) if `primary_gpu()`'s chosen device fails to open
+  or load resources, fall back to trying each device from `all_gpus()` in
+  turn rather than giving up immediately — likely the higher-value fix,
+  since it would make `--tty` "just work" on this class of hardware with
+  no user action needed; (b) add a manual override (a `--gpu PATH` flag
+  and/or an env var) so a user can point flexwm at the right
+  `/dev/dri/cardN` directly, both as an immediate workaround and as a
+  documented escape hatch if the automatic fallback ever guesses wrong.
+  Probably want both, not just one.
+
+  **Verification will need real hardware, not just the dev VM**: the dev
+  VM's `virtio-gpu` device is a single unified render+display device, so
+  this split-topology bug can't be reproduced or verified there — the fix
+  can be built and unit-tested for logic correctness in the usual way, but
+  confirming it actually resolves `--tty` on Apple Silicon needs the same
+  real machine that reported this, or equivalent split-GPU/display-
+  controller hardware.
 
 - **`ext-idle-notify-v1` and `idle-inhibit-unstable-v1` — pairs naturally
   with session-lock.** User request, 2026-09-13. `ext-idle-notify-v1` is
@@ -3151,7 +3256,7 @@ review, and why.
   not to consider the session idle while it's active. Neither has design
   work done; natural to scope alongside session-lock since they're the
   same feature area (idle/lock lifecycle), not before it. **Now the obvious
-  next pick in that area**: item 16 landed the lock itself, and without an
+  next pick in that area**: item 17 landed the lock itself, and without an
   idle notification nothing can trigger it automatically — locking is
   whatever the user runs by hand.
 
@@ -3870,3 +3975,63 @@ data-loss/RCE in what was checked.
   character position, and the fix is now a short reach: have `resolve_combo`
   go through `modifiers::ModifierKeys` (or equivalent) the same way
   `type_text` already does, instead of a hard-coded keysym table.
+
+- **The flake's `systems` list still names `x86_64-darwin`, which the pinned
+  nixpkgs refuses to evaluate at all (LOW, pre-existing).** Found while
+  adding item 16's `packages` output: `nix flake check --all-systems` fails
+  on `packages.x86_64-darwin.default` — and equally on
+  `devShells.x86_64-darwin.default`, i.e. it predates the new outputs rather
+  than being introduced by them. Verified against `main` itself, not just by
+  reading: `nix eval
+  'git+file:///Users/steveyackey/code/flexwm?ref=main#devShells.x86_64-darwin.default.name'`
+  throws out of `nixpkgs.legacyPackages.x86_64-darwin`, nixpkgs having
+  dropped that platform after the 26.05 branch. Plain `nix flake check`
+  (current system only) passes, on both macOS and the dev VM. The fix is a
+  one-line choice — drop `x86_64-darwin` from `systems`, or repin nixpkgs to
+  a branch that still carries it — and it only matters if an Intel Mac ever
+  has to build this; left alone to keep item 16 to its own scope.
+
+- **The Nix package's `src = self` invalidates the whole build on any
+  doc-only edit (LOW, non-blocking).** Found by `flexwm-reviewer` reviewing
+  item 16: `src` is the whole flake tree — `CLAUDE.md`, `README.md`,
+  `ROADMAP.md`, `vm/`, `scripts/` included — none of which the compiler
+  reads, but a change to any of them still busts the derivation's cache and
+  forces a full ~3.5 minute rebuild. Demonstrated directly: appending one
+  newline to `README.md` changed the output path entirely. Since this repo
+  edits `ROADMAP.md` on essentially every PR, that's a real recurring cost
+  once this lands. Fix direction: a `lib.fileset` filter scoped to
+  `Cargo.toml`/`Cargo.lock`/`crates/` — but first confirm nothing the build
+  actually needs lives outside that set (a `build.rs`, an `include_str!` of
+  a root-level file, a license file read at build time). Two reads were
+  checked and are safe (`vm/compositor-deps.nix`'s import, and
+  `builtins.readFile ./Cargo.toml` for the version string, both of which
+  resolve against the flake tree rather than `src`), but that check should
+  be redone against whatever the tree looks like when this is picked up,
+  not assumed still true.
+
+- **`scripts/smoke-test.sh` hardcodes some of its temp paths, so two
+  concurrent runs (e.g. two agents verifying different branches on the same
+  VM at once) can collide (LOW, pre-existing).** Found by `flexwm-reviewer`
+  reviewing item 16, whose own PR body overstated its run's isolation: the
+  `SOCKET`/`LOG` environment overrides the script does honor don't cover
+  every path it uses — `/tmp/flexwm-smoke-config.log`/`-config.sock` and
+  `-broken.*` are hardcoded (`scripts/smoke-test.sh` around lines 299-300
+  and 392-393) regardless of what `SOCKET`/`LOG` are set to. Low priority —
+  this session's own practice of using distinctly-named scratch scripts and
+  checking for other active agents before running concurrent hardware
+  verification has avoided hitting it so far — but worth closing so two
+  agents' hardware bug-bashes can't silently corrupt each other's evidence
+  if they ever do overlap. Fix direction: derive every temp path in the
+  script from the same overridable prefix, not just the two that happen to
+  have env vars today.
+
+- **`flake.nix`'s top-level `description` and its package's
+  `meta.description` are two independently hand-copied strings that can
+  drift (NIT).** Found by `flexwm-reviewer` reviewing item 16. Also, on
+  Darwin, `meta.description` still advertises "a scrolling-tiling Wayland
+  compositor that runs without a GPU" when the Darwin build is actually
+  just the `flexwm msg` client (`README.md` explains this correctly, but
+  `nix search`/`nix flake show` metadata would not). Cheap to fix whenever
+  `flake.nix` is next touched for another reason (e.g. the `src` filesetting
+  above) — bundling it there avoids paying for a second full evaluation/
+  rebuild cycle just for a string.
