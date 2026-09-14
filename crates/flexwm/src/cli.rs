@@ -12,7 +12,7 @@ flexwm -- a scrolling-tiling Wayland compositor
 USAGE:
     flexwm --headless [--width W] [--height H] [--socket PATH] [--config PATH] [-- COMMAND...]
     flexwm --nested [--width W] [--height H] [--socket PATH] [--config PATH] [-- COMMAND...]
-    flexwm --tty [--socket PATH] [--config PATH] [-- COMMAND...]
+    flexwm --tty [--gpu PATH] [--socket PATH] [--config PATH] [-- COMMAND...]
     flexwm msg REQUEST
     flexwm --help
 
@@ -73,6 +73,19 @@ pub struct CompositorOptions {
     /// size, and unlike `--nested` there's no host to negotiate a different
     /// size with.
     pub tty: bool,
+    /// `--tty`'s DRM device, when the automatic choice is wrong. `None`
+    /// (the normal case) means `tty::gpu::candidates` picks: Smithay's
+    /// `primary_gpu` first, then every other device on the seat as a
+    /// fallback. A path here replaces that search entirely -- exactly one
+    /// candidate, no fallback -- so a user on hardware both heuristics get
+    /// wrong can name the right device instead. Meaningless outside
+    /// `--tty`, where `compositor::run` ignores it *with a warning* --
+    /// unlike `width`/`height` under `--tty`, which are dropped silently.
+    /// The difference is deliberate: a size has a sensible reading on a
+    /// backend that ignores it (the mode wins), whereas naming a DRM
+    /// device on a backend with no DRM device at all means the user
+    /// believes they are on `--tty` and is not.
+    pub gpu: Option<PathBuf>,
 }
 
 impl Default for CompositorOptions {
@@ -85,6 +98,7 @@ impl Default for CompositorOptions {
             command: Vec::new(),
             nested: false,
             tty: false,
+            gpu: None,
         }
     }
 }
@@ -141,6 +155,10 @@ fn compositor(
             "--config" => {
                 let path = args.next().ok_or(Error::Missing("a path after --config"))?;
                 options.config = Some(PathBuf::from(path));
+            }
+            "--gpu" => {
+                let path = args.next().ok_or(Error::Missing("a path after --gpu"))?;
+                options.gpu = Some(PathBuf::from(path));
             }
             "--" => {
                 options.command = args.by_ref().collect();
@@ -431,6 +449,28 @@ mod tests {
             panic!("expected compositor");
         };
         assert!(!options.tty);
+    }
+
+    #[test]
+    fn gpu_is_none_by_default_and_takes_a_path() {
+        let Ok(Command::Compositor(options)) = parse_args(&["--tty"]) else {
+            panic!("expected compositor");
+        };
+        assert_eq!(options.gpu, None);
+
+        let Ok(Command::Compositor(options)) = parse_args(&["--tty", "--gpu", "/dev/dri/card1"])
+        else {
+            panic!("expected compositor");
+        };
+        assert_eq!(options.gpu, Some(PathBuf::from("/dev/dri/card1")));
+    }
+
+    #[test]
+    fn gpu_without_a_path_is_an_error() {
+        assert_eq!(
+            parse_args(&["--tty", "--gpu"]),
+            Err(Error::Missing("a path after --gpu"))
+        );
     }
 
     #[test]

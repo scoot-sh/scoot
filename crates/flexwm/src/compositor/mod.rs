@@ -61,8 +61,20 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
     // create the render target at. Neither `--nested` nor plain
     // `--headless` touch `options.width`/`options.height` here.
     let (width, height) = if options.tty {
-        tty::init(state.loop_handle.clone(), &mut state)?
+        tty::init(
+            state.loop_handle.clone(),
+            &mut state,
+            options.gpu.as_deref(),
+        )?
     } else {
+        // Not silently dropped the way `--width`/`--height` are under
+        // `--tty`: those have a sensible reading on the backend that
+        // ignores them (the mode wins), whereas `--gpu` on a backend with
+        // no DRM device at all means the user believes they are on `--tty`
+        // and is not.
+        if options.gpu.is_some() {
+            tracing::warn!("--gpu names the DRM device for --tty; ignoring it on this backend");
+        }
         (options.width, options.height)
     };
     headless::init(&mut state, width, height)?;
