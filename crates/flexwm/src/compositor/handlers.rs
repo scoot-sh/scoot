@@ -30,6 +30,7 @@ use smithay::wayland::shell::xdg::{
 use smithay::wayland::shm::{ShmHandler, ShmState};
 
 use super::State;
+use super::output_scale::send_preferred_buffer_scale;
 use super::state::ClientState;
 
 impl CompositorHandler for State {
@@ -44,7 +45,25 @@ impl CompositorHandler for State {
             .compositor_state
     }
 
+    /// A new `wl_surface` exists. The integer `preferred_buffer_scale` is
+    /// advertised here as well as on commit: the scale is fixed for the
+    /// process's life and known before any client can connect (it is set in
+    /// `State::new`, not when the output is configured), so a surface can be
+    /// told the moment it exists, and a client that queries before its first
+    /// commit is answered rather than left at the implicit default. `commit`
+    /// is the general path that covers a surface this hook somehow missed; see
+    /// `send_preferred_buffer_scale`'s own doc for why repeating it per commit
+    /// is free.
+    fn new_surface(&mut self, surface: &WlSurface) {
+        send_preferred_buffer_scale(surface, self.integer_scale);
+    }
+
     fn commit(&mut self, surface: &WlSurface) {
+        // The integer half of the scale story, alongside the fractional
+        // `preferred_scale` `FractionalScaleHandler` sends. `send_surface_state`
+        // caches per surface, so this emits only when it differs from what the
+        // surface already has -- nothing after the first call at a fixed scale.
+        send_preferred_buffer_scale(surface, self.integer_scale);
         on_commit_buffer_handler::<Self>(surface);
         self.last_commit = std::time::Instant::now();
         self.request_render();

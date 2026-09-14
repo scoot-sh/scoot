@@ -47,7 +47,8 @@ bars can also list, follow and switch workspaces (see Workspaces for bars
 below), `ext-session-lock-v1`, so a real screen locker can lock the session
 with the compositor itself enforcing it (see Screen locking below), and
 output scaling (`[output] scale` over `wl_output.scale`,
-`wp_fractional_scale_v1` and `wp_viewporter`, so a HiDPI panel gets
+`wp_fractional_scale_v1`, `wl_surface.preferred_buffer_scale` and
+`wp_viewporter`, so a HiDPI panel gets
 correctly-sized clients and text instead of everything rendered physically
 tiny — see Output scaling below), plus a
 hardened control socket (owner-only
@@ -539,7 +540,7 @@ greater than 1, or everything comes out physically tiny (text especially).
 scale = 2.0        # 1.5, 1.25, ... all work; 1.0 is the default
 ```
 
-It is advertised two ways, matching what clients actually support:
+It is advertised three ways, matching what clients actually support:
 
 - **`wl_output.scale`** — the integer `ceil(scale)`. Every client that binds
   an output gets it automatically (re-sent on bind and whenever the output's
@@ -552,6 +553,16 @@ It is advertised two ways, matching what clients actually support:
   alongside it, because that is the protocol a client uses to submit such a
   buffer (it sets the surface's logical destination size and flexwm scales the
   buffer into it) — without it, a fractional client has no way to render.
+- **`wl_surface.preferred_buffer_scale`** (needs client `wl_compositor` v6) —
+  the integer preference that backs the fractional value up, sent with the
+  default `preferred_buffer_transform` (`normal`). It is a separate event on a
+  separate object from the fractional one, so a client that opts into
+  fractional scaling receives **both**: the exact `1.5` *and* the integer `2`.
+  Some toolkits (GTK4/Ghostty among them) act on the fractional value only when
+  the integer companion is also present; without it, a fractional session
+  silently fails to render where an integer one works. A client below
+  `wl_compositor` v6 is not sent the event and keeps the implicit default of 1,
+  exactly as before.
 
 Notes, because they are real limits rather than polish:
 
@@ -668,7 +679,7 @@ all.)
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
-| `scale` | float | `1.0` | Output scale advertised to clients and rendered at. `1.0` is byte-identical to no setting at all; anything else advertises `ceil(scale)` on `wl_output` and the exact value through `wp_fractional_scale_v1`/`wp_viewporter` (see Output scaling above). Clamped into `0.5..=4.0` with a warning, and a non-finite value falls back to `1.0`; startup-only. `--nested` ignores a non-1.0 value with a warning. |
+| `scale` | float | `1.0` | Output scale advertised to clients and rendered at. `1.0` is byte-identical to no setting at all; anything else advertises `ceil(scale)` on `wl_output` and `wl_surface.preferred_buffer_scale`, and the exact value through `wp_fractional_scale_v1`/`wp_viewporter` (see Output scaling above). Clamped into `0.5..=4.0` with a warning, and a non-finite value falls back to `1.0`; startup-only. `--nested` ignores a non-1.0 value with a warning. |
 
 ### `[binds]`
 

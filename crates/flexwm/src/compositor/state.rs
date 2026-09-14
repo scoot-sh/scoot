@@ -103,6 +103,14 @@ pub struct State {
     /// `compositor::run` forces this to 1.0 under `--nested`, where the host
     /// compositor owns the scale.
     pub output_scale: f64,
+    /// The integer form of [`Self::output_scale`] -- `ceil(output_scale)`, the
+    /// value sent on `wl_surface.preferred_buffer_scale` and the same one
+    /// Smithay advertises on `wl_output.scale` (see `output_scale.rs`'s
+    /// `integer_scale`). Precomputed once at construction because
+    /// `CompositorHandler::commit` reads it on every surface commit, and it can
+    /// never disagree with `output_scale`: that field is fixed for the
+    /// process's life and nothing writes either one after `new`.
+    pub integer_scale: i32,
     pub backend: Option<Backend>,
     /// Set only under `--nested`: the connection presenting `backend`'s
     /// framebuffer as a window in a host compositor, and forwarding that
@@ -223,7 +231,7 @@ impl State {
         scale: f64,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let dh = display.handle();
-        let compositor_state = CompositorState::new::<Self>(&dh);
+        let compositor_state = CompositorState::new_v6::<Self>(&dh);
         let xdg_shell_state = XdgShellState::new::<Self>(&dh);
         let xdg_decoration_state = XdgDecorationState::new::<Self>(&dh);
         let layer_shell_state = WlrLayerShellState::new::<Self>(&dh);
@@ -267,6 +275,7 @@ impl State {
             popups: PopupManager::default(),
             output: None,
             output_scale: scale,
+            integer_scale: super::output_scale::integer_scale(scale),
             backend: None,
             host: None,
             tty: None,

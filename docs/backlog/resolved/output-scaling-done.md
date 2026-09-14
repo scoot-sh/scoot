@@ -26,6 +26,15 @@ forces scale 1.0 with a warning. IPC's `OutputSnapshot` carries `scale`
 (additive, serde-defaulted to 1.0, so it did **not** need a `PROTOCOL_VERSION`
 bump — the planned `usable`-rect/focus-workspace bundle is untouched).
 
+**Follow-up (2026-09-14):** this landed the fractional path but created the
+`wl_compositor` global at version 5, so clients never received the integer
+`wl_surface.preferred_buffer_scale` (a v6 event) that backs the fractional
+`preferred_scale` up. Ghostty failed to load at `[output] scale = 1.5` for
+exactly that reason. Fixed in
+[`fractional-scale-preferred-buffer-scale-done.md`](fractional-scale-preferred-buffer-scale-done.md)
+(global now v6; `send_surface_state` called from `new_surface`/`commit`);
+real-hardware confirmation on the reporting Asahi M2 is still pending.
+
 The original diagnosis is kept below for history.
 
 ---

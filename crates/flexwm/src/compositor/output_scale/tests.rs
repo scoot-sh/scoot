@@ -114,6 +114,38 @@ fn exactly_one_is_spelled_as_the_integer_variant() {
     ));
 }
 
+/// The integer `wl_surface.preferred_buffer_scale` is `ceil`, matching what
+/// Smithay puts on `wl_output.scale` for the same `Scale`: `1.5` rounds up to
+/// `2`, `2.0` stays `2`, `1.0` stays `1`, and both ends of the clamp are
+/// integers already.
+#[test]
+fn integer_scale_rounds_up_to_match_wl_output_scale() {
+    for (scale, expected) in [
+        (MIN_SCALE, 1),
+        (0.75, 1),
+        (1.0, 1),
+        (1.25, 2),
+        (1.5, 2),
+        (2.0, 2),
+        (2.5, 3),
+        (MAX_SCALE, 4),
+    ] {
+        assert_eq!(
+            integer_scale(scale),
+            expected,
+            "integer_scale({scale}) was wrong"
+        );
+        // The value must agree with Smithay's own integer scale for the
+        // `Scale` this configured value resolves to -- they are two views of
+        // the same number and a client may see both.
+        assert_eq!(
+            integer_scale(scale),
+            smithay_scale(scale).integer_scale(),
+            "integer_scale({scale}) disagrees with Scale::integer_scale()"
+        );
+    }
+}
+
 // -- logical_size --------------------------------------------------------
 
 /// The exact rectangles a real panel produces, including the one that does
@@ -200,8 +232,9 @@ const WINDOW_BGRA: [u8; 4] = [0x20, 0xE0, 0x20, 0xFF];
 
 /// One instruction for the client thread.
 enum Step {
-    /// Create a surface, attach a `wp_fractional_scale_v1` to it, round trip,
-    /// and report the preferred scale it was sent plus the `wl_output.scale`.
+    /// Create a surface, attach a `wp_fractional_scale_v1` to it, bind a v6
+    /// `wl_compositor`, round trip, and report the preferred scales it was
+    /// sent plus the `wl_output.scale`.
     Negotiate,
     /// Map an `xdg_toplevel` whose buffer is `buffer`x`buffer` physical
     /// pixels, with an optional viewport destination of `destination` logical
@@ -216,6 +249,11 @@ enum Step {
 enum Ack {
     Negotiated {
         preferred_scale: Option<f64>,
+        /// `wl_surface.preferred_buffer_scale` (v6), the integer companion to
+        /// `preferred_scale`.
+        preferred_buffer_scale: Option<i32>,
+        /// How many times that event arrived across several commits.
+        preferred_buffer_scale_events: u32,
         output_scale: Option<i32>,
     },
     Done,
@@ -238,6 +276,13 @@ struct TestClient {
     /// `wp_fractional_scale_v1.preferred_scale`, converted from the protocol's
     /// 1/120ths to a plain factor.
     preferred_scale: Option<f64>,
+    /// `wl_surface.preferred_buffer_scale` (v6), the integer preference a
+    /// client that opted into fractional scaling still expects.
+    preferred_buffer_scale: Option<i32>,
+    /// How many `preferred_buffer_scale` events that surface was sent. Proves
+    /// Smithay's per-surface cache: committing repeatedly at a fixed scale
+    /// emits once, not once per commit.
+    preferred_buffer_scale_events: u32,
     /// `wl_output.scale`, the integer a client that doesn't speak
     /// fractional-scale is told.
     output_scale: Option<i32>,
@@ -264,7 +309,7 @@ impl Dispatch<wl_registry::WlRegistry, ()> for TestClient {
         };
         match interface.as_str() {
             "wl_compositor" => {
-                client.compositor = Some(registry.bind(name, version.min(4), qh, ()))
+                client.compositor = Some(registry.bind(name, version.min(6), qh, ()))
             }
             "wl_shm" => client.shm = Some(registry.bind(name, version.min(1), qh, ())),
             "xdg_wm_base" => client.wm_base = Some(registry.bind(name, version.min(3), qh, ())),
@@ -385,8 +430,25 @@ impl Dispatch<xdg_surface::XdgSurface, SurfaceIndex> for TestClient {
     }
 }
 
+impl Dispatch<wl_surface::WlSurface, ()> for TestClient {
+    fn event(
+        client: &mut Self,
+        _: &wl_surface::WlSurface,
+        event: wl_surface::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        // v6's integer preference. Captured for every surface; the tests read
+        // the value the one surface under test was sent.
+        if let wl_surface::Event::PreferredBufferScale { factor } = event {
+            client.preferred_buffer_scale = Some(factor);
+            client.preferred_buffer_scale_events += 1;
+        }
+    }
+}
+
 wayland_client::delegate_noop!(TestClient: ignore wl_compositor::WlCompositor);
-wayland_client::delegate_noop!(TestClient: ignore wl_surface::WlSurface);
 wayland_client::delegate_noop!(TestClient: ignore wl_shm::WlShm);
 wayland_client::delegate_noop!(TestClient: ignore wl_shm_pool::WlShmPool);
 wayland_client::delegate_noop!(TestClient: ignore wl_buffer::WlBuffer);
@@ -469,15 +531,27 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
             Step::Negotiate => {
                 let surface = compositor.create_surface(&qh, ());
                 let fractional = manager.get_fractional_scale(&surface, &qh, ());
+                // Bare commits (no buffer, no role) so the compositor's
+                // per-commit path -- where the integer scale is also sent --
+                // actually runs. Three of them: Smithay's cache means the
+                // client must still see exactly one event.
+                surface.commit();
+                surface.commit();
+                surface.commit();
+                // Wait for *both* events. They are independent protocol
+                // objects (the integer travels on the surface, the fractional
+                // on its own object), so neither implies the other.
                 for _ in 0..50 {
                     queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
-                    if client.preferred_scale.is_some() {
+                    if client.preferred_scale.is_some() && client.preferred_buffer_scale.is_some() {
                         break;
                     }
                 }
                 queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
                 outcome = Ack::Negotiated {
                     preferred_scale: client.preferred_scale,
+                    preferred_buffer_scale: client.preferred_buffer_scale,
+                    preferred_buffer_scale_events: client.preferred_buffer_scale_events,
                     output_scale: client.output_scale,
                 };
                 keep_alive.push((surface, None, None, Some(fractional)));
@@ -653,15 +727,39 @@ fn bgra_at(pixels: &[u8], x: i32, y: i32) -> [u8; 4] {
     pixels[index..index + 4].try_into().expect("four bytes")
 }
 
-/// A real client gets both halves of the scale story: `preferred_scale` from
-/// `wp_fractional_scale_v1` (the exact fractional value) and `wl_output.scale`
-/// (the integer a client that doesn't speak fractional-scale is told).
+/// A real client gets all of the scale story: `preferred_scale` from
+/// `wp_fractional_scale_v1` (the exact fractional value), the integer
+/// `wl_surface.preferred_buffer_scale` that backs it up (v6), and
+/// `wl_output.scale` (the integer a client that doesn't speak fractional-scale
+/// is told). At `1.5` the two integers are both `2` while the fractional value
+/// is `1.5`; at `2.0` all three coincide.
+///
+/// At `1.0` the client receives *no* `preferred_buffer_scale`, and that is
+/// correct rather than a gap: Smithay's `send_surface_state` caches a default
+/// of `scale: 1` (`compositor/tree.rs`'s `SuggestedSurfaceState::default`) and
+/// only emits on a change, so a scale-1 session sends nothing and the client
+/// keeps the implicit integer default of 1 -- byte-identical to the behavior
+/// before this event existed. The effective integer is 1 either way, which is
+/// what the `output_scale`/implicit assertions below pin.
+///
+/// This is the regression test for the Ghostty failure: remove the
+/// `send_surface_state` call and the `1.5`/`2.0` cases fail, because the
+/// client then never receives `preferred_buffer_scale` at all.
 #[test]
 fn a_client_is_told_the_fractional_and_integer_scales() {
-    for (scale, preferred, integer) in [(1.5, 1.5, 2), (2.0, 2.0, 2), (1.0, 1.0, 1)] {
+    // `expected_buffer_scale` is `None` exactly where Smithay's own cache makes
+    // the event redundant (scale 1); `integer` is the effective integer either
+    // way.
+    for (scale, preferred, expected_buffer_scale, integer) in [
+        (1.5, 1.5, Some(2), 2),
+        (2.0, 2.0, Some(2), 2),
+        (1.0, 1.0, None, 1),
+    ] {
         let mut fixture = Fixture::new(scale);
         let Ack::Negotiated {
             preferred_scale,
+            preferred_buffer_scale,
+            preferred_buffer_scale_events,
             output_scale,
         } = fixture.run(Step::Negotiate)
         else {
@@ -670,7 +768,25 @@ fn a_client_is_told_the_fractional_and_integer_scales() {
         assert_eq!(
             preferred_scale,
             Some(preferred),
-            "preferred_scale at scale {scale}"
+            "wp_fractional_scale_v1.preferred_scale at scale {scale}"
+        );
+        assert_eq!(
+            preferred_buffer_scale, expected_buffer_scale,
+            "wl_surface.preferred_buffer_scale at scale {scale}"
+        );
+        // Three commits were sent; Smithay's per-surface cache means at most
+        // one event, so the per-commit path adds no repeated traffic.
+        assert_eq!(
+            preferred_buffer_scale_events,
+            u32::from(expected_buffer_scale.is_some()),
+            "preferred_buffer_scale events across three commits at scale {scale}"
+        );
+        // Whatever was (or wasn't) sent explicitly, the integer the client acts
+        // on is `ceil(scale)`.
+        assert_eq!(
+            preferred_buffer_scale.unwrap_or(1),
+            integer,
+            "effective wl_surface.preferred_buffer_scale at scale {scale}"
         );
         assert_eq!(
             output_scale,
