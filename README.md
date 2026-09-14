@@ -405,9 +405,14 @@ real `--tty` hardware by screenshot and by what clients were actually sent:
 - **Only the lock surface receives input.** Keyboard focus moves to it (or to
   nobody, if the client hasn't created one yet) the instant the lock request
   arrives, and pointer focus is moved with it, so a click can't land in the
-  window that happened to be under the pointer. Any pointer grab in flight —
-  a drag-and-drop, say — is dropped as well; that last part is code-traced
-  rather than exercised, since there is no drag-and-drop fixture here.
+  window that happened to be under the pointer. Any pointer grab in flight is
+  dropped as well — not only when the lock is taken, but at every transition
+  that changes which lock surfaces count (a lock surface destroyed, a lock
+  given up, a locker that died), because a grab outlives focus changes by
+  design and would otherwise keep steering the pointer to whoever holds it.
+  A held-button grab is exercised by a test; the drag-and-drop case is still
+  code-traced rather than exercised, since there is no drag-and-drop fixture
+  here.
 - **"The lock surface" means the *current* lock's.** A lock object can be
   destroyed while the client that made it stays connected and keeps the
   `wl_surface` underneath alive, so "is this surface alive" is not the same
@@ -415,6 +420,12 @@ real `--tty` hardware by screenshot and by what clients were actually sent:
   session". flexwm asks the second one everywhere: a surface from a lock that
   was given up, or replaced, stops being drawn and stops receiving keyboard
   and pointer input immediately, without waiting for anything to replace it.
+- **A destroyed lock surface falls back to the backdrop straight away.** The
+  protocol's own rule ("the compositor must fall back to rendering a solid
+  color"), and "straight away" means without waiting for anything else to
+  change on screen — including when the client destroys only the
+  `ext_session_lock_surface_v1` and keeps the `wl_surface` under it alive,
+  which is what a locker does when an output is removed under it.
 - **Keybindings that run an action don't fire.** `Super+Q`, a `spawn` bind,
   every layout motion: suppressed, and forwarded to the lock client as
   ordinary keystrokes instead. The one exception is deliberate: the `--tty`
@@ -445,7 +456,13 @@ session:
   the lock it replaces had already blanked the screen; if that lock went in
   the window *before* its first blanked frame, the replacement waits for one
   exactly like a fresh lock does, because until then your actual desktop is
-  still what's on the display. Both behaviors match what sway does.
+  still what's on the display. Taking the lock over at all rather than
+  refusing is what sway does too (`lock.c`'s `handle_session_lock` replaces an
+  abandoned lock and refuses a live one, exactly as flexwm does); the
+  *conditional* confirmation is niri's (`Niri::lock` confirms immediately only
+  from an already-locked state, never from a lock still waiting for its first
+  frame). sway confirms unconditionally, fresh lock or takeover alike, so that
+  half is deliberately not sway's behavior.
 
 The same applies to a lock client that gives up without dying: destroying an
 `ext_session_lock_v1` before `locked` arrives is legal (only
@@ -485,6 +502,14 @@ its connection and its `wl_surface`s are still perfectly alive.
   between the lock request and the first blanked frame. That is inherent (the
   protocol's `locked` ordering exists precisely because of it), not something
   flexwm defers.
+- **The first click on a fresh lock screen, before the mouse has moved,
+  reaches nobody.** Pointer focus is re-derived when the lock surface is
+  created, which is before it has drawn anything, so the hit test finds
+  nothing and the click goes nowhere; one pointer motion fixes it for the rest
+  of the session. It fails safe — "nobody" is nobody, never the window that
+  was under the pointer before the lock — and a locker is a keyboard-first
+  thing, so it's a papercut rather than a hole, but it is on the backlog
+  rather than fixed.
 - **flexwm blanks immediately rather than waiting for the lock client to
   draw.** Some compositors wait up to a second for lock surfaces so the
   transition doesn't flash black; flexwm doesn't, deliberately — waiting means

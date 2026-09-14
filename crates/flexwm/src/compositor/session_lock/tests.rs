@@ -138,6 +138,12 @@ enum Step {
     /// the protocol's "the compositor must fall back to rendering a solid
     /// color" case.
     DestroyLockSurface { index: usize },
+    /// The same protocol case, but destroying *only* the
+    /// `ext_session_lock_surface_v1` role object and keeping the `wl_surface`
+    /// underneath -- and the lock, and the connection -- alive. Legal, and
+    /// what a locker does when an output is removed under it, so it reaches
+    /// none of the hooks the step above does.
+    DestroyLockRoleOnly { index: usize },
     /// `unlock_and_destroy` on the `index`-th lock object.
     Unlock { lock: usize },
     /// `ext_session_lock_manager_v1.lock` without waiting for the compositor's
@@ -591,6 +597,10 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 lock_surface.destroy();
                 surface.destroy();
             }
+            Step::DestroyLockRoleOnly { index } => {
+                let (_, lock_surface) = lock_surfaces.get(index).ok_or("no such lock surface")?;
+                lock_surface.destroy();
+            }
             Step::LockNoWait => {
                 let lock = manager.lock(&qh, ());
                 locks.push(lock);
@@ -933,6 +943,12 @@ fn a_lock_surface_with_no_buffer_yet_shows_the_backdrop() {
 /// The protocol's own words: "If a lock surface on an active output is
 /// destroyed before the ext_session_lock_v1.unlock_and_destroy event is sent,
 /// the compositor must fall back to rendering a solid color."
+///
+/// Asserted on the frame the compositor drew *by itself* -- [`Fixture::tick`]
+/// then [`Fixture::pixels`], never [`Fixture::render`] -- because "falls back"
+/// is a claim about what is on the display, and a fallback that waited for an
+/// unrelated pointer motion to mark the screen dirty would pass a
+/// `render()`-based test while leaving the destroyed surface's pixels up.
 #[test]
 fn destroying_a_lock_surface_falls_back_to_a_solid_color() {
     let mut fixture = Fixture::new();
@@ -942,8 +958,113 @@ fn destroying_a_lock_surface_falls_back_to_a_solid_color() {
     assert!(contains(&fixture.render(), LOCK_BGRA));
 
     fixture.run(Step::DestroyLockSurface { index: 0 });
-    let pixels = fixture.render();
+    fixture.tick(Duration::from_millis(120));
+    let pixels = fixture.pixels();
     assert_whole_screen_is(&pixels, BLACK_BGRA, "after the lock surface was destroyed");
+}
+
+/// The same protocol sentence, for the destruction that reaches no other hook:
+/// only the `ext_session_lock_surface_v1` role object goes, and the
+/// `wl_surface` under it, the lock and the connection all stay.
+///
+/// That is legal, and it is what a locker does when an output is removed under
+/// it -- so "the compositor must fall back to rendering a solid color" applies
+/// with nothing else changing to prompt a redraw. Before `dispatch.rs`'s
+/// `destroyed` hook existed this left the destroyed surface's last frame on
+/// screen indefinitely: Smithay resets the surface's `last_acked` (so it stops
+/// producing render elements) but nothing asked for the frame that would show
+/// it gone, and no `wl_surface` or lock object destruction ran to ask on its
+/// behalf.
+#[test]
+fn destroying_only_the_lock_surfaces_role_falls_back_without_waiting_for_damage() {
+    let mut fixture = Fixture::new();
+    fixture.run(Step::MapWindow);
+    fixture.run(Step::Lock);
+    fixture.run(Step::map_lock_surface(0));
+    assert_whole_screen_is(&fixture.render(), LOCK_BGRA, "the lock surface");
+
+    fixture.run(Step::DestroyLockRoleOnly { index: 0 });
+    // A whole frame period with nothing else going on: no pointer motion, no
+    // commit, no colour change -- the damage a stale frame would otherwise be
+    // waiting for.
+    fixture.tick(Duration::from_millis(120));
+    let unasked = fixture.pixels();
+    assert!(
+        fixture.state.session_lock.is_locked() && !fixture.state.session_lock.abandoned(),
+        "the lock itself is untouched: only its surface's role object went"
+    );
+    assert_whole_screen_is(
+        &unasked,
+        BLACK_BGRA,
+        "the frame the compositor drew by itself after the role object was destroyed",
+    );
+}
+
+/// ...and the lock is still a real lock afterwards: the client that destroyed
+/// its own surface still owns the session, can still unlock it, and the
+/// orphaned `wl_surface` it kept alive does not survive that unlock.
+#[test]
+fn a_lock_whose_surfaces_role_was_destroyed_still_unlocks() {
+    let mut fixture = Fixture::new();
+    fixture.run(Step::MapWindow);
+    fixture.run(Step::Lock);
+    fixture.run(Step::map_lock_surface(0));
+    fixture.render();
+    fixture.run(Step::DestroyLockRoleOnly { index: 0 });
+    fixture.tick(Duration::from_millis(120));
+
+    fixture.run(Step::Unlock { lock: 0 });
+    assert!(!fixture.state.session_lock.is_locked());
+    assert!(
+        fixture.state.session_lock.surfaces.is_empty(),
+        "the orphaned surface must not outlive the lock that made it"
+    );
+    let pixels = fixture.render();
+    assert!(
+        contains(&pixels, WINDOW_BGRA),
+        "the window should be back on screen after unlocking"
+    );
+    assert!(
+        !contains(&pixels, LOCK_BGRA),
+        "the destroyed lock surface must not come back with the session"
+    );
+}
+
+/// A button held down installs an implicit pointer grab (Smithay's
+/// `DefaultGrab` sets a `ClickGrab` on every press), and a grab outlives focus
+/// changes by design. So every lock transition has to drop it explicitly --
+/// including the one that only destroys a role object, which is the shape the
+/// reviewer's "hold the lock, click, drag, destroy the surface" sequence takes.
+#[test]
+fn a_lock_transition_drops_a_grab_a_click_left_behind() {
+    let mut fixture = Fixture::new();
+    fixture.run(Step::Lock);
+    fixture.run(Step::map_lock_surface(0));
+    fixture.render();
+    fixture.state.pointer_move(30.0, 30.0);
+    fixture.state.pointer_button(PointerButton::Left, true);
+    fixture.settle();
+    assert!(
+        fixture
+            .state
+            .seat
+            .get_pointer()
+            .expect("a pointer")
+            .is_grabbed(),
+        "a press with no release leaves the implicit click grab installed"
+    );
+
+    fixture.run(Step::DestroyLockRoleOnly { index: 0 });
+    fixture.settle();
+    assert!(
+        !fixture
+            .state
+            .seat
+            .get_pointer()
+            .expect("a pointer")
+            .is_grabbed(),
+        "the grab must not survive a lock transition"
+    );
 }
 
 /// Unlocking puts the session back exactly as it was, including the window

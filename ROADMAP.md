@@ -2357,7 +2357,92 @@ review, and why.
     `scripts/smoke-test.sh` passes end to end against the Nix-built binary.
     `flake.lock` is untouched (no new input), and the flake's `description`
     lost its last "window manager" while it was open.
-17. ~~`ext-session-lock-v1`: a real screen lock the compositor enforces~~ —
+17. ~~`--tty` picked one GPU and gave up if it couldn't drive a display~~ —
+    BUILT, PR #27; **verified on the dev VM, still awaiting confirmation on
+    the Apple Silicon machine that reported it.** Picked up from the Backlog
+    (entry struck through there). `flexwm --tty` on the user's M2 laptop
+    under Asahi Linux died at startup with `Error loading resource handles
+    on device Some("/dev/dri/card1")`, reproduced twice.
+
+    **The fault is in the heuristic, not the hardware** — niri drives the
+    same machine's display. `tty/mod.rs` called
+    `smithay::backend::udev::primary_gpu` and trusted the answer, and that
+    function ranks (1) a PCI parent with `boot_vga=1`, (2) the
+    alphabetically first device with a DRM *render* node, (3)
+    alphabetically first. Apple Silicon has no PCI GPU and no VGA BIOS, so
+    (1) never matches; (2) then picks `asahi`/AGX, the 3D GPU, over
+    `apple,dcp`, which is a *separate* DRM device and the one that owns the
+    CRTCs and connectors. `ENOTSUP` from `resource_handles` is what a
+    device with no mode-setting pipeline returns.
+
+    **Both halves of the Backlog entry's fix direction shipped.** A new
+    `tty/gpu.rs` builds a candidate list — `primary_gpu()`'s pick first, so
+    ordinary hardware keeps today's answer and opens exactly one device,
+    then every other device on the seat in `all_gpus()`'s sorted order —
+    and `init` walks it until one works, reporting every device it tried
+    and what each said if none does. `--gpu PATH` replaces the search
+    outright (one candidate, no fallback), as both the immediate workaround
+    and the documented escape hatch. It is ignored, with a warning, outside
+    `--tty`.
+
+    **Two decisions worth the words.** (a) *A candidate is checked on a
+    borrowed fd, before anything owns it.* `Session::close` — which is how
+    a rejected device goes back to libseat instead of leaving seatd holding
+    it open for the process's life — needs the `OwnedFd`, and Smithay's
+    `DeviceFd` is an `Arc<OwnedFd>` with no way back out. So `gpu::probe`
+    reads the KMS resources and the connector list through a tiny
+    `Probe(BorrowedFd)` (three empty trait impls) first. It also stops a
+    hopeless candidate from ever constructing a `DrmDeviceFd`, whose
+    "Unable to become drm master" logging would otherwise fire once per
+    device and read like the cause. The three steps *after* that
+    (`DrmDevice::new`, surface, buffers) still fall through to the next
+    candidate; they just close by dropping. (b) *No env-var counterpart.*
+    `FLEXWM_SOCKET` exists because child processes must inherit the socket
+    path; nothing inherits `--gpu`, and `--config` — the closest analogue —
+    has no env var either.
+
+    **What the dev VM can and cannot prove.** Its `virtio-gpu` is a single
+    unified render+display device, so the split topology this fixes cannot
+    exist there. Verified there instead: the working `--tty` path is
+    unchanged and still opens exactly one device (`drm: driving this device
+    path=/dev/dri/card0`, no `device unusable` warning — the loop never
+    iterates); `--gpu /dev/dri/card0` behaves identically to the automatic
+    path; `--gpu` pointed at a render node, a nonexistent path, `/dev/null`,
+    a directory and the empty string each exit 1 with a clear message
+    naming the device, no hang and no panic; a plain `--tty` still starts
+    after six consecutive failed starts, so a rejected device doesn't leak
+    the VT-bound seat. The fallback *iterating* is covered by unit tests
+    against `first_usable`, which is why the loop takes its opener as a
+    parameter. Whether this actually fixes Asahi Linux needs that machine.
+
+    **One real fix and five accuracy fixes from review**, all on the same
+    branch. The fix: `candidates` `?`-ed *both* udev calls, so a machine
+    whose primary device was found and would have worked could fail to
+    start because the fallback's own `all_gpus` enumeration hiccuped —
+    contradicting this item's "no behavior change on ordinary hardware".
+    It now degrades to "primary only, with a warning"; only a failure with
+    no primary to fall back to is still fatal (`gpu::assemble`, unit-tested
+    both ways). The rest: the all-candidates-failed error no longer
+    recommends `--gpu` when *every* candidate was refused at
+    `Session::open` (a busy seat, which is the likeliest real failure —
+    naming a device cannot help), which needed the per-candidate reason to
+    become a typed `gpu::Rejection` rather than a bare string; the
+    probe-rejection message dropped its "a device that only computes …"
+    trailing clause, which was asserted for every cause (an evdev path
+    typo included); `cli.rs`'s `gpu` doc said "silently ignored" where the
+    code warns; `OpenGpu`'s doc claimed the probe used a *different* file
+    description when it borrows the same one (and the same-fd property is
+    load-bearing — libseat keys its device table by raw fd); and two
+    README wordings ("the certain workaround", a dangling clause).
+
+    **Found while bug-bashing, not caused by this change:
+    `MODE=--tty scripts/smoke-test.sh` fails its background-pixel check**
+    (`the background pixel at (3,3) is rgb(0,0,0), expected #123456`).
+    Reproduced identically against a binary built from `main` at `868dd83`
+    on the same VM, with the assertion lines diffing clean between the two
+    — see the Backlog entry.
+
+18. ~~`ext-session-lock-v1`: a real screen lock the compositor enforces~~ —
     DONE, PR #25. Picked up from the Backlog (entry struck below) as the
     highest-priority protocol gap, and tied to a safety finding already on
     record: item 14's third review round established that a layer-shell
@@ -2604,93 +2689,69 @@ review, and why.
     per lock surface per read, of which there is one per output, with no
     allocation anywhere. The *unlocked* paths are untouched by construction —
     every change sits behind an `is_locked()` check or inside an
-    `if self.forget_lock_surface(..)` that is false while unlocked — so item
-    16's existing unlocked numbers still stand.
+    `if self.forget_lock_surface(..)` that is false while unlocked — so this
+    item's own round-one unlocked numbers (above) still stand. (Written as
+    "item 16's" when this entry *was* item 16; it is a self-reference, and is
+    spelled that way now so the next renumber can't break it again.)
 
-17. ~~`--tty` picked one GPU and gave up if it couldn't drive a display~~ —
-    BUILT, PR #27; **verified on the dev VM, still awaiting confirmation on
-    the Apple Silicon machine that reported it.** Picked up from the Backlog
-    (entry struck through there). `flexwm --tty` on the user's M2 laptop
-    under Asahi Linux died at startup with `Error loading resource handles
-    on device Some("/dev/dri/card1")`, reproduced twice.
+    **Round three** re-reviewed the round-two fix adversarially — seven more
+    attack variants beyond the original three, including a stronger one (an
+    attacker surface mapped with real full-output pixels *after* its lock was
+    already gone) — and **none reproduced**: the keyboard-hijack hole is
+    closed. One real, non-security finding survived that pass, plus four
+    documentation/consistency items, all fixed in the round-three commit:
 
-    **The fault is in the heuristic, not the hardware** — niri drives the
-    same machine's display. `tty/mod.rs` called
-    `smithay::backend::udev::primary_gpu` and trusted the answer, and that
-    function ranks (1) a PCI parent with `boot_vga=1`, (2) the
-    alphabetically first device with a DRM *render* node, (3)
-    alphabetically first. Apple Silicon has no PCI GPU and no VGA BIOS, so
-    (1) never matches; (2) then picks `asahi`/AGX, the 3D GPU, over
-    `apple,dcp`, which is a *separate* DRM device and the one that owns the
-    CRTCs and connectors. `ENOTSUP` from `resource_handles` is what a
-    device with no mode-setting pipeline returns.
-
-    **Both halves of the Backlog entry's fix direction shipped.** A new
-    `tty/gpu.rs` builds a candidate list — `primary_gpu()`'s pick first, so
-    ordinary hardware keeps today's answer and opens exactly one device,
-    then every other device on the seat in `all_gpus()`'s sorted order —
-    and `init` walks it until one works, reporting every device it tried
-    and what each said if none does. `--gpu PATH` replaces the search
-    outright (one candidate, no fallback), as both the immediate workaround
-    and the documented escape hatch. It is ignored, with a warning, outside
-    `--tty`.
-
-    **Two decisions worth the words.** (a) *A candidate is checked on a
-    borrowed fd, before anything owns it.* `Session::close` — which is how
-    a rejected device goes back to libseat instead of leaving seatd holding
-    it open for the process's life — needs the `OwnedFd`, and Smithay's
-    `DeviceFd` is an `Arc<OwnedFd>` with no way back out. So `gpu::probe`
-    reads the KMS resources and the connector list through a tiny
-    `Probe(BorrowedFd)` (three empty trait impls) first. It also stops a
-    hopeless candidate from ever constructing a `DrmDeviceFd`, whose
-    "Unable to become drm master" logging would otherwise fire once per
-    device and read like the cause. The three steps *after* that
-    (`DrmDevice::new`, surface, buffers) still fall through to the next
-    candidate; they just close by dropping. (b) *No env-var counterpart.*
-    `FLEXWM_SOCKET` exists because child processes must inherit the socket
-    path; nothing inherits `--gpu`, and `--config` — the closest analogue —
-    has no env var either.
-
-    **What the dev VM can and cannot prove.** Its `virtio-gpu` is a single
-    unified render+display device, so the split topology this fixes cannot
-    exist there. Verified there instead: the working `--tty` path is
-    unchanged and still opens exactly one device (`drm: driving this device
-    path=/dev/dri/card0`, no `device unusable` warning — the loop never
-    iterates); `--gpu /dev/dri/card0` behaves identically to the automatic
-    path; `--gpu` pointed at a render node, a nonexistent path, `/dev/null`,
-    a directory and the empty string each exit 1 with a clear message
-    naming the device, no hang and no panic; a plain `--tty` still starts
-    after six consecutive failed starts, so a rejected device doesn't leak
-    the VT-bound seat. The fallback *iterating* is covered by unit tests
-    against `first_usable`, which is why the loop takes its opener as a
-    parameter. Whether this actually fixes Asahi Linux needs that machine.
-
-    **One real fix and five accuracy fixes from review**, all on the same
-    branch. The fix: `candidates` `?`-ed *both* udev calls, so a machine
-    whose primary device was found and would have worked could fail to
-    start because the fallback's own `all_gpus` enumeration hiccuped —
-    contradicting this item's "no behavior change on ordinary hardware".
-    It now degrades to "primary only, with a warning"; only a failure with
-    no primary to fall back to is still fatal (`gpu::assemble`, unit-tested
-    both ways). The rest: the all-candidates-failed error no longer
-    recommends `--gpu` when *every* candidate was refused at
-    `Session::open` (a busy seat, which is the likeliest real failure —
-    naming a device cannot help), which needed the per-candidate reason to
-    become a typed `gpu::Rejection` rather than a bare string; the
-    probe-rejection message dropped its "a device that only computes …"
-    trailing clause, which was asserted for every cause (an evdev path
-    typo included); `cli.rs`'s `gpu` doc said "silently ignored" where the
-    code warns; `OpenGpu`'s doc claimed the probe used a *different* file
-    description when it borrows the same one (and the same-fd property is
-    load-bearing — libseat keys its device table by raw fd); and two
-    README wordings ("the certain workaround", a dangling clause).
-
-    **Found while bug-bashing, not caused by this change:
-    `MODE=--tty scripts/smoke-test.sh` fails its background-pixel check**
-    (`the background pixel at (3,3) is rgb(0,0,0), expected #123456`).
-    Reproduced identically against a binary built from `main` at `868dd83`
-    on the same VM, with the assertion lines diffing clean between the two
-    — see the Backlog entry.
+    - **MEDIUM, protocol compliance: destroying only the lock *surface* left
+      its last frame on screen.** A client may destroy its
+      `ext_session_lock_surface_v1` and keep the lock, the `wl_surface` and
+      the connection — legal, and what a locker does when an output is
+      removed under it. Smithay's `ExtLockSurfaceUserData::destroyed` resets
+      `last_acked`, so the surface stops producing render elements, but
+      *nothing asked for a frame*: the destroyed surface's pixels stayed up
+      until some unrelated damage (a pointer motion, the backdrop turning
+      red) happened along, against the protocol's own "the compositor must
+      fall back to rendering a solid color". Pre-existing, not a round-two
+      regression (reproduced on `ace80a1` too). Fixed where that destruction
+      is the only visible: `dispatch.rs`'s hand-written blanket
+      `Dispatch::destroyed`, which now calls `State::lock_surface_destroyed`
+      for that one interface — `SessionLockHandler` has `lock`, `unlock` and
+      `new_surface` and no callback for a surface going away. The interface
+      test is the same compile-time-folded `TypeId` comparison the three
+      request guards there already use, so every other interface's
+      destruction pays nothing.
+    - **LOW: the grab drop was asymmetric across the lock lifecycle.** Only
+      `lock()` dropped a pointer grab; the other transitions (a surface
+      dropped by `refresh_lock_state`, by the render loop's cleanup, by
+      either destruction hook) re-derived focus and left any grab installed —
+      and a grab outlives focus changes *by design*. Fixed by making all five
+      call one `State::lock_transition` (grab, both focuses, redraw); only
+      `unlock` deliberately does not, since that hands the session back. Two
+      grabs can actually be live: a drag-and-drop, and — found while fixing
+      this, contradicting the round-two note that DnD was the only one —
+      Smithay's *implicit click grab*, which `DefaultGrab::button` installs on
+      every press. That is what makes the fix testable without a DnD fixture,
+      and the new test holds a button down across a role-object destroy.
+      Nothing installs a keyboard grab today, which is why the same asymmetry
+      was never a keystroke leak; `drop_pointer_grab`'s doc says where one
+      would have to be dropped if that ever changes.
+    - **Doc accuracy: "both behaviors match what sway does" was wrong** for
+      the newer half. sway's `handle_session_lock` does replace an abandoned
+      lock and refuse a live one the way flexwm does, but it confirms
+      **unconditionally** — no blanked-frame gate, fresh lock or takeover
+      alike. The conditional confirmation round two added is **niri's**
+      (`Niri::lock` fast-confirms only from an already-`Locked` state), which
+      the module doc and PR body already attributed correctly; only
+      `README.md` said sway. Fixed there.
+    - **Doc completeness:** the README's own caveat list was missing the
+      first-click-on-a-fresh-lock-screen gap (its own backlog entry below),
+      which sits beside caveats of the same severity, and said nothing about
+      the destroyed-surface fallback above. Both added.
+    - **NIT: an invariant the round-two fix quietly depends on** is now
+      written down on `SessionLock::pending`: while it is `Some`, its lock
+      object is the same object as `owner` (both written together in
+      `lock()`). Without that, the dead-`pending` sweep could clear a
+      `pending` belonging to a lock that never blanked the screen and leave
+      the *next* lock fast-confirmed over a visible desktop.
 
 ## Backlog (unordered — pick up whenever it fits)
 
@@ -3236,13 +3297,13 @@ review, and why.
   worth naming while the memory of writing it is fresh: the fix belongs
   with those, as per-client accounting, not as a one-off limit here.
 
-- **~~`ext-session-lock-v1` protocol support~~ — DONE as item 17**, PR #25.
+- **~~`ext-session-lock-v1` protocol support~~ — DONE as item 18**, PR #25.
   The entry as written asked whether the pinned Smithay rev had a helper: it
   does (`wayland::session_lock`), so the protocol plumbing came from there
-  and flexwm wrote the policy. See item 17 for what shipped, what was
+  and flexwm wrote the policy. See item 18 for what shipped, what was
   deliberately deferred, and the crash-recovery decision.
 
-- **No IPC way to ask whether the session is locked** (item 17). An agent
+- **No IPC way to ask whether the session is locked** (item 18). An agent
   driving flexwm can tell indirectly — `flexwm msg action ...` answers
   `refused: the session is locked ...`, and a screenshot shows the lock
   screen — but there is no request that says so directly. Deferred because
@@ -3252,7 +3313,7 @@ review, and why.
   which are waiting on the same bump.
 
 - **flexwm blanks the screen immediately on a lock request rather than
-  waiting for the lock client's first surface** (item 17, deliberate). niri
+  waiting for the lock client's first surface** (item 18, deliberate). niri
   waits up to a second for lock surfaces so the transition doesn't flash
   black; the cost of that is rendering the *unlocked* session for that whole
   second, which is the wrong half of the trade to take first. Worth
@@ -3260,7 +3321,7 @@ review, and why.
   daily use — with a hard deadline, as the protocol requires.
 
 - **`locked` is sent once a blanked frame has been *rendered*, not once a
-  vblank has confirmed it** (item 17, restated precisely in round two after
+  vblank has confirmed it** (item 18, restated precisely in round two after
   review traced the original wording against the code and found it too
   strong). `confirm_lock` fires on `drew_a_frame`, which `headless.rs` sets
   when `render_output` succeeds on the pixman image — before, and independent
@@ -3280,7 +3341,7 @@ review, and why.
   item rather than riding along with a fix round.
 
 - **The `ext_session_lock_manager_v1` global is offered to every client**
-  (item 17). The protocol explicitly allows restricting it ("the compositor
+  (item 18). The protocol explicitly allows restricting it ("the compositor
   may choose to restrict this protocol to a special client"), and Smithay's
   helper takes a client filter flexwm passes `|_| true` to. There is nothing
   to filter *on* today — flexwm has no `wp_security_context_v1` support, so
@@ -3288,7 +3349,7 @@ review, and why.
   not as a bespoke allow-list.
 
 - **The first click on a fresh lock screen, before the mouse has moved,
-  reaches nobody** (item 17, found by round two's hardware bug-bash rather
+  reaches nobody** (item 18, found by round two's hardware bug-bash rather
   than by any test). `new_surface` does re-derive pointer focus, but it runs
   while the lock surface is still *unmapped*, so the hit test finds nothing;
   the commit that maps it asks for a render and nothing else
@@ -3303,10 +3364,30 @@ review, and why.
   recognise one in `commit` without making every ordinary window's commit pay
   for the lookup.
 
-- **Lock surfaces are per-output and flexwm has one output** (item 17).
+- **Lock surfaces are per-output and flexwm has one output** (item 18).
   `new_surface` honours the `wl_output` the client named but falls back to
   the single output; `configure_all` resizes them all together. One more
   site for the multi-output list `headless.rs`'s `OUTPUT_ID` doc keeps.
+
+- **One physical output can hold unboundedly many lock surfaces if the lock
+  client binds `wl_output` more than once** (item 18, found by round three's
+  review through source reading — not exercised, and not a privilege
+  escalation). The protocol's one-surface-per-output rule is enforced by
+  Smithay, whose `SessionLockState` keeps a `Vec<WlOutput>` of locked outputs
+  and compares `WlOutput` **resource** identity (`locked_outputs.contains(&output)`
+  in `session_lock/lock.rs`). A client may bind the same `wl_output` global
+  any number of times, and each bind is a different resource, so `lock`,
+  `get_lock_surface(bind_1)`, `get_lock_surface(bind_2)`, … all succeed for
+  one physical output. flexwm's `new_surface` accepts each (they pass
+  `is_current`: same lock, live surfaces) and `SessionLock::current`
+  composites every mapped one, so the render list grows with the number of
+  binds, and the first in creation order keeps the keyboard. Only reachable
+  by whoever already holds the lock — they already own the whole screen, so
+  there is nothing to escalate to, and the cost is their own memory plus the
+  compositor's per-frame work over a list they control. The fix belongs in
+  the same place multi-output does: resolve each `wl_output` to its
+  `Output` (`Output::from_resource`) and treat *that* as the key, in
+  `new_surface`, rather than trusting Smithay's resource-identity guard.
 
 - **~~`--tty` can pick a GPU that can't drive a display at all, and gives up
   outright instead of trying another one~~ — DONE as item 17, PR #27;
@@ -3378,7 +3459,7 @@ review, and why.
   not to consider the session idle while it's active. Neither has design
   work done; natural to scope alongside session-lock since they're the
   same feature area (idle/lock lifecycle), not before it. **Now the obvious
-  next pick in that area**: item 17 landed the lock itself, and without an
+  next pick in that area**: item 18 landed the lock itself, and without an
   idle notification nothing can trigger it automatically — locking is
   whatever the user runs by hand.
 

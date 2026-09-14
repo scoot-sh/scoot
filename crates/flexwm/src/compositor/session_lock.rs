@@ -155,6 +155,27 @@
 //! whatever the pointer last *entered*, so a filter that hid a zombie from the
 //! hit test while leaving it holding pointer focus would still deliver it
 //! every click.
+//!
+//! ## Every lock transition does the same three things
+//!
+//! Re-deriving both focuses is only two of them. The third is dropping a
+//! pointer grab, and it is the one a call site can silently forget: a grab
+//! outlives focus changes *by design*, so a transition that re-derived focus
+//! and stopped there would leave the grabbing client -- a drag-and-drop
+//! started before the transition -- receiving exactly the pointer events the
+//! focus change was meant to take away from it. [`State::lock_transition`] is
+//! the three together, and every transition calls it rather than repeating
+//! them: [`SessionLockHandler::lock`], [`State::refresh_lock_state`],
+//! [`State::lock_post_frame`]'s caller in the render loop, and both
+//! destruction hooks (`handlers.rs` for a destroyed `wl_surface`,
+//! `dispatch.rs` for a destroyed lock-surface *role object* --
+//! [`State::lock_surface_destroyed`]). [`SessionLockHandler::unlock`] is the
+//! single deliberate exception, documented there.
+//!
+//! No keyboard grab is dropped because nothing in this compositor installs
+//! one; if one is ever added, [`State::drop_pointer_grab`] is where it has to
+//! be dropped too, or the same asymmetry becomes a keystroke leak instead of
+//! a pointer one.
 
 use std::time::Duration;
 
@@ -212,6 +233,17 @@ pub struct SessionLock {
     /// 'locked' frame ... has been presented on all outputs"), which is what
     /// keeps a client that suspends the machine on `locked` from racing an
     /// unlocked frame onto the screen.
+    ///
+    /// **Invariant, which [`SessionLockHandler::lock`]'s fast-confirm depends
+    /// on: while this is `Some`, its `ext_session_lock()` is the same object
+    /// as [`SessionLock::owner`].** Both are written together, from the one
+    /// `confirmation` a `lock` call is handed, and `confirm_lock`/`unlock`
+    /// only ever clear this one. That is what makes "locked, with nothing
+    /// pending" mean "a blanked frame has been drawn for the lock we hold"
+    /// rather than "for some other lock": if the two could name different
+    /// objects, the dead-`pending` sweep could clear a `pending` belonging to
+    /// a lock that never blanked the screen and leave the next lock being
+    /// fast-confirmed over a fully visible desktop.
     ///
     /// Dropping a [`SessionLocker`] sends `finished` instead, which is how
     /// every refusal below tells a client its lock did not take.
@@ -570,25 +602,18 @@ impl SessionLockHandler for State {
             self.session_lock.pending = Some(confirmation);
         }
 
-        // A pointer grab (a drag-and-drop in flight, say) outlives focus
-        // changes by design -- that is what a grab is -- so it has to be
-        // dropped explicitly, or the client that started it keeps receiving
-        // pointer events through the lock.
-        if let Some(pointer) = self.seat.get_pointer()
-            && pointer.is_grabbed()
-        {
-            let serial = SERIAL_COUNTER.next_serial();
-            let time = InputTime::from_millis(self.millis());
-            pointer.unset_grab(self, serial, time);
-        }
         // Whatever cursor image a client asked for before the lock is that
         // client's own pixels, and the protocol says only lock surfaces are
         // rendered. Back to the compositor's own shape; from here only the
         // lock client can change it, because only it has pointer focus.
+        //
+        // Before the transition below rather than after only for readability:
+        // nothing `lock_transition` does reads or writes the cursor status
+        // (`unset_grab` cancels the drag and restores focus; a client's
+        // `wl_pointer.set_cursor` in response is a later request, not a
+        // synchronous callback), so the two are independent.
         self.cursor.set_status(CursorImageStatus::default_named());
-        self.refresh_keyboard_focus();
-        self.refresh_pointer_focus();
-        self.request_render();
+        self.lock_transition();
     }
 
     /// The owning client unlocked. Smithay has already checked that the
@@ -603,6 +628,12 @@ impl SessionLockHandler for State {
         // would keep an unlocked session waiting to confirm a lock.
         self.session_lock.pending = None;
         self.session_lock.surfaces.clear();
+        // Deliberately not [`State::lock_transition`]: this is the one lock
+        // transition that hands the session *back*, so a pointer grab has to
+        // survive it exactly as it survives any other focus change. Only the
+        // unlocking client itself can hold one by now -- nothing else has had
+        // pointer focus since the lock -- so dropping it here would break a
+        // drag that client is entitled to finish, and would protect nobody.
         self.refresh_keyboard_focus();
         self.refresh_pointer_focus();
         self.request_render();
@@ -653,6 +684,122 @@ impl SessionLockHandler for State {
 }
 
 impl State {
+    /// Everything the compositor has to catch up when the set of lock
+    /// surfaces that may be drawn and focused has just changed: any input
+    /// grab dropped, both focuses re-derived, the screen marked dirty.
+    ///
+    /// One function rather than the same three calls repeated, because the
+    /// three are not independent and the *asymmetry* is what goes wrong: a
+    /// transition that re-derived focus but left a grab installed would leave
+    /// the grabbing client receiving pointer events the focus change was
+    /// supposed to take away from it, and that mistake is invisible at the
+    /// call site that forgot it. The four callers are
+    /// [`SessionLockHandler::lock`] (a fresh lock or a takeover),
+    /// [`State::refresh_lock_state`] (a `destroy`/disconnect observed on the
+    /// wayland connection), [`State::lock_post_frame`]'s caller (the render
+    /// loop's own cleanup pass) and the two destruction hooks --
+    /// `handlers.rs`'s `CompositorHandler::destroyed` (the `wl_surface` went)
+    /// and `dispatch.rs`'s lock-surface `destroyed` (only the role object
+    /// went).
+    ///
+    /// Not used by [`SessionLockHandler::unlock`], which is the one
+    /// transition that gives the session *back* -- see the note there.
+    pub(super) fn lock_transition(&mut self) {
+        // Before the focus refreshes, not after: `unset_grab` restores focus
+        // to whatever the pointer had pending, so re-deriving afterwards is
+        // what gets the final word.
+        self.drop_pointer_grab();
+        self.refresh_keyboard_focus();
+        self.refresh_pointer_focus();
+        self.request_render();
+    }
+
+    /// Drops a pointer grab so it cannot outlive a lock transition.
+    ///
+    /// A grab deliberately outlives focus changes -- that is what a grab *is*
+    /// -- so re-deriving focus is not enough on its own: the grabbing client
+    /// goes on receiving every motion and button until the grab ends by
+    /// itself. Two kinds can be active here, and both matter:
+    ///
+    /// - **A drag-and-drop**, installed by `handlers.rs`'s
+    ///   `WaylandDndGrabHandler` at a client's own request. It ends only when
+    ///   the drag does, and while it lasts it routes pointer events through
+    ///   `DnDGrab` rather than through focus at all.
+    /// - **The implicit click grab**, which is not flexwm's code but is
+    ///   nonetheless installed on *every* button press: Smithay's
+    ///   `DefaultGrab::button` calls `SeatHandler::click_grab` (flexwm takes
+    ///   the default `ClickGrab`) and sets it. It releases itself once every
+    ///   button is up -- so this only ever finds one with a button still
+    ///   held, which is exactly the case that must not survive a lock
+    ///   transition: a press delivered to a surface before the transition
+    ///   would otherwise keep steering the pointer afterwards.
+    ///
+    /// **If a keyboard grab is ever added to this compositor, it has to be
+    /// dropped here too.** Nothing installs one today, which is the only
+    /// reason this is a pointer-only function and the only reason the same
+    /// asymmetry was not already a keystroke leak.
+    ///
+    /// Costs one mutex-guarded enum check on a transition that has already
+    /// decided to re-derive focus and redraw; nothing on any per-event path.
+    fn drop_pointer_grab(&mut self) {
+        let Some(pointer) = self.seat.get_pointer() else {
+            return;
+        };
+        if !pointer.is_grabbed() {
+            return;
+        }
+        let serial = SERIAL_COUNTER.next_serial();
+        let time = InputTime::from_millis(self.millis());
+        pointer.unset_grab(self, serial, time);
+    }
+
+    /// A lock surface's *role object* was destroyed, with its `wl_surface`,
+    /// its lock and its client all still alive.
+    ///
+    /// This is the protocol's "If a lock surface on an active output is
+    /// destroyed before the `ext_session_lock_v1.unlock_and_destroy` event is
+    /// sent, the compositor must fall back to rendering a solid color" -- and
+    /// it is legal, ordinary behaviour: it is what a locker does when an
+    /// output goes away under it.
+    ///
+    /// Smithay's `ExtLockSurfaceUserData::destroyed` resets the surface's
+    /// `last_acked`, so [`is_mapped`] goes false and the surface stops
+    /// producing render elements from the very next frame -- but *nothing
+    /// asks for that frame*. Without this hook the destroyed surface's last
+    /// pixels stay on the display indefinitely, until something unrelated
+    /// (a pointer motion, the backdrop turning red) happens to mark the
+    /// screen dirty. Same shape as the abandoned-backdrop bug
+    /// [`State::refresh_lock_state`] documents, on the one teardown path
+    /// that reaches no other hook: no `wl_surface` is destroyed, so
+    /// `handlers.rs`'s `CompositorHandler::destroyed` never runs, and no lock
+    /// object is destroyed, so `refresh_lock_state`'s two questions both
+    /// still answer "nothing changed".
+    ///
+    /// What this deliberately does *not* do is drop the orphaned
+    /// [`LockSurface`] from [`SessionLock::surfaces`]: it still passes
+    /// [`is_current`] (its `wl_surface` is alive and its lock is still the
+    /// owner), and there is no public way to tell *which* stored surface the
+    /// destroyed role object belonged to -- both `ExtLockSurfaceUserData`'s
+    /// and `LockSurfaceAttributes`' handle on it is `pub(crate)` in Smithay.
+    /// It costs nothing to leave: it can never be drawn again (`last_acked`
+    /// is reset for good, and a later commit on it is a protocol error), and
+    /// the keyboard it may still hold is the lock client's own -- the same
+    /// client that owns the session -- which cannot put a replacement surface
+    /// up for that output anyway, because Smithay's `locked_outputs` list
+    /// never shrinks. It goes for real when that `wl_surface` is destroyed,
+    /// when the client disconnects, or at the next takeover.
+    ///
+    /// Runs only while the session is locked: with the session unlocked no
+    /// lock surface is drawn, focused or hit-tested at all, so a late
+    /// teardown after an unlock has nothing to catch up (and
+    /// [`SessionLockHandler::unlock`] has already asked for its own redraw).
+    pub(super) fn lock_surface_destroyed(&mut self) {
+        if !self.session_lock.is_locked() {
+            return;
+        }
+        self.lock_transition();
+    }
+
     /// Confirms a pending lock now that a blanked frame has been drawn.
     ///
     /// Called from `headless.rs::render` after a successful frame, which is
@@ -722,22 +869,33 @@ impl State {
     /// flag, so there is no second piece of state to fall out of step with what
     /// was actually drawn.
     ///
-    /// Called from the one place a disconnect is observed: the wayland display
-    /// source in `state.rs`. Costs one `Option::is_some` on every wayland
-    /// dispatch cycle with the session unlocked, which is every cycle in
-    /// ordinary use; while locked it adds a `retain` over one surface per
-    /// output and one colour compare, on a connection carrying only the lock
-    /// client's own traffic. No allocation either way.
+    /// Called from the place a disconnect is observed: the wayland display
+    /// source in `state.rs`. That is where the *lock object* going away is
+    /// caught; the two surface-level teardowns have their own explicit hooks
+    /// (`handlers.rs`'s `CompositorHandler::destroyed` for the `wl_surface`,
+    /// `dispatch.rs`'s for the role object alone), so none of the three
+    /// depends on another one's ordering to be noticed. Costs one
+    /// `Option::is_some` on every wayland dispatch cycle with the session
+    /// unlocked, which is every cycle in ordinary use; while locked it adds a
+    /// `retain` over one surface per output and one colour compare, on a
+    /// connection carrying only the lock client's own traffic. No allocation
+    /// either way.
     pub(super) fn refresh_lock_state(&mut self) {
         if !self.session_lock.is_locked() {
             return;
         }
         if self.session_lock.cleanup() {
-            self.refresh_keyboard_focus();
-            self.refresh_pointer_focus();
-            self.request_render();
+            self.lock_transition();
         }
         if self.session_lock.backdrop.color() != self.session_lock.backdrop_color() {
+            // The lock has just been abandoned with no surface of its own to
+            // drop above -- the `kill -9` case in this doc. A grab the dead
+            // client started still outlives that by design, and until some
+            // later takeover happens to drop it, it keeps taking pointer
+            // events away from the lock screen, so it goes here too. Only
+            // reachable on the edge: the next locked frame repaints the
+            // backdrop in the new colour, and the comparison is false again.
+            self.drop_pointer_grab();
             self.request_render();
         }
     }

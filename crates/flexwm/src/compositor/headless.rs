@@ -511,13 +511,12 @@ impl State {
             // after unlocking.
             if self.lock_post_frame(&output, time) {
                 // A lock surface was dropped, and it may have been the one
-                // holding the keyboard or the pointer -- and what is drawn
-                // just changed. Pointer focus has to be re-derived explicitly
-                // and not just hit-tested: `wl_pointer.button` goes to
-                // whatever the pointer last entered (see `session_lock.rs`).
-                self.refresh_keyboard_focus();
-                self.refresh_pointer_focus();
-                self.request_render();
+                // holding the keyboard, the pointer or a grab -- and what is
+                // drawn just changed. Pointer focus has to be re-derived
+                // explicitly and not just hit-tested: `wl_pointer.button`
+                // goes to whatever the pointer last entered, and a grab
+                // outlives focus changes entirely (see `session_lock.rs`).
+                self.lock_transition();
             }
         } else {
             for window in self.space.elements() {
