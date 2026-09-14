@@ -26,6 +26,7 @@ use smithay::wayland::shell::wlr_layer::Layer;
 use super::State;
 use super::cursor::CursorElement;
 use super::layer_shell;
+use super::output_scale::smithay_scale;
 use super::tty::Tty;
 
 // What kinds of thing `render()` can draw. Which one covers which is decided
@@ -108,14 +109,38 @@ pub fn init(state: &mut State, width: i32, height: i32) -> Result<(), Box<dyn Er
         },
     );
     output.create_global::<State>(&state.display_handle);
-    set_mode(&output, width, height, Some((0, 0).into()));
+    set_mode(
+        &output,
+        width,
+        height,
+        Some((0, 0).into()),
+        state.output_scale,
+    );
     state.space.map_output(&output, (0, 0));
 
     state.backend = Some(create_backend(&output, width, height)?);
+    // What the core is told is the *logical* output rectangle, which is the
+    // same rectangle Smithay's `Space` lays windows out in -- see
+    // `output_scale.rs`'s `logical_size`. Handing the core the physical
+    // framebuffer size instead (what this did before output scaling existed)
+    // makes every window, gap and edge land at physical coordinates the
+    // render path then scales a second time.
+    let area = state
+        .space
+        .output_geometry(&output)
+        .map(|geometry| {
+            Rect::new(
+                geometry.loc.x,
+                geometry.loc.y,
+                geometry.size.w,
+                geometry.size.h,
+            )
+        })
+        .unwrap_or_else(|| Rect::new(0, 0, width, height));
     state.output = Some(output);
     state.world.handle_event(CoreEvent::OutputAdded {
         id: OUTPUT_ID,
-        area: Rect::new(0, 0, width, height),
+        area,
     });
     // apply() ends in request_render(), which arms the frame timer via
     // ensure_ticking() -- this is what puts the very first frame on it.
@@ -124,20 +149,31 @@ pub fn init(state: &mut State, width: i32, height: i32) -> Result<(), Box<dyn Er
     Ok(())
 }
 
-/// Updates an already-created output's mode. `location` is only meaningful
-/// the first time (see `init`); later callers (`State::resize_output`) pass
-/// `None` to leave it where it is.
+/// Updates an already-created output's mode and scale. `location` is only
+/// meaningful the first time (see `init`); later callers
+/// (`State::resize_output`) pass `None` to leave it where it is.
+///
+/// The third `change_current_state` argument is the scale slot the pre-output-
+/// scaling code passed `None` for, which left every output at Smithay's
+/// default `Scale::Integer(1)`. See `output_scale.rs` for why exactly 1.0 is
+/// still spelled `Scale::Integer(1)`.
 fn set_mode(
     output: &Output,
     width: i32,
     height: i32,
     location: Option<smithay::utils::Point<i32, smithay::utils::Logical>>,
+    scale: f64,
 ) {
     let mode = Mode {
         size: (width, height).into(),
         refresh: 60_000,
     };
-    output.change_current_state(Some(mode), Some(Transform::Normal), None, location);
+    output.change_current_state(
+        Some(mode),
+        Some(Transform::Normal),
+        Some(smithay_scale(scale)),
+        location,
+    );
     output.set_preferred(mode);
 }
 
@@ -204,19 +240,35 @@ impl State {
             // that cannot show it. `apply()` still runs the layout on every
             // change underneath, so nothing is lost by the time it unlocks.
             let (width, height) = *size;
-            let bounds = Rect::new(0, 0, width, height);
+            // What every element's own coordinates are built at, read from the
+            // output rather than hardcoded so windows, layer surfaces, the
+            // ring and the cursor can never disagree about it. 1.0 unless
+            // `[output] scale` says otherwise (see `output_scale.rs`).
+            let scale = output.current_scale().fractional_scale();
+            // The output rectangle in *logical* coordinates -- the space the
+            // core arranges in and the space every element is built in. The
+            // decorations' clip bounds and the lock backdrop's physical origin
+            // both come from here, which is the whole coordinate-space split
+            // in one place: `bounds` is logical, `(width, height)` below is the
+            // physical render target.
+            let geometry = self.space.output_geometry(&output);
+            let bounds = geometry
+                .map(|geometry| {
+                    Rect::new(
+                        geometry.loc.x,
+                        geometry.loc.y,
+                        geometry.size.w,
+                        geometry.size.h,
+                    )
+                })
+                .unwrap_or_else(|| Rect::new(0, 0, width, height));
             let ring_elements = if locked {
                 Vec::new()
             } else {
                 let arrangement = self.world.arrange();
                 self.decorations
-                    .elements(&arrangement, &self.appearance, bounds)
+                    .elements(&arrangement, &self.appearance, bounds, scale)
             };
-            // What every element's own coordinates are built at. Always 1.0
-            // today (nothing sets an output scale), read from the output
-            // rather than hardcoded so windows and layer surfaces can never
-            // disagree about it.
-            let scale = output.current_scale().fractional_scale();
             match renderer.bind(image) {
                 Ok(mut framebuffer) => {
                     // Only `--tty` ever draws a cursor -- see `cursor.rs`'s
@@ -230,7 +282,8 @@ impl State {
                         match self.seat.get_pointer() {
                             Some(pointer) => {
                                 cursor_surface = self.cursor.surface().cloned();
-                                self.cursor.element(renderer, pointer.current_location())
+                                self.cursor
+                                    .element(renderer, pointer.current_location(), scale)
                             }
                             None => Vec::new(),
                         }
@@ -290,9 +343,7 @@ impl State {
                     // time) -- a lock screen with a password field needs a
                     // pointer.
                     let elements = if locked {
-                        let origin = self
-                            .space
-                            .output_geometry(&output)
+                        let origin = geometry
                             .map(|geometry| geometry.loc.to_physical_precise_round(scale))
                             .unwrap_or_default();
                         let (lock_surfaces, backdrop) =
@@ -304,7 +355,7 @@ impl State {
                         elements.push(Elements::Decoration(backdrop));
                         elements
                     } else {
-                        let window_elements = match self.space.output_geometry(&output) {
+                        let window_elements = match geometry {
                             Some(region) => self
                                 .space
                                 .render_elements_for_region(renderer, &region, scale, 1.0),
@@ -574,7 +625,7 @@ impl State {
         let Some(output) = self.output.clone() else {
             return;
         };
-        set_mode(&output, width, height, None);
+        set_mode(&output, width, height, None, self.output_scale);
         match create_backend(&output, width, height) {
             Ok(backend) => self.backend = Some(backend),
             Err(error) => {
@@ -582,12 +633,21 @@ impl State {
                 return;
             }
         }
+        // The logical rectangle the core and the `Space` both work in -- see
+        // `output_scale.rs`'s `logical_size`, and `init`'s comment on why the
+        // core must never be handed the physical size.
+        let logical = self
+            .space
+            .output_geometry(&output)
+            .map(|geometry| (geometry.size.w, geometry.size.h))
+            .unwrap_or((width, height));
         // A lock surface's configured size is an *exact* requirement -- the
         // next buffer that doesn't match it is a `dimensions_mismatch`
         // protocol error, i.e. a killed lock client on a locked session -- so
         // a resized output has to reconfigure them. A no-op when the session
-        // isn't locked (there are none).
-        self.resize_lock_surfaces((width, height));
+        // isn't locked (there are none). Logical, not physical: a lock
+        // surface's configure size is in surface-local logical coordinates.
+        self.resize_lock_surfaces(logical);
         // Layer surfaces are anchored to the output's edges, so every one of
         // them has moved or resized -- `LayerMap::arrange` recomputes their
         // rectangles against the new mode and configures whoever needs a new
@@ -597,7 +657,7 @@ impl State {
         layer_map_for_output(&output).arrange();
         self.world.handle_event(CoreEvent::OutputChanged {
             id: OUTPUT_ID,
-            area: Rect::new(0, 0, width, height),
+            area: Rect::new(0, 0, logical.0, logical.1),
         });
         // The core re-clamps its old usable area into the new one on
         // `OutputChanged` (see `flexwm_core`'s `Output::set_area`), which is

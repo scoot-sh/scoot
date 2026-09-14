@@ -68,7 +68,7 @@ use flexwm_core::{Arrangement, Rect, WindowId};
 use smithay::backend::renderer::Color32F;
 use smithay::backend::renderer::element::Kind;
 use smithay::backend::renderer::element::solid::{SolidColorBuffer, SolidColorRenderElement};
-use smithay::utils::{Physical, Point};
+use smithay::utils::{Logical, Point};
 
 /// A straight (non-premultiplied) RGBA color in `0.0..=1.0`, the form a
 /// `"#rrggbb"`/`"#rrggbbaa"` config string parses into. Kept distinct from
@@ -410,6 +410,7 @@ impl Decorations {
         arrangement: &Arrangement,
         appearance: &Appearance,
         bounds: Rect,
+        scale: f64,
     ) -> Vec<SolidColorRenderElement> {
         self.live.clear();
         self.live
@@ -429,10 +430,10 @@ impl Decorations {
             };
             let rects = ring_rects(placement.rect, appearance.focus_ring_width, bounds);
             let ring = self.rings.entry(placement.id).or_default();
-            push(&mut elements, &mut ring.top, rects.top, color);
-            push(&mut elements, &mut ring.bottom, rects.bottom, color);
-            push(&mut elements, &mut ring.left, rects.left, color);
-            push(&mut elements, &mut ring.right, rects.right, color);
+            push(&mut elements, &mut ring.top, rects.top, color, scale);
+            push(&mut elements, &mut ring.bottom, rects.bottom, color, scale);
+            push(&mut elements, &mut ring.left, rects.left, color, scale);
+            push(&mut elements, &mut ring.right, rects.right, color, scale);
         }
         elements
     }
@@ -442,22 +443,33 @@ impl Decorations {
 /// segment isn't present this frame) and, only if it has real area, pushes a
 /// render element for it built from that same buffer -- so the element's
 /// `Id` is the buffer's stable one, not a fresh one each call.
+///
+/// `rect` is logical (`ring_rects` works in the core's coordinates, and the
+/// configured ring width is a logical width); `scale` is the output scale the
+/// element is ultimately drawn at. The persistent buffer therefore stays
+/// sized in logical pixels and `SolidColorRenderElement::from_buffer` does the
+/// logical→physical conversion, while the location is converted here by the
+/// same `to_physical_precise_round` the rest of the render path uses, so the
+/// size and the origin agree. At scale 1.0 both conversions are the identity
+/// (this is the code path that shipped before fractional scaling), which is
+/// what keeps a scale-1 session pixel-identical.
 fn push(
     elements: &mut Vec<SolidColorRenderElement>,
     buffer: &mut SolidColorBuffer,
     rect: Option<Rect>,
     color: Color,
+    scale: f64,
 ) {
     let Some(rect) = rect else {
         buffer.resize((0, 0));
         return;
     };
     buffer.update((rect.w, rect.h), color);
-    let location = Point::<i32, Physical>::from((rect.x, rect.y));
+    let location = Point::<i32, Logical>::from((rect.x, rect.y)).to_physical_precise_round(scale);
     elements.push(SolidColorRenderElement::from_buffer(
         buffer,
         location,
-        1.0,
+        scale,
         1.0,
         Kind::Unspecified,
     ));
@@ -765,7 +777,7 @@ mod tests {
         let arrangement = arrangement(vec![placement(1, Rect::new(100, 100, 200, 150))], 1);
         let mut decorations = Decorations::default();
 
-        let elements = decorations.elements(&arrangement, &appearance, SCREEN);
+        let elements = decorations.elements(&arrangement, &appearance, SCREEN, 1.0);
 
         assert_eq!(elements.len(), 4);
         let expected: Color32F = appearance.focus_ring_active_color.into();
@@ -784,7 +796,7 @@ mod tests {
 
         assert!(
             decorations
-                .elements(&arrangement, &appearance, SCREEN)
+                .elements(&arrangement, &appearance, SCREEN, 1.0)
                 .is_empty()
         );
     }
@@ -794,11 +806,11 @@ mod tests {
         let appearance = Appearance::default();
         let mut decorations = Decorations::default();
         let with_window = arrangement(vec![placement(1, Rect::new(100, 100, 200, 150))], 1);
-        decorations.elements(&with_window, &appearance, SCREEN);
+        decorations.elements(&with_window, &appearance, SCREEN, 1.0);
         assert_eq!(decorations.rings.len(), 1);
 
         let closed = Arrangement::default();
-        decorations.elements(&closed, &appearance, SCREEN);
+        decorations.elements(&closed, &appearance, SCREEN, 1.0);
         assert!(decorations.rings.is_empty());
     }
 
@@ -819,7 +831,7 @@ mod tests {
         let b = placement(2, Rect::new(400, 100, 200, 150));
 
         let a_focused = arrangement(vec![a, b], 1);
-        let elements = decorations.elements(&a_focused, &appearance, SCREEN);
+        let elements = decorations.elements(&a_focused, &appearance, SCREEN, 1.0);
         assert_eq!(elements.len(), 8);
         for element in &elements {
             let expected = if element.geometry(1.0.into()).loc.x < 350 {
@@ -831,7 +843,7 @@ mod tests {
         }
 
         let b_focused = arrangement(vec![a, b], 2);
-        let elements = decorations.elements(&b_focused, &appearance, SCREEN);
+        let elements = decorations.elements(&b_focused, &appearance, SCREEN, 1.0);
         assert_eq!(elements.len(), 8);
         for element in &elements {
             let expected = if element.geometry(1.0.into()).loc.x < 350 {

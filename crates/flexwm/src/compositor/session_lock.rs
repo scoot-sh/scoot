@@ -200,6 +200,7 @@ use smithay::wayland::session_lock::{
 };
 
 use super::State;
+use super::output_scale::logical_size;
 
 #[cfg(test)]
 mod tests;
@@ -673,10 +674,7 @@ impl SessionLockHandler for State {
             tracing::warn!("no output for a lock surface");
             return;
         };
-        let size = output
-            .current_mode()
-            .map(|mode| (mode.size.w, mode.size.h))
-            .unwrap_or((0, 0));
+        let size = logical_size(&output);
         configure(&surface, size);
         self.session_lock.surfaces.push(surface);
         // The first surface takes the keyboard off nobody, and the pointer

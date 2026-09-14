@@ -20,6 +20,7 @@ use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::{BindError, Display, DisplayHandle};
 use smithay::utils::{Logical, Point};
 use smithay::wayland::compositor::{CompositorClientState, CompositorState};
+use smithay::wayland::fractional_scale::FractionalScaleManagerState;
 use smithay::wayland::output::OutputManagerState;
 use smithay::wayland::selection::data_device::DataDeviceState;
 use smithay::wayland::shell::wlr_layer::WlrLayerShellState;
@@ -27,6 +28,7 @@ use smithay::wayland::shell::xdg::XdgShellState;
 use smithay::wayland::shell::xdg::decoration::XdgDecorationState;
 use smithay::wayland::shm::ShmState;
 use smithay::wayland::socket::ListeningSocketSource;
+use smithay::wayland::viewporter::ViewporterState;
 
 use super::cursor::Cursor;
 use super::decorations::{Appearance, Decorations};
@@ -89,6 +91,18 @@ pub struct State {
     pub space: Space<Window>,
     pub popups: PopupManager,
     pub output: Option<Output>,
+    /// The output scale resolved from `[output] scale` (see
+    /// `output_scale.rs`), fixed for the process's lifetime. Read by
+    /// `headless`'s `set_mode` (which applies it to the `Output`), by the
+    /// `wp_fractional_scale_v1` handler (which advertises it per surface), and
+    /// by `ipc.rs` (which reports it to an agent that must convert between
+    /// logical rects and physical screenshot pixels). It is *not* the source
+    /// the input clamp reads: that goes through `output_scale::logical_size`,
+    /// which derives the logical extent from the `Output` itself, so a site
+    /// handling input can never disagree with what the `Space` laid out.
+    /// `compositor::run` forces this to 1.0 under `--nested`, where the host
+    /// compositor owns the scale.
+    pub output_scale: f64,
     pub backend: Option<Backend>,
     /// Set only under `--nested`: the connection presenting `backend`'s
     /// framebuffer as a window in a host compositor, and forwarding that
@@ -140,6 +154,18 @@ pub struct State {
     /// `session_lock.rs`, which owns both the protocol objects and the one
     /// field that says whether the session is locked at all.
     pub session_lock: SessionLock,
+    /// `wp_fractional_scale_v1`: the fractional value `wl_output.scale` can
+    /// only round. Held only to keep the global alive; the handler itself
+    /// (`FractionalScaleHandler`) lives in `output_scale.rs`.
+    #[allow(dead_code)]
+    pub fractional_scale_manager_state: FractionalScaleManagerState,
+    /// `wp_viewporter`: the global a client needs to render a fractionally
+    /// scaled buffer (it sets a logical destination size and lets the
+    /// compositor scale the buffer into it). Held only to keep the global
+    /// alive -- the render path reads each surface's `ViewportCachedState`
+    /// through `on_commit_buffer_handler` and needs nothing from this field.
+    #[allow(dead_code)]
+    pub viewporter_state: ViewporterState,
     /// Held only to keep the `zxdg_decoration_manager_v1` global alive --
     /// like `output_manager_state`, `XdgDecorationHandler` (see
     /// `handlers.rs`) has no `&mut XdgDecorationState` accessor to route
@@ -194,6 +220,7 @@ impl State {
         config: Config,
         keybindings: Keybindings,
         appearance: Appearance,
+        scale: f64,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let dh = display.handle();
         let compositor_state = CompositorState::new::<Self>(&dh);
@@ -202,6 +229,8 @@ impl State {
         let layer_shell_state = WlrLayerShellState::new::<Self>(&dh);
         let ext_workspace = ExtWorkspaceState::new(&dh);
         let session_lock = SessionLock::new(&dh);
+        let fractional_scale_manager_state = FractionalScaleManagerState::new::<Self>(&dh);
+        let viewporter_state = super::output_scale::viewporter(&dh);
         let shm_state = ShmState::new::<Self>(&dh, vec![]);
         let output_manager_state = OutputManagerState::new_with_xdg_output::<Self>(&dh);
         let data_device_state = DataDeviceState::new::<Self>(&dh);
@@ -237,6 +266,7 @@ impl State {
             space: Space::default(),
             popups: PopupManager::default(),
             output: None,
+            output_scale: scale,
             backend: None,
             host: None,
             tty: None,
@@ -248,6 +278,8 @@ impl State {
             layer_shell_state,
             ext_workspace,
             session_lock,
+            fractional_scale_manager_state,
+            viewporter_state,
             xdg_decoration_state,
             shm_state,
             output_manager_state,

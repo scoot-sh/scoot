@@ -36,6 +36,7 @@ use smithay::input::keyboard::Keysym;
 use super::decorations::{Appearance, Color};
 use super::input::keysym_named;
 use super::keybindings::{Bound, Keybindings, Modifiers};
+use super::output_scale::{MAX_SCALE, MIN_SCALE, clamp_scale};
 
 /// `[layout]`. Mirrors `flexwm_core::Config` field-for-field, each optional
 /// so a partial table (e.g. just `gap`) leaves the rest at their defaults
@@ -61,6 +62,51 @@ impl LayoutConfig {
         // Range/sanity clamping (negative gap, an out-of-range default
         // index, ...) is `World::new`'s job via `Config::validated`, not
         // this module's -- no need to duplicate it here.
+    }
+}
+
+/// `[output]`. One field today: `scale`, the output scale flexwm advertises
+/// to clients and renders at (see `output_scale.rs`). `Option`-everything for
+/// the same reason [`LayoutConfig`] is: a partial table leaves the rest at
+/// their defaults.
+#[derive(Debug, Default, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+struct OutputConfig {
+    scale: Option<f64>,
+}
+
+impl OutputConfig {
+    /// Resolves `scale` to a usable value, warning (never failing) when it
+    /// had to change the configured one -- the same graceful-degradation rule
+    /// every other config field follows (see this module's doc).
+    ///
+    /// TOML can spell `nan` and `inf`, and `NaN.clamp(..)` propagates NaN
+    /// rather than clamping, so non-finite values are rejected explicitly
+    /// before the range clamp. `Scale::fractional_scale()` feeding
+    /// `physical / scale` (and `wl_output.scale`'s `ceil`) with NaN or
+    /// infinity is a compositor that lays nothing out, so this is a
+    /// correctness bound, not taste.
+    fn into_scale(self) -> f64 {
+        let Some(scale) = self.scale else {
+            return 1.0;
+        };
+        if !scale.is_finite() {
+            tracing::warn!(
+                configured = scale,
+                "output scale is not a finite number; using 1.0"
+            );
+            return 1.0;
+        }
+        let clamped = clamp_scale(scale);
+        if clamped != scale {
+            tracing::warn!(
+                configured = scale,
+                min = MIN_SCALE,
+                max = MAX_SCALE,
+                "output scale is out of range; clamping"
+            );
+        }
+        clamped
     }
 }
 
@@ -143,6 +189,8 @@ struct FileConfig {
     #[serde(default)]
     appearance: Option<AppearanceConfig>,
     #[serde(default)]
+    output: Option<OutputConfig>,
+    #[serde(default)]
     binds: HashMap<String, String>,
 }
 
@@ -153,6 +201,8 @@ pub struct LoadedConfig {
     pub config: Config,
     pub keybindings: Keybindings,
     pub appearance: Appearance,
+    /// The resolved `[output] scale`, already clamped (or the default 1.0).
+    pub scale: f64,
 }
 
 impl LoadedConfig {
@@ -161,6 +211,7 @@ impl LoadedConfig {
             config: Config::default(),
             keybindings: Keybindings::default(),
             appearance: Appearance::default(),
+            scale: 1.0,
         }
     }
 
@@ -170,12 +221,14 @@ impl LoadedConfig {
             .appearance
             .unwrap_or_default()
             .into_appearance(Config::clamp_gap(config.gap));
+        let scale = file.output.unwrap_or_default().into_scale();
         let mut keybindings = Keybindings::default();
         apply_binds(&mut keybindings, file.binds);
         Self {
             config,
             keybindings,
             appearance,
+            scale,
         }
     }
 }
@@ -965,6 +1018,76 @@ mod tests {
             Config::MAX_GAP / 2,
             "clamped to half of the capped gap, not half of i32::MAX"
         );
+    }
+
+    // -- [output] ---------------------------------------------------------
+
+    #[test]
+    fn a_fractional_output_scale_round_trips() {
+        let file: FileConfig = toml::from_str("[output]\nscale = 1.5\n").expect("valid toml");
+        assert_eq!(file.output, Some(OutputConfig { scale: Some(1.5) }));
+        assert_eq!(LoadedConfig::from_file(file).scale, 1.5);
+    }
+
+    /// TOML integers and floats are distinct types; `scale = 2` is the way
+    /// most people will write a whole-number scale, and serde's `f64` visitor
+    /// accepts an integer for exactly this reason. Pinned here so a future
+    /// field type change can't silently make `scale = 2` a parse failure.
+    #[test]
+    fn an_integer_output_scale_is_accepted_as_a_float() {
+        let file: FileConfig = toml::from_str("[output]\nscale = 2\n").expect("valid toml");
+        assert_eq!(LoadedConfig::from_file(file).scale, 2.0);
+    }
+
+    #[test]
+    fn a_missing_output_table_means_scale_one() {
+        let file: FileConfig = toml::from_str("").unwrap();
+        assert_eq!(LoadedConfig::from_file(file).scale, 1.0);
+    }
+
+    #[test]
+    fn deny_unknown_fields_rejects_an_output_typo() {
+        let toml = "[output]\nscales = 2\n";
+        assert!(toml::from_str::<FileConfig>(toml).is_err());
+    }
+
+    /// The same graceful-degradation rule every other config field follows:
+    /// an out-of-range scale is clamped with a warning, never a startup
+    /// failure -- on `--tty` a refused config would be a hard lockout.
+    #[test]
+    fn an_out_of_range_output_scale_is_clamped() {
+        // Spelled as TOML *float* literals: `1e300` rather than an
+        // integer-looking string, which TOML would reject as integer overflow
+        // before the field type ever saw it.
+        for (configured, expected) in [
+            ("0.1", MIN_SCALE),
+            ("-1.0", MIN_SCALE),
+            ("9.0", MAX_SCALE),
+            ("1e300", MAX_SCALE),
+        ] {
+            let text = format!("[output]\nscale = {configured}\n");
+            let file: FileConfig = toml::from_str(&text).expect("valid toml");
+            assert_eq!(
+                LoadedConfig::from_file(file).scale,
+                expected,
+                "scale {configured} was not clamped"
+            );
+        }
+    }
+
+    /// TOML can spell `nan` and `inf`; neither is a usable output scale, so
+    /// both resolve to 1.0 rather than poisoning `physical / scale`.
+    #[test]
+    fn a_non_finite_output_scale_falls_back_to_one() {
+        for spelling in ["nan", "inf", "-inf"] {
+            let text = format!("[output]\nscale = {spelling}\n");
+            let file: FileConfig = toml::from_str(&text).expect("valid toml");
+            assert_eq!(
+                LoadedConfig::from_file(file).scale,
+                1.0,
+                "scale = {spelling} did not fall back to 1.0"
+            );
+        }
     }
 
     /// Every way TOML can nest, each built to exactly `depth` levels, always

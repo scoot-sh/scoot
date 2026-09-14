@@ -45,7 +45,11 @@ notification daemons work — including keyboard focus for the ones that ask
 for it (see Layer-shell clients below), `ext-workspace-v1`, so those
 bars can also list, follow and switch workspaces (see Workspaces for bars
 below), `ext-session-lock-v1`, so a real screen locker can lock the session
-with the compositor itself enforcing it (see Screen locking below), and a
+with the compositor itself enforcing it (see Screen locking below), and
+output scaling (`[output] scale` over `wl_output.scale`,
+`wp_fractional_scale_v1` and `wp_viewporter`, so a HiDPI panel gets
+correctly-sized clients and text instead of everything rendered physically
+tiny — see Output scaling below), plus a
 hardened control socket (owner-only
 permissions, a same-user peer check, a 1 MiB cap on a single request, and
 screenshots rate-limited to one per connection per frame) whose connections
@@ -307,9 +311,11 @@ What doesn't, yet:
   not tracked yet, for a reason that predates this: flexwm doesn't send the
   initial configure for *any* `xdg_popup` yet, so no popup maps, from a window
   or a layer surface. Also in the backlog.
-- **`flexwm msg outputs`** reports each output's *full* rectangle. The
-  reserved area a bar takes isn't exposed over IPC yet; an agent asking "how
-  big is the screen" gets the screen.
+- **`flexwm msg outputs`** reports each output's *full* rectangle (in logical
+  pixels, along with the output's `scale`). The reserved area a bar takes
+  isn't exposed over IPC yet; an agent asking "how big is the screen" gets the
+  screen. Screenshots are captured at physical resolution, so multiply a
+  logical rectangle by `scale` to convert it to screenshot pixels.
 
 Two things for agents to know about layer surfaces:
 
@@ -522,15 +528,63 @@ its connection and its `wl_surface`s are still perfectly alive.
   `ext-idle-notify-v1` yet, so a `swayidle`-style daemon has nothing to watch.
   Locking is whatever you run (from a keybinding's `spawn`, say).
 
+## Output scaling
+
+A HiDPI panel needs the compositor to tell clients to render at a scale
+greater than 1, or everything comes out physically tiny (text especially).
+`[output] scale` sets that scale:
+
+```toml
+[output]
+scale = 2.0        # 1.5, 1.25, ... all work; 1.0 is the default
+```
+
+It is advertised two ways, matching what clients actually support:
+
+- **`wl_output.scale`** — the integer `ceil(scale)`. Every client that binds
+  an output gets it automatically (re-sent on bind and whenever the output's
+  state changes). A scale of `1.5` is therefore advertised as `2` here, which
+  is what a client that only understands integer scaling should draw at.
+- **`wp_fractional_scale_v1`** — the exact fractional value. A client that
+  creates a `wp_fractional_scale_v1` for one of its surfaces is sent
+  `preferred_scale` (`1.5`, not `2`), and can render a larger buffer and let
+  the compositor scale it down. The `wp_viewporter` global is advertised
+  alongside it, because that is the protocol a client uses to submit such a
+  buffer (it sets the surface's logical destination size and flexwm scales the
+  buffer into it) — without it, a fractional client has no way to render.
+
+Notes, because they are real limits rather than polish:
+
+- **Startup only, and one output.** The scale is read once when flexwm starts
+  and never changes; there is no config reload and no per-output setting
+  (flexwm has exactly one output). Changing it means restarting flexwm.
+- **Clamped to `0.5..=4.0`**, warn-and-continue like every other config field
+  (see Configuration below): a `scale` outside that range is brought into it
+  and logged, and `nan`/`inf` fall back to `1.0`. A non-finite or zero scale
+  would make the logical output size nonsense, so this is a correctness bound,
+  not taste.
+- **`--nested` is scale-1 only.** The host compositor owns the scale of the
+  window flexwm is drawn inside, so a non-1.0 `scale` there would double-count
+  it; flexwm logs a warning and uses `1.0`. `--headless` and `--tty` honour
+  the setting.
+- **Screenshots are physical pixels; layout coordinates are logical.**
+  `flexwm msg screenshot` captures the framebuffer at full physical
+  resolution, while `flexwm msg windows`/`outputs` report logical rectangles.
+  An agent converts with `physical = logical * scale`, rounded down where a
+  rectangle's edge lands mid-pixel (the logical size is `ceil(physical /
+  scale)`, so a full-output `logical * scale` can overshoot by under one
+  pixel). `flexwm msg outputs` reports each output's `scale` for exactly that
+  (older servers omit it, which decodes as `1.0`).
+
 ## Configuration
 
 `--config PATH` loads a TOML file explicitly. Without it, flexwm looks for
 `$XDG_CONFIG_HOME/flexwm/config.toml`, falling back to
 `~/.config/flexwm/config.toml` if `$XDG_CONFIG_HOME` is unset or empty, and runs on
-built-in defaults if neither exists. Three optional tables: `[layout]`,
-`[appearance]`, `[binds]`. Every field in every table is itself optional and
-defaults independently, so a config that only sets `gap` leaves everything
-else — including the rest of `[layout]` — at its built-in default.
+built-in defaults if neither exists. Four optional tables: `[layout]`,
+`[appearance]`, `[output]`, `[binds]`. Every field in every table is itself
+optional and defaults independently, so a config that only sets `gap` leaves
+everything else — including the rest of `[layout]` — at its built-in default.
 
 **Failure semantics are deliberate, not an oversight.** An explicit
 `--config PATH` that doesn't exist or can't be read is a hard startup
@@ -609,6 +663,12 @@ field unset to get the real built-in default; only set it to a hex string if
 you want to *change* it. (`cursor_color`'s `#ffffff` is the one exception:
 pure white *is* exactly representable, so writing it out changes nothing at
 all.)
+
+### `[output]`
+
+| Field | Type | Default | Meaning |
+|---|---|---|---|
+| `scale` | float | `1.0` | Output scale advertised to clients and rendered at. `1.0` is byte-identical to no setting at all; anything else advertises `ceil(scale)` on `wl_output` and the exact value through `wp_fractional_scale_v1`/`wp_viewporter` (see Output scaling above). Clamped into `0.5..=4.0` with a warning, and a non-finite value falls back to `1.0`; startup-only. `--nested` ignores a non-1.0 value with a warning. |
 
 ### `[binds]`
 
@@ -721,6 +781,11 @@ background_color = "#101014"
 cursor_size = 24
 cursor_color = "#ffcc66"
 prefer_no_csd = true
+
+[output]
+# 1.0 is correct for a non-HiDPI display; raise it (e.g. 2.0) on a HiDPI
+# panel, or text and widgets render far too small. See the reference above.
+scale = 1.0
 
 [binds]
 "super+n" = "focus-column right"

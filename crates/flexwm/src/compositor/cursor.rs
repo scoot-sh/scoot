@@ -241,6 +241,7 @@ impl Cursor {
         &self,
         renderer: &mut R,
         pointer_location: Point<f64, Logical>,
+        scale: f64,
     ) -> Vec<CursorElement<R>>
     where
         R: Renderer + ImportAll + ImportMem,
@@ -255,15 +256,18 @@ impl Cursor {
             // so "the status didn't change" does not mean "the hotspot
             // didn't change".
             let hotspot = surface_hotspot(surface);
-            let location = element_location(pointer_location, hotspot).to_i32_round();
-            // Scale 1.0: this project never runs an output at another scale
-            // (same assumption `element_location` documents). `Kind::Cursor`
-            // is what lets a damage tracker treat this as cursor content.
+            let location = element_location(pointer_location, hotspot, scale).to_i32_round();
+            // `scale` (the output scale), not 1.0: a client cursor surface is
+            // drawn at the same scale as everything else, so its own
+            // fractional-scale/viewport state lands it at the right physical
+            // size and `Kind::Cursor` still lets a damage tracker treat it as
+            // cursor content. `element_location` puts the origin in the same
+            // physical space.
             return render_elements_from_surface_tree(
                 renderer,
                 surface,
                 location,
-                1.0,
+                scale,
                 1.0,
                 Kind::Cursor,
             );
@@ -271,7 +275,7 @@ impl Cursor {
         if matches!(self.status, CursorImageStatus::Hidden) {
             return Vec::new();
         }
-        let location = element_location(pointer_location, self.fallback_hotspot);
+        let location = element_location(pointer_location, self.fallback_hotspot, scale);
         match MemoryRenderBufferRenderElement::from_buffer(
             renderer,
             location,
@@ -314,18 +318,23 @@ fn surface_hotspot(surface: &WlSurface) -> Point<i32, Logical> {
 }
 
 /// Where the render element's origin belongs given the pointer's own
-/// location and the image's hotspot -- pulled out of `element` so this
-/// arithmetic is testable without a live renderer, same rationale as
-/// `input.rs`'s `clamp_to_extent`. Physical, not Logical, matches what
-/// `MemoryRenderBufferRenderElement::from_buffer` wants for `location`
-/// (renderer output space) -- numerically identical to Logical here since
-/// this project never runs an output at a scale other than 1.0.
+/// location, the image's hotspot and the output scale -- pulled out of
+/// `element` so this arithmetic is testable without a live renderer, same
+/// rationale as `input.rs`'s `clamp_to_extent`.
+///
+/// Physical, not Logical, matches what the render-element constructors want
+/// for their location (renderer output space). The pointer and the hotspot
+/// are both logical, so both are scaled: subtracting first and scaling the
+/// difference keeps the hotspot offset exact at a fractional scale, and at
+/// 1.0 the multiplication is the identity, which is what keeps a scale-1
+/// session byte-identical to before output scaling existed.
 fn element_location(
     pointer: Point<f64, Logical>,
     hotspot: Point<i32, Logical>,
+    scale: f64,
 ) -> Point<f64, Physical> {
     Point::from((
-        pointer.x - f64::from(hotspot.x),
-        pointer.y - f64::from(hotspot.y),
+        (pointer.x - f64::from(hotspot.x)) * scale,
+        (pointer.y - f64::from(hotspot.y)) * scale,
     ))
 }

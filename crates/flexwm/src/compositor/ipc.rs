@@ -330,6 +330,7 @@ impl State {
                 id: id.0,
                 name: name.clone(),
                 rect: wire(area),
+                scale: self.output_scale,
             })
             .collect()
     }

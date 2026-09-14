@@ -37,3 +37,6 @@ reacquired across a VT switch) — see the resolved DRM-master entry in the
 Backlog.
 Out of scope, stated: cursor rendering, DRM hotplug, multi-GPU/output,
 DPMS, output scale, key-repeat.
+
+*Two of those have since landed:* cursor rendering as item 5, and output
+scale as `docs/backlog/resolved/output-scaling-done.md`.

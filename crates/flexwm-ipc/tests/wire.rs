@@ -2,7 +2,8 @@
 //! `PROTOCOL_VERSION` bump.
 
 use flexwm_ipc::{
-    Action, Horizontal, PointerButton, Request, Response, Screenshot, decode, encode,
+    Action, Horizontal, OutputSnapshot, PointerButton, Rect, Request, Response, Screenshot, decode,
+    encode,
 };
 use serde_json::{Value, json};
 
@@ -131,4 +132,53 @@ fn every_request_round_trips_on_one_line() {
 #[test]
 fn unknown_request_types_are_rejected() {
     assert!(decode::<Request>(r#"{"type":"format_disk"}"#).is_err());
+}
+
+/// `scale` is additive and defaulted: an older server that predates the field
+/// must still decode, as scale 1.0 -- the only scale such a server ran at.
+/// This is what lets the field ship without a `PROTOCOL_VERSION` bump (see
+/// the crate's `PROTOCOL_VERSION` doc for the "breaks existing clients" bar).
+#[test]
+fn an_output_snapshot_defaults_a_missing_scale_to_one() {
+    let decoded: OutputSnapshot =
+        decode(r#"{"id":1,"name":"headless","rect":{"x":0,"y":0,"width":800,"height":600}}"#)
+            .expect("an older server's output snapshot still decodes");
+    assert_eq!(decoded.scale, 1.0);
+    assert_eq!(
+        decoded.rect,
+        Rect {
+            x: 0,
+            y: 0,
+            width: 800,
+            height: 600
+        }
+    );
+}
+
+#[test]
+fn an_output_snapshot_carries_its_scale_on_the_wire() {
+    let snapshot = OutputSnapshot {
+        id: 1,
+        name: "headless".into(),
+        rect: Rect {
+            x: 0,
+            y: 0,
+            width: 1920,
+            height: 1200,
+        },
+        scale: 1.5,
+    };
+    assert_eq!(
+        json_of(&snapshot),
+        json!({
+            "id": 1,
+            "name": "headless",
+            "rect": { "x": 0, "y": 0, "width": 1920, "height": 1200 },
+            "scale": 1.5,
+        })
+    );
+    assert_eq!(
+        decode::<OutputSnapshot>(&encode(&snapshot).unwrap()).unwrap(),
+        snapshot
+    );
 }

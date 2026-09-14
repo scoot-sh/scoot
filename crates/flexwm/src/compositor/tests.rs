@@ -101,6 +101,7 @@ impl Probe {
             Config::default(),
             Keybindings::default(),
             Appearance::default(),
+            1.0,
         )
         .expect("a compositor state with a wayland socket");
 

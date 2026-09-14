@@ -17,10 +17,9 @@
 //! `compositor::run`'s later `set_var`.
 //!
 //! Out of scope for this backend (see the commit introducing it for why):
-//! cursor rendering, DRM hotplug, multi-GPU, multi-output, DPMS, output
-//! scale, key repeat. "Multi-GPU" there means driving more than one at
-//! once -- *choosing* between several is `gpu.rs`'s job, and `init` below
-//! walks its list until a device works.
+//! DRM hotplug, multi-GPU, multi-output, DPMS, key repeat. ("Multi-GPU"
+//! there means driving more than one at once -- *choosing* between several
+//! is `gpu.rs`'s job, and `init` below walks its list until a device works.)
 
 mod buffers;
 mod gpu;
