@@ -177,6 +177,7 @@
 //! be dropped too, or the same asymmetry becomes a keystroke leak instead of
 //! a pointer one.
 
+use std::collections::HashMap;
 use std::time::Duration;
 
 use smithay::backend::input::InputTime;
@@ -191,12 +192,15 @@ use smithay::desktop::utils::{send_frames_surface_tree, under_from_surface_tree}
 use smithay::input::pointer::CursorImageStatus;
 use smithay::output::Output;
 use smithay::reexports::wayland_protocols::ext::session_lock::v1::server::ext_session_lock_v1::ExtSessionLockV1;
+use smithay::reexports::wayland_server::backend::ObjectId;
 use smithay::reexports::wayland_server::protocol::wl_output::WlOutput;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::{DisplayHandle, Resource};
 use smithay::utils::{Logical, Physical, Point, SERIAL_COUNTER};
+use smithay::wayland::compositor::{BufferAssignment, SurfaceAttributes, with_states};
 use smithay::wayland::session_lock::{
-    LockSurface, SessionLockHandler, SessionLockManagerState, SessionLocker,
+    LockSurface, LockSurfaceConfigure, LockSurfaceData, SessionLockHandler,
+    SessionLockManagerState, SessionLocker,
 };
 
 use super::State;
@@ -216,6 +220,21 @@ const BACKDROP: Color32F = Color32F::new(0.0, 0.0, 0.0, 1.0);
 /// needs to be able to tell those apart to know that re-running their locker
 /// is what fixes it.
 const ABANDONED_BACKDROP: Color32F = Color32F::new(1.0, 0.0, 0.0, 1.0);
+
+/// The configure a lock surface last acked while its role was alive, plus
+/// whether that role has since been destroyed.
+///
+/// Smithay's role-destruction handler resets the role attributes -- including
+/// `last_acked` -- so after a destroy the surface on the wire is
+/// indistinguishable from one that never acked anything. This is the record
+/// that tells them apart: an entry means "this surface acked this configure",
+/// and `role_destroyed` means "its role object has since gone away", which
+/// [`State::prepare_post_destroy_lock_commit`] sets the first time it sees
+/// the reset. See that method for why both halves are needed.
+struct AckedLockSurface {
+    configure: LockSurfaceConfigure,
+    role_destroyed: bool,
+}
 
 /// The compositor's whole `ext-session-lock-v1` state.
 pub struct SessionLock {
@@ -263,6 +282,20 @@ pub struct SessionLock {
     /// [`SessionLockHandler::unlock`], and the `retain` in
     /// [`SessionLock::cleanup`] and [`State::forget_lock_surface`].
     surfaces: Vec<LockSurface>,
+    /// The last configure every lock surface acked while its role was alive,
+    /// keyed by its `wl_surface`'s object id.
+    ///
+    /// This outlives [`SessionLock::surfaces`] on purpose: the real unlock
+    /// teardown (`unlock_and_destroy`, which clears `surfaces`, *then* the
+    /// role destroy, *then* the trailing null commit) arrives after the
+    /// surface has been forgotten, and the trailing commit still needs the
+    /// ack it dropped. Entries are pruned when their `wl_surface` dies
+    /// ([`State::forget_lock_surface`]), so this is bounded by live surfaces.
+    /// The complete set of writers: the `insert` in
+    /// [`SessionLockHandler::ack_configure`], the flag write in
+    /// [`State::prepare_post_destroy_lock_commit`], and the `remove` in
+    /// [`State::forget_lock_surface`].
+    acked: HashMap<ObjectId, AckedLockSurface>,
     /// The opaque full-output rectangle drawn behind the lock surfaces.
     ///
     /// A persistent buffer updated in place, not a fresh one per frame, for
@@ -292,6 +325,7 @@ impl SessionLock {
             owner: None,
             pending: None,
             surfaces: Vec::new(),
+            acked: HashMap::new(),
             backdrop: SolidColorBuffer::default(),
         }
     }
@@ -683,6 +717,24 @@ impl SessionLockHandler for State {
         self.refresh_pointer_focus();
         self.request_render();
     }
+
+    /// A lock surface acked a configure: record it.
+    ///
+    /// This is the "before" half of the post-destroy commit fix (see
+    /// [`State::prepare_post_destroy_lock_commit`]): Smithay's
+    /// role-destruction reset drops exactly this value, and only a copy kept
+    /// outside the role attributes can tell a surface whose role was destroyed
+    /// from one that never acked anything. Overwrites unconditionally -- a
+    /// dead role object can never ack again, so any ack names a live role.
+    fn ack_configure(&mut self, surface: WlSurface, configure: LockSurfaceConfigure) {
+        self.session_lock.acked.insert(
+            surface.id(),
+            AckedLockSurface {
+                configure,
+                role_destroyed: false,
+            },
+        );
+    }
 }
 
 impl State {
@@ -786,13 +838,14 @@ impl State {
     /// owner), and there is no public way to tell *which* stored surface the
     /// destroyed role object belonged to -- both `ExtLockSurfaceUserData`'s
     /// and `LockSurfaceAttributes`' handle on it is `pub(crate)` in Smithay.
-    /// It costs nothing to leave: it can never be drawn again (`last_acked`
-    /// is reset for good, and a later commit on it is a protocol error), and
-    /// the keyboard it may still hold is the lock client's own -- the same
-    /// client that owns the session -- which cannot put a replacement surface
-    /// up for that output anyway, because Smithay's `locked_outputs` list
-    /// never shrinks. It goes for real when that `wl_surface` is destroyed,
-    /// when the client disconnects, or at the next takeover.
+    /// It costs nothing to leave: a later commit on it survives as a no-op
+    /// now (see [`State::prepare_post_destroy_lock_commit`]) rather than a
+    /// protocol error, and the keyboard it may still hold is the lock
+    /// client's own -- the same client that owns the session -- which cannot
+    /// put a replacement surface up for that output anyway, because Smithay's
+    /// `locked_outputs` list never shrinks. It goes for real when that
+    /// `wl_surface` is destroyed, when the client disconnects, or at the next
+    /// takeover.
     ///
     /// The visible consequence, seen on real `--tty` hardware rather than
     /// inferred: the pointer refresh below can *enter* that orphan, because
@@ -817,6 +870,94 @@ impl State {
             return;
         }
         self.lock_transition();
+    }
+
+    /// Prepares a `wl_surface.commit` on a lock surface whose role object has
+    /// already been destroyed, so Smithay's role validation does not kill the
+    /// client for it.
+    ///
+    /// Called from `dispatch.rs`'s blanket request impl *before* the commit
+    /// is delegated -- the only seam flexwm owns ahead of Smithay's
+    /// pre-commit hooks, which is where the kill happens. The commit itself
+    /// is still delegated afterwards, so frame callbacks, buffer release and
+    /// damage all flow exactly as they would have.
+    ///
+    /// Two facets, matching the two errors the trailing commit would trip:
+    ///
+    /// - **Bare commit.** Smithay's `destroyed` reset `last_acked` to `None`,
+    ///   and the pre-commit hook's first check posts `CommitBeforeFirstAck`
+    ///   without it. Restoring the acked configure recorded by
+    ///   [`SessionLockHandler::ack_configure`] passes that check, and the
+    ///   hook then finds no new buffer and nothing previously mapped, so it
+    ///   commits nothing: a no-op.
+    /// - **Null commit** (the real quickshell teardown: `destroy` then
+    ///   `attach(nil)` then `commit`). The same restore is not enough on its
+    ///   own -- a null attach on a surface the hook believes was mapped is
+    ///   the *by-design* `NullBuffer` error. But the surface is not mapped:
+    ///   the reset cleared the cached state too. Clearing the pending
+    ///   `Removed` turns it into the bare commit above, which is what the
+    ///   surface going unmapped means now that its role is gone.
+    ///
+    /// The carve-out applies *only* to destroyed-role surfaces, and the two
+    /// halves of the gate are both load-bearing:
+    ///
+    /// - An entry in [`SessionLock::acked`] means this surface acked a
+    ///   configure while its role was alive. A surface that never acked --
+    ///   the by-design `CommitBeforeFirstAck` case -- has no entry and is
+    ///   left alone to die loudly.
+    /// - `last_acked` still `None` in the role attributes (or the
+    ///   `role_destroyed` flag from a previous restore) means the reset ran.
+    ///   A surface whose role is still alive keeps its `last_acked`, so its
+    ///   commits -- including the by-design `NullBuffer` for a mapped lock
+    ///   surface -- validate exactly as before.
+    ///
+    /// `reset` is the only writer that clears `last_acked` after an ack, so
+    /// "acked plus currently `None`" can only mean the role was destroyed;
+    /// the flag then keeps later commits covered after the first restore put
+    /// a value back. A same-size buffer committed after the destroy maps the
+    /// surface again -- the hook cannot tell the restored ack from a live
+    /// one -- but only its own locker's pixels on its own lock screen (every
+    /// read still goes through [`SessionLock::current`]), and a wrong-size
+    /// one still dies with `DimensionsMismatch`.
+    ///
+    /// Costs one typemap probe per `wl_surface.commit` for surfaces that never
+    /// had a lock role (the `get` misses, nothing is allocated), and a map
+    /// lookup only for ones that did -- and neither at all while no lock
+    /// surface has ever acked a configure (the `is_empty` check below), which
+    /// is every commit of an unlocked session that never locked. No allocation
+    /// on any path.
+    pub(super) fn prepare_post_destroy_lock_commit(
+        &mut self,
+        id: ObjectId,
+        dhandle: &DisplayHandle,
+    ) {
+        if self.session_lock.acked.is_empty() {
+            return;
+        }
+        // The request's interface is `wl_surface`, so this id names the
+        // committed surface itself.
+        let Ok(surface) = WlSurface::from_id(dhandle, id) else {
+            return;
+        };
+        let Some(acked) = self.session_lock.acked.get_mut(&surface.id()) else {
+            return;
+        };
+        with_states(&surface, |states| {
+            let Some(attributes) = states.data_map.get::<LockSurfaceData>() else {
+                return;
+            };
+            let mut attributes = attributes.lock().expect("lock surface attributes");
+            if attributes.last_acked.is_some() && !acked.role_destroyed {
+                // The role is still alive: normal validation, untouched.
+                return;
+            }
+            attributes.last_acked = Some(acked.configure);
+            acked.role_destroyed = true;
+            let mut cached = states.cached_state.get::<SurfaceAttributes>();
+            if matches!(cached.pending().buffer, Some(BufferAssignment::Removed)) {
+                cached.pending().buffer = None;
+            }
+        });
     }
 
     /// Confirms a pending lock now that a blanked frame has been drawn.
@@ -990,11 +1131,18 @@ impl State {
     /// down one surface (or disconnecting entirely) stops that surface being
     /// drawn or focused on the very next frame rather than at the next
     /// cleanup pass.
+    ///
+    /// Also prunes [`SessionLock::acked`]'s record of the surface, which lives
+    /// past the surface list on purpose (see that field) and so needs its own
+    /// removal here. Silent -- it does not affect the return value: a surface
+    /// that was already filtered out of the list needs no focus or redraw
+    /// catch-up when its `wl_surface` finally goes.
     pub(super) fn forget_lock_surface(&mut self, surface: &WlSurface) -> bool {
         let before = self.session_lock.surfaces.len();
         self.session_lock
             .surfaces
             .retain(|lock| lock.wl_surface() != surface);
+        self.session_lock.acked.remove(&surface.id());
         before != self.session_lock.surfaces.len()
     }
 

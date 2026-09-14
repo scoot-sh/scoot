@@ -5,8 +5,9 @@
 //! every request to whichever `Dispatch2` impl the object's user data
 //! carries -- plus three guards on sizes a client chooses
 //! ([`reject_invalid_shm_pool_resize`], [`reject_oversized_shm_pool_creation`]
-//! and [`reject_unrepresentable_layer_size`]) and one post-destruction hook
-//! ([`redraw_after_lock_surface_destroyed`]).
+//! and [`reject_unrepresentable_layer_size`]), one pre-delegation
+//! interception ([`prepare_post_destroy_lock_commit`]) and one
+//! post-destruction hook ([`redraw_after_lock_surface_destroyed`]).
 //!
 //! ## Why the first guard exists
 //!
@@ -194,12 +195,35 @@
 //! (`cargo expand`, or the macro's own source) on every Smithay version
 //! bump, not just when this bug is eventually fixed upstream.
 
+//! ## Why the interception exists
+//!
+//! Not a guard either: unlike the three above it never refuses a request.
+//! Destroying only an `ext_session_lock_surface_v1` role object (legal, and
+//! what a locker does when an output is removed under it -- or, as a real
+//! Quickshell client proved, on every unlock) makes Smithay reset that
+//! surface's role state, and the client's next commit on the surviving
+//! `wl_surface` then trips the role's commit-time validation on the reset:
+//! a bare commit posts `CommitBeforeFirstAck`, a null commit `NullBuffer`.
+//! Either kills the client -- on unlock, its entire shell. See
+//! `docs/backlog/resolved/session-lock-post-destroy-commit-resolved.md`, and
+//! [`State::prepare_post_destroy_lock_commit`](super::session_lock) for what
+//! this prepares and why the carve-out reaches only destroyed-role surfaces.
+//!
+//! It has to run here rather than in `CompositorHandler::commit` because the
+//! kill happens in Smithay's pre-commit hooks, which run before that: this
+//! blanket `request` is the only seam flexwm owns ahead of them. It delegates
+//! afterwards unconditionally -- the commit still applies -- so unlike a guard
+//! it has no refusal path and posts no protocol error, which is also why the
+//! module doc's `Client::kill` mutex precondition is unaffected by it:
+//! nothing here can reach `ClientState::disconnected` holding the
+//! backend mutex any differently than the delegated request already could.
+
 use std::any::{Any, TypeId};
 
 use smithay::reexports::wayland_protocols::ext::session_lock::v1::server::ext_session_lock_surface_v1;
 use smithay::reexports::wayland_protocols_wlr::layer_shell::v1::server::zwlr_layer_surface_v1;
 use smithay::reexports::wayland_server::backend::ClientId;
-use smithay::reexports::wayland_server::protocol::{wl_shm, wl_shm_pool};
+use smithay::reexports::wayland_server::protocol::{wl_shm, wl_shm_pool, wl_surface};
 use smithay::reexports::wayland_server::{
     Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource,
 };
@@ -256,6 +280,7 @@ where
         {
             return;
         }
+        prepare_post_destroy_lock_commit(state, resource, &request, dhandle);
         data.request(state, client, resource, request, dhandle, data_init);
     }
 
@@ -407,6 +432,41 @@ where
         ),
     );
     true
+}
+
+/// Prepares a `wl_surface.commit` on a lock surface whose role object has
+/// already been destroyed, before Smithay's own commit handler (and its
+/// pre-commit hooks) sees it. See the module doc's "Why the interception
+/// exists", and `session_lock.rs`'s [`State::prepare_post_destroy_lock_commit`]
+/// for what it prepares.
+///
+/// Unlike the guards above this never refuses the request: the commit is
+/// always delegated afterwards. Folds away for every interface other than
+/// `wl_surface`, and for every `wl_surface` request other than `commit`, for
+/// the same monomorphization reason as the guards -- which matters in the same
+/// way: this runs on every request of every interface.
+fn prepare_post_destroy_lock_commit<I>(
+    state: &mut State,
+    resource: &I,
+    request: &I::Request,
+    dhandle: &DisplayHandle,
+) where
+    I: Resource,
+    I::Request: 'static,
+{
+    if TypeId::of::<I::Request>() != TypeId::of::<wl_surface::Request>() {
+        return;
+    }
+    let Some(wl_surface::Request::Commit) =
+        (request as &dyn Any).downcast_ref::<wl_surface::Request>()
+    else {
+        return;
+    };
+    // The request's interface is `wl_surface`, so its resource is the
+    // committed surface itself -- recovered by object id rather than by
+    // downcasting `resource`, which would need an `I: 'static` bound this
+    // blanket impl does not (and should not) carry.
+    state.prepare_post_destroy_lock_commit(resource.id(), dhandle);
 }
 
 /// Neutralizes the pending layer state of every surface whose
