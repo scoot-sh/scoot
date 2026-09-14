@@ -1,10 +1,54 @@
 ---
-title: "Committing a lock surface after its role is destroyed kills the client."
-status: "open"
-area: "protocols"
-priority: "high"
+title: "Committing a lock surface after its role is destroyed kills the client — RESOLVED."
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
 ---
+
+# Committing a lock surface after its role is destroyed kills the client — RESOLVED.
+
+## Resolution (2026-09-14)
+
+Fixed flexwm-side; the pinned test is inverted (the client now survives)
+with eight sibling tests covering both teardown orders, both by-design
+kills, and the takeover/abandoned paths.
+
+- **Resolution (a) is closed as confirmed fatal.** The Noctalia probe
+  (`docs/backlog/protocols/noctalia-probe.md`, gap 1) field-confirmed it:
+  real quickshell 0.3.1 (Noctalia 4.7.7) sends `unlock_and_destroy` →
+  `ext_session_lock_surface_v1.destroy` → `wl_surface.attach(nil)` →
+  `wl_surface.commit` on every unlock, and the server answered
+  `CommitBeforeFirstAck` and dropped the connection 1/1. The entry's
+  urgency was P0, not hardening.
+- **Chosen: a flexwm-side capture-and-restore at commit time** -- closest
+  to candidate (c), but not as sketched. The sketch's pre-destroy hook in
+  `dispatch.rs`'s request path could never have worked: nothing on the
+  destruction path hands flexwm the `wl_surface` (the role object's
+  surface handle is `pub(crate)` in Smithay, and `unlock` clears
+  `SessionLock::surfaces` first), so there is no surface to capture
+  *for* at destroy time. Instead the ack is captured where the surface
+  *is* known -- the existing `SessionLockHandler::ack_configure`
+  callback, which Smithay calls with the `WlSurface` -- and restored
+  where the surface is known again: a pre-delegation interception in
+  `dispatch.rs`'s blanket `request` for `wl_surface::Commit`, the only
+  seam ahead of Smithay's pre-commit hooks. The entry's "nothing honest
+  to write" stands answered the same way: the restored value is the exact
+  configure the client did ack, kept in `SessionLock::acked` (pruned when
+  the `wl_surface` dies, deliberately surviving `unlock`'s surface clear
+  because the real teardown commits after it).
+- **The `NullBuffer` facet turned out fixable after all** -- not by
+  waiving the error through any public API (still impossible), but by not
+  reaching it: the interception clears the pending `Removed` (public
+  `SurfaceAttributes.buffer`) on destroyed-role surfaces, turning the
+  null commit into the bare commit the unmapped surface means. A live
+  role's mapped-surface null commit still dies with `NullBuffer`, and a
+  never-acked content commit still dies with `CommitBeforeFirstAck` --
+  both pinned by tests, since the carve-out keys off "acked plus
+  reset-observed", which only a destroyed role satisfies.
+- **Not (b):** no upstream Smithay change was needed, so none was made.
+
+Original entry, left as written:
 
 # Committing a lock surface after its role is destroyed kills the client.
 
