@@ -30,7 +30,7 @@
 //! become drm master...") would otherwise be emitted once per device and
 //! read like the cause of the failure rather than noise.
 
-use std::fmt::Write as _;
+use std::fmt::{self, Write as _};
 use std::io;
 use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
 use std::path::{Path, PathBuf};
@@ -48,11 +48,17 @@ use smithay::reexports::rustix::fs::OFlags;
 /// display pipeline: its KMS resources loaded and one of its connectors is
 /// connected with a usable mode.
 ///
-/// The `connector`/`mode` pair was read through [`Probe`], i.e. through a
-/// different file description than the `DrmDevice` the caller goes on to
-/// build. That is fine and deliberate: a `connector::Handle` is a
-/// device-global kernel object id, not a per-fd token, and `Mode` is a
-/// plain `Copy` description of a timing.
+/// The `connector`/`mode` pair was read through [`Probe`], which borrows
+/// *this same fd* -- the one the caller goes on to build its `DrmDevice`
+/// from -- rather than opening the device a second time. That is
+/// deliberate, not incidental: Smithay's `LibSeatSession` keys its device
+/// table by the raw fd libseat handed out (`devices: RefCell<HashMap<RawFd,
+/// libseat::Device>>`, `backend/session/libseat.rs` at the pinned rev), so
+/// a second open would be a second entry and a second device held open by
+/// seatd, which only `Session::close` on *that* fd can release. Borrowing
+/// costs nothing in exchange: the probe is finished before `fd` moves on,
+/// a `connector::Handle` is a device-global kernel object id rather than a
+/// per-fd token, and `Mode` is a plain `Copy` description of a timing.
 pub struct OpenGpu {
     /// Ownership passes to the caller, which means so does the
     /// responsibility to keep it (or to drop it, closing the fd). Every
@@ -77,11 +83,45 @@ pub struct OpenGpu {
 /// `primary_gpu()` always returns one of `all_gpus()`'s entries, so
 /// filtering it out of the tail is what keeps a device from being tried
 /// twice.
+///
+/// The tail is best-effort: see [`assemble`] for why enumerating it is
+/// allowed to fail without taking the primary down with it.
 pub fn candidates(seat: &str, explicit: Option<&Path>) -> io::Result<Vec<PathBuf>> {
     if let Some(path) = explicit {
         return Ok(vec![path.to_owned()]);
     }
-    Ok(order(primary_gpu(seat)?, all_gpus(seat)?))
+    assemble(primary_gpu(seat)?, all_gpus(seat))
+}
+
+/// Combines the two udev queries [`candidates`] makes, split out so the
+/// interesting case -- one of them failing -- can be tested without a seat.
+///
+/// `primary_gpu()` failing is still fatal (it is `?`-ed by the caller,
+/// exactly as before this fallback existed). `all_gpus()` failing is not:
+/// that call only produces the *tail*, and a transient udev error while
+/// enumerating it must not take down a machine whose primary device was
+/// found and would have worked -- that would make this fallback a
+/// regression on the hardware it is supposed to leave alone. With no
+/// primary to fall back *to*, though, there is nothing left to try, and
+/// the enumeration error is the honest thing to report rather than
+/// [`unusable_device_error`]'s "is a GPU present?", which would blame the
+/// hardware for a failure that was udev's.
+fn assemble(primary: Option<PathBuf>, rest: io::Result<Vec<PathBuf>>) -> io::Result<Vec<PathBuf>> {
+    match (primary, rest) {
+        (primary, Ok(rest)) => Ok(order(primary, rest)),
+        (Some(primary), Err(error)) => {
+            // warn!, not debug!: the run that follows looks completely
+            // normal on hardware where the primary is right, and is missing
+            // every fallback candidate on hardware where it is not.
+            tracing::warn!(
+                %error,
+                path = %primary.display(),
+                "drm: could not list the seat's other devices; trying only the primary"
+            );
+            Ok(vec![primary])
+        }
+        (None, Err(error)) => Err(error),
+    }
 }
 
 /// The ordering half of [`candidates`], split out so it can be tested
@@ -94,6 +134,51 @@ fn order(primary: Option<PathBuf>, rest: Vec<PathBuf>) -> Vec<PathBuf> {
     ordered.extend(rest.into_iter().filter(|path| *path != primary));
     ordered.insert(0, primary);
     ordered
+}
+
+/// Why one candidate was rejected, and -- the part that matters beyond
+/// printing it -- at which stage.
+///
+/// The text is a lowercase phrase completing "this device ...", which is
+/// how [`unusable_device_error`] lists it. The variant is what separates
+/// "the session would not hand this device over" from "the device came
+/// back and cannot drive a display": only the second is something naming
+/// a different device could route around, and telling them apart is what
+/// keeps the final error from recommending `--gpu` for a problem that has
+/// nothing to do with which device was picked.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Rejection {
+    /// `Session::open` refused, so nothing here is a statement about the
+    /// device itself: a seat that will not take this process refuses every
+    /// device on it identically (seatd's "seat is VT-bound and has an
+    /// active client" is exactly that shape).
+    SessionOpen(String),
+    /// The device opened, and then could not drive a display: no KMS
+    /// pipeline, nothing connected with a usable mode, or one of the
+    /// later setup steps `tty/mod.rs` runs on it failed. This is the
+    /// failure the fallback -- and `--gpu` -- exist for.
+    Unusable(String),
+}
+
+impl Rejection {
+    fn is_session_open(&self) -> bool {
+        matches!(self, Self::SessionOpen(_))
+    }
+
+    /// The phrase, without the stage. Borrowed rather than rendered
+    /// through `Display` so the one caller that needs it mid-sentence
+    /// doesn't allocate a second copy of a string it already has.
+    fn reason(&self) -> &str {
+        match self {
+            Self::SessionOpen(reason) | Self::Unusable(reason) => reason,
+        }
+    }
+}
+
+impl fmt::Display for Rejection {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.reason())
+    }
 }
 
 /// Walks [`candidates`] in order and returns the first one `open` accepts,
@@ -110,8 +195,8 @@ fn order(primary: Option<PathBuf>, rest: Vec<PathBuf>) -> Vec<PathBuf> {
 /// hardware doing exactly one `Session::open` as it always has.
 pub fn first_usable<T>(
     candidates: Vec<PathBuf>,
-    mut open: impl FnMut(&Path) -> Result<T, String>,
-) -> Result<(PathBuf, T), Vec<(PathBuf, String)>> {
+    mut open: impl FnMut(&Path) -> Result<T, Rejection>,
+) -> Result<(PathBuf, T), Vec<(PathBuf, Rejection)>> {
     let mut failures = Vec::new();
     for path in candidates {
         match open(&path) {
@@ -120,7 +205,7 @@ pub fn first_usable<T>(
                 // warn!, not debug!: on hardware where the first pick is
                 // wrong this is the only trace of what was rejected and
                 // why, and the run that follows it looks completely normal.
-                tracing::warn!(path = %path.display(), reason, "drm: device unusable");
+                tracing::warn!(path = %path.display(), reason = %reason, "drm: device unusable");
                 failures.push((path, reason));
             }
         }
@@ -129,13 +214,16 @@ pub fn first_usable<T>(
 }
 
 /// Opens one candidate through the session and checks it can drive a
-/// display. `Err` is a lowercase phrase completing "this device ...", for
+/// display. `Err` is a [`Rejection`] -- which stage failed, and a
+/// lowercase phrase completing "this device ..." for
 /// [`unusable_device_error`] to list; a rejected device has already been
 /// closed and returned to the session by the time it is returned.
-pub fn open(session: &mut LibSeatSession, path: &Path) -> Result<OpenGpu, String> {
+pub fn open(session: &mut LibSeatSession, path: &Path) -> Result<OpenGpu, Rejection> {
     let fd = session
         .open(path, OFlags::RDWR | OFlags::CLOEXEC)
-        .map_err(|error| format!("could not be opened through the session ({error})"))?;
+        .map_err(|error| {
+            Rejection::SessionOpen(format!("could not be opened through the session ({error})"))
+        })?;
 
     match probe(fd.as_fd()) {
         Ok((connector, mode)) => Ok(OpenGpu {
@@ -156,7 +244,7 @@ pub fn open(session: &mut LibSeatSession, path: &Path) -> Result<OpenGpu, String
                     "could not hand the rejected drm device back to the session"
                 );
             }
-            Err(reason)
+            Err(Rejection::Unusable(reason))
         }
     }
 }
@@ -165,18 +253,20 @@ pub fn open(session: &mut LibSeatSession, path: &Path) -> Result<OpenGpu, String
 /// the check happens before anything takes ownership of it.
 fn probe(fd: BorrowedFd<'_>) -> Result<(connector::Handle, Mode), String> {
     let device = Probe(fd);
-    // The wording stops at what the kernel actually said: the errno varies
-    // with *why* there is no mode-setting pipeline (`ENOTSUP` from a driver
+    // The wording stops at what the kernel actually said, and says nothing
+    // about *why*: the errno varies with the cause (`ENOTSUP` from a driver
     // built without `DRIVER_MODESET`, which is the Apple Silicon report;
     // `EACCES` when the path is a render node, which is what the dev VM's
-    // `renderD128` returns), so naming one cause would be wrong for the
-    // other. The shared, provable part is that this device cannot mode-set.
+    // `renderD128` returns; `EINVAL` when `--gpu` names something that is
+    // not a DRM device at all, which is what an evdev node returns there),
+    // so any one diagnosis appended here would be a lie for the others --
+    // and a user who mistyped a path is worse off being told their GPU
+    // only computes.
+    // The shared, provable part is that this device cannot mode-set; what
+    // the split-GPU case looks like is in `README.md`, where it can be
+    // explained rather than asserted.
     let resources = device.resource_handles().map_err(|error| {
-        format!(
-            "has no usable KMS pipeline -- loading its DRM resources failed \
-             ({error}); a device that only computes, with no display \
-             controller behind it, fails exactly here"
-        )
+        format!("has no usable KMS pipeline -- loading its DRM resources failed ({error})")
     })?;
     find_connector_and_mode(&device, &resources)
         .ok_or_else(|| "has no connected connector with a usable mode".to_owned())
@@ -236,19 +326,26 @@ fn find_connector_and_mode(
 /// The old error named one device and one OS error; this keeps that detail
 /// per device rather than collapsing the list into a count, so "tried two,
 /// one has no KMS and the other has nothing plugged in" stays readable.
+/// Which advice goes above that list depends on [`Rejection`]: a list that
+/// is *entirely* session-open failures is a seat problem, where naming a
+/// device cannot help, so it is not offered.
 /// An explicit `--gpu` gets its own wording: there is exactly one device
 /// and the user chose it, so a list of one and an offer of the flag they
-/// already passed would both be noise.
+/// already passed would both be noise. (It gets no seat-specific hint
+/// either, unlike the list form below: one [`Rejection::SessionOpen`] on a
+/// path the user typed is far more likely to be a path that does not exist
+/// than a seat that is busy, and the session's own errno already says
+/// which.)
 pub fn unusable_device_error(
     seat: &str,
     explicit: Option<&Path>,
-    failures: &[(PathBuf, String)],
+    failures: &[(PathBuf, Rejection)],
 ) -> String {
     if let Some(path) = explicit {
         let reason = failures
             .iter()
             .find(|(failed, _)| failed == path)
-            .map_or("is not usable", |(_, reason)| reason.as_str());
+            .map_or("is not usable", |(_, reason)| reason.reason());
         // Quoted, unlike the list form below where the path starts its own
         // indented line: here it sits mid-sentence, where a path with a
         // space in it -- or the empty string, which `--gpu ""` really does
@@ -261,10 +358,26 @@ pub fn unusable_device_error(
              to this seat? (`--gpu PATH` names one explicitly)"
         );
     }
-    let mut message = format!(
-        "no usable DRM device on seat `{seat}`; pass `--gpu PATH` to name one \
-         explicitly. Tried:"
-    );
+    // Every candidate refused at `Session::open` says nothing about which
+    // device to pick -- it is the seat that would not take this process,
+    // and it refuses all of them identically. Recommending `--gpu` there
+    // sends a user off re-picking devices when no device would have worked;
+    // this is the likeliest real-world failure of the three, since it is
+    // what running `--tty` while another compositor holds the seat does.
+    let mut message = if failures.iter().all(|(_, reason)| reason.is_session_open()) {
+        format!(
+            "the session refused every DRM device on seat `{seat}`: the seat \
+             is what failed here, not the choice of device. A seat takes one \
+             client at a time -- another compositor may already hold this one \
+             -- and a session that is not allowed on the seat is refused the \
+             same way. Tried:"
+        )
+    } else {
+        format!(
+            "no usable DRM device on seat `{seat}`; pass `--gpu PATH` to name one \
+             explicitly. Tried:"
+        )
+    };
     for (path, reason) in failures {
         // Writing to a String cannot fail.
         let _ = write!(message, "\n  {} {reason}", path.display());
@@ -278,6 +391,20 @@ mod tests {
 
     fn paths(paths: &[&str]) -> Vec<PathBuf> {
         paths.iter().map(PathBuf::from).collect()
+    }
+
+    fn unusable(reason: &str) -> Rejection {
+        Rejection::Unusable(reason.to_owned())
+    }
+
+    fn refused(reason: &str) -> Rejection {
+        Rejection::SessionOpen(reason.to_owned())
+    }
+
+    /// Stands in for `all_gpus` failing: any `io::Error` will do, but udev
+    /// enumeration really does surface as one of these.
+    fn enumeration_failed() -> io::Error {
+        io::Error::new(io::ErrorKind::OutOfMemory, "udev said no")
     }
 
     #[test]
@@ -327,6 +454,44 @@ mod tests {
     }
 
     #[test]
+    fn a_failed_fallback_listing_still_tries_the_primary() {
+        // The regression this guards: before the fallback existed, only
+        // `primary_gpu` had to succeed. A machine whose primary device is
+        // found and works must not fail to start because the *tail*
+        // enumeration -- which exists only to be tried afterwards --
+        // hiccuped.
+        assert_eq!(
+            assemble(
+                Some(PathBuf::from("/dev/dri/card0")),
+                Err(enumeration_failed())
+            )
+            .expect("a found primary is still worth trying"),
+            paths(&["/dev/dri/card0"]),
+        );
+    }
+
+    #[test]
+    fn a_failed_listing_with_no_primary_is_reported_as_itself() {
+        // Nothing to degrade to here, and "is a GPU present?" would blame
+        // the hardware for udev's failure, so the enumeration error stands.
+        let error = assemble(None, Err(enumeration_failed()))
+            .expect_err("no primary and no listing leaves nothing to try");
+        assert_eq!(error.kind(), io::ErrorKind::OutOfMemory);
+    }
+
+    #[test]
+    fn a_listing_that_works_is_ordered_as_usual() {
+        assert_eq!(
+            assemble(
+                Some(PathBuf::from("/dev/dri/card1")),
+                Ok(paths(&["/dev/dri/card0", "/dev/dri/card1"])),
+            )
+            .expect("nothing failed"),
+            paths(&["/dev/dri/card1", "/dev/dri/card0"]),
+        );
+    }
+
+    #[test]
     fn an_explicit_gpu_replaces_the_search() {
         let chosen = Path::new("/dev/dri/card3");
         assert_eq!(
@@ -340,13 +505,13 @@ mod tests {
     fn opener<'a>(
         tried: &'a mut Vec<PathBuf>,
         works: &'a str,
-    ) -> impl FnMut(&Path) -> Result<&'static str, String> + 'a {
+    ) -> impl FnMut(&Path) -> Result<&'static str, Rejection> + 'a {
         move |path| {
             tried.push(path.to_owned());
             if path == Path::new(works) {
                 Ok("a device")
             } else {
-                Err("has no usable KMS pipeline".to_owned())
+                Err(unusable("has no usable KMS pipeline"))
             }
         }
     }
@@ -396,11 +561,11 @@ mod tests {
             vec![
                 (
                     PathBuf::from("/dev/dri/card1"),
-                    "has no usable KMS pipeline".to_owned()
+                    unusable("has no usable KMS pipeline")
                 ),
                 (
                     PathBuf::from("/dev/dri/card0"),
-                    "has no usable KMS pipeline".to_owned()
+                    unusable("has no usable KMS pipeline")
                 ),
             ]
         );
@@ -420,11 +585,11 @@ mod tests {
         let failures = vec![
             (
                 PathBuf::from("/dev/dri/card0"),
-                "has no KMS resources to load (os error 95)".to_owned(),
+                unusable("has no KMS resources to load (os error 95)"),
             ),
             (
                 PathBuf::from("/dev/dri/card1"),
-                "has no connected connector with a usable mode".to_owned(),
+                unusable("has no connected connector with a usable mode"),
             ),
         ];
         let message = unusable_device_error("seat0", None, &failures);
@@ -444,7 +609,7 @@ mod tests {
     fn one_failing_device_reads_as_a_reason_not_a_tally() {
         let failures = vec![(
             PathBuf::from("/dev/dri/card0"),
-            "has no connected connector with a usable mode".to_owned(),
+            unusable("has no connected connector with a usable mode"),
         )];
         let message = unusable_device_error("seat0", None, &failures);
         assert!(
@@ -454,6 +619,61 @@ mod tests {
         // The list is the message; nothing counts how long it is, so one
         // failure reads the same way two do rather than as "tried 1 of 1".
         assert_eq!(message.matches('\n').count(), 1, "{message}");
+    }
+
+    #[test]
+    fn a_seat_that_refused_everything_is_not_blamed_on_device_choice() {
+        // The real case: another compositor (or the user's own session on
+        // another VT) already holds the seat, so libseat answers EPERM for
+        // every device. `--gpu` names a device and cannot fix a seat.
+        let failures = vec![
+            (
+                PathBuf::from("/dev/dri/card0"),
+                refused("could not be opened through the session (Operation not permitted)"),
+            ),
+            (
+                PathBuf::from("/dev/dri/card1"),
+                refused("could not be opened through the session (Operation not permitted)"),
+            ),
+        ];
+        let message = unusable_device_error("seat0", None, &failures);
+        assert!(!message.contains("--gpu"), "{message}");
+        assert!(
+            message.contains("the seat is what failed here"),
+            "{message}"
+        );
+        // Still says which devices were tried and what each said: the list
+        // is what makes "all of them, identically" visible at all.
+        assert!(
+            message.contains("/dev/dri/card0 could not be opened"),
+            "{message}"
+        );
+        assert!(
+            message.contains("/dev/dri/card1 could not be opened"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn one_device_that_opened_and_failed_keeps_the_gpu_advice() {
+        // Not all-session-open: something did open, and picking a
+        // different device is exactly what might help.
+        let failures = vec![
+            (
+                PathBuf::from("/dev/dri/card0"),
+                refused("could not be opened through the session (Operation not permitted)"),
+            ),
+            (
+                PathBuf::from("/dev/dri/card1"),
+                unusable("has no connected connector with a usable mode"),
+            ),
+        ];
+        let message = unusable_device_error("seat0", None, &failures);
+        assert!(message.contains("--gpu"), "{message}");
+        assert!(
+            !message.contains("the seat is what failed here"),
+            "{message}"
+        );
     }
 
     #[test]
@@ -471,7 +691,7 @@ mod tests {
         let chosen = PathBuf::from("/dev/dri/card9");
         let failures = vec![(
             chosen.clone(),
-            "could not be opened through the session (No such file or directory)".to_owned(),
+            refused("could not be opened through the session (No such file or directory)"),
         )];
         let message = unusable_device_error("seat0", Some(&chosen), &failures);
         assert_eq!(

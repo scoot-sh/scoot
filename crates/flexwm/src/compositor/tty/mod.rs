@@ -247,9 +247,12 @@ struct Device {
 }
 
 /// Opens one candidate and builds everything on it, or says why it can't.
-/// `Err` is a phrase completing "this device ...", matching `gpu::open`'s
-/// own convention, because `gpu::unusable_device_error` lists them all
-/// under the device path they belong to.
+/// `Err` is a `gpu::Rejection` carrying a phrase completing "this device
+/// ...", matching `gpu::open`'s own convention, because
+/// `gpu::unusable_device_error` lists them all under the device path they
+/// belong to. Every failure below is `Unusable`, never `SessionOpen`: the
+/// session already handed this device over by the time any of them can
+/// happen, so what failed is the device, not the seat.
 ///
 /// `gpu::open` has already rejected -- and handed back to the session --
 /// any device with no KMS resources or no connected connector, which is
@@ -262,7 +265,7 @@ struct Device {
 /// being dropped rather than returned to libseat -- it stays in seatd's
 /// open set until the process exits. Harmless, bounded by the number of
 /// GPUs on the seat, and not worth an fd-juggling workaround.
-fn open_device(session: &mut LibSeatSession, path: &Path) -> Result<Device, String> {
+fn open_device(session: &mut LibSeatSession, path: &Path) -> Result<Device, gpu::Rejection> {
     // `gpu::open` goes through `Session::open`, never a bare
     // `std::fs::File::open` -- that would compile and even run, right up
     // until the modeset call, which then fails with EACCES with no obvious
@@ -296,16 +299,21 @@ fn open_device(session: &mut LibSeatSession, path: &Path) -> Result<Device, Stri
     // cycle) -- see `vm/README.md`'s DRM-master troubleshooting entry and the
     // resolved backlog entry in `ROADMAP.md`.
     let drm_fd = DrmDeviceFd::new(DeviceFd::from(fd));
-    let (mut drm, notifier) = DrmDevice::new(drm_fd.clone(), true)
-        .map_err(|error| format!("could not be initialized as a DRM device ({error})"))?;
+    let (mut drm, notifier) = DrmDevice::new(drm_fd.clone(), true).map_err(|error| {
+        gpu::Rejection::Unusable(format!(
+            "could not be initialized as a DRM device ({error})"
+        ))
+    })?;
 
-    let surface = create_surface(&mut drm, connector, mode)
-        .ok_or("has no crtc usable with the chosen connector")?;
+    let surface = create_surface(&mut drm, connector, mode).ok_or_else(|| {
+        gpu::Rejection::Unusable("has no crtc usable with the chosen connector".to_owned())
+    })?;
 
     let (mode_width, mode_height) = mode.size();
     let (width, height) = (i32::from(mode_width), i32::from(mode_height));
-    let buffers = BufferPool::new(&drm_fd, width, height)
-        .map_err(|error| format!("could not allocate scanout buffers ({error})"))?;
+    let buffers = BufferPool::new(&drm_fd, width, height).map_err(|error| {
+        gpu::Rejection::Unusable(format!("could not allocate scanout buffers ({error})"))
+    })?;
 
     Ok(Device {
         drm,

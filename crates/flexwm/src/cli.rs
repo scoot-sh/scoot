@@ -79,8 +79,12 @@ pub struct CompositorOptions {
     /// fallback. A path here replaces that search entirely -- exactly one
     /// candidate, no fallback -- so a user on hardware both heuristics get
     /// wrong can name the right device instead. Meaningless outside
-    /// `--tty` and silently ignored there, the same as `width`/`height`
-    /// under `--tty`.
+    /// `--tty`, where `compositor::run` ignores it *with a warning* --
+    /// unlike `width`/`height` under `--tty`, which are dropped silently.
+    /// The difference is deliberate: a size has a sensible reading on a
+    /// backend that ignores it (the mode wins), whereas naming a DRM
+    /// device on a backend with no DRM device at all means the user
+    /// believes they are on `--tty` and is not.
     pub gpu: Option<PathBuf>,
 }
 

@@ -31,11 +31,11 @@ Early, but all three Wayland backends are real and working: `--headless`
 (pixman rendering, xdg-shell, seat/input, full IPC control surface),
 `--nested` (runs as a window inside an existing compositor, e.g. for webtop),
 and `--tty` (a real DRM/KMS + libseat + libinput backend on actual hardware,
-including VT switching and a rendered pointer cursor — a client's own cursor
-image when it supplies one, a built-in shape otherwise, whose size and color
-the config file can override — which tries every DRM device on the seat
-rather than trusting the first guess, and takes `--gpu PATH` when even that
-picks wrong; see Which DRM device `--tty` drives below). Also done: vim-style
+including VT switching; it tries every DRM device on the seat rather than
+trusting the first guess, and takes `--gpu PATH` when even that picks wrong,
+see Which DRM device `--tty` drives below; and it draws a pointer cursor —
+a client's own cursor image when it supplies one, a built-in shape
+otherwise, whose size and color the config file can override). Also done: vim-style
 keybindings, a TOML config file (`--config`, `[layout]`/`[appearance]`/
 `[binds]`, see Configuration below), window decorations (a niri-style focus
 ring, background color, server-side `zxdg_decoration_manager_v1`),
@@ -190,7 +190,10 @@ first rule to match. Picking the render-only device there fails with
 `Operation not supported (os error 95)` loading its KMS resources. (That
 specific machine is where the bug was reported from; the fallback is built
 and tested, but no one has yet confirmed it end to end on Apple Silicon —
-`--gpu` is the certain workaround there until someone does.)
+`--gpu` is the first thing to try there until someone does. It is not a
+guarantee: naming a device skips the *search*, not the checks, so the device
+named still has to open through the session and pass the same KMS probe every
+automatic candidate does.)
 
 If the automatic search still picks wrong, name the device:
 
@@ -210,7 +213,14 @@ for c in /sys/class/drm/card*/device/driver; do echo "$c -> $(readlink -f "$c")"
 ```
 
 When nothing works, the startup error lists every device that was tried and
-why each one was rejected, rather than naming only the first.
+why each one was rejected, rather than naming only the first. If the *session*
+refused all of them — which is what happens when another compositor already
+holds the seat, since a seat takes one client at a time — the error says so
+instead of suggesting `--gpu`: no choice of device gets around a busy seat.
+And if enumerating the seat's other devices fails outright, the primary pick
+is still tried on its own (with a `could not list the seat's other devices`
+warning), rather than losing a working device to a failure in the fallback
+machinery.
 
 ## Layer-shell clients (bars, wallpapers, launchers)
 

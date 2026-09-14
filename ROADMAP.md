@@ -2416,6 +2416,26 @@ review, and why.
     against `first_usable`, which is why the loop takes its opener as a
     parameter. Whether this actually fixes Asahi Linux needs that machine.
 
+    **One real fix and five accuracy fixes from review**, all on the same
+    branch. The fix: `candidates` `?`-ed *both* udev calls, so a machine
+    whose primary device was found and would have worked could fail to
+    start because the fallback's own `all_gpus` enumeration hiccuped —
+    contradicting this item's "no behavior change on ordinary hardware".
+    It now degrades to "primary only, with a warning"; only a failure with
+    no primary to fall back to is still fatal (`gpu::assemble`, unit-tested
+    both ways). The rest: the all-candidates-failed error no longer
+    recommends `--gpu` when *every* candidate was refused at
+    `Session::open` (a busy seat, which is the likeliest real failure —
+    naming a device cannot help), which needed the per-candidate reason to
+    become a typed `gpu::Rejection` rather than a bare string; the
+    probe-rejection message dropped its "a device that only computes …"
+    trailing clause, which was asserted for every cause (an evdev path
+    typo included); `cli.rs`'s `gpu` doc said "silently ignored" where the
+    code warns; `OpenGpu`'s doc claimed the probe used a *different* file
+    description when it borrows the same one (and the same-fd property is
+    load-bearing — libseat keys its device table by raw fd); and two
+    README wordings ("the certain workaround", a dangling clause).
+
     **Found while bug-bashing, not caused by this change:
     `MODE=--tty scripts/smoke-test.sh` fails its background-pixel check**
     (`the background pixel at (3,3) is rgb(0,0,0), expected #123456`).
@@ -2424,6 +2444,23 @@ review, and why.
     — see the Backlog entry.
 
 ## Backlog (unordered — pick up whenever it fits)
+
+- **A config-file key for `--tty`'s DRM device, so `--gpu` doesn't have to be
+  retyped on every launch.** Suggested by the review of PR #27, 2026-09-13;
+  deliberately *not* in that PR. On hardware where the automatic search picks
+  wrong (the Apple Silicon case item 17 exists for), `--gpu PATH` is the fix,
+  and a fix you must remember to type is not the daily-drive form of one — a
+  display manager, a `.desktop` entry or a shell alias each have to carry it
+  separately. Shape: a new `[tty]` section (the config file has
+  `[layout]`/`[appearance]`/`[binds]` today, none of which fits a backend
+  device path) with a `gpu = "/dev/dri/card1"` key, and `--gpu` overriding it
+  the way an explicit flag should. Small: `config.rs` already has the
+  parse-and-warn-per-key machinery, and `tty::init` already takes the path as
+  an `Option<&Path>` argument, so nothing below `compositor::run` changes.
+  **Gate on the user confirming `--gpu` actually fixes their Asahi machine
+  first** — if it doesn't, the right shape of the persistent setting may not
+  be a device path at all, and this would be a config key shipped for a
+  workaround that didn't work.
 
 - **Under `--tty`, the background color is not painted where no window
   covers it — the uncovered area stays black.** Found while bug-bashing
