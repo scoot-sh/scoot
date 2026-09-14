@@ -607,11 +607,14 @@ impl SessionLockHandler for State {
         // rendered. Back to the compositor's own shape; from here only the
         // lock client can change it, because only it has pointer focus.
         //
-        // Before the transition below rather than after only for readability:
-        // nothing `lock_transition` does reads or writes the cursor status
-        // (`unset_grab` cancels the drag and restores focus; a client's
-        // `wl_pointer.set_cursor` in response is a later request, not a
-        // synchronous callback), so the two are independent.
+        // Before the transition below rather than after, and the order does
+        // not matter: the only cursor-status write `lock_transition` can
+        // cause is `PointerTarget::replace`'s own reset -- `unset_grab`
+        // restores focus with a motion, and a motion that replaces one focus
+        // with another calls `cursor_image(default_named())` -- which is the
+        // same value this line sets. A client's `wl_pointer.set_cursor` in
+        // answer to the enter is a later request, not a synchronous callback,
+        // and by then only the lock client can send one.
         self.cursor.set_status(CursorImageStatus::default_named());
         self.lock_transition();
     }
@@ -734,10 +737,13 @@ impl State {
     ///   transition: a press delivered to a surface before the transition
     ///   would otherwise keep steering the pointer afterwards.
     ///
-    /// **If a keyboard grab is ever added to this compositor, it has to be
-    /// dropped here too.** Nothing installs one today, which is the only
-    /// reason this is a pointer-only function and the only reason the same
-    /// asymmetry was not already a keystroke leak.
+    /// **If a keyboard or touch grab is ever added to this compositor, it has
+    /// to be dropped here too.** Neither exists today -- nothing installs a
+    /// keyboard grab, and nothing calls `Seat::add_touch`, so Smithay's
+    /// `TouchDownGrab` (the touch twin of the click grab above) is never
+    /// reached -- which is the only reason this is a pointer-only function
+    /// and the only reason the same asymmetry was not already a keystroke
+    /// leak.
     ///
     /// Costs one mutex-guarded enum check on a transition that has already
     /// decided to re-derive focus and redraw; nothing on any per-event path.

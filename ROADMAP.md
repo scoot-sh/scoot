@@ -2759,10 +2759,14 @@ review, and why.
     observation below and what the `is_locked` gate does *not* ask),
     alongside this record itself.
 
-    - Dev VM: `cargo test -p flexwm` **372 passed** (346 at `4d6799e`, plus
-      22 from item 17's merge and 4 new), `cargo clippy -p flexwm
+    - Dev VM: `cargo test -p flexwm` **372 passed**, `cargo clippy -p flexwm
       --all-targets -- -D warnings` clean, `cargo fmt --all --check` clean.
-      macOS: 13 passed (the non-Linux subset), clippy and fmt clean.
+      macOS: 13 passed (the non-Linux subset), clippy and fmt clean. The 372
+      counted, not estimated: 346 at `4d6799e`, plus the **23** that came
+      with merging item 17 (`git grep -c '#\[test\]'` across
+      `crates/flexwm/src` goes 320 → 343 between `868dd83` and `6bfd29e`:
+      21 in `tty/gpu.rs`, 2 in `cli.rs`), plus **3** new here — the fourth
+      test named below is an existing one rewritten, not an addition.
     - **The two new regression tests fail without the hook**, which is the
       point of having them: with `redraw_after_lock_surface_destroyed`
       disabled, `destroying_only_the_lock_surfaces_role_falls_back_without_waiting_for_damage`
