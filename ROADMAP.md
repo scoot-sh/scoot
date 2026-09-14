@@ -2753,6 +2753,71 @@ review, and why.
       `pending` belonging to a lock that never blanked the screen and leave
       the *next* lock fast-confirmed over a visible desktop.
 
+    **Round-three verification, all against `166210b`.** Nothing executable
+    changed after that commit: the only later diff to a `.rs` file is the
+    six-line doc comment on `State::lock_surface_destroyed` recording the
+    pointer-enter observation below, alongside this record itself.
+
+    - Dev VM: `cargo test -p flexwm` **372 passed** (346 at `4d6799e`, plus
+      22 from item 17's merge and 4 new), `cargo clippy -p flexwm
+      --all-targets -- -D warnings` clean, `cargo fmt --all --check` clean.
+      macOS: 13 passed (the non-Linux subset), clippy and fmt clean.
+    - **The two new regression tests fail without the hook**, which is the
+      point of having them: with `redraw_after_lock_surface_destroyed`
+      disabled, `destroying_only_the_lock_surfaces_role_falls_back_without_waiting_for_damage`
+      reads `pixel (0, 0) is [224, 32, 224, 255]` — the destroyed surface's
+      literal pixels — and `a_lock_transition_drops_a_grab_a_click_left_behind`
+      fails on the grab. Both pass with it.
+    - `scripts/smoke-test.sh` under **`--headless`** and, inside `cage`,
+      **`--nested`**: both exit 0 with all 12 `ok:` checks, on
+      `/var/cargo-target/debug/flexwm`
+      `sha256:3aafe38d29b2cc975880936d6a085f16a3520cb56606a84edeb22bb16ce5e077`.
+    - **Real `--tty` hardware, run once per binary so the evidence
+      discriminates** (`~/hw-r4-role-destroy.sh`, artifacts in
+      `/tmp/hw-r4-before` and `/tmp/hw-r4-after` on the dev VM; a locker
+      puts a 1600x1000 magenta lock screen up, holds it 4s, destroys **only**
+      its `ext_session_lock_surface_v1`, and the screen is then read ~3s
+      later with no pointer motion, no client commit and nothing else
+      touching it):
+      - pre-fix `4d6799e` (`sha256:8f481bac…`): `3-role-destroyed` is
+        **1,599,864 magenta pixels** and `magick compare -metric AE` against
+        the locked frame is **0** — the stale frame, exactly the finding.
+      - post-fix `166210b` (`sha256:3aafe38d…`): the same read is
+        **1,599,895 black pixels** (the remaining 105 are the cursor), AE
+        **799,932** against the locked frame. The session is still locked on
+        both (`flexwm msg action close` refused), and the rest of the
+        lifecycle still works from there: `kill -9` on the locker turns the
+        screen fully red, and a third locker takes that red screen over and
+        draws its own blue.
+      - One behaviour worth recording rather than leaving to be rediscovered:
+        the post-fix log shows the locker getting `PTR_ENTER` at the moment
+        of the destroy. That is `refresh_pointer_focus` finding the orphaned
+        `wl_surface` — which still has its buffer and input region — in the
+        hit test. It is the lock owner's own surface, it is no longer drawn,
+        and nothing else can be focused while locked, so this is a
+        consequence of leaving the orphan registered (see
+        `State::lock_surface_destroyed`'s doc for why there is no public way
+        to drop it), not a new path anywhere.
+    - **Round three's own core attack scenario re-run against `166210b`**
+      (`~/hw-lock.sh attack-mapped`, artifacts in `/tmp/hw-attack-mapped`),
+      because this round touches the same dispatch/render-request code:
+      attacker **KEY=0 BTN=0**, the abandoned screen is fully red with no
+      attacker magenta anywhere, the real locker's screen is fully green and
+      gets the keystrokes, an IPC action is refused, and a VT switch away and
+      back leaves the lock screen pixel-identical (AE 120.5, entirely the two
+      16x16 cursor boxes the script itself moved between shots — the same
+      figure round two recorded).
+    - **Benchmark on the one per-event path this adds work to**: the
+      `destroyed` arm now runs a `TypeId` comparison for every destroyed
+      object of every interface. 200,000 `wl_region` create/destroy pairs
+      (the cheapest object there is, so nearly all of the measured work *is*
+      the destruction path), 5 alternating reps per side, debug builds on
+      both sides — the worst case for a comparison a release build folds to
+      a constant. `4d6799e` mean **200.4** jiffies (186–211), `166210b`
+      **198.6** (190–208), Welch t = 0.33, p ≈ 0.75; the "after" side is
+      nominally *faster*, i.e. the difference is noise. ~10µs per
+      create+destroy round trip on this rig, unchanged.
+
 ## Backlog (unordered — pick up whenever it fits)
 
 - **A config-file key for `--tty`'s DRM device, so `--gpu` doesn't have to be
@@ -3384,7 +3449,11 @@ review, and why.
   binds, and the first in creation order keeps the keyboard. Only reachable
   by whoever already holds the lock — they already own the whole screen, so
   there is nothing to escalate to, and the cost is their own memory plus the
-  compositor's per-frame work over a list they control. The fix belongs in
+  compositor's per-frame work over a list they control. Tearing that list
+  down is quadratic (every surface destruction re-derives focus over what is
+  left), which predates round three's hook and is not made worse by it: the
+  `retain` in `State::forget_lock_surface` was already O(list) per destroyed
+  `wl_surface`. The fix belongs in
   the same place multi-output does: resolve each `wl_output` to its
   `Output` (`Output::from_resource`) and treat *that* as the key, in
   `new_surface`, rather than trusting Smithay's resource-identity guard.

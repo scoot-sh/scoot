@@ -693,7 +693,7 @@ impl State {
     /// transition that re-derived focus but left a grab installed would leave
     /// the grabbing client receiving pointer events the focus change was
     /// supposed to take away from it, and that mistake is invisible at the
-    /// call site that forgot it. The four callers are
+    /// call site that forgot it. The callers are
     /// [`SessionLockHandler::lock`] (a fresh lock or a takeover),
     /// [`State::refresh_lock_state`] (a `destroy`/disconnect observed on the
     /// wayland connection), [`State::lock_post_frame`]'s caller (the render
@@ -788,6 +788,13 @@ impl State {
     /// up for that output anyway, because Smithay's `locked_outputs` list
     /// never shrinks. It goes for real when that `wl_surface` is destroyed,
     /// when the client disconnects, or at the next takeover.
+    ///
+    /// The visible consequence, seen on real `--tty` hardware rather than
+    /// inferred: the pointer refresh below can *enter* that orphan, because
+    /// its `wl_surface` still carries the buffer and input region the hit
+    /// test reads. Same client, nothing else is reachable while locked, and
+    /// it is no longer drawn -- so this is a cosmetic consequence of leaving
+    /// the orphan registered, not a route anywhere.
     ///
     /// Runs only while the session is locked: with the session unlocked no
     /// lock surface is drawn, focused or hit-tested at all, so a late
