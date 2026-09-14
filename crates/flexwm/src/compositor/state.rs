@@ -449,7 +449,8 @@ impl State {
 /// a process-global environment variable that every other test in this binary
 /// needs (`State::new` binds a real socket) -- the same hazard item 9's umask
 /// attempt hit and abandoned. The end-to-end behavior is verified against a
-/// real release binary instead; see this item's entry in `ROADMAP.md`.
+/// real release binary instead; see
+/// `docs/roadmap/12-four-bounds.md` for that verification.
 fn socket_error(error: BindError) -> String {
     match error {
         BindError::RuntimeDirNotSet => {

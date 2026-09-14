@@ -11,7 +11,8 @@
 //! `apple,dcp` owns the CRTCs and connectors -- rule (1) can never match
 //! (no PCI, no VGA BIOS) and rule (2) picks the render-only compute GPU.
 //! Loading KMS resources on that device fails with `ENOTSUP`, which is
-//! exactly the failure reported from real hardware (see `ROADMAP.md`).
+//! exactly the failure reported from real hardware (see
+//! `docs/roadmap/17-drm-device-selection.md`).
 //!
 //! So: [`candidates`] returns `primary_gpu()`'s pick *first* -- it is
 //! right on ordinary hardware and must keep winning there -- followed by

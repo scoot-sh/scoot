@@ -11,7 +11,7 @@
 //!
 //! [`SessionLock::owner`] is that field: `owner.is_some()` **is** "the session
 //! is locked", and this module keeps no second boolean beside it that could
-//! disagree (see `ROADMAP.md` item 5b for why this project treats a field with
+//! disagree (see `docs/roadmap/05b-vt-switch-eperm.md` for why this project treats a field with
 //! two meanings as a bug class of its own). It is written `Some` in exactly one
 //! place -- [`SessionLockHandler::lock`], when a lock is accepted -- and `None`
 //! in exactly one place -- [`SessionLockHandler::unlock`], when the owning
@@ -285,7 +285,8 @@ impl SessionLock {
             // No client filter: this compositor has no security-context
             // support to distinguish a privileged lock client from any other,
             // so restricting the global by client would only be theatre. See
-            // `README.md` and the backlog entry in `ROADMAP.md`.
+            // `README.md` and
+            // `docs/backlog/protocols/session-lock-global-restriction.md`.
             manager: SessionLockManagerState::new::<State, _>(display, |_| true),
             owner: None,
             pending: None,
@@ -838,7 +839,8 @@ impl State {
     ///   buffer for up to one more vblank after `locked` has gone out.
     ///
     /// `README.md` states that weaker guarantee in those terms rather than
-    /// claiming vblank accuracy, and `ROADMAP.md`'s backlog carries closing it
+    /// claiming vblank accuracy, and
+    /// `docs/backlog/protocols/session-lock-vblank-confirm.md` carries closing it
     /// (confirming from the `DrmEvent::VBlank` handler instead) as its own
     /// item -- it means tracking which in-flight flip carries the blanked frame
     /// through a path that also has to not hang a locker when the session is

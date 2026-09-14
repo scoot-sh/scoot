@@ -5,8 +5,8 @@
 //! nothing in this module may block, ever. A blocking read of half a request
 //! line, or a blocking write to a client that has stopped reading, does not
 //! stall one connection: it stalls the whole compositor, for every client, for
-//! as long as the offender likes. Both used to happen (see `ROADMAP.md`'s
-//! entry for this item). The shape that replaces them:
+//! as long as the offender likes. Both used to happen (see
+//! `docs/roadmap/10-ipc-connection-loop.md`). The shape that replaces them:
 //!
 //! - the accepted socket is non-blocking, and a line that has only half
 //!   arrived leaves its bytes in [`line::Lines`] to be finished on a later
@@ -208,7 +208,7 @@ impl State {
             //   -- if it's the caller's only input path -- may be about to
             //   lose the one channel that could switch back (see
             //   `tty::VtSwitchOutcome`'s doc and the backlog item this
-            //   closes in `ROADMAP.md`). Worded as "requested"/"if it takes
+            //   closes in `docs/roadmap/05b-vt-switch-eperm.md`). Worded as "requested"/"if it takes
             //   effect," not "this switched" -- libseat's own docs say a
             //   successful switch_session call doesn't guarantee a switch
             //   happens (confirmed on real hardware: requesting the VT
@@ -221,7 +221,8 @@ impl State {
             //   its switch-back combo over IPC while paused needs to hear
             //   "this can't work from here," not a bare `Ok` indistinguishable
             //   from a real switch-back actually working (see 5b/5c in
-            //   `ROADMAP.md` for why that ambiguity is exactly the defect).
+            //   `docs/roadmap/05b-vt-switch-eperm.md` for why that ambiguity is
+            //   exactly the defect).
             // - `Failed`: libseat itself returned an error -- a request that
             //   did not succeed, so unlike `Requested` this isn't "success
             //   with a side effect," it's a plain failure and gets

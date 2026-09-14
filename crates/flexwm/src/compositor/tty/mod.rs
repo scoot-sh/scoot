@@ -297,7 +297,8 @@ fn open_device(session: &mut LibSeatSession, path: &Path) -> Result<Device, gpu:
     // Measured end to end on the dev
     // VM (clients/state debugfs, a root `SET_MASTER` probe, a full VT-switch
     // cycle) -- see `vm/README.md`'s DRM-master troubleshooting entry and the
-    // resolved backlog entry in `ROADMAP.md`.
+    // resolved backlog entry in
+    // `docs/backlog/resolved/drm-master-unprivileged-resolved.md`.
     let drm_fd = DrmDeviceFd::new(DeviceFd::from(fd));
     let (mut drm, notifier) = DrmDevice::new(drm_fd.clone(), true).map_err(|error| {
         gpu::Rejection::Unusable(format!(
@@ -685,7 +686,8 @@ fn linux_button(code: u32) -> Option<PointerButton> {
 /// user is physically still at the console either way), but an agent whose
 /// only input *and output* is this one IPC connection needs to learn from
 /// the reply itself whenever this call didn't accomplish what a normal
-/// switch-back would -- see the backlog item this closes (`ROADMAP.md`) and
+/// switch-back would -- see the backlog item this closes
+/// (`docs/roadmap/05b-vt-switch-eperm.md`) and
 /// `flexwm-vision`'s "IPC-first, an agent doing computer-use is a
 /// first-class client" goal.
 ///

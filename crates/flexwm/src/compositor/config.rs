@@ -292,8 +292,8 @@ fn load_from(path: &Path, explicit: bool) -> Result<LoadedConfig, ConfigFileErro
 /// That budget is an assumption, not a guarantee, and so are two other things
 /// about *how* this is called; all three are invisible at the site that would
 /// break them (measured on aarch64 Linux + macOS, `toml` 1.1.6, 2026-09-13 --
-/// see `ROADMAP.md`'s resolved recursion-depth entry for the raw numbers and the
-/// commands that produced them):
+/// see `docs/backlog/resolved/config-recursion-depth-resolved.md` for the raw
+/// numbers and the commands that produced them):
 ///
 /// - **The 8 MiB main-thread stack.** [`load`] runs on the process's main thread
 ///   via `compositor::run`, so it gets `RLIMIT_STACK`, which is 8 MiB by default

@@ -163,7 +163,7 @@ pub(super) struct Connection {
     ///
     /// Also how replies get out: writing through `lines.socket()` rather than a
     /// second duplicated fd costs one fewer fd per connection, and connections
-    /// are not capped (see `ROADMAP.md`'s backlog).
+    /// are not capped (see `docs/backlog/ipc/screenshot-sync-no-rate-limit.md`).
     lines: Lines<UnixStream>,
     /// Replies the socket has not taken yet. Empty almost always: a client
     /// that reads its answers never fills its own receive buffer.
