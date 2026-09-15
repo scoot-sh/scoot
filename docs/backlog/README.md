@@ -19,8 +19,8 @@ actionable.
 
 ## High priority
 
-- [**`ext-idle-notify-v1` + `idle-inhibit-unstable-v1`**](./protocols/ext-idle-notify.md)
-  — the automatic trigger session-lock currently lacks. The next protocol pick.
+- [**`ext-idle-notify-v1` + `idle-inhibit-unstable-v1`**](./resolved/ext-idle-notify-resolved.md)
+  — RESOLVED 2026-09-15: swayidle-style auto-lock trigger, field-proven live.
 
 ## Open
 

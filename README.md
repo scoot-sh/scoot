@@ -43,10 +43,13 @@ niri-style focus ring, background color, server-side
 `wlr-layer-shell-unstable-v1`, so bars, docks, wallpapers, launchers and
 notification daemons work — including keyboard focus for the ones that ask
 for it (see Layer-shell clients below), `ext-workspace-v1`, so those
-bars can also list, follow and switch workspaces (see Workspaces for bars
-below), `ext-session-lock-v1`, so a real screen locker can lock the session
-with the compositor itself enforcing it (see Screen locking below), the
-clipboard/primary-selection globals and `zwlr_gamma_control_manager_v1`, so
+ bars can also list, follow and switch workspaces (see Workspaces for bars
+ below), `ext-session-lock-v1`, so a real screen locker can lock the session
+ with the compositor itself enforcing it (see Screen locking below),
+ `ext-idle-notify-v1` and `idle-inhibit-unstable-v1`, so a `swayidle`-style
+ daemon can idle the seat and lock it automatically while a video player
+ holds it awake (see Idle detection below), the
+ clipboard/primary-selection globals and `zwlr_gamma_control_manager_v1`, so
 clipboard managers, middle-click paste and night-light tools work (see
 Clipboard managers and Night light below), and
 output scaling (`[output] scale` over `wl_output.scale`,
@@ -530,9 +533,34 @@ its connection and its `wl_surface`s are still perfectly alive.
   rendering the unlocked session for that whole second.
 - **One output.** A lock surface is configured per `wl_output` and flexwm has
   exactly one; multi-output support has to revisit this.
-- **No idle trigger.** Nothing locks the session automatically — there is no
-  `ext-idle-notify-v1` yet, so a `swayidle`-style daemon has nothing to watch.
-  Locking is whatever you run (from a keybinding's `spawn`, say).
+
+## Idle detection (`ext-idle-notify-v1`, `idle-inhibit-unstable-v1`)
+
+flexwm implements `ext_idle_notifier_v1` (version 2), so a `swayidle`-style
+daemon can learn the seat has been quiet N milliseconds and dim the screen,
+lock it (see Screen locking above) or suspend the machine — verified live
+with real swayidle: the timeout command fires after a quiet window, input
+runs the resume command, and the next quiet window fires again. Every input
+source resets the timers: real devices under `--tty`, host-forwarded input
+under `--nested`, and IPC-injected input (`flexwm msg type`/`key`/`pointer`
+count as a user at the machine, which is also what keeps an agent's own
+activity from looking like idleness). What does *not* reset them is the
+compositor re-running its own hit test on a lock transition — that is not
+input and doesn't claim to be.
+
+`zwp_idle_inhibit_manager_v1` (version 1) is the reverse: a video player or
+presentation app creates an inhibitor on one of its surfaces and `idled`
+holds off until the inhibitor is gone — destroyed explicitly, or released
+implicitly when the surface dies or the client disconnects. The
+input-specific watch (`get_input_idle_notification`, for daemons with their
+own inhibit policy) ignores inhibitors by design.
+
+Two things to know: there is no built-in auto-locker — the timeouts and
+commands are the daemon's config, not flexwm's, the swayidle way — and an
+inhibitor counts while its surface is *alive*, whether or not it is visible.
+A client inhibiting from a surface it never maps holds off `idled`; that
+client is local either way (same trust model as the session-lock global
+above).
 
 ## Clipboard managers and primary selection
 

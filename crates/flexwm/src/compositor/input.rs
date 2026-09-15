@@ -57,6 +57,18 @@ pub(super) struct KeyOutcome {
 
 impl State {
     pub fn pointer_move(&mut self, x: f64, y: f64) {
+        self.announce_activity();
+        self.pointer_move_quietly(x, y);
+    }
+
+    /// [`State::pointer_move`] without the activity announcement: the
+    /// compositor re-running its own hit test is not a user at the
+    /// machine, and announcing it would restart every idle timer on
+    /// each lock transition. The only caller is
+    /// [`State::refresh_pointer_focus`]; every real motion source --
+    /// libinput (`pointer_move_relative`), the host (`nested_dispatch`),
+    /// IPC injection -- goes through `pointer_move`.
+    fn pointer_move_quietly(&mut self, x: f64, y: f64) {
         let Some(pointer) = self.seat.get_pointer() else {
             return;
         };
@@ -102,7 +114,7 @@ impl State {
             return;
         };
         let location = pointer.current_location();
-        self.pointer_move(location.x, location.y);
+        self.pointer_move_quietly(location.x, location.y);
     }
 
     /// Moves the pointer by a relative delta, clamped to the current
@@ -134,6 +146,7 @@ impl State {
     }
 
     pub fn pointer_button(&mut self, button: PointerButton, pressed: bool) {
+        self.announce_activity();
         let Some(pointer) = self.seat.get_pointer() else {
             return;
         };
@@ -160,6 +173,7 @@ impl State {
     }
 
     pub fn scroll(&mut self, dx: f64, dy: f64) {
+        self.announce_activity();
         let Some(pointer) = self.seat.get_pointer() else {
             return;
         };
@@ -345,6 +359,10 @@ impl State {
     /// presses already use, rather than duplicating the `keyboard.input`
     /// call.
     pub(super) fn key(&mut self, keycode: Keycode, state: KeyState) -> KeyOutcome {
+        // Announced before the keyboard check, not after: a key event with
+        // no keyboard on the seat reaches no client, but it is still a
+        // user at the machine rather than an idle one.
+        self.announce_activity();
         let Some(keyboard) = self.seat.get_keyboard() else {
             return KeyOutcome::default();
         };

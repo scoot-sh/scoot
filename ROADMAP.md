@@ -44,8 +44,10 @@ read of it, not a commitment:
    user's own hardware, not the dev VM (no split GPU/display-controller
    topology there). Unblocks the
    [`[tty] gpu` config key](docs/backlog/tty/tty-gpu-config-key.md).
-2. **[`ext-idle-notify-v1` + `idle-inhibit-unstable-v1`](docs/backlog/protocols/ext-idle-notify.md)** —
-   the automatic trigger session-lock has no way to get today.
+2. **[`ext-idle-notify-v1` + `idle-inhibit-unstable-v1`](docs/backlog/resolved/ext-idle-notify-resolved.md)** —
+   RESOLVED 2026-09-15: the automatic trigger session-lock had no other
+   way to get. A `swayidle`-style daemon can now idle, resume and
+   re-idle the seat (field-proven live); inhibitors hold it awake.
 3. **The `PROTOCOL_VERSION` bundle** — `OutputSnapshot.usable`
    ([#1](docs/backlog/ipc/msg-outputs-usable-rect.md)), a focus-workspace-N
    action, and a locked-session query
@@ -76,8 +78,9 @@ probes' recommended order:
    keyboard focus never moves onto one, grabs are a no-op (so nothing
    dismisses a menu either), and layer-surface-parented popups (a bar's
    own menus/tooltips) are still untracked.
-2. Item 2 above (idle) — auto-lock, pairing with the proven session
-   lock; first real clients now confirmed.
+2. Item 2 above (idle) — RESOLVED 2026-09-15: auto-lock's trigger
+   exists and is field-proven with real swayidle; what remains is the
+   user's own daemon config, not compositor work.
 3. [`foreign-toplevel`](docs/backlog/protocols/foreign-toplevel-management.md)
    — window lists (check for an `ext-` successor first).
 4. [`output-management`](docs/backlog/protocols/output-management.md)
