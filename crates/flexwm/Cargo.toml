@@ -76,6 +76,14 @@ libc = "0.2"
 # (smithay itself depends on it), so this adds no new version, just a
 # direct dev-dependency on one already resolved.
 tempfile = "3"
+# The *client* half of input-method-v2, for
+# compositor/input_method/tests.rs: those tests drive a real input method
+# (the privileged half of the IME pair) through a real compositor, which is
+# the only way to make an IME popup exist at all. Smithay already pins this
+# exact crate (with only its "server" feature) for its own input-method
+# support, so this adds a feature to a crate already in the tree, not a new
+# dependency.
+wayland-protocols-misc = { version = "0.3", features = ["client"] }
 # The *client* half of wlr-layer-shell, for compositor/layer_shell/tests.rs:
 # those tests drive a real layer-shell client through a real compositor
 # rather than calling the handler directly. Smithay already pins this exact

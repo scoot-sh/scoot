@@ -51,7 +51,15 @@ for it (see Layer-shell clients below), `ext-workspace-v1`, so those
  holds it awake (see Idle detection below), the
  clipboard/primary-selection globals and `zwlr_gamma_control_manager_v1`, so
 clipboard managers, middle-click paste and night-light tools work (see
-Clipboard managers and Night light below), and
+Clipboard managers and Night light below),
+`wp-cursor-shape-v1`, so a client can name the cursor it wants and get one of
+ten shapes the compositor draws itself rather than uploading its own (see
+Cursor shapes below), `xdg-activation-v1`, so a launcher can hand focus to
+the app it started (see Focus handoff between clients below),
+`xdg-toplevel-icon-v1`, so a bar or an agent can read a window's icon name
+off `flexwm msg windows` (see Window icons below), `text-input-v3` and
+`input-method-v2`, so an IME or on-screen keyboard can compose into the
+focused text field, popup and all (see Input methods below), and
 output scaling (`[output] scale` over `wl_output.scale`,
 `wp_fractional_scale_v1`, `wl_surface.preferred_buffer_scale` and
 `wp_viewporter`, so a HiDPI panel gets
@@ -621,6 +629,114 @@ is the ordinary case.
 No config option, keybinding, CLI flag or IPC surface comes with any of
 this: clipboard, primary selection and gamma are pure Wayland protocols, used
 by existing clients as-is.
+
+## Cursor shapes (`wp-cursor-shape-v1`)
+
+flexwm implements `wp_cursor_shape_manager_v1` (version 2), so a client can
+*name* the cursor it wants — `text`, `ew-resize`, `not-allowed` — instead of
+loading an xcursor theme and uploading a surface of its own. Modern GTK4/Qt6
+toolkits and `foot` prefer this when it exists; without it `foot` logs
+"compositor does not implement server-side cursors".
+
+Because flexwm ships no cursor theme (niri's assets are GPL and Adwaita's
+aren't MIT-clean, so there is nothing MIT-clean to load — see License below),
+every named shape is **drawn procedurally by the compositor**, in
+`cursor/shapes.rs`. Ten shapes are drawn, and the mapping collapses the names
+a user cannot tell apart at 16 pixels:
+
+| Drawn as | Named shapes it answers |
+| --- | --- |
+| arrow | `default`, and every name below has no entry — `help`, `wait`, `progress`, `pointer`, `zoom-in`, … |
+| I-beam | `text` |
+| sideways I-beam | `vertical-text` |
+| crosshair | `crosshair`, `cell` |
+| vertical double arrow | `n-resize`, `s-resize`, `ns-resize`, `row-resize` |
+| horizontal double arrow | `e-resize`, `w-resize`, `ew-resize`, `col-resize` |
+| diagonal double arrow | `ne-resize`, `sw-resize`, `nesw-resize` / `nw-resize`, `se-resize`, `nwse-resize` |
+| four-way arrow | `move`, `all-scroll`, `all-resize`, `grab`, `grabbing` |
+| circle with a slash | `not-allowed`, `no-drop` |
+
+They use the same `[appearance]` `cursor_size`/`cursor_color` the built-in
+arrow already did, they are built once at startup (never per frame and never
+per request), and the arrow stays byte-identical to what it has always been.
+A client that uploads its own cursor *surface* still gets its own pixels
+drawn, exactly as before — the two paths are unchanged relative to each
+other. Cursors are only drawn under `--tty`; `--headless` has no display and
+`--nested` shows the host compositor's own cursor.
+
+## Focus handoff between clients (`xdg-activation-v1`)
+
+flexwm implements `xdg_activation_v1` (version 1), so a launcher can hand
+focus to the app it started and a notification daemon can focus the app its
+popup came from. Without it the only way to move focus is flexwm's own
+keybindings and IPC — a client has no standard way to ask.
+
+Honoring every such request unconditionally would be a focus-stealing
+primitive, so flexwm bounds it two ways (see `compositor/activation.rs`):
+
+- **A token is valid for 30 seconds.** Long enough for a cold-starting app to
+  finish launching and redeem the token its launcher gave it; short enough
+  that a token is still a receipt for something the user just did rather than
+  a permit a client can sit on.
+- **At most 64 unredeemed tokens exist at once**, across all clients, with
+  expired ones swept first. `get_activation_token` is unauthenticated and
+  unlimited, and nothing upstream prunes what it hands out; this is the same
+  resource bound as the `wl_shm` pool cap.
+
+A redeemed token is removed whether or not it was honored, so one user action
+cannot be replayed into focus later. Activation goes through the same action
+path a keybinding does, which means it is refused while the session is locked
+and it scrolls the activated column into view rather than only marking it
+focused. A refused activation does nothing visible: flexwm has no per-window
+urgency state to raise instead.
+
+## Window icons (`xdg-toplevel-icon-v1`)
+
+flexwm implements `xdg_toplevel_icon_manager_v1` (version 1), so a client can
+say which icon belongs to its window. flexwm draws no icons itself — it has
+no titlebars, taskbar or window switcher — so this exists for the two
+consumers outside it: a bar or dock showing a window list, and an agent
+driving the session.
+
+`flexwm msg windows` therefore grew one field:
+
+```json
+{ "id": 1, "app_id": "foot", "title": "zsh", "icon": "org.codeberg.dnkl.foot", ... }
+```
+
+`icon` is the freedesktop icon name the client committed, or `null`. It is
+read off the surface's own current state when asked, so it is never stale and
+never reports an icon the client attached but has not committed. The field is
+optional on the wire (an older server simply omits it), so it does not bump
+`PROTOCOL_VERSION`. Two deliberate limits: no *preferred icon sizes* are
+advertised, since nothing in flexwm draws an icon and so it has no size to
+prefer; and a client that supplies raw pixel buffers instead of a name reads
+as having no icon, since handing those over IPC would mean re-encoding shm
+buffers to PNG per query and no consumer has asked for it.
+
+## Input methods (`text-input-v3`, `input-method-v2`)
+
+flexwm implements `zwp_text_input_manager_v3` (version 1) and
+`zwp_input_method_manager_v2` (version 1) — the two halves of IME support,
+neither of which is useful alone. An application binds the first to say
+"there is a text field here"; an input method (fcitx5, ibus, an on-screen
+keyboard) binds the second to compose into it. Without the first, `foot` logs
+"text input interface not implemented by compositor; IME will be disabled"
+and never sets the path up at all.
+
+Which text field is focused follows keyboard focus automatically, so it works
+for a layer-shell surface with a search field (a launcher) as well as for an
+ordinary window. What flexwm owns is the input method's **popup** — the
+candidate window beside the text cursor — which is tracked against whichever
+surface has the field and drawn with that surface's own popups, so it follows
+the window, gets frame callbacks, and disappears when the field is disabled.
+
+Same trust note as the other privileged globals: there is no client filter on
+`zwp_input_method_manager_v2`, because an allow-list would be theatre without
+security-context support. An input method is more privileged than a clipboard
+manager — it can grab the keyboard and inject text into the focused client —
+so this is a deliberate consistency with flexwm's existing trust model rather
+than an oversight.
 
 ## Output scaling
 

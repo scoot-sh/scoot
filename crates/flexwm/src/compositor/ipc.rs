@@ -293,7 +293,7 @@ impl State {
         self.pending_idle = waiting;
     }
 
-    fn window_snapshots(&self) -> Vec<WindowSnapshot> {
+    pub(super) fn window_snapshots(&self) -> Vec<WindowSnapshot> {
         let arrangement = self.world.arrange();
         arrangement
             .placements
@@ -308,6 +308,12 @@ impl State {
                     id: placement.id.0,
                     app_id: info.app_id,
                     title: info.title,
+                    // Read off the surface rather than the core: the core is
+                    // platform-independent and knows nothing about Wayland
+                    // protocols (see `toplevel_icon.rs`). One `with_states`
+                    // per window per `windows` request, which is an agent
+                    // asking for a list -- not a per-frame path.
+                    icon: self.icon_name_of(placement.id),
                     output: placement.output.0,
                     rect: wire(placement.rect),
                     visible: placement.visible,

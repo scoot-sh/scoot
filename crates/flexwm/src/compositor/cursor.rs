@@ -15,24 +15,34 @@
 //!   arrow on a window edge, an animated spinner). Those pixels are the
 //!   client's, so they're what gets drawn: [`Cursor::element`] renders that
 //!   surface's whole subsurface tree, at the hotspot the client set.
-//! - [`CursorImageStatus::Named`] -- the client named an xcursor theme shape
-//!   but supplied no pixels, so there is nothing of the client's to draw.
-//!   This module's own procedurally-generated fallback bitmap is used
-//!   instead. Drawing a *different* shape per requested name is still out of
-//!   reach for the license reason below; its size and fill color are
-//!   configurable (`[appearance]`'s `cursor_size`/`cursor_color`, resolved
-//!   once at startup -- see [`Cursor::new`]).
+//! - [`CursorImageStatus::Named`] -- the client named a shape but supplied no
+//!   pixels, so there is nothing of the client's to draw. One of this
+//!   compositor's own procedurally-generated bitmaps is drawn instead,
+//!   chosen by [`shapes::Shape::for_icon`]: an I-beam for `text`, a
+//!   double-headed arrow for a resize edge, a crosshair, and so on, with the
+//!   arrow below as the answer for every name none of those fits. Their size
+//!   and fill color are configurable (`[appearance]`'s
+//!   `cursor_size`/`cursor_color`, resolved once at startup -- see
+//!   [`Cursor::new`]).
 //! - [`CursorImageStatus::Hidden`] -- nothing is drawn.
 //!
-//! The fallback bitmap is procedurally generated, not an embedded image file
-//! or a copy of any cursor theme's actual pixel data -- niri's own cursor
-//! assets are GPL, Adwaita's aren't MIT-clean, and `CLAUDE.md`'s license note
-//! says not to borrow either. It's a plain filled triangle, not a
-//! pixel-accurate arrow, and no config option can make it one: there is no
-//! `cursor_theme` field here, because honoring a theme name means loading a
-//! real xcursor asset, and this project has no MIT-clean one to load. Nothing
-//! here loads or ships a theme asset; a client surface's pixels come from the
-//! client, over the wire.
+//! A client reaches the `Named` path either through `wl_pointer.set_cursor`
+//! with no surface, or -- since `wp-cursor-shape-v1` is advertised (see
+//! `state.rs`'s `cursor_shape_manager_state`) -- by naming a shape directly
+//! and never allocating a cursor buffer at all. Both arrive here as the same
+//! [`CursorImageStatus::Named`], which is the point of the protocol: the
+//! compositor's own shapes, consistently, across every client that asks.
+//!
+//! Every one of those bitmaps is procedurally generated, not an embedded
+//! image file or a copy of any cursor theme's actual pixel data -- niri's own
+//! cursor assets are GPL, Adwaita's aren't MIT-clean, and `CLAUDE.md`'s
+//! license note says not to borrow either. They are line art, not
+//! pixel-accurate theme shapes, and no config option can make them one: there
+//! is no `cursor_theme` field here, because honoring a theme name means
+//! loading a real xcursor asset, and this project has no MIT-clean one to
+//! load. Nothing here loads or ships a theme asset; a client surface's pixels
+//! come from the client, over the wire. See `cursor/shapes.rs` for how each
+//! shape is drawn.
 //!
 //! # Renderer-generic, like `decorations.rs`
 //!
@@ -51,12 +61,15 @@ use smithay::backend::renderer::element::surface::{
 };
 use smithay::backend::renderer::element::{Kind, render_elements};
 use smithay::backend::renderer::{ImportAll, ImportMem, Renderer, Texture};
-use smithay::input::pointer::{CursorImageStatus, CursorImageSurfaceData};
+use smithay::input::pointer::{CursorIcon, CursorImageStatus, CursorImageSurfaceData};
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{IsAlive, Logical, Physical, Point, Transform};
 use smithay::wayland::compositor::with_states;
 
 use super::decorations::{Appearance, Color};
+use shapes::Shape;
+
+pub mod shapes;
 
 #[cfg(test)]
 mod tests;
@@ -107,23 +120,35 @@ fn generate_bitmap(size: i32, fill: [u8; 4], outline: [u8; 4]) -> Vec<u8> {
     pixels
 }
 
-/// The cursor's current image request and the one persistent render buffer
-/// behind its fallback shape. That buffer is built once (see [`Cursor::new`])
-/// and never rebuilt -- same stable-`Id` reasoning as `decorations.rs`'s
-/// persistent per-window buffers, so a static cursor doesn't read as "new
-/// content" to the damage tracker on every frame it happens to still be
-/// visible. A client-supplied cursor surface needs no equivalent here: its
-/// texture is owned and cached by Smithay's own per-surface renderer state,
-/// keyed off the client's commits.
+/// The cursor's current image request and the persistent render buffers
+/// behind this compositor's own shapes. Those are built once (see
+/// [`Cursor::new`]) and never rebuilt -- same stable-`Id` reasoning as
+/// `decorations.rs`'s persistent per-window buffers, so a static cursor
+/// doesn't read as "new content" to the damage tracker on every frame it
+/// happens to still be visible, and a client flipping between `default` and
+/// `text` as the pointer crosses a text field re-uses two buffers rather than
+/// allocating on the way past. A client-supplied cursor surface needs no
+/// equivalent here: its texture is owned and cached by Smithay's own
+/// per-surface renderer state, keyed off the client's commits.
 pub struct Cursor {
-    fallback: MemoryRenderBuffer,
-    /// The point within the *fallback bitmap* that lines up with the
-    /// pointer's actual location -- the top-left corner, since
-    /// [`generate_bitmap`]'s triangle has its point there. This is not the
-    /// hotspot of a client-supplied cursor surface: that one belongs to the
-    /// client, lives in the surface's own user data, and is read per frame
-    /// by [`surface_hotspot`].
-    fallback_hotspot: Point<i32, Logical>,
+    /// One bitmap per [`Shape`], indexed by [`Shape::index`].
+    ///
+    /// Built eagerly rather than on first use, for the stable-`Id` reason
+    /// above -- a buffer created mid-session is new content to the damage
+    /// tracker at the moment the pointer is moving fastest -- and because
+    /// the whole set is small: `Shape::COUNT` bitmaps of `size * size * 4`
+    /// bytes, i.e. ~10 KiB at the default 16px cursor and ~2.6 MiB at the
+    /// largest size `Appearance::MAX_CURSOR_SIZE` allows, once, for the
+    /// process's lifetime.
+    shapes: [MemoryRenderBuffer; Shape::COUNT],
+    /// The clamped edge length every bitmap in [`Self::shapes`] was built at,
+    /// kept so [`Shape::hotspot`] can be asked about them. Not a hotspot
+    /// itself: each shape has its own (the arrow points at its top-left
+    /// corner, the symmetric shapes at their middle), and none of them is the
+    /// hotspot of a client-supplied cursor surface -- that one belongs to the
+    /// client, lives in the surface's own user data, and is read per frame by
+    /// [`surface_hotspot`].
+    size: i32,
     status: CursorImageStatus,
 }
 
@@ -156,16 +181,29 @@ impl Cursor {
     pub fn new(size: i32, color: Color) -> Self {
         let size = Appearance::clamp_cursor_size(size);
         let outline = Color::new(0.0, 0.0, 0.0, color.a);
+        let (fill, outline) = (color.to_argb8888(), outline.to_argb8888());
         Self {
-            fallback: MemoryRenderBuffer::from_slice(
-                &generate_bitmap(size, color.to_argb8888(), outline.to_argb8888()),
-                Fourcc::Argb8888,
-                (size, size),
-                1,
-                Transform::Normal,
-                None,
-            ),
-            fallback_hotspot: (0, 0).into(),
+            // `Shape::ALL` in its own order, indexed back by `Shape::index`
+            // -- see that constant's doc for why the order lives there and
+            // not here. `Shape::Arrow` is the one shape `shapes::generate`
+            // does not draw: it is `generate_bitmap` above, kept exactly as
+            // it has always been (see `shapes`'s module doc on the two
+            // outline styles), so it is routed here rather than there.
+            shapes: Shape::ALL.map(|shape| {
+                let pixels = match shape {
+                    Shape::Arrow => generate_bitmap(size, fill, outline),
+                    other => shapes::generate(other, size, fill, outline),
+                };
+                MemoryRenderBuffer::from_slice(
+                    &pixels,
+                    Fourcc::Argb8888,
+                    (size, size),
+                    1,
+                    Transform::Normal,
+                    None,
+                )
+            }),
+            size,
             status: CursorImageStatus::default_named(),
         }
     }
@@ -226,11 +264,12 @@ impl Cursor {
 
     /// This frame's cursor render elements at `pointer_location`, front-most
     /// first: empty when the cursor is hidden (or when a client cursor
-    /// surface has no content to show yet), one element for the fallback
-    /// shape, and one per mapped node of a client cursor surface's tree.
+    /// surface has no content to show yet), one element for whichever of
+    /// this compositor's own shapes the client named, and one per mapped
+    /// node of a client cursor surface's tree.
     ///
-    /// Failing to build the fallback element (the fixed bitmap failing to
-    /// import) is logged and dropped here rather than returned: the client
+    /// Failing to build the shape element (one of the fixed bitmaps failing
+    /// to import) is logged and dropped here rather than returned: the client
     /// surface path can't report failures the same way -- Smithay's
     /// `render_elements_from_surface_tree` logs a failed import itself and
     /// simply omits that node -- so a `Result` out of this function would
@@ -272,14 +311,22 @@ impl Cursor {
                 Kind::Cursor,
             );
         }
-        if matches!(self.status, CursorImageStatus::Hidden) {
-            return Vec::new();
-        }
-        let location = element_location(pointer_location, self.fallback_hotspot, scale);
+        let icon = match &self.status {
+            CursorImageStatus::Hidden => return Vec::new(),
+            CursorImageStatus::Named(icon) => *icon,
+            // A client cursor surface that is no longer alive -- the live
+            // one returned above. Drawn as the default shape rather than as
+            // nothing, for the same reason `forget_surface` falls back to it
+            // rather than to `Hidden`: the pointer still exists and is still
+            // being moved, so the wrong shape beats no cursor at all.
+            CursorImageStatus::Surface(_) => CursorIcon::Default,
+        };
+        let shape = Shape::for_icon(icon);
+        let location = element_location(pointer_location, shape.hotspot(self.size), scale);
         match MemoryRenderBufferRenderElement::from_buffer(
             renderer,
             location,
-            &self.fallback,
+            &self.shapes[shape.index()],
             None,
             None,
             None,
@@ -287,7 +334,7 @@ impl Cursor {
         ) {
             Ok(element) => vec![CursorElement::Fallback(element)],
             Err(error) => {
-                tracing::warn!(%error, "could not build the fallback cursor element");
+                tracing::warn!(%error, ?shape, "could not build the cursor shape element");
                 Vec::new()
             }
         }

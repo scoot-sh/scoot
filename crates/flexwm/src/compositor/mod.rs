@@ -4,6 +4,7 @@
 //! keybindings say what should happen, and after either the compositor applies
 //! whatever [`Arrangement`](flexwm_core::Arrangement) the core produced.
 
+mod activation;
 mod config;
 mod cursor;
 mod decorations;
@@ -14,6 +15,7 @@ mod handlers;
 mod headless;
 mod idle;
 mod input;
+mod input_method;
 mod ipc;
 mod keybindings;
 mod layer_shell;
@@ -25,6 +27,7 @@ mod selection;
 mod session_lock;
 mod shell;
 mod state;
+mod toplevel_icon;
 mod tty;
 
 #[cfg(test)]

@@ -20,9 +20,11 @@ use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::{BindError, Display, DisplayHandle};
 use smithay::utils::{Logical, Point};
 use smithay::wayland::compositor::{CompositorClientState, CompositorState};
+use smithay::wayland::cursor_shape::CursorShapeManagerState;
 use smithay::wayland::fractional_scale::FractionalScaleManagerState;
 use smithay::wayland::idle_inhibit::IdleInhibitManagerState;
 use smithay::wayland::idle_notify::IdleNotifierState;
+use smithay::wayland::input_method::InputMethodManagerState;
 use smithay::wayland::output::OutputManagerState;
 use smithay::wayland::selection::data_device::DataDeviceState;
 use smithay::wayland::selection::ext_data_control::DataControlState as ExtDataControlState;
@@ -33,7 +35,10 @@ use smithay::wayland::shell::xdg::XdgShellState;
 use smithay::wayland::shell::xdg::decoration::XdgDecorationState;
 use smithay::wayland::shm::ShmState;
 use smithay::wayland::socket::ListeningSocketSource;
+use smithay::wayland::text_input::TextInputManagerState;
 use smithay::wayland::viewporter::ViewporterState;
+use smithay::wayland::xdg_activation::XdgActivationState;
+use smithay::wayland::xdg_toplevel_icon::XdgToplevelIconManager;
 
 use super::cursor::Cursor;
 use super::decorations::{Appearance, Decorations};
@@ -204,6 +209,16 @@ pub struct State {
     /// (`FractionalScaleHandler`) lives in `output_scale.rs`.
     #[allow(dead_code)]
     pub fractional_scale_manager_state: FractionalScaleManagerState,
+    /// `wp_cursor_shape_v1` (version 2): lets a client name a cursor shape
+    /// (`text`, `ew-resize`, `not-allowed`) instead of uploading a cursor
+    /// surface of its own, and have the compositor draw it. Held only to keep
+    /// the global alive -- Smithay routes `set_shape` straight into
+    /// `SeatHandler::cursor_image` as a `CursorImageStatus::Named`, which is
+    /// the same path `wl_pointer.set_cursor` with no surface already took, so
+    /// there is no handler of flexwm's own between the two. What each name is
+    /// drawn as lives in `cursor/shapes.rs`.
+    #[allow(dead_code)]
+    pub cursor_shape_manager_state: CursorShapeManagerState,
     /// `wp_viewporter`: the global a client needs to render a fractionally
     /// scaled buffer (it sets a logical destination size and lets the
     /// compositor scale the buffer into it). Held only to keep the global
@@ -242,6 +257,47 @@ pub struct State {
     /// paste. Held only to keep the global alive, same rationale as above.
     #[allow(dead_code)]
     pub primary_selection_state: PrimarySelectionState,
+    /// `zwp_text_input_manager_v3` (version 1): what an application binds to
+    /// say "there is a text field here". Held only to keep the global alive
+    /// -- which text field is focused follows keyboard focus inside Smithay's
+    /// own seat (see `input_method.rs`), so nothing reads this field again.
+    #[allow(dead_code)]
+    pub text_input_manager_state: TextInputManagerState,
+    /// `zwp_input_method_manager_v2` (version 1): what an input method --
+    /// fcitx5, ibus, an on-screen keyboard -- binds to receive that text
+    /// field and send composed text back to it. Held only to keep the global
+    /// alive; `InputMethodHandler` (see `input_method.rs`) owns the one part
+    /// this compositor has to do, which is the IME's popup.
+    ///
+    /// No client filter, for the same reason the session-lock and
+    /// data-control globals have none: an allow-list would be theatre
+    /// without security-context support (see `README.md`'s trust note).
+    /// Worth naming here because an input method is more privileged than
+    /// those two -- it can grab the keyboard and inject text into the focused
+    /// client -- so this is a deliberate consistency with the existing trust
+    /// model, not an oversight about what the protocol can do.
+    #[allow(dead_code)]
+    pub input_method_manager_state: InputMethodManagerState,
+    /// `xdg_toplevel_icon_manager_v1`: the icon a client wants shown for its
+    /// window. Held only to keep the global alive -- flexwm draws no icons
+    /// itself, and what a bar or an agent reads comes off the surface's own
+    /// cached state (see `toplevel_icon.rs`), not from here.
+    ///
+    /// Deliberately advertising *no* preferred icon sizes: the manager sends
+    /// its `icon_size` list at bind time, and this compositor has no size to
+    /// prefer, since nothing in it draws an icon. An empty list is the
+    /// protocol's own way of saying exactly that ("the compositor has no
+    /// preference"), whereas inventing 16/24/32 here would be telling every
+    /// client to rasterize at sizes no consumer asked for.
+    #[allow(dead_code)]
+    pub xdg_toplevel_icon_manager: XdgToplevelIconManager,
+    /// `xdg_activation_v1`: how one client asks that another be focused --
+    /// a launcher handing focus to the app it just started, a notification
+    /// daemon focusing the app its popup came from. Unlike the states above
+    /// this is read again on every token and every activation, to sweep
+    /// expired tokens and to bound how many can exist at once; see
+    /// `activation.rs` for the policy those two bounds implement.
+    pub xdg_activation: XdgActivationState,
     /// `zwlr_gamma_control_manager_v1`: night-light tools. Unlike the three
     /// above this is read again -- every `get_gamma_control`/`set_gamma`
     /// goes through it (see `gamma_control.rs`).
@@ -314,6 +370,7 @@ impl State {
         let ext_workspace = ExtWorkspaceState::new(&dh);
         let session_lock = SessionLock::new(&dh);
         let fractional_scale_manager_state = FractionalScaleManagerState::new::<Self>(&dh);
+        let cursor_shape_manager_state = CursorShapeManagerState::new::<Self>(&dh);
         let viewporter_state = super::output_scale::viewporter(&dh);
         let shm_state = ShmState::new::<Self>(&dh, vec![]);
         let output_manager_state = OutputManagerState::new_with_xdg_output::<Self>(&dh);
@@ -325,6 +382,10 @@ impl State {
             WlrDataControlState::new::<Self, _>(&dh, Some(&primary_selection_state), |_| true);
         let ext_data_control_state =
             ExtDataControlState::new::<Self, _>(&dh, Some(&primary_selection_state), |_| true);
+        let xdg_activation = XdgActivationState::new::<Self>(&dh);
+        let xdg_toplevel_icon_manager = XdgToplevelIconManager::new::<Self>(&dh);
+        let text_input_manager_state = TextInputManagerState::new::<Self>(&dh);
+        let input_method_manager_state = InputMethodManagerState::new::<Self, _>(&dh, |_| true);
         let gamma_control = GammaControlState::new(&dh);
         let idle_notifier = IdleNotifierState::new(&dh, event_loop.handle());
         let idle_inhibit_manager_state = IdleInhibitManagerState::new::<Self>(&dh);
@@ -376,6 +437,7 @@ impl State {
             ext_workspace,
             session_lock,
             fractional_scale_manager_state,
+            cursor_shape_manager_state,
             viewporter_state,
             xdg_decoration_state,
             shm_state,
@@ -385,6 +447,10 @@ impl State {
             wlr_data_control_state,
             ext_data_control_state,
             primary_selection_state,
+            text_input_manager_state,
+            input_method_manager_state,
+            xdg_toplevel_icon_manager,
+            xdg_activation,
             gamma_control,
             idle_notifier,
             idle_inhibitors: idle::Inhibitors::default(),

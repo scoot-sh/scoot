@@ -58,6 +58,25 @@ pub struct WindowSnapshot {
     pub id: u64,
     pub app_id: String,
     pub title: String,
+    /// The freedesktop icon name the window's client set through
+    /// `xdg-toplevel-icon-v1`, if it set one -- what a bar or dock shows
+    /// beside the title, and what an agent matches a window against when the
+    /// `app_id` is a generic one.
+    ///
+    /// `None` means the client set no *name*: it may have set none at all, or
+    /// have supplied raw pixel buffers instead, which this protocol allows
+    /// and flexwm does not expose (see the compositor's `toplevel_icon.rs`).
+    ///
+    /// Defaulted rather than required, like `OutputSnapshot::scale` above and
+    /// `Response::Ok`'s `locked`, and for the same wire reason: adding a
+    /// field does not change the internally-tagged `Response` discriminant an
+    /// older client keys on, and serde ignores an unknown one -- so this
+    /// strictly adds information without breaking a single existing client,
+    /// which is why it does *not* bump `PROTOCOL_VERSION`. `None` from an
+    /// older server is truthful in the only sense that matters: it had no
+    /// icon to report, because it did not implement the protocol.
+    #[serde(default)]
+    pub icon: Option<String>,
     pub output: u64,
     pub rect: Rect,
     pub visible: bool,

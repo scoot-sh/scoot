@@ -21,13 +21,19 @@ actionable.
 
 - [**`ext-idle-notify-v1` + `idle-inhibit-unstable-v1`**](./resolved/ext-idle-notify-resolved.md)
   — RESOLVED 2026-09-15: swayidle-style auto-lock trigger, field-proven live.
+- [**The four protocols `foot` warned about**](./resolved/foot-protocol-warnings-done.md)
+  — RESOLVED 2026-09-15 (issue #40): `wp-cursor-shape-v1` (with ten
+  procedurally-drawn shapes, so naming one gets you that shape),
+  `xdg-activation-v1`, `xdg-toplevel-icon-v1` (name exposed as
+  `WindowSnapshot::icon`), `text-input-v3` + `input-method-v2`. Verified by
+  before/after on `foot`'s own warnings.
 
 ## Open
 
 ### Protocols
-- [`xdg-activation-v1`](./protocols/xdg-activation.md) — clients asking each other to be focused
 - [Foreign-toplevel management](./protocols/foreign-toplevel-management.md) — window enumeration for taskbars/switchers
-- [`cursor-shape-v1`](./protocols/cursor-shape.md) — named cursor shapes without client-side themes
+- [`xdg-toplevel-icon-v1` pixel-buffer icons are not exposed](./protocols/toplevel-icon-buffers.md) — only the icon name reaches IPC
+- [`spawn` hands its child no `XDG_ACTIVATION_TOKEN`](./protocols/activation-token-for-spawned-children.md)
 - [Popup input](./protocols/xdg-popup-input.md) — popups map/draw (initial-configure fix, resolved), but keyboard focus/grabs and layer-parented popups still missing
 - [Layer surface with no buffer still holds its exclusive zone](./protocols/layer-surface-bufferless-exclusive-zone.md)
 - [Unbounded `ext_workspace_manager_v1` binds per client](./protocols/ext-workspace-object-binding-cap.md)
