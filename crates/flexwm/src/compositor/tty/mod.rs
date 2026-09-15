@@ -32,8 +32,8 @@ use smithay::backend::drm::{
     DrmDevice, DrmDeviceFd, DrmDeviceNotifier, DrmEvent, DrmEventMetadata, PlaneConfig, PlaneState,
 };
 use smithay::backend::input::{
-    Axis, ButtonState, InputEvent, KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent,
-    PointerMotionEvent,
+    AbsolutePositionEvent, Axis, ButtonState, InputEvent, KeyboardKeyEvent, PointerAxisEvent,
+    PointerButtonEvent, PointerMotionEvent,
 };
 use smithay::backend::libinput::{LibinputInputBackend, LibinputSessionInterface};
 use smithay::backend::session::libseat::LibSeatSession;
@@ -46,6 +46,7 @@ use smithay::utils::{Buffer as BufferSpace, DeviceFd, Physical, Rectangle, Size,
 use self::buffers::BufferPool;
 use super::State;
 use super::keybindings::Keybindings;
+use super::output_scale::logical_size;
 
 /// The DRM/KMS presenter: session, device, surface, and the dumb-buffer
 /// pool frames get copied into. See the module doc for how this fits next
@@ -721,6 +722,20 @@ fn libinput_event(event: InputEvent<LibinputInputBackend>, _: &mut (), state: &m
         }
         InputEvent::PointerMotion { event } => {
             state.pointer_move_relative(event.delta_x(), event.delta_y());
+        }
+        // Absolute pointing devices -- a USB tablet, or the "Virtual USB
+        // Digitizer" that Apple's Virtualization.framework (vfkit) exposes,
+        // which has ABS_X/ABS_Y and no REL_X/REL_Y at all -- never produce
+        // `PointerMotion`; libinput reports their position through this event
+        // instead. Without this arm the pointer sat at 0,0 forever under
+        // vfkit while clicks and scrolling still arrived, all at the corner.
+        // `position_transformed` maps the device's own coordinate range onto
+        // the output's *logical* size, the same space `pointer_move` and the
+        // relative path's clamp use.
+        InputEvent::PointerMotionAbsolute { event } => {
+            let (width, height) = state.output.as_ref().map(logical_size).unwrap_or((0, 0));
+            let position = event.position_transformed((width, height).into());
+            state.pointer_move(position.x, position.y);
         }
         InputEvent::PointerButton { event } => {
             if let Some(button) = linux_button(event.button_code()) {
