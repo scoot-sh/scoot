@@ -42,8 +42,7 @@ actionable.
 
 ### IPC / computer use
 - [Targeted input injection without moving seat focus](./ipc/targeted-input-injection.md) — the computer-use gap (research)
-- [`flexwm msg outputs` reports only the full rect](./ipc/msg-outputs-usable-rect.md) — bundle with a `PROTOCOL_VERSION` bump
-- [No IPC way to ask whether the session is locked](./ipc/ipc-session-locked-query.md) — same bump
+- [IPC bundle: usable rect, focus-workspace-index, ambient locked](./resolved/protocol-bundle-resolved.md) — RESOLVED 2026-09-15, no bump needed
 - [Screenshot capture is synchronous, no connection cap](./ipc/screenshot-sync-no-rate-limit.md)
 - [A large `msg type` blocks the event loop](./ipc/msg-type-blocks-event-loop.md)
 

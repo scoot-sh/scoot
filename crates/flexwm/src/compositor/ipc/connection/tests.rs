@@ -512,7 +512,7 @@ fn several_connections_each_holding_a_partial_line_are_each_answered_their_own()
             (Request::Version, Response::Version { .. })
                 | (Request::Windows, Response::Windows { .. })
                 | (Request::Outputs, Response::Outputs { .. })
-                | (Request::Type { .. }, Response::Ok)
+                | (Request::Type { .. }, Response::Ok { .. })
         );
         assert!(
             matched,
@@ -859,7 +859,7 @@ fn a_large_but_legal_request_split_across_writes_still_works() {
     // (`Response::Error` carrying a serde message), so accepting an error here
     // would pass against the very bug this is for.
     match client.expect_reply(&mut harness) {
-        Response::Ok => {}
+        Response::Ok { .. } => {}
         other => panic!("the request did not survive being split up: {other:?}"),
     }
 }

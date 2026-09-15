@@ -31,10 +31,11 @@
 //!   stable across multiple sessions"; these are not stable across the next
 //!   window closing.
 //! - **`name` is the 1-based position** ("1", "2", ...), which is what a bar
-//!   displays. There is no IPC action that takes the same number yet --
-//!   `flexwm msg action focus-workspace` only steps `up`/`down` -- see
-//!   `docs/backlog/ipc/msg-outputs-usable-rect.md` on the next
-//!   `flexwm-ipc` version bump.
+//!   displays. The IPC twin is 0-based: `flexwm msg action
+//!   focus-workspace-index N` drives the same core action `activate` does,
+//!   so a bar label `"2"` means `focus-workspace-index 1`, not `2` --
+//!   nothing on either side adjusts, and nothing warns. See
+//!   `docs/backlog/resolved/protocol-bundle-resolved.md`.
 //! - **`coordinates` is that same 1-based position**, as a one-element array
 //!   (`"1"` is `[1]`), which the protocol explicitly allows for compositors
 //!   that simply number their workspaces -- it requires only that coordinates

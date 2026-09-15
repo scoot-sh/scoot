@@ -1141,6 +1141,67 @@ fn a_session_with_no_layer_surfaces_is_unchanged() {
 // The render stack
 // -------------------------------------------------------------------------
 
+/// `msg outputs` reports the bar-reserved usable area, not just the full
+/// output: with no bar they coincide, and a 30px bar narrows `usable`
+/// while `rect` stays whole.
+#[test]
+fn outputs_reports_the_bar_reserved_usable_area() {
+    use flexwm_ipc::{Request, Response};
+
+    let mut fixture = Fixture::new();
+    fixture.run(Step::MapWindow);
+
+    let Response::Outputs { outputs } = fixture.state.handle_request(Request::Outputs) else {
+        panic!("outputs should answer with outputs");
+    };
+    assert_eq!(outputs.len(), 1, "one output in these tests");
+    assert_eq!(
+        outputs[0].rect,
+        flexwm_ipc::Rect {
+            x: 0,
+            y: 0,
+            width: CANVAS,
+            height: CANVAS,
+        },
+        "rect is the whole output"
+    );
+    assert_eq!(
+        outputs[0].usable, outputs[0].rect,
+        "with no bar reserved, usable is the whole output"
+    );
+
+    fixture.run(Step::CreateLayer(LayerSpec::bar(30)));
+    fixture.run(Step::MapLayer {
+        index: 0,
+        color: BAR_BGRA,
+    });
+
+    let Response::Outputs { outputs } = fixture.state.handle_request(Request::Outputs) else {
+        panic!("outputs should answer with outputs");
+    };
+    assert_eq!(
+        outputs[0].rect,
+        flexwm_ipc::Rect {
+            x: 0,
+            y: 0,
+            width: CANVAS,
+            height: CANVAS,
+        },
+        "a bar reserves from usable, never from the output itself"
+    );
+    assert_eq!(
+        outputs[0].usable,
+        flexwm_ipc::Rect {
+            x: 0,
+            y: 30,
+            width: CANVAS,
+            height: CANVAS - 30,
+        },
+        "usable is the output minus the bar's 30px strip"
+    );
+    fixture.disconnect_client();
+}
+
 /// A `top` layer surface covers a window, which is the whole point of the
 /// layer: a bar is not something a maximized window is allowed to hide.
 #[test]

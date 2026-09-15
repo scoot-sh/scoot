@@ -174,7 +174,7 @@ impl State {
                     );
                 }
                 self.act(Action::from(action));
-                Response::Ok
+                self.ok()
             }
             Request::Screenshot { .. } => match self.screenshot() {
                 Ok(screenshot) => Response::Screenshot(screenshot),
@@ -182,21 +182,21 @@ impl State {
             },
             Request::PointerMove { x, y } => {
                 self.pointer_move(x, y);
-                Response::Ok
+                self.ok()
             }
             Request::PointerButton { button, pressed } => {
                 self.pointer_button(button, pressed);
-                Response::Ok
+                self.ok()
             }
             Request::Click { x, y, button } => {
                 self.pointer_move(x, y);
                 self.pointer_button(button, true);
                 self.pointer_button(button, false);
-                Response::Ok
+                self.ok()
             }
             Request::Scroll { dx, dy } => {
                 self.scroll(dx, dy);
-                Response::Ok
+                self.ok()
             }
             // Three of `press()`'s `Ok(Some(VtSwitchOutcome))` cases need
             // something other than a bare `Ok` -- each for a different
@@ -262,11 +262,11 @@ impl State {
                 // `VtSwitchOutcome::Ignored`'s doc) -- keeping this
                 // exhaustive means a future fifth `VtSwitchOutcome` variant
                 // fails to compile here instead of silently becoming `Ok`.
-                Ok(None) | Ok(Some(VtSwitchOutcome::Ignored)) => Response::Ok,
+                Ok(None) | Ok(Some(VtSwitchOutcome::Ignored)) => self.ok(),
                 Err(error) => Response::error(error),
             },
             Request::Type { text } => match self.type_text(&text) {
-                Ok(()) => Response::Ok,
+                Ok(()) => self.ok(),
                 Err(error) => Response::error(error),
             },
             // Connection::step() intercepts and answers this variant itself
@@ -317,6 +317,16 @@ impl State {
             .collect()
     }
 
+    /// Success, carrying the session-lock state the response was built
+    /// under -- see `Response::Ok`'s doc for what `locked` does and does
+    /// not promise. One constructor rather than seven literals, so a new
+    /// `Ok` site cannot forget the flag.
+    fn ok(&self) -> Response {
+        Response::Ok {
+            locked: self.session_lock.is_locked(),
+        }
+    }
+
     fn output_snapshots(&self) -> Vec<OutputSnapshot> {
         let name = self
             .output
@@ -331,6 +341,12 @@ impl State {
                 name: name.clone(),
                 rect: wire(area),
                 scale: self.output_scale,
+                // Unknown output (not in the core's list) reports no
+                // usable area rather than a wrong one: an all-zero
+                // `usable` is the documented "predates the field"
+                // sentinel, and a missing output is the closest thing to
+                // that this server can say.
+                usable: wire(self.world.usable_area(id).unwrap_or_default()),
             })
             .collect()
     }

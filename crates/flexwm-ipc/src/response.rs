@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Rect {
     pub x: i32,
     pub y: i32,
@@ -30,6 +30,21 @@ pub struct OutputSnapshot {
     /// reserves a bump for a change that *breaks* existing clients.
     #[serde(default = "default_scale")]
     pub scale: f64,
+    /// The part of `rect` ordinary windows are arranged within: the full
+    /// output minus whatever a bar reserved at its edges (layer-shell
+    /// exclusive zones). An agent mapping screenshot pixels to "where can a
+    /// window be" wants this, not `rect`.
+    ///
+    /// Defaulted like `scale`, for the same wire reason -- but unlike
+    /// `scale`, the default is a sentinel, not a truthful value: all
+    /// zeros, which no output the platform produces in practice can have
+    /// (a zero-sized output has no pixels to arrange into). An older
+    /// server *did* reserve bars, so "same as `rect`" would be a lie; the
+    /// sentinel tells a new client the server predates the field and it
+    /// should fall back to `rect`, exactly what it did before the field
+    /// existed.
+    #[serde(default)]
+    pub usable: Rect,
 }
 
 /// The `scale` an [`OutputSnapshot`] carries when the server predates the
@@ -61,7 +76,22 @@ pub struct Screenshot {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Response {
-    Ok,
+    /// Success. `locked` is the session-lock state when the response was
+    /// built -- an agent typing a password over IPC learns the unlock
+    /// landed from the very next reply, without polling anything else.
+    ///
+    /// Defaulted like `OutputSnapshot::scale`, for the same wire reason --
+    /// but read it asymmetrically: `true` is always truthful (only a
+    /// server new enough to know the state sends it), while `false` means
+    /// "unlocked *or* the server predates the field". There is no version
+    /// that distinguishes those, by design: this field strictly adds
+    /// information (a `true` is new knowledge) without breaking a single
+    /// existing client, which is what keeps it off the
+    /// `PROTOCOL_VERSION`-bump list.
+    Ok {
+        #[serde(default)]
+        locked: bool,
+    },
     Version {
         version: String,
         protocol: u32,

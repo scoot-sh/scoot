@@ -1692,6 +1692,34 @@ fn an_action_keybinding_does_not_fire_while_locked() {
     );
 }
 
+/// Every IPC success carries the session-lock state it was built under,
+/// so an agent learns an unlock landed from the very next reply: `true`
+/// while locked (injected input is still served, reaching only the lock
+/// screen), `false` once unlocked.
+#[test]
+fn ok_replies_carry_the_locked_state() {
+    let mut fixture = Fixture::new();
+    fixture.run(Step::MapWindow);
+    fixture.run(Step::Lock);
+
+    let response = fixture
+        .state
+        .handle_request(Request::Type { text: "x".into() });
+    assert!(
+        matches!(response, Response::Ok { locked: true }),
+        "input served while locked should say so, got {response:?}"
+    );
+
+    fixture.run(Step::Unlock { lock: 0 });
+    let response = fixture
+        .state
+        .handle_request(Request::Type { text: "x".into() });
+    assert!(
+        matches!(response, Response::Ok { locked: false }),
+        "input served unlocked should say so, got {response:?}"
+    );
+}
+
 /// An IPC `action` bypasses input entirely, so it is refused outright while
 /// locked -- and works again afterwards.
 #[test]
@@ -1719,7 +1747,7 @@ fn ipc_actions_are_refused_while_locked() {
         .state
         .handle_request(Request::Action(flexwm_ipc::Action::CloseFocused));
     assert!(
-        matches!(response, Response::Ok),
+        matches!(response, Response::Ok { locked: false }),
         "the same action should work once unlocked, got {response:?}"
     );
     fixture.settle();
