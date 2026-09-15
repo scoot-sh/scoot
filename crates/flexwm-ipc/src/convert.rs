@@ -31,6 +31,7 @@ impl From<Action> for flexwm_core::Action {
             Action::ConsumeOrExpel { direction } => Self::ConsumeOrExpel(direction.into()),
             Action::CycleColumnWidth => Self::CycleColumnWidth,
             Action::FocusWorkspace { direction } => Self::FocusWorkspace(direction.into()),
+            Action::FocusWorkspaceIndex { index } => Self::FocusWorkspaceIndex(index),
             Action::MoveWindowToWorkspace { direction } => {
                 Self::MoveWindowToWorkspace(direction.into())
             }
@@ -56,6 +57,10 @@ mod tests {
         assert_eq!(
             flexwm_core::Action::from(Action::FocusWindowId { id: 7 }),
             flexwm_core::Action::FocusWindowId(flexwm_core::WindowId(7))
+        );
+        assert_eq!(
+            flexwm_core::Action::from(Action::FocusWorkspaceIndex { index: 2 }),
+            flexwm_core::Action::FocusWorkspaceIndex(2)
         );
     }
 }

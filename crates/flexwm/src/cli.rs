@@ -33,7 +33,7 @@ ACTIONS:
     focus-column|move-column|consume-or-expel   left|right
     focus-window|move-window                    up|down
     focus-workspace|move-window-to-workspace    up|down
-    focus-window-id ID | cycle-column-width | close | spawn COMMAND... | quit
+    focus-window-id ID | focus-workspace-index N | cycle-column-width | close | spawn COMMAND... | quit
 ";
 
 #[derive(Debug, PartialEq)]
@@ -256,6 +256,9 @@ pub(crate) fn action(args: &mut impl Iterator<Item = String>) -> Result<Action, 
         },
         "focus-window-id" => Action::FocusWindowId {
             id: number("a window id", args.next())?,
+        },
+        "focus-workspace-index" => Action::FocusWorkspaceIndex {
+            index: number("a workspace index", args.next())?,
         },
         "cycle-column-width" => Action::CycleColumnWidth,
         "close" => Action::CloseFocused,
@@ -484,6 +487,20 @@ mod tests {
                 out: None,
             })
         );
+    }
+
+    #[test]
+    fn focus_workspace_index_takes_a_number() {
+        assert_eq!(
+            parse_args(&["msg", "action", "focus-workspace-index", "2"]),
+            Ok(Command::Msg {
+                request: Request::Action(Action::FocusWorkspaceIndex { index: 2 }),
+                out: None,
+            })
+        );
+        // ...which is a number, not a direction: sharing the
+        // `focus-workspace` name would make `up`/`down` and `2` ambiguous.
+        assert!(parse_args(&["msg", "action", "focus-workspace-index", "down"]).is_err());
     }
 
     #[test]

@@ -167,6 +167,12 @@ fn an_output_snapshot_carries_its_scale_on_the_wire() {
             height: 1200,
         },
         scale: 1.5,
+        usable: Rect {
+            x: 0,
+            y: 0,
+            width: 1920,
+            height: 1200,
+        },
     };
     assert_eq!(
         json_of(&snapshot),
@@ -175,10 +181,81 @@ fn an_output_snapshot_carries_its_scale_on_the_wire() {
             "name": "headless",
             "rect": { "x": 0, "y": 0, "width": 1920, "height": 1200 },
             "scale": 1.5,
+            "usable": { "x": 0, "y": 0, "width": 1920, "height": 1200 },
         })
     );
     assert_eq!(
         decode::<OutputSnapshot>(&encode(&snapshot).unwrap()).unwrap(),
         snapshot
     );
+}
+
+#[test]
+fn an_output_snapshot_carries_its_usable_rect_on_the_wire() {
+    let snapshot = OutputSnapshot {
+        id: 1,
+        name: "headless".into(),
+        rect: Rect {
+            x: 0,
+            y: 0,
+            width: 1920,
+            height: 1200,
+        },
+        scale: 1.0,
+        usable: Rect {
+            x: 0,
+            y: 30,
+            width: 1920,
+            height: 1170,
+        },
+    };
+    assert_eq!(
+        json_of(&snapshot),
+        json!({
+            "id": 1,
+            "name": "headless",
+            "rect": { "x": 0, "y": 0, "width": 1920, "height": 1200 },
+            "scale": 1.0,
+            "usable": { "x": 0, "y": 30, "width": 1920, "height": 1170 },
+        })
+    );
+}
+
+/// An older server's reply -- no `usable`, no `scale` -- still decodes:
+/// `usable` falls back to the all-zero sentinel (never a real area, so a
+/// client can tell "predates the field" apart from a value), exactly the
+/// contract that keeps this off the `PROTOCOL_VERSION`-bump list.
+#[test]
+fn an_output_snapshot_from_before_usable_still_decodes() {
+    let snapshot: OutputSnapshot =
+        decode(r#"{"id":1,"name":"headless","rect":{"x":0,"y":0,"width":1920,"height":1200}}"#)
+            .unwrap();
+    assert_eq!(snapshot.scale, 1.0);
+    assert_eq!(
+        snapshot.usable,
+        Rect {
+            x: 0,
+            y: 0,
+            width: 0,
+            height: 0
+        }
+    );
+}
+
+/// Same contract for the lock flag: `{"type":"ok"}` from an older server
+/// decodes with `locked: false`, and a new server's reply still decodes
+/// for an older client (serde ignores the unknown field -- asserted here
+/// by decoding with a struct that lacks it, the way an old client would).
+#[test]
+fn an_ok_from_before_locked_still_decodes() {
+    let response: Response = decode(r#"{"type":"ok"}"#).unwrap();
+    assert_eq!(response, Response::Ok { locked: false });
+
+    #[derive(serde::Deserialize, PartialEq, Debug)]
+    #[serde(tag = "type", rename_all = "snake_case")]
+    enum OldResponse {
+        Ok,
+    }
+    let old: OldResponse = decode(r#"{"type":"ok","locked":true}"#).unwrap();
+    assert_eq!(old, OldResponse::Ok);
 }

@@ -48,11 +48,12 @@ read of it, not a commitment:
    RESOLVED 2026-09-15: the automatic trigger session-lock had no other
    way to get. A `swayidle`-style daemon can now idle, resume and
    re-idle the seat (field-proven live); inhibitors hold it awake.
-3. **The `PROTOCOL_VERSION` bundle** — `OutputSnapshot.usable`
-   ([#1](docs/backlog/ipc/msg-outputs-usable-rect.md)), a focus-workspace-N
-   action, and a locked-session query
-   ([#2](docs/backlog/ipc/ipc-session-locked-query.md)) all wait on the same
-   wire bump; land them together.
+3. **The IPC bundle** ([resolved](docs/backlog/resolved/protocol-bundle-resolved.md),
+   2026-09-15) — `OutputSnapshot.usable`, a focus-workspace-N action
+   (`focus-workspace-index N`), and an ambient `locked` flag on every
+   `Ok` reply. Landed together with **no** `PROTOCOL_VERSION` bump: all
+   three are defaulted/additive, and the resolution record has the
+   analysis for why the assumed bump was never needed.
 4. Small, unblocked fixes: [`msg key` modifier
    resolution](docs/backlog/input/msg-key-modifier-resolution.md),
    [`[binds]` capital

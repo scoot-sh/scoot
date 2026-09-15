@@ -321,10 +321,18 @@ What doesn't, yet:
   parented to a *layer* surface) are still untracked. Also in the
   backlog (`xdg-popup-input.md`).
 - **`flexwm msg outputs`** reports each output's *full* rectangle (in logical
-  pixels, along with the output's `scale`). The reserved area a bar takes
-  isn't exposed over IPC yet; an agent asking "how big is the screen" gets the
-  screen. Screenshots are captured at physical resolution, so multiply a
-  logical rectangle by `scale` to convert it to screenshot pixels.
+  pixels, along with the output's `scale`) plus its *usable* rectangle — the
+  full output minus whatever a bar reserved at its edges, which is where
+  windows actually go. An agent asking "how big is the screen" wants `rect`;
+  asking "where can a window be" wants `usable`. (An all-zero `usable` means
+  the server predates the field — fall back to `rect`, which is what every
+  client did before it existed.) Screenshots are captured at
+  physical resolution, so multiply a logical rectangle by `scale` to convert
+  it to screenshot pixels. Every success reply (`ok`) also carries the
+  session-lock state it was built under (`locked`), so an agent typing a
+  password over IPC learns the unlock landed from the very next reply —
+  `true` is always truthful; `false` means unlocked or a server predating
+  the field.
 
 Two things for agents to know about layer surfaces:
 
@@ -392,10 +400,11 @@ Worth knowing before you write against it:
   naming a workspace that vanished between the client reading the list and the
   `commit` arriving is dropped, and one for the workspace that is already
   active does nothing.
-- **There is no IPC equivalent yet.** `flexwm msg action focus-workspace
-  up|down` still only steps one workspace at a time; switching to a workspace
-  *by number* is reachable over this protocol only. See
-  `docs/backlog/ipc/msg-outputs-usable-rect.md`.
+- **Switching to a workspace *by number* works from both sides now.**
+  `flexwm msg action focus-workspace-index N` (0-based, out of range does
+  nothing) drives the same core action `ext-workspace-v1`'s `activate`
+  already used, so an agent jumps straight to a workspace instead of
+  stepping one at a time.
 - **Multiple outputs will change the shape of this** — a group per output is
   what the protocol is built for — but flexwm has exactly one output today, so
   there is exactly one group.
@@ -795,7 +804,7 @@ file's `[binds]` values:
 focus-column|move-column|consume-or-expel   left|right
 focus-window|move-window                    up|down
 focus-workspace|move-window-to-workspace    up|down
-focus-window-id ID | cycle-column-width | close | spawn COMMAND... | quit
+focus-window-id ID | focus-workspace-index N | cycle-column-width | close | spawn COMMAND... | quit
 ```
 
 e.g. `"focus-column left"`, `"close"`, or `"spawn foot -e htop"` (split on
