@@ -99,7 +99,7 @@ impl CompositorHandler for State {
     /// Smithay calls this for every `wl_surface` that goes away, whether the
     /// client destroyed it explicitly or simply quit.
     ///
-    /// Two things this compositor keeps a `WlSurface` in outside
+    /// Three things this compositor keeps a `WlSurface` in outside
     /// `self.space`/`self.windows` (both already driven by their own
     /// xdg-shell destruction paths) need clearing here:
     ///
@@ -109,6 +109,11 @@ impl CompositorHandler for State {
     ///   disconnecting) stops it being drawn and stops it holding the
     ///   keyboard on the very next frame rather than at the render loop's
     ///   own cleanup pass -- see `session_lock.rs`.
+    /// - an idle inhibitor, so a client that disconnects (or destroys the
+    ///   surface) without destroying its inhibitor stops holding the
+    ///   session awake -- see `idle.rs`. A dead client can never destroy
+    ///   anything explicitly, so without this the recompute would keep
+    ///   seeing its surface forever.
     fn destroyed(&mut self, surface: &WlSurface) {
         if self.cursor.forget_surface(surface) && self.tty.is_some() {
             // The cursor's shape just changed to the fallback; only `--tty`
@@ -124,6 +129,7 @@ impl CompositorHandler for State {
             // `enter`, not the hit test, and a grab follows neither.
             self.lock_transition();
         }
+        self.forget_idle_inhibitor(surface);
     }
 }
 

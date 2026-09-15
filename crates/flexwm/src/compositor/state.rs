@@ -21,6 +21,8 @@ use smithay::reexports::wayland_server::{BindError, Display, DisplayHandle};
 use smithay::utils::{Logical, Point};
 use smithay::wayland::compositor::{CompositorClientState, CompositorState};
 use smithay::wayland::fractional_scale::FractionalScaleManagerState;
+use smithay::wayland::idle_inhibit::IdleInhibitManagerState;
+use smithay::wayland::idle_notify::IdleNotifierState;
 use smithay::wayland::output::OutputManagerState;
 use smithay::wayland::selection::data_device::DataDeviceState;
 use smithay::wayland::selection::ext_data_control::DataControlState as ExtDataControlState;
@@ -38,6 +40,7 @@ use super::decorations::{Appearance, Decorations};
 use super::ext_workspace::ExtWorkspaceState;
 use super::gamma_control::GammaControlState;
 use super::headless::Backend;
+use super::idle;
 use super::ipc::PendingIdle;
 use super::keybindings::Keybindings;
 use super::layer_shell;
@@ -243,6 +246,22 @@ pub struct State {
     /// above this is read again -- every `get_gamma_control`/`set_gamma`
     /// goes through it (see `gamma_control.rs`).
     pub gamma_control: GammaControlState,
+    /// `ext_idle_notifier_v1` (version 2): what a `swayidle`-style daemon
+    /// binds to learn the seat has been quiet N milliseconds. Read on
+    /// every input event (`announce_activity`, see `idle.rs`) and written
+    /// by the inhibit bookkeeping in the same module.
+    pub idle_notifier: IdleNotifierState<State>,
+    /// The surfaces holding `idle-inhibit-unstable-v1` inhibition. The
+    /// aggregate, not the protocol objects -- Smithay owns those; this is
+    /// what `refresh_idle_inhibit` derives the notifier flag from (see
+    /// `idle.rs`).
+    pub idle_inhibitors: idle::Inhibitors,
+    /// `zwp_idle_inhibit_manager_v1` (version 1): lets a video player or
+    /// presentation app hold the session awake. Held only to keep the
+    /// global alive -- `IdleInhibitHandler` (see `idle.rs`) routes through
+    /// `idle_inhibitors` above.
+    #[allow(dead_code)]
+    pub idle_inhibit_manager_state: IdleInhibitManagerState,
     pub seat: Seat<State>,
 
     pub keybindings: Keybindings,
@@ -307,6 +326,8 @@ impl State {
         let ext_data_control_state =
             ExtDataControlState::new::<Self, _>(&dh, Some(&primary_selection_state), |_| true);
         let gamma_control = GammaControlState::new(&dh);
+        let idle_notifier = IdleNotifierState::new(&dh, event_loop.handle());
+        let idle_inhibit_manager_state = IdleInhibitManagerState::new::<Self>(&dh);
 
         let mut seat_state = SeatState::new();
         let mut seat = seat_state.new_wl_seat(&dh, "flexwm");
@@ -365,6 +386,9 @@ impl State {
             ext_data_control_state,
             primary_selection_state,
             gamma_control,
+            idle_notifier,
+            idle_inhibitors: idle::Inhibitors::default(),
+            idle_inhibit_manager_state,
             seat,
             keybindings,
             suppressed_keys: HashSet::new(),

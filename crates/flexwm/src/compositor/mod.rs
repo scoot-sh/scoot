@@ -12,6 +12,7 @@ mod ext_workspace;
 mod gamma_control;
 mod handlers;
 mod headless;
+mod idle;
 mod input;
 mod ipc;
 mod keybindings;

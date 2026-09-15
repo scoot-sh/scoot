@@ -177,8 +177,9 @@ anything.
 - Zero idle-protocol wire traffic. Noctalia logs the same sentence
   quickshell emits everywhere: `Cannot create idle monitor as
   ext-idle-notify-v1 is not supported by the current compositor.`
-  (`IdleService`/`IdleInhibitor` start, then never fire.) Same entry:
-  `docs/backlog/protocols/ext-idle-notify.md`.
+  (`IdleService`/`IdleInhibitor` start, then never fire.) Resolved
+  2026-09-15: `docs/backlog/resolved/ext-idle-notify-resolved.md` --
+  that sentence should now be gone on a current build.
 
 ### 4. No `wlr-output-management-unstable-v1` — reproduces
 

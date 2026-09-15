@@ -98,9 +98,10 @@ list behind that.
   `IdleService.qml` arms five Quickshell `IdleMonitor`s, which need
   `ext-idle-notify-v1` or `org_kde_kwin_idle` — neither is advertised, so
   they never fire. Manual lock (gap: none) works; *automatic* lock is dead.
-- Rough size: M. Already filed as
-  `docs/backlog/protocols/ext-idle-notify.md` (roadmap "what's next" #2);
-  this probe confirms the first real client that needs it.
+- Rough size: M. Resolved 2026-09-15:
+  `docs/backlog/resolved/ext-idle-notify-resolved.md` (field-proven
+  with real swayidle: idle → resume → re-idle). DMS's `IdleService`
+  monitors should now fire; auto-lock is a daemon config away.
 
 ### 4. No `wlr-output-management-unstable-v1`
 
