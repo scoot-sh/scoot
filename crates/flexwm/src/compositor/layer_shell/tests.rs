@@ -71,6 +71,7 @@ const BAR_BGRA: [u8; 4] = [0xE0, 0x20, 0x20, 0xFF];
 const WALLPAPER_BGRA: [u8; 4] = [0x20, 0x20, 0xE0, 0xFF];
 const RING_BGRA: [u8; 4] = [0xFF, 0x00, 0xFF, 0xFF];
 const BACKGROUND_BGRA: [u8; 4] = [0x56, 0x34, 0x12, 0xFF];
+const POPUP_BGRA: [u8; 4] = [0xE0, 0xE0, 0x20, 0xFF];
 
 /// A palette nothing else in this compositor defaults to, so a pixel
 /// assertion can only pass because the thing it names was actually drawn.
@@ -220,18 +221,29 @@ enum Step {
     },
     /// Report what the client's own `wl_keyboard` has seen so far.
     ReportKeyboard,
-    /// Create an `xdg_popup` on the first mapped toplevel and report whether
-    /// the compositor ever configures it. See
-    /// [`no_xdg_popup_is_configured_yet`].
-    ProbePopup,
+    /// Create an `xdg_popup` on the first mapped toplevel and drive it
+    /// through configure, ack, attach and a frame request, reporting
+    /// whether the compositor ever configured it. See
+    /// [`an_xdg_popup_configures_maps_draws_and_tears_down`].
+    MapPopup { color: [u8; 4] },
+    /// Destroy the popup [`Step::MapPopup`] made: `xdg_popup.destroy` +
+    /// `xdg_surface.destroy` + `wl_surface.destroy`.
+    DestroyPopup,
+    /// Report how many `xdg_surface.configure` events the mapped popup has
+    /// received in total -- the compositor must send exactly one (later
+    /// commits stay quiet, as a non-reactive positioner requires).
+    ReportPopupConfigures,
 }
 
 /// What the client reports back once a step is done.
 enum Ack {
     Done,
-    /// [`Step::ProbePopup`]'s answer: did an `xdg_surface.configure` arrive
+    /// [`Step::MapPopup`]'s answer: did an `xdg_surface.configure` arrive
     /// for the popup?
     PopupConfigured(bool),
+    /// [`Step::ReportPopupConfigures`]'s answer: total configures for the
+    /// mapped popup.
+    PopupConfigures(u32),
     /// [`Step::ReportKeyboard`]'s answer.
     Keyboard(KeyboardReport),
     /// [`Step::ReportFrames`]'s answer: per requested callback, how many
@@ -306,6 +318,11 @@ struct TestClient {
     /// configure before attaching buffer", killing the client at random.
     /// (Found by this harness failing intermittently, not by inspection.)
     window_serials: Vec<Option<u32>>,
+    /// How many `xdg_surface.configure` events each toplevel or popup has
+    /// received, by creation order -- so a test can tell "configured once"
+    /// apart from "re-configured on every commit", which the protocol
+    /// forbids for a non-reactive positioner.
+    window_configures: Vec<u32>,
     /// How many `done` events each frame callback requested by
     /// [`Step::RequestLayerFrame`] has received, by request order.
     frame_dones: Vec<u32>,
@@ -419,10 +436,13 @@ impl Dispatch<xdg_surface::XdgSurface, SurfaceIndex> for TestClient {
         _: &Connection,
         _: &QueueHandle<Self>,
     ) {
-        if let xdg_surface::Event::Configure { serial } = event
-            && let Some(slot) = client.window_serials.get_mut(index.0)
-        {
-            *slot = Some(serial);
+        if let xdg_surface::Event::Configure { serial } = event {
+            if let Some(slot) = client.window_serials.get_mut(index.0) {
+                *slot = Some(serial);
+            }
+            if let Some(seen) = client.window_configures.get_mut(index.0) {
+                *seen = seen.saturating_add(1);
+            }
         }
     }
 }
@@ -582,6 +602,16 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
     // ...and the `wl_surface`s under them, which is what a
     // `wl_keyboard.enter` names.
     let mut windows: Vec<wl_surface::WlSurface> = Vec::new();
+    // Popups [`Step::MapPopup`] left mapped: surface, `xdg_surface`,
+    // `xdg_popup` and serial-slot index, so [`Step::DestroyPopup`] can tear
+    // them down in order and [`Step::ReportPopupConfigures`] can count
+    // their configures.
+    let mut popups: Vec<(
+        wl_surface::WlSurface,
+        xdg_surface::XdgSurface,
+        xdg_popup::XdgPopup,
+        usize,
+    )> = Vec::new();
     // Requested frame callbacks, kept alive so a `done` that arrives late
     // lands on a live proxy and is counted rather than killing the
     // connection outright.
@@ -595,6 +625,7 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 let surface = compositor.create_surface(&qh, ());
                 let index = client.window_serials.len();
                 client.window_serials.push(None);
+                client.window_configures.push(0);
                 let xdg = wm_base.get_xdg_surface(&surface, &qh, SurfaceIndex(index));
                 let _toplevel = xdg.get_toplevel(&qh, ());
                 surface.commit();
@@ -736,11 +767,12 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                     leaves: client.leaves,
                 });
             }
-            Step::ProbePopup => {
+            Step::MapPopup { color } => {
                 let parent = toplevels.first().ok_or("no toplevel to hang a popup on")?;
                 let surface = compositor.create_surface(&qh, ());
                 let index = client.window_serials.len();
                 client.window_serials.push(None);
+                client.window_configures.push(0);
                 let xdg = wm_base.get_xdg_surface(&surface, &qh, SurfaceIndex(index));
                 let positioner = wm_base.create_positioner(&qh, ());
                 // Both are required before `get_popup`, or the compositor
@@ -759,11 +791,44 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                         break;
                     }
                 }
-                outcome = Ack::PopupConfigured(client.window_serials[index].is_some());
+                let configured = client.window_serials[index].is_some();
+                if configured {
+                    // The same attach-after-ack sequence `MapWindow` runs:
+                    // only a mapped popup proves the configure was usable,
+                    // not just sent.
+                    let serial = client.window_serials[index].ok_or("a popup serial")?;
+                    xdg.ack_configure(serial);
+                    let buffer = solid_buffer(&shm, &qh, 50, 50, *color);
+                    surface.attach(Some(&buffer), 0, 0);
+                    surface.damage(0, 0, 50, 50);
+                    // A frame callback before the attach commit, the way
+                    // [`Step::RequestLayerFrame`] does it -- kept alive in
+                    // `frames` for the same reason.
+                    let tag = FrameTag(client.frame_dones.len());
+                    client.frame_dones.push(0);
+                    let callback = surface.frame(&qh, tag);
+                    surface.commit();
+                    frames.push(callback);
+                    popups.push((surface, xdg, popup, index));
+                } else {
+                    popup.destroy();
+                    xdg.destroy();
+                    surface.destroy();
+                }
+                positioner.destroy();
+                outcome = Ack::PopupConfigured(configured);
+            }
+            Step::DestroyPopup => {
+                let (surface, xdg, popup, _) = popups.pop().ok_or("no mapped popup to destroy")?;
                 popup.destroy();
                 xdg.destroy();
                 surface.destroy();
-                positioner.destroy();
+            }
+            Step::ReportPopupConfigures => {
+                let (_, _, _, index) = popups.last().ok_or("no mapped popup to report")?;
+                outcome = Ack::PopupConfigures(
+                    client.window_configures.get(*index).copied().unwrap_or(0),
+                );
             }
         }
         queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
@@ -971,6 +1036,14 @@ impl Fixture {
         dones
     }
 
+    /// Total configures the mapped popup has received.
+    fn popup_configures(&mut self) -> u32 {
+        let Ack::PopupConfigures(count) = self.run(Step::ReportPopupConfigures) else {
+            panic!("the popup-configure probe should report what the client saw");
+        };
+        count
+    }
+
     /// A left click at a point, press and release, the way a user makes one.
     fn click(&mut self, x: f64, y: f64) {
         self.state.pointer_move(x, y);
@@ -1019,6 +1092,13 @@ impl Drop for Fixture {
 fn pixel(pixels: &[u8], x: i32, y: i32) -> [u8; 4] {
     let index = ((y * CANVAS + x) * 4) as usize;
     pixels[index..index + 4].try_into().expect("four bytes")
+}
+
+/// Whether any pixel in the framebuffer is `color` -- position-independent,
+/// for surfaces whose exact placement the test does not pin down (a popup
+/// lands where the positioner puts it; what matters is that it drew).
+fn contains_color(pixels: &[u8], color: [u8; 4]) -> bool {
+    pixels.chunks_exact(4).any(|pixel| pixel == color)
 }
 
 fn assert_pixel(pixels: &[u8], x: i32, y: i32, expected: [u8; 4], what: &str) {
@@ -2355,34 +2435,68 @@ fn resizing_the_output_re_arranges_bars_and_the_zone() {
 // Known gaps, pinned so the fix has a failing test to turn green
 // -------------------------------------------------------------------------
 
-/// Pins a *pre-existing* bug this feature did not introduce and deliberately
-/// did not fix: nothing in the compositor ever sends an `xdg_popup` its
-/// initial `xdg_surface.configure`, so no popup may legally attach a buffer
-/// and none ever maps -- not a layer surface's tooltip, and not an ordinary
-/// window's menu either.
+/// An `xdg_popup` gets its initial configure, maps, draws and tears down
+/// without taking the compositor with it.
 ///
-/// It lives with the layer-shell tests because it is the reason this PR
-/// tracks no popups for layer surfaces (`LayerSurface::surface_under` is
-/// already asked for `WindowSurfaceType::ALL`, so the input side is ready;
-/// the mapping side is what is missing). Deleting this test is part of
-/// fixing it -- see
-/// `docs/backlog/protocols/xdg-popup-never-configured.md` -- and inverting the
-/// assertion is how the fix proves itself.
+/// This is the fix for `docs/backlog/protocols/xdg-popup-never-configured.md`
+/// proving itself: it replaces the pinned-gap test that asserted no popup
+/// is ever configured (deleted with that entry), and inverts its
+/// assertion -- and then goes further,
+/// because a configure the client cannot use is no fix. The popup acks,
+/// attaches a buffer and maps; its pixels reach the framebuffer (which is
+/// what "no popup maps at all" denied); its frame callback completes
+/// (`Window::send_frame` covers popup surfaces, and this is the test that
+/// would catch it if that ever stopped); exactly one configure arrived
+/// (later commits stay quiet, as a non-reactive positioner requires); and
+/// destroying the popup leaves the compositor serving.
+///
+/// What this deliberately does *not* cover is popup input: pointer
+/// hit-testing stops at the window tree, keyboard focus never moves onto
+/// the popup, and `grab` is still a no-op -- menus show but cannot be
+/// clicked yet. Follow-ups, not this fix.
 #[test]
-fn no_xdg_popup_is_configured_yet() {
+fn an_xdg_popup_configures_maps_draws_and_tears_down() {
     let mut fixture = Fixture::new();
     fixture.run(Step::MapWindow);
 
-    let Ack::PopupConfigured(configured) = fixture.run(Step::ProbePopup) else {
-        panic!("the popup probe should report whether a configure arrived");
+    let before = fixture.render();
+    assert!(
+        !contains_color(&before, POPUP_BGRA),
+        "the popup color should be absent before any popup exists"
+    );
+
+    let Ack::PopupConfigured(configured) = fixture.run(Step::MapPopup { color: POPUP_BGRA }) else {
+        panic!("the popup step should report whether a configure arrived");
     };
     assert!(
-        !configured,
-        "a popup was configured -- if that is the popup fix landing, delete \
-         this test and its backlog entry"
+        configured,
+        "the popup never got its initial configure -- the fix regressed"
     );
-    // ...and the compositor survived being asked, which is the part that
-    // would otherwise be a crash rather than a missing feature.
+
+    let pixels = fixture.render();
+    assert!(
+        contains_color(&pixels, POPUP_BGRA),
+        "the mapped popup's pixels should reach the framebuffer"
+    );
+    assert_eq!(
+        fixture.frames(),
+        vec![1],
+        "one frame should complete the popup's requested callback"
+    );
+    assert_eq!(
+        fixture.popup_configures(),
+        1,
+        "the popup should be configured exactly once -- later commits stay quiet"
+    );
+
+    fixture.run(Step::DestroyPopup);
+    // ...and the compositor survived the whole lifecycle, still serving.
     assert_eq!(fixture.usable(), WHOLE);
-    assert_eq!(fixture.render().len(), (CANVAS * CANVAS * 4) as usize);
+    let after = fixture.render();
+    assert_eq!(after.len(), (CANVAS * CANVAS * 4) as usize);
+    assert!(
+        !contains_color(&after, POPUP_BGRA),
+        "the destroyed popup's pixels should be gone"
+    );
+    fixture.disconnect_client();
 }

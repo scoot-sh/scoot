@@ -69,8 +69,13 @@ shells render fully; Noctalia is the better target (generic
 `ext-workspace-v1` backend, richer IPC). Remaining gaps, in the
 probes' recommended order:
 
-1. [`xdg_popup`](docs/backlog/protocols/xdg-popup-never-configured.md)
-   — menus/tooltips (no popup maps at all today).
+1. [Popup input](docs/backlog/protocols/xdg-popup-input.md)
+   — popups map and draw since the initial-configure fix (resolved:
+   [`xdg-popup-initial-configure`](docs/backlog/resolved/xdg-popup-initial-configure-resolved.md)),
+   and pointer clicks already land on them via the window hit-test, but
+   keyboard focus never moves onto one, grabs are a no-op (so nothing
+   dismisses a menu either), and layer-surface-parented popups (a bar's
+   own menus/tooltips) are still untracked.
 2. Item 2 above (idle) — auto-lock, pairing with the proven session
    lock; first real clients now confirmed.
 3. [`foreign-toplevel`](docs/backlog/protocols/foreign-toplevel-management.md)
@@ -80,8 +85,10 @@ probes' recommended order:
 5. [`screencopy / image-capture`](docs/backlog/protocols/screencopy-capture.md)
    — thumbnails/overview previews (filed 2026-09-14; IPC screenshots
    stay regardless).
-6. DMS unlock-path re-probe — inferred fixed by PRs #34+#36, proven
-   only for Noctalia; ~10 minutes in the dev VM.
+6. DMS unlock-path re-probe — done 2026-09-14 (see the re-probe note
+   in the DMS gaps entry): lock → auth → unlock teardown survives on
+   current `main`, and so does a spotlight open/Escape-dismiss cycle.
+   Both shells' destroy kills are now proven fixed, not inferred.
 
 Small follow-ups already filed alongside:
 [`gamma-control`](docs/backlog/protocols/gamma-control-followups.md),

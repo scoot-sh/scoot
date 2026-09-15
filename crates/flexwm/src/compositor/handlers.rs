@@ -12,8 +12,8 @@ use smithay::reexports::wayland_server::{Client, Resource, protocol::wl_buffer};
 use smithay::utils::Serial;
 use smithay::wayland::buffer::BufferHandler;
 use smithay::wayland::compositor::{
-    CompositorClientState, CompositorHandler, CompositorState, get_parent, is_sync_subsurface,
-    with_states,
+    CompositorClientState, CompositorHandler, CompositorState, get_parent, get_role,
+    is_sync_subsurface, with_states,
 };
 use smithay::wayland::output::OutputHandler;
 use smithay::wayland::pointer_constraints::PointerConstraintsHandler;
@@ -33,7 +33,7 @@ use smithay::wayland::selection::wlr_data_control::{
 use smithay::reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode;
 use smithay::wayland::shell::xdg::decoration::XdgDecorationHandler;
 use smithay::wayland::shell::xdg::{
-    PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
+    PopupSurface, PositionerState, ToplevelSurface, XDG_POPUP_ROLE, XdgShellHandler, XdgShellState,
     XdgToplevelSurfaceData,
 };
 use smithay::wayland::shm::{ShmHandler, ShmState};
@@ -93,6 +93,7 @@ impl CompositorHandler for State {
         }
 
         self.popups.commit(surface);
+        send_popup_initial_configure(self, surface);
     }
 
     /// Smithay calls this for every `wl_surface` that goes away, whether the
@@ -123,6 +124,40 @@ impl CompositorHandler for State {
             // `enter`, not the hit test, and a grab follows neither.
             self.lock_transition();
         }
+    }
+}
+
+/// An `xdg_popup` needs one configure before it may attach a buffer, the
+/// same shape as [`send_initial_configure`] for toplevels: nothing ever
+/// sends it (the pinned rev's `PopupManager::commit` only moves the popup
+/// from unmapped to mapped), so the popup surface's first commit earns it
+/// here. Once mapped, the popup needs nothing else from this file to
+/// appear: `Space`'s `Window` element draws each window's popups itself
+/// (`popups_for_surface`), and `Window::send_frame` completes their frame
+/// callbacks the same way.
+///
+/// Guarded twice: the role check keeps ordinary commits from paying for
+/// the popup-tree lookup, and `is_initial_configure_sent` keeps later
+/// commits quiet -- a second configure would be a protocol error for a
+/// non-reactive positioner (`AlreadyConfigured`/`NotReactive`), not a
+/// harmless repeat. An initial configure cannot fail either way (both
+/// errors require a first configure already sent), so an `Err` here is
+/// logged, not retried specially: the flag stays unset and the next
+/// commit tries again.
+fn send_popup_initial_configure(state: &State, surface: &WlSurface) {
+    if get_role(surface) != Some(XDG_POPUP_ROLE) {
+        return;
+    }
+    let Some(smithay::desktop::PopupKind::Xdg(popup)) = state.popups.find_popup(surface) else {
+        // Not tracked (gone between the role check and the lookup), or a
+        // surface flexwm doesn't track at all (input-method popups -- no
+        // implementation here yet, so nothing to configure).
+        return;
+    };
+    if !popup.is_initial_configure_sent()
+        && let Err(error) = popup.send_configure()
+    {
+        tracing::warn!(?error, "xdg_popup initial configure failed");
     }
 }
 
