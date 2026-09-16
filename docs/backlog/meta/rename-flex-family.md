@@ -1,34 +1,33 @@
 ---
-title: "Rename `flexwm` to `flex` (binary, crates, CLI, docs) — scheduled as the last item of the current backlog burn-down."
+title: "Rename `flexwm` to `flex` and split the CLI into `flexctl` — scheduled as the last item of the current backlog burn-down."
 status: "open"
 area: "meta"
 priority: "low"
 blocked: "everything else in the backlog burn-down"
 ---
 
-# Rename `flexwm` to `flex` (binary, crates, CLI, docs) — scheduled as the last item of the current backlog burn-down.
+# Rename `flexwm` to `flex` and split the CLI into `flexctl` — scheduled as the last item of the current backlog burn-down.
 
-**Decided and scheduled, 2026-09-16** (user, via `/goal`): do this rename
+**Decided and scheduled, 2026-09-16** (user, via `/goal`, clarified in a
+follow-up correction — "flexctl is part of the split"): do this rename
 *last*, after every other open backlog item from this burn-down has landed —
 not because it is low priority in the usual sense, but because it touches
 nearly every file in the tree and every backlog item completed after it would
-otherwise need its own diff rebased across the rename. Scope, as the user
-stated it: **rename the project from `flexwm` to `flex` — the CLI and all —
-with docs updated.** That is narrower than this entry's original 2026-09-13
-framing below: it means renaming the *existing* single binary and its
-existing `msg`/`type`/`key`/etc. CLI surface in place (`flexwm` → `flex`,
-`flexwm msg ...` → `flex msg ...`), **not** splitting the CLI out into a
-separate `flexctl` binary, and **not** building `flexbar`. Sections 2 and 3
-below (`flexctl`, `flexbar`) are unrelated future ideas this entry happened
-to be filed alongside — leave them open and undecided; do not fold either
-into the rename PR.
+otherwise need its own diff rebased across it. Scope: **rename the compositor
+binary/crates from `flexwm` to `flex`, and split today's `flexwm msg
+...`/`type`/`key`/etc. CLI out of the compositor binary into a separate
+`flexctl` binary/crate that talks the same Unix-socket protocol from the
+outside** — i.e. both section 1 (the rename) and section 2 (`flexctl`) below
+are in scope, not just the rename in isolation. Docs updated throughout.
+**`flexbar` (section 3) stays out of scope** — a new project, not part of
+this rename, undecided and unscheduled unless the user says otherwise.
 
 ---
 
-*Original entry, 2026-09-13 — kept for the parts of the mechanical rename
-below that still apply (crates, textual references, the naming collision
-check); the "family of tools" framing and the `flexctl`/`flexbar` scope are
-superseded by the decision above.*
+*Original entry, 2026-09-13 — the mechanical rename details below (crates,
+textual references, the naming collision check) and the `flexctl` split
+design questions both still apply as scoped above; only `flexbar` (section 3)
+is explicitly excluded.*
 
 Rename the project from `flexwm` to `flex`, as part of a small family of
 tools: `flex` (the compositor), `flexctl` (a CLI/IPC client), `flexbar` (a
