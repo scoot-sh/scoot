@@ -45,7 +45,17 @@ actionable.
 ## Open
 
 ### Protocols
-- [Foreign-toplevel management](./protocols/foreign-toplevel-management.md) — window enumeration for taskbars/switchers
+- [Foreign-toplevel management](./resolved/foreign-toplevel-list-done.md)
+  — RESOLVED 2026-09-16 (PR #47): `ext-foreign-toplevel-list-v1`, the `ext-`
+  successor the entry told its reader to check for, so a taskbar or switcher
+  can list windows. Enumeration only (the protocol has no control requests);
+  the identifier carries the `flexwm msg windows` id, which is the bridge to
+  acting on a window over IPC. Quickshell binds the wlr protocol and ignores
+  this one (measured), so DMS/Noctalia window lists wait on the entry below.
+- [Quickshell's window list needs `wlr-foreign-toplevel-management-v1`](./protocols/wlr-foreign-toplevel-management.md)
+  — the other half of the gap above, and a control protocol as much as an
+  enumeration one (no Smithay support; minimize/maximize/fullscreen have no
+  meaning in flexwm's core yet)
 - [`xdg-toplevel-icon-v1` pixel-buffer icons are not exposed](./protocols/toplevel-icon-buffers.md) — only the icon name reaches IPC
 - [An IME popup over a lock screen is tracked but never drawn](./protocols/ime-popup-over-lock-screen.md)
 - [An IME keyboard grab makes the activation gate credit a client that received nothing](./protocols/interaction-serial-ime-grab.md)

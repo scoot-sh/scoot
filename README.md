@@ -44,7 +44,9 @@ niri-style focus ring, background color, server-side
 notification daemons work — including keyboard focus for the ones that ask
 for it (see Layer-shell clients below), `ext-workspace-v1`, so those
  bars can also list, follow and switch workspaces (see Workspaces for bars
- below), `ext-session-lock-v1`, so a real screen locker can lock the session
+ below), `ext-foreign-toplevel-list-v1`, so a taskbar, dock or alt-tab
+ switcher can list the windows themselves (see Window lists for bars below),
+ `ext-session-lock-v1`, so a real screen locker can lock the session
  with the compositor itself enforcing it (see Screen locking below),
  `ext-idle-notify-v1` and `idle-inhibit-unstable-v1`, so a `swayidle`-style
  daemon can idle the seat and lock it automatically while a video player
@@ -543,6 +545,69 @@ Worth knowing before you write against it:
   what the protocol is built for — but flexwm has exactly one output today, so
   there is exactly one group.
 
+## Window lists for bars (`ext-foreign-toplevel-list-v1`)
+
+flexwm implements `ext-foreign-toplevel-list-v1` (version 1), the
+compositor-agnostic protocol a taskbar, dock or alt-tab switcher reads the
+*window* list from — the other half of what a shell needs alongside
+`ext-workspace-v1` above. The global is `ext_foreign_toplevel_list_v1`,
+available to every client, no privilege or allow-list.
+
+It is the protocol-side twin of `flexwm msg windows`: the same windows, the
+same lifetime, live rather than polled.
+
+What a client sees:
+
+- **One `ext_foreign_toplevel_handle_v1` per window**, carrying `identifier`,
+  `title` and `app_id`. Binding the global announces every window that
+  already exists, so registry order doesn't matter.
+- **Changes arrive in batches closed by `done`** — draw on `done`, not on
+  each event. In particular, a window is announced the moment its
+  `xdg_toplevel` exists, which is *before* the toolkit has sent its app id
+  and title: the first batch is usually two empty strings, followed a
+  moment later by a batch per field as they arrive.
+- **`closed` when the window goes**, after which nothing else is ever sent on
+  that handle.
+- **`stop` is answered with `finished`**, and means "no more *new* windows":
+  handles the client already has keep reporting title and app id changes
+  until it destroys them, which is what the protocol's own teardown sequence
+  (stop, wait for `finished`, then destroy the handles) requires.
+
+**The identifier is `<generation>-<window id>`** — e.g. `a3e689a2-1`: eight
+hex digits of per-session randomness (the "opaque generation value" the
+protocol recommends, so identifiers from two flexwm sessions never collide)
+and, after the last dash, the window id `flexwm msg windows` reports. That
+suffix is deliberate and is the bridge between the two: this protocol has no
+requests at all, so a client that finds a window here and wants to *act* on
+it sends `flexwm msg action focus-window-id N` with the number after the
+dash.
+
+Worth knowing before you write against it:
+
+- **There is no control half, by design.** The protocol is deliberately
+  minimal — no `activate`, `close`, `minimize`, `fullscreen`, geometry or
+  per-output state. Those are meant for extension protocols that don't exist
+  yet. flexwm's IPC covers the case (`flexwm msg action focus-window-id N`,
+  `flexwm msg action close` for the focused window).
+- **This is the `ext-` protocol, not `wlr-foreign-toplevel-management-v1`,
+  and that matters for Quickshell-based shells today.** A tool that speaks
+  only the older wlr protocol sees no global and shows no windows —
+  measured: `quickshell` 0.3.1 (what DMS and Noctalia run on) is offered
+  this global and never binds it, so their launchers' window sections stay
+  empty. See `docs/backlog/protocols/wlr-foreign-toplevel-management.md`;
+  the wlr protocol is a control protocol as much as an enumeration one, so
+  it is an item of its own rather than a switch to flip.
+- **A handle covers a window's whole life, not the time it is mapped.** The
+  protocol talks about "mapped" toplevels, but flexwm has no map/unmap
+  boundary at all — a window is in the layout, the focus order and
+  `flexwm msg windows` from the moment its `xdg_toplevel` exists — so a
+  handle covers exactly that, and the two lists can never disagree.
+- **An identifier is never reused.** Close a window and open another and it
+  gets a new one, even from the same client.
+- **The list stays live while the session is locked**, exactly as `flexwm msg
+  windows` does — see Screen locking below for the trust model that sits
+  behind that.
+
 ## Screen locking (`ext-session-lock-v1`)
 
 flexwm implements `ext-session-lock-v1` (version 1), so a real locker
@@ -647,6 +712,13 @@ its connection and its `wl_surface`s are still perfectly alive.
 - **`flexwm msg windows` still lists your windows while locked**, titles
   included, and `flexwm msg outputs` still answers. Nothing is drawn from
   them, but the IPC surface is not blanked.
+- **So does `ext-foreign-toplevel-list-v1`** (see Window lists for bars
+  above): handles stay, titles keep updating, and a window opened behind the
+  lock screen is still announced. Same boundary as the line above — a client
+  that can reach the wayland socket is a same-uid process — and sending
+  `closed` for windows that did not close would be a lie a taskbar could not
+  recover from, since the protocol forbids reusing their identifiers
+  afterwards.
 - **The `locked` event is sent once a blanked frame has been *rendered*, not
   once a vblank has confirmed it on screen.** Under `--headless`/`--nested`
   that is exact — there is no scanout at all, and the framebuffer a screenshot
