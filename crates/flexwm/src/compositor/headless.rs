@@ -162,6 +162,12 @@ pub fn init_named(
         })
         .unwrap_or_else(|| Rect::new(0, 0, width, height));
     state.output = Some(output);
+    // The head a display-configuration client sees. After `state.output` is
+    // set, because that is where the advertised state is read from -- and
+    // before `apply()`, so a client that bound the manager during `State::new`
+    // (before there was an output) hears about the head in the same startup
+    // pass everything else is announced in. See `output_management.rs`.
+    state.refresh_output_heads();
     state.world.handle_event(CoreEvent::OutputAdded {
         id: OUTPUT_ID,
         area,
@@ -679,6 +685,10 @@ impl State {
         // `refresh_layer_zone` below reports a zone measured against this
         // mode rather than the previous one.
         layer_map_for_output(&output).arrange();
+        // The mode changed, so every output-management client is a mode, a
+        // current-mode and a `done` behind. `set_mode` above is the write; this
+        // is the only other site that reaches it (see `output_management.rs`).
+        self.refresh_output_heads();
         self.world.handle_event(CoreEvent::OutputChanged {
             id: OUTPUT_ID,
             area: Rect::new(0, 0, logical.0, logical.1),

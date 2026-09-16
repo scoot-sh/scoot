@@ -54,6 +54,7 @@ use super::ipc::PendingIdle;
 use super::keybindings::Keybindings;
 use super::layer_shell;
 use super::nested::Host;
+use super::output_management::OutputManagement;
 use super::popup::ActivePopupGrab;
 use super::session_lock::SessionLock;
 use super::tty::Tty;
@@ -345,6 +346,13 @@ pub struct State {
     /// above this is read again -- every `get_gamma_control`/`set_gamma`
     /// goes through it (see `gamma_control.rs`).
     pub gamma_control: GammaControlState,
+    /// `zwlr_output_manager_v1` (version 4): what a shell's Settings ->
+    /// Display page and `wlr-randr` read the output's modes, position, scale
+    /// and transform from. Read on every bind and on the two sites that change
+    /// the output's state -- see `output_management.rs`, which owns both the
+    /// protocol objects and the snapshot of what clients have been told.
+    /// Read-only: every configuration a client builds is refused.
+    pub output_management: OutputManagement,
     /// `ext_idle_notifier_v1` (version 2): what a `swayidle`-style daemon
     /// binds to learn the seat has been quiet N milliseconds. Read on
     /// every input event (`announce_activity`, see `idle.rs`) and written
@@ -451,6 +459,7 @@ impl State {
         let text_input_manager_state = TextInputManagerState::new::<Self>(&dh);
         let input_method_manager_state = InputMethodManagerState::new::<Self, _>(&dh, |_| true);
         let gamma_control = GammaControlState::new(&dh);
+        let output_management = OutputManagement::new(&dh);
         let idle_notifier = IdleNotifierState::new(&dh, event_loop.handle());
         let idle_inhibit_manager_state = IdleInhibitManagerState::new::<Self>(&dh);
 
@@ -523,6 +532,7 @@ impl State {
             xdg_toplevel_icon_manager,
             xdg_activation,
             gamma_control,
+            output_management,
             idle_notifier,
             idle_inhibitors: idle::Inhibitors::default(),
             idle_inhibit_manager_state,
