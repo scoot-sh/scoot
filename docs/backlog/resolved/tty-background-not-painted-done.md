@@ -137,9 +137,9 @@ coverage of the fix.
 
 **The pointer starts at the output's origin, not centred.** That is why the
 cursor was in the corner at all. It is defensible (a cursor has to be
-somewhere before the first motion event) but it is not what most compositors
-do, and on a real `--tty` session it means the arrow sits wedged in the
-top-left until the user moves the mouse. Changing it is a behaviour change
+somewhere before the first motion event), but on a real `--tty` session it
+means the arrow sits wedged in the top-left until the user moves the
+mouse. Changing it is a behaviour change
 with its own edge cases (which output, what about multi-output, does it count
 as motion for idle/activation purposes) and belongs in its own item, not in a
 test fix: `docs/backlog/rendering/pointer-starts-at-origin.md`.

@@ -11,7 +11,9 @@ blocked: null
 Nothing places the pointer at startup, so Smithay's seat leaves it at (0,0)
 and `--tty` — the one backend that draws a cursor — draws the arrow in the
 extreme top-left corner of the screen, hotspot exactly on the corner, until
-the user moves the mouse. Most compositors centre it on an output instead.
+the user moves the mouse. Centring it on an output is the more familiar
+behaviour, and the likely fix, but which compositors actually do that has not
+been checked against their source here — don't take it from this entry.
 
 Purely cosmetic, and not a correctness bug: a cursor has to be *somewhere*
 before the first motion event. Found while resolving
