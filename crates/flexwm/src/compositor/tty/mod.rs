@@ -17,12 +17,18 @@
 //! `compositor::run`'s later `set_var`.
 //!
 //! Out of scope for this backend (see the commit introducing it for why):
-//! DRM hotplug, multi-GPU, multi-output, DPMS, key repeat. ("Multi-GPU"
-//! there means driving more than one at once -- *choosing* between several
-//! is `gpu.rs`'s job, and `init` below walks its list until a device works.)
+//! multi-GPU, multi-output, DPMS, key repeat. ("Multi-GPU" there means
+//! driving more than one at once -- *choosing* between several is `gpu.rs`'s
+//! job, and `init` below walks its list until a device works.)
+//!
+//! DRM hotplug used to be on that list and no longer is: `hotplug.rs`
+//! watches udev and re-runs the connector/mode choice whenever the display
+//! underneath changes, still onto one output. It stays one output -- see
+//! that module's doc for what a hotplug does and deliberately does not do.
 
 mod buffers;
 mod gpu;
+mod hotplug;
 
 use std::error::Error;
 use std::path::Path;
@@ -38,6 +44,7 @@ use smithay::backend::input::{
 use smithay::backend::libinput::{LibinputInputBackend, LibinputSessionInterface};
 use smithay::backend::session::libseat::LibSeatSession;
 use smithay::backend::session::{Event as SessionEvent, Session};
+use smithay::backend::udev::UdevBackend;
 use smithay::reexports::calloop::LoopHandle;
 use smithay::reexports::drm::control::{Mode, connector, crtc};
 use smithay::reexports::input::Libinput;
@@ -65,6 +72,43 @@ pub struct Tty {
     session: LibSeatSession,
     drm: DrmDevice,
     surface: smithay::backend::drm::DrmSurface,
+    /// Which udev device this backend is driving, so a `change` event for
+    /// one of the seat's *other* DRM devices can be told from one for ours.
+    /// `DrmDevice::device_id`'s own value, which is the `st_rdev` of the
+    /// node it was opened from -- the same number `UdevBackend` keys its
+    /// device table by (it `stat`s every path `all_gpus` returns), so the
+    /// two really are comparable and not merely both called "device id".
+    device_id: libc::dev_t,
+    /// The one connector this backend drives. Startup picks it
+    /// (`gpu::find_connector_and_mode`) and a hotplug can move it
+    /// (`hotplug.rs`), which is the only other write site.
+    ///
+    /// The `DrmSurface` has its own `pending_connectors()`, and the two
+    /// agree by construction -- every write here happens right after the
+    /// matching `set_connectors` succeeded. This field exists because the
+    /// surface's answer is a set (Smithay supports several connectors per
+    /// CRTC; this backend deliberately drives exactly one), and re-deriving
+    /// "the connector" from a set would mean inventing a rule for a case
+    /// that cannot arise.
+    connector: connector::Handle,
+    /// `--mode WxH`, exactly as the user gave it, kept so a hotplug can
+    /// re-run the same choice startup made rather than silently demoting
+    /// the flag to a startup-only preference. `None` means the connector's
+    /// preferred mode wins, at startup and at every re-probe alike.
+    requested_mode: Option<(u16, u16)>,
+    /// Whether the last probe of this device found *nothing* `Connected`.
+    ///
+    /// Only that. Not "the session is paused" ([`session_paused`](Self::session_paused))
+    /// and not "DRM master is not held" ([`active`](Self::active)) -- all
+    /// three can be true or false independently, and this project has been
+    /// bitten before by two fields that looked like the same question
+    /// (`docs/roadmap/05b-vt-switch-eperm.md`). Written only by
+    /// `Tty::reconfigure`, on every probe: set when the probe found nothing,
+    /// cleared when it found something. Read only there too, to decide
+    /// whether a display that came back at the mode it left on still needs a
+    /// modeset -- it does, because the CRTC spent the gap driving a
+    /// connector that had physically gone away.
+    nothing_connected: bool,
     buffers: BufferPool,
     /// Kept only to `suspend()`/`resume()` in step with session pause/
     /// activate -- `LibinputInputBackend` owns its own clone of the same
@@ -173,11 +217,13 @@ pub fn init(
         drm,
         notifier: drm_notifier,
         surface,
+        connector,
         buffers,
         width,
         height,
         name,
     } = device;
+    let device_id = drm.device_id();
     // info!, not debug!: which device `--tty` ended up on is the first
     // question to ask when a screen stays black, and on hardware where the
     // automatic pick is wrong it is the only thing separating "the fallback
@@ -195,6 +241,10 @@ pub fn init(
         session,
         drm,
         surface,
+        device_id,
+        connector,
+        requested_mode: mode,
+        nothing_connected: false,
         buffers,
         libinput: libinput_context,
         width,
@@ -228,6 +278,7 @@ pub fn init(
     loop_handle
         .insert_source(libinput_backend, libinput_event)
         .map_err(|error| format!("could not register libinput: {error}"))?;
+    watch_for_hotplug(&loop_handle, &seat_name, device_id);
 
     // `--tty`-only: Ctrl+Alt+F1..F12. Kept out of `Keybindings::default()`
     // so the headless/nested tables stay exactly what they were before this
@@ -251,6 +302,59 @@ pub fn init(
     Ok((width, height, name))
 }
 
+/// Registers the udev monitor that delivers DRM hotplug events (see
+/// `hotplug.rs`), on a best-effort basis.
+///
+/// Deliberately not fatal, unlike the three sources `init` registers with
+/// `?` above. Those are what makes `--tty` work at all -- no session
+/// notifier, no DRM events or no input and there is nothing to run. This
+/// one only makes it *keep* working when the display changes underneath, so
+/// a udev socket that cannot be opened has to degrade to the behaviour
+/// every release before this had (mode-set once, at startup) rather than
+/// refuse to start a session that would otherwise have been fine. Same
+/// reasoning as `gpu::assemble`'s tolerance of a failed device listing.
+fn watch_for_hotplug(loop_handle: &LoopHandle<'static, State>, seat: &str, device_id: libc::dev_t) {
+    let udev = match UdevBackend::new(seat) {
+        Ok(udev) => udev,
+        Err(error) => {
+            // warn!, not debug!: the session that follows looks completely
+            // normal right up until a display is plugged in or the host
+            // window is resized, and this is the only explanation for why
+            // nothing happened then.
+            tracing::warn!(
+                %error,
+                "drm: could not watch udev for display changes; this session \
+                 keeps the mode it starts with"
+            );
+            return;
+        }
+    };
+    // `UdevBackend` only reports `Changed` for devices in the snapshot it
+    // took at construction, which is `all_gpus(seat)`'s list (verified in
+    // `backend/udev.rs` at the pinned rev: the `EventType::Change` arm is
+    // gated on `self.devices.contains_key(&devnum)`). `--gpu PATH` can name
+    // a device that list does not contain -- a node on another seat, or one
+    // udev does not tag as a GPU -- and then hotplug events for it are
+    // dropped by Smithay before this module ever sees them. Saying so here
+    // costs one pass over a list of at most a handful of devices, at
+    // startup, and is the difference between a diagnosable limitation and
+    // silence.
+    if !udev.device_list().any(|(id, _)| id == device_id) {
+        tracing::warn!(
+            "drm: the chosen device is not in udev's list for this seat, so \
+             display changes on it will not be noticed; this session keeps \
+             the mode it starts with"
+        );
+    }
+    if let Err(error) = loop_handle.insert_source(udev, hotplug::udev_event) {
+        tracing::warn!(
+            %error,
+            "drm: could not register the udev monitor; this session keeps the \
+             mode it starts with"
+        );
+    }
+}
+
 /// Everything `init` needs from one DRM device, once that device has
 /// proven it can actually drive a display. Exists so a candidate can be
 /// built and then thrown away wholesale if it turns out not to work,
@@ -259,6 +363,10 @@ struct Device {
     drm: DrmDevice,
     notifier: DrmDeviceNotifier,
     surface: smithay::backend::drm::DrmSurface,
+    /// The connector the surface was created against -- `Tty::connector`'s
+    /// initial value. Carried out of `open_device` rather than re-derived,
+    /// because that is where the choice was made.
+    connector: connector::Handle,
     buffers: BufferPool,
     width: i32,
     height: i32,
@@ -345,6 +453,7 @@ fn open_device(
         drm,
         notifier,
         surface,
+        connector,
         buffers,
         width,
         height,
@@ -460,14 +569,31 @@ impl Tty {
     ///
     /// Does nothing if the session is paused, or a reactivation attempt
     /// failed to reacquire the DRM device (`active` is `false` in either
-    /// case -- see `reactivate`), if `frame_size` doesn't match this
-    /// output's fixed mode size (this backend doesn't support resizing --
-    /// the mode is chosen once, at startup), or if a previous flip hasn't
+    /// case -- see `reactivate`), if `frame_size` doesn't match the size of
+    /// the mode currently being scanned out, or if a previous flip hasn't
     /// been confirmed by a `VBlank` yet (`flip_pending`) -- flipping again
-    /// before that would fail with EBUSY. The last two set `present_skipped`
-    /// so a `VBlank` (or, for the
-    /// paused case, a reactivation) re-triggers a render instead of leaving
-    /// the screen stale.
+    /// before that would fail with EBUSY.
+    ///
+    /// Only the last of those three sets `present_skipped`, and it is the
+    /// only one that needs to: `flip_pending` is the one case where a
+    /// *different*, already-in-flight frame is what will eventually confirm
+    /// (a `VBlank`) that it's safe to try again, so the flag is what makes
+    /// that confirmation retry the render instead of leaving the screen
+    /// stale. The other two don't need it. `!active` means the session is
+    /// paused or DRM-masterless -- nothing here can retry until
+    /// `reactivate()` runs, and `reactivate()` unconditionally arms a fresh
+    /// modeset and render on its own, `present_skipped` or not. A
+    /// `frame_size` mismatch means a resize is in flight -- `State::
+    /// resize_output` has already asked for a render at the new size before
+    /// this function is ever called with the old one, so there is nothing
+    /// left for a flag to retry.
+    ///
+    /// The size check is a *mismatch* check, not a fixed-size one: the mode
+    /// can change while the session runs (`hotplug.rs`), and the frame
+    /// `headless::render` produced may have been laid out against the
+    /// previous one. Dropping that frame is right -- the next render, which
+    /// `State::resize_output` has already asked for, is built at the new
+    /// size.
     pub fn present(
         &mut self,
         pixels: &[u8],
@@ -551,6 +677,21 @@ impl Tty {
                 // Undo the write above -- this slot was never actually
                 // sent to the CRTC, so it must not stay marked busy.
                 self.buffers.mark_free(index);
+                // This frame was rendered and never shown, so the screen is
+                // stale by exactly the amount that was damaged -- the same
+                // condition the two skips above set this for. Without it a
+                // rejected flip leaves the screen wrong until something
+                // unrelated happens to damage it again.
+                //
+                // Newly reachable rather than newly wrong: `hotplug.rs`'s
+                // `invalidate_scanout` clears `flip_pending` while a flip
+                // really may still be in flight (see its doc for why that
+                // is the safer of the two mistakes), which can put one
+                // EBUSY-rejected flip between the hotplug and the first
+                // frame at the new mode. Self-limiting: nothing re-reads
+                // this except a `VBlank` or a `DrmEvent::Error`, both of
+                // which only arrive for a flip that *was* accepted.
+                self.present_skipped = true;
             }
         }
     }
@@ -630,8 +771,6 @@ impl Tty {
             tracing::warn!(%error, "could not reset drm surface state after reactivation");
         }
         self.active = drm_active;
-        self.flip_pending = false;
-        self.needs_modeset = true;
         // The surface's own notion of what's scanned out is gone along with
         // its state (or, if `drm.activate` failed, was never something we
         // can trust to begin with) -- either way both buffer slots are safe
@@ -641,19 +780,19 @@ impl Tty {
         // doc): a slot's pre-pause content is real, but nothing here can
         // vouch for what's actually on screen right now, so the next
         // present must be a full redraw rather than trusting a stale age.
-        self.buffers.mark_all_free();
-        self.buffers.invalidate_ages();
-        self.showing = None;
-        self.pending_free = None;
+        // Shared with the hotplug path, which invalidates exactly the same
+        // six things for exactly the same reason -- see
+        // `hotplug.rs`'s `invalidate_scanout`.
+        self.invalidate_scanout();
         drm_active
     }
 }
 
 fn session_event(event: SessionEvent, _: &mut (), state: &mut State) {
-    // Scoped so the mutable borrow of `state.tty` ends before the possible
-    // `state.request_render()` call below needs `state` whole again --
-    // same shape as `nested_dispatch.rs`'s `Dispatch<HostBuffer>` handler.
-    let needs_render = {
+    // Scoped so the mutable borrow of `state.tty` ends before the
+    // `Reconfigured::finish` call below needs `state` whole again -- same
+    // shape as `nested_dispatch.rs`'s `Dispatch<HostBuffer>` handler.
+    let outcome = {
         let Some(tty) = &mut state.tty else {
             return;
         };
@@ -665,7 +804,7 @@ fn session_event(event: SessionEvent, _: &mut (), state: &mut State) {
                 tty.drm.pause();
                 tty.libinput.suspend();
                 tty.flip_pending = false;
-                false
+                hotplug::Reconfigured::Nothing
             }
             SessionEvent::ActivateSession => {
                 tracing::info!("session activated");
@@ -678,13 +817,31 @@ fn session_event(event: SessionEvent, _: &mut (), state: &mut State) {
                 // working keyboard, retry the VT switch" case `reactivate`'s
                 // doc calls out as the one meant to stay recoverable.
                 tty.session_paused = false;
-                tty.reactivate()
+                if !tty.reactivate() {
+                    hotplug::Reconfigured::Nothing
+                } else {
+                    // A display plugged in (or the host window resized)
+                    // while this session was on another VT fired its udev
+                    // event then, with no DRM master to act on it, and
+                    // `Tty::reconfigure` correctly declined. Nothing else
+                    // will ever deliver that event again, so the switch back
+                    // has to ask the device what it says *now* rather than
+                    // assume the mode it left on is still the right one.
+                    //
+                    // `reactivate` has already armed a full modeset and
+                    // asked for a render, so the do-nothing answer this
+                    // returns in the overwhelmingly common case (nothing
+                    // changed while away) loses none of that -- `Nothing`
+                    // here means "nothing *further*", not "no frame".
+                    match tty.reconfigure() {
+                        hotplug::Reconfigured::Nothing => hotplug::Reconfigured::Render,
+                        further => further,
+                    }
+                }
             }
         }
     };
-    if needs_render {
-        state.request_render();
-    }
+    outcome.finish(state);
 }
 
 fn drm_event(event: DrmEvent, _: &mut Option<DrmEventMetadata>, state: &mut State) {

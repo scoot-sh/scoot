@@ -390,3 +390,60 @@ fn resizing_the_output_re_arranges_bars_and_the_zone() {
         "the window should fit the new mode: {rect:?}"
     );
 }
+
+/// ...and the clients are told, not just the core.
+///
+/// The test above reads `World::arrange()`, which recomputes from the core's
+/// new area whether or not anything pushed that arrangement onto the windows
+/// -- so it passes even if every client is still sized for the old mode and
+/// hanging off the edge of the screen. `State::requested` is the difference:
+/// only `apply()` writes it, on the same pass that sends each toplevel its
+/// `configure`.
+///
+/// This is why `resize_output` ends in `apply()` rather than
+/// `request_render()`. It used to end in the latter, which was harmless while
+/// its only caller was `--nested`'s first host configure (once per process,
+/// before any window has mapped) and became a real bug the moment `--tty`
+/// started resizing dynamically on DRM hotplug: `refresh_layer_zone`, the one
+/// thing in there that can reach `apply()`, returns early whenever the zone
+/// did not move -- which is the common case (no bar mapped at all, or a bar
+/// whose exclusive zone is unchanged).
+#[test]
+fn resizing_the_output_reconfigures_the_windows_on_it() {
+    // Deliberately no layer surface: with one mapped, a changed exclusive
+    // zone can reach `apply()` through `refresh_layer_zone` and hide the
+    // regression this is guarding.
+    let mut fixture = Fixture::new();
+    fixture.run(Step::MapWindow);
+
+    let configured = |fixture: &Fixture| {
+        *fixture
+            .state
+            .requested
+            .values()
+            .next()
+            .expect("the mapped window was configured at some size")
+    };
+    // The baseline, so a resize that changed nothing cannot pass below by
+    // having been wrong in the same way twice: mapping alone already
+    // configures the window at the size the core laid it out at.
+    let before = configured(&fixture);
+    let before_rect = fixture.window_rect();
+    assert_eq!(before, Size::new(before_rect.w, before_rect.h));
+
+    let smaller = CANVAS / 2;
+    fixture.state.resize_output(smaller, smaller);
+    fixture.settle();
+
+    let after = configured(&fixture);
+    assert_ne!(
+        after, before,
+        "the window is still configured for the old mode"
+    );
+    let rect = fixture.window_rect();
+    assert_eq!(
+        after,
+        Size::new(rect.w, rect.h),
+        "the size the client was configured at should be the one the core laid out"
+    );
+}

@@ -33,7 +33,9 @@ Early, but all three Wayland backends are real and working: `--headless`
 and `--tty` (a real DRM/KMS + libseat + libinput backend on actual hardware,
 including VT switching; it picks its DRM device by trying every one on the
 seat rather than trusting the first guess, and takes `--gpu PATH` when even
-that picks wrong — see Which DRM device `--tty` drives below; and it renders
+that picks wrong — see Which DRM device `--tty` drives below; it follows DRM
+hotplug, so plugging a monitor in, pulling one out or resizing a VM's window
+re-modesets instead of leaving the screen wrong; and it renders
 a pointer cursor, a client's own image when it supplies one, a built-in shape
 otherwise, whose size and color the config file can override). Also done:
 vim-style keybindings, a TOML config file (`--config`, `[layout]`/
@@ -290,7 +292,12 @@ flexwm --tty --gpu /dev/dri/card1 -- foot
 fallback — so a wrong path is a clean startup error naming the device and
 what failed, not a silent fall back to something else. It only means
 anything under `--tty`; on `--headless` or `--nested` it is ignored with a
-warning.
+warning. One thing it can cost: hotplug (below) is followed only for
+devices udev lists as GPUs on this seat, and `--gpu` can name one that
+isn't in that list. flexwm says so at startup — `the chosen device is not
+in udev's list for this seat, so display changes on it will not be
+noticed` — and the session otherwise runs exactly as it always did, with
+the mode it started on.
 
 The output's size is the connector's preferred mode. When that is the wrong
 size — under Apple's Virtualization framework (vfkit, UTM) the "preferred"
@@ -305,6 +312,54 @@ flexwm --tty --mode 1920x1080 -- foot
 the preferred one with a warning if the connector lists no such mode (`cat
 /sys/class/drm/card*-*/modes` shows what it lists). Like `--gpu`, it is
 ignored with a warning outside `--tty`.
+
+### `--tty` follows the display: hotplug and host resizes
+
+`--tty` watches udev for DRM changes and re-runs the choice above whenever
+the display underneath it moves, so nothing here is a once-at-startup
+decision any more:
+
+- **Plug a monitor in or pull one out.** Unplugging the connector flexwm is
+  driving makes it pick another connected one and mode-set onto it. Plugging
+  one back in after everything was unplugged mode-sets back onto it. (The
+  fall-back to a *different* connector works only where the display
+  controller can route that connector to the CRTC flexwm is already on —
+  true of ordinary PC graphics, not guaranteed on SoCs whose encoders are
+  wired to specific CRTCs. flexwm does not currently move to a different
+  CRTC; if the new connector can't be driven from the current one it logs
+  `could not move the surface onto the new connector in either order` and
+  stays put. See
+  [`docs/backlog/tty/tty-connector-switch-crtc.md`](docs/backlog/tty/tty-connector-switch-crtc.md).)
+- **Resize, rescale or full-screen a VM window.** Apple's Virtualization
+  framework reconfigures the guest display when you do, which reaches the
+  guest as a hotplug with a new mode list and a new preferred mode; flexwm
+  follows it. `--mode WxH` is still honoured on every re-probe, not just the
+  first: if the size you named is in the new list it wins, and if it is not
+  you get the same warning and the new preferred mode.
+
+A change reaches everything that cares: the render target, `wl_output`
+(`mode` + `done`), `wlr-output-management`, layer-shell surfaces (bars
+re-anchor and re-arrange), the window layout, and `flexwm msg outputs`,
+which reports the new rectangle on the next query with no extra plumbing.
+
+Two limits worth knowing, both deliberate:
+
+- **Still one output.** Plugging a second monitor into a laptop already
+  running on `eDP-1` keeps the session on `eDP-1` rather than jumping to the
+  new screen — flexwm drives one output, so one of the two has to be dark,
+  and the one you are looking at is the one it keeps. Real multi-output is a
+  separate, larger piece of work.
+- **The output keeps the name it started with.** A session that started on
+  `HDMI-A-1` and fell back to `eDP-1` when the cable came out still reports
+  `HDMI-A-1`. Renaming a `wl_output` is not something the protocol allows;
+  recreating it would make every client re-enter the output and re-map its
+  surfaces, which is a bigger lie about what happened than a stale name.
+
+With nothing connected at all, flexwm holds the last frame, keeps the
+session running and logs `nothing is connected to this device any more` —
+plug a display back in and it mode-sets onto it. Hotplug events that arrive
+while flexwm is on another VT are picked up on the switch back, since a
+session without DRM master cannot mode-set when they happen.
 
 Under `--tty` the output is named after its connector — `HDMI-A-1`, `eDP-1`,
 `Virtual-1`, the same spelling as `/sys/class/drm/card*-*` — so bars and
@@ -744,15 +799,24 @@ Worth knowing before you write against it:
   and the protocol allows omitting both. A client that keys a saved
   per-monitor profile off a serial would otherwise match every flexwm session
   on every machine.
-- **The mode list only grows, and only once.** If the `--nested` host's
-  initial configure at startup proposes a size other than `--width`/
-  `--height`, that adds a mode rather than replacing one, so both sizes stay
-  advertised — matching what `wl_output` does with the same change. A host
-  resizing the window after startup does nothing; flexwm never picks up a
-  second mode change.
-- **A `--tty` VT switch changes nothing.** The output does not go away when
-  you switch to another VT, it just stops being drawn, so the head stays
-  enabled with the same mode and no `done` is sent.
+- **The mode list only grows, never shrinks.** A new mode is added rather
+  than replacing the old one, so every size the output has had stays
+  advertised — matching what `wl_output` does with the same change. Under
+  `--nested` that happens at most once (only the host's *initial* configure,
+  if it proposes a size other than `--width`/`--height`; a host resizing the
+  window afterwards does nothing). Under `--tty` it happens once per mode
+  the display actually changes to, so a VM window moved between a 2x and a
+  1x screen a few times leaves a mode for each distinct size it settled at.
+  Bounded by the number of distinct sizes the connector has offered, not by
+  how many hotplug events arrive.
+- **A `--tty` VT switch changes nothing by itself.** The output does not go
+  away when you switch to another VT, it just stops being drawn, so the head
+  stays enabled with the same mode and no `done` is sent. The one thing a
+  switch *back* can produce is a mode change, and the switch is not what
+  caused it: a display plugged in or resized while flexwm was on another VT
+  could not be acted on then, so the switch back re-probes and applies
+  whatever moved. Switch away and back with the display untouched and
+  nothing is sent.
 - **Multiple outputs will change the shape of this** — one head per output is
   what the protocol is built for — but flexwm has exactly one output today.
 

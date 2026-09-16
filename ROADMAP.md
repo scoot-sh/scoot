@@ -112,6 +112,21 @@ gap jumped the queue — each item's own file records why it landed when it did.
   generated wlr bindings like `output_management.rs`. Verified live against
   the real quickshell: the window list populates, a panel click focuses the
   right window, and `close` closes it.
+- **[`--tty` follows DRM hotplug](docs/backlog/resolved/tty-drm-hotplug-done.md)**
+  (issue #48, PR #51, 2026-09-16) — `--tty` no longer mode-sets once and
+  ignores the display afterwards: a udev monitor re-runs the connector/mode
+  choice on every DRM `change` event, so unplugging the connector it is on
+  falls back to another instead of going black until restart, and a VM host
+  resizing or rescaling its window is followed rather than scaled. Still one
+  output, deliberately: a hotplug re-runs the *same* single-connector choice
+  startup makes, it does not start driving a second screen. The mode is no
+  longer fixed for the process's life, which makes `--tty`'s `set_mode` the
+  smallest remaining piece of
+  [output-management reconfiguration](docs/backlog/protocols/output-management-reconfiguration.md).
+  Two paths (a new mode list, and falling back to a *different* connector)
+  could not be reproduced on the QEMU dev VM and still want confirmation on
+  the vfkit/laptop hardware that filed the issue, which is why #48 is
+  referenced rather than closed.
 
 ## What's next
 

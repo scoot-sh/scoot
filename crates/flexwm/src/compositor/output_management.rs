@@ -54,16 +54,23 @@
 //!   calls `change_current_state` with the real DRM refresh. `wl_output`
 //!   already reports the same 60 Hz, so this mirrors the existing inaccuracy
 //!   rather than adding a second one.
-//! - **[`Output::modes`] only ever grows, and only ever once.**
+//! - **[`Output::modes`] only ever grows, never shrinks.**
 //!   `change_current_state` pushes any mode it has not seen and nothing
-//!   calls `delete_mode` -- but the only production caller that can hand it
-//!   a second mode is [`State::resize_output`], and `--nested`'s dispatch
-//!   loop (`nested_dispatch.rs`) calls that at most once per process, gated
-//!   by `Host::is_configured`: only the host's *initial* configure, if it
-//!   proposes a size other than `--width`/`--height`, grows the mode list.
-//!   A host resizing flexwm's window afterwards is acked and otherwise
-//!   ignored -- the window keeps its original size and the mode list does
-//!   not grow again. `wl_output` advertises every known mode for the same
+//!   calls `delete_mode`. The only production caller that can hand it a
+//!   second mode is [`State::resize_output`], which two backends reach:
+//!   `--nested`'s dispatch loop (`nested_dispatch.rs`) calls it at most
+//!   once per process, gated by `Host::is_configured` (only the host's
+//!   *initial* configure, if it proposes a size other than
+//!   `--width`/`--height`, grows the list; a host resizing flexwm's window
+//!   afterwards is acked and otherwise ignored), and `--tty`'s hotplug
+//!   handler (`tty/hotplug.rs`) calls it once per mode change the display
+//!   underneath actually makes. So under `--tty` the list can grow more
+//!   than once -- a vfkit window moved between a 2x and a 1x screen a few
+//!   times leaves a mode for each distinct size it settled at. It is
+//!   bounded by the number of distinct sizes the connector has offered,
+//!   not by uevent traffic: a re-probe that lands on a size already in the
+//!   list adds nothing, and `plan` in `tty/hotplug.rs` does not even reach
+//!   `set_mode` unless the size changed. `wl_output` advertises every known mode for the same
 //!   reason this protocol does, but the `preferred` flag does not track it
 //!   the same way on both: this protocol's snapshot is taken once `set_mode`
 //!   has fully returned, so a newly-added mode is correctly `preferred`
@@ -100,13 +107,21 @@
 //! sends nothing when nothing moved, so it is safe to call from anywhere and
 //! is not on any per-frame or per-event path.
 //!
-//! A `--tty` VT switch changes nothing here, and that is the right answer: the
-//! [`Output`] object is untouched across one (the session pauses rendering and
-//! drops DRM master, see `tty/mod.rs`), the head never stops existing, and its
-//! mode, position, scale and transform are all still what the compositor will
-//! present the moment the VT comes back. wlroots keeps its heads enabled
-//! across a VT switch for the same reason. So the head stays `enabled(1)` and
-//! no `done` is sent.
+//! A `--tty` VT switch changes nothing here *by itself*, and that is the right
+//! answer: the [`Output`] object is untouched across one (the session pauses
+//! rendering and drops DRM master, see `tty/mod.rs`), the head never stops
+//! existing, and its mode, position, scale and transform are all still what
+//! the compositor will present the moment the VT comes back. wlroots keeps its
+//! heads enabled across a VT switch for the same reason. So the head stays
+//! `enabled(1)` and no `done` is sent.
+//!
+//! The one thing a switch *back* can produce is a mode change, and it is not
+//! the switch that caused it: a display plugged in or resized while this
+//! session was on another VT could not be acted on then (no DRM master), so
+//! `tty/mod.rs`'s reactivation re-probes the device and applies whatever
+//! changed, which reaches `resize_output` and therefore this module by the
+//! ordinary path. A VT switch across which nothing about the display moved
+//! still sends nothing.
 //!
 //! ## Batching
 //!

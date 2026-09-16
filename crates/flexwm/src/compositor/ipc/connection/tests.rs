@@ -1549,3 +1549,61 @@ fn a_queue_that_fills_again_gets_a_fresh_deadline() {
             .all(|reply| matches!(reply, Response::Version { .. }))
     );
 }
+
+/// An agent that asked `outputs` before the screen changed size, and asks
+/// again after, is told the new rectangle -- with no new plumbing on the IPC
+/// side and no event to subscribe to.
+///
+/// The question `--tty`'s DRM hotplug support (`tty/hotplug.rs`) raised: a
+/// mode change reaches `wl_output` and `wlr-output-management` through
+/// `State::resize_output`, but `outputs` is answered from a different place
+/// (`ipc.rs`'s `output_snapshots`), and a snapshot cached at startup would
+/// serve an agent a stale size forever. It is not cached -- every field is
+/// read from the live `Output` and the live `Space` -- and this is what says
+/// so, over a real socket rather than by inspection.
+///
+/// `usable` is asserted alongside `rect` because they come from different
+/// sources (the core's usable area, not the output's geometry) and only one
+/// of them following the resize would be the more likely bug.
+///
+/// There is deliberately no `outputs`-changed event to wait on: `wait-idle`
+/// already covers it, because `resize_output` ends in `apply()`, which ends
+/// in `request_render()`. An agent that resizes something, waits for idle and
+/// then asks is reading a settled compositor.
+#[test]
+fn an_agent_asking_outputs_again_after_a_resize_is_told_the_new_size() {
+    const BEFORE: i32 = 64;
+    const AFTER: i32 = 32;
+
+    let mut harness = Harness::with_output(BEFORE, BEFORE);
+    let mut client = harness.connect(None);
+    let request = request_line(&Request::Outputs);
+
+    let rects = |reply: Response| match reply {
+        Response::Outputs { outputs } => {
+            let output = outputs.first().expect("one output").clone();
+            (output.rect, output.usable)
+        }
+        other => panic!("not an outputs reply: {other:?}"),
+    };
+
+    client.send(request.as_bytes());
+    let (rect, usable) = rects(client.expect_reply(&mut harness));
+    assert_eq!((rect.width, rect.height), (BEFORE, BEFORE));
+    assert_eq!((usable.width, usable.height), (BEFORE, BEFORE));
+
+    harness.state.resize_output(AFTER, AFTER);
+
+    client.send(request.as_bytes());
+    let (rect, usable) = rects(client.expect_reply(&mut harness));
+    assert_eq!(
+        (rect.width, rect.height),
+        (AFTER, AFTER),
+        "the reply still describes the pre-resize mode"
+    );
+    assert_eq!(
+        (usable.width, usable.height),
+        (AFTER, AFTER),
+        "the usable area still describes the pre-resize mode"
+    );
+}

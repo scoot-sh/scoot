@@ -176,15 +176,16 @@ impl Host {
     /// (which needs `&mut State` and knows nothing about `Host`) can be
     /// called without a double-borrow.
     ///
-    /// Returns `Err` if the host-side buffers couldn't be (re)created. The
-    /// caller (`nested_dispatch`) only calls `mark_configured` on `Ok` --
-    /// v1 only ever calls this once, gated by `is_configured`, so a failure
-    /// here is equivalent to a fatal startup condition, not a transient one
-    /// to limp on from: `present()`'s size guard would otherwise silently
-    /// and permanently mismatch (the render target having already resized
-    /// successfully while the host-side buffers stayed at the old size),
-    /// dropping every future frame with nothing but a warning to show it --
-    /// the same silent-failure shape this project has hit before elsewhere.
+    /// Returns `Err` if the render target or the host-side buffers couldn't
+    /// be (re)created. The caller (`nested_dispatch`) only calls
+    /// `mark_configured` on `Ok` -- v1 only ever calls this once, gated by
+    /// `is_configured`, so a failure here is equivalent to a fatal startup
+    /// condition, not a transient one to limp on from: `present()`'s size
+    /// guard would otherwise silently and permanently mismatch (one of the
+    /// two having resized successfully while the other stayed at the old
+    /// size), dropping every future frame with nothing but a warning to show
+    /// it -- the same silent-failure shape this project has hit before
+    /// elsewhere.
     pub(super) fn apply_size(
         state: &mut State,
         width: i32,
@@ -193,13 +194,31 @@ impl Host {
         let Some(host) = state.host.take() else {
             return Ok(());
         };
-        state.resize_output(width, height);
+        let resized = state.resize_output(width, height);
         let result = BufferPool::new(&host.shm, &host.qh, width, height);
         // Put `host` back before propagating any error, so `state.host` is
         // never left `None` -- the caller stops the event loop on `Err`
         // regardless, but leaving this `Some` keeps every other path (e.g.
         // `render()`'s `if let Some(host) = &mut self.host`) simple.
         state.host = Some(host);
+        // Checked after `state.host` is whole again, and before the buffers
+        // are swapped in: a render target still at the old size with
+        // host-side buffers at the new one is the exact mismatch this
+        // function's doc says must not be limped on from. `resize_output`
+        // has already logged what failed.
+        //
+        // `result`'s buffers are destroyed rather than dropped: a `BufferPool`
+        // here owns host-side `wl_buffer`/`wl_shm_pool` objects that only
+        // `destroy` releases, and letting them fall out of scope would leak
+        // them on the host connection. The caller stops the event loop either
+        // way, but "it is about to exit" is not a reason to write the leaking
+        // version.
+        if !resized {
+            if let Ok(buffers) = result {
+                buffers.destroy();
+            }
+            return Err("could not resize the render target".into());
+        }
         let buffers = result?;
         if let Some(host) = &mut state.host {
             let old = std::mem::replace(&mut host.buffers, buffers);
