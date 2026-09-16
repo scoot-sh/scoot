@@ -356,14 +356,41 @@ impl State {
             );
             return;
         }
+        if self.session_lock.is_locked() {
+            tracing::debug!(
+                index,
+                "ignoring an ext-workspace activate: the session is locked"
+            );
+            return;
+        }
+        // Mirrors `input.rs`'s `focus_under_pointer`, which clears this on the
+        // line before its own `act(FocusWindowId)` -- and what
+        // `wlr_toplevel_activate` and `request_activation` do for their own
+        // focus requests: without it `layer_shell.rs`'s `layer_keyboard_focus`
+        // hands the keyboard straight back to a still-mapped `on_demand`
+        // surface named here, so the refresh `act` ends in would re-derive
+        // the panel -- which is exactly what sent this request, and stays
+        // mapped -- instead of the window. The click is spent only once the
+        // request is known to be honored, which is why the stale-index return
+        // and the lock gate above come first: a refused request must not
+        // disturb anything, so the session comes back as the user left it.
+        // `act`'s gate remains as the backstop `shell.rs` describes it as.
+        self.clicked_layer = None;
         // Not just an optimisation, and not a behaviour difference either:
         // activating the already-active workspace is a no-op in the core
         // (`focus_workspace_index` sets the index it already has and
         // re-normalises an already-normalised tree). Doing it anyway would
         // mean a client repeating `activate`+`commit` on the workspace it is
         // already on could drive a full `apply` -- an arrange, a configure per
-        // window, a render -- as fast as it can write to its socket.
+        // window, a render -- as fast as it can write to its socket. So, like
+        // `wlr_toplevel_activate`'s already-focused fast path, this skips
+        // `act` and runs only the keyboard half -- now with `clicked_layer`
+        // already cleared, so it reaches the window rather than stopping at
+        // the taskbar. The same request over IPC (`FocusWorkspaceIndex`, PR
+        // #53) spends the click unconditionally, and this path agrees with it
+        // rather than differing by transport.
         if index == current.active {
+            self.refresh_keyboard_focus();
             return;
         }
         self.act(Action::FocusWorkspaceIndex(index));
