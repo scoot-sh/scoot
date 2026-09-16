@@ -97,14 +97,38 @@ pub struct Backend {
     pub size: (i32, i32),
 }
 
+/// The output's name -- and model -- when no backend has a better one:
+/// `--headless` and `--nested`, and every test. `--tty` passes its
+/// connector's name to [`init_named`] instead.
+pub const OUTPUT_NAME: &str = "headless";
+
+/// [`init_named`] under the default name -- what every test harness wants,
+/// and the same output every test has always had. `compositor::run` goes
+/// through `init_named` for all three backends (with [`OUTPUT_NAME`] for the
+/// two connector-less ones), so this is test-only.
+#[cfg(test)]
 pub fn init(state: &mut State, width: i32, height: i32) -> Result<(), Box<dyn Error>> {
+    init_named(state, OUTPUT_NAME, width, height)
+}
+
+/// Creates the one output and the CPU render target behind it. `name` is
+/// what clients see as `wl_output.name` (and `model`): a connector name
+/// such as `HDMI-A-1` or `Virtual-1` under `--tty`, so a bar or shell
+/// labels the screen the way it would under any other compositor, or
+/// [`OUTPUT_NAME`] where there is no connector.
+pub fn init_named(
+    state: &mut State,
+    name: &str,
+    width: i32,
+    height: i32,
+) -> Result<(), Box<dyn Error>> {
     let output = Output::new(
-        "headless".to_string(),
+        name.to_owned(),
         PhysicalProperties {
             size: (0, 0).into(),
             subpixel: Subpixel::Unknown,
             make: "flexwm".into(),
-            model: "headless".into(),
+            model: name.to_owned(),
             serial_number: "0".into(),
         },
     );

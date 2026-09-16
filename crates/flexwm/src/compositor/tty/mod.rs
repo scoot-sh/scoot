@@ -141,7 +141,9 @@ pub struct Tty {
 /// the user named -- which the caller (`compositor::run`) uses in place of
 /// `--width`/`--height` when initializing `headless::init`'s render target:
 /// under `--tty` the mode picks the size, there being no host to negotiate
-/// one with the way `--nested` does.
+/// one with the way `--nested` does. Also returns the connector's name
+/// (`HDMI-A-1`, `Virtual-1`), which the caller gives the `wl_output` so
+/// clients see the screen under the name every other compositor would use.
 ///
 /// `gpu` is `--gpu PATH`: `None` (the normal case) means try every device
 /// on the seat, best guess first, until one works; `Some` means try
@@ -154,7 +156,7 @@ pub fn init(
     state: &mut State,
     gpu: Option<&Path>,
     mode: Option<(u16, u16)>,
-) -> Result<(i32, i32), Box<dyn Error>> {
+) -> Result<(i32, i32, String), Box<dyn Error>> {
     let (mut session, notifier) = LibSeatSession::new()?;
     let seat_name = session.seat();
 
@@ -174,12 +176,13 @@ pub fn init(
         buffers,
         width,
         height,
+        name,
     } = device;
     // info!, not debug!: which device `--tty` ended up on is the first
     // question to ask when a screen stays black, and on hardware where the
     // automatic pick is wrong it is the only thing separating "the fallback
     // worked" from "it happened to work anyway".
-    tracing::info!(path = %path.display(), width, height, "drm: driving this device");
+    tracing::info!(path = %path.display(), connector = %name, width, height, "drm: driving this device");
 
     let interface = LibinputSessionInterface::from(session.clone());
     let mut libinput_context = Libinput::new_with_udev(interface);
@@ -245,7 +248,7 @@ pub fn init(
         );
     }
 
-    Ok((width, height))
+    Ok((width, height, name))
 }
 
 /// Everything `init` needs from one DRM device, once that device has
@@ -259,6 +262,8 @@ struct Device {
     buffers: BufferPool,
     width: i32,
     height: i32,
+    /// The connector's name (`gpu::OpenGpu::name`), for the `wl_output`.
+    name: String,
 }
 
 /// Opens one candidate and builds everything on it, or says why it can't.
@@ -293,6 +298,7 @@ fn open_device(
         fd,
         connector,
         mode,
+        name,
     } = gpu::open(session, path, requested)?;
     // Smithay logs `Unable to become drm master, assuming unprivileged mode`
     // from inside `DrmDeviceFd::new` on every run here. It is expected, and it
@@ -342,6 +348,7 @@ fn open_device(
         buffers,
         width,
         height,
+        name,
     })
 }
 

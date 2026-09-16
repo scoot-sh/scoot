@@ -68,6 +68,12 @@ pub struct OpenGpu {
     pub fd: OwnedFd,
     pub connector: connector::Handle,
     pub mode: Mode,
+    /// The connector's conventional name -- `HDMI-A-1`, `eDP-1`, `Virtual-1`
+    /// -- as every other compositor exposes it, built from the interface
+    /// type and the kernel's per-type index. It becomes the `wl_output`
+    /// name, so bars and shells label the screen by it; before this the
+    /// output was called `headless` on every backend, this one included.
+    pub name: String,
 }
 
 /// Every device worth trying, best guess first.
@@ -231,10 +237,11 @@ pub fn open(
         })?;
 
     match probe(fd.as_fd(), requested) {
-        Ok((connector, mode)) => Ok(OpenGpu {
+        Ok((connector, mode, name)) => Ok(OpenGpu {
             fd,
             connector,
             mode,
+            name,
         }),
         Err(reason) => {
             // Back to libseat, not merely dropped: dropping closes our fd
@@ -259,7 +266,7 @@ pub fn open(
 fn probe(
     fd: BorrowedFd<'_>,
     requested: Option<(u16, u16)>,
-) -> Result<(connector::Handle, Mode), String> {
+) -> Result<(connector::Handle, Mode, String), String> {
     let device = Probe(fd);
     // The wording stops at what the kernel actually said, and says nothing
     // about *why*: the errno varies with the cause (`ENOTSUP` from a driver
@@ -314,7 +321,7 @@ fn find_connector_and_mode(
     device: &impl ControlDevice,
     resources: &ResourceHandles,
     requested: Option<(u16, u16)>,
-) -> Option<(connector::Handle, Mode)> {
+) -> Option<(connector::Handle, Mode, String)> {
     for &conn in resources.connectors() {
         let Ok(info) = device.get_connector(conn, false) else {
             continue;
@@ -344,7 +351,11 @@ fn find_connector_and_mode(
             .or_else(|| modes.first())
             .copied();
         if let Some(mode) = mode {
-            return Some((conn, mode));
+            // `HDMI-A-1`, not `HDMI-A` + `1`: the same spelling the kernel
+            // uses in sysfs (`/sys/class/drm/card0-HDMI-A-1`) and every
+            // wlroots/Smithay compositor uses for `wl_output.name`.
+            let name = format!("{}-{}", info.interface().as_str(), info.interface_id());
+            return Some((conn, mode, name));
         }
     }
     None

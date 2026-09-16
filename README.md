@@ -296,7 +296,15 @@ flexwm --tty --mode 1920x1080 -- foot
 `--mode WxH` picks the connector mode of exactly that size, and falls back to
 the preferred one with a warning if the connector lists no such mode (`cat
 /sys/class/drm/card*-*/modes` shows what it lists). Like `--gpu`, it is
-ignored with a warning outside `--tty`. To see what the seat has, and which driver is behind each device:
+ignored with a warning outside `--tty`.
+
+Under `--tty` the output is named after its connector — `HDMI-A-1`, `eDP-1`,
+`Virtual-1`, the same spelling as `/sys/class/drm/card*-*` — so bars and
+shells label the screen as they would under any other compositor;
+`flexwm msg outputs` shows the same name. `--headless` and `--nested` have no
+connector and keep the name `headless`.
+
+To see what the seat has, and which driver is behind each device:
 
 ```sh
 ls /dev/dri/card*

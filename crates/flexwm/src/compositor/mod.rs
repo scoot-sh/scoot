@@ -93,7 +93,10 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
     // `headless::init`, which needs a concrete size to create the render
     // target at. Neither `--nested` nor plain `--headless` touch
     // `options.width`/`options.height` here.
-    let (width, height) = if options.tty {
+    // `--tty` also names the output after its connector; the other two
+    // backends have no connector, and keep the name clients have always
+    // seen from them.
+    let (width, height, output_name) = if options.tty {
         tty::init(
             state.loop_handle.clone(),
             &mut state,
@@ -112,9 +115,13 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
         if options.mode.is_some() {
             tracing::warn!("--mode picks the display mode for --tty; ignoring it on this backend");
         }
-        (options.width, options.height)
+        (
+            options.width,
+            options.height,
+            headless::OUTPUT_NAME.to_owned(),
+        )
     };
-    headless::init(&mut state, width, height)?;
+    headless::init_named(&mut state, &output_name, width, height)?;
 
     // Order matters, and it's load-bearing, not incidental: `--nested`
     // connects to the *host* compositor via the caller's own WAYLAND_DISPLAY
