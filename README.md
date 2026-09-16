@@ -875,17 +875,27 @@ What to know before pointing a client at it:
 - **The buffer size is the framebuffer's, and it is re-advertised on a
   resize.** If `--tty` follows a hotplug to a new mode (see `--tty` follows
   the display above), every live session gets a fresh `buffer_size` +
-  `done`; a capture with a buffer still sized for the old mode is answered
-  `failed(buffer_constraints)`, which asks the client to re-allocate.
+  `done`. A capture whose buffer is now *too small* is answered
+  `failed(buffer_constraints)`, asking the client to re-allocate — but one
+  whose buffer is still large enough (the output shrank) succeeds into the
+  oversized buffer, with whatever the client's own margin pixels already
+  held left untouched outside the captured region. A client that resizes
+  its buffer exactly to match `buffer_size` on every `done`, as the protocol
+  expects, never sees this.
 - **A session's first capture is served on the next frame; later ones wait
   for the screen to change.** The protocol allows exactly this ("the
   compositor may wait an indefinite amount of time for the source content to
   change"), and it is what keeps a live-preview client from costing a
   full-screen copy every frame on a desktop that is not moving. A capture
   parked this way is served the moment anything redraws.
-- **At most one frame may be outstanding per session**, which the protocol
-  also requires; a second `capture` before the first has been answered is
-  failed rather than queued.
+- **At most one *outstanding capture* per session** — a second `capture`
+  request before the first has been answered is failed rather than queued.
+  That is flexwm's own throttle, not quite the protocol's: the protocol's
+  own rule is at most one frame *object* per session (a second `create_frame`
+  while the first object still exists is `duplicate_frame`), which is
+  stricter and checked earlier than flexwm's rule. The distinction rarely
+  matters to a well-behaved client, which never has a reason to hold two
+  frame objects open anyway.
 - **While the session is locked, a capture sees the lock screen** — never the
   windows behind it, and never a half-drawn transition. This is the same
   guarantee `flexwm msg screenshot` gives, and it comes from the same place:
@@ -896,10 +906,13 @@ What to know before pointing a client at it:
   all, so a capture never contains one. Under `--tty` the cursor is part of
   the one framebuffer a capture is read out of, so a capture always contains
   it, flag or no flag. `flexwm msg screenshot` behaves the same way.
-- **Cursor capture sessions are refused.**
-  `create_pointer_cursor_session` answers `stopped`: capturing the cursor
-  *image* into its own buffer is a second render target nothing measured asks
-  for.
+- **Cursor capture sessions are refused.** `create_pointer_cursor_session`
+  itself gets no event — the cursor-session object has no `stopped` of its
+  own — but the `ext_image_copy_capture_session_v1` a client gets back from
+  its `get_capture_session` is answered `stopped` immediately, which is
+  where a client actually observes the refusal. Capturing the cursor
+  *image* into its own buffer is a second render target nothing measured
+  asks for.
 
 `wlr-screencopy-unstable-v1` is deliberately **not** implemented alongside it,
 unlike the two window-list protocols above. The clients that motivated this
