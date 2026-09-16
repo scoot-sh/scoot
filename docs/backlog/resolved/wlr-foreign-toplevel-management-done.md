@@ -199,10 +199,21 @@ by the manager that created them.
 
 ## Evidence
 
-Compositor code as of **`30289ca`** (everything after it is documentation).
-Dev VM (`ssh -p 2222 dev@localhost`), debug build through the 9p mount at
-`/mnt/flexwm`, `CARGO_TARGET_DIR=/var/cargo-target`, force-cleaned
-(`cargo clean -p flexwm && cargo build -p flexwm`) before every live run.
+Everything below was captured at **`699d940`** — the whole PR, code and
+docs; the only commit after it is the one that writes this SHA into this
+section. Dev VM (`ssh -p 2222 dev@localhost`), debug build through the 9p
+mount at `/mnt/flexwm`, `CARGO_TARGET_DIR=/var/cargo-target`, force-cleaned
+(`cargo clean -p flexwm && cargo build -p flexwm`) first, because a build
+through that mount can otherwise report `Finished` in under two seconds
+without recompiling a real change.
+
+The dev VM's target directory was shared with a second implementer while
+this ran, so the live probes were pointed at a **copy** of the binary taken
+straight after that clean build (`/var/tmp/flexwm-ftlmgmt`, since deleted)
+rather than at `/var/cargo-target/debug/flexwm`, which the other agent's
+build could have replaced in between. Each probe is also self-verifying on
+that point: a binary without this PR does not offer the global the logs
+below show being bound.
 
 ### The checks
 
@@ -219,9 +230,13 @@ foreign_toplevel` — the wlr suite plus the `ext-` one it must agree with).
 ### Live, against the real quickshell
 
 Three runs, scripts kept on the dev VM so this can be re-run without
-rebuilding them: `/var/tmp/qs-probe.sh` (the original probe, unmodified),
-`/var/tmp/qs-control-probe.sh`, `/var/tmp/qs-activate-probe.sh`. Raw
-`WAYLAND_DEBUG=1` logs at `/tmp/qsctl-wire.log` and `/tmp/qsact-wire.log`.
+rebuilding them. `/var/tmp/qs-probe.sh` is PR #47's original probe,
+untouched; `/var/tmp/qs-control-probe.sh` and
+`/var/tmp/qs-activate-probe.sh` are this PR's. The `-699d940.sh` copy of
+each is the one that produced the transcripts here — identical but for the
+binary path described above. Raw output at `/tmp/p1.log`, `/tmp/p2.log`,
+`/tmp/p3.log`, with the full `WAYLAND_DEBUG=1` wire logs at
+`/tmp/qsctl-wire.log` and `/tmp/qsact-wire.log`.
 
 **1. The original probe, unchanged, now passes.** Same script that measured
 `count = 0` when this entry was filed; one real `foot` window:
