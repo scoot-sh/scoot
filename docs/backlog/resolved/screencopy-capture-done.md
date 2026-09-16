@@ -552,3 +552,91 @@ Disk moved around more than usual because round 2 needed a release build:
 target dir was removed to make room (40% / 9.0G), release built twice, and
 the debug tree rebuilt afterwards — 49% / 7.6G at the end, i.e. more free
 space than this started with.
+
+### Round 3: the wide alpha pass had no coverage of its own bounds logic
+
+Independent review found one real gap left. Round 2 added two tests for
+`write_capture`'s `data.offset` and `data.stride` handling — but both used
+`Argb8888`, which is a plain row `memcpy` and **never enters the opacity pass
+at all**. So the wide `Xrgb8888` pass added in the same round, which walks
+those same two client numbers a second time with its own arithmetic, was
+itself only ever exercised at `offset == 0` and `stride == width * 4`:
+precisely the gap those two tests exist to close, one code path later.
+
+The review proved it was reachable rather than theoretical, and both of its
+mutations were reproduced here against the shipped code before the fix:
+
+```
+# A. the wide pass sizes itself from the stride instead of the image width
+-  let steps = width / PIXELS_PER_STEP;
++  let steps = dst_stride as usize / PIXELS_PER_STEP;
+   before the fix: 646 passed, 0 failed   <- nothing noticed
+
+# B. the wide pass loses `data.offset`, stamping 0xff through a sibling buffer
+-  let at = dst.add(step * STEP_BYTES)...
++  let at = ptr.add((y * dst_stride) as usize + step * STEP_BYTES)...
+   before the fix: 646 passed, 0 failed   <- nothing noticed
+```
+
+B is the one worth spelling out: a toolkit double-buffering out of one
+`wl_shm` pool asks for an `Xrgb8888` capture into its *second* buffer, and the
+opacity pass stamps `0xff` over every fourth byte starting at the pool's
+start — corrupting the **first** buffer, which the client may have attached to
+a visible surface. The returned capture looks perfectly correct; the damage
+lands elsewhere in the client's own memory.
+
+#### The fix, and the proof it bites
+
+One test, `an_opaque_capture_honours_the_offset_and_the_stride_as_well`,
+combining all three conditions that separate these paths: `Xrgb8888` (so the
+opacity pass actually runs), a sibling buffer ahead of it in the pool (so
+`data.offset` is non-zero), and 16 bytes of row padding (so `data.stride`
+exceeds the pixels). It asserts the sibling is byte-for-byte untouched, every
+row's padding is untouched, and every pixel is both the frame's colour *and*
+alpha-forced, at its own stride.
+
+The two near-duplicate steps round 2 added were collapsed into one
+parameterised `Step::CaptureFromPool { format, sibling, pad }` that all three
+tests now drive, so the three shapes read as three points in one space rather
+than three copies of a helper.
+
+Re-run of both review mutations against the fixed suite, plus a third:
+
+| mutation | result |
+| --- | --- |
+| A. `steps` from `dst_stride` instead of `width` | **646 passed, 1 failed** — `an_opaque_capture_honours_the_offset_and_the_stride_as_well`, and nothing else |
+| B. opacity pass drops `data.offset` (sibling corruption) | **646 passed, 1 failed** — the new test, and nothing else |
+| B'. opacity pass drops `y * dst_stride` (every row onto row 0) | 644 passed, 3 failed — the new test plus the two plain `Xrgb8888` tests, which already catch un-forced rows |
+
+So for both of the mutations that only the combined shape can distinguish, the
+new test is the **only** thing in a 647-test suite that fails.
+
+#### Re-verification
+
+Force-clean again — the whole `debug` target dir removed first, not
+incremental:
+
+```
+$ rm -rf /var/cargo-target/debug && cargo build -p flexwm --all-targets
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1m 56s
+
+$ cargo fmt --check -p flexwm                       FMT_CLEAN
+$ cargo clippy -p flexwm --all-targets -- -D warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 48.84s
+$ cargo test -p flexwm
+test result: ok. 647 passed; 0 failed; 1 ignored
+$ cargo nextest run --workspace
+     Summary [  25.966s] 741 tests run: 741 passed, 1 skipped
+$ bash scripts/smoke-test.sh
+rc=0, 12 `ok:` assertions
+```
+
+Fifteen screencopy tests run six more times in isolation and the full suite
+twice more, all clean.
+
+Not re-run, and named rather than implied: the live `grim`, `swaylock` and
+`--tty` results, and the round-2 release-vs-dev benchmark. This round changes
+no compositor behaviour at all — the only `.rs` change outside the test module
+is none; `screencopy.rs` is untouched by this round.
+
+Dev VM at 51% used / 7.3G free at the end, nothing left running.

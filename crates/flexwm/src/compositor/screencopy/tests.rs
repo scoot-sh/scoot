@@ -123,12 +123,21 @@ enum Step {
         height: i32,
         format: wl_shm::Format,
     },
-    /// Capture into the **second** of two buffers carved out of one pool, so
-    /// the write has a non-zero `offset` within that pool.
-    CaptureAtOffset,
-    /// Capture into a buffer whose rows are `pad` bytes further apart than the
-    /// pixels need, i.e. `stride > width * 4`.
-    CaptureWithPaddedRows { pad: i32 },
+    /// Carve a buffer out of a pool and capture into it, with the three things
+    /// [`solid_buffer`]'s one-buffer-per-pool shape cannot express:
+    ///
+    /// - `format` decides whether the opacity pass runs at all -- only
+    ///   `Xrgb8888` takes it, which is why an `Argb8888` test of the offset and
+    ///   stride terms says nothing about the *wide* pass that also uses them;
+    /// - `sibling` puts another buffer ahead of the capture's, so `data.offset`
+    ///   is non-zero and there is something adjacent that must stay untouched;
+    /// - `pad` puts `pad` bytes between rows, so `data.stride` exceeds the
+    ///   pixels and there is padding that must stay untouched too.
+    CaptureFromPool {
+        format: wl_shm::Format,
+        sibling: bool,
+        pad: i32,
+    },
     /// The same, but return as soon as the request is on the wire -- for the
     /// cases where "the compositor has *not* answered yet" is the assertion.
     CaptureWithoutWaiting,
@@ -454,7 +463,13 @@ fn a_capture_lands_at_its_buffers_offset_inside_a_shared_pool() {
     fixture.run(Step::StartSession {
         paint_cursors: false,
     });
-    let (outcome, pool) = fixture.run(Step::CaptureAtOffset).frame();
+    let (outcome, pool) = fixture
+        .run(Step::CaptureFromPool {
+            format: wl_shm::Format::Argb8888,
+            sibling: true,
+            pad: 0,
+        })
+        .frame();
     assert_eq!(outcome, Outcome::Ready);
 
     let bytes = (CANVAS * CANVAS * 4) as usize;
@@ -488,7 +503,11 @@ fn a_capture_honours_a_buffer_whose_rows_are_padded() {
         paint_cursors: false,
     });
     let (outcome, pool) = fixture
-        .run(Step::CaptureWithPaddedRows { pad: PAD })
+        .run(Step::CaptureFromPool {
+            format: wl_shm::Format::Argb8888,
+            sibling: false,
+            pad: PAD,
+        })
         .frame();
     assert_eq!(outcome, Outcome::Ready);
 
@@ -507,6 +526,74 @@ fn a_capture_honours_a_buffer_whose_rows_are_padded() {
         assert!(
             line[row..].chunks_exact(4).all(|pixel| pixel == SENTINEL),
             "row {y}'s padding is not part of the image and must be left alone"
+        );
+    }
+}
+
+#[test]
+fn an_opaque_capture_honours_the_offset_and_the_stride_as_well() {
+    // The two tests above cover `data.offset` and `data.stride` for the
+    // `Argb8888` path -- which is a plain row `memcpy` and never enters the
+    // opacity pass at all. So the *wide* `Xrgb8888` pass, which walks the same
+    // two client numbers a second time with its own arithmetic, was covered
+    // only at `offset == 0` and `stride == width * 4`: exactly the gap those
+    // two tests exist to close, one code path later.
+    //
+    // All three at once, because that is the shape that separates them: a
+    // client double-buffering out of one pool, asking for the opaque format,
+    // with padded rows. An opacity pass that ignored `data.offset` would stamp
+    // `0xff` over every fourth byte of the *sibling* buffer -- which the client
+    // may have attached to a visible surface -- while the capture it returned
+    // looked perfectly correct.
+    const PAD: i32 = 16;
+    let mut fixture = Fixture::start();
+    fixture.run(Step::MapWindow(WINDOW_BGRA));
+    fixture.run(Step::StartSession {
+        paint_cursors: false,
+    });
+    let (outcome, pool) = fixture
+        .run(Step::CaptureFromPool {
+            format: wl_shm::Format::Xrgb8888,
+            sibling: true,
+            pad: PAD,
+        })
+        .frame();
+    assert_eq!(outcome, Outcome::Ready);
+
+    let row = (CANVAS * 4) as usize;
+    let stride = row + PAD as usize;
+    let bytes = stride * CANVAS as usize;
+    assert_eq!(pool.len(), bytes * 2, "the whole pool is read back");
+    let (sibling, target) = pool.split_at(bytes);
+    let framebuffer = fixture.pixels();
+
+    assert!(
+        sibling.chunks_exact(4).all(|pixel| pixel == SENTINEL),
+        "the sibling buffer must be byte-for-byte untouched -- neither the row \
+         copy nor the opacity pass may write outside the buffer it was given"
+    );
+    for y in 0..CANVAS as usize {
+        let line = &target[y * stride..][..stride];
+        let drawn = &framebuffer[y * row..][..row];
+        for (x, (captured, drawn)) in line[..row]
+            .chunks_exact(4)
+            .zip(drawn.chunks_exact(4))
+            .enumerate()
+        {
+            assert_eq!(
+                &captured[..3],
+                &drawn[..3],
+                "row {y} pixel {x}: the colour has to be the frame's, at its own stride"
+            );
+            assert_eq!(
+                captured[3], 0xFF,
+                "row {y} pixel {x}: the X byte has to be forced opaque, at its own stride"
+            );
+        }
+        assert!(
+            line[row..].chunks_exact(4).all(|pixel| pixel == SENTINEL),
+            "row {y}'s padding is not part of the image -- the opacity pass must \
+             stop at the pixels, not run to the stride"
         );
     }
 }
@@ -819,42 +906,26 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 })?;
                 Ack::Frame(client.frame, read_back(&held))
             }
-            Step::CaptureAtOffset => {
-                let session = session.as_ref().ok_or("no session")?;
-                let bytes = (CANVAS * CANVAS * 4) as usize;
-                let mut pool = Pool::new(&shm, &qh, bytes * 2, SENTINEL);
-                // Two buffers, the capture going into the *second* -- what a
-                // toolkit double-buffering out of one pool has.
-                let first = pool.buffer(0, CANVAS, CANVAS, CANVAS * 4, wl_shm::Format::Argb8888);
-                let second = pool.buffer(
-                    bytes as i32,
-                    CANVAS,
-                    CANVAS,
-                    CANVAS * 4,
-                    wl_shm::Format::Argb8888,
-                );
-                pool.finish();
-                neighbours.push(first);
-                capture_into(
-                    session,
-                    &qh,
-                    &mut frame,
-                    &mut held,
-                    &mut client,
-                    second,
-                    CANVAS,
-                    CANVAS,
-                );
-                wait_for(&mut queue, &mut client, "a frame outcome", |client| {
-                    (client.frame != Outcome::Waiting).then_some(())
-                })?;
-                Ack::Frame(client.frame, read_back(&held))
-            }
-            Step::CaptureWithPaddedRows { pad } => {
+            Step::CaptureFromPool {
+                format,
+                sibling,
+                pad,
+            } => {
                 let session = session.as_ref().ok_or("no session")?;
                 let stride = CANVAS * 4 + pad;
-                let mut pool = Pool::new(&shm, &qh, (stride * CANVAS) as usize, SENTINEL);
-                let buffer = pool.buffer(0, CANVAS, CANVAS, stride, wl_shm::Format::Argb8888);
+                let bytes = (stride * CANVAS) as usize;
+                let mut pool = Pool::new(&shm, &qh, bytes * if sibling { 2 } else { 1 }, SENTINEL);
+                let offset = if sibling {
+                    // A buffer ahead of the capture's -- what a toolkit
+                    // double-buffering out of one pool has, and what a write
+                    // that ignored `data.offset` would land in. Kept alive for
+                    // the run so the pool really does hold two live buffers.
+                    neighbours.push(pool.buffer(0, CANVAS, CANVAS, stride, format));
+                    bytes as i32
+                } else {
+                    0
+                };
+                let target = pool.buffer(offset, CANVAS, CANVAS, stride, format);
                 pool.finish();
                 capture_into(
                     session,
@@ -862,7 +933,7 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                     &mut frame,
                     &mut held,
                     &mut client,
-                    buffer,
+                    target,
                     CANVAS,
                     CANVAS,
                 );
