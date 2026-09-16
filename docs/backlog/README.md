@@ -26,11 +26,21 @@ actionable.
   long (and wrongly) recorded as blocked on a license-clean asset. Shipping
   one is blocked; reading the user's own never was.
 - [**The four protocols `foot` warned about**](./resolved/foot-protocol-warnings-done.md)
-  — RESOLVED 2026-09-15 (issue #40): `wp-cursor-shape-v1` (with ten
+  — RESOLVED 2026-09-15 (issue #40, PR #41): `wp-cursor-shape-v1` (with ten
   procedurally-drawn shapes, so naming one gets you that shape),
   `xdg-activation-v1`, `xdg-toplevel-icon-v1` (name exposed as
   `WindowSnapshot::icon`), `text-input-v3` + `input-method-v2`. Verified by
   before/after on `foot`'s own warnings.
+- [**`xdg-activation-v1` had no input-serial gate**](./resolved/activation-serial-validation-done.md)
+  — RESOLVED 2026-09-16 (PR #42), found by independent review of the
+  four-protocols PR: an unfocused client with no user interaction at all
+  could self-activate its own surface. A token now has to name a real,
+  recent key/button event actually delivered to the requesting client.
+- [**Popup input: grabs, keyboard focus, layer-parented popups**](./resolved/xdg-popup-input-resolved.md)
+  — RESOLVED 2026-09-16 (PR #44): `xdg_popup.grab` is honoured, with a
+  stated focus precedence (lock > exclusive layer surface > popup grab >
+  window). Locking dismisses any open popup grab and refuses new ones, so a
+  menu left open at lock time cannot receive the password.
 
 ## Open
 

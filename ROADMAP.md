@@ -35,41 +35,83 @@ pulled forward from [`docs/backlog/`](docs/backlog/) rather than the order
 above, at the user's direction or because a live crash-DoS or daily-driver
 gap jumped the queue — each item's own file records why it landed when it did.
 
+## Recently shipped (since 2026-09-15)
+
+- **[`ext-idle-notify-v1` + `idle-inhibit-unstable-v1`](docs/backlog/resolved/ext-idle-notify-resolved.md)**
+  (PR #38, 2026-09-15) — the automatic trigger session-lock had no other way
+  to get. A `swayidle`-style daemon can now idle, resume and re-idle the
+  seat (field-proven live); inhibitors hold it awake.
+- **[The IPC bundle](docs/backlog/resolved/protocol-bundle-resolved.md)**
+  (PR #39, 2026-09-15) — `OutputSnapshot.usable`, a focus-workspace-N action
+  (`focus-workspace-index N`), and an ambient `locked` flag on every `Ok`
+  reply. Landed with **no** `PROTOCOL_VERSION` bump: all three are
+  defaulted/additive.
+- **[The four protocols `foot` warned about](docs/backlog/resolved/foot-protocol-warnings-done.md)**
+  (issue #40, PR #41, 2026-09-15) — `wp-cursor-shape-v1` (ten
+  procedurally-drawn fallback shapes, plus real xcursor-theme loading so a
+  themed session keeps its real artwork instead of regressing to line art),
+  `xdg-activation-v1`, `xdg-toplevel-icon-v1`, and `text-input-v3` +
+  `input-method-v2` (the IME popup). Verified before/after against `foot`'s
+  own warnings.
+- **[`xdg-activation-v1` had no input-serial gate](docs/backlog/resolved/activation-serial-validation-done.md)**
+  (PR #42, 2026-09-16) — found by independent review of PR #41. An
+  unfocused client with no user interaction at all could self-activate its
+  own surface; a token now has to name a real, recent key/button event
+  actually delivered to the requesting client, not just be young and under
+  the count cap.
+- **[`--tty` background "not painted"](docs/backlog/resolved/tty-background-not-painted-done.md)**
+  (PR #43, 2026-09-16) — misdiagnosis, not a rendering bug: the background
+  was always painted, and the smoke test's sample pixel sat on the cursor
+  (the one thing only `--tty` draws). Fixed in the test script; no
+  compositor code changed.
+- **[Popup input](docs/backlog/resolved/xdg-popup-input-resolved.md)**
+  (PR #44, 2026-09-16) — `xdg_popup.grab` is honoured, with a stated focus
+  precedence (lock > exclusive layer surface > popup grab > window /
+  click-focused layer surface): locking dismisses any open popup grab and
+  refuses new ones, so a menu left open at lock time cannot receive the
+  password. Layer-parented popups turned out to already work.
+- **[Shared test harness + `cargo-nextest`](docs/backlog/resolved/large-test-file-organization-done.md)**
+  (PR #45, 2026-09-16) — extracted the real-client harness five of the
+  largest test files each reimplemented (707 fewer duplicated lines), split
+  the two biggest by concern, adopted `cargo-nextest` alongside `cargo
+  test`. Infrastructure, not a protocol or user-facing change.
+
 ## What's next
 
 The backlog is the source of truth for what to pick up; this is the current
-read of it, not a commitment:
+read of it, not a commitment. The backlog's own "High priority" entries
+([DMS gaps](docs/backlog/protocols/dms-enablement-gaps.md),
+[Noctalia probe](docs/backlog/protocols/noctalia-probe.md)) are stale probe
+reports now: their P0 findings are resolved elsewhere (see "Recently
+shipped" above), and what's left of each is filed individually under
+`docs/backlog/protocols/` at medium priority — the effective top of what's
+actually open.
 
 1. **Confirm `--gpu` fixes the Asahi Linux `--tty` failure** — needs the
    user's own hardware, not the dev VM (no split GPU/display-controller
    topology there). Unblocks the
    [`[tty] gpu` config key](docs/backlog/tty/tty-gpu-config-key.md).
-2. **[`ext-idle-notify-v1` + `idle-inhibit-unstable-v1`](docs/backlog/resolved/ext-idle-notify-resolved.md)** —
-   RESOLVED 2026-09-15: the automatic trigger session-lock had no other
-   way to get. A `swayidle`-style daemon can now idle, resume and
-   re-idle the seat (field-proven live); inhibitors hold it awake.
-3. **The IPC bundle** ([resolved](docs/backlog/resolved/protocol-bundle-resolved.md),
-   2026-09-15) — `OutputSnapshot.usable`, a focus-workspace-N action
-   (`focus-workspace-index N`), and an ambient `locked` flag on every
-   `Ok` reply. Landed together with **no** `PROTOCOL_VERSION` bump: all
-   three are defaulted/additive, and the resolution record has the
-   analysis for why the assumed bump was never needed.
-4. **[The four protocols `foot` warned about](docs/backlog/resolved/foot-protocol-warnings-done.md)** —
-   RESOLVED 2026-09-15 (issue #40): `wp-cursor-shape-v1`,
-   `xdg-activation-v1`, `xdg-toplevel-icon-v1`, and `text-input-v3` +
-   `input-method-v2`, landed together because each was one global plus a
-   handler and the issue tracked them as one gap. The substance was on
-   flexwm's own side rather than in the protocol wiring: ten
-   procedurally-drawn cursor shapes (without them, advertising cursor-shape
-   would have *regressed* a session that had been getting a real I-beam from
-   a client's own theme), two policy bounds on activation tokens, and the
-   IME popup. Verified before/after against the actual `foot` warnings.
-5. Small, unblocked fixes: [`msg key` modifier
+2. **Medium-priority protocol gaps**, mostly what's left of the DMS/Noctalia
+   probes (see "Shell enablement" below for their recommended order):
+   [foreign-toplevel management](docs/backlog/protocols/foreign-toplevel-management.md),
+   [output-management](docs/backlog/protocols/output-management.md),
+   [screencopy/image-capture](docs/backlog/protocols/screencopy-capture.md),
+   plus two filed from PR #44's own review —
+   [popup grab serial validation](docs/backlog/protocols/popup-grab-serial-validation.md)
+   and [a window-focus change doesn't dismiss an active popup
+   grab](docs/backlog/protocols/popup-grab-survives-window-focus-change.md).
+3. **[IPC screenshot capture: synchronous, no connection
+   cap](docs/backlog/ipc/screenshot-sync-no-rate-limit.md)** (medium
+   priority).
+4. Small, unblocked low-priority fixes: [`msg key` modifier
    resolution](docs/backlog/input/msg-key-modifier-resolution.md),
    [`[binds]` capital
    letters](docs/backlog/config/binds-capital-letter.md),
    [`--width/--height`
    bounds](docs/backlog/core/width-height-unbounded.md).
+5. [Rename `flexwm` → `flex`, split out
+   `flexctl`](docs/backlog/meta/rename-flex-family.md) — decided, explicitly
+   scheduled **last** in the burn-down, per the entry's own frontmatter.
 
 ## Shell enablement (DMS / Noctalia probes, 2026-09-14)
 
@@ -96,9 +138,14 @@ probes' recommended order:
    handler the entry asked for would have put two tree nodes on one
    surface (measured). Follow-up filed:
    [grab serial validation](docs/backlog/protocols/popup-grab-serial-validation.md).
-2. Item 2 above (idle) — RESOLVED 2026-09-15: auto-lock's trigger
-   exists and is field-proven with real swayidle; what remains is the
-   user's own daemon config, not compositor work.
+   Neither probed shell exercises any of this directly: DMS and Noctalia
+   both route their own menus through layer surfaces, with zero
+   `xdg_popup` wire traffic in either probe — the first real client for
+   this work is an ordinary GTK/Qt toolkit menu, not DMS or Noctalia.
+2. [Idle](docs/backlog/resolved/ext-idle-notify-resolved.md) — RESOLVED
+   2026-09-15: auto-lock's trigger exists and is field-proven with real
+   swayidle; what remains is the user's own daemon config, not compositor
+   work.
 3. [`foreign-toplevel`](docs/backlog/protocols/foreign-toplevel-management.md)
    — window lists (check for an `ext-` successor first).
 4. [`output-management`](docs/backlog/protocols/output-management.md)
