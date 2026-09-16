@@ -107,6 +107,10 @@
             pkgs.cargo
             pkgs.clippy
             pkgs.rustfmt
+            # Part of the documented verification set (see `CLAUDE.md`), so
+            # the dev shell has to provide it. Already in the VM's own system
+            # closure, which keeps the Linux shell a subset of it as below.
+            pkgs.cargo-nextest
             pkgs.pkg-config
           ]
           # Not on Linux: the VM's system closure deliberately drops

@@ -173,8 +173,9 @@ fn the_locked_event_waits_for_a_blanked_frame() {
     let backend = fixture.state.backend.take().expect("a backend");
 
     fixture.send_step(0, Step::Lock);
-    // The client's own `Step::Lock` gives up after 100 round trips without
-    // either event, which is what this asserts: it cannot be confirmed.
+    // The client's own `Step::Lock` gives up on its five-second deadline
+    // without either event, which is what this asserts: with no backend there
+    // is no blanked frame, so the lock cannot be confirmed.
     let deadline = Instant::now() + Duration::from_secs(5);
     while Instant::now() < deadline {
         fixture
