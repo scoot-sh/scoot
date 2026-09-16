@@ -24,14 +24,9 @@
 //! pair) but which is created either way.
 
 use std::os::unix::net::UnixStream;
-use std::sync::Arc;
-use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
-use std::thread::{self, JoinHandle};
-use std::time::{Duration, Instant};
+use std::sync::mpsc::{Receiver, Sender};
 
-use flexwm_core::{Action, Config, Horizontal, Vertical};
-use smithay::reexports::calloop::EventLoop;
-use smithay::reexports::wayland_server::Display;
+use flexwm_core::{Action, Horizontal, Vertical};
 use wayland_client::protocol::{wl_compositor, wl_output, wl_registry, wl_surface};
 use wayland_client::{Connection, Dispatch, Proxy, QueueHandle, WEnum, event_created_child};
 use wayland_protocols::ext::workspace::v1::client::ext_workspace_group_handle_v1::{
@@ -45,11 +40,9 @@ use wayland_protocols::ext::workspace::v1::client::ext_workspace_manager_v1::{
 };
 use wayland_protocols::xdg::shell::client::{xdg_surface, xdg_toplevel, xdg_wm_base};
 
-use crate::compositor::State;
 use crate::compositor::decorations::Appearance;
 use crate::compositor::headless;
-use crate::compositor::keybindings::Keybindings;
-use crate::compositor::state::ClientState;
+use crate::compositor::test_support::{Harness, wait_for};
 
 /// The framebuffer these tests render into. Nothing here reads a pixel; it
 /// only has to be a valid size for the headless backend.
@@ -423,13 +416,10 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 let xdg = wm_base.get_xdg_surface(&surface, &qh, WindowIndex(index));
                 let toplevel = xdg.get_toplevel(&qh, ());
                 surface.commit();
-                for _ in 0..50 {
-                    queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
-                    if let Some(serial) = client.window_serials[index] {
-                        xdg.ack_configure(serial);
-                        break;
-                    }
-                }
+                let serial = wait_for(&mut queue, &mut client, "a toplevel configure", |client| {
+                    client.window_serials[index]
+                })?;
+                xdg.ack_configure(serial);
                 windows.push((surface, xdg, toplevel));
             }
             Step::CloseWindow(index) => {
@@ -486,64 +476,15 @@ fn manager(client: &TestClient, index: usize) -> Result<ExtWorkspaceManagerV1, S
 }
 
 /// A live compositor with a real headless backend and one connected client,
-/// scripted a step at a time -- the same shape `layer_shell/tests.rs` uses.
-struct Fixture {
-    event_loop: EventLoop<'static, State>,
-    state: State,
-    clients: Vec<ClientHandle>,
-}
-
-/// One connected client thread and the channels driving it.
-struct ClientHandle {
-    /// `None` once the test has disconnected this client on purpose.
-    steps: Option<Sender<Step>>,
-    acks: Receiver<Ack>,
-    thread: Option<JoinHandle<Result<(), String>>>,
-}
+/// scripted a step at a time. See [`crate::compositor::test_support`] for
+/// everything that is not specific to this protocol.
+type Fixture = Harness<Step, Ack>;
 
 impl Fixture {
     fn new() -> Self {
-        let mut event_loop: EventLoop<'static, State> =
-            EventLoop::try_new().expect("an event loop");
-        let display: Display<State> = Display::new().expect("a wayland display");
-        let mut state = State::new(
-            &mut event_loop,
-            display,
-            Config::default(),
-            Keybindings::default(),
-            Appearance::default(),
-            1.0,
-        )
-        .expect("a compositor state with a wayland socket");
-        headless::init(&mut state, CANVAS, CANVAS).expect("a headless backend");
-
-        let mut fixture = Self {
-            event_loop,
-            state,
-            clients: Vec::new(),
-        };
-        fixture.spawn_client();
+        let mut fixture = Harness::headless(Appearance::default(), CANVAS);
+        fixture.spawn(run_client);
         fixture
-    }
-
-    /// Connects another, independent client. Its steps are addressed by the
-    /// index this returns.
-    fn spawn_client(&mut self) -> usize {
-        let (server_end, client_end) = UnixStream::pair().expect("a socket pair");
-        self.state
-            .display_handle
-            .insert_client(server_end, Arc::new(ClientState::default()))
-            .expect("an inserted client");
-
-        let (step_tx, step_rx) = channel();
-        let (ack_tx, ack_rx) = channel();
-        let thread = thread::spawn(move || run_client(client_end, step_rx, ack_tx));
-        self.clients.push(ClientHandle {
-            steps: Some(step_tx),
-            acks: ack_rx,
-            thread: Some(thread),
-        });
-        self.clients.len() - 1
     }
 
     /// A fixture whose client has bound the output and then the manager --
@@ -557,24 +498,6 @@ impl Fixture {
         fixture
     }
 
-    fn run(&mut self, step: Step) -> Ack {
-        self.run_on(0, step)
-    }
-
-    fn run_on(&mut self, client: usize, step: Step) -> Ack {
-        self.clients[client]
-            .steps
-            .as_ref()
-            .expect("the step channel")
-            .send(step)
-            .expect("the client thread is still running");
-        let acks = std::mem::replace(&mut self.clients[client].acks, channel().1);
-        let ack = self.wait_for(client, &acks, "a client step acknowledgement");
-        self.clients[client].acks = acks;
-        self.settle();
-        ack
-    }
-
     /// Everything the client has seen since the last call.
     fn take_log(&mut self) -> Vec<Seen> {
         self.take_log_on(0)
@@ -585,41 +508,6 @@ impl Fixture {
             Ack::Log(log) => log,
             Ack::Done => panic!("the client answered a log request with nothing"),
         }
-    }
-
-    fn wait_for<T>(&mut self, client: usize, channel: &Receiver<T>, what: &str) -> T {
-        let deadline = Instant::now() + Duration::from_secs(10);
-        loop {
-            match channel.try_recv() {
-                Ok(value) => return value,
-                Err(TryRecvError::Disconnected) => {
-                    let outcome = self.clients[client]
-                        .thread
-                        .take()
-                        .map(|handle| handle.join().expect("the client thread"));
-                    panic!("client {client} stopped while waiting for {what}: {outcome:?}");
-                }
-                Err(TryRecvError::Empty) => {}
-            }
-            assert!(
-                Instant::now() < deadline,
-                "timed out waiting for {what}; the compositor stopped serving"
-            );
-            self.event_loop
-                .dispatch(Some(Duration::from_millis(5)), &mut self.state)
-                .expect("a compositor dispatch");
-        }
-    }
-
-    /// A few dispatch cycles with nothing outstanding, so in-flight protocol
-    /// traffic in both directions has been processed.
-    fn settle(&mut self) {
-        for _ in 0..10 {
-            self.event_loop
-                .dispatch(Some(Duration::from_millis(1)), &mut self.state)
-                .expect("a compositor dispatch");
-        }
-        let _ = self.state.display_handle.flush_clients();
     }
 
     /// Applies an action compositor-side, the way a keybinding or an IPC
@@ -642,18 +530,6 @@ impl Fixture {
     /// How many managers the compositor is keeping in step.
     fn registered_managers(&self) -> usize {
         self.state.ext_workspace.managers.len()
-    }
-
-    /// Disconnects a client and waits for the compositor to notice.
-    fn disconnect_client(&mut self, client: usize) {
-        drop(self.clients[client].steps.take());
-        if let Some(handle) = self.clients[client].thread.take() {
-            handle
-                .join()
-                .expect("the client thread")
-                .expect("the client ran cleanly");
-        }
-        self.settle();
     }
 }
 
@@ -1038,7 +914,7 @@ fn stop_is_answered_with_finished_and_ends_the_updates() {
 #[test]
 fn two_clients_are_kept_in_step_independently() {
     let mut fixture = Fixture::bound();
-    let second = fixture.spawn_client();
+    let second = fixture.spawn(run_client);
     fixture.run_on(second, Step::BindManager);
     // The second client binds its `wl_output` *after* its manager, so the
     // compositor's `output_bound` hook has to answer it -- and answer it
@@ -1082,7 +958,7 @@ fn two_clients_are_kept_in_step_independently() {
 #[test]
 fn one_client_disconnecting_does_not_disturb_another() {
     let mut fixture = Fixture::bound();
-    let second = fixture.spawn_client();
+    let second = fixture.spawn(run_client);
     fixture.run_on(second, Step::BindOutput);
     fixture.run_on(second, Step::BindManager);
     fixture.run_on(second, Step::MapWindow);
@@ -1094,7 +970,7 @@ fn one_client_disconnecting_does_not_disturb_another() {
     // The second client owned the window, so its disconnect also shrinks the
     // workspace list -- which the survivor must be told about, in full,
     // while the dead client's manager is being dropped in the same pass.
-    fixture.disconnect_client(second);
+    fixture.disconnect(second);
     assert_eq!(fixture.registered_managers(), 1);
     assert_eq!(fixture.workspaces(), (1, 0));
     assert_eq!(
@@ -1109,7 +985,7 @@ fn a_client_going_away_stops_being_tracked() {
     fixture.run(Step::MapWindow);
     assert_eq!(fixture.registered_managers(), 1);
 
-    fixture.disconnect_client(0);
+    fixture.disconnect(0);
     assert_eq!(
         fixture.registered_managers(),
         0,
