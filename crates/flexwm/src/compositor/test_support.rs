@@ -411,3 +411,31 @@ pub(crate) fn pixel(pixels: &[u8], width: i32, x: i32, y: i32) -> [u8; 4] {
 pub(crate) fn contains(pixels: &[u8], color: [u8; 4]) -> bool {
     pixels.chunks_exact(4).any(|pixel| pixel == color)
 }
+
+/// Where the first `color` pixel is, scanning in row order.
+///
+/// For pointing at a surface whose placement the test does not pin down: a
+/// popup lands wherever its positioner and the parent's geometry put it, and
+/// hard-coding that coordinate would be re-deriving Smithay's own positioner
+/// arithmetic in a test -- which would then pass or fail for reasons that
+/// have nothing to do with what is under test.
+pub(crate) fn find_color(pixels: &[u8], width: i32, color: [u8; 4]) -> Option<(f64, f64)> {
+    let index = pixels.chunks_exact(4).position(|pixel| pixel == color)? as i32;
+    Some(((index % width) as f64, (index / width) as f64))
+}
+
+/// Asserts one pixel of the frame is `expected`, naming what was being drawn.
+pub(crate) fn assert_pixel(
+    pixels: &[u8],
+    width: i32,
+    x: i32,
+    y: i32,
+    expected: [u8; 4],
+    what: &str,
+) {
+    assert_eq!(
+        pixel(pixels, width, x, y),
+        expected,
+        "{what}: wrong pixel at ({x}, {y})"
+    );
+}

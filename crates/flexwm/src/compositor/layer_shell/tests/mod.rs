@@ -23,17 +23,9 @@
 use std::io::Write;
 use std::os::fd::AsFd;
 use std::os::unix::net::UnixStream;
-use std::sync::Arc;
-use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
-use std::thread::{self, JoinHandle};
-use std::time::{Duration, Instant};
+use std::sync::mpsc::{Receiver, Sender};
 
-use flexwm_core::{Config, Rect};
-use smithay::backend::allocator::Fourcc;
-use smithay::backend::renderer::{Bind, ExportMem};
-use smithay::reexports::calloop::EventLoop;
-use smithay::reexports::wayland_server::Display;
-use smithay::utils::Rectangle;
+use flexwm_core::Rect;
 use wayland_client::protocol::{
     wl_buffer, wl_callback, wl_compositor, wl_keyboard, wl_output, wl_pointer, wl_registry,
     wl_seat, wl_shm, wl_shm_pool, wl_surface,
@@ -48,12 +40,9 @@ use wayland_protocols::xdg::shell::client::{
 use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_surface_v1::KeyboardInteractivity;
 use wayland_protocols_wlr::layer_shell::v1::client::{zwlr_layer_shell_v1, zwlr_layer_surface_v1};
 
-use crate::compositor::State;
 use crate::compositor::decorations::{Appearance, Color};
-use crate::compositor::headless::{self, Backend};
-use crate::compositor::keybindings::Keybindings;
 use crate::compositor::layer_shell::{ABOVE_WINDOWS, BELOW_WINDOWS};
-use crate::compositor::state::ClientState;
+use crate::compositor::test_support::{self, Harness, contains, wait_for};
 
 /// Popup input -- grabs, keyboard focus and layer-parented popups. Split out
 /// rather than appended because this file was already the largest test file
@@ -674,27 +663,6 @@ fn describe_layer(layer: &zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, spec: Layer
     layer.set_margin(top, right, bottom, left);
 }
 
-/// Round-trips until `configure` reports that the compositor has configured
-/// the surface in question.
-///
-/// One round trip is *not* enough and cannot be made enough: a configure is
-/// sent when the compositor's layout says so, which may be a dispatch cycle
-/// or two after the request that provoked it (a second window changes the
-/// first one's size; a bar's exclusive zone re-lays-out everything).
-fn wait_for_configure<T>(
-    queue: &mut wayland_client::EventQueue<TestClient>,
-    client: &mut TestClient,
-    configure: impl Fn(&TestClient) -> Option<T>,
-) -> Result<T, String> {
-    for _ in 0..50 {
-        queue.roundtrip(client).map_err(|e| e.to_string())?;
-        if let Some(value) = configure(client) {
-            return Ok(value);
-        }
-    }
-    Err("the compositor never configured a surface".into())
-}
-
 /// Runs the client half: binds the globals, then executes whatever steps the
 /// test sends, acknowledging each one once the compositor has seen it.
 fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> Result<(), String> {
@@ -764,7 +732,7 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 // The compositor answers with a configure, which has to be
                 // acked before a buffer may be attached -- and which may
                 // take more than one round trip to arrive.
-                let serial = wait_for_configure(&mut queue, &mut client, |client| {
+                let serial = wait_for(&mut queue, &mut client, "a toplevel configure", |client| {
                     client.window_serials[index]
                 })?;
                 xdg.ack_configure(serial);
@@ -808,9 +776,10 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 // a configure, and it must draw at the size that configure
                 // carried -- which may take more than one round trip to
                 // arrive, and is the compositor's choice, not the spec's.
-                let (width, height) = wait_for_configure(&mut queue, &mut client, |client| {
-                    client.layer_sizes[index]
-                })?;
+                let (width, height) =
+                    wait_for(&mut queue, &mut client, "a layer configure", |client| {
+                        client.layer_sizes[index]
+                    })?;
                 let buffer = solid_buffer(&shm, &qh, width as i32, height as i32, color);
                 surface.attach(Some(&buffer), 0, 0);
                 surface.damage(0, 0, width as i32, height as i32);
@@ -864,12 +833,17 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 // return the stale one instantly and draw at the wrong size.
                 let seen = client.layer_configures.get(index).copied().unwrap_or(0);
                 surface.commit();
-                let (width, height) = wait_for_configure(&mut queue, &mut client, |client| {
-                    let fresh = client.layer_configures.get(index).copied().unwrap_or(0) > seen;
-                    fresh
-                        .then(|| client.layer_sizes.get(index).copied().flatten())
-                        .flatten()
-                })?;
+                let (width, height) = wait_for(
+                    &mut queue,
+                    &mut client,
+                    "a fresh layer configure",
+                    |client| {
+                        let fresh = client.layer_configures.get(index).copied().unwrap_or(0) > seen;
+                        fresh
+                            .then(|| client.layer_sizes.get(index).copied().flatten())
+                            .flatten()
+                    },
+                )?;
                 let buffer = solid_buffer(&shm, &qh, width as i32, height as i32, color);
                 surface.attach(Some(&buffer), 0, 0);
                 surface.damage(0, 0, width as i32, height as i32);
@@ -948,8 +922,7 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 surface.commit();
                 // Ten round trips is far more than the one a configure needs
                 // when a compositor sends it: `MapWindow` above gets its
-                // toplevel's configure inside `wait_for_configure`'s first
-                // few.
+                // toplevel's configure inside `wait_for`'s first few.
                 for _ in 0..10 {
                     queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
                     if client.window_serials[index].is_some() {
@@ -1028,176 +1001,20 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
 }
 
 /// A live compositor with a real headless backend and one connected client,
-/// scripted a step at a time.
-struct Fixture {
-    event_loop: EventLoop<'static, State>,
-    state: State,
-    steps: Option<Sender<Step>>,
-    acks: Receiver<Ack>,
-    client: Option<JoinHandle<Result<(), String>>>,
-}
+/// scripted a step at a time. See [`crate::compositor::test_support`] for
+/// everything that is not specific to this protocol.
+type Fixture = Harness<Step, Ack>;
 
 impl Fixture {
     fn new() -> Self {
-        let mut event_loop: EventLoop<'static, State> =
-            EventLoop::try_new().expect("an event loop");
-        let display: Display<State> = Display::new().expect("a wayland display");
-        let mut state = State::new(
-            &mut event_loop,
-            display,
-            Config::default(),
-            Keybindings::default(),
-            appearance(),
-            1.0,
-        )
-        .expect("a compositor state with a wayland socket");
-        headless::init(&mut state, CANVAS, CANVAS).expect("a headless backend");
-
-        let (server_end, client_end) = UnixStream::pair().expect("a socket pair");
-        state
-            .display_handle
-            .insert_client(server_end, Arc::new(ClientState::default()))
-            .expect("an inserted client");
-
-        let (step_tx, step_rx) = channel();
-        let (ack_tx, ack_rx) = channel();
-        let handle = thread::spawn(move || run_client(client_end, step_rx, ack_tx));
-
-        Self {
-            event_loop,
-            state,
-            steps: Some(step_tx),
-            acks: ack_rx,
-            client: Some(handle),
-        }
+        let mut fixture = Harness::headless(appearance(), CANVAS);
+        fixture.spawn(run_client);
+        fixture
     }
 
-    /// Runs one client step to completion, then lets the compositor settle so
-    /// anything the step provoked (a configure, a re-layout) has happened
-    /// before the test looks.
-    fn run(&mut self, step: Step) -> Ack {
-        self.steps
-            .as_ref()
-            .expect("the step channel")
-            .send(step)
-            .expect("the client thread is still running");
-        let acks = std::mem::replace(&mut self.acks, channel().1);
-        let ack = self.wait_for(&acks, "a client step acknowledgement");
-        self.acks = acks;
-        self.settle();
-        ack
-    }
-
-    /// Dispatches until `channel` produces a value.
-    ///
-    /// A client that died instead of answering is reported with *its own*
-    /// error (the protocol error it provoked, usually), not as a timeout:
-    /// the channel disconnecting is exactly that case, and a bare "timed
-    /// out" there costs ten seconds and says nothing. The deadline is for
-    /// the other case -- a compositor that stopped serving without anyone
-    /// noticing.
-    fn wait_for<T>(&mut self, channel: &Receiver<T>, what: &str) -> T {
-        let deadline = Instant::now() + Duration::from_secs(10);
-        loop {
-            match channel.try_recv() {
-                Ok(value) => return value,
-                Err(TryRecvError::Disconnected) => {
-                    let outcome = self
-                        .client
-                        .take()
-                        .map(|handle| handle.join().expect("the client thread"));
-                    panic!("the client stopped while waiting for {what}: {outcome:?}");
-                }
-                Err(TryRecvError::Empty) => {}
-            }
-            assert!(
-                Instant::now() < deadline,
-                "timed out waiting for {what}; the compositor stopped serving"
-            );
-            self.event_loop
-                .dispatch(Some(Duration::from_millis(5)), &mut self.state)
-                .expect("a compositor dispatch");
-        }
-    }
-
-    /// Sends a step the client is expected *not* to survive -- a request the
-    /// compositor answers with a protocol error -- and dispatches until the
-    /// client thread has gone.
-    ///
-    /// The signal is the ack channel's sender dropping: [`run_client`]
-    /// returns its error instead of acknowledging the step, which
-    /// disconnects the receiver here.
-    fn run_expecting_disconnect(&mut self, step: Step) -> String {
-        self.steps
-            .as_ref()
-            .expect("the step channel")
-            .send(step)
-            .expect("the client thread is still running");
-        let deadline = Instant::now() + Duration::from_secs(10);
-        loop {
-            match self.acks.try_recv() {
-                Ok(_) => panic!("the client survived a request that should have been refused"),
-                Err(TryRecvError::Disconnected) => break,
-                Err(TryRecvError::Empty) => {}
-            }
-            assert!(
-                Instant::now() < deadline,
-                "timed out waiting for the client to be disconnected"
-            );
-            self.event_loop
-                .dispatch(Some(Duration::from_millis(5)), &mut self.state)
-                .expect("a compositor dispatch");
-        }
-        let error = self
-            .client
-            .take()
-            .map(|handle| handle.join().expect("the client thread"))
-            .and_then(Result::err)
-            .expect("the client should have stopped with the protocol error it provoked");
-        self.settle();
-        error
-    }
-
-    /// A few dispatch cycles with nothing outstanding, so in-flight protocol
-    /// traffic in both directions has been processed.
-    fn settle(&mut self) {
-        for _ in 0..10 {
-            self.event_loop
-                .dispatch(Some(Duration::from_millis(1)), &mut self.state)
-                .expect("a compositor dispatch");
-        }
-        let _ = self.state.display_handle.flush_clients();
-    }
-
-    /// Disconnects the client and waits for the compositor to notice.
+    /// Disconnects the one client and waits for the compositor to notice.
     fn disconnect_client(&mut self) {
-        drop(self.steps.take());
-        if let Some(handle) = self.client.take() {
-            handle
-                .join()
-                .expect("the client thread")
-                .expect("the client ran cleanly");
-        }
-        self.settle();
-    }
-
-    /// Renders a frame and hands back its raw BGRA pixels.
-    fn render(&mut self) -> Vec<u8> {
-        self.state.request_render();
-        self.state.render();
-        let backend = self.state.backend.as_mut().expect("a backend");
-        let Backend {
-            renderer, image, ..
-        } = backend;
-        let framebuffer = renderer.bind(image).expect("a framebuffer");
-        let region = Rectangle::from_size((CANVAS, CANVAS).into());
-        let mapping = renderer
-            .copy_framebuffer(&framebuffer, region, Fourcc::Argb8888)
-            .expect("a framebuffer readback");
-        renderer
-            .map_texture(&mapping)
-            .expect("mapped pixels")
-            .to_vec()
+        self.disconnect(0);
     }
 
     /// The usable area the core currently arranges windows within.
@@ -1306,59 +1123,18 @@ impl Fixture {
     }
 }
 
-impl Drop for Fixture {
-    /// Closes the step channel, which is what ends [`run_client`]'s loop.
-    ///
-    /// Deliberately does *not* join while unwinding: a compositor-side panic
-    /// leaves the client thread blocked in a roundtrip whose answer will
-    /// never come (the server end of its socket outlives this `Drop`, so it
-    /// sees no EOF either), and joining there turns a failing test into a
-    /// hung one -- which is exactly what happened while writing these, and
-    /// cost the real bug `reject_unrepresentable_layer_size` now guards
-    /// against a diagnosis. The thread is released when `state`, and with it
-    /// the server end, drops a moment later.
-    fn drop(&mut self) {
-        drop(self.steps.take());
-        if std::thread::panicking() {
-            return;
-        }
-        if let Some(handle) = self.client.take() {
-            let _ = handle.join();
-        }
-    }
-}
-
 /// Reads one pixel out of a [`CANVAS`]-square BGRA framebuffer.
 fn pixel(pixels: &[u8], x: i32, y: i32) -> [u8; 4] {
-    let index = ((y * CANVAS + x) * 4) as usize;
-    pixels[index..index + 4].try_into().expect("four bytes")
-}
-
-/// Whether any pixel in the framebuffer is `color` -- position-independent,
-/// for surfaces whose exact placement the test does not pin down (a popup
-/// lands where the positioner puts it; what matters is that it drew).
-fn contains_color(pixels: &[u8], color: [u8; 4]) -> bool {
-    pixels.chunks_exact(4).any(|pixel| pixel == color)
+    test_support::pixel(pixels, CANVAS, x, y)
 }
 
 /// Where the first `color` pixel is, scanning in row order.
-///
-/// For pointing at a surface whose placement the test does not pin down: a
-/// popup lands wherever its positioner and the parent's geometry put it, and
-/// hard-coding that coordinate would be re-deriving Smithay's own
-/// positioner arithmetic in a test -- which would then pass or fail for
-/// reasons that have nothing to do with input.
 fn find_color(pixels: &[u8], color: [u8; 4]) -> Option<(f64, f64)> {
-    let index = pixels.chunks_exact(4).position(|pixel| pixel == color)? as i32;
-    Some(((index % CANVAS) as f64, (index / CANVAS) as f64))
+    test_support::find_color(pixels, CANVAS, color)
 }
 
 fn assert_pixel(pixels: &[u8], x: i32, y: i32, expected: [u8; 4], what: &str) {
-    assert_eq!(
-        pixel(pixels, x, y),
-        expected,
-        "{what}: wrong pixel at ({x}, {y})"
-    );
+    test_support::assert_pixel(pixels, CANVAS, x, y, expected, what);
 }
 
 // -------------------------------------------------------------------------
