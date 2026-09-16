@@ -14,6 +14,7 @@ use super::output_scale::logical_size;
 use super::tty::VtSwitchOutcome;
 use modifiers::{HeldKeys, NamedKey, Untypable};
 
+pub(super) mod interaction;
 mod modifiers;
 #[cfg(test)]
 mod tests;
@@ -74,6 +75,13 @@ impl State {
         };
         let location = Point::<f64, Logical>::from((x, y));
         let under = self.surface_under(location);
+        // Deliberately not recorded in `interaction_serials` (unlike the
+        // button and key serials below): motion is continuous and passive.
+        // libinput reports it at 500-1000Hz just from a hand resting on a
+        // desk, and `refresh_pointer_focus` above synthesizes it with no
+        // user involvement at all -- treating that as "the user asked for
+        // this" would hand every client a permanent, self-refreshing
+        // activation serial and defeat the gate in `activation.rs`.
         let serial = SERIAL_COUNTER.next_serial();
         let time = InputTime::from_millis(self.millis());
         pointer.motion(
@@ -154,6 +162,11 @@ impl State {
             self.focus_under_pointer();
         }
         let serial = SERIAL_COUNTER.next_serial();
+        // Both states, not just the press: which of the two a client mints an
+        // activation token from is its own choice (a GTK button activates on
+        // release), and a tracker that only knew presses would refuse the
+        // legitimate half of that. See `interaction.rs`.
+        self.interaction_serials.record(serial);
         let time = InputTime::from_millis(self.millis());
         let state = if pressed {
             ButtonState::Pressed
@@ -367,6 +380,12 @@ impl State {
             return KeyOutcome::default();
         };
         let serial = SERIAL_COUNTER.next_serial();
+        // Recorded for both states, and before the filter below runs: a key a
+        // keybinding intercepts never reaches a client, so no client can know
+        // that serial to mint a token from -- but it is still a real
+        // interaction, and skipping it here would only make this depend on
+        // which keys happen to be bound. See `interaction.rs`.
+        self.interaction_serials.record(serial);
         let time = InputTime::from_millis(self.millis());
         keyboard
             .input::<KeyOutcome, _>(self, keycode, state, serial, time, |data, mods, handle| {

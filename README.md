@@ -695,10 +695,19 @@ popup came from. Without it the only way to move focus is flexwm's own
 keybindings and IPC — a client has no standard way to ask.
 
 Honoring every such request unconditionally would be a focus-stealing
-primitive, so flexwm bounds the token two ways (see
-`compositor/activation.rs`) — **both resource bounds, not a defense against
-focus-stealing itself**:
+primitive, so flexwm checks the token three ways (see
+`compositor/activation.rs`):
 
+- **The token must name a real, recent input event.** `set_serial(serial,
+  seat)` is how a client says which click or keypress caused it to ask, and a
+  token that names none of them — no serial at all, a seat flexwm doesn't
+  own, or a stale or made-up number — is refused when it is created. What
+  counts is a serial flexwm issued for a key or button event (press *or*
+  release; pointer motion never counts, and neither does a *focus* event,
+  which every newly mapped window gets for free) within the last few input
+  events. A launcher minting its token inside its own input handler has one;
+  a background client that was never interacted with does not, which is
+  exactly the focus-steal case the two bounds below do not stop.
 - **A token is valid for 30 seconds.** Long enough for a cold-starting app to
   finish launching and redeem the token its launcher gave it; short enough
   that a token is still a receipt for something the user just did rather than
@@ -708,15 +717,14 @@ focus-stealing itself**:
   unlimited, and nothing upstream prunes what it hands out; this is the same
   resource bound as the `wl_shm` pool cap.
 
-Neither bound stops a client with no focus and no user interaction at all
-from minting a token and immediately redeeming it against its own surface —
-the token is fresh and the table isn't full, so both checks pass. The actual
-gate the protocol offers against that, requiring the token to carry an input
-serial, is not implemented: real launchers routinely mint a token from a
-keyboard-driven selection and hand it to a slower-starting process, which is
-the case this protocol exists for, and this is a known gap rather than a
-considered trade-off — see
-`docs/backlog/protocols/activation-serial-validation.md`.
+The serial is checked when the token is *created*, never when it is redeemed:
+a launcher hands its token to a process that may take seconds to start, by
+which point plenty of newer input has happened, and re-checking then would
+break the one case this protocol exists for. A client the user really did
+interact with can still activate itself off that interaction — the user just
+clicked it, which is the protocol working as intended. A refused token costs
+nothing visible in the usual case: flexwm focuses every newly mapped window
+anyway.
 
 A redeemed token is removed whether or not it was honored, so one user action
 cannot be replayed into focus later. Activation goes through the same action

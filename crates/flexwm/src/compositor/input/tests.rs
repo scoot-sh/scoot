@@ -30,6 +30,7 @@ use std::time::{Duration, Instant};
 use flexwm_core::Config;
 use smithay::reexports::calloop::EventLoop;
 use smithay::reexports::wayland_server::Display;
+use smithay::utils::Serial;
 use wayland_client::protocol::{wl_compositor, wl_keyboard, wl_registry, wl_seat, wl_surface};
 use wayland_client::{Connection, Dispatch, QueueHandle, WEnum};
 use wayland_protocols::xdg::shell::client::{xdg_surface, xdg_toplevel, xdg_wm_base};
@@ -668,4 +669,120 @@ fn a_repeated_modifier_is_resolved_and_pressed_once() {
     let typed = fixture.press(&combo).expect("a repeated modifier is legal");
     assert_eq!(typed.text, "!");
     assert_eq!(typed.keys, 4, "one Shift press, not a thousand");
+}
+
+// -------------------------------------------------------------------------
+// Which serials count as the user asking for something
+// -------------------------------------------------------------------------
+//
+// The ring itself is tested in `interaction.rs`; these pin the other half --
+// *which* of this module's three `SERIAL_COUNTER` call sites feed it. What
+// reads the answer is `activation.rs`'s focus-stealing gate, so a motion
+// serial quietly becoming an interaction would hand every client a
+// permanently-refreshing one.
+
+/// Any key press or release: the key an agent injects, the key a user
+/// presses and the key `nested_dispatch` forwards all come through here.
+#[test]
+fn a_key_press_and_its_release_are_both_recorded() {
+    let mut fixture = Fixture::new();
+    let code = Keycode::new(28 + 8); // evdev `Return`, +8 for the xkb offset.
+
+    fixture.state.key(code, KeyState::Pressed);
+    let press = fixture
+        .state
+        .interaction_serials
+        .latest()
+        .expect("the press recorded a serial");
+    fixture.state.key(code, KeyState::Released);
+    let release = fixture
+        .state
+        .interaction_serials
+        .latest()
+        .expect("the release recorded a serial");
+
+    assert_ne!(press, release, "both went out with the same serial");
+    // Both, because which one a client mints an activation token from is the
+    // client's own choice -- see `interaction.rs`.
+    assert!(fixture.state.interaction_serials.contains(press));
+    assert!(fixture.state.interaction_serials.contains(release));
+}
+
+/// The pointer's other half: a click is an interaction, and so is letting go
+/// of it (a GTK button activates on release).
+#[test]
+fn a_button_press_and_its_release_are_both_recorded() {
+    let mut fixture = Fixture::new();
+
+    fixture.state.pointer_button(PointerButton::Left, true);
+    let press = fixture
+        .state
+        .interaction_serials
+        .latest()
+        .expect("the press recorded a serial");
+    fixture.state.pointer_button(PointerButton::Left, false);
+    let release = fixture
+        .state
+        .interaction_serials
+        .latest()
+        .expect("the release recorded a serial");
+
+    assert_ne!(press, release, "both went out with the same serial");
+    assert!(fixture.state.interaction_serials.contains(press));
+    assert!(fixture.state.interaction_serials.contains(release));
+}
+
+/// Motion is the one that must not count: it is continuous and passive, and
+/// `refresh_pointer_focus` synthesizes it with no user involvement at all.
+///
+/// Asserted by bracketing the move between two recorded key events rather
+/// than by predicting the motion serial: `SERIAL_COUNTER` is process-global
+/// and every other test running in parallel draws from it, so the only thing
+/// known about the motion's serial is that it lies strictly between these
+/// two. Nothing in that whole window may be in the ring.
+#[test]
+fn pointer_motion_is_never_recorded_as_an_interaction() {
+    let mut fixture = Fixture::new();
+    let code = Keycode::new(28 + 8);
+
+    fixture.state.key(code, KeyState::Pressed);
+    fixture.state.key(code, KeyState::Released);
+    let before = u32::from(
+        fixture
+            .state
+            .interaction_serials
+            .latest()
+            .expect("a serial before the move"),
+    );
+
+    fixture.state.pointer_move(10.0, 10.0);
+
+    fixture.state.key(code, KeyState::Pressed);
+    let after = u32::from(
+        fixture
+            .state
+            .interaction_serials
+            .latest()
+            .expect("a serial after the move"),
+    );
+
+    assert!(after > before + 1, "the move issued no serial of its own");
+    let mut raw = before + 1;
+    while raw < after {
+        assert!(
+            !fixture
+                .state
+                .interaction_serials
+                .contains(Serial::from(raw)),
+            "serial {raw}, issued between two key events, is in the ring; \
+             pointer motion (or another passive source) is being recorded"
+        );
+        raw += 1;
+    }
+    assert!(
+        fixture
+            .state
+            .interaction_serials
+            .contains(Serial::from(after))
+    );
 }

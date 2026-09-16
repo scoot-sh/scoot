@@ -48,6 +48,7 @@ use super::ext_workspace::ExtWorkspaceState;
 use super::gamma_control::GammaControlState;
 use super::headless::Backend;
 use super::idle;
+use super::input;
 use super::ipc::PendingIdle;
 use super::keybindings::Keybindings;
 use super::layer_shell;
@@ -331,6 +332,17 @@ pub struct State {
     #[allow(dead_code)]
     pub idle_inhibit_manager_state: IdleInhibitManagerState,
     pub seat: Seat<State>,
+    /// The serials of the recent input events that count as the user asking
+    /// for something -- key and button presses and releases, never pointer
+    /// motion.
+    ///
+    /// Written only by `input.rs` (`key` and `pointer_button`, the two
+    /// qualifying serial sources; `pointer_move_quietly`'s motion serial is
+    /// deliberately not among them) and read only by `activation.rs`, which
+    /// refuses an `xdg-activation-v1` token whose claimed serial is not one
+    /// of these. See `input/interaction.rs` for why this is a short history
+    /// rather than a single "last serial".
+    pub interaction_serials: input::interaction::Recent,
 
     pub keybindings: Keybindings,
     /// Keycodes currently held that a keybinding intercepted on press, so
@@ -473,6 +485,7 @@ impl State {
             idle_inhibitors: idle::Inhibitors::default(),
             idle_inhibit_manager_state,
             seat,
+            interaction_serials: input::interaction::Recent::default(),
             keybindings,
             suppressed_keys: HashSet::new(),
             // true without going through request_render(), so nothing has
