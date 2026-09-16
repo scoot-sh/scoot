@@ -262,6 +262,11 @@ enum Step {
     DestroyHandle(usize),
     /// `stop` on the `index`-th list.
     Stop(usize),
+    /// `destroy` on the `index`-th list, keeping every handle it made.
+    DestroyList(usize),
+    /// Open and immediately destroy `count` toplevels, in one burst, without
+    /// waiting for anything in between.
+    ChurnWindows(usize),
     /// Take the session lock, without ever creating a lock surface.
     LockSession,
     /// Hand back (and clear) everything seen so far.
@@ -346,6 +351,23 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 .ok_or("no such toplevel handle")?
                 .destroy(),
             Step::Stop(index) => client.lists.get(index).ok_or("no such list")?.stop(),
+            Step::DestroyList(index) => client.lists.get(index).ok_or("no such list")?.destroy(),
+            Step::ChurnWindows(count) => {
+                // No configure ack and no wait: the point is the compositor
+                // seeing creation and destruction at the rate a client can
+                // write them, not a well-behaved window.
+                for _ in 0..count {
+                    let surface = compositor.create_surface(&qh, ());
+                    let index = client.window_serials.len();
+                    client.window_serials.push(None);
+                    let xdg = wm_base.get_xdg_surface(&surface, &qh, WindowIndex(index));
+                    let toplevel = xdg.get_toplevel(&qh, ());
+                    surface.commit();
+                    toplevel.destroy();
+                    xdg.destroy();
+                    surface.destroy();
+                }
+            }
             Step::LockSession => {
                 let manager = client
                     .locks
@@ -800,6 +822,118 @@ fn stop_finishes_the_list_and_no_later_window_is_announced() {
     // The window itself is still tracked -- `stop` is one client's choice, not
     // a change to the compositor.
     assert_eq!(fixture.tracked(), 1);
+}
+
+#[test]
+fn stopping_or_destroying_a_list_twice_over_is_survivable() {
+    // Neither is well-behaved -- the protocol's sequence is stop, wait for
+    // `finished`, destroy -- and neither may take the compositor with it. A
+    // second `stop` is answered a second time (`finished` is not a destructor
+    // event, so the object is still there to answer), and `destroy` while
+    // handles are still held leaves those handles working, which is the part
+    // that would otherwise reach a dead list object on the next window.
+    let mut fixture = Fixture::bound();
+    fixture.run(Step::MapWindow);
+    fixture.take_log();
+
+    fixture.run(Step::Stop(0));
+    fixture.run(Step::Stop(0));
+    assert_eq!(
+        fixture.take_log(),
+        vec![Seen::Finished(0), Seen::Finished(0)],
+    );
+
+    fixture.run(Step::DestroyList(0));
+    fixture.run(Step::MapWindow);
+    fixture.run(Step::SetTitle(0, "orphaned handle".to_string()));
+    assert_eq!(
+        fixture.take_log(),
+        vec![Seen::Title(0, "orphaned handle".to_string()), Seen::Done(0)],
+    );
+    assert_eq!(fixture.tracked(), 2);
+
+    // Still serving: a fresh list binds and sees both windows.
+    fixture.run(Step::BindList);
+    let log = fixture.take_log();
+    assert_eq!(
+        log.iter()
+            .filter(|seen| matches!(seen, Seen::Toplevel(_)))
+            .count(),
+        2,
+        "a fresh list did not see both windows: {log:?}"
+    );
+}
+
+#[test]
+fn windows_opened_and_destroyed_at_full_rate_leave_nothing_behind() {
+    // The maximum rate a client can actually reach: 200 toplevels created and
+    // destroyed in one burst, with no configure ack and nothing waited for in
+    // between -- so the compositor sees creation and destruction of the same
+    // window in a single dispatch. What is under test is that each one is
+    // announced and closed exactly once and that nothing is left tracked
+    // afterwards, which is the leak this module's handle map could have.
+    const CHURN: usize = 200;
+
+    let mut fixture = Fixture::bound();
+    fixture.run(Step::ChurnWindows(CHURN));
+    let log = fixture.take_log();
+    let toplevels = log
+        .iter()
+        .filter(|seen| matches!(seen, Seen::Toplevel(_)))
+        .count();
+    let closed = log
+        .iter()
+        .filter(|seen| matches!(seen, Seen::Closed(_)))
+        .count();
+    assert_eq!(toplevels, CHURN, "not every window was announced");
+    assert_eq!(closed, CHURN, "not every window was closed");
+    assert_eq!(fixture.tracked(), 0, "handles outlived their windows");
+    assert!(
+        fixture.state.windows.is_empty(),
+        "the compositor kept windows the client destroyed"
+    );
+
+    // And the identifiers are all distinct, which is what the protocol
+    // requires of a compositor that has just burned 200 of them.
+    let mut identifiers: Vec<&String> = log
+        .iter()
+        .filter_map(|seen| match seen {
+            Seen::Identifier(_, identifier) => Some(identifier),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(identifiers.len(), CHURN);
+    identifiers.sort();
+    identifiers.dedup();
+    assert_eq!(identifiers.len(), CHURN, "an identifier was reused");
+}
+
+#[test]
+fn a_title_as_long_as_the_wire_allows_survives_the_round_trip() {
+    // A client's title is its own to choose, and it reaches every watching
+    // client verbatim. Nothing here truncates or validates it -- the wayland
+    // message size is the only bound -- so this pins that a large-but-legal
+    // one is forwarded whole rather than truncated, dropped, or turned into a
+    // protocol error for the innocent client watching.
+    let title = "t".repeat(3000);
+    let mut fixture = Fixture::bound();
+    fixture.run(Step::MapWindow);
+    fixture.take_log();
+
+    fixture.run(Step::SetTitle(0, title.clone()));
+    assert_eq!(
+        fixture.take_log(),
+        vec![Seen::Title(0, title.clone()), Seen::Done(0)],
+    );
+    // And the same string reaches the IPC window list, which is the other
+    // consumer of the very same `WindowInfo`.
+    let snapshot = fixture
+        .state
+        .window_snapshots()
+        .into_iter()
+        .next()
+        .expect("the window is in the IPC list");
+    assert_eq!(snapshot.title, title);
 }
 
 #[test]

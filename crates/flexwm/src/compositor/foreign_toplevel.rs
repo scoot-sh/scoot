@@ -89,6 +89,15 @@
 //!   [`State::close_foreign_toplevel`] is the only place a handle is dropped,
 //!   and it removes before it drops, so no dead entry is ever in that list
 //!   when this is called.
+//! - A client that cannot be given a new handle object (it has exhausted its
+//!   own object ids) is silently skipped upstream -- `new_toplevel` and the
+//!   bind path both `continue` past a failed `create_resource`, and neither
+//!   reports it -- so that client misses that window and is never told. There
+//!   is nothing to do about it from here (the failure is not visible to this
+//!   module at all), and unlike `ext_workspace.rs`'s positional handle list a
+//!   missing handle corrupts nothing: each handle is independent, so the
+//!   client is out of date about one window rather than wrong about all of
+//!   them.
 
 use std::collections::HashMap;
 
