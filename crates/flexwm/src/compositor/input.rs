@@ -162,11 +162,21 @@ impl State {
             self.focus_under_pointer();
         }
         let serial = SERIAL_COUNTER.next_serial();
+        // Recorded against whoever `pointer.button` below is about to deliver
+        // this to -- the surface the pointer last *entered*, which is what
+        // the pointer's own focus is, not what is under it now and not
+        // whatever `focus_under_pointer` just gave the keyboard to.
+        //
         // Both states, not just the press: which of the two a client mints an
         // activation token from is its own choice (a GTK button activates on
         // release), and a tracker that only knew presses would refuse the
         // legitimate half of that. See `interaction.rs`.
-        self.interaction_serials.record(serial);
+        if let Some(client) = pointer
+            .current_focus()
+            .and_then(|surface| self.client_of(&surface))
+        {
+            self.interaction_serials.record(serial, client);
+        }
         let time = InputTime::from_millis(self.millis());
         let state = if pressed {
             ButtonState::Pressed
@@ -380,12 +390,25 @@ impl State {
             return KeyOutcome::default();
         };
         let serial = SERIAL_COUNTER.next_serial();
-        // Recorded for both states, and before the filter below runs: a key a
-        // keybinding intercepts never reaches a client, so no client can know
-        // that serial to mint a token from -- but it is still a real
-        // interaction, and skipping it here would only make this depend on
-        // which keys happen to be bound. See `interaction.rs`.
-        self.interaction_serials.record(serial);
+        // Recorded against the client holding keyboard focus *now*, which is
+        // who `keyboard.input` below forwards to. Read before the filter runs
+        // rather than after, because a keybinding that changes focus must not
+        // move this key's serial onto whatever gained it -- and a key that
+        // reaches a binding at all is never forwarded, so the two can only
+        // disagree if this were read late.
+        //
+        // Both states, and a key a binding intercepts too: the focused client
+        // never sees an intercepted key, so the entry is simply unusable
+        // (nobody can name a serial they were not sent) rather than wrong,
+        // and skipping it here would make this depend on which keys happen to
+        // be bound. Nothing is recorded when nothing has focus: an event no
+        // client received is evidence for no one. See `interaction.rs`.
+        if let Some(client) = keyboard
+            .current_focus()
+            .and_then(|surface| self.client_of(&surface))
+        {
+            self.interaction_serials.record(serial, client);
+        }
         let time = InputTime::from_millis(self.millis());
         keyboard
             .input::<KeyOutcome, _>(self, keycode, state, serial, time, |data, mods, handle| {

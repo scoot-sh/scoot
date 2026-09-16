@@ -1,13 +1,36 @@
-//! The serials of the input events that count as "the user just did
-//! something".
+//! The recent input events that count as the user asking for something, and
+//! *who* received each one.
 //!
-//! One consumer today: `xdg-activation-v1`. The protocol lets a client
-//! attach the seat and serial of the input event that caused it to ask for a
-//! token (`xdg_activation_token_v1.set_serial`), and the compositor is meant
-//! to refuse a token whose serial does not name a real, recent interaction
-//! -- that is the only thing standing between "a launcher hands focus to the
-//! app it just started" and "any background client takes the keyboard
-//! whenever it likes". See `activation.rs` for the policy this feeds.
+//! One consumer today: `xdg-activation-v1`. The protocol lets a client attach
+//! the seat and serial of the input event that caused it to ask for a token
+//! (`xdg_activation_token_v1.set_serial`), and the compositor is meant to
+//! refuse a token whose serial does not name a real, recent interaction --
+//! that is the only thing standing between "a launcher hands focus to the app
+//! it just started" and "any background client takes the keyboard whenever it
+//! likes". See `activation.rs` for the policy this feeds.
+//!
+//! # Why the client identity is stored too, and is not optional
+//!
+//! A serial on its own is just a number out of [`SERIAL_COUNTER`], which is
+//! process-global and shared by far more than input: the pinned Smithay rev
+//! draws `xdg_surface.configure` and `xdg_popup.configure` serials from the
+//! very same counter (`src/wayland/shell/xdg/mod.rs`). So any client can read
+//! the counter's live value for free and unobserved -- create an
+//! `xdg_surface`, commit it with no buffer so it never maps, and read the
+//! serial of the configure it gets back -- and then guess. Guessing costs
+//! nothing: a refused token posts no protocol error and Smithay still sends
+//! `done`, so a client can pipeline a token per candidate offset and simply
+//! see which one works. With a value-only check, a couple of dozen guesses
+//! spanning the counter while the user types anywhere would eventually land
+//! on a real serial and steal focus.
+//!
+//! Recording *who the event was delivered to* closes that, and is what makes
+//! this a check on interaction rather than on arithmetic: an entry is only
+//! spendable by the client that genuinely received that event, so a client
+//! that was never focused (or under the pointer) has nothing to guess *with*,
+//! however many numbers it tries. The identity comes from
+//! [`XdgActivationTokenData::client_id`], which Smithay fills in from the
+//! client that actually sent the request and no client can forge.
 //!
 //! # Why a ring rather than "the last serial"
 //!
@@ -20,27 +43,32 @@
 //!   by the time the client's `commit` is handled the last serial issued is
 //!   the *release*'s. (`flexwm msg key Return` is exactly this, and it is
 //!   how the real-launcher flow in
-//!   `docs/backlog/resolved/foot-protocol-warnings-done.md` was driven.)
+//!   `docs/backlog/resolved/activation-serial-validation-done.md` was
+//!   driven: the compositor issued 6 and 7, and the launcher's token carried
+//!   6.)
 //! - A pointer-driven one (a GTK button activates on release, not press)
 //!   mints from the release serial, which a press-only tracker never saw.
 //!
-//! So what has to be remembered is a short *history* of qualifying serials,
-//! and a token is honored if its serial is any one of them. Exact match
-//! against remembered values, never a range: serials from events that do
-//! *not* qualify (pointer motion) and from the compositor's own focus
-//! changes (`shell.rs`'s `set_focus`) are drawn from the same global
-//! counter and fall between them, so "between the oldest and the newest"
-//! would quietly admit the passive events this exists to exclude.
+//! So what has to be remembered is a short *history* of qualifying events,
+//! and a token is honored if its serial and client are one of them. Exact
+//! match against remembered values, never a range: serials from events that
+//! do *not* qualify (pointer motion) and from the compositor's own focus
+//! changes (`shell.rs`'s `set_focus`) are drawn from the same global counter
+//! and fall between them, so "between the oldest and the newest" would
+//! quietly admit the passive events this exists to exclude.
 //!
 //! Fixed-size and stored inline in [`State`], with no heap indirection of
 //! its own: this is written from the input path, on every key and button
 //! event, and must not allocate.
 //!
+//! [`SERIAL_COUNTER`]: smithay::utils::SERIAL_COUNTER
 //! [`State`]: super::State
+//! [`XdgActivationTokenData::client_id`]: smithay::wayland::xdg_activation::XdgActivationTokenData::client_id
 
+use smithay::reexports::wayland_server::backend::ClientId;
 use smithay::utils::Serial;
 
-/// How many qualifying serials are remembered.
+/// How many qualifying events are remembered.
 ///
 /// Sized off the largest burst one user action can produce, so that the
 /// serial a client legitimately captured cannot be evicted before the
@@ -49,7 +77,7 @@ use smithay::utils::Serial;
 /// key's press and release, four modifier releases), and `type_text` spends
 /// two to six per character. Sixteen covers that with room to spare while
 /// staying a fraction of a second of real typing -- which is the other half
-/// of the bound, since every remembered serial is one a token may still be
+/// of the bound, since every remembered entry is one a token may still be
 /// minted against.
 ///
 /// `pub(crate)` only so `activation/tests.rs` can say "older than the whole
@@ -59,43 +87,43 @@ use smithay::utils::Serial;
 /// [`State::press`]: super::State::press
 pub(crate) const CAPACITY: usize = 16;
 
-/// The most recent qualifying input serials, newest overwriting oldest.
-#[derive(Debug)]
+/// The most recent qualifying input events, newest overwriting oldest.
+#[derive(Debug, Default)]
 pub(crate) struct Recent {
-    /// `None` only before the ring has been filled once -- a fresh session
-    /// that has seen no input at all matches nothing, which is the case the
-    /// activation gate exists for.
-    serials: [Option<Serial>; CAPACITY],
-    /// Where the next serial goes. Always `< CAPACITY` (see [`Self::record`]),
+    /// Each entry is a serial and the client the event carrying it was
+    /// delivered to. `None` only before the ring has been filled once -- a
+    /// fresh session that has seen no input at all matches nothing, which is
+    /// the case the activation gate exists for.
+    events: [Option<(Serial, ClientId)>; CAPACITY],
+    /// Where the next event goes. Always `< CAPACITY` (see [`Self::record`]),
     /// so indexing with it cannot panic.
     next: usize,
 }
 
-impl Default for Recent {
-    fn default() -> Self {
-        Self {
-            serials: [None; CAPACITY],
-            next: 0,
-        }
-    }
-}
-
 impl Recent {
-    /// Remembers one serial, evicting the oldest once full.
-    pub(crate) fn record(&mut self, serial: Serial) {
-        self.serials[self.next] = Some(serial);
+    /// Remembers one event, evicting the oldest once full.
+    ///
+    /// `client` is whoever the event is being delivered to, resolved at the
+    /// call site from the seat's current focus -- not the client that later
+    /// asks about it.
+    pub(crate) fn record(&mut self, serial: Serial, client: ClientId) {
+        self.events[self.next] = Some((serial, client));
         self.next = (self.next + 1) % CAPACITY;
     }
 
-    /// Whether `serial` is one of the remembered ones.
+    /// Whether `client` was given an event carrying `serial`.
     ///
-    /// A linear scan of sixteen `Option<u32>`s, on a path that runs once per
-    /// activation token (a user action), not per event.
-    pub(crate) fn contains(&self, serial: Serial) -> bool {
-        self.serials.contains(&Some(serial))
+    /// A linear scan of sixteen entries, on a path that runs once per
+    /// activation token (a user action), not per input event.
+    pub(crate) fn contains(&self, serial: Serial, client: &ClientId) -> bool {
+        self.events.iter().any(|known| {
+            known
+                .as_ref()
+                .is_some_and(|(s, c)| *s == serial && c == client)
+        })
     }
 
-    /// The serial recorded most recently, if any.
+    /// The event recorded most recently, if any.
     ///
     /// Tests only: the compositor itself never asks "what was the last one",
     /// precisely because that question has no single right answer (see the
@@ -105,15 +133,44 @@ impl Recent {
     ///
     /// [`SERIAL_COUNTER`]: smithay::utils::SERIAL_COUNTER
     #[cfg(test)]
-    pub(crate) fn latest(&self) -> Option<Serial> {
+    pub(crate) fn latest(&self) -> Option<(Serial, ClientId)> {
         let last = (self.next + CAPACITY - 1) % CAPACITY;
-        self.serials[last]
+        self.events[last].clone()
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::os::unix::net::UnixStream;
+    use std::sync::Arc;
+
+    use smithay::reexports::wayland_server::Display;
+
     use super::*;
+    use crate::compositor::State;
+    use crate::compositor::state::ClientState;
+
+    /// Two real clients on a display that never listens on a socket: a
+    /// [`ClientId`] cannot be built by hand, and its identity is the whole
+    /// point of what is being tested.
+    ///
+    /// The `UnixStream`s are handed back so the clients stay connected --
+    /// dropping the other end would disconnect them mid-test.
+    fn two_clients() -> (Display<State>, [ClientId; 2], [UnixStream; 2]) {
+        let display: Display<State> = Display::new().expect("a wayland display");
+        let mut handle = display.handle();
+        let mut connect = || {
+            let (server, ours) = UnixStream::pair().expect("a socket pair");
+            let id = handle
+                .insert_client(server, Arc::new(ClientState::default()))
+                .expect("an inserted client")
+                .id();
+            (id, ours)
+        };
+        let (first, first_end) = connect();
+        let (second, second_end) = connect();
+        (display, [first, second], [first_end, second_end])
+    }
 
     fn serial(raw: u32) -> Serial {
         Serial::from(raw)
@@ -121,57 +178,93 @@ mod tests {
 
     #[test]
     fn a_fresh_ring_remembers_nothing() {
+        let (_display, [one, _two], _kept) = two_clients();
         let recent = Recent::default();
-        assert!(!recent.contains(serial(1)));
+        assert!(!recent.contains(serial(1), &one));
         assert_eq!(recent.latest(), None);
     }
 
     #[test]
-    fn a_recorded_serial_is_remembered() {
+    fn a_recorded_event_is_remembered_for_the_client_it_went_to() {
+        let (_display, [one, two], _kept) = two_clients();
         let mut recent = Recent::default();
-        recent.record(serial(7));
-        assert!(recent.contains(serial(7)));
-        assert!(!recent.contains(serial(8)));
-        assert_eq!(recent.latest(), Some(serial(7)));
+        recent.record(serial(7), one.clone());
+
+        assert!(recent.contains(serial(7), &one));
+        assert!(
+            !recent.contains(serial(8), &one),
+            "a serial nothing carried"
+        );
+        assert!(
+            !recent.contains(serial(7), &two),
+            "a client that never received this event can spend it"
+        );
+        assert_eq!(recent.latest(), Some((serial(7), one)));
     }
 
     #[test]
-    fn every_serial_in_a_full_ring_still_matches() {
+    fn the_same_serial_for_two_clients_stays_two_entries() {
+        // Not a case the compositor can produce -- one event has one
+        // recipient -- but the check must be on the pair, not on either half
+        // of it, and this is what says so.
+        let (_display, [one, two], _kept) = two_clients();
+        let mut recent = Recent::default();
+        recent.record(serial(3), one.clone());
+        assert!(!recent.contains(serial(3), &two));
+        recent.record(serial(3), two.clone());
+        assert!(recent.contains(serial(3), &one));
+        assert!(recent.contains(serial(3), &two));
+    }
+
+    #[test]
+    fn every_event_in_a_full_ring_still_matches() {
         // The press/release pairs of one burst must all stay valid: which of
         // them a given client minted its token from is the client's choice,
         // not something this can predict.
+        let (_display, [one, _two], _kept) = two_clients();
         let mut recent = Recent::default();
         for raw in 1..=CAPACITY as u32 {
-            recent.record(serial(raw));
+            recent.record(serial(raw), one.clone());
         }
         for raw in 1..=CAPACITY as u32 {
-            assert!(recent.contains(serial(raw)), "{raw} was forgotten early");
+            assert!(
+                recent.contains(serial(raw), &one),
+                "{raw} was forgotten early"
+            );
         }
     }
 
     #[test]
-    fn the_oldest_serial_is_evicted_once_the_ring_wraps() {
+    fn the_oldest_event_is_evicted_once_the_ring_wraps() {
+        let (_display, [one, _two], _kept) = two_clients();
         let mut recent = Recent::default();
         for raw in 1..=CAPACITY as u32 + 1 {
-            recent.record(serial(raw));
+            recent.record(serial(raw), one.clone());
         }
-        assert!(!recent.contains(serial(1)), "the oldest serial survived");
-        assert!(recent.contains(serial(2)));
-        assert!(recent.contains(serial(CAPACITY as u32 + 1)));
-        assert_eq!(recent.latest(), Some(serial(CAPACITY as u32 + 1)));
+        assert!(
+            !recent.contains(serial(1), &one),
+            "the oldest event survived"
+        );
+        assert!(recent.contains(serial(2), &one));
+        assert!(recent.contains(serial(CAPACITY as u32 + 1), &one));
+        assert_eq!(
+            recent.latest(),
+            Some((serial(CAPACITY as u32 + 1), one.clone()))
+        );
     }
 
     #[test]
-    fn recording_far_past_the_capacity_keeps_exactly_the_last_capacity_serials() {
+    fn recording_far_past_the_capacity_keeps_exactly_the_last_capacity_events() {
         // The index arithmetic wraps rather than growing, so a long session
         // is the same memory and the same cost as a fresh one.
+        let (_display, [one, _two], _kept) = two_clients();
         let mut recent = Recent::default();
         for raw in 1..=1_000u32 {
-            recent.record(serial(raw));
+            recent.record(serial(raw), one.clone());
         }
-        assert!(!recent.contains(serial(1_000 - CAPACITY as u32)));
-        assert!(recent.contains(serial(1_000 - CAPACITY as u32 + 1)));
-        assert!(recent.contains(serial(1_000)));
+        assert!(!recent.contains(serial(1_000 - CAPACITY as u32), &one));
+        assert!(recent.contains(serial(1_000 - CAPACITY as u32 + 1), &one));
+        assert!(recent.contains(serial(1_000), &one));
     }
 
     #[test]
@@ -179,12 +272,13 @@ mod tests {
         // `Serial`'s own ordering is wrap-aware, but this only ever asks for
         // equality, so a counter that has wrapped past `u32::MAX` matches the
         // same way any other value does.
+        let (_display, [one, _two], _kept) = two_clients();
         let mut recent = Recent::default();
-        recent.record(serial(u32::MAX));
-        recent.record(serial(0));
-        recent.record(serial(1));
-        assert!(recent.contains(serial(u32::MAX)));
-        assert!(recent.contains(serial(0)));
-        assert!(!recent.contains(serial(2)));
+        recent.record(serial(u32::MAX), one.clone());
+        recent.record(serial(0), one.clone());
+        recent.record(serial(1), one.clone());
+        assert!(recent.contains(serial(u32::MAX), &one));
+        assert!(recent.contains(serial(0), &one));
+        assert!(!recent.contains(serial(2), &one));
     }
 }

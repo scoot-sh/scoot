@@ -21,9 +21,12 @@
 //! Like every other live-[`State`] test module here, these need a writable
 //! `$XDG_RUNTIME_DIR`: [`State::new`] binds a real listening socket.
 
+use std::io::Write;
+use std::os::fd::AsFd;
 use std::os::unix::net::UnixStream;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{Sender, channel};
 use std::thread;
 use std::time::Instant;
 
@@ -32,12 +35,15 @@ use flexwm_ipc::PointerButton;
 use smithay::backend::input::KeyState;
 use smithay::input::keyboard::Keycode;
 use smithay::reexports::calloop::EventLoop;
+use smithay::reexports::wayland_server::backend::ClientId;
 use smithay::reexports::wayland_server::protocol::wl_seat::WlSeat as ServerSeat;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface as ServerSurface;
 use smithay::reexports::wayland_server::{Client, Display};
 use smithay::utils::Serial;
-use wayland_client::protocol::{wl_compositor, wl_registry, wl_seat, wl_surface};
-use wayland_client::{Connection, Dispatch, Proxy, QueueHandle};
+use wayland_client::protocol::{
+    wl_buffer, wl_compositor, wl_keyboard, wl_registry, wl_seat, wl_shm, wl_shm_pool, wl_surface,
+};
+use wayland_client::{Connection, Dispatch, Proxy, QueueHandle, WEnum};
 use wayland_protocols::xdg::activation::v1::client::{xdg_activation_token_v1, xdg_activation_v1};
 use wayland_protocols::xdg::shell::client::{xdg_surface, xdg_toplevel, xdg_wm_base};
 
@@ -64,6 +70,12 @@ const SEAT: &str = "flexwm";
 /// pointer, and nothing in [`State`] refers to it.
 const OTHER_SEAT: &str = "flexwm-test-other";
 
+/// The side, in pixels, of the buffer each toplevel paints. Small, and far
+/// smaller than the column the core lays the window out in -- so a test that
+/// wants the pointer over a window has to aim at the surface's own top-left
+/// corner, not at the middle of its column.
+const SURFACE: i32 = 64;
+
 /// evdev's `KEY_ENTER`, plus the offset every xkb keymap is built with.
 ///
 /// Pressed bare, so it cannot match a default keybinding -- every one of
@@ -88,6 +100,17 @@ struct TestClient {
     /// two (see [`OTHER_SEAT`]) and has to name the right one, which is what
     /// makes the compositor-side seat check testable at all.
     seats: Vec<(wl_seat::WlSeat, Option<String>)>,
+    /// Taken from the compositor's own seat once it advertises a keyboard.
+    keyboard: Option<wl_keyboard::WlKeyboard>,
+    /// For the one buffer this client paints: a toplevel with no buffer has
+    /// no size, so nothing the pointer can be *over* (see [`solid_buffer`]).
+    shm: Option<wl_shm::WlShm>,
+    /// The serial of the first key press this client was *sent*, which is the
+    /// only serial it can honestly mint a token from. Learned over the
+    /// protocol rather than handed in from the compositor side, because
+    /// "did the client that received the event get to spend it" is exactly
+    /// what the gate is made of.
+    key_serial: Option<u32>,
     /// The token string the compositor sent back, once `commit` produced one.
     /// Sent whether or not the compositor accepted the token -- a refusal is
     /// invisible from here, which is the protocol's own shape (see
@@ -120,6 +143,8 @@ impl Dispatch<wl_registry::WlRegistry, ()> for TestClient {
             client.wm_base = Some(registry.bind(name, version.min(1), qh, ()));
         } else if interface == xdg_activation_v1::XdgActivationV1::interface().name {
             client.activation = Some(registry.bind(name, version.min(1), qh, ()));
+        } else if interface == wl_shm::WlShm::interface().name {
+            client.shm = Some(registry.bind(name, version.min(1), qh, ()));
         } else if interface == wl_seat::WlSeat::interface().name {
             // Version 2, unlike everything else here, for one reason: the
             // `name` event arrived in 2, and it is how this client tells the
@@ -139,14 +164,52 @@ impl Dispatch<wl_seat::WlSeat, ()> for TestClient {
         event: wl_seat::Event,
         _: &(),
         _: &Connection,
+        qh: &QueueHandle<Self>,
+    ) {
+        match event {
+            wl_seat::Event::Name { name } => {
+                if let Some(entry) = client.seats.iter_mut().find(|(bound, _)| bound == seat) {
+                    entry.1 = Some(name);
+                }
+            }
+            // Only the compositor's own seat has any capability at all (the
+            // second one is inert), so this needs no name check to pick the
+            // right keyboard.
+            wl_seat::Event::Capabilities {
+                capabilities: WEnum::Value(capabilities),
+            } if capabilities.contains(wl_seat::Capability::Keyboard)
+                && client.keyboard.is_none() =>
+            {
+                client.keyboard = Some(seat.get_keyboard(qh, ()));
+            }
+            _ => {}
+        }
+    }
+}
+
+impl Dispatch<wl_keyboard::WlKeyboard, ()> for TestClient {
+    fn event(
+        client: &mut Self,
+        _: &wl_keyboard::WlKeyboard,
+        event: wl_keyboard::Event,
+        _: &(),
+        _: &Connection,
         _: &QueueHandle<Self>,
     ) {
-        // Capabilities are ignored on purpose: nothing here takes a keyboard
-        // or a pointer from the seat, it only names it in `set_serial`.
-        if let wl_seat::Event::Name { name } = event
-            && let Some(entry) = client.seats.iter_mut().find(|(bound, _)| bound == seat)
+        // The serial of the first key *press* this client is given, which is
+        // the one a real launcher mints its token from -- fuzzel sets its
+        // stored serial in exactly this handler and calls
+        // `get_activation_token` from the binding that runs off it. The
+        // keymap fd and everything else about the key are irrelevant here;
+        // only the serial is.
+        if let wl_keyboard::Event::Key {
+            serial,
+            state: WEnum::Value(wl_keyboard::KeyState::Pressed),
+            ..
+        } = event
+            && client.key_serial.is_none()
         {
-            entry.1 = Some(name);
+            client.key_serial = Some(serial);
         }
     }
 }
@@ -200,6 +263,42 @@ wayland_client::delegate_noop!(TestClient: ignore wl_compositor::WlCompositor);
 wayland_client::delegate_noop!(TestClient: ignore wl_surface::WlSurface);
 wayland_client::delegate_noop!(TestClient: ignore xdg_toplevel::XdgToplevel);
 wayland_client::delegate_noop!(TestClient: ignore xdg_activation_v1::XdgActivationV1);
+wayland_client::delegate_noop!(TestClient: ignore wl_shm::WlShm);
+wayland_client::delegate_noop!(TestClient: ignore wl_shm_pool::WlShmPool);
+wayland_client::delegate_noop!(TestClient: ignore wl_buffer::WlBuffer);
+
+/// A `SURFACE`x`SURFACE` `wl_buffer` of opaque pixels, over a real memfd --
+/// the same path any toolkit takes, and the shape `cursor/tests.rs` uses.
+///
+/// Needed for one reason: a toplevel that never attaches a buffer has an
+/// empty bounding box, so `Space::element_under` can never find it and the
+/// pointer can never be over anything. Without this the click half of the
+/// gate would be tested against a pointer focused on nothing, which accepts
+/// and asserts nothing.
+fn solid_buffer(
+    shm: &wl_shm::WlShm,
+    qh: &QueueHandle<TestClient>,
+) -> Result<wl_buffer::WlBuffer, String> {
+    let stride = SURFACE * 4;
+    let len = (stride * SURFACE) as usize;
+    let fd = rustix::fs::memfd_create("flexwm-activation-test", rustix::fs::MemfdFlags::CLOEXEC)
+        .map_err(|e| e.to_string())?;
+    let mut file = std::fs::File::from(fd);
+    file.write_all(&vec![0xffu8; len])
+        .map_err(|e| e.to_string())?;
+    let pool = shm.create_pool(file.as_fd(), len as i32, qh, ());
+    let buffer = pool.create_buffer(
+        0,
+        SURFACE,
+        SURFACE,
+        stride,
+        wl_shm::Format::Argb8888,
+        qh,
+        (),
+    );
+    pool.destroy();
+    Ok(buffer)
+}
 
 /// What one live run reports back to the compositor side.
 struct Run {
@@ -238,13 +337,15 @@ enum Claim {
     Fabricated,
 }
 
-/// Maps two toplevels, then -- unless `activate` says otherwise -- takes a
-/// token and redeems it against the *first* one, which mapping the second
-/// took focus away from.
+/// Maps two toplevels, waits to be typed at, then -- unless `activate` says
+/// otherwise -- takes a token and redeems it against the *first* one, which
+/// mapping the second took focus away from.
 ///
-/// Every token minted here carries `serial` (on the compositor's own seat)
-/// unless it is `None`, which is the client never calling `set_serial` at
-/// all.
+/// The wait is the point, and it is what makes this the real flow rather than
+/// a simulation of it: the client mints its token from the serial of a key
+/// press *it was sent*, the way `fuzzel` does, instead of being handed a
+/// number the compositor side picked. `mapped` tells the compositor when
+/// there is a focused window to type into; the key press follows.
 ///
 /// `spare_tokens` are created and committed but never redeemed, which is how
 /// the cap test fills the table through the real protocol path.
@@ -252,7 +353,8 @@ fn map_two_and_activate_first(
     stream: UnixStream,
     activate: bool,
     spare_tokens: usize,
-    serial: Option<u32>,
+    claim: Claim,
+    mapped: Sender<()>,
 ) -> Result<Run, String> {
     let conn = Connection::from_socket(stream).map_err(|e| e.to_string())?;
     let mut queue = conn.new_event_queue();
@@ -264,6 +366,7 @@ fn map_two_and_activate_first(
     let compositor = client.compositor.clone().ok_or("no wl_compositor")?;
     let wm_base = client.wm_base.clone().ok_or("no xdg_wm_base")?;
 
+    let shm = client.shm.clone().ok_or("no wl_shm")?;
     let map = |title: &str| -> Result<wl_surface::WlSurface, String> {
         let surface = compositor.create_surface(&qh, ());
         let xdg = wm_base.get_xdg_surface(&surface, &qh, ());
@@ -272,15 +375,47 @@ fn map_two_and_activate_first(
         surface.commit();
         Ok(surface)
     };
+    // Mapped in two commits, the way the protocol asks: the role-only commit
+    // above, then pixels once the compositor's configure has been acked (the
+    // `xdg_surface` handler above does that as the event arrives).
+    let paint = |surface: &wl_surface::WlSurface| -> Result<(), String> {
+        surface.attach(Some(&solid_buffer(&shm, &qh)?), 0, 0);
+        surface.damage(0, 0, SURFACE, SURFACE);
+        surface.commit();
+        Ok(())
+    };
     let first = map("first")?;
     queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
-    let _second = map("second")?;
+    paint(&first)?;
+    let second = map("second")?;
+    queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+    paint(&second)?;
     queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
 
     // No xdg role, no buffer: a surface the compositor tracks as a surface
     // and as nothing else.
     let bare = compositor.create_surface(&qh, ());
     queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+
+    // Two windows are up and one of them has the keyboard, so there is
+    // something for a keypress to reach. Dispatch until it arrives; the
+    // compositor side's own deadline is what turns "it never comes" into a
+    // failed assertion rather than a hang.
+    mapped.send(()).map_err(|e| e.to_string())?;
+    while client.key_serial.is_none() {
+        queue
+            .blocking_dispatch(&mut client)
+            .map_err(|e| e.to_string())?;
+    }
+    let received = client.key_serial.ok_or("no key press reached the client")?;
+    let serial = match claim {
+        Claim::RealKeyPress => Some(received),
+        Claim::Nothing => None,
+        // Far past anything this test issues, so it cannot collide with a
+        // serial that really was recorded -- what a guessed or stale number
+        // looks like.
+        Claim::Fabricated => Some(received.wrapping_add(1_000)),
+    };
 
     let activation = client.activation.clone().ok_or("no xdg_activation_v1")?;
     // A serial is only meaningful against the seat that issued it, so name
@@ -336,12 +471,12 @@ fn map_two_and_activate_first(
 /// Stands up a real compositor with one output, runs the client script above
 /// against it, and hands back both halves for the caller to assert on.
 ///
-/// Two things happen before the client is let in, both so the serial gate in
-/// `token_created` is exercised rather than accidentally short-circuited: a
-/// second, inert seat is advertised (see [`OTHER_SEAT`]), and one real key
-/// press and release go through the seat, which is the user interaction a
-/// legitimate token is minted from. `claim` decides what the client then
-/// attaches to its tokens.
+/// Two things happen around the client so that the gate in `token_created` is
+/// exercised rather than accidentally short-circuited: a second, inert seat is
+/// advertised before it connects (see [`OTHER_SEAT`]), and once its windows
+/// are up a real key press and release go through the seat -- the user
+/// interaction a legitimate token is minted from, delivered to the client
+/// itself. `claim` decides what the client then attaches to its tokens.
 fn drive(
     activate: bool,
     spare_tokens: usize,
@@ -370,15 +505,6 @@ fn drive(
     state
         .seat_state
         .new_wl_seat(&state.display_handle, OTHER_SEAT);
-    let (press, _release) = press_a_key(&mut state);
-    let claimed = match claim {
-        Claim::RealKeyPress => Some(u32::from(press)),
-        Claim::Nothing => None,
-        // Far past anything this test issues, so it cannot collide with a
-        // serial that really was recorded: the ring holds two entries here,
-        // both from the press above.
-        Claim::Fabricated => Some(u32::from(press).wrapping_add(1_000)),
-    };
 
     let (server, client_end) = UnixStream::pair().expect("a socket pair");
     let client: Client = state
@@ -388,8 +514,10 @@ fn drive(
 
     let finished = Arc::new(AtomicBool::new(false));
     let flag = Arc::clone(&finished);
+    let (mapped_tx, mapped_rx) = channel();
     let thread = thread::spawn(move || {
-        let result = map_two_and_activate_first(client_end, activate, spare_tokens, claimed);
+        let result =
+            map_two_and_activate_first(client_end, activate, spare_tokens, claim, mapped_tx);
         flag.store(true, Ordering::Release);
         result
     });
@@ -398,10 +526,20 @@ fn drive(
     // dispatched from here until it is done. The deadline only exists so a
     // regression fails in seconds instead of hanging forever.
     let deadline = Instant::now() + PATIENCE;
+    let mut typed = false;
     while !finished.load(Ordering::Acquire) && Instant::now() < deadline {
         event_loop
             .dispatch(Some(Duration::from_millis(10)), &mut state)
             .expect("a compositor dispatch");
+        if !typed && mapped_rx.try_recv().is_ok() {
+            // The client is up and focused, and is now waiting to be typed
+            // at. Flushed explicitly afterwards because it is blocked reading
+            // rather than writing, and the display source only pushes events
+            // out when the *client* writes.
+            press_a_key(&mut state);
+            let _ = state.display_handle.flush_clients();
+            typed = true;
+        }
     }
     assert!(
         finished.load(Ordering::Acquire),
@@ -415,43 +553,77 @@ fn drive(
 }
 
 /// Presses and releases one key on the compositor's own seat, reporting the
-/// serials the press and the release went out with.
+/// serials the press and the release went out with, and who they went to.
 ///
 /// The only way a test can learn a serial this compositor really issued:
 /// `SERIAL_COUNTER` is process-global and shared with every other test
-/// running in parallel, so the values cannot be predicted, only observed.
-fn press_a_key(state: &mut State) -> (Serial, Serial) {
+/// running in parallel, so the values cannot be predicted, only observed. The
+/// recipient is asserted rather than returned per-event: both halves of one
+/// press go to whoever holds the keyboard, and a test that found otherwise
+/// would be testing a compositor that had stopped making sense.
+fn press_a_key(state: &mut State) -> (Serial, Serial, ClientId) {
     let outcome = state.key(Keycode::new(RETURN), KeyState::Pressed);
     assert!(
         !outcome.intercepted,
-        "a keybinding took the seeding keypress; it would have run an action \
+        "a keybinding took the test keypress; it would have run an action \
          in the middle of a test that is not about keybindings"
     );
-    let press = state
+    let (press, client) = state
         .interaction_serials
         .latest()
-        .expect("the press recorded a serial");
+        .expect("the press was recorded, so a client had the keyboard");
     state.key(Keycode::new(RETURN), KeyState::Released);
-    let release = state
+    let (release, released_to) = state
         .interaction_serials
         .latest()
-        .expect("the release recorded a serial");
-    (press, release)
+        .expect("the release was recorded");
+    assert_eq!(client, released_to, "the pair went to different clients");
+    (press, release, client)
 }
 
-/// The same, with the pointer: presses and releases the left button.
-fn click(state: &mut State) -> (Serial, Serial) {
+/// The same, with the pointer: presses and releases the left button over
+/// whatever the pointer last entered.
+///
+/// Fails rather than reports if the click reached nobody -- a button event
+/// with no pointer focus records nothing, and reading [`Recent::latest`] then
+/// silently returns whatever came *before* the click, which is how the first
+/// version of this test passed while testing a keypress.
+fn click(state: &mut State) -> (Serial, Serial, ClientId) {
+    let before = state.interaction_serials.latest();
     state.pointer_button(PointerButton::Left, true);
-    let press = state
+    let (press, client) = state
         .interaction_serials
         .latest()
-        .expect("the press recorded a serial");
+        .expect("the press was recorded, so the pointer was over a surface");
+    assert_ne!(
+        Some((press, client.clone())),
+        before,
+        "the click recorded nothing: the pointer is over no surface, so this \
+         would have gone on to assert about the event before it"
+    );
     state.pointer_button(PointerButton::Left, false);
-    let release = state
+    let (release, released_to) = state
         .interaction_serials
         .latest()
-        .expect("the release recorded a serial");
-    (press, release)
+        .expect("the release was recorded");
+    assert_eq!(client, released_to, "the pair went to different clients");
+    (press, release, client)
+}
+
+/// A second client that connects and does nothing at all -- no surfaces, no
+/// focus, never sent an input event. What a background client trying to spend
+/// someone else's serial looks like.
+///
+/// Its own end of the socket comes back with it: dropping that would
+/// disconnect it before the assertion.
+fn bystander(state: &mut State) -> (ClientId, UnixStream) {
+    let (server, ours) = UnixStream::pair().expect("a socket pair");
+    let id = state
+        .display_handle
+        .insert_client(server, Arc::new(ClientState::default()))
+        .expect("an inserted client")
+        .id();
+    (id, ours)
 }
 
 /// The client's `wl_seat` resources, split into the compositor's own and the
@@ -476,12 +648,19 @@ fn seats(state: &State, client: &Client, run: &Run) -> (ServerSeat, ServerSeat) 
     )
 }
 
-/// A token whose data claims `serial`, and which is otherwise as fresh as
-/// one a client just committed.
+/// A token whose data claims `serial` and comes from `client`, and which is
+/// otherwise as fresh as one a client just committed.
+///
+/// `client` is what Smithay fills in from whoever sent the request, so a test
+/// that passes someone else's id here is a client naming a serial that was
+/// delivered elsewhere -- not something a client can do over the protocol,
+/// which is exactly why it is checked from this side.
 fn token_claiming(
     serial: Option<(Serial, ServerSeat)>,
+    client: Option<ClientId>,
 ) -> (XdgActivationToken, XdgActivationTokenData) {
     let data = XdgActivationTokenData {
+        client_id: client,
         serial,
         ..XdgActivationTokenData::default()
     };
@@ -687,14 +866,14 @@ fn activating_a_surface_that_is_not_a_window_changes_nothing() {
 }
 
 // -------------------------------------------------------------------------
-// The serial gate, called directly
+// The gate, called directly
 // -------------------------------------------------------------------------
 //
 // `token_created`'s answer is a `bool` a client can never see, so these ask
-// it straight rather than inferring it from focus. The live tests above
-// cover the two shapes a cooperating client can actually produce; these
-// cover the ones it cannot -- another seat's serial, and a serial that was
-// real once and has since scrolled out of the recent history.
+// it straight rather than inferring it from focus. The live tests above cover
+// the shapes a cooperating client can actually produce; these cover the ones
+// it cannot -- another seat's serial, another *client's* serial, and a serial
+// that was real once and has since scrolled out of the recent history.
 
 #[test]
 fn a_token_carrying_either_half_of_a_key_press_is_accepted() {
@@ -704,14 +883,14 @@ fn a_token_carrying_either_half_of_a_key_press_is_accepted() {
     // `flexwm msg key` ever leads to.
     let (_loop, mut state, client, run) = drive(false, 0, Claim::RealKeyPress);
     let (ours, _other) = seats(&state, &client, &run);
-    let (press, release) = press_a_key(&mut state);
+    let (press, release, typed_at) = press_a_key(&mut state);
 
-    let (token, data) = token_claiming(Some((press, ours.clone())));
+    let (token, data) = token_claiming(Some((press, ours.clone())), Some(typed_at.clone()));
     assert!(
         state.token_created(token, data),
         "a token naming the press serial was refused"
     );
-    let (token, data) = token_claiming(Some((release, ours)));
+    let (token, data) = token_claiming(Some((release, ours)), Some(typed_at));
     assert!(
         state.token_created(token, data),
         "a token naming the release serial was refused"
@@ -725,14 +904,18 @@ fn a_token_carrying_either_half_of_a_click_is_accepted() {
     // the release.
     let (_loop, mut state, client, run) = drive(false, 0, Claim::RealKeyPress);
     let (ours, _other) = seats(&state, &client, &run);
-    let (press, release) = click(&mut state);
+    // A button goes to whatever the pointer last entered, so put it over the
+    // first window's painted area first -- which is `SURFACE` pixels square
+    // at the window's own origin, not the whole column the core gave it.
+    state.pointer_move(30.0, 30.0);
+    let (press, release, clicked_on) = click(&mut state);
 
-    let (token, data) = token_claiming(Some((press, ours.clone())));
+    let (token, data) = token_claiming(Some((press, ours.clone())), Some(clicked_on.clone()));
     assert!(
         state.token_created(token, data),
         "a token naming the button press serial was refused"
     );
-    let (token, data) = token_claiming(Some((release, ours)));
+    let (token, data) = token_claiming(Some((release, ours)), Some(clicked_on));
     assert!(
         state.token_created(token, data),
         "a token naming the button release serial was refused"
@@ -747,15 +930,17 @@ fn two_tokens_from_different_recent_interactions_are_both_accepted() {
     // of those serials can be the *latest*; both are recent.
     let (_loop, mut state, client, run) = drive(false, 0, Claim::RealKeyPress);
     let (ours, _other) = seats(&state, &client, &run);
-    let (older, _) = press_a_key(&mut state);
-    let (newer, _) = click(&mut state);
+    state.pointer_move(30.0, 30.0);
+    let (older, _, typed_at) = press_a_key(&mut state);
+    let (newer, _, clicked_on) = click(&mut state);
+    assert_eq!(typed_at, clicked_on, "one client, two kinds of interaction");
 
-    let (token, data) = token_claiming(Some((older, ours.clone())));
+    let (token, data) = token_claiming(Some((older, ours.clone())), Some(typed_at.clone()));
     assert!(
         state.token_created(token, data),
         "the older of two recent interactions was refused"
     );
-    let (token, data) = token_claiming(Some((newer, ours)));
+    let (token, data) = token_claiming(Some((newer, ours)), Some(clicked_on));
     assert!(
         state.token_created(token, data),
         "the newer of two recent interactions was refused"
@@ -764,8 +949,8 @@ fn two_tokens_from_different_recent_interactions_are_both_accepted() {
 
 #[test]
 fn a_token_that_names_no_input_event_is_refused() {
-    let (_loop, mut state, _client, _run) = drive(false, 0, Claim::RealKeyPress);
-    let (token, data) = token_claiming(None);
+    let (_loop, mut state, client, _run) = drive(false, 0, Claim::RealKeyPress);
+    let (token, data) = token_claiming(None, Some(client.id()));
     assert!(
         !state.token_created(token, data),
         "a token with no serial at all was accepted"
@@ -779,9 +964,9 @@ fn a_token_naming_a_seat_this_compositor_does_not_own_is_refused() {
     // a future that has more than one rather than one being enforced daily.
     let (_loop, mut state, client, run) = drive(false, 0, Claim::RealKeyPress);
     let (_ours, other) = seats(&state, &client, &run);
-    let (press, _release) = press_a_key(&mut state);
+    let (press, _release, typed_at) = press_a_key(&mut state);
 
-    let (token, data) = token_claiming(Some((press, other)));
+    let (token, data) = token_claiming(Some((press, other)), Some(typed_at));
     assert!(
         !state.token_created(token, data),
         "a token naming another seat was accepted"
@@ -792,12 +977,12 @@ fn a_token_naming_a_seat_this_compositor_does_not_own_is_refused() {
 fn a_token_whose_serial_no_input_event_carried_is_refused() {
     let (_loop, mut state, client, run) = drive(false, 0, Claim::RealKeyPress);
     let (ours, _other) = seats(&state, &client, &run);
-    let (press, _release) = press_a_key(&mut state);
+    let (press, _release, typed_at) = press_a_key(&mut state);
 
     // Far enough past a real one that nothing in this test could have
-    // issued it, which is what a guessed or stale serial looks like.
+    // issued it, which is what a stale serial looks like.
     let fabricated = Serial::from(u32::from(press).wrapping_add(1_000));
-    let (token, data) = token_claiming(Some((fabricated, ours)));
+    let (token, data) = token_claiming(Some((fabricated, ours)), Some(typed_at));
     assert!(
         !state.token_created(token, data),
         "a token with a fabricated serial was accepted"
@@ -805,21 +990,69 @@ fn a_token_whose_serial_no_input_event_carried_is_refused() {
 }
 
 #[test]
+fn a_serial_delivered_to_another_client_is_refused_however_right_the_number_is() {
+    // The reason the ring stores who received each event. `SERIAL_COUNTER` is
+    // process-global and a client can read a live value out of it for free --
+    // an `xdg_surface.configure` serial comes from the same counter -- so a
+    // value-only check would be brute-forceable by a client that received no
+    // input at all: a few dozen guesses around an observed value, each costing
+    // nothing because a refused token posts no error. Here the number is not
+    // guessed but exactly right, and it still gets nowhere.
+    let (_loop, mut state, client, run) = drive(false, 0, Claim::RealKeyPress);
+    let (ours, _other) = seats(&state, &client, &run);
+    let (press, release, typed_at) = press_a_key(&mut state);
+    let (guesser, _socket) = bystander(&mut state);
+    assert_ne!(guesser, typed_at, "the bystander is the focused client");
+
+    for (serial, which) in [(press, "press"), (release, "release")] {
+        let (token, data) = token_claiming(Some((serial, ours.clone())), Some(guesser.clone()));
+        assert!(
+            !state.token_created(token, data),
+            "a client that never received the {which} spent its serial anyway"
+        );
+    }
+    // ... and the client that really did receive it still can, so the refusal
+    // above is about the recipient and not about the serial having gone stale.
+    let (token, data) = token_claiming(Some((press, ours)), Some(typed_at));
+    assert!(
+        state.token_created(token, data),
+        "the client the key actually went to was refused too"
+    );
+}
+
+#[test]
+fn a_token_with_no_requesting_client_is_refused() {
+    // Not reachable over the protocol -- Smithay fills `client_id` in from
+    // the sender -- but "no client" can never satisfy a rule about which
+    // client received the event, and defaulting it open would be the whole
+    // gate.
+    let (_loop, mut state, client, run) = drive(false, 0, Claim::RealKeyPress);
+    let (ours, _other) = seats(&state, &client, &run);
+    let (press, _release, _typed_at) = press_a_key(&mut state);
+
+    let (token, data) = token_claiming(Some((press, ours)), None);
+    assert!(
+        !state.token_created(token, data),
+        "a token with no requesting client was accepted"
+    );
+}
+
+#[test]
 fn a_serial_from_before_the_recent_history_is_refused() {
     // The bound on how far back "recent" goes: the ring keeps a fixed
-    // number of qualifying serials, and one pushed out of it is no longer
+    // number of qualifying events, and one pushed out of it is no longer
     // evidence of anything. A launcher mints and hands over its token in
     // milliseconds; this is a client that sat on a serial while the user
     // went on typing.
     let (_loop, mut state, client, run) = drive(false, 0, Claim::RealKeyPress);
     let (ours, _other) = seats(&state, &client, &run);
-    let (press, _release) = press_a_key(&mut state);
+    let (press, _release, typed_at) = press_a_key(&mut state);
     // Two events each, so this is twice the history's own length.
     for _ in 0..interaction::CAPACITY {
         press_a_key(&mut state);
     }
 
-    let (token, data) = token_claiming(Some((press, ours)));
+    let (token, data) = token_claiming(Some((press, ours)), Some(typed_at));
     assert!(
         !state.token_created(token, data),
         "a serial older than the whole recent history was still accepted"
@@ -831,13 +1064,13 @@ fn a_session_that_has_seen_no_input_at_all_refuses_everything() {
     // The state a compositor starts in, and the one a client racing the
     // session's first keypress would find: nothing has been interacted
     // with, so no serial can be recent -- not even one this compositor
-    // really did issue.
+    // really did issue, to the very client asking.
     let (_loop, mut state, client, run) = drive(false, 0, Claim::RealKeyPress);
     let (ours, _other) = seats(&state, &client, &run);
-    let (press, _release) = press_a_key(&mut state);
+    let (press, _release, typed_at) = press_a_key(&mut state);
     state.interaction_serials = interaction::Recent::default();
 
-    let (token, data) = token_claiming(Some((press, ours)));
+    let (token, data) = token_claiming(Some((press, ours)), Some(typed_at));
     assert!(
         !state.token_created(token, data),
         "a serial was accepted against an empty interaction history"

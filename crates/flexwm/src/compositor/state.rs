@@ -19,7 +19,7 @@ use smithay::reexports::wayland_server::backend::{
     ClientData, ClientId, DisconnectReason, ObjectId,
 };
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-use smithay::reexports::wayland_server::{BindError, Display, DisplayHandle};
+use smithay::reexports::wayland_server::{BindError, Display, DisplayHandle, Resource};
 use smithay::utils::{Logical, Point};
 use smithay::wayland::compositor::{CompositorClientState, CompositorState};
 use smithay::wayland::cursor_shape::CursorShapeManagerState;
@@ -332,16 +332,17 @@ pub struct State {
     #[allow(dead_code)]
     pub idle_inhibit_manager_state: IdleInhibitManagerState,
     pub seat: Seat<State>,
-    /// The serials of the recent input events that count as the user asking
-    /// for something -- key and button presses and releases, never pointer
-    /// motion.
+    /// The recent input events that count as the user asking for something --
+    /// key and button presses and releases, never pointer motion -- each with
+    /// the client it was delivered to.
     ///
     /// Written only by `input.rs` (`key` and `pointer_button`, the two
     /// qualifying serial sources; `pointer_move_quietly`'s motion serial is
     /// deliberately not among them) and read only by `activation.rs`, which
-    /// refuses an `xdg-activation-v1` token whose claimed serial is not one
-    /// of these. See `input/interaction.rs` for why this is a short history
-    /// rather than a single "last serial".
+    /// refuses an `xdg-activation-v1` token unless its claimed serial is one
+    /// of these *and* was delivered to the client that asked. See
+    /// `input/interaction.rs` for why this is a short history rather than a
+    /// single "last serial", and why the client identity is part of it.
     pub interaction_serials: input::interaction::Recent,
 
     pub keybindings: Keybindings,
@@ -595,6 +596,20 @@ impl State {
             .iter()
             .find(|(_, window)| window.toplevel().is_some_and(|t| t.wl_surface() == surface))
             .map(|(&id, _)| id)
+    }
+
+    /// Who owns `surface` -- `None` if the surface or its client is already
+    /// gone, which a client disconnecting mid-event makes possible.
+    ///
+    /// The same lookup `focus_changed` (see `handlers.rs`) does for the
+    /// selection, named here because `input.rs` needs it per key and button
+    /// event to record *whose* interaction a serial was (see
+    /// `input/interaction.rs`). It costs a backend lookup, no allocation.
+    pub(super) fn client_of(&self, surface: &WlSurface) -> Option<ClientId> {
+        self.display_handle
+            .get_client(surface.id())
+            .ok()
+            .map(|client| client.id())
     }
 
     /// What the pointer is over: the top-most surface at `pos` and where that

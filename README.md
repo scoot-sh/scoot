@@ -698,16 +698,21 @@ Honoring every such request unconditionally would be a focus-stealing
 primitive, so flexwm checks the token three ways (see
 `compositor/activation.rs`):
 
-- **The token must name a real, recent input event.** `set_serial(serial,
-  seat)` is how a client says which click or keypress caused it to ask, and a
-  token that names none of them — no serial at all, a seat flexwm doesn't
-  own, or a stale or made-up number — is refused when it is created. What
-  counts is a serial flexwm issued for a key or button event (press *or*
-  release; pointer motion never counts, and neither does a *focus* event,
-  which every newly mapped window gets for free) within the last few input
-  events. A launcher minting its token inside its own input handler has one;
-  a background client that was never interacted with does not, which is
-  exactly the focus-steal case the two bounds below do not stop.
+- **The token must name a real, recent input event that went to the client
+  asking.** `set_serial(serial, seat)` is how a client says which click or
+  keypress caused it to ask, and a token that names none of them — no serial
+  at all, a seat flexwm doesn't own, or a stale or made-up number — is
+  refused when it is created. What counts is a serial flexwm issued for a key
+  or button event (press *or* release; pointer motion never counts, and
+  neither does a *focus* event, which every newly mapped window gets for
+  free) within the last few input events, **and that was delivered to that
+  same client**. The recipient half matters: Wayland serials come from one
+  process-wide counter shared with non-input events, so a number alone is
+  cheap to observe and guess — pairing it with who actually received the
+  event is what makes this a check on interaction. A launcher minting its
+  token inside its own input handler passes; a background client that was
+  never typed into or clicked has nothing to offer, which is exactly the
+  focus-steal case the two bounds below do not stop.
 - **A token is valid for 30 seconds.** Long enough for a cold-starting app to
   finish launching and redeem the token its launcher gave it; short enough
   that a token is still a receipt for something the user just did rather than
@@ -722,10 +727,19 @@ a launcher hands its token to a process that may take seconds to start, by
 which point plenty of newer input has happened, and re-checking then would
 break the one case this protocol exists for. A client the user really did
 interact with can still activate itself off that interaction — the user just
-clicked it, which is the protocol working as intended. A launcher whose token
-is refused is rarely even noticeable, because flexwm focuses every newly
-mapped window itself — which is where a launched app's focus came from before
-this protocol existed at all.
+clicked it, which is the protocol working as intended.
+
+What a refused token costs depends on what was being activated. For a **fresh
+spawn** it is invisible: the app maps a window, and mapping focuses it, which
+is where a launched app's focus came from before this protocol existed. For
+**something already running** — a single-instance app (Firefox, Chromium,
+anything on `GApplication`) re-invoked from a launcher, or the notification
+daemon case above — nothing maps, so nothing else focuses it and the
+activation simply does not happen. That is worth knowing because of the one
+case flexwm refuses that the protocol would allow: a launcher that mints its
+token from a *focus* serial rather than a key or button one (fuzzel does this
+when an entry is picked with the mouse) gets no activation, and for an
+already-running target that is the whole outcome.
 
 A redeemed token is removed whether or not it was honored, so one user action
 cannot be replayed into focus later. Activation goes through the same action

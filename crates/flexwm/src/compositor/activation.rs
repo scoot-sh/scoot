@@ -36,17 +36,27 @@
 //! leaves the table nowhere near full. The third rule is the one that does,
 //! and it is the gate the protocol itself offers:
 //!
-//! - **The token must name a real, recent interaction.** `set_serial(serial,
-//!   seat)` is how a client says "this is the click/keypress that caused
-//!   me to ask". It is optional in the protocol -- a request, not a
-//!   constructor argument -- so a token arrives here with no serial at all,
-//!   with one naming a seat this compositor does not own, or with a stale or
-//!   fabricated number, and all three are refused at creation. What is
-//!   accepted is a serial this compositor actually issued for a key or
-//!   button event within the last few input events (see
-//!   `input/interaction.rs`), which is what a launcher minting a token from
-//!   inside its own input handler necessarily has and a background client
-//!   necessarily does not.
+//! - **The token must name a real, recent interaction *with the client
+//!   asking*.** `set_serial(serial, seat)` is how a client says "this is the
+//!   click/keypress that caused me to ask". It is optional in the protocol --
+//!   a request, not a constructor argument -- so a token arrives here with no
+//!   serial at all, with one naming a seat this compositor does not own, or
+//!   with a stale or fabricated number, and all of those are refused at
+//!   creation. What is accepted is a serial this compositor issued for a key
+//!   or button event within the last few input events **and delivered to
+//!   this same client** (see `input/interaction.rs`), which is what a
+//!   launcher minting a token from inside its own input handler necessarily
+//!   has.
+//!
+//!   The client half is not a formality. `SERIAL_COUNTER` is process-global
+//!   and shared with events that are not input at all -- an
+//!   `xdg_surface.configure` serial comes from the same counter -- so any
+//!   client can read its live value for free (commit a role-less surface,
+//!   read the configure) and guess nearby numbers at no cost, since a refused
+//!   token posts no error. Matching the serial *and* the recipient is what
+//!   makes this a check on interaction rather than on arithmetic: a client
+//!   that was never focused, and never had the pointer over it, has nothing
+//!   to guess with.
 //!
 //! Checked when the token is *created*, never when it is redeemed. A
 //! launcher hands its token to a process that may take seconds to cold-start
@@ -62,12 +72,29 @@
 //! flexwm focuses every newly mapped window itself (`shell.rs`'s
 //! `add_window` passes `focus: true`), so any client can collect a
 //! `wl_keyboard.enter` serial just by mapping, and spending it later is the
-//! steal this gate exists to refuse. The cost is a launcher that mints from
-//! its last *focus* serial because nothing was typed or clicked in its own
-//! surface -- `fuzzel` does exactly that when an entry is chosen with the
-//! mouse, since it only ever sends its keyboard serial. Its token is
-//! refused, and the app it started is focused on map anyway, which is where
-//! a launched window's focus came from before this protocol existed at all.
+//! steal this gate exists to refuse.
+//!
+//! That has a real cost, and it is narrower than "harmless" but wider than
+//! nothing: a launcher that mints from its last *focus* serial, because
+//! nothing was typed or clicked in its own surface, is refused. `fuzzel`
+//! does exactly that when an entry is chosen with the mouse -- it only ever
+//! sends its keyboard serial, which is then the one from `wl_keyboard.enter`.
+//! Two different outcomes follow, and only the first is covered:
+//!
+//! - **A fresh spawn is unaffected.** The app the launcher started maps a
+//!   window, and mapping focuses it, which is where a launched window's focus
+//!   came from before this protocol existed at all.
+//! - **Re-activating something already running is not.** A single-instance
+//!   app (Firefox, Chromium, anything on `GApplication`) hands the token to
+//!   its existing process, which calls `activate` on a window that already
+//!   exists -- nothing maps, so nothing focuses it, and a refused token here
+//!   means nothing visible happens. The same is true of the notification
+//!   daemon case: focusing the app a clicked popup came from is exactly an
+//!   activation of an existing window.
+//!
+//! So the rule is: a token minted from a real key or button press works; one
+//! minted from a focus serial alone is refused, and for an already-running
+//! target that refusal is the whole outcome.
 //!
 //! What this deliberately does *not* stop: a client the user really did
 //! interact with can activate itself off that interaction -- including more
@@ -165,10 +192,25 @@ impl XdgActivationHandler for State {
                 return false;
             }
         }
-        if !self.interaction_serials.contains(*serial) {
+        // Whose event it was, not just which number: `SERIAL_COUNTER` is
+        // process-global and a client can read its live value for free (an
+        // `xdg_surface.configure` serial comes out of the same counter), so a
+        // value-only check is guessable by a client that received no input at
+        // all -- see `input/interaction.rs`. `client_id` is filled in by
+        // Smithay from the client that sent the request, so it cannot be
+        // forged; it is `None` only for a token the compositor minted itself
+        // (`create_external_token`), which never reaches this handler.
+        let Some(client) = &data.client_id else {
             tracing::debug!(
                 app_id = ?data.app_id,
-                "refusing an xdg-activation token: its serial is not a recent key or button event"
+                "refusing an xdg-activation token: it has no requesting client"
+            );
+            return false;
+        };
+        if !self.interaction_serials.contains(*serial, client) {
+            tracing::debug!(
+                app_id = ?data.app_id,
+                "refusing an xdg-activation token: its serial is not a recent key or button event this client received"
             );
             return false;
         }
