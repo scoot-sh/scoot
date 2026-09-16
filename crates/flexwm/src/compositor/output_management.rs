@@ -359,12 +359,10 @@ impl Manager {
         let mut modes = Vec::with_capacity(current.modes.len());
         for mode in &current.modes {
             let Some(object) = create_mode(dh, client, &head, version, *mode, current) else {
-                // The head object exists and has been introduced, so hand it
-                // to the tracking before giving up -- `give_up` does not
-                // retire it (the manager is about to be `finished`, which
-                // leaves every object under it inert anyway), but leaving a
-                // half-built `Head` unrecorded would be the one shape where
-                // this client's objects are unreachable from here.
+                // Recorded before giving up so `give_up` can retire it: the
+                // head has already been introduced and half described, and the
+                // client is owed a `finished` on it rather than a partial head
+                // it will never hear about again.
                 self.head = Some(Head {
                     head: head.downgrade(),
                     modes,
@@ -456,16 +454,19 @@ impl Manager {
     /// failure that can happen mid-announcement: a client that has exhausted
     /// its own object ids.
     ///
-    /// `done` first, so a client waiting for one before it redraws is left out
-    /// of date rather than waiting forever, then `finished` so it knows
-    /// nothing more is coming. `finished` is a destructor event, so nothing
-    /// may be sent on the manager afterwards -- hence the immediate `false`,
-    /// which drops this entry.
-    fn give_up(&self, what: &str, serial: u32) -> bool {
+    /// The head goes first (it may have been half described, and the client is
+    /// owed a `finished` on it rather than a partial head nothing will ever
+    /// correct), then `done`, so a client waiting for one before it redraws is
+    /// left out of date rather than waiting forever, then `finished` so it
+    /// knows nothing more is coming. `finished` is a destructor event, so
+    /// nothing may be sent on the manager afterwards -- hence the immediate
+    /// `false`, which drops this entry.
+    fn give_up(&mut self, what: &str, serial: u32) -> bool {
         tracing::warn!(
             interface = what,
             "could not create an output-management object; dropping this manager"
         );
+        self.retire_head();
         self.manager.done(serial);
         self.manager.finished();
         false

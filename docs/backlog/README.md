@@ -56,6 +56,19 @@ actionable.
   — the other half of the gap above, and a control protocol as much as an
   enumeration one (no Smithay support; minimize/maximize/fullscreen have no
   meaning in flexwm's core yet)
+- [Output management for shell display pages](./resolved/output-management-read-only-done.md)
+  — RESOLVED 2026-09-16 (PR #48), read half only:
+  `wlr-output-management-unstable-v1` (no `ext-` successor exists at the
+  pinned rev, and Smithay has no helper for either, so the handler layer is
+  hand-written against the generated wlr bindings the way `gamma_control.rs`
+  is). One head for flexwm's one output, read from the same `Output` that
+  configures `wl_output`.
+- [`wlr-output-management` reconfiguration: `apply`/`test` always fail](./protocols/output-management-reconfiguration.md)
+  — the deliberately-deferred other half of the entry above; gated on
+  multi-output support, since nothing a configuration asks for exists yet
+- [Screen capture for clients (`wlr-screencopy` / `ext-image-copy-capture`)](./protocols/screencopy-capture.md)
+  — shell thumbnails and previews; flexwm's own IPC screenshot covers agents,
+  not generic clients
 - [`xdg-toplevel-icon-v1` pixel-buffer icons are not exposed](./protocols/toplevel-icon-buffers.md) — only the icon name reaches IPC
 - [An IME popup over a lock screen is tracked but never drawn](./protocols/ime-popup-over-lock-screen.md)
 - [An IME keyboard grab makes the activation gate credit a client that received nothing](./protocols/interaction-serial-ime-grab.md)
