@@ -649,12 +649,17 @@ What a client sees, per window, on a `zwlr_foreign_toplevel_handle_v1`:
 
 What a client can ask for:
 
-- **`activate`** focuses that window — the same action a click on the window
-  itself and `flexwm msg action focus-window-id N` run, and with the same
-  effect on the keyboard: if your panel is a layer surface that took the
-  keyboard when the user clicked it, `activate` hands the keyboard on to the
-  window, exactly as clicking the window would. It does that whether or not
-  the window was already the focused one.
+- **`activate`** focuses that window, with the same effect on the keyboard as
+  a click on the window itself: if your panel is a layer surface that took
+  the keyboard when the user clicked it, `activate` hands the keyboard on to
+  the window, exactly as clicking the window would. It does that whether or
+  not the window was already the focused one. **`flexwm msg action
+  focus-window-id N` does not do this** — it moves window focus the same way
+  but does not take the keyboard back off a layer surface that holds it, so
+  an agent driving focus over IPC while a clicked panel still has the
+  keyboard will have its keystrokes delivered to the panel, not the window,
+  with nothing in `flexwm msg windows` to show the mismatch. See
+  `docs/backlog/protocols/activation-leaves-the-keyboard-on-a-clicked-layer-surface.md`.
 - **`close`** sends the window's `xdg_toplevel.close`. Whether the window
   actually goes is up to its own client, as the protocol says; `closed`
   follows if and when it does.

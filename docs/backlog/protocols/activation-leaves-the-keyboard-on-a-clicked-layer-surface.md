@@ -2,7 +2,7 @@
 title: "`xdg-activation-v1` moves window focus but leaves the keyboard on a clicked layer surface"
 status: "open"
 area: "protocols"
-priority: "medium"
+priority: "high"
 blocked: null
 ---
 
@@ -70,5 +70,20 @@ PR #50's first attempt at it got through.
 
 Worth checking the other callers of `Action::FocusWindowId` in the same pass
 rather than one at a time: as of writing they are `input.rs` (correct),
-`activation.rs` (this entry), and `foreign_toplevel_management.rs` (correct
-since PR #50).
+`activation.rs` (this entry), `foreign_toplevel_management.rs` (correct since
+PR #50) — and a fourth, missed in an earlier draft of this entry:
+`ipc.rs`'s `Request::Action` handler, which calls `self.act(Action::from(action))`
+for every IPC action, `focus-window-id` included, with no `clicked_layer`
+clear anywhere on that path.
+
+That fourth caller is why this entry's priority is `high`, not `medium`: an
+`xdg-activation-v1` launcher usually unmaps itself right after activating
+something, which is the whole reason this bug went unnoticed (see above) —
+but `flexwm msg action focus-window-id N` has no such self-correcting
+mitigation, and it is the primary way an agent focuses a window over IPC.
+An agent that clicks an `on_demand` panel (taking the keyboard), then drives
+focus with `focus-window-id` and injects keystrokes, gets every keystroke
+delivered to the panel instead of the window — with `flexwm msg windows`
+reporting the window as focused the whole time, so there is nothing to
+detect the mismatch from. This sits squarely on the computer-use mission
+`CLAUDE.md` names as one of two things this project has to get right.
