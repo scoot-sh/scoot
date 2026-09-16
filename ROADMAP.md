@@ -75,6 +75,16 @@ gap jumped the queue — each item's own file records why it landed when it did.
   largest test files each reimplemented (707 fewer duplicated lines), split
   the two biggest by concern, adopted `cargo-nextest` alongside `cargo
   test`. Infrastructure, not a protocol or user-facing change.
+- **[`ext-foreign-toplevel-list-v1`](docs/backlog/resolved/foreign-toplevel-list-done.md)**
+  (PR #47, 2026-09-16) — the window list an external taskbar, dock or
+  alt-tab switcher reads, alongside the workspace list `ext-workspace-v1`
+  already gave them. Enumeration only (the protocol has no control
+  requests); the identifier is `<generation>-<window id>`, so a client can
+  go from a toplevel it found here to `flexwm msg action focus-window-id
+  N`. Measured caveat, filed as
+  [its own item](docs/backlog/protocols/wlr-foreign-toplevel-management.md):
+  quickshell — and so DMS and Noctalia — binds the *wlr* protocol and
+  ignores this one.
 
 ## What's next
 
@@ -93,7 +103,9 @@ actually open.
    [`[tty] gpu` config key](docs/backlog/tty/tty-gpu-config-key.md).
 2. **Medium-priority protocol gaps**, mostly what's left of the DMS/Noctalia
    probes (see "Shell enablement" below for their recommended order):
-   [foreign-toplevel management](docs/backlog/protocols/foreign-toplevel-management.md),
+   [`wlr-foreign-toplevel-management`](docs/backlog/protocols/wlr-foreign-toplevel-management.md)
+   (what those two shells actually bind — the `ext-` list shipped in PR #47
+   and, measured, quickshell ignores it),
    [output-management](docs/backlog/protocols/output-management.md),
    [screencopy/image-capture](docs/backlog/protocols/screencopy-capture.md),
    plus two filed from PR #44's own review —
@@ -158,8 +170,16 @@ probes' recommended order:
    2026-09-15: auto-lock's trigger exists and is field-proven with real
    swayidle; what remains is the user's own daemon config, not compositor
    work.
-3. [`foreign-toplevel`](docs/backlog/protocols/foreign-toplevel-management.md)
-   — window lists (check for an `ext-` successor first).
+3. [`foreign-toplevel`](docs/backlog/resolved/foreign-toplevel-list-done.md)
+   — HALF-RESOLVED 2026-09-16: the successor the entry told its reader to
+   check for exists (`ext-foreign-toplevel-list-v1`) and is implemented, so
+   a standards-following taskbar or switcher can list windows and map each
+   one back to its `flexwm msg windows` id. It does *not* unlock these two
+   shells: quickshell 0.3.1 is offered the global and never binds it
+   (measured, wire-level) — its `ToplevelManager` is a wlr client. The rest
+   of this gap is
+   [`wlr-foreign-toplevel-management`](docs/backlog/protocols/wlr-foreign-toplevel-management.md),
+   which is a control protocol as much as an enumeration one.
 4. [`output-management`](docs/backlog/protocols/output-management.md)
    — shell display/settings pages.
 5. [`screencopy / image-capture`](docs/backlog/protocols/screencopy-capture.md)

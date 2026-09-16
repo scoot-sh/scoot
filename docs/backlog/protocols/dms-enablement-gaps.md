@@ -88,9 +88,15 @@ list behind that.
 - Log evidence: none needed beyond `wayland-info` (global absent) plus the
   launcher screenshots showing Applications/Settings only, no Windows
   section.
-- Rough size: M. See
-  `docs/backlog/protocols/foreign-toplevel-management.md` (check for an
-  `ext-` successor first, per the standing rule).
+- Rough size: M. Half-resolved 2026-09-16: the `ext-` successor exists and
+  is implemented
+  (`docs/backlog/resolved/foreign-toplevel-list-done.md`), which is what
+  the standing rule asked for — but it is not what Quickshell binds.
+  Measured against quickshell 0.3.1 (this probe's own build): flexwm offers
+  `ext_foreign_toplevel_list_v1` and quickshell never binds it, so a
+  minimal `ToplevelManager` reports `count = 0` with a real window open.
+  This gap needs
+  `docs/backlog/protocols/wlr-foreign-toplevel-management.md`.
 
 ### 3. No `ext-idle-notify-v1` and no `idle-inhibit`
 
@@ -212,7 +218,10 @@ rendered; these only limit live data, not protocol conclusions.
    the shell survives.
 3. **Gap 3 (idle)** — already roadmap-next; unlocks auto-lock, pairing with
    the now-proven session lock.
-4. **Gap 2 (foreign-toplevel)** — already filed; unlocks window lists.
+4. **Gap 2 (foreign-toplevel)** — the `ext-` half landed 2026-09-16 and
+   does *not* unlock this: quickshell binds the wlr protocol, measured.
+   Window lists wait on
+   `protocols/wlr-foreign-toplevel-management.md`.
 5. **Gap 4 (output-management)** — display settings.
 6. **Gap 6 (screencopy)** — thumbnails/overview previews.
 7. **Gap 7 (DMS recognition)** — upstream issue; raises the ceiling from
