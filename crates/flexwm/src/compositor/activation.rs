@@ -14,8 +14,10 @@
 //! The protocol explicitly leaves the decision to the compositor ("the
 //! compositor may ignore the request"), because honoring every request
 //! unconditionally is a focus-stealing primitive: any client, at any time,
-//! could take the keyboard from whatever the user is typing into. flexwm's
-//! answer is two bounds, both on the token rather than on the surface:
+//! could take the keyboard from whatever the user is typing into. flexwm
+//! bounds two things, both on the token rather than on the surface -- but
+//! **both are resource bounds, not a defense against focus-stealing itself**
+//! (see below for what actually gates that):
 //!
 //! - **Freshness** ([`TOKEN_LIFETIME`]). A token is a receipt for something
 //!   that just happened, not a standing permit. One older than this is
@@ -28,14 +30,25 @@
 //!   `wl_shm` pool cap in `dispatch.rs` and the IPC line-length cap. Expired
 //!   tokens are swept first and only a genuinely full table refuses.
 //!
-//! Deliberately *not* part of the policy: requiring the token to carry a seat
-//! and input serial. The protocol makes both optional (`set_serial` is a
-//! request, not a constructor argument), and real launchers -- the exact
-//! case this exists for -- routinely create a token from a keyboard-driven
-//! selection and hand it to a process that takes a second to start. Refusing
-//! those would make the feature not work for the one thing it is for, to stop
-//! an attack that a malicious client can mount anyway by simply clicking
-//! first.
+//! Neither bound stops the actual focus-steal case: a client with no
+//! keyboard or pointer focus, and no user interaction at all, can call
+//! `get_activation_token` and immediately `activate(token, its_own_surface)`
+//! -- the token is milliseconds old and the table is nowhere near full, so
+//! both checks pass. **Deliberately not part of the policy: requiring the
+//! token to carry a seat and input serial**, which is the actual gate the
+//! protocol offers against exactly this (`set_serial` is a request, not a
+//! constructor argument, so today nothing requires or checks it). Real
+//! launchers -- the exact case this protocol exists for -- routinely create a
+//! token from a keyboard-driven selection and hand it to a process that takes
+//! a second to start, and requiring a serial would make that the common case
+//! work correctly while still refusing a client that was never interacted
+//! with at all. That correct version is not implemented yet -- this is a
+//! known gap, not a considered trade-off, filed as
+//! `docs/backlog/protocols/activation-serial-validation.md`. What the two
+//! bounds above actually buy, honestly: they keep an unauthenticated,
+//! unlimited protocol entry point from being a memory-exhaustion vector,
+//! which is worth having regardless, but they are orthogonal to who gets to
+//! steal focus.
 //!
 //! What the compositor does *not* do with a refused request is also
 //! deliberate: nothing. There is no urgency hint to raise instead -- flexwm

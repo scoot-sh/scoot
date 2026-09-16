@@ -695,7 +695,9 @@ popup came from. Without it the only way to move focus is flexwm's own
 keybindings and IPC — a client has no standard way to ask.
 
 Honoring every such request unconditionally would be a focus-stealing
-primitive, so flexwm bounds it two ways (see `compositor/activation.rs`):
+primitive, so flexwm bounds the token two ways (see
+`compositor/activation.rs`) — **both resource bounds, not a defense against
+focus-stealing itself**:
 
 - **A token is valid for 30 seconds.** Long enough for a cold-starting app to
   finish launching and redeem the token its launcher gave it; short enough
@@ -705,6 +707,16 @@ primitive, so flexwm bounds it two ways (see `compositor/activation.rs`):
   expired ones swept first. `get_activation_token` is unauthenticated and
   unlimited, and nothing upstream prunes what it hands out; this is the same
   resource bound as the `wl_shm` pool cap.
+
+Neither bound stops a client with no focus and no user interaction at all
+from minting a token and immediately redeeming it against its own surface —
+the token is fresh and the table isn't full, so both checks pass. The actual
+gate the protocol offers against that, requiring the token to carry an input
+serial, is not implemented: real launchers routinely mint a token from a
+keyboard-driven selection and hand it to a slower-starting process, which is
+the case this protocol exists for, and this is a known gap rather than a
+considered trade-off — see
+`docs/backlog/protocols/activation-serial-validation.md`.
 
 A redeemed token is removed whether or not it was honored, so one user action
 cannot be replayed into focus later. Activation goes through the same action
@@ -724,7 +736,7 @@ driving the session.
 `flexwm msg windows` therefore grew one field:
 
 ```json
-{ "id": 1, "app_id": "foot", "title": "zsh", "icon": "org.codeberg.dnkl.foot", ... }
+{ "id": 1, "app_id": "foot", "title": "zsh", "icon": "foot", ... }
 ```
 
 `icon` is the freedesktop icon name the client committed, or `null`. It is

@@ -37,12 +37,19 @@
 //! image file or a copy of any cursor theme's actual pixel data -- niri's own
 //! cursor assets are GPL, Adwaita's aren't MIT-clean, and `CLAUDE.md`'s
 //! license note says not to borrow either. They are line art, not
-//! pixel-accurate theme shapes, and no config option can make them one: there
-//! is no `cursor_theme` field here, because honoring a theme name means
-//! loading a real xcursor asset, and this project has no MIT-clean one to
-//! load. Nothing here loads or ships a theme asset; a client surface's pixels
-//! come from the client, over the wire. See `cursor/shapes.rs` for how each
-//! shape is drawn.
+//! pixel-accurate theme shapes, and this module ships none of its own: no
+//! asset is embedded or vendored anywhere in this project.
+//!
+//! What *is* honored, when available, is the machine's own already-installed
+//! theme -- reading it carries no licensing obligation, unlike shipping one
+//! (see `cursor/theme.rs`, which resolves `[appearance] cursor_theme` /
+//! `$XCURSOR_THEME` and loads that theme's real artwork through the
+//! MIT-licensed `xcursor` crate). [`Cursor::theme`] holds it; a `Named`
+//! status is drawn from it when it has that shape, falling back to the
+//! drawn bitmaps above otherwise -- a machine with no theme installed at
+//! all, such as a webtop or minimal container, is the everyday case that
+//! fallback exists for. See `cursor/shapes.rs` for how each drawn shape is
+//! generated.
 //!
 //! # Renderer-generic, like `decorations.rs`
 //!
@@ -160,12 +167,13 @@ pub struct Cursor {
     /// that status changes rather than per frame.
     ///
     /// The invariant that makes this safe to read in [`Cursor::element`]:
-    /// **every write to `status` goes through [`Cursor::set_named`] or
-    /// [`Cursor::set_status`], and both rewrite this field in the same
-    /// statement.** There is no third write site, and adding one without
-    /// refreshing this would leave the previous shape's pixels drawn under
-    /// the new shape's name -- the single most likely way this module could
-    /// silently draw the wrong thing.
+    /// **every write to `status` refreshes this field in the same
+    /// statement.** There are exactly two write sites -- the struct literal
+    /// in [`Cursor::new`] (immediately followed by a refresh) and
+    /// [`Cursor::set_status`] (which refreshes inline) -- and adding a third
+    /// without refreshing this would leave the previous shape's pixels drawn
+    /// under the new shape's name -- the single most likely way this module
+    /// could silently draw the wrong thing.
     ///
     /// `None` means "no theme image for this status": a hidden cursor, a
     /// client surface, or a named shape the theme does not carry. All three
@@ -238,9 +246,10 @@ impl Cursor {
         cursor
     }
 
-    /// Whether a real cursor theme was found, i.e. whether a named shape is
-    /// drawn from the machine's own theme rather than from `shapes.rs`.
-    /// Read only by tests and by `compositor::run`'s environment export.
+    /// The machine's own cursor theme, as resolved at startup -- empty
+    /// (`Theme::is_loaded() == false`) when none was found, in which case
+    /// every named shape draws from `shapes.rs` instead. Read only by tests
+    /// and by `compositor::run`'s environment export.
     pub fn theme(&self) -> &Theme {
         &self.theme
     }

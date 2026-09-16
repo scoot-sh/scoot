@@ -253,7 +253,12 @@ rather than trusted from the earlier session:
   - `grep -iE "panic|error"` on both `--tty` run logs: no matches beyond the
     pre-existing, unrelated `Failed to destroy old mode property blob: No
     such file or directory` (a legacy-fbadd quirk of this VM's virtio-gpu,
-    seen on `main` too, not introduced here).
+    seen on `main` too, not introduced here). **Not fully reproducible**: a
+    reviewer's independent spot-check of this same scenario also saw, only at
+    teardown, `Failed to restore previous state. Error: Permission denied`
+    from the same DRM device-teardown path — present on `main` too (this PR's
+    diff does not touch that code) but not something either run here can
+    claim never happens; recorded honestly rather than smoothed over.
   - Both runs shut down cleanly via `flexwm msg action quit`; seatd logs
     confirm the seat was released each time (no process left holding it for
     whoever runs `--tty` next).
@@ -263,6 +268,28 @@ VT to switch to/from over ssh) and `xdg-activation-v1` end to end (no
 activation-aware launcher was on hand). Both are called out here rather than
 silently assumed clean — the ordinary render/input/tiling path they'd
 interact with was exercised extensively above and showed no regression.
+
+### Independent review of `e16aada` (the commit the earlier review never saw)
+
+The "What independent review caught" section above reviewed `b312366` --
+before `cursor/theme.rs` (264 lines) and its tests (169 lines) existed. A
+second independent pass, dispatched specifically because of that gap,
+reviewed the full diff through `e16aada` (plus this doc's own hardware-bug-bash
+commit, doc-only). Verdict: no blocking findings. It independently re-derived
+correctness for `frozen_icons` (traced every write/read site and the two
+Smithay fall-through arms it guards), the layer-surface `parent_geometry` fix
+(traced the popup-offset math for both the window and layer render paths),
+the activation token bounds' enforcement, and the absence of any
+theme-parsing panic path against malformed/adversarial xcursor files -- and
+live-spot-checked a themed `--tty` run itself rather than trusting the
+evidence above on faith. It also caught two doc-accuracy problems this PR
+introduced, both fixed as a follow-up commit before merge: `cursor.rs`'s
+module doc still said "there is no `cursor_theme` field here" after
+`e16aada` added exactly that, and `activation.rs`/`README.md` described the
+token-lifetime/count bounds as the answer to focus-stealing when they are
+resource bounds only -- the real gap (no input-serial check) is now stated
+honestly and filed as
+`docs/backlog/protocols/activation-serial-validation.md`.
 
 ## What this deliberately leaves open
 
