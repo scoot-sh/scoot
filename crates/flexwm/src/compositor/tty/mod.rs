@@ -572,10 +572,21 @@ impl Tty {
     /// case -- see `reactivate`), if `frame_size` doesn't match the size of
     /// the mode currently being scanned out, or if a previous flip hasn't
     /// been confirmed by a `VBlank` yet (`flip_pending`) -- flipping again
-    /// before that would fail with EBUSY. The last two set `present_skipped`
-    /// so a `VBlank` (or, for the
-    /// paused case, a reactivation) re-triggers a render instead of leaving
-    /// the screen stale.
+    /// before that would fail with EBUSY.
+    ///
+    /// Only the last of those three sets `present_skipped`, and it is the
+    /// only one that needs to: `flip_pending` is the one case where a
+    /// *different*, already-in-flight frame is what will eventually confirm
+    /// (a `VBlank`) that it's safe to try again, so the flag is what makes
+    /// that confirmation retry the render instead of leaving the screen
+    /// stale. The other two don't need it. `!active` means the session is
+    /// paused or DRM-masterless -- nothing here can retry until
+    /// `reactivate()` runs, and `reactivate()` unconditionally arms a fresh
+    /// modeset and render on its own, `present_skipped` or not. A
+    /// `frame_size` mismatch means a resize is in flight -- `State::
+    /// resize_output` has already asked for a render at the new size before
+    /// this function is ever called with the old one, so there is nothing
+    /// left for a flag to retry.
     ///
     /// The size check is a *mismatch* check, not a fixed-size one: the mode
     /// can change while the session runs (`hotplug.rs`), and the frame

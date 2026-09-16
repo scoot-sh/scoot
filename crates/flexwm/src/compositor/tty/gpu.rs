@@ -328,21 +328,26 @@ pub(super) enum Freshness {
     /// Take the kernel's cached answer.
     ///
     /// Right at startup, and only there. Two reasons, and the first is the
-    /// one that makes it correct rather than merely cheaper: while *no*
-    /// userspace DRM master exists, the kernel's own fbdev/fbcon client
-    /// handles hotplug and refreshes this cache itself, so what is cached
-    /// when flexwm opens the device already reflects whatever is plugged in.
-    /// The staleness [`Reprobe`](Self::Reprobe) exists for begins the moment
-    /// flexwm takes master, which is after this.
+    /// one that makes it correct rather than merely cheaper: the staleness
+    /// [`Reprobe`](Self::Reprobe) exists for begins the moment flexwm takes
+    /// DRM master, which is at `session.open()` -- seatd's own `SET_MASTER`
+    /// happens there, *before* [`probe`] runs, not after it (see
+    /// `tty/mod.rs`'s comment on that, measured on hardware). Up to that
+    /// `open`, though, no userspace master has existed, so the kernel's own
+    /// fbdev/fbcon client (present whenever `CONFIG_DRM_FBDEV_EMULATION` is
+    /// on, which is every mainstream distro kernel) has been handling
+    /// hotplug and keeping this cache current on its own. [`probe`]'s read
+    /// happens microseconds after that `open`, well inside the window where
+    /// nothing has yet had a chance to go stale -- so `Cached` is correct
+    /// here, not just close enough.
     ///
     /// The second is that forcing here would not be free, contrary to what
     /// it might look like. It would be a real probe, not a no-op: master is
-    /// per-open-file, seatd's own `SET_MASTER` has already made the file it
-    /// hands us master before [`probe`] borrows it (see `tty/mod.rs`'s
-    /// comment on that, measured on hardware), and `DeviceFd::from` later
-    /// adopts that *same* open file -- so the kernel would not demote the
-    /// request. It would cost one EDID read per connector examined, per
-    /// candidate device walked by [`first_usable`], on the startup path.
+    /// per-open-file, already held on the fd `probe` borrows for the reason
+    /// above, and `DeviceFd::from` later adopts that *same* open file -- so
+    /// the kernel would not demote the request. It would cost one EDID read
+    /// per connector examined, per candidate device walked by
+    /// [`first_usable`], on the startup path.
     Cached,
     /// Make the kernel re-probe the connector before answering.
     ///

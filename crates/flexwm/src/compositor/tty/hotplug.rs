@@ -353,9 +353,13 @@ impl Tty {
         } else {
             None
         };
-        // The previous pair is read from the surface, not from this struct's
-        // own fields, because it is the surface's *pending* state that a
-        // half-applied change has to be undone back to.
+        // Only the mode half of this pair is read from the surface --
+        // `self.surface.pending_mode()` -- because it is the surface's
+        // *pending* mode that a half-applied change has to be undone back
+        // to. The connector half is `self.connector`, not
+        // `self.surface.pending_connectors()`: this field is the one this
+        // module treats as authoritative for "which connector are we on",
+        // and it is what the failure path below restores toward.
         let previous = (self.connector, self.surface.pending_mode());
         if !set_pending(&self.surface, (connector, mode), previous) {
             // `buffers` is dropped here, releasing the dumb buffers that
@@ -520,10 +524,19 @@ fn set_pending(
             tracing::warn!(%error, "drm: could not put the previous mode back either");
         }
     }
-    if connectors_moved {
-        if let Err(error) = surface.set_connectors(&[previous_connector]) {
-            tracing::warn!(%error, "drm: could not put the previous connector back either");
-        }
+    // Through `move_connector`, not a raw `set_connectors`, for the same
+    // reason the two attempts above are: on Smithay's legacy (non-atomic)
+    // surface, `set_connectors` can answer `Ok` for a connector it did not
+    // actually move to (see that function's doc) -- and the restore target
+    // here is exactly the shape that triggers it, a connector that has just
+    // disconnected and so offers an empty mode list. Without this, a legacy
+    // restore failure would be silent: `pending_connectors()` would still
+    // name whichever connector attempt 1 or 2 left it on, `Tty::connector`
+    // would say `previous_connector`, and the two would disagree from here
+    // on -- the exact fact-in-two-places split `move_connector` exists to
+    // catch.
+    if connectors_moved && !move_connector(surface, previous_connector) {
+        tracing::warn!("drm: could not put the previous connector back either");
     }
     false
 }
