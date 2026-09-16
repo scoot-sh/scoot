@@ -111,25 +111,30 @@ by `the_window_list_stays_live_while_the_session_is_locked`.
 
 ## Evidence
 
-Compositor code as of **`4ff9eaa`** (everything after it is documentation).
+Compositor code as of **`c28a1ed`** (everything after it is documentation).
 Dev VM (`ssh -p 2222 dev@localhost`), debug build, `/mnt/flexwm`.
 
 ```
-cargo test -p flexwm          TEST EXIT=0    555 passed; 0 failed; 1 ignored
-cargo nextest run --workspace NEXTEST EXIT=0 649 tests run: 649 passed, 1 skipped
-cargo clippy --workspace --all-targets -- -D warnings   Finished, no warnings
+cargo test -p flexwm          TEST EXIT=0    558 passed; 0 failed; 1 ignored
+cargo nextest run --workspace NEXTEST EXIT=0 652 tests run: 652 passed, 1 skipped
+cargo clippy --workspace --all-targets -- -D warnings   CLIPPY EXIT=0, no warnings
 cargo fmt --check --all       clean (run on the Mac; the VM's 9p mount is read-only)
 bash scripts/smoke-test.sh    SMOKE EXIT=0   12 "ok:" checks
 ```
 
-20 of those tests are new (`compositor::foreign_toplevel::tests::*`), all
+23 of those tests are new (`compositor::foreign_toplevel::tests::*`), all
 driving a real `wayland-client` connection through a real `State` and
 asserting on the exact event sequence: the zero-window bind, binding before
 and after windows exist, one `done` per real change and none for a repeated
 `set_title`, `closed` on the right handle when one of two windows goes, a
 new identifier after a reopen, the identifier matching the IPC id, two lists
 in one client, two clients, a client disconnecting, a handle destroyed
-early, `stop`, a handle surviving `stop`, and the locked session.
+early, `stop`, a handle surviving `stop`, the locked session, and three
+bug-bash cases: 200 windows opened and destroyed at the rate a client can
+write them (every one announced and closed, nothing left tracked, 200
+distinct identifiers), a doubled `stop` followed by `destroy` on a list
+whose handles are still held, and a 3000-byte title round-tripping to both
+this protocol and the IPC window list.
 
 ### Live, against a real compositor and a real client
 
@@ -147,7 +152,7 @@ over IPC, retitled by its own shell, then closed:
 registry: ext_foreign_toplevel_list_v1 version 1
 -- listening for 16s --
 [4278190080] toplevel
-[4278190080] identifier=a3e689a2-1
+[4278190080] identifier=7f75c8d9-1
 [4278190080] title=""
 [4278190080] app_id=""
 [4278190080] done
@@ -155,7 +160,7 @@ registry: ext_foreign_toplevel_list_v1 version 1
 [4278190080] done
 [4278190080] title="foot"
 [4278190080] done
-[4278190080] title="dev@flexwm-vm: ~"
+[4278190080] title="dev@flexwm-vm: /mnt/flexwm"
 [4278190080] done
 [4278190080] closed
 ```
@@ -170,16 +175,16 @@ existed, one after both did), closing the focused one:
 --- ids flexwm msg windows reports ---
 [{"id":1,"app_id":"foot","title":"dev@flexwm-vm: ~"},{"id":2,"app_id":"foot","title":"dev@flexwm-vm: ~"}]
 === the client bound BEFORE any window existed saw ===
-[4278190080] toplevel / identifier=2b0af76a-1 / title="" / app_id="" / done
+[4278190080] toplevel / identifier=ac459c5f-1 / title="" / app_id="" / done
   ... app_id="foot" done, title="foot" done
-[4278190081] toplevel / identifier=2b0af76a-2 / title="" / app_id="" / done
+[4278190081] toplevel / identifier=ac459c5f-2 / title="" / app_id="" / done
   ... app_id="foot" done, title="foot" done
 [4278190080] title="dev@flexwm-vm: ~" done
 [4278190081] title="dev@flexwm-vm: ~" done
 [4278190081] closed
 === the client bound AFTER both windows existed saw ===
-[4278190080] toplevel / identifier=2b0af76a-1 / title="dev@flexwm-vm: ~" / app_id="foot" / done
-[4278190081] toplevel / identifier=2b0af76a-2 / title="dev@flexwm-vm: ~" / app_id="foot" / done
+[4278190080] toplevel / identifier=ac459c5f-1 / title="dev@flexwm-vm: ~" / app_id="foot" / done
+[4278190081] toplevel / identifier=ac459c5f-2 / title="dev@flexwm-vm: ~" / app_id="foot" / done
 [4278190081] closed
 ```
 
@@ -202,9 +207,16 @@ DEBUG qml: QS: initial count = 0
 ```
 
 `WAYLAND_DEBUG=1` for the same run: `wl_registry#2.global(7,
-"ext_foreign_toplevel_list_v1", 1)` is offered and never bound (`grep -n
-"bind.*foreign" /tmp/qs-wire.log` — empty, 223-line log). See
-`protocols/wlr-foreign-toplevel-management.md`.
+"ext_foreign_toplevel_list_v1", 1)` appears 5 times (quickshell's main
+registry plus mesa's three) and `grep -c "bind(.*foreign"` is **0** across
+the whole 223-line log. See `protocols/wlr-foreign-toplevel-management.md`.
+
+The three live scenarios and the quickshell probe were all re-run at
+`c28a1ed` after the bug-bash commit, so every transcript here is from the
+same tree as the test numbers above. The scripts are on the dev VM
+(`/var/tmp/live-probe.sh`, `/var/tmp/live-probe2.sh`, `/var/tmp/qs-probe.sh`,
+with the probe crate at `/var/tmp/ftl-probe`), kept so this can be re-run
+without rebuilding it.
 
 ### Not benchmarked, and why
 
