@@ -194,16 +194,15 @@ const BYTES_PER_PIXEL: i32 = 4;
 
 /// Everything this compositor keeps for `ext-image-copy-capture-v1`.
 pub struct Screencopy {
-    /// The `ext_output_image_capture_source_manager_v1` global. Held only to
-    /// keep it alive -- `OutputCaptureSourceHandler` routes through it and
-    /// nothing here reads it again.
+    /// The `ext_output_image_capture_source_manager_v1` global, which every
+    /// `create_source` request is routed through
+    /// ([`OutputCaptureSourceHandler::output_capture_source_state`]).
     ///
     /// There is deliberately no `ToplevelCaptureSourceState` beside it, and no
     /// `ImageCaptureSourceState` either: the latter is a unit struct at the
     /// pinned rev with no global of its own and no accessor on its handler
     /// trait, so storing one would document nothing. A Smithay revision that
     /// gives it state will fail to compile here rather than silently lose it.
-    #[allow(dead_code)]
     output_sources: OutputCaptureSourceState,
     /// The `ext_image_copy_capture_manager_v1` global plus Smithay's own
     /// session/frame bookkeeping. Read on every session and every frame.
@@ -405,8 +404,13 @@ impl ImageCopyCaptureHandler for State {
     ///
     /// Two things have to happen and neither is optional:
     ///
-    /// - the owned [`Session`] is dropped, which fails whatever frame was
-    ///   parked on it (and is a no-op on an object that is already gone);
+    /// - the [`Capture`] is dropped, and with it the [`Frame`] parked on it,
+    ///   whose own `Drop` fails it. It is specifically **not** [`Session`]'s
+    ///   `Drop` that does this, even though that one also fails frames: by the
+    ///   time this runs the session object is dead, and `Session::drop` opens
+    ///   by returning early on exactly that. Without the parked frame being
+    ///   dropped here, a client that destroyed a session with a capture
+    ///   outstanding would never hear `ready` or `failed` for it;
     /// - Smithay's *own* session list is swept. Nothing upstream removes a
     ///   destroyed session from `ImageCopyCaptureState::sessions`; only
     ///   `cleanup()` does, and nothing upstream calls that either. Without

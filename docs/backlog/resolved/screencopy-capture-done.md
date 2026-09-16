@@ -175,8 +175,14 @@ landed in a client's buffer, which a compositor-side assertion cannot make.
 ## Verification
 
 Everything below was captured against commit **`74557ec`**
-(`ext-image-copy-capture-v1: the screen capture shell clients and grim read`)
-on the dev VM (`ssh -p 2222 dev@localhost`, NixOS, QEMU), building through the
+(`ext-image-copy-capture-v1: the screen capture shell clients and grim read`).
+Two doc comments in `screencopy.rs` were corrected afterwards (an
+`#[allow(dead_code)]` on a field that does have a reader, and a
+`session_destroyed` comment that credited `Session::drop` for failing the
+parked frame when it is `Frame::drop` that does it — `Session::drop` returns
+early on an already-dead object). **No executable statement changed**, and
+`cargo build`/`clippy`/`fmt`/`test`/`nextest` were re-run clean after them, so
+the live results below still describe this tree. Run on the dev VM (`ssh -p 2222 dev@localhost`, NixOS, QEMU), building through the
 9p mount at `/mnt/flexwm` with `CARGO_TARGET_DIR=/var/cargo-target`. The
 binaries under test were copied out of the shared target dir immediately after
 each build (`~/screencopy-evidence/flexwm-74557ec`,
@@ -291,6 +297,49 @@ focus ring or the desktop background.** `flexwm msg windows` still listed the
 window at that moment (the window did not go away; it simply is not in the
 frame), which is what makes this a capture-path result rather than a
 window-list one.
+
+### `--tty`, and the cursor deviation measured rather than reasoned
+
+The `paint_cursors` deviation is a `--tty`-only claim ("under `--tty` a
+capture always contains the cursor, flag or no flag"), so it was taken on the
+real backend rather than argued from the element list. The VT-bound seat was
+confirmed free first (`pgrep -fa 'flexwm|sway'` empty), and the run was
+`--tty` over ssh, which takes real DRM master and scans out to the QEMU
+window.
+
+```
+$ ./flexwm-74557ec --tty --socket $XDG_RUNTIME_DIR/flexwm-tty.sock &
+   INFO flexwm::compositor::tty: drm: driving this device
+        path=/dev/dri/card0 connector=Virtual-1 width=1280 height=720
+
+$ flexwm msg outputs
+   { "id": 1, "name": "Virtual-1", "rect": { 0,0 1280x720 }, "scale": 1.0 }
+
+$ flexwm msg pointer move 400 300
+$ grim tty-grim.png            # no -c, i.e. the client did NOT ask for cursors
+
+$ file tty-grim.png
+tty-grim.png: PNG image data, 1280 x 720, 8-bit/color RGB, non-interlaced
+```
+
+Artifact pulled to the Mac and viewed: the capture is the configured
+background at the connector's full 1280x720 mode, **with the compositor's own
+cursor arrow drawn at exactly (400, 300)** — the pointer position just set.
+`grim` was not given `-c`, so this is the deviation happening, not a client
+asking for it. (`dev@flexwm-vm:~/screencopy-evidence/tty-grim.png`, 4390
+bytes.) It also confirms the size half of the constraints on a real
+connector: the buffer is the DRM mode, not the headless default.
+
+The compositor was stopped and confirmed gone afterwards; nothing else was
+holding the seat before or after.
+
+Not measured: that `frame_serial` stays put when `--tty`'s damage tracker
+returns `Ok` with `damage: None` (the `age > 0` path, unreachable on the
+other two backends). Reasoned rather than observed, and the direction is the
+safe one: `damage: None` from an age-based tracker means the framebuffer is
+unchanged, so a parked capture that waits is waiting correctly. The failure
+mode a wrong answer here produces is one redundant copy, not a frozen
+preview.
 
 ### Benchmark: what the per-frame path costs
 
