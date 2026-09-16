@@ -68,6 +68,10 @@ actionable.
 - [`ext_workspace.rs`'s cross-client check takes two backend locks per manager, per `wl_output` bind](./protocols/ext-workspace-client-lookup-per-bind.md)
   — pre-existing, same review; `ObjectId::same_client_as` answers the exact
   same question without locking
+- [`ext-workspace-v1` workspace activation moves window focus but leaves the keyboard on a clicked layer surface](./protocols/ext-workspace-activate-leaves-the-keyboard-on-a-clicked-layer-surface.md)
+  — suspected same shape as the entry above, left out of PR #53 per scope and
+  reviewer-confirmed still calling `act` bare; needs its own failing-first
+  test before any fix, or closes as not-a-bug
 - [Output management for shell display pages](./resolved/output-management-read-only-done.md)
   — RESOLVED 2026-09-16 (PR #49), read half only:
   `wlr-output-management-unstable-v1` (no `ext-` successor exists at the

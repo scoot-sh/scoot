@@ -141,7 +141,7 @@ ones *mean* "the keyboard should be on a window now".
 
 ### Tests
 
-Three new tests, each on a real mapped `on_demand` layer surface clicked
+Four new tests, each on a real mapped `on_demand` layer surface clicked
 through the real pointer, asserting on the seat's actual keyboard focus
 surface — never on a hand-set field:
 
@@ -159,6 +159,17 @@ surface — never on a hand-set field:
   `CycleColumnWidth` after a real click leaves the keyboard on exactly the
   clicked surface, focus unmoved, the click unspent. Passes with and without
   the fix, by design: it pins what the predicate must *not* do.
+- `activation/tests/keyboard.rs::a_refused_activation_while_locked_...`
+  (review follow-up, `10dfc06`): with the taskbar holding the keyboard, lock
+  the session, attempt activation, assert refusal AND `clicked_layer`
+  survival AND the keyboard back on the taskbar after unlock. Moving the
+  clear above the `is_locked()` check fails it (`left: None` /
+  `right: Some(LayerSurface(...))`) — it pins the refusal-before-clear
+  ordering, mirroring PR #50's
+  `activating_the_focused_window_while_locked_moves_no_keyboard_either`.
+  No lock surface is mapped in the fixture, so while locked the seat focus
+  is `None` by design; the test asserts what the lock actually guarantees
+  rather than keyboard-==-taskbar under lock.
 
 Both suites live in their own test module per the post-PR-#45 convention
 (`activation/tests.rs` → `tests/mod.rs` + `tests/keyboard.rs`,
@@ -181,7 +192,10 @@ test result: FAILED. 2 passed; 2 failed
 
 Both failures land on the assertion that the seat's keyboard focus is the
 window's `wl_surface` — the property itself, not a proxy. With the fix:
-all three pass.
+all four pass (`651 passed; 0 failed` / `745 passed` at the final `10dfc06`;
+the table below was re-run at `802e045` and re-verified green at `10dfc06`
+by the implementer, plus a coordinator spot-check of the four focus tests
+on the final SHA).
 
 ### Evidence
 
