@@ -722,9 +722,10 @@ a launcher hands its token to a process that may take seconds to start, by
 which point plenty of newer input has happened, and re-checking then would
 break the one case this protocol exists for. A client the user really did
 interact with can still activate itself off that interaction — the user just
-clicked it, which is the protocol working as intended. A refused token costs
-nothing visible in the usual case: flexwm focuses every newly mapped window
-anyway.
+clicked it, which is the protocol working as intended. A launcher whose token
+is refused is rarely even noticeable, because flexwm focuses every newly
+mapped window itself — which is where a launched app's focus came from before
+this protocol existed at all.
 
 A redeemed token is removed whether or not it was honored, so one user action
 cannot be replayed into focus later. Activation goes through the same action
