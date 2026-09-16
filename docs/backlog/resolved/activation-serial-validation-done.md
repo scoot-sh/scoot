@@ -95,12 +95,24 @@ interaction with the guesser. `input.rs` resolves the recipient at the moment
 it records — `keyboard.current_focus()` for a key, `pointer.current_focus()`
 for a button, each mapped to its owning client — so it is the client the event
 is about to be *delivered to*, not one derived later from something that could
-have changed. An event with no recipient (a key with nothing focused, a click
-on bare desktop) is recorded as nothing: evidence for no one.
+have changed.
+
+"Delivered" has to be meant literally, which took one more pass: the first
+version of this fix still recorded keys a **keybinding intercepted**, on the
+reasoning that nobody can name a serial they were never sent. Finding 1 is
+precisely that they can — by guessing from a nearby one they *were* sent, and
+the modifier presses around a chord are forwarded, so a client sees serials on
+either side of the one it never got. The intercepted *release* is worse: `act`
+may already have moved focus, so it would be filed under a client that was not
+even the intended recipient. Recording now happens after the filter and only
+when nothing intercepted the key. Likewise, an event with no recipient at all
+(a key with nothing focused, a click on bare desktop) is recorded as nothing:
+evidence for no one.
 
 Pinned by `a_serial_delivered_to_another_client_is_refused_however_right_the_number_is`
-(activation), `an_event_is_not_evidence_for_a_client_that_never_received_it`
-and `a_button_that_reaches_no_surface_is_recorded_as_nothing` (input).
+(activation), `an_event_is_not_evidence_for_a_client_that_never_received_it`,
+`a_key_a_binding_intercepts_is_not_recorded` and
+`a_button_that_reaches_no_surface_is_recorded_as_nothing` (input).
 
 ## Verified against a real launcher, not only in tests
 

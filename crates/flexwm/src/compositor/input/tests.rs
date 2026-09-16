@@ -773,6 +773,68 @@ fn a_button_that_reaches_no_surface_is_recorded_as_nothing() {
     );
 }
 
+/// A key a keybinding swallowed never reaches the focused client, so it is
+/// not evidence of anything and is not recorded.
+///
+/// It would otherwise be worse than useless: the modifier presses around a
+/// chord *are* forwarded, so the focused client sees serials either side of
+/// the one it never got and could simply guess it -- and the intercepted
+/// release lands after `act` may have moved focus, which would file it under
+/// a client that was not even the intended recipient.
+#[test]
+fn a_key_a_binding_intercepts_is_not_recorded() {
+    let mut fixture = Fixture::new();
+    let client = fixture.client_id.clone();
+    // Resolved from the keymap rather than hard-coded, so this keeps testing
+    // the binding rather than a keycode that happens to be `h` today.
+    let combo: KeyCombo = "super+h".parse().expect("a parsable combination");
+    let (code, held) = fixture
+        .state
+        .resolve_combo(&combo)
+        .expect("`super+h` is pressable on a US layout");
+    let modifier = *held.as_slice().first().expect("Super is held for it");
+
+    // Super's own press matches nothing, so it is forwarded and recorded.
+    fixture.state.key(modifier, KeyState::Pressed);
+    let forwarded = fixture
+        .state
+        .interaction_serials
+        .latest()
+        .expect("the modifier press reached the client");
+
+    let pressed = fixture.state.key(code, KeyState::Pressed);
+    assert!(
+        pressed.intercepted,
+        "`super+h` is not bound, so this test proves nothing"
+    );
+    assert_eq!(
+        fixture.state.interaction_serials.latest(),
+        Some(forwarded.clone()),
+        "an intercepted key press was recorded"
+    );
+    let released = fixture.state.key(code, KeyState::Released);
+    assert!(
+        released.intercepted,
+        "the matching release should be suppressed too"
+    );
+    assert_eq!(
+        fixture.state.interaction_serials.latest(),
+        Some(forwarded.clone()),
+        "an intercepted key release was recorded"
+    );
+
+    // ... and the modifier's release is forwarded like its press, so the ring
+    // does still move when something really is delivered.
+    fixture.state.key(modifier, KeyState::Released);
+    let latest = fixture
+        .state
+        .interaction_serials
+        .latest()
+        .expect("the modifier release reached the client");
+    assert_ne!(latest, forwarded, "the release went unrecorded");
+    assert_eq!(latest.1, client, "recorded under the wrong client");
+}
+
 /// The serial is evidence for the client that *received* the event and for
 /// nobody else, which is what stops a client from guessing its way to one:
 /// `SERIAL_COUNTER` is process-global and a client can read a live value out

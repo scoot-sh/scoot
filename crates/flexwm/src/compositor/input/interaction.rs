@@ -32,6 +32,16 @@
 //! [`XdgActivationTokenData::client_id`], which Smithay fills in from the
 //! client that actually sent the request and no client can forge.
 //!
+//! "Delivered" is meant literally, and the call sites in `input.rs` keep it
+//! that way: a key a keybinding swallowed is not recorded at all (its serial
+//! is one the focused client never saw but could guess from the forwarded
+//! modifier presses around it), nor is an event with no recipient -- a key
+//! with nothing focused, a click on bare desktop. The one case that slips
+//! through is a duplicate press of a key already held, which Smithay absorbs
+//! as a non-transition without telling the caller; its serial is only
+//! guessable by the very client already being sent that key's real events,
+//! which has honest entries of its own either way.
+//!
 //! # Why a ring rather than "the last serial"
 //!
 //! A single remembered serial cannot answer the question correctly, in

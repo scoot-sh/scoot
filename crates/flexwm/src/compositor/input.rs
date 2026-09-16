@@ -390,27 +390,16 @@ impl State {
             return KeyOutcome::default();
         };
         let serial = SERIAL_COUNTER.next_serial();
-        // Recorded against the client holding keyboard focus *now*, which is
-        // who `keyboard.input` below forwards to. Read before the filter runs
-        // rather than after, because a keybinding that changes focus must not
-        // move this key's serial onto whatever gained it -- and a key that
-        // reaches a binding at all is never forwarded, so the two can only
-        // disagree if this were read late.
-        //
-        // Both states, and a key a binding intercepts too: the focused client
-        // never sees an intercepted key, so the entry is simply unusable
-        // (nobody can name a serial they were not sent) rather than wrong,
-        // and skipping it here would make this depend on which keys happen to
-        // be bound. Nothing is recorded when nothing has focus: an event no
-        // client received is evidence for no one. See `interaction.rs`.
-        if let Some(client) = keyboard
+        // Who this key is *about* to go to, read before the filter below runs
+        // rather than after: a keybinding can change focus, and this key's
+        // serial must not follow it onto whatever gained it. What the filter
+        // decides then says whether it went there at all -- see the recording
+        // after the call.
+        let recipient = keyboard
             .current_focus()
-            .and_then(|surface| self.client_of(&surface))
-        {
-            self.interaction_serials.record(serial, client);
-        }
+            .and_then(|surface| self.client_of(&surface));
         let time = InputTime::from_millis(self.millis());
-        keyboard
+        let outcome = keyboard
             .input::<KeyOutcome, _>(self, keycode, state, serial, time, |data, mods, handle| {
                 match state {
                     KeyState::Pressed => {
@@ -472,7 +461,28 @@ impl State {
                     }
                 }
             })
-            .unwrap_or_default()
+            .unwrap_or_default();
+        // Only what was actually *delivered*, which is why this is after the
+        // call and not before it: a key a binding intercepted never reaches
+        // the focused client, and recording it would put a serial that client
+        // never saw under its name -- guessable from the ones it did see (the
+        // modifier presses around a chord are forwarded), which is exactly the
+        // hole the client half of this check exists to close. The intercepted
+        // *release* is worse still: by then `act` may have moved focus, so it
+        // would land under a client that not only never received it but was
+        // not even the intended recipient.
+        //
+        // Both states otherwise, because which of them a client mints an
+        // activation token from is its own choice (a GTK button activates on
+        // release). Nothing at all is recorded when nothing has focus: an
+        // event no client received is evidence for no one. See
+        // `interaction.rs`.
+        if !outcome.intercepted
+            && let Some(client) = recipient
+        {
+            self.interaction_serials.record(serial, client);
+        }
+        outcome
     }
 
     /// Runs `read` against the seat keyboard's keymap and the layout (xkb
