@@ -326,6 +326,15 @@ enum Ack {
     /// The taskbar client mapped its `on_demand` layer surface (see
     /// `keyboard.rs`, the only script that sends this).
     TaskbarMapped,
+    /// The windows client mapped its two toplevels and parked holding them
+    /// (see `keyboard.rs`, the only script that sends this).
+    WindowsMapped,
+    /// The locker client took the session lock (see `keyboard.rs`, the only
+    /// script that sends this).
+    Locked,
+    /// The locker client unlocked again after the test told it to (see
+    /// `keyboard.rs`, the only script that sends this).
+    Unlocked,
     /// The script ran to the end. Boxed because a `Run` owns a `Connection`
     /// and is far larger than the other variant.
     Done(Box<Run>),

@@ -21,14 +21,25 @@
 //! With the `clicked_layer = None` line removed from `request_activation`
 //! the final keyboard assertion fails, because `layer_keyboard_focus`
 //! re-derives the still-mapped taskbar.
+//!
+//! A second test pins the lock gate's ordering the same way: taskbar clicked,
+//! session locked (a third client holding `ext_session_lock_v1`, no lock
+//! surface, like `foreign_toplevel_management`'s `LockSession` step), then a
+//! direct `request_activation` that must be refused without spending the
+//! click -- and the keyboard must still be on the taskbar after the unlock.
+//! Moving the clear above the `is_locked()` check fails that test.
 
 use std::sync::mpsc::Receiver;
+use std::time::Duration;
 
+use wayland_protocols::ext::session_lock::v1::client::{
+    ext_session_lock_manager_v1, ext_session_lock_v1,
+};
 use wayland_protocols_wlr::layer_shell::v1::client::{zwlr_layer_shell_v1, zwlr_layer_surface_v1};
 
 use super::*;
 use crate::compositor::test_support::wait_for;
-use smithay::desktop::Window;
+use smithay::desktop::{LayerSurface, Window};
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 
 /// The framebuffer the headless backend renders into. Nothing here reads a
@@ -350,5 +361,377 @@ fn an_activation_takes_the_keyboard_back_from_a_clicked_taskbar() {
     assert!(
         fixture.state.clicked_layer.is_none(),
         "the taskbar's click was not spent"
+    );
+}
+
+// -------------------------------------------------------------------------
+// The lock gate: a refused activation must disturb nothing
+// -------------------------------------------------------------------------
+
+/// The window end for the lock test: two bare `xdg_toplevel`s, held for the
+/// whole test. Bare, like `foreign_toplevel_management/tests` uses them:
+/// what puts a window in flexwm's model is the toplevel existing, and the
+/// activation below is driven by a direct `request_activation` call -- the
+/// serial gate lives at token creation, the ordering under test lives in
+/// this handler's tail -- so no key press, no buffers, and no token round
+/// trip are needed.
+#[derive(Default)]
+struct WindowsClient {
+    compositor: Option<wl_compositor::WlCompositor>,
+    wm_base: Option<xdg_wm_base::XdgWmBase>,
+    /// The serial of each toplevel's latest unacked `xdg_surface.configure`.
+    window_serials: Vec<Option<u32>>,
+}
+
+impl Dispatch<wl_registry::WlRegistry, ()> for WindowsClient {
+    fn event(
+        client: &mut Self,
+        registry: &wl_registry::WlRegistry,
+        event: wl_registry::Event,
+        _: &(),
+        _: &Connection,
+        qh: &QueueHandle<Self>,
+    ) {
+        let wl_registry::Event::Global {
+            name,
+            interface,
+            version,
+        } = event
+        else {
+            return;
+        };
+        if interface == wl_compositor::WlCompositor::interface().name {
+            client.compositor = Some(registry.bind(name, version.min(4), qh, ()));
+        } else if interface == xdg_wm_base::XdgWmBase::interface().name {
+            client.wm_base = Some(registry.bind(name, version.min(3), qh, ()));
+        }
+    }
+}
+
+impl Dispatch<xdg_surface::XdgSurface, WindowIndex> for WindowsClient {
+    fn event(
+        client: &mut Self,
+        _: &xdg_surface::XdgSurface,
+        event: xdg_surface::Event,
+        index: &WindowIndex,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let xdg_surface::Event::Configure { serial } = event
+            && let Some(slot) = client.window_serials.get_mut(index.0)
+        {
+            *slot = Some(serial);
+        }
+    }
+}
+
+impl Dispatch<xdg_toplevel::XdgToplevel, WindowIndex> for WindowsClient {
+    fn event(
+        _: &mut Self,
+        _: &xdg_toplevel::XdgToplevel,
+        _: xdg_toplevel::Event,
+        _: &WindowIndex,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+    }
+}
+
+impl Dispatch<xdg_wm_base::XdgWmBase, ()> for WindowsClient {
+    fn event(
+        _: &mut Self,
+        wm_base: &xdg_wm_base::XdgWmBase,
+        event: xdg_wm_base::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let xdg_wm_base::Event::Ping { serial } = event {
+            wm_base.pong(serial);
+        }
+    }
+}
+
+wayland_client::delegate_noop!(WindowsClient: ignore wl_compositor::WlCompositor);
+wayland_client::delegate_noop!(WindowsClient: ignore wl_surface::WlSurface);
+
+/// A window's own index in creation order, so its configure can be matched
+/// back to it.
+struct WindowIndex(usize);
+
+/// Maps one bare window and acks its configure, returning everything the
+/// caller must hold: dropping a role object would destroy the window it
+/// stands for.
+fn map_bare_window(
+    compositor: &wl_compositor::WlCompositor,
+    wm_base: &xdg_wm_base::XdgWmBase,
+    qh: &QueueHandle<WindowsClient>,
+    queue: &mut wayland_client::EventQueue<WindowsClient>,
+    client: &mut WindowsClient,
+) -> Result<
+    (
+        wl_surface::WlSurface,
+        xdg_surface::XdgSurface,
+        xdg_toplevel::XdgToplevel,
+    ),
+    String,
+> {
+    let surface = compositor.create_surface(qh, ());
+    let index = client.window_serials.len();
+    client.window_serials.push(None);
+    let xdg = wm_base.get_xdg_surface(&surface, qh, WindowIndex(index));
+    let toplevel = xdg.get_toplevel(qh, WindowIndex(index));
+    surface.commit();
+    let serial = wait_for(queue, client, "a toplevel configure", |client| {
+        client.window_serials[index]
+    })?;
+    xdg.ack_configure(serial);
+    Ok((surface, xdg, toplevel))
+}
+
+/// Maps two windows, reports them, and parks holding them until the test
+/// disconnects it -- returning early would destroy the windows out from
+/// under the assertions.
+fn run_windows(stream: UnixStream, steps: Receiver<()>, acks: Sender<Ack>) -> Result<(), String> {
+    let conn = Connection::from_socket(stream).map_err(|e| e.to_string())?;
+    let mut queue = conn.new_event_queue();
+    let qh = queue.handle();
+    let mut client = WindowsClient::default();
+    conn.display().get_registry(&qh, ());
+    queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+
+    let compositor = client.compositor.clone().ok_or("no wl_compositor")?;
+    let wm_base = client.wm_base.clone().ok_or("no xdg_wm_base")?;
+    // Held so the windows stay mapped: dropping a role object would destroy
+    // the window it stands for.
+    let windows = vec![
+        map_bare_window(&compositor, &wm_base, &qh, &mut queue, &mut client)?,
+        map_bare_window(&compositor, &wm_base, &qh, &mut queue, &mut client)?,
+    ];
+    let _windows = windows;
+
+    queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+    acks.send(Ack::WindowsMapped).map_err(|e| e.to_string())?;
+    while steps.recv().is_ok() {}
+    Ok(())
+}
+
+/// The lock end: takes the session lock the way a lock screen does --
+/// `ext_session_lock_manager_v1.lock`, held for the whole test -- and maps
+/// no lock surface, like `foreign_toplevel_management`'s `LockSession` step.
+/// The one `()` this client ever receives means "unlock now", answered with
+/// a real `unlock_and_destroy` rather than a disconnect, which would abandon
+/// the lock instead of ending it.
+#[derive(Default)]
+struct LockerClient {
+    locks: Option<ext_session_lock_manager_v1::ExtSessionLockManagerV1>,
+    locked: u32,
+    finished: u32,
+}
+
+impl Dispatch<wl_registry::WlRegistry, ()> for LockerClient {
+    fn event(
+        client: &mut Self,
+        registry: &wl_registry::WlRegistry,
+        event: wl_registry::Event,
+        _: &(),
+        _: &Connection,
+        qh: &QueueHandle<Self>,
+    ) {
+        let wl_registry::Event::Global {
+            name,
+            interface,
+            version,
+        } = event
+        else {
+            return;
+        };
+        if interface == ext_session_lock_manager_v1::ExtSessionLockManagerV1::interface().name {
+            client.locks = Some(registry.bind(name, version.min(1), qh, ()));
+        }
+    }
+}
+
+impl Dispatch<ext_session_lock_v1::ExtSessionLockV1, ()> for LockerClient {
+    fn event(
+        client: &mut Self,
+        _: &ext_session_lock_v1::ExtSessionLockV1,
+        event: ext_session_lock_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        match event {
+            ext_session_lock_v1::Event::Locked => client.locked += 1,
+            ext_session_lock_v1::Event::Finished => client.finished += 1,
+            _ => {}
+        }
+    }
+}
+
+wayland_client::delegate_noop!(LockerClient: ignore ext_session_lock_manager_v1::ExtSessionLockManagerV1);
+
+fn run_locker(stream: UnixStream, steps: Receiver<()>, acks: Sender<Ack>) -> Result<(), String> {
+    let conn = Connection::from_socket(stream).map_err(|e| e.to_string())?;
+    let mut queue = conn.new_event_queue();
+    let qh = queue.handle();
+    let mut client = LockerClient::default();
+    conn.display().get_registry(&qh, ());
+    queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+
+    let manager = client
+        .locks
+        .clone()
+        .ok_or("no ext_session_lock_manager_v1 -- the global is missing")?;
+    let seen = client.locked + client.finished;
+    // Held so the session stays locked: dropping the lock object ends the
+    // lock, which is exactly what must not happen until the test unlocks.
+    let lock = manager.lock(&qh, ());
+    // Exactly one of the two must arrive, and the protocol says so in as
+    // many words: "In response to the creation of this object the compositor
+    // must send either the locked or finished event." The shape
+    // `session_lock/tests` uses for its own `Lock` step.
+    wait_for(&mut queue, &mut client, "locked or finished", |client| {
+        (client.locked + client.finished > seen).then_some(())
+    })?;
+    queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+    acks.send(Ack::Locked).map_err(|e| e.to_string())?;
+
+    steps.recv().map_err(|e| e.to_string())?;
+    lock.unlock_and_destroy();
+    queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+    acks.send(Ack::Unlocked).map_err(|e| e.to_string())?;
+    while steps.recv().is_ok() {}
+    Ok(())
+}
+
+/// Two parked windows mapped by client 0, the taskbar mapped by client 1
+/// and clicked so it holds the keyboard, then the session locked by client
+/// 2. Returns the compositor and the clicked layer surface itself, so the
+/// test can show the refusal preserved exactly that click.
+fn drive_locked_with_taskbar() -> (Fixture, LayerSurface) {
+    let mut fixture = Harness::headless(Appearance::default(), CANVAS);
+    fixture.spawn(run_windows);
+    fixture.spawn(run_taskbar);
+    let Ack::WindowsMapped = fixture.wait_for_ack(0) else {
+        panic!("the window client never mapped its windows");
+    };
+    let Ack::TaskbarMapped = fixture.wait_for_ack(1) else {
+        panic!("the taskbar client never mapped its layer surface");
+    };
+    // As in `drive_with_taskbar`: the ack only proves the *client* finished,
+    // not that the compositor dispatched the commits yet.
+    fixture.settle();
+    // The second window mapped last, so it has window focus -- the one the
+    // refused activation below must leave alone.
+    assert_eq!(
+        fixture.state.focus,
+        Some(WindowId(2)),
+        "the second window should have focus before anything is clicked"
+    );
+
+    // The launcher gesture: a real click on the taskbar, which takes the
+    // keyboard without moving window focus.
+    click(&mut fixture, TASKBAR_POINT.0, TASKBAR_POINT.1);
+    assert!(
+        fixture.state.clicked_layer.is_some(),
+        "the click never reached the taskbar -- check TASKBAR_POINT against the layout"
+    );
+    assert!(
+        fixture.state.keyboard_on_layer,
+        "an on_demand layer surface should hold the keyboard once clicked"
+    );
+    assert_eq!(
+        keyboard_surface(&fixture),
+        Some(clicked_surface(&fixture)),
+        "the keyboard is not on the taskbar the click landed on"
+    );
+    let taskbar = fixture
+        .state
+        .clicked_layer
+        .clone()
+        .expect("the taskbar holds the click");
+
+    fixture.spawn(run_locker);
+    let Ack::Locked = fixture.wait_for_ack(2) else {
+        panic!("the locker client never took the session lock");
+    };
+    fixture.settle();
+    assert!(fixture.state.session_lock.is_locked());
+    // The precondition this test is named for: locking itself must not move
+    // window focus, or the refusal below would exercise nothing.
+    assert_eq!(
+        fixture.state.focus,
+        Some(WindowId(2)),
+        "locking the session moved window focus"
+    );
+    (fixture, taskbar)
+}
+
+#[test]
+fn a_refused_activation_while_locked_spends_neither_focus_nor_the_taskbars_click() {
+    // The lock gate's ordering, pinned: `request_activation` refuses before
+    // touching anything, because what follows a honored request spends the
+    // launcher's click -- and a refused request must not disturb anything, so
+    // the session comes back as the user left it. Moving the
+    // `clicked_layer = None` line above the `is_locked()` check keeps every
+    // other test in this file green while silently spending the taskbar's
+    // click here: on unlock the keyboard would be on the window instead of
+    // the taskbar.
+    //
+    // Driven by a direct call, like the `token_aged` tests: the serial gate
+    // lives at token creation, the ordering under test lives in this
+    // handler's tail.
+    let (mut fixture, taskbar) = drive_locked_with_taskbar();
+
+    let surface = window_surface(&fixture, WindowId(1));
+    let (token, data) = token_aged(Duration::from_secs(0));
+    fixture.state.request_activation(token, data, surface);
+
+    assert!(
+        fixture.state.session_lock.is_locked(),
+        "the session came unlocked on its own mid-test"
+    );
+    assert_eq!(
+        fixture.state.focus,
+        Some(WindowId(2)),
+        "a locked session's focus was moved by an activation"
+    );
+    assert_eq!(
+        fixture.state.clicked_layer.as_ref(),
+        Some(&taskbar),
+        "a refused activate spent the taskbar's click anyway"
+    );
+    assert_ne!(
+        keyboard_surface(&fixture),
+        Some(window_surface(&fixture, WindowId(1))),
+        "a locked session gave the keyboard to a window on a client's request"
+    );
+    // Deliberately not asserting the keyboard is still on the taskbar *while*
+    // locked: with no lock surface mapped the seat has no focus at all, and
+    // the lock guarantees no window does -- which is the half that matters
+    // here. The click's survival is what brings the keyboard back below.
+
+    // Unlock the way a lock screen does after auth, and the session must
+    // come back as the user left it: same window focus, same click, and the
+    // keyboard back on the taskbar it was clicked onto.
+    let Ack::Unlocked = fixture.run_on(2, ()) else {
+        panic!("the locker client never unlocked the session");
+    };
+    assert!(!fixture.state.session_lock.is_locked());
+    assert_eq!(
+        fixture.state.focus,
+        Some(WindowId(2)),
+        "unlocking moved window focus"
+    );
+    assert_eq!(
+        fixture.state.clicked_layer.as_ref(),
+        Some(&taskbar),
+        "the taskbar's click did not survive the lock"
+    );
+    assert_eq!(
+        keyboard_surface(&fixture),
+        Some(clicked_surface(&fixture)),
+        "unlocking did not hand the keyboard back to the clicked taskbar"
     );
 }
