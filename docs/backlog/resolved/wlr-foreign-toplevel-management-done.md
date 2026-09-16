@@ -222,10 +222,17 @@ cargo test -p flexwm            TEST EXIT=0     621 passed; 0 failed; 1 ignored
 cargo nextest run --workspace   NEXTEST EXIT=0  715 tests run: 715 passed, 1 skipped
 cargo clippy -p flexwm --all-targets -- -D warnings   CLIPPY EXIT=0 (0 warnings)
 cargo fmt --check -p flexwm                           FMT EXIT=0
+MODE=--headless scripts/smoke-test.sh                 SMOKE EXIT=0 (12 `ok:` lines,
+                                                      screenshot /tmp/flexwm-smoke.png)
 ```
 
-70 of those tests are this protocol's own (`cargo test -p flexwm
-foreign_toplevel` — the wlr suite plus the `ext-` one it must agree with).
+68 of those tests are this protocol's own and the `ext-` one it must agree
+with (`cargo test -p flexwm foreign_toplevel`: `68 passed; 0 failed`, 554
+filtered out).
+
+The smoke test was pointed at a copy of the binary for the same shared
+target-directory reason described below (`FLEXWM=/var/tmp/flexwm-smoke-bin`,
+since deleted).
 
 ### Live, against the real quickshell
 

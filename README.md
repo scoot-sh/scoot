@@ -650,8 +650,7 @@ What a client sees, per window, on a `zwlr_foreign_toplevel_handle_v1`:
 What a client can ask for:
 
 - **`activate`** focuses that window — the same action a click on the window
-  itself, `flexwm msg action focus-window-id N` and an `ext-workspace-v1`
-  activation all run.
+  itself and `flexwm msg action focus-window-id N` run.
 - **`close`** sends the window's `xdg_toplevel.close`. Whether the window
   actually goes is up to its own client, as the protocol says; `closed`
   follows if and when it does.
