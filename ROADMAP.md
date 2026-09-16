@@ -54,7 +54,17 @@ read of it, not a commitment:
    `Ok` reply. Landed together with **no** `PROTOCOL_VERSION` bump: all
    three are defaulted/additive, and the resolution record has the
    analysis for why the assumed bump was never needed.
-4. Small, unblocked fixes: [`msg key` modifier
+4. **[The four protocols `foot` warned about](docs/backlog/resolved/foot-protocol-warnings-done.md)** —
+   RESOLVED 2026-09-15 (issue #40): `wp-cursor-shape-v1`,
+   `xdg-activation-v1`, `xdg-toplevel-icon-v1`, and `text-input-v3` +
+   `input-method-v2`, landed together because each was one global plus a
+   handler and the issue tracked them as one gap. The substance was on
+   flexwm's own side rather than in the protocol wiring: ten
+   procedurally-drawn cursor shapes (without them, advertising cursor-shape
+   would have *regressed* a session that had been getting a real I-beam from
+   a client's own theme), two policy bounds on activation tokens, and the
+   IME popup. Verified before/after against the actual `foot` warnings.
+5. Small, unblocked fixes: [`msg key` modifier
    resolution](docs/backlog/input/msg-key-modifier-resolution.md),
    [`[binds]` capital
    letters](docs/backlog/config/binds-capital-letter.md),

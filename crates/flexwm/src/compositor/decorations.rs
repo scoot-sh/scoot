@@ -196,6 +196,17 @@ pub struct Appearance {
     /// The fallback cursor shape's fill color. Its 1px outline is always
     /// black (at this color's own alpha) -- see `cursor::generate_bitmap`.
     pub cursor_color: Color,
+    /// Which installed xcursor theme to draw named cursor shapes from, or
+    /// `None` to take `$XCURSOR_THEME` (and `"default"` if that is unset too)
+    /// -- see `cursor/theme.rs` for the resolution order and for why reading
+    /// the machine's own theme is not the license problem *shipping* one
+    /// would be.
+    ///
+    /// Only names a theme; it never makes flexwm carry one. A name that
+    /// matches nothing installed is not an error: named shapes then come from
+    /// `cursor/shapes.rs`, exactly as they do on a machine with no themes at
+    /// all.
+    pub cursor_theme: Option<String>,
     /// Whether to answer a client's `zxdg_toplevel_decoration_v1` request
     /// with `ServerSide` -- see `handlers.rs`'s `XdgDecorationHandler` impl.
     /// niri's own default is `true`; this project uses the same default for
@@ -221,6 +232,10 @@ impl Default for Appearance {
             // configurable.
             cursor_size: 16,
             cursor_color: Color::new(1.0, 1.0, 1.0, 1.0),
+            // Unset, i.e. follow `$XCURSOR_THEME` like every other client on
+            // the machine does, rather than overriding the user's desktop
+            // from a compositor default.
+            cursor_theme: None,
             prefer_no_csd: true,
         }
     }

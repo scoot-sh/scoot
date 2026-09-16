@@ -64,6 +64,13 @@ calloop-wayland-source = "0.4"
 # ipc/listener.rs, neither of which has a std equivalent; both add a feature to
 # a crate already here, not a crate (neither pulls in anything of its own).
 rustix = { version = "1", features = ["fs", "mm", "process", "rand"] }
+# Parses the xcursor files of whatever cursor theme is installed on the
+# machine, for cursor/theme.rs. Nothing is vendored or shipped: this reads the
+# user's own theme at runtime, which is what sway/niri/anvil do and carries
+# none of the license obligation *shipping* a theme would (see that module's
+# doc). MIT-licensed, no dependencies of its own, and the same crate and major
+# version Smithay's own anvil uses against this pinned rev.
+xcursor = "0.3"
 # For `SO_PEERCRED` in ipc/listener.rs -- see `peer_uid`'s doc for why neither
 # std nor rustix can answer that one question today. Already in the tree
 # transitively (rustix, smithay, wayland and every sys crate here depend on
@@ -76,6 +83,14 @@ libc = "0.2"
 # (smithay itself depends on it), so this adds no new version, just a
 # direct dev-dependency on one already resolved.
 tempfile = "3"
+# The *client* half of input-method-v2, for
+# compositor/input_method/tests.rs: those tests drive a real input method
+# (the privileged half of the IME pair) through a real compositor, which is
+# the only way to make an IME popup exist at all. Smithay already pins this
+# exact crate (with only its "server" feature) for its own input-method
+# support, so this adds a feature to a crate already in the tree, not a new
+# dependency.
+wayland-protocols-misc = { version = "0.3", features = ["client"] }
 # The *client* half of wlr-layer-shell, for compositor/layer_shell/tests.rs:
 # those tests drive a real layer-shell client through a real compositor
 # rather than calling the handler directly. Smithay already pins this exact

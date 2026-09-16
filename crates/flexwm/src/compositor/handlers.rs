@@ -3,6 +3,7 @@
 use smithay::backend::renderer::utils::on_commit_buffer_handler;
 use smithay::input::dnd::{DnDGrab, DndGrabHandler, GrabType, Source};
 use smithay::input::pointer::Focus;
+use smithay::input::tablet::TabletSeatHandler;
 use smithay::input::{Seat, SeatHandler, SeatState};
 use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::wl_output::WlOutput;
@@ -155,9 +156,11 @@ fn send_popup_initial_configure(state: &State, surface: &WlSurface) {
         return;
     }
     let Some(smithay::desktop::PopupKind::Xdg(popup)) = state.popups.find_popup(surface) else {
-        // Not tracked (gone between the role check and the lookup), or a
-        // surface flexwm doesn't track at all (input-method popups -- no
-        // implementation here yet, so nothing to configure).
+        // Not tracked: gone between the role check and the lookup. The role
+        // check above is also what keeps input-method popups out of here --
+        // they are tracked (see `input_method.rs`) but carry
+        // `zwp_input_popup_surface_v2`, not `xdg_popup`, and have no
+        // configure to send at all.
         return;
     };
     if !popup.is_initial_configure_sent()
@@ -337,6 +340,22 @@ impl SeatHandler for State {
 }
 
 impl PointerConstraintsHandler for State {}
+
+/// `wp_cursor_shape_v1` reaches a tablet tool as well as a pointer, so its
+/// dispatch is bounded on this trait whether or not a compositor offers
+/// `zwp_tablet_manager_v2` -- which this one does not. Implementing it
+/// advertises no global on its own (only `TabletManagerState::new` does
+/// that), so no client can ever construct the `zwp_tablet_tool_v2` the
+/// tablet half of `get_tablet_tool_v2` needs; the type exists here purely to
+/// satisfy the bound so the *pointer* half compiles.
+///
+/// `ToolFocus` is `WlSurface` to match the three focus types in
+/// [`SeatHandler`] above: the trait requires the same `WaylandFocus` bound
+/// they satisfy, and picking a different type here would only invent a second
+/// notion of focus for a device this compositor has no input path for.
+impl TabletSeatHandler for State {
+    type ToolFocus = WlSurface;
+}
 
 impl SelectionHandler for State {
     type SelectionUserData = ();

@@ -43,6 +43,9 @@ use wayland_client::protocol::{
     wl_subcompositor, wl_subsurface, wl_surface,
 };
 use wayland_client::{Connection, Dispatch, Proxy, QueueHandle};
+use wayland_protocols::wp::cursor_shape::v1::client::{
+    wp_cursor_shape_device_v1, wp_cursor_shape_manager_v1,
+};
 
 use super::*;
 use crate::compositor::State;
@@ -63,6 +66,17 @@ const DEFAULT_SIZE: i32 = 16;
 const WHITE: [u8; 4] = [255, 255, 255, 255];
 const BLACK: [u8; 4] = [0, 0, 0, 255];
 const TRANSPARENT: [u8; 4] = [0, 0, 0, 0];
+
+/// What `Cursor::new` is given for its theme name when a test wants the
+/// compositor's *own* drawn shapes rather than whatever the machine running
+/// the suite happens to have installed.
+///
+/// A deliberately unresolvable name, not `None`: `None` means "follow
+/// `$XCURSOR_THEME`, then `default`", which on a developer's own desktop (or
+/// any container with an icon theme installed) would find a real theme and
+/// make every pixel assertion below depend on which distro's cursors are
+/// present. See `cursor/theme.rs`.
+const NO_THEME: Option<&str> = Some("flexwm-test-no-such-theme");
 
 /// Reads pixel `(x, y)` out of a `size`-square bitmap.
 fn pixel(pixels: &[u8], size: i32, x: i32, y: i32) -> [u8; 4] {
@@ -181,7 +195,7 @@ fn cursor_new_clamps_a_degenerate_or_absurd_size() {
         Appearance::MAX_CURSOR_SIZE,
         i32::MAX,
     ] {
-        let cursor = Cursor::new(size, Color::new(1.0, 1.0, 1.0, 1.0));
+        let cursor = Cursor::new(size, Color::new(1.0, 1.0, 1.0, 1.0), NO_THEME);
         let elements = cursor.element(&mut renderer, (0.0, 0.0).into(), 1.0);
         assert_eq!(
             elements.len(),
@@ -274,6 +288,11 @@ enum Step {
     HideCursor,
     /// Destroy the cursor surface without setting any replacement.
     DestroyCursorSurface,
+    /// `wp_cursor_shape_device_v1.set_shape`: name a shape and let the
+    /// compositor draw it, with no cursor surface anywhere in sight.
+    SetShape {
+        shape: wp_cursor_shape_device_v1::Shape,
+    },
     /// Give the cursor surface a child subsurface with its own buffer.
     AddSubsurface {
         size: i32,
@@ -289,6 +308,9 @@ struct TestClient {
     subcompositor: Option<wl_subcompositor::WlSubcompositor>,
     shm: Option<wl_shm::WlShm>,
     seat: Option<wl_seat::WlSeat>,
+    /// `wp_cursor_shape_manager_v1`, if the compositor advertised it. `None`
+    /// here is what a test asserting the global exists actually fails on.
+    cursor_shape: Option<wp_cursor_shape_manager_v1::WpCursorShapeManagerV1>,
     /// The serial of the most recent `wl_pointer.enter`. Smithay refuses a
     /// `set_cursor` whose serial doesn't match it.
     enter_serial: Option<u32>,
@@ -320,6 +342,9 @@ impl Dispatch<wl_registry::WlRegistry, ()> for TestClient {
             }
             "wl_shm" => client.shm = Some(registry.bind(name, version.min(1), qh, ())),
             "wl_seat" => client.seat = Some(registry.bind(name, version.min(5), qh, ())),
+            "wp_cursor_shape_manager_v1" => {
+                client.cursor_shape = Some(registry.bind(name, version.min(1), qh, ()));
+            }
             _ => {}
         }
     }
@@ -348,6 +373,8 @@ wayland_client::delegate_noop!(TestClient: ignore wl_shm::WlShm);
 wayland_client::delegate_noop!(TestClient: ignore wl_shm_pool::WlShmPool);
 wayland_client::delegate_noop!(TestClient: ignore wl_buffer::WlBuffer);
 wayland_client::delegate_noop!(TestClient: ignore wl_seat::WlSeat);
+wayland_client::delegate_noop!(TestClient: ignore wp_cursor_shape_manager_v1::WpCursorShapeManagerV1);
+wayland_client::delegate_noop!(TestClient: ignore wp_cursor_shape_device_v1::WpCursorShapeDeviceV1);
 
 /// A `size`x`size` `wl_buffer` filled with `color`, as a real shm pool over
 /// a real memfd -- the same path any toolkit takes.
@@ -398,7 +425,16 @@ fn run_client(
     ids.send(focus.id().protocol_id())
         .map_err(|e| e.to_string())?;
 
+    // Reported back before any step runs, so a test can assert the global is
+    // advertised at all rather than only that `set_shape` had an effect.
+    ids.send(u32::from(client.cursor_shape.is_some()))
+        .map_err(|e| e.to_string())?;
+
     let mut cursor: Option<wl_surface::WlSurface> = None;
+    // Created once and reused: the protocol allows one device per pointer,
+    // and re-creating it per step would be a second object for the same
+    // pointer rather than a fresh start.
+    let mut shape_device: Option<wp_cursor_shape_device_v1::WpCursorShapeDeviceV1> = None;
     while let Ok(step) = steps.recv() {
         // Drain anything the compositor sent since the last step -- in
         // particular the `wl_pointer.enter` whose serial `SetCursor` needs.
@@ -426,6 +462,21 @@ fn run_client(
             Step::DestroyCursorSurface => {
                 let surface = cursor.take().ok_or("no cursor surface to destroy")?;
                 surface.destroy();
+            }
+            Step::SetShape { shape } => {
+                let serial = client.enter_serial.ok_or("the pointer never entered")?;
+                let device = match &shape_device {
+                    Some(device) => device,
+                    None => {
+                        let manager = client
+                            .cursor_shape
+                            .clone()
+                            .ok_or("no wp_cursor_shape_manager_v1")?;
+                        shape_device = Some(manager.get_pointer(&pointer, &qh, ()));
+                        shape_device.as_ref().expect("the device just created")
+                    }
+                };
+                device.set_shape(serial, shape);
             }
             Step::AddSubsurface {
                 size,
@@ -463,6 +514,8 @@ struct Fixture {
     steps: Option<Sender<Step>>,
     acks: Receiver<()>,
     client: Option<JoinHandle<Result<(), String>>>,
+    /// Whether the client found `wp_cursor_shape_manager_v1` in the registry.
+    cursor_shape_advertised: bool,
 }
 
 impl Fixture {
@@ -473,7 +526,15 @@ impl Fixture {
     /// Like [`Fixture::new`], but with the `[appearance]` values a config file
     /// would have resolved to -- which is all `Cursor::new` ever sees, since
     /// the fallback bitmap is built once in `State::new` and never rebuilt.
-    fn with_appearance(appearance: Appearance) -> Self {
+    fn with_appearance(mut appearance: Appearance) -> Self {
+        // Force the drawn shapes, whatever the machine running the suite has
+        // installed. Every pixel assertion below describes `shapes.rs`'s own
+        // output; with `Appearance::default()`'s `cursor_theme: None` these
+        // would instead assert on whichever xcursor theme happens to be
+        // present, and would pass on a bare container while failing on a
+        // developer's desktop. The themed path is covered hermetically in
+        // `cursor/theme/tests.rs`.
+        appearance.cursor_theme = NO_THEME.map(str::to_owned);
         let mut event_loop: EventLoop<'static, State> =
             EventLoop::try_new().expect("an event loop");
         let display: Display<State> = Display::new().expect("a wayland display");
@@ -506,12 +567,16 @@ impl Fixture {
             steps: Some(step_tx),
             acks: ack_rx,
             client: Some(handle),
+            cursor_shape_advertised: false,
         };
 
         // Give the pointer a focus inside this client, which is what makes
         // its later `set_cursor` calls legal (Smithay checks the serial
         // against the last `wl_pointer.enter` it sent).
         let focus_id = fixture.wait_for(&id_rx, "the client's focus surface id");
+        // Sent straight after the id, from the same registry roundtrip.
+        fixture.cursor_shape_advertised =
+            fixture.wait_for(&id_rx, "the client's cursor-shape report") != 0;
         let focus: ServerSurface = client
             .object_from_protocol_id(&fixture.state.display_handle, focus_id)
             .expect("the client's focus surface");
@@ -908,4 +973,159 @@ fn a_cursor_surface_with_a_subsurface_draws_both() {
     assert_eq!(canvas.at(50, 50), CLIENT_BGRA, "the parent at the hotspot");
     assert_eq!(canvas.at(75, 51), CHILD_BGRA, "the child, offset by 24");
     assert_eq!(canvas.at(82, 51), CLEAR_BGRA, "past the child's 8x8");
+}
+
+// -------------------------------------------------------------------------
+// `wp-cursor-shape-v1`
+// -------------------------------------------------------------------------
+
+/// The BGRA bytes the default `[appearance]` draws a shape's fill and outline
+/// in, as they land on the canvas.
+const FILL_BGRA: [u8; 4] = [255, 255, 255, 255];
+const OUTLINE_BGRA: [u8; 4] = [0, 0, 0, 255];
+
+#[test]
+fn the_cursor_shape_manager_is_advertised() {
+    // The global itself, not its effect: a client that cannot find it never
+    // gets as far as `set_shape`, and every test below would then be
+    // asserting on the default status rather than on anything the protocol
+    // did. `foot` prints "compositor does not implement server-side cursors"
+    // on exactly this.
+    let fixture = Fixture::new();
+    assert!(
+        fixture.cursor_shape_advertised,
+        "wp_cursor_shape_manager_v1 is not in the registry"
+    );
+}
+
+#[test]
+fn a_named_shape_reaches_the_rendered_pixels() {
+    let mut fixture = Fixture::new();
+    // The default status is already `Named(Default)`, so asking for the
+    // arrow would prove nothing. `Text` is the shape a terminal asks for the
+    // moment the pointer is over its grid, and it is drawn as an I-beam --
+    // which has *nothing* at the pointer's own position minus the hotspot,
+    // where the arrow has its point.
+    fixture.run(Step::SetShape {
+        shape: wp_cursor_shape_device_v1::Shape::Text,
+    });
+
+    assert!(
+        matches!(
+            fixture.state.cursor.status,
+            CursorImageStatus::Named(CursorIcon::Text)
+        ),
+        "set_shape(text) did not reach the cursor's status"
+    );
+
+    let canvas = fixture.render();
+    assert_eq!(canvas.count, 1, "one element for a named shape");
+    // The I-beam is centred on the pointer (see `Shape::hotspot`), so its
+    // 16x16 bitmap occupies x 42..58, y 42..58 -- and the arrow's own
+    // top-left point, at the pointer itself, is nowhere in it.
+    assert_eq!(
+        canvas.at(50, 50),
+        FILL_BGRA,
+        "the I-beam's stem runs through the pointer"
+    );
+    assert_eq!(
+        canvas.at(41, 50),
+        CLEAR_BGRA,
+        "one pixel left of the centred 16x16 bitmap"
+    );
+    assert_eq!(
+        canvas.at(58, 50),
+        CLEAR_BGRA,
+        "one pixel right of the centred 16x16 bitmap"
+    );
+    // The arrow would have filled the quadrant below-right of the pointer;
+    // the I-beam does not, which is what distinguishes "drew the shape asked
+    // for" from "drew the default and happened to cover the middle".
+    assert_eq!(
+        canvas.at(55, 55),
+        CLEAR_BGRA,
+        "the arrow's interior is empty for an I-beam"
+    );
+}
+
+#[test]
+fn different_named_shapes_draw_different_pixels() {
+    // The reason the protocol is worth having: one compositor-drawn shape per
+    // name, not one shape for every name. Compared as whole frames so this
+    // cannot pass on a single lucky pixel.
+    let mut fixture = Fixture::new();
+    let mut frames: Vec<(wp_cursor_shape_device_v1::Shape, Vec<u8>)> = Vec::new();
+    for shape in [
+        wp_cursor_shape_device_v1::Shape::Default,
+        wp_cursor_shape_device_v1::Shape::Text,
+        wp_cursor_shape_device_v1::Shape::Crosshair,
+        wp_cursor_shape_device_v1::Shape::EwResize,
+        wp_cursor_shape_device_v1::Shape::NsResize,
+        wp_cursor_shape_device_v1::Shape::NotAllowed,
+        wp_cursor_shape_device_v1::Shape::Move,
+    ] {
+        fixture.run(Step::SetShape { shape });
+        frames.push((shape, fixture.render().pixels));
+    }
+    for (i, (shape, pixels)) in frames.iter().enumerate() {
+        for (other, other_pixels) in &frames[i + 1..] {
+            assert_ne!(
+                pixels, other_pixels,
+                "{shape:?} and {other:?} rendered identically"
+            );
+        }
+    }
+}
+
+#[test]
+fn an_unmapped_shape_name_still_draws_the_arrow() {
+    // Every name this compositor does not draw something specific for falls
+    // back to the arrow rather than to nothing -- see `Shape::for_icon`. A
+    // pointer that vanishes because a client named `wait` would be a worse
+    // bug than the wrong shape.
+    let mut fixture = Fixture::new();
+    fixture.run(Step::SetShape {
+        shape: wp_cursor_shape_device_v1::Shape::Wait,
+    });
+    let canvas = fixture.render();
+    assert_eq!(canvas.count, 1, "the arrow element");
+    assert_eq!(
+        canvas.at(50, 50),
+        OUTLINE_BGRA,
+        "the arrow's own point, at the pointer"
+    );
+    assert_eq!(canvas.at(51, 53), FILL_BGRA, "its white interior");
+}
+
+#[test]
+fn a_named_shape_replaces_a_client_cursor_surface() {
+    // The two sources of cursor pixels are one status, so a client that
+    // uploaded a surface and then named a shape must stop showing the
+    // surface -- otherwise its own stale image outlives the request that
+    // replaced it, and (worse) keeps its `SurfaceData` pinned.
+    let mut fixture = Fixture::new();
+    fixture.run(Step::CommitCursorBuffer {
+        size: 24,
+        color: CLIENT_BGRA,
+    });
+    fixture.run(Step::SetCursor { hotspot: (4, 6) });
+    assert_eq!(fixture.render().at(50, 50), CLIENT_BGRA);
+
+    fixture.run(Step::SetShape {
+        shape: wp_cursor_shape_device_v1::Shape::Crosshair,
+    });
+    assert!(
+        matches!(
+            fixture.state.cursor.status,
+            CursorImageStatus::Named(CursorIcon::Crosshair)
+        ),
+        "the client's surface is still the active cursor image"
+    );
+    let canvas = fixture.render();
+    assert_eq!(canvas.count, 1, "one element, and it is not the surface");
+    assert_ne!(
+        canvas.at(50, 50),
+        CLIENT_BGRA,
+        "the client's own pixels are still being drawn"
+    );
 }

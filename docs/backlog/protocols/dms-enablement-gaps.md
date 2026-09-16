@@ -168,7 +168,9 @@ list behind that.
 - `xdg-activation-v1`: launching apps from DMS was not exercised
   end-to-end (no app launch attempted); expect launched windows to map
   without activation/focus handoff. Already filed as
-  `docs/backlog/protocols/xdg-activation.md`.
+  `docs/backlog/resolved/foot-protocol-warnings-done.md` (implemented
+  2026-09-15; this probe's own question -- whether launching apps from DMS
+  hands focus over correctly -- is still unexercised).
 
 ## Not gaps (VM environment, not flexwm)
 

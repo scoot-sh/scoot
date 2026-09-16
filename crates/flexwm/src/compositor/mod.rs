@@ -4,6 +4,7 @@
 //! keybindings say what should happen, and after either the compositor applies
 //! whatever [`Arrangement`](flexwm_core::Arrangement) the core produced.
 
+mod activation;
 mod config;
 mod cursor;
 mod decorations;
@@ -11,9 +12,10 @@ mod dispatch;
 mod ext_workspace;
 mod gamma_control;
 mod handlers;
-mod headless;
+pub(crate) mod headless;
 mod idle;
 mod input;
+mod input_method;
 mod ipc;
 mod keybindings;
 mod layer_shell;
@@ -25,6 +27,7 @@ mod selection;
 mod session_lock;
 mod shell;
 mod state;
+mod toplevel_icon;
 mod tty;
 
 #[cfg(test)]
@@ -136,6 +139,20 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
         if let Some(path) = &state.ipc_path {
             std::env::set_var(flexwm_ipc::SOCKET_ENV, path);
         }
+        // The cursor theme this compositor resolved, so a client that loads a
+        // theme *itself* picks the same one. `wp-cursor-shape-v1` covers the
+        // clients that ask the compositor to draw for them (see
+        // `cursor/theme.rs`), but GTK3 and anything predating that protocol
+        // still load their own -- and would otherwise take the session's
+        // default while flexwm drew a different theme's shapes, which is the
+        // inconsistency the protocol exists to remove.
+        //
+        // Exported unconditionally rather than only when a theme was found:
+        // `XCURSOR_THEME` names the theme flexwm *would* use, and a client
+        // that has one installed where flexwm found none should still use it
+        // rather than fall back to something else again.
+        std::env::set_var("XCURSOR_THEME", state.cursor.theme().name());
+        std::env::set_var("XCURSOR_SIZE", state.cursor.theme().size().to_string());
     }
 
     if !options.command.is_empty() {

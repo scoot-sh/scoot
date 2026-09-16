@@ -35,8 +35,13 @@ recorded so they don't get lost rather than because any is scheduled:
   `docs/backlog/resolved/fractional-scale-integer-companion-done.md`. (The
   Ghostty-at-`1.5` symptom that surfaced it is a separate, still-open question:
   `docs/backlog/protocols/ghostty-fails-at-1-5.md`.)
-- `text-input-v3`/`input-method-v2` — IME support for non-Latin
+- `text-input-v3`/`input-method-v2` — ~~IME support for non-Latin
   script input, and on-screen keyboards. A real gap for non-US-keyboard
   daily use; unrelated to item 14's `flexwm msg type`/`msg key` work,
   which is about agent-driven synthetic input, not live IME composition
-  from a real input method.
+  from a real input method.~~ — **DONE**, both halves implemented together
+  with the other three protocols `foot` warned about
+  (`docs/backlog/resolved/foot-protocol-warnings-done.md`); the compositor's
+  own part is the IME popup, see `compositor/input_method.rs`. The statement
+  above still holds: this is unrelated to `msg type`/`msg key`, which remain
+  the agent-driven synthetic-input path.
