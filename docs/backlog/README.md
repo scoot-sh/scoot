@@ -88,4 +88,4 @@ actionable.
 - [Enhanced hardware/DRM testing ideas](./testing/hardware-testing-ideas.md) (research)
 
 ### Meta
-- [Rename `flexwm` → `flex` / `flexctl` / `flexbar`](./meta/rename-flex-family.md)
+- [Rename `flexwm` → `flex`](./meta/rename-flex-family.md) — decided, do this **last** in the burn-down (`flexctl`/`flexbar` remain separate, undecided)
