@@ -36,14 +36,18 @@ Not the protocol work — the handler shape is already there, `refuse` just
 has to become a real path. It needs the compositor to be able to *do* the
 things a configuration asks for, none of which exist:
 
-- **`set_mode` / `set_custom_mode`**: only `--nested` can change mode today
-  (`State::resize_output`, driven by the host's configure). `--tty` picks a
-  mode once at startup from the connector's preferred mode or `--mode WxH`
-  and never re-modesets; `--headless` takes `--width`/`--height` once.
-  Issue #48 (`--tty`: follow DRM hotplug / host display reconfiguration
-  instead of mode-setting once) is the same missing capability arrived at
-  from the other direction — whatever lands there is what `set_mode` would
-  then drive, and it is the natural first piece of this entry.
+- **`set_mode` / `set_custom_mode`**: the *mechanism* now exists on two
+  backends. `--nested` changes mode from the host's configure and `--tty`
+  re-modesets on DRM hotplug (issue #48, `compositor/tty/hotplug.rs`), both
+  through `State::resize_output`, which already propagates a new mode to
+  `wl_output`, this protocol, layer surfaces and the layout. `--headless`
+  still takes `--width`/`--height` once. What is missing for a client-driven
+  `set_mode` is the *trigger*, not the plumbing: `tty/hotplug.rs` re-selects
+  from what the connector offers rather than taking a size it is handed, so
+  this needs a path that applies a caller-chosen mode (and refuses one the
+  connector does not list) and an `apply`/`test` handler that routes into it
+  — a much smaller piece of work than it was before #48, and still the
+  natural first piece of this entry.
 - **`set_position`**: meaningless with one output at `(0, 0)`. This is the
   multi-output item.
 - **`set_scale`**: `State::output_scale` is resolved once from `[output]

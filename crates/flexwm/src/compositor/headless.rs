@@ -644,23 +644,36 @@ impl State {
         let _ = self.display_handle.flush_clients();
     }
 
-    /// Recreates the render target at a new size.
+    /// Recreates the render target at a new size. Returns whether it
+    /// actually got there.
     ///
-    /// Used only by `--nested`, when the host's first configure disagrees
-    /// with the size flexwm started at (see `nested::init`). This function
-    /// doesn't know `Host` exists -- it only touches the render target and
-    /// the core's notion of output geometry; the caller is responsible for
-    /// resizing `Host`'s own host-side buffers to match, separately.
-    pub fn resize_output(&mut self, width: i32, height: i32) {
+    /// Two callers: `--nested`, when the host's first configure disagrees
+    /// with the size flexwm started at (see `nested::init`), and `--tty`,
+    /// when a DRM hotplug changes the connector's mode (see
+    /// `tty/hotplug.rs`). This function doesn't know `Host` or `Tty` exists
+    /// -- it only touches the render target and the core's notion of output
+    /// geometry; the caller is responsible for resizing its own scanout
+    /// buffers to match, separately.
+    ///
+    /// `false` means the render target could not be rebuilt and is still at
+    /// the *old* size while the caller has (or is about to) size its scanout
+    /// buffers to the new one. Both callers treat that as fatal-ish rather
+    /// than something to limp on from, because the two sizes disagreeing is
+    /// exactly what `present()`'s size guard silently drops every frame for:
+    /// `--nested` stops the loop, `--tty` logs an error saying the screen
+    /// stays as it is until the next hotplug or a restart. Nothing is
+    /// reverted here -- a failure to build a pixman image at one size is not
+    /// evidence that rebuilding it at the previous size would work.
+    pub fn resize_output(&mut self, width: i32, height: i32) -> bool {
         let Some(output) = self.output.clone() else {
-            return;
+            return false;
         };
         set_mode(&output, width, height, None, self.output_scale);
         match create_backend(&output, width, height) {
             Ok(backend) => self.backend = Some(backend),
             Err(error) => {
                 tracing::warn!(%error, "could not resize the render target");
-                return;
+                return false;
             }
         }
         // The logical rectangle the core and the `Space` both work in -- see
@@ -696,19 +709,27 @@ impl State {
         // The core re-clamps its old usable area into the new one on
         // `OutputChanged` (see `flexwm_core`'s `Output::set_area`), which is
         // the right thing to do with a reservation nobody has re-reported
-        // yet -- this is that re-report. *When the zone actually moved* (a
-        // bar is mapped, so the new mode leaves a different usable
-        // rectangle) it ends in `apply()`, which is what puts the resized
-        // arrangement onto the windows. With nothing reserving anything it
-        // returns early instead: `OutputChanged`'s own re-clamp has already
+        // yet -- this is that re-report. It only does anything when the zone
+        // actually moved (a bar is mapped, so the new mode leaves a
+        // different usable rectangle); with nothing reserving anything it
+        // returns early, because `OutputChanged`'s own re-clamp has already
         // left the core's usable area equal to the zone this recomputes.
-        // That is not a regression -- before layer shell this function never
-        // called `apply()` at all -- and it is harmless for the one caller
-        // there is (`nested::apply_size`, on the host's configure, which
-        // arrives before any window has mapped). Anything that makes
-        // `--nested` resize *dynamically* has to revisit it.
         self.refresh_layer_zone();
-        self.request_render();
+        // `apply()`, not `request_render()`: the core now lays out against a
+        // different rectangle, and nothing else pushes that arrangement onto
+        // the windows -- `refresh_layer_zone` above ends in `apply()` only on
+        // the paths where the zone moved, which is not the common case (no
+        // bar mapped, or a bar whose exclusive zone is unchanged). Without
+        // this, a window keeps the size it was configured at before the
+        // resize and sits clipped or half off the new output until some
+        // unrelated action happens to call `apply()`. That was harmless while
+        // the only caller was `nested::apply_size` (one call per process, on
+        // the host's first configure, before any window has mapped) and is
+        // not once `--tty` resizes dynamically on hotplug with windows
+        // already up. `apply()` ends in `request_render()`, so the frame is
+        // still requested exactly once.
+        self.apply();
+        true
     }
 
     /// Marks the screen dirty and makes sure the frame ticker is running to

@@ -22,7 +22,15 @@
 //! of the file descriptor, that KMS resources load and some connector is
 //! connected with a usable mode.
 //!
-//! Doing that check on a *borrowed* fd is the point of [`Probe`]. A
+//! Connector and mode choice ([`find_connector_and_mode`], and
+//! [`reselect`] for the hotplug path) lives here too, for the same reason:
+//! it is the other half of "can this device drive a display", and it has to
+//! run twice -- once on a borrowed fd before the device is adopted, and
+//! again on the live `DrmDevice` every time the connectors change underneath
+//! a running session (see `tty/hotplug.rs`). One implementation, two
+//! callers, rather than a startup copy and a hotplug copy free to drift.
+//!
+//! Doing the startup check on a *borrowed* fd is the point of [`Probe`]. A
 //! rejected candidate can then be handed straight back to libseat with
 //! `Session::close`, which needs the `OwnedFd` -- once the fd goes into
 //! Smithay's `DeviceFd` (an `Arc<OwnedFd>` with no way back out) that is
@@ -307,58 +315,90 @@ impl ControlDevice for Probe<'_> {}
 /// output only (multi-output is out of scope for this backend), so the
 /// first match wins.
 ///
-/// A `requested` size the connector does not offer is a warning, not a
-/// rejection: falling through to the preferred mode leaves the user with a
-/// display of the wrong size, which they can read the log about, whereas
-/// rejecting the device would leave them with no display at all -- and on
-/// a multi-GPU seat would send the search on to a device they did not mean.
-///
-/// Generic over the device so the same search runs on a [`Probe`] here and
-/// could run on a `DrmDevice`; `resources` is passed in rather than read
-/// here so [`probe`] can tell "this device has no KMS at all" (the Asahi
-/// failure) apart from "this device has KMS but nothing is plugged in".
-fn find_connector_and_mode(
+/// Generic over the device so the same search runs on a [`Probe`] at
+/// startup and on the live `DrmDevice` when a hotplug event asks what the
+/// connectors say *now* (see `tty/hotplug.rs`); `resources` is passed in
+/// rather than read here so [`probe`] can tell "this device has no KMS at
+/// all" (the Asahi failure) apart from "this device has KMS but nothing is
+/// plugged in", and so the hotplug path can read a *fresh* set rather than
+/// the one cached at startup.
+pub(super) fn find_connector_and_mode(
     device: &impl ControlDevice,
     resources: &ResourceHandles,
     requested: Option<(u16, u16)>,
 ) -> Option<(connector::Handle, Mode, String)> {
-    for &conn in resources.connectors() {
-        let Ok(info) = device.get_connector(conn, false) else {
-            continue;
-        };
-        if info.state() != connector::State::Connected {
-            continue;
-        }
-        let modes = info.modes();
-        let requested_mode =
-            requested.and_then(|size| modes.iter().find(|mode| mode.size() == size));
-        if let (Some((width, height)), None, false) = (requested, requested_mode, modes.is_empty())
-        {
-            // warn!, not debug!: the size on screen is about to disagree
-            // with what the user asked for, and this is the only explanation.
-            tracing::warn!(
-                width,
-                height,
-                "drm: connector offers no mode of the requested size; using its preferred mode"
-            );
-        }
-        let mode = requested_mode
-            .or_else(|| {
-                modes
-                    .iter()
-                    .find(|mode| mode.mode_type().contains(ModeTypeFlags::PREFERRED))
-            })
-            .or_else(|| modes.first())
-            .copied();
-        if let Some(mode) = mode {
-            // `HDMI-A-1`, not `HDMI-A` + `1`: the same spelling the kernel
-            // uses in sysfs (`/sys/class/drm/card0-HDMI-A-1`) and every
-            // wlroots/Smithay compositor uses for `wl_output.name`.
-            let name = format!("{}-{}", info.interface().as_str(), info.interface_id());
-            return Some((conn, mode, name));
-        }
+    resources.connectors().iter().find_map(|&conn| {
+        connector_mode(device, conn, requested).map(|(mode, name)| (conn, mode, name))
+    })
+}
+
+/// The same search, but biased towards `current` -- the connector this
+/// backend is already driving. Used by the hotplug path, never at startup
+/// (there is nothing current then).
+///
+/// Staying on `current` while it is still `Connected` is what keeps
+/// plugging a *second* display into a laptop from moving the session off
+/// the panel the user is looking at: this backend drives one output, so one
+/// of the two connectors has to be dark, and the one already lit is the
+/// only defensible choice. Only when `current` is gone -- unplugged, or its
+/// mode list emptied -- does the full [`find_connector_and_mode`] search
+/// run and pick whatever else is connected, which is exactly what issue #48
+/// asks for ("if the connector is gone, pick another `Connected` one").
+pub(super) fn reselect(
+    device: &impl ControlDevice,
+    resources: &ResourceHandles,
+    current: connector::Handle,
+    requested: Option<(u16, u16)>,
+) -> Option<(connector::Handle, Mode, String)> {
+    connector_mode(device, current, requested)
+        .map(|(mode, name)| (current, mode, name))
+        .or_else(|| find_connector_and_mode(device, resources, requested))
+}
+
+/// One connector's mode and name, or `None` if it isn't `Connected` or
+/// lists no mode at all. The per-connector half of
+/// [`find_connector_and_mode`], split out so [`reselect`] can ask about one
+/// specific connector without duplicating the choice of mode.
+///
+/// A `requested` size the connector does not offer is a warning, not a
+/// rejection: falling through to the preferred mode leaves the user with a
+/// display of the wrong size, which they can read the log about, whereas
+/// rejecting the connector would leave them with no display at all -- and
+/// at startup, on a multi-GPU seat, would send the search on to a device
+/// they did not mean.
+fn connector_mode(
+    device: &impl ControlDevice,
+    conn: connector::Handle,
+    requested: Option<(u16, u16)>,
+) -> Option<(Mode, String)> {
+    let info = device.get_connector(conn, false).ok()?;
+    if info.state() != connector::State::Connected {
+        return None;
     }
-    None
+    let modes = info.modes();
+    let requested_mode = requested.and_then(|size| modes.iter().find(|mode| mode.size() == size));
+    if let (Some((width, height)), None, false) = (requested, requested_mode, modes.is_empty()) {
+        // warn!, not debug!: the size on screen is about to disagree
+        // with what the user asked for, and this is the only explanation.
+        tracing::warn!(
+            width,
+            height,
+            "drm: connector offers no mode of the requested size; using its preferred mode"
+        );
+    }
+    let mode = requested_mode
+        .or_else(|| {
+            modes
+                .iter()
+                .find(|mode| mode.mode_type().contains(ModeTypeFlags::PREFERRED))
+        })
+        .or_else(|| modes.first())
+        .copied()?;
+    // `HDMI-A-1`, not `HDMI-A` + `1`: the same spelling the kernel
+    // uses in sysfs (`/sys/class/drm/card0-HDMI-A-1`) and every
+    // wlroots/Smithay compositor uses for `wl_output.name`.
+    let name = format!("{}-{}", info.interface().as_str(), info.interface_id());
+    Some((mode, name))
 }
 
 /// What to tell the user when no candidate worked, given the same
