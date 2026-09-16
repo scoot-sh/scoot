@@ -10,6 +10,7 @@ mod cursor;
 mod decorations;
 mod dispatch;
 mod ext_workspace;
+mod foreign_toplevel;
 mod gamma_control;
 mod handlers;
 pub(crate) mod headless;

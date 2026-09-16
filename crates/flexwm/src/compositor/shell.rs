@@ -19,6 +19,11 @@ impl State {
         let id = WindowId(self.next_id);
         self.windows.insert(id, Window::new_wayland_window(surface));
         let info = self.info_of(id);
+        // Before the core hears about it, though nothing depends on the order:
+        // this is the other list of windows flexwm publishes (see
+        // `foreign_toplevel.rs`), and it covers the same lifetime as this one
+        // -- from here to `remove_window`, not from first buffer to last.
+        self.open_foreign_toplevel(id, &info);
         let output = self.world.outputs().first().map(|(id, _)| *id);
         self.world.handle_event(Event::WindowOpened {
             id,
@@ -33,6 +38,9 @@ impl State {
         if let Some(window) = self.windows.remove(&id) {
             self.space.unmap_elem(&window);
         }
+        // Paired with `add_window`'s announcement: this sends `closed` to
+        // every client watching the list, so a taskbar drops the entry.
+        self.close_foreign_toplevel(id);
         self.requested.remove(&id);
         if self.focus == Some(id) {
             self.focus = None;
@@ -42,8 +50,15 @@ impl State {
     }
 
     /// Re-reads a window's app id, title and minimum size.
+    ///
+    /// Called only from `XdgShellHandler`'s `title_changed`/`app_id_changed`,
+    /// which the pinned Smithay rev raises only when the value really changed
+    /// -- which is what lets the foreign-toplevel publish below send one
+    /// `done` per real change without comparing anything itself.
     pub fn refresh_window(&mut self, id: WindowId) {
         let info = self.info_of(id);
+        // Before `info` moves into the event below.
+        self.publish_foreign_toplevel(id, &info);
         self.world.handle_event(Event::WindowChanged { id, info });
         self.apply();
     }

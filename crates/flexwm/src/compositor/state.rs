@@ -45,6 +45,7 @@ use smithay::wayland::xdg_toplevel_icon::XdgToplevelIconManager;
 use super::cursor::Cursor;
 use super::decorations::{Appearance, Decorations};
 use super::ext_workspace::ExtWorkspaceState;
+use super::foreign_toplevel::ForeignToplevels;
 use super::gamma_control::GammaControlState;
 use super::headless::Backend;
 use super::idle;
@@ -235,6 +236,12 @@ pub struct State {
     /// owns both the protocol objects and the "what have clients been told"
     /// snapshot behind them.
     pub ext_workspace: ExtWorkspaceState,
+    /// `ext_foreign_toplevel_list_v1`: what a taskbar, dock or alt-tab
+    /// switcher reads the window list from. Unlike the two
+    /// `#[allow(dead_code)]` states below, this is read on every window
+    /// opening, closing and retitling -- see `foreign_toplevel.rs`, which
+    /// owns both the protocol objects and the handle per window behind them.
+    pub foreign_toplevels: ForeignToplevels,
     /// `ext_session_lock_manager_v1`: the compositor-enforced screen lock.
     /// Unlike the two `#[allow(dead_code)]` states below, this is read on
     /// every render, every focus refresh and every pointer hit test -- see
@@ -425,6 +432,7 @@ impl State {
         let xdg_decoration_state = XdgDecorationState::new::<Self>(&dh);
         let layer_shell_state = WlrLayerShellState::new::<Self>(&dh);
         let ext_workspace = ExtWorkspaceState::new(&dh);
+        let foreign_toplevels = ForeignToplevels::new(&dh);
         let session_lock = SessionLock::new(&dh);
         let fractional_scale_manager_state = FractionalScaleManagerState::new::<Self>(&dh);
         let cursor_shape_manager_state = CursorShapeManagerState::new::<Self>(&dh);
@@ -498,6 +506,7 @@ impl State {
             xdg_shell_state,
             layer_shell_state,
             ext_workspace,
+            foreign_toplevels,
             session_lock,
             fractional_scale_manager_state,
             cursor_shape_manager_state,
