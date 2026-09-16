@@ -63,14 +63,21 @@ const TINY_SNDBUF: usize = 1024;
 
 /// A deliberately short write-stall deadline, for the eviction tests.
 ///
-/// Long enough that a test doing a little work between pumps cannot trip it by
-/// accident (a debug build on a VM), short enough that waiting out the two
-/// windows an eviction can take is a fraction of a second rather than the
-/// twenty [`WRITE_STALL_TIMEOUT`] would cost. Every other test here connects
-/// with the real constant, so nothing that holds a queue across a slow pump
-/// loop -- `a_client_that_queues_more_than_it_reads_is_held_then_served_in_order`
-/// above all -- is at the mercy of this number.
-const TINY_STALL: Duration = Duration::from_millis(150);
+/// Short enough that waiting out the two windows an eviction can take is under
+/// a second rather than the twenty [`WRITE_STALL_TIMEOUT`] would cost, and long
+/// enough to leave real headroom above the one thing that could make a "never
+/// evicted" test lie: those tests read a little between pumps, and a whole
+/// window passing between two of those reads is an eviction. A debug build on a
+/// four-core VM running its suite in parallel is exactly where a test thread
+/// can lose a slice, so this is 300ms rather than the 150 it started at --
+/// costing a second or so of suite time to put a scheduling stall well outside
+/// the window.
+///
+/// Every other test here connects with the real constant, so nothing that holds
+/// a queue across a slow pump loop --
+/// `a_client_that_queues_more_than_it_reads_is_held_then_served_in_order` above
+/// all -- is at the mercy of this number.
+const TINY_STALL: Duration = Duration::from_millis(300);
 
 /// A compositor with a real event loop, and nothing on screen unless a test
 /// asks for it.

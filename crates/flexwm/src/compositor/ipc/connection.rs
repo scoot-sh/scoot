@@ -204,6 +204,10 @@ impl EventSource for ConnectionSource {
             TimeoutAction::ToDuration(*window)
         })?;
         if evicted {
+            // `debug`, like this file's other close paths, rather than the
+            // `warn` `PendingIdle::push` gives up at: a script killed
+            // mid-read leaves exactly this behind and is routine, whereas a
+            // waiter that has to be given up on was promised an answer.
             tracing::debug!(
                 pending = connection.pending(),
                 stall_ms = window.as_millis(),

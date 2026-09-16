@@ -212,15 +212,17 @@ prints and exits non-zero on — rather than a silent drop or a delay:
   open a connection per request. `flexwm msg` opens one per invocation and
   closes it as soon as it has its answer, so ordinary scripted use never
   approaches this.
-- **A connection whose peer stops reading is dropped after ten seconds.**
-  Replies that don't fit in the socket are queued and pushed out as the
-  client reads; a client that takes no bytes at all for ten seconds — the
-  classic case being one that sends a request, does `shutdown(SHUT_WR)`
+- **A connection whose peer stops reading is dropped**, ten to twenty
+  seconds after the last byte it took (the check runs on a deadline of its
+  own, so the exact moment falls in that range rather than on the ten
+  exactly). Replies that don't fit in the socket are queued and pushed out
+  as the client reads; a client that takes no bytes at all for that long —
+  the classic case being one that sends a request, does `shutdown(SHUT_WR)`
   and then never reads the answer — is treated as gone, and its connection
   and fds are released. Reading *slowly* is fine and is never given up on:
-  the ten seconds are measured from the last byte that went out, not from
-  when the reply was queued, so draining a multi-megabyte screenshot over
-  a minute costs nothing.
+  the clock is measured from the last byte that actually went out, not from
+  when the reply was queued, so draining a multi-megabyte screenshot over a
+  minute costs nothing.
 
 `--tty` needs a seat (`seatd` or logind) with a DRM device on it. On a modern
 kernel, on every non-root `--tty` run, Smithay logs `Unable to become drm
