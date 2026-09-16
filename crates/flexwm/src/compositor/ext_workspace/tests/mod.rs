@@ -18,17 +18,32 @@
 //! the workspace list is a window *existing* (`XdgShellHandler::new_toplevel`
 //! reaches the core immediately), so nothing here needs `wl_shm` at all.
 //!
+//! Split two ways, by what a test is about rather than by size:
+//!
+//! - this file: the client script every suite shares, plus what a client is
+//!   told as workspaces come and go, and the `activate`/`commit` lifecycle;
+//! - [`keyboard`]: a clicked `on_demand` taskbar's keyboard across a
+//!   workspace switch -- the client-protocol half of the `clicked_layer`
+//!   class PR #50 and PR #53 fixed on their paths.
+//!
 //! Like the other integration-style tests in this crate, these need a
 //! writable `$XDG_RUNTIME_DIR`: [`State::new`] binds a real wayland listening
 //! socket, which nothing here connects to (the client is inserted as a socket
 //! pair) but which is created either way.
 
+use std::io::Write;
+use std::os::fd::AsFd;
 use std::os::unix::net::UnixStream;
 use std::sync::mpsc::{Receiver, Sender};
 
 use flexwm_core::{Action, Horizontal, Vertical};
-use wayland_client::protocol::{wl_compositor, wl_output, wl_registry, wl_surface};
+use wayland_client::protocol::{
+    wl_buffer, wl_compositor, wl_output, wl_registry, wl_shm, wl_shm_pool, wl_surface,
+};
 use wayland_client::{Connection, Dispatch, Proxy, QueueHandle, WEnum, event_created_child};
+use wayland_protocols::ext::session_lock::v1::client::{
+    ext_session_lock_manager_v1, ext_session_lock_v1,
+};
 use wayland_protocols::ext::workspace::v1::client::ext_workspace_group_handle_v1::{
     self, ExtWorkspaceGroupHandleV1,
 };
@@ -39,14 +54,28 @@ use wayland_protocols::ext::workspace::v1::client::ext_workspace_manager_v1::{
     self, ExtWorkspaceManagerV1,
 };
 use wayland_protocols::xdg::shell::client::{xdg_surface, xdg_toplevel, xdg_wm_base};
+use wayland_protocols_wlr::layer_shell::v1::client::{zwlr_layer_shell_v1, zwlr_layer_surface_v1};
 
 use crate::compositor::decorations::Appearance;
 use crate::compositor::headless;
 use crate::compositor::test_support::{Harness, wait_for};
 
+mod keyboard;
+
 /// The framebuffer these tests render into. Nothing here reads a pixel; it
 /// only has to be a valid size for the headless backend.
 const CANVAS: i32 = 200;
+
+/// How wide and tall the `on_demand` taskbar in [`Step::MapTaskbar`] is.
+///
+/// Anchored to the bottom-right corner, so [`TASKBAR_POINT`] is inside it and
+/// outside any window: the layout puts columns from the left edge, and this
+/// suite never opens enough of them to reach the corner.
+const TASKBAR: u32 = 60;
+
+/// A point inside that taskbar, for a click that really goes through the
+/// pointer.
+const TASKBAR_POINT: (f64, f64) = (CANVAS as f64 - 20.0, CANVAS as f64 - 20.0);
 
 /// The `active` bit of `ext_workspace_handle_v1.state`, and the empty set.
 const ACTIVE: u32 = 1;
@@ -110,6 +139,9 @@ struct TestClient {
     manager_name: Option<(u32, u32)>,
     compositor: Option<wl_compositor::WlCompositor>,
     wm_base: Option<xdg_wm_base::XdgWmBase>,
+    shm: Option<wl_shm::WlShm>,
+    layer_shell: Option<zwlr_layer_shell_v1::ZwlrLayerShellV1>,
+    locks: Option<ext_session_lock_manager_v1::ExtSessionLockManagerV1>,
     outputs: Vec<wl_output::WlOutput>,
     managers: Vec<ExtWorkspaceManagerV1>,
     groups: Vec<ExtWorkspaceGroupHandleV1>,
@@ -118,6 +150,11 @@ struct TestClient {
     log: Vec<Seen>,
     /// The serial of each toplevel's latest unacked `xdg_surface.configure`.
     window_serials: Vec<Option<u32>>,
+    /// The size the compositor configured the taskbar at, once it has. A layer
+    /// surface may only attach a buffer after acking a configure, and must draw
+    /// at the size that configure carried -- which is the compositor's choice,
+    /// not the client's.
+    taskbar_size: Option<(u32, u32)>,
 }
 
 impl TestClient {
@@ -181,6 +218,13 @@ impl Dispatch<wl_registry::WlRegistry, ()> for TestClient {
                 client.compositor = Some(registry.bind(name, version.min(4), qh, ()))
             }
             "xdg_wm_base" => client.wm_base = Some(registry.bind(name, version.min(3), qh, ())),
+            "wl_shm" => client.shm = Some(registry.bind(name, version.min(1), qh, ())),
+            "zwlr_layer_shell_v1" => {
+                client.layer_shell = Some(registry.bind(name, version.min(4), qh, ()))
+            }
+            "ext_session_lock_manager_v1" => {
+                client.locks = Some(registry.bind(name, version.min(1), qh, ()))
+            }
             _ => {}
         }
     }
@@ -328,10 +372,39 @@ impl Dispatch<xdg_surface::XdgSurface, WindowIndex> for TestClient {
     }
 }
 
+impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, ()> for TestClient {
+    /// Acks the configure and records the size it carried, which is the only
+    /// thing the taskbar needs from the compositor before it can draw.
+    fn event(
+        client: &mut Self,
+        layer: &zwlr_layer_surface_v1::ZwlrLayerSurfaceV1,
+        event: zwlr_layer_surface_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let zwlr_layer_surface_v1::Event::Configure {
+            serial,
+            width,
+            height,
+        } = event
+        {
+            layer.ack_configure(serial);
+            client.taskbar_size = Some((width, height));
+        }
+    }
+}
+
 wayland_client::delegate_noop!(TestClient: ignore wl_compositor::WlCompositor);
 wayland_client::delegate_noop!(TestClient: ignore wl_surface::WlSurface);
 wayland_client::delegate_noop!(TestClient: ignore wl_output::WlOutput);
 wayland_client::delegate_noop!(TestClient: ignore xdg_toplevel::XdgToplevel);
+wayland_client::delegate_noop!(TestClient: ignore wl_shm::WlShm);
+wayland_client::delegate_noop!(TestClient: ignore wl_shm_pool::WlShmPool);
+wayland_client::delegate_noop!(TestClient: ignore wl_buffer::WlBuffer);
+wayland_client::delegate_noop!(TestClient: ignore zwlr_layer_shell_v1::ZwlrLayerShellV1);
+wayland_client::delegate_noop!(TestClient: ignore ext_session_lock_manager_v1::ExtSessionLockManagerV1);
+wayland_client::delegate_noop!(TestClient: ignore ext_session_lock_v1::ExtSessionLockV1);
 
 /// One instruction for the client thread.
 enum Step {
@@ -343,6 +416,15 @@ enum Step {
     /// Create an `xdg_toplevel` (and ack its configure). No buffer: what
     /// changes the workspace list is the window existing.
     MapWindow,
+    /// Map a real `on_demand` taskbar: a `zwlr_layer_surface_v1` in the
+    /// bottom-right corner with a real `wl_shm` buffer behind it, which is
+    /// what it takes to be in the compositor's layer map and therefore
+    /// eligible to hold the keyboard.
+    MapTaskbar,
+    /// Take the session lock, without ever creating a lock surface.
+    LockSession,
+    /// Release the lock the way a lock screen does after auth.
+    Unlock,
     /// Destroy the `index`-th window.
     CloseWindow(usize),
     /// `activate` on the `index`-th workspace handle -- staged, not
@@ -368,9 +450,13 @@ enum Step {
     TakeLog,
 }
 
+#[derive(Debug)]
 enum Ack {
     Done,
     Log(Vec<Seen>),
+    TaskbarMapped,
+    Locked,
+    Unlocked,
 }
 
 /// Runs the client half: binds what it needs, then executes whatever steps
@@ -394,6 +480,16 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
         xdg_surface::XdgSurface,
         xdg_toplevel::XdgToplevel,
     )> = Vec::new();
+    // Held so the taskbar stays mapped: dropping the role object or the
+    // buffer would unmap it, which is exactly what must not happen while a
+    // workspace switch is trying to take the keyboard away from it.
+    let mut taskbar: Option<(
+        wl_surface::WlSurface,
+        zwlr_layer_surface_v1::ZwlrLayerSurfaceV1,
+        wl_buffer::WlBuffer,
+    )> = None;
+    // Held so the lock is not released the moment it is taken.
+    let mut lock: Option<ext_session_lock_v1::ExtSessionLockV1> = None;
 
     while let Ok(step) = steps.recv() {
         queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
@@ -421,6 +517,62 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 })?;
                 xdg.ack_configure(serial);
                 windows.push((surface, xdg, toplevel));
+            }
+            Step::MapTaskbar => {
+                let shell = client
+                    .layer_shell
+                    .clone()
+                    .ok_or("no zwlr_layer_shell_v1 -- the global is missing")?;
+                let shm = client.shm.clone().ok_or("no wl_shm")?;
+                let surface = compositor.create_surface(&qh, ());
+                let layer = shell.get_layer_surface(
+                    &surface,
+                    None,
+                    zwlr_layer_shell_v1::Layer::Overlay,
+                    "flexwm-ext-workspace-test-taskbar".into(),
+                    &qh,
+                    (),
+                );
+                layer.set_anchor(
+                    zwlr_layer_surface_v1::Anchor::Bottom | zwlr_layer_surface_v1::Anchor::Right,
+                );
+                layer.set_size(TASKBAR, TASKBAR);
+                layer.set_exclusive_zone(0);
+                // The whole point: a surface that takes the keyboard when it
+                // is clicked, and keeps it until something takes it away --
+                // which is what a workspace-switching panel is.
+                layer.set_keyboard_interactivity(
+                    zwlr_layer_surface_v1::KeyboardInteractivity::OnDemand,
+                );
+                // The first commit carries no buffer; the protocol requires
+                // that before the first configure.
+                surface.commit();
+                let (width, height) =
+                    wait_for(&mut queue, &mut client, "a taskbar configure", |client| {
+                        client.taskbar_size
+                    })?;
+                let buffer = solid_buffer(&shm, &qh, width as i32, height as i32);
+                surface.attach(Some(&buffer), 0, 0);
+                surface.damage_buffer(0, 0, width as i32, height as i32);
+                surface.commit();
+                taskbar = Some((surface, layer, buffer));
+                queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                outcome = Ack::TaskbarMapped;
+            }
+            Step::LockSession => {
+                let manager = client
+                    .locks
+                    .clone()
+                    .ok_or("no ext_session_lock_manager_v1")?;
+                lock = Some(manager.lock(&qh, ()));
+                queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                outcome = Ack::Locked;
+            }
+            Step::Unlock => {
+                let held = lock.take().ok_or("no session lock is held")?;
+                held.unlock_and_destroy();
+                queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                outcome = Ack::Unlocked;
             }
             Step::CloseWindow(index) => {
                 // In this order, or the compositor answers with a protocol
@@ -456,7 +608,34 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
         }
         acks.send(outcome).map_err(|e| e.to_string())?;
     }
+    // Keeps both alive for the whole script rather than dropping them at the
+    // first step boundary.
+    drop(lock);
+    drop(taskbar);
     Ok(())
+}
+
+/// A `width`x`height` opaque `wl_buffer` over a real memfd -- the same path any
+/// toolkit takes, and what a layer surface needs before it counts as mapped.
+///
+/// The colour does not matter: nothing in this suite reads a pixel. What
+/// matters is that a buffer exists at the size the compositor configured.
+fn solid_buffer(
+    shm: &wl_shm::WlShm,
+    qh: &QueueHandle<TestClient>,
+    width: i32,
+    height: i32,
+) -> wl_buffer::WlBuffer {
+    let stride = width * 4;
+    let len = (stride * height) as usize;
+    let fd = rustix::fs::memfd_create("flexwm-ext-workspace-test", rustix::fs::MemfdFlags::CLOEXEC)
+        .expect("a memfd");
+    let mut file = std::fs::File::from(fd);
+    file.write_all(&vec![0xffu8; len]).expect("a filled pool");
+    let pool = shm.create_pool(file.as_fd(), len as i32, qh, ());
+    let buffer = pool.create_buffer(0, width, height, stride, wl_shm::Format::Argb8888, qh, ());
+    pool.destroy();
+    buffer
 }
 
 fn handle(client: &TestClient, index: usize) -> Result<ExtWorkspaceHandleV1, String> {
@@ -506,7 +685,7 @@ impl Fixture {
     fn take_log_on(&mut self, client: usize) -> Vec<Seen> {
         match self.run_on(client, Step::TakeLog) {
             Ack::Log(log) => log,
-            Ack::Done => panic!("the client answered a log request with nothing"),
+            other => panic!("the client answered a log request with {other:?}"),
         }
     }
 

@@ -153,6 +153,14 @@ gap jumped the queue — each item's own file records why it landed when it did.
   path). Both now spend the click; IPC spends it for the whole focus family
   and nothing else (pinned by a boundary test). Each new test confirmed to
   fail unfixed before being kept.
+- **[`ext-workspace-v1` activation leaves the keyboard on a clicked layer surface](docs/backlog/resolved/ext-workspace-clicked-layer-keyboard-done.md)**
+  (PR #54, 2026-09-16) — the client-protocol half PR #53 left out per scope,
+  confirmed real rather than not-a-bug by two fail-first tests. The fix
+  spends the click before `act` (refusing a locked session first), including
+  on the already-active early return — which now runs the keyboard half, so
+  the path agrees with IPC `FocusWorkspaceIndex` rather than differing by
+  transport. The agent-facing IPC half was already fixed, so no agent loop
+  silently mistypes; this closes the panel-that-stays-mapped exposure.
 
 ## What's next
 
