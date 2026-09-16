@@ -237,12 +237,20 @@ impl XdgActivationHandler for State {
     /// for one event, and leaving a spent one in the table would let the same
     /// client re-activate itself from the same user action indefinitely.
     ///
+    /// Refused before anything is touched: an expired token, a surface that
+    /// is not a window, and -- like `wlr_toplevel_activate`, and for the same
+    /// reason -- a locked session. The lock is checked here rather than left
+    /// to [`State::act`]'s own gate because what follows spends the
+    /// launcher's click (see below), and a refused request must not disturb
+    /// anything: `clicked_layer` has to survive the lock so the session comes
+    /// back as the user left it. `act`'s gate remains as the backstop
+    /// `shell.rs` describes it as.
+    ///
     /// Focus moves through [`State::act`], not by writing `self.focus`: that
-    /// is the one path every requested action goes through, so an activation
-    /// while the session is locked is refused by the same gate a keybinding
-    /// is (see `shell.rs::act`), and the core re-derives the whole
-    /// arrangement -- scrolling the activated column into view, which is what
-    /// actually makes an off-screen window visible in a scrolling layout.
+    /// is the one path every requested action goes through, and the core
+    /// re-derives the whole arrangement -- scrolling the activated column
+    /// into view, which is what actually makes an off-screen window visible
+    /// in a scrolling layout.
     fn request_activation(
         &mut self,
         token: XdgActivationToken,
@@ -271,7 +279,26 @@ impl XdgActivationHandler for State {
             );
             return;
         };
+        if self.session_lock.is_locked() {
+            tracing::debug!(
+                ?id,
+                app_id = ?token_data.app_id,
+                "ignoring an xdg-activation request: the session is locked"
+            );
+            return;
+        }
         tracing::debug!(?id, app_id = ?token_data.app_id, "activating a window");
+        // Mirrors `input.rs`'s `focus_under_pointer`, which clears this on the
+        // line before its own `act(FocusWindowId)` -- and what
+        // `wlr_toplevel_activate` does for its own `activate`: without it
+        // `layer_shell.rs`'s `layer_keyboard_focus` hands the keyboard straight
+        // back to a still-mapped `on_demand` surface named here, so the refresh
+        // `act` ends in would re-derive the launcher -- which is exactly what
+        // sent this request, and may well still be mapped -- instead of the
+        // window. The click is spent only once the request is known to be
+        // honored, which is why the refusals above (and the lock gate ahead of
+        // them) come first.
+        self.clicked_layer = None;
         self.act(Action::FocusWindowId(id));
     }
 }

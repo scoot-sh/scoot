@@ -241,6 +241,36 @@ impl State {
                          pointer input still works, and reaches only the lock screen)",
                     );
                 }
+                // A click that gave an `on_demand` layer surface the keyboard
+                // is spent here when the action moves window focus -- exactly
+                // what `input.rs`'s `focus_under_pointer` does on the line
+                // before its own `act(FocusWindowId)`, and what
+                // `wlr_toplevel_activate` and `request_activation` do for
+                // their own focus requests. Without it `layer_shell.rs`'s
+                // `layer_keyboard_focus` hands the keyboard straight back to
+                // that still-mapped surface, so the refresh `act` ends in
+                // re-derives the panel instead of the window: `flexwm msg
+                // windows` reports the new focus while every keystroke still
+                // goes to the panel, with nothing to detect the mismatch
+                // from -- and unlike an `xdg-activation-v1` launcher, nothing
+                // here unmaps itself a moment later to self-correct. Only the
+                // actions whose purpose is moving window focus spend it: a
+                // layout or lifecycle action (`MoveColumn`, `CloseFocused`,
+                // ...) changes arrangement rather than where focus is
+                // reported to be, so it leaves a deliberate keyboard placement
+                // alone. After the lock gate above, for the same reason as
+                // there: a refused request must not spend the click, so the
+                // session comes back as the user left it.
+                if matches!(
+                    &action,
+                    flexwm_ipc::Action::FocusColumn { .. }
+                        | flexwm_ipc::Action::FocusWindow { .. }
+                        | flexwm_ipc::Action::FocusWindowId { .. }
+                        | flexwm_ipc::Action::FocusWorkspace { .. }
+                        | flexwm_ipc::Action::FocusWorkspaceIndex { .. }
+                ) {
+                    self.clicked_layer = None;
+                }
                 self.act(Action::from(action));
                 self.ok()
             }

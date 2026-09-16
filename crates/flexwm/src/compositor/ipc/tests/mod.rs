@@ -16,6 +16,8 @@ use flexwm_ipc::decode;
 use super::listener;
 use super::*;
 
+mod actions;
+
 /// Shrinks how much unread data the kernel will hold for writes to `stream`.
 ///
 /// Lives here rather than beside its busiest caller (`connection/tests.rs`)
