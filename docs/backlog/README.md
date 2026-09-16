@@ -61,7 +61,7 @@ actionable.
   Verified live against the real quickshell: window list, click-to-focus and
   close all work.
 - [`xdg-activation-v1` / IPC focus leaves the keyboard on a clicked layer surface](./resolved/activation-clicked-layer-keyboard-done.md)
-  — RESOLVED 2026-09-16: `request_activation` and every focus-family IPC
+  — RESOLVED 2026-09-16 (PR #53): `request_activation` and every focus-family IPC
   action now spend the click (`clicked_layer = None`), the way PR #50's own
   `activate` and a window click already did. A launcher or panel that stays
   mapped no longer keeps every keystroke after handing focus away.

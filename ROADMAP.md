@@ -147,7 +147,7 @@ gap jumped the queue — each item's own file records why it landed when it did.
   its own session list (an unbounded, client-driven leak) and never raises
   `duplicate_frame`. `flexwm msg screenshot` is unchanged.
 - **[Activation / IPC focus leaves the keyboard on a clicked layer surface](docs/backlog/resolved/activation-clicked-layer-keyboard-done.md)**
-  (2026-09-16) — the identical bug PR #50 fixed in its own `activate`,
+  (PR #53, 2026-09-16) — the identical bug PR #50 fixed in its own `activate`,
   pre-existing in `xdg-activation-v1`'s `request_activation` and worse in
   `Request::Action` (no self-correcting unmap; the primary agent focus
   path). Both now spend the click; IPC spends it for the whole focus family

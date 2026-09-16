@@ -90,7 +90,7 @@ reporting the window as focused the whole time, so there is nothing to
 detect the mismatch from. This sits squarely on the computer-use mission
 `CLAUDE.md` names as one of two things this project has to get right.
 
-## Resolution (2026-09-16)
+## Resolution (2026-09-16, PR #53)
 
 Both callers fixed in one PR, each with a test that was confirmed to fail
 against the unfixed code before being kept.
