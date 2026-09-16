@@ -222,52 +222,76 @@ by the manager that created them.
 
 ## Evidence
 
-Everything below was captured at **`699d940`** — the whole PR, code and
-docs. Every commit after it changes Markdown only (this evidence section and
-two documentation corrections); no `.rs` file differs between `699d940` and
-the branch head, which `git diff 699d940 -- '*.rs'` shows as empty. Dev VM (`ssh -p 2222 dev@localhost`), debug build through the 9p
-mount at `/mnt/flexwm`, `CARGO_TARGET_DIR=/var/cargo-target`, force-cleaned
-(`cargo clean -p flexwm && cargo build -p flexwm`) first, because a build
-through that mount can otherwise report `Finished` in under two seconds
-without recompiling a real change.
+Everything below was captured at **`1ade117`**, the review-fix commit —
+re-run from scratch rather than carried over from the first round, because
+that commit changed what `activate` does and the earlier transcripts were
+therefore stale for it. Dev VM (`ssh -p 2222 dev@localhost`), debug build
+through the 9p mount at `/mnt/flexwm`,
+`CARGO_TARGET_DIR=/var/cargo-target`, force-cleaned (`cargo clean -p flexwm
+&& cargo build -p flexwm`) first, because a build through that mount can
+otherwise report `Finished` in under two seconds without recompiling a real
+change.
 
-The dev VM's target directory was shared with a second implementer while
-this ran, so the live probes were pointed at a **copy** of the binary taken
-straight after that clean build (`/var/tmp/flexwm-ftlmgmt`, since deleted)
-rather than at `/var/cargo-target/debug/flexwm`, which the other agent's
-build could have replaced in between. Each probe is also self-verifying on
-that point: a binary without this PR does not offer the global the logs
-below show being bound.
+The dev VM's target directory was shared with a second implementer
+throughout, and a build from *their* tree replaced
+`/var/cargo-target/debug/flexwm` under someone else between a build and a
+probe during this PR's review round — not a queueing delay, an actual wrong
+binary. So the smoke test and every live probe here were pointed at a
+**copy** taken in the same command as the clean build
+(`/var/tmp/flexwm-r2`, since deleted), never at the shared path. Each probe
+is also self-verifying on that point: a binary without this PR does not
+offer the global the logs below show being bound.
 
 ### The checks
 
 ```
-cargo test -p flexwm            TEST EXIT=0     621 passed; 0 failed; 1 ignored
-cargo nextest run --workspace   NEXTEST EXIT=0  715 tests run: 715 passed, 1 skipped
+cargo test -p flexwm            TEST EXIT=0     622 passed; 0 failed; 1 ignored
+cargo nextest run --workspace   NEXTEST EXIT=0  716 tests run: 716 passed, 1 skipped
 cargo clippy -p flexwm --all-targets -- -D warnings   CLIPPY EXIT=0 (0 warnings)
 cargo fmt --check -p flexwm                           FMT EXIT=0
 MODE=--headless scripts/smoke-test.sh                 SMOKE EXIT=0 (12 `ok:` lines,
-                                                      screenshot /tmp/flexwm-smoke.png)
+                                                      screenshot /tmp/flexwm-smoke.png,
+                                                      FLEXWM=/var/tmp/flexwm-r2)
 ```
 
-68 of those tests are this protocol's own and the `ext-` one it must agree
-with (`cargo test -p flexwm foreign_toplevel`: `68 passed; 0 failed`, 554
+69 of those tests are this protocol's own and the `ext-` one it must agree
+with (`cargo test -p flexwm foreign_toplevel`: `69 passed; 0 failed`, 554
 filtered out).
 
-The smoke test was pointed at a copy of the binary for the same shared
-target-directory reason described below (`FLEXWM=/var/tmp/flexwm-smoke-bin`,
-since deleted).
+### The keyboard tests really can fail
+
+The review's blocking finding was that the *previous* version of this test
+could not have caught the bug it was named for. So the replacements were run
+against the unfixed code before being kept: with the `self.clicked_layer =
+None` line in `wlr_toplevel_activate` commented out and nothing else
+changed,
+
+```
+cargo test -p flexwm foreign_toplevel_management::tests::requests
+EXIT=101
+  activating_the_focused_window_takes_the_keyboard_back_from_the_taskbar ... FAILED
+    panicked at .../tests/requests.rs:138
+  activating_a_different_window_takes_the_keyboard_back_too ... FAILED
+    panicked at .../tests/requests.rs:171
+test result: FAILED. 11 passed; 2 failed
+```
+
+Both failures land on the assertion that the seat's keyboard focus is the
+window's `wl_surface` — i.e. on the property itself, not on a proxy for it.
+With the line restored: `45 passed; 0 failed`.
 
 ### Live, against the real quickshell
 
 Three runs, scripts kept on the dev VM so this can be re-run without
 rebuilding them. `/var/tmp/qs-probe.sh` is PR #47's original probe,
 untouched; `/var/tmp/qs-control-probe.sh` and
-`/var/tmp/qs-activate-probe.sh` are this PR's. The `-699d940.sh` copy of
+`/var/tmp/qs-activate-probe.sh` are this PR's. The `-1ade117.sh` copy of
 each is the one that produced the transcripts here — identical but for the
 binary path described above. Raw output at `/tmp/p1.log`, `/tmp/p2.log`,
 `/tmp/p3.log`, with the full `WAYLAND_DEBUG=1` wire logs at
-`/tmp/qsctl-wire.log` and `/tmp/qsact-wire.log`.
+`/tmp/qsctl-wire.log` and `/tmp/qsact-wire.log`. (The `-699d940.sh` copies
+from the first round are still there too; they point at a binary that has
+been deleted, so re-point them before use.)
 
 **1. The original probe, unchanged, now passes.** Same script that measured
 `count = 0` when this entry was filed; one real `foot` window:
