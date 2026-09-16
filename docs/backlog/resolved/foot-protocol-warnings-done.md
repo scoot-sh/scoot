@@ -206,22 +206,63 @@ allocation on the render path, stable buffer `Id`s for the damage tracker).
 Building them lazily would trade that for a first-use allocation while the
 pointer is moving, which is the worse moment.
 
-**Not covered, and stated plainly rather than implied: neither `--tty` nor
-`--nested` was ever run for this change.** The session container has no DRM
-device, no `/lib/modules` (so no `vkms` to load), no `/sys/class/drm` and no
-host compositor, so `--tty` is unreachable from it and `--nested` has nothing
-to nest in. That matters most for the cursor, which is the one thing *only*
-`--tty` draws: these shapes and theme images have been rendered through the
-real `PixmanRenderer` and asserted pixel by pixel, but have never been on a
-physical display. A `--tty` bug-bash on the dev VM is the outstanding
-verification for this work.
+### `--tty` hardware bug-bash (2026-09-16, dev VM, at `e16aada`)
 
-Otherwise unchanged by this work: real `--tty` hardware. Nothing
-in the four protocols is backend-specific except *drawing* the cursor, which
-only `--tty` does — the shapes themselves are asserted pixel-by-pixel in
-`cursor/shapes/tests.rs` and rendered end-to-end through a real
-`PixmanRenderer` in `cursor/tests.rs`, which is the same renderer `--tty`
-scans out.
+The session container that did the work above has no DRM device, so the gap
+it left open — the cursor is the one thing only `--tty` draws — is closed
+here, on the project's dev VM (`ssh -p 2222 dev@localhost`, NixOS aarch64,
+real virtio-gpu/DRM/KMS via QEMU). Binary freshness checked against
+`vm/README.md`'s own gotcha before trusting any run
+(`ls -l --time-style=full-iso /var/cargo-target/debug/flexwm` newer than
+`git log -1 --format=%ci`) — the first `scripts/smoke-test.sh` pass here
+actually caught a stale binary this way (a leftover build from before this
+branch was checked out still showed all four warnings; a plain `cargo build`
+fixed it and the rerun showed none). Standing evidence, re-run from scratch
+rather than trusted from the earlier session:
+
+- `XDG_RUNTIME_DIR=/tmp/xdgrt cargo test --workspace`: 477 + 68 + 26 pass, 1
+  ignored — matches this doc's earlier count exactly. `cargo clippy
+  --workspace --all-targets -- -D warnings` and `cargo fmt --check --all`:
+  clean.
+- `scripts/smoke-test.sh` (`--headless`): exit 0, no `BUG` lines, decoration
+  pixel checks pass (after the rebuild above).
+- The issue's own acceptance grep (`--headless`, spawn `foot`, grep the log
+  for the four warning strings): no matches. `no cursor theme found; using
+  the compositor's own drawn shapes theme=default` confirms the fallback
+  path — this VM ships no cursor theme by default (only `hicolor`/`locolor`
+  icon dirs, no `cursors/`).
+- **`--tty -- foot`, real DRM master.** Verified genuinely held, not just
+  logged (`vm/README.md`'s own recipe): `sudo cat
+  /sys/kernel/debug/dri/0/clients` shows `master=y` on seatd's fd, and `sudo
+  cat /sys/kernel/debug/dri/0/state` shows `plane[33]` scanning out
+  `allocated by = flexwm`. `flexwm msg pointer move` + `flexwm msg
+  screenshot` over IPC, cropped and upscaled around the pointer:
+  - No theme configured: I-beam over `foot`'s grid and arrow over the
+    background are the drawn line-art shapes — matches the fallback
+    contract exactly (this VM has none installed).
+  - `nix build nixpkgs#adwaita-icon-theme`, symlinked to `~/.icons/Adwaita`,
+    `[appearance] cursor_theme = "Adwaita"`: log line `loaded a cursor theme
+    theme=Adwaita size=16`; both crops now show real Adwaita artwork
+    (anti-aliased hollow-bar I-beam, a proper angled pointer arrow) —
+    visibly distinct in shape and shading from the drawn fallback captured
+    moments before, not just a theme-name log line taken on faith.
+  - `flexwm msg windows` carries `"icon": "foot"` — `xdg-toplevel-icon-v1`
+    exercised end to end by a real client on real hardware.
+  - Spawned a second `foot`: two-column tiling and both focus-ring colors
+    render correctly under `--tty` — no regression to the ordinary path.
+  - `grep -iE "panic|error"` on both `--tty` run logs: no matches beyond the
+    pre-existing, unrelated `Failed to destroy old mode property blob: No
+    such file or directory` (a legacy-fbadd quirk of this VM's virtio-gpu,
+    seen on `main` too, not introduced here).
+  - Both runs shut down cleanly via `flexwm msg action quit`; seatd logs
+    confirm the seat was released each time (no process left holding it for
+    whoever runs `--tty` next).
+
+**Not exercised even now:** VT switching (this bug-bash never had a second
+VT to switch to/from over ssh) and `xdg-activation-v1` end to end (no
+activation-aware launcher was on hand). Both are called out here rather than
+silently assumed clean — the ordinary render/input/tiling path they'd
+interact with was exercised extensively above and showed no regression.
 
 ## What this deliberately leaves open
 
