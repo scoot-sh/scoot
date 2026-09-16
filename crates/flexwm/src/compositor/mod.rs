@@ -26,6 +26,7 @@ mod nested_dispatch;
 mod output_management;
 mod output_scale;
 mod popup;
+mod screencopy;
 mod screenshot;
 mod selection;
 mod session_lock;

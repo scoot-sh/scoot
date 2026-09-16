@@ -458,6 +458,20 @@ impl State {
                     match result {
                         Ok(render_result) => {
                             drew_a_frame = true;
+                            // What `screencopy.rs` asks "have the pixels moved
+                            // since this session's last capture?" with. Gated
+                            // on the damage tracker having something to report
+                            // rather than on reaching this arm at all: under
+                            // `--tty` (the one backend passing a real buffer
+                            // age) a redundant `request_render` legitimately
+                            // draws nothing and leaves the previous frame on
+                            // screen, and counting that as a change would make
+                            // every capture session copy the same pixels
+                            // again. See `State::frame_serial`'s doc for what
+                            // this does and does not claim.
+                            if render_result.damage.is_some() {
+                                self.frame_serial = self.frame_serial.wrapping_add(1);
+                            }
                             // Must run unconditionally, even when there
                             // turns out to be nothing to present below --
                             // see `BufferPool::advance_generation`'s doc for
@@ -710,6 +724,11 @@ impl State {
         // current-mode and a `done` behind. `set_mode` above is the write; this
         // is the only other site that reaches it (see `output_management.rs`).
         self.refresh_output_heads();
+        // ...and every screen-capture client is holding a buffer sized for the
+        // old framebuffer, which its next capture would be refused for with no
+        // explanation. After the new backend is in place, because the size
+        // re-advertised is read from it. See `screencopy.rs`.
+        self.refresh_capture_constraints();
         self.world.handle_event(CoreEvent::OutputChanged {
             id: OUTPUT_ID,
             area: Rect::new(0, 0, logical.0, logical.1),
@@ -776,6 +795,13 @@ impl State {
 
 fn frame_tick(_now: std::time::Instant, _metadata: &mut (), state: &mut State) -> TimeoutAction {
     state.render();
+    // Immediately after the render, so a screen-capture client is handed the
+    // frame that was just drawn rather than the one before it. Deliberately
+    // *not* part of this tick's re-arm decision below: a capture session
+    // waiting for the screen to change has nothing to do until something else
+    // marks it dirty, and keeping the timer alive for it would undo the idle
+    // behaviour `ensure_ticking` exists for. See `screencopy.rs`.
+    state.service_captures();
     state.settle_idle_waiters();
     if state.needs_render || !state.pending_idle.is_empty() {
         TimeoutAction::ToDuration(FRAME_INTERVAL)

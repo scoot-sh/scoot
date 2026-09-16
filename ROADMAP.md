@@ -127,6 +127,25 @@ gap jumped the queue — each item's own file records why it landed when it did.
   could not be reproduced on the QEMU dev VM and still want confirmation on
   the vfkit/laptop hardware that filed the issue, which is why #48 is
   referenced rather than closed.
+- **[Screen capture for clients](docs/backlog/resolved/screencopy-capture-done.md)**
+  (PR #52, 2026-09-16) — `ext-image-copy-capture-v1` with
+  `ext-image-capture-source-v1`, the standard path `grim`, a screen recorder
+  and a shell's workspace-overview preview read the screen through. The
+  `ext-` protocol and *not* `wlr-screencopy` alongside it, the opposite call
+  to PR #50 and for the same reason — measured: `grim` 1.5.0 speaks only the
+  `ext-` one, and quickshell 0.3.1 speaks it too. Unlike the three protocol
+  items before it, Smithay implements this one, so flexwm writes handlers.
+  **Output capture only**: a per-window source needs a second render target
+  per session and is [its own
+  item](docs/backlog/protocols/screencopy-toplevel-capture.md). A capture is
+  parked and served from the frame tick rather than copied on request, which
+  bounds it to one per session per frame and lets a repeat capture of an
+  unchanged screen wait — both of which the protocol explicitly allows. The
+  lock guarantee is inherited from `render()` rather than re-checked, plus
+  one guard for the locked-but-not-yet-blanked window `flexwm msg screenshot`
+  still has. Two upstream gaps found and worked around: Smithay never sweeps
+  its own session list (an unbounded, client-driven leak) and never raises
+  `duplicate_frame`. `flexwm msg screenshot` is unchanged.
 
 ## What's next
 
@@ -145,7 +164,8 @@ actually open.
    [`[tty] gpu` config key](docs/backlog/tty/tty-gpu-config-key.md).
 2. **Medium-priority protocol gaps**, mostly what's left of the DMS/Noctalia
    probes (see "Shell enablement" below for their recommended order):
-   [screencopy/image-capture](docs/backlog/protocols/screencopy-capture.md),
+   [screencopy's toplevel half](docs/backlog/protocols/screencopy-toplevel-capture.md)
+   (the output half shipped — see "Recently shipped" above),
    plus two filed from PR #44's own review —
    [popup grab serial validation](docs/backlog/protocols/popup-grab-serial-validation.md)
    and [a window-focus change doesn't dismiss an active popup
@@ -226,9 +246,13 @@ probes' recommended order:
    to prefer). Reconfiguration is deliberately refused and re-filed as
    [its own item](docs/backlog/protocols/output-management-reconfiguration.md),
    gated on multi-output support: nothing an `apply` could ask for exists yet.
-5. [`screencopy / image-capture`](docs/backlog/protocols/screencopy-capture.md)
-   — thumbnails/overview previews (filed 2026-09-14; IPC screenshots
-   stay regardless).
+5. [`screencopy / image-capture`](docs/backlog/resolved/screencopy-capture-done.md)
+   — HALF-RESOLVED 2026-09-16 (PR #52): `ext-image-copy-capture-v1` with
+   `ext-image-capture-source-v1` for **output** capture, which is the
+   workspace-overview preview half. The per-window thumbnail half needs a
+   toplevel capture source (a second render target per session) and is
+   [its own item](docs/backlog/protocols/screencopy-toplevel-capture.md).
+   IPC screenshots stay regardless.
 6. DMS unlock-path re-probe — done 2026-09-14 (see the re-probe note
    in the DMS gaps entry): lock → auth → unlock teardown survives on
    current `main`, and so does a spotlight open/Escape-dismiss cycle.

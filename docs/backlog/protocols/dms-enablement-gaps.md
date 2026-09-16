@@ -158,6 +158,13 @@ list behind that.
   DMS-client gap.)
 - Rough size: M. No existing backlog entry — file one when this is
   scheduled.
+- **HALF-RESOLVED 2026-09-16 (PR #52).** `ext-image-copy-capture-v1` with
+  `ext-image-capture-source-v1` is advertised, so the **overview live
+  preview** (an output source) has something to consume. The **launcher
+  window thumbnails** are a per-window source and still do not — that half
+  needs a second render target per session and is filed as
+  [`screencopy-toplevel-capture.md`](./screencopy-toplevel-capture.md). See
+  [`resolved/screencopy-capture-done.md`](../resolved/screencopy-capture-done.md).
 
 ### 7. DMS does not recognize flexwm ("No compositor detected") — mostly upstream work
 

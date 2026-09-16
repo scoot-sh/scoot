@@ -220,6 +220,12 @@ anything.
   advertised. Noctalia's launcher/overview thumbnail views have nothing
   to consume. (flexwm agent screenshots go over flexwm IPC, so this is
   purely a shell-client gap, same as DMS gap 6.)
+- **HALF-RESOLVED 2026-09-16 (PR #52).** `ext-image-copy-capture-v1` with
+  `ext-image-capture-source-v1` is advertised, so the **overview preview**
+  (an output source) has something to consume; the **launcher window
+  thumbnails** need a per-window source and still do not — filed as
+  [`screencopy-toplevel-capture.md`](./screencopy-toplevel-capture.md). See
+  [`resolved/screencopy-capture-done.md`](../resolved/screencopy-capture-done.md).
 
 ### 7. Compositor recognition — NOT a gap for Noctalia (biggest delta in the shell's favor)
 

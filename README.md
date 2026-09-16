@@ -54,6 +54,11 @@ for it (see Layer-shell clients below), `ext-workspace-v1`, so those
  Settings → Display page can read the screen's modes, position, scale and
  transform — read-only, every reconfiguration is refused (see Display
  information below),
+ `ext-image-copy-capture-v1` with `ext-image-capture-source-v1`, so `grim`,
+ a shell's workspace-overview preview or a screen-share can capture the
+ screen over the standard protocol — output capture only, `wl_shm` only, and
+ a capture taken while the session is locked sees the lock screen, never the
+ windows behind it (see Screen capture for clients below),
  `ext-session-lock-v1`, so a real screen locker can lock the session
  with the compositor itself enforcing it (see Screen locking below),
  `ext-idle-notify-v1` and `idle-inhibit-unstable-v1`, so a `swayidle`-style
@@ -819,6 +824,89 @@ Worth knowing before you write against it:
   nothing is sent.
 - **Multiple outputs will change the shape of this** — one head per output is
   what the protocol is built for — but flexwm has exactly one output today.
+
+## Screen capture for clients (`ext-image-copy-capture-v1`)
+
+flexwm implements `ext-image-copy-capture-v1` (version 1) together with
+`ext-image-capture-source-v1` (version 1), which is what `grim`, a shell's
+workspace-overview live preview, a screen recorder or a conferencing
+screen-share uses to read the screen. Two globals are advertised:
+
+| Global | What it is for |
+| ------ | -------------- |
+| `ext_image_copy_capture_manager_v1` | Creating a capture session and its frames |
+| `ext_output_image_capture_source_manager_v1` | Turning a `wl_output` into a capture source |
+
+Both are available to every client, no privilege or allow-list (flexwm has no
+security-context support to distinguish a privileged client from any other, so
+an allow-list would be theatre — see the trust note under Screen locking
+below). Screen capture is the most obviously sensitive protocol that applies
+to, so it is worth saying plainly: **any process that can reach flexwm's
+Wayland socket can read your screen.**
+
+This is separate from, and does not change, `flexwm msg screenshot` — that
+still goes over the privileged, owner-only IPC socket, is rate-limited per
+connection, and is what an agent uses. This is the standard-protocol path, for
+tools that will never speak flexwm's own IPC.
+
+`grim` works with no flags:
+
+```sh
+grim /tmp/screen.png          # the whole output
+grim -t ppm - | ...           # or to stdout
+```
+
+What to know before pointing a client at it:
+
+- **Output capture only.** A source can be made from a `wl_output`; there is
+  no `ext_foreign_toplevel_image_capture_source_manager_v1`, so a *single
+  window* cannot be captured on its own. That is the half a launcher's
+  per-window thumbnails need, and it is a separate item
+  (`docs/backlog/protocols/screencopy-toplevel-capture.md`) rather than a
+  stub here — the global is not advertised at all, so a client takes its
+  fallback path immediately instead of discovering a refusal at runtime.
+- **`wl_shm` buffers only, `Xrgb8888` or `Argb8888`.** flexwm renders on the
+  CPU with pixman and has no GPU or dma-buf path, so no `dmabuf_device` or
+  `dmabuf_format` is advertised. `Xrgb8888` is offered first: if `[appearance]
+  background_color` has an alpha below 1.0 then the framebuffer really is
+  translucent, and an `Xrgb8888` capture forces the fourth byte opaque so you
+  get a screenshot rather than a translucent image. An `Argb8888` capture
+  hands you the framebuffer's own alpha, which is what that format means.
+- **The buffer size is the framebuffer's, and it is re-advertised on a
+  resize.** If `--tty` follows a hotplug to a new mode (see `--tty` follows
+  the display above), every live session gets a fresh `buffer_size` +
+  `done`; a capture with a buffer still sized for the old mode is answered
+  `failed(buffer_constraints)`, which asks the client to re-allocate.
+- **A session's first capture is served on the next frame; later ones wait
+  for the screen to change.** The protocol allows exactly this ("the
+  compositor may wait an indefinite amount of time for the source content to
+  change"), and it is what keeps a live-preview client from costing a
+  full-screen copy every frame on a desktop that is not moving. A capture
+  parked this way is served the moment anything redraws.
+- **At most one frame may be outstanding per session**, which the protocol
+  also requires; a second `capture` before the first has been answered is
+  failed rather than queued.
+- **While the session is locked, a capture sees the lock screen** — never the
+  windows behind it, and never a half-drawn transition. This is the same
+  guarantee `flexwm msg screenshot` gives, and it comes from the same place:
+  both read back the framebuffer the compositor just drew, and a locked frame
+  never has a window in it (see Screen locking below).
+- **The `paint_cursors` option is accepted and has no effect**, which is a
+  known deviation. Under `--headless` and `--nested` nothing draws a cursor at
+  all, so a capture never contains one. Under `--tty` the cursor is part of
+  the one framebuffer a capture is read out of, so a capture always contains
+  it, flag or no flag. `flexwm msg screenshot` behaves the same way.
+- **Cursor capture sessions are refused.**
+  `create_pointer_cursor_session` answers `stopped`: capturing the cursor
+  *image* into its own buffer is a second render target nothing measured asks
+  for.
+
+`wlr-screencopy-unstable-v1` is deliberately **not** implemented alongside it,
+unlike the two window-list protocols above. The clients that motivated this
+already speak the `ext-` protocol: `grim` 1.5.0 carries
+`ext_image_copy_capture_v1` and nothing else, and stock quickshell 0.3.1 — the
+build both DMS and Noctalia run on — carries the `ext-` manager and both
+`ext-` source managers.
 
 ## Screen locking (`ext-session-lock-v1`)
 

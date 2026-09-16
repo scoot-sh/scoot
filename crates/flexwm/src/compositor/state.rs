@@ -57,6 +57,7 @@ use super::layer_shell;
 use super::nested::Host;
 use super::output_management::OutputManagement;
 use super::popup::ActivePopupGrab;
+use super::screencopy::Screencopy;
 use super::session_lock::SessionLock;
 use super::tty::Tty;
 
@@ -252,6 +253,14 @@ pub struct State {
     /// closing, retitling and focus change -- see
     /// `foreign_toplevel_management.rs`.
     pub foreign_toplevel_management: ForeignToplevelManagement,
+    /// `ext_image_copy_capture_v1` + `ext_image_capture_source_v1`: the screen
+    /// capture a shell's window thumbnails, a workspace-overview preview,
+    /// `grim` or a screen-share reads. Read on every capture session, every
+    /// frame request and every frame tick that has one parked -- see
+    /// `screencopy.rs`, which owns both the protocol objects and the parked
+    /// frames behind them. Output capture only; flexwm's own agent
+    /// screenshots go over IPC (`screenshot.rs`) and are unaffected.
+    pub screencopy: Screencopy,
     /// `ext_session_lock_manager_v1`: the compositor-enforced screen lock.
     /// Unlike the two `#[allow(dead_code)]` states below, this is read on
     /// every render, every focus refresh and every pointer hit test -- see
@@ -418,6 +427,29 @@ pub struct State {
 
     /// Something changed that the framebuffer doesn't show yet.
     pub needs_render: bool,
+    /// How many frames [`State::render`](super::State) has drawn whose damage
+    /// tracker reported at least one changed region -- i.e. how many times the
+    /// framebuffer's pixels may have changed since startup.
+    ///
+    /// **"May have changed", specifically**, and the distinction matters at
+    /// both ends. It is *not* "how many times `render()` ran": `render()`
+    /// early-returns on a clean screen, and a run that failed to bind or
+    /// failed to draw leaves the previous frame in place. It is also not "how
+    /// many times the pixels really differ": under `--headless`/`--nested` the
+    /// damage tracker is handed a buffer age of `0`, so it reports full damage
+    /// for every frame it draws whether or not anything moved. Only `--tty`
+    /// passes a real age and so only there does this skip a redundant redraw.
+    ///
+    /// Its one reader is `screencopy.rs`, which uses it for exactly the
+    /// question it answers: may the framebuffer differ from the one a capture
+    /// session was last handed? A false "yes" costs one extra copy; a false
+    /// "no" would leave a client's live preview frozen, which is why the
+    /// conservative direction is the one taken.
+    ///
+    /// Wraps rather than saturates (`wrapping_add`), which is unreachable in
+    /// practice -- 2^64 frames at 60 Hz is ~9.7 billion years -- and is a
+    /// comparison against a stored copy in any case, never an ordering.
+    pub frame_serial: u64,
     /// Whether the frame timer (see `headless::ensure_ticking`) is currently
     /// running. It drops itself when there's nothing to do rather than
     /// polling forever, so this is how callers know whether to re-arm it.
@@ -451,6 +483,7 @@ impl State {
         let ext_workspace = ExtWorkspaceState::new(&dh);
         let foreign_toplevels = ForeignToplevels::new(&dh);
         let foreign_toplevel_management = ForeignToplevelManagement::new(&dh);
+        let screencopy = Screencopy::new(&dh);
         let session_lock = SessionLock::new(&dh);
         let fractional_scale_manager_state = FractionalScaleManagerState::new::<Self>(&dh);
         let cursor_shape_manager_state = CursorShapeManagerState::new::<Self>(&dh);
@@ -527,6 +560,7 @@ impl State {
             ext_workspace,
             foreign_toplevels,
             foreign_toplevel_management,
+            screencopy,
             session_lock,
             fractional_scale_manager_state,
             cursor_shape_manager_state,
@@ -562,6 +596,7 @@ impl State {
             // never draws, timer never arms" with no test failure pointing
             // here.
             needs_render: true,
+            frame_serial: 0,
             timer_armed: false,
             last_commit: Instant::now(),
             pending_idle: Vec::new(),
