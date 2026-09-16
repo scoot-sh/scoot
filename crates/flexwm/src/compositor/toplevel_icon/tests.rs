@@ -14,6 +14,8 @@
 //! Like every other live-[`State`] test module here, these need a writable
 //! `$XDG_RUNTIME_DIR`: [`State::new`] binds a real listening socket.
 
+use std::io::Write;
+use std::os::fd::AsFd;
 use std::os::unix::net::UnixStream;
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
@@ -23,7 +25,9 @@ use std::time::{Duration, Instant};
 use flexwm_core::{Config, Event, OutputId, Rect};
 use smithay::reexports::calloop::EventLoop;
 use smithay::reexports::wayland_server::Display;
-use wayland_client::protocol::{wl_compositor, wl_registry, wl_surface};
+use wayland_client::protocol::{
+    wl_buffer, wl_compositor, wl_registry, wl_shm, wl_shm_pool, wl_surface,
+};
 use wayland_client::{Connection, Dispatch, Proxy, QueueHandle};
 use wayland_protocols::xdg::shell::client::{xdg_surface, xdg_toplevel, xdg_wm_base};
 use wayland_protocols::xdg::toplevel_icon::v1::client::{
@@ -48,6 +52,12 @@ enum Step {
     Commit,
     /// `set_icon(toplevel, None)`: take the icon away again.
     ClearIcon,
+    /// `set_name` on an icon that has already been assigned to a toplevel.
+    /// A protocol error for the client -- and, unguarded, a compositor
+    /// panic; see `dispatch.rs`.
+    RenameAssignedIcon,
+    /// `add_buffer` on an already-assigned icon: the same trap, other arm.
+    AddBufferToAssignedIcon,
 }
 
 #[derive(Default)]
@@ -55,6 +65,7 @@ struct TestClient {
     compositor: Option<wl_compositor::WlCompositor>,
     wm_base: Option<xdg_wm_base::XdgWmBase>,
     icons: Option<xdg_toplevel_icon_manager_v1::XdgToplevelIconManagerV1>,
+    shm: Option<wl_shm::WlShm>,
     /// Every `icon_size` the manager advertised at bind time.
     advertised_sizes: Vec<i32>,
 }
@@ -84,6 +95,8 @@ impl Dispatch<wl_registry::WlRegistry, ()> for TestClient {
             == xdg_toplevel_icon_manager_v1::XdgToplevelIconManagerV1::interface().name
         {
             client.icons = Some(registry.bind(name, version.min(1), qh, ()));
+        } else if interface == wl_shm::WlShm::interface().name {
+            client.shm = Some(registry.bind(name, version.min(1), qh, ()));
         }
     }
 }
@@ -137,6 +150,29 @@ wayland_client::delegate_noop!(TestClient: ignore wl_compositor::WlCompositor);
 wayland_client::delegate_noop!(TestClient: ignore wl_surface::WlSurface);
 wayland_client::delegate_noop!(TestClient: ignore xdg_toplevel::XdgToplevel);
 wayland_client::delegate_noop!(TestClient: ignore xdg_toplevel_icon_v1::XdgToplevelIconV1);
+wayland_client::delegate_noop!(TestClient: ignore wl_shm::WlShm);
+wayland_client::delegate_noop!(TestClient: ignore wl_shm_pool::WlShmPool);
+wayland_client::delegate_noop!(TestClient: ignore wl_buffer::WlBuffer);
+
+/// A square, shm-backed `wl_buffer` -- what `xdg_toplevel_icon_v1.add_buffer`
+/// requires, so that a rejected `add_buffer` is rejected for its timing and
+/// not for its contents.
+fn square_shm_buffer(
+    shm: &wl_shm::WlShm,
+    qh: &QueueHandle<TestClient>,
+    size: i32,
+) -> wl_buffer::WlBuffer {
+    let stride = size * 4;
+    let len = (stride * size) as usize;
+    let fd = rustix::fs::memfd_create("flexwm-icon-test", rustix::fs::MemfdFlags::CLOEXEC)
+        .expect("a memfd");
+    let mut file = std::fs::File::from(fd);
+    file.write_all(&vec![0u8; len]).expect("a filled pool file");
+    let pool = shm.create_pool(file.as_fd(), len as i32, qh, ());
+    let buffer = pool.create_buffer(0, size, size, stride, wl_shm::Format::Argb8888, qh, ());
+    pool.destroy();
+    buffer
+}
 
 /// Maps one toplevel, reports what the manager advertised, then runs whatever
 /// steps arrive, acknowledging each.
@@ -159,6 +195,7 @@ fn run_client(
         .icons
         .clone()
         .ok_or("no xdg_toplevel_icon_manager_v1")?;
+    let shm = client.shm.clone().ok_or("no wl_shm")?;
     // The manager's `icon_size` list arrives at bind time, followed by
     // `done`; the roundtrip above already delivered both.
     report
@@ -172,18 +209,33 @@ fn run_client(
     surface.commit();
     queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
 
+    // The most recently created icon, kept so a step can poke it after it has
+    // been assigned.
+    let mut last_icon: Option<xdg_toplevel_icon_v1::XdgToplevelIconV1> = None;
     while let Ok(step) = steps.recv() {
         match step {
             Step::AttachIcon { name } => {
                 let icon = icons.create_icon(&qh, ());
                 icon.set_name(name);
                 icons.set_icon(&toplevel, Some(&icon));
+                last_icon = Some(icon.clone());
                 // Not destroyed here: the icon object stays the toplevel's
                 // until it is replaced, and destroying it before the commit
                 // would race the attachment.
             }
             Step::Commit => surface.commit(),
             Step::ClearIcon => icons.set_icon(&toplevel, None),
+            Step::RenameAssignedIcon => {
+                let icon = last_icon.as_ref().ok_or("no icon to rename")?;
+                icon.set_name("renamed-after-assignment".to_string());
+            }
+            Step::AddBufferToAssignedIcon => {
+                let icon = last_icon.as_ref().ok_or("no icon to add a buffer to")?;
+                // A real, square, shm-backed buffer, so the only thing wrong
+                // with the request is *when* it is sent.
+                let buffer = square_shm_buffer(&shm, &qh, 16);
+                icon.add_buffer(&buffer, 1);
+            }
         }
         queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
         acks.send(()).map_err(|e| e.to_string())?;
@@ -272,6 +324,16 @@ impl Fixture {
             );
             self.pump();
         }
+    }
+
+    /// Sends a step without waiting for its acknowledgement -- for a step
+    /// that kills the client, which then never acknowledges anything.
+    fn send(&mut self, step: Step) {
+        self.steps
+            .as_ref()
+            .expect("the step channel")
+            .send(step)
+            .expect("the client thread is still running");
     }
 
     fn run(&mut self, step: Step) {
@@ -431,4 +493,54 @@ fn the_icon_reaches_the_ipc_window_list() {
         fixture.icon_over_ipc(),
         Some("org.flexwm.Probe".to_string())
     );
+}
+
+/// Reproduces the upstream trap this protocol brings with it: a client that
+/// touches an icon *after* assigning it to a toplevel.
+///
+/// The protocol says that is a client error (`immutable`), and the client
+/// being disconnected for it is correct and expected. What must not happen is
+/// the compositor going down with it -- see `dispatch.rs`'s guard. The
+/// assertion is therefore not about the client at all: it is that the
+/// compositor is still alive and still serving afterwards.
+fn survives_a_frozen_icon_request(step: Step) {
+    let mut fixture = Fixture::new();
+    fixture.run(Step::AttachIcon {
+        name: "org.flexwm.Probe".to_string(),
+    });
+    fixture.run(Step::Commit);
+    assert_eq!(fixture.icon(), Some("org.flexwm.Probe".to_string()));
+
+    // The offending request. The client is killed for it, so its own thread
+    // may fail from here on -- which is why this does not go through
+    // `Fixture::run` (that waits for an acknowledgement the dead client will
+    // never send).
+    fixture.send(step);
+    // Pump well past the point the request has been dispatched. A panic in
+    // the compositor unwinds *here*, inside `dispatch`, and fails the test.
+    for _ in 0..50 {
+        fixture.pump();
+    }
+
+    // Still serving: a fresh client can still connect and be answered, which
+    // is the property that actually matters to every *other* client in a real
+    // session.
+    let (server, client_end) = UnixStream::pair().expect("a socket pair");
+    fixture
+        .state
+        .display_handle
+        .insert_client(server, Arc::new(ClientState::default()))
+        .expect("the compositor still accepts clients");
+    drop(client_end);
+    fixture.pump();
+}
+
+#[test]
+fn renaming_an_assigned_icon_does_not_take_the_compositor_down() {
+    survives_a_frozen_icon_request(Step::RenameAssignedIcon);
+}
+
+#[test]
+fn adding_a_buffer_to_an_assigned_icon_does_not_take_the_compositor_down() {
+    survives_a_frozen_icon_request(Step::AddBufferToAssignedIcon);
 }

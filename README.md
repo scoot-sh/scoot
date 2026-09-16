@@ -52,9 +52,10 @@ for it (see Layer-shell clients below), `ext-workspace-v1`, so those
  clipboard/primary-selection globals and `zwlr_gamma_control_manager_v1`, so
 clipboard managers, middle-click paste and night-light tools work (see
 Clipboard managers and Night light below),
-`wp-cursor-shape-v1`, so a client can name the cursor it wants and get one of
-ten shapes the compositor draws itself rather than uploading its own (see
-Cursor shapes below), `xdg-activation-v1`, so a launcher can hand focus to
+`wp-cursor-shape-v1`, so a client can name the cursor it wants and get it
+drawn from the machine's own installed xcursor theme -- or, where none is
+installed, from ten shapes the compositor draws itself (see Cursor shapes
+below), `xdg-activation-v1`, so a launcher can hand focus to
 the app it started (see Focus handoff between clients below),
 `xdg-toplevel-icon-v1`, so a bar or an agent can read a window's icon name
 off `flexwm msg windows` (see Window icons below), `text-input-v3` and
@@ -638,15 +639,28 @@ loading an xcursor theme and uploading a surface of its own. Modern GTK4/Qt6
 toolkits and `foot` prefer this when it exists; without it `foot` logs
 "compositor does not implement server-side cursors".
 
-Because flexwm ships no cursor theme (niri's assets are GPL and Adwaita's
-aren't MIT-clean, so there is nothing MIT-clean to load — see License below),
-every named shape is **drawn procedurally by the compositor**, in
-`cursor/shapes.rs`. Ten shapes are drawn, and the mapping collapses the names
-a user cannot tell apart at 16 pixels:
+A named shape is answered from **the cursor theme already installed on the
+machine**: flexwm resolves `[appearance] cursor_theme`, else `$XCURSOR_THEME`,
+else `default`, and draws that theme's own artwork — the same pixels the
+client would have loaded for itself. That is what makes the protocol a win
+rather than a downgrade: without it, advertising cursor-shape would take a
+correctly themed I-beam away from a client that had been uploading one and
+replace it with line art.
+
+flexwm still ships no theme (niri's assets are GPL and Adwaita's aren't
+MIT-clean — see License below), and it does not need to: reading the user's
+own installed theme carries no such obligation, and is what sway, niri and
+Hyprland do. Parsing is the MIT-licensed `xcursor` crate; nothing is
+vendored.
+
+**When no theme is installed** — a linuxserver webtop or any minimal
+container, which is a first-class flexwm target — named shapes fall back to
+ten shapes flexwm **draws procedurally itself**, in `cursor/shapes.rs`. The
+mapping collapses the names a user cannot tell apart at 16 pixels:
 
 | Drawn as | Named shapes it answers |
 | --- | --- |
-| arrow | `default`, and every name below has no entry — `help`, `wait`, `progress`, `pointer`, `zoom-in`, … |
+| arrow | `default`, plus every name with no row of its own — `help`, `wait`, `progress`, `pointer`, `zoom-in`, … |
 | I-beam | `text` |
 | sideways I-beam | `vertical-text` |
 | crosshair | `crosshair`, `cell` |
@@ -656,12 +670,21 @@ a user cannot tell apart at 16 pixels:
 | four-way arrow | `move`, `all-scroll`, `all-resize`, `grab`, `grabbing` |
 | circle with a slash | `not-allowed`, `no-drop` |
 
-They use the same `[appearance]` `cursor_size`/`cursor_color` the built-in
-arrow already did, they are built once at startup (never per frame and never
-per request), and the arrow stays byte-identical to what it has always been.
+The drawn shapes use the same `[appearance]` `cursor_size`/`cursor_color` the
+built-in arrow already did, are built once at startup (never per frame and
+never per request), and the arrow stays byte-identical to what it has always
+been. Theme images are loaded when a client first asks for that shape — an
+event, not a frame — and cached from then on, including a negative cache so a
+theme missing `zoom-in` is not re-searched on every hover.
+
 A client that uploads its own cursor *surface* still gets its own pixels
-drawn, exactly as before — the two paths are unchanged relative to each
-other. Cursors are only drawn under `--tty`; `--headless` has no display and
+drawn, exactly as before. flexwm also exports `XCURSOR_THEME`/`XCURSOR_SIZE`
+to everything it spawns, so a client that loads a theme itself (GTK3, and
+anything predating this protocol) picks the same one the compositor draws —
+which is the "consistent cursor across clients" half the protocol cannot
+reach on its own.
+
+Cursors are only drawn under `--tty`; `--headless` has no display and
 `--nested` shows the host compositor's own cursor.
 
 ## Focus handoff between clients (`xdg-activation-v1`)
@@ -857,19 +880,19 @@ the ring, the background, and the built-in pointer cursor — nothing else.
 | `background_color` | `"#rrggbb"` / `"#rrggbbaa"` | `#141419` (near-black) | Cleared behind all window content — there's no separate background render element, this is the frame clear color. |
 | `cursor_size` | integer (pixels) | `16` | Both dimensions of the built-in pointer cursor (see below). Clamped into `4..=256`: under `4` the shape is left with at most one interior pixel (none at all below 3), and a pointer that small is indistinguishable from a dead pixel; over `256` it covers a quarter of a 1080p display's height and the bitmap it allocates stops being small. A value outside `i32` altogether (or a float) isn't a valid value for this field at all, so it's a whole-file parse error (see Failure semantics above), not a clamp. |
 | `cursor_color` | `"#rrggbb"` / `"#rrggbbaa"` | `#ffffff` (white) | Fill color of the built-in pointer cursor. Its 1px outline is always black, at this color's own alpha, and isn't separately configurable — the outline exists to keep the shape's edges visible against similarly-colored content. That doesn't help against a *dark* `cursor_color`: with black (or any near-black) fill, the outline blends into it and the pointer can be hard to spot against dark window content. An alpha of `00` makes the built-in cursor invisible; that's your call, not a clamped value. |
+| `cursor_theme` | string | unset | Which installed xcursor theme named cursor shapes are drawn from (see Cursor shapes above). Unset means follow `$XCURSOR_THEME`, then `default` — i.e. whatever the rest of the desktop uses; an empty string means the same as unset. This only *names* a theme, it never makes flexwm ship one, and a name that matches nothing installed is not an error: named shapes then come from flexwm's own drawn set, exactly as on a machine with no themes at all. |
 | `prefer_no_csd` | boolean | `true` | Whether to answer a client's `zxdg_toplevel_decoration_v1` request with `ServerSide`, so a well-behaved client stops drawing its own titlebar (which would otherwise double up with the ring). |
 
-The two `cursor_*` fields apply to flexwm's own procedurally-drawn fallback
-shape — a filled triangle whose point is the hotspot, drawn only under
-`--tty` (`--headless` has no display and `--nested` already shows the host's
-cursor). They do **not** affect a client that supplies its own cursor image
-(a text I-beam, a resize arrow, a spinner): those pixels come from the client
-over the wire, and flexwm draws them at the size and hotspot the client
-chose. There is deliberately no `cursor_theme` option: honoring a named
-xcursor shape means loading a real theme asset, and flexwm has no MIT-clean
-one to load (see `docs/backlog/rendering/cursor-theme-name.md`). Both values
-are read once at
-startup, like every other setting here — there's no config reload.
+`cursor_size` and `cursor_color` apply to flexwm's own drawn shapes — the
+fallback used when the machine has no cursor theme installed, drawn only
+under `--tty` (`--headless` has no display and `--nested` already shows the
+host's cursor). `cursor_size` also picks which size is taken out of a real
+theme's file, and `cursor_color` has no effect there: a theme's artwork
+brings its own colors. None of the three affects a client that supplies its
+own cursor *image* (a spinner, say): those pixels come from the client over
+the wire, and flexwm draws them at the size and hotspot the client chose.
+All three are read once at startup, like every other setting here — there's
+no config reload.
 
 The first three hex values above are the actual rendered colors (pixel-sampled
 from a real screenshot, and pasting any of them back into the matching
@@ -999,6 +1022,9 @@ focus_ring_inactive_color = "#333333"
 background_color = "#101014"
 cursor_size = 24
 cursor_color = "#ffcc66"
+# Unset follows $XCURSOR_THEME, then "default" -- i.e. the rest of the
+# desktop. Name one here only to override that.
+# cursor_theme = "Adwaita"
 prefer_no_csd = true
 
 [output]

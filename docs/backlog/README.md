@@ -21,6 +21,10 @@ actionable.
 
 - [**`ext-idle-notify-v1` + `idle-inhibit-unstable-v1`**](./resolved/ext-idle-notify-resolved.md)
   — RESOLVED 2026-09-15: swayidle-style auto-lock trigger, field-proven live.
+- [**Custom/client cursor support**](./resolved/cursor-theme-name-done.md)
+  — RESOLVED 2026-09-15: real xcursor theme loading, which this entry had
+  long (and wrongly) recorded as blocked on a license-clean asset. Shipping
+  one is blocked; reading the user's own never was.
 - [**The four protocols `foot` warned about**](./resolved/foot-protocol-warnings-done.md)
   — RESOLVED 2026-09-15 (issue #40): `wp-cursor-shape-v1` (with ten
   procedurally-drawn shapes, so naming one gets you that shape),
@@ -33,6 +37,7 @@ actionable.
 ### Protocols
 - [Foreign-toplevel management](./protocols/foreign-toplevel-management.md) — window enumeration for taskbars/switchers
 - [`xdg-toplevel-icon-v1` pixel-buffer icons are not exposed](./protocols/toplevel-icon-buffers.md) — only the icon name reaches IPC
+- [An IME popup over a lock screen is tracked but never drawn](./protocols/ime-popup-over-lock-screen.md)
 - [`spawn` hands its child no `XDG_ACTIVATION_TOKEN`](./protocols/activation-token-for-spawned-children.md)
 - [Popup input](./protocols/xdg-popup-input.md) — popups map/draw (initial-configure fix, resolved), but keyboard focus/grabs and layer-parented popups still missing
 - [Layer surface with no buffer still holds its exclusive zone](./protocols/layer-surface-bufferless-exclusive-zone.md)
@@ -68,7 +73,6 @@ actionable.
 - [Per-frame `Vec` alloc in the cursor fallback path](./rendering/cursor-element-per-frame-alloc.md)
 - [Cursor frames still tick while VT-paused](./rendering/cursor-frame-callback-when-paused.md)
 - [`wl_surface.offset` doesn't move the cursor hotspot](./rendering/cursor-surface-offset-hotspot.md)
-- [Cursor theme *name* support](./rendering/cursor-theme-name.md) — blocked on a license-clean asset
 
 ### Security
 - [Unbounded total shm reservation per client](./security/shm-total-per-client-unbounded.md)

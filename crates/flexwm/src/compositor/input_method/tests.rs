@@ -26,7 +26,7 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use flexwm_core::{Config, Event, OutputId, Rect, WindowId};
+use flexwm_core::{Config, Rect, WindowId};
 use smithay::reexports::calloop::EventLoop;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface as ServerSurface;
 use smithay::reexports::wayland_server::{Client, Display};
@@ -285,10 +285,14 @@ impl Fixture {
             1.0,
         )
         .expect("a compositor state with a wayland socket");
-        state.world.handle_event(Event::OutputAdded {
-            id: OutputId(1),
-            area: OUTPUT,
-        });
+        // The real headless backend rather than a bare `OutputAdded` into the
+        // core: a layer surface needs an actual `Output` in `State::output`
+        // and a layer map to be mapped into (`layer_shell.rs` returns early
+        // without one), and `parent_geometry`'s layer branch reads the same
+        // output. `layer_shell/tests.rs` stands its compositor up the same
+        // way, for the same reason.
+        crate::compositor::headless::init(&mut state, OUTPUT.w, OUTPUT.h)
+            .expect("a headless backend");
 
         let (server, client_end) = UnixStream::pair().expect("a socket pair");
         let client: Client = state
@@ -436,21 +440,46 @@ fn an_input_method_popup_is_tracked_against_the_focused_window() {
 }
 
 #[test]
-fn a_popup_asks_for_the_frame_that_shows_it() {
-    // Nothing commits on the popup's own path -- it is created, or
-    // re-parented, without the client touching a buffer -- so without the
-    // explicit request in `new_popup` the candidate window would sit
-    // invisible until some unrelated event happened to mark the screen dirty.
+fn every_popup_transition_asks_for_the_frame_that_shows_it() {
+    // Nothing commits on the popup's own paths -- it is created, moved or
+    // re-parented without the client touching a buffer -- so without an
+    // explicit `request_render` in each handler the candidate window would
+    // sit invisible (or keep being drawn after dismissal) until some
+    // unrelated event happened to mark the screen dirty.
+    //
+    // The three handlers are called *directly* rather than driven through
+    // the client, deliberately: `needs_render` is cleared again by the very
+    // next frame the compositor draws, so observing it after a client round
+    // trip (which pumps the loop, and therefore renders) is a race. What
+    // the client *can* observe -- that the popup is tracked and untracked --
+    // is covered by the round-trip tests above.
     let mut fixture = Fixture::new();
     fixture.run(Step::EnableTextInput);
-    // Clear whatever the setup traffic left dirty, so what is observed below
-    // is this step's own doing.
-    fixture.state.needs_render = false;
-    fixture.run(Step::CreatePopup);
-    assert!(
-        fixture.state.needs_render,
-        "creating an input-method popup did not ask for a frame"
-    );
+    let popup_id = fixture.run(Step::CreatePopup).expect("a popup surface id");
+    let surface = fixture.server_surface(popup_id);
+    let Some(PopupKind::InputMethod(popup)) = fixture.state.popups.find_popup(&surface) else {
+        panic!("the input-method popup is not tracked, so there is nothing to transition");
+    };
+
+    for (what, call) in [
+        (
+            "new_popup",
+            Box::new(|state: &mut State, popup: PopupSurface| state.new_popup(popup))
+                as Box<dyn Fn(&mut State, PopupSurface)>,
+        ),
+        (
+            "popup_repositioned",
+            Box::new(|state: &mut State, popup: PopupSurface| state.popup_repositioned(popup)),
+        ),
+        (
+            "dismiss_popup",
+            Box::new(|state: &mut State, popup: PopupSurface| state.dismiss_popup(popup)),
+        ),
+    ] {
+        fixture.state.needs_render = false;
+        call(&mut fixture.state, popup.clone());
+        assert!(fixture.state.needs_render, "{what} did not ask for a frame");
+    }
 }
 
 #[test]
@@ -463,36 +492,37 @@ fn disabling_the_text_field_dismisses_the_popup() {
     let popup = fixture.run(Step::CreatePopup).expect("a popup surface id");
     assert!(fixture.popup_is_on_the_window(popup));
 
-    fixture.state.needs_render = false;
     fixture.run(Step::DisableTextInput);
     assert!(
         !fixture.popup_is_on_the_window(popup),
         "the popup is still tracked against the window after the field was disabled"
     );
-    assert!(
-        fixture.state.needs_render,
-        "dismissing an input-method popup did not ask for a frame"
-    );
 }
 
 #[test]
-fn moving_the_text_cursor_asks_for_a_frame() {
-    // `popup_repositioned`: Smithay has already written the new rectangle
-    // into the popup's own state, and the render path reads it per frame --
-    // so the only thing missing is a frame to read it in.
+fn moving_the_text_cursor_moves_the_popup_with_it() {
+    // `set_cursor_rectangle` is how the application says where its caret is,
+    // and it is what the candidate window is placed against. Asserted on the
+    // popup's own rectangle rather than on a rendered frame, because that is
+    // the value the render path reads per frame.
     let mut fixture = Fixture::new();
     fixture.run(Step::EnableTextInput);
-    fixture.run(Step::CreatePopup);
-    fixture.state.needs_render = false;
+    let popup_id = fixture.run(Step::CreatePopup).expect("a popup surface id");
     fixture.run(Step::SetCursorRectangle {
         x: 40,
         y: 60,
         w: 2,
         h: 18,
     });
-    assert!(
-        fixture.state.needs_render,
-        "moving the text cursor did not ask for a frame"
+
+    let surface = fixture.server_surface(popup_id);
+    let Some(PopupKind::InputMethod(popup)) = fixture.state.popups.find_popup(&surface) else {
+        panic!("the input-method popup is not tracked");
+    };
+    assert_eq!(
+        popup.text_input_rectangle(),
+        Rectangle::new((40, 60).into(), (2, 18).into()),
+        "the caret rectangle never reached the popup"
     );
 }
 
@@ -528,4 +558,201 @@ fn an_unknown_surface_has_no_parent_geometry() {
         fixture.state.parent_geometry(&surface),
         Rectangle::default()
     );
+}
+
+// -------------------------------------------------------------------------
+// `parent_geometry` for a layer surface
+// -------------------------------------------------------------------------
+
+/// A launcher-shaped layer surface: a centred panel, i.e. one whose position
+/// on the output is *not* the origin. That is the whole point of the test
+/// below -- the bug it guards is invisible at (0, 0).
+const PANEL: (i32, i32) = (400, 200);
+
+/// Maps one centred layer surface with a real committed buffer and reports
+/// its `wl_surface`'s protocol id.
+fn run_layer_client(stream: UnixStream, ready: Sender<u32>) -> Result<Connection, String> {
+    use std::io::Write;
+    use std::os::fd::AsFd;
+    use wayland_client::protocol::{wl_buffer, wl_shm, wl_shm_pool};
+    use wayland_protocols_wlr::layer_shell::v1::client::{
+        zwlr_layer_shell_v1, zwlr_layer_surface_v1,
+    };
+
+    #[derive(Default)]
+    struct LayerClient {
+        compositor: Option<wl_compositor::WlCompositor>,
+        shell: Option<zwlr_layer_shell_v1::ZwlrLayerShellV1>,
+        shm: Option<wl_shm::WlShm>,
+    }
+    impl Dispatch<wl_registry::WlRegistry, ()> for LayerClient {
+        fn event(
+            client: &mut Self,
+            registry: &wl_registry::WlRegistry,
+            event: wl_registry::Event,
+            _: &(),
+            _: &Connection,
+            qh: &QueueHandle<Self>,
+        ) {
+            let wl_registry::Event::Global {
+                name,
+                interface,
+                version,
+            } = event
+            else {
+                return;
+            };
+            if interface == wl_compositor::WlCompositor::interface().name {
+                client.compositor = Some(registry.bind(name, version.min(1), qh, ()));
+            } else if interface == zwlr_layer_shell_v1::ZwlrLayerShellV1::interface().name {
+                client.shell = Some(registry.bind(name, version.min(1), qh, ()));
+            } else if interface == wl_shm::WlShm::interface().name {
+                client.shm = Some(registry.bind(name, version.min(1), qh, ()));
+            }
+        }
+    }
+    impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, ()> for LayerClient {
+        fn event(
+            _: &mut Self,
+            layer: &zwlr_layer_surface_v1::ZwlrLayerSurfaceV1,
+            event: zwlr_layer_surface_v1::Event,
+            _: &(),
+            _: &Connection,
+            _: &QueueHandle<Self>,
+        ) {
+            if let zwlr_layer_surface_v1::Event::Configure { serial, .. } = event {
+                layer.ack_configure(serial);
+            }
+        }
+    }
+    wayland_client::delegate_noop!(LayerClient: ignore wl_compositor::WlCompositor);
+    wayland_client::delegate_noop!(LayerClient: ignore wl_surface::WlSurface);
+    wayland_client::delegate_noop!(LayerClient: ignore wl_shm::WlShm);
+    wayland_client::delegate_noop!(LayerClient: ignore wl_shm_pool::WlShmPool);
+    wayland_client::delegate_noop!(LayerClient: ignore wl_buffer::WlBuffer);
+    wayland_client::delegate_noop!(LayerClient: ignore zwlr_layer_shell_v1::ZwlrLayerShellV1);
+
+    let conn = Connection::from_socket(stream).map_err(|e| e.to_string())?;
+    let mut queue = conn.new_event_queue();
+    let qh = queue.handle();
+    let mut client = LayerClient::default();
+    conn.display().get_registry(&qh, ());
+    queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+
+    let compositor = client.compositor.clone().ok_or("no wl_compositor")?;
+    let shell = client.shell.clone().ok_or("no zwlr_layer_shell_v1")?;
+    let shm = client.shm.clone().ok_or("no wl_shm")?;
+
+    let surface = compositor.create_surface(&qh, ());
+    let layer = shell.get_layer_surface(
+        &surface,
+        None,
+        zwlr_layer_shell_v1::Layer::Overlay,
+        "ime-parent-probe".to_string(),
+        &qh,
+        (),
+    );
+    // No anchors: `LayerMap::arrange` centres it, which is what puts it at a
+    // non-zero position on the output.
+    layer.set_size(PANEL.0 as u32, PANEL.1 as u32);
+    surface.commit();
+    queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+
+    // A real buffer, because `LayerSurface::geometry` reads the committed
+    // surface view -- without one it is the default rectangle and the
+    // assertion below could not tell the two candidate answers apart.
+    let (w, h) = PANEL;
+    let stride = w * 4;
+    let len = (stride * h) as usize;
+    let fd = rustix::fs::memfd_create("flexwm-ime-layer", rustix::fs::MemfdFlags::CLOEXEC)
+        .expect("a memfd");
+    let mut file = std::fs::File::from(fd);
+    file.write_all(&vec![0xffu8; len]).expect("a pool file");
+    let pool = shm.create_pool(file.as_fd(), len as i32, &qh, ());
+    let buffer = pool.create_buffer(0, w, h, stride, wl_shm::Format::Argb8888, &qh, ());
+    pool.destroy();
+    surface.attach(Some(&buffer), 0, 0);
+    surface.damage(0, 0, w, h);
+    surface.commit();
+    queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+
+    ready
+        .send(surface.id().protocol_id())
+        .map_err(|e| e.to_string())?;
+    Ok(conn)
+}
+
+#[test]
+fn a_layer_surfaces_parent_geometry_is_surface_local_not_its_place_on_the_output() {
+    // The bug this pins: `LayerMap::layer_geometry` is the surface's rectangle
+    // *plus its position on the output*, and the pinned rev's layer render
+    // path (`space/wayland/layer.rs`) subtracts what `parent_geometry`
+    // returns without adding the position back -- it has already placed the
+    // surface there. Returning the output-positioned rectangle therefore
+    // cancels the placement out and drops the IME's candidate window at the
+    // raw surface-local caret, interpreted as output coordinates: for this
+    // centred panel, ~(600, 400) away from the field it belongs to.
+    //
+    // Asserted against *both* candidate answers rather than just the right
+    // one, so the test cannot pass by coincidence on an output where the two
+    // happen to agree.
+    let mut fixture = Fixture::new();
+
+    let (server, client_end) = UnixStream::pair().expect("a socket pair");
+    let client: Client = fixture
+        .state
+        .display_handle
+        .insert_client(server, Arc::new(ClientState::default()))
+        .expect("an inserted layer client");
+    let (ready_tx, ready_rx) = channel();
+    let layer_thread = thread::spawn(move || {
+        let result = run_layer_client(client_end, ready_tx);
+        if let Err(error) = &result {
+            eprintln!("LAYER CLIENT FAILED: {error}");
+        }
+        result
+    });
+    let surface_id = fixture.wait_for(&ready_rx, "the layer client's surface id");
+
+    let surface: ServerSurface = client
+        .object_from_protocol_id(&fixture.state.display_handle, surface_id)
+        .expect("the layer client's surface");
+
+    let output = fixture.state.output.clone().expect("an output");
+    let (positioned, local) = {
+        let map = smithay::desktop::layer_map_for_output(&output);
+        let layer = map
+            .layer_for_surface(&surface, smithay::desktop::WindowSurfaceType::TOPLEVEL)
+            .expect("the layer surface is mapped")
+            .clone();
+        (
+            map.layer_geometry(&layer).expect("a geometry"),
+            layer.geometry(),
+        )
+    };
+
+    // The premise: this really is a surface whose position is not the origin,
+    // so the two answers really do differ here.
+    assert_ne!(
+        positioned.loc, local.loc,
+        "the layer surface sits at the origin, so this test cannot distinguish \
+         the two answers -- it needs a centred panel"
+    );
+
+    let answer = fixture.state.parent_geometry(&surface);
+    assert_eq!(
+        answer, local,
+        "parent_geometry must return the surface-local geometry"
+    );
+    assert_ne!(
+        answer, positioned,
+        "parent_geometry returned the output-positioned rectangle; the IME \
+         popup would be placed {:?} away from its text field",
+        positioned.loc
+    );
+
+    // Joined only now: the thread returns the live `Connection`, and dropping
+    // that disconnects the client and unmaps the layer surface the
+    // assertions above are about.
+    drop(layer_thread.join().expect("the layer client thread"));
 }

@@ -15,7 +15,9 @@ use smithay::input::{Seat, SeatState};
 use smithay::output::Output;
 use smithay::reexports::calloop::generic::Generic;
 use smithay::reexports::calloop::{EventLoop, Interest, LoopHandle, LoopSignal, Mode, PostAction};
-use smithay::reexports::wayland_server::backend::{ClientData, ClientId, DisconnectReason};
+use smithay::reexports::wayland_server::backend::{
+    ClientData, ClientId, DisconnectReason, ObjectId,
+};
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::{BindError, Display, DisplayHandle};
 use smithay::utils::{Logical, Point};
@@ -129,6 +131,16 @@ pub struct State {
     /// description at all still fails loudly with `invalid_size`.
     /// Removed on `layer_destroyed`, so this never outlives the surface.
     pub mapped_layers: HashSet<WlSurface>,
+
+    /// `xdg_toplevel_icon_v1` objects that have been handed to a toplevel and
+    /// are therefore immutable from now on.
+    ///
+    /// Held to keep a client from panicking the compositor: see
+    /// `dispatch.rs`'s fourth guard and `toplevel_icon.rs`'s three methods
+    /// that own this set. Written only by those, and bounded by how many icon
+    /// objects a client has alive (entries are dropped on the object's
+    /// destruction, from `dispatch.rs`'s `destroyed`).
+    pub frozen_icons: HashSet<ObjectId>,
 
     pub space: Space<Window>,
     pub popups: PopupManager,
@@ -402,7 +414,11 @@ impl State {
         // `appearance` before `cursor`'s own field initializer could read it.
         // The fallback bitmap is built exactly once, from the config this
         // process started with -- see `Cursor::new`.
-        let cursor = Cursor::new(appearance.cursor_size, appearance.cursor_color);
+        let cursor = Cursor::new(
+            appearance.cursor_size,
+            appearance.cursor_color,
+            appearance.cursor_theme.as_deref(),
+        );
 
         Ok(Self {
             start_time: Instant::now(),
@@ -420,6 +436,7 @@ impl State {
             keyboard_on_layer: false,
             layers_awaiting_neutralize: Vec::new(),
             mapped_layers: HashSet::new(),
+            frozen_icons: HashSet::new(),
             space: Space::default(),
             popups: PopupManager::default(),
             output: None,

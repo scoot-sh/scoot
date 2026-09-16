@@ -20,12 +20,29 @@ compositor does not offer~~ — DONE, all four implemented together (issue #40).
   into `SeatHandler::cursor_image` as a `CursorImageStatus::Named`, the same
   path `wl_pointer.set_cursor` with no surface already took.
 
-  The substance is on flexwm's side: `cursor/shapes.rs` **draws ten shapes
-  procedurally** so that naming a shape actually gets you that shape. Without
-  it, advertising the protocol would have been a *regression* in a real
-  session — a client that had been uploading a proper I-beam from its own
-  xcursor theme would switch to cursor-shape and get one blob triangle for
-  every name. Each shape is stamped into a coverage mask by a small
+  The substance is on flexwm's side, and it took two goes. Advertising the
+  protocol without answering it well is a *regression*: a client that had
+  been uploading a proper I-beam from its own xcursor theme switches to
+  cursor-shape and gets whatever the compositor draws. The first version
+  answered with ten procedurally-drawn shapes (`cursor/shapes.rs`), which is
+  far better than one blob triangle but still line art where the client used
+  to show real artwork. **The user caught this from the other end** — "when
+  we mouse over gtk it shows a real cursor" — which also exposed a framing
+  error this project had been carrying:
+  `docs/backlog/resolved/cursor-theme-name-done.md` (then under
+  `rendering/`) recorded per-shape cursors as
+  blocked on a license-clean asset, conflating *shipping* a theme (genuinely
+  blocked) with *reading the one already installed on the user's machine*
+  (never blocked, and what sway/niri/anvil do). So `cursor/theme.rs` now
+  loads the machine's own theme through the MIT-licensed `xcursor` crate and
+  draws its artwork, with the ten drawn shapes as the fallback for a machine
+  that has none — a webtop or minimal container, which is a first-class
+  flexwm target. `[appearance] cursor_theme` names one explicitly;
+  `XCURSOR_THEME`/`XCURSOR_SIZE` are exported to children so clients that
+  still load a theme themselves match.
+
+  The drawn fallback set is not a throwaway: each shape is stamped into a
+  coverage mask by a small
   rasterizer (`stroke_line`/`fill_triangle`/`stroke_circle`) and inked with
   an 8-way dilated outline; the arrow keeps `cursor.rs`'s own byte-identical
   generator, because its outline is drawn *inside* a solid body while every
@@ -61,17 +78,84 @@ compositor does not offer~~ — DONE, all four implemented together (issue #40).
   `parent_geometry` answers for a layer surface as well as a window, because
   keyboard focus in flexwm can be on a launcher's search field.
 
+## What independent review caught
+
+Two blocking findings, both confirmed by reproducing them rather than taken
+on report, and both fixed here.
+
+1. **The IME popup was placed wrongly whenever its parent was a layer
+   surface** — the exact case `input_method.rs`'s own doc, the README and
+   this record all singled out as the reason `parent_geometry` answers for
+   two kinds of surface. `LayerMap::layer_geometry` is the surface's
+   rectangle *plus its position on the output*, but the pinned rev's layer
+   render path (`space/wayland/layer.rs`) subtracts what `parent_geometry`
+   returns without adding the position back — `headless.rs::layer_elements`
+   has already placed the surface there. The window path
+   (`space/wayland/window.rs`) *does* add it back, which is why the same
+   value is right for a window and wrong for a layer surface. A launcher
+   anchored centre on a 1600x1000 output would have put its candidate window
+   in the top-left corner of the screen, ~600px from the search field —
+   invisible only for a surface at the origin, i.e. a top-left bar. Fixed by
+   returning `LayerSurface::geometry` (surface-local). Pinned by
+   `a_layer_surfaces_parent_geometry_is_surface_local_not_its_place_on_the_output`,
+   which asserts against *both* candidate answers and was checked to fail
+   against the old code.
+
+2. **A client-triggerable compositor panic, newly reachable because this work
+   advertises `xdg_toplevel_icon_manager_v1`.** Reproduced live:
+   `create_icon` → `set_name` → `set_icon` → `set_name` aborts the process
+   with `assertion failed: !self.is_immutable()`. Same shape as the
+   `wl_shm_pool.resize(0)` bug `dispatch.rs` already guards — the pinned rev
+   posts the `immutable` protocol error and then *falls through* into
+   `set_icon_name`, whose `debug_assert!` fires; `add_buffer` is a second
+   trigger. `debug_assert!` only, so release builds are safe — but every
+   build this project develops, tests and smoke-tests with is a debug build,
+   and a buggy toolkit reaches it as easily as a malicious client. Fixed as a
+   fourth guard in `dispatch.rs`, which has to track the assignment itself
+   (`State::frozen_icons`) because upstream's `constructed` flag is private
+   with no accessor. Both arms covered by tests that assert the *compositor*
+   survives, which is the property that matters to every other client.
+
+Non-blocking findings were acted on too: the lock-screen limitation the review
+spotted is now filed
+(`docs/backlog/protocols/ime-popup-over-lock-screen.md`) and documented
+honestly in `input_method.rs` rather than described as "placed at the
+origin", and a misleading README table row was corrected. One was
+deliberately not acted on: the review asked for a test pinning "activation is
+refused while the session is locked" directly rather than transitively
+through `State::act`'s gate. Locking a session in a test needs a real
+`ext-session-lock-v1` client, which `session_lock/tests.rs` has and does not
+export; duplicating ~120 lines of it here was judged out of proportion to a
+claim that holds by construction (activation calls `act`, whose gate is
+covered where it lives). Recorded rather than silently skipped.
+
 ## Evidence
 
 Measured against this branch's tree, in the session container (Ubuntu 24.04,
 `foot` 1.16.2, a debug build), not narrated:
 
-- `cargo test --workspace`: 465 + 68 + 26 pass, 1 ignored (`shape_art`, which
+- `cargo test --workspace`: 477 + 68 + 26 pass, 1 ignored (`shape_art`, which
   prints the shapes as ASCII art for a human and asserts nothing).
   `cargo clippy -p flexwm --all-targets -- -D warnings` and
   `cargo fmt --check -p flexwm` are clean.
 - `scripts/smoke-test.sh` (`--headless`, `FLEXWM=target/debug/flexwm`): exit
   0, zero `BUG` lines, including the decoration pixel checks.
+- Cursor theme, end to end: with `adwaita-icon-theme` installed the
+  compositor logs `loaded a cursor theme theme=default size=16`, and
+  rendering every named shape through the real `Cursor::element` +
+  `PixmanRenderer` path produces the theme's own artwork — including a real
+  hand for `pointer` and a real busy cursor for `wait`, neither of which the
+  drawn set has. Pointed at a theme name that does not exist, the same code
+  falls back to the drawn shapes. Both rendered to PNG and compared by eye.
+- What real clients actually do with the protocol, measured with
+  `WAYLAND_DEBUG=1` against a live headless flexwm rather than assumed:
+  **GTK4 4.14.5 binds `wp_cursor_shape_manager_v1` but never calls
+  `get_pointer` on it** — it still uploads its own 32x32 cursor surface
+  (`wl_pointer@17.set_cursor(8, wl_surface@21, 0, 0)`), so for that version
+  the client path is unchanged either way. `foot` is the client that warns
+  about the protocol's absence and therefore the one that switches. Recorded
+  because it bounds how much the theme work changes *today*: it is insurance
+  against the regression, not a visible change for every client.
 - Before/after on the *actual* warnings, same `foot`, same probe (start
   headless, `msg action spawn foot`, grep the log):
 
@@ -122,7 +206,17 @@ allocation on the render path, stable buffer `Id`s for the damage tracker).
 Building them lazily would trade that for a first-use allocation while the
 pointer is moving, which is the worse moment.
 
-Not covered here, and unchanged by this work: real `--tty` hardware. Nothing
+**Not covered, and stated plainly rather than implied: neither `--tty` nor
+`--nested` was ever run for this change.** The session container has no DRM
+device, no `/lib/modules` (so no `vkms` to load), no `/sys/class/drm` and no
+host compositor, so `--tty` is unreachable from it and `--nested` has nothing
+to nest in. That matters most for the cursor, which is the one thing *only*
+`--tty` draws: these shapes and theme images have been rendered through the
+real `PixmanRenderer` and asserted pixel by pixel, but have never been on a
+physical display. A `--tty` bug-bash on the dev VM is the outstanding
+verification for this work.
+
+Otherwise unchanged by this work: real `--tty` hardware. Nothing
 in the four protocols is backend-specific except *drawing* the cursor, which
 only `--tty` does — the shapes themselves are asserted pixel-by-pixel in
 `cursor/shapes/tests.rs` and rendered end-to-end through a real
@@ -141,7 +235,15 @@ scans out.
   mint an external token for the child, so a compositor-spawned app cannot
   activate itself the way a launcher-spawned one can. `create_external_token`
   is the upstream hook for it.
-- **Cursor shapes beyond the ten.** `help`, `wait`, `progress`, `pointer`,
+- **HiDPI cursor sizing.** Theme images are picked at the nominal
+  `cursor_size` and drawn at buffer scale 1, so a scaled output gets a cursor
+  at its logical size rather than the theme's larger variant. Pre-existing
+  (the drawn shapes have always worked this way), but now *fixable*, since
+  there is a theme with several sizes to pick from.
+- **An IME popup over a lock screen is tracked but never drawn**
+  (`docs/backlog/protocols/ime-popup-over-lock-screen.md`), because the
+  locked render path replaces the element list wholesale by design.
+- **Cursor shapes beyond the ten**, in the no-theme fallback. `help`, `wait`, `progress`, `pointer`,
   `zoom-in`/`zoom-out`, `alias`, `copy` and `context-menu` all draw the
   arrow, deliberately: a hand or an hourglass is not distinguishable as line
   art at the default 16px, and drawing a near-duplicate nobody can read is

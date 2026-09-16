@@ -37,6 +37,9 @@
 //! see `docs/backlog/protocols/`.
 
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::XdgToplevel;
+use smithay::reexports::wayland_protocols::xdg::toplevel_icon::v1::server::xdg_toplevel_icon_v1;
+use smithay::reexports::wayland_server::Resource;
+use smithay::reexports::wayland_server::backend::ObjectId;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::wayland::compositor::with_states;
 use smithay::wayland::xdg_toplevel_icon::{ToplevelIconCachedState, XdgToplevelIconHandler};
@@ -66,6 +69,54 @@ impl XdgToplevelIconHandler for State {
 }
 
 impl State {
+    /// Records that `icon` has been handed to a toplevel, so a later request
+    /// on it can be refused before it reaches Smithay.
+    ///
+    /// Called from `dispatch.rs` for every
+    /// `xdg_toplevel_icon_manager_v1.set_icon` that names an icon -- which is
+    /// exactly when upstream freezes that icon's contents
+    /// (`XdgToplevelIconUserData::freeze`). `set_icon(toplevel, None)` freezes
+    /// nothing and is not recorded.
+    ///
+    /// Re-recording an icon already in the set is a no-op, which is correct:
+    /// assigning the same icon to a second toplevel leaves it just as frozen.
+    pub(super) fn note_toplevel_icon_assigned(&mut self, icon: ObjectId) {
+        self.frozen_icons.insert(icon);
+    }
+
+    /// Drops an icon from the frozen set once its protocol object is gone.
+    ///
+    /// This is what bounds the set: an entry exists only while the client's
+    /// own `xdg_toplevel_icon_v1` does, so it is bounded by the same thing
+    /// wayland-backend already bounds -- how many live objects a client
+    /// holds. Nothing else removes entries, deliberately: an icon does not
+    /// become mutable again.
+    pub(super) fn forget_toplevel_icon(&mut self, icon: &ObjectId) {
+        self.frozen_icons.remove(icon);
+    }
+
+    /// Whether a request on `icon` must be refused because the icon has
+    /// already been assigned, and posts the protocol error if so.
+    ///
+    /// See `dispatch.rs`'s module doc for the upstream fall-through this
+    /// exists to get in front of. The error code and message are upstream's
+    /// own, for the same reason the `wl_shm` guards match theirs: a client
+    /// sees exactly what it would have seen, minus the compositor dying.
+    pub(super) fn refuse_frozen_toplevel_icon(
+        &self,
+        icon: &xdg_toplevel_icon_v1::XdgToplevelIconV1,
+    ) -> bool {
+        if !self.frozen_icons.contains(&icon.id()) {
+            return false;
+        }
+        icon.post_error(
+            xdg_toplevel_icon_v1::Error::Immutable,
+            "Request made after the icon has been assigned to a toplevel via 'set_icon'"
+                .to_string(),
+        );
+        true
+    }
+
     /// The freedesktop icon name a window's client has committed for it, if
     /// any.
     ///

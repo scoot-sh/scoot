@@ -113,16 +113,46 @@ impl InputMethodHandler for State {
     /// Where the surface holding the focused text field is, so the IME can
     /// place its candidate window against it rather than at the origin.
     ///
-    /// Answers for a layer surface as well as a window -- see the module doc
-    /// for why that is not an edge case. Takes the layer map's guard, reads,
-    /// and drops it without calling back into Smithay, per `layer_shell.rs`'s
-    /// guard-discipline note.
+    /// **This must be the parent's *surface-local* geometry, not its position
+    /// on the output**, and that is the whole subtlety of this function.
+    /// Smithay stores what it returns as `PopupParent::location`, and the
+    /// render path reads it straight back as `popup.geometry().loc` and
+    /// *subtracts* it from the popup's own offset -- where that offset is the
+    /// client's `set_cursor_rectangle`, which the text-input protocol defines
+    /// as surface-local. The two render paths in the pinned rev then differ:
+    ///
+    /// - `space/wayland/window.rs` computes `self.geometry().loc +
+    ///   popup_offset - popup.geometry().loc`, so returning `window.geometry()`
+    ///   makes the two cancel and leaves the surface-local offset.
+    /// - `space/wayland/layer.rs` computes `popup_offset -
+    ///   popup.geometry().loc` and adds *nothing* back -- because
+    ///   `headless.rs::layer_elements` has already placed the surface at
+    ///   `LayerMap::layer_geometry(..).loc`.
+    ///
+    /// So for a layer surface this returns [`LayerSurface::geometry`] (the
+    /// client's own window geometry, normally at the origin) rather than
+    /// `LayerMap::layer_geometry`, which is that same rectangle *plus the
+    /// surface's position on the output*. Returning the latter cancels
+    /// against the position the render path already applied, leaving the
+    /// popup at the raw surface-local caret interpreted as output
+    /// coordinates: a launcher anchored centre on a 1600x1000 output puts its
+    /// candidate window in the top-left corner of the screen instead of
+    /// beside its search field. It is invisible only for a surface that
+    /// happens to sit at the origin, i.e. a top-left-anchored bar -- which is
+    /// why `layer_parent_geometry_is_surface_local` below tests it at a
+    /// non-zero position specifically.
+    ///
+    /// Takes the layer map's guard, reads, and drops it without calling back
+    /// into Smithay, per `layer_shell.rs`'s guard-discipline note.
     ///
     /// An unknown surface gets the default (empty) rectangle, which is what
     /// the protocol's own callers do with no parent at all: the popup is
-    /// placed at the origin rather than not placed. That covers a text field
-    /// on a surface this compositor does not lay out -- a session-lock
-    /// surface's password box, most concretely.
+    /// tracked and positioned at the origin. That covers a text field on a
+    /// surface this compositor does not lay out -- a session-lock surface's
+    /// password box, most concretely, where the popup is in fact never drawn
+    /// at all (the locked render path replaces the element list wholesale
+    /// rather than gathering popups; see `session_lock.rs` and
+    /// `docs/backlog/protocols/ime-popup-over-lock-screen.md`).
     fn parent_geometry(&self, parent: &WlSurface) -> Rectangle<i32, Logical> {
         if let Some(window) = self.id_of(parent).and_then(|id| self.window(id)) {
             return window.geometry();
@@ -132,7 +162,7 @@ impl InputMethodHandler for State {
         };
         let map = layer_map_for_output(output);
         map.layer_for_surface(parent, WindowSurfaceType::TOPLEVEL)
-            .and_then(|layer| map.layer_geometry(layer))
+            .map(|layer| layer.geometry())
             .unwrap_or_default()
     }
 }

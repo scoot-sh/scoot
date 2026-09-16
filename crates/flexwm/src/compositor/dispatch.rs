@@ -3,9 +3,10 @@
 //! This is a hand-written copy of what `smithay::delegate_dispatch2!(State)`
 //! expands to -- the blanket `Dispatch`/`GlobalDispatch` impls that forward
 //! every request to whichever `Dispatch2` impl the object's user data
-//! carries -- plus three guards on sizes a client chooses
-//! ([`reject_invalid_shm_pool_resize`], [`reject_oversized_shm_pool_creation`]
-//! and [`reject_unrepresentable_layer_size`]), one pre-delegation
+//! carries -- plus four guards on what a client may ask for
+//! ([`reject_invalid_shm_pool_resize`], [`reject_oversized_shm_pool_creation`],
+//! [`reject_unrepresentable_layer_size`] and
+//! [`reject_frozen_toplevel_icon_request`]), one pre-delegation
 //! interception ([`prepare_post_destroy_lock_commit`]) and one
 //! post-destruction hook ([`redraw_after_lock_surface_destroyed`]).
 //!
@@ -145,6 +146,48 @@
 //! already `int`, and anchor/layer/keyboard-interactivity/exclusive-edge are
 //! all validated by Smithay before use.
 //!
+//! ## Why the fourth guard exists
+//!
+//! The same missing `return` as the first guard, in a different protocol, and
+//! it only became reachable when this compositor started advertising
+//! `xdg_toplevel_icon_manager_v1`. This rev's
+//! `src/wayland/xdg_toplevel_icon.rs:355-372` handles both requests that
+//! mutate an icon:
+//!
+//! ```ignore
+//! Request::SetName { icon_name } => {
+//!     if self.is_immutable() {
+//!         icon.post_error(
+//!             xdg_toplevel_icon_v1::Error::Immutable,
+//!             "Request made after the icon has been assigned to a toplevel via 'set_icon'"
+//!         );
+//!     }
+//!     // <-- no `return`
+//!     self.set_icon_name(icon_name);
+//! ```
+//!
+//! and `set_icon_name` opens with `debug_assert!(!self.is_immutable())`
+//! (line 149). So `create_icon` -> `set_name` -> `set_icon` -> `set_name`
+//! **panics a debug build of the compositor**, from any client, with no
+//! privilege and no special buffer -- exactly the shape of the `resize(0)`
+//! crash above. `AddBuffer` (line 362) falls through into `add_buffer`, whose
+//! own `debug_assert!` is at line 192, so it is a second trigger for the same
+//! bug. Reproduced live against this compositor before the guard existed;
+//! `toplevel_icon/tests.rs` keeps both arms covered.
+//!
+//! Release builds compile the assertion out, so this is a debug-build crash
+//! -- but every build this project develops, tests, dev-VM-runs and
+//! smoke-tests with is a debug build (`scripts/smoke-test.sh` defaults to
+//! one), and a buggy toolkit reaches it as easily as a malicious client.
+//!
+//! Unlike the three guards above, this one needs *state*: whether an icon has
+//! been assigned lives in `XdgToplevelIconUserData::constructed`, which is
+//! private with no public accessor, so flexwm cannot ask. It tracks the
+//! assignment itself instead -- `set_icon` is the request that freezes an
+//! icon, and it passes through this very function -- in
+//! [`State::frozen_icons`](super::State), owned by `toplevel_icon.rs`. Delete
+//! this guard, and that set, once the pinned rev's two error arms `return`.
+//!
 //! ## Why the hook exists
 //!
 //! Not a guard at all, and not a workaround for a Smithay bug: a callback
@@ -225,6 +268,9 @@
 use std::any::{Any, TypeId};
 
 use smithay::reexports::wayland_protocols::ext::session_lock::v1::server::ext_session_lock_surface_v1;
+use smithay::reexports::wayland_protocols::xdg::toplevel_icon::v1::server::{
+    xdg_toplevel_icon_manager_v1, xdg_toplevel_icon_v1,
+};
 use smithay::reexports::wayland_protocols_wlr::layer_shell::v1::server::zwlr_layer_surface_v1;
 use smithay::reexports::wayland_server::backend::ClientId;
 use smithay::reexports::wayland_server::protocol::{wl_shm, wl_shm_pool, wl_surface};
@@ -281,9 +327,11 @@ where
         if reject_invalid_shm_pool_resize(resource, &request)
             || reject_oversized_shm_pool_creation(resource, &request)
             || reject_unrepresentable_layer_size(resource, &request)
+            || reject_frozen_toplevel_icon_request(state, resource, &request)
         {
             return;
         }
+        note_assigned_toplevel_icon::<I>(state, &request);
         prepare_post_destroy_lock_commit(state, resource, &request, dhandle);
         data.request(state, client, resource, request, dhandle, data_init);
     }
@@ -298,6 +346,7 @@ where
         // has run, so only something here can prepare its next commit.
         redraw_after_lock_surface_destroyed::<I>(state);
         neutralize_destroyed_layer_surface::<I>(state);
+        forget_destroyed_toplevel_icon::<I>(state, resource);
     }
 }
 
@@ -516,6 +565,101 @@ where
         return;
     }
     state.lock_surface_destroyed();
+}
+
+/// Posts a protocol error and returns `true` when `request` would mutate an
+/// `xdg_toplevel_icon_v1` that has already been assigned to a toplevel. See
+/// the module doc for the upstream fall-through that reaches a
+/// `debug_assert!` and takes the whole compositor with it.
+///
+/// Both mutating requests are covered, because both fall through the same
+/// way. `Destroy` is not a mutation and is left alone.
+///
+/// Folds away for every interface other than `xdg_toplevel_icon_v1`, for the
+/// same monomorphization reason as the guards above.
+fn reject_frozen_toplevel_icon_request<I>(
+    state: &mut State,
+    resource: &I,
+    request: &I::Request,
+) -> bool
+where
+    I: Resource,
+    I::Request: 'static,
+{
+    if TypeId::of::<I::Request>() != TypeId::of::<xdg_toplevel_icon_v1::Request>() {
+        return false;
+    }
+    let Some(
+        xdg_toplevel_icon_v1::Request::SetName { .. }
+        | xdg_toplevel_icon_v1::Request::AddBuffer { .. },
+    ) = (request as &dyn Any).downcast_ref::<xdg_toplevel_icon_v1::Request>()
+    else {
+        return false;
+    };
+    // The request's interface is `xdg_toplevel_icon_v1`, so its resource is
+    // the icon itself -- recovered through the client's own object rather
+    // than by downcasting `resource`, which would need an `I: 'static` bound
+    // this blanket impl does not (and should not) carry.
+    let Some(icon) = state
+        .display_handle
+        .get_client(resource.id())
+        .ok()
+        .and_then(|client| {
+            client
+                .object_from_protocol_id::<xdg_toplevel_icon_v1::XdgToplevelIconV1>(
+                    &state.display_handle,
+                    resource.id().protocol_id(),
+                )
+                .ok()
+        })
+    else {
+        return false;
+    };
+    state.refuse_frozen_toplevel_icon(&icon)
+}
+
+/// Records an icon as frozen when `request` is the
+/// `xdg_toplevel_icon_manager_v1.set_icon` that hands it to a toplevel.
+///
+/// Runs *before* delegation, which is what the guard above needs: upstream
+/// freezes the icon inside its own handling of this same request, so
+/// recording it here means the very next request on that icon is already
+/// refusable. `set_icon(toplevel, None)` carries no icon and freezes nothing.
+///
+/// Folds away for every interface other than `xdg_toplevel_icon_manager_v1`.
+fn note_assigned_toplevel_icon<I>(state: &mut State, request: &I::Request)
+where
+    I: Resource,
+    I::Request: 'static,
+{
+    if TypeId::of::<I::Request>() != TypeId::of::<xdg_toplevel_icon_manager_v1::Request>() {
+        return;
+    }
+    let Some(xdg_toplevel_icon_manager_v1::Request::SetIcon {
+        icon: Some(icon), ..
+    }) = (request as &dyn Any).downcast_ref::<xdg_toplevel_icon_manager_v1::Request>()
+    else {
+        return;
+    };
+    state.note_toplevel_icon_assigned(icon.id());
+}
+
+/// Drops a destroyed `xdg_toplevel_icon_v1` from the frozen set, which is what
+/// keeps that set bounded by the client's live objects. See
+/// [`State::forget_toplevel_icon`](super::State).
+///
+/// Folds away for every interface other than `xdg_toplevel_icon_v1`, which
+/// matters in the same way as the hooks above: this sits on the destruction
+/// path of every object of every interface.
+fn forget_destroyed_toplevel_icon<I>(state: &mut State, resource: &I)
+where
+    I: Resource,
+    I::Request: 'static,
+{
+    if TypeId::of::<I::Request>() != TypeId::of::<xdg_toplevel_icon_v1::Request>() {
+        return;
+    }
+    state.forget_toplevel_icon(&resource.id());
 }
 
 /// The message both size-cap refusals carry. Allocating is fine here and

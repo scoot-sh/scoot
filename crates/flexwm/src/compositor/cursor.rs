@@ -68,8 +68,10 @@ use smithay::wayland::compositor::with_states;
 
 use super::decorations::{Appearance, Color};
 use shapes::Shape;
+use theme::{Theme, Themed};
 
 pub mod shapes;
+pub mod theme;
 
 #[cfg(test)]
 mod tests;
@@ -150,6 +152,25 @@ pub struct Cursor {
     /// [`surface_hotspot`].
     size: i32,
     status: CursorImageStatus,
+    /// The machine's own installed cursor theme, and everything drawn from it
+    /// so far. Empty on a machine with no icon theme, which is the ordinary
+    /// state in a container -- see `cursor/theme.rs`.
+    theme: Theme,
+    /// The theme image for the *current* [`Self::status`], resolved once when
+    /// that status changes rather than per frame.
+    ///
+    /// The invariant that makes this safe to read in [`Cursor::element`]:
+    /// **every write to `status` goes through [`Cursor::set_named`] or
+    /// [`Cursor::set_status`], and both rewrite this field in the same
+    /// statement.** There is no third write site, and adding one without
+    /// refreshing this would leave the previous shape's pixels drawn under
+    /// the new shape's name -- the single most likely way this module could
+    /// silently draw the wrong thing.
+    ///
+    /// `None` means "no theme image for this status": a hidden cursor, a
+    /// client surface, or a named shape the theme does not carry. All three
+    /// fall through to [`Self::shapes`].
+    themed: Option<Themed>,
 }
 
 impl Cursor {
@@ -178,11 +199,12 @@ impl Cursor {
     /// alpha is what makes a translucent `cursor_color` actually look
     /// translucent instead of an opaque black triangle outline around a
     /// see-through middle.
-    pub fn new(size: i32, color: Color) -> Self {
+    pub fn new(size: i32, color: Color, theme_name: Option<&str>) -> Self {
         let size = Appearance::clamp_cursor_size(size);
         let outline = Color::new(0.0, 0.0, 0.0, color.a);
         let (fill, outline) = (color.to_argb8888(), outline.to_argb8888());
-        Self {
+        let theme = Theme::load(theme_name, size);
+        let mut cursor = Self {
             // `Shape::ALL` in its own order, indexed back by `Shape::index`
             // -- see that constant's doc for why the order lives there and
             // not here. `Shape::Arrow` is the one shape `shapes::generate`
@@ -205,11 +227,44 @@ impl Cursor {
             }),
             size,
             status: CursorImageStatus::default_named(),
-        }
+            theme,
+            themed: None,
+        };
+        // The default status is a *named* shape, so the themed image for it
+        // has to be resolved here too -- the field's invariant is "every
+        // write to `status` refreshes this", and the struct literal above is
+        // one such write.
+        cursor.refresh_themed();
+        cursor
+    }
+
+    /// Whether a real cursor theme was found, i.e. whether a named shape is
+    /// drawn from the machine's own theme rather than from `shapes.rs`.
+    /// Read only by tests and by `compositor::run`'s environment export.
+    pub fn theme(&self) -> &Theme {
+        &self.theme
     }
 
     pub fn set_status(&mut self, status: CursorImageStatus) {
         self.status = status;
+        self.refresh_themed();
+    }
+
+    /// Re-resolves [`Self::themed`] for whatever [`Self::status`] now is.
+    ///
+    /// The one place that field is written. Called from every site that
+    /// writes `status`, which is what keeps the two from disagreeing -- see
+    /// the field's doc. Loading happens here, on the event that changed the
+    /// shape, and never on the render path; a shape already looked up (or
+    /// already known missing) costs one hash lookup.
+    fn refresh_themed(&mut self) {
+        self.themed = match &self.status {
+            CursorImageStatus::Named(icon) => self.theme.image(*icon).cloned(),
+            // A client surface draws the client's own pixels, and a hidden
+            // cursor draws nothing; neither has a theme image, and leaving a
+            // stale one here is exactly the bug the invariant exists to stop.
+            CursorImageStatus::Surface(_) | CursorImageStatus::Hidden => None,
+        };
     }
 
     /// Drops `surface` as the active cursor image if that's what it was,
@@ -231,7 +286,10 @@ impl Cursor {
         if !matches!(&self.status, CursorImageStatus::Surface(active) if active == surface) {
             return false;
         }
-        self.status = CursorImageStatus::default_named();
+        // Through the one setter, not a bare field write: this is the second
+        // site that changes `status`, and `themed` has to follow it (see that
+        // field's invariant).
+        self.set_status(CursorImageStatus::default_named());
         true
     }
 
@@ -321,12 +379,25 @@ impl Cursor {
             // being moved, so the wrong shape beats no cursor at all.
             CursorImageStatus::Surface(_) => CursorIcon::Default,
         };
-        let shape = Shape::for_icon(icon);
-        let location = element_location(pointer_location, shape.hotspot(self.size), scale);
+        // The machine's own theme first, this module's drawn shapes second.
+        // `themed` was resolved when the status changed, so this is a field
+        // read, not a lookup -- see `refresh_themed`. It is deliberately not
+        // consulted on the dead-surface path above: `themed` is `None` for a
+        // `Surface` status by construction, so that path always draws the
+        // arrow, which is the defensive fallback `forget_surface` normally
+        // replaces within the same dispatch.
+        let (buffer, hotspot) = match &self.themed {
+            Some(themed) => (&themed.buffer, themed.hotspot),
+            None => {
+                let shape = Shape::for_icon(icon);
+                (&self.shapes[shape.index()], shape.hotspot(self.size))
+            }
+        };
+        let location = element_location(pointer_location, hotspot, scale);
         match MemoryRenderBufferRenderElement::from_buffer(
             renderer,
             location,
-            &self.shapes[shape.index()],
+            buffer,
             None,
             None,
             None,
@@ -334,7 +405,7 @@ impl Cursor {
         ) {
             Ok(element) => vec![CursorElement::Fallback(element)],
             Err(error) => {
-                tracing::warn!(%error, ?shape, "could not build the cursor shape element");
+                tracing::warn!(%error, ?icon, "could not build the cursor element");
                 Vec::new()
             }
         }

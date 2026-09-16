@@ -126,6 +126,7 @@ struct AppearanceConfig {
     background_color: Option<String>,
     cursor_size: Option<i32>,
     cursor_color: Option<String>,
+    cursor_theme: Option<String>,
     prefer_no_csd: Option<bool>,
 }
 
@@ -173,6 +174,11 @@ impl AppearanceConfig {
             ),
             cursor_size: self.cursor_size.unwrap_or(defaults.cursor_size),
             cursor_color: color(self.cursor_color, "cursor_color", defaults.cursor_color),
+            // An empty string is treated as unset rather than as a theme
+            // named "": it is what a user writing `cursor_theme = ""` to mean
+            // "no override" would expect, and `Theme::load` would otherwise
+            // search for a theme that cannot exist.
+            cursor_theme: self.cursor_theme.filter(|name| !name.is_empty()),
             prefer_no_csd: self.prefer_no_csd.unwrap_or(defaults.prefer_no_csd),
         }
         .clamped(gap)
@@ -789,12 +795,18 @@ mod tests {
             background_color = "#101010"
             cursor_size = 32
             cursor_color = "#ff8000"
+            cursor_theme = "Adwaita"
             prefer_no_csd = false
         "##;
         let file: FileConfig = toml::from_str(toml).expect("valid toml");
         let loaded = LoadedConfig::from_file(file);
         assert_eq!(loaded.appearance.focus_ring_width, 5);
         assert_eq!(loaded.appearance.cursor_size, 32);
+        assert_eq!(
+            loaded.appearance.cursor_theme.as_deref(),
+            Some("Adwaita"),
+            "cursor_theme did not round-trip"
+        );
         assert_eq!(
             loaded.appearance.cursor_color,
             Color::new(1.0, 128.0 / 255.0, 0.0, 1.0)
@@ -1235,5 +1247,22 @@ mod tests {
             assert_eq!(loaded.config.gap, 7, "{text}");
             assert_eq!(loaded.config.column_widths, vec![0.3, 0.7], "{text}");
         }
+    }
+
+    /// An empty `cursor_theme` means "no override", not "a theme called
+    /// nothing" -- see `into_appearance`. Without this, `Theme::load` would
+    /// search for a theme that cannot exist instead of falling through to
+    /// `$XCURSOR_THEME`.
+    #[test]
+    fn an_empty_cursor_theme_is_treated_as_unset() {
+        let file: FileConfig = toml::from_str(
+            r#"
+            [appearance]
+            cursor_theme = ""
+        "#,
+        )
+        .expect("valid toml");
+        let loaded = LoadedConfig::from_file(file);
+        assert_eq!(loaded.appearance.cursor_theme, None);
     }
 }

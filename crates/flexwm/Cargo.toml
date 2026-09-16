@@ -64,6 +64,13 @@ calloop-wayland-source = "0.4"
 # ipc/listener.rs, neither of which has a std equivalent; both add a feature to
 # a crate already here, not a crate (neither pulls in anything of its own).
 rustix = { version = "1", features = ["fs", "mm", "process", "rand"] }
+# Parses the xcursor files of whatever cursor theme is installed on the
+# machine, for cursor/theme.rs. Nothing is vendored or shipped: this reads the
+# user's own theme at runtime, which is what sway/niri/anvil do and carries
+# none of the license obligation *shipping* a theme would (see that module's
+# doc). MIT-licensed, no dependencies of its own, and the same crate and major
+# version Smithay's own anvil uses against this pinned rev.
+xcursor = "0.3"
 # For `SO_PEERCRED` in ipc/listener.rs -- see `peer_uid`'s doc for why neither
 # std nor rustix can answer that one question today. Already in the tree
 # transitively (rustix, smithay, wayland and every sys crate here depend on

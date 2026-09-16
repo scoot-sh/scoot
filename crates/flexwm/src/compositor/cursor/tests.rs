@@ -67,6 +67,17 @@ const WHITE: [u8; 4] = [255, 255, 255, 255];
 const BLACK: [u8; 4] = [0, 0, 0, 255];
 const TRANSPARENT: [u8; 4] = [0, 0, 0, 0];
 
+/// What `Cursor::new` is given for its theme name when a test wants the
+/// compositor's *own* drawn shapes rather than whatever the machine running
+/// the suite happens to have installed.
+///
+/// A deliberately unresolvable name, not `None`: `None` means "follow
+/// `$XCURSOR_THEME`, then `default`", which on a developer's own desktop (or
+/// any container with an icon theme installed) would find a real theme and
+/// make every pixel assertion below depend on which distro's cursors are
+/// present. See `cursor/theme.rs`.
+const NO_THEME: Option<&str> = Some("flexwm-test-no-such-theme");
+
 /// Reads pixel `(x, y)` out of a `size`-square bitmap.
 fn pixel(pixels: &[u8], size: i32, x: i32, y: i32) -> [u8; 4] {
     let idx = ((y * size + x) * 4) as usize;
@@ -184,7 +195,7 @@ fn cursor_new_clamps_a_degenerate_or_absurd_size() {
         Appearance::MAX_CURSOR_SIZE,
         i32::MAX,
     ] {
-        let cursor = Cursor::new(size, Color::new(1.0, 1.0, 1.0, 1.0));
+        let cursor = Cursor::new(size, Color::new(1.0, 1.0, 1.0, 1.0), NO_THEME);
         let elements = cursor.element(&mut renderer, (0.0, 0.0).into(), 1.0);
         assert_eq!(
             elements.len(),
@@ -515,7 +526,15 @@ impl Fixture {
     /// Like [`Fixture::new`], but with the `[appearance]` values a config file
     /// would have resolved to -- which is all `Cursor::new` ever sees, since
     /// the fallback bitmap is built once in `State::new` and never rebuilt.
-    fn with_appearance(appearance: Appearance) -> Self {
+    fn with_appearance(mut appearance: Appearance) -> Self {
+        // Force the drawn shapes, whatever the machine running the suite has
+        // installed. Every pixel assertion below describes `shapes.rs`'s own
+        // output; with `Appearance::default()`'s `cursor_theme: None` these
+        // would instead assert on whichever xcursor theme happens to be
+        // present, and would pass on a bare container while failing on a
+        // developer's desktop. The themed path is covered hermetically in
+        // `cursor/theme/tests.rs`.
+        appearance.cursor_theme = NO_THEME.map(str::to_owned);
         let mut event_loop: EventLoop<'static, State> =
             EventLoop::try_new().expect("an event loop");
         let display: Display<State> = Display::new().expect("a wayland display");
