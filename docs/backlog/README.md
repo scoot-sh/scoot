@@ -86,6 +86,7 @@ actionable.
 - [`smoke-test.sh` hardcodes temp paths](./testing/smoke-test-hardcoded-temp-paths.md)
 - [`smoke-test.sh` background check samples the cursor under `--tty`](./testing/smoke-test-background-cursor-sample.md)
 - [Enhanced hardware/DRM testing ideas](./testing/hardware-testing-ideas.md) (research)
+- [Extract a shared test harness; split the largest test files; adopt `cargo-nextest`](./testing/large-test-file-organization.md)
 
 ### Meta
 - [Rename `flexwm` → `flex`, split out `flexctl`](./meta/rename-flex-family.md) — decided, do this **last** in the burn-down (`flexbar` stays separate, undecided)
