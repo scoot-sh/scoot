@@ -1,12 +1,141 @@
 ---
-title: "Extract a shared test harness for the real-Wayland-client test files, then split the two largest by concern; adopt `cargo-nextest` alongside `cargo test`."
-status: "open"
-area: "testing"
-priority: "medium"
+title: "Extract a shared test harness for the real-Wayland-client test files, then split the two largest by concern; adopt `cargo-nextest` alongside `cargo test` — RESOLVED."
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
 ---
 
-# Extract a shared test harness for the real-Wayland-client test files, then split the two largest by concern; adopt `cargo-nextest` alongside `cargo test`.
+# Extract a shared test harness for the real-Wayland-client test files, then split the two largest by concern; adopt `cargo-nextest` alongside `cargo test` — RESOLVED.
+
+## Resolution (2026-09-16)
+
+Done as specced, in seven commits — one per file migrated, then one per
+split — so each step is reviewable on its own. Nothing was mocked and no
+test was removed: every suite has exactly the test count it had before.
+
+`crates/flexwm/src/compositor/test_support.rs` holds the shared half:
+`Harness<S, A>` (the event loop, the `State`, the socket pairs, the client
+threads, `run`/`run_on`/`send_step`/`wait_for_ack`/`wait_for`/
+`run_expecting_disconnect`/`settle`/`tick`/`disconnect`, the framebuffer
+readback, and one `Drop` that no longer joins while unwinding), the
+client-side deadline-bounded `wait_for`, and the pixel helpers
+(`pixel`/`contains`/`find_color`/`assert_pixel`).
+
+Each suite keeps its own `Fixture` name and every call site through
+`type Fixture = Harness<Step, Ack>;` plus an inherent impl — legal because
+this is one crate and each suite's `Step` differs. `solid_buffer` and the
+`Step`/`Ack` enums stayed put, as the entry asked.
+
+### Line counts, at `c9eaa70` (before) and `189659a` (after)
+
+Note that the entry's own numbers predate PR #44, which had already split
+`layer_shell/tests.rs` into `tests/mod.rs` + `tests/popup.rs`.
+
+```
+                                  before    after harness    after split
+session_lock/tests.rs               2270            2017      736 + 5 files
+                                                                (138/222/241/296/431)
+layer_shell/tests/mod.rs            2748            2524     1154 + 4 files
+                                                                (116/157/392/741)
+layer_shell/tests/popup.rs           683             683      683 (unchanged)
+ext_workspace/tests.rs              1131            1007      1007
+cursor/tests.rs                     1131            1041      1041
+activation/tests.rs                 1108            1092      1092
+                                   -----           -----
+                                    9071            8364
+compositor/test_support.rs             -             478
+```
+
+707 lines of duplicated harness removed for 478 lines of shared harness,
+and no file over 1154 lines — that largest one being `layer_shell`'s
+`TestClient` (nine protocols' `Dispatch` impls), its twenty-variant `Step`
+and the client script that runs it, which is one cohesive thing and was
+left alone.
+
+`ext_workspace`, `cursor` and `activation` came in at 1007–1092 lines and
+were **not** split: the entry said to measure first and not to split them
+pre-emptively, and a split there would add navigation overhead for ~21–25
+tests that already read as one subject.
+
+### `cargo-nextest`
+
+`pkgs.cargo-nextest` added to `vm/configuration.nix` and pushed with
+`nixos-rebuild switch --target-host` (closure delta only, no image
+rebuild). Guest disk before and after: `1.7G`/`1.6G` free of 16G, i.e. the
+addition cost under 100 MiB and did not move the 90% figure.
+
+`cargo nextest run --workspace` on the dev VM: **616 tests run, 616
+passed, 1 skipped**, 20.2s. Nothing surfaced — no test in this workspace
+turned out to depend on sharing `SERIAL_COUNTER` (or any other
+process-global) with its neighbours, so there was no correctness fix in
+disguise to make. Recorded because a *clean* run of that check is the
+result, not the absence of one.
+
+Documented in `CLAUDE.md`'s verification set and in `README.md`'s "To work
+on the code", both as an addition to `cargo test` rather than a
+replacement (nextest does not run doctests). `vm/README.md` and
+`scripts/smoke-test.sh`'s header were checked: neither documents a test
+invocation sequence, so neither went stale.
+
+### Verification, at `189659a`, all on the dev VM (`cd /mnt/flexwm`)
+
+```
+cargo test --workspace         522 + 68 + 10 + 3 + 13 passed, 1 ignored, 0 failed
+cargo nextest run --workspace  616 run, 616 passed, 1 skipped
+cargo clippy -p flexwm --all-targets -- -D warnings   clean
+cargo fmt --check -p flexwm                            clean
+```
+
+Per-suite test counts, `cargo test -p flexwm -- --list`, before → after:
+
+```
+session_lock::tests      40 -> 10 abandoned + 6 blanking + 6 input
+                               + 10 lifecycle + 8 teardown   = 40
+layer_shell::tests       38 -> 2 adversarial + 5 frames + 19 input
+                               + 12 layout                   = 38
+layer_shell::tests::popup 14 -> 14
+ext_workspace::tests     21 -> 21
+cursor::tests            25 -> 25
+activation::tests        22 -> 22
+```
+
+### Behaviour deltas, stated rather than left to be found
+
+All neutral-or-better, all a consequence of one harness replacing five:
+
+- `Drop` gives each client thread a bounded, *dispatched* wait to finish
+  and reports its error, and never joins a thread that has not finished
+  (cursor's copy did, which could have hung the suite instead of failing
+  it). It still refuses to join while unwinding.
+- `layer_shell`'s client-side `wait_for_configure` was bounded by 50 round
+  trips; it is now the shared deadline-bounded `wait_for`, for the reason
+  `session_lock`'s copy already was one. No test consumed its `Err`. The
+  one place that genuinely needs a bounded wait — the popup-configure
+  probe, where "no configure" is an outcome to record — keeps its own
+  explicit loop.
+- `ext_workspace`'s `MapWindow` had a bare `for _ in 0..50 { roundtrip }`
+  that fell through without acking if the configure was late; it now fails
+  with a named error instead.
+- `cursor`'s `run` now settles after each step, which its own did not, and
+  its `wait_for` now diagnoses a dead client thread instead of timing out.
+- `activation`'s `drive` traded an `AtomicBool` plus a side channel polled
+  inside the dispatch loop for two sequential waits. Same ordering; a
+  panicking client thread now reports its panic instead of a ten-second
+  timeout blaming the compositor.
+
+### Follow-ups, deliberately not done here
+
+- `input_method/tests.rs` (758 lines) and the smaller `dispatch`/`shell`/
+  `toplevel_icon` suites carry the same fixture shape. The entry scoped
+  five files; these are a straightforward follow-on now that the harness
+  exists.
+- `solid_buffer` is still per-file. `session_lock`'s and `layer_shell`'s
+  are identical modulo the memfd name, so unifying them is a one-line
+  generic — left alone per this entry's own "extract what is actually
+  identical, leave what only looks similar."
+
+Original entry, left as written:
 
 User question, 2026-09-16: "Why some 1600+ line files of tests?", followed
 by a request to decide structure (a `tests/` folder vs. helpers vs.
