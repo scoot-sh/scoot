@@ -269,6 +269,46 @@ activation-aware launcher was on hand). Both are called out here rather than
 silently assumed clean — the ordinary render/input/tiling path they'd
 interact with was exercised extensively above and showed no regression.
 
+### The two remaining gaps, closed after merge (2026-09-16, same dev VM)
+
+Both of the items directly above turned out to be testable on this same VM
+without new hardware, once looked into rather than assumed unreachable —
+`chvt`/`openvt` are already on the system, and `nix build` can fetch a real
+launcher just as it fetched Adwaita earlier in this doc:
+
+- **VT switching, `--tty -- foot`.** `sudo chvt 3` away from the VT flexwm
+  was bound to: log shows `session paused; drm master released` immediately,
+  libinput devices suspended, and `/sys/kernel/debug/dri/0/clients` confirms
+  `master=n`. IPC (`msg version`) still answers while paused — the event loop
+  itself doesn't block, only the DRM render path does. `sudo chvt` back:
+  `session activated`, a forced full modeset (`drm: modeset (full commit)`),
+  no `could not reactivate`/`could not resume libinput` warnings, master
+  back to `y` with a flexwm-allocated `fb` on the scanout plane. Spawned a
+  second `foot` afterward: two-column tiling and both focus rings rendered
+  correctly, proving the render/input path is actually live again, not just
+  the process. This exact scenario surfaced a second, independent, *pre-existing*
+  finding — see `docs/backlog/tty/drm-teardown-restore-eperm.md`.
+- **`xdg-activation-v1`, end to end, with a real launcher.** `nix build
+  nixpkgs#fuzzel` (1.14.1) — confirmed via `strings` to link real
+  `xdg_activation_v1`/`get_activation_token` support, unlike anything
+  synthetic. Gave it one `.desktop` entry (`foot`) via `XDG_DATA_DIRS`,
+  drove it entirely over IPC (`msg key Return` on the already-selected
+  entry — no physical input at all), and captured `WAYLAND_DEBUG=1` output
+  across the fork/exec boundary (env vars, including `WAYLAND_DEBUG` and the
+  activation token, survive fuzzel's fork into `foot`, so both processes'
+  protocol traffic land in the same log). Full trace: fuzzel
+  `get_activation_token` + `set_serial` + `set_surface` + `commit` →
+  flexwm logs `xdg-activation token created token="hGz6..."` → fuzzel forks
+  and execs `foot` with that token in `XDG_ACTIVATION_TOKEN` → **`foot`
+  itself**, now a separate live client, opens its own connection, creates
+  its real toplevel surface, and calls `xdg_activation_v1.activate(token,
+  its_own_surface)` → flexwm logs `activating a window id=WindowId(1)
+  app_id=None` and `flexwm msg windows` confirms that window `"focused":
+  true` immediately after, with fuzzel's launcher UI gone from the
+  screenshot. Every hop of the real protocol flow the module doc describes,
+  exercised by two independent real clients, not a synthetic in-process
+  test.
+
 ### Independent review of `e16aada` (the commit the earlier review never saw)
 
 The "What independent review caught" section above reviewed `b312366` --

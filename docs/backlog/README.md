@@ -67,6 +67,7 @@ actionable.
 - [Background color not painted where no window covers](./tty/tty-background-not-painted.md)
 - [Same-VT no-op VT-switch warning](./tty/vt-switch-same-vt-warning.md)
 - [`O_CLOEXEC` request is a no-op at the libseat layer](./tty/tty-o-cloexec-noop.md) (informational)
+- [`--tty` quit sometimes logs a DRM "restore previous state" EPERM](./tty/drm-teardown-restore-eperm.md)
 
 ### Core / config / rendering
 - [`--width`/`--height` are unbounded `i32`s](./core/width-height-unbounded.md)
