@@ -645,8 +645,11 @@ What a client sees:
   refresh rate and whether it is preferred. Binding the global announces
   everything immediately, so registry order doesn't matter.
 - **Changes arrive in batches closed by `done`**, which carries a serial that
-  advances on every real change. The only thing that changes one today is a
-  `--nested` host resizing flexwm's window.
+  advances on every real change. The only thing that can trigger one today is
+  a `--nested` host's *initial* configure at startup, if it proposes a size
+  other than `--width`/`--height` — flexwm applies that one and then ignores
+  every later resize of the host window, so nothing changes again after
+  startup.
 - **`stop` is answered with `finished`**, after which the head and mode
   objects the client already has stay valid until it destroys them — the
   protocol's own teardown order.
@@ -661,9 +664,12 @@ Worth knowing before you write against it:
   and the protocol allows omitting both. A client that keys a saved
   per-monitor profile off a serial would otherwise match every flexwm session
   on every machine.
-- **The mode list only grows.** A `--nested` resize adds a mode rather than
-  replacing one, so both the old and the new size stay advertised — which is
-  exactly what `wl_output` does with the same change.
+- **The mode list only grows, and only once.** If the `--nested` host's
+  initial configure at startup proposes a size other than `--width`/
+  `--height`, that adds a mode rather than replacing one, so both sizes stay
+  advertised — matching what `wl_output` does with the same change. A host
+  resizing the window after startup does nothing; flexwm never picks up a
+  second mode change.
 - **A `--tty` VT switch changes nothing.** The output does not go away when
   you switch to another VT, it just stops being drawn, so the head stays
   enabled with the same mode and no `done` is sent.

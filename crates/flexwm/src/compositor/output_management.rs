@@ -54,14 +54,24 @@
 //!   calls `change_current_state` with the real DRM refresh. `wl_output`
 //!   already reports the same 60 Hz, so this mirrors the existing inaccuracy
 //!   rather than adding a second one.
-//! - **[`Output::modes`] only ever grows.** `change_current_state` pushes any
-//!   mode it has not seen and nothing calls `delete_mode`, so after a
-//!   `--nested` resize the output knows both the old mode and the new one --
-//!   and `wl_output` advertises both too. Every known mode is advertised here
-//!   for the same reason, and the `preferred` flag on the *old* mode object
-//!   goes stale exactly as it does on `wl_output` (the protocol has no
-//!   un-prefer event, and Smithay's own `wl_output` re-send never clears the
-//!   old flag either).
+//! - **[`Output::modes`] only ever grows, and only ever once.**
+//!   `change_current_state` pushes any mode it has not seen and nothing
+//!   calls `delete_mode` -- but the only production caller that can hand it
+//!   a second mode is [`State::resize_output`], and `--nested`'s dispatch
+//!   loop (`nested_dispatch.rs`) calls that at most once per process, gated
+//!   by `Host::is_configured`: only the host's *initial* configure, if it
+//!   proposes a size other than `--width`/`--height`, grows the mode list.
+//!   A host resizing flexwm's window afterwards is acked and otherwise
+//!   ignored -- the window keeps its original size and the mode list does
+//!   not grow again. `wl_output` advertises every known mode for the same
+//!   reason this protocol does, but the `preferred` flag does not track it
+//!   the same way on both: this protocol's snapshot is taken once `set_mode`
+//!   has fully returned, so a newly-added mode is correctly `preferred`
+//!   here, while an already-bound `wl_output` client is told about the new
+//!   mode by the earlier `change_current_state` call -- before
+//!   `set_preferred` runs -- so it is never told the new mode is preferred
+//!   at all, not even briefly (see
+//!   `docs/backlog/protocols/wl-output-preferred-flag-on-late-mode.md`).
 //!
 //! Two properties are deliberately *not* sent, which the protocol explicitly
 //! allows:
@@ -451,8 +461,12 @@ impl Manager {
     }
 
     /// Closes an incomplete batch and retires this manager, for the one
-    /// failure that can happen mid-announcement: a client that has exhausted
-    /// its own object ids.
+    /// failure that can happen mid-announcement: `create_resource` fails
+    /// only when the client is already gone by the time this runs
+    /// (`Handle::create_object` errors solely from `get_client_mut` missing
+    /// the client; the server's own id allocation for a new object never
+    /// fails). Object-id exhaustion is not a real failure mode here -- this
+    /// exists for the client that disconnects mid-batch.
     ///
     /// The head goes first (it may have been half described, and the client is
     /// owed a `finished` on it rather than a partial head nothing will ever

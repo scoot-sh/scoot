@@ -66,6 +66,8 @@ actionable.
 - [`wlr-output-management` reconfiguration: `apply`/`test` always fail](./protocols/output-management-reconfiguration.md)
   — the deliberately-deferred other half of the entry above; gated on
   multi-output support, since nothing a configuration asks for exists yet
+- [An already-bound `wl_output` client is never told a `--nested` resize's new mode is preferred](./protocols/wl-output-preferred-flag-on-late-mode.md)
+  — pre-existing, found reviewing the entry above's own (correct) handling of the same event
 - [Screen capture for clients (`wlr-screencopy` / `ext-image-copy-capture`)](./protocols/screencopy-capture.md)
   — shell thumbnails and previews; flexwm's own IPC screenshot covers agents,
   not generic clients

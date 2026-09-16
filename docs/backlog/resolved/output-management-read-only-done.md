@@ -102,8 +102,37 @@ for the same reason.
 wire-level, including the `wl_output` cross-check, per-version event gating
 (v1/v2/v4), a resize batch, two managers in lockstep, `stop`/`finished`,
 disconnect cleanup, `release` on a head and on a mode, and the three
-refusal cases. Plus live `wlr-randr` and `wayland-info` against a real
-`--headless` session on the dev VM: the head reads back correctly and every
-`wlr-randr` write (`--pos`, `--scale`, `--transform`, `--custom-mode`,
-`--off`, `--dryrun`) prints `failed to apply configuration` and leaves the
-output untouched.
+refusal cases: `cargo nextest run -p flexwm` at `7e7ec91`, 577/577 passed.
+
+Live, on the dev VM against `7e7ec91`: `/var/cargo-target/debug/flexwm
+--headless --width 1280 --height 800`, then `WAYLAND_DISPLAY=wayland-1
+wlr-randr`:
+
+```
+headless "flexwm - headless - headless"
+  Make: flexwm
+  Model: headless
+  Enabled: yes
+  Modes:
+    1280x800 px, 60.000000 Hz (preferred, current)
+  Position: 0,0
+  Transform: normal
+  Scale: 1.000000
+  Adaptive Sync: disabled
+```
+
+Then, on that same live session, every write `wlr-randr` offers, each its
+own command:
+
+| command | output | exit |
+|---|---|---|
+| `wlr-randr --output headless --pos 100,100` | `failed to apply configuration` | 1 |
+| `wlr-randr --output headless --scale 2` | `failed to apply configuration` | 1 |
+| `wlr-randr --output headless --transform 90` | `failed to apply configuration` | 1 |
+| `wlr-randr --output headless --custom-mode 1920x1080` | `failed to apply configuration` | 1 |
+| `wlr-randr --output headless --off` | `failed to apply configuration` | 1 |
+| `wlr-randr --output headless --pos 50,50 --dryrun` | `failed to apply configuration` | 1 |
+
+A `wlr-randr` re-read afterwards printed byte-identical output to the one
+above — six real refused configurations, output state untouched by any of
+them.
