@@ -25,18 +25,10 @@
 use std::io::Write;
 use std::os::fd::AsFd;
 use std::os::unix::net::UnixStream;
-use std::sync::Arc;
-use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
-use std::thread::{self, JoinHandle};
+use std::sync::mpsc::{Receiver, Sender};
 use std::time::{Duration, Instant};
 
-use flexwm_core::Config;
 use flexwm_ipc::{KeyCombo, Modifier, PointerButton, Request, Response};
-use smithay::backend::allocator::Fourcc;
-use smithay::backend::renderer::{Bind, ExportMem};
-use smithay::reexports::calloop::EventLoop;
-use smithay::reexports::wayland_server::Display;
-use smithay::utils::Rectangle;
 use wayland_client::protocol::{
     wl_buffer, wl_compositor, wl_keyboard, wl_output, wl_pointer, wl_registry, wl_seat, wl_shm,
     wl_shm_pool, wl_surface,
@@ -48,11 +40,8 @@ use wayland_protocols::ext::session_lock::v1::client::{
 use wayland_protocols::xdg::shell::client::{xdg_surface, xdg_toplevel, xdg_wm_base};
 use wayland_protocols_wlr::layer_shell::v1::client::{zwlr_layer_shell_v1, zwlr_layer_surface_v1};
 
-use crate::compositor::State;
 use crate::compositor::decorations::{Appearance, Color};
-use crate::compositor::headless::{self, Backend};
-use crate::compositor::keybindings::Keybindings;
-use crate::compositor::state::ClientState;
+use crate::compositor::test_support::{self, Harness, contains, wait_for};
 
 /// The framebuffer these tests render into.
 const CANVAS: i32 = 120;
@@ -464,35 +453,6 @@ fn solid_buffer(
     buffer
 }
 
-/// Round-trips until the compositor has answered, or gives up.
-///
-/// Bounded by a *deadline*, not by a number of round trips, and that is not
-/// interchangeable here: `locked` is sent from the render loop once a blanked
-/// frame has been drawn, which is a 16ms frame tick away
-/// (`headless::FRAME_INTERVAL`), while a hundred round trips against a
-/// compositor being dispatched on another thread finish in a fraction of
-/// that. Counting round trips would make this give up before the frame it is
-/// waiting for could possibly have happened -- which it did, until this was a
-/// deadline.
-fn wait_for<T>(
-    queue: &mut wayland_client::EventQueue<TestClient>,
-    client: &mut TestClient,
-    what: &str,
-    ready: impl Fn(&TestClient) -> Option<T>,
-) -> Result<T, String> {
-    let deadline = Instant::now() + Duration::from_secs(5);
-    loop {
-        queue.roundtrip(client).map_err(|e| e.to_string())?;
-        if let Some(value) = ready(client) {
-            return Ok(value);
-        }
-        if Instant::now() >= deadline {
-            return Err(format!("the compositor never sent {what}"));
-        }
-        thread::sleep(Duration::from_millis(1));
-    }
-}
-
 /// Runs one client half: binds the globals, then executes whatever steps the
 /// test sends, acknowledging each one once the compositor has seen it.
 fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> Result<(), String> {
@@ -708,42 +668,15 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
     Ok(())
 }
 
-/// One connected client's end of the fixture.
-struct ClientHandle {
-    steps: Option<Sender<Step>>,
-    acks: Receiver<Ack>,
-    thread: Option<JoinHandle<Result<(), String>>>,
-}
-
 /// A live compositor with a real headless backend and one or more connected
-/// clients, each scripted a step at a time.
-struct Fixture {
-    event_loop: EventLoop<'static, State>,
-    state: State,
-    clients: Vec<ClientHandle>,
-}
+/// clients, each scripted a step at a time. See
+/// [`crate::compositor::test_support`] for everything that is not specific to
+/// this protocol.
+type Fixture = Harness<Step, Ack>;
 
 impl Fixture {
     fn new() -> Self {
-        let mut event_loop: EventLoop<'static, State> =
-            EventLoop::try_new().expect("an event loop");
-        let display: Display<State> = Display::new().expect("a wayland display");
-        let mut state = State::new(
-            &mut event_loop,
-            display,
-            Config::default(),
-            Keybindings::default(),
-            appearance(),
-            1.0,
-        )
-        .expect("a compositor state with a wayland socket");
-        headless::init(&mut state, CANVAS, CANVAS).expect("a headless backend");
-
-        let mut fixture = Self {
-            event_loop,
-            state,
-            clients: Vec::new(),
-        };
+        let mut fixture = Harness::headless(appearance(), CANVAS);
         fixture.connect();
         fixture
     }
@@ -754,125 +687,7 @@ impl Fixture {
     /// by definition something a *different* connection does, after the first
     /// one has gone.
     fn connect(&mut self) -> usize {
-        let (server_end, client_end) = UnixStream::pair().expect("a socket pair");
-        self.state
-            .display_handle
-            .insert_client(server_end, Arc::new(ClientState::default()))
-            .expect("an inserted client");
-        let (step_tx, step_rx) = channel();
-        let (ack_tx, ack_rx) = channel();
-        let thread = thread::spawn(move || run_client(client_end, step_rx, ack_tx));
-        self.clients.push(ClientHandle {
-            steps: Some(step_tx),
-            acks: ack_rx,
-            thread: Some(thread),
-        });
-        self.clients.len() - 1
-    }
-
-    /// Runs one step on client 0 to completion, then lets the compositor
-    /// settle.
-    fn run(&mut self, step: Step) -> Ack {
-        self.run_on(0, step)
-    }
-
-    fn run_on(&mut self, client: usize, step: Step) -> Ack {
-        self.clients[client]
-            .steps
-            .as_ref()
-            .expect("the step channel")
-            .send(step)
-            .expect("the client thread is still running");
-        let ack = self.wait_for_ack(client);
-        self.settle();
-        ack
-    }
-
-    /// Dispatches until `client` answers.
-    ///
-    /// A client that died instead of answering is reported with *its own*
-    /// error (the protocol error it provoked, usually), not as a timeout.
-    fn wait_for_ack(&mut self, client: usize) -> Ack {
-        let deadline = Instant::now() + Duration::from_secs(10);
-        loop {
-            match self.clients[client].acks.try_recv() {
-                Ok(value) => return value,
-                Err(TryRecvError::Disconnected) => {
-                    let outcome = self.clients[client]
-                        .thread
-                        .take()
-                        .map(|handle| handle.join().expect("the client thread"));
-                    panic!("client {client} stopped while waiting for a step: {outcome:?}");
-                }
-                Err(TryRecvError::Empty) => {}
-            }
-            assert!(
-                Instant::now() < deadline,
-                "timed out waiting for client {client}; the compositor stopped serving"
-            );
-            self.event_loop
-                .dispatch(Some(Duration::from_millis(5)), &mut self.state)
-                .expect("a compositor dispatch");
-        }
-    }
-
-    /// Sends a step the client is expected *not* to survive -- a request the
-    /// compositor answers with a protocol error -- and dispatches until the
-    /// client thread has gone, handing back its own error.
-    fn run_expecting_disconnect(&mut self, step: Step) -> String {
-        self.clients[0]
-            .steps
-            .as_ref()
-            .expect("the step channel")
-            .send(step)
-            .expect("the client thread is still running");
-        let deadline = Instant::now() + Duration::from_secs(10);
-        loop {
-            match self.clients[0].acks.try_recv() {
-                Ok(_) => panic!("the client survived a request that should have been refused"),
-                Err(TryRecvError::Disconnected) => break,
-                Err(TryRecvError::Empty) => {}
-            }
-            assert!(
-                Instant::now() < deadline,
-                "timed out waiting for client 0 to be disconnected"
-            );
-            self.event_loop
-                .dispatch(Some(Duration::from_millis(5)), &mut self.state)
-                .expect("a compositor dispatch");
-        }
-        let error = self.clients[0]
-            .thread
-            .take()
-            .map(|handle| handle.join().expect("the client thread"))
-            .and_then(Result::err)
-            .expect("the client should have stopped with the protocol error it provoked");
-        self.settle();
-        error
-    }
-
-    /// A few dispatch cycles with nothing outstanding, so in-flight protocol
-    /// traffic in both directions has been processed.
-    fn settle(&mut self) {
-        for _ in 0..10 {
-            self.event_loop
-                .dispatch(Some(Duration::from_millis(1)), &mut self.state)
-                .expect("a compositor dispatch");
-        }
-        let _ = self.state.display_handle.flush_clients();
-    }
-
-    /// Disconnects a client and waits for the compositor to notice -- the
-    /// "the lock client died" case, as far as the compositor can tell.
-    fn disconnect(&mut self, client: usize) {
-        drop(self.clients[client].steps.take());
-        if let Some(handle) = self.clients[client].thread.take() {
-            handle
-                .join()
-                .expect("the client thread")
-                .expect("the client ran cleanly");
-        }
-        self.settle();
+        self.spawn(run_client)
     }
 
     /// What client 0 (or `client`) has been told so far.
@@ -886,58 +701,10 @@ impl Fixture {
         };
         report
     }
-
-    /// Dispatches for `duration` without asking for anything, so the frame
-    /// timer gets to run on its own -- which is the only way to test that the
-    /// compositor redraws *by itself*.
-    fn tick(&mut self, duration: Duration) {
-        let deadline = Instant::now() + duration;
-        while Instant::now() < deadline {
-            self.event_loop
-                .dispatch(Some(Duration::from_millis(5)), &mut self.state)
-                .expect("a compositor dispatch");
-        }
-    }
-
-    /// Renders a frame and hands back its raw BGRA pixels.
-    fn render(&mut self) -> Vec<u8> {
-        self.state.request_render();
-        self.state.render();
-        self.pixels()
-    }
-
-    /// Reads the framebuffer back without rendering first -- what a
-    /// screenshot would see of whatever is already there.
-    fn pixels(&mut self) -> Vec<u8> {
-        let backend = self.state.backend.as_mut().expect("a backend");
-        let Backend {
-            renderer, image, ..
-        } = backend;
-        let framebuffer = renderer.bind(image).expect("a framebuffer");
-        let region = Rectangle::from_size((CANVAS, CANVAS).into());
-        let mapping = renderer
-            .copy_framebuffer(&framebuffer, region, Fourcc::Argb8888)
-            .expect("a framebuffer readback");
-        renderer
-            .map_texture(&mapping)
-            .expect("mapped pixels")
-            .to_vec()
-    }
-}
-
-impl Drop for Fixture {
-    fn drop(&mut self) {
-        // Without this a panicking test leaves client threads blocked on
-        // `steps.recv()` forever, and the test binary never exits.
-        for client in &mut self.clients {
-            drop(client.steps.take());
-        }
-    }
 }
 
 fn pixel(pixels: &[u8], x: i32, y: i32) -> [u8; 4] {
-    let index = ((y * CANVAS + x) * 4) as usize;
-    pixels[index..index + 4].try_into().expect("a BGRA pixel")
+    test_support::pixel(pixels, CANVAS, x, y)
 }
 
 /// Asserts every pixel of the frame is `color` -- the assertion that actually
@@ -953,11 +720,6 @@ fn assert_whole_screen_is(pixels: &[u8], color: [u8; 4], what: &str) {
             );
         }
     }
-}
-
-/// Whether any pixel of the frame is `color`.
-fn contains(pixels: &[u8], color: [u8; 4]) -> bool {
-    (0..CANVAS).any(|y| (0..CANVAS).any(|x| pixel(pixels, x, y) == color))
 }
 
 // -- what is on screen ---------------------------------------------------
@@ -1491,12 +1253,7 @@ fn the_locked_event_waits_for_a_blanked_frame() {
     fixture.run(Step::MapWindow);
     let backend = fixture.state.backend.take().expect("a backend");
 
-    fixture.clients[0]
-        .steps
-        .as_ref()
-        .expect("the step channel")
-        .send(Step::Lock)
-        .expect("the client thread is still running");
+    fixture.send_step(0, Step::Lock);
     // The client's own `Step::Lock` gives up after 100 round trips without
     // either event, which is what this asserts: it cannot be confirmed.
     let deadline = Instant::now() + Duration::from_secs(5);
@@ -1899,12 +1656,7 @@ fn a_replacement_locker_is_accepted_after_one_died_unconfirmed() {
     let mut fixture = Fixture::new();
     // No render between the lock and the disconnect, so the first lock is
     // still pending confirmation when its client goes away.
-    fixture.clients[0]
-        .steps
-        .as_ref()
-        .expect("the step channel")
-        .send(Step::Lock)
-        .expect("the client thread is still running");
+    fixture.send_step(0, Step::Lock);
     let _ = fixture.wait_for_ack(0);
     fixture.disconnect(0);
     assert!(fixture.state.session_lock.is_locked());
@@ -2199,12 +1951,7 @@ fn a_takeover_waits_for_the_blanked_frame_the_replaced_lock_never_drew() {
     // and it must not answer yet, so it is sent by hand -- the same pattern
     // `the_locked_event_waits_for_a_blanked_frame` uses.
     let second = fixture.connect();
-    fixture.clients[second]
-        .steps
-        .as_ref()
-        .expect("the step channel")
-        .send(Step::Lock)
-        .expect("the client thread is still running");
+    fixture.send_step(second, Step::Lock);
     let deadline = Instant::now() + Duration::from_millis(200);
     while Instant::now() < deadline {
         fixture
