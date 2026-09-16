@@ -40,14 +40,12 @@ acks/attaches/maps, its pixels reach the framebuffer, exactly one
 configure arrives across further commits, its frame callback completes,
 and destroying it leaves the compositor serving with its pixels gone.
 
-**What is still open, filed as `xdg-popup-input.md`:** popup *input*.
-Pointer hit-testing stops at the window tree (`WindowSurfaceType::ALL`
-finds popups for input, but keyboard focus never moves onto a popup and
-`XdgShellHandler::grab` is still a no-op) — a menu shows but cannot be
-clicked with the keyboard yet. Layer-surface-parented popups remain
-untracked (`WlrLayerShellHandler::new_popup` is still not implemented):
-they now *would* configure if tracked, but a bar's tooltips and menus
-still need that half.
+**Popup *input* is now resolved too**, see
+`docs/backlog/resolved/xdg-popup-input-resolved.md`: `xdg_popup.grab` routes
+keyboard and pointer into the popup tree, and layer-surface-parented popups
+turned out to already track and configure correctly once probed (no change
+needed there — implementing the handler the way this entry expected would
+have double-tracked them).
 
 Original entry, left as written:
 

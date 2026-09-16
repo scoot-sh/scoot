@@ -338,8 +338,12 @@ popup grabs landed — take the keyboard.
      opened over a menu is typeable, and the menu is dismissed rather than
      left on screen holding input it can no longer use.
   3. **The menu wins over everything else**: over the focused window, and
-     over a layer surface that got the keyboard from a click — so a bar's own
-     dropdown is not dismissed by the bar that opened it.
+     over a layer surface that got the keyboard from a click — so an
+     `on_demand` bar's own dropdown is not dismissed by the bar that opened
+     it. An `exclusive` bar's own dropdown is the one case this doesn't hold
+     for yet: rule 2 above dismisses it too, even though it is the very
+     surface that opened it. Filed as
+     `docs/backlog/protocols/popup-grab-exclusive-self-dismiss.md`.
 
   Losing is always spelled `popup_done` (the protocol lets a compositor
   dismiss a popup at any time), never "leave it up but take its input away".
@@ -351,6 +355,15 @@ popup grabs landed — take the keyboard.
   is an ordinary `xdg_popup` too, and handing one the keyboard would take it
   away from the window you are typing into. Menus and combo boxes that want
   keys take a grab; that is what the request is for.
+- **The grab's serial is not checked against a real interaction, yet.**
+  Unlike `xdg-activation-v1`'s token (see Focus handoff below), any same-uid
+  client can map a popup and grab the keyboard with any serial it names —
+  there is no proof-of-interaction gate here today. The other bounds still
+  apply (locking or an exclusive layer surface dismisses the grab, any click
+  outside dismisses it, keybindings still fire), so this is narrower than it
+  sounds, but a client that was never focused can still take the keyboard on
+  its own say-so. Filed as
+  `docs/backlog/protocols/popup-grab-serial-validation.md`.
 
 What doesn't, yet:
 

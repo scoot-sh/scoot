@@ -172,10 +172,12 @@
 //! [`State::lock_surface_destroyed`]). [`SessionLockHandler::unlock`] is the
 //! single deliberate exception, documented there.
 //!
-//! No keyboard grab is dropped because nothing in this compositor installs
-//! one; if one is ever added, [`State::drop_pointer_grab`] is where it has to
-//! be dropped too, or the same asymmetry becomes a keystroke leak instead of
-//! a pointer one.
+//! A keyboard grab exists today -- an `xdg_popup.grab` (see `popup.rs`) --
+//! and [`State::drop_input_grabs`] is where it, and any future non-pointer
+//! grab, has to be dropped too: `PopupKeyboardGrab` ignores `set_focus`
+//! while it is live, so leaving one installed across a lock would route the
+//! user's password into whatever had a menu open, the keystroke twin of the
+//! pointer leak above.
 
 use std::collections::HashMap;
 use std::time::Duration;
@@ -784,7 +786,6 @@ impl State {
     ///   underneath cannot restore keyboard focus to the popup's root on its
     ///   way out (`PopupPointerGrab::unset` does exactly that while the
     ///   keyboard is still grabbed).
-    ///
     ///
     /// - **A drag-and-drop**, installed by `handlers.rs`'s
     ///   `WaylandDndGrabHandler` at a client's own request. It ends only when

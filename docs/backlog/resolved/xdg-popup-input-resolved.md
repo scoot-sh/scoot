@@ -147,8 +147,9 @@ the keyboard-first order and confirmed fixed, both with a real client
 
 ### Tests
 
-12 new, in `crates/flexwm/src/compositor/layer_shell/tests/popup.rs` — that
-file was already the largest test file in the tree, so `tests.rs` became
+13 new (14 total in the file, one moved here from `tests.rs`), in
+`crates/flexwm/src/compositor/layer_shell/tests/popup.rs` — that file was
+already the largest test file in the tree, so `tests.rs` became
 `tests/mod.rs` (harness) plus `tests/popup.rs`, without pre-empting the
 broader extraction `testing/large-test-file-organization.md` plans.
 
@@ -156,15 +157,22 @@ Grab and focus: the keyboard moves onto a grabbing popup and typed keys
 really arrive there; it goes back to the window on destroy; a click over a
 popup reaches the popup (the pre-existing hit test, pinned); a click outside
 dismisses and a click inside does not; submenus nest and unwind; keybindings
-still fire. Precedence: an `exclusive` layer surface pre-empts an open grab
-*and* refuses a new one; a click-focused `on_demand` surface does neither; a
-`none` bar does not keep a keyboard when its own menu closes; locking takes
-the keyboard off a menu and refuses a grab asked for while locked.
-Teardown: a client that dies mid-grab leaves nothing behind.
+still fire while a popup grabs the keyboard. Precedence: an `exclusive`
+layer surface pre-empts an open grab *and* refuses a new one; a
+click-focused `on_demand` surface does neither; a `none` bar does not keep a
+keyboard when its own menu closes; locking takes the keyboard off a menu and
+refuses a grab asked for while locked. Teardown: a client that dies mid-grab
+leaves nothing behind; a nested popup grab unwinds to its parent rather than
+losing the parent's own grab.
 
-**Negative control**: with `XdgShellHandler::grab` stubbed back to a no-op,
-9 of the 12 fail and exactly the 3 pre-existing behaviours (mapping, drawing,
-the pointer hit test) pass.
+**Negative control**, run against the first grab commit (`8ac930a`, 12 tests
+in the file at that point) before the later fixes landed: with
+`XdgShellHandler::grab` stubbed back to a no-op, 9 of the 12 failed and
+exactly the 3 pre-existing behaviours (mapping, drawing, the pointer hit
+test) passed. Not re-run at the current tree; the two tests added since
+(`keybindings_still_fire_while_a_popup_grabs_the_keyboard`,
+`a_nested_popup_grab_unwinds_to_its_parent`) are both grab-dependent, so
+re-running could only raise the failing count, not lower it.
 
 ### Not done, and deliberately
 
