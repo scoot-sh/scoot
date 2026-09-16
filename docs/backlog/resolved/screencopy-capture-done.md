@@ -174,4 +174,179 @@ landed in a client's buffer, which a compositor-side assertion cannot make.
 
 ## Verification
 
-See the evidence block appended below.
+Everything below was captured against commit **`74557ec`**
+(`ext-image-copy-capture-v1: the screen capture shell clients and grim read`)
+on the dev VM (`ssh -p 2222 dev@localhost`, NixOS, QEMU), building through the
+9p mount at `/mnt/flexwm` with `CARGO_TARGET_DIR=/var/cargo-target`. The
+binaries under test were copied out of the shared target dir immediately after
+each build (`~/screencopy-evidence/flexwm-74557ec`,
+`~/screencopy-evidence/flexwm-main-37c44f1`) and every live run used those
+copies, not `/var/cargo-target/debug/flexwm`.
+
+### Build, test, lint
+
+```
+$ cargo clean -p flexwm && cargo build -p flexwm
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 33.15s
+
+$ cargo fmt --check -p flexwm
+FMT_CLEAN
+
+$ cargo clippy -p flexwm --all-targets -- -D warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 13.56s
+
+$ cargo test -p flexwm
+test result: ok. 643 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 18.67s
+
+$ cargo nextest run --workspace
+     Summary [  26.418s] 737 tests run: 737 passed, 1 skipped
+
+$ bash scripts/smoke-test.sh     # default --headless
+rc=0, 12 `ok:` assertions, no failures
+```
+
+The eleven screencopy tests were also run in isolation eight times in a row
+(`cargo test -p flexwm --bin flexwm screencopy`), all `11 passed`, after a
+flake in `a_later_capture_waits_for_the_screen_to_change` was traced to the
+*test client* sharing one `xdg_surface.configure` serial slot between two
+windows (mapping the second re-configures the first, so the second acked a
+serial that was not its own →
+`xdg_wm_base.wrong_configure_serial`). Fixed by keying the serial per surface,
+which is what the other real-client suites here already do.
+
+### `grim` end to end
+
+`grim` 1.5.0 from the VM's nix store — checked first that it speaks this
+protocol and not the older one:
+
+```
+$ strings $(readlink -f /run/current-system/sw/bin/grim) | grep -E 'ext_image_copy_capture|ext_image_capture_source|zwlr_screencopy'
+ext_image_capture_source_v1
+ext_image_copy_capture_frame_v1
+ext_image_copy_capture_manager_v1
+ext_image_copy_capture_session_v1
+...            (no zwlr_screencopy_* symbol at all)
+```
+
+Both globals are advertised:
+
+```
+$ wayland-info | grep -iE 'image_c(opy|apture)'
+interface: 'ext_output_image_capture_source_manager_v1', version:  1, name:  9
+interface: 'ext_image_copy_capture_manager_v1',          version:  1, name: 10
+```
+
+Against `flexwm --headless --width 800 --height 600 -- foot`, with one real
+`foot` window mapped (`flexwm msg windows` reports
+`id 1, app_id foot, rect 12,12 382x576, focused true`):
+
+```
+$ for i in 1 2 3; do time grim shot$i.png; done
+grim run 1: 0.05 s
+grim run 2: 0.04 s
+grim run 3: 0.04 s
+
+$ file shot1.png
+shot1.png: PNG image data, 800 x 600, 8-bit/color RGB, non-interlaced
+
+$ sha256sum shot1.png shot2.png shot3.png
+4699a0802ee70d15d9eea3bf78c38df6acc52c71d232170558eaad4f3eefa5cc  shot1.png
+4699a0802ee70d15d9eea3bf78c38df6acc52c71d232170558eaad4f3eefa5cc  shot2.png
+4699a0802ee70d15d9eea3bf78c38df6acc52c71d232170558eaad4f3eefa5cc  shot3.png
+```
+
+`8-bit/color RGB` with no alpha channel is `grim` taking the `Xrgb8888` this
+compositor offers first, which is the point of that ordering. The three
+captures of a static screen being byte-identical is the copy being the
+framebuffer rather than anything reconstructed.
+
+Artifact pulled to the Mac and viewed: the capture shows the `foot` terminal
+with its prompt, flexwm's blue focus ring around it, and the configured
+background — i.e. exactly what `flexwm msg screenshot` shows.
+(`dev@flexwm-vm:~/screencopy-evidence/grim.png`, 7426 bytes, sha256 as above.)
+
+### The session-lock guarantee, against a real locker
+
+`swaylock` 1.8.6 (`nix shell nixpkgs#swaylock`, ephemeral) locking the same
+session with `foot` still mapped, then `grim` capturing through the lock:
+
+```
+$ grim unlocked-grim.png                       # desktop, foot visible
+$ swaylock -c 2060c0 -f &                      # real ext-session-lock-v1 client
+   INFO flexwm::compositor::session_lock: locking the session
+$ grim lock-grim.png
+
+$ ls -l unlocked-grim.png lock-grim.png
+-rw-r--r-- 1 dev users 7426 unlocked-grim.png
+-rw-r--r-- 1 dev users 2791 lock-grim.png
+
+$ sha256sum unlocked-grim.png lock-grim.png
+4699a0802ee70d15d9eea3bf78c38df6acc52c71d232170558eaad4f3eefa5cc  unlocked-grim.png
+10ba935a1d2561a54116e5666bd71d2edaae9746df65ec60e431d16eb5117a0a  lock-grim.png
+```
+
+`lock-grim.png` pulled to the Mac and viewed: **a solid `#2060c0` field, the
+exact colour passed to `swaylock -c`, with no trace of the `foot` window, the
+focus ring or the desktop background.** `flexwm msg windows` still listed the
+window at that moment (the window did not go away; it simply is not in the
+frame), which is what makes this a capture-path result rather than a
+window-list one.
+
+### Benchmark: what the per-frame path costs
+
+Method: `flexwm --headless --width 1920 --height 1080` with a client that
+forces a redraw ~20x/s (`foot -- sh -c 'while :; do date; sleep 0.05; done'`),
+6s of warm-up, then the compositor process's own `utime+stime` from
+`/proc/<pid>/stat` over a 20s window. `CLK_TCK=100`, so 2000 jiffies is one
+full core. Same workload, same VM, alternating runs; `main` is `37c44f1`, the
+commit this branch is cut from.
+
+| Scenario | Binary | jiffies / 20s | % of one core |
+| --- | --- | --- | --- |
+| Redrawing client, **nobody capturing** | main `37c44f1` | 147 | 7.35% |
+| Redrawing client, **nobody capturing** | branch `74557ec` | 149 | 7.45% |
+| ...repeat | main `37c44f1` | 148 | 7.40% |
+| ...repeat | branch `74557ec` | 150 | 7.50% |
+| No clients at all | main `37c44f1` | 0 | 0% |
+| No clients at all | branch `74557ec` | 0 | 0% |
+
+**+2 jiffies over 20s — 0.1% of one core, at the noise floor.** That is the
+whole per-frame cost added to a compositor nobody is capturing: one
+`Option::is_some` and one `wrapping_add` in `render()`, and one `Vec::iter`
+over an empty list in `service_captures`. An idle compositor still uses
+exactly zero, i.e. a parked capture does not keep the frame timer alive (the
+`frame()` handler calls `ensure_ticking`, deliberately not `request_render`).
+
+What a capture actually costs, same setup, loops run for 20s:
+
+| Load | iterations in 20s | jiffies | % of one core |
+| --- | --- | --- | --- |
+| `grim -t ppm /dev/null` in a tight loop | 229 | 1230 | 61.5% |
+| `flexwm msg screenshot` in a tight loop | 10 | 1979 | 99.0% |
+
+229 whole `grim` runs — each one a fresh connection, registry round trip,
+source, session, constraint batch, frame and 1920x1080 copy — in 20s, at 61.5%
+of one core: **~54ms of compositor CPU per complete `grim` invocation in a
+debug build.** The `flexwm msg screenshot` row is not a like-for-like
+comparison and is included only as the existing reference point: it is
+dominated by PNG encoding on the event-loop thread (already filed as
+`docs/backlog/ipc/screenshot-encode-on-event-loop.md`), which this path does
+not do — a screencopy client is handed raw pixels.
+
+Not measured live, because no CLI client holds a session across captures:
+the "a later capture waits for the screen to change" throttle. `grim` opens a
+new session per run, so every one of the 229 above is a session's *first*
+frame and is served unconditionally. The behaviour is covered at the wire
+level by `a_later_capture_waits_for_the_screen_to_change`, which asserts a
+repeat capture of a static screen is still unanswered after 300ms (~18 frame
+ticks) and is served the moment a window maps.
+
+### VM state
+
+Both VMs were up before this work and neither was started, stopped or
+restarted by it (`nc -z localhost 31022`, `nc -z localhost 2222` both
+succeeded first). No `--tty` seat was claimed at any point — every live run
+here is `--headless`, so nothing here could collide with another agent's
+hardware work. Disk before: 78% used / 3.3G free; after cleanup: 76% / 3.6G.
+Every `flexwm` and `swaylock` process started here was killed and confirmed
+gone (`pgrep -fa` empty) at the end of each run.
