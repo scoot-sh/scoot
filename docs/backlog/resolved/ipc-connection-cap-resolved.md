@@ -60,11 +60,20 @@ half-close case is not fixed by registering for reads — the reason item 10
 rejected that stands — so it is fixed on a deadline instead: a calloop
 `Timer` composed into `ConnectionSource`, armed exactly while the connection
 is registered for writability (i.e. exactly while it has a queue its peer has
-not taken), comparing what is still queued against what was queued a window
-ago. No progress in a window means the peer is not reading, and the
-connection is dropped. It is a bound on *progress*, not on total time —
-exactly how `PendingIdle::push` already gives up on a `wait-idle` answer — so
-a client slowly draining a multi-megabyte screenshot is never given up on.
+not taken), comparing how many bytes have left the queue against how many had
+left it a window ago. Not one byte in a whole window means the peer is not
+reading, and the connection is dropped. It is a bound on *progress*, not on
+total time — exactly how `PendingIdle::push` already gives up on a
+`wait-idle` answer — so a client slowly draining a multi-megabyte screenshot
+is never given up on.
+
+Counted in bytes that *left* rather than in bytes still queued, which is not
+the same test and was the first version of this (caught bug-bashing the
+diff): a queue the same size a window later may have drained and refilled in
+between, which is what a client pipelining a batch and reading the answers as
+it goes looks like from the compositor's side. Watching the queue's depth
+would have dropped that connection mid-batch for reading slower than it was
+being answered.
 An idle connection (nothing queued) is not armed at all and costs no wakeups:
 measured 0 jiffies over 10s with a live idle client, before and after.
 
@@ -81,8 +90,8 @@ table handing slots out again once they closed.
 
 **Benchmarked** on the round-trip path it touches (item 9/10's method:
 release, 50,000 `version` round-trips over one connection, balanced run
-order, 6 reps a side). Medians **130.33us/73 jiffies after versus
-130.88us/74.5 before** — no measurable difference, which is what the shape
+order, 6 reps a side). Medians **130.10us/72.5 jiffies after versus
+130.36us/72.5 before** — no measurable difference, which is what the shape
 predicts: a connection with nothing queued adds one `Timer::process_events`
-call per wakeup against an unregistered timer, and the accept path adds one
-`Cell` increment.
+call per wakeup against an unregistered timer, one `u64` add per socket
+write, and one `Cell` increment per accept.
