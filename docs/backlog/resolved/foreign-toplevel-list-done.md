@@ -111,7 +111,7 @@ by `the_window_list_stays_live_while_the_session_is_locked`.
 
 ## Evidence
 
-Compositor code as of **`c28a1ed`** (everything after it is documentation).
+Compositor code as of **`da38591`** (everything after it is documentation).
 Dev VM (`ssh -p 2222 dev@localhost`), debug build, `/mnt/flexwm`.
 
 ```
@@ -152,7 +152,7 @@ over IPC, retitled by its own shell, then closed:
 registry: ext_foreign_toplevel_list_v1 version 1
 -- listening for 16s --
 [4278190080] toplevel
-[4278190080] identifier=7f75c8d9-1
+[4278190080] identifier=ce5c1f95-1
 [4278190080] title=""
 [4278190080] app_id=""
 [4278190080] done
@@ -160,7 +160,7 @@ registry: ext_foreign_toplevel_list_v1 version 1
 [4278190080] done
 [4278190080] title="foot"
 [4278190080] done
-[4278190080] title="dev@flexwm-vm: /mnt/flexwm"
+[4278190080] title="dev@flexwm-vm: ~"
 [4278190080] done
 [4278190080] closed
 ```
@@ -175,16 +175,16 @@ existed, one after both did), closing the focused one:
 --- ids flexwm msg windows reports ---
 [{"id":1,"app_id":"foot","title":"dev@flexwm-vm: ~"},{"id":2,"app_id":"foot","title":"dev@flexwm-vm: ~"}]
 === the client bound BEFORE any window existed saw ===
-[4278190080] toplevel / identifier=ac459c5f-1 / title="" / app_id="" / done
+[4278190080] toplevel / identifier=4e08a545-1 / title="" / app_id="" / done
   ... app_id="foot" done, title="foot" done
-[4278190081] toplevel / identifier=ac459c5f-2 / title="" / app_id="" / done
+[4278190081] toplevel / identifier=4e08a545-2 / title="" / app_id="" / done
   ... app_id="foot" done, title="foot" done
 [4278190080] title="dev@flexwm-vm: ~" done
 [4278190081] title="dev@flexwm-vm: ~" done
 [4278190081] closed
 === the client bound AFTER both windows existed saw ===
-[4278190080] toplevel / identifier=ac459c5f-1 / title="dev@flexwm-vm: ~" / app_id="foot" / done
-[4278190081] toplevel / identifier=ac459c5f-2 / title="dev@flexwm-vm: ~" / app_id="foot" / done
+[4278190080] toplevel / identifier=4e08a545-1 / title="dev@flexwm-vm: ~" / app_id="foot" / done
+[4278190081] toplevel / identifier=4e08a545-2 / title="dev@flexwm-vm: ~" / app_id="foot" / done
 [4278190081] closed
 ```
 
@@ -212,7 +212,7 @@ registry plus mesa's three) and `grep -c "bind(.*foreign"` is **0** across
 the whole 223-line log. See `protocols/wlr-foreign-toplevel-management.md`.
 
 The three live scenarios and the quickshell probe were all re-run at
-`c28a1ed` after the bug-bash commit, so every transcript here is from the
+`da38591`, the final code commit, so every transcript here is from the
 same tree as the test numbers above. The scripts are on the dev VM
 (`/var/tmp/live-probe.sh`, `/var/tmp/live-probe2.sh`, `/var/tmp/qs-probe.sh`,
 with the probe crate at `/var/tmp/ftl-probe`), kept so this can be re-run
