@@ -88,15 +88,19 @@ list behind that.
 - Log evidence: none needed beyond `wayland-info` (global absent) plus the
   launcher screenshots showing Applications/Settings only, no Windows
   section.
-- Rough size: M. Half-resolved 2026-09-16: the `ext-` successor exists and
-  is implemented
-  (`docs/backlog/resolved/foreign-toplevel-list-done.md`), which is what
-  the standing rule asked for — but it is not what Quickshell binds.
-  Measured against quickshell 0.3.1 (this probe's own build): flexwm offers
-  `ext_foreign_toplevel_list_v1` and quickshell never binds it, so a
-  minimal `ToplevelManager` reports `count = 0` with a real window open.
-  This gap needs
-  `docs/backlog/protocols/wlr-foreign-toplevel-management.md`.
+- Rough size: M. **RESOLVED 2026-09-16, in two halves.** The `ext-`
+  successor exists and is implemented
+  (`docs/backlog/resolved/foreign-toplevel-list-done.md`), which is what the
+  standing rule asked for — but it is not what Quickshell binds. Measured
+  against quickshell 0.3.1 (this probe's own build): flexwm offered
+  `ext_foreign_toplevel_list_v1` and quickshell never bound it, so a minimal
+  `ToplevelManager` reported `count = 0` with a real window open. The wlr
+  protocol then landed alongside it
+  (`docs/backlog/resolved/wlr-foreign-toplevel-management-done.md`, PR #50)
+  and the same probe now reports the window, its title and its app id; a
+  click on a real Quickshell `PanelWindow` focuses the named window, and
+  `close` closes it. `ProcessListModal`'s minimise/maximise actions stay
+  inert — flexwm's core has no concept of either.
 
 ### 3. No `ext-idle-notify-v1` and no `idle-inhibit`
 
@@ -225,10 +229,9 @@ rendered; these only limit live data, not protocol conclusions.
    the shell survives.
 3. **Gap 3 (idle)** — already roadmap-next; unlocks auto-lock, pairing with
    the now-proven session lock.
-4. **Gap 2 (foreign-toplevel)** — the `ext-` half landed 2026-09-16 and
-   does *not* unlock this: quickshell binds the wlr protocol, measured.
-   Window lists wait on
-   `protocols/wlr-foreign-toplevel-management.md`.
+4. **Gap 2 (foreign-toplevel)** — DONE 2026-09-16, both halves. The `ext-`
+   one alone did *not* unlock this (quickshell binds the wlr protocol,
+   measured); `resolved/wlr-foreign-toplevel-management-done.md` did.
 5. **Gap 4 (output-management)** — display settings.
 6. **Gap 6 (screencopy)** — thumbnails/overview previews.
 7. **Gap 7 (DMS recognition)** — upstream issue; raises the ceiling from

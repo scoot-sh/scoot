@@ -90,18 +90,20 @@ by `the_window_list_stays_live_while_the_session_is_locked`.
   `ext_foreign_toplevel_list_v1` by flexwm and **never binds it** — its
   `ToplevelManager` is a `wlr-foreign-toplevel-management-unstable-v1`
   client. With one real `foot` window open it reports `count = 0`. Filed
-  with the full measurement as
-  `protocols/wlr-foreign-toplevel-management.md`, including why that is not
-  a small follow-up (no Smithay support, and it is a *control* protocol
-  whose minimize/maximize/fullscreen states flexwm's core has no concept
-  of).
+  with the full measurement as its own entry, and **resolved the same day**
+  by PR #50 (`resolved/wlr-foreign-toplevel-management-done.md`): flexwm now
+  speaks the wlr protocol too, from the same lifecycle events as this
+  module, and the same probe reports the window. That entry also records why
+  it was not a small follow-up (no Smithay support, and it is a *control*
+  protocol whose minimize/maximize/fullscreen states flexwm's core still has
+  no concept of — those requests are accepted and ignored).
 
   This does not undo the choice of protocol — `CLAUDE.md`'s rule points at
   the `ext-` successor, the pinned Smithay rev implements only that, and it
   is what a standards-following client gets — but it does mean this item
-  closes the *standards* gap rather than the two shells' gap, and the
+  closed the *standards* gap rather than the two shells' gap, and the
   original entry's motivation ("a taskbar, an alt-tab switcher applet")
-  is only half-served until the wlr entry is picked up.
+  was only half-served until the wlr entry landed.
 - **No cap on how many times one client may bind the global.** Each bind
   creates one handle object per window, so a client can multiply its own
   object count. The same unbounded-binds shape as
@@ -209,7 +211,7 @@ DEBUG qml: QS: initial count = 0
 `WAYLAND_DEBUG=1` for the same run: `wl_registry#2.global(7,
 "ext_foreign_toplevel_list_v1", 1)` appears 5 times (quickshell's main
 registry plus mesa's three) and `grep -c "bind(.*foreign"` is **0** across
-the whole 223-line log. See `protocols/wlr-foreign-toplevel-management.md`.
+the whole 223-line log. See `resolved/wlr-foreign-toplevel-management-done.md`.
 
 The three live scenarios and the quickshell probe were all re-run at
 `da38591`, the final code commit, so every transcript here is from the

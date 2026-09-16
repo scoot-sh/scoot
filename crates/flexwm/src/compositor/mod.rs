@@ -11,6 +11,7 @@ mod decorations;
 mod dispatch;
 mod ext_workspace;
 mod foreign_toplevel;
+mod foreign_toplevel_management;
 mod gamma_control;
 mod handlers;
 pub(crate) mod headless;

@@ -46,6 +46,7 @@ use super::cursor::Cursor;
 use super::decorations::{Appearance, Decorations};
 use super::ext_workspace::ExtWorkspaceState;
 use super::foreign_toplevel::ForeignToplevels;
+use super::foreign_toplevel_management::ForeignToplevelManagement;
 use super::gamma_control::GammaControlState;
 use super::headless::Backend;
 use super::idle;
@@ -242,6 +243,15 @@ pub struct State {
     /// closing and retitling -- see `foreign_toplevel.rs`, which owns both
     /// the protocol objects and the one handle per window behind them.
     pub foreign_toplevels: ForeignToplevels,
+    /// `zwlr_foreign_toplevel_manager_v1` (version 3): the *older* window-list
+    /// protocol, published alongside the `ext-` one above rather than instead
+    /// of it -- the clients that exist today (every Quickshell-based shell)
+    /// bind this one and ignore that one. Unlike the `ext-` list this half has
+    /// a control side: `activate` and `close` are answered, and a window's
+    /// `activated` bit follows [`Self::focus`]. Read on every window opening,
+    /// closing, retitling and focus change -- see
+    /// `foreign_toplevel_management.rs`.
+    pub foreign_toplevel_management: ForeignToplevelManagement,
     /// `ext_session_lock_manager_v1`: the compositor-enforced screen lock.
     /// Unlike the two `#[allow(dead_code)]` states below, this is read on
     /// every render, every focus refresh and every pointer hit test -- see
@@ -440,6 +450,7 @@ impl State {
         let layer_shell_state = WlrLayerShellState::new::<Self>(&dh);
         let ext_workspace = ExtWorkspaceState::new(&dh);
         let foreign_toplevels = ForeignToplevels::new(&dh);
+        let foreign_toplevel_management = ForeignToplevelManagement::new(&dh);
         let session_lock = SessionLock::new(&dh);
         let fractional_scale_manager_state = FractionalScaleManagerState::new::<Self>(&dh);
         let cursor_shape_manager_state = CursorShapeManagerState::new::<Self>(&dh);
@@ -515,6 +526,7 @@ impl State {
             layer_shell_state,
             ext_workspace,
             foreign_toplevels,
+            foreign_toplevel_management,
             session_lock,
             fractional_scale_manager_state,
             cursor_shape_manager_state,

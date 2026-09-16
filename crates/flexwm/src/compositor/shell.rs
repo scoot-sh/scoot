@@ -20,10 +20,15 @@ impl State {
         self.windows.insert(id, Window::new_wayland_window(surface));
         let info = self.info_of(id);
         // Before the core hears about it, though nothing depends on the order:
-        // this is the other list of windows flexwm publishes (see
-        // `foreign_toplevel.rs`), and it covers the same lifetime as this one
-        // -- from here to `remove_window`, not from first buffer to last.
+        // these are the other two lists of windows flexwm publishes (see
+        // `foreign_toplevel.rs` for `ext-foreign-toplevel-list-v1` and
+        // `foreign_toplevel_management.rs` for the wlr protocol every
+        // Quickshell-based shell actually binds), and both cover the same
+        // lifetime as this one -- from here to `remove_window`, not from first
+        // buffer to last. Announced together so the two can never disagree
+        // about when a window came into existence.
         self.open_foreign_toplevel(id, &info);
+        self.open_wlr_toplevel(id, &info);
         let output = self.world.outputs().first().map(|(id, _)| *id);
         self.world.handle_event(Event::WindowOpened {
             id,
@@ -38,9 +43,12 @@ impl State {
         if let Some(window) = self.windows.remove(&id) {
             self.space.unmap_elem(&window);
         }
-        // Paired with `add_window`'s announcement: this sends `closed` to
-        // every client watching the list, so a taskbar drops the entry.
+        // Paired with `add_window`'s announcements: these send `closed` to
+        // every client watching either list, so a taskbar drops the entry.
+        // Before the focus is cleared below, so nothing tries to publish an
+        // activation change for a window that has just been closed.
         self.close_foreign_toplevel(id);
+        self.close_wlr_toplevel(id);
         self.requested.remove(&id);
         if self.focus == Some(id) {
             self.focus = None;
@@ -59,6 +67,7 @@ impl State {
         let info = self.info_of(id);
         // Before `info` moves into the event below.
         self.publish_foreign_toplevel(id, &info);
+        self.publish_wlr_toplevel(id, &info);
         self.world.handle_event(Event::WindowChanged { id, info });
         self.apply();
     }
@@ -164,6 +173,17 @@ impl State {
                     toplevel.send_pending_configure();
                 }
             }
+            // The third reader of the same `focus`, alongside `set_activated`
+            // above and the focus ring the render path draws from
+            // `State::focus`: `wlr-foreign-toplevel-management-v1`'s
+            // `activated` state bit (see
+            // `foreign_toplevel_management.rs`). Deliberately re-derived from
+            // `self.focus` there rather than handed the two ids that moved --
+            // `remove_window` writes that field directly without coming
+            // through here, so the field is the only thing always current.
+            // Sends nothing for the windows whose bit did not move, which is
+            // every window but at most two.
+            self.refresh_wlr_activation();
         }
         self.refresh_keyboard_focus();
     }

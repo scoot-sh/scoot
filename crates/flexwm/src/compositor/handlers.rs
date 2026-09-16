@@ -452,6 +452,11 @@ impl WaylandDndGrabHandler for State {
 impl OutputHandler for State {
     fn output_bound(&mut self, output: Output, wl_output: WlOutput) {
         self.workspace_group_output_bound(&output, &wl_output);
+        // The same hook for the same reason, one protocol over:
+        // `wlr-foreign-toplevel-management-v1`'s `output_enter` is owed to a
+        // client that bound this manager before it bound the screen. See
+        // `foreign_toplevel_management.rs`.
+        self.wlr_toplevel_output_bound(&output, &wl_output);
     }
 }
 
