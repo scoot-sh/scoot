@@ -29,7 +29,7 @@ for `wlr-output-management-unstable-v1`. Rough size: M–L (new protocol
 surface; read-only advertisement first, reconfiguration later if ever
 while single-output).
 
-## Resolution (2026-09-16, PR #48) — the read half only
+## Resolution (2026-09-16, PR #49) — the read half only
 
 `compositor/output_management.rs` (plus `configuration.rs` and its test
 suite) implements `zwlr_output_manager_v1` at version 4, read-only. The

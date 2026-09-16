@@ -57,7 +57,7 @@ actionable.
   enumeration one (no Smithay support; minimize/maximize/fullscreen have no
   meaning in flexwm's core yet)
 - [Output management for shell display pages](./resolved/output-management-read-only-done.md)
-  — RESOLVED 2026-09-16 (PR #48), read half only:
+  — RESOLVED 2026-09-16 (PR #49), read half only:
   `wlr-output-management-unstable-v1` (no `ext-` successor exists at the
   pinned rev, and Smithay has no helper for either, so the handler layer is
   hand-written against the generated wlr bindings the way `gamma_control.rs`

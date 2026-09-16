@@ -10,7 +10,7 @@ blocked: "multi-output support"
 
 Split out of
 [`output-management-read-only-done.md`](../resolved/output-management-read-only-done.md)
-when the read half shipped (PR #48, 2026-09-16), the same way PR #46 split
+when the read half shipped (PR #49, 2026-09-16), the same way PR #46 split
 the connection-cap item and PR #47 split the wlr foreign-toplevel one — so
 what actually shipped and what did not are two separate records, not one
 half-true one.
@@ -40,6 +40,10 @@ things a configuration asks for, none of which exist:
   (`State::resize_output`, driven by the host's configure). `--tty` picks a
   mode once at startup from the connector's preferred mode or `--mode WxH`
   and never re-modesets; `--headless` takes `--width`/`--height` once.
+  Issue #48 (`--tty`: follow DRM hotplug / host display reconfiguration
+  instead of mode-setting once) is the same missing capability arrived at
+  from the other direction — whatever lands there is what `set_mode` would
+  then drive, and it is the natural first piece of this entry.
 - **`set_position`**: meaningless with one output at `(0, 0)`. This is the
   multi-output item.
 - **`set_scale`**: `State::output_scale` is resolved once from `[output]
@@ -61,7 +65,7 @@ batching.
 
 ## What a user loses meanwhile
 
-Nothing they had before — the protocol was absent entirely until PR #48.
+Nothing they had before — the protocol was absent entirely until PR #49.
 `README.md`'s "Display information" section says the refusal is deliberate
 and points here, so "my Display page won't change the resolution" has
 somewhere to land.

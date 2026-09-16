@@ -86,7 +86,7 @@ gap jumped the queue — each item's own file records why it landed when it did.
   quickshell — and so DMS and Noctalia — binds the *wlr* protocol and
   ignores this one.
 - **[Output management, read half](docs/backlog/resolved/output-management-read-only-done.md)**
-  (PR #48, 2026-09-16) — `zwlr_output_manager_v1` (version 4), what a shell's
+  (PR #49, 2026-09-16) — `zwlr_output_manager_v1` (version 4), what a shell's
   Settings → Display page and `wlr-randr` read the screen's modes, position,
   scale and transform from. The wlr protocol rather than an `ext-` one only
   because no successor exists at the pinned rev — checked, not assumed — and
@@ -194,7 +194,7 @@ probes' recommended order:
    [`wlr-foreign-toplevel-management`](docs/backlog/protocols/wlr-foreign-toplevel-management.md),
    which is a control protocol as much as an enumeration one.
 4. [`output-management`](docs/backlog/resolved/output-management-read-only-done.md)
-   — HALF-RESOLVED 2026-09-16 (PR #48): the query half a shell's display page
+   — HALF-RESOLVED 2026-09-16 (PR #49): the query half a shell's display page
    binds is implemented (`wlr-output-management-unstable-v1` v4 — no `ext-`
    successor exists at the pinned rev, so the standing preference had nothing
    to prefer). Reconfiguration is deliberately refused and re-filed as

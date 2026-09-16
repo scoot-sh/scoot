@@ -25,7 +25,7 @@ blocked: null
     tools like `wlr-randr`/`kanshi` query and reconfigure output mode,
     position and scale. Moot while flexwm has exactly one `Output` and no
     real multi-monitor support; relevant once that lands. *Half-resolved
-    2026-09-16 (PR #48): the query half shipped — it turned out to have real
+    2026-09-16 (PR #49): the query half shipped — it turned out to have real
     clients (shell display pages) well ahead of multi-output support, and
     there is no newer successor to prefer. See
     `../resolved/output-management-read-only-done.md`. The reconfigure half
