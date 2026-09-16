@@ -34,8 +34,8 @@ quickshell simply does not take it:
 wl_registry#2.global(7, "ext_foreign_toplevel_list_v1", 1)
 ```
 
-— offered four times across its four registries (main + three mesa ones),
-bound zero times; `grep -n "bind.*foreign" /tmp/qs-wire.log` is empty. Its
+— offered five times across four registries (main twice, plus three mesa
+ones), bound zero times; `grep -n "bind.*foreign" /tmp/qs-wire.log` is empty. Its
 binary carries a complete *wlr* client instead
 (`zwlr_foreign_toplevel_manager_v1{,_listener,handle_toplevel,handle_finished}`
 and `zwlr_foreign_toplevel_handle_v1handle_state`, …); the

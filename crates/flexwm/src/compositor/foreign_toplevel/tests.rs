@@ -612,6 +612,44 @@ fn a_window_closing_leaves_the_others_alone() {
 }
 
 #[test]
+fn a_late_bind_after_closing_the_first_of_several_sees_the_right_survivors() {
+    // Regression guard for the hazard this module's own doc describes:
+    // upstream's `remove_toplevel` computes a removal index over the
+    // *upgradable* handles and removes that index from the full list, so a
+    // dead entry earlier in the list would make it remove the wrong, still-
+    // live one. Closing the *first* of several windows is exactly the shape
+    // that would expose that -- if the removal ever went wrong, a client
+    // binding afterwards would see the wrong pair of survivors (the closed
+    // window still present, or a live one missing) rather than exactly the
+    // two that are actually still open.
+    let mut fixture = Fixture::bound();
+    fixture.run(Step::MapWindow); // window 1
+    fixture.run(Step::MapWindow); // window 2
+    fixture.run(Step::MapWindow); // window 3
+    fixture.take_log();
+
+    fixture.run(Step::CloseWindow(0)); // closes window 1, the earliest entry
+    fixture.take_log();
+
+    fixture.run(Step::BindList);
+    let log = fixture.take_log();
+    let mut seen: Vec<String> = log
+        .iter()
+        .filter_map(|seen| match seen {
+            Seen::Identifier(_, identifier) => Some(identifier.clone()),
+            _ => None,
+        })
+        .collect();
+    seen.sort();
+    let mut expected = vec![fixture.identifier_of(2), fixture.identifier_of(3)];
+    expected.sort();
+    assert_eq!(
+        seen, expected,
+        "a fresh bind after closing the first window saw the wrong survivors"
+    );
+}
+
+#[test]
 fn a_reopened_window_gets_a_new_identifier() {
     // The protocol forbids reusing an identifier once a toplevel is gone.
     // flexwm's window ids only ever increase, which is what makes that hold.
