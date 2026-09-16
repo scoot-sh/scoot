@@ -162,6 +162,17 @@ impl State {
     /// it: while the session is locked, "nobody" is a correct answer and a
     /// window or a layer surface never is (see `session_lock.rs`).
     ///
+    /// An active `xdg_popup.grab` is the one thing that can override the
+    /// answer below, because Smithay's `PopupKeyboardGrab` ignores a
+    /// `set_focus` while it is live. That is intended for a window and for a
+    /// click-focused layer surface -- a menu is meant to hold the keyboard
+    /// -- and unacceptable for the two cases handled here explicitly: a lock
+    /// screen would never receive the password, and a launcher would never
+    /// receive a keystroke. Both dismiss the grab outright rather than
+    /// quietly losing to it; see `popup.rs` for the whole precedence order
+    /// and why dismissal (not just unsetting the seat grab) is the right
+    /// verb.
+    ///
     /// Safe to call as often as anything might have changed. Smithay's own
     /// `set_focus` compares against the current focus and does nothing when
     /// it matches, so a redundant call costs a serial and two locks rather
@@ -180,11 +191,18 @@ impl State {
             // gate `commit_layer_surface` reads must say so too, or a bar
             // committing while locked would re-derive focus for nothing.
             self.keyboard_on_layer = false;
+            self.dismiss_popup_grab();
             self.lock_keyboard_focus()
         } else {
+            // Owned, so the layer-map guard is already gone by the time
+            // `dismiss_popup_grab` re-enters Smithay -- see this module's
+            // guard-discipline note in `layer_shell.rs`.
             let layer = self.layer_keyboard_focus();
             self.keyboard_on_layer = layer.is_some();
-            layer.or_else(|| {
+            if layer.as_ref().is_some_and(|found| found.exclusive) {
+                self.dismiss_popup_grab();
+            }
+            layer.map(|found| found.surface).or_else(|| {
                 self.focus
                     .and_then(|id| self.windows.get(&id))
                     .and_then(Window::toplevel)

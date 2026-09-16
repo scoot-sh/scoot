@@ -53,6 +53,7 @@ use super::ipc::PendingIdle;
 use super::keybindings::Keybindings;
 use super::layer_shell;
 use super::nested::Host;
+use super::popup::ActivePopupGrab;
 use super::session_lock::SessionLock;
 use super::tty::Tty;
 
@@ -91,12 +92,22 @@ pub struct State {
     /// refresh if the client vanished without any of those
     /// (`forget_dead_clicked_layer`).
     pub clicked_layer: Option<LayerSurface>,
-    /// Whether the keyboard focus `refresh_keyboard_focus` last handed out
+    /// Whether the keyboard focus `refresh_keyboard_focus` last *derived*
     /// went to a layer surface rather than a window's toplevel.
     ///
-    /// Written *only* there, read *only* by `commit_layer_surface`'s gate,
-    /// and it means exactly that -- not "a layer surface wants the keyboard"
-    /// and not "`clicked_layer` is set". It exists so a bar with
+    /// "Derived", not "handed out", and the distinction is real since popup
+    /// grabs landed: an active `xdg_popup.grab` swallows the `set_focus`
+    /// that refresh ends in (see `popup.rs`), so the keyboard may be on a
+    /// menu while this says "layer". Its one reader is
+    /// `commit_layer_surface`'s gate, which only decides whether to
+    /// re-derive focus at all -- re-deriving once too often is a wasted
+    /// layer-map walk, never a wrong answer -- so the looser meaning is
+    /// safe, but it is the meaning, and this field must not be read as
+    /// "a layer surface currently holds the keyboard".
+    ///
+    /// Written *only* there, and it means exactly that -- not "a layer
+    /// surface wants the keyboard" and not "`clicked_layer` is set". It
+    /// exists so a bar with
     /// `keyboard_interactivity: none` (i.e. nearly every layer surface that
     /// will ever run) skips focus resolution entirely on each of its
     /// redraws, while a surface that *stops* wanting the keyboard still gets
@@ -145,6 +156,19 @@ pub struct State {
 
     pub space: Space<Window>,
     pub popups: PopupManager,
+    /// The explicit `xdg_popup.grab` currently routing input into a menu,
+    /// if one is. See `popup.rs` for the precedence this sits at.
+    ///
+    /// Kept beside the seat's own grab rather than instead of it: the seat
+    /// hands back only a `&dyn KeyboardGrab`, so "has this grab ended" and
+    /// "dismiss it" are questions only the [`PopupGrab`] itself can answer.
+    /// Holding one holds an `Arc` to the grab's root surface, so it is
+    /// dropped the moment the grab is over --
+    /// [`State::settle_popup_grab`](super::popup) reaps it from the wayland
+    /// display source and after every pointer button.
+    ///
+    /// [`PopupGrab`]: smithay::desktop::PopupGrab
+    pub popup_grab: Option<ActivePopupGrab>,
     pub output: Option<Output>,
     /// The output scale resolved from `[output] scale` (see
     /// `output_scale.rs`), fixed for the process's lifetime. Read by
@@ -460,6 +484,7 @@ impl State {
             frozen_icons: HashSet::new(),
             space: Space::default(),
             popups: PopupManager::default(),
+            popup_grab: None,
             output: None,
             output_scale: scale,
             integer_scale: super::output_scale::integer_scale(scale),
@@ -574,6 +599,14 @@ impl State {
                     // dirty, drops the surfaces it left behind or moves the
                     // focus off them. See `session_lock.rs`.
                     state.refresh_lock_state();
+                    // Same reasoning, one object down: a client destroying
+                    // the popup it was grabbing with -- which is how a menu
+                    // closes -- is seen here and nowhere else, and nothing
+                    // about a destroyed role object hands the keyboard back
+                    // or marks the screen dirty. See `popup.rs`. Costs one
+                    // `Option` check when no menu is open, which is always,
+                    // except when one is.
+                    state.settle_popup_grab();
                     // Replies (e.g. the initial registry globals) should reach
                     // the socket now rather than wait for `mod.rs`'s
                     // `post_dispatch` (which also flushes every client, once

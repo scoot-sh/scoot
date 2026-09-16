@@ -193,6 +193,13 @@ impl State {
             },
         );
         pointer.frame(self);
+        // A click outside an open menu is what dismisses it (Smithay's
+        // `PopupPointerGrab` does that inside the call above), and it leaves
+        // the keyboard on the popup's root rather than wherever flexwm's own
+        // policy would put it. Settling here rather than waiting for the
+        // client's follow-up traffic keeps the two in step within the same
+        // event. One `Option` check when no menu is open.
+        self.settle_popup_grab();
     }
 
     pub fn scroll(&mut self, dx: f64, dy: f64) {

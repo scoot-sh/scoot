@@ -82,13 +82,20 @@ shells render fully; Noctalia is the better target (generic
 `ext-workspace-v1` backend, richer IPC). Remaining gaps, in the
 probes' recommended order:
 
-1. [Popup input](docs/backlog/protocols/xdg-popup-input.md)
-   — popups map and draw since the initial-configure fix (resolved:
-   [`xdg-popup-initial-configure`](docs/backlog/resolved/xdg-popup-initial-configure-resolved.md)),
-   and pointer clicks already land on them via the window hit-test, but
-   keyboard focus never moves onto one, grabs are a no-op (so nothing
-   dismisses a menu either), and layer-surface-parented popups (a bar's
-   own menus/tooltips) are still untracked.
+1. [Popup input](docs/backlog/resolved/xdg-popup-input-resolved.md)
+   — RESOLVED 2026-09-16: `xdg_popup.grab` is honoured, so a menu takes
+   the keyboard, Escape/arrow keys/typeahead reach it, and clicking
+   outside dismisses it (the only thing that ever sends `popup_done`).
+   The focus precedence it sits at is stated once in `popup.rs`: the
+   session lock and an `exclusive` layer surface both pre-empt a grab
+   (dismissing the menu rather than silently outranking it), and the
+   grab wins over the focused window and over a click-focused
+   `on_demand` layer surface — so a launcher stays typeable and a bar's
+   own dropdown is not dismissed by the bar that opened it.
+   Layer-parented popups turned out already to work; implementing the
+   handler the entry asked for would have put two tree nodes on one
+   surface (measured). Follow-up filed:
+   [grab serial validation](docs/backlog/protocols/popup-grab-serial-validation.md).
 2. Item 2 above (idle) — RESOLVED 2026-09-15: auto-lock's trigger
    exists and is field-proven with real swayidle; what remains is the
    user's own daemon config, not compositor work.

@@ -35,10 +35,13 @@ use smithay::reexports::calloop::EventLoop;
 use smithay::reexports::wayland_server::Display;
 use smithay::utils::Rectangle;
 use wayland_client::protocol::{
-    wl_buffer, wl_callback, wl_compositor, wl_keyboard, wl_output, wl_registry, wl_seat, wl_shm,
-    wl_shm_pool, wl_surface,
+    wl_buffer, wl_callback, wl_compositor, wl_keyboard, wl_output, wl_pointer, wl_registry,
+    wl_seat, wl_shm, wl_shm_pool, wl_surface,
 };
 use wayland_client::{Connection, Dispatch, QueueHandle, WEnum};
+use wayland_protocols::ext::session_lock::v1::client::{
+    ext_session_lock_manager_v1, ext_session_lock_v1,
+};
 use wayland_protocols::xdg::shell::client::{
     xdg_popup, xdg_positioner, xdg_surface, xdg_toplevel, xdg_wm_base,
 };
@@ -51,6 +54,13 @@ use crate::compositor::headless::{self, Backend};
 use crate::compositor::keybindings::Keybindings;
 use crate::compositor::layer_shell::{ABOVE_WINDOWS, BELOW_WINDOWS};
 use crate::compositor::state::ClientState;
+
+/// Popup input -- grabs, keyboard focus and layer-parented popups. Split out
+/// rather than appended because this file was already the largest test file
+/// in the tree; the harness below stays shared (see
+/// `docs/backlog/testing/large-test-file-organization.md`, which plans the
+/// same extraction across every real-client test file).
+mod popup;
 
 /// The framebuffer these tests render into. Square and small: every
 /// assertion below is a pixel coordinate, and a small canvas keeps them
@@ -221,18 +231,54 @@ enum Step {
     },
     /// Report what the client's own `wl_keyboard` has seen so far.
     ReportKeyboard,
-    /// Create an `xdg_popup` on the first mapped toplevel and drive it
-    /// through configure, ack, attach and a frame request, reporting
-    /// whether the compositor ever configured it. See
+    /// Create an `xdg_popup` on `parent` and drive it through configure,
+    /// ack, attach and a frame request, reporting whether the compositor
+    /// ever configured it. See
     /// [`an_xdg_popup_configures_maps_draws_and_tears_down`].
-    MapPopup { color: [u8; 4] },
-    /// Destroy the popup [`Step::MapPopup`] made: `xdg_popup.destroy` +
+    MapPopup {
+        parent: PopupParent,
+        color: [u8; 4],
+        /// Whether to ask for an explicit grab (`xdg_popup.grab`) on the way
+        /// up. Sent *before* the first commit, which is the only time it is
+        /// legal: the pinned rev's `PopupSurface::pre_commit_hook` answers a
+        /// grab requested after the popup has a buffer with `invalid_grab`
+        /// and kills the client.
+        grab: bool,
+    },
+    /// Destroy the popup [`Step::MapPopup`] made last: `xdg_popup.destroy` +
     /// `xdg_surface.destroy` + `wl_surface.destroy`.
     DestroyPopup,
     /// Report how many `xdg_surface.configure` events the mapped popup has
     /// received in total -- the compositor must send exactly one (later
     /// commits stay quiet, as a non-reactive positioner requires).
     ReportPopupConfigures,
+    /// Report how many `xdg_popup.popup_done` events this client has been
+    /// sent across every popup it ever made -- which is the only evidence
+    /// that the compositor dismissed one, since nothing else on the wire
+    /// says so.
+    ReportPopupDone,
+    /// Report which of the client's surfaces its own `wl_pointer` was last
+    /// told it entered.
+    ReportPointer,
+    /// `ext_session_lock_manager_v1.lock`, and nothing else: no lock surface
+    /// is created, because what these tests ask of a lock is only that it
+    /// takes input away from everything that is not it. The session is
+    /// locked the moment the request is accepted (see `session_lock.rs`'s
+    /// note on `owner`), which is the transition under test.
+    LockSession,
+}
+
+/// What an `xdg_popup` hangs off: a window's `xdg_toplevel`, or a layer
+/// surface (`zwlr_layer_surface_v1.get_popup`, a bar's own dropdown).
+#[derive(Clone, Copy)]
+enum PopupParent {
+    /// The first toplevel [`Step::MapWindow`] mapped.
+    Window,
+    /// The `index`-th layer surface, by creation order.
+    Layer(usize),
+    /// The `index`-th still-mapped popup -- a submenu, which is the shape
+    /// that exercises nested grabs.
+    Popup(usize),
 }
 
 /// What the client reports back once a step is done.
@@ -244,6 +290,10 @@ enum Ack {
     /// [`Step::ReportPopupConfigures`]'s answer: total configures for the
     /// mapped popup.
     PopupConfigures(u32),
+    /// [`Step::ReportPopupDone`]'s answer: total `popup_done` events.
+    PopupDone(u32),
+    /// [`Step::ReportPointer`]'s answer.
+    Pointer(Option<Focused>),
     /// [`Step::ReportKeyboard`]'s answer.
     Keyboard(KeyboardReport),
     /// [`Step::ReportFrames`]'s answer: per requested callback, how many
@@ -257,6 +307,8 @@ enum Ack {
 enum Focused {
     Layer(usize),
     Window(usize),
+    /// A popup, by the order [`Step::MapPopup`] created it.
+    Popup(usize),
     /// A surface this client made but the script doesn't track (nothing
     /// produces one today; it exists so a mismatch reads as a mismatch
     /// rather than as "no focus").
@@ -294,6 +346,15 @@ struct TestClient {
     /// Created from the seat's `Capabilities` event, so the client never
     /// asks for a keyboard the compositor didn't advertise.
     keyboard: Option<wl_keyboard::WlKeyboard>,
+    /// ...and the pointer, the same way. What it was last told it entered is
+    /// the only honest answer to "did that click reach the popup": the
+    /// compositor's own hit test is what is under test, so reading it back
+    /// would prove nothing.
+    pointer: Option<wl_pointer::WlPointer>,
+    pointer_focus: Option<wl_surface::WlSurface>,
+    /// `ext_session_lock_manager_v1`, bound only so [`Step::LockSession`]
+    /// can take a lock.
+    lock_manager: Option<ext_session_lock_manager_v1::ExtSessionLockManagerV1>,
     /// The surface the outstanding `wl_keyboard.enter` named. Stored as the
     /// raw `wl_surface` because this handler has no idea which of the
     /// script's surfaces it is; [`run_client`] resolves it at report time.
@@ -301,6 +362,15 @@ struct TestClient {
     keys: u32,
     enters: u32,
     leaves: u32,
+    /// The serial of the last `wl_keyboard.key` this client was sent, which
+    /// is the serial a real toolkit passes to `xdg_popup.grab` (GTK and Qt
+    /// both track the last button/key/touch serial for exactly that).
+    /// `None` until the client has actually been sent a key.
+    last_key_serial: Option<u32>,
+    /// `xdg_popup.popup_done` events received, cumulative across every popup
+    /// -- the compositor dismissing a popup is invisible on the wire
+    /// otherwise.
+    popup_dones: u32,
     /// The size the compositor last configured each layer surface to, by
     /// creation order -- `None` until its first configure arrives.
     layer_sizes: Vec<Option<(u32, u32)>>,
@@ -357,6 +427,9 @@ impl Dispatch<wl_registry::WlRegistry, ()> for TestClient {
                 client.layer_shell = Some(registry.bind(name, version.min(4), qh, ()));
             }
             "wl_seat" => client.seat = Some(registry.bind(name, version.min(5), qh, ())),
+            "ext_session_lock_manager_v1" => {
+                client.lock_manager = Some(registry.bind(name, version.min(1), qh, ()));
+            }
             _ => {}
         }
     }
@@ -371,13 +444,37 @@ impl Dispatch<wl_seat::WlSeat, ()> for TestClient {
         _: &Connection,
         qh: &QueueHandle<Self>,
     ) {
-        if let wl_seat::Event::Capabilities {
+        let wl_seat::Event::Capabilities {
             capabilities: WEnum::Value(capabilities),
         } = event
-            && capabilities.contains(wl_seat::Capability::Keyboard)
-            && client.keyboard.is_none()
-        {
+        else {
+            return;
+        };
+        if capabilities.contains(wl_seat::Capability::Keyboard) && client.keyboard.is_none() {
             client.keyboard = Some(seat.get_keyboard(qh, ()));
+        }
+        if capabilities.contains(wl_seat::Capability::Pointer) && client.pointer.is_none() {
+            client.pointer = Some(seat.get_pointer(qh, ()));
+        }
+    }
+}
+
+/// Only `enter`/`leave` are recorded: which surface the pointer is on is the
+/// whole question a popup hit test raises, and motion/button/axis add
+/// nothing to it.
+impl Dispatch<wl_pointer::WlPointer, ()> for TestClient {
+    fn event(
+        client: &mut Self,
+        _: &wl_pointer::WlPointer,
+        event: wl_pointer::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        match event {
+            wl_pointer::Event::Enter { surface, .. } => client.pointer_focus = Some(surface),
+            wl_pointer::Event::Leave { .. } => client.pointer_focus = None,
+            _ => {}
         }
     }
 }
@@ -400,7 +497,10 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for TestClient {
                 client.keyboard_focus = None;
                 client.leaves += 1;
             }
-            wl_keyboard::Event::Key { .. } => client.keys += 1,
+            wl_keyboard::Event::Key { serial, .. } => {
+                client.keys += 1;
+                client.last_key_serial = Some(serial);
+            }
             // Keymap (whose fd is simply dropped), modifiers and repeat info
             // all arrive too; none of them says anything about focus.
             _ => {}
@@ -478,6 +578,24 @@ impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, SurfaceIndex> for TestC
     }
 }
 
+/// `xdg_popup.popup_done` is the compositor saying "I dismissed this" --
+/// the only wire evidence a grab ended by anything other than the client's
+/// own `destroy`, so it is counted rather than ignored.
+impl Dispatch<xdg_popup::XdgPopup, ()> for TestClient {
+    fn event(
+        client: &mut Self,
+        _: &xdg_popup::XdgPopup,
+        event: xdg_popup::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let xdg_popup::Event::PopupDone = event {
+            client.popup_dones = client.popup_dones.saturating_add(1);
+        }
+    }
+}
+
 /// Which requested frame callback a `done` belongs to, by request order.
 struct FrameTag(usize);
 
@@ -506,8 +624,14 @@ wayland_client::delegate_noop!(TestClient: ignore wl_buffer::WlBuffer);
 wayland_client::delegate_noop!(TestClient: ignore wl_output::WlOutput);
 wayland_client::delegate_noop!(TestClient: ignore xdg_toplevel::XdgToplevel);
 wayland_client::delegate_noop!(TestClient: ignore xdg_positioner::XdgPositioner);
-wayland_client::delegate_noop!(TestClient: ignore xdg_popup::XdgPopup);
 wayland_client::delegate_noop!(TestClient: ignore zwlr_layer_shell_v1::ZwlrLayerShellV1);
+wayland_client::delegate_noop!(
+    TestClient: ignore ext_session_lock_manager_v1::ExtSessionLockManagerV1
+);
+// `locked`/`finished` both arrive here and neither is asserted on: these
+// tests lock only to take input away, and `session_lock/tests.rs` owns
+// everything about the lock's own lifecycle.
+wayland_client::delegate_noop!(TestClient: ignore ext_session_lock_v1::ExtSessionLockV1);
 
 /// A `width`x`height` `wl_buffer` filled with `color`, over a real memfd --
 /// the same path any toolkit takes.
@@ -588,6 +712,8 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
         .layer_shell
         .clone()
         .ok_or("no zwlr_layer_shell_v1 -- the global is missing")?;
+    // Named here rather than per step because `xdg_popup.grab` takes one.
+    let seat = client.seat.clone().ok_or("no wl_seat")?;
 
     // The spec is kept beside each surface because a re-map has to say all
     // of it again (see [`Step::RemapLayer`]).
@@ -612,6 +738,12 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
         xdg_popup::XdgPopup,
         usize,
     )> = Vec::new();
+    // Every popup surface ever mapped, in creation order and never removed,
+    // so [`Focused::Popup`]'s index stays stable across a destroy -- unlike
+    // `popups` above, which [`Step::DestroyPopup`] pops from.
+    let mut popup_surfaces: Vec<wl_surface::WlSurface> = Vec::new();
+    // Held rather than dropped -- see [`Step::LockSession`].
+    let mut locks: Vec<ext_session_lock_v1::ExtSessionLockV1> = Vec::new();
     // Requested frame callbacks, kept alive so a `done` that arrives late
     // lands on a live proxy and is counted rather than killing the
     // connection outright.
@@ -756,6 +888,8 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                         Focused::Layer(index)
                     } else if let Some(index) = windows.iter().position(|s| s == focused) {
                         Focused::Window(index)
+                    } else if let Some(index) = popup_surfaces.iter().position(|s| s == focused) {
+                        Focused::Popup(index)
                     } else {
                         Focused::Other
                     }
@@ -767,8 +901,11 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                     leaves: client.leaves,
                 });
             }
-            Step::MapPopup { color } => {
-                let parent = toplevels.first().ok_or("no toplevel to hang a popup on")?;
+            Step::MapPopup {
+                parent,
+                color,
+                grab,
+            } => {
                 let surface = compositor.create_surface(&qh, ());
                 let index = client.window_serials.len();
                 client.window_serials.push(None);
@@ -779,7 +916,35 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 // rightly answers with `invalid_positioner`.
                 positioner.set_size(50, 50);
                 positioner.set_anchor_rect(0, 0, 10, 10);
-                let popup = xdg.get_popup(Some(parent), &positioner, &qh, ());
+                // A layer-parented popup names *no* xdg parent here and gets
+                // one from `zwlr_layer_surface_v1.get_popup` instead, which
+                // is how the two protocols are specified to meet.
+                let popup = match parent {
+                    PopupParent::Window => {
+                        let parent = toplevels.first().ok_or("no toplevel to hang a popup on")?;
+                        xdg.get_popup(Some(parent), &positioner, &qh, ())
+                    }
+                    PopupParent::Layer(index) => {
+                        let (_, layer, _) = layers.get(*index).ok_or("no such layer surface")?;
+                        let popup = xdg.get_popup(None, &positioner, &qh, ());
+                        layer.get_popup(&popup);
+                        popup
+                    }
+                    PopupParent::Popup(index) => {
+                        let (_, parent, ..) = popups.get(*index).ok_or("no such popup")?;
+                        xdg.get_popup(Some(parent), &positioner, &qh, ())
+                    }
+                };
+                if *grab {
+                    // Before the first commit, and with the serial of a key
+                    // this client was actually sent: a grab requested after
+                    // the popup has a buffer is `invalid_grab`, and a real
+                    // toolkit passes its last input serial.
+                    let serial = client.last_key_serial.ok_or(
+                        "a grab needs an input serial; press a key into this client first",
+                    )?;
+                    popup.grab(&seat, serial);
+                }
                 surface.commit();
                 // Ten round trips is far more than the one a configure needs
                 // when a compositor sends it: `MapWindow` above gets its
@@ -809,6 +974,7 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                     let callback = surface.frame(&qh, tag);
                     surface.commit();
                     frames.push(callback);
+                    popup_surfaces.push(surface.clone());
                     popups.push((surface, xdg, popup, index));
                 } else {
                     popup.destroy();
@@ -829,6 +995,30 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 outcome = Ack::PopupConfigures(
                     client.window_configures.get(*index).copied().unwrap_or(0),
                 );
+            }
+            Step::ReportPopupDone => outcome = Ack::PopupDone(client.popup_dones),
+            Step::ReportPointer => {
+                outcome = Ack::Pointer(client.pointer_focus.as_ref().map(|focused| {
+                    if let Some(index) = layers.iter().position(|(s, ..)| s == focused) {
+                        Focused::Layer(index)
+                    } else if let Some(index) = windows.iter().position(|s| s == focused) {
+                        Focused::Window(index)
+                    } else if let Some(index) = popup_surfaces.iter().position(|s| s == focused) {
+                        Focused::Popup(index)
+                    } else {
+                        Focused::Other
+                    }
+                }));
+            }
+            Step::LockSession => {
+                let manager = client
+                    .lock_manager
+                    .clone()
+                    .ok_or("no ext_session_lock_manager_v1 -- the global is missing")?;
+                // Kept alive for the rest of the run: dropping the proxy
+                // destroys the lock object, which is a legal way to abandon a
+                // lock and would change what is under test.
+                locks.push(manager.lock(&qh, ()));
             }
         }
         queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
@@ -1044,6 +1234,56 @@ impl Fixture {
         count
     }
 
+    /// How many popups the compositor has tracked against the first layer
+    /// surface, counted from the `PopupTree` the render path, the hit test
+    /// and the frame-callback pass all walk.
+    ///
+    /// White-box, unlike everything else here, and deliberately so: a popup
+    /// tracked *twice* is indistinguishable on the wire and in pixels (a
+    /// duplicate draws in the same place, and frame callbacks are taken
+    /// rather than copied when sent) right up until a dismissal removes one
+    /// node and leaves the other on screen. Counting the tree is the only
+    /// direct way to pin it.
+    fn popups_on_first_layer(&self) -> usize {
+        let output = self.state.output.as_ref().expect("the one output");
+        let map = smithay::desktop::layer_map_for_output(output);
+        let layer = map.layers().next().expect("a mapped layer surface");
+        smithay::desktop::PopupManager::popups_for_surface(layer.wl_surface()).count()
+    }
+
+    /// Total `xdg_popup.popup_done` events the client has been sent.
+    fn popup_dones(&mut self) -> u32 {
+        let Ack::PopupDone(count) = self.run(Step::ReportPopupDone) else {
+            panic!("the popup-done probe should report what the client saw");
+        };
+        count
+    }
+
+    /// Which of the client's surfaces its `wl_pointer` was last told it
+    /// entered.
+    fn pointer_focus(&mut self) -> Option<Focused> {
+        let Ack::Pointer(focused) = self.run(Step::ReportPointer) else {
+            panic!("the pointer probe should report what the client saw");
+        };
+        focused
+    }
+
+    /// Presses and releases one unbound key, so the client is sent a real
+    /// `wl_keyboard.key` whose serial it can pass to `xdg_popup.grab`.
+    ///
+    /// `a` deliberately: [`Keybindings::default`] binds nothing bare, so
+    /// this is forwarded rather than intercepted -- and an intercepted key
+    /// reaches no client and would leave the grab with no serial to use.
+    fn press_a_key(&mut self) {
+        self.state
+            .press(&flexwm_ipc::KeyCombo {
+                key: "a".into(),
+                modifiers: Vec::new(),
+            })
+            .expect("a pressable combo");
+        self.settle();
+    }
+
     /// A left click at a point, press and release, the way a user makes one.
     fn click(&mut self, x: f64, y: f64) {
         self.state.pointer_move(x, y);
@@ -1099,6 +1339,18 @@ fn pixel(pixels: &[u8], x: i32, y: i32) -> [u8; 4] {
 /// lands where the positioner puts it; what matters is that it drew).
 fn contains_color(pixels: &[u8], color: [u8; 4]) -> bool {
     pixels.chunks_exact(4).any(|pixel| pixel == color)
+}
+
+/// Where the first `color` pixel is, scanning in row order.
+///
+/// For pointing at a surface whose placement the test does not pin down: a
+/// popup lands wherever its positioner and the parent's geometry put it, and
+/// hard-coding that coordinate would be re-deriving Smithay's own
+/// positioner arithmetic in a test -- which would then pass or fail for
+/// reasons that have nothing to do with input.
+fn find_color(pixels: &[u8], color: [u8; 4]) -> Option<(f64, f64)> {
+    let index = pixels.chunks_exact(4).position(|pixel| pixel == color)? as i32;
+    Some(((index % CANVAS) as f64, (index / CANVAS) as f64))
 }
 
 fn assert_pixel(pixels: &[u8], x: i32, y: i32, expected: [u8; 4], what: &str) {
@@ -2492,72 +2744,5 @@ fn resizing_the_output_re_arranges_bars_and_the_zone() {
     );
 }
 
-// -------------------------------------------------------------------------
-// Known gaps, pinned so the fix has a failing test to turn green
-// -------------------------------------------------------------------------
-
-/// An `xdg_popup` gets its initial configure, maps, draws and tears down
-/// without taking the compositor with it.
-///
-/// This is the fix for `docs/backlog/protocols/xdg-popup-never-configured.md`
-/// proving itself: it replaces the pinned-gap test that asserted no popup
-/// is ever configured (deleted with that entry), and inverts its
-/// assertion -- and then goes further,
-/// because a configure the client cannot use is no fix. The popup acks,
-/// attaches a buffer and maps; its pixels reach the framebuffer (which is
-/// what "no popup maps at all" denied); its frame callback completes
-/// (`Window::send_frame` covers popup surfaces, and this is the test that
-/// would catch it if that ever stopped); exactly one configure arrived
-/// (later commits stay quiet, as a non-reactive positioner requires); and
-/// destroying the popup leaves the compositor serving.
-///
-/// What this deliberately does *not* cover is popup input: pointer
-/// hit-testing stops at the window tree, keyboard focus never moves onto
-/// the popup, and `grab` is still a no-op -- menus show but cannot be
-/// clicked yet. Follow-ups, not this fix.
-#[test]
-fn an_xdg_popup_configures_maps_draws_and_tears_down() {
-    let mut fixture = Fixture::new();
-    fixture.run(Step::MapWindow);
-
-    let before = fixture.render();
-    assert!(
-        !contains_color(&before, POPUP_BGRA),
-        "the popup color should be absent before any popup exists"
-    );
-
-    let Ack::PopupConfigured(configured) = fixture.run(Step::MapPopup { color: POPUP_BGRA }) else {
-        panic!("the popup step should report whether a configure arrived");
-    };
-    assert!(
-        configured,
-        "the popup never got its initial configure -- the fix regressed"
-    );
-
-    let pixels = fixture.render();
-    assert!(
-        contains_color(&pixels, POPUP_BGRA),
-        "the mapped popup's pixels should reach the framebuffer"
-    );
-    assert_eq!(
-        fixture.frames(),
-        vec![1],
-        "one frame should complete the popup's requested callback"
-    );
-    assert_eq!(
-        fixture.popup_configures(),
-        1,
-        "the popup should be configured exactly once -- later commits stay quiet"
-    );
-
-    fixture.run(Step::DestroyPopup);
-    // ...and the compositor survived the whole lifecycle, still serving.
-    assert_eq!(fixture.usable(), WHOLE);
-    let after = fixture.render();
-    assert_eq!(after.len(), (CANVAS * CANVAS * 4) as usize);
-    assert!(
-        !contains_color(&after, POPUP_BGRA),
-        "the destroyed popup's pixels should be gone"
-    );
-    fixture.disconnect_client();
-}
+// Popup tests -- mapping, grabs, focus precedence and layer-parented popups
+// -- live in `popup.rs`, on the harness above.

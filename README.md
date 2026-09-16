@@ -312,6 +312,59 @@ What works:
   `Ctrl+Alt+F1`..`F12` (VT switch) still work while a full-screen layer
   surface is holding every keystroke. That is the escape hatch if one wedges.
 
+### Popup menus (`xdg_popup`)
+
+An application menu, a combo box, a bar's own dropdown: all of them are
+`xdg_popup` surfaces, and all of them map, draw, take clicks and — since
+popup grabs landed — take the keyboard.
+
+- **A grab routes input into the menu.** When a client opens a menu it asks
+  for an explicit grab (`xdg_popup.grab`). While one is held, keyboard focus
+  is on the popup, so Escape-to-close, arrow-key navigation and typeahead
+  reach it; clicking inside it keeps it up; clicking anywhere outside
+  dismisses it. Dismissal is also the only thing that ever sends
+  `popup_done`, so without a grab nothing closes a menu.
+- **Submenus nest.** A grab on a popup whose parent is the current grab
+  takes over, and closing it unwinds to the parent menu rather than closing
+  the whole chain.
+- **A bar's own dropdowns work too** — a popup parented to a *layer* surface
+  (`zwlr_layer_surface_v1.get_popup`), not just to a window.
+- **A grab loses to the compositor's own focus rules, rather than fighting
+  them**, in this order:
+  1. **The session lock wins.** Locking dismisses an open menu, and a grab
+     requested while locked is refused. Nothing but a lock surface receives a
+     keystroke while the session is locked — a menu is not a way around that.
+  2. **An `exclusive` layer surface on `top`/`overlay` wins** — a launcher
+     opened over a menu is typeable, and the menu is dismissed rather than
+     left on screen holding input it can no longer use.
+  3. **The menu wins over everything else**: over the focused window, and
+     over a layer surface that got the keyboard from a click — so an
+     `on_demand` bar's own dropdown is not dismissed by the bar that opened
+     it. An `exclusive` bar's own dropdown is the one case this doesn't hold
+     for yet: rule 2 above dismisses it too, even though it is the very
+     surface that opened it. Filed as
+     `docs/backlog/protocols/popup-grab-exclusive-self-dismiss.md`.
+
+  Losing is always spelled `popup_done` (the protocol lets a compositor
+  dismiss a popup at any time), never "leave it up but take its input away".
+- **Keybindings still win over a grab**, exactly as they do over an
+  `exclusive` layer surface and for the same reason: they are matched before
+  anything is forwarded. A client cannot wedge the session by holding a menu
+  open.
+- **Keyboard focus does not move onto a popup that did not grab.** A tooltip
+  is an ordinary `xdg_popup` too, and handing one the keyboard would take it
+  away from the window you are typing into. Menus and combo boxes that want
+  keys take a grab; that is what the request is for.
+- **The grab's serial is not checked against a real interaction, yet.**
+  Unlike `xdg-activation-v1`'s token (see Focus handoff below), any same-uid
+  client can map a popup and grab the keyboard with any serial it names —
+  there is no proof-of-interaction gate here today. The other bounds still
+  apply (locking or an exclusive layer surface dismisses the grab, any click
+  outside dismisses it, keybindings still fire), so this is narrower than it
+  sounds, but a client that was never focused can still take the keyboard on
+  its own say-so. Filed as
+  `docs/backlog/protocols/popup-grab-serial-validation.md`.
+
 What doesn't, yet:
 
 - **A layer-shell "lock screen" is still not a security boundary** — use a
@@ -323,12 +376,6 @@ What doesn't, yet:
   up, and everything behind it is still drawn and still capturable. Treat one
   as a screen *blanker* you can type a password into, not as something that
   keeps anyone out.
-- **Popup input** (keyboard focus, grabs, layer-parented popups): popups
-  *map and draw* since the initial-configure fix — an ordinary window's
-  menus render — but keyboard focus never moves onto one, popup grabs
-  are still a no-op, and a bar's own dropdown menus/tooltips (popups
-  parented to a *layer* surface) are still untracked. Also in the
-  backlog (`xdg-popup-input.md`).
 - **`flexwm msg outputs`** reports each output's *full* rectangle (in logical
   pixels, along with the output's `scale`) plus its *usable* rectangle — the
   full output minus whatever a bar reserved at its edges, which is where
@@ -440,14 +487,17 @@ real `--tty` hardware by screenshot and by what clients were actually sent:
 - **Only the lock surface receives input.** Keyboard focus moves to it (or to
   nobody, if the client hasn't created one yet) the instant the lock request
   arrives, and pointer focus is moved with it, so a click can't land in the
-  window that happened to be under the pointer. Any pointer grab in flight is
+  window that happened to be under the pointer. Any grab in flight is
   dropped as well — not only when the lock is taken, but at every transition
   that changes which lock surfaces count (a lock surface destroyed, a lock
   given up, a locker that died), because a grab outlives focus changes by
-  design and would otherwise keep steering the pointer to whoever holds it.
-  A held-button grab is exercised by a test; the drag-and-drop case is still
-  code-traced rather than exercised, since there is no drag-and-drop fixture
-  here.
+  design and would otherwise keep steering input to whoever holds it. That
+  covers an open popup menu, whose grab holds the *keyboard* and would
+  otherwise swallow the focus change entirely and receive the password: the
+  menu is dismissed, and a new grab asked for while locked is refused.
+  A held-button grab and an open popup grab are each exercised by a test; the
+  drag-and-drop case is still code-traced rather than exercised, since there
+  is no drag-and-drop fixture here.
 - **"The lock surface" means the *current* lock's.** A lock object can be
   destroyed while the client that made it stays connected and keeps the
   `wl_surface` underneath alive, so "is this surface alive" is not the same

@@ -128,9 +128,9 @@ list behind that.
 - Rough size: M. The mapping half (no initial configure, so no popup
   maps) resolved 2026-09-14:
   `docs/backlog/resolved/xdg-popup-initial-configure-resolved.md`. What
-  remains is the input half, filed as
-  `docs/backlog/protocols/xdg-popup-input.md` (grabs, keyboard focus,
-  layer-parented popups).
+  remains was the input half (grabs, keyboard focus, layer-parented
+  popups), resolved 2026-09-16:
+  `docs/backlog/resolved/xdg-popup-input-resolved.md`.
 
 ### 6. No screencopy / image-capture (`wlr-screencopy`, `ext-image-capture-source`)
 
@@ -207,9 +207,9 @@ rendered; these only limit live data, not protocol conclusions.
 
 1. **Gap 1 (destroy kill)** — P0; the shell cannot survive normal use, and
    any Qt layer-shell client likely trips the same path.
-2. **Gap 5 (`xdg_popup`)** — input half filed
-   (`xdg-popup-input.md`; the mapping half resolved); unlocks
-   menus/tooltips once the shell survives.
+2. **Gap 5 (`xdg_popup`)** — both halves resolved
+   (`resolved/xdg-popup-input-resolved.md`); unlocks menus/tooltips once
+   the shell survives.
 3. **Gap 3 (idle)** — already roadmap-next; unlocks auto-lock, pairing with
    the now-proven session lock.
 4. **Gap 2 (foreign-toplevel)** — already filed; unlocks window lists.
