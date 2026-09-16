@@ -76,6 +76,8 @@ actionable.
 - [IPC bundle: usable rect, focus-workspace-index, ambient locked](./resolved/protocol-bundle-resolved.md) — RESOLVED 2026-09-15, no bump needed
 - [No cap on concurrent IPC connections, and a half-closed client leaks one](./resolved/ipc-connection-cap-resolved.md) — RESOLVED 2026-09-16: 64 connections, refused with a reason past that, and a write-stall deadline that drops a peer which has stopped reading
 - [Screenshot capture and encode run on the event-loop thread](./ipc/screenshot-encode-on-event-loop.md) — split out of the entry above; the ~12ms stall itself, which no bound closes
+- [The accept loop swallows `EMFILE` and can spin the event loop](./ipc/accept-loop-swallows-emfile.md) — pre-existing, found reviewing the cap
+- [The connection cap turns one client's leak into everyone's refusal](./ipc/connection-cap-denies-the-same-user.md) — accepted tradeoff, recorded so a future "the bar cannot connect" has somewhere to land
 - [A large `msg type` blocks the event loop](./ipc/msg-type-blocks-event-loop.md)
 
 ### Input

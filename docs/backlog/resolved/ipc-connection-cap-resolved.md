@@ -54,6 +54,30 @@ A `wait-idle` hand-off moves its slot into the waiter rather than releasing
 it. Without that the cap would be decorative: a client could park every
 connection it opened in a `wait-idle` whose `quiet_ms` never comes due, free
 the slot on the way, and hold an unbounded number of fds in `pending_idle`.
+Holding it is also what bounds `pending_idle` itself — a waiter costs one of
+the 64, so there can never be more than 64 waiters.
+
+**A cap on how long a `wait-idle` may park** (`MAX_IDLE_WAIT`, 60s), which
+the review of this change found was the other half of that hand-off. A parked
+waiter is the one thing on this socket that outlives its connection, and it
+is bounded only by its own `timeout_ms` — a client-chosen `u64` clamped
+nowhere. It is also the one thing that cannot notice its peer dying: nothing
+touches its socket until it has an answer to write (`PendingIdle::push`
+returns immediately with an empty queue, and `idle_outcome` only reads
+clocks), and it has already left the event loop, so the write-stall deadline
+below cannot reach it either. With `timeout_ms: u64::MAX` that slot was gone
+for the rest of the session — and 64 of them, parked by an agent that then
+crashed, took the whole control channel with them: every other client refused,
+with no living process to blame. Demonstrated live on the dev VM before the
+fix (64 parked waiters, parker killed, fds pinned at 75 and a `flexwm msg`
+still refused 30 seconds later) and re-run after it.
+
+Capped rather than refused, matching `shell::clamp_hint`'s treatment of a
+client-chosen size that cannot be honored as asked: the client still gets the
+answer it asked for, just no later than a minute. `quiet_ms` is deliberately
+left alone — with the wait itself bounded, a quiet period longer than the
+timeout simply times out, which it already did, whereas shortening it would
+answer `idle` over a screen the client asked to see settle for longer.
 
 **A write-stall deadline** (`connection.rs`, `WRITE_STALL_TIMEOUT`, 10s). The
 half-close case is not fixed by registering for reads — the reason item 10
@@ -96,3 +120,12 @@ order, 6 reps a side). Medians **130.13us/72 jiffies after versus
 predicts: a connection with nothing queued adds one `Timer::process_events`
 call per wakeup against an unregistered timer, one `u64` add per socket
 write, and one `Cell` increment per accept.
+
+## Adjacent, named rather than fixed here
+
+Two things this work found in the code around it, both pre-existing, both
+filed rather than folded in:
+[the accept loop swallowing `EMFILE`](../ipc/accept-loop-swallows-emfile.md)
+and [what a shared connection table means for an innocent
+client](../ipc/connection-cap-denies-the-same-user.md) when another of the
+same user holds every slot.

@@ -75,17 +75,79 @@ const READS_PER_WAKEUP: u32 = 1;
 /// later than twice that.
 pub(super) const WRITE_STALL_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// The longest a `wait-idle` may park a connection for, whatever `timeout_ms`
+/// it asked for.
+///
+/// A parked waiter is the one thing on this socket that outlives its
+/// connection: it keeps the socket and its connection slot after leaving the
+/// event loop, and is finished with only once it has been answered (idle, or
+/// timed out) and that answer has gone out. `timeout_ms` is a client-chosen
+/// `u64` with no upper bound of its own, so without this a waiter's lifetime
+/// is the client's to choose -- and `u64::MAX` chooses forever.
+///
+/// Forever is worse than it sounds, and worse than it was before the
+/// connection cap, which is why this is bounded here rather than left as it
+/// was:
+///
+/// - **A parked waiter cannot notice its peer dying.** Nothing on that path
+///   touches the socket while it is still waiting: `PendingIdle::push` returns
+///   straight away with an empty queue, and `idle_outcome` only looks at
+///   clocks. A live *connection* whose client dies reads an end of stream and
+///   closes; a parked waiter has already left the event loop, so the
+///   write-stall deadline above cannot reach it either. The answer's own write
+///   is the first thing that would fail -- and with no bound on `timeout_ms`,
+///   that write never happens.
+/// - **Which now costs every other client, not just fds.** 64 waiters parked
+///   with a huge `timeout_ms` by a client that then exits hold the whole
+///   connection table for the rest of the session: the bar, the notifier and
+///   every `flexwm msg` are refused, with no living process to blame and
+///   nothing to do about it short of restarting the compositor. (They also
+///   keep `pending_idle` non-empty, which pins the frame timer at its full
+///   rate -- see `headless::ensure_ticking`.)
+///
+/// A minute is twelve times the client's own default (`flexwm msg wait-idle`
+/// asks for 5s) and far past what the request is for: waiting for a screen to
+/// settle after an injected keystroke or a spawn is hundreds of milliseconds,
+/// and a cold Electron or JVM start -- the longest thing anything here waits
+/// on, see `activation::TOKEN_LIFETIME` -- is seconds. Capped rather than
+/// refused, matching how a client-chosen size that cannot be honored as asked
+/// is handled elsewhere (`shell::clamp_hint`): a bounded wait still answers
+/// the question the client asked, where a refusal answers nothing.
+pub(super) const MAX_IDLE_WAIT: Duration = Duration::from_secs(60);
+
+/// The bounds [`super::accept`] hands each connection.
+///
+/// Both are compile-time constants in production -- [`Limits::REAL`] is the
+/// only value `accept` is called with outside `#[cfg(test)]`, and nothing
+/// reads either from a config file or the command line. The type exists so
+/// that a test needing one of them in milliseconds rather than tens of
+/// seconds can shorten that one (`..Limits::REAL`) without every call site
+/// having to name both.
+#[derive(Clone, Copy)]
+pub(super) struct Limits {
+    /// How long a connection may hold a reply its peer is not reading. See
+    /// [`WRITE_STALL_TIMEOUT`].
+    pub(super) stall: Duration,
+    /// The longest a `wait-idle` on it may park for. See [`MAX_IDLE_WAIT`].
+    pub(super) idle_wait: Duration,
+}
+
+impl Limits {
+    pub(super) const REAL: Self = Self {
+        stall: WRITE_STALL_TIMEOUT,
+        idle_wait: MAX_IDLE_WAIT,
+    };
+}
+
 /// Wraps an accepted socket up as an event source ready to be inserted.
 ///
 /// The socket must already be non-blocking; [`super::accept`] does that, and
 /// says why there rather than here. `slot` is this connection's claim on one of
-/// `slots::MAX_CONNECTIONS`, released when the source is dropped; `stall` is
-/// how long it may hold an unread reply (see [`WRITE_STALL_TIMEOUT`], which is
-/// what production passes).
+/// `slots::MAX_CONNECTIONS`, released when the source is dropped.
 pub(super) fn source(
     stream: UnixStream,
     slot: Slot,
-    stall: Duration,
+    limits: Limits,
 ) -> std::io::Result<ConnectionSource> {
     Ok(ConnectionSource {
         // A second fd on the same socket: this one is polled, the one inside
@@ -98,13 +160,14 @@ pub(super) fn source(
             last_screenshot: None,
             closing: false,
             slot: Some(slot),
+            idle_wait: limits.idle_wait,
         },
         socket: Generic::new(stream, Interest::READ, Mode::Level),
         // The deadline this starts with is never the one that fires: arming
         // sets a fresh one (see `process_events`), and until then the timer is
         // not registered at all.
-        stall: Timer::from_duration(stall),
-        window: stall,
+        stall: Timer::from_duration(limits.stall),
+        window: limits.stall,
         armed: false,
         stall_progress: 0,
     })
@@ -225,10 +288,12 @@ impl EventSource for ConnectionSource {
         })?;
         match step {
             // Removing the source drops it, which closes both fds and releases
-            // its slot. An armed deadline is left behind in the loop's heap
-            // (calloop drops a removed source without unregistering it, so
-            // there is nothing to cancel it from); it comes due once, finds no
-            // source to dispatch to, and is discarded.
+            // its slot -- and takes an armed deadline with it: calloop notices
+            // the emptied slot right after this returns and calls
+            // `unregister` on the dispatcher it is still holding, which is
+            // this source's own (`loop_logic.rs`, the `entry.source.is_none()`
+            // check after the `PostAction` match). So nothing is left in the
+            // timer heap to come due later.
             Some(Step::Close) => Ok(PostAction::Remove),
             // Neither sub-source's token, or the deadline's -- which has
             // already rescheduled itself above. Either way nothing about this
@@ -356,6 +421,10 @@ pub(super) struct Connection {
     /// (see [`Connection::serve`]), which happens immediately before this
     /// connection leaves the event loop.
     slot: Option<Slot>,
+    /// The longest a `wait-idle` on this connection may park for, whatever it
+    /// asks for. [`MAX_IDLE_WAIT`] in production; held per connection only so
+    /// the tests can shorten it.
+    idle_wait: Duration,
 }
 
 impl Connection {
@@ -570,11 +639,32 @@ impl Connection {
             let Ok(stream) = self.lines.socket().try_clone() else {
                 return Step::Close;
             };
+            // The one bound on how long this waiter can live, and the only
+            // place it can be applied: `timeout_ms` is a client-chosen `u64`,
+            // and a parked waiter has no other way to find out that nobody is
+            // coming back for its answer (see `MAX_IDLE_WAIT`). Capped rather
+            // than refused, so a client asking for longer than it may have
+            // still gets the answer it asked for, just sooner.
+            //
+            // `quiet_ms` is deliberately left alone: with the wait itself
+            // bounded, a quiet period longer than the timeout simply times
+            // out -- which it already did -- whereas shortening it would
+            // answer `idle` over a screen the client asked to see settle for
+            // longer, i.e. a wrong answer rather than an early one.
+            let asked = Duration::from_millis(timeout_ms);
+            let timeout = asked.min(self.idle_wait);
+            if timeout < asked {
+                tracing::debug!(
+                    asked_ms = timeout_ms,
+                    capped_ms = timeout.as_millis(),
+                    "capped a wait-idle timeout"
+                );
+            }
             let now = Instant::now();
             state.pending_idle.push(PendingIdle {
                 stream,
                 quiet: Duration::from_millis(quiet_ms),
-                timeout: Duration::from_millis(timeout_ms),
+                timeout,
                 started: now,
                 last_progress: now,
                 answered: false,
@@ -588,11 +678,14 @@ impl Connection {
                 // drain.
                 outbound: std::mem::take(&mut self.outbound),
                 // The slot moves with the socket rather than being released
-                // here: a waiter still holds an fd, for as long as the
-                // `quiet_ms` and `timeout_ms` it chose. Released instead, a
-                // client could shed the cap entirely -- park every connection
-                // it opens in a `wait-idle` that never comes due, and each one
-                // frees its slot on the way into a list nothing bounds.
+                // here: a waiter still holds an fd, for as long as the wait
+                // above allows. Released instead, a client could shed the cap
+                // entirely -- park every connection it opens in a `wait-idle`
+                // that never comes due, and each one frees its slot on the way
+                // into a list nothing bounds. Holding it is also what bounds
+                // `pending_idle` itself: a waiter costs one of
+                // `slots::MAX_CONNECTIONS`, so there can never be more than
+                // that many at once.
                 _slot: self.slot.take(),
             });
             // The frame timer answers this, but it drops itself when there's

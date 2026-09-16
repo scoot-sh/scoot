@@ -103,11 +103,18 @@ actually open.
 3. **[IPC connection cap and the half-closed-connection
    leak](docs/backlog/resolved/ipc-connection-cap-resolved.md)** — RESOLVED
    2026-09-16: 64 concurrent connections, refused with a reason past that,
-   and a write-stall deadline that drops a peer which has stopped reading
-   (the leak a cap alone could not free). The third concern that entry
-   bundled — [capture and encode on the event-loop
+   a write-stall deadline that drops a peer which has stopped reading (the
+   leak a cap alone could not free), and — found by the review of that — a
+   cap on how long a `wait-idle` may park a connection, without which 64
+   parked waiters from a since-crashed agent wedged the whole control
+   channel. The third concern that entry bundled — [capture and encode on
+   the event-loop
    thread](docs/backlog/ipc/screenshot-encode-on-event-loop.md) — is re-filed
-   and still open (medium priority).
+   and still open (medium priority), as are two adjacent things found while
+   reviewing it: [the accept loop and
+   `EMFILE`](docs/backlog/ipc/accept-loop-swallows-emfile.md) and [what a
+   shared connection table costs an innocent
+   client](docs/backlog/ipc/connection-cap-denies-the-same-user.md).
 4. Small, unblocked low-priority fixes: [`msg key` modifier
    resolution](docs/backlog/input/msg-key-modifier-resolution.md),
    [`[binds]` capital

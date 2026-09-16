@@ -35,6 +35,7 @@ mod tests;
 use std::io::Write;
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
+use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 
 use flexwm_core::Action;
@@ -45,6 +46,7 @@ use flexwm_ipc::{
 use smithay::reexports::calloop::generic::Generic;
 use smithay::reexports::calloop::{EventLoop, Interest, Mode, PostAction};
 
+use self::connection::Limits;
 use self::outbound::Outbound;
 use self::slots::{MAX_CONNECTIONS, Slot, Slots};
 use super::State;
@@ -86,6 +88,25 @@ pub struct PendingIdle {
     _slot: Option<Slot>,
 }
 
+/// What a client past [`MAX_CONNECTIONS`] is told, encoded once.
+///
+/// A constant answer to a constant question, so it is built on the first
+/// refusal and reused: the path is not hot (it takes a client in a connect
+/// loop to reach it at all), but a fresh `format!` and `encode` per refusal
+/// would be allocation handed out in response to exactly the behaviour this
+/// bound exists to discourage.
+static REFUSAL: LazyLock<String> = LazyLock::new(|| {
+    encode(&Response::error(format!(
+        "refused: flexwm serves at most {MAX_CONNECTIONS} ipc connections at once, \
+         and every slot is in use. Close one, or send this request on a connection \
+         that is already open -- requests pipeline, so one connection is enough for \
+         any number of them"
+    )))
+    // `Response::Error` is one `String`; serde cannot fail on it. An empty
+    // line would simply mean a refused client is closed without a reason.
+    .unwrap_or_default()
+});
+
 pub fn init(
     event_loop: &mut EventLoop<'static, State>,
     state: &mut State,
@@ -104,7 +125,7 @@ pub fn init(
         Generic::new(listener, Interest::READ, Mode::Level),
         move |_, listener, state: &mut State| {
             while let Ok((stream, _)) = listener.accept() {
-                if let Err(error) = accept(state, stream, &slots, connection::WRITE_STALL_TIMEOUT) {
+                if let Err(error) = accept(state, stream, &slots, Limits::REAL) {
                     tracing::warn!(%error, "could not take an ipc client");
                 }
             }
@@ -118,15 +139,13 @@ pub fn init(
 
 /// Takes one accepted socket into the event loop, or refuses it.
 ///
-/// `stall` is how long the connection may hold a reply its peer is not
-/// reading; production passes [`connection::WRITE_STALL_TIMEOUT`]. It is a
-/// parameter rather than read from that constant inside so the eviction tests
-/// can use a short one instead of parking a test thread for ten seconds.
+/// `limits` is [`Limits::REAL`] everywhere but the tests, which pass shorter
+/// deadlines rather than parking a test thread for tens of seconds.
 fn accept(
     state: &mut State,
     stream: UnixStream,
     slots: &Slots,
-    stall: Duration,
+    limits: Limits,
 ) -> std::io::Result<()> {
     // First, before this connection costs anything: an fd duplicated, a
     // buffer allocated, a place in the event loop -- and long before any
@@ -172,21 +191,14 @@ fn accept(
             max = MAX_CONNECTIONS,
             "refused an ipc connection: every connection slot is taken"
         );
-        if let Ok(line) = encode(&Response::error(format!(
-            "refused: flexwm serves at most {MAX_CONNECTIONS} ipc connections at once, \
-             and every slot is in use. Close one, or send this request on a connection \
-             that is already open -- requests pipeline, so one connection is enough for \
-             any number of them"
-        ))) {
-            let _ = (&stream).write_all(line.as_bytes());
-        }
+        let _ = (&stream).write_all(REFUSAL.as_bytes());
         return Ok(());
     };
 
     state
         .loop_handle
         .insert_source(
-            connection::source(stream, slot, stall)?,
+            connection::source(stream, slot, limits)?,
             |_readiness, connection, state: &mut State| connection.step(state),
         )
         // The message rather than the error itself: an `InsertError` carries

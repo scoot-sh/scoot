@@ -79,6 +79,11 @@ const TINY_SNDBUF: usize = 1024;
 /// all -- is at the mercy of this number.
 const TINY_STALL: Duration = Duration::from_millis(300);
 
+/// The same idea for the cap on how long a `wait-idle` may park a connection:
+/// short enough to wait out, long enough that the hand-off itself (which takes
+/// a pump or two) cannot be mistaken for the cap firing.
+const TINY_IDLE_WAIT: Duration = Duration::from_millis(300);
+
 /// A compositor with a real event loop, and nothing on screen unless a test
 /// asks for it.
 struct Harness {
@@ -123,25 +128,36 @@ impl Harness {
     /// Hands the compositor one end of a socket pair through the same
     /// `accept()` a real client goes through, and keeps the other.
     ///
-    /// With the write-stall deadline production uses, so that a test holding a
-    /// queue across a long pump loop is never evicted out from under itself.
+    /// With the deadlines production uses, so that a test holding a queue
+    /// across a long pump loop is never evicted out from under itself.
     fn connect(&mut self, sndbuf: Option<usize>) -> TestClient {
-        self.connect_stalling(sndbuf, WRITE_STALL_TIMEOUT)
+        self.connect_limited(sndbuf, Limits::REAL)
     }
 
     /// The same, with a chosen write-stall deadline. For the tests that are
     /// about that deadline.
+    fn connect_stalling(&mut self, sndbuf: Option<usize>, stall: Duration) -> TestClient {
+        self.connect_limited(
+            sndbuf,
+            Limits {
+                stall,
+                ..Limits::REAL
+            },
+        )
+    }
+
+    /// The same, with both deadlines chosen.
     ///
     /// Note what this does *not* assert: that the connection was accepted at
     /// all. A refusal is a live socket the compositor writes one line to and
     /// closes, so it is the client end that can tell the difference -- see
     /// `the_connection_past_the_cap_is_refused_with_a_reason`.
-    fn connect_stalling(&mut self, sndbuf: Option<usize>, stall: Duration) -> TestClient {
+    fn connect_limited(&mut self, sndbuf: Option<usize>, limits: Limits) -> TestClient {
         let (server, client) = UnixStream::pair().expect("a socket pair");
         if let Some(size) = sndbuf {
             set_sndbuf(&server, size);
         }
-        super::super::accept(&mut self.state, server, &self.slots, stall)
+        super::super::accept(&mut self.state, server, &self.slots, limits)
             .expect("the connection is taken or refused, not failed");
         // Non-blocking on this side too: the compositor only runs inside
         // `pump`, so a blocking read or write here would deadlock the test
@@ -1144,7 +1160,7 @@ fn a_connection_waits_for_writable_only_while_something_is_queued() {
     server.set_nonblocking(true).expect("non-blocking");
     let slots = Slots::new();
     let slot = slots.claim().expect("a slot");
-    let mut connection = source(server, slot, WRITE_STALL_TIMEOUT)
+    let mut connection = source(server, slot, Limits::REAL)
         .expect("a connection")
         .connection;
     assert!(connection.interest().readable);
@@ -1289,6 +1305,94 @@ fn a_wait_idle_hand_off_keeps_its_slot() {
         harness.state.pending_idle.is_empty()
     });
     assert_eq!(harness.slots.live(), MAX_CONNECTIONS - 1);
+}
+
+#[test]
+fn a_parked_wait_idle_cannot_hold_its_slot_forever() {
+    // The wedge a slot that moves into a waiter would otherwise open, and the
+    // reason `MAX_IDLE_WAIT` exists. `timeout_ms` is a client-chosen `u64`,
+    // and a parked waiter is the one thing here that cannot notice its peer
+    // dying: nothing touches its socket until it has an answer to write, and
+    // it has already left the event loop, so the write-stall deadline cannot
+    // reach it either. Uncapped, this connection's slot is gone for the rest
+    // of the session -- and 64 of them take the whole control channel with
+    // them, for a bar and a notifier and every `flexwm msg` that had nothing
+    // to do with it.
+    let mut harness = Harness::new();
+    let mut client = harness.connect_limited(
+        None,
+        Limits {
+            idle_wait: TINY_IDLE_WAIT,
+            ..Limits::REAL
+        },
+    );
+    client.send(
+        request_line(&Request::WaitIdle {
+            // Never quiet enough, and never out of time: the two values that
+            // ask for forever.
+            quiet_ms: u64::MAX,
+            timeout_ms: u64::MAX,
+        })
+        .as_bytes(),
+    );
+    harness.pump_until("the wait-idle never handed over", |harness| {
+        !harness.state.pending_idle.is_empty()
+    });
+    assert_eq!(
+        harness.slots.live(),
+        1,
+        "the waiter should be holding the slot at this point"
+    );
+
+    // The peer dies, abruptly and without reading anything -- a killed agent,
+    // not a polite disconnect.
+    drop(client);
+    harness.pump_until("a parked waiter held its slot for good", |harness| {
+        harness.slots.live() == 0
+    });
+    assert!(
+        harness.state.pending_idle.is_empty(),
+        "the waiter outlived its slot"
+    );
+}
+
+#[test]
+fn a_wait_idle_within_the_cap_is_left_exactly_as_it_asked() {
+    // The other half: capping must not quietly shorten a wait that was
+    // already inside the bound. This one asks for a quiet period it will
+    // never get and a timeout well under the cap, so the moment it is
+    // answered is its own `timeout_ms` and nothing else.
+    const TIMEOUT: Duration = Duration::from_millis(200);
+
+    let mut harness = Harness::new();
+    let mut client = harness.connect_limited(
+        None,
+        Limits {
+            idle_wait: TINY_IDLE_WAIT,
+            ..Limits::REAL
+        },
+    );
+    let started = Instant::now();
+    client.send(
+        request_line(&Request::WaitIdle {
+            quiet_ms: u64::MAX,
+            timeout_ms: TIMEOUT.as_millis() as u64,
+        })
+        .as_bytes(),
+    );
+    match client.expect_reply(&mut harness) {
+        Response::Error { message } => assert!(
+            message.contains("timed out"),
+            "answered something else: {message}"
+        ),
+        other => panic!("a wait that can never be quiet was answered {other:?}"),
+    }
+    let waited = started.elapsed();
+    assert!(
+        waited >= TIMEOUT,
+        "answered after {waited:?}, before the {TIMEOUT:?} it asked for"
+    );
+    client.expect_closed(&mut harness);
 }
 
 // --- a peer that has stopped reading --------------------------------------
