@@ -68,9 +68,9 @@ clocks), and it has already left the event loop, so the write-stall deadline
 below cannot reach it either. With `timeout_ms: u64::MAX` that slot was gone
 for the rest of the session — and 64 of them, parked by an agent that then
 crashed, took the whole control channel with them: every other client refused,
-with no living process to blame. Demonstrated live on the dev VM before the
-fix (64 parked waiters, parker killed, fds pinned at 75 and a `flexwm msg`
-still refused 30 seconds later) and re-run after it.
+with no living process to blame. Found by the review, reproduced live against
+this branch's own pre-fix binary and then against the fixed one — the numbers
+are in the evidence below.
 
 Capped rather than refused, matching `shell::clamp_hint`'s treatment of a
 client-chosen size that cannot be honored as asked: the client still gets the
@@ -102,24 +102,44 @@ An idle connection (nothing queued) is not armed at all and costs no wakeups:
 measured 0 jiffies over 10s with a live idle client, before and after.
 
 Shown on hardware rather than argued (dev VM, release build, real socket,
-`RUST_LOG=flexwm=debug`): a client that writes 228,736 bytes of requests,
-half-closes and never reads takes the compositor from 11 to 13 open fds. On
-the pre-change binary it is still at 13 fds thirty seconds later. On this one
-it is back to 11 within fifteen, with
-`dropped an ipc connection whose peer stopped reading its reply pending=7650
-stall_ms=10000` in the log. The cap, the same way: 64 connections all
-answered, the 65th told `refused: flexwm serves at most 64 ipc connections at
-once...` and closed, a connection that was let in still answering, and the
-table handing slots out again once they closed.
+`RUST_LOG=flexwm=debug`), all three:
+
+- **The half-close leak.** A client that writes 228,736 bytes of requests,
+  half-closes and never reads takes the compositor from 11 to 13 open fds. On
+  the pre-change binary it is still at 13 fds thirty seconds later. On this
+  one it is back to 11 within fifteen, with
+  `dropped an ipc connection whose peer stopped reading its reply pending=7650
+  stall_ms=10000` in the log.
+- **The cap.** 64 connections all answered, the 65th told `refused: flexwm
+  serves at most 64 ipc connections at once...` and closed, a connection that
+  was let in still answering, and the table handing slots out again once they
+  closed.
+- **The parked-waiter wedge**, against the branch's own pre-fix binary: 64
+  connections parked in a `wait-idle` asking for `u64::MAX`, then the parking
+  process exits, so every peer is a dead process. Before the cap on the wait,
+  fds sit at 75 and `flexwm msg version` is refused at t+5s, t+65s and still
+  at t+95s; after it, fds are back to 11 by t+65s and `msg version` answers
+  normally. Sampled 70 seconds after the parker died, the compositor's own CPU
+  over the next 10s is 1 jiffy on the pre-fix binary (`pending_idle` is never
+  empty, so the frame timer never stops) and 0 on this one.
 
 **Benchmarked** on the round-trip path it touches (item 9/10's method:
 release, 50,000 `version` round-trips over one connection, balanced run
-order, 6 reps a side). Medians **130.13us/72 jiffies after versus
-129.96us/71.5 before** — 0.13%, against a spread of 1.8us within the
-"before" side alone, so no measurable difference. That is what the shape
-predicts: a connection with nothing queued adds one `Timer::process_events`
-call per wakeup against an unregistered timer, one `u64` add per socket
-write, and one `Cell` increment per accept.
+order, 12 reps a side). Medians **130.81us/73 jiffies after versus
+129.86us/72.5 before** — 0.7%, against a 10us spread *within* each side, so
+no measurable difference. Reported as medians with the spread named for the
+reason item 10 gave: on this VM the run's position and whatever else the
+scheduler is doing are worth more than the change being measured. Three
+balanced runs were taken across the branch's life and the sign of the
+difference changed between them (130.10 after vs 130.36 before at one,
+130.13 vs 129.96 at the next), which is what noise looks like.
+
+That is also what the shape predicts: a connection with nothing queued adds
+one `Timer::process_events` call per wakeup against an unregistered timer,
+one `u64` add per socket write, and one `Cell` increment per accept. Nothing
+was added to the per-request path by the wait-idle cap at all — it is one
+`min` on the hand-off, which happens once per `wait-idle` and ends the
+connection.
 
 ## Adjacent, named rather than fixed here
 
