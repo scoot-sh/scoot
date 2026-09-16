@@ -35,7 +35,7 @@ Note that the entry's own numbers predate PR #44, which had already split
 ```
                                   before    after harness    after split
 session_lock/tests.rs               2270            2017      736 + 5 files
-                                                                (138/222/241/296/431)
+                                                                (138/222/241/297/431)
 layer_shell/tests/mod.rs            2748            2524     1154 + 4 files
                                                                 (116/157/392/741)
 layer_shell/tests/popup.rs           683             683      683 (unchanged)
@@ -126,10 +126,22 @@ All neutral-or-better, all a consequence of one harness replacing five:
 
 ### Follow-ups, deliberately not done here
 
-- `input_method/tests.rs` (758 lines) and the smaller `dispatch`/`shell`/
-  `toplevel_icon` suites carry the same fixture shape. The entry scoped
-  five files; these are a straightforward follow-on now that the harness
-  exists.
+- **Nine suites still carry their own copy of the fixture shape this entry
+  scoped to five**: `idle`, `input`, `shell`, `dispatch`, `output_scale`,
+  `selection`, `toplevel_icon`, `gamma_control`, `input_method` (758 lines,
+  the largest of the nine). All are a straightforward follow-on now that
+  `test_support::Harness` exists.
+- **Independent review of this entry found a real latent hang in the
+  harness's own `client_died`/`disconnect`/`run_expecting_disconnect` --
+  fixed in the same PR** (a plain blocking `handle.join()` in each, which
+  the file's own `Drop` doc already named as the exact failure mode to
+  avoid; all three, plus `Drop`, now share one `wait_for_thread` helper).
+  **Two of the nine unconverted suites still have the bug this fixed**:
+  `toplevel_icon/tests.rs` and `input_method/tests.rs`'s own `Drop` impls
+  still block-join unconditionally, `toplevel_icon`'s without even the
+  `thread::panicking()` unwind guard `Drop` had before this PR. Converting
+  either onto the shared harness inherits the fix for free; that is now the
+  more concrete reason to do it, not just line count.
 - `solid_buffer` is still per-file. `session_lock`'s and `layer_shell`'s
   are identical modulo the memfd name, so unifying them is a one-line
   generic — left alone per this entry's own "extract what is actually

@@ -255,11 +255,24 @@ impl<S, A> Harness<S, A> {
     /// A client that died instead of answering is reported with *its own*
     /// error -- the protocol error it provoked, usually -- rather than as a
     /// timeout, which costs [`PATIENCE`] and says nothing.
+    ///
+    /// A disconnected channel is evidence the client is on its way out, not
+    /// proof it already has: a client that reports something over a
+    /// secondary channel and then drops it while still running its main step
+    /// loop looks the same from here. So this waits for the thread itself,
+    /// dispatched rather than blocked on, and says so distinctly if the
+    /// thread never actually finishes -- see [`Harness::wait_for_thread`].
     fn client_died(&mut self, index: usize, what: &str) -> ! {
-        let outcome = self.clients[index]
-            .thread
-            .take()
-            .map(|handle| handle.join().expect("the client thread"));
+        let Some(handle) = self.clients[index].thread.take() else {
+            panic!("client {index} stopped while waiting for {what}, and was already joined");
+        };
+        if !self.wait_for_thread(&handle) {
+            panic!(
+                "client {index}'s channel disconnected while waiting for {what}, but its \
+                 thread never finished -- it is likely still running, not dead"
+            );
+        }
+        let outcome = handle.join().expect("the client thread");
         panic!("client {index} stopped while waiting for {what}: {outcome:?}");
     }
 
@@ -285,12 +298,17 @@ impl<S, A> Harness<S, A> {
             );
             self.dispatch_once();
         }
-        let error = self.clients[0]
-            .thread
-            .take()
-            .map(|handle| handle.join().expect("the client thread"))
-            .and_then(Result::err)
-            .expect("the client should have stopped with the protocol error it provoked");
+        let Some(handle) = self.clients[0].thread.take() else {
+            panic!("client 0 disconnected as expected, but was already joined");
+        };
+        assert!(
+            self.wait_for_thread(&handle),
+            "client 0's ack channel disconnected, but its thread never finished"
+        );
+        let error = handle
+            .join()
+            .expect("the client thread")
+            .expect_err("the client should have stopped with the protocol error it provoked");
         self.settle();
         error
     }
@@ -300,12 +318,40 @@ impl<S, A> Harness<S, A> {
     pub(crate) fn disconnect(&mut self, index: usize) {
         drop(self.clients[index].steps.take());
         if let Some(handle) = self.clients[index].thread.take() {
+            assert!(
+                self.wait_for_thread(&handle),
+                "client {index} never finished after being disconnected"
+            );
             handle
                 .join()
                 .expect("the client thread")
                 .expect("the client ran cleanly");
         }
         self.settle();
+    }
+
+    /// Dispatches until `handle` finishes, or gives up after [`PATIENCE`] and
+    /// says so by returning `false`.
+    ///
+    /// Shared by every caller that needs to join a client thread outside the
+    /// normal step/ack protocol ([`Harness::client_died`],
+    /// [`Harness::disconnect`], [`Harness::run_expecting_disconnect`], and
+    /// this type's own `Drop` impl): a plain `handle.join()` blocks the
+    /// calling thread
+    /// outright, and a thread legitimately still running (parked on its own
+    /// step channel, say, rather than actually finished) would hang the
+    /// caller forever instead of letting it fail loudly. Dispatching while
+    /// waiting is also what lets a join that depends on the compositor
+    /// processing something first (a disconnect notification, a flush)
+    /// actually happen.
+    fn wait_for_thread(&mut self, handle: &JoinHandle<Result<(), String>>) -> bool {
+        let deadline = Instant::now() + PATIENCE;
+        while !handle.is_finished() && Instant::now() < deadline {
+            let _ = self
+                .event_loop
+                .dispatch(Some(Duration::from_millis(5)), &mut self.state);
+        }
+        handle.is_finished()
     }
 
     /// A few dispatch cycles with nothing outstanding, so in-flight protocol
@@ -371,8 +417,13 @@ impl<S, A> Drop for Harness<S, A> {
     /// leaves the client thread blocked in a round trip whose answer will
     /// never come (the server end of its socket outlives this `Drop`, so it
     /// sees no EOF either), and joining there turns a failing test into a hung
-    /// one. The threads are released a moment later, when `state` -- and with
-    /// it the server end of every socket -- drops.
+    /// one -- which is exactly what happened while writing an early version
+    /// of `layer_shell`'s oversized-layer test, and cost the real bug
+    /// `dispatch.rs`'s `reject_unrepresentable_layer_size` now guards against
+    /// a diagnosis (the test hung instead of failing, on the client side of
+    /// the very panic it was about to catch). The threads are released a
+    /// moment later, when `state` -- and with it the server end of every
+    /// socket -- drops.
     ///
     /// Otherwise each client is given [`PATIENCE`] to finish, *dispatched*
     /// rather than blocked on, because a client mid-round-trip only completes
@@ -390,13 +441,7 @@ impl<S, A> Drop for Harness<S, A> {
             let Some(handle) = self.clients[index].thread.take() else {
                 continue;
             };
-            let deadline = Instant::now() + PATIENCE;
-            while !handle.is_finished() && Instant::now() < deadline {
-                let _ = self
-                    .event_loop
-                    .dispatch(Some(Duration::from_millis(5)), &mut self.state);
-            }
-            if !handle.is_finished() {
+            if !self.wait_for_thread(&handle) {
                 eprintln!("the test client {index} never finished");
                 continue;
             }

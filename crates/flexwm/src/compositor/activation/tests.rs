@@ -1075,7 +1075,7 @@ fn an_interaction_from_hours_ago_is_refused_even_with_nothing_since() {
 
 #[test]
 fn a_session_that_has_seen_no_input_at_all_refuses_everything() {
-    // The fixture.state a compositor starts in, and the one a client racing the
+    // The state a compositor starts in, and the one a client racing the
     // session's first keypress would find: nothing has been interacted
     // with, so no serial can be recent -- not even one this compositor
     // really did issue, to the very client asking.
