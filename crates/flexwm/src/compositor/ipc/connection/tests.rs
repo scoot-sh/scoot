@@ -238,15 +238,16 @@ impl TestClient {
         }
     }
 
-    /// Takes at most one kilobyte of whatever has arrived.
+    /// Takes at most `bytes` (up to a kilobyte) of whatever has arrived.
     ///
     /// For being a *slow* reader rather than a fast one: [`TestClient::collect`]
     /// drains everything available, which empties the compositor's queue in one
     /// go, and a queue that empties is the opposite of the case the write-stall
     /// deadline is about.
-    fn sip(&mut self) -> usize {
+    fn sip(&mut self, bytes: usize) -> usize {
         let mut chunk = [0u8; 1024];
-        match self.stream.read(&mut chunk) {
+        let chunk = &mut chunk[..bytes.min(1024)];
+        match self.stream.read(chunk) {
             Ok(0) => {
                 self.closed = true;
                 0
@@ -1325,7 +1326,7 @@ fn a_peer_that_keeps_reading_slowly_is_never_evicted() {
     let until = Instant::now() + TINY_STALL * 4;
     while Instant::now() < until {
         harness.pump();
-        client.sip();
+        client.sip(1024);
     }
     assert_eq!(
         harness.slots.live(),
@@ -1342,6 +1343,44 @@ fn a_peer_that_keeps_reading_slowly_is_never_evicted() {
             .all(|reply| matches!(reply, Response::Version { .. })),
         "a queued reply came back damaged"
     );
+}
+
+#[test]
+fn a_peer_reading_slower_than_its_replies_are_produced_is_never_evicted() {
+    // The distinction the deadline turns on, and the reason it counts bytes
+    // that *left* rather than bytes still queued: this client reads the whole
+    // time, but slower than the compositor answers it, so its queue only ever
+    // grows. Watching the queue's depth would read that as "no progress" and
+    // drop a connection that is working exactly as intended -- an agent
+    // pipelining a batch of requests and reading the answers as it goes.
+    const PER_ROUND: usize = 8;
+    const SIP: usize = 64;
+
+    let mut harness = Harness::new();
+    let mut client = harness.connect_stalling(Some(TINY_SNDBUF), TINY_STALL);
+    let request = request_line(&Request::Version);
+    let batch = request.repeat(PER_ROUND);
+
+    let until = Instant::now() + TINY_STALL * 4;
+    let mut asked = 0;
+    let mut sipped = 0;
+    while Instant::now() < until {
+        asked += client.send_some(batch.as_bytes()) / request.len();
+        harness.pump();
+        sipped += client.sip(SIP);
+    }
+    assert_eq!(
+        harness.slots.live(),
+        1,
+        "a connection whose peer was reading, only slowly, was evicted"
+    );
+    // The test is only worth anything if the queue really did outgrow what was
+    // being read: otherwise this is the drain-as-you-go case again.
+    assert!(
+        asked * reply_line_len() > sipped * 2,
+        "the client kept up after all ({asked} replies owed, {sipped} bytes read)"
+    );
+    assert!(sipped > 0, "the client never read a byte");
 }
 
 #[test]

@@ -265,3 +265,41 @@ fn a_drained_queue_frees_its_buffer_rather_than_keeping_the_capacity() {
         "a megabyte of capacity must not outlive the reply that needed it"
     );
 }
+
+#[test]
+fn what_has_gone_out_is_counted_across_replies_and_partial_writes() {
+    // The write-stall deadline in `connection.rs` asks this and nothing else:
+    // has anything left since the last look? So it has to count bytes the
+    // socket took, wherever they were written from -- a reply that went
+    // straight out, the tail of one that did not, and the next reply queued
+    // behind it -- and it must not go backwards when the queue empties and
+    // frees its buffer.
+    let mut socket = Throttled::with_room(4);
+    let mut outbound = Outbound::default();
+    assert_eq!(outbound.total_sent(), 0, "nothing has gone out yet");
+
+    outbound
+        .send(&mut socket, "hello\n".to_string())
+        .expect("writes what it can");
+    assert_eq!(outbound.total_sent(), 4, "four bytes of six went out");
+
+    // Blocked: a flush that moves nothing must not count anything.
+    outbound.flush(&mut socket).expect("blocks, not fails");
+    assert_eq!(outbound.total_sent(), 4);
+
+    // A second reply queues behind the first, and one more byte of room lets
+    // exactly one more byte out.
+    socket.room = 1;
+    outbound
+        .send(&mut socket, "world\n".to_string())
+        .expect("queues behind the tail");
+    assert_eq!(outbound.total_sent(), 5);
+
+    // Everything else goes, the queue empties and frees its buffer -- and the
+    // count is still the total, not what the emptied buffer remembers.
+    socket.room = usize::MAX;
+    outbound.flush(&mut socket).expect("finishes");
+    assert!(outbound.is_empty());
+    assert_eq!(outbound.total_sent(), 12, "both replies, whole");
+    assert_eq!(socket.accepted, b"hello\nworld\n");
+}

@@ -106,7 +106,7 @@ pub(super) fn source(
         stall: Timer::from_duration(stall),
         window: stall,
         armed: false,
-        stall_pending: 0,
+        stall_progress: 0,
     })
 }
 
@@ -141,10 +141,17 @@ pub(super) struct ConnectionSource {
     /// [`Connection::interest`]): a connection with nothing to write cannot be
     /// stalled, and must not be woken to be told so.
     armed: bool,
-    /// How much was still queued when the deadline last looked. What it is
-    /// compared against next time is what makes this a bound on *no progress*
-    /// rather than on how long a slow reader may take.
-    stall_pending: usize,
+    /// How many bytes this connection had got out when the deadline last
+    /// looked. Compared against the same count a window later, which is what
+    /// makes this a bound on *no progress* rather than on how long a slow
+    /// reader may take.
+    ///
+    /// Counted in bytes that left rather than in bytes still queued, which is
+    /// not the same test: a queue the same size a window later may have
+    /// drained and refilled in between -- a client reading steadily while the
+    /// compositor answers it -- and dropping that connection would be exactly
+    /// wrong. See [`Outbound::total_sent`].
+    stall_progress: u64,
     connection: Connection,
 }
 
@@ -168,7 +175,7 @@ impl EventSource for ConnectionSource {
             stall,
             window,
             armed,
-            stall_pending,
+            stall_progress,
             connection,
         } = self;
         // The deadline first: if this wakeup is it coming due, whether there is
@@ -177,18 +184,19 @@ impl EventSource for ConnectionSource {
         // it is not theirs, so exactly one of the two runs per wakeup.
         let mut evicted = false;
         stall.process_events(readiness, token, |_deadline, ()| {
-            let pending = connection.pending();
-            // `pending == 0` cannot happen while this is armed -- armed means
-            // registered for writability, which means something is queued --
-            // and is deliberately written as "not stalled" rather than
-            // branched on, so that a state that cannot happen could only ever
-            // cost a spurious re-arm, never a live connection.
-            if pending > 0 && pending >= *stall_pending {
+            let progress = connection.total_sent();
+            // Two conditions, and the queue check is not redundant: a
+            // connection with nothing to write has made no progress either,
+            // and is not stalled -- it is idle. (It also cannot be armed, so
+            // this is belt and braces; written this way round so that a state
+            // that cannot happen could only ever cost a spurious re-arm,
+            // never a live connection.)
+            if !connection.is_drained() && progress == *stall_progress {
                 evicted = true;
                 // Nothing to reschedule for: this source is leaving the loop.
                 return TimeoutAction::Drop;
             }
-            *stall_pending = pending;
+            *stall_progress = progress;
             // Rescheduled from here rather than by re-registering: calloop
             // puts the new deadline straight back in its heap, so a peer
             // draining a large reply slowly costs one wakeup per window and no
@@ -248,7 +256,7 @@ impl EventSource for ConnectionSource {
                 *armed = wanted.writable;
                 if *armed {
                     stall.set_duration(*window);
-                    *stall_pending = connection.pending();
+                    *stall_progress = connection.total_sent();
                 }
                 Ok(PostAction::Reregister)
             }
@@ -350,6 +358,16 @@ impl Connection {
     /// How many bytes of reply this connection's peer has not taken yet.
     fn pending(&self) -> usize {
         self.outbound.pending()
+    }
+
+    /// Whether everything queued for this connection has gone out.
+    fn is_drained(&self) -> bool {
+        self.outbound.is_empty()
+    }
+
+    /// How many bytes of reply have gone out since this connection opened.
+    fn total_sent(&self) -> u64 {
+        self.outbound.total_sent()
     }
 
     /// What this connection needs to hear about next.
