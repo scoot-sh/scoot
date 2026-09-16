@@ -219,14 +219,18 @@ pub fn first_usable<T>(
 /// lowercase phrase completing "this device ..." for
 /// [`unusable_device_error`] to list; a rejected device has already been
 /// closed and returned to the session by the time it is returned.
-pub fn open(session: &mut LibSeatSession, path: &Path) -> Result<OpenGpu, Rejection> {
+pub fn open(
+    session: &mut LibSeatSession,
+    path: &Path,
+    requested: Option<(u16, u16)>,
+) -> Result<OpenGpu, Rejection> {
     let fd = session
         .open(path, OFlags::RDWR | OFlags::CLOEXEC)
         .map_err(|error| {
             Rejection::SessionOpen(format!("could not be opened through the session ({error})"))
         })?;
 
-    match probe(fd.as_fd()) {
+    match probe(fd.as_fd(), requested) {
         Ok((connector, mode)) => Ok(OpenGpu {
             fd,
             connector,
@@ -252,7 +256,10 @@ pub fn open(session: &mut LibSeatSession, path: &Path) -> Result<OpenGpu, Reject
 
 /// Reads KMS state through a borrowed fd -- see this module's doc for why
 /// the check happens before anything takes ownership of it.
-fn probe(fd: BorrowedFd<'_>) -> Result<(connector::Handle, Mode), String> {
+fn probe(
+    fd: BorrowedFd<'_>,
+    requested: Option<(u16, u16)>,
+) -> Result<(connector::Handle, Mode), String> {
     let device = Probe(fd);
     // The wording stops at what the kernel actually said, and says nothing
     // about *why*: the errno varies with the cause (`ENOTSUP` from a driver
@@ -269,7 +276,7 @@ fn probe(fd: BorrowedFd<'_>) -> Result<(connector::Handle, Mode), String> {
     let resources = device.resource_handles().map_err(|error| {
         format!("has no usable KMS pipeline -- loading its DRM resources failed ({error})")
     })?;
-    find_connector_and_mode(&device, &resources)
+    find_connector_and_mode(&device, &resources, requested)
         .ok_or_else(|| "has no connected connector with a usable mode".to_owned())
 }
 
@@ -287,10 +294,17 @@ impl AsFd for Probe<'_> {
 impl BasicDevice for Probe<'_> {}
 impl ControlDevice for Probe<'_> {}
 
-/// The first `Connected` connector with at least one mode, and that mode
-/// (its `PREFERRED`-flagged one if any, else its first). One output only
-/// (multi-output is out of scope for this backend), so the first match
-/// wins.
+/// The first `Connected` connector with at least one mode, and that mode:
+/// the one whose size is `requested` (`--mode WxH`) if the connector lists
+/// one, else its `PREFERRED`-flagged one if any, else its first. One
+/// output only (multi-output is out of scope for this backend), so the
+/// first match wins.
+///
+/// A `requested` size the connector does not offer is a warning, not a
+/// rejection: falling through to the preferred mode leaves the user with a
+/// display of the wrong size, which they can read the log about, whereas
+/// rejecting the device would leave them with no display at all -- and on
+/// a multi-GPU seat would send the search on to a device they did not mean.
 ///
 /// Generic over the device so the same search runs on a [`Probe`] here and
 /// could run on a `DrmDevice`; `resources` is passed in rather than read
@@ -299,6 +313,7 @@ impl ControlDevice for Probe<'_> {}
 fn find_connector_and_mode(
     device: &impl ControlDevice,
     resources: &ResourceHandles,
+    requested: Option<(u16, u16)>,
 ) -> Option<(connector::Handle, Mode)> {
     for &conn in resources.connectors() {
         let Ok(info) = device.get_connector(conn, false) else {
@@ -307,11 +322,26 @@ fn find_connector_and_mode(
         if info.state() != connector::State::Connected {
             continue;
         }
-        let mode = info
-            .modes()
-            .iter()
-            .find(|mode| mode.mode_type().contains(ModeTypeFlags::PREFERRED))
-            .or_else(|| info.modes().first())
+        let modes = info.modes();
+        let requested_mode =
+            requested.and_then(|size| modes.iter().find(|mode| mode.size() == size));
+        if let (Some((width, height)), None, false) = (requested, requested_mode, modes.is_empty())
+        {
+            // warn!, not debug!: the size on screen is about to disagree
+            // with what the user asked for, and this is the only explanation.
+            tracing::warn!(
+                width,
+                height,
+                "drm: connector offers no mode of the requested size; using its preferred mode"
+            );
+        }
+        let mode = requested_mode
+            .or_else(|| {
+                modes
+                    .iter()
+                    .find(|mode| mode.mode_type().contains(ModeTypeFlags::PREFERRED))
+            })
+            .or_else(|| modes.first())
             .copied();
         if let Some(mode) = mode {
             return Some((conn, mode));

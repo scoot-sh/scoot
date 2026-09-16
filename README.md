@@ -146,6 +146,7 @@ flexwm --headless --width 1280 --height 800 -- foot   # start, spawn a terminal
 flexwm --nested --width 1280 --height 800 -- foot     # inside your existing compositor
 flexwm --tty -- foot                                  # on a real DRM/KMS seat
 flexwm --tty --gpu /dev/dri/card1 -- foot             # ...naming the DRM device yourself
+flexwm --tty --mode 1920x1080 -- foot                 # ...naming the display mode (see below)
 flexwm msg windows                                     # in another shell
 flexwm msg action focus-column left
 flexwm msg screenshot --out /tmp/shot.png
@@ -281,7 +282,21 @@ flexwm --tty --gpu /dev/dri/card1 -- foot
 fallback — so a wrong path is a clean startup error naming the device and
 what failed, not a silent fall back to something else. It only means
 anything under `--tty`; on `--headless` or `--nested` it is ignored with a
-warning. To see what the seat has, and which driver is behind each device:
+warning.
+
+The output's size is the connector's preferred mode. When that is the wrong
+size — under Apple's Virtualization framework (vfkit, UTM) the "preferred"
+mode is just the host window's size in backing pixels, so it doubles or
+halves with whichever screen the window opened on — name the mode:
+
+```sh
+flexwm --tty --mode 1920x1080 -- foot
+```
+
+`--mode WxH` picks the connector mode of exactly that size, and falls back to
+the preferred one with a warning if the connector lists no such mode (`cat
+/sys/class/drm/card*-*/modes` shows what it lists). Like `--gpu`, it is
+ignored with a warning outside `--tty`. To see what the seat has, and which driver is behind each device:
 
 ```sh
 ls /dev/dri/card*

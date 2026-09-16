@@ -137,20 +137,23 @@ pub struct Tty {
 
 /// Sets up the session, DRM device and surface, and libinput, and extends
 /// the keybinding table with `--tty`-only VT-switch bindings. Returns the
-/// chosen connector's preferred mode size, which the caller
-/// (`compositor::run`) uses in place of `--width`/`--height` when
-/// initializing `headless::init`'s render target -- under `--tty` the mode
-/// picks the size, there being no host to negotiate one with the way
-/// `--nested` does.
+/// chosen mode's size -- the connector's preferred mode, or the `--mode`
+/// the user named -- which the caller (`compositor::run`) uses in place of
+/// `--width`/`--height` when initializing `headless::init`'s render target:
+/// under `--tty` the mode picks the size, there being no host to negotiate
+/// one with the way `--nested` does.
 ///
 /// `gpu` is `--gpu PATH`: `None` (the normal case) means try every device
 /// on the seat, best guess first, until one works; `Some` means try
 /// exactly that one. See `gpu.rs` for the ordering and for what "works"
-/// means.
+/// means. `mode` is `--mode WxH`, applied to whichever device is chosen;
+/// see `gpu::find_connector_and_mode` for the fallback when the connector
+/// has no mode of that size.
 pub fn init(
     loop_handle: LoopHandle<'static, State>,
     state: &mut State,
     gpu: Option<&Path>,
+    mode: Option<(u16, u16)>,
 ) -> Result<(i32, i32), Box<dyn Error>> {
     let (mut session, notifier) = LibSeatSession::new()?;
     let seat_name = session.seat();
@@ -161,8 +164,9 @@ pub fn init(
     // a user staring at a black screen needs to know which devices exist
     // and what each of them said, not just that something went wrong.
     let candidates = gpu::candidates(&seat_name, gpu)?;
-    let (path, device) = gpu::first_usable(candidates, |path| open_device(&mut session, path))
-        .map_err(|failures| gpu::unusable_device_error(&seat_name, gpu, &failures))?;
+    let (path, device) =
+        gpu::first_usable(candidates, |path| open_device(&mut session, path, mode))
+            .map_err(|failures| gpu::unusable_device_error(&seat_name, gpu, &failures))?;
     let Device {
         drm,
         notifier: drm_notifier,
@@ -276,7 +280,11 @@ struct Device {
 /// being dropped rather than returned to libseat -- it stays in seatd's
 /// open set until the process exits. Harmless, bounded by the number of
 /// GPUs on the seat, and not worth an fd-juggling workaround.
-fn open_device(session: &mut LibSeatSession, path: &Path) -> Result<Device, gpu::Rejection> {
+fn open_device(
+    session: &mut LibSeatSession,
+    path: &Path,
+    requested: Option<(u16, u16)>,
+) -> Result<Device, gpu::Rejection> {
     // `gpu::open` goes through `Session::open`, never a bare
     // `std::fs::File::open` -- that would compile and even run, right up
     // until the modeset call, which then fails with EACCES with no obvious
@@ -285,7 +293,7 @@ fn open_device(session: &mut LibSeatSession, path: &Path) -> Result<Device, gpu:
         fd,
         connector,
         mode,
-    } = gpu::open(session, path)?;
+    } = gpu::open(session, path, requested)?;
     // Smithay logs `Unable to become drm master, assuming unprivileged mode`
     // from inside `DrmDeviceFd::new` on every run here. It is expected, and it
     // does *not* mean master wasn't acquired: master goes to whichever open

@@ -86,26 +86,31 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
         scale,
     )?;
 
-    // `--tty` picks its own size from the connector's preferred mode --
-    // there's no host to negotiate a size with the way `--nested` does, and
-    // no `--width`/`--height` to honor the way `--headless` does -- so it
-    // has to run before `headless::init`, which needs a concrete size to
-    // create the render target at. Neither `--nested` nor plain
-    // `--headless` touch `options.width`/`options.height` here.
+    // `--tty` picks its own size from the connector's preferred mode (or
+    // the `--mode` the user named) -- there's no host to negotiate a size
+    // with the way `--nested` does, and no `--width`/`--height` to honor
+    // the way `--headless` does -- so it has to run before
+    // `headless::init`, which needs a concrete size to create the render
+    // target at. Neither `--nested` nor plain `--headless` touch
+    // `options.width`/`options.height` here.
     let (width, height) = if options.tty {
         tty::init(
             state.loop_handle.clone(),
             &mut state,
             options.gpu.as_deref(),
+            options.mode,
         )?
     } else {
         // Not silently dropped the way `--width`/`--height` are under
         // `--tty`: those have a sensible reading on the backend that
-        // ignores them (the mode wins), whereas `--gpu` on a backend with
-        // no DRM device at all means the user believes they are on `--tty`
-        // and is not.
+        // ignores them (the mode wins), whereas `--gpu` or `--mode` on a
+        // backend with no DRM device at all means the user believes they
+        // are on `--tty` and is not.
         if options.gpu.is_some() {
             tracing::warn!("--gpu names the DRM device for --tty; ignoring it on this backend");
+        }
+        if options.mode.is_some() {
+            tracing::warn!("--mode picks the display mode for --tty; ignoring it on this backend");
         }
         (options.width, options.height)
     };

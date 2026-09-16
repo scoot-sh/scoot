@@ -12,7 +12,7 @@ flexwm -- a scrolling-tiling Wayland compositor
 USAGE:
     flexwm --headless [--width W] [--height H] [--socket PATH] [--config PATH] [-- COMMAND...]
     flexwm --nested [--width W] [--height H] [--socket PATH] [--config PATH] [-- COMMAND...]
-    flexwm --tty [--gpu PATH] [--socket PATH] [--config PATH] [-- COMMAND...]
+    flexwm --tty [--gpu PATH] [--mode WxH] [--socket PATH] [--config PATH] [-- COMMAND...]
     flexwm msg REQUEST
     flexwm --help
 
@@ -69,9 +69,9 @@ pub struct CompositorOptions {
     /// the actual deployment target, rather than headless or nested inside
     /// another compositor. Mutually exclusive with `nested` (`parse` only
     /// ever sets one of the two). `width`/`height` are meaningless here and
-    /// silently ignored: the connector's preferred mode picks the output
-    /// size, and unlike `--nested` there's no host to negotiate a different
-    /// size with.
+    /// silently ignored: the connector's preferred mode (or `--mode`, see
+    /// `mode` below) picks the output size, and unlike `--nested` there's no
+    /// host to negotiate a different size with.
     pub tty: bool,
     /// `--tty`'s DRM device, when the automatic choice is wrong. `None`
     /// (the normal case) means `tty::gpu::candidates` picks: Smithay's
@@ -86,6 +86,19 @@ pub struct CompositorOptions {
     /// device on a backend with no DRM device at all means the user
     /// believes they are on `--tty` and is not.
     pub gpu: Option<PathBuf>,
+    /// `--tty`'s display mode, as `WxH`, when the connector's own preferred
+    /// mode is the wrong size. `None` (the normal case) takes the preferred
+    /// mode, else the first one listed. `Some` picks the connector mode of
+    /// exactly that size, and falls back to the preferred one *with a
+    /// warning* when the connector offers no such mode -- the wrong size
+    /// beats a black screen. Exists for hosts whose "preferred" size is an
+    /// artefact rather than a monitor's: Apple's Virtualization framework
+    /// (vfkit, UTM) hands the guest a mode sized from the host window in
+    /// backing pixels, so it doubles or halves with the screen the window
+    /// happened to open on, while the connector also lists the usual
+    /// standard sizes. Meaningless outside `--tty`, where `compositor::run`
+    /// ignores it with a warning, for the same reason as `gpu`.
+    pub mode: Option<(u16, u16)>,
 }
 
 impl Default for CompositorOptions {
@@ -99,6 +112,7 @@ impl Default for CompositorOptions {
             nested: false,
             tty: false,
             gpu: None,
+            mode: None,
         }
     }
 }
@@ -160,6 +174,7 @@ fn compositor(
                 let path = args.next().ok_or(Error::Missing("a path after --gpu"))?;
                 options.gpu = Some(PathBuf::from(path));
             }
+            "--mode" => options.mode = Some(mode("--mode", args.next())?),
             "--" => {
                 options.command = args.by_ref().collect();
                 break;
@@ -168,6 +183,22 @@ fn compositor(
         }
     }
     Ok(options)
+}
+
+/// A display mode as `WxH` (`1920x1080`): two positive pixel counts around a
+/// lowercase `x`. `u16` because that is what DRM's `Mode::size()` yields,
+/// so the comparison in `tty::gpu` is exact rather than converted.
+fn mode(what: &'static str, value: Option<String>) -> Result<(u16, u16), Error> {
+    let value = value.ok_or(Error::Missing("a WxH size after --mode"))?;
+    let invalid = || Error::Invalid {
+        what,
+        value: value.clone(),
+    };
+    let (width, height) = value.split_once('x').ok_or_else(invalid)?;
+    match (width.parse::<u16>(), height.parse::<u16>()) {
+        (Ok(width), Ok(height)) if width > 0 && height > 0 => Ok((width, height)),
+        _ => Err(invalid()),
+    }
 }
 
 fn message(mut args: impl Iterator<Item = String>) -> Result<Command, Error> {
@@ -396,6 +427,44 @@ mod tests {
         assert_eq!(options.height, 600);
         assert_eq!(options.command, vec!["foot", "-e", "sh"]);
         assert!(!options.nested);
+    }
+
+    #[test]
+    fn tty_mode_is_none_by_default_parses_wxh_and_rejects_the_rest() {
+        let Ok(Command::Compositor(options)) = parse_args(&["--tty"]) else {
+            panic!("expected compositor");
+        };
+        assert_eq!(options.mode, None);
+
+        let Ok(Command::Compositor(options)) = parse_args(&["--tty", "--mode", "1920x1080"]) else {
+            panic!("expected compositor");
+        };
+        assert!(options.tty);
+        assert_eq!(options.mode, Some((1920, 1080)));
+
+        // Anything that is not two positive numbers around an `x`.
+        for bad in [
+            "1920",
+            "1920x",
+            "x1080",
+            "0x1080",
+            "1920x0",
+            "1920X1080",
+            "wide",
+        ] {
+            assert_eq!(
+                parse_args(&["--tty", "--mode", bad]),
+                Err(Error::Invalid {
+                    what: "--mode",
+                    value: bad.to_owned(),
+                }),
+                "{bad}"
+            );
+        }
+        assert_eq!(
+            parse_args(&["--tty", "--mode"]),
+            Err(Error::Missing("a WxH size after --mode"))
+        );
     }
 
     #[test]
