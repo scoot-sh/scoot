@@ -52,6 +52,12 @@ kills, and the takeover/abandoned paths.
   role satisfies.
 - **Not (b):** no upstream Smithay change was needed, so none was made.
 
+Note for anyone following the original entry's reproduction command below:
+the suite has since moved. `session_lock/tests.rs` is now
+`session_lock/tests/`, and those tests are in its `teardown` submodule --
+so the filter is
+`cargo test -p flexwm --bin flexwm session_lock::tests::teardown`.
+
 Original entry, left as written:
 
 # Committing a lock surface after its role is destroyed kills the client.

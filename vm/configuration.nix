@@ -189,6 +189,11 @@ in
       cargo
       clippy
       rustfmt
+      # One process per test, which `cargo test` cannot do: several suites
+      # here note that `smithay::utils::SERIAL_COUNTER` is process-global and
+      # shared with every other test in the same binary. Run alongside
+      # `cargo test`, not instead of it -- nextest does not run doctests.
+      cargo-nextest
       gcc
       gnumake
       pkg-config

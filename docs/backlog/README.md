@@ -101,7 +101,12 @@ actionable.
   — RESOLVED 2026-09-16, together with the `--tty` entry above that had
   independently (and wrongly) filed the same failure as a compositor bug.
 - [Enhanced hardware/DRM testing ideas](./testing/hardware-testing-ideas.md) (research)
-- [Extract a shared test harness; split the largest test files; adopt `cargo-nextest`](./testing/large-test-file-organization.md)
+- [Extract a shared test harness; split the largest test files; adopt `cargo-nextest`](./resolved/large-test-file-organization-done.md)
+  — RESOLVED 2026-09-16: `compositor/test_support.rs` now carries the
+  real-client harness the five largest suites each reimplemented; the two
+  biggest are split by concern; `cargo-nextest` is on the dev VM and in the
+  documented verification set. Same tests, same assertions, 707 fewer lines
+  of duplication.
 
 ### Meta
 - [Rename `flexwm` → `flex`, split out `flexctl`](./meta/rename-flex-family.md) — decided, do this **last** in the burn-down (`flexbar` stays separate, undecided)

@@ -125,7 +125,13 @@ nix develop        # every dependency, on Linux or macOS
 cargo build         # flexwm-core, flexwm-ipc, and the CLI build anywhere;
                      # the compositor itself only compiles on Linux
 cargo test --workspace
+cargo nextest run --workspace   # optional: one process per test, and faster
 ```
+
+`cargo nextest` runs each test in its own process, which keeps the
+compositor's real-Wayland-client test suites from sharing process-global
+state. It is an addition, not a replacement — it does not run doctests, so
+`cargo test` stays the baseline and needs no extra tool.
 
 To actually run the compositor you need a real (or virtual) Linux machine with
 a seat — see `vm/README.md` for a Mac-native NixOS VM that provides one.

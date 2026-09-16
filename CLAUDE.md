@@ -150,12 +150,21 @@ when the user is likely on mobile, and ask them to verify the result (e.g.
 ## Verification and evidence (avoiding redundant hardware work)
 
 The standard verification set for any compositor change: `cargo test -p
-flexwm`, `cargo clippy -p flexwm --all-targets -- -D warnings`, `cargo fmt
---check -p flexwm`, and `scripts/smoke-test.sh` (backend-agnostic IPC-driven
-end-to-end test; set `MODE=--nested` to run under a host compositor, and real
-`--tty` hardware needs the binary launched there — see the script's header).
+flexwm`, `cargo nextest run --workspace`, `cargo clippy -p flexwm
+--all-targets -- -D warnings`, `cargo fmt --check -p flexwm`, and
+`scripts/smoke-test.sh` (backend-agnostic IPC-driven end-to-end test; set
+`MODE=--nested` to run under a host compositor, and real `--tty` hardware
+needs the binary launched there — see the script's header).
 
-The first three are cheap to re-run in full every time, no exceptions —
+`cargo nextest run` is an **addition to** `cargo test`, not a replacement:
+it runs each test in its own process, which is how a test that only passed
+because it shared `smithay::utils::SERIAL_COUNTER` (process-global, and
+several suites say so in as many words) with its neighbours gets caught —
+but it does not run doctests, which only `cargo test` does. It is installed
+on the dev VM (`vm/configuration.nix`); a machine without it still has the
+`cargo test` baseline, which needs no extra tool.
+
+The first four are cheap to re-run in full every time, no exceptions —
 `cargo`'s incremental cache means re-running them after a successful build
 costs almost nothing, and this is exactly where a fabricated or merely-wrong
 "it works" self-report gets caught cheaply. Independent review never skips

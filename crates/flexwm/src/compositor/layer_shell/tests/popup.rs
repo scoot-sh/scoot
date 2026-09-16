@@ -31,7 +31,7 @@ fn an_xdg_popup_configures_maps_draws_and_tears_down() {
 
     let before = fixture.render();
     assert!(
-        !contains_color(&before, POPUP_BGRA),
+        !contains(&before, POPUP_BGRA),
         "the popup color should be absent before any popup exists"
     );
 
@@ -49,7 +49,7 @@ fn an_xdg_popup_configures_maps_draws_and_tears_down() {
 
     let pixels = fixture.render();
     assert!(
-        contains_color(&pixels, POPUP_BGRA),
+        contains(&pixels, POPUP_BGRA),
         "the mapped popup's pixels should reach the framebuffer"
     );
     assert_eq!(
@@ -69,7 +69,7 @@ fn an_xdg_popup_configures_maps_draws_and_tears_down() {
     let after = fixture.render();
     assert_eq!(after.len(), (CANVAS * CANVAS * 4) as usize);
     assert!(
-        !contains_color(&after, POPUP_BGRA),
+        !contains(&after, POPUP_BGRA),
         "the destroyed popup's pixels should be gone"
     );
     fixture.disconnect_client();
@@ -217,7 +217,7 @@ fn a_click_outside_a_grabbing_popup_dismisses_it() {
     // pixels go on the next frame rather than when the client gets around to
     // destroying it.
     assert!(
-        !contains_color(&fixture.render(), POPUP_BGRA),
+        !contains(&fixture.render(), POPUP_BGRA),
         "a dismissed menu should stop being drawn"
     );
     fixture.disconnect_client();
@@ -609,7 +609,7 @@ fn a_client_that_dies_while_grabbing_leaves_nothing_behind() {
     let pixels = fixture.render();
     assert_eq!(pixels.len(), (CANVAS * CANVAS * 4) as usize);
     assert!(
-        !contains_color(&pixels, POPUP_BGRA),
+        !contains(&pixels, POPUP_BGRA),
         "the dead client's menu should be gone"
     );
 }
@@ -629,7 +629,7 @@ fn a_layer_parented_popup_configures_maps_and_draws() {
 
     let before = fixture.render();
     assert!(
-        !contains_color(&before, POPUP_BGRA),
+        !contains(&before, POPUP_BGRA),
         "the popup color should be absent before any popup exists"
     );
 
@@ -647,7 +647,7 @@ fn a_layer_parented_popup_configures_maps_and_draws() {
 
     let pixels = fixture.render();
     assert!(
-        contains_color(&pixels, POPUP_BGRA),
+        contains(&pixels, POPUP_BGRA),
         "a bar's own dropdown should reach the framebuffer"
     );
     assert_eq!(
@@ -671,7 +671,7 @@ fn a_layer_parented_popup_configures_maps_and_draws() {
     fixture.run(Step::DestroyPopup);
     let after = fixture.render();
     assert!(
-        !contains_color(&after, POPUP_BGRA),
+        !contains(&after, POPUP_BGRA),
         "the destroyed dropdown's pixels should be gone"
     );
     assert_eq!(

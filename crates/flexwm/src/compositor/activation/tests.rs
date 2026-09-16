@@ -25,20 +25,16 @@ use std::io::Write;
 use std::os::fd::AsFd;
 use std::os::unix::net::UnixStream;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{Sender, channel};
-use std::thread;
+use std::sync::mpsc::Sender;
 use std::time::Instant;
 
-use flexwm_core::{Config, Event, OutputId, Rect, WindowId};
+use flexwm_core::{Event, OutputId, Rect, WindowId};
 use flexwm_ipc::PointerButton;
 use smithay::backend::input::KeyState;
 use smithay::input::keyboard::Keycode;
-use smithay::reexports::calloop::EventLoop;
 use smithay::reexports::wayland_server::backend::ClientId;
 use smithay::reexports::wayland_server::protocol::wl_seat::WlSeat as ServerSeat;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface as ServerSurface;
-use smithay::reexports::wayland_server::{Client, Display};
 use smithay::utils::Serial;
 use wayland_client::protocol::{
     wl_buffer, wl_compositor, wl_keyboard, wl_registry, wl_seat, wl_shm, wl_shm_pool, wl_surface,
@@ -50,16 +46,12 @@ use wayland_protocols::xdg::shell::client::{xdg_surface, xdg_toplevel, xdg_wm_ba
 use super::*;
 use crate::compositor::decorations::Appearance;
 use crate::compositor::input::interaction;
-use crate::compositor::keybindings::Keybindings;
 use crate::compositor::state::ClientState;
+use crate::compositor::test_support::Harness;
 
 /// The one output every test here gives the core, so there is somewhere for
 /// windows to be arranged.
 const OUTPUT: Rect = Rect::new(0, 0, 1600, 1000);
-
-/// How long a live test will dispatch before deciding the compositor stopped
-/// serving its client. Generous: a debug build under a VM.
-const PATIENCE: Duration = Duration::from_secs(10);
 
 /// The name [`State::new`] gives the one seat this compositor has, which is
 /// how the test client picks it out of the registry.
@@ -321,6 +313,16 @@ struct Run {
     activation_advertised: bool,
 }
 
+/// What the client thread reports, in the order it reports it.
+enum Ack {
+    /// Both toplevels are up, one of them has the keyboard, and the client is
+    /// now blocked waiting to be typed at.
+    Mapped,
+    /// The script ran to the end. Boxed because a `Run` owns a `Connection`
+    /// and is far larger than the other variant.
+    Done(Box<Run>),
+}
+
 /// What a client attaches to the tokens it mints.
 #[derive(Clone, Copy, Debug)]
 enum Claim {
@@ -354,8 +356,8 @@ fn map_two_and_activate_first(
     activate: bool,
     spare_tokens: usize,
     claim: Claim,
-    mapped: Sender<()>,
-) -> Result<Run, String> {
+    acks: Sender<Ack>,
+) -> Result<(), String> {
     let conn = Connection::from_socket(stream).map_err(|e| e.to_string())?;
     let mut queue = conn.new_event_queue();
     let qh = queue.handle();
@@ -401,7 +403,7 @@ fn map_two_and_activate_first(
     // something for a keypress to reach. Dispatch until it arrives; the
     // compositor side's own deadline is what turns "it never comes" into a
     // failed assertion rather than a hang.
-    mapped.send(()).map_err(|e| e.to_string())?;
+    acks.send(Ack::Mapped).map_err(|e| e.to_string())?;
     while client.key_serial.is_none() {
         queue
             .blocking_dispatch(&mut client)
@@ -451,7 +453,7 @@ fn map_two_and_activate_first(
         queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
     }
 
-    Ok(Run {
+    acks.send(Ack::Done(Box::new(Run {
         connection: conn,
         first_surface: first.id().protocol_id(),
         bare_surface: bare.id().protocol_id(),
@@ -465,8 +467,17 @@ fn map_two_and_activate_first(
         // explicitly so the dedicated test below asserts on the registry
         // rather than on a side effect.
         activation_advertised: true,
-    })
+    })))
+    .map_err(|e| e.to_string())
 }
+
+/// A live compositor with one output and one connected client. See
+/// [`crate::compositor::test_support`] for everything that is not specific to
+/// activation.
+///
+/// The client takes no steps -- its script runs start to finish on its own --
+/// so the step type is `()`; everything it has to say comes back as an [`Ack`].
+type Fixture = Harness<(), Ack>;
 
 /// Stands up a real compositor with one output, runs the client script above
 /// against it, and hands back both halves for the caller to assert on.
@@ -477,79 +488,43 @@ fn map_two_and_activate_first(
 /// are up a real key press and release go through the seat -- the user
 /// interaction a legitimate token is minted from, delivered to the client
 /// itself. `claim` decides what the client then attaches to its tokens.
-fn drive(
-    activate: bool,
-    spare_tokens: usize,
-    claim: Claim,
-) -> (EventLoop<'static, State>, State, Client, Run) {
-    let mut event_loop: EventLoop<'static, State> = EventLoop::try_new().expect("an event loop");
-    let display: Display<State> = Display::new().expect("a wayland display");
-    let mut state = State::new(
-        &mut event_loop,
-        display,
-        Config::default(),
-        Keybindings::default(),
-        Appearance::default(),
-        1.0,
-    )
-    .expect("a compositor state with a wayland socket");
-    // Added directly rather than through `headless::init`, which would also
-    // build a renderer and a render target nothing here draws to.
-    state.world.handle_event(Event::OutputAdded {
+fn drive(activate: bool, spare_tokens: usize, claim: Claim) -> (Fixture, Run) {
+    // No backend: an output is added to the core directly rather than through
+    // `headless::init`, which would also build a renderer and a render target
+    // nothing here draws to.
+    let mut fixture = Harness::bare(Appearance::default());
+    fixture.state.world.handle_event(Event::OutputAdded {
         id: OutputId(1),
         area: OUTPUT,
     });
     // Created before the client connects so it reaches the client's
     // registry, and kept alive by `seat_state`'s own list of seats rather
     // than by this handle.
-    state
+    fixture
+        .state
         .seat_state
-        .new_wl_seat(&state.display_handle, OTHER_SEAT);
-
-    let (server, client_end) = UnixStream::pair().expect("a socket pair");
-    let client: Client = state
-        .display_handle
-        .insert_client(server, Arc::new(ClientState::default()))
-        .expect("an inserted client");
-
-    let finished = Arc::new(AtomicBool::new(false));
-    let flag = Arc::clone(&finished);
-    let (mapped_tx, mapped_rx) = channel();
-    let thread = thread::spawn(move || {
-        let result =
-            map_two_and_activate_first(client_end, activate, spare_tokens, claim, mapped_tx);
-        flag.store(true, Ordering::Release);
-        result
+        .new_wl_seat(&fixture.state.display_handle, OTHER_SEAT);
+    fixture.spawn(move |stream, _steps, acks| {
+        map_two_and_activate_first(stream, activate, spare_tokens, claim, acks)
     });
 
     // The client blocks on its roundtrips, so the compositor has to be
-    // dispatched from here until it is done. The deadline only exists so a
-    // regression fails in seconds instead of hanging forever.
-    let deadline = Instant::now() + PATIENCE;
-    let mut typed = false;
-    while !finished.load(Ordering::Acquire) && Instant::now() < deadline {
-        event_loop
-            .dispatch(Some(Duration::from_millis(10)), &mut state)
-            .expect("a compositor dispatch");
-        if !typed && mapped_rx.try_recv().is_ok() {
-            // The client is up and focused, and is now waiting to be typed
-            // at. Flushed explicitly afterwards because it is blocked reading
-            // rather than writing, and the display source only pushes events
-            // out when the *client* writes.
-            press_a_key(&mut state);
-            let _ = state.display_handle.flush_clients();
-            typed = true;
-        }
-    }
-    assert!(
-        finished.load(Ordering::Acquire),
-        "the client thread never finished; the compositor stopped serving it"
-    );
-    let run = thread
-        .join()
-        .expect("the client thread did not panic")
-        .expect("the client script ran");
-    (event_loop, state, client, run)
+    // dispatched from here until it answers -- which is what `wait_for_ack`
+    // does, with the deadline that turns "it never comes" into a failed
+    // assertion rather than a hang.
+    let Ack::Mapped = fixture.wait_for_ack(0) else {
+        panic!("the client reported it was done before it reported being mapped");
+    };
+    // The client is up and focused, and is now waiting to be typed at. Flushed
+    // explicitly afterwards because it is blocked reading rather than writing,
+    // and the display source only pushes events out when the *client* writes.
+    press_a_key(&mut fixture);
+    let _ = fixture.state.display_handle.flush_clients();
+
+    let Ack::Done(run) = fixture.wait_for_ack(0) else {
+        panic!("the client reported being mapped twice");
+    };
+    (fixture, *run)
 }
 
 /// Presses and releases one key on the compositor's own seat, reporting the
@@ -561,7 +536,8 @@ fn drive(
 /// recipient is asserted rather than returned per-event: both halves of one
 /// press go to whoever holds the keyboard, and a test that found otherwise
 /// would be testing a compositor that had stopped making sense.
-fn press_a_key(state: &mut State) -> (Serial, Serial, ClientId) {
+fn press_a_key(fixture: &mut Fixture) -> (Serial, Serial, ClientId) {
+    let state = &mut fixture.state;
     let before = state.interaction_serials.latest();
     let outcome = state.key(Keycode::new(RETURN), KeyState::Pressed);
     assert!(
@@ -597,7 +573,8 @@ fn press_a_key(state: &mut State) -> (Serial, Serial, ClientId) {
 /// with no pointer focus records nothing, and reading [`Recent::latest`] then
 /// silently returns whatever came *before* the click, which is how the first
 /// version of this test passed while testing a keypress.
-fn click(state: &mut State) -> (Serial, Serial, ClientId) {
+fn click(fixture: &mut Fixture) -> (Serial, Serial, ClientId) {
+    let state = &mut fixture.state;
     let before = state.interaction_serials.latest();
     state.pointer_button(PointerButton::Left, true);
     let (press, client) = state
@@ -625,9 +602,10 @@ fn click(state: &mut State) -> (Serial, Serial, ClientId) {
 ///
 /// Its own end of the socket comes back with it: dropping that would
 /// disconnect it before the assertion.
-fn bystander(state: &mut State) -> (ClientId, UnixStream) {
+fn bystander(fixture: &mut Fixture) -> (ClientId, UnixStream) {
     let (server, ours) = UnixStream::pair().expect("a socket pair");
-    let id = state
+    let id = fixture
+        .state
         .display_handle
         .insert_client(server, Arc::new(ClientState::default()))
         .expect("an inserted client")
@@ -638,14 +616,16 @@ fn bystander(state: &mut State) -> (ClientId, UnixStream) {
 /// The client's `wl_seat` resources, split into the compositor's own and the
 /// other one -- resolved the same way `token_created` does it, rather than
 /// by the order the client bound them in.
-fn seats(state: &State, client: &Client, run: &Run) -> (ServerSeat, ServerSeat) {
+fn seats(fixture: &Fixture, run: &Run) -> (ServerSeat, ServerSeat) {
     let mut ours = None;
     let mut other = None;
     for &id in &run.seats {
-        let resource: ServerSeat = client
-            .object_from_protocol_id(&state.display_handle, id)
+        let resource: ServerSeat = fixture
+            .client(0)
+            .object_from_protocol_id(&fixture.state.display_handle, id)
             .expect("the client's seat");
-        if Seat::<State>::from_resource(&resource).is_some_and(|named| named == state.seat) {
+        if Seat::<State>::from_resource(&resource).is_some_and(|named| named == fixture.state.seat)
+        {
             ours = Some(resource);
         } else {
             other = Some(resource);
@@ -676,13 +656,22 @@ fn token_claiming(
     (XdgActivationToken::from("test-token".to_string()), data)
 }
 
+/// The client's own `wl_surface` resource for `protocol_id`.
+fn surface_of(fixture: &Fixture, protocol_id: u32) -> ServerSurface {
+    fixture
+        .client(0)
+        .object_from_protocol_id(&fixture.state.display_handle, protocol_id)
+        .expect("the client's surface")
+}
+
 /// The [`WindowId`] of the window whose toplevel is the client's surface
 /// `protocol_id`.
-fn window_of(state: &State, client: &Client, protocol_id: u32) -> WindowId {
-    let surface: ServerSurface = client
-        .object_from_protocol_id(&state.display_handle, protocol_id)
-        .expect("the client's surface");
-    state.id_of(&surface).expect("a window for that surface")
+fn window_of(fixture: &Fixture, protocol_id: u32) -> WindowId {
+    let surface = surface_of(fixture, protocol_id);
+    fixture
+        .state
+        .id_of(&surface)
+        .expect("a window for that surface")
 }
 
 #[test]
@@ -690,7 +679,7 @@ fn the_activation_global_is_advertised() {
     // The global itself, not its effect: `foot` prints "compositor does not
     // implement XDG activation" on exactly this, and a client that cannot
     // find it never gets as far as asking for a token.
-    let (_loop, _state, _client, run) = drive(false, 0, Claim::RealKeyPress);
+    let (_fixture, run) = drive(false, 0, Claim::RealKeyPress);
     assert!(run.activation_advertised, "xdg_activation_v1 is missing");
 }
 
@@ -699,10 +688,10 @@ fn mapping_a_second_window_takes_focus_from_the_first() {
     // Not a test of this module, but what makes the one below non-vacuous:
     // if focus were already on the first window, an activation that did
     // nothing at all would pass.
-    let (_loop, state, client, run) = drive(false, 0, Claim::RealKeyPress);
-    let first = window_of(&state, &client, run.first_surface);
+    let (fixture, run) = drive(false, 0, Claim::RealKeyPress);
+    let first = window_of(&fixture, run.first_surface);
     assert_ne!(
-        state.focus,
+        fixture.state.focus,
         Some(first),
         "the first window still has focus, so activating it would prove nothing"
     );
@@ -714,10 +703,10 @@ fn a_fresh_token_activates_the_window_it_names() {
     // a key press happens, the client mints a token naming that press's
     // serial on this compositor's seat, and redeems it. This is what
     // `fuzzel` handing `foot` an `XDG_ACTIVATION_TOKEN` does.
-    let (_loop, state, client, run) = drive(true, 0, Claim::RealKeyPress);
-    let first = window_of(&state, &client, run.first_surface);
+    let (fixture, run) = drive(true, 0, Claim::RealKeyPress);
+    let first = window_of(&fixture, run.first_surface);
     assert_eq!(
-        state.focus,
+        fixture.state.focus,
         Some(first),
         "the activated window did not get focus"
     );
@@ -729,10 +718,10 @@ fn a_token_that_names_no_input_event_never_moves_focus() {
     // `set_serial` is optional in the protocol, so a background client can
     // simply not call it. The token is milliseconds old and the table is
     // empty, so neither other bound refuses it.
-    let (_loop, state, client, run) = drive(true, 0, Claim::Nothing);
-    let first = window_of(&state, &client, run.first_surface);
+    let (fixture, run) = drive(true, 0, Claim::Nothing);
+    let first = window_of(&fixture, run.first_surface);
     assert_ne!(
-        state.focus,
+        fixture.state.focus,
         Some(first),
         "a token with no input serial still moved focus"
     );
@@ -742,10 +731,10 @@ fn a_token_that_names_no_input_event_never_moves_focus() {
 fn a_token_naming_a_serial_no_input_event_carried_never_moves_focus() {
     // The same client, one step cleverer: it calls `set_serial` with the
     // right seat and a made-up number rather than omitting it.
-    let (_loop, state, client, run) = drive(true, 0, Claim::Fabricated);
-    let first = window_of(&state, &client, run.first_surface);
+    let (fixture, run) = drive(true, 0, Claim::Fabricated);
+    let first = window_of(&fixture, run.first_surface);
     assert_ne!(
-        state.focus,
+        fixture.state.focus,
         Some(first),
         "a token with a fabricated serial still moved focus"
     );
@@ -756,17 +745,17 @@ fn a_redeemed_token_cannot_be_spent_twice() {
     // One token, one activation: `request_activation` removes it whether or
     // not it honored it, so the same user action cannot be replayed into
     // focus later.
-    let (_loop, state, client, run) = drive(true, 0, Claim::RealKeyPress);
+    let (fixture, run) = drive(true, 0, Claim::RealKeyPress);
     // Asserted first so the count below cannot pass vacuously: a token
     // refused at creation would also leave an empty table.
-    let first = window_of(&state, &client, run.first_surface);
+    let first = window_of(&fixture, run.first_surface);
     assert_eq!(
-        state.focus,
+        fixture.state.focus,
         Some(first),
         "the token was never honored, so its removal proves nothing"
     );
     assert_eq!(
-        state.xdg_activation.tokens().count(),
+        fixture.state.xdg_activation.tokens().count(),
         0,
         "the redeemed token is still outstanding"
     );
@@ -779,9 +768,9 @@ fn outstanding_tokens_are_bounded() {
     // here commits well past the cap through the real protocol path, every
     // one of them properly serialled, so they are all otherwise acceptable;
     // the table must stop growing rather than track every one.
-    let (_loop, state, _client, _run) = drive(false, MAX_TOKENS + 8, Claim::RealKeyPress);
+    let (fixture, _run) = drive(false, MAX_TOKENS + 8, Claim::RealKeyPress);
     assert_eq!(
-        state.xdg_activation.tokens().count(),
+        fixture.state.xdg_activation.tokens().count(),
         MAX_TOKENS,
         "the token table grew past its cap"
     );
@@ -792,9 +781,9 @@ fn refused_tokens_never_reach_the_table_at_all() {
     // The other half of the cap: a client looping on unserialled tokens is
     // refused before the table is touched, so it cannot evict anything or
     // occupy a slot a legitimate launcher needs.
-    let (_loop, state, _client, _run) = drive(false, MAX_TOKENS + 8, Claim::Nothing);
+    let (fixture, _run) = drive(false, MAX_TOKENS + 8, Claim::Nothing);
     assert_eq!(
-        state.xdg_activation.tokens().count(),
+        fixture.state.xdg_activation.tokens().count(),
         0,
         "refused tokens were tracked anyway"
     );
@@ -815,19 +804,17 @@ fn token_aged(age: Duration) -> (XdgActivationToken, XdgActivationTokenData) {
 
 #[test]
 fn an_expired_token_does_not_move_focus() {
-    let (_loop, mut state, client, run) = drive(false, 0, Claim::RealKeyPress);
-    let first = window_of(&state, &client, run.first_surface);
-    let focus_before = state.focus;
+    let (mut fixture, run) = drive(false, 0, Claim::RealKeyPress);
+    let first = window_of(&fixture, run.first_surface);
+    let focus_before = fixture.state.focus;
     assert_ne!(focus_before, Some(first));
 
-    let surface: ServerSurface = client
-        .object_from_protocol_id(&state.display_handle, run.first_surface)
-        .expect("the client's surface");
+    let surface = surface_of(&fixture, run.first_surface);
     let (token, data) = token_aged(TOKEN_LIFETIME + Duration::from_secs(1));
-    state.request_activation(token, data, surface);
+    fixture.state.request_activation(token, data, surface);
 
     assert_eq!(
-        state.focus, focus_before,
+        fixture.state.focus, focus_before,
         "a token past TOKEN_LIFETIME still moved focus"
     );
 }
@@ -836,16 +823,14 @@ fn an_expired_token_does_not_move_focus() {
 fn a_token_just_inside_the_lifetime_still_works() {
     // The other side of the bound, so the test above is checking an edge
     // rather than a handler that never activates anything.
-    let (_loop, mut state, client, run) = drive(false, 0, Claim::RealKeyPress);
-    let first = window_of(&state, &client, run.first_surface);
+    let (mut fixture, run) = drive(false, 0, Claim::RealKeyPress);
+    let first = window_of(&fixture, run.first_surface);
 
-    let surface: ServerSurface = client
-        .object_from_protocol_id(&state.display_handle, run.first_surface)
-        .expect("the client's surface");
+    let surface = surface_of(&fixture, run.first_surface);
     let (token, data) = token_aged(TOKEN_LIFETIME - Duration::from_secs(1));
-    state.request_activation(token, data, surface);
+    fixture.state.request_activation(token, data, surface);
 
-    assert_eq!(state.focus, Some(first));
+    assert_eq!(fixture.state.focus, Some(first));
 }
 
 #[test]
@@ -854,22 +839,20 @@ fn activating_a_surface_that_is_not_a_window_changes_nothing() {
     // same way a toplevel does -- the protocol takes any `wl_surface`. None
     // of them is somewhere focus can go, and the lookup returning `None`
     // must be a no-op rather than clearing whatever had focus.
-    let (_loop, mut state, client, run) = drive(false, 0, Claim::RealKeyPress);
-    let focus_before = state.focus;
+    let (mut fixture, run) = drive(false, 0, Claim::RealKeyPress);
+    let focus_before = fixture.state.focus;
     assert!(focus_before.is_some(), "nothing had focus to begin with");
 
-    let surface: ServerSurface = client
-        .object_from_protocol_id(&state.display_handle, run.bare_surface)
-        .expect("the client's role-less surface");
+    let surface = surface_of(&fixture, run.bare_surface);
     assert!(
-        state.id_of(&surface).is_none(),
+        fixture.state.id_of(&surface).is_none(),
         "the role-less surface is a window after all; this test proves nothing"
     );
     let (token, data) = token_aged(Duration::from_secs(0));
-    state.request_activation(token, data, surface);
+    fixture.state.request_activation(token, data, surface);
 
     assert_eq!(
-        state.focus, focus_before,
+        fixture.state.focus, focus_before,
         "activating a non-window surface changed focus"
     );
 }
@@ -890,18 +873,18 @@ fn a_token_carrying_either_half_of_a_key_press_is_accepted() {
     // `State::press` sends the release before any client could answer the
     // press: a gate that only knew one of them would refuse every token
     // `flexwm msg key` ever leads to.
-    let (_loop, mut state, client, run) = drive(false, 0, Claim::RealKeyPress);
-    let (ours, _other) = seats(&state, &client, &run);
-    let (press, release, typed_at) = press_a_key(&mut state);
+    let (mut fixture, run) = drive(false, 0, Claim::RealKeyPress);
+    let (ours, _other) = seats(&fixture, &run);
+    let (press, release, typed_at) = press_a_key(&mut fixture);
 
     let (token, data) = token_claiming(Some((press, ours.clone())), Some(typed_at.clone()));
     assert!(
-        state.token_created(token, data),
+        fixture.state.token_created(token, data),
         "a token naming the press serial was refused"
     );
     let (token, data) = token_claiming(Some((release, ours)), Some(typed_at));
     assert!(
-        state.token_created(token, data),
+        fixture.state.token_created(token, data),
         "a token naming the release serial was refused"
     );
 }
@@ -911,22 +894,22 @@ fn a_token_carrying_either_half_of_a_click_is_accepted() {
     // The pointer's own half of the same rule: a launcher entry activated
     // with the mouse mints from a button event, and a GTK button fires on
     // the release.
-    let (_loop, mut state, client, run) = drive(false, 0, Claim::RealKeyPress);
-    let (ours, _other) = seats(&state, &client, &run);
+    let (mut fixture, run) = drive(false, 0, Claim::RealKeyPress);
+    let (ours, _other) = seats(&fixture, &run);
     // A button goes to whatever the pointer last entered, so put it over the
     // first window's painted area first -- which is `SURFACE` pixels square
     // at the window's own origin, not the whole column the core gave it.
-    state.pointer_move(30.0, 30.0);
-    let (press, release, clicked_on) = click(&mut state);
+    fixture.state.pointer_move(30.0, 30.0);
+    let (press, release, clicked_on) = click(&mut fixture);
 
     let (token, data) = token_claiming(Some((press, ours.clone())), Some(clicked_on.clone()));
     assert!(
-        state.token_created(token, data),
+        fixture.state.token_created(token, data),
         "a token naming the button press serial was refused"
     );
     let (token, data) = token_claiming(Some((release, ours)), Some(clicked_on));
     assert!(
-        state.token_created(token, data),
+        fixture.state.token_created(token, data),
         "a token naming the button release serial was refused"
     );
 }
@@ -937,31 +920,31 @@ fn two_tokens_from_different_recent_interactions_are_both_accepted() {
     // different real interaction -- a launcher's token still being redeemed
     // by a cold-starting app while the user clicks something else. Only one
     // of those serials can be the *latest*; both are recent.
-    let (_loop, mut state, client, run) = drive(false, 0, Claim::RealKeyPress);
-    let (ours, _other) = seats(&state, &client, &run);
-    state.pointer_move(30.0, 30.0);
-    let (older, _, typed_at) = press_a_key(&mut state);
-    let (newer, _, clicked_on) = click(&mut state);
+    let (mut fixture, run) = drive(false, 0, Claim::RealKeyPress);
+    let (ours, _other) = seats(&fixture, &run);
+    fixture.state.pointer_move(30.0, 30.0);
+    let (older, _, typed_at) = press_a_key(&mut fixture);
+    let (newer, _, clicked_on) = click(&mut fixture);
     assert_eq!(typed_at, clicked_on, "one client, two kinds of interaction");
 
     let (token, data) = token_claiming(Some((older, ours.clone())), Some(typed_at.clone()));
     assert!(
-        state.token_created(token, data),
+        fixture.state.token_created(token, data),
         "the older of two recent interactions was refused"
     );
     let (token, data) = token_claiming(Some((newer, ours)), Some(clicked_on));
     assert!(
-        state.token_created(token, data),
+        fixture.state.token_created(token, data),
         "the newer of two recent interactions was refused"
     );
 }
 
 #[test]
 fn a_token_that_names_no_input_event_is_refused() {
-    let (_loop, mut state, client, _run) = drive(false, 0, Claim::RealKeyPress);
-    let (token, data) = token_claiming(None, Some(client.id()));
+    let (mut fixture, _run) = drive(false, 0, Claim::RealKeyPress);
+    let (token, data) = token_claiming(None, Some(fixture.client(0).id()));
     assert!(
-        !state.token_created(token, data),
+        !fixture.state.token_created(token, data),
         "a token with no serial at all was accepted"
     );
 }
@@ -971,29 +954,29 @@ fn a_token_naming_a_seat_this_compositor_does_not_own_is_refused() {
     // A real serial, on a real seat -- just not the seat that issued it. One
     // seat is all flexwm has today, so this is the rule holding the line for
     // a future that has more than one rather than one being enforced daily.
-    let (_loop, mut state, client, run) = drive(false, 0, Claim::RealKeyPress);
-    let (_ours, other) = seats(&state, &client, &run);
-    let (press, _release, typed_at) = press_a_key(&mut state);
+    let (mut fixture, run) = drive(false, 0, Claim::RealKeyPress);
+    let (_ours, other) = seats(&fixture, &run);
+    let (press, _release, typed_at) = press_a_key(&mut fixture);
 
     let (token, data) = token_claiming(Some((press, other)), Some(typed_at));
     assert!(
-        !state.token_created(token, data),
+        !fixture.state.token_created(token, data),
         "a token naming another seat was accepted"
     );
 }
 
 #[test]
 fn a_token_whose_serial_no_input_event_carried_is_refused() {
-    let (_loop, mut state, client, run) = drive(false, 0, Claim::RealKeyPress);
-    let (ours, _other) = seats(&state, &client, &run);
-    let (press, _release, typed_at) = press_a_key(&mut state);
+    let (mut fixture, run) = drive(false, 0, Claim::RealKeyPress);
+    let (ours, _other) = seats(&fixture, &run);
+    let (press, _release, typed_at) = press_a_key(&mut fixture);
 
     // Far enough past a real one that nothing in this test could have
     // issued it, which is what a stale serial looks like.
     let fabricated = Serial::from(u32::from(press).wrapping_add(1_000));
     let (token, data) = token_claiming(Some((fabricated, ours)), Some(typed_at));
     assert!(
-        !state.token_created(token, data),
+        !fixture.state.token_created(token, data),
         "a token with a fabricated serial was accepted"
     );
 }
@@ -1007,16 +990,16 @@ fn a_serial_delivered_to_another_client_is_refused_however_right_the_number_is()
     // input at all: a few dozen guesses around an observed value, each costing
     // nothing because a refused token posts no error. Here the number is not
     // guessed but exactly right, and it still gets nowhere.
-    let (_loop, mut state, client, run) = drive(false, 0, Claim::RealKeyPress);
-    let (ours, _other) = seats(&state, &client, &run);
-    let (press, release, typed_at) = press_a_key(&mut state);
-    let (guesser, _socket) = bystander(&mut state);
+    let (mut fixture, run) = drive(false, 0, Claim::RealKeyPress);
+    let (ours, _other) = seats(&fixture, &run);
+    let (press, release, typed_at) = press_a_key(&mut fixture);
+    let (guesser, _socket) = bystander(&mut fixture);
     assert_ne!(guesser, typed_at, "the bystander is the focused client");
 
     for (serial, which) in [(press, "press"), (release, "release")] {
         let (token, data) = token_claiming(Some((serial, ours.clone())), Some(guesser.clone()));
         assert!(
-            !state.token_created(token, data),
+            !fixture.state.token_created(token, data),
             "a client that never received the {which} spent its serial anyway"
         );
     }
@@ -1024,7 +1007,7 @@ fn a_serial_delivered_to_another_client_is_refused_however_right_the_number_is()
     // above is about the recipient and not about the serial having gone stale.
     let (token, data) = token_claiming(Some((press, ours)), Some(typed_at));
     assert!(
-        state.token_created(token, data),
+        fixture.state.token_created(token, data),
         "the client the key actually went to was refused too"
     );
 }
@@ -1035,13 +1018,13 @@ fn a_token_with_no_requesting_client_is_refused() {
     // the sender -- but "no client" can never satisfy a rule about which
     // client received the event, and defaulting it open would be the whole
     // gate.
-    let (_loop, mut state, client, run) = drive(false, 0, Claim::RealKeyPress);
-    let (ours, _other) = seats(&state, &client, &run);
-    let (press, _release, _typed_at) = press_a_key(&mut state);
+    let (mut fixture, run) = drive(false, 0, Claim::RealKeyPress);
+    let (ours, _other) = seats(&fixture, &run);
+    let (press, _release, _typed_at) = press_a_key(&mut fixture);
 
     let (token, data) = token_claiming(Some((press, ours)), None);
     assert!(
-        !state.token_created(token, data),
+        !fixture.state.token_created(token, data),
         "a token with no requesting client was accepted"
     );
 }
@@ -1053,17 +1036,17 @@ fn a_serial_from_before_the_recent_history_is_refused() {
     // evidence of anything. A launcher mints and hands over its token in
     // milliseconds; this is a client that sat on a serial while the user
     // went on typing.
-    let (_loop, mut state, client, run) = drive(false, 0, Claim::RealKeyPress);
-    let (ours, _other) = seats(&state, &client, &run);
-    let (press, _release, typed_at) = press_a_key(&mut state);
+    let (mut fixture, run) = drive(false, 0, Claim::RealKeyPress);
+    let (ours, _other) = seats(&fixture, &run);
+    let (press, _release, typed_at) = press_a_key(&mut fixture);
     // Two events each, so this is twice the history's own length.
     for _ in 0..interaction::CAPACITY {
-        press_a_key(&mut state);
+        press_a_key(&mut fixture);
     }
 
     let (token, data) = token_claiming(Some((press, ours)), Some(typed_at));
     assert!(
-        !state.token_created(token, data),
+        !fixture.state.token_created(token, data),
         "a serial older than the whole recent history was still accepted"
     );
 }
@@ -1075,16 +1058,17 @@ fn an_interaction_from_hours_ago_is_refused_even_with_nothing_since() {
     // `State::act`, and motion and scroll never qualify. Without the age
     // bound this morning's click would still be spendable tonight, against
     // whatever the agent had arranged since.
-    let (_loop, mut state, client, run) = drive(false, 0, Claim::RealKeyPress);
-    let (ours, _other) = seats(&state, &client, &run);
-    let (press, _release, typed_at) = press_a_key(&mut state);
-    state
+    let (mut fixture, run) = drive(false, 0, Claim::RealKeyPress);
+    let (ours, _other) = seats(&fixture, &run);
+    let (press, _release, typed_at) = press_a_key(&mut fixture);
+    fixture
+        .state
         .interaction_serials
         .backdate(Duration::from_secs(8 * 3600));
 
     let (token, data) = token_claiming(Some((press, ours)), Some(typed_at));
     assert!(
-        !state.token_created(token, data),
+        !fixture.state.token_created(token, data),
         "an interaction from hours ago was still good enough"
     );
 }
@@ -1095,14 +1079,14 @@ fn a_session_that_has_seen_no_input_at_all_refuses_everything() {
     // session's first keypress would find: nothing has been interacted
     // with, so no serial can be recent -- not even one this compositor
     // really did issue, to the very client asking.
-    let (_loop, mut state, client, run) = drive(false, 0, Claim::RealKeyPress);
-    let (ours, _other) = seats(&state, &client, &run);
-    let (press, _release, typed_at) = press_a_key(&mut state);
-    state.interaction_serials = interaction::Recent::default();
+    let (mut fixture, run) = drive(false, 0, Claim::RealKeyPress);
+    let (ours, _other) = seats(&fixture, &run);
+    let (press, _release, typed_at) = press_a_key(&mut fixture);
+    fixture.state.interaction_serials = interaction::Recent::default();
 
     let (token, data) = token_claiming(Some((press, ours)), Some(typed_at));
     assert!(
-        !state.token_created(token, data),
+        !fixture.state.token_created(token, data),
         "a serial was accepted against an empty interaction history"
     );
 }
