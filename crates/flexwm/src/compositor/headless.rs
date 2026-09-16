@@ -666,6 +666,14 @@ impl State {
     /// evidence that rebuilding it at the previous size would work.
     pub fn resize_output(&mut self, width: i32, height: i32) -> bool {
         let Some(output) = self.output.clone() else {
+            // Logged, not a silent `false`: both callers' comments say
+            // "`resize_output` has already logged what failed", and without
+            // this that was only true of the `create_backend` path below.
+            // Unreachable today -- `headless::init_named` runs before either
+            // backend can ask for a resize -- but a `false` nobody can
+            // explain is exactly the shape of failure this project treats as
+            // seriously as a crash.
+            tracing::warn!(width, height, "could not resize: there is no output yet");
             return false;
         };
         set_mode(&output, width, height, None, self.output_scale);

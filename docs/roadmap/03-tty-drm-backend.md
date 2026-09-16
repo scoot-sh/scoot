@@ -38,5 +38,8 @@ Backlog.
 Out of scope, stated: cursor rendering, DRM hotplug, multi-GPU/output,
 DPMS, output scale, key-repeat.
 
-*Two of those have since landed:* cursor rendering as item 5, and output
-scale as `docs/backlog/resolved/output-scaling-done.md`.
+*Three of those have since landed:* cursor rendering as item 5, output
+scale as `docs/backlog/resolved/output-scaling-done.md`, and DRM hotplug as
+`docs/backlog/resolved/tty-drm-hotplug-done.md` (issue #48, PR #51) —
+`tty/mod.rs`'s own module doc no longer lists hotplug as out of scope, and
+this line is kept accurate to match rather than left to contradict it.

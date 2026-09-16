@@ -201,15 +201,25 @@ impl Host {
         // regardless, but leaving this `Some` keeps every other path (e.g.
         // `render()`'s `if let Some(host) = &mut self.host`) simple.
         state.host = Some(host);
-        let buffers = result?;
         // Checked after `state.host` is whole again, and before the buffers
         // are swapped in: a render target still at the old size with
         // host-side buffers at the new one is the exact mismatch this
         // function's doc says must not be limped on from. `resize_output`
         // has already logged what failed.
+        //
+        // `result`'s buffers are destroyed rather than dropped: a `BufferPool`
+        // here owns host-side `wl_buffer`/`wl_shm_pool` objects that only
+        // `destroy` releases, and letting them fall out of scope would leak
+        // them on the host connection. The caller stops the event loop either
+        // way, but "it is about to exit" is not a reason to write the leaking
+        // version.
         if !resized {
+            if let Ok(buffers) = result {
+                buffers.destroy();
+            }
             return Err("could not resize the render target".into());
         }
+        let buffers = result?;
         if let Some(host) = &mut state.host {
             let old = std::mem::replace(&mut host.buffers, buffers);
             old.destroy();

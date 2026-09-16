@@ -319,7 +319,15 @@ decision any more:
 
 - **Plug a monitor in or pull one out.** Unplugging the connector flexwm is
   driving makes it pick another connected one and mode-set onto it. Plugging
-  one back in after everything was unplugged mode-sets back onto it.
+  one back in after everything was unplugged mode-sets back onto it. (The
+  fall-back to a *different* connector works only where the display
+  controller can route that connector to the CRTC flexwm is already on —
+  true of ordinary PC graphics, not guaranteed on SoCs whose encoders are
+  wired to specific CRTCs. flexwm does not currently move to a different
+  CRTC; if the new connector can't be driven from the current one it logs
+  `could not move the surface onto the new connector in either order` and
+  stays put. See
+  [`docs/backlog/tty/tty-connector-switch-crtc.md`](docs/backlog/tty/tty-connector-switch-crtc.md).)
 - **Resize, rescale or full-screen a VM window.** Apple's Virtualization
   framework reconfigures the guest display when you do, which reaches the
   guest as a hotplug with a new mode list and a new preferred mode; flexwm

@@ -129,12 +129,22 @@ impl Reconfigured {
                     // and every frame from here on is dropped by its size
                     // guard. `resize_output` has logged what actually
                     // failed; this says what it costs.
+                    //
+                    // The wording is careful not to promise a retry that
+                    // cannot happen: `Tty::width`/`height` were updated
+                    // before this call, so as far as the next probe is
+                    // concerned this backend is *already* on the new mode.
+                    // Plugging the same display back in re-probes to the same
+                    // size, plans `Unchanged`, and never reaches here again.
+                    // Only a move to a genuinely different mode retries.
                     tracing::error!(
                         width,
                         height,
                         "drm: the display changed mode but the render target \
-                         could not follow; the screen stays as it is until the \
-                         next hotplug or a restart"
+                         could not follow, so every frame from here is dropped \
+                         as the wrong size. Only a change to a *different* mode \
+                         retries this -- the same display coming back at this \
+                         same size will not -- so a restart is the reliable way out"
                     );
                 }
             }
@@ -264,12 +274,17 @@ impl Tty {
                 let Some((connector, mode, name)) = found else {
                     return Reconfigured::Nothing;
                 };
-                // Cleared on every probe that found *something*, including
-                // an otherwise uninteresting one: this field means "the last
-                // probe found nothing `Connected`", nothing more. It is not
-                // about DRM master (`active`) or the session (`session_paused`).
-                let reconnected = std::mem::replace(&mut self.nothing_connected, false);
-                match plan {
+                // Read, not taken. Clearing this is what records "a display
+                // is back *and this backend has acted on it*", so it must not
+                // happen before the acting: `retarget` below can still fail
+                // (a refused buffer allocation, a surface that would not take
+                // the new state), and clearing it first would throw away the
+                // one thing that makes the next identical uevent retry rather
+                // than plan `Unchanged` and do nothing. That is the same
+                // two-sites-disagreeing-about-one-fact shape this module is
+                // otherwise careful about.
+                let reconnected = self.nothing_connected;
+                let outcome = match plan {
                     Plan::Unchanged if reconnected => {
                         // The undock/redock case: the same monitor came back
                         // at the same mode, so nothing about the *choice*
@@ -290,7 +305,17 @@ impl Tty {
                         Reconfigured::Nothing
                     }
                     Plan::NewMode | Plan::NewConnector => self.retarget(connector, mode, &name),
+                };
+                // Now, and only for an outcome that actually did something.
+                // `Nothing` from the arms above means either that there was
+                // never anything to act on (an uninteresting uevent, where
+                // this is already `false`) or that acting on it failed, and
+                // in the second case the next uevent has to find this still
+                // set or it will not try again.
+                if outcome != Reconfigured::Nothing {
+                    self.nothing_connected = false;
                 }
+                outcome
             }
         }
     }
@@ -382,6 +407,19 @@ impl Tty {
     /// it) freezes the screen permanently with no error anywhere, while
     /// clearing it costs at worst one rejected flip, which `present` logs
     /// and retries from the next `VBlank` (see its error arm).
+    ///
+    /// `mark_all_free` likewise frees the slot the CRTC may still be
+    /// scanning out, so the next `write_region` can write into live scanout
+    /// -- a torn frame, in principle. Accepted, and bounded to nothing a
+    /// user can see: `needs_modeset` is set in the same breath, so the next
+    /// `present` issues a full `commit` rather than a page flip, and every
+    /// caller of this is already on a path that blanks the screen (a VT
+    /// switch back, or a modeset onto a connector that just changed). The
+    /// alternative -- keeping the showing slot busy -- reintroduces exactly
+    /// the "both slots stuck, nothing ever flips again" state `present`'s
+    /// own warning exists for, on a path where nothing can vouch for what
+    /// the CRTC is holding. This is pre-existing behaviour from
+    /// `reactivate`, restated here rather than newly chosen.
     pub(super) fn invalidate_scanout(&mut self) {
         self.flip_pending = false;
         self.needs_modeset = true;
@@ -438,23 +476,16 @@ fn set_pending(
 
     // Attempt 1: connectors, then mode.
     let mut connectors_moved = false;
-    match surface.set_connectors(&[connector]) {
-        Ok(()) => {
-            connectors_moved = true;
-            match surface.use_mode(mode) {
-                Ok(()) => return true,
-                Err(error) => tracing::debug!(
-                    %error,
-                    "drm: new connector accepted but not with the new mode; \
-                     trying the other order"
-                ),
-            }
+    if move_connector(surface, connector) {
+        connectors_moved = true;
+        match surface.use_mode(mode) {
+            Ok(()) => return true,
+            Err(error) => tracing::debug!(
+                %error,
+                "drm: new connector accepted but not with the new mode; \
+                 trying the other order"
+            ),
         }
-        Err(error) => tracing::debug!(
-            %error,
-            "drm: new connector rejected with the current mode; trying the \
-             other order"
-        ),
     }
 
     // Attempt 2: mode, then connectors. Attempt 1's connector move, if it
@@ -465,14 +496,13 @@ fn set_pending(
     match surface.use_mode(mode) {
         Ok(()) => {
             mode_moved = true;
-            match surface.set_connectors(&[connector]) {
-                Ok(()) => return true,
-                Err(error) => tracing::warn!(
-                    %error,
-                    "drm: could not move the surface onto the new connector in \
-                     either order; staying on the current one"
-                ),
+            if move_connector(surface, connector) {
+                return true;
             }
+            tracing::warn!(
+                "drm: could not move the surface onto the new connector in \
+                 either order; staying on the current one"
+            );
         }
         Err(error) => tracing::warn!(
             %error,
@@ -495,6 +525,51 @@ fn set_pending(
             tracing::warn!(%error, "drm: could not put the previous connector back either");
         }
     }
+    false
+}
+
+/// `DrmSurface::set_connectors(&[connector])`, plus a check that it
+/// actually took. Returns whether the surface is now pending on
+/// `connector`.
+///
+/// The check is not belt-and-braces. Smithay's **legacy** (non-atomic)
+/// surface answers `Ok(())` for a connector its CRTC cannot drive and
+/// simply leaves its pending set alone -- `surface/legacy.rs` at the pinned
+/// rev collects every `check_connector` result and assigns the new set only
+/// when they are all `true`, with no `else` and no error. (Its atomic
+/// sibling does return `Err(TestFailed)`, so this only bites on legacy
+/// hardware; the dev VM is atomic, so nothing there exercises it.) Taking
+/// that `Ok` at face value would leave `Tty::connector` naming a connector
+/// the surface is not driving -- one fact recorded in two places that
+/// disagree, which is the failure mode this project has a whole roadmap
+/// entry about (`docs/roadmap/05b-vt-switch-eperm.md`) and the one
+/// `set_pending`'s caller relies on being true to pick a starting point for
+/// the next probe.
+///
+/// Reading `pending_connectors()` back answers it for both implementations
+/// without caring which is underneath, and costs one small `Vec` on a path
+/// that has just done a `TEST_ONLY` atomic commit.
+fn move_connector(surface: &DrmSurface, connector: connector::Handle) -> bool {
+    if let Err(error) = surface.set_connectors(&[connector]) {
+        tracing::debug!(
+            %error,
+            "drm: the surface refused the new connector with the mode it \
+             currently has pending"
+        );
+        return false;
+    }
+    if surface
+        .pending_connectors()
+        .into_iter()
+        .any(|pending| pending == connector)
+    {
+        return true;
+    }
+    tracing::debug!(
+        "drm: the surface accepted the new connector without applying it, \
+         which means its crtc cannot drive that connector with the mode \
+         currently pending"
+    );
     false
 }
 

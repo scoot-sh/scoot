@@ -291,7 +291,9 @@ fn probe(
     let resources = device.resource_handles().map_err(|error| {
         format!("has no usable KMS pipeline -- loading its DRM resources failed ({error})")
     })?;
-    find_connector_and_mode(&device, &resources, requested)
+    // `Cached`, deliberately -- see [`Freshness`] for why a startup probe
+    // does not need to force one and a hotplug re-probe absolutely does.
+    find_connector_and_mode(&device, &resources, requested, Freshness::Cached)
         .ok_or_else(|| "has no connected connector with a usable mode".to_owned())
 }
 
@@ -308,6 +310,64 @@ impl AsFd for Probe<'_> {
 
 impl BasicDevice for Probe<'_> {}
 impl ControlDevice for Probe<'_> {}
+
+/// Whether a connector query may answer from the mode list the kernel
+/// already has, or has to make it go and look.
+///
+/// This is not a tuning knob, it is the difference between the hotplug path
+/// working and silently doing nothing, so it is spelled out at every call
+/// site rather than left as a bare `bool`. `drm`'s `get_connector(conn,
+/// force_probe)` turns `force_probe` into the `count_modes` field of
+/// `drm_mode_getconnector` (`drm-ffi` 0.9.1 `mode::get_connector`: `false`
+/// sends `count_modes: 1`, `true` sends `0`), and the kernel's
+/// `drm_mode_getconnector` only calls the driver's `fill_modes()` -- the
+/// actual re-probe, which is what re-reads EDID and rebuilds the mode list
+/// -- when `count_modes` is `0`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Freshness {
+    /// Take the kernel's cached answer.
+    ///
+    /// Right at startup, and only there. Two reasons, and the first is the
+    /// one that makes it correct rather than merely cheaper: while *no*
+    /// userspace DRM master exists, the kernel's own fbdev/fbcon client
+    /// handles hotplug and refreshes this cache itself, so what is cached
+    /// when flexwm opens the device already reflects whatever is plugged in.
+    /// The staleness [`Reprobe`](Self::Reprobe) exists for begins the moment
+    /// flexwm takes master, which is after this.
+    ///
+    /// The second is that forcing here would not be free, contrary to what
+    /// it might look like. It would be a real probe, not a no-op: master is
+    /// per-open-file, seatd's own `SET_MASTER` has already made the file it
+    /// hands us master before [`probe`] borrows it (see `tty/mod.rs`'s
+    /// comment on that, measured on hardware), and `DeviceFd::from` later
+    /// adopts that *same* open file -- so the kernel would not demote the
+    /// request. It would cost one EDID read per connector examined, per
+    /// candidate device walked by [`first_usable`], on the startup path.
+    Cached,
+    /// Make the kernel re-probe the connector before answering.
+    ///
+    /// The hotplug path, and the reason it works at all. Once flexwm holds
+    /// DRM master, the in-kernel client that would otherwise refresh the
+    /// cache stops doing so -- its hotplug handler bails out when a
+    /// userspace master is present -- so the cached list stays whatever it
+    /// was when we took over. Reading it after a hotplug gives back the
+    /// *old* modes, `tty/hotplug.rs`'s `plan` concludes nothing changed, and
+    /// the display is never re-modeset. Silently: the only trace is a debug
+    /// line saying the hotplug changed nothing, which is precisely the
+    /// wrong answer.
+    ///
+    /// It is not free. A forced probe re-reads EDID over DDC on real
+    /// HDMI/DP hardware -- tens of milliseconds, and longer on a marginal
+    /// cable or an adapter that needs retries -- synchronously, on the
+    /// calloop thread, once per connector examined. That happens on every
+    /// `change` uevent for this device and on every VT-switch-back (see
+    /// `tty/hotplug.rs`'s `Tty::reconfigure` callers), which is why
+    /// [`reselect`] is careful to examine as few connectors as it can.
+    /// wlroots pays exactly the same cost on the same path for the same
+    /// reason; there is no cheaper way to learn what a connector is
+    /// actually offering now.
+    Reprobe,
+}
 
 /// The first `Connected` connector with at least one mode, and that mode:
 /// the one whose size is `requested` (`--mode WxH`) if the connector lists
@@ -326,39 +386,74 @@ pub(super) fn find_connector_and_mode(
     device: &impl ControlDevice,
     resources: &ResourceHandles,
     requested: Option<(u16, u16)>,
+    freshness: Freshness,
 ) -> Option<(connector::Handle, Mode, String)> {
-    resources.connectors().iter().find_map(|&conn| {
-        connector_mode(device, conn, requested).map(|(mode, name)| (conn, mode, name))
-    })
+    search(
+        device,
+        resources.connectors().iter().copied(),
+        requested,
+        freshness,
+    )
 }
 
 /// The same search, but biased towards `current` -- the connector this
 /// backend is already driving. Used by the hotplug path, never at startup
-/// (there is nothing current then).
+/// (there is nothing current then), so it always re-probes; see
+/// [`Freshness`].
 ///
 /// Staying on `current` while it is still `Connected` is what keeps
 /// plugging a *second* display into a laptop from moving the session off
 /// the panel the user is looking at: this backend drives one output, so one
 /// of the two connectors has to be dark, and the one already lit is the
 /// only defensible choice. Only when `current` is gone -- unplugged, or its
-/// mode list emptied -- does the full [`find_connector_and_mode`] search
-/// run and pick whatever else is connected, which is exactly what issue #48
-/// asks for ("if the connector is gone, pick another `Connected` one").
+/// mode list emptied -- does the search widen to the rest, which is exactly
+/// what issue #48 asks for ("if the connector is gone, pick another
+/// `Connected` one").
+///
+/// `current` is excluded from that widened search rather than left in it:
+/// it has just been re-probed and rejected a few lines up, and a second
+/// forced probe of the same connector would be a second EDID read for an
+/// answer already in hand. On a dock with several dead connectors that is
+/// the difference between one redundant read and one per fallback.
 pub(super) fn reselect(
     device: &impl ControlDevice,
     resources: &ResourceHandles,
     current: connector::Handle,
     requested: Option<(u16, u16)>,
 ) -> Option<(connector::Handle, Mode, String)> {
-    connector_mode(device, current, requested)
-        .map(|(mode, name)| (current, mode, name))
-        .or_else(|| find_connector_and_mode(device, resources, requested))
+    if let Some((mode, name)) = connector_mode(device, current, requested, Freshness::Reprobe) {
+        return Some((current, mode, name));
+    }
+    search(
+        device,
+        resources
+            .connectors()
+            .iter()
+            .copied()
+            .filter(|&conn| conn != current),
+        requested,
+        Freshness::Reprobe,
+    )
+}
+
+/// Walks `connectors` in order and returns the first one that can drive a
+/// display. The shared body of [`find_connector_and_mode`] and
+/// [`reselect`], which differ only in which connectors they offer it.
+fn search(
+    device: &impl ControlDevice,
+    mut connectors: impl Iterator<Item = connector::Handle>,
+    requested: Option<(u16, u16)>,
+    freshness: Freshness,
+) -> Option<(connector::Handle, Mode, String)> {
+    connectors.find_map(|conn| {
+        connector_mode(device, conn, requested, freshness).map(|(mode, name)| (conn, mode, name))
+    })
 }
 
 /// One connector's mode and name, or `None` if it isn't `Connected` or
-/// lists no mode at all. The per-connector half of
-/// [`find_connector_and_mode`], split out so [`reselect`] can ask about one
-/// specific connector without duplicating the choice of mode.
+/// lists no mode at all. The per-connector half of [`search`], split out so
+/// [`reselect`] can ask about one specific connector without duplicating
+/// the choice of mode.
 ///
 /// A `requested` size the connector does not offer is a warning, not a
 /// rejection: falling through to the preferred mode leaves the user with a
@@ -366,12 +461,22 @@ pub(super) fn reselect(
 /// rejecting the connector would leave them with no display at all -- and
 /// at startup, on a multi-GPU seat, would send the search on to a device
 /// they did not mean.
+///
+/// The returned name is built here, which is one small `String` per
+/// connector that turns out usable -- at most one or two per hotplug event,
+/// on a path that has just spent milliseconds reading EDID, and never on
+/// any per-frame or input-dispatch path. Handing back the whole
+/// `connector::Info` to let the caller build it only when it logs would
+/// trade this for a much larger one.
 fn connector_mode(
     device: &impl ControlDevice,
     conn: connector::Handle,
     requested: Option<(u16, u16)>,
+    freshness: Freshness,
 ) -> Option<(Mode, String)> {
-    let info = device.get_connector(conn, false).ok()?;
+    let info = device
+        .get_connector(conn, freshness == Freshness::Reprobe)
+        .ok()?;
     if info.state() != connector::State::Connected {
         return None;
     }
