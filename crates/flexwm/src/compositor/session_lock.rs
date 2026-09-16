@@ -338,6 +338,23 @@ impl SessionLock {
         self.owner.is_some()
     }
 
+    /// Whether a lock has been accepted but the blanked frame confirming it
+    /// has not been drawn yet -- the one window in which
+    /// [`SessionLock::is_locked`] already answers `true` while the framebuffer
+    /// still holds the unlocked desktop.
+    ///
+    /// Never true while unlocked: [`SessionLock::pending`]'s invariant is that
+    /// while it is `Some` it names the same lock [`SessionLock::owner`] does,
+    /// and both are written together.
+    ///
+    /// Read by `screencopy.rs`, which must not hand a client the desktop
+    /// pixels a locked session is about to paint over. Nothing else needs it:
+    /// the render path decides what to draw from `is_locked` alone, and
+    /// drawing the lock screen is precisely what clears this.
+    pub(super) fn awaiting_blank(&self) -> bool {
+        self.pending.is_some()
+    }
+
     /// Whether the session is locked and the client that locked it is gone.
     ///
     /// Never true while unlocked, because it is derived from the same field.

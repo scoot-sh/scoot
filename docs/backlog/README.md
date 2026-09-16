@@ -79,9 +79,21 @@ actionable.
   multi-output support, since nothing a configuration asks for exists yet
 - [An already-bound `wl_output` client is never told a `--nested` resize's new mode is preferred](./protocols/wl-output-preferred-flag-on-late-mode.md)
   — pre-existing, found reviewing the entry above's own (correct) handling of the same event
-- [Screen capture for clients (`wlr-screencopy` / `ext-image-copy-capture`)](./protocols/screencopy-capture.md)
-  — shell thumbnails and previews; flexwm's own IPC screenshot covers agents,
-  not generic clients
+- [Screen capture for clients (`wlr-screencopy` / `ext-image-copy-capture`)](./resolved/screencopy-capture-done.md)
+  — HALF-RESOLVED 2026-09-16: `ext-image-copy-capture-v1` +
+  `ext-image-capture-source-v1` for **output** capture, so `grim` and a
+  workspace-overview preview work. `wlr-screencopy` deliberately not
+  implemented alongside it — measured, both clients that matter speak the
+  `ext-` protocol. flexwm's own IPC screenshot is unchanged.
+- [Screen capture, toplevel half](./protocols/screencopy-toplevel-capture.md)
+  — the per-window source a launcher's thumbnails need; needs a second render
+  target per session, so split out rather than half-implemented
+- [Screen capture: the session count is unbounded](./protocols/screencopy-session-cap.md)
+  — found building the output half; why a cap was not simply added
+- [Screen capture forces `Xrgb8888`'s undefined fourth byte opaque](./protocols/screencopy-xrgb-alpha-forcing.md)
+  — found measuring a review finding on the output half: the forcing is ~13%
+  of a release capture and ~77% of a debug one, to set a byte the format says
+  is undefined and `grim` demonstrably ignores
 - [`xdg-toplevel-icon-v1` pixel-buffer icons are not exposed](./protocols/toplevel-icon-buffers.md) — only the icon name reaches IPC
 - [An IME popup over a lock screen is tracked but never drawn](./protocols/ime-popup-over-lock-screen.md)
 - [An IME keyboard grab makes the activation gate credit a client that received nothing](./protocols/interaction-serial-ime-grab.md)
