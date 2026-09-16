@@ -149,19 +149,41 @@ impl State {
             return;
         }
 
+        // The install order is keyboard-down, pointer, keyboard-up, and all
+        // three steps are here because of what happens when this grab
+        // *replaces* a live one -- a submenu opening on top of the menu it
+        // came from.
+        //
+        // `PointerHandle::set_grab` runs the outgoing grab's `unset`, and
+        // `PopupPointerGrab::unset` hands keyboard focus back to the chain's
+        // root whenever the keyboard is still grabbed with a serial matching
+        // the *outgoing* grab. A client is free to reuse one input serial for
+        // both grabs -- a submenu opened by hovering has had no new input
+        // event to draw a fresh one from -- and then that condition is true
+        // of the grab being installed right now, so the outgoing pointer
+        // grab's teardown silently removes the incoming keyboard grab and
+        // drops focus back to the toplevel with the submenu still on screen.
+        // Measured, with a real client, before this order was chosen.
+        //
+        // Taking the keyboard grab down first makes that teardown a no-op.
+        // It cannot take down a grab belonging to anyone else: the check
+        // above has already established that any keyboard grab still
+        // installed here is one of this popup chain's own.
         if let Some(keyboard) = &keyboard {
-            // The focus is set before the grab, not after: `PopupKeyboardGrab`
-            // only lets a `set_focus` through when it already names the
-            // current grab, so setting it afterwards would be swallowed by
-            // the grab that was just installed.
-            keyboard.set_focus(self, grab.current_grab(), serial);
-            keyboard.set_grab(self, PopupKeyboardGrab::new(&grab), serial);
+            keyboard.unset_grab(self);
         }
         if let Some(pointer) = &pointer {
             // `Focus::Keep`: the pointer is wherever the click that opened
             // the menu left it, and the grab decides for itself which
             // surface may have it from here.
             pointer.set_grab(self, PopupPointerGrab::new(&grab), serial, Focus::Keep);
+        }
+        if let Some(keyboard) = &keyboard {
+            // Focus before grab: `PopupKeyboardGrab` only lets a `set_focus`
+            // through when it already names the current grab, so setting it
+            // afterwards would be swallowed by the grab just installed.
+            keyboard.set_focus(self, grab.current_grab(), serial);
+            keyboard.set_grab(self, PopupKeyboardGrab::new(&grab), serial);
         }
         // Held so flexwm can ask whether the grab is over (`settle_popup_grab`)
         // and end it on its own terms (`dismiss_popup_grab`); neither is

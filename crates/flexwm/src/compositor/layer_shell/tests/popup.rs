@@ -79,21 +79,19 @@ fn an_xdg_popup_configures_maps_draws_and_tears_down() {
 // Input: grabs, and where the keyboard goes while a menu is up
 // -------------------------------------------------------------------------
 
-/// Maps a window and a grabbing popup on it, and hands back the point to
+/// Maps a grabbing popup on the first window, and hands back the point to
 /// click to land on the popup itself.
 ///
-/// The shared opening of every grab test below: a window to hang the menu
-/// off, one real keystroke so the client has an input serial to grab with
-/// (a toolkit always does), and the assertion that the grab actually took --
-/// so a test that goes on to check what *ends* the grab cannot pass by never
-/// having started one.
+/// The shared opening of every grab test below: one real keystroke so the
+/// client has an input serial to grab with (a toolkit always does), and the
+/// assertion that the grab actually took -- so a test that goes on to check
+/// what *ends* the grab cannot pass by never having started one. The caller
+/// maps the windows, because how many there are is the test's business.
 fn window_with_grabbing_popup(fixture: &mut Fixture) -> (f64, f64) {
-    fixture.run(Step::MapWindow);
     fixture.press_a_key();
-    assert_eq!(
-        fixture.keyboard().focused,
-        Some(Focused::Window(0)),
-        "the window should hold the keyboard before any popup exists"
+    assert!(
+        matches!(fixture.keyboard().focused, Some(Focused::Window(_))),
+        "a window should hold the keyboard before any popup exists"
     );
 
     let Ack::PopupConfigured(configured) = fixture.run(Step::MapPopup {
@@ -122,6 +120,7 @@ fn window_with_grabbing_popup(fixture: &mut Fixture) -> (f64, f64) {
 #[test]
 fn a_popup_grab_moves_the_keyboard_onto_the_popup_and_gives_it_back() {
     let mut fixture = Fixture::new();
+    fixture.run(Step::MapWindow);
     window_with_grabbing_popup(&mut fixture);
 
     let during = fixture.keyboard();
@@ -197,6 +196,7 @@ fn a_click_over_a_popup_reaches_the_popup() {
 #[test]
 fn a_click_outside_a_grabbing_popup_dismisses_it() {
     let mut fixture = Fixture::new();
+    fixture.run(Step::MapWindow);
     window_with_grabbing_popup(&mut fixture);
     assert_eq!(fixture.popup_dones(), 0, "nothing has dismissed it yet");
 
@@ -228,6 +228,7 @@ fn a_click_outside_a_grabbing_popup_dismisses_it() {
 #[test]
 fn a_click_inside_a_grabbing_popup_keeps_it() {
     let mut fixture = Fixture::new();
+    fixture.run(Step::MapWindow);
     let (x, y) = window_with_grabbing_popup(&mut fixture);
 
     fixture.click(x, y);
@@ -262,6 +263,7 @@ fn a_click_inside_a_grabbing_popup_keeps_it() {
 #[test]
 fn an_exclusive_layer_surface_pre_empts_an_open_popup_grab() {
     let mut fixture = Fixture::new();
+    fixture.run(Step::MapWindow);
     window_with_grabbing_popup(&mut fixture);
 
     fixture.run(Step::CreateLayer(LayerSpec::launcher(60)));
@@ -348,6 +350,7 @@ fn a_popup_grab_is_refused_while_a_launcher_holds_the_keyboard() {
 #[test]
 fn locking_the_session_takes_the_keyboard_off_a_popup_grab() {
     let mut fixture = Fixture::new();
+    fixture.run(Step::MapWindow);
     window_with_grabbing_popup(&mut fixture);
 
     fixture.run(Step::LockSession);
@@ -374,6 +377,25 @@ fn locking_the_session_takes_the_keyboard_off_a_popup_grab() {
         fixture.keyboard().keys,
         before,
         "keys must not reach a client behind the lock screen"
+    );
+
+    // Nor can it take the keyboard back by opening a *new* menu: a grab
+    // asked for while the session is already locked is refused at grant
+    // time, which is a different code path from the pre-emption above and
+    // the one an adversarial client would actually reach for.
+    fixture.run(Step::MapPopup {
+        parent: PopupParent::Window,
+        color: POPUP_BGRA,
+        grab: true,
+    });
+    assert!(
+        fixture.state.popup_grab.is_none(),
+        "a grab requested while locked must be refused"
+    );
+    assert_eq!(
+        fixture.keyboard().focused,
+        None,
+        "and the keyboard must stay off it"
     );
     fixture.disconnect_client();
 }
@@ -478,6 +500,93 @@ fn a_bar_that_wants_no_keyboard_does_not_keep_one_when_its_menu_closes() {
     fixture.disconnect_client();
 }
 
+/// Keybindings keep firing while a menu holds the keyboard.
+///
+/// The property that makes it safe to let a client take every keystroke at
+/// all, and the same one `layer_shell.rs` relies on for an `exclusive`
+/// surface: `input.rs`'s `key()` matches bindings in the filter Smithay runs
+/// *before* `input_forward`, and only `input_forward` consults the grab. So
+/// the VT-switch binds and `quit` stay reachable even if a client wedges
+/// with a menu open -- which is the escape hatch a keyboard grab needs.
+#[test]
+fn keybindings_still_fire_while_a_popup_grabs_the_keyboard() {
+    let mut fixture = Fixture::new();
+    fixture.run(Step::MapWindow);
+    fixture.run(Step::MapWindow);
+    window_with_grabbing_popup(&mut fixture);
+
+    let before = fixture.keyboard();
+    assert_eq!(before.focused, Some(Focused::Popup(0)));
+    let focused = fixture.state.focus;
+    fixture
+        .state
+        .press(&flexwm_ipc::KeyCombo {
+            key: "h".into(),
+            modifiers: vec![flexwm_ipc::Modifier::Super],
+        })
+        .expect("a pressable combo");
+    fixture.settle();
+
+    assert_ne!(
+        fixture.state.focus, focused,
+        "Super+h should still move window focus with a menu open"
+    );
+    let after = fixture.keyboard();
+    assert_eq!(
+        after.focused,
+        Some(Focused::Popup(0)),
+        "and the menu should keep the keyboard -- a binding is not a focus change"
+    );
+    assert_eq!(
+        after.keys,
+        before.keys + 2,
+        "only the Super modifier's own press and release reach the popup; \
+         the bound `h` is intercepted"
+    );
+    fixture.disconnect_client();
+}
+
+/// A submenu grabs on top of its parent menu, and closing it unwinds to the
+/// parent rather than all the way out.
+///
+/// Nested grabs are a protocol feature (`xdg_popup.grab` on a popup whose
+/// parent is the current grab), and the unwind is the part a menu bar
+/// depends on: closing a submenu must leave the menu it came from usable.
+#[test]
+fn a_nested_popup_grab_unwinds_to_its_parent() {
+    let mut fixture = Fixture::new();
+    fixture.run(Step::MapWindow);
+    window_with_grabbing_popup(&mut fixture);
+
+    fixture.run(Step::MapPopup {
+        parent: PopupParent::Popup(0),
+        color: WALLPAPER_BGRA,
+        grab: true,
+    });
+    assert_eq!(
+        fixture.keyboard().focused,
+        Some(Focused::Popup(1)),
+        "the submenu should take the keyboard from its parent menu"
+    );
+    assert_eq!(fixture.popup_dones(), 0, "neither has been dismissed");
+
+    // Closing the submenu: the parent menu is still grabbing, so the grab is
+    // not over and must not be reaped.
+    fixture.run(Step::DestroyPopup);
+    assert!(
+        fixture.state.popup_grab.is_some(),
+        "the parent menu's grab should survive its submenu closing"
+    );
+    fixture.run(Step::DestroyPopup);
+    assert_eq!(
+        fixture.keyboard().focused,
+        Some(Focused::Window(0)),
+        "closing the last menu hands the keyboard back to the window"
+    );
+    assert!(fixture.state.popup_grab.is_none());
+    fixture.disconnect_client();
+}
+
 // -------------------------------------------------------------------------
 // Teardown edge cases
 // -------------------------------------------------------------------------
@@ -488,6 +597,7 @@ fn a_bar_that_wants_no_keyboard_does_not_keep_one_when_its_menu_closes() {
 #[test]
 fn a_client_that_dies_while_grabbing_leaves_nothing_behind() {
     let mut fixture = Fixture::new();
+    fixture.run(Step::MapWindow);
     window_with_grabbing_popup(&mut fixture);
 
     fixture.disconnect_client();

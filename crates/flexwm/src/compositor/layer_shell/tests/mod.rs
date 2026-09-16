@@ -276,6 +276,9 @@ enum PopupParent {
     Window,
     /// The `index`-th layer surface, by creation order.
     Layer(usize),
+    /// The `index`-th still-mapped popup -- a submenu, which is the shape
+    /// that exercises nested grabs.
+    Popup(usize),
 }
 
 /// What the client reports back once a step is done.
@@ -926,6 +929,10 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                         let popup = xdg.get_popup(None, &positioner, &qh, ());
                         layer.get_popup(&popup);
                         popup
+                    }
+                    PopupParent::Popup(index) => {
+                        let (_, parent, ..) = popups.get(*index).ok_or("no such popup")?;
+                        xdg.get_popup(Some(parent), &positioner, &qh, ())
                     }
                 };
                 if *grab {
