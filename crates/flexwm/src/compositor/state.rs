@@ -237,10 +237,9 @@ pub struct State {
     /// snapshot behind them.
     pub ext_workspace: ExtWorkspaceState,
     /// `ext_foreign_toplevel_list_v1`: what a taskbar, dock or alt-tab
-    /// switcher reads the window list from. Unlike the two
-    /// `#[allow(dead_code)]` states below, this is read on every window
-    /// opening, closing and retitling -- see `foreign_toplevel.rs`, which
-    /// owns both the protocol objects and the handle per window behind them.
+    /// switcher reads the window list from. Read on every window opening,
+    /// closing and retitling -- see `foreign_toplevel.rs`, which owns both
+    /// the protocol objects and the one handle per window behind them.
     pub foreign_toplevels: ForeignToplevels,
     /// `ext_session_lock_manager_v1`: the compositor-enforced screen lock.
     /// Unlike the two `#[allow(dead_code)]` states below, this is read on
