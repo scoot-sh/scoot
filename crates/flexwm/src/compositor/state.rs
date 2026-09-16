@@ -19,7 +19,7 @@ use smithay::reexports::wayland_server::backend::{
     ClientData, ClientId, DisconnectReason, ObjectId,
 };
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-use smithay::reexports::wayland_server::{BindError, Display, DisplayHandle};
+use smithay::reexports::wayland_server::{BindError, Display, DisplayHandle, Resource};
 use smithay::utils::{Logical, Point};
 use smithay::wayland::compositor::{CompositorClientState, CompositorState};
 use smithay::wayland::cursor_shape::CursorShapeManagerState;
@@ -48,6 +48,7 @@ use super::ext_workspace::ExtWorkspaceState;
 use super::gamma_control::GammaControlState;
 use super::headless::Backend;
 use super::idle;
+use super::input;
 use super::ipc::PendingIdle;
 use super::keybindings::Keybindings;
 use super::layer_shell;
@@ -331,6 +332,18 @@ pub struct State {
     #[allow(dead_code)]
     pub idle_inhibit_manager_state: IdleInhibitManagerState,
     pub seat: Seat<State>,
+    /// The recent input events that count as the user asking for something --
+    /// key and button presses and releases, never pointer motion -- each with
+    /// the client it was delivered to.
+    ///
+    /// Written only by `input.rs` (`key` and `pointer_button`, the two
+    /// qualifying serial sources; `pointer_move_quietly`'s motion serial is
+    /// deliberately not among them) and read only by `activation.rs`, which
+    /// refuses an `xdg-activation-v1` token unless its claimed serial is one
+    /// of these *and* was delivered to the client that asked. See
+    /// `input/interaction.rs` for why this is a short history rather than a
+    /// single "last serial", and why the client identity is part of it.
+    pub interaction_serials: input::interaction::Recent,
 
     pub keybindings: Keybindings,
     /// Keycodes currently held that a keybinding intercepted on press, so
@@ -346,6 +359,14 @@ pub struct State {
     /// keycode will have its legitimate release wrongly intercepted as a
     /// stale stuck entry.
     pub suppressed_keys: HashSet<Keycode>,
+    /// Keycodes currently held, mirroring the set Smithay keeps inside the
+    /// seat keyboard so `input.rs` can tell a key that will be *delivered*
+    /// from one it will absorb as a non-transition -- a distinction
+    /// `KeyboardHandle::input`'s return value does not make. Only
+    /// `State::note_held` writes it; see the invariant on
+    /// [`State::suppressed_keys`] above, which applies here for the same
+    /// reason.
+    pub held_keys: HashSet<Keycode>,
 
     /// Something changed that the framebuffer doesn't show yet.
     pub needs_render: bool,
@@ -473,8 +494,10 @@ impl State {
             idle_inhibitors: idle::Inhibitors::default(),
             idle_inhibit_manager_state,
             seat,
+            interaction_serials: input::interaction::Recent::default(),
             keybindings,
             suppressed_keys: HashSet::new(),
+            held_keys: HashSet::new(),
             // true without going through request_render(), so nothing has
             // armed the frame timer yet. That's only safe because
             // headless::init() unconditionally and synchronously calls
@@ -582,6 +605,20 @@ impl State {
             .iter()
             .find(|(_, window)| window.toplevel().is_some_and(|t| t.wl_surface() == surface))
             .map(|(&id, _)| id)
+    }
+
+    /// Who owns `surface` -- `None` if the surface or its client is already
+    /// gone, which a client disconnecting mid-event makes possible.
+    ///
+    /// The same lookup `focus_changed` (see `handlers.rs`) does for the
+    /// selection, named here because `input.rs` needs it per key and button
+    /// event to record *whose* interaction a serial was (see
+    /// `input/interaction.rs`). It costs a backend lookup, no allocation.
+    pub(super) fn client_of(&self, surface: &WlSurface) -> Option<ClientId> {
+        self.display_handle
+            .get_client(surface.id())
+            .ok()
+            .map(|client| client.id())
     }
 
     /// What the pointer is over: the top-most surface at `pos` and where that

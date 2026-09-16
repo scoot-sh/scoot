@@ -14,6 +14,7 @@ use super::output_scale::logical_size;
 use super::tty::VtSwitchOutcome;
 use modifiers::{HeldKeys, NamedKey, Untypable};
 
+pub(super) mod interaction;
 mod modifiers;
 #[cfg(test)]
 mod tests;
@@ -74,6 +75,13 @@ impl State {
         };
         let location = Point::<f64, Logical>::from((x, y));
         let under = self.surface_under(location);
+        // Deliberately not recorded in `interaction_serials` (unlike the
+        // button and key serials below): motion is continuous and passive.
+        // libinput reports it at 500-1000Hz just from a hand resting on a
+        // desk, and `refresh_pointer_focus` above synthesizes it with no
+        // user involvement at all -- treating that as "the user asked for
+        // this" would hand every client a permanent, self-refreshing
+        // activation serial and defeat the gate in `activation.rs`.
         let serial = SERIAL_COUNTER.next_serial();
         let time = InputTime::from_millis(self.millis());
         pointer.motion(
@@ -154,6 +162,21 @@ impl State {
             self.focus_under_pointer();
         }
         let serial = SERIAL_COUNTER.next_serial();
+        // Recorded against whoever `pointer.button` below is about to deliver
+        // this to -- the surface the pointer last *entered*, which is what
+        // the pointer's own focus is, not what is under it now and not
+        // whatever `focus_under_pointer` just gave the keyboard to.
+        //
+        // Both states, not just the press: which of the two a client mints an
+        // activation token from is its own choice (a GTK button activates on
+        // release), and a tracker that only knew presses would refuse the
+        // legitimate half of that. See `interaction.rs`.
+        if let Some(client) = pointer
+            .current_focus()
+            .and_then(|surface| self.client_of(&surface))
+        {
+            self.interaction_serials.record(serial, client);
+        }
         let time = InputTime::from_millis(self.millis());
         let state = if pressed {
             ButtonState::Pressed
@@ -367,8 +390,17 @@ impl State {
             return KeyOutcome::default();
         };
         let serial = SERIAL_COUNTER.next_serial();
+        // Who this key is *about* to go to, read before the filter below runs
+        // rather than after: a keybinding can change focus, and this key's
+        // serial must not follow it onto whatever gained it. What the filter
+        // decides then says whether it went there at all -- see the recording
+        // after the call.
+        let recipient = keyboard
+            .current_focus()
+            .and_then(|surface| self.client_of(&surface));
+        let transition = self.note_held(keycode, state);
         let time = InputTime::from_millis(self.millis());
-        keyboard
+        let outcome = keyboard
             .input::<KeyOutcome, _>(self, keycode, state, serial, time, |data, mods, handle| {
                 match state {
                     KeyState::Pressed => {
@@ -430,7 +462,59 @@ impl State {
                     }
                 }
             })
-            .unwrap_or_default()
+            .unwrap_or_default();
+        // Only what was actually *delivered*, which is why this is after the
+        // call and not before it: a key a binding intercepted never reaches
+        // the focused client, and recording it would put a serial that client
+        // never saw under its name -- guessable from the ones it did see (the
+        // modifier presses around a chord are forwarded), which is exactly the
+        // hole the client half of this check exists to close. The intercepted
+        // *release* is worse still: by then `act` may have moved focus, so it
+        // would land under a client that not only never received it but was
+        // not even the intended recipient. A key Smithay absorbed as a
+        // non-transition reached nobody either.
+        //
+        // Both states otherwise, because which of them a client mints an
+        // activation token from is its own choice (a GTK button activates on
+        // release). Nothing at all is recorded when nothing has focus: an
+        // event no client received is evidence for no one. See
+        // `interaction.rs`.
+        if transition
+            && !outcome.intercepted
+            && let Some(client) = recipient
+        {
+            self.interaction_serials.record(serial, client);
+        }
+        outcome
+    }
+
+    /// Tracks this keycode's held state, answering whether the event actually
+    /// changes it -- which is what decides whether Smithay delivers it at all.
+    ///
+    /// A mirror of the pinned rev's `KbdInternal::key_input`, which absorbs a
+    /// press of a key already held and a release of a key it has no record of,
+    /// returning `None` from `KeyboardHandle::input` *before* the filter and
+    /// before forwarding. That `None` is indistinguishable from "the filter
+    /// said forward", so [`KeyOutcome`] alone cannot tell a delivered key from
+    /// an absorbed one, and neither can `pressed_keys()` (it clones a
+    /// `HashSet` per call, which this path must not do). Both absorbed cases
+    /// are reachable here: a lone release arrives under `--nested` when a
+    /// modifier was held as the pointer entered flexwm's window
+    /// (`nested_dispatch` forwards keys but not `enter`'s held-key array), and
+    /// under `--tty` when a press lands while the session is paused.
+    ///
+    /// Invariant, same as [`State::suppressed_keys`]: this stays in step with
+    /// Smithay's own set only because [`State::key`] is the one caller of
+    /// `KeyboardHandle::input` in this compositor. Anything that ever feeds
+    /// the seat keyboard another way (`input_forward`, `release_source`) must
+    /// update this too, or a real key will be mistaken for an absorbed one.
+    ///
+    /// [`State::suppressed_keys`]: super::State::suppressed_keys
+    fn note_held(&mut self, keycode: Keycode, state: KeyState) -> bool {
+        match state {
+            KeyState::Pressed => self.held_keys.insert(keycode),
+            KeyState::Released => self.held_keys.remove(&keycode),
+        }
     }
 
     /// Runs `read` against the seat keyboard's keymap and the layout (xkb

@@ -327,9 +327,9 @@ introduced, both fixed as a follow-up commit before merge: `cursor.rs`'s
 module doc still said "there is no `cursor_theme` field here" after
 `e16aada` added exactly that, and `activation.rs`/`README.md` described the
 token-lifetime/count bounds as the answer to focus-stealing when they are
-resource bounds only -- the real gap (no input-serial check) is now stated
-honestly and filed as
-`docs/backlog/protocols/activation-serial-validation.md`.
+resource bounds only -- the real gap (no input-serial check) was stated
+honestly and filed, and has since been closed:
+`docs/backlog/resolved/activation-serial-validation-done.md`.
 
 ## What this deliberately leaves open
 

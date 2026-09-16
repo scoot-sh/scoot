@@ -30,6 +30,8 @@ use std::time::{Duration, Instant};
 use flexwm_core::Config;
 use smithay::reexports::calloop::EventLoop;
 use smithay::reexports::wayland_server::Display;
+use smithay::reexports::wayland_server::backend::ClientId;
+use smithay::utils::Serial;
 use wayland_client::protocol::{wl_compositor, wl_keyboard, wl_registry, wl_seat, wl_surface};
 use wayland_client::{Connection, Dispatch, QueueHandle, WEnum};
 use wayland_protocols::xdg::shell::client::{xdg_surface, xdg_toplevel, xdg_wm_base};
@@ -337,6 +339,17 @@ struct Fixture {
     steps: Option<Sender<Step>>,
     acks: Receiver<Typed>,
     client: Option<JoinHandle<Result<(), String>>>,
+    /// Who the scripted client is, compositor-side. Needed because an input
+    /// serial is only evidence for the client the event went *to* (see
+    /// `interaction.rs`), so the tests below have to name it.
+    client_id: ClientId,
+    /// A second client that connects and does nothing else -- no surfaces, no
+    /// focus, never sent an input event. What a background client trying to
+    /// spend someone else's serial looks like.
+    bystander_id: ClientId,
+    /// The bystander's own end of its socket, held so it stays connected.
+    #[allow(dead_code)]
+    bystander: UnixStream,
 }
 
 impl Fixture {
@@ -356,10 +369,17 @@ impl Fixture {
         headless::init(&mut state, CANVAS, CANVAS).expect("a headless backend");
 
         let (server_end, client_end) = UnixStream::pair().expect("a socket pair");
-        state
+        let client_id = state
             .display_handle
             .insert_client(server_end, Arc::new(ClientState::default()))
-            .expect("an inserted client");
+            .expect("an inserted client")
+            .id();
+        let (bystander_end, bystander) = UnixStream::pair().expect("a socket pair");
+        let bystander_id = state
+            .display_handle
+            .insert_client(bystander_end, Arc::new(ClientState::default()))
+            .expect("an inserted client")
+            .id();
 
         let (step_tx, step_rx) = channel();
         let (ack_tx, ack_rx) = channel();
@@ -371,6 +391,9 @@ impl Fixture {
             steps: Some(step_tx),
             acks: ack_rx,
             client: Some(handle),
+            client_id,
+            bystander_id,
+            bystander,
         };
         fixture.run(Step::MapWindow);
         // Asserted here, once, rather than in every test: without focus the
@@ -668,4 +691,316 @@ fn a_repeated_modifier_is_resolved_and_pressed_once() {
     let typed = fixture.press(&combo).expect("a repeated modifier is legal");
     assert_eq!(typed.text, "!");
     assert_eq!(typed.keys, 4, "one Shift press, not a thousand");
+}
+
+// -------------------------------------------------------------------------
+// Which events count as the user asking for something, and whose they are
+// -------------------------------------------------------------------------
+//
+// The ring itself is tested in `interaction.rs`; these pin the other half --
+// *which* of this module's three `SERIAL_COUNTER` call sites feed it, and
+// which client each recorded event is attributed to. What reads the answer is
+// `activation.rs`'s focus-stealing gate, so a motion serial quietly becoming
+// an interaction, or an event landing under the wrong client, would each hand
+// a client a key to the keyboard it never earned.
+
+/// Any key press or release: the key an agent injects, the key a user
+/// presses and the key `nested_dispatch` forwards all come through here.
+#[test]
+fn a_key_press_and_its_release_are_both_recorded_for_the_focused_client() {
+    let mut fixture = Fixture::new();
+    let code = Keycode::new(28 + 8); // evdev `Return`, +8 for the xkb offset.
+    let client = fixture.client_id.clone();
+
+    fixture.state.key(code, KeyState::Pressed);
+    let (press, press_client) = fixture
+        .state
+        .interaction_serials
+        .latest()
+        .expect("the press recorded an event");
+    fixture.state.key(code, KeyState::Released);
+    let (release, release_client) = fixture
+        .state
+        .interaction_serials
+        .latest()
+        .expect("the release recorded an event");
+
+    assert_ne!(press, release, "both went out with the same serial");
+    assert_eq!(press_client, client, "recorded under the wrong client");
+    assert_eq!(release_client, client, "recorded under the wrong client");
+    // Both, because which one a client mints an activation token from is the
+    // client's own choice -- see `interaction.rs`.
+    assert!(fixture.state.interaction_serials.contains(press, &client));
+    assert!(fixture.state.interaction_serials.contains(release, &client));
+}
+
+/// The pointer's other half: a click is an interaction, and so is letting go
+/// of it (a GTK button activates on release) -- but only when the click
+/// reaches somebody.
+///
+/// This client's toplevel never attaches a buffer, so it has no bounding box
+/// and `Space::element_under` can never find it: every click here lands on
+/// bare desktop, with no pointer focus, and must therefore be recorded as
+/// nothing at all rather than against whoever happens to hold the keyboard.
+/// (The click that *does* reach a surface is in `activation/tests.rs`, whose
+/// client paints real pixels.)
+#[test]
+fn a_button_that_reaches_no_surface_is_recorded_as_nothing() {
+    let mut fixture = Fixture::new();
+    let code = Keycode::new(28 + 8);
+    fixture.state.key(code, KeyState::Pressed);
+    let before = fixture.state.interaction_serials.latest();
+    assert!(before.is_some(), "the keypress should have been recorded");
+
+    fixture.state.pointer_move(10.0, 10.0);
+    assert!(
+        fixture
+            .state
+            .seat
+            .get_pointer()
+            .expect("a pointer")
+            .current_focus()
+            .is_none(),
+        "something is under the pointer after all; this test proves nothing"
+    );
+    fixture.state.pointer_button(PointerButton::Left, true);
+    fixture.state.pointer_button(PointerButton::Left, false);
+
+    assert_eq!(
+        fixture.state.interaction_serials.latest(),
+        before,
+        "a click nobody received was recorded anyway"
+    );
+}
+
+/// A key a keybinding swallowed never reaches the focused client, so it is
+/// not evidence of anything and is not recorded.
+///
+/// It would otherwise be worse than useless: the modifier presses around a
+/// chord *are* forwarded, so the focused client sees serials either side of
+/// the one it never got and could simply guess it -- and the intercepted
+/// release lands after `act` may have moved focus, which would file it under
+/// a client that was not even the intended recipient.
+#[test]
+fn a_key_a_binding_intercepts_is_not_recorded() {
+    let mut fixture = Fixture::new();
+    let client = fixture.client_id.clone();
+    // Resolved from the keymap rather than hard-coded, so this keeps testing
+    // the binding rather than a keycode that happens to be `h` today.
+    let combo: KeyCombo = "super+h".parse().expect("a parsable combination");
+    let (code, held) = fixture
+        .state
+        .resolve_combo(&combo)
+        .expect("`super+h` is pressable on a US layout");
+    let modifier = *held.as_slice().first().expect("Super is held for it");
+
+    // Super's own press matches nothing, so it is forwarded and recorded.
+    fixture.state.key(modifier, KeyState::Pressed);
+    let forwarded = fixture
+        .state
+        .interaction_serials
+        .latest()
+        .expect("the modifier press reached the client");
+
+    let pressed = fixture.state.key(code, KeyState::Pressed);
+    assert!(
+        pressed.intercepted,
+        "`super+h` is not bound, so this test proves nothing"
+    );
+    assert_eq!(
+        fixture.state.interaction_serials.latest(),
+        Some(forwarded.clone()),
+        "an intercepted key press was recorded"
+    );
+    let released = fixture.state.key(code, KeyState::Released);
+    assert!(
+        released.intercepted,
+        "the matching release should be suppressed too"
+    );
+    assert_eq!(
+        fixture.state.interaction_serials.latest(),
+        Some(forwarded.clone()),
+        "an intercepted key release was recorded"
+    );
+
+    // ... and the modifier's release is forwarded like its press, so the ring
+    // does still move when something really is delivered.
+    fixture.state.key(modifier, KeyState::Released);
+    let latest = fixture
+        .state
+        .interaction_serials
+        .latest()
+        .expect("the modifier release reached the client");
+    assert_ne!(latest, forwarded, "the release went unrecorded");
+    assert_eq!(latest.1, client, "recorded under the wrong client");
+}
+
+/// A release of a key the seat never saw pressed is absorbed by Smithay
+/// before the filter and before forwarding, so it reaches nobody and must not
+/// be recorded.
+///
+/// Not a synthetic case: `--nested` forwards key events but not the held-key
+/// array in `wl_keyboard.enter`, so a modifier held as focus enters flexwm's
+/// window arrives here as a lone release, and `--tty` produces the same shape
+/// when the press landed while the session was paused. Since flexwm focuses
+/// every newly mapped window, crediting the focused client for one of these
+/// would hand a serial to a client that had received nothing at all.
+#[test]
+fn a_release_of_a_key_that_was_never_pressed_is_not_recorded() {
+    let mut fixture = Fixture::new();
+    let code = Keycode::new(28 + 8);
+    fixture.state.key(code, KeyState::Pressed);
+    fixture.state.key(code, KeyState::Released);
+    let before = fixture.state.interaction_serials.latest();
+    assert!(before.is_some(), "the real pair should have been recorded");
+
+    // Nothing is holding it now, so this is the lone-release shape.
+    let outcome = fixture.state.key(code, KeyState::Released);
+    assert!(
+        !outcome.intercepted,
+        "an absorbed key looks like a forwarded one from the outcome alone, \
+         which is why the held-key mirror exists"
+    );
+
+    assert_eq!(
+        fixture.state.interaction_serials.latest(),
+        before,
+        "a release nobody received was recorded anyway"
+    );
+}
+
+/// The other absorbed case: pressing a key that is already held. The client
+/// gets one press, not two, so only the first is evidence.
+#[test]
+fn a_second_press_of_a_held_key_is_not_recorded() {
+    let mut fixture = Fixture::new();
+    let code = Keycode::new(28 + 8);
+    fixture.state.key(code, KeyState::Pressed);
+    let before = fixture.state.interaction_serials.latest();
+    assert!(
+        before.is_some(),
+        "the first press should have been recorded"
+    );
+
+    fixture.state.key(code, KeyState::Pressed);
+    assert_eq!(
+        fixture.state.interaction_serials.latest(),
+        before,
+        "a repeated press nobody received was recorded anyway"
+    );
+
+    // ... and the release that really does end the hold still is.
+    fixture.state.key(code, KeyState::Released);
+    assert_ne!(
+        fixture.state.interaction_serials.latest(),
+        before,
+        "the release went unrecorded"
+    );
+}
+
+/// The serial is evidence for the client that *received* the event and for
+/// nobody else, which is what stops a client from guessing its way to one:
+/// `SERIAL_COUNTER` is process-global and a client can read a live value out
+/// of it for free (an `xdg_surface.configure` serial comes from the same
+/// counter), so a check on the number alone would be brute-forceable.
+#[test]
+fn an_event_is_not_evidence_for_a_client_that_never_received_it() {
+    let mut fixture = Fixture::new();
+    let code = Keycode::new(28 + 8);
+    let bystander = fixture.bystander_id.clone();
+
+    fixture.state.key(code, KeyState::Pressed);
+    let (press, _) = fixture
+        .state
+        .interaction_serials
+        .latest()
+        .expect("the press recorded an event");
+
+    assert!(
+        !fixture
+            .state
+            .interaction_serials
+            .contains(press, &bystander),
+        "a client that was never focused can spend the focused client's serial"
+    );
+}
+
+/// An event nobody receives is evidence for nobody: with no keyboard focus
+/// there is no client to attribute the keypress to, so nothing is recorded
+/// rather than something being recorded against an arbitrary client.
+#[test]
+fn a_key_with_nothing_focused_records_nothing() {
+    let mut fixture = Fixture::new();
+    let code = Keycode::new(28 + 8);
+    let client = fixture.client_id.clone();
+    fixture.state.key(code, KeyState::Pressed);
+    let before = fixture.state.interaction_serials.latest();
+
+    // Takes the keyboard away from the only client there is.
+    let keyboard = fixture.state.seat.get_keyboard().expect("a keyboard");
+    let serial = SERIAL_COUNTER.next_serial();
+    keyboard.set_focus(&mut fixture.state, None, serial);
+    fixture.state.key(code, KeyState::Released);
+
+    assert_eq!(
+        fixture.state.interaction_serials.latest(),
+        before,
+        "a key nobody received was still recorded"
+    );
+    let (_, ring) = before.expect("the first press was recorded");
+    assert_eq!(ring, client);
+}
+
+/// Motion is the one that must not count: it is continuous and passive, and
+/// `refresh_pointer_focus` synthesizes it with no user involvement at all.
+///
+/// Asserted by bracketing the move between two recorded key events rather
+/// than by predicting the motion serial: `SERIAL_COUNTER` is process-global
+/// and every other test running in parallel draws from it, so the only thing
+/// known about the motion's serial is that it lies strictly between these
+/// two. Nothing in that whole window may be in the ring.
+#[test]
+fn pointer_motion_is_never_recorded_as_an_interaction() {
+    let mut fixture = Fixture::new();
+    let code = Keycode::new(28 + 8);
+    let client = fixture.client_id.clone();
+
+    fixture.state.key(code, KeyState::Pressed);
+    fixture.state.key(code, KeyState::Released);
+    let (before, _) = fixture
+        .state
+        .interaction_serials
+        .latest()
+        .expect("an event before the move");
+    let before = u32::from(before);
+
+    fixture.state.pointer_move(10.0, 10.0);
+
+    fixture.state.key(code, KeyState::Pressed);
+    let (after, _) = fixture
+        .state
+        .interaction_serials
+        .latest()
+        .expect("an event after the move");
+    let after = u32::from(after);
+
+    assert!(after > before + 1, "the move issued no serial of its own");
+    let mut raw = before + 1;
+    while raw < after {
+        assert!(
+            !fixture
+                .state
+                .interaction_serials
+                .contains(Serial::from(raw), &client),
+            "serial {raw}, issued between two key events, is in the ring; \
+             pointer motion (or another passive source) is being recorded"
+        );
+        raw += 1;
+    }
+    assert!(
+        fixture
+            .state
+            .interaction_serials
+            .contains(Serial::from(after), &client)
+    );
 }

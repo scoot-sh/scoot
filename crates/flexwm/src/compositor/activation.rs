@@ -15,9 +15,9 @@
 //! compositor may ignore the request"), because honoring every request
 //! unconditionally is a focus-stealing primitive: any client, at any time,
 //! could take the keyboard from whatever the user is typing into. flexwm
-//! bounds two things, both on the token rather than on the surface -- but
-//! **both are resource bounds, not a defense against focus-stealing itself**
-//! (see below for what actually gates that):
+//! applies three rules, all to the token rather than to the surface. Two of
+//! them bound resources and are **not** a defense against focus-stealing
+//! itself (the third, below, is the one that answers that):
 //!
 //! - **Freshness** ([`TOKEN_LIFETIME`]). A token is a receipt for something
 //!   that just happened, not a standing permit. One older than this is
@@ -30,25 +30,83 @@
 //!   `wl_shm` pool cap in `dispatch.rs` and the IPC line-length cap. Expired
 //!   tokens are swept first and only a genuinely full table refuses.
 //!
-//! Neither bound stops the actual focus-steal case: a client with no
-//! keyboard or pointer focus, and no user interaction at all, can call
-//! `get_activation_token` and immediately `activate(token, its_own_surface)`
-//! -- the token is milliseconds old and the table is nowhere near full, so
-//! both checks pass. **Deliberately not part of the policy: requiring the
-//! token to carry a seat and input serial**, which is the actual gate the
-//! protocol offers against exactly this (`set_serial` is a request, not a
-//! constructor argument, so today nothing requires or checks it). Real
-//! launchers -- the exact case this protocol exists for -- routinely create a
-//! token from a keyboard-driven selection and hand it to a process that takes
-//! a second to start, and requiring a serial would make that the common case
-//! work correctly while still refusing a client that was never interacted
-//! with at all. That correct version is not implemented yet -- this is a
-//! known gap, not a considered trade-off, filed as
-//! `docs/backlog/protocols/activation-serial-validation.md`. What the two
-//! bounds above actually buy, honestly: they keep an unauthenticated,
-//! unlimited protocol entry point from being a memory-exhaustion vector,
-//! which is worth having regardless, but they are orthogonal to who gets to
-//! steal focus.
+//! Neither bound stops the actual focus-steal case -- a client with no
+//! keyboard or pointer focus, and no user interaction at all, minting a token
+//! and immediately redeeming it against its own surface, which is fresh and
+//! leaves the table nowhere near full. The third rule is the one that does,
+//! and it is the gate the protocol itself offers:
+//!
+//! - **The token must name a real, recent interaction *with the client
+//!   asking*.** `set_serial(serial, seat)` is how a client says "this is the
+//!   click/keypress that caused me to ask". It is optional in the protocol --
+//!   a request, not a constructor argument -- so a token arrives here with no
+//!   serial at all, with one naming a seat this compositor does not own, or
+//!   with a stale or fabricated number, and all of those are refused at
+//!   creation. What is accepted is a serial this compositor issued for a key
+//!   or button event within the last few input events *and* the last few
+//!   seconds, **and delivered to this same client** (see
+//!   `input/interaction.rs`), which is what a launcher minting a token from
+//!   inside its own input handler necessarily has. The age bound is not
+//!   redundant with the count: an idle session -- including an
+//!   agent-driven one, where every action arrives over IPC rather than as
+//!   input -- never rotates the history at all.
+//!
+//!   The client half is not a formality. `SERIAL_COUNTER` is process-global
+//!   and shared with events that are not input at all -- an
+//!   `xdg_surface.configure` serial comes from the same counter -- so any
+//!   client can read its live value for free (commit a role-less surface,
+//!   read the configure) and guess nearby numbers at no cost, since a refused
+//!   token posts no error. Matching the serial *and* the recipient is what
+//!   makes this a check on interaction rather than on arithmetic: a client
+//!   that was never focused, and never had the pointer over it, has nothing
+//!   to guess with.
+//!
+//! Checked when the token is *created*, never when it is redeemed. A
+//! launcher hands its token to a process that may take seconds to cold-start
+//! before it maps a window and calls `activate`, by which point dozens of
+//! newer events have happened; re-checking then would break the one case
+//! this protocol exists for. The serial only has to have been valid when the
+//! token was minted, and [`TOKEN_LIFETIME`] is what bounds the gap after
+//! that.
+//!
+//! Only key and button events count, which is stricter than the loosest
+//! reading of the protocol -- upstream documents the serial as one that "can
+//! come from an input or focus event". A *focus* event is not consent:
+//! flexwm focuses every newly mapped window itself (`shell.rs`'s
+//! `add_window` passes `focus: true`), so any client can collect a
+//! `wl_keyboard.enter` serial just by mapping, and spending it later is the
+//! steal this gate exists to refuse.
+//!
+//! That has a real cost, and it is narrower than "harmless" but wider than
+//! nothing: a launcher that mints from its last *focus* serial, because
+//! nothing was typed or clicked in its own surface, is refused. `fuzzel`
+//! does exactly that when an entry is chosen with the mouse -- it only ever
+//! sends its keyboard serial, which is then the one from `wl_keyboard.enter`.
+//! Two different outcomes follow, and only the first is covered:
+//!
+//! - **A fresh spawn is unaffected.** The app the launcher started maps a
+//!   window, and mapping focuses it, which is where a launched window's focus
+//!   came from before this protocol existed at all.
+//! - **Re-activating something already running is not.** A single-instance
+//!   app (Firefox, Chromium, anything on `GApplication`) hands the token to
+//!   its existing process, which calls `activate` on a window that already
+//!   exists -- nothing maps, so nothing focuses it, and a refused token here
+//!   means nothing visible happens. The same is true of the notification
+//!   daemon case: focusing the app a clicked popup came from is exactly an
+//!   activation of an existing window.
+//!
+//! So the rule is: a token minted from a real key or button press works; one
+//! minted from a focus serial alone is refused, and for an already-running
+//! target that refusal is the whole outcome.
+//!
+//! What this deliberately does *not* stop: a client the user really did
+//! interact with can activate itself off that interaction -- including more
+//! than once, since one serial may be named by several tokens, bounded only
+//! by [`MAX_TOKENS`] and [`TOKEN_LIFETIME`]. That is the protocol working as
+//! intended: the user just clicked it. Nor does any of this touch
+//! `XdgActivationState::create_external_token`, which the compositor would
+//! use to hand a token to a process it spawned itself: upstream does not
+//! route those through [`XdgActivationHandler::token_created`] at all.
 //!
 //! What the compositor does *not* do with a refused request is also
 //! deliberate: nothing. There is no urgency hint to raise instead -- flexwm
@@ -59,6 +117,7 @@
 use std::time::Duration;
 
 use flexwm_core::Action;
+use smithay::input::Seat;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::wayland::xdg_activation::{
     XdgActivationHandler, XdgActivationState, XdgActivationToken, XdgActivationTokenData,
@@ -95,21 +154,69 @@ impl XdgActivationHandler for State {
         &mut self.xdg_activation
     }
 
-    /// A client asked for a token. Sweeps expired ones, then accepts unless
-    /// the table is genuinely full.
+    /// A client asked for a token. Refuses one that does not name a real,
+    /// recent interaction on this compositor's own seat; otherwise sweeps
+    /// expired tokens and accepts unless the table is genuinely full.
     ///
     /// Returning `false` makes Smithay drop the token immediately rather than
     /// track it; the client still gets its `done` event with a token string,
     /// which simply will not be honored later. That is the protocol's own
     /// shape for a refusal -- there is no error to post for "I would rather
-    /// not" -- and it is why the refusal is logged here: from the client's
-    /// side it is indistinguishable from an activation the compositor chose
-    /// to ignore.
+    /// not" -- and it is why each refusal is logged here, with the reason:
+    /// from the client's side all of them are indistinguishable from an
+    /// activation the compositor chose to ignore.
     ///
+    /// The serial is checked before the sweep, so a client looping on
+    /// unqualified tokens is rejected without touching the table at all.
     /// The sweep is here rather than on a timer because this is the only
     /// place the table can grow: an expired token costs nothing until
     /// something tries to add another one.
     fn token_created(&mut self, token: XdgActivationToken, data: XdgActivationTokenData) -> bool {
+        let Some((serial, seat)) = &data.serial else {
+            tracing::debug!(
+                app_id = ?data.app_id,
+                "refusing an xdg-activation token: it names no input event (set_serial was never called)"
+            );
+            return false;
+        };
+        // Resolved rather than assumed: flexwm has exactly one seat, so in
+        // practice any `wl_seat` a client can name is this one -- but a
+        // resource that resolves to some other seat, or to no live seat at
+        // all, has no bearing on what this compositor's keyboard and pointer
+        // did, and a serial is only meaningful against the seat that issued
+        // it.
+        match Seat::<State>::from_resource(seat) {
+            Some(named) if named == self.seat => {}
+            _ => {
+                tracing::debug!(
+                    app_id = ?data.app_id,
+                    "refusing an xdg-activation token: its serial names a seat this compositor does not own"
+                );
+                return false;
+            }
+        }
+        // Whose event it was, not just which number: `SERIAL_COUNTER` is
+        // process-global and a client can read its live value for free (an
+        // `xdg_surface.configure` serial comes out of the same counter), so a
+        // value-only check is guessable by a client that received no input at
+        // all -- see `input/interaction.rs`. `client_id` is filled in by
+        // Smithay from the client that sent the request, so it cannot be
+        // forged; it is `None` only for a token the compositor minted itself
+        // (`create_external_token`), which never reaches this handler.
+        let Some(client) = &data.client_id else {
+            tracing::debug!(
+                app_id = ?data.app_id,
+                "refusing an xdg-activation token: it has no requesting client"
+            );
+            return false;
+        };
+        if !self.interaction_serials.contains(*serial, client) {
+            tracing::debug!(
+                app_id = ?data.app_id,
+                "refusing an xdg-activation token: its serial is not a recent key or button event this client received"
+            );
+            return false;
+        }
         self.xdg_activation
             .retain_tokens(|_, data| data.timestamp.elapsed() < TOKEN_LIFETIME);
         if self.xdg_activation.tokens().count() >= MAX_TOKENS {
