@@ -650,7 +650,11 @@ What a client sees, per window, on a `zwlr_foreign_toplevel_handle_v1`:
 What a client can ask for:
 
 - **`activate`** focuses that window — the same action a click on the window
-  itself and `flexwm msg action focus-window-id N` run.
+  itself and `flexwm msg action focus-window-id N` run, and with the same
+  effect on the keyboard: if your panel is a layer surface that took the
+  keyboard when the user clicked it, `activate` hands the keyboard on to the
+  window, exactly as clicking the window would. It does that whether or not
+  the window was already the focused one.
 - **`close`** sends the window's `xdg_toplevel.close`. Whether the window
   actually goes is up to its own client, as the protocol says; `closed`
   follows if and when it does.

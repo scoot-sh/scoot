@@ -35,10 +35,14 @@
 //! which nothing here connects to (clients are inserted as socket pairs) but
 //! which is created either way.
 
+use std::io::Write;
+use std::os::fd::AsFd;
 use std::os::unix::net::UnixStream;
 use std::sync::mpsc::{Receiver, Sender};
 
-use wayland_client::protocol::{wl_compositor, wl_output, wl_registry, wl_seat, wl_surface};
+use wayland_client::protocol::{
+    wl_buffer, wl_compositor, wl_output, wl_registry, wl_seat, wl_shm, wl_shm_pool, wl_surface,
+};
 use wayland_client::{Connection, Dispatch, Proxy, QueueHandle, event_created_child};
 use wayland_protocols::ext::foreign_toplevel_list::v1::client::ext_foreign_toplevel_handle_v1::{
     self, ExtForeignToplevelHandleV1,
@@ -56,6 +60,10 @@ use wayland_protocols_wlr::foreign_toplevel::v1::client::zwlr_foreign_toplevel_h
 use wayland_protocols_wlr::foreign_toplevel::v1::client::zwlr_foreign_toplevel_manager_v1::{
     self as client_manager, ZwlrForeignToplevelManagerV1,
 };
+use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_shell_v1;
+use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_surface_v1;
+
+use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 
 use super::*;
 use crate::compositor::decorations::Appearance;
@@ -68,6 +76,17 @@ mod requests;
 /// backend exists so the compositor has a real output, as it does in a
 /// session.
 const CANVAS: i32 = 200;
+
+/// How wide and tall the `on_demand` taskbar in [`Step::MapTaskbar`] is.
+///
+/// Anchored to the bottom-right corner, so [`TASKBAR_POINT`] is inside it and
+/// outside any window: the layout puts columns from the left edge, and this
+/// suite never opens enough of them to reach the corner.
+const TASKBAR: u32 = 60;
+
+/// A point inside that taskbar, for a click that really goes through the
+/// pointer.
+const TASKBAR_POINT: (f64, f64) = (CANVAS as f64 - 20.0, CANVAS as f64 - 20.0);
 
 /// One protocol event, as the client saw it.
 ///
@@ -148,6 +167,8 @@ struct TestClient {
     compositor: Option<wl_compositor::WlCompositor>,
     wm_base: Option<xdg_wm_base::XdgWmBase>,
     seat: Option<wl_seat::WlSeat>,
+    shm: Option<wl_shm::WlShm>,
+    layer_shell: Option<zwlr_layer_shell_v1::ZwlrLayerShellV1>,
     locks: Option<ext_session_lock_manager_v1::ExtSessionLockManagerV1>,
     managers: Vec<ZwlrForeignToplevelManagerV1>,
     handles: Vec<ZwlrForeignToplevelHandleV1>,
@@ -158,6 +179,11 @@ struct TestClient {
     log: Vec<Seen>,
     /// The serial of each toplevel's latest unacked `xdg_surface.configure`.
     window_serials: Vec<Option<u32>>,
+    /// The size the compositor configured the taskbar at, once it has. A layer
+    /// surface may only attach a buffer after acking a configure, and must draw
+    /// at the size that configure carried -- which is the compositor's choice,
+    /// not the client's.
+    taskbar_size: Option<(u32, u32)>,
 }
 
 impl TestClient {
@@ -207,6 +233,10 @@ impl Dispatch<wl_registry::WlRegistry, ()> for TestClient {
             }
             "xdg_wm_base" => client.wm_base = Some(registry.bind(name, version.min(3), qh, ())),
             "wl_seat" => client.seat = Some(registry.bind(name, version.min(5), qh, ())),
+            "wl_shm" => client.shm = Some(registry.bind(name, version.min(1), qh, ())),
+            "zwlr_layer_shell_v1" => {
+                client.layer_shell = Some(registry.bind(name, version.min(4), qh, ()))
+            }
             "ext_session_lock_manager_v1" => {
                 client.locks = Some(registry.bind(name, version.min(1), qh, ()))
             }
@@ -363,7 +393,34 @@ impl Dispatch<xdg_toplevel::XdgToplevel, WindowIndex> for TestClient {
     }
 }
 
+impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, ()> for TestClient {
+    /// Acks the configure and records the size it carried, which is the only
+    /// thing the taskbar needs from the compositor before it can draw.
+    fn event(
+        client: &mut Self,
+        layer: &zwlr_layer_surface_v1::ZwlrLayerSurfaceV1,
+        event: zwlr_layer_surface_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let zwlr_layer_surface_v1::Event::Configure {
+            serial,
+            width,
+            height,
+        } = event
+        {
+            layer.ack_configure(serial);
+            client.taskbar_size = Some((width, height));
+        }
+    }
+}
+
 wayland_client::delegate_noop!(TestClient: ignore wl_compositor::WlCompositor);
+wayland_client::delegate_noop!(TestClient: ignore wl_shm::WlShm);
+wayland_client::delegate_noop!(TestClient: ignore wl_shm_pool::WlShmPool);
+wayland_client::delegate_noop!(TestClient: ignore wl_buffer::WlBuffer);
+wayland_client::delegate_noop!(TestClient: ignore zwlr_layer_shell_v1::ZwlrLayerShellV1);
 wayland_client::delegate_noop!(TestClient: ignore wl_surface::WlSurface);
 wayland_client::delegate_noop!(TestClient: ignore wl_output::WlOutput);
 wayland_client::delegate_noop!(TestClient: ignore wl_seat::WlSeat);
@@ -380,6 +437,11 @@ enum Step {
     /// Bind an `ext_foreign_toplevel_list_v1` as well, for the cross-protocol
     /// check.
     BindList,
+    /// Map a real `on_demand` taskbar: a `zwlr_layer_surface_v1` in the
+    /// bottom-right corner with a real `wl_shm` buffer behind it, which is
+    /// what it takes to be in the compositor's layer map and therefore
+    /// eligible to hold the keyboard.
+    MapTaskbar,
     /// Create an `xdg_toplevel` (and ack its configure), with no title, no app
     /// id and no buffer.
     MapWindow,
@@ -447,6 +509,13 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
     )> = Vec::new();
     // Held so the lock is not released the moment it is taken.
     let mut lock: Option<ext_session_lock_v1::ExtSessionLockV1> = None;
+    // Held for the same reason: dropping the buffer or the role object would
+    // unmap the taskbar, which is exactly what the test needs to stay mapped.
+    let mut taskbar: Option<(
+        wl_surface::WlSurface,
+        zwlr_layer_surface_v1::ZwlrLayerSurfaceV1,
+        wl_buffer::WlBuffer,
+    )> = None;
 
     while let Ok(step) = steps.recv() {
         queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
@@ -467,6 +536,45 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 let list: ExtForeignToplevelListV1 =
                     registry.bind(global.0, global.1.min(1), &qh, ());
                 client.lists.push(list);
+            }
+            Step::MapTaskbar => {
+                let shell = client
+                    .layer_shell
+                    .clone()
+                    .ok_or("no zwlr_layer_shell_v1 -- the global is missing")?;
+                let shm = client.shm.clone().ok_or("no wl_shm")?;
+                let surface = compositor.create_surface(&qh, ());
+                let layer = shell.get_layer_surface(
+                    &surface,
+                    None,
+                    zwlr_layer_shell_v1::Layer::Overlay,
+                    "flexwm-ftl-test-taskbar".into(),
+                    &qh,
+                    (),
+                );
+                layer.set_anchor(
+                    zwlr_layer_surface_v1::Anchor::Bottom | zwlr_layer_surface_v1::Anchor::Right,
+                );
+                layer.set_size(TASKBAR, TASKBAR);
+                layer.set_exclusive_zone(0);
+                // The whole point: a surface that takes the keyboard when it
+                // is clicked, and keeps it until something takes it away --
+                // which is what DMS's and Noctalia's panels are.
+                layer.set_keyboard_interactivity(
+                    zwlr_layer_surface_v1::KeyboardInteractivity::OnDemand,
+                );
+                // The first commit carries no buffer; the protocol requires
+                // that before the first configure.
+                surface.commit();
+                let (width, height) =
+                    wait_for(&mut queue, &mut client, "a taskbar configure", |client| {
+                        client.taskbar_size
+                    })?;
+                let buffer = solid_buffer(&shm, &qh, width as i32, height as i32);
+                surface.attach(Some(&buffer), 0, 0);
+                surface.damage_buffer(0, 0, width as i32, height as i32);
+                surface.commit();
+                taskbar = Some((surface, layer, buffer));
             }
             Step::MapWindow => windows.push(map_window(
                 &compositor,
@@ -568,10 +676,34 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
         }
         acks.send(outcome).map_err(|e| e.to_string())?;
     }
-    // Keeps the lock alive for the whole script rather than dropping it at the
+    // Keeps both alive for the whole script rather than dropping them at the
     // first step boundary.
     drop(lock);
+    drop(taskbar);
     Ok(())
+}
+
+/// A `width`x`height` opaque `wl_buffer` over a real memfd -- the same path any
+/// toolkit takes, and what a layer surface needs before it counts as mapped.
+///
+/// The colour does not matter: nothing in this suite reads a pixel. What
+/// matters is that a buffer exists at the size the compositor configured.
+fn solid_buffer(
+    shm: &wl_shm::WlShm,
+    qh: &QueueHandle<TestClient>,
+    width: i32,
+    height: i32,
+) -> wl_buffer::WlBuffer {
+    let stride = width * 4;
+    let len = (stride * height) as usize;
+    let fd = rustix::fs::memfd_create("flexwm-ftl-test", rustix::fs::MemfdFlags::CLOEXEC)
+        .expect("a memfd");
+    let mut file = std::fs::File::from(fd);
+    file.write_all(&vec![0xffu8; len]).expect("a filled pool");
+    let pool = shm.create_pool(file.as_fd(), len as i32, qh, ());
+    let buffer = pool.create_buffer(0, width, height, stride, wl_shm::Format::Argb8888, qh, ());
+    pool.destroy();
+    buffer
 }
 
 /// Creates one `xdg_toplevel`, optionally describing it first, and acks the
@@ -642,6 +774,40 @@ impl Fixture {
             Ack::Log(log) => log,
             Ack::Done => panic!("the client answered a log request with nothing"),
         }
+    }
+
+    /// A left click at a point, press and release, the way a user makes one --
+    /// the same helper `layer_shell/tests/mod.rs` uses, for the same reason:
+    /// `State::clicked_layer` is only ever written by a click that really went
+    /// through the pointer.
+    fn click(&mut self, x: f64, y: f64) {
+        self.state.pointer_move(x, y);
+        self.state
+            .pointer_button(flexwm_ipc::PointerButton::Left, true);
+        self.state
+            .pointer_button(flexwm_ipc::PointerButton::Left, false);
+        self.settle();
+    }
+
+    /// The `wl_surface` the seat's keyboard focus is actually on, which is the
+    /// only unambiguous answer to "where do keystrokes go".
+    fn keyboard_surface(&self) -> Option<WlSurface> {
+        self.state
+            .seat
+            .get_keyboard()
+            .expect("a keyboard")
+            .current_focus()
+    }
+
+    /// The `wl_surface` of the `id`-th window's toplevel.
+    fn window_surface(&self, id: u64) -> WlSurface {
+        self.state
+            .windows
+            .get(&WindowId(id))
+            .and_then(Window::toplevel)
+            .expect("a live window")
+            .wl_surface()
+            .clone()
     }
 
     /// How many windows the compositor is keeping handles for.
@@ -1158,10 +1324,17 @@ fn a_handle_from_before_stop_still_reports_changes() {
 fn stopping_a_manager_twice_over_is_survivable() {
     // Not well-behaved -- the protocol says a client must send no further
     // requests after `stop` -- and it may not take the compositor with it.
-    // `finished` is a destructor event here (unlike the `ext-` list's, which
-    // is not), so the object is gone the moment it is sent and the second
-    // `stop` must simply be swallowed: exactly one `finished` comes back, and
-    // the manager is unregistered once.
+    //
+    // What is actually exercised is a *client-side* swallow, and saying so is
+    // the point of this comment: `finished` is a destructor event here (unlike
+    // the `ext-` list's, which is not), so by the time the round trip after the
+    // first `stop` returns, wayland-client has marked the proxy dead and the
+    // generated `stop()` drops the second request before it is written. The
+    // compositor therefore sees one `stop`, answers one `finished`, and
+    // unregisters once -- which is what the assertions below pin, and why a
+    // *second* `finished` would be the failure rather than a protocol error.
+    // Pinning it matters because the other order (send both before the round
+    // trip) is a client's to choose and the compositor must survive either.
     let mut fixture = Fixture::bound();
     fixture.run(Step::MapWindow);
     fixture.take_log();

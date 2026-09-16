@@ -167,17 +167,40 @@ every `xdg_toplevel` is an independent column entry, dialogs included. A
 version 1 or 2 client would see exactly the same picture, so capping the
 version would remove a client's ability to ask without adding a fact.
 
-**5. `activate` on the already-focused window skips the layout, not the
-keyboard.** Going through `State::act` unconditionally would let a client
-drive a full `apply` (arrange, a configure per window, a render) as fast as
-it can write — the hazard `ext_workspace.rs` already guards against for
-workspace `activate`. But the guarded branch still calls
-`refresh_keyboard_focus`, because the click that produced the request landed
-on a taskbar, which is a layer surface that may be holding the keyboard, and
-`set_focus`'s own doc says that unconditional refresh is the only thing that
-takes it back when the window focus has not moved. Without it, clicking the
-focused window's row in a launcher and clicking the window itself would
-disagree. Both halves are refused while the session is locked.
+**5. `activate` is exactly what clicking the window is, and that took two
+tries.** Going through `State::act` unconditionally would let a client drive
+a full `apply` (arrange, a configure per window, a render) as fast as it can
+write — the hazard `ext_workspace.rs` already guards against for workspace
+`activate` — so an already-focused window skips `act` and runs only the
+keyboard half.
+
+The first version of that guard called `refresh_keyboard_focus` and stopped
+there, reasoning from `set_focus`'s doc ("its unconditional
+`refresh_keyboard_focus` is the only thing that takes the keyboard back off"
+a clicked `on_demand` layer surface). **That was not enough, and review
+caught it.** The refresh is only half of what `input.rs`'s
+`focus_under_pointer` does; the other half is the line before it,
+`self.clicked_layer = None`. `layer_shell.rs`'s `layer_keyboard_focus` reads
+that field and hands the keyboard straight back to a still-mapped `on_demand`
+surface — so without clearing it the refresh re-derives the *taskbar* and
+nothing moves, which is the exact two-path disagreement the guard existed to
+prevent, relocated rather than fixed.
+
+So the click is now spent before either branch, mirroring `input.rs`
+statement for statement, and the branch split is purely about cost. The
+session-lock check moved ahead of both, since the fast path never reaches
+`act`'s own gate and a refused request must not spend the taskbar's click
+either.
+
+The test that was supposed to pin this could not: it hand-set
+`keyboard_on_layer` with no real layer surface in the fixture, so
+`layer_keyboard_focus` returned `None` whatever the guard did and the
+assertion passed either way. It is now built on a real mapped `on_demand`
+layer surface with a real `wl_shm` buffer, clicked through the real pointer
+(`taskbar_holding_the_keyboard`), and asserts on the seat's actual keyboard
+focus surface. Both the already-focused and the not-focused branch are
+covered, and both were confirmed to **fail** against the unfixed code before
+being accepted — see the evidence below.
 
 **6. `stop` leaves the handles working.** The protocol's teardown is stop,
 wait for `finished`, then destroy the handles — which a client cannot do

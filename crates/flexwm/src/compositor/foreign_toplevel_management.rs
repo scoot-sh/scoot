@@ -107,11 +107,13 @@
 //! window that did not close is a lie a taskbar cannot recover from).
 //!
 //! The two *requests* are refused while locked, which is the difference this
-//! protocol introduces: `activate` goes through
-//! [`State::act`](super::State), whose session-lock gate already covers every
-//! requested action, and `close` checks the same gate itself for the same
-//! reason that gate exists -- a window the user cannot see must not be closed
-//! from behind the lock screen.
+//! protocol introduces. Both check `SessionLock::is_locked` themselves
+//! rather than leaning on [`State::act`](super::State)'s gate -- `close` has
+//! no core action to route through at all, and `activate` has a fast path that
+//! deliberately does not go through `act` either -- for exactly the reason
+//! that gate exists: a window the user cannot see must not be focused or
+//! closed from behind the lock screen. `act` keeps its own check as the
+//! backstop `shell.rs` describes it as.
 
 use std::collections::BTreeMap;
 
@@ -448,9 +450,7 @@ impl State {
         if self.output.as_ref() != Some(output) {
             return;
         }
-        let Some(client) = wl_output.client() else {
-            return;
-        };
+        let bound = wl_output.id();
         for toplevel in self.foreign_toplevel_management.toplevels.values() {
             for handle in &toplevel.handles {
                 // Load-bearing, not tidiness: wayland-backend *panics* when an
@@ -458,7 +458,20 @@ impl State {
                 // the one it is sent to ("Attempting to send an event with
                 // objects from wrong client", `rs/server_impl/client.rs`), and
                 // a panic here takes every client's session down with it.
-                if handle.client().as_ref() != Some(&client) {
+                //
+                // Compared as ids rather than through `Resource::client`,
+                // because this runs once per handle per `wl_output` bind and
+                // any client may provoke it: `same_client_as` is a comparison
+                // of the two `ObjectId`s' stored client ids, while `client()`
+                // takes the backend's state mutex twice and clones an
+                // `Arc<dyn ClientData>` to answer the same question. It is
+                // also the *exact* question -- the panic above is literally
+                // `o.id.client_id != self.id` on the object argument. A handle
+                // that has since died is skipped under the system backend and
+                // harmlessly kept under the Rust one, where the event is
+                // swallowed as `InvalidId` rather than sent (same file's
+                // `get_object`, whose `?` the generated `let _ =` eats).
+                if !handle.id().same_client_as(&bound) {
                     continue;
                 }
                 handle.output_enter(wl_output);
@@ -520,48 +533,63 @@ impl State {
     /// in `State::new` and never replaced, so "which seat" has one answer; the
     /// protocol offers the argument for compositors that have more.
     ///
-    /// Two gates before the action, both of which a real taskbar hits:
+    /// ## Refused before anything is touched
     ///
-    /// - an inert handle (its window closed while the click was in flight)
+    /// - **An inert handle** (its window closed while the click was in flight)
     ///   resolves to no entry, and the protocol says such a handle's requests
-    ///   are ignored;
-    /// - a window that is *already* focused does not go through
-    ///   [`State::act`](super::State), which would otherwise run a full `apply`
-    ///   -- an arrange, a configure per window and a render -- for a client
-    ///   that can repeat `activate` as fast as it can write to its socket. Same
-    ///   reasoning, and the same shape, as `ext_workspace.rs`'s guard against
-    ///   re-activating the current workspace.
+    ///   are ignored.
+    /// - **A locked session.** Checked here rather than left to
+    ///   [`State::act`](super::State)'s own gate, because the fast path below
+    ///   does not go through `act` at all and because nothing before the check
+    ///   may be disturbed on a refusal -- `clicked_layer` in particular has to
+    ///   survive the lock so the session comes back as the user left it.
+    ///   `act`'s gate remains as the backstop `shell.rs` describes it as.
     ///
-    /// That second gate skips the layout, but **not** the keyboard. The click
-    /// that produced this request landed on the taskbar, which is a layer
-    /// surface and may well have taken the keyboard with it (see
-    /// `layer_shell.rs`'s policy); `shell.rs`'s `set_focus` says in as many
-    /// words that its unconditional `refresh_keyboard_focus` is the only thing
-    /// that takes the keyboard back off such a surface when the window focus
-    /// itself has not moved -- which is exactly this case. So the cheap half
-    /// still runs: a layer-map walk and, in the common case, a `set_focus` that
-    /// Smithay drops because the surface already has it. Without it, clicking
-    /// the focused window's entry in a launcher would leave the keyboard in the
-    /// launcher, while clicking the window itself (`input.rs`, same action, no
-    /// guard) would not -- two paths disagreeing about the same gesture.
+    /// ## Then: exactly what clicking the window itself does
     ///
-    /// Everything else -- the session-lock refusal above all -- is
-    /// [`State::act`](super::State)'s, which is the one path every requested
-    /// action goes through. The gated branch has to repeat that check itself,
-    /// for the same reason it exists: a locked session's keyboard belongs to
-    /// the lock surface, and nothing a client asks for may move it.
+    /// `input.rs`'s `focus_under_pointer` is the reference implementation of
+    /// this gesture, and it is two statements: clear
+    /// [`State::clicked_layer`](super::State), then run
+    /// `Action::FocusWindowId`. Both are needed, and the first is the one
+    /// that is easy to leave out -- `layer_shell.rs`'s `layer_keyboard_focus`
+    /// consults `clicked_layer` and hands the keyboard straight back to a
+    /// still-mapped `on_demand` surface, so without clearing it a
+    /// `refresh_keyboard_focus` here re-derives the *taskbar* and changes
+    /// nothing. And the taskbar is exactly what sent this request: it is a
+    /// layer surface, the user clicked it to reach the window list, and that
+    /// click may well have given it the keyboard.
+    ///
+    /// So the click is spent here, the same way a click on the window spends
+    /// it. What follows splits only on cost:
+    ///
+    /// - **The window is already focused**: skip
+    ///   [`State::act`](super::State), which would run a full `apply` -- an
+    ///   arrange, a configure per window and a render -- for a client that can
+    ///   repeat `activate` as fast as it can write to its socket (the hazard
+    ///   `ext_workspace.rs` guards the same way for workspace activation), and
+    ///   run only the keyboard half, which is what actually has to happen.
+    /// - **Otherwise**: `act`, whose `apply` ends in the same
+    ///   `refresh_keyboard_focus` -- now with `clicked_layer` already cleared,
+    ///   so it reaches the window rather than stopping at the taskbar.
+    ///
+    /// Either way the two paths agree about the same gesture, which is the
+    /// whole point.
     fn wlr_toplevel_activate(&mut self, id: WindowId) {
         if !self.foreign_toplevel_management.toplevels.contains_key(&id) {
             return;
         }
+        if self.session_lock.is_locked() {
+            tracing::debug!(
+                ?id,
+                "ignoring a foreign-toplevel activate: the session is locked"
+            );
+            return;
+        }
+        // Mirrors `input.rs`'s `focus_under_pointer`, which clears this on the
+        // line before its own `act(FocusWindowId)` -- see above for why it is
+        // load-bearing rather than tidiness.
+        self.clicked_layer = None;
         if self.focus == Some(id) {
-            if self.session_lock.is_locked() {
-                tracing::debug!(
-                    ?id,
-                    "ignoring a foreign-toplevel activate: the session is locked"
-                );
-                return;
-            }
             self.refresh_keyboard_focus();
             return;
         }

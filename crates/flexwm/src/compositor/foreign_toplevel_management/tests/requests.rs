@@ -78,47 +78,135 @@ fn activating_the_window_that_is_already_focused_does_no_work_at_all() {
     assert_eq!(fixture.state.focus, Some(WindowId(1)));
 }
 
-#[test]
-fn activating_the_focused_window_still_takes_the_keyboard_back() {
-    // The half of that guard which must *not* be skipped. A taskbar is a layer
-    // surface, and clicking one can leave it holding the keyboard (see
-    // `layer_shell.rs`); `shell.rs`'s `set_focus` says its unconditional
-    // `refresh_keyboard_focus` is the only thing that takes the keyboard back
-    // when the window focus itself has not moved -- which is exactly the case
-    // the guard above short-circuits.
-    //
-    // `keyboard_on_layer` is written by `refresh_keyboard_focus` and by nothing
-    // else (its own doc says so), so pre-setting it and watching it be
-    // re-derived is a direct observation that the refresh ran.
+/// Sets up the scenario every keyboard test below shares, and asserts it
+/// really happened: one window with the keyboard, then a real `on_demand`
+/// taskbar clicked so that it holds the keyboard instead.
+///
+/// The click has to be a real one through the pointer: `State::clicked_layer`
+/// is written by `layer_shell.rs`'s `click_layer` and by nothing else, and it
+/// is the field this whole group of tests is about.
+fn taskbar_holding_the_keyboard() -> Fixture {
     let mut fixture = Fixture::bound();
     fixture.run(Step::MapWindow);
+    fixture.run(Step::MapTaskbar);
+    fixture.take_log();
+    assert_eq!(
+        fixture.keyboard_surface(),
+        Some(fixture.window_surface(1)),
+        "the window should start with the keyboard"
+    );
+
+    fixture.click(TASKBAR_POINT.0, TASKBAR_POINT.1);
+    assert!(
+        fixture.state.clicked_layer.is_some(),
+        "the click never reached the taskbar -- check TASKBAR_POINT against the layout"
+    );
+    assert!(
+        fixture.state.keyboard_on_layer,
+        "an on_demand layer surface should hold the keyboard once clicked"
+    );
+    assert_ne!(
+        fixture.keyboard_surface(),
+        Some(fixture.window_surface(1)),
+        "the window should have lost the keyboard to the taskbar"
+    );
+    assert_eq!(
+        fixture.state.focus,
+        Some(WindowId(1)),
+        "clicking a bar must not move *window* focus"
+    );
+    fixture
+}
+
+#[test]
+fn activating_the_focused_window_takes_the_keyboard_back_from_the_taskbar() {
+    // The half of that guard which must *not* be skipped, and the exact
+    // gesture: the user clicks a taskbar (which takes the keyboard, being
+    // `on_demand`), then clicks the row of the window that already had focus.
+    //
+    // `refresh_keyboard_focus` alone is not enough and this test is what says
+    // so: `layer_shell.rs`'s `layer_keyboard_focus` reads `clicked_layer` and
+    // hands the keyboard straight back to a still-mapped `on_demand` surface,
+    // so without clearing that field first the refresh re-derives the taskbar
+    // and nothing moves. `input.rs`'s `focus_under_pointer` clears it on the
+    // line before its own `act`, which is what makes clicking the window
+    // itself work -- and what this path has to mirror.
+    let mut fixture = taskbar_holding_the_keyboard();
+
+    fixture.run(Step::Activate(0));
+
+    assert_eq!(
+        fixture.keyboard_surface(),
+        Some(fixture.window_surface(1)),
+        "activating the focused window left the keyboard on the taskbar"
+    );
+    assert!(!fixture.state.keyboard_on_layer);
+    assert!(
+        fixture.state.clicked_layer.is_none(),
+        "the taskbar's click was not spent"
+    );
+    assert_eq!(fixture.state.focus, Some(WindowId(1)));
+}
+
+#[test]
+fn activating_a_different_window_takes_the_keyboard_back_too() {
+    // The other branch, which goes through `State::act` and so through
+    // `set_focus`'s own `refresh_keyboard_focus` -- and which needs the same
+    // `clicked_layer` clear for the same reason. Without it the *window* focus
+    // would move while the keyboard stayed in the taskbar, which is a worse
+    // state than either end of it.
+    let mut fixture = taskbar_holding_the_keyboard();
+    fixture.run(Step::MapWindow); // window 2, which takes focus
+    fixture.click(TASKBAR_POINT.0, TASKBAR_POINT.1);
+    assert!(
+        fixture.state.keyboard_on_layer,
+        "the taskbar has the keyboard"
+    );
     fixture.take_log();
 
-    fixture.state.keyboard_on_layer = true;
-    fixture.state.wlr_toplevel_activate(WindowId(1));
-    assert!(
-        !fixture.state.keyboard_on_layer,
-        "activating the focused window left the keyboard on a layer surface"
+    // Handle 0 is window 1, which is *not* the focused one.
+    fixture.run(Step::Activate(0));
+
+    assert_eq!(fixture.state.focus, Some(WindowId(1)));
+    assert_eq!(
+        fixture.keyboard_surface(),
+        Some(fixture.window_surface(1)),
+        "activating another window left the keyboard on the taskbar"
     );
+    assert!(fixture.state.clicked_layer.is_none());
 }
 
 #[test]
 fn activating_the_focused_window_while_locked_moves_no_keyboard_either() {
-    // The lock gate covers both halves of `activate`, not just the one that
-    // goes through `State::act`: while the session is locked the keyboard
+    // The lock gate covers `activate` before either branch, not just the one
+    // that goes through `State::act`: while the session is locked the keyboard
     // belongs to the lock surface, and a client asking for a window must not
-    // start a focus re-derivation at all.
-    let mut fixture = Fixture::bound();
-    fixture.run(Step::MapWindow);
+    // start a focus re-derivation -- nor spend the taskbar's click, which has
+    // to survive so the session comes back as the user left it.
+    let mut fixture = taskbar_holding_the_keyboard();
+    let taskbar = fixture
+        .state
+        .clicked_layer
+        .clone()
+        .expect("the taskbar holds the click");
     fixture.run(Step::LockSession);
     fixture.take_log();
     assert!(fixture.state.session_lock.is_locked());
+    // The precondition this test is named for: without it a future change that
+    // cleared window focus on lock would silently exercise the *other* branch.
+    assert_eq!(fixture.state.focus, Some(WindowId(1)));
 
-    fixture.state.keyboard_on_layer = true;
-    fixture.state.wlr_toplevel_activate(WindowId(1));
-    assert!(
-        fixture.state.keyboard_on_layer,
-        "a locked session re-derived keyboard focus for a foreign-toplevel activate"
+    fixture.run(Step::Activate(0));
+
+    assert_ne!(
+        fixture.keyboard_surface(),
+        Some(fixture.window_surface(1)),
+        "a locked session gave the keyboard to a window on a client's request"
+    );
+    assert_eq!(
+        fixture.state.clicked_layer.as_ref(),
+        Some(&taskbar),
+        "a refused activate spent the taskbar's click anyway"
     );
 }
 

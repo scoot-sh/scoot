@@ -55,9 +55,14 @@ for whoever sizes the eventual cap:
   fix changes — per-client accounting across every global of this shape —
   but the budget has to be shared across them, or a client simply spends it
   twice.
-- **This one is also walked on a path the other three are not: a focus
-  change.** `refresh_wlr_activation` visits every bound handle whenever the
-  focused window changes, on top of the per-window-change walk all four
-  share. Still not a per-frame path, and it sends nothing for the handles
-  whose bit did not move — but it means a bind here buys work on an ordinary
-  user action, not only on window churn.
+- **Its worst walk is `wl_output` binding, not window churn.**
+  `wlr_toplevel_output_bound` runs once per `wl_output` bind *by any client*
+  and visits every handle of every window — `binds × windows` of work that
+  the client provoking it need not own a single window or handle to trigger,
+  which none of the other three globals has an equivalent of. It is a plain
+  id comparison per handle and sends nothing to the clients it skips, so it
+  is cheap per unit; it is the *shape* that belongs in this entry.
+  (`refresh_wlr_activation`, on a focus change, is **not** the expensive one
+  and an earlier draft of this paragraph said it was: its handle loop is
+  inside the changed-bit branch, so a focus change reaches the handles of at
+  most two windows, not all of them.)

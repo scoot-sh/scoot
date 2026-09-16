@@ -58,6 +58,13 @@ actionable.
   (title/app id/output), `activate`, `close`, and `activated` as the one
   state bit flexwm can honestly answer; minimize/maximize/fullscreen are
   accepted and ignored, since the core has no concept of any of them.
+- [`xdg-activation-v1` moves window focus but leaves the keyboard on a clicked layer surface](./protocols/activation-leaves-the-keyboard-on-a-clicked-layer-surface.md)
+  — pre-existing, found reviewing the entry above, which had the same bug in
+  its own `activate` and fixed it there. A launcher that stays mapped keeps
+  every keystroke after handing focus away
+- [`ext_workspace.rs`'s cross-client check takes two backend locks per manager, per `wl_output` bind](./protocols/ext-workspace-client-lookup-per-bind.md)
+  — pre-existing, same review; `ObjectId::same_client_as` answers the exact
+  same question without locking
   Verified live against the real quickshell: window list, click-to-focus and
   close all work.
 - [Output management for shell display pages](./resolved/output-management-read-only-done.md)
