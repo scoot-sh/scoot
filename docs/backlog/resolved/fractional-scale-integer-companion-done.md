@@ -100,8 +100,10 @@ and is emitted.
   `clippy -D warnings`, `fmt --check`, and `MODE=--headless`/`MODE=--nested`
   smoke tests (all pass) plus `MODE=--tty`, which fails only the pre-existing
   background-pixel assertion documented in
-  `docs/backlog/tty/tty-background-not-painted.md` (rings still pass) — no new
-  failure.
+  `docs/backlog/resolved/tty-background-not-painted-done.md` (rings still
+  pass) — no new failure. (That assertion has since been resolved: it was
+  the cursor, not the background; the path here is updated to the record
+  rather than left dangling at the moved file.)
 - Hot path: 20 000 commits through the real dispatch loop at scales 1.0 and
   1.5, with and without the send call, are within run-to-run noise
   (~34–46 ms both ways on the dev VM), consistent with a non-allocating

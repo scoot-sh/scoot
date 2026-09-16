@@ -231,10 +231,6 @@ if [ "$(focused_window)" != "$first_id" ]; then
 fi
 echo "ok: super+h moved focus from window $second_id to window $first_id"
 
-echo "--- screenshot ---"
-"$FLEXWM" msg screenshot --out "$SHOT"
-
-echo "=== decorations: focus ring + background render the configured colors ==="
 # At this point (after the super+h test above) $first_id is focused and
 # $second_id is not. Sampling the *top* of each window's ring rather than a
 # side facing the other window sidesteps needing to reason about which side
@@ -242,14 +238,34 @@ echo "=== decorations: focus ring + background render the configured colors ==="
 # window on a single row, focused or not, regardless of how many columns
 # there are or which one is scrolled into view.
 windows_json=$("$FLEXWM" msg windows)
-read -r focused_x focused_y focused_w < <(
+read -r focused_x focused_y focused_w focused_h < <(
     echo "$windows_json" | jq -r --argjson id "$first_id" \
-        '.windows[] | select(.id == $id) | "\(.rect.x) \(.rect.y) \(.rect.width)"'
+        '.windows[] | select(.id == $id) | "\(.rect.x) \(.rect.y) \(.rect.width) \(.rect.height)"'
 )
 read -r unfocused_x unfocused_y unfocused_w < <(
     echo "$windows_json" | jq -r --argjson id "$second_id" \
         '.windows[] | select(.id == $id) | "\(.rect.x) \(.rect.y) \(.rect.width)"'
 )
+
+echo "--- parking the pointer clear of everything sampled below ---"
+# --tty is the one backend that draws a cursor (see cursor.rs), and the
+# pointer starts at the output's origin -- where the built-in arrow's opaque
+# black outline runs diagonally straight through the background sample at
+# (3,3) below, which is why that check read rgb(0,0,0) under --tty alone
+# while --headless/--nested passed. Parking the pointer is what makes that
+# sample measure the background; moving the sample instead would bake today's
+# cursor placement and size into a coordinate that has no reason to know
+# them. The focused window's middle is hundreds of pixels from all three
+# sampled pixels, and motion never moves keyboard focus here (input.rs has no
+# focus-follows-mouse), so the ring colors below still describe the focus
+# super+h left behind.
+"$FLEXWM" msg pointer move "$((focused_x + focused_w / 2))" "$((focused_y + focused_h / 2))"
+"$FLEXWM" msg wait-idle --quiet-ms 300 --timeout-ms 10000
+
+echo "--- screenshot ---"
+"$FLEXWM" msg screenshot --out "$SHOT"
+
+echo "=== decorations: focus ring + background render the configured colors ==="
 ring_ok=1
 expect_pixel_color "$SHOT" \
     "$((focused_x + focused_w / 2))" "$((focused_y - RING_WIDTH / 2))" \

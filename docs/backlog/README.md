@@ -64,7 +64,10 @@ actionable.
 
 ### --tty / backend
 - [Config-file key for the DRM device](./tty/tty-gpu-config-key.md) — **gated on Asahi confirmation**
-- [Background color not painted where no window covers](./tty/tty-background-not-painted.md)
+- [Background color not painted where no window covers](./resolved/tty-background-not-painted-done.md)
+  — RESOLVED 2026-09-16: it always was painted. The smoke test's background
+  sample pixel sat on the cursor, which only `--tty` draws. Closes the
+  duplicate `testing/` entry that had the right diagnosis all along.
 - [Same-VT no-op VT-switch warning](./tty/vt-switch-same-vt-warning.md)
 - [`O_CLOEXEC` request is a no-op at the libseat layer](./tty/tty-o-cloexec-noop.md) (informational)
 - [`--tty` quit sometimes logs a DRM "restore previous state" EPERM](./tty/drm-teardown-restore-eperm.md)
@@ -75,6 +78,7 @@ actionable.
 - [Per-frame `Vec` alloc in the cursor fallback path](./rendering/cursor-element-per-frame-alloc.md)
 - [Cursor frames still tick while VT-paused](./rendering/cursor-frame-callback-when-paused.md)
 - [`wl_surface.offset` doesn't move the cursor hotspot](./rendering/cursor-surface-offset-hotspot.md)
+- [The pointer starts at the output's origin, not centred](./rendering/pointer-starts-at-origin.md)
 
 ### Security
 - [Unbounded total shm reservation per client](./security/shm-total-per-client-unbounded.md)
@@ -84,7 +88,9 @@ actionable.
 - [`x86_64-darwin` in `systems` breaks `flake check --all-systems`](./packaging/flake-x86-darwin-system.md)
 - [`flake.nix` description drift](./packaging/flake-description-drift.md) (nit)
 - [`smoke-test.sh` hardcodes temp paths](./testing/smoke-test-hardcoded-temp-paths.md)
-- [`smoke-test.sh` background check samples the cursor under `--tty`](./testing/smoke-test-background-cursor-sample.md)
+- [`smoke-test.sh` background check samples the cursor under `--tty`](./resolved/tty-background-not-painted-done.md)
+  — RESOLVED 2026-09-16, together with the `--tty` entry above that had
+  independently (and wrongly) filed the same failure as a compositor bug.
 - [Enhanced hardware/DRM testing ideas](./testing/hardware-testing-ideas.md) (research)
 - [Extract a shared test harness; split the largest test files; adopt `cargo-nextest`](./testing/large-test-file-organization.md)
 
