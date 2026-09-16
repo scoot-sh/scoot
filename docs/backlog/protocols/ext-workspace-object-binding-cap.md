@@ -40,3 +40,29 @@ doc) — so on its own it is the least dangerous of the three multipliers,
 closer to `ext-workspace`'s than to foreign-toplevel's. Still the same
 fix when one lands: per-client accounting across all of them, not a
 one-off limit on any single global.
+
+Update 2026-09-16 (PR #50): `zwlr_foreign_toplevel_manager_v1` (see
+`resolved/wlr-foreign-toplevel-management-done.md`) is the fourth, and it
+shares the *worst* multiplier rather than adding a new one: its per-bind
+cost is one handle object per **window**, exactly like
+`ext_foreign_toplevel_list_v1`'s, and window count is the one factor a
+single client can inflate on its own and without limit. Two consequences
+for whoever sizes the eventual cap:
+
+- **A client now has two globals carrying that multiplier, not one.** The
+  worst case one connection can force is `(ext binds + wlr binds) ×
+  self-created windows` of server-side object allocation. Nothing about the
+  fix changes — per-client accounting across every global of this shape —
+  but the budget has to be shared across them, or a client simply spends it
+  twice.
+- **Its worst walk is `wl_output` binding, not window churn.**
+  `wlr_toplevel_output_bound` runs once per `wl_output` bind *by any client*
+  and visits every handle of every window — `binds × windows` of work that
+  the client provoking it need not own a single window or handle to trigger,
+  which none of the other three globals has an equivalent of. It is a plain
+  id comparison per handle and sends nothing to the clients it skips, so it
+  is cheap per unit; it is the *shape* that belongs in this entry.
+  (`refresh_wlr_activation`, on a focus change, is **not** the expensive one
+  and an earlier draft of this paragraph said it was: its handle loop is
+  inside the changed-bit branch, so a focus change reaches the handles of at
+  most two windows, not all of them.)

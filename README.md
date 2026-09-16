@@ -46,8 +46,10 @@ niri-style focus ring, background color, server-side
 notification daemons work — including keyboard focus for the ones that ask
 for it (see Layer-shell clients below), `ext-workspace-v1`, so those
  bars can also list, follow and switch workspaces (see Workspaces for bars
- below), `ext-foreign-toplevel-list-v1`, so a taskbar, dock or alt-tab
- switcher can list the windows themselves (see Window lists for bars below),
+ below), `ext-foreign-toplevel-list-v1` **and**
+ `wlr-foreign-toplevel-management-unstable-v1`, so a taskbar, dock or
+ alt-tab switcher can list the windows themselves — and, through the wlr
+ one, focus and close them (see Window lists for bars below),
  `wlr-output-management-unstable-v1`, so `wlr-randr` and a shell's
  Settings → Display page can read the screen's modes, position, scale and
  transform — read-only, every reconfiguration is refused (see Display
@@ -604,16 +606,27 @@ Worth knowing before you write against it:
   what the protocol is built for — but flexwm has exactly one output today, so
   there is exactly one group.
 
-## Window lists for bars (`ext-foreign-toplevel-list-v1`)
+## Window lists for bars (two protocols)
 
-flexwm implements `ext-foreign-toplevel-list-v1` (version 1), the
-compositor-agnostic protocol a taskbar, dock or alt-tab switcher reads the
-*window* list from — the other half of what a shell needs alongside
-`ext-workspace-v1` above. The global is `ext_foreign_toplevel_list_v1`,
-available to every client, no privilege or allow-list.
+flexwm publishes its window list through **two** protocols at once, both
+available to every client with no privilege or allow-list:
 
-It is the protocol-side twin of `flexwm msg windows`: the same windows, the
-same lifetime, live rather than polled.
+- **`ext-foreign-toplevel-list-v1`** (version 1, global
+  `ext_foreign_toplevel_list_v1`) — the compositor-agnostic successor, and
+  what a standards-following taskbar, dock or alt-tab switcher should
+  prefer. Enumeration only; the protocol has no requests.
+- **`wlr-foreign-toplevel-management-unstable-v1`** (version 3, global
+  `zwlr_foreign_toplevel_manager_v1`) — the older protocol, which is what
+  every Quickshell-based shell (DMS, Noctalia) actually binds today. It
+  enumerates *and* controls: `activate` and `close` are answered.
+
+Both are the protocol-side twin of `flexwm msg windows`: the same windows,
+the same lifetime, live rather than polled — and, because they are driven
+from the same three window-lifecycle events inside the compositor, a client
+bound to both sees one window list described twice rather than two lists
+that can drift.
+
+### `ext-foreign-toplevel-list-v1`
 
 What a client sees:
 
@@ -646,16 +659,8 @@ Worth knowing before you write against it:
 - **There is no control half, by design.** The protocol is deliberately
   minimal — no `activate`, `close`, `minimize`, `fullscreen`, geometry or
   per-output state. Those are meant for extension protocols that don't exist
-  yet. flexwm's IPC covers the case (`flexwm msg action focus-window-id N`,
-  `flexwm msg action close` for the focused window).
-- **This is the `ext-` protocol, not `wlr-foreign-toplevel-management-v1`,
-  and that matters for Quickshell-based shells today.** A tool that speaks
-  only the older wlr protocol sees no global and shows no windows —
-  measured: `quickshell` 0.3.1 (what DMS and Noctalia run on) is offered
-  this global and never binds it, so their launchers' window sections stay
-  empty. See `docs/backlog/protocols/wlr-foreign-toplevel-management.md`;
-  the wlr protocol is a control protocol as much as an enumeration one, so
-  it is an item of its own rather than a switch to flip.
+  yet. Use the wlr protocol below, or flexwm's IPC (`flexwm msg action
+  focus-window-id N`, `flexwm msg action close` for the focused window).
 - **A handle covers a window's whole life, not the time it is mapped.** The
   protocol talks about "mapped" toplevels, but flexwm has no map/unmap
   boundary at all — a window is in the layout, the focus order and
@@ -666,6 +671,81 @@ Worth knowing before you write against it:
 - **The list stays live while the session is locked**, exactly as `flexwm msg
   windows` does — see Screen locking below for the trust model that sits
   behind that.
+
+### `wlr-foreign-toplevel-management-unstable-v1`
+
+The older protocol, kept alongside the `ext-` one rather than instead of it.
+The reason is measurement, not preference: stock `quickshell` 0.3.1 — the
+build DMS and Noctalia both run on — is offered `ext_foreign_toplevel_list_v1`
+and never binds it, because its `ToplevelManager` is a wlr client. Without
+this, both shells' window sections render empty. See
+`docs/backlog/resolved/wlr-foreign-toplevel-management-done.md` for the
+measurement, both before and after.
+
+What a client sees, per window, on a `zwlr_foreign_toplevel_handle_v1`:
+
+- **`title` and `app_id`**, and **`output_enter`** naming the screen it is
+  on. Binding the global announces every window that already exists,
+  oldest first, so registry order doesn't matter — and a client that binds
+  `wl_output` *after* the manager is sent the `output_enter` it missed as
+  soon as it does.
+- **`state`, carrying `activated` and nothing else** — flexwm's real window
+  focus, the same one `flexwm msg windows` reports as `focused`.
+- **Changes arrive in batches closed by `done`**, same as the `ext-` list:
+  draw on `done`. A window is announced before its toolkit has sent a title
+  or taken focus, so its first batch is usually two empty strings and an
+  empty state array, with a batch per fact as they arrive.
+- **`closed` when the window goes.** The handle then becomes inert: it is
+  still a valid object until the client destroys it, and every request on it
+  is ignored.
+- **`stop` is answered with `finished`**, and means "no more *new* windows":
+  handles the client already has keep reporting until it destroys them,
+  which is what the protocol's own teardown sequence requires.
+
+What a client can ask for:
+
+- **`activate`** focuses that window, with the same effect on the keyboard as
+  a click on the window itself: if your panel is a layer surface that took
+  the keyboard when the user clicked it, `activate` hands the keyboard on to
+  the window, exactly as clicking the window would. It does that whether or
+  not the window was already the focused one. **`flexwm msg action
+  focus-window-id N` does not do this** — it moves window focus the same way
+  but does not take the keyboard back off a layer surface that holds it, so
+  an agent driving focus over IPC while a clicked panel still has the
+  keyboard will have its keystrokes delivered to the panel, not the window,
+  with nothing in `flexwm msg windows` to show the mismatch. See
+  `docs/backlog/protocols/activation-leaves-the-keyboard-on-a-clicked-layer-surface.md`.
+- **`close`** sends the window's `xdg_toplevel.close`. Whether the window
+  actually goes is up to its own client, as the protocol says; `closed`
+  follows if and when it does.
+- **`set_maximized`, `unset_maximized`, `set_minimized`, `unset_minimized`,
+  `set_fullscreen`, `unset_fullscreen` and `set_rectangle` are accepted and
+  do nothing.** flexwm has no concept of maximized, minimized or fullscreen
+  at all, so the matching state bits are never sent either — a taskbar's
+  minimise button is inert rather than lying. `set_rectangle` is a
+  minimise-animation hint flexwm reads nothing from; unlike wlroots, an
+  invalid rectangle is ignored rather than answered with a protocol error,
+  because disconnecting a shell over a number nothing looks at would be
+  worse.
+
+Worth knowing before you write against it:
+
+- **`activate` needs a seat, and a headless shell may not have one.**
+  Measured while verifying this: quickshell sources the `wl_seat` argument
+  from Qt's last input device, so a `ShellRoot` with no window and no input
+  event sends nothing at all when you call `activate()` — no request reaches
+  the compositor. With a real `PanelWindow` and a real click it works. If you
+  are testing this, test it with a window.
+- **`output_leave` is never sent.** flexwm has one output, a window is on it
+  for its whole life, and switching workspaces does not move it — the same
+  answer wlroots-based compositors give.
+- **`parent` is never sent** (the version 3 event). flexwm's layout has no
+  parent/child relation; every `xdg_toplevel` is an independent column
+  entry, dialogs included.
+- **The list stays live while the session is locked, but the two requests
+  are refused.** Same trust model as everything else here (see Screen
+  locking below) — but a window you cannot see must not be focused or
+  closed from behind the lock screen.
 
 ## Display information (`wlr-output-management-unstable-v1`)
 
@@ -844,13 +924,18 @@ its connection and its `wl_surface`s are still perfectly alive.
 - **`flexwm msg windows` still lists your windows while locked**, titles
   included, and `flexwm msg outputs` still answers. Nothing is drawn from
   them, but the IPC surface is not blanked.
-- **So does `ext-foreign-toplevel-list-v1`** (see Window lists for bars
+- **So do both foreign-toplevel protocols** (see Window lists for bars
   above): handles stay, titles keep updating, and a window opened behind the
   lock screen is still announced. Same boundary as the line above — a client
   that can reach the wayland socket is a same-uid process — and sending
   `closed` for windows that did not close would be a lie a taskbar could not
-  recover from, since the protocol forbids reusing their identifiers
+  recover from, since the `ext-` protocol forbids reusing their identifiers
   afterwards.
+- **The wlr protocol's two *requests* are refused while locked**, which is
+  the one thing that does change: `activate` will not move focus and `close`
+  will not reach a window, because a window you cannot see must not be
+  focused or closed from behind the lock screen. That is the same gate every
+  `flexwm msg action` request already sits behind.
 - **The `locked` event is sent once a blanked frame has been *rendered*, not
   once a vblank has confirmed it on screen.** Under `--headless`/`--nested`
   that is exact — there is no scanout at all, and the framebuffer a screenshot

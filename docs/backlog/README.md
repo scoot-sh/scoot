@@ -51,11 +51,22 @@ actionable.
   can list windows. Enumeration only (the protocol has no control requests);
   the identifier carries the `flexwm msg windows` id, which is the bridge to
   acting on a window over IPC. Quickshell binds the wlr protocol and ignores
-  this one (measured), so DMS/Noctalia window lists wait on the entry below.
-- [Quickshell's window list needs `wlr-foreign-toplevel-management-v1`](./protocols/wlr-foreign-toplevel-management.md)
-  — the other half of the gap above, and a control protocol as much as an
-  enumeration one (no Smithay support; minimize/maximize/fullscreen have no
-  meaning in flexwm's core yet)
+  this one (measured), which is the entry below.
+- [Quickshell's window list needs `wlr-foreign-toplevel-management-v1`](./resolved/wlr-foreign-toplevel-management-done.md)
+  — RESOLVED 2026-09-16 (PR #50): the older protocol implemented alongside
+  the `ext-` one, from the same window-lifecycle events. Enumeration
+  (title/app id/output), `activate`, `close`, and `activated` as the one
+  state bit flexwm can honestly answer; minimize/maximize/fullscreen are
+  accepted and ignored, since the core has no concept of any of them.
+  Verified live against the real quickshell: window list, click-to-focus and
+  close all work.
+- [`xdg-activation-v1` moves window focus but leaves the keyboard on a clicked layer surface](./protocols/activation-leaves-the-keyboard-on-a-clicked-layer-surface.md)
+  — pre-existing, found reviewing the entry above, which had the same bug in
+  its own `activate` and fixed it there. A launcher that stays mapped keeps
+  every keystroke after handing focus away
+- [`ext_workspace.rs`'s cross-client check takes two backend locks per manager, per `wl_output` bind](./protocols/ext-workspace-client-lookup-per-bind.md)
+  — pre-existing, same review; `ObjectId::same_client_as` answers the exact
+  same question without locking
 - [Output management for shell display pages](./resolved/output-management-read-only-done.md)
   — RESOLVED 2026-09-16 (PR #49), read half only:
   `wlr-output-management-unstable-v1` (no `ext-` successor exists at the

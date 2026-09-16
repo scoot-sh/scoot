@@ -4,19 +4,28 @@
 //! exist; this one tells it which *windows* do. It is the protocol-side twin
 //! of what `flexwm msg windows` already answers over flexwm's own IPC, for the
 //! clients that have no reason to speak a compositor-specific protocol: a
-//! taskbar's window list, an alt-tab switcher, a dock. Both Quickshell shells
-//! probed against flexwm (see `docs/backlog/protocols/`) show an
-//! "Applications" section and no "Windows" one for exactly this reason --
-//! their generic toplevel widget had no global to bind.
+//! taskbar's window list, an alt-tab switcher, a dock.
 //!
-//! ## Why this protocol, and not `wlr-foreign-toplevel-management-unstable-v1`
+//! ## Why this protocol, and why it is not the only one
 //!
-//! The same reason `ext-workspace-v1` is here instead of the wlr workspace
-//! protocols: it is the compositor-agnostic successor, and `CLAUDE.md`'s
-//! standing preference is for the `ext-` protocol where one exists. The pinned
-//! Smithay rev agrees -- it carries `wayland::foreign_toplevel_list` and
-//! nothing at all for the wlr protocol -- so this is also the one that comes
-//! with a maintained implementation rather than a hand-rolled one.
+//! It is here for the same reason `ext-workspace-v1` is here instead of the
+//! wlr workspace protocols: it is the compositor-agnostic successor, and
+//! `CLAUDE.md`'s standing preference is for the `ext-` protocol where one
+//! exists. The pinned Smithay rev agrees -- it carries
+//! `wayland::foreign_toplevel_list` and nothing at all for the wlr protocol --
+//! so this is also the one that comes with a maintained implementation rather
+//! than a hand-rolled one.
+//!
+//! It is not the only one because measurement said so. Stock `quickshell`
+//! 0.3.1 -- the build both Quickshell shells probed against flexwm (DMS,
+//! Noctalia) run on -- is offered this global and **never binds it**: its
+//! `ToplevelManager` is a `zwlr_foreign_toplevel_manager_v1` client. So
+//! `foreign_toplevel_management.rs` implements the older wlr protocol
+//! alongside this one, from the same three window-lifecycle events, and the
+//! two lists are one window list described twice. This module is unchanged by
+//! that and is still what a standards-following client gets; see
+//! `docs/backlog/resolved/wlr-foreign-toplevel-management-done.md` for the
+//! measurement and the decision.
 //!
 //! ## Enumeration only, and that is the whole protocol
 //!
@@ -89,15 +98,19 @@
 //!   [`State::close_foreign_toplevel`] is the only place a handle is dropped,
 //!   and it removes before it drops, so no dead entry is ever in that list
 //!   when this is called.
-//! - A client that cannot be given a new handle object (it has exhausted its
-//!   own object ids) is silently skipped upstream -- `new_toplevel` and the
-//!   bind path both `continue` past a failed `create_resource`, and neither
-//!   reports it -- so that client misses that window and is never told. There
-//!   is nothing to do about it from here (the failure is not visible to this
-//!   module at all), and unlike `ext_workspace.rs`'s positional handle list a
-//!   missing handle corrupts nothing: each handle is independent, so the
-//!   client is out of date about one window rather than wrong about all of
-//!   them.
+//! - A client that cannot be given a new handle object is silently skipped
+//!   upstream -- `new_toplevel` and the bind path both `continue` past a
+//!   failed `create_resource`, and neither reports it -- so that client misses
+//!   that window and is never told. The only thing that failure means is that
+//!   the client is already gone by the time it runs: `Client::create_resource`
+//!   forwards to `Handle::create_object`, whose sole error is
+//!   `ClientStore::get_client_mut` no longer finding the client
+//!   (wayland-backend 0.3.17, `rs/server_impl/handle.rs`), and the server's own
+//!   id allocation for a new object cannot fail. There is nothing to do about
+//!   it from here (the failure is not visible to this module at all), and
+//!   unlike `ext_workspace.rs`'s positional handle list a missing handle
+//!   corrupts nothing: each handle is independent, so the client is out of
+//!   date about one window rather than wrong about all of them.
 
 use std::collections::HashMap;
 

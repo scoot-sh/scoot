@@ -81,8 +81,8 @@ gap jumped the queue — each item's own file records why it landed when it did.
   already gave them. Enumeration only (the protocol has no control
   requests); the identifier is `<generation>-<window id>`, so a client can
   go from a toplevel it found here to `flexwm msg action focus-window-id
-  N`. Measured caveat, filed as
-  [its own item](docs/backlog/protocols/wlr-foreign-toplevel-management.md):
+  N`. Measured caveat, filed as its own item and
+  [since resolved](docs/backlog/resolved/wlr-foreign-toplevel-management-done.md):
   quickshell — and so DMS and Noctalia — binds the *wlr* protocol and
   ignores this one.
 - **[Output management, read half](docs/backlog/resolved/output-management-read-only-done.md)**
@@ -99,6 +99,19 @@ gap jumped the queue — each item's own file records why it landed when it did.
   [its own deferred item](docs/backlog/protocols/output-management-reconfiguration.md)
   — flexwm has one output with a fixed mode, position and scale, so a
   `succeeded` that changed nothing would be a settings page that lies.
+- **[`wlr-foreign-toplevel-management-unstable-v1`](docs/backlog/resolved/wlr-foreign-toplevel-management-done.md)**
+  (PR #50, 2026-09-16) — the other half of PR #47 above, and the window
+  list DMS and Noctalia actually read. Published alongside the `ext-` one
+  rather than instead of it, from the same three window-lifecycle events, so
+  the two are one list described twice. Enumeration (title, app id,
+  `output_enter`), `activate` and `close`, and `activated` as the only state
+  bit flexwm can honestly answer — minimize/maximize/fullscreen are accepted
+  and ignored, because the core has no concept of any of them and deciding
+  what they mean in a scrolling-column layout is layout design, not wire
+  format. No Smithay support at the pinned rev, so hand-rolled against the
+  generated wlr bindings like `output_management.rs`. Verified live against
+  the real quickshell: the window list populates, a panel click focuses the
+  right window, and `close` closes it.
 - **[`--tty` follows DRM hotplug](docs/backlog/resolved/tty-drm-hotplug-done.md)**
   (issue #48, PR #51, 2026-09-16) — `--tty` no longer mode-sets once and
   ignores the display afterwards: a udev monitor re-runs the connector/mode
@@ -132,9 +145,6 @@ actually open.
    [`[tty] gpu` config key](docs/backlog/tty/tty-gpu-config-key.md).
 2. **Medium-priority protocol gaps**, mostly what's left of the DMS/Noctalia
    probes (see "Shell enablement" below for their recommended order):
-   [`wlr-foreign-toplevel-management`](docs/backlog/protocols/wlr-foreign-toplevel-management.md)
-   (what those two shells actually bind — the `ext-` list shipped in PR #47
-   and, measured, quickshell ignores it),
    [screencopy/image-capture](docs/backlog/protocols/screencopy-capture.md),
    plus two filed from PR #44's own review —
    [popup grab serial validation](docs/backlog/protocols/popup-grab-serial-validation.md)
@@ -199,15 +209,16 @@ probes' recommended order:
    swayidle; what remains is the user's own daemon config, not compositor
    work.
 3. [`foreign-toplevel`](docs/backlog/resolved/foreign-toplevel-list-done.md)
-   — HALF-RESOLVED 2026-09-16: the successor the entry told its reader to
-   check for exists (`ext-foreign-toplevel-list-v1`) and is implemented, so
-   a standards-following taskbar or switcher can list windows and map each
-   one back to its `flexwm msg windows` id. It does *not* unlock these two
-   shells: quickshell 0.3.1 is offered the global and never binds it
-   (measured, wire-level) — its `ToplevelManager` is a wlr client. The rest
-   of this gap is
-   [`wlr-foreign-toplevel-management`](docs/backlog/protocols/wlr-foreign-toplevel-management.md),
-   which is a control protocol as much as an enumeration one.
+   — RESOLVED 2026-09-16, in two halves. The successor the entry told its
+   reader to check for exists (`ext-foreign-toplevel-list-v1`, PR #47) and is
+   implemented, so a standards-following taskbar or switcher can list windows
+   and map each one back to its `flexwm msg windows` id — but it did *not*
+   unlock these two shells: quickshell 0.3.1 is offered the global and never
+   binds it (measured, wire-level), because its `ToplevelManager` is a wlr
+   client. [`wlr-foreign-toplevel-management`](docs/backlog/resolved/wlr-foreign-toplevel-management-done.md)
+   (PR #50) closes that half — list, click-to-focus and close, all verified
+   live against the real quickshell. Minimise/maximise remain no-ops, since
+   flexwm's core has no concept of either.
 4. [`output-management`](docs/backlog/resolved/output-management-read-only-done.md)
    — HALF-RESOLVED 2026-09-16 (PR #49): the query half a shell's display page
    binds is implemented (`wlr-output-management-unstable-v1` v4 — no `ext-`
