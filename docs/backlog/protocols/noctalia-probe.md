@@ -169,14 +169,16 @@ anything.
   absent from `wayland-info`. Client-side proof: with a real `foot`
   window mapped (flexwm `msg windows` lists it, and it renders), the
   Noctalia launcher still shows Applications only — "6 results", no
-  Windows/running-apps section. Same entry as DMS gap 2. Half-resolved
-  2026-09-16: flexwm now implements the `ext-` successor
-  (`docs/backlog/resolved/foreign-toplevel-list-done.md`) — but that is
-  *not* what Quickshell binds. Measured on the same quickshell 0.3.1 this
-  probe used: the global is offered and never bound, and a minimal
-  `ToplevelManager` config reports `count = 0` with a real window open.
-  What this gap actually needs is
-  `docs/backlog/protocols/wlr-foreign-toplevel-management.md`.
+  Windows/running-apps section. Same entry as DMS gap 2. **RESOLVED
+  2026-09-16, in two halves.** flexwm implemented the `ext-` successor
+  first (`docs/backlog/resolved/foreign-toplevel-list-done.md`) — but that
+  is *not* what Quickshell binds. Measured on the same quickshell 0.3.1
+  this probe used: the global was offered and never bound, and a minimal
+  `ToplevelManager` config reported `count = 0` with a real window open.
+  What this gap actually needed was
+  `docs/backlog/resolved/wlr-foreign-toplevel-management-done.md` (PR #50),
+  which the same probe now measures as listing the window with its title
+  and app id, focusing it on a panel click, and closing it on request.
 
 ### 3. No `ext-idle-notify-v1` and no `idle-inhibit` — reproduces, verbatim
 
@@ -288,10 +290,9 @@ Almost nothing — and what differs favors Noctalia:
 2. **Gap 5 (`xdg_popup`)** — already filed; unlocks menus/tooltips.
 3. **Gap 3 (idle)** — already roadmap-next; unlocks auto-lock, pairing
    with the now-almost-proven session lock.
-4. **Gap 2 (foreign-toplevel)** — the `ext-` half landed 2026-09-16 and
-   does *not* unlock this: quickshell binds the wlr protocol, measured.
-   The window lists (Noctalia's launcher shows the hole clearly) wait on
-   `protocols/wlr-foreign-toplevel-management.md`.
+4. **Gap 2 (foreign-toplevel)** — DONE 2026-09-16, both halves. The `ext-`
+   one alone did *not* unlock this (quickshell binds the wlr protocol,
+   measured); `resolved/wlr-foreign-toplevel-management-done.md` did.
 5. **Gap 4 (output-management)** — display settings.
 6. **Gap 6 (screencopy)** — thumbnails/overview previews.
 7. Nothing for gap 7 — Noctalia already does the right thing.
