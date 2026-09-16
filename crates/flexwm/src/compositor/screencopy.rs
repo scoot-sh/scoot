@@ -226,6 +226,15 @@ const PIXELS_PER_STEP: usize = 4;
 /// the copy stays a `memcpy` intrinsic, and the opacity pass does a quarter as
 /// many iterations as a per-pixel one.
 ///
+/// This isolated table is a lower bound on the dev-build cost, not a
+/// prediction of it: measured end to end (below), the dev-build gap is
+/// 2-2.5x wider than this table's own +3.3ms would suggest, most likely
+/// because the standalone micro-benchmark doesn't reproduce the real
+/// function's `opt-level=0` codegen, where `u128::from_le_bytes`/
+/// `to_le_bytes`/`read_unaligned` are genuine, non-inlined calls in context.
+/// The *ranking* of the five rows is what this table is good for; the
+/// absolute numbers should be read from the end-to-end measurement.
+///
 /// End to end, over a whole `grim` capture rather than this pass alone
 /// (`ms/capture`, 1920x1080, three 20s runs each, median):
 ///
@@ -234,13 +243,21 @@ const PIXELS_PER_STEP: usize = 4;
 /// | release build (`opt-level=3`, fat LTO) | 10.66 | **10.26** |
 /// | dev build (`opt-level=0`) | 54.8 | 63.3 |
 ///
-/// So: ~4% off a real capture in the profile that ships, ~15% added to one in
-/// the profile developers run. That trade is taken rather than assumed --
-/// `Cargo.toml`'s own release-profile comment is explicit that "lightweight"
-/// is judged in release -- but it is a trade, and the numbers are here rather
-/// than a claim that this is faster everywhere. Neither figure moves a
-/// compositor nobody is capturing from: measured unchanged at 147 vs 148
-/// jiffies over 20s.
+/// The dev-build cost is unambiguous: independently reproduced (+15% here,
+/// +18% on a second run), no overlap between the two distributions either
+/// time. The release-build win is real but smaller relative to its own
+/// run-to-run spread than "~4%" suggests on its own -- a block-ordered
+/// re-run (all of one binary's samples, then all of the other's) briefly
+/// inverted it, and only alternating between binaries (the method this
+/// table uses) recovered a consistent ~3-4% direction, with individual
+/// samples from *before* still occasionally beating individual samples from
+/// *after*. So: the trade actually being accepted is a certain 15-18% dev-
+/// build cost for a probable, smaller release-build gain, not two equally
+/// solid numbers -- and it is accepted on that basis, not a stronger one:
+/// `Cargo.toml`'s own release-profile comment is explicit that
+/// "lightweight" is judged in release. Neither figure moves a compositor
+/// nobody is capturing from: measured unchanged at 147 vs 148 jiffies over
+/// 20s.
 ///
 /// The row this table does not have is the one that would dwarf all of them:
 /// **not forcing the byte at all** is ~13% off a release capture and ~77% off
@@ -759,7 +776,12 @@ fn write_capture(
             // may mutate concurrently, which is why this writes through the
             // raw pointer rather than materializing a `&mut [u8]` -- a
             // reference into it would be undefined behavior the moment the
-            // client touched the same bytes.
+            // client touched the same bytes. The `opaque` branch below reads
+            // through the same raw pointer for the same reason: it reads back
+            // bytes this same loop iteration just wrote, so a concurrent
+            // client write can only race with the compositor's own data,
+            // never observe uninitialized memory -- the worst case is the
+            // client corrupting its own buffer, not a leak of anything else.
             unsafe {
                 let dst = ptr.add((data.offset as i64 + y * dst_stride) as usize);
                 std::ptr::copy_nonoverlapping(src.as_ptr(), dst, row as usize);

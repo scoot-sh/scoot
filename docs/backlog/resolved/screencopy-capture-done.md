@@ -410,13 +410,13 @@ making it and watching them fail, then restoring:
 -  let dst = ptr.add((data.offset as i64 + y * dst_stride) as usize);
 +  let dst = ptr.add((y * dst_stride) as usize);
    => a_capture_lands_at_its_buffers_offset_inside_a_shared_pool ... FAILED
-      (the only failure; the other 12 tests all still passed)
+      (the only failure; the other 13 screencopy tests all still passed)
 
 # 2. walk rows by pixel width instead of the client's stride
 -  let dst = ptr.add((data.offset as i64 + y * dst_stride) as usize);
 +  let dst = ptr.add((data.offset as i64 + y * row) as usize);
    => a_capture_honours_a_buffer_whose_rows_are_padded ... FAILED
-      (the only failure; 12 passed)
+      (the only failure; 13 passed)
 
 # 3. drop the alpha forcing (checks the existing Xrgb test still bites)
    => an_xrgb_capture_is_opaque_even_over_a_translucent_background ... FAILED
@@ -426,6 +426,12 @@ making it and watching them fail, then restoring:
 +  for x in steps * PIXELS_PER_STEP..steps * PIXELS_PER_STEP {
    => an_xrgb_capture_is_opaque_at_a_width_the_wide_step_cannot_divide ... FAILED
 ```
+
+(Counts above are against this module's own 14 tests, at the point each
+mutation was tried. Round 3's independent re-derivation of mutations 1 and
+2 ran the same experiment against the *whole* 646/647-test workspace suite
+rather than this module alone, and got the same result stated more
+strongly: exactly one failure workspace-wide, everything else green.)
 
 One term is deliberately **not** covered, and saying so is more useful than
 implying it is: the `data.offset` term inside the `reach` bounds check. A
