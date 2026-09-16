@@ -90,8 +90,9 @@ table handing slots out again once they closed.
 
 **Benchmarked** on the round-trip path it touches (item 9/10's method:
 release, 50,000 `version` round-trips over one connection, balanced run
-order, 6 reps a side). Medians **130.10us/72.5 jiffies after versus
-130.36us/72.5 before** — no measurable difference, which is what the shape
+order, 6 reps a side). Medians **130.13us/72 jiffies after versus
+129.96us/71.5 before** — 0.13%, against a spread of 1.8us within the
+"before" side alone, so no measurable difference. That is what the shape
 predicts: a connection with nothing queued adds one `Timer::process_events`
 call per wakeup against an unregistered timer, one `u64` add per socket
 write, and one `Cell` increment per accept.
