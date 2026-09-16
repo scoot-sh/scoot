@@ -393,8 +393,9 @@ impl Tty {
 }
 
 /// Points `surface` at `target`'s connector and mode as the state for its
-/// next commit, leaving the surface's pending state as it found it if it
-/// cannot. Returns whether both took.
+/// next commit. Returns whether both took; on `false` it has tried to put
+/// back whatever it managed to apply along the way, so the surface matches
+/// what the caller still believes it is driving.
 ///
 /// Both orderings are tried when the connector changes, because Smithay's
 /// two setters each validate what is being set against the *other* one's
@@ -409,6 +410,15 @@ impl Tty {
 /// one more `TEST_ONLY` atomic commit on a path that runs when a cable
 /// moves, and is the difference between the display coming back and the
 /// black-screen-until-restart this module exists to fix.
+///
+/// The restore is best-effort and can itself be refused, for the same
+/// chicken-and-egg reason: putting the mode back is tested against the
+/// connector set, and vice versa. That is logged rather than escalated,
+/// because it is self-healing -- `Tty::connector` is left untouched, so the
+/// next probe tries this connector again from a surface that is already
+/// part-way there, and the pending state it disagrees with cannot reach the
+/// CRTC before then (a `page_flip` commits plane state only; only the full
+/// `commit` a modeset arms applies a pending mode or connector set).
 fn set_pending(
     surface: &DrmSurface,
     target: (connector::Handle, Mode),
@@ -425,56 +435,67 @@ fn set_pending(
         }
         return true;
     }
+
+    // Attempt 1: connectors, then mode.
+    let mut connectors_moved = false;
     match surface.set_connectors(&[connector]) {
-        Ok(()) => match surface.use_mode(mode) {
-            Ok(()) => return true,
-            Err(error) => {
-                tracing::debug!(
+        Ok(()) => {
+            connectors_moved = true;
+            match surface.use_mode(mode) {
+                Ok(()) => return true,
+                Err(error) => tracing::debug!(
                     %error,
                     "drm: new connector accepted but not with the new mode; \
                      trying the other order"
-                );
-                if let Err(error) = surface.set_connectors(&[previous_connector]) {
-                    // Not fatal, and not even unhelpful: the second attempt
-                    // below sets the mode first and then this same connector,
-                    // so a failed undo leaves the surface closer to the
-                    // target, not further from it.
-                    tracing::debug!(%error, "drm: could not put the previous connector back");
-                }
+                ),
             }
-        },
-        Err(error) => {
-            tracing::debug!(
-                %error,
-                "drm: new connector rejected with the current mode; trying the \
-                 other order"
-            );
         }
+        Err(error) => tracing::debug!(
+            %error,
+            "drm: new connector rejected with the current mode; trying the \
+             other order"
+        ),
     }
+
+    // Attempt 2: mode, then connectors. Attempt 1's connector move, if it
+    // took, is deliberately *not* undone first -- it is half of what this
+    // attempt is trying to reach, so undoing it would only make the mode
+    // below harder to accept.
+    let mut mode_moved = false;
     match surface.use_mode(mode) {
-        Ok(()) => match surface.set_connectors(&[connector]) {
-            Ok(()) => true,
-            Err(error) => {
-                tracing::warn!(
+        Ok(()) => {
+            mode_moved = true;
+            match surface.set_connectors(&[connector]) {
+                Ok(()) => return true,
+                Err(error) => tracing::warn!(
                     %error,
                     "drm: could not move the surface onto the new connector in \
                      either order; staying on the current one"
-                );
-                if let Err(error) = surface.use_mode(previous_mode) {
-                    tracing::warn!(%error, "drm: could not put the previous mode back either");
-                }
-                false
+                ),
             }
-        },
-        Err(error) => {
-            tracing::warn!(
-                %error,
-                "drm: could not move the surface onto the new connector in \
-                 either order; staying on the current one"
-            );
-            false
+        }
+        Err(error) => tracing::warn!(
+            %error,
+            "drm: could not move the surface onto the new connector in either \
+             order; staying on the current one"
+        ),
+    }
+
+    // Neither order took. Put back only what was actually applied: a
+    // `set_connectors`/`use_mode` that failed left `pending` untouched, so
+    // re-asserting it would be a test commit for nothing -- and one that can
+    // fail and log a warning about a state that was never wrong.
+    if mode_moved {
+        if let Err(error) = surface.use_mode(previous_mode) {
+            tracing::warn!(%error, "drm: could not put the previous mode back either");
         }
     }
+    if connectors_moved {
+        if let Err(error) = surface.set_connectors(&[previous_connector]) {
+            tracing::warn!(%error, "drm: could not put the previous connector back either");
+        }
+    }
+    false
 }
 
 /// A mode's size in the `i32` physical pixels every other size in this
