@@ -192,6 +192,65 @@ const FORMATS: [wl_shm::Format; 2] = [wl_shm::Format::Xrgb8888, wl_shm::Format::
 /// framebuffer they are read back from.
 const BYTES_PER_PIXEL: i32 = 4;
 
+/// How many pixels the `Xrgb8888` opacity pass covers per step.
+///
+/// Four, i.e. sixteen bytes at a time. Measured rather than picked -- see
+/// [`OPAQUE`].
+const PIXELS_PER_STEP: usize = 4;
+
+/// [`PIXELS_PER_STEP`] fully opaque alpha channels, as the little-endian word
+/// that many pixels of either [`FORMATS`] entry read as.
+///
+/// Both formats are little-endian BGRA in memory, so the alpha byte -- for
+/// `Xrgb8888` the undefined `X` byte -- is the *high* byte of each 32-bit
+/// pixel. OR-ing this into four pixels at once is what makes an `Xrgb8888`
+/// capture opaque; see this module's doc for why it has to be.
+///
+/// **Four at a time, rather than one, and deliberately still a second pass
+/// over the row rather than folded into the copy.** "Don't walk the row twice"
+/// is the obvious shape for this, and measuring says it is the wrong one.
+/// Isolated over a 1920x1080 frame, at the two optimization levels this crate
+/// is built at (`ms/frame`, dev VM, median of runs):
+///
+/// | | `opt-level=0` | `opt-level=3` |
+/// | --- | --- | --- |
+/// | row `memcpy` alone (what the `Argb8888` path does) | 0.84 | 0.20 |
+/// | ...plus one alpha byte per pixel | 30.4 | 1.56 |
+/// | one pass, per pixel, copying and forcing together | 186.4 | 1.29 |
+/// | ...plus alpha two pixels at a time (`u64`) | 83.8 | 0.89 |
+/// | **...plus alpha four pixels at a time (`u128`)** | **33.7** | **0.92** |
+///
+/// A single per-pixel pass is **six times slower** at `opt-level=0` -- which is
+/// what every test, every smoke test and every dev-VM session here runs -- and
+/// buys ~17% of this pass in release. Two *wide* passes beat one narrow one:
+/// the copy stays a `memcpy` intrinsic, and the opacity pass does a quarter as
+/// many iterations as a per-pixel one.
+///
+/// End to end, over a whole `grim` capture rather than this pass alone
+/// (`ms/capture`, 1920x1080, three 20s runs each, median):
+///
+/// | | before (per byte) | after (`u128`) |
+/// | --- | --- | --- |
+/// | release build (`opt-level=3`, fat LTO) | 10.66 | **10.26** |
+/// | dev build (`opt-level=0`) | 54.8 | 63.3 |
+///
+/// So: ~4% off a real capture in the profile that ships, ~15% added to one in
+/// the profile developers run. That trade is taken rather than assumed --
+/// `Cargo.toml`'s own release-profile comment is explicit that "lightweight"
+/// is judged in release -- but it is a trade, and the numbers are here rather
+/// than a claim that this is faster everywhere. Neither figure moves a
+/// compositor nobody is capturing from: measured unchanged at 147 vs 148
+/// jiffies over 20s.
+///
+/// The row this table does not have is the one that would dwarf all of them:
+/// **not forcing the byte at all** is ~13% off a release capture and ~77% off
+/// a debug one, because `Xrgb8888`'s fourth byte is undefined by the format
+/// and a conforming client never reads it. That is a *behaviour* question
+/// rather than a performance one, so it is
+/// [filed as its own item](../../../../docs/backlog/protocols/screencopy-xrgb-alpha-forcing.md)
+/// rather than decided here.
+const OPAQUE: u128 = 0xFF00_0000_FF00_0000_FF00_0000_FF00_0000;
+
 /// Everything this compositor keeps for `ext-image-copy-capture-v1`.
 pub struct Screencopy {
     /// The `ext_output_image_capture_source_manager_v1` global, which every
@@ -709,7 +768,32 @@ fn write_capture(
                     // framebuffer's own alpha is not what a client reading an
                     // opaque format expects to find there. See this module's
                     // doc.
-                    for x in 0..width as usize {
+                    //
+                    // [`PIXELS_PER_STEP`] pixels per iteration rather than one,
+                    // which is the whole reason this stayed a second pass over
+                    // the row instead of becoming part of the copy -- see
+                    // `OPAQUE`'s doc for the measurements that decided it.
+                    let width = width as usize;
+                    let steps = width / PIXELS_PER_STEP;
+                    const STEP_BYTES: usize = PIXELS_PER_STEP * BYTES_PER_PIXEL as usize;
+                    for step in 0..steps {
+                        let at = dst.add(step * STEP_BYTES).cast::<[u8; STEP_BYTES]>();
+                        // `from_le_bytes`/`to_le_bytes` rather than a native
+                        // read: they say "the alpha byte is the high byte of a
+                        // little-endian pixel" in as many words, so nothing
+                        // here silently changes meaning on a big-endian target.
+                        // `*_unaligned`, because `data.offset` and `data.stride`
+                        // are the client's own numbers and need not leave this
+                        // on any particular boundary.
+                        let wide = u128::from_le_bytes(at.read_unaligned()) | OPAQUE;
+                        at.write_unaligned(wide.to_le_bytes());
+                    }
+                    // The 0..3 pixels a width that is not a multiple of
+                    // [`PIXELS_PER_STEP`] leaves over -- the same byte, written
+                    // one pixel at a time. Reachable for any odd output width,
+                    // which `--tty` takes from the connector and does not
+                    // choose.
+                    for x in steps * PIXELS_PER_STEP..width {
                         dst.add(x * BYTES_PER_PIXEL as usize + 3).write(0xff);
                     }
                 }

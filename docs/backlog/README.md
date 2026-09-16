@@ -90,6 +90,10 @@ actionable.
   target per session, so split out rather than half-implemented
 - [Screen capture: the session count is unbounded](./protocols/screencopy-session-cap.md)
   — found building the output half; why a cap was not simply added
+- [Screen capture forces `Xrgb8888`'s undefined fourth byte opaque](./protocols/screencopy-xrgb-alpha-forcing.md)
+  — found measuring a review finding on the output half: the forcing is ~13%
+  of a release capture and ~77% of a debug one, to set a byte the format says
+  is undefined and `grim` demonstrably ignores
 - [`xdg-toplevel-icon-v1` pixel-buffer icons are not exposed](./protocols/toplevel-icon-buffers.md) — only the icon name reaches IPC
 - [An IME popup over a lock screen is tracked but never drawn](./protocols/ime-popup-over-lock-screen.md)
 - [An IME keyboard grab makes the activation gate credit a client that received nothing](./protocols/interaction-serial-ime-grab.md)

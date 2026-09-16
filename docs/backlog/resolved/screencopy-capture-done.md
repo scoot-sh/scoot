@@ -390,12 +390,159 @@ level by `a_later_capture_waits_for_the_screen_to_change`, which asserts a
 repeat capture of a static screen is still unanswered after 300ms (~18 frame
 ticks) and is served the moment a window maps.
 
+### Round 2: what independent review changed, and what it measured
+
+Two review findings needed code. Both were addressed and re-verified; this
+section is keyed to the commit that carries them, not to `74557ec`.
+
+#### `write_capture`'s `offset` and `stride` handling had no test that could fail
+
+Correct, but untested in the only shape that matters: every test allocated one
+buffer per pool at `offset 0` with `stride == width * 4`, so the `data.offset`
+term and the padded-stride case were never exercised by anything that would
+notice their removal. Two tests were added -- one capturing into the second of
+two buffers carved from one pool, one into a buffer with 16 bytes of row
+padding -- and both were **proved** to catch the corresponding mistake by
+making it and watching them fail, then restoring:
+
+```
+# 1. drop the `data.offset` term from the destination pointer
+-  let dst = ptr.add((data.offset as i64 + y * dst_stride) as usize);
++  let dst = ptr.add((y * dst_stride) as usize);
+   => a_capture_lands_at_its_buffers_offset_inside_a_shared_pool ... FAILED
+      (the only failure; the other 12 tests all still passed)
+
+# 2. walk rows by pixel width instead of the client's stride
+-  let dst = ptr.add((data.offset as i64 + y * dst_stride) as usize);
++  let dst = ptr.add((data.offset as i64 + y * row) as usize);
+   => a_capture_honours_a_buffer_whose_rows_are_padded ... FAILED
+      (the only failure; 12 passed)
+
+# 3. drop the alpha forcing (checks the existing Xrgb test still bites)
+   => an_xrgb_capture_is_opaque_even_over_a_translucent_background ... FAILED
+
+# 4. neuter the tail loop the wide alpha step cannot cover
+-  for x in steps * PIXELS_PER_STEP..width {
++  for x in steps * PIXELS_PER_STEP..steps * PIXELS_PER_STEP {
+   => an_xrgb_capture_is_opaque_at_a_width_the_wide_step_cannot_divide ... FAILED
+```
+
+One term is deliberately **not** covered, and saying so is more useful than
+implying it is: the `data.offset` term inside the `reach` bounds check. A
+buffer that overhangs its pool cannot be created in the first place --
+Smithay's own `create_buffer` refuses `offset > pool_size - stride * height`
+-- and pools only ever grow, so there is no reachable input that distinguishes
+the check with the term from the check without it. It stays as
+defence-in-depth against a future upstream change, not as something a test can
+pin.
+
+#### The `Xrgb8888` alpha pass: the finding was right, the proposed fix was not
+
+The review asked for the second, per-pixel alpha pass to be folded into the
+row copy as a single pass. Measured first rather than assumed, and the single
+pass is **six times slower** in the profile every test and dev-VM session
+runs. Isolated over a 1920x1080 frame (`ms/frame`, median of runs, standalone
+`rustc` at each level so nothing else is in the number):
+
+| | `opt-level=0` | `opt-level=3` |
+| --- | --- | --- |
+| row `memcpy` alone (the `Argb8888` path) | 0.84 | 0.20 |
+| ...plus one alpha byte per pixel (what shipped) | 30.4 | 1.56 |
+| one pass, per pixel, copy and force together (as asked) | 186.4 | 1.29 |
+| ...plus alpha two pixels at a time (`u64`) | 83.8 | 0.89 |
+| **...plus alpha four pixels at a time (`u128`)** | **33.7** | **0.92** |
+
+So the finding's substance held -- the alpha pass really is most of what this
+path costs, 30.4 of 31.2 ms at `opt-level=0` -- but the fix that follows from
+it does not. Two *wide* passes beat one narrow one: the copy stays a `memcpy`
+intrinsic and the opacity pass does a quarter as many iterations. What shipped
+is the `u128` row.
+
+End to end, against real `grim`, both directions measured rather than
+extrapolated. Method as before: `--headless` 1920x1080 with a client forcing
+~20 redraws/s, `grim -t ppm /dev/null` in a tight loop for 20s, compositor's
+own `utime+stime` from `/proc/<pid>/stat`, three runs each, alternating.
+
+```
+RELEASE build (opt-level=3, fat LTO -- the profile that ships)
+  BEFORE per-byte alpha pass  rep1: jiffies=508 captures=493 => 10.30 ms/capture
+  AFTER  u128 alpha step      rep1: jiffies=518 captures=508 => 10.20 ms/capture
+  BEFORE per-byte alpha pass  rep2: jiffies=534 captures=501 => 10.66 ms/capture
+  AFTER  u128 alpha step      rep2: jiffies=522 captures=506 => 10.32 ms/capture
+  BEFORE per-byte alpha pass  rep3: jiffies=538 captures=504 => 10.67 ms/capture
+  AFTER  u128 alpha step      rep3: jiffies=520 captures=507 => 10.26 ms/capture
+
+DEV build (opt-level=0 -- what tests and the dev VM run)
+  BEFORE per-byte alpha pass  rep1: jiffies=1262 captures=230 => 54.9 ms/capture
+  AFTER  u128 alpha step      rep1: jiffies=1331 captures=208 => 64.0 ms/capture
+  BEFORE per-byte alpha pass  rep2: jiffies=1270 captures=232 => 54.7 ms/capture
+  AFTER  u128 alpha step      rep2: jiffies=1327 captures=211 => 62.9 ms/capture
+  BEFORE per-byte alpha pass  rep3: jiffies=1277 captures=233 => 54.8 ms/capture
+  AFTER  u128 alpha step      rep3: jiffies=1338 captures=212 => 63.1 ms/capture
+
+Idle (nobody capturing), dev build: BEFORE 147, AFTER 148 jiffies over 20s
+```
+
+**~4% off a real capture in release, ~15% added in a dev build, and nothing at
+all for a compositor nobody is capturing.** That is a trade, not a free win,
+and it is taken on the grounds `Cargo.toml`'s own release-profile comment
+states: "lightweight" is judged in release. The release build for this was a
+real `cargo build -p flexwm --release` of both variants (4m13s cold, 2m33s for
+the second), not an extrapolation; the debug target dir was removed first for
+disk and rebuilt afterwards.
+
+The much larger number this turned up is **not** in the shipped change: not
+forcing the byte at all is ~13% off a release capture and ~77% off a debug
+one, because `Xrgb8888`'s fourth byte is undefined and a conforming client
+(`grim` demonstrably) never reads it. That is a behaviour question rather than
+an optimization, so it is
+[filed](../protocols/screencopy-xrgb-alpha-forcing.md) -- with the probable
+answer, which is to force only when `background_color`'s alpha is actually
+below 1.0 -- rather than decided mid-review.
+
+#### Re-verification after both fixes
+
+Force-clean rebuild (the whole `debug` target dir was removed for the release
+experiment, so this is from scratch, not incremental):
+
+```
+$ rm -rf /var/cargo-target/debug && cargo build -p flexwm --all-targets
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2m 14s
+
+$ cargo fmt --check -p flexwm                       FMT_CLEAN
+$ cargo clippy -p flexwm --all-targets -- -D warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1m 05s
+$ cargo test -p flexwm
+test result: ok. 646 passed; 0 failed; 1 ignored
+$ cargo nextest run --workspace
+     Summary [  26.419s] 740 tests run: 740 passed, 1 skipped
+$ bash scripts/smoke-test.sh
+rc=0, 12 `ok:` assertions
+```
+
+The fourteen screencopy tests were run six more times in isolation and the
+full suite twice more, all clean -- the same flake check the first round's
+`wrong_configure_serial` bug earned.
+
+Not re-run after these two fixes, and named rather than implied: the live
+`grim`, `swaylock` and `--tty` results above. Both changes are inside
+`write_capture`'s row loop, which the `grim` benchmark above exercised
+hundreds of times per run in both builds, and neither touches the lock guard,
+the cursor path or the constraint negotiation those results cover.
+
 ### VM state
 
 Both VMs were up before this work and neither was started, stopped or
 restarted by it (`nc -z localhost 31022`, `nc -z localhost 2222` both
-succeeded first). No `--tty` seat was claimed at any point — every live run
-here is `--headless`, so nothing here could collide with another agent's
-hardware work. Disk before: 78% used / 3.3G free; after cleanup: 76% / 3.6G.
-Every `flexwm` and `swaylock` process started here was killed and confirmed
-gone (`pgrep -fa` empty) at the end of each run.
+succeeded first). The VT-bound `--tty` seat was claimed exactly once, for the
+cursor-deviation measurement above: it was confirmed free first
+(`pgrep -fa 'flexwm|sway'` empty) and released immediately after. Every other
+live run here is `--headless` and takes no seat. Every `flexwm` and `swaylock`
+process started here was killed and confirmed gone (`pgrep -fa` empty) at the
+end of each run.
+
+Disk moved around more than usual because round 2 needed a release build:
+78% used / 3.3G free at the start, 85% / 2.3G at its peak, then the debug
+target dir was removed to make room (40% / 9.0G), release built twice, and
+the debug tree rebuilt afterwards — 49% / 7.6G at the end, i.e. more free
+space than this started with.

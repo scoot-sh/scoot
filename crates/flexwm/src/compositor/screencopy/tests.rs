@@ -56,6 +56,15 @@ const CANVAS: i32 = 60;
 /// wrong frame differs in more than one pixel.
 const WINDOW_BUFFER: i32 = 24;
 
+/// What every client buffer here is pre-filled with before a capture.
+///
+/// Load-bearing in the offset and padding tests, which assert on the bytes the
+/// compositor must *not* have written: a fill of zeroes would be
+/// indistinguishable from a wrong write that happened to land on black. Picked
+/// so no pixel this compositor draws in these tests can equal it -- the
+/// background, the ring, the window and the lock surface are all listed above.
+const SENTINEL: [u8; 4] = [0x11, 0x22, 0x33, 0x44];
+
 // Colors as the BGRA bytes a pixman `Argb8888` buffer holds them in.
 const WINDOW_BGRA: [u8; 4] = [0x20, 0xE0, 0x20, 0xFF];
 const SECOND_WINDOW_BGRA: [u8; 4] = [0xE0, 0x20, 0x20, 0xFF];
@@ -114,6 +123,12 @@ enum Step {
         height: i32,
         format: wl_shm::Format,
     },
+    /// Capture into the **second** of two buffers carved out of one pool, so
+    /// the write has a non-zero `offset` within that pool.
+    CaptureAtOffset,
+    /// Capture into a buffer whose rows are `pad` bytes further apart than the
+    /// pixels need, i.e. `stride > width * 4`.
+    CaptureWithPaddedRows { pad: i32 },
     /// The same, but return as soon as the request is on the wire -- for the
     /// cases where "the compositor has *not* answered yet" is the assertion.
     CaptureWithoutWaiting,
@@ -267,6 +282,44 @@ fn an_xrgb_capture_is_opaque_even_over_a_translucent_background() {
 }
 
 #[test]
+fn an_xrgb_capture_is_opaque_at_a_width_the_wide_step_cannot_divide() {
+    // `write_capture` forces the X byte four pixels at a time, so a width that
+    // is not a multiple of four leaves a tail the wide step cannot reach. Every
+    // other test here runs at `CANVAS` (60 = 15 whole steps, no tail), so
+    // without this the tail loop could be deleted and nothing would notice --
+    // and a `--tty` session takes its width from the connector, not from a
+    // number this compositor gets to pick.
+    let mut fixture = Fixture::start();
+    let odd = CANVAS + 1;
+    assert_eq!(odd % 4, 1, "the point of this test is a width with a tail");
+    assert!(fixture.state.resize_output(odd, CANVAS));
+    fixture.settle();
+    fixture.run(Step::StartSession {
+        paint_cursors: false,
+    });
+
+    let (outcome, captured) = fixture
+        .run(Step::Capture {
+            width: odd,
+            height: CANVAS,
+            format: wl_shm::Format::Xrgb8888,
+        })
+        .frame();
+    assert_eq!(outcome, Outcome::Ready);
+    let opaque = captured
+        .chunks_exact(4)
+        .enumerate()
+        .find(|(_, pixel)| pixel[3] != 0xFF);
+    assert_eq!(
+        opaque,
+        None,
+        "every pixel of an Xrgb8888 capture must be opaque, including the \
+         last {} of each row, which the wide step cannot cover",
+        odd % 4
+    );
+}
+
+#[test]
 fn a_capture_while_locked_shows_the_lock_screen_and_not_the_windows() {
     let mut fixture = Fixture::start();
     fixture.run(Step::MapWindow(WINDOW_BGRA));
@@ -387,6 +440,75 @@ fn a_later_capture_waits_for_the_screen_to_change() {
             .any(|pixel| pixel == SECOND_WINDOW_BGRA.as_slice()),
         "and it must carry the *new* frame, not the one it waited on"
     );
+}
+
+#[test]
+fn a_capture_lands_at_its_buffers_offset_inside_a_shared_pool() {
+    // Every other test here allocates one buffer per pool at offset 0, which is
+    // exactly the shape that cannot tell "honours `data.offset`" from "writes
+    // at the start of the pool". A toolkit sub-allocating several buffers from
+    // one pool is the ordinary case; drop the `data.offset` term from
+    // `write_capture` and this is the only thing in the suite that notices.
+    let mut fixture = Fixture::start();
+    fixture.run(Step::MapWindow(WINDOW_BGRA));
+    fixture.run(Step::StartSession {
+        paint_cursors: false,
+    });
+    let (outcome, pool) = fixture.run(Step::CaptureAtOffset).frame();
+    assert_eq!(outcome, Outcome::Ready);
+
+    let bytes = (CANVAS * CANVAS * 4) as usize;
+    assert_eq!(pool.len(), bytes * 2, "the whole pool is read back");
+    let (first, second) = pool.split_at(bytes);
+    let framebuffer = fixture.pixels();
+
+    assert_eq!(
+        second, framebuffer,
+        "the capture must land in the buffer it was attached to, at its own \
+         offset in the pool"
+    );
+    assert!(
+        first.chunks_exact(4).all(|pixel| pixel == SENTINEL),
+        "the sibling buffer at offset 0 must be byte-for-byte untouched -- a \
+         capture written at the pool's start instead of the buffer's would \
+         have clobbered another of the client's own buffers"
+    );
+}
+
+#[test]
+fn a_capture_honours_a_buffer_whose_rows_are_padded() {
+    // The other half of the same gap: every other buffer here has
+    // `stride == width * 4`, so nothing notices if `write_capture` walked rows
+    // by the pixel width instead of by the client's stride. `wl_shm` allows any
+    // stride at least that wide.
+    const PAD: i32 = 16;
+    let mut fixture = Fixture::start();
+    fixture.run(Step::MapWindow(WINDOW_BGRA));
+    fixture.run(Step::StartSession {
+        paint_cursors: false,
+    });
+    let (outcome, pool) = fixture
+        .run(Step::CaptureWithPaddedRows { pad: PAD })
+        .frame();
+    assert_eq!(outcome, Outcome::Ready);
+
+    let row = (CANVAS * 4) as usize;
+    let stride = row + PAD as usize;
+    assert_eq!(pool.len(), stride * CANVAS as usize);
+    let framebuffer = fixture.pixels();
+
+    for y in 0..CANVAS as usize {
+        let line = &pool[y * stride..][..stride];
+        assert_eq!(
+            &line[..row],
+            &framebuffer[y * row..][..row],
+            "row {y} has to land at its own stride, not packed against the last one"
+        );
+        assert!(
+            line[row..].chunks_exact(4).all(|pixel| pixel == SENTINEL),
+            "row {y}'s padding is not part of the image and must be left alone"
+        );
+    }
 }
 
 #[test]
@@ -539,7 +661,10 @@ fn a_client_that_disconnects_with_a_capture_outstanding_leaves_nothing_behind() 
 struct CaptureBuffer {
     buffer: wl_buffer::WlBuffer,
     file: std::fs::File,
-    len: usize,
+    /// The whole **pool**'s length, which is what [`read_back`] reads: for the
+    /// offset and padding tests, what the compositor left alone is as much the
+    /// assertion as what it wrote.
+    pool_len: usize,
 }
 
 #[derive(Default)]
@@ -615,6 +740,11 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
     let mut held: Option<CaptureBuffer> = None;
     let mut windows: Vec<wl_surface::WlSurface> = Vec::new();
     let mut locks: Vec<ext_session_lock_v1::ExtSessionLockV1> = Vec::new();
+    // Buffers that share a pool with a capture buffer and are never attached to
+    // anything -- the "sibling the compositor must not have touched" in
+    // `Step::CaptureAtOffset`. Held so the `wl_buffer` objects stay alive for
+    // the whole run, i.e. so the pool really does have two live buffers in it.
+    let mut neighbours: Vec<CaptureBuffer> = Vec::new();
 
     while let Ok(step) = steps.recv() {
         queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
@@ -684,6 +814,58 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                     height,
                     format,
                 )?;
+                wait_for(&mut queue, &mut client, "a frame outcome", |client| {
+                    (client.frame != Outcome::Waiting).then_some(())
+                })?;
+                Ack::Frame(client.frame, read_back(&held))
+            }
+            Step::CaptureAtOffset => {
+                let session = session.as_ref().ok_or("no session")?;
+                let bytes = (CANVAS * CANVAS * 4) as usize;
+                let mut pool = Pool::new(&shm, &qh, bytes * 2, SENTINEL);
+                // Two buffers, the capture going into the *second* -- what a
+                // toolkit double-buffering out of one pool has.
+                let first = pool.buffer(0, CANVAS, CANVAS, CANVAS * 4, wl_shm::Format::Argb8888);
+                let second = pool.buffer(
+                    bytes as i32,
+                    CANVAS,
+                    CANVAS,
+                    CANVAS * 4,
+                    wl_shm::Format::Argb8888,
+                );
+                pool.finish();
+                neighbours.push(first);
+                capture_into(
+                    session,
+                    &qh,
+                    &mut frame,
+                    &mut held,
+                    &mut client,
+                    second,
+                    CANVAS,
+                    CANVAS,
+                );
+                wait_for(&mut queue, &mut client, "a frame outcome", |client| {
+                    (client.frame != Outcome::Waiting).then_some(())
+                })?;
+                Ack::Frame(client.frame, read_back(&held))
+            }
+            Step::CaptureWithPaddedRows { pad } => {
+                let session = session.as_ref().ok_or("no session")?;
+                let stride = CANVAS * 4 + pad;
+                let mut pool = Pool::new(&shm, &qh, (stride * CANVAS) as usize, SENTINEL);
+                let buffer = pool.buffer(0, CANVAS, CANVAS, stride, wl_shm::Format::Argb8888);
+                pool.finish();
+                capture_into(
+                    session,
+                    &qh,
+                    &mut frame,
+                    &mut held,
+                    &mut client,
+                    buffer,
+                    CANVAS,
+                    CANVAS,
+                );
                 wait_for(&mut queue, &mut client, "a frame outcome", |client| {
                     (client.frame != Outcome::Waiting).then_some(())
                 })?;
@@ -798,12 +980,32 @@ fn start_frame(
     height: i32,
     format: wl_shm::Format,
 ) -> Result<(), String> {
+    // A recognisable fill, so a capture that wrote nothing is not mistaken for
+    // one that wrote black.
+    let buffer = solid_buffer(shm, qh, width, height, SENTINEL, format);
+    capture_into(session, qh, frame, held, client, buffer, width, height);
+    Ok(())
+}
+
+/// Attaches an already-allocated buffer to a fresh frame and sends `capture`.
+///
+/// Split out of [`start_frame`] for the steps that need a buffer this file's
+/// one-buffer-per-pool helper cannot make: one at a non-zero offset in its
+/// pool, or one with padded rows.
+#[allow(clippy::too_many_arguments)]
+fn capture_into(
+    session: &ext_image_copy_capture_session_v1::ExtImageCopyCaptureSessionV1,
+    qh: &QueueHandle<TestClient>,
+    frame: &mut Option<ext_image_copy_capture_frame_v1::ExtImageCopyCaptureFrameV1>,
+    held: &mut Option<CaptureBuffer>,
+    client: &mut TestClient,
+    buffer: CaptureBuffer,
+    width: i32,
+    height: i32,
+) {
     if let Some(previous) = frame.take() {
         previous.destroy();
     }
-    // A recognisable fill, so a capture that wrote nothing is not mistaken for
-    // one that wrote black.
-    let buffer = solid_buffer(shm, qh, width, height, [0x11, 0x22, 0x33, 0x44], format);
     let new_frame = session.create_frame(qh, FrameSlot { extra: false });
     client.frame = Outcome::Waiting;
     new_frame.attach_buffer(buffer.as_ref());
@@ -811,22 +1013,28 @@ fn start_frame(
     new_frame.capture();
     *frame = Some(new_frame);
     *held = Some(buffer);
-    Ok(())
 }
 
-/// The client's own buffer, read straight back out of the memfd behind it.
+/// The client's **whole pool**, read straight back out of the memfd behind it.
+///
+/// The pool and not just the buffer, which matters for the two tests that put
+/// more than the capture's own bytes in one: what they assert on is as much
+/// what the compositor did *not* touch (a sibling buffer, a row's padding) as
+/// what it did. For a pool holding exactly one tightly-strided buffer -- every
+/// other test here -- the two are the same bytes.
 fn read_back(held: &Option<CaptureBuffer>) -> Vec<u8> {
     let Some(held) = held else {
         return Vec::new();
     };
-    let mut pixels = vec![0u8; held.len];
+    let mut pixels = vec![0u8; held.pool_len];
     held.file
         .read_exact_at(&mut pixels, 0)
         .expect("the client's own pool is readable");
     pixels
 }
 
-/// A `width`x`height` `wl_buffer` filled with `color`, over a real memfd --
+/// A `width`x`height` `wl_buffer` filled with `color`, alone in its pool at
+/// offset 0 with rows exactly `width * 4` bytes apart -- over a real memfd,
 /// the same path any toolkit takes, and readable afterwards.
 fn solid_buffer(
     shm: &wl_shm::WlShm,
@@ -837,16 +1045,68 @@ fn solid_buffer(
     format: wl_shm::Format,
 ) -> CaptureBuffer {
     let stride = width * 4;
-    let len = (stride * height) as usize;
-    let fd = rustix::fs::memfd_create("flexwm-capture-test", rustix::fs::MemfdFlags::CLOEXEC)
-        .expect("a memfd");
-    let mut file = std::fs::File::from(fd);
-    let pixels: Vec<u8> = color.iter().copied().cycle().take(len).collect();
-    file.write_all(&pixels).expect("a filled pool file");
-    let pool = shm.create_pool(file.as_fd(), len as i32, qh, ());
-    let buffer = pool.create_buffer(0, width, height, stride, format, qh, ());
-    pool.destroy();
-    CaptureBuffer { buffer, file, len }
+    let mut pool = Pool::new(shm, qh, (stride * height) as usize, color);
+    let buffer = pool.buffer(0, width, height, stride, format);
+    pool.finish();
+    buffer
+}
+
+/// A `wl_shm` pool a test can carve more than one buffer out of, or carve one
+/// padded buffer out of.
+///
+/// Exists because `solid_buffer`'s shape -- one buffer, offset 0, stride
+/// exactly `width * 4` -- is precisely the shape that cannot exercise the two
+/// client-supplied numbers `write_capture` has to honour. A toolkit
+/// sub-allocating several buffers from one pool is the ordinary case, not an
+/// exotic one.
+struct Pool {
+    pool: wl_shm_pool::WlShmPool,
+    qh: QueueHandle<TestClient>,
+    file: std::fs::File,
+    len: usize,
+}
+
+impl Pool {
+    /// A pool of `len` bytes, pre-filled with `fill` repeated, so anything the
+    /// compositor writes is distinguishable from what was already there.
+    fn new(shm: &wl_shm::WlShm, qh: &QueueHandle<TestClient>, len: usize, fill: [u8; 4]) -> Self {
+        let fd = rustix::fs::memfd_create("flexwm-capture-test", rustix::fs::MemfdFlags::CLOEXEC)
+            .expect("a memfd");
+        let mut file = std::fs::File::from(fd);
+        let bytes: Vec<u8> = fill.iter().copied().cycle().take(len).collect();
+        file.write_all(&bytes).expect("a filled pool file");
+        let pool = shm.create_pool(file.as_fd(), len as i32, qh, ());
+        Self {
+            pool,
+            qh: qh.clone(),
+            file,
+            len,
+        }
+    }
+
+    /// One buffer inside it, at `offset` bytes from the pool's start.
+    fn buffer(
+        &mut self,
+        offset: i32,
+        width: i32,
+        height: i32,
+        stride: i32,
+        format: wl_shm::Format,
+    ) -> CaptureBuffer {
+        CaptureBuffer {
+            buffer: self
+                .pool
+                .create_buffer(offset, width, height, stride, format, &self.qh, ()),
+            file: self.file.try_clone().expect("a second handle on the pool"),
+            pool_len: self.len,
+        }
+    }
+
+    /// The `wl_shm_pool` is no longer needed once its buffers exist -- the
+    /// mapping outlives it, which is what every toolkit relies on.
+    fn finish(self) {
+        self.pool.destroy();
+    }
 }
 
 impl CaptureBuffer {
