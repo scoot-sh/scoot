@@ -485,7 +485,13 @@ impl State {
     /// means the surface that takes the keyboard is the one actually drawn in
     /// front. Failing that, whatever a click focused, if it is still there
     /// and still wants keys.
-    pub(super) fn layer_keyboard_focus(&self) -> Option<WlSurface> {
+    ///
+    /// *Why* the surface won, not just which one, because the two answers
+    /// outrank an `xdg_popup` grab differently: `exclusive` is the
+    /// protocol's own "mine until I unmap" and pre-empts a menu, while a
+    /// click-focused `on_demand` surface does not -- a bar's own menu is
+    /// exactly the case that would otherwise fight itself. See `popup.rs`.
+    pub(super) fn layer_keyboard_focus(&self) -> Option<LayerKeyboardFocus> {
         let output = self.output.as_ref()?;
         let map = layer_map_for_output(output);
         for &layer in &ABOVE_WINDOWS {
@@ -494,7 +500,10 @@ impl State {
                 .rev()
                 .find(|found| layer_focus(found) == LayerFocus::Exclusive);
             if let Some(found) = exclusive {
-                return Some(found.wl_surface().clone());
+                return Some(LayerKeyboardFocus {
+                    surface: found.wl_surface().clone(),
+                    exclusive: true,
+                });
             }
         }
         let clicked = self.clicked_layer.as_ref()?;
@@ -509,8 +518,10 @@ impl State {
         // still states the whole policy on its own rather than depending on
         // that clear having run first.
         let still_mapped = map.layers().any(|found| found == clicked);
-        (still_mapped && layer_focus(clicked) != LayerFocus::Never)
-            .then(|| clicked.wl_surface().clone())
+        (still_mapped && layer_focus(clicked) != LayerFocus::Never).then(|| LayerKeyboardFocus {
+            surface: clicked.wl_surface().clone(),
+            exclusive: false,
+        })
     }
 
     /// Applies a click that landed on `layer`.
@@ -542,6 +553,15 @@ impl State {
             self.clicked_layer = None;
         }
     }
+}
+
+/// What [`State::layer_keyboard_focus`] found: the surface that should hold
+/// the keyboard, and whether it holds it by the protocol's `exclusive` rule
+/// (which outranks a popup grab) rather than because a click gave it to it
+/// (which does not).
+pub(super) struct LayerKeyboardFocus {
+    pub surface: WlSurface,
+    pub exclusive: bool,
 }
 
 /// What [`State::layer_hit`] found: the layer surface, the (sub)surface

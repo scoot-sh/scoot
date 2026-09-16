@@ -22,6 +22,7 @@ mod layer_shell;
 mod nested;
 mod nested_dispatch;
 mod output_scale;
+mod popup;
 mod screenshot;
 mod selection;
 mod session_lock;

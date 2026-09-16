@@ -762,18 +762,29 @@ impl State {
         // Before the focus refreshes, not after: `unset_grab` restores focus
         // to whatever the pointer had pending, so re-deriving afterwards is
         // what gets the final word.
-        self.drop_pointer_grab();
+        self.drop_input_grabs();
         self.refresh_keyboard_focus();
         self.refresh_pointer_focus();
         self.request_render();
     }
 
-    /// Drops a pointer grab so it cannot outlive a lock transition.
+    /// Drops every input grab so none can outlive a lock transition.
     ///
     /// A grab deliberately outlives focus changes -- that is what a grab *is*
     /// -- so re-deriving focus is not enough on its own: the grabbing client
     /// goes on receiving every motion and button until the grab ends by
-    /// itself. Two kinds can be active here, and both matter:
+    /// itself. Three kinds can be active here, and all three matter:
+    ///
+    /// - **A popup grab** (`xdg_popup.grab`, see `popup.rs`), which holds
+    ///   the *keyboard* as well as the pointer, and whose keyboard half
+    ///   swallows the very `set_focus` the refresh below is about to make --
+    ///   so without dropping it the lock client would never be told it has
+    ///   the keyboard, and every keystroke of the user's password would go
+    ///   to whatever had a menu open. Dropped first, so the pointer unset
+    ///   underneath cannot restore keyboard focus to the popup's root on its
+    ///   way out (`PopupPointerGrab::unset` does exactly that while the
+    ///   keyboard is still grabbed).
+    ///
     ///
     /// - **A drag-and-drop**, installed by `handlers.rs`'s
     ///   `WaylandDndGrabHandler` at a client's own request. It ends only when
@@ -788,17 +799,18 @@ impl State {
     ///   transition: a press delivered to a surface before the transition
     ///   would otherwise keep steering the pointer afterwards.
     ///
-    /// **If a keyboard or touch grab is ever added to this compositor, it has
-    /// to be dropped here too.** Neither exists today -- nothing installs a
-    /// keyboard grab, and nothing calls `Seat::add_touch`, so Smithay's
-    /// `TouchDownGrab` (the touch twin of the click grab above) is never
-    /// reached -- which is the only reason this is a pointer-only function
-    /// and the only reason the same asymmetry was not already a keystroke
-    /// leak.
+    /// **If a touch grab is ever added to this compositor, it has to be
+    /// dropped here too.** It does not exist today -- nothing calls
+    /// `Seat::add_touch`, so Smithay's `TouchDownGrab` (the touch twin of
+    /// the click grab above) is never reached. The keyboard half of that
+    /// warning has since come true and is handled: popup grabs are the
+    /// keyboard grab this function was told to expect.
     ///
-    /// Costs one mutex-guarded enum check on a transition that has already
-    /// decided to re-derive focus and redraw; nothing on any per-event path.
-    fn drop_pointer_grab(&mut self) {
+    /// Costs one `Option` check and one mutex-guarded enum check on a
+    /// transition that has already decided to re-derive focus and redraw;
+    /// nothing on any per-event path.
+    fn drop_input_grabs(&mut self) {
+        self.dismiss_popup_grab();
         let Some(pointer) = self.seat.get_pointer() else {
             return;
         };
@@ -1056,7 +1068,7 @@ impl State {
             // events away from the lock screen, so it goes here too. Only
             // reachable on the edge: the next locked frame repaints the
             // backdrop in the new colour, and the comparison is false again.
-            self.drop_pointer_grab();
+            self.drop_input_grabs();
             self.request_render();
         }
     }

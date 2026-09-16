@@ -226,13 +226,29 @@ impl XdgShellHandler for State {
         }
     }
 
+    /// Every `xdg_popup` is tracked here, whatever it will end up parented
+    /// to -- including one created with no xdg parent at all, which is how
+    /// a layer surface's own dropdown is built
+    /// (`xdg_surface.get_popup(None, ..)` then
+    /// `zwlr_layer_surface_v1.get_popup`). Such a popup lands in
+    /// `PopupManager`'s unmapped list until its first commit, by which time
+    /// the layer-shell request has set its parent, and `PopupManager::commit`
+    /// moves it into the parent's tree from there.
+    ///
+    /// That is why `WlrLayerShellHandler::new_popup` stays unimplemented:
+    /// tracking a popup a second time on that path puts a *second* node for
+    /// the same surface in the layer surface's `PopupTree` -- measured, see
+    /// `layer_shell/tests/popup.rs` -- which every tree walk then sees twice
+    /// and which a dismissal only half removes.
     fn new_popup(&mut self, surface: PopupSurface, _positioner: PositionerState) {
         let _ = self
             .popups
             .track_popup(smithay::desktop::PopupKind::Xdg(surface));
     }
 
-    fn grab(&mut self, _surface: PopupSurface, _seat: wl_seat::WlSeat, _serial: Serial) {}
+    fn grab(&mut self, surface: PopupSurface, seat: wl_seat::WlSeat, serial: Serial) {
+        self.grab_popup(surface, seat, serial);
+    }
 
     fn reposition_request(
         &mut self,
