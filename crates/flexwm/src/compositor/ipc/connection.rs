@@ -11,12 +11,14 @@ use std::time::{Duration, Instant};
 use flexwm_ipc::{Request, Response, decode, encode};
 use smithay::reexports::calloop;
 use smithay::reexports::calloop::generic::Generic;
+use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
 use smithay::reexports::calloop::{
     EventSource, Interest, Mode, Poll, PostAction, Readiness, Token, TokenFactory,
 };
 
 use super::line::{LineRead, Lines, MAX_REQUEST_BYTES};
 use super::outbound::Outbound;
+use super::slots::Slot;
 use super::{PendingIdle, screenshot_throttled};
 use crate::compositor::State;
 use crate::compositor::headless::FRAME_INTERVAL;
@@ -43,11 +45,48 @@ mod tests;
 /// pipelined requests, which is not a cost anything can measure.
 const READS_PER_WAKEUP: u32 = 1;
 
+/// How long a connection may hold a reply its peer has not taken a byte of
+/// before it is dropped.
+///
+/// This is what stops a half-closed client from pinning a connection slot and
+/// two fds for the rest of the session. A client that does `shutdown(SHUT_WR)`
+/// and then never reads raises `EPOLLIN`/`EPOLLRDHUP`, not `EPOLLHUP`, and a
+/// connection with something queued is registered for *writability* only (see
+/// [`Connection::interest`]) -- so nothing ever wakes it again to notice. The
+/// fix that suggests itself, registering for reads as well, is the one
+/// `docs/roadmap/10-ipc-connection-loop.md` deliberately rejected: readiness
+/// here is level-triggered, an end of stream is reported on every turn, and
+/// the queue cannot drain into a socket nobody is reading, so the loop would
+/// spin at full speed on an event it can never act on. A deadline can act on
+/// it.
+///
+/// Measured in *progress*, not in total time, exactly as `PendingIdle::push`
+/// measures a `wait-idle` answer that will not go out: a client slowly
+/// draining a multi-megabyte screenshot is making progress and is never given
+/// up on, however long it takes. What is given up on is a peer that has not
+/// taken a single byte in this long -- and the queue is only non-empty at all
+/// once that peer's receive buffer is full, which on Linux is a couple of
+/// hundred kilobytes it is already behind by. Ten seconds of that is not a
+/// slow reader; it is a dead one.
+///
+/// The check runs on a deadline of its own rather than continuously, so the
+/// real window is between one and two of these: a connection is dropped no
+/// sooner than [`WRITE_STALL_TIMEOUT`] after its last byte went out, and no
+/// later than twice that.
+pub(super) const WRITE_STALL_TIMEOUT: Duration = Duration::from_secs(10);
+
 /// Wraps an accepted socket up as an event source ready to be inserted.
 ///
 /// The socket must already be non-blocking; [`super::accept`] does that, and
-/// says why there rather than here.
-pub(super) fn source(stream: UnixStream) -> std::io::Result<ConnectionSource> {
+/// says why there rather than here. `slot` is this connection's claim on one of
+/// `slots::MAX_CONNECTIONS`, released when the source is dropped; `stall` is
+/// how long it may hold an unread reply (see [`WRITE_STALL_TIMEOUT`], which is
+/// what production passes).
+pub(super) fn source(
+    stream: UnixStream,
+    slot: Slot,
+    stall: Duration,
+) -> std::io::Result<ConnectionSource> {
     Ok(ConnectionSource {
         // A second fd on the same socket: this one is polled, the one inside
         // `Lines` is read and written. `Generic` has to own what it polls, and
@@ -58,8 +97,16 @@ pub(super) fn source(stream: UnixStream) -> std::io::Result<ConnectionSource> {
             outbound: Outbound::default(),
             last_screenshot: None,
             closing: false,
+            slot: Some(slot),
         },
         socket: Generic::new(stream, Interest::READ, Mode::Level),
+        // The deadline this starts with is never the one that fires: arming
+        // sets a fresh one (see `process_events`), and until then the timer is
+        // not registered at all.
+        stall: Timer::from_duration(stall),
+        window: stall,
+        armed: false,
+        stall_pending: 0,
     })
 }
 
@@ -70,8 +117,34 @@ pub(super) fn source(stream: UnixStream) -> std::io::Result<ConnectionSource> {
 /// drain, and the callback a `Generic` hands out has no way to reach the
 /// `Generic`'s own `interest` field to say so. A source that owns both can --
 /// see [`ConnectionSource::process_events`].
+///
+/// It owns a second sub-source for the same reason the first one is here: the
+/// deadline that evicts a peer which has stopped reading (see
+/// [`WRITE_STALL_TIMEOUT`]) has to be able to say "this connection is
+/// finished", and only the source itself can answer `PostAction::Remove`.
+/// A `Timer` costs no fd and no syscall -- calloop tracks deadlines in the
+/// loop's own heap -- so an armed one costs a heap entry and a wakeup per
+/// window, and a connection whose peer is keeping up is never armed at all.
 pub(super) struct ConnectionSource {
     socket: Generic<UnixStream>,
+    /// Comes due when the peer may have stopped reading. Registered -- and so
+    /// able to fire -- only while [`ConnectionSource::armed`].
+    stall: Timer,
+    /// How long that deadline is, held because a `Timer`'s own is set at
+    /// arming time and there is no reading it back out.
+    window: Duration,
+    /// Whether [`ConnectionSource::stall`] currently has a live deadline in the
+    /// event loop.
+    ///
+    /// True exactly while this connection is registered for writability, which
+    /// is exactly while it has a queue its peer has not taken (see
+    /// [`Connection::interest`]): a connection with nothing to write cannot be
+    /// stalled, and must not be woken to be told so.
+    armed: bool,
+    /// How much was still queued when the deadline last looked. What it is
+    /// compared against next time is what makes this a bound on *no progress*
+    /// rather than on how long a slow reader may take.
+    stall_pending: usize,
     connection: Connection,
 }
 
@@ -90,7 +163,46 @@ impl EventSource for ConnectionSource {
     where
         F: FnMut(Readiness, &mut Connection) -> Step,
     {
-        let Self { socket, connection } = self;
+        let Self {
+            socket,
+            stall,
+            window,
+            armed,
+            stall_pending,
+            connection,
+        } = self;
+        // The deadline first: if this wakeup is it coming due, whether there is
+        // anything left to serve depends on what it finds. Each sub-source
+        // compares the token against its own registration and does nothing if
+        // it is not theirs, so exactly one of the two runs per wakeup.
+        let mut evicted = false;
+        stall.process_events(readiness, token, |_deadline, ()| {
+            let pending = connection.pending();
+            // `pending == 0` cannot happen while this is armed -- armed means
+            // registered for writability, which means something is queued --
+            // and is deliberately written as "not stalled" rather than
+            // branched on, so that a state that cannot happen could only ever
+            // cost a spurious re-arm, never a live connection.
+            if pending > 0 && pending >= *stall_pending {
+                evicted = true;
+                // Nothing to reschedule for: this source is leaving the loop.
+                return TimeoutAction::Drop;
+            }
+            *stall_pending = pending;
+            // Rescheduled from here rather than by re-registering: calloop
+            // puts the new deadline straight back in its heap, so a peer
+            // draining a large reply slowly costs one wakeup per window and no
+            // registration churn at all.
+            TimeoutAction::ToDuration(*window)
+        })?;
+        if evicted {
+            tracing::debug!(
+                pending = connection.pending(),
+                stall_ms = window.as_millis(),
+                "dropped an ipc connection whose peer stopped reading its reply"
+            );
+            return Ok(PostAction::Remove);
+        }
         let mut step = None;
         // Delegated to `Generic` rather than calling `callback` straight away
         // so its stale-token check still runs -- the token it compares against
@@ -100,9 +212,15 @@ impl EventSource for ConnectionSource {
             Ok(PostAction::Continue)
         })?;
         match step {
+            // Removing the source drops it, which closes both fds and releases
+            // its slot. An armed deadline is left behind in the loop's heap
+            // (calloop drops a removed source without unregistering it, so
+            // there is nothing to cancel it from); it comes due once, finds no
+            // source to dispatch to, and is discarded.
             Some(Step::Close) => Ok(PostAction::Remove),
-            // `Generic` skipped the callback (not this source's token), so
-            // nothing has changed and there is nothing to re-register.
+            // Neither sub-source's token, or the deadline's -- which has
+            // already rescheduled itself above. Either way nothing about this
+            // connection has changed and there is nothing to re-register.
             None => Ok(PostAction::Continue),
             Some(Step::Continue) => {
                 let wanted = connection.interest();
@@ -120,17 +238,40 @@ impl EventSource for ConnectionSource {
                 // a token change in between. Checked against calloop 0.14.4's
                 // `loop_logic.rs`, `generic.rs` and `token.rs`.
                 socket.interest = wanted;
+                // The stall deadline runs exactly while this connection waits
+                // for writability, so this is also where it is armed and
+                // disarmed. Both halves of an arming happen here together and
+                // unconditionally: a `Timer` keeps whatever deadline it was
+                // last given, and re-registering one whose deadline has since
+                // gone by would fire immediately against a fresh baseline --
+                // evicting a healthy connection for the first byte it queued.
+                *armed = wanted.writable;
+                if *armed {
+                    stall.set_duration(*window);
+                    *stall_pending = connection.pending();
+                }
                 Ok(PostAction::Reregister)
             }
         }
     }
+
+    // Registration order is load-bearing and the same in all three: the socket
+    // takes the first sub-token, the deadline the second, so the socket's token
+    // does not shift with whether the deadline is armed. calloop re-derives
+    // both from the same registration on every re-registration (a fresh
+    // `TokenFactory` and one `token()` per sub-source, in order), so nothing
+    // has to be remembered between them.
 
     fn register(
         &mut self,
         poll: &mut Poll,
         token_factory: &mut TokenFactory,
     ) -> calloop::Result<()> {
-        self.socket.register(poll, token_factory)
+        self.socket.register(poll, token_factory)?;
+        if self.armed {
+            self.stall.register(poll, token_factory)?;
+        }
+        Ok(())
     }
 
     fn reregister(
@@ -138,11 +279,22 @@ impl EventSource for ConnectionSource {
         poll: &mut Poll,
         token_factory: &mut TokenFactory,
     ) -> calloop::Result<()> {
-        self.socket.reregister(poll, token_factory)
+        self.socket.reregister(poll, token_factory)?;
+        // A `Timer` hands its deadline to the event loop when it registers, so
+        // a deadline set above only takes effect here -- and one that is no
+        // longer wanted only leaves the loop here. Unregistered first either
+        // way: registering a timer that already holds a registration would
+        // leave two deadlines racing for one connection.
+        self.stall.unregister(poll)?;
+        if self.armed {
+            self.stall.register(poll, token_factory)?;
+        }
+        Ok(())
     }
 
     fn unregister(&mut self, poll: &mut Poll) -> calloop::Result<()> {
-        self.socket.unregister(poll)
+        self.socket.unregister(poll)?;
+        self.stall.unregister(poll)
     }
 }
 
@@ -162,8 +314,8 @@ pub(super) struct Connection {
     /// for the rest to arrive.
     ///
     /// Also how replies get out: writing through `lines.socket()` rather than a
-    /// second duplicated fd costs one fewer fd per connection, and connections
-    /// are not capped (see `docs/backlog/ipc/screenshot-sync-no-rate-limit.md`).
+    /// second duplicated fd costs one fewer fd per connection, of the two each
+    /// of `slots::MAX_CONNECTIONS` may hold.
     lines: Lines<UnixStream>,
     /// Replies the socket has not taken yet. Empty almost always: a client
     /// that reads its answers never fills its own receive buffer.
@@ -185,9 +337,21 @@ pub(super) struct Connection {
     /// tell where it ends, so leaving it unread -- the client's own writes
     /// filling the socket and then failing -- is the intended outcome.
     closing: bool,
+    /// This connection's claim on one of `slots::MAX_CONNECTIONS`, released
+    /// when the connection is dropped.
+    ///
+    /// `None` only after a `wait-idle` hand-off has moved it into the waiter
+    /// (see [`Connection::serve`]), which happens immediately before this
+    /// connection leaves the event loop.
+    slot: Option<Slot>,
 }
 
 impl Connection {
+    /// How many bytes of reply this connection's peer has not taken yet.
+    fn pending(&self) -> usize {
+        self.outbound.pending()
+    }
+
     /// What this connection needs to hear about next.
     ///
     /// Never both at once, and that is the whole of the flow control between
@@ -401,6 +565,13 @@ impl Connection {
                 // the `Step::Close` below an immediate close rather than a
                 // drain.
                 outbound: std::mem::take(&mut self.outbound),
+                // The slot moves with the socket rather than being released
+                // here: a waiter still holds an fd, for as long as the
+                // `quiet_ms` and `timeout_ms` it chose. Released instead, a
+                // client could shed the cap entirely -- park every connection
+                // it opens in a `wait-idle` that never comes due, and each one
+                // frees its slot on the way into a list nothing bounds.
+                _slot: self.slot.take(),
             });
             // The frame timer answers this, but it drops itself when there's
             // nothing to do -- if the compositor was already idle, it needs

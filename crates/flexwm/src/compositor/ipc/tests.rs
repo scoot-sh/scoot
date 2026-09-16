@@ -71,6 +71,10 @@ fn pending(now: Instant, quiet_ms: u64, timeout_ms: u64) -> PendingIdle {
         last_progress: now,
         answered: false,
         outbound: Outbound::default(),
+        // No connection handed over to this one, so there is no slot to
+        // inherit. What a real hand-off does with it is
+        // `connection/tests.rs`'s `a_wait_idle_hand_off_keeps_its_slot`.
+        _slot: None,
     }
 }
 
@@ -168,6 +172,7 @@ fn stalled(now: Instant, quiet_ms: u64, timeout_ms: u64) -> (PendingIdle, UnixSt
         last_progress: now,
         answered: false,
         outbound: Outbound::default(),
+        _slot: None,
     };
     let PendingIdle {
         stream, outbound, ..
@@ -275,6 +280,7 @@ fn a_timed_out_answer_gets_its_own_window_rather_than_none() {
         last_progress: started,
         answered: false,
         outbound: Outbound::default(),
+        _slot: None,
     };
     assert!(
         wait.advance(started + ms(150), started),
@@ -301,6 +307,7 @@ fn a_waiter_is_finished_with_once_its_answer_has_gone_out() {
         last_progress: started,
         answered: false,
         outbound: Outbound::default(),
+        _slot: None,
     };
     assert!(wait.advance(started + ms(5), started), "not quiet yet");
     assert!(
