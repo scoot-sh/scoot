@@ -67,8 +67,10 @@ output scaling (`[output] scale` over `wl_output.scale`,
 correctly-sized clients and text instead of everything rendered physically
 tiny — see Output scaling below), plus a
 hardened control socket (owner-only
-permissions, a same-user peer check, a 1 MiB cap on a single request, and
-screenshots rate-limited to one per connection per frame) whose connections
+permissions, a same-user peer check, a 1 MiB cap on a single request,
+screenshots rate-limited to one per connection per frame, at most 64
+connections at once, and a connection whose peer has stopped reading its
+reply dropped after ten seconds) whose connections
 are non-blocking end to end, so no client — however slow, chunked or
 unresponsive — can stall the compositor for anyone else. Sizes a client or a
 config supplies are bounded too: each individual `wl_shm` pool is capped at
@@ -189,6 +191,36 @@ things worth knowing:
   needs AltGr, which `key` has no name for); `flexwm msg type` is the one
   that works the modifiers out from the layout, and the one to reach for
   when the goal is text rather than a chord.
+
+### What the control socket refuses
+
+Four bounds an agent driving flexwm over IPC can actually hit. Each is a
+refusal with a reason — an ordinary `error` response, which `flexwm msg`
+prints and exits non-zero on — rather than a silent drop or a delay:
+
+- **One request line may be at most 1 MiB.** Past that the connection is
+  told so and closed; there is no resynchronizing mid-line.
+- **One screenshot per connection per 16ms frame.** A capture costs a full
+  render and PNG encode on the thread that serves every other client, so a
+  second one inside the same frame is refused rather than queued. Retry
+  after a frame.
+- **At most 64 connections at once**, across every client. A 65th is
+  refused with a message naming the limit and closed immediately, not
+  queued behind the others. This is what keeps the per-connection bounds
+  above meaningful — otherwise reconnecting resets them — so an agent that
+  wants many requests should pipeline them on *one* connection rather than
+  open a connection per request. `flexwm msg` opens one per invocation and
+  closes it as soon as it has its answer, so ordinary scripted use never
+  approaches this.
+- **A connection whose peer stops reading is dropped after ten seconds.**
+  Replies that don't fit in the socket are queued and pushed out as the
+  client reads; a client that takes no bytes at all for ten seconds — the
+  classic case being one that sends a request, does `shutdown(SHUT_WR)`
+  and then never reads the answer — is treated as gone, and its connection
+  and fds are released. Reading *slowly* is fine and is never given up on:
+  the ten seconds are measured from the last byte that went out, not from
+  when the reply was queued, so draining a multi-megabyte screenshot over
+  a minute costs nothing.
 
 `--tty` needs a seat (`seatd` or logind) with a DRM device on it. On a modern
 kernel, on every non-root `--tty` run, Smithay logs `Unable to become drm

@@ -100,9 +100,14 @@ actually open.
    [popup grab serial validation](docs/backlog/protocols/popup-grab-serial-validation.md)
    and [a window-focus change doesn't dismiss an active popup
    grab](docs/backlog/protocols/popup-grab-survives-window-focus-change.md).
-3. **[IPC screenshot capture: synchronous, no connection
-   cap](docs/backlog/ipc/screenshot-sync-no-rate-limit.md)** (medium
-   priority).
+3. **[IPC connection cap and the half-closed-connection
+   leak](docs/backlog/resolved/ipc-connection-cap-resolved.md)** — RESOLVED
+   2026-09-16: 64 concurrent connections, refused with a reason past that,
+   and a write-stall deadline that drops a peer which has stopped reading
+   (the leak a cap alone could not free). The third concern that entry
+   bundled — [capture and encode on the event-loop
+   thread](docs/backlog/ipc/screenshot-encode-on-event-loop.md) — is re-filed
+   and still open (medium priority).
 4. Small, unblocked low-priority fixes: [`msg key` modifier
    resolution](docs/backlog/input/msg-key-modifier-resolution.md),
    [`[binds]` capital

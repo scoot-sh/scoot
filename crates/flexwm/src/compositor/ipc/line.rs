@@ -236,9 +236,9 @@ impl<R: Read> Lines<R> {
     /// A line that grew past one read chunk gives its allocation up rather than
     /// keeping the capacity, matching what `Outbound` does with a drained reply
     /// and for the same reason: a client may send one near-mebibyte
-    /// `Request::Type` and then nothing large ever again, and connections are
-    /// not capped (see `docs/backlog/ipc/screenshot-sync-no-rate-limit.md`), so that is a megabyte per
-    /// connection held for the rest of its life. Anything within one chunk
+    /// `Request::Type` and then nothing large ever again, which would be a
+    /// megabyte held for the rest of that connection's life -- and up to
+    /// `slots::MAX_CONNECTIONS` of them at once. Anything within one chunk
     /// keeps its buffer, which is every real request.
     fn take_line(&mut self) {
         if self.line.capacity() > DEFAULT_CAPACITY {

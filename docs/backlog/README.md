@@ -74,7 +74,8 @@ actionable.
 ### IPC / computer use
 - [Targeted input injection without moving seat focus](./ipc/targeted-input-injection.md) — the computer-use gap (research)
 - [IPC bundle: usable rect, focus-workspace-index, ambient locked](./resolved/protocol-bundle-resolved.md) — RESOLVED 2026-09-15, no bump needed
-- [Screenshot capture is synchronous, no connection cap](./ipc/screenshot-sync-no-rate-limit.md)
+- [No cap on concurrent IPC connections, and a half-closed client leaks one](./resolved/ipc-connection-cap-resolved.md) — RESOLVED 2026-09-16: 64 connections, refused with a reason past that, and a write-stall deadline that drops a peer which has stopped reading
+- [Screenshot capture and encode run on the event-loop thread](./ipc/screenshot-encode-on-event-loop.md) — split out of the entry above; the ~12ms stall itself, which no bound closes
 - [A large `msg type` blocks the event loop](./ipc/msg-type-blocks-event-loop.md)
 
 ### Input
