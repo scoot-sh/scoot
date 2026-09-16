@@ -22,21 +22,15 @@
 use std::io::Write;
 use std::os::fd::AsFd;
 use std::os::unix::net::UnixStream;
-use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
-use std::thread::{self, JoinHandle};
-use std::time::{Duration, Instant};
 
-use flexwm_core::Config;
 use smithay::backend::input::InputTime;
 use smithay::backend::renderer::damage::OutputDamageTracker;
 use smithay::backend::renderer::element::Element;
 use smithay::backend::renderer::pixman::PixmanRenderer;
 use smithay::backend::renderer::{Bind, ExportMem, Offscreen};
 use smithay::input::pointer::MotionEvent;
-use smithay::reexports::calloop::EventLoop;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface as ServerSurface;
-use smithay::reexports::wayland_server::{Client, Display};
 use smithay::utils::{Rectangle, SERIAL_COUNTER};
 use wayland_client::protocol::{
     wl_buffer, wl_compositor, wl_pointer, wl_registry, wl_seat, wl_shm, wl_shm_pool,
@@ -48,10 +42,8 @@ use wayland_protocols::wp::cursor_shape::v1::client::{
 };
 
 use super::*;
-use crate::compositor::State;
 use crate::compositor::decorations::Appearance;
-use crate::compositor::keybindings::Keybindings;
-use crate::compositor::state::ClientState;
+use crate::compositor::test_support::{Harness, pixel};
 
 // -------------------------------------------------------------------------
 // Pure arithmetic
@@ -77,12 +69,6 @@ const TRANSPARENT: [u8; 4] = [0, 0, 0, 0];
 /// make every pixel assertion below depend on which distro's cursors are
 /// present. See `cursor/theme.rs`.
 const NO_THEME: Option<&str> = Some("flexwm-test-no-such-theme");
-
-/// Reads pixel `(x, y)` out of a `size`-square bitmap.
-fn pixel(pixels: &[u8], size: i32, x: i32, y: i32) -> [u8; 4] {
-    let idx = ((y * size + x) * 4) as usize;
-    pixels[idx..idx + 4].try_into().expect("four bytes")
-}
 
 #[test]
 fn bitmap_hotspot_pixel_is_the_outline_color() {
@@ -503,20 +489,14 @@ fn run_client(
 }
 
 /// A live compositor with one connected client, scripted a step at a time.
+/// See [`crate::compositor::test_support`] for everything that is not specific
+/// to the cursor.
 ///
 /// The client keeps running (and its surfaces keep existing) until this is
-/// dropped, so every assertion a test makes must happen while its `Fixture`
-/// is still alive -- dropping it disconnects the client, which destroys its
+/// dropped, so every assertion a test makes must happen while its `Fixture` is
+/// still alive -- dropping it disconnects the client, which destroys its
 /// surfaces and resets the very cursor state under test.
-struct Fixture {
-    event_loop: EventLoop<'static, State>,
-    state: State,
-    steps: Option<Sender<Step>>,
-    acks: Receiver<()>,
-    client: Option<JoinHandle<Result<(), String>>>,
-    /// Whether the client found `wp_cursor_shape_manager_v1` in the registry.
-    cursor_shape_advertised: bool,
-}
+type Fixture = Harness<Step, ()>;
 
 impl Fixture {
     fn new() -> Self {
@@ -526,7 +506,20 @@ impl Fixture {
     /// Like [`Fixture::new`], but with the `[appearance]` values a config file
     /// would have resolved to -- which is all `Cursor::new` ever sees, since
     /// the fallback bitmap is built once in `State::new` and never rebuilt.
-    fn with_appearance(mut appearance: Appearance) -> Self {
+    fn with_appearance(appearance: Appearance) -> Self {
+        Self::start(appearance).0
+    }
+
+    /// [`Fixture::new`], plus whether the client found
+    /// `wp_cursor_shape_manager_v1` in its registry.
+    ///
+    /// Only the client's own registry roundtrip can answer that, and only one
+    /// test asks, so it is handed back here rather than kept as fixture state.
+    fn reporting_globals() -> (Self, bool) {
+        Self::start(Appearance::default())
+    }
+
+    fn start(mut appearance: Appearance) -> (Self, bool) {
         // Force the drawn shapes, whatever the machine running the suite has
         // installed. Every pixel assertion below describes `shapes.rs`'s own
         // output; with `Appearance::default()`'s `cursor_theme: None` these
@@ -535,49 +528,21 @@ impl Fixture {
         // developer's desktop. The themed path is covered hermetically in
         // `cursor/theme/tests.rs`.
         appearance.cursor_theme = NO_THEME.map(str::to_owned);
-        let mut event_loop: EventLoop<'static, State> =
-            EventLoop::try_new().expect("an event loop");
-        let display: Display<State> = Display::new().expect("a wayland display");
-        let mut state = State::new(
-            &mut event_loop,
-            display,
-            Config::default(),
-            Keybindings::default(),
-            appearance,
-            1.0,
-        )
-        .expect("a compositor state with a wayland socket");
-
-        // A socket pair rather than the listening socket: identical
-        // per-client dispatch, no dependence on which socket name it got.
-        let (server_end, client_end) = UnixStream::pair().expect("a socket pair");
-        let client: Client = state
-            .display_handle
-            .insert_client(server_end, Arc::new(ClientState::default()))
-            .expect("an inserted client");
-
+        // No backend: nothing here renders through the compositor's own
+        // pipeline. [`Fixture::frame`] draws the cursor elements offscreen.
+        let mut fixture = Harness::bare(appearance);
         let (id_tx, id_rx) = channel();
-        let (step_tx, step_rx) = channel();
-        let (ack_tx, ack_rx) = channel();
-        let handle = thread::spawn(move || run_client(client_end, id_tx, step_rx, ack_tx));
-
-        let mut fixture = Self {
-            event_loop,
-            state,
-            steps: Some(step_tx),
-            acks: ack_rx,
-            client: Some(handle),
-            cursor_shape_advertised: false,
-        };
+        fixture.spawn(move |stream, steps, acks| run_client(stream, id_tx, steps, acks));
 
         // Give the pointer a focus inside this client, which is what makes
         // its later `set_cursor` calls legal (Smithay checks the serial
         // against the last `wl_pointer.enter` it sent).
-        let focus_id = fixture.wait_for(&id_rx, "the client's focus surface id");
+        let focus_id = fixture.wait_for(0, &id_rx, "the client's focus surface id");
         // Sent straight after the id, from the same registry roundtrip.
-        fixture.cursor_shape_advertised =
-            fixture.wait_for(&id_rx, "the client's cursor-shape report") != 0;
-        let focus: ServerSurface = client
+        let cursor_shape_advertised =
+            fixture.wait_for(0, &id_rx, "the client's cursor-shape report") != 0;
+        let focus: ServerSurface = fixture
+            .client(0)
             .object_from_protocol_id(&fixture.state.display_handle, focus_id)
             .expect("the client's focus surface");
         let pointer = fixture.state.seat.get_pointer().expect("a pointer");
@@ -593,44 +558,13 @@ impl Fixture {
         );
         pointer.frame(&mut fixture.state);
         let _ = fixture.state.display_handle.flush_clients();
-        fixture
-    }
-
-    /// Dispatches the compositor until `channel` produces a value. The
-    /// deadline only exists so a regression fails in seconds instead of
-    /// hanging the suite forever.
-    fn wait_for<T>(&mut self, channel: &Receiver<T>, what: &str) -> T {
-        let deadline = Instant::now() + Duration::from_secs(10);
-        loop {
-            if let Ok(value) = channel.try_recv() {
-                return value;
-            }
-            assert!(
-                Instant::now() < deadline,
-                "timed out waiting for {what}; the client thread stopped or the compositor did"
-            );
-            self.event_loop
-                .dispatch(Some(Duration::from_millis(5)), &mut self.state)
-                .expect("a compositor dispatch");
-        }
-    }
-
-    /// Runs one client step to completion.
-    fn run(&mut self, step: Step) {
-        self.steps
-            .as_ref()
-            .expect("the step channel")
-            .send(step)
-            .expect("the client thread is still running");
-        let acks = std::mem::replace(&mut self.acks, channel().1);
-        self.wait_for(&acks, "a client step acknowledgement");
-        self.acks = acks;
+        (fixture, cursor_shape_advertised)
     }
 
     /// Renders this frame's cursor elements into a [`CANVAS`]-square
     /// framebuffer and hands back the raw BGRA pixels, exactly the layout
     /// `headless.rs` renders into.
-    fn render(&self) -> Canvas {
+    fn frame(&self) -> Canvas {
         let mut renderer = PixmanRenderer::new().expect("a pixman renderer");
         let mut image = renderer
             .create_buffer(Fourcc::Argb8888, (CANVAS, CANVAS).into())
@@ -657,29 +591,6 @@ impl Fixture {
     }
 }
 
-impl Drop for Fixture {
-    fn drop(&mut self) {
-        // Closing the step channel is what ends `run_client`'s loop.
-        self.steps = None;
-        if let Some(handle) = self.client.take() {
-            // The client may still be mid-roundtrip, which only completes
-            // while the compositor dispatches -- so keep dispatching until
-            // it's actually done rather than blocking on the join.
-            let deadline = Instant::now() + Duration::from_secs(10);
-            while !handle.is_finished() && Instant::now() < deadline {
-                let _ = self
-                    .event_loop
-                    .dispatch(Some(Duration::from_millis(5)), &mut self.state);
-            }
-            if let Ok(Err(error)) = handle.join() {
-                // Not an assert: a panicking `Drop` while another assertion
-                // is already unwinding aborts the process and hides it.
-                eprintln!("the test client failed: {error}");
-            }
-        }
-    }
-}
-
 /// One rendered frame: its raw BGRA pixels and how many cursor elements went
 /// into it.
 struct Canvas {
@@ -689,8 +600,7 @@ struct Canvas {
 
 impl Canvas {
     fn at(&self, x: i32, y: i32) -> [u8; 4] {
-        let idx = ((y * CANVAS + x) * 4) as usize;
-        self.pixels[idx..idx + 4].try_into().expect("four bytes")
+        pixel(&self.pixels, CANVAS, x, y)
     }
 
     /// Asserts no cursor element existed at all *and* nothing was drawn.
@@ -718,7 +628,7 @@ fn a_client_cursor_surface_is_drawn_instead_of_the_fallback() {
     });
     fixture.run(Step::SetCursor { hotspot: (4, 6) });
 
-    let canvas = fixture.render();
+    let canvas = fixture.frame();
     assert_eq!(canvas.count, 1, "one element for a cursor with no children");
     // The hotspot must land exactly on the pointer: the client asked for
     // (4, 6) within a 24x24 image, so the image occupies x 46..70, y 44..68.
@@ -743,14 +653,14 @@ fn a_new_hotspot_on_the_same_surface_moves_the_cursor() {
         color: CLIENT_BGRA,
     });
     fixture.run(Step::SetCursor { hotspot: (4, 6) });
-    assert_eq!(fixture.render().at(46, 44), CLIENT_BGRA);
+    assert_eq!(fixture.frame().at(46, 44), CLIENT_BGRA);
 
     // Same surface, new hotspot. `CursorImageStatus::Surface` carries only
     // the surface, so this second status compares equal to the first -- the
     // hotspot has to be re-read from the surface at render time or this
     // change is invisible.
     fixture.run(Step::SetCursor { hotspot: (0, 0) });
-    let canvas = fixture.render();
+    let canvas = fixture.frame();
     assert_eq!(canvas.at(50, 50), CLIENT_BGRA, "the new hotspot pixel");
     assert_eq!(canvas.at(73, 73), CLIENT_BGRA, "the image's bottom-right");
     assert_eq!(canvas.at(46, 44), CLEAR_BGRA, "the old position is clear");
@@ -764,7 +674,7 @@ fn a_cursor_surface_with_no_buffer_draws_nothing() {
     // Not the fallback triangle: the client did supply a cursor, it just has
     // no content yet, and inventing a shape for it would flash the wrong
     // image between `set_cursor` and the client's first commit.
-    fixture.render().assert_blank();
+    fixture.frame().assert_blank();
 }
 
 #[test]
@@ -775,7 +685,7 @@ fn destroying_the_cursor_surface_falls_back_to_the_builtin_shape() {
         color: CLIENT_BGRA,
     });
     fixture.run(Step::SetCursor { hotspot: (4, 6) });
-    assert_eq!(fixture.render().at(50, 50), CLIENT_BGRA);
+    assert_eq!(fixture.frame().at(50, 50), CLIENT_BGRA);
 
     // No replacement cursor is set: the surface simply goes away while it is
     // still the active image. Nothing upstream resets the status for us, so
@@ -790,7 +700,7 @@ fn destroying_the_cursor_surface_falls_back_to_the_builtin_shape() {
         "the destroyed cursor surface is still the active status"
     );
 
-    let canvas = fixture.render();
+    let canvas = fixture.frame();
     assert_eq!(canvas.count, 1, "the fallback element");
     assert_eq!(
         canvas.at(50, 50),
@@ -836,7 +746,7 @@ fn a_configured_cursor_size_and_color_reach_the_rendered_pixels() {
     });
     // No client cursor is ever set, so this is the fallback shape: the status
     // `State::new` starts with is `default_named()`.
-    let canvas = fixture.render();
+    let canvas = fixture.frame();
     assert_eq!(canvas.count, 1, "the fallback element");
 
     let (px, py) = (POINTER.0 as i32, POINTER.1 as i32);
@@ -877,7 +787,7 @@ fn a_translucent_cursor_color_blends_with_the_background() {
         cursor_color: Color::parse("#ffffff80").expect("a valid color"),
         ..Appearance::default()
     });
-    let canvas = fixture.render();
+    let canvas = fixture.frame();
     let (px, py) = (POINTER.0 as i32, POINTER.1 as i32);
 
     let blended = canvas.at(px + 1, py + 3);
@@ -910,13 +820,13 @@ fn hiding_and_restoring_a_cursor_leaves_no_stale_state() {
     // crosses widget boundaries; nothing may leak or wedge across them.
     for _ in 0..8 {
         fixture.run(Step::SetCursor { hotspot: (4, 6) });
-        assert_eq!(fixture.render().at(50, 50), CLIENT_BGRA);
+        assert_eq!(fixture.frame().at(50, 50), CLIENT_BGRA);
         fixture.run(Step::HideCursor);
-        fixture.render().assert_blank();
+        fixture.frame().assert_blank();
     }
 
     fixture.run(Step::SetCursor { hotspot: (4, 6) });
-    assert_eq!(fixture.render().at(46, 44), CLIENT_BGRA);
+    assert_eq!(fixture.frame().at(46, 44), CLIENT_BGRA);
 }
 
 #[test]
@@ -938,7 +848,7 @@ fn an_extreme_hotspot_neither_panics_nor_draws() {
     // panic on overflow.
     for hotspot in [(i32::MIN, i32::MIN), (i32::MAX, i32::MAX)] {
         fixture.run(Step::SetCursor { hotspot });
-        let canvas = fixture.render();
+        let canvas = fixture.frame();
         // The element must really have been built and handed to the damage
         // tracker at that coordinate -- an early bail-out would make the
         // "nothing drawn" assertion below prove nothing.
@@ -949,7 +859,7 @@ fn an_extreme_hotspot_neither_panics_nor_draws() {
     // ...and a sane hotspot afterwards still works, i.e. nothing was left
     // wedged.
     fixture.run(Step::SetCursor { hotspot: (4, 6) });
-    assert_eq!(fixture.render().at(50, 50), CLIENT_BGRA);
+    assert_eq!(fixture.frame().at(50, 50), CLIENT_BGRA);
 }
 
 #[test]
@@ -968,7 +878,7 @@ fn a_cursor_surface_with_a_subsurface_draws_both() {
 
     // Spec-legal and rare, but nothing here may assume a cursor is exactly
     // one element: the child sits to the right of the parent's 24x24.
-    let canvas = fixture.render();
+    let canvas = fixture.frame();
     assert_eq!(canvas.count, 2, "a parent and its subsurface");
     assert_eq!(canvas.at(50, 50), CLIENT_BGRA, "the parent at the hotspot");
     assert_eq!(canvas.at(75, 51), CHILD_BGRA, "the child, offset by 24");
@@ -991,9 +901,9 @@ fn the_cursor_shape_manager_is_advertised() {
     // asserting on the default status rather than on anything the protocol
     // did. `foot` prints "compositor does not implement server-side cursors"
     // on exactly this.
-    let fixture = Fixture::new();
+    let (_fixture, advertised) = Fixture::reporting_globals();
     assert!(
-        fixture.cursor_shape_advertised,
+        advertised,
         "wp_cursor_shape_manager_v1 is not in the registry"
     );
 }
@@ -1018,7 +928,7 @@ fn a_named_shape_reaches_the_rendered_pixels() {
         "set_shape(text) did not reach the cursor's status"
     );
 
-    let canvas = fixture.render();
+    let canvas = fixture.frame();
     assert_eq!(canvas.count, 1, "one element for a named shape");
     // The I-beam is centred on the pointer (see `Shape::hotspot`), so its
     // 16x16 bitmap occupies x 42..58, y 42..58 -- and the arrow's own
@@ -1065,7 +975,7 @@ fn different_named_shapes_draw_different_pixels() {
         wp_cursor_shape_device_v1::Shape::Move,
     ] {
         fixture.run(Step::SetShape { shape });
-        frames.push((shape, fixture.render().pixels));
+        frames.push((shape, fixture.frame().pixels));
     }
     for (i, (shape, pixels)) in frames.iter().enumerate() {
         for (other, other_pixels) in &frames[i + 1..] {
@@ -1087,7 +997,7 @@ fn an_unmapped_shape_name_still_draws_the_arrow() {
     fixture.run(Step::SetShape {
         shape: wp_cursor_shape_device_v1::Shape::Wait,
     });
-    let canvas = fixture.render();
+    let canvas = fixture.frame();
     assert_eq!(canvas.count, 1, "the arrow element");
     assert_eq!(
         canvas.at(50, 50),
@@ -1109,7 +1019,7 @@ fn a_named_shape_replaces_a_client_cursor_surface() {
         color: CLIENT_BGRA,
     });
     fixture.run(Step::SetCursor { hotspot: (4, 6) });
-    assert_eq!(fixture.render().at(50, 50), CLIENT_BGRA);
+    assert_eq!(fixture.frame().at(50, 50), CLIENT_BGRA);
 
     fixture.run(Step::SetShape {
         shape: wp_cursor_shape_device_v1::Shape::Crosshair,
@@ -1121,7 +1031,7 @@ fn a_named_shape_replaces_a_client_cursor_surface() {
         ),
         "the client's surface is still the active cursor image"
     );
-    let canvas = fixture.render();
+    let canvas = fixture.frame();
     assert_eq!(canvas.count, 1, "one element, and it is not the surface");
     assert_ne!(
         canvas.at(50, 50),

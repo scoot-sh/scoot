@@ -50,7 +50,7 @@ use flexwm_core::Config;
 use smithay::backend::allocator::Fourcc;
 use smithay::backend::renderer::{Bind, ExportMem};
 use smithay::reexports::calloop::EventLoop;
-use smithay::reexports::wayland_server::Display;
+use smithay::reexports::wayland_server::{Client, Display};
 use smithay::utils::Rectangle;
 use wayland_client::EventQueue;
 
@@ -94,6 +94,9 @@ pub(crate) struct Harness<S, A> {
 
 /// One connected client thread and the channels driving it.
 struct ClientHandle<S, A> {
+    /// The compositor's own handle on the client, for resolving a protocol id
+    /// the client reported back into the server-side resource it names.
+    client: Client,
     /// `None` once the test has disconnected this client on purpose. Dropping
     /// it is what ends the client script's `steps.recv()` loop.
     steps: Option<Sender<S>>,
@@ -104,6 +107,13 @@ struct ClientHandle<S, A> {
 }
 
 impl<S, A> Harness<S, A> {
+    /// A compositor with no backend at all: nothing renders, and
+    /// [`Harness::pixels`] would panic. For suites that assert on the wire, or
+    /// that render offscreen themselves.
+    pub(crate) fn bare(appearance: Appearance) -> Self {
+        Self::build(appearance, None)
+    }
+
     /// A compositor with a real headless backend rendering into a
     /// `canvas`-square framebuffer, which [`Harness::render`] draws and reads
     /// back with the real `PixmanRenderer`.
@@ -151,7 +161,8 @@ impl<S, A> Harness<S, A> {
         A: Send + 'static,
     {
         let (server_end, client_end) = UnixStream::pair().expect("a socket pair");
-        self.state
+        let client = self
+            .state
             .display_handle
             .insert_client(server_end, Arc::new(ClientState::default()))
             .expect("an inserted client");
@@ -160,11 +171,18 @@ impl<S, A> Harness<S, A> {
         let (ack_tx, ack_rx) = channel();
         let thread = thread::spawn(move || script(client_end, step_rx, ack_tx));
         self.clients.push(ClientHandle {
+            client,
             steps: Some(step_tx),
             acks: ack_rx,
             thread: Some(thread),
         });
         self.clients.len() - 1
+    }
+
+    /// The compositor's own handle on a connected client, for turning a
+    /// protocol id the client reported back into a server-side resource.
+    pub(crate) fn client(&self, index: usize) -> &Client {
+        &self.clients[index].client
     }
 
     /// Runs one step on client 0 to completion, then lets the compositor
@@ -210,6 +228,25 @@ impl<S, A> Harness<S, A> {
             assert!(
                 Instant::now() < deadline,
                 "timed out waiting for client {index}; the compositor stopped serving"
+            );
+            self.dispatch_once();
+        }
+    }
+
+    /// Dispatches until `channel` produces a value, for whatever a client
+    /// reports outside the step protocol -- the ids of the surfaces it made
+    /// before the first step, say.
+    pub(crate) fn wait_for<T>(&mut self, index: usize, channel: &Receiver<T>, what: &str) -> T {
+        let deadline = Instant::now() + PATIENCE;
+        loop {
+            match channel.try_recv() {
+                Ok(value) => return value,
+                Err(TryRecvError::Disconnected) => self.client_died(index, what),
+                Err(TryRecvError::Empty) => {}
+            }
+            assert!(
+                Instant::now() < deadline,
+                "timed out waiting for {what}; the compositor stopped serving"
             );
             self.dispatch_once();
         }
