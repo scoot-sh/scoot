@@ -1359,10 +1359,11 @@ fn a_parked_wait_idle_cannot_hold_its_slot_forever() {
 #[test]
 fn a_wait_idle_within_the_cap_is_left_exactly_as_it_asked() {
     // The other half: capping must not quietly shorten a wait that was
-    // already inside the bound. This one asks for a quiet period it will
-    // never get and a timeout well under the cap, so the moment it is
-    // answered is its own `timeout_ms` and nothing else.
-    const TIMEOUT: Duration = Duration::from_millis(200);
+    // already inside the bound -- nor lengthen it to the cap. This one asks
+    // for a quiet period it will never get and a timeout well under the cap,
+    // so the moment it is answered is its own `timeout_ms` and nothing else,
+    // and the assertions below bracket it on both sides.
+    const TIMEOUT: Duration = Duration::from_millis(100);
 
     let mut harness = Harness::new();
     let mut client = harness.connect_limited(
@@ -1391,6 +1392,11 @@ fn a_wait_idle_within_the_cap_is_left_exactly_as_it_asked() {
     assert!(
         waited >= TIMEOUT,
         "answered after {waited:?}, before the {TIMEOUT:?} it asked for"
+    );
+    assert!(
+        waited < TINY_IDLE_WAIT,
+        "answered after {waited:?}: waited the cap out rather than its own \
+         {TIMEOUT:?}"
     );
     client.expect_closed(&mut harness);
 }
