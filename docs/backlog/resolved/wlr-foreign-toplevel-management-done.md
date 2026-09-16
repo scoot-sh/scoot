@@ -200,8 +200,9 @@ by the manager that created them.
 ## Evidence
 
 Everything below was captured at **`699d940`** — the whole PR, code and
-docs; the only commit after it is the one that writes this SHA into this
-section. Dev VM (`ssh -p 2222 dev@localhost`), debug build through the 9p
+docs. Every commit after it changes Markdown only (this evidence section and
+two documentation corrections); no `.rs` file differs between `699d940` and
+the branch head, which `git diff 699d940 -- '*.rs'` shows as empty. Dev VM (`ssh -p 2222 dev@localhost`), debug build through the 9p
 mount at `/mnt/flexwm`, `CARGO_TARGET_DIR=/var/cargo-target`, force-cleaned
 (`cargo clean -p flexwm && cargo build -p flexwm`) first, because a build
 through that mount can otherwise report `Finished` in under two seconds
