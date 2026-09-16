@@ -119,7 +119,14 @@ list behind that.
   to bind. DMS docs list this protocol as required for generic
   compositors.
 - Rough size: M–L (new protocol surface; check for an `ext-` successor
-  first, per the standing rule).
+  first, per the standing rule). Half-resolved 2026-09-16 (PR #49): there is
+  no `ext-` successor at the pinned rev, so the wlr protocol it is, and the
+  query half DMS's daemon is asking for now exists — `Received empty outputs
+  list` should be gone on a current build.
+  `docs/backlog/resolved/output-management-read-only-done.md`.
+  Reconfiguration (the "Settings → display" *writes*, and interface scaling)
+  is still refused, deliberately:
+  `docs/backlog/protocols/output-management-reconfiguration.md`.
 
 ### 5. `xdg_popup` never configured
 

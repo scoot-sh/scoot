@@ -193,6 +193,12 @@ anything.
   Display page (rendered, in the sidebar) but nothing to bind —
   display/scaling management is dead the same way DMS's was. Check for
   an `ext-` successor first, per the standing rule.
+- Half-resolved 2026-09-16 (PR #49): there is no `ext-` successor at the
+  pinned rev, and the query half now exists, so the Display page has
+  something to bind and read.
+  `docs/backlog/resolved/output-management-read-only-done.md`. Changing the
+  mode/position/scale from that page is still refused, deliberately:
+  `docs/backlog/protocols/output-management-reconfiguration.md`.
 
 ### 5. `xdg_popup` never configured — reproduces (untested live, same standing as DMS)
 

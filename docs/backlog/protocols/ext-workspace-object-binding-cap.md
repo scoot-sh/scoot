@@ -31,3 +31,12 @@ without limit (see `windows_opened_and_destroyed_at_full_rate_leave_
 nothing_behind`'s 200-in-a-burst case) — so a single client can force
 `binds × self-created windows` of server-side object allocation, both
 factors entirely under that one client's control.
+
+Update 2026-09-16 (PR #49): `zwlr_output_manager_v1` is the third of this
+shape. Its per-bind cost is one head object plus one mode object per known
+mode — bounded, since flexwm has exactly one output and `Output::modes`
+only grows at most once per process (see `output_management.rs`'s module
+doc) — so on its own it is the least dangerous of the three multipliers,
+closer to `ext-workspace`'s than to foreign-toplevel's. Still the same
+fix when one lands: per-client accounting across all of them, not a
+one-off limit on any single global.

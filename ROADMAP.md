@@ -85,6 +85,20 @@ gap jumped the queue — each item's own file records why it landed when it did.
   [its own item](docs/backlog/protocols/wlr-foreign-toplevel-management.md):
   quickshell — and so DMS and Noctalia — binds the *wlr* protocol and
   ignores this one.
+- **[Output management, read half](docs/backlog/resolved/output-management-read-only-done.md)**
+  (PR #49, 2026-09-16) — `zwlr_output_manager_v1` (version 4), what a shell's
+  Settings → Display page and `wlr-randr` read the screen's modes, position,
+  scale and transform from. The wlr protocol rather than an `ext-` one only
+  because no successor exists at the pinned rev — checked, not assumed — and
+  Smithay carries no helper for either, so the handler layer is hand-written
+  against the generated wlr bindings, the shape `gamma_control.rs` already
+  uses. Every value is read from the same `Output` that configures
+  `wl_output`, with a test that binds both on one connection and compares
+  them. **Read-only by design**: `apply`/`test` always answer `failed`, and
+  reconfiguration is
+  [its own deferred item](docs/backlog/protocols/output-management-reconfiguration.md)
+  — flexwm has one output with a fixed mode, position and scale, so a
+  `succeeded` that changed nothing would be a settings page that lies.
 
 ## What's next
 
@@ -106,7 +120,6 @@ actually open.
    [`wlr-foreign-toplevel-management`](docs/backlog/protocols/wlr-foreign-toplevel-management.md)
    (what those two shells actually bind — the `ext-` list shipped in PR #47
    and, measured, quickshell ignores it),
-   [output-management](docs/backlog/protocols/output-management.md),
    [screencopy/image-capture](docs/backlog/protocols/screencopy-capture.md),
    plus two filed from PR #44's own review —
    [popup grab serial validation](docs/backlog/protocols/popup-grab-serial-validation.md)
@@ -180,8 +193,13 @@ probes' recommended order:
    of this gap is
    [`wlr-foreign-toplevel-management`](docs/backlog/protocols/wlr-foreign-toplevel-management.md),
    which is a control protocol as much as an enumeration one.
-4. [`output-management`](docs/backlog/protocols/output-management.md)
-   — shell display/settings pages.
+4. [`output-management`](docs/backlog/resolved/output-management-read-only-done.md)
+   — HALF-RESOLVED 2026-09-16 (PR #49): the query half a shell's display page
+   binds is implemented (`wlr-output-management-unstable-v1` v4 — no `ext-`
+   successor exists at the pinned rev, so the standing preference had nothing
+   to prefer). Reconfiguration is deliberately refused and re-filed as
+   [its own item](docs/backlog/protocols/output-management-reconfiguration.md),
+   gated on multi-output support: nothing an `apply` could ask for exists yet.
 5. [`screencopy / image-capture`](docs/backlog/protocols/screencopy-capture.md)
    — thumbnails/overview previews (filed 2026-09-14; IPC screenshots
    stay regardless).

@@ -46,6 +46,10 @@ for it (see Layer-shell clients below), `ext-workspace-v1`, so those
  bars can also list, follow and switch workspaces (see Workspaces for bars
  below), `ext-foreign-toplevel-list-v1`, so a taskbar, dock or alt-tab
  switcher can list the windows themselves (see Window lists for bars below),
+ `wlr-output-management-unstable-v1`, so `wlr-randr` and a shell's
+ Settings → Display page can read the screen's modes, position, scale and
+ transform — read-only, every reconfiguration is refused (see Display
+ information below),
  `ext-session-lock-v1`, so a real screen locker can lock the session
  with the compositor itself enforcing it (see Screen locking below),
  `ext-idle-notify-v1` and `idle-inhibit-unstable-v1`, so a `swayidle`-style
@@ -607,6 +611,70 @@ Worth knowing before you write against it:
 - **The list stays live while the session is locked**, exactly as `flexwm msg
   windows` does — see Screen locking below for the trust model that sits
   behind that.
+
+## Display information (`wlr-output-management-unstable-v1`)
+
+flexwm implements `zwlr_output_manager_v1` (version 4), which is what
+`wlr-randr`, `kanshi` and a shell's Settings → Display page read the screen's
+modes, position, scale and transform from. `wl_output` says what the screen
+*is*; this is the management protocol on top of it. The global is available to
+every client, no privilege or allow-list.
+
+**It is read-only. `apply` and `test` always answer `failed`.** flexwm has
+exactly one output, whose mode, position, scale and transform are fixed for the
+life of the process, so there is nothing a configuration could change. That is
+a refusal, not a stub: a configuration that reported `succeeded` and changed
+nothing would give you a Display page whose buttons appear to work.
+`wlr-randr --output <name> --pos 100,100` prints `failed to apply
+configuration` and exits non-zero, which is the honest answer. Reconfiguration
+gets implemented alongside real multi-output support; see
+`docs/backlog/protocols/output-management-reconfiguration.md`.
+
+This is the wlr protocol rather than an `ext-` one only because no `ext-`
+successor exists yet — unlike `ext-workspace-v1` and
+`ext-foreign-toplevel-list-v1` above, there is nothing newer to prefer.
+
+What a client sees:
+
+- **One `zwlr_output_head_v1`**, since there is one output, carrying its
+  `name` (the same one `wl_output` reports — a DRM connector name like
+  `HDMI-A-1` under `--tty`, `headless` otherwise), `description`, `make`,
+  `model`, `enabled`, `position`, `transform`, `scale` and `adaptive_sync`
+  (always `disabled`; flexwm has no VRR support).
+- **A `zwlr_output_mode_v1` per mode the output knows**, with its size,
+  refresh rate and whether it is preferred. Binding the global announces
+  everything immediately, so registry order doesn't matter.
+- **Changes arrive in batches closed by `done`**, which carries a serial that
+  advances on every real change. The only thing that can trigger one today is
+  a `--nested` host's *initial* configure at startup, if it proposes a size
+  other than `--width`/`--height` — flexwm applies that one and then ignores
+  every later resize of the host window, so nothing changes again after
+  startup.
+- **`stop` is answered with `finished`**, after which the head and mode
+  objects the client already has stay valid until it destroys them — the
+  protocol's own teardown order.
+
+Worth knowing before you write against it:
+
+- **The refresh rate is always 60 Hz**, including under `--tty` on a faster
+  panel. `wl_output` already reports the same thing; this mirrors it rather
+  than adding a second, differently-wrong number.
+- **No `physical_size` and no `serial_number`.** flexwm knows neither (its
+  physical size is `0x0` on `wl_output` too, and its serial is a placeholder),
+  and the protocol allows omitting both. A client that keys a saved
+  per-monitor profile off a serial would otherwise match every flexwm session
+  on every machine.
+- **The mode list only grows, and only once.** If the `--nested` host's
+  initial configure at startup proposes a size other than `--width`/
+  `--height`, that adds a mode rather than replacing one, so both sizes stay
+  advertised — matching what `wl_output` does with the same change. A host
+  resizing the window after startup does nothing; flexwm never picks up a
+  second mode change.
+- **A `--tty` VT switch changes nothing.** The output does not go away when
+  you switch to another VT, it just stops being drawn, so the head stays
+  enabled with the same mode and no `done` is sent.
+- **Multiple outputs will change the shape of this** — one head per output is
+  what the protocol is built for — but flexwm has exactly one output today.
 
 ## Screen locking (`ext-session-lock-v1`)
 

@@ -24,7 +24,13 @@ blocked: null
   - **`wlr-output-management-unstable-v1`** (or a newer successor) — lets
     tools like `wlr-randr`/`kanshi` query and reconfigure output mode,
     position and scale. Moot while flexwm has exactly one `Output` and no
-    real multi-monitor support; relevant once that lands.
+    real multi-monitor support; relevant once that lands. *Half-resolved
+    2026-09-16 (PR #49): the query half shipped — it turned out to have real
+    clients (shell display pages) well ahead of multi-output support, and
+    there is no newer successor to prefer. See
+    `../resolved/output-management-read-only-done.md`. The reconfigure half
+    is still moot for exactly the reason above, and is re-filed as
+    `output-management-reconfiguration.md`.*
   - **`security-context-v1`** — lets a compositor scope what a sandboxed
     client (e.g. a Flatpak) is allowed to do. Relevant for hardened setups,
     not a natural fit with this project's current minimalist scope.
