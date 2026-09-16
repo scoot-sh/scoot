@@ -20,6 +20,9 @@
 //!
 //! Like every other live-[`State`] test module here, these need a writable
 //! `$XDG_RUNTIME_DIR`: [`State::new`] binds a real listening socket.
+//!
+//! Whether an activation takes the keyboard back from a clicked `on_demand`
+//! layer surface lives in [`keyboard`], which has its own taskbar fixture.
 
 use std::io::Write;
 use std::os::fd::AsFd;
@@ -48,6 +51,8 @@ use crate::compositor::decorations::Appearance;
 use crate::compositor::input::interaction;
 use crate::compositor::state::ClientState;
 use crate::compositor::test_support::Harness;
+
+mod keyboard;
 
 /// The one output every test here gives the core, so there is somewhere for
 /// windows to be arranged.
@@ -318,6 +323,18 @@ enum Ack {
     /// Both toplevels are up, one of them has the keyboard, and the client is
     /// now blocked waiting to be typed at.
     Mapped,
+    /// The taskbar client mapped its `on_demand` layer surface (see
+    /// `keyboard.rs`, the only script that sends this).
+    TaskbarMapped,
+    /// The windows client mapped its two toplevels and parked holding them
+    /// (see `keyboard.rs`, the only script that sends this).
+    WindowsMapped,
+    /// The locker client took the session lock (see `keyboard.rs`, the only
+    /// script that sends this).
+    Locked,
+    /// The locker client unlocked again after the test told it to (see
+    /// `keyboard.rs`, the only script that sends this).
+    Unlocked,
     /// The script ran to the end. Boxed because a `Run` owns a `Connection`
     /// and is far larger than the other variant.
     Done(Box<Run>),
