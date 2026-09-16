@@ -67,8 +67,11 @@ output scaling (`[output] scale` over `wl_output.scale`,
 correctly-sized clients and text instead of everything rendered physically
 tiny — see Output scaling below), plus a
 hardened control socket (owner-only
-permissions, a same-user peer check, a 1 MiB cap on a single request, and
-screenshots rate-limited to one per connection per frame) whose connections
+permissions, a same-user peer check, a 1 MiB cap on a single request,
+screenshots rate-limited to one per connection per frame, at most 64
+connections at once, a connection whose peer has stopped reading its
+reply dropped after ten seconds, and a `wait-idle` capped at a minute
+however long it asked for) whose connections
 are non-blocking end to end, so no client — however slow, chunked or
 unresponsive — can stall the compositor for anyone else. Sizes a client or a
 config supplies are bounded too: each individual `wl_shm` pool is capped at
@@ -189,6 +192,50 @@ things worth knowing:
   needs AltGr, which `key` has no name for); `flexwm msg type` is the one
   that works the modifiers out from the layout, and the one to reach for
   when the goal is text rather than a chord.
+
+### What the control socket refuses
+
+Five bounds an agent driving flexwm over IPC can actually hit. The first
+three are refusals with a reason — an ordinary `error` response, which
+`flexwm msg` prints and exits non-zero on — rather than a silent drop or a
+delay. The last two can't be: one drops a peer that is by definition not
+reading its socket, and the other shortens a wait rather than refusing it.
+
+- **One request line may be at most 1 MiB.** Past that the connection is
+  told so and closed; there is no resynchronizing mid-line.
+- **One screenshot per connection per 16ms frame.** A capture costs a full
+  render and PNG encode on the thread that serves every other client, so a
+  second one inside the same frame is refused rather than queued. Retry
+  after a frame.
+- **At most 64 connections at once**, across every client. A 65th is
+  refused with a message naming the limit and closed immediately, not
+  queued behind the others. This is what keeps the per-connection bounds
+  above meaningful — otherwise reconnecting resets them — so an agent that
+  wants many requests should pipeline them on *one* connection rather than
+  open a connection per request. `flexwm msg` opens one per invocation and
+  closes it as soon as it has its answer, so ordinary scripted use never
+  approaches this.
+- **A connection whose peer stops reading is dropped**, ten to twenty
+  seconds after the last byte it took (the check runs on a deadline of its
+  own, so the exact moment falls in that range rather than on the ten
+  exactly). Nothing is sent when this happens — there is nobody reading to
+  send it to; the connection simply closes. Replies that don't fit in the
+  socket are queued and pushed out as the client reads; a client that takes
+  no bytes at all for that long — the classic case being one that sends a
+  request, does `shutdown(SHUT_WR)` and then never reads the answer — is
+  treated as gone, and its connection and fds are released. Reading *slowly*
+  is fine and is never given up on: the clock is measured from the last byte
+  that actually went out, not from when the reply was queued, so draining a
+  multi-megabyte screenshot over a minute costs nothing.
+- **`wait-idle` waits at most 60 seconds**, whatever `--timeout-ms` asks
+  for. A longer request isn't refused, it's shortened: the answer comes back
+  as usual, at the minute mark at the latest. A waiting `wait-idle` keeps
+  its connection (and one of the 64 slots above) for as long as it waits,
+  and — uniquely on this socket — cannot notice its client dying while it
+  waits, so an unbounded wait from a client that then exits would hold that
+  slot for the rest of the session. The default is 5 seconds and the request
+  is meant for hundreds of milliseconds, so this is well out of the way of
+  any real use.
 
 `--tty` needs a seat (`seatd` or logind) with a DRM device on it. On a modern
 kernel, on every non-root `--tty` run, Smithay logs `Unable to become drm
@@ -413,6 +460,8 @@ Measured on real hardware with a `waybar` clock ticking once a second,
 `--quiet-ms 200` still settles normally (204 ms) while `--quiet-ms 1500`
 never does and times out. Keep `--quiet-ms` below whatever your bar's own
 redraw interval is — the same caveat an animated cursor already carried.
+(`--timeout-ms` is capped at 60 seconds, for the reason under What the
+control socket refuses above.)
 
 ## Workspaces for bars (`ext-workspace-v1`)
 

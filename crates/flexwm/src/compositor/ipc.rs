@@ -28,11 +28,14 @@ mod connection;
 mod line;
 mod listener;
 mod outbound;
+mod slots;
 #[cfg(test)]
 mod tests;
 
+use std::io::Write;
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
+use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 
 use flexwm_core::Action;
@@ -43,7 +46,9 @@ use flexwm_ipc::{
 use smithay::reexports::calloop::generic::Generic;
 use smithay::reexports::calloop::{EventLoop, Interest, Mode, PostAction};
 
+use self::connection::Limits;
 use self::outbound::Outbound;
+use self::slots::{MAX_CONNECTIONS, Slot, Slots};
 use super::State;
 use super::headless::FRAME_INTERVAL;
 use super::tty::VtSwitchOutcome;
@@ -75,7 +80,32 @@ pub struct PendingIdle {
     /// This request's answer on its way out, plus -- ahead of it -- whatever
     /// the connection had not finished writing when it handed over.
     outbound: Outbound,
+    /// The connection slot this waiter inherited, released when it is done
+    /// with (answered and written, or given up on). Held, never read: a
+    /// waiter's fd is one of the [`MAX_CONNECTIONS`] this compositor serves
+    /// just as much as a live connection's is. `Option` only because that is
+    /// how it moves out of the connection handing over; always `Some` here.
+    _slot: Option<Slot>,
 }
+
+/// What a client past [`MAX_CONNECTIONS`] is told, encoded once.
+///
+/// A constant answer to a constant question, so it is built on the first
+/// refusal and reused: the path is not hot (it takes a client in a connect
+/// loop to reach it at all), but a fresh `format!` and `encode` per refusal
+/// would be allocation handed out in response to exactly the behaviour this
+/// bound exists to discourage.
+static REFUSAL: LazyLock<String> = LazyLock::new(|| {
+    encode(&Response::error(format!(
+        "refused: flexwm serves at most {MAX_CONNECTIONS} ipc connections at once, \
+         and every slot is in use. Close one, or send this request on a connection \
+         that is already open -- requests pipeline, so one connection is enough for \
+         any number of them"
+    )))
+    // `Response::Error` is one `String`; serde cannot fail on it. An empty
+    // line would simply mean a refused client is closed without a reason.
+    .unwrap_or_default()
+});
 
 pub fn init(
     event_loop: &mut EventLoop<'static, State>,
@@ -87,11 +117,15 @@ pub fn init(
         .ok_or("no socket path: set FLEXWM_SOCKET or XDG_RUNTIME_DIR")?;
     let listener = listener::bind(&path)?;
 
+    // Owned by the accept loop rather than by `State`: the count is nobody
+    // else's business, and every live connection holds its own claim on it
+    // (see `slots`).
+    let slots = Slots::new();
     event_loop.handle().insert_source(
         Generic::new(listener, Interest::READ, Mode::Level),
-        |_, listener, state: &mut State| {
+        move |_, listener, state: &mut State| {
             while let Ok((stream, _)) = listener.accept() {
-                if let Err(error) = accept(state, stream) {
+                if let Err(error) = accept(state, stream, &slots, Limits::REAL) {
                     tracing::warn!(%error, "could not take an ipc client");
                 }
             }
@@ -103,7 +137,16 @@ pub fn init(
     Ok(())
 }
 
-fn accept(state: &mut State, stream: UnixStream) -> std::io::Result<()> {
+/// Takes one accepted socket into the event loop, or refuses it.
+///
+/// `limits` is [`Limits::REAL`] everywhere but the tests, which pass shorter
+/// deadlines rather than parking a test thread for tens of seconds.
+fn accept(
+    state: &mut State,
+    stream: UnixStream,
+    slots: &Slots,
+    limits: Limits,
+) -> std::io::Result<()> {
     // First, before this connection costs anything: an fd duplicated, a
     // buffer allocated, a place in the event loop -- and long before any
     // request of its own is read. A client that is not this compositor's own
@@ -130,15 +173,40 @@ fn accept(state: &mut State, stream: UnixStream) -> std::io::Result<()> {
     // Verified on the dev VM rather than assumed -- with the listener itself
     // already non-blocking, `fcntl(F_GETFL) & O_NONBLOCK` on the accepted fd
     // reads false. Set explicitly either way: this is load-bearing enough that
-    // it should not depend on what the listener happens to be.
+    // it should not depend on what the listener happens to be. Before the
+    // refusal below as well as after it, so that refusal's one write cannot
+    // block the compositor either.
     stream.set_nonblocking(true)?;
+
+    let Some(slot) = slots.claim() else {
+        // Refused outright rather than queued: a client waiting for a slot
+        // would be an unbounded list of waiting clients instead of an
+        // unbounded list of connections, and a retry costs a millisecond.
+        // Told why, rather than handed a socket that closes for no stated
+        // reason -- an agent that hits this needs to know it is the one
+        // holding them all. Best-effort, because there is nothing to do about
+        // a refusal that cannot be written, and reliable in practice: a
+        // freshly accepted socket's buffer is empty and this line is short.
+        tracing::debug!(
+            max = MAX_CONNECTIONS,
+            "refused an ipc connection: every connection slot is taken"
+        );
+        let _ = (&stream).write_all(REFUSAL.as_bytes());
+        return Ok(());
+    };
+
     state
         .loop_handle
         .insert_source(
-            connection::source(stream)?,
+            connection::source(stream, slot, limits)?,
             |_readiness, connection, state: &mut State| connection.step(state),
         )
-        .map_err(std::io::Error::other)?;
+        // The message rather than the error itself: an `InsertError` carries
+        // the source back out, and a source is single-threaded (it holds the
+        // connection's slot and its stall deadline, both `Rc`-backed), while
+        // `io::Error::other` wants something `Send + Sync`. Dropping it here
+        // is also what releases the slot the connection never got to use.
+        .map_err(|error| std::io::Error::other(error.to_string()))?;
     Ok(())
 }
 
@@ -387,10 +455,11 @@ fn wire(rect: flexwm_core::Rect) -> WireRect {
 /// is answered in microseconds, so a client that ignores it and hammers
 /// anyway costs the compositor a JSON reply per attempt, not a render.
 ///
-/// Per connection, not global, and so bypassable by reconnecting for every
-/// capture -- capping concurrent connections is the audit's separate finding
-/// and deliberately not in scope here. What this does close is the case the
-/// finding described: one connection issuing back-to-back captures.
+/// Per connection, not global, so what it bounds on its own is one connection
+/// issuing back-to-back captures; a client could otherwise reconnect for every
+/// capture and get a fresh allowance each time. That is what [`MAX_CONNECTIONS`]
+/// closes: reconnecting is still free, but only 64 connections can exist at
+/// once, so the captures a client can extract per frame are bounded too.
 ///
 /// `duration_since` saturates to zero rather than panicking when `last` is
 /// somehow later than `now`, so a clock that fails to be monotonic makes this

@@ -74,6 +74,22 @@ pub(super) struct Outbound {
     /// How much of `buffer` the socket has taken. Invariant: never greater
     /// than `buffer.len()`.
     sent: usize,
+    /// How many bytes have gone out through this queue since the connection
+    /// opened, across every reply. Only ever increases.
+    ///
+    /// Deliberately not derivable from [`Outbound::pending`], which is what
+    /// the write-stall deadline in `connection.rs` tried first: a queue that
+    /// is the same size a window later has not necessarily stalled -- it may
+    /// have drained and been refilled, which is a client reading steadily
+    /// while the compositor answers it. Only a count of what actually left
+    /// can tell those apart.
+    ///
+    /// A `u64` because a `usize` would be one on 32-bit: a connection that
+    /// moved four gigabytes of screenshots would wrap it, and a wrapped
+    /// counter that happens to land on its previous value reads as "no
+    /// progress" -- i.e. drops a connection that is working perfectly. At
+    /// this width it cannot happen at any transfer rate a socket has.
+    total_sent: u64,
 }
 
 impl Outbound {
@@ -93,6 +109,12 @@ impl Outbound {
 
     pub(super) fn is_empty(&self) -> bool {
         self.pending() == 0
+    }
+
+    /// How many bytes this queue has ever got out. See [`Outbound::total_sent`]
+    /// for why the write-stall deadline watches this rather than `pending`.
+    pub(super) fn total_sent(&self) -> u64 {
+        self.total_sent
     }
 
     /// How much the queue is holding on to, sent bytes included. Only a test
@@ -144,6 +166,7 @@ impl Outbound {
         self.buffer = Vec::new();
         self.sent = 0;
         let written = write_some(socket, line.as_bytes())?;
+        self.total_sent += written as u64;
         if written < line.len() {
             self.sent = written;
             self.buffer = line.into_bytes();
@@ -158,6 +181,7 @@ impl Outbound {
         }
         let written = write_some(socket, &self.buffer[self.sent..])?;
         self.sent += written;
+        self.total_sent += written as u64;
         if self.sent == self.buffer.len() {
             // Fully out. Freed rather than cleared, for the reason in `send`.
             self.buffer = Vec::new();
