@@ -32,8 +32,11 @@
 //! counter and fall between them, so "between the oldest and the newest"
 //! would quietly admit the passive events this exists to exclude.
 //!
-//! Fixed-size and stack-allocated: this is written from the input path, on
-//! every key and button event, and must not allocate.
+//! Fixed-size and stored inline in [`State`], with no heap indirection of
+//! its own: this is written from the input path, on every key and button
+//! event, and must not allocate.
+//!
+//! [`State`]: super::State
 
 use smithay::utils::Serial;
 
