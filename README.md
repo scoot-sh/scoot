@@ -705,8 +705,12 @@ primitive, so flexwm checks the token three ways (see
   refused when it is created. What counts is a serial flexwm issued for a key
   or button event (press *or* release; pointer motion never counts, and
   neither does a *focus* event, which every newly mapped window gets for
-  free) within the last few input events, **and that was delivered to that
-  same client**. The recipient half matters: Wayland serials come from one
+  free) within the last few input events **and the last 10 seconds**, **and
+  that was delivered to that same client**. Both bounds are needed: an idle
+  session — an agent driving flexwm over IPC makes one, since injected
+  actions are not input events — never rotates the event history, so without
+  the clock a click from this morning would still be spendable tonight. The
+  recipient half matters too: Wayland serials come from one
   process-wide counter shared with non-input events, so a number alone is
   cheap to observe and guess — pairing it with who actually received the
   event is what makes this a check on interaction. A launcher minting its

@@ -33,14 +33,29 @@
 //! client that actually sent the request and no client can forge.
 //!
 //! "Delivered" is meant literally, and the call sites in `input.rs` keep it
-//! that way: a key a keybinding swallowed is not recorded at all (its serial
-//! is one the focused client never saw but could guess from the forwarded
-//! modifier presses around it), nor is an event with no recipient -- a key
-//! with nothing focused, a click on bare desktop. The one case that slips
-//! through is a duplicate press of a key already held, which Smithay absorbs
-//! as a non-transition without telling the caller; its serial is only
-//! guessable by the very client already being sent that key's real events,
-//! which has honest entries of its own either way.
+//! that way. Nothing is recorded for:
+//!
+//! - a key a keybinding swallowed -- its serial is one the focused client
+//!   never saw but could guess from the forwarded modifier presses around it;
+//! - an event with no recipient at all -- a key with nothing focused, a click
+//!   on bare desktop;
+//! - a key Smithay *absorbs* rather than delivers, which the pinned rev's
+//!   `KbdInternal::key_input` does for a press of a key already held and for
+//!   a release of a key it has no record of. The second is not theoretical:
+//!   under `--nested`, `nested_dispatch` forwards key events but not the
+//!   held-key array in `wl_keyboard.enter`, so a modifier held while entering
+//!   flexwm's window arrives as a lone release; `--tty` produces the same
+//!   shape when a press happens while the session is paused. `is_transition`
+//!   is not exposed, so `key()` tracks held keycodes itself to tell the
+//!   difference (see [`State::key`]).
+//!
+//! The one place the claim is not yet literal is an input method holding a
+//! keyboard grab (`zwp_input_method_v2.grab_keyboard`): Smithay's grab sends
+//! keys to the IME alone and leaves the seat's focus untouched, so the
+//! focused client is credited for keys it did not receive. That is not an
+//! escalation -- the window the user is typing into is still the one credited,
+//! which is the gate's intent -- but it is a divergence, filed as
+//! `docs/backlog/protocols/interaction-serial-ime-grab.md`.
 //!
 //! # Why a ring rather than "the last serial"
 //!
@@ -60,12 +75,13 @@
 //!   mints from the release serial, which a press-only tracker never saw.
 //!
 //! So what has to be remembered is a short *history* of qualifying events,
-//! and a token is honored if its serial and client are one of them. Exact
-//! match against remembered values, never a range: serials from events that
-//! do *not* qualify (pointer motion) and from the compositor's own focus
-//! changes (`shell.rs`'s `set_focus`) are drawn from the same global counter
-//! and fall between them, so "between the oldest and the newest" would
-//! quietly admit the passive events this exists to exclude.
+//! and a token is honored if its serial and client are one of them, and it is
+//! recent (see [`INTERACTION_WINDOW`]). Exact match against remembered
+//! values, never a range: serials from events that do *not* qualify (pointer
+//! motion) and from the compositor's own focus changes (`shell.rs`'s
+//! `set_focus`) are drawn from the same global counter and fall between them,
+//! so "between the oldest and the newest" would quietly admit the passive
+//! events this exists to exclude.
 //!
 //! Fixed-size and stored inline in [`State`], with no heap indirection of
 //! its own: this is written from the input path, on every key and button
@@ -73,7 +89,10 @@
 //!
 //! [`SERIAL_COUNTER`]: smithay::utils::SERIAL_COUNTER
 //! [`State`]: super::State
+//! [`State::key`]: super::State::key
 //! [`XdgActivationTokenData::client_id`]: smithay::wayland::xdg_activation::XdgActivationTokenData::client_id
+
+use std::time::{Duration, Instant};
 
 use smithay::reexports::wayland_server::backend::ClientId;
 use smithay::utils::Serial;
@@ -85,10 +104,11 @@ use smithay::utils::Serial;
 /// client's own request makes it back to the compositor: a full four-modifier
 /// combo through [`State::press`] is ten events (four modifier presses, the
 /// key's press and release, four modifier releases), and `type_text` spends
-/// two to six per character. Sixteen covers that with room to spare while
-/// staying a fraction of a second of real typing -- which is the other half
-/// of the bound, since every remembered entry is one a token may still be
-/// minted against.
+/// two to six per character. Sixteen covers that with room to spare.
+///
+/// It is a bound on *count* and nothing else -- how long an entry may be
+/// spent for is [`INTERACTION_WINDOW`]'s job. An idle session rotates nothing
+/// out at all, which is exactly why the age bound has to exist separately.
 ///
 /// `pub(crate)` only so `activation/tests.rs` can say "older than the whole
 /// history" without hard-coding a number that would silently stop meaning
@@ -97,14 +117,40 @@ use smithay::utils::Serial;
 /// [`State::press`]: super::State::press
 pub(crate) const CAPACITY: usize = 16;
 
+/// How long after the event itself a token may still be minted from it.
+///
+/// The count bound above cannot do this job: it only evicts when *newer*
+/// qualifying input arrives, and a session can go hours without any. That is
+/// not a corner case here but flexwm's own computer-use path -- an agent
+/// drives windows through `Request::Action`, which goes straight to
+/// `State::act` and never through `key`/`pointer_button` -- so without an age
+/// bound a click from this morning would still be spendable this evening, and
+/// the app clicked then could yank focus off whatever the agent had arranged.
+/// `TOKEN_LIFETIME` does not cover it: that bounds creation to redemption,
+/// not interaction to creation.
+///
+/// Ten seconds is three orders of magnitude more than the legitimate case
+/// needs -- a launcher mints its token inside its own input handler, within
+/// milliseconds -- with room for a client that was descheduled or waiting on
+/// something slow, while keeping "the user just did this" true.
+const INTERACTION_WINDOW: Duration = Duration::from_secs(10);
+
+/// One qualifying event: which serial it carried, who it was delivered to,
+/// and when.
+#[derive(Clone, Debug)]
+struct Delivered {
+    serial: Serial,
+    client: ClientId,
+    at: Instant,
+}
+
 /// The most recent qualifying input events, newest overwriting oldest.
 #[derive(Debug, Default)]
 pub(crate) struct Recent {
-    /// Each entry is a serial and the client the event carrying it was
-    /// delivered to. `None` only before the ring has been filled once -- a
-    /// fresh session that has seen no input at all matches nothing, which is
-    /// the case the activation gate exists for.
-    events: [Option<(Serial, ClientId)>; CAPACITY],
+    /// `None` only before the ring has been filled once -- a fresh session
+    /// that has seen no input at all matches nothing, which is the case the
+    /// activation gate exists for.
+    events: [Option<Delivered>; CAPACITY],
     /// Where the next event goes. Always `< CAPACITY` (see [`Self::record`]),
     /// so indexing with it cannot panic.
     next: usize,
@@ -116,24 +162,36 @@ impl Recent {
     /// `client` is whoever the event is being delivered to, resolved at the
     /// call site from the seat's current focus -- not the client that later
     /// asks about it.
+    ///
+    /// The timestamp is an [`Instant`] rather than the millisecond counter
+    /// the call sites already have for `InputTime`: that one is a `u32` and
+    /// wraps every 49 days, which would make a very old entry look fresh
+    /// rather than stale -- the wrong way round for a security check. One
+    /// clock read per key or button event pays for not having to reason about
+    /// that.
     pub(crate) fn record(&mut self, serial: Serial, client: ClientId) {
-        self.events[self.next] = Some((serial, client));
+        self.events[self.next] = Some(Delivered {
+            serial,
+            client,
+            at: Instant::now(),
+        });
         self.next = (self.next + 1) % CAPACITY;
     }
 
-    /// Whether `client` was given an event carrying `serial`.
+    /// Whether `client` was given an event carrying `serial`, recently
+    /// enough to still be worth something.
     ///
     /// A linear scan of sixteen entries, on a path that runs once per
     /// activation token (a user action), not per input event.
     pub(crate) fn contains(&self, serial: Serial, client: &ClientId) -> bool {
-        self.events.iter().any(|known| {
-            known
-                .as_ref()
-                .is_some_and(|(s, c)| *s == serial && c == client)
+        self.events.iter().flatten().any(|known| {
+            known.serial == serial
+                && known.client == *client
+                && known.at.elapsed() < INTERACTION_WINDOW
         })
     }
 
-    /// The event recorded most recently, if any.
+    /// The serial and recipient of the event recorded most recently, if any.
     ///
     /// Tests only: the compositor itself never asks "what was the last one",
     /// precisely because that question has no single right answer (see the
@@ -145,7 +203,21 @@ impl Recent {
     #[cfg(test)]
     pub(crate) fn latest(&self) -> Option<(Serial, ClientId)> {
         let last = (self.next + CAPACITY - 1) % CAPACITY;
-        self.events[last].clone()
+        self.events[last]
+            .as_ref()
+            .map(|event| (event.serial, event.client.clone()))
+    }
+
+    /// Ages every remembered event by `by`, as if the session had been idle
+    /// that long.
+    ///
+    /// Tests only, and the only way to reach [`INTERACTION_WINDOW`] without
+    /// a test that really sleeps for it.
+    #[cfg(test)]
+    pub(crate) fn backdate(&mut self, by: Duration) {
+        for event in self.events.iter_mut().flatten() {
+            event.at -= by;
+        }
     }
 }
 
@@ -275,6 +347,49 @@ mod tests {
         assert!(!recent.contains(serial(1_000 - CAPACITY as u32), &one));
         assert!(recent.contains(serial(1_000 - CAPACITY as u32 + 1), &one));
         assert!(recent.contains(serial(1_000), &one));
+    }
+
+    #[test]
+    fn an_event_older_than_the_window_is_no_longer_recent() {
+        // Nothing evicts an entry in an idle session -- the ring only rotates
+        // when newer qualifying input arrives -- so this is the only thing
+        // stopping this morning's click from being spendable tonight.
+        let (_display, [one, _two], _kept) = two_clients();
+        let mut recent = Recent::default();
+        recent.record(serial(5), one.clone());
+        assert!(recent.contains(serial(5), &one));
+
+        recent.backdate(INTERACTION_WINDOW);
+        assert!(
+            !recent.contains(serial(5), &one),
+            "an event exactly at the window is still spendable"
+        );
+    }
+
+    #[test]
+    fn an_event_just_inside_the_window_still_counts() {
+        // The other side of the bound, so the test above is checking an edge
+        // rather than a check that refuses everything.
+        let (_display, [one, _two], _kept) = two_clients();
+        let mut recent = Recent::default();
+        recent.record(serial(5), one.clone());
+
+        recent.backdate(INTERACTION_WINDOW - Duration::from_secs(1));
+        assert!(recent.contains(serial(5), &one));
+    }
+
+    #[test]
+    fn ageing_out_one_event_leaves_a_newer_one_alone() {
+        // `contains` filters per entry rather than treating the whole ring as
+        // one age, so a burst that straddles the window keeps its recent half.
+        let (_display, [one, _two], _kept) = two_clients();
+        let mut recent = Recent::default();
+        recent.record(serial(5), one.clone());
+        recent.backdate(INTERACTION_WINDOW);
+        recent.record(serial(6), one.clone());
+
+        assert!(!recent.contains(serial(5), &one), "the old one survived");
+        assert!(recent.contains(serial(6), &one), "the new one aged out too");
     }
 
     #[test]

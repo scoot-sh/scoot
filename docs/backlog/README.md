@@ -38,6 +38,7 @@ actionable.
 - [Foreign-toplevel management](./protocols/foreign-toplevel-management.md) — window enumeration for taskbars/switchers
 - [`xdg-toplevel-icon-v1` pixel-buffer icons are not exposed](./protocols/toplevel-icon-buffers.md) — only the icon name reaches IPC
 - [An IME popup over a lock screen is tracked but never drawn](./protocols/ime-popup-over-lock-screen.md)
+- [An IME keyboard grab makes the activation gate credit a client that received nothing](./protocols/interaction-serial-ime-grab.md)
 - [`spawn` hands its child no `XDG_ACTIVATION_TOKEN`](./protocols/activation-token-for-spawned-children.md)
 - [Popup input](./protocols/xdg-popup-input.md) — popups map/draw (initial-configure fix, resolved), but keyboard focus/grabs and layer-parented popups still missing
 - [Layer surface with no buffer still holds its exclusive zone](./protocols/layer-surface-bufferless-exclusive-zone.md)

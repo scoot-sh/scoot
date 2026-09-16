@@ -835,6 +835,69 @@ fn a_key_a_binding_intercepts_is_not_recorded() {
     assert_eq!(latest.1, client, "recorded under the wrong client");
 }
 
+/// A release of a key the seat never saw pressed is absorbed by Smithay
+/// before the filter and before forwarding, so it reaches nobody and must not
+/// be recorded.
+///
+/// Not a synthetic case: `--nested` forwards key events but not the held-key
+/// array in `wl_keyboard.enter`, so a modifier held as focus enters flexwm's
+/// window arrives here as a lone release, and `--tty` produces the same shape
+/// when the press landed while the session was paused. Since flexwm focuses
+/// every newly mapped window, crediting the focused client for one of these
+/// would hand a serial to a client that had received nothing at all.
+#[test]
+fn a_release_of_a_key_that_was_never_pressed_is_not_recorded() {
+    let mut fixture = Fixture::new();
+    let code = Keycode::new(28 + 8);
+    fixture.state.key(code, KeyState::Pressed);
+    fixture.state.key(code, KeyState::Released);
+    let before = fixture.state.interaction_serials.latest();
+    assert!(before.is_some(), "the real pair should have been recorded");
+
+    // Nothing is holding it now, so this is the lone-release shape.
+    let outcome = fixture.state.key(code, KeyState::Released);
+    assert!(
+        !outcome.intercepted,
+        "an absorbed key looks like a forwarded one from the outcome alone, \
+         which is why the held-key mirror exists"
+    );
+
+    assert_eq!(
+        fixture.state.interaction_serials.latest(),
+        before,
+        "a release nobody received was recorded anyway"
+    );
+}
+
+/// The other absorbed case: pressing a key that is already held. The client
+/// gets one press, not two, so only the first is evidence.
+#[test]
+fn a_second_press_of_a_held_key_is_not_recorded() {
+    let mut fixture = Fixture::new();
+    let code = Keycode::new(28 + 8);
+    fixture.state.key(code, KeyState::Pressed);
+    let before = fixture.state.interaction_serials.latest();
+    assert!(
+        before.is_some(),
+        "the first press should have been recorded"
+    );
+
+    fixture.state.key(code, KeyState::Pressed);
+    assert_eq!(
+        fixture.state.interaction_serials.latest(),
+        before,
+        "a repeated press nobody received was recorded anyway"
+    );
+
+    // ... and the release that really does end the hold still is.
+    fixture.state.key(code, KeyState::Released);
+    assert_ne!(
+        fixture.state.interaction_serials.latest(),
+        before,
+        "the release went unrecorded"
+    );
+}
+
 /// The serial is evidence for the client that *received* the event and for
 /// nobody else, which is what stops a client from guessing its way to one:
 /// `SERIAL_COUNTER` is process-global and a client can read a live value out

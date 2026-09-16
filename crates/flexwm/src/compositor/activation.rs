@@ -43,10 +43,13 @@
 //!   serial at all, with one naming a seat this compositor does not own, or
 //!   with a stale or fabricated number, and all of those are refused at
 //!   creation. What is accepted is a serial this compositor issued for a key
-//!   or button event within the last few input events **and delivered to
-//!   this same client** (see `input/interaction.rs`), which is what a
-//!   launcher minting a token from inside its own input handler necessarily
-//!   has.
+//!   or button event within the last few input events *and* the last few
+//!   seconds, **and delivered to this same client** (see
+//!   `input/interaction.rs`), which is what a launcher minting a token from
+//!   inside its own input handler necessarily has. The age bound is not
+//!   redundant with the count: an idle session -- including an
+//!   agent-driven one, where every action arrives over IPC rather than as
+//!   input -- never rotates the history at all.
 //!
 //!   The client half is not a formality. `SERIAL_COUNTER` is process-global
 //!   and shared with events that are not input at all -- an

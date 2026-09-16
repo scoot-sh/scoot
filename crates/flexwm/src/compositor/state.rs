@@ -359,6 +359,14 @@ pub struct State {
     /// keycode will have its legitimate release wrongly intercepted as a
     /// stale stuck entry.
     pub suppressed_keys: HashSet<Keycode>,
+    /// Keycodes currently held, mirroring the set Smithay keeps inside the
+    /// seat keyboard so `input.rs` can tell a key that will be *delivered*
+    /// from one it will absorb as a non-transition -- a distinction
+    /// `KeyboardHandle::input`'s return value does not make. Only
+    /// `State::note_held` writes it; see the invariant on
+    /// [`State::suppressed_keys`] above, which applies here for the same
+    /// reason.
+    pub held_keys: HashSet<Keycode>,
 
     /// Something changed that the framebuffer doesn't show yet.
     pub needs_render: bool,
@@ -489,6 +497,7 @@ impl State {
             interaction_serials: input::interaction::Recent::default(),
             keybindings,
             suppressed_keys: HashSet::new(),
+            held_keys: HashSet::new(),
             // true without going through request_render(), so nothing has
             // armed the frame timer yet. That's only safe because
             // headless::init() unconditionally and synchronously calls

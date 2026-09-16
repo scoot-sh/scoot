@@ -398,6 +398,7 @@ impl State {
         let recipient = keyboard
             .current_focus()
             .and_then(|surface| self.client_of(&surface));
+        let transition = self.note_held(keycode, state);
         let time = InputTime::from_millis(self.millis());
         let outcome = keyboard
             .input::<KeyOutcome, _>(self, keycode, state, serial, time, |data, mods, handle| {
@@ -470,19 +471,50 @@ impl State {
         // hole the client half of this check exists to close. The intercepted
         // *release* is worse still: by then `act` may have moved focus, so it
         // would land under a client that not only never received it but was
-        // not even the intended recipient.
+        // not even the intended recipient. A key Smithay absorbed as a
+        // non-transition reached nobody either.
         //
         // Both states otherwise, because which of them a client mints an
         // activation token from is its own choice (a GTK button activates on
         // release). Nothing at all is recorded when nothing has focus: an
         // event no client received is evidence for no one. See
         // `interaction.rs`.
-        if !outcome.intercepted
+        if transition
+            && !outcome.intercepted
             && let Some(client) = recipient
         {
             self.interaction_serials.record(serial, client);
         }
         outcome
+    }
+
+    /// Tracks this keycode's held state, answering whether the event actually
+    /// changes it -- which is what decides whether Smithay delivers it at all.
+    ///
+    /// A mirror of the pinned rev's `KbdInternal::key_input`, which absorbs a
+    /// press of a key already held and a release of a key it has no record of,
+    /// returning `None` from `KeyboardHandle::input` *before* the filter and
+    /// before forwarding. That `None` is indistinguishable from "the filter
+    /// said forward", so [`KeyOutcome`] alone cannot tell a delivered key from
+    /// an absorbed one, and neither can `pressed_keys()` (it clones a
+    /// `HashSet` per call, which this path must not do). Both absorbed cases
+    /// are reachable here: a lone release arrives under `--nested` when a
+    /// modifier was held as the pointer entered flexwm's window
+    /// (`nested_dispatch` forwards keys but not `enter`'s held-key array), and
+    /// under `--tty` when a press lands while the session is paused.
+    ///
+    /// Invariant, same as [`State::suppressed_keys`]: this stays in step with
+    /// Smithay's own set only because [`State::key`] is the one caller of
+    /// `KeyboardHandle::input` in this compositor. Anything that ever feeds
+    /// the seat keyboard another way (`input_forward`, `release_source`) must
+    /// update this too, or a real key will be mistaken for an absorbed one.
+    ///
+    /// [`State::suppressed_keys`]: super::State::suppressed_keys
+    fn note_held(&mut self, keycode: Keycode, state: KeyState) -> bool {
+        match state {
+            KeyState::Pressed => self.held_keys.insert(keycode),
+            KeyState::Released => self.held_keys.remove(&keycode),
+        }
     }
 
     /// Runs `read` against the seat keyboard's keymap and the layout (xkb

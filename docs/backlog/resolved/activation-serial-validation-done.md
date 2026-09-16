@@ -28,13 +28,14 @@ A third rule, checked in `token_created` before either existing bound:
 - The token's optional `set_serial(serial, seat)` is now required. `seat`
   must resolve (`Seat::<State>::from_resource`) to the compositor's own seat;
   `serial` must be one flexwm issued for a **key or button press or
-  release**; and that event must have been **delivered to the client asking**
+  release**; that event must have been **delivered to the client asking**
   (`XdgActivationTokenData::client_id`, which Smithay fills in from the
-  sender and no client can forge). Missing serial, another seat's serial,
-  another client's serial, and a stale or fabricated number are each refused
-  with their own `debug!` line, and refused before the token table is touched
-  at all — a client looping on unqualified tokens cannot evict anything or
-  occupy a slot.
+  sender and no client can forge); and it must be **recent** — within both
+  the last 16 qualifying events and the last 10 seconds. Missing serial,
+  another seat's serial, another client's serial, and a stale or fabricated
+  number are each refused with their own `debug!` line, and refused before
+  the token table is touched at all — a client looping on unqualified tokens
+  cannot evict anything or occupy a slot.
 - Pointer *motion* deliberately does not qualify: it is continuous and
   passive (libinput reports it at 500-1000Hz, `refresh_pointer_focus`
   synthesizes it with no user involvement), so counting it would hand every
@@ -149,6 +150,37 @@ is a key serial; chosen with the mouse it would still be the *focus* serial
 was inconclusive -- clicking fuzzel's entry rows over IPC selected but never
 executed an entry, so no token was minted at all.
 
+## Two more gaps, from the third review round
+
+Both found after the client-binding fix landed, both closed here:
+
+- **Absorbed keys were still recorded.** The pinned rev's
+  `KbdInternal::key_input` returns `is_transition == false` — absorbing the
+  event before the filter and before forwarding — for a press of a key already
+  held *and* for a release of a key it has no record of. `KeyboardHandle::input`
+  returns `None` in both, which is indistinguishable from "the filter said
+  forward", so `KeyOutcome` alone could not tell them apart. The lone release
+  is reachable in practice: under `--nested`, `nested_dispatch` forwards key
+  events but not the held-key array in `wl_keyboard.enter`, so a modifier held
+  as focus enters flexwm's window arrives as a release of a key the seat never
+  saw pressed; `--tty` produces the same shape when the press landed while the
+  session was paused. `key()` now mirrors the held-keycode set itself (the way
+  `suppressed_keys` already does) and records only real transitions.
+  `is_transition` is exposed nowhere, `input_intercept` would double-run the
+  filter, and `pressed_keys()` clones a `HashSet` per call, so a local mirror
+  is the only option that is both correct and allocation-free.
+- **Entries had no age bound.** The ring evicts only on the 17th newer
+  qualifying event, and an idle session produces none — which is not a corner
+  case but flexwm's own computer-use path, where an agent drives windows
+  through `Request::Action` (straight to `State::act`, never through
+  `key`/`pointer_button`) and motion and scroll deliberately do not qualify.
+  A click at 09:00 was therefore still spendable at 17:00: the app clicked
+  then could yank focus off whatever the agent had arranged. `TOKEN_LIFETIME`
+  does not cover this leg — it bounds creation to redemption, not interaction
+  to creation. Each entry now carries an `Instant` and `contains` requires it
+  to be within `INTERACTION_WINDOW` (10s, three orders of magnitude more than
+  a launcher's own millisecond path needs).
+
 ## What it does not stop, by design
 
 - A client the user really did interact with can activate itself off that
@@ -175,6 +207,13 @@ executed an entry, so no token was minted at all.
     simply does not happen. The same is true of the notification-daemon case
     (focusing the app a clicked popup came from), which is an activation of
     an existing window by definition.
+- An input method holding a keyboard grab: Smithay's grab sends keys to the
+  IME alone and never touches the seat's focus, so the focused client is
+  credited for keys it did not receive. Not an escalation — that client is the
+  window the user is typing into, which is who the gate means to credit — but
+  a real divergence from "delivered", filed as
+  `docs/backlog/protocols/interaction-serial-ime-grab.md` because the fix
+  needs a decision about grabs in general rather than a one-liner.
 - `XdgActivationState::create_external_token` (what the compositor would use
   to hand a token to a process it spawned itself — see
   `docs/backlog/protocols/activation-token-for-spawned-children.md`) never

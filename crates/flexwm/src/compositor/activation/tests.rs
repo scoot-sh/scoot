@@ -562,6 +562,7 @@ fn drive(
 /// press go to whoever holds the keyboard, and a test that found otherwise
 /// would be testing a compositor that had stopped making sense.
 fn press_a_key(state: &mut State) -> (Serial, Serial, ClientId) {
+    let before = state.interaction_serials.latest();
     let outcome = state.key(Keycode::new(RETURN), KeyState::Pressed);
     assert!(
         !outcome.intercepted,
@@ -572,6 +573,14 @@ fn press_a_key(state: &mut State) -> (Serial, Serial, ClientId) {
         .interaction_serials
         .latest()
         .expect("the press was recorded, so a client had the keyboard");
+    // The same guard `click` carries, for the same reason: with no keyboard
+    // focus nothing is recorded, and `latest()` then quietly returns whatever
+    // came before -- which a test would go on to assert about.
+    assert_ne!(
+        Some((press, client.clone())),
+        before,
+        "the keypress recorded nothing: no client holds the keyboard"
+    );
     state.key(Keycode::new(RETURN), KeyState::Released);
     let (release, released_to) = state
         .interaction_serials
@@ -1056,6 +1065,27 @@ fn a_serial_from_before_the_recent_history_is_refused() {
     assert!(
         !state.token_created(token, data),
         "a serial older than the whole recent history was still accepted"
+    );
+}
+
+#[test]
+fn an_interaction_from_hours_ago_is_refused_even_with_nothing_since() {
+    // The ring only rotates when *newer* qualifying input arrives, and an
+    // agent-driven session produces none: `Request::Action` goes straight to
+    // `State::act`, and motion and scroll never qualify. Without the age
+    // bound this morning's click would still be spendable tonight, against
+    // whatever the agent had arranged since.
+    let (_loop, mut state, client, run) = drive(false, 0, Claim::RealKeyPress);
+    let (ours, _other) = seats(&state, &client, &run);
+    let (press, _release, typed_at) = press_a_key(&mut state);
+    state
+        .interaction_serials
+        .backdate(Duration::from_secs(8 * 3600));
+
+    let (token, data) = token_claiming(Some((press, ours)), Some(typed_at));
+    assert!(
+        !state.token_created(token, data),
+        "an interaction from hours ago was still good enough"
     );
 }
 
