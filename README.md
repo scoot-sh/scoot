@@ -909,11 +909,15 @@ What to know before pointing a client at it:
 
 - **Output capture only.** A source can be made from a `wl_output`; there is
   no `ext_foreign_toplevel_image_capture_source_manager_v1`, so a *single
-  window* cannot be captured on its own. That is the half a launcher's
-  per-window thumbnails need, and it is a separate item
-  (`docs/backlog/protocols/screencopy-toplevel-capture.md`) rather than a
-  stub here — the global is not advertised at all, so a client takes its
-  fallback path immediately instead of discovering a refusal at runtime.
+  window* cannot be captured on its own. That half was measured and closed as
+  unreachable for the shell clients rather than stubbed here
+  (`docs/backlog/resolved/screencopy-toplevel-capture-done.md` — stock
+  quickshell routes per-window thumbnails exclusively to
+  `hyprland-toplevel-export-v1`): the global is not advertised at all, so a
+  client takes its fallback path immediately instead of discovering a refusal
+  at runtime. The remaining thumbnail fallback (region crop out of the
+  output) is
+  `docs/backlog/protocols/screencopy-shell-thumbnails-fallback.md`.
 - **`wl_shm` buffers only, `Xrgb8888` or `Argb8888`.** flexwm renders on the
   CPU with pixman and has no GPU or dma-buf path, so no `dmabuf_device` or
   `dmabuf_format` is advertised. `Xrgb8888` is offered first: if `[appearance]

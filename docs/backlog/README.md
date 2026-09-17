@@ -92,9 +92,12 @@ actionable.
   workspace-overview preview work. `wlr-screencopy` deliberately not
   implemented alongside it — measured, both clients that matter speak the
   `ext-` protocol. flexwm's own IPC screenshot is unchanged.
-- [Screen capture, toplevel half](./protocols/screencopy-toplevel-capture.md)
-  — the per-window source a launcher's thumbnails need; needs a second render
-  target per session, so split out rather than half-implemented
+- [Screen capture, toplevel half](./resolved/screencopy-toplevel-capture-done.md)
+  — CLOSED UNREACHABLE 2026-09-17 by phase-1 probe (no build): stock
+  quickshell 0.3.1 routes a `Toplevel` capture source exclusively to
+  `hyprland-toplevel-export-v1`, so the ext toplevel-source manager would
+  never be bound. Fallback filed as
+  [shell thumbnails without a toplevel protocol](./protocols/screencopy-shell-thumbnails-fallback.md).
 - [Screen capture: the session count is unbounded](./protocols/screencopy-session-cap.md)
   — found building the output half; why a cap was not simply added
 - [Screen capture forces `Xrgb8888`'s undefined fourth byte opaque](./protocols/screencopy-xrgb-alpha-forcing.md)

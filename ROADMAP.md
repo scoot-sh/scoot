@@ -136,8 +136,10 @@ gap jumped the queue — each item's own file records why it landed when it did.
   `ext-` one, and quickshell 0.3.1 speaks it too. Unlike the three protocol
   items before it, Smithay implements this one, so flexwm writes handlers.
   **Output capture only**: a per-window source needs a second render target
-  per session and is [its own
-  item](docs/backlog/protocols/screencopy-toplevel-capture.md). A capture is
+  per session and was [its own
+  item](docs/backlog/resolved/screencopy-toplevel-capture-done.md) — probed
+  2026-09-17 and closed unreachable without building it (stock quickshell
+  routes per-window thumbnails only to `hyprland-toplevel-export-v1`). A capture is
   parked and served from the frame tick rather than copied on request, which
   bounds it to one per session per frame and lets a repeat capture of an
   unchanged screen wait — both of which the protocol explicitly allows. The
@@ -197,7 +199,11 @@ actually open.
    [`[tty] gpu` config key](docs/backlog/tty/tty-gpu-config-key.md).
 2. **Medium-priority protocol gaps**, mostly what's left of the DMS/Noctalia
    probes (see "Shell enablement" below for their recommended order):
-   [screencopy's toplevel half](docs/backlog/protocols/screencopy-toplevel-capture.md)
+   [screencopy's toplevel half](docs/backlog/resolved/screencopy-toplevel-capture-done.md)
+   is CLOSED UNREACHABLE (phase-1 probe, no build — stock quickshell routes
+   per-window thumbnails only to `hyprland-toplevel-export-v1`); the remaining
+   thumbnail fallback is
+   [shell thumbnails without a toplevel protocol](docs/backlog/protocols/screencopy-shell-thumbnails-fallback.md)
    (the output half shipped — see "Recently shipped" above).
    [Popup grab serial validation](docs/backlog/resolved/popup-grab-serial-validation-done.md)
    is also done — a grab now has to name a real, recent key/button/enter
@@ -289,12 +295,14 @@ probes' recommended order:
    [its own item](docs/backlog/protocols/output-management-reconfiguration.md),
    gated on multi-output support: nothing an `apply` could ask for exists yet.
 5. [`screencopy / image-capture`](docs/backlog/resolved/screencopy-capture-done.md)
-   — HALF-RESOLVED 2026-09-16 (PR #52): `ext-image-copy-capture-v1` with
-   `ext-image-capture-source-v1` for **output** capture, which is the
-   workspace-overview preview half. The per-window thumbnail half needs a
-   toplevel capture source (a second render target per session) and is
-   [its own item](docs/backlog/protocols/screencopy-toplevel-capture.md).
-   IPC screenshots stay regardless.
+    — HALF-RESOLVED 2026-09-16 (PR #52): `ext-image-copy-capture-v1` with
+    `ext-image-capture-source-v1` for **output** capture, which is the
+    workspace-overview preview half. The per-window thumbnail half was
+    [probed and closed unreachable](docs/backlog/resolved/screencopy-toplevel-capture-done.md)
+    rather than built (stock quickshell 0.3.1 speaks only
+    `hyprland-toplevel-export-v1` for a `Toplevel` source); its fallback is
+    [shell thumbnails without a toplevel protocol](docs/backlog/protocols/screencopy-shell-thumbnails-fallback.md).
+    IPC screenshots stay regardless.
 6. DMS unlock-path re-probe — done 2026-09-14 (see the re-probe note
    in the DMS gaps entry): lock → auth → unlock teardown survives on
    current `main`, and so does a spotlight open/Escape-dismiss cycle.

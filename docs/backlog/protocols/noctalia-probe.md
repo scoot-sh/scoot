@@ -223,9 +223,14 @@ anything.
 - **HALF-RESOLVED 2026-09-16 (PR #52).** `ext-image-copy-capture-v1` with
   `ext-image-capture-source-v1` is advertised, so the **overview preview**
   (an output source) has something to consume; the **launcher window
-  thumbnails** need a per-window source and still do not — filed as
-  [`screencopy-toplevel-capture.md`](./screencopy-toplevel-capture.md). See
-  [`resolved/screencopy-capture-done.md`](../resolved/screencopy-capture-done.md).
+  thumbnails** need a per-window source and still do not — and the toplevel
+  half was **CLOSED UNREACHABLE 2026-09-17 without building it** (stock
+  quickshell routes a `Toplevel` source only to
+  `hyprland-toplevel-export-v1`; see
+  [`resolved/screencopy-toplevel-capture-done.md`](../resolved/screencopy-toplevel-capture-done.md)).
+  Fallback:
+  [`screencopy-shell-thumbnails-fallback.md`](./screencopy-shell-thumbnails-fallback.md).
+  See [`resolved/screencopy-capture-done.md`](../resolved/screencopy-capture-done.md).
 
 ### 7. Compositor recognition — NOT a gap for Noctalia (biggest delta in the shell's favor)
 

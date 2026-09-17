@@ -76,7 +76,10 @@ discovering a `stopped` at runtime. Capturing one window in isolation needs a
 second render target per session, a constraint-refresh path driven by window
 resizes, mid-session teardown when the window closes, and a stated answer for
 a locked session; that is this module again, so it is
-[its own item](../protocols/screencopy-toplevel-capture.md) — the same split
+[its own item](../resolved/screencopy-toplevel-capture-done.md) — probed
+2026-09-17 and closed unreachable without building it (stock quickshell 0.3.1
+routes a `Toplevel` source only to `hyprland-toplevel-export-v1`; see that
+file for the wire evidence) — the same split
 PR #47 and PR #49 made.
 
 ### How a capture is served
