@@ -273,9 +273,18 @@ gap jumped the queue — each item's own file records why it landed when it did.
   copying `wlr_toplevel_output_bound`'s shape including its comment. Pinned
   by a cross-client test proven fail-first (neutered filter panics in
   `wayland-backend`, not a failed assertion). Measured ~10x on the
-  predicate but ~300ns absolute — noise at session scale, so merged on
-  correctness-clarity grounds, not a performance claim. No README change
-  (same events, same order, same clients).
+   predicate but ~300ns absolute — noise at session scale, so merged on
+   correctness-clarity grounds, not a performance claim. No README change
+   (same events, same order, same clients).
+- **[A large `msg type` blocks the event
+  loop](docs/backlog/resolved/msg-type-blocks-event-loop-resolved.md)** —
+  RESOLVED 2026-09-17: `type` text capped at 16,384 characters per request,
+  refused rather than delayed (the screenshot-rate-limit shape), sized by
+  measurement on the dev VM (release `--headless`: ~2us/char plain,
+  ~4.3us/char shifted, so the worst case costs ~75ms — comfortably
+  sub-second). Counted in characters, not bytes; the other injected-input
+  requests were audited and need no cap (`key` is one combo, `spawn` is one
+  process). README's refusal list carries the new bound.
 ## What's next
 
 The backlog is the source of truth for what to pick up; this is the current

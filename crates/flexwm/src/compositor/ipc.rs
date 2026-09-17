@@ -101,6 +101,24 @@ pub struct PendingIdle {
 /// anything else.
 static NEXT_CONN: AtomicU64 = AtomicU64::new(1);
 
+/// The most characters one `Request::Type` may carry.
+///
+/// A separate, smaller cap than [`line::MAX_REQUEST_BYTES`]: each character
+/// becomes two to four key events run synchronously on the event-loop thread,
+/// so a megabyte of text stalls wayland dispatch, input and rendering for
+/// seconds (see `docs/backlog/resolved/msg-type-blocks-event-loop-resolved.md`). Sized by
+/// measurement, not feel: release `--headless` on the dev VM types 50,000
+/// characters in ~99ms all-lowercase and ~215ms all-shifted, i.e. ~2us and
+/// ~4.3us per character, so 16,384 worst-case characters cost ~75ms --
+/// comfortably sub-second -- while a real shell command line (a few hundred
+/// characters, under a millisecond) never notices it.
+///
+/// Counted in characters, not bytes: a character is the cost unit (each one
+/// becomes key events), whatever its UTF-8 length. Even 16,384 four-byte
+/// characters encode to well under the 1 MiB line limit, so this cap always
+/// fires first -- the layering is deliberate, not incidental.
+pub(super) const MAX_TYPE_CHARS: usize = 16 * 1024;
+
 /// What a client past [`MAX_CONNECTIONS`] is told, encoded once.
 ///
 /// A constant answer to a constant question, so it is built on the first
@@ -408,10 +426,28 @@ impl State {
                 Ok(None) | Ok(Some(VtSwitchOutcome::Ignored)) => self.ok(),
                 Err(error) => Response::error(error),
             },
-            Request::Type { text } => match self.type_text(&text) {
-                Ok(()) => self.ok(),
-                Err(error) => Response::error(error),
-            },
+            Request::Type { text } => {
+                // Refused rather than delayed, the same shape the screenshot
+                // rate limit took, and for the same reason: this runs to
+                // completion synchronously on the event-loop thread, so
+                // waiting (or chunking, which needs the per-connection
+                // progress state item 10 deliberately avoided) is not on
+                // offer. Checked before `type_text`, so a refused request
+                // types nothing -- not even a prefix.
+                let chars = text.chars().count();
+                if chars > MAX_TYPE_CHARS {
+                    return Response::error(format!(
+                        "refused: `type` carries at most {MAX_TYPE_CHARS} characters per \
+                         request (this one has {chars}), because each character becomes \
+                         key events typed synchronously on the event-loop thread. Split \
+                         the text across several `type` requests"
+                    ));
+                }
+                match self.type_text(&text) {
+                    Ok(()) => self.ok(),
+                    Err(error) => Response::error(error),
+                }
+            }
             // Connection::step() intercepts and answers this variant itself
             // (see above) before handle_request is ever called, since a
             // reply here has to wait on pending_idle instead of being

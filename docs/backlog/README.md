@@ -167,7 +167,7 @@ actionable.
 - [Screenshot capture and encode run on the event-loop thread](./resolved/screenshot-encode-off-thread-resolved.md) — RESOLVED 2026-09-17 (PR #57): PNG encode moved to a single FIFO worker; per-connection ordering via refused-with-retry, 4 captures max globally, `wait-idle` unchanged
 - [The accept loop swallows `EMFILE` and can spin the event loop](./ipc/accept-loop-swallows-emfile.md) — pre-existing, found reviewing the cap
 - [The connection cap turns one client's leak into everyone's refusal](./ipc/connection-cap-denies-the-same-user.md) — accepted tradeoff, recorded so a future "the bar cannot connect" has somewhere to land
-- [A large `msg type` blocks the event loop](./ipc/msg-type-blocks-event-loop.md)
+- [A large `msg type` blocks the event loop](./resolved/msg-type-blocks-event-loop-resolved.md) — RESOLVED 2026-09-17: `type` text capped at 16,384 characters per request (sized by measurement; worst case ~75ms), refused naming the limit and the split-workaround, counted in characters not bytes
 - [`flexwm msg` panics when its stdout reader goes away](./resolved/msg-client-broken-pipe-done.md) — RESOLVED 2026-09-17 (PR #62): per-write EPIPE handling at every client-binary stdio site, quiet exit 0; compositor unaffected
 - [IPC focus actions run a full `apply` even when nothing moves](./resolved/focus-action-no-op-fast-path-done.md) — RESOLVED 2026-09-17 (PR #67): already-there focus actions skip `act` and run only the keyboard half, mirroring PR #54; relative steps deliberately left on the full path
 

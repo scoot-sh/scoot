@@ -37,6 +37,7 @@ use smithay::reexports::wayland_server::Display;
 
 use super::*;
 use crate::compositor::decorations::Appearance;
+use crate::compositor::ipc::MAX_TYPE_CHARS;
 use crate::compositor::ipc::slots::{MAX_CONNECTIONS, Slots};
 use crate::compositor::ipc::tests::set_sndbuf;
 use crate::compositor::keybindings::Keybindings;
@@ -950,13 +951,17 @@ fn an_over_long_request_line_is_refused_across_however_many_writes_it_takes() {
 #[test]
 fn a_large_but_legal_request_split_across_writes_still_works() {
     // The other side of the same cap: a real `Request::Type` with a big paste,
-    // arriving in pieces, must still be answered rather than refused.
+    // arriving in pieces, must still be answered rather than refused. Sized
+    // under [`MAX_TYPE_CHARS`] (the per-`type` cap below) but over one
+    // [`super::super::line::DEFAULT_CAPACITY`] read chunk, so it still spans
+    // several reads the way the half-megabyte paste this used to send did.
     let mut harness = Harness::new();
     let mut client = harness.connect(None);
     let request = request_line(&Request::Type {
-        text: "x".repeat(500_000),
+        text: "x".repeat(10_000),
     });
     assert!(request.len() < MAX_REQUEST_BYTES);
+    assert!(request.len() > super::super::line::DEFAULT_CAPACITY);
     client.send_all(request.as_bytes(), &mut harness);
     // `Response::Ok` exactly, not "anything but a crash": a reassembly that
     // lost or duplicated a chunk decodes as a *different* failure
@@ -965,6 +970,133 @@ fn a_large_but_legal_request_split_across_writes_still_works() {
     match client.expect_reply(&mut harness) {
         Response::Ok { .. } => {}
         other => panic!("the request did not survive being split up: {other:?}"),
+    }
+}
+
+// --- the `type` text cap ----------------------------------------------------
+
+/// An over-cap `type` is refused before a single character is typed, in both
+/// character classes: shifted text costs ~2x (four key events per character,
+/// not two), so the cap has to refuse the worst case, not the mean.
+#[test]
+fn an_over_cap_type_is_refused_before_anything_is_typed() {
+    for text in [
+        "x".repeat(MAX_TYPE_CHARS + 1),
+        "X".repeat(MAX_TYPE_CHARS + 1),
+        // Multi-byte past the cap, refused for its length before `type_text`
+        // ever gets to refuse it for its content (`é` is not on a US layout
+        // -- see `input::tests::an_untypable_character_errors...`).
+        "\u{e9}".repeat(MAX_TYPE_CHARS + 1),
+    ] {
+        let mut harness = Harness::new();
+        let mut client = harness.connect(None);
+        client.send(request_line(&Request::Type { text }).as_bytes());
+        match client.expect_reply(&mut harness) {
+            Response::Error { message } => {
+                assert!(
+                    message.contains(&MAX_TYPE_CHARS.to_string()),
+                    "the refusal must name the limit: {message}"
+                );
+                assert!(
+                    message.to_lowercase().contains("split"),
+                    "the refusal must name the workaround: {message}"
+                );
+            }
+            other => panic!("an over-cap type was not refused, got {other:?}"),
+        }
+    }
+}
+
+/// Exactly at the cap is still served: the boundary belongs to the client,
+/// in both character classes (the cap refuses the worst case, so it must
+/// serve it at the boundary too).
+#[test]
+fn a_type_at_exactly_the_cap_is_still_served() {
+    for text in ["x".repeat(MAX_TYPE_CHARS), "X".repeat(MAX_TYPE_CHARS)] {
+        let mut harness = Harness::new();
+        let mut client = harness.connect(None);
+        client.send(request_line(&Request::Type { text }).as_bytes());
+        match client.expect_reply(&mut harness) {
+            Response::Ok { .. } => {}
+            other => panic!("an at-cap type was not served, got {other:?}"),
+        }
+    }
+}
+
+/// The cap counts characters, not bytes: each character becomes key events,
+/// so characters are the cost unit whatever their UTF-8 length.
+///
+/// No multi-byte character the US layout can type exists to assert `Ok`
+/// with (that layout has no `é` -- see
+/// `input::tests::an_untypable_character_errors...`), so this pins the
+/// choice from the other side instead: 9,000 `é` is 18,000 bytes on the
+/// wire -- past the number -- but only 9,000 characters. A bytes-counted
+/// cap would refuse it naming the limit; the characters-counted one lets
+/// it through to `type_text`, which refuses it for its own reason. The
+/// message tells the two refusals apart.
+#[test]
+fn the_type_cap_counts_characters_not_bytes() {
+    let text = "é".repeat(9_000);
+    assert_eq!(text.chars().count(), 9_000);
+    assert!(
+        text.len() > MAX_TYPE_CHARS,
+        "the test string must be more bytes than the cap's number"
+    );
+    let mut harness = Harness::new();
+    let mut client = harness.connect(None);
+    client.send(request_line(&Request::Type { text }).as_bytes());
+    match client.expect_reply(&mut harness) {
+        Response::Error { message } => {
+            assert!(
+                message.contains('é'),
+                "this refusal should come from the layout, naming the character: {message}"
+            );
+            assert!(
+                !message.contains(&MAX_TYPE_CHARS.to_string()),
+                "the cap fired on bytes: {message}"
+            );
+        }
+        other => panic!("a within-cap multi-byte type should reach the layout, got {other:?}"),
+    }
+}
+
+/// The everyday path, pinned: a realistic few-hundred-character shell command
+/// line is orders of magnitude under the cap and must be unaffected by it.
+#[test]
+fn a_realistic_few_hundred_character_type_is_unaffected() {
+    let mut harness = Harness::new();
+    let mut client = harness.connect(None);
+    let text = "git log --oneline -20 -- crates/flexwm/src/compositor/ipc.rs | head -40 && \
+                cargo test -p flexwm --lib compositor::ipc 2>&1 | tail -5; echo done";
+    assert!(text.len() < 300, "the test string drifted from realistic");
+    client.send(
+        request_line(&Request::Type {
+            text: text.to_string(),
+        })
+        .as_bytes(),
+    );
+    match client.expect_reply(&mut harness) {
+        Response::Ok { .. } => {}
+        other => panic!("an ordinary type was not served, got {other:?}"),
+    }
+}
+
+/// Empty text is accepted and is a no-op: this confirms the current behavior
+/// rather than changing it, so the cap cannot turn a harmless request into
+/// an error.
+#[test]
+fn an_empty_type_is_accepted_as_a_no_op() {
+    let mut harness = Harness::new();
+    let mut client = harness.connect(None);
+    client.send(
+        request_line(&Request::Type {
+            text: String::new(),
+        })
+        .as_bytes(),
+    );
+    match client.expect_reply(&mut harness) {
+        Response::Ok { .. } => {}
+        other => panic!("an empty type was not served, got {other:?}"),
     }
 }
 
