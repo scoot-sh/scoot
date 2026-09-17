@@ -3,12 +3,16 @@
 //! This is a hand-written copy of what `smithay::delegate_dispatch2!(State)`
 //! expands to -- the blanket `Dispatch`/`GlobalDispatch` impls that forward
 //! every request to whichever `Dispatch2` impl the object's user data
-//! carries -- plus four guards on what a client may ask for
+//! carries -- plus five guards on what a client may ask for
 //! ([`reject_invalid_shm_pool_resize`], [`reject_oversized_shm_pool_creation`],
-//! [`reject_unrepresentable_layer_size`] and
-//! [`reject_frozen_toplevel_icon_request`]), one pre-delegation
-//! interception ([`prepare_post_destroy_lock_commit`]) and one
-//! post-destruction hook ([`redraw_after_lock_surface_destroyed`]).
+//! [`reject_unrepresentable_layer_size`],
+//! [`reject_frozen_toplevel_icon_request`] and
+//! [`reject_excess_capture_frame`]), one pre-delegation
+//! interception ([`prepare_post_destroy_lock_commit`]) and four
+//! post-destruction hooks ([`redraw_after_lock_surface_destroyed`],
+//! [`neutralize_destroyed_layer_surface`],
+//! [`forget_destroyed_toplevel_icon`] and
+//! [`forget_destroyed_capture_frame`]).
 //!
 //! ## Why the first guard exists
 //!
@@ -188,6 +192,64 @@
 //! [`State::frozen_icons`](super::State), owned by `toplevel_icon.rs`. Delete
 //! this guard, and that set, once the pinned rev's two error arms `return`.
 //!
+//! ## Why the fifth guard exists
+//!
+//! The pinned Smithay rev (`0ff00983`)
+//! `src/wayland/image_copy_capture/mod.rs` handles
+//! `ext_image_copy_capture_session_v1.create_frame` by initialising the frame
+//! object and pushing it onto the session's `active_frames` with no cap, no
+//! pruning, and no `duplicate_frame` -- even though the protocol allows at
+//! most one frame object per session at a time ("If a client sends a
+//! create_frame request before a previous frame object has been destroyed,
+//! the duplicate_frame protocol error is raised"). And flexwm's own
+//! `Capture::pending` throttle never sees this shape at all: `frame()`, where
+//! that throttle lives, is only reached from the client's `capture` request,
+//! never from `create_frame` itself. So one client, one session, and a
+//! `create_frame` loop with no `capture` ever sent is unbounded protocol
+//! objects -- plus a `Vec` Smithay's `capture` dispatch then scans linearly
+//! on every capture, and walks again on every frame teardown.
+//!
+//! The guard refuses a `create_frame` past
+//! [`MAX_FRAMES_PER_CLIENT`](super::screencopy::MAX_FRAMES_PER_CLIENT) live
+//! frames for the requesting client, before Smithay's handler ever sees it.
+//! Two deliberate choices, both worth recording rather than re-deriving:
+//!
+//! - **Per client, not per session.** The protocol's rule is per session, but
+//!   the pinned rev exposes no way to learn *which* session a `create_frame`
+//!   names before delegating it: `Session`/`SessionRef` carry no protocol id
+//!   or client accessor, `SessionData`'s fields are private with no accessor,
+//!   and `ImageCaptureSource` (the one thing `capture_constraints` sees)
+//!   names the source, not the session or its client. What this seam *does*
+//!   see is the [`Client`](smithay::reexports::wayland_server::Client), so
+//!   the bound is keyed by that -- and it still bounds the ticket's exact
+//!   attack, which is single-session.
+//! - **A protocol error, not a silent ignore.** The spec says the error "is
+//!   raised", and a silent ignore would be worse than the leak: returning
+//!   without initialising the request's `New` leaves wayland-backend's
+//!   `UninitObjectData` in place, whose `request` is a `panic!` -- and the
+//!   dispatch loop's own `(Some(child_id), None)` arm panics too unless the
+//!   client is already `killed` (wayland-backend 0.3.17
+//!   `rs/server_impl/{mod.rs:126,common_poll.rs:288-296}`). Either one takes
+//!   the whole compositor down the moment the client touches the frame it was
+//!   never given. `post_error` kills synchronously, so both are covered, by
+//!   the same argument the `wl_shm` guards above already make.
+//!
+//! A well-behaved client cannot trip this by racing its own frame lifecycle:
+//! requests on one connection are dispatched in order, so a `destroy` the
+//! client sent always runs before a later `create_frame`, and a session's
+//! objects belong to exactly one client. The only clients that see
+//! `duplicate_frame` are ones holding more live frames than the cap --
+//! `grim`, which holds one frame per run, and the persistent-preview shape,
+//! which holds one per session, are nowhere near it. And the kill is
+//! per-client: one client's greed can only ever disconnect that client,
+//! never deny a well-behaved one (the global-cap shape the IPC connection-cap
+//! entry already filed against).
+//!
+//! The count itself lives in `screencopy.rs` (`frames_per_client`), counted
+//! up here and back down in the destruction hook below; see
+//! [`State::refuse_excess_capture_frame`](super::State) for why delegation
+//! after a count cannot leak it. Delete neither half without the other.
+//!
 //! ## Why the hook exists
 //!
 //! Not a guard at all, and not a workaround for a Smithay bug: a callback
@@ -267,6 +329,9 @@
 
 use std::any::{Any, TypeId};
 
+use smithay::reexports::wayland_protocols::ext::image_copy_capture::v1::server::{
+    ext_image_copy_capture_frame_v1, ext_image_copy_capture_session_v1,
+};
 use smithay::reexports::wayland_protocols::ext::session_lock::v1::server::ext_session_lock_surface_v1;
 use smithay::reexports::wayland_protocols::xdg::toplevel_icon::v1::server::{
     xdg_toplevel_icon_manager_v1, xdg_toplevel_icon_v1,
@@ -328,6 +393,7 @@ where
             || reject_oversized_shm_pool_creation(resource, &request)
             || reject_unrepresentable_layer_size(resource, &request)
             || reject_frozen_toplevel_icon_request(state, resource, &request)
+            || reject_excess_capture_frame(state, client, resource, &request)
         {
             return;
         }
@@ -337,6 +403,10 @@ where
     }
 
     fn destroyed(state: &mut Self, client: ClientId, resource: &I, data: &UserData) {
+        // *Before* the delegate, unlike every hook below: this only touches
+        // flexwm's own per-client frame count, which Smithay's teardown
+        // neither reads nor writes, and `data.destroyed` moves `client`.
+        forget_destroyed_capture_frame::<I>(state, &client, resource);
         data.destroyed(state, client, resource);
         // *After* the delegate, not before: Smithay's own
         // `ExtLockSurfaceUserData::destroyed` is what unmaps the surface, and
@@ -660,6 +730,77 @@ where
         return;
     }
     state.forget_toplevel_icon(&resource.id());
+}
+
+/// Posts a protocol error and returns `true` when `request` is a
+/// `create_frame` that would push its client past
+/// [`MAX_FRAMES_PER_CLIENT`](super::screencopy::MAX_FRAMES_PER_CLIENT) live
+/// capture frames.
+///
+/// See the module doc's "Why the fifth guard exists" for the full argument;
+/// the short form: the pinned Smithay rev pushes every `create_frame` onto an
+/// unbounded per-session list and never raises `duplicate_frame`, and
+/// flexwm's own `Capture::pending` throttle only runs on `capture`, so a
+/// `create_frame` loop with no `capture` ever sent is an unbounded-objects
+/// shape nothing else bounds. The refusal is the protocol's own
+/// `duplicate_frame` error on the offending session, which disconnects only
+/// the client that overflowed.
+///
+/// Folds away for every interface other than
+/// `ext_image_copy_capture_session_v1`, for the same monomorphization reason
+/// as the guards above -- which matters here too: this runs on every request
+/// of every interface.
+fn reject_excess_capture_frame<I>(
+    state: &mut State,
+    client: &Client,
+    resource: &I,
+    request: &I::Request,
+) -> bool
+where
+    I: Resource,
+    I::Request: 'static,
+{
+    if TypeId::of::<I::Request>() != TypeId::of::<ext_image_copy_capture_session_v1::Request>() {
+        return false;
+    }
+    let Some(ext_image_copy_capture_session_v1::Request::CreateFrame { .. }) =
+        (request as &dyn Any).downcast_ref::<ext_image_copy_capture_session_v1::Request>()
+    else {
+        return false;
+    };
+    if !state.refuse_excess_capture_frame(client) {
+        return false;
+    }
+    resource.post_error(
+        ext_image_copy_capture_session_v1::Error::DuplicateFrame,
+        format!(
+            "create_frame refused: this client already holds the maximum of {} \
+             live capture frames (duplicate_frame)",
+            super::screencopy::MAX_FRAMES_PER_CLIENT,
+        ),
+    );
+    true
+}
+
+/// Forgets one live capture frame when its protocol object dies, which is
+/// what keeps [`MAX_FRAMES_PER_CLIENT`](super::screencopy::MAX_FRAMES_PER_CLIENT)'s
+/// bookkeeping exact: every counted `create_frame` is paired with exactly one
+/// destruction, including on client disconnect (whose cleanup destroys every
+/// object) and for frames that outlive their session.
+///
+/// Folds away for every interface other than
+/// `ext_image_copy_capture_frame_v1`, which matters in the same way as the
+/// hooks above: this sits on the destruction path of every object of every
+/// interface.
+fn forget_destroyed_capture_frame<I>(state: &mut State, client: &ClientId, _resource: &I)
+where
+    I: Resource,
+    I::Request: 'static,
+{
+    if TypeId::of::<I::Request>() != TypeId::of::<ext_image_copy_capture_frame_v1::Request>() {
+        return;
+    }
+    state.forget_capture_frame(client);
 }
 
 /// The message both size-cap refusals carry. Allocating is fine here and

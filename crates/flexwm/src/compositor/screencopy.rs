@@ -92,12 +92,28 @@
 //!   cap on one and not the other would be inconsistent, not safer.
 //! - The only non-punitive form of a cap is per *client*, and the handler API
 //!   this is written against does not say which client a session belongs to
-//!   (`capture_constraints` is handed a source, not a `Client`). A global cap
-//!   would let one greedy client deny a well-behaved one -- exactly the
+//!   (`capture_constraints` is handed a source, not a `Client`).
+//!   `ImageCopyCaptureHandler::new_session` is handed a `Session` with no
+//!   protocol id or client accessor either, and Smithay's
+//!   `new_with_filter` counts manager *binds*, not sessions -- so per-client
+//!   session accounting has no hook at all today, and building a fifth
+//!   independent one here instead of folding sessions into the shared
+//!   mechanism the sibling entries will land would contradict the backlog's
+//!   own direction. A global cap would let one greedy client deny a
+//!   well-behaved one -- exactly the
 //!   concern already filed against the IPC connection cap.
 //!
+//! What *is* capped is the cheaper half of the same attack: **how many live
+//! frame objects one client holds**, at [`MAX_FRAMES_PER_CLIENT`], refused
+//! pre-delegation with the protocol's own `duplicate_frame` error (see
+//! `dispatch.rs`'s module doc for why a protocol error and not a silent
+//! ignore). A `create_frame` loop with no `capture` -- which flexwm's
+//! [`Capture::pending`] throttle never sees, since it only runs on `capture`
+//! -- can therefore cost at most sixteen small objects per abusive client,
+//! and each refusal kills only the client that overflowed.
+//!
 //! Filed as
-//! [its own item](../../../../docs/backlog/protocols/screencopy-session-cap.md),
+//! [its own item](../../../../docs/backlog/resolved/screencopy-session-cap-done.md),
 //! the same way the `wl_shm` per-pool cap names the total it does not bound,
 //! rather than treated as covered by the throttling above.
 //!
@@ -165,14 +181,16 @@
 //! a client that asks for `Argb8888` gets the framebuffer's own alpha, which is
 //! what that format means.
 
+use std::collections::HashMap;
 use std::time::Duration;
 
 use smithay::backend::allocator::Fourcc;
 use smithay::backend::renderer::{Bind, ExportMem};
 use smithay::output::{Output, WeakOutput};
-use smithay::reexports::wayland_server::DisplayHandle;
+use smithay::reexports::wayland_server::backend::ClientId;
 use smithay::reexports::wayland_server::protocol::wl_buffer::WlBuffer;
 use smithay::reexports::wayland_server::protocol::wl_shm;
+use smithay::reexports::wayland_server::{Client, DisplayHandle};
 use smithay::utils::{Buffer as BufferCoords, Clock, IsAlive, Monotonic, Rectangle, Transform};
 use smithay::wayland::dmabuf::DmabufState;
 use smithay::wayland::image_capture_source::{
@@ -201,6 +219,35 @@ mod tests;
 /// other -- which it can only do if it can read this one.
 pub(super) const FORMATS: [wl_shm::Format; 2] =
     [wl_shm::Format::Xrgb8888, wl_shm::Format::Argb8888];
+
+/// How many capture frames one Wayland client may hold at once, across all of
+/// its sessions, before a further `create_frame` is refused with the
+/// protocol's own `duplicate_frame` error.
+///
+/// Why this number, and why per client rather than per session (which is what
+/// the protocol's rule literally says -- "at most one frame object ... for a
+/// given session"):
+///
+/// - The pinned Smithay rev exposes no way to learn *which* session a
+///   `create_frame` names before delegating it: `Session`/`SessionRef` carry
+///   no protocol id or client, and `SessionData`'s fields are private, so a
+///   `dispatch.rs` intercept cannot map the request to this module's
+///   [`Capture`] list. What the intercept *does* see is the [`Client`], so
+///   the bound is keyed by that. See `dispatch.rs`'s module doc for the full
+///   derivation, including why a silent ignore is not an option.
+/// - 16 is far above anything legitimate: the protocol allows one live frame
+///   per session, and a client would need sixteen sessions each mid-flight at
+///   once to trip this -- `grim` holds one per run, a shell's persistent
+///   overview preview one per session, and the suites here never exceed two.
+///   The failure mode of tripping it is the client being disconnected, so the
+///   margin errs generous: a tighter number would bound a few more small
+///   objects per abuser, a looser one risks nothing an abuser could not already
+///   do with sixteen mapped surfaces.
+/// - Per client rather than global, deliberately: a global cap would let one
+///   greedy client deny a well-behaved one, the concern already filed against
+///   the IPC connection cap. Refusing this way kills only the client that
+///   overflowed, never an innocent one.
+pub(super) const MAX_FRAMES_PER_CLIENT: u32 = 16;
 
 /// Bytes per pixel in both formats [`FORMATS`] offers, and in the `Argb8888`
 /// framebuffer they are read back from.
@@ -314,6 +361,19 @@ pub struct Screencopy {
     /// [`ImageCopyCaptureHandler::session_destroyed`], which is the only place
     /// a session is dropped.
     sessions: Vec<Capture>,
+    /// How many live `ext_image_copy_capture_frame_v1` objects each Wayland
+    /// client holds, by client id.
+    ///
+    /// Counted up in [`State::refuse_excess_capture_frame`] (called from
+    /// `dispatch.rs` for every `create_frame` before Smithay sees it) and
+    /// back down in [`State::forget_capture_frame`] (called from the same
+    /// file's destruction hook for every dead frame object). An entry exists
+    /// only while the client holds at least one frame, so this is bounded by
+    /// live protocol objects the same way wayland-backend already bounds
+    /// them -- and a frame that outlives its session (legal per the
+    /// protocol) keeps counting until *it* dies, which is what keeps the
+    /// bookkeeping exact across session teardown.
+    frames_per_client: HashMap<ClientId, u32>,
     /// The monotonic clock a frame's `presentation_time` is read from.
     ///
     /// Not [`State::start_time`](super::State), which measures time since this
@@ -381,6 +441,7 @@ impl Screencopy {
             capture: ImageCopyCaptureState::new::<State>(dh),
             dmabuf: dmabuf::advertise(dh),
             sessions: Vec::new(),
+            frames_per_client: HashMap::new(),
             clock: Clock::new(),
         }
     }
@@ -397,6 +458,65 @@ impl Screencopy {
     #[cfg(test)]
     pub(super) fn session_count(&self) -> (usize, usize) {
         (self.sessions.len(), self.capture.sessions().len())
+    }
+
+    /// How many capture frames all clients hold between them. Test-only: the
+    /// flood and cycling tests assert the bookkeeping drains, which a
+    /// compositor-side count states directly -- while Smithay's own
+    /// `active_frames` lists stay private, so no test could read them.
+    #[cfg(test)]
+    pub(super) fn frames_in_flight(&self) -> usize {
+        self.frames_per_client.values().sum::<u32>() as usize
+    }
+}
+
+impl State {
+    /// Records one more live capture frame for `client`, refusing past
+    /// [`MAX_FRAMES_PER_CLIENT`].
+    ///
+    /// Returns whether the caller must refuse the `create_frame` -- and the
+    /// refusal itself (the `duplicate_frame` protocol error, posted on the
+    /// session) stays with the caller in `dispatch.rs`, which holds the
+    /// session object this module never sees. Counting and refusing split
+    /// that way for the same reason the frozen-icon guard keeps both halves
+    /// together does not apply here: the counted key (the client) and the
+    /// error target (the session) are different objects.
+    ///
+    /// Called *before* delegation, so a refused frame is never created and a
+    /// counted one always is: Smithay's `create_frame` handler cannot fail
+    /// (it initialises the object and pushes it unconditionally), which is
+    /// what keeps this count exact rather than leaking on a path that counts
+    /// but never creates.
+    pub(super) fn refuse_excess_capture_frame(&mut self, client: &Client) -> bool {
+        let count = self
+            .screencopy
+            .frames_per_client
+            .entry(client.id())
+            .or_insert(0);
+        if *count >= MAX_FRAMES_PER_CLIENT {
+            return true;
+        }
+        *count += 1;
+        false
+    }
+
+    /// Forgets one live capture frame for the client a dead frame object
+    /// belonged to.
+    ///
+    /// Called from `dispatch.rs`'s destruction hook for every destroyed
+    /// `ext_image_copy_capture_frame_v1`, which is also what bounds the map:
+    /// an entry leaves it exactly when its last frame's protocol object does,
+    /// including on client disconnect (whose cleanup destroys every object)
+    /// and for frames that outlive their session. `saturating_sub`, because a
+    /// destroy the count never saw would be a bookkeeping bug, not a client
+    /// one -- and a compositor must not panic on its own accounting.
+    pub(super) fn forget_capture_frame(&mut self, client: &ClientId) {
+        if let Some(count) = self.screencopy.frames_per_client.get_mut(client) {
+            *count = count.saturating_sub(1);
+            if *count == 0 {
+                self.screencopy.frames_per_client.remove(client);
+            }
+        }
     }
 }
 
