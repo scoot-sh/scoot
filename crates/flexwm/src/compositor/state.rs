@@ -42,6 +42,7 @@ use smithay::wayland::viewporter::ViewporterState;
 use smithay::wayland::xdg_activation::XdgActivationState;
 use smithay::wayland::xdg_toplevel_icon::XdgToplevelIconManager;
 
+use super::bind_budget::BindBudget;
 use super::cursor::Cursor;
 use super::decorations::{Appearance, Decorations};
 use super::ext_workspace::ExtWorkspaceState;
@@ -388,6 +389,12 @@ pub struct State {
     /// protocol objects and the snapshot of what clients have been told.
     /// Read-only: every configuration a client builds is refused.
     pub output_management: OutputManagement,
+    /// The shared per-client budget for binding the manager/list globals
+    /// above (`ext_workspace`, `foreign_toplevels`,
+    /// `foreign_toplevel_management`, `output_management`). Counted in each
+    /// global's `bind`, released on its `stop` and `destroyed` -- see
+    /// `bind_budget.rs`, which owns the policy and the number.
+    pub bind_budget: BindBudget,
     /// `ext_idle_notifier_v1` (version 2): what a `swayidle`-style daemon
     /// binds to learn the seat has been quiet N milliseconds. Read on
     /// every input event (`announce_activity`, see `idle.rs`) and written
@@ -614,6 +621,7 @@ impl State {
             xdg_activation,
             gamma_control,
             output_management,
+            bind_budget: BindBudget::default(),
             idle_notifier,
             idle_inhibitors: idle::Inhibitors::default(),
             idle_inhibit_manager_state,

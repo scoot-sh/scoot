@@ -323,6 +323,23 @@ gap jumped the queue — each item's own file records why it landed when it did.
   rule-3 caveat removed now the claim is true as written. No hot-path
   benchmark (per-grab path plus one `Option` compare per focus
   derivation).
+- **[Nothing bounded how many manager/list objects one client may
+  bind](docs/backlog/resolved/ext-workspace-object-binding-cap-done.md)** —
+  one shared per-client budget (8 binds across `ext_workspace_manager_v1`,
+  `ext_foreign_toplevel_list_v1`, `zwlr_foreign_toplevel_manager_v1` and
+  `zwlr_output_manager_v1`), sized at 2x the one-per-global legitimate max
+  against the worst multiplier (self-created windows), refused with each
+  global's own `finished` rather than a protocol error, released
+  idempotently across `stop`/destroy/disconnect. Two findings on the way:
+  a destructor `finished` sent inside `bind` panics wayland-backend's bind
+  epilogue (so refusals defer to loop idle), and Smithay's
+  `ForeignToplevelListState` exposes no bind seam — the ext list is now
+  flexwm-owned, mirroring its wlr twin, with byte-identical wire behavior
+  pinned by the existing suite. Fail-first harness tests per global plus
+  isolation, drain, floor and same-batch stop/destroy shapes; bind-storm
+  before/after (64 binds × 50 windows: 64 registered before, 8 after) and
+  live quickshell (1 bind per connection, window list unaffected). README
+  carries the per-global refusal semantics.
 ## What's next
 
 The backlog is the source of truth for what to pick up; this is the current
