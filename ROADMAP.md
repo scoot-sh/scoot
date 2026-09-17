@@ -428,7 +428,9 @@ gap jumped the queue — each item's own file records why it landed when it did.
   VM (completions fire; three consecutive locks each vblank-confirmed).
   Found alongside, pre-existing and filed separately: a lock surface
   mapped after the confirming frame never appears on live `--tty`
-  ([surface-not-drawn-live](docs/backlog/protocols/session-lock-surface-not-drawn-live.md)).
+  ([surface-not-drawn-live](docs/backlog/resolved/session-lock-surface-not-drawn-live-done.md))
+  — CLOSED UNREPRODUCED 2026-09-17 (six green live sessions + mechanism
+  audit; likely stale-socket artifact, VM swept).
 ## What's next
 
 The backlog is the source of truth for what to pick up; this is the current

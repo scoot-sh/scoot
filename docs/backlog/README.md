@@ -177,9 +177,15 @@ actionable.
   the blanked frame under `--tty` (sequence-tracked; one-second fallback
   confirms anyway rather than hanging the locker); headless/nested confirm
   on render unchanged
-- [A lock surface mapped after the confirming frame never appears on live `--tty`](./protocols/session-lock-surface-not-drawn-live.md)
-  — found verifying the item above: pre-existing (identical on the
-  pre-change binary), harness-green, damage-under-buffer-age suspected
+- [A lock surface mapped after the confirming frame never appears on live `--tty`](./resolved/session-lock-surface-not-drawn-live-done.md)
+  — CLOSED UNREPRODUCED 2026-09-17 by isolate-first probe (no PR): six
+  live sessions all green with pixel censuses, and the suspected damage
+  hole disconfirmed by mechanism audit (all surface damage flows through
+  the generic commit handler + new-element rules). Likely artifact class:
+  hundreds of stale probe sockets on the dev VM (since swept); future
+  probes must pin `--socket` + `WAYLAND_DISPLAY`. Adjacent code-traced
+  present-skip damage finding filed as
+  [present-skip eats frame damage](./rendering/present-skip-eats-frame-damage.md).
 - [Lock manager global offered to every client](./protocols/session-lock-global-restriction.md)
 - [First click on a fresh lock screen reaches nobody](./resolved/session-lock-first-click-done.md)
   — RESOLVED 2026-09-17 (PR #76): pointer focus is re-derived on the commit
@@ -224,6 +230,7 @@ actionable.
   config-parse time with a warning (`"A"` means plain `a`, not `shift+a`);
   `msg key A` still refuses.
 - [Per-frame `Vec` alloc in the cursor fallback path](./rendering/cursor-element-per-frame-alloc.md)
+- [A `present()` skipped for an in-flight flip consumes that frame's damage](./rendering/present-skip-eats-frame-damage.md) — code-traced only, never observed; scanout (not the read-back image) goes stale until next damage; candidate fix touches the hot present path, so correctly waiting on a live observation
 - [Cursor frames still tick while VT-paused](./rendering/cursor-frame-callback-when-paused.md)
 - [`wl_surface.offset` doesn't move the cursor hotspot](./rendering/cursor-surface-offset-hotspot.md)
 - [The pointer starts at the output's origin, not centred](./rendering/pointer-starts-at-origin.md)
