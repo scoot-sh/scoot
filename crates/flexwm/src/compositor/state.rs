@@ -61,6 +61,7 @@ use super::popup::ActivePopupGrab;
 use super::screencopy::Screencopy;
 use super::screenshot::{Encoder, PendingShot, ShotSink};
 use super::session_lock::SessionLock;
+use super::shm_pools::ShmPools;
 use super::tty::Tty;
 
 #[cfg(test)]
@@ -395,6 +396,11 @@ pub struct State {
     /// global's `bind`, released on its `stop` and `destroyed` -- see
     /// `bind_budget.rs`, which owns the policy and the number.
     pub bind_budget: BindBudget,
+    /// How many live `wl_shm` pools each Wayland client holds. Counted at
+    /// `create_pool` before delegation, released in `dispatch.rs`'s pool
+    /// destruction hook (which also drains disconnects and kills) -- see
+    /// `shm_pools.rs`, which owns the policy and the number.
+    pub shm_pools: ShmPools,
     /// `ext_idle_notifier_v1` (version 2): what a `swayidle`-style daemon
     /// binds to learn the seat has been quiet N milliseconds. Read on
     /// every input event (`announce_activity`, see `idle.rs`) and written
@@ -622,6 +628,7 @@ impl State {
             gamma_control,
             output_management,
             bind_budget: BindBudget::default(),
+            shm_pools: ShmPools::default(),
             idle_notifier,
             idle_inhibitors: idle::Inhibitors::default(),
             idle_inhibit_manager_state,

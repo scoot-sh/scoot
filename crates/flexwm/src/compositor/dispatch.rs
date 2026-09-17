@@ -3,16 +3,17 @@
 //! This is a hand-written copy of what `smithay::delegate_dispatch2!(State)`
 //! expands to -- the blanket `Dispatch`/`GlobalDispatch` impls that forward
 //! every request to whichever `Dispatch2` impl the object's user data
-//! carries -- plus five guards on what a client may ask for
+//! carries -- plus six guards on what a client may ask for
 //! ([`reject_invalid_shm_pool_resize`], [`reject_oversized_shm_pool_creation`],
-//! [`reject_unrepresentable_layer_size`],
+//! [`reject_excess_shm_pool`], [`reject_unrepresentable_layer_size`],
 //! [`reject_frozen_toplevel_icon_request`] and
 //! [`reject_excess_capture_frame`]), one pre-delegation
-//! interception ([`prepare_post_destroy_lock_commit`]) and four
+//! interception ([`prepare_post_destroy_lock_commit`]) and five
 //! post-destruction hooks ([`redraw_after_lock_surface_destroyed`],
 //! [`neutralize_destroyed_layer_surface`],
-//! [`forget_destroyed_toplevel_icon`] and
-//! [`forget_destroyed_capture_frame`]).
+//! [`forget_destroyed_toplevel_icon`],
+//! [`forget_destroyed_capture_frame`] and
+//! [`forget_destroyed_shm_pool`]).
 //!
 //! ## Why the first guard exists
 //!
@@ -63,12 +64,16 @@
 //! sparse pool is merely sparse), just unbounded reservation: the same
 //! resource-exhaustion family as the IPC line-length cap and the screenshot
 //! throttle. [`MAX_SHM_POOL_BYTES`] bounds this **per pool, not in total** --
-//! nothing here stops one client from opening many pools each just under the
-//! cap (measured: 40 pools at exactly the cap reserve ~20 GiB from a single
-//! connection). Bounding the sum needs per-client accounting this module
-//! doesn't have yet; see
-//! `docs/backlog/security/shm-total-per-client-unbounded.md` for it rather than
-//! treating this fix as closing that case too.
+//! a byte total would need each pool's size at destroy time, which is
+//! unknowable at the pinned rev (the wall is stated with sources in
+//! `shm_pools.rs` rather than re-derived here). What *is* bounded is the
+//! concurrency: [`reject_excess_shm_pool`] refuses a `create_pool` past
+//! [`MAX_POOLS_PER_CLIENT`](super::shm_pools::MAX_POOLS_PER_CLIENT) live
+//! pools for the requesting client -- which caps the per-connection fds and
+//! mappings (one fd minimum per live pool) even though it cannot cap the
+//! bytes. See
+//! `docs/backlog/resolved/shm-pool-count-cap-done.md` for the byte
+//! half rather than treating either fix as closing that case too.
 //!
 //! [`MAX_SHM_POOL_BYTES`] is the bound, and a request past it is **rejected,
 //! not clamped**: a clamp would leave the client and the compositor
@@ -363,11 +368,13 @@ mod tests;
 ///   ~2 GiB of address space reserved per pool; this is a quarter of that, and
 ///   leaves the `size as usize` conversion Smithay does trivially in range.
 ///
-/// What it deliberately does *not* claim: a total. A client may still hold
-/// several pools, and bounding the sum would need per-client accounting, which
-/// is a larger change than this bound and a separate concern from "one request
-/// must not reserve 2 GiB". See this module's doc for why an oversized request
-/// is refused rather than clamped.
+/// What it deliberately does *not* claim: a byte total. A client may hold
+/// up to [`MAX_POOLS_PER_CLIENT`](super::shm_pools::MAX_POOLS_PER_CLIENT)
+/// pools, and bounding the byte sum would need each pool's size at destroy
+/// time, which is unknowable at the pinned rev (see `shm_pools.rs`). The
+/// concurrency -- and with it the per-connection fds, one minimum per live
+/// pool -- is what [`reject_excess_shm_pool`] bounds. See this module's doc
+/// for why an oversized request is refused rather than clamped.
 const MAX_SHM_POOL_BYTES: i32 = 512 * 1024 * 1024;
 
 impl<I, UserData> Dispatch<I, UserData> for State
@@ -391,6 +398,7 @@ where
     ) {
         if reject_invalid_shm_pool_resize(resource, &request)
             || reject_oversized_shm_pool_creation(resource, &request)
+            || reject_excess_shm_pool(state, client, resource, &request)
             || reject_unrepresentable_layer_size(resource, &request)
             || reject_frozen_toplevel_icon_request(state, resource, &request)
             || reject_excess_capture_frame(state, client, resource, &request)
@@ -407,6 +415,7 @@ where
         // flexwm's own per-client frame count, which Smithay's teardown
         // neither reads nor writes, and `data.destroyed` moves `client`.
         forget_destroyed_capture_frame::<I>(state, &client, resource);
+        forget_destroyed_shm_pool::<I>(state, &client, resource);
         data.destroyed(state, client, resource);
         // *After* the delegate, not before: Smithay's own
         // `ExtLockSurfaceUserData::destroyed` is what unmaps the surface, and
@@ -519,6 +528,76 @@ where
     // the client would already have got for a size this handler refused.
     resource.post_error(wl_shm::Error::InvalidStride, too_large(*size));
     true
+}
+
+/// Posts a protocol error and returns `true` when `request` is a
+/// `wl_shm.create_pool` that would push its client past
+/// [`MAX_POOLS_PER_CLIENT`](super::shm_pools::MAX_POOLS_PER_CLIENT) live
+/// pools.
+///
+/// Only creations are claimed: a `resize` grows the pool it names rather
+/// than opening a new one, so it leaves the count alone, and a destroy
+/// releases through [`forget_destroyed_shm_pool`] below. Sizes the per-pool
+/// cap or upstream already refuse (`size <= 0`, past
+/// [`MAX_SHM_POOL_BYTES`]) never reach the claim -- each is refused (and the
+/// client killed) without ever creating a pool, so counting one would leak
+/// a unit no destruction could release. Checking both here rather than
+/// leaning on the chain order is what keeps that true however the guards
+/// are ordered.
+///
+/// The refusal is `InvalidStride` on `wl_shm`, the same code (and object)
+/// the per-pool cap's own creation refusal uses: one consistent answer for
+/// "this pool cannot be opened", whichever bound said so.
+///
+/// Folds away for every interface other than `wl_shm`, for the same
+/// monomorphization reason as the guards above -- which matters here too:
+/// this runs on every request of every interface.
+fn reject_excess_shm_pool<I>(
+    state: &mut State,
+    client: &Client,
+    resource: &I,
+    request: &I::Request,
+) -> bool
+where
+    I: Resource,
+    I::Request: 'static,
+{
+    if TypeId::of::<I::Request>() != TypeId::of::<wl_shm::Request>() {
+        return false;
+    }
+    let Some(wl_shm::Request::CreatePool { size, .. }) =
+        (request as &dyn Any).downcast_ref::<wl_shm::Request>()
+    else {
+        return false;
+    };
+    if *size <= 0 || *size > MAX_SHM_POOL_BYTES {
+        return false;
+    }
+    if !state.shm_pools.refuse_pool_creation(client) {
+        return false;
+    }
+    resource.post_error(wl_shm::Error::InvalidStride, too_many_pools());
+    true
+}
+
+/// Forgets one live `wl_shm` pool when its protocol object dies, which is
+/// what keeps [`MAX_POOLS_PER_CLIENT`](super::shm_pools::MAX_POOLS_PER_CLIENT)'s
+/// bookkeeping exact: every counted `create_pool` is paired with exactly one
+/// destruction, including on client disconnect (whose cleanup destroys every
+/// object) and on a protocol-error kill.
+///
+/// Folds away for every interface other than `wl_shm_pool`, which matters in
+/// the same way as the hooks above: this sits on the destruction path of
+/// every object of every interface.
+fn forget_destroyed_shm_pool<I>(state: &mut State, client: &ClientId, _resource: &I)
+where
+    I: Resource,
+    I::Request: 'static,
+{
+    if TypeId::of::<I::Request>() != TypeId::of::<wl_shm_pool::Request>() {
+        return;
+    }
+    state.shm_pools.forget_pool(client);
 }
 
 /// Posts a protocol error and returns `true` when `request` is a
@@ -808,4 +887,13 @@ where
 /// disconnected a client, never on a served request.
 fn too_large(size: i32) -> String {
     format!("wl_shm pool size {size} exceeds flexwm's maximum of {MAX_SHM_POOL_BYTES} bytes")
+}
+
+/// The message the live-pool-count refusal carries: which bound said no and
+/// what it is. Same allocation rule as [`too_large`] -- refusal path only.
+fn too_many_pools() -> String {
+    format!(
+        "wl_shm pool refused: this client already holds the maximum of {} live pools",
+        super::shm_pools::MAX_POOLS_PER_CLIENT,
+    )
 }
