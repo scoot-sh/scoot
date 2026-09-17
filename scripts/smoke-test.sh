@@ -11,14 +11,62 @@
 #     cage -- env MODE=--nested scripts/smoke-test.sh
 # so flexwm's own Connection::connect_to_env() (nested.rs) finds cage's
 # WAYLAND_DISPLAY when it starts, not this shell's.
+#
+# Every temp path this script uses derives from one overridable prefix, so
+# two concurrent runs (e.g. two agents verifying different branches on the
+# same VM) can't collide: run one as SMOKE_PREFIX=/tmp/smoke-a
+# scripts/smoke-test.sh and the other as SMOKE_PREFIX=/tmp/smoke-b
+# scripts/smoke-test.sh and every socket, log, screenshot, config and
+# scratch file below becomes /tmp/smoke-a* vs /tmp/smoke-b*. Two runs
+# sharing one prefix still collide -- prefixes must differ. An explicit
+# SOCKET/SHOT/LOG/CONFIG/TYPED still wins over the prefix-derived default
+# for that one path, so existing callers that set SOCKET/LOG/MODE/FLEXWM
+# keep working; with SMOKE_PREFIX unset every default is exactly the
+# historical hardcoded path. A trailing slash on the prefix is stripped, a
+# nonexistent parent dir is created (mkdir -p), and every expansion is
+# quoted so a prefix containing spaces works.
 set -euo pipefail
 
 MODE=${MODE:---headless}
 FLEXWM=${FLEXWM:-/var/cargo-target/debug/flexwm}
-SOCKET=${SOCKET:-/run/user/$(id -u)/flexwm-smoke.sock}
-SHOT=${SHOT:-/tmp/flexwm-smoke.png}
-LOG=${LOG:-/tmp/flexwm-smoke.log}
-CONFIG=${CONFIG:-/tmp/flexwm-smoke-appearance.toml}
+SMOKE_PREFIX=${SMOKE_PREFIX:-}
+while [ -n "$SMOKE_PREFIX" ] && [ "$SMOKE_PREFIX" != "/" ] && [ "${SMOKE_PREFIX%/}" != "$SMOKE_PREFIX" ]; do
+    SMOKE_PREFIX=${SMOKE_PREFIX%/}
+done
+if [ -n "$SMOKE_PREFIX" ]; then
+    mkdir -p "$(dirname "$SMOKE_PREFIX")"
+    SOCKET=${SOCKET:-"$SMOKE_PREFIX.sock"}
+    SHOT=${SHOT:-"$SMOKE_PREFIX.png"}
+    LOG=${LOG:-"$SMOKE_PREFIX.log"}
+    CONFIG=${CONFIG:-"$SMOKE_PREFIX-appearance.toml"}
+    TYPED_DEFAULT="$SMOKE_PREFIX-typed.txt"
+    KILLED="$SMOKE_PREFIX-killed.png"
+    CONFIG_SOCK="$SMOKE_PREFIX-config.sock"
+    CONFIG_LOG="$SMOKE_PREFIX-config.log"
+    CAPITAL_SOCK="$SMOKE_PREFIX-capital.sock"
+    CAPITAL_LOG="$SMOKE_PREFIX-capital.log"
+    BROKEN_SOCK="$SMOKE_PREFIX-broken.sock"
+    BROKEN_LOG="$SMOKE_PREFIX-broken.log"
+    CONFIG_TEMPLATE="$SMOKE_PREFIX-config-XXXXXX.toml"
+    CAPITAL_TEMPLATE="$SMOKE_PREFIX-capital-XXXXXX.toml"
+    BROKEN_TEMPLATE="$SMOKE_PREFIX-broken-XXXXXX.toml"
+else
+    SOCKET=${SOCKET:-/run/user/$(id -u)/flexwm-smoke.sock}
+    SHOT=${SHOT:-/tmp/flexwm-smoke.png}
+    LOG=${LOG:-/tmp/flexwm-smoke.log}
+    CONFIG=${CONFIG:-/tmp/flexwm-smoke-appearance.toml}
+    TYPED_DEFAULT=/tmp/flexwm-smoke-typed.txt
+    KILLED=/tmp/flexwm-smoke-killed.png
+    CONFIG_SOCK="/run/user/$(id -u)/flexwm-smoke-config.sock"
+    CONFIG_LOG=/tmp/flexwm-smoke-config.log
+    CAPITAL_SOCK="/run/user/$(id -u)/flexwm-smoke-capital.sock"
+    CAPITAL_LOG=/tmp/flexwm-smoke-capital.log
+    BROKEN_SOCK="/run/user/$(id -u)/flexwm-smoke-broken.sock"
+    BROKEN_LOG=/tmp/flexwm-smoke-broken.log
+    CONFIG_TEMPLATE=/tmp/flexwm-smoke-config-XXXXXX.toml
+    CAPITAL_TEMPLATE=/tmp/flexwm-smoke-capital-XXXXXX.toml
+    BROKEN_TEMPLATE=/tmp/flexwm-smoke-broken-XXXXXX.toml
+fi
 export FLEXWM_SOCKET="$SOCKET"
 
 rm -f "$SOCKET" "$SHOT" "$LOG" "$CONFIG"
@@ -174,13 +222,13 @@ echo "--- typing shifted characters, round-tripped back out of the terminal ---"
 # written without the fix.
 NEWLINE=$'\n'
 SHIFTED='AbC_xyz !?~:|@#$%^&*()+{}<>"'
-TYPED=${TYPED:-/tmp/flexwm-smoke-typed.txt}
+TYPED=${TYPED:-"$TYPED_DEFAULT"}
 rm -f "$TYPED"
 # The steps above left `echo two` sitting at the prompt unexecuted; run it so
 # this one starts on an empty command line.
 "$FLEXWM" msg type "$NEWLINE"
 "$FLEXWM" msg wait-idle --quiet-ms 300 --timeout-ms 10000
-"$FLEXWM" msg type "printf '%s' '$SHIFTED' > $TYPED$NEWLINE"
+"$FLEXWM" msg type "printf '%s' '$SHIFTED' > \"$TYPED\"$NEWLINE"
 "$FLEXWM" msg wait-idle --quiet-ms 500 --timeout-ms 10000
 for _ in $(seq 1 50); do
     [ -s "$TYPED" ] && break
@@ -308,7 +356,7 @@ echo "--- clients killed mid-screenshot do not wedge the compositor ---"
 # the mid-encode case deterministically (a_client_that_disconnects_mid_encode);
 # this hammers every interleaving end to end instead.
 for _ in $(seq 1 20); do
-    "$FLEXWM" msg screenshot --out /tmp/flexwm-smoke-killed.png >/dev/null 2>&1 &
+    "$FLEXWM" msg screenshot --out "$KILLED" >/dev/null 2>&1 &
     killer=$!
     killed="${killed-} $killer"
     kill -9 "$killer" 2>/dev/null || true
@@ -317,7 +365,7 @@ done
 # never exits on its own, and hang the script.
 # shellcheck disable=SC2086
 wait $killed 2>/dev/null || true
-rm -f /tmp/flexwm-smoke-killed.png
+rm -f "$KILLED"
 "$FLEXWM" msg version >/dev/null || {
     echo "BUG: the compositor stopped answering after clients were killed mid-screenshot"
     tail -30 "$LOG"
@@ -375,10 +423,10 @@ tail -20 "$LOG"
 
 echo "=== config file: a user bind actually takes effect ==="
 run_config_bind_test() {
-    local socket="/run/user/$(id -u)/flexwm-smoke-config.sock"
-    local log="/tmp/flexwm-smoke-config.log"
+    local socket="$CONFIG_SOCK"
+    local log="$CONFIG_LOG"
     local cfg
-    cfg=$(mktemp /tmp/flexwm-smoke-config-XXXXXX.toml)
+    cfg=$(mktemp "$CONFIG_TEMPLATE")
     # super+n is bound to nothing by default (see keybindings.rs) -- an
     # otherwise-unused combo, so this only passes if the config file's bind
     # is what moved focus, not some default binding coincidentally doing it.
@@ -468,10 +516,10 @@ EOF
 
 echo "=== config file: a capital-letter bind fires on the unshifted key ==="
 run_capital_bind_test() {
-    local socket="/run/user/$(id -u)/flexwm-smoke-capital.sock"
-    local log="/tmp/flexwm-smoke-capital.log"
+    local socket="$CAPITAL_SOCK"
+    local log="$CAPITAL_LOG"
     local cfg
-    cfg=$(mktemp /tmp/flexwm-smoke-capital-XXXXXX.toml)
+    cfg=$(mktemp "$CAPITAL_TEMPLATE")
     # A lone "A" names the unshifted `a` key, not shift+a (see the [binds]
     # reference): injecting a bare `a` must close the window, and loading
     # the file must log the warning that says so.
@@ -534,10 +582,10 @@ EOF
 
 echo "=== config file: a malformed file falls back to defaults instead of blocking startup ==="
 run_broken_config_test() {
-    local socket="/run/user/$(id -u)/flexwm-smoke-broken.sock"
-    local log="/tmp/flexwm-smoke-broken.log"
+    local socket="$BROKEN_SOCK"
+    local log="$BROKEN_LOG"
     local cfg
-    cfg=$(mktemp /tmp/flexwm-smoke-broken-XXXXXX.toml)
+    cfg=$(mktemp "$BROKEN_TEMPLATE")
     printf 'this is not valid toml [[[\n' >"$cfg"
     rm -f "$socket" "$log"
 

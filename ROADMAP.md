@@ -429,8 +429,14 @@ gap jumped the queue — each item's own file records why it landed when it did.
   Found alongside, pre-existing and filed separately: a lock surface
   mapped after the confirming frame never appears on live `--tty`
   ([surface-not-drawn-live](docs/backlog/resolved/session-lock-surface-not-drawn-live-done.md))
-  — CLOSED UNREPRODUCED 2026-09-17 (six green live sessions + mechanism
-  audit; likely stale-socket artifact, VM swept).
+   — CLOSED UNREPRODUCED 2026-09-17 (six green live sessions + mechanism
+   audit; likely stale-socket artifact, VM swept).
+- **[`scripts/smoke-test.sh` hardcoded temp
+  paths](docs/backlog/resolved/smoke-test-temp-prefix-done.md)** —
+  RESOLVED 2026-09-17: every socket, log, screenshot, config and scratch
+  path derives from `$SMOKE_PREFIX` (unset = byte-identical legacy
+  defaults, so existing `SOCKET`/`LOG` callers see no change); two
+  concurrent prefixed runs proven green with fully disjoint file sets.
 ## What's next
 
 The backlog is the source of truth for what to pick up; this is the current

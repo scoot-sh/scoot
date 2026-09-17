@@ -243,7 +243,7 @@ actionable.
 - [Nix `src = self` invalidates the build on doc-only edits](./packaging/nix-src-fileset.md)
 - [`x86_64-darwin` in `systems` breaks `flake check --all-systems`](./packaging/flake-x86-darwin-system.md)
 - [`flake.nix` description drift](./packaging/flake-description-drift.md) (nit)
-- [`smoke-test.sh` hardcodes temp paths](./testing/smoke-test-hardcoded-temp-paths.md)
+- [`smoke-test.sh` hardcodes temp paths](./resolved/smoke-test-temp-prefix-done.md) — RESOLVED 2026-09-17: every temp path derives from `$SMOKE_PREFIX` (unset = byte-identical legacy defaults); two concurrent runs with different prefixes proven green
 - [`smoke-test.sh` background check samples the cursor under `--tty`](./resolved/tty-background-not-painted-done.md)
   — RESOLVED 2026-09-16, together with the `--tty` entry above that had
   independently (and wrongly) filed the same failure as a compositor bug.
