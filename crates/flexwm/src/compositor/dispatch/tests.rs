@@ -14,7 +14,7 @@
 //! clients here don't use that socket -- they're inserted directly as
 //! socket pairs -- but `State::new` creates it either way.
 
-use std::os::fd::AsFd;
+use std::os::fd::{AsFd, OwnedFd};
 use std::os::unix::net::UnixStream;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -26,12 +26,13 @@ use smithay::reexports::calloop::EventLoop;
 use smithay::reexports::wayland_server::Display;
 use wayland_client::backend::WaylandError;
 use wayland_client::protocol::{wl_registry, wl_shm, wl_shm_pool};
-use wayland_client::{Connection, Dispatch, DispatchError, Proxy, QueueHandle};
+use wayland_client::{Connection, Dispatch, DispatchError, EventQueue, Proxy, QueueHandle};
 
 use super::MAX_SHM_POOL_BYTES;
 use crate::compositor::State;
 use crate::compositor::decorations::Appearance;
 use crate::compositor::keybindings::Keybindings;
+use crate::compositor::shm_pools::MAX_POOLS_PER_CLIENT;
 use crate::compositor::state::ClientState;
 
 /// The client end of one test connection.
@@ -77,6 +78,11 @@ struct Report {
     /// assertion that actually matters: the offending client must be the
     /// only casualty.
     survivor: Result<usize, DispatchError>,
+    /// How many pools the compositor still counts across all clients once
+    /// both runs are done. The live-count tests assert the bookkeeping
+    /// drains (or holds exactly what is still alive), which only the
+    /// compositor side can state.
+    pools: usize,
 }
 
 /// Binds `wl_shm`, makes a one-byte pool and asks for `size`.
@@ -154,6 +160,27 @@ fn healthy_client(stream: UnixStream) -> Result<usize, DispatchError> {
 fn drive(
     offender: impl FnOnce(UnixStream) -> Result<(), DispatchError> + Send + 'static,
 ) -> Report {
+    let (resize, survivor, pools) = drive_both(|offender_stream, survivor| {
+        (offender(offender_stream), healthy_client(survivor))
+    });
+    Report {
+        resize,
+        survivor,
+        pools,
+    }
+}
+
+/// The two-connection form: one closure owns *both* client ends, so the
+/// first connection can stay up -- holding its pools -- while the second
+/// runs. That is what the isolation test needs; everything else goes
+/// through [`drive`].
+fn drive_both<A, B>(
+    act: impl FnOnce(UnixStream, UnixStream) -> (A, B) + Send + 'static,
+) -> (A, B, usize)
+where
+    A: Send + 'static,
+    B: Send + 'static,
+{
     let mut event_loop: EventLoop<'static, State> = EventLoop::try_new().expect("an event loop");
     let display: Display<State> = Display::new().expect("a wayland display");
     let mut state = State::new(
@@ -182,12 +209,9 @@ fn drive(
     let finished = Arc::new(AtomicBool::new(false));
     let flag = Arc::clone(&finished);
     let clients = thread::spawn(move || {
-        let report = Report {
-            resize: offender(offender_stream),
-            survivor: healthy_client(survivor),
-        };
+        let outcome = act(offender_stream, survivor);
         flag.store(true, Ordering::Release);
-        report
+        outcome
     });
 
     // The clients block on their roundtrips, so the compositor has to be
@@ -203,7 +227,22 @@ fn drive(
         finished.load(Ordering::Acquire),
         "the client thread never finished; the compositor stopped serving it"
     );
-    clients.join().expect("the client thread")
+    let (first, second) = clients.join().expect("the client thread");
+    // Drain any disconnect cleanup the client thread's return queued: its
+    // sockets are closed (the thread joined), but the destroyed hooks that
+    // release the count only run in a dispatch. Without this, the pools read
+    // below races cleanup -- usually winning, sometimes not. Zero-timeout
+    // polls, so a settled loop costs microseconds; 50 passes is far more
+    // than two disconnects need.
+    for _ in 0..50 {
+        event_loop
+            .dispatch(Some(Duration::ZERO), &mut state)
+            .expect("a compositor dispatch");
+    }
+    // Read after the drain, so every dispatch the clients provoked --
+    // including disconnect cleanup -- has run.
+    let pools = state.shm_pools.pools_in_flight();
+    (first, second, pools)
 }
 
 /// Asserts the offender was refused with `code` on `interface`, and on the
@@ -340,4 +379,249 @@ fn a_pipelined_request_after_a_refused_pool_does_not_reach_the_dead_object() {
     });
     assert_shm_protocol_error(&report.resize, "wl_shm", wl_shm::Error::InvalidStride);
     assert_survivor_still_served(&report);
+}
+
+// -- the per-client live-pool count (`shm_pools.rs`) -----------------------
+
+/// One client connection that can hold pools open across round trips.
+///
+/// The free helpers above open one pool and drop the connection, which is
+/// enough for size-cap tests -- but the count tests need a connection that
+/// stays up while pools accumulate, so creation, destruction and
+/// disconnect are separate steps on one held connection.
+struct PoolClient {
+    /// Held so the socket stays open: dropping the connection is the
+    /// disconnect half of the drain test, and it must happen exactly when
+    /// the test says, not when a helper returns.
+    _conn: Connection,
+    queue: EventQueue<TestClient>,
+    client: TestClient,
+    shm: wl_shm::WlShm,
+    pools: Vec<wl_shm_pool::WlShmPool>,
+    /// The backing files, kept alive until the pools that reference them
+    /// are flushed: a destroyed fd before its `create_pool` goes out would
+    /// hand Smithay an already-closed file.
+    _fds: Vec<OwnedFd>,
+}
+
+impl PoolClient {
+    fn connect(stream: UnixStream) -> Result<Self, DispatchError> {
+        let conn = Connection::from_socket(stream).expect("a client connection");
+        let mut queue = conn.new_event_queue();
+        let qh = queue.handle();
+        let mut client = TestClient::default();
+        conn.display().get_registry(&qh, ());
+        queue.roundtrip(&mut client)?;
+        let shm = client.shm.clone().expect("the wl_shm global");
+        Ok(Self {
+            _conn: conn,
+            queue,
+            client,
+            shm,
+            pools: Vec::new(),
+            _fds: Vec::new(),
+        })
+    }
+
+    /// Opens one pool per size in a single batch and flushes once, holding
+    /// every pool (and fd) open. Small sizes on purpose: the count is
+    /// size-agnostic, and 4 KiB mappings keep a 129-pool flood cheap.
+    fn create_many(&mut self, sizes: &[i32]) -> Result<(), DispatchError> {
+        let qh = self.queue.handle();
+        for size in sizes {
+            let fd = rustix::fs::memfd_create("flexwm-shm-test", rustix::fs::MemfdFlags::CLOEXEC)
+                .expect("a memfd");
+            rustix::fs::ftruncate(&fd, 1).expect("a one-byte pool file");
+            self.pools
+                .push(self.shm.create_pool(fd.as_fd(), *size, &qh, ()));
+            self._fds.push(fd);
+        }
+        self.queue.roundtrip(&mut self.client)?;
+        Ok(())
+    }
+
+    /// Destroys every held pool and flushes, then forgets them client-side.
+    fn destroy_all(&mut self) -> Result<(), DispatchError> {
+        for pool in self.pools.drain(..) {
+            pool.destroy();
+        }
+        self._fds.clear();
+        self.queue.roundtrip(&mut self.client)?;
+        Ok(())
+    }
+}
+
+/// Over the live-pool cap, the excess `create_pool` is refused with the
+/// same `InvalidStride` on `wl_shm` the per-pool cap uses -- and the kill
+/// that carries it drains the dead client's pools: the compositor counts
+/// zero afterwards, and the survivor never noticed.
+#[test]
+fn creating_pools_past_the_count_cap_kills_only_the_client_that_asked() {
+    let report = drive(|stream| {
+        let mut pools = PoolClient::connect(stream)?;
+        pools.create_many(&vec![4096; MAX_POOLS_PER_CLIENT as usize + 1])?;
+        Ok(())
+    });
+    assert_shm_protocol_error(&report.resize, "wl_shm", wl_shm::Error::InvalidStride);
+    assert_survivor_still_served(&report);
+    assert_eq!(
+        report.pools, 0,
+        "the killed client's pools must drain with it, or the count leaks per kill"
+    );
+}
+
+/// Destroying pools reopens headroom: a full cap's worth created, all
+/// destroyed, one more created -- the 129th lifetime pool succeeds iff
+/// every destroy released its unit.
+#[test]
+fn destroying_pools_reopens_headroom() {
+    let report = drive(|stream| {
+        let mut pools = PoolClient::connect(stream)?;
+        pools.create_many(&vec![4096; MAX_POOLS_PER_CLIENT as usize])?;
+        pools.destroy_all()?;
+        pools.create_many(&[4096])?;
+        Ok(())
+    });
+    if let Err(error) = &report.resize {
+        panic!("a pool created after destroying a full cap was refused: {error:?}");
+    }
+    assert_survivor_still_served(&report);
+}
+
+/// The anti-shared-table property: one client sitting exactly at the cap
+/// must not deny a second client its first pool. Both runs succeed on their
+/// own connections; a global count would refuse the second.
+#[test]
+fn a_second_client_is_unaffected_by_the_first_clients_full_cap() {
+    let (first, second, _) = drive_both(|greedy_stream, survivor_stream| {
+        let mut greedy = PoolClient::connect(greedy_stream)
+            .expect("the greedy client connects and binds wl_shm");
+        let first = greedy.create_many(&vec![4096; MAX_POOLS_PER_CLIENT as usize]);
+        // `greedy` stays alive -- and its pools open -- while the second
+        // client runs: that overlap is the whole assertion.
+        let second = healthy_client(survivor_stream);
+        (first, second)
+    });
+    if let Err(error) = &first {
+        panic!("filling exactly to the cap was refused: {error:?}");
+    }
+    let globals = second
+        .as_ref()
+        .expect("a second client's first pool was refused while another sat at the cap");
+    assert!(*globals > 0, "the second client saw no globals at all");
+}
+
+/// Both bounds compose: a pool past the per-pool cap is refused by that cap
+/// without consuming a unit of this one -- the compositor still counts
+/// zero, so a client that keeps overshooting cannot wedge its own budget.
+#[test]
+fn an_oversized_create_consumes_no_count_budget() {
+    let report = drive(|stream| create_pool_of(stream, MAX_SHM_POOL_BYTES + 1));
+    assert_shm_protocol_error(&report.resize, "wl_shm", wl_shm::Error::InvalidStride);
+    assert_survivor_still_served(&report);
+    assert_eq!(
+        report.pools, 0,
+        "a pool refused by the per-pool cap must not be counted"
+    );
+}
+
+/// Same for the size upstream refuses: a zero-size `create_pool` dies with
+/// upstream's `InvalidStride` and consumes nothing. Without the `size <= 0`
+/// carve-out each of these would leak one unit for a client with no live
+/// objects left to drain it.
+#[test]
+fn a_zero_size_create_consumes_no_count_budget() {
+    let report = drive(|stream| create_pool_of(stream, 0));
+    assert_shm_protocol_error(&report.resize, "wl_shm", wl_shm::Error::InvalidStride);
+    assert_survivor_still_served(&report);
+    assert_eq!(
+        report.pools, 0,
+        "a pool refused by upstream must not be counted"
+    );
+}
+
+/// Same for a valid size on an unmappable fd: Smithay's own `mmap` fails
+/// (`InvalidFd`, client killed, pool never created), so claiming one would
+/// leak a unit no destruction could release -- the never-initialized object
+/// keeps `UninitObjectData`, whose `destroyed` is a no-op that never reaches
+/// the blanket hook. `/dev/null` cannot be mapped `SHARED`, deterministically.
+#[test]
+fn an_unmappable_fd_create_consumes_no_count_budget() {
+    let report = drive(|stream| {
+        let conn = Connection::from_socket(stream).expect("a client connection");
+        let mut queue = conn.new_event_queue();
+        let qh = queue.handle();
+        let mut client = TestClient::default();
+        conn.display().get_registry(&qh, ());
+        queue.roundtrip(&mut client)?;
+
+        let shm = client.shm.clone().expect("the wl_shm global");
+        let null = std::fs::File::open("/dev/null").expect("/dev/null exists");
+        let _pool = shm.create_pool(null.as_fd(), 4096, &qh, ());
+        queue.roundtrip(&mut client)?;
+        Ok(())
+    });
+    assert_shm_protocol_error(&report.resize, "wl_shm", wl_shm::Error::InvalidFd);
+    assert_survivor_still_served(&report);
+    assert_eq!(
+        report.pools, 0,
+        "a pool Smithay never created must not be counted"
+    );
+}
+
+/// Disconnecting with live pools drains the count to zero: the destruction
+/// hook runs for every object in cleanup, so no entry outlives the client
+/// it names.
+#[test]
+fn disconnecting_with_live_pools_drains_the_count() {
+    let report = drive(|stream| {
+        let mut pools = PoolClient::connect(stream)?;
+        pools.create_many(&[4096, 4096, 4096])?;
+        // No destroy: dropping `pools` disconnects with three pools live.
+        Ok(())
+    });
+    if let Err(error) = &report.resize {
+        panic!("creating three small pools was refused: {error:?}");
+    }
+    assert_survivor_still_served(&report);
+    assert_eq!(report.pools, 0, "live pools must drain on disconnect");
+}
+
+/// A `resize` neither claims nor frees: it grows the pool it names. 130
+/// successive grows stay at a count of one -- if resizes ever counted,
+/// this trips the cap and fails.
+#[test]
+fn resizing_a_pool_leaves_the_count_alone() {
+    let report = drive(|stream| {
+        let conn = Connection::from_socket(stream).expect("a client connection");
+        let mut queue = conn.new_event_queue();
+        let qh = queue.handle();
+        let mut client = TestClient::default();
+        conn.display().get_registry(&qh, ());
+        queue.roundtrip(&mut client)?;
+
+        let shm = client.shm.clone().expect("the wl_shm global");
+        let fd = rustix::fs::memfd_create("flexwm-shm-test", rustix::fs::MemfdFlags::CLOEXEC)
+            .expect("a memfd");
+        rustix::fs::ftruncate(&fd, 4096).expect("a one-page pool file");
+        let pool = shm.create_pool(fd.as_fd(), 4096, &qh, ());
+        queue.roundtrip(&mut client)?;
+
+        // The healthy pattern, 130 times: widen the backing first, then
+        // grow the mapping into it. Each grow is far under the per-pool
+        // cap, so only a miscounted resize could refuse one.
+        let mut size = 4096i32;
+        for _ in 0..130 {
+            size += 1024;
+            rustix::fs::ftruncate(&fd, size as u64).expect("a wider pool file");
+            pool.resize(size);
+            queue.roundtrip(&mut client)?;
+        }
+        Ok(())
+    });
+    if let Err(error) = &report.resize {
+        panic!("growing one pool 130 times was refused: {error:?}");
+    }
+    assert_survivor_still_served(&report);
+    assert_eq!(report.pools, 0, "the grown pool must drain on disconnect");
 }

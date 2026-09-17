@@ -33,6 +33,7 @@ mod screenshot;
 mod selection;
 mod session_lock;
 mod shell;
+mod shm_pools;
 mod state;
 mod toplevel_icon;
 mod tty;

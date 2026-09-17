@@ -93,14 +93,17 @@
 //! below are documented so they land as interception points, not as a fifth
 //! mechanism:
 //!
-//! - **`wl_shm` pools** (`docs/backlog/security/shm-total-per-client-unbounded.md`):
-//!   the per-pool byte cap stays, and the *total* joins this table. Claim at
-//!   `wl_shm.create_pool` / `wl_shm_pool.resize` -- both pass through
-//!   `dispatch.rs`'s blanket `request`, which sees the `Client` -- and release
-//!   at pool destroy, which the same file's destruction hook sees with the
-//!   `ClientId`. The only open question is the unit: pools are bytes, binds
-//!   are counts, so joining means either a second budget on the same key or a
-//!   weight. Do not mix them into the bind count.
+//! - **`wl_shm` pools** (`docs/backlog/resolved/shm-pool-count-cap-done.md`):
+//!   the per-pool byte cap stays. What landed since is a *count*, not the
+//!   byte total this seam sketched: `shm_pools.rs` caps live pools per
+//!   client on the same `ClientId` key and the same claim-before-delegation /
+//!   release-in-`destroyed` shape, as its own counter rather than a second
+//!   column here -- pools refuse with a protocol error that kills, binds
+//!   refuse with a `finished` that does not, and one table across those two
+//!   refusal forms would be the awkward shoehorn this paragraph warned
+//!   against. The byte total itself is still open, and needs an upstream
+//!   size accessor first (see `shm_pools.rs` for the wall, stated with
+//!   sources).
 //! - **Screencopy sessions** (`docs/backlog/resolved/screencopy-session-cap-done.md`):
 //!   the frames half stays where it is (per-client, pre-delegation, in
 //!   `dispatch.rs`). Sessions join here the same way: claim on the manager
