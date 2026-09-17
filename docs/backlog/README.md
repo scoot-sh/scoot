@@ -143,7 +143,10 @@ actionable.
   key/button/`enter` event delivered to the grabbing client (or continue
   its own open menu); background clients can no longer take the keyboard
   unprompted. `start_drag` needs its own analysis and stays open separately.
-- [An `exclusive` layer surface's own popup grab dismisses itself](./protocols/popup-grab-exclusive-self-dismiss.md)
+- [An `exclusive` layer surface's own popup grab dismisses itself](./resolved/popup-grab-exclusive-self-dismiss-done.md)
+  — RESOLVED 2026-09-17 (PR #72): grant and pre-emption both check the
+  grab's root — an exclusive surface no longer outranks its own menu,
+  while a different exclusive surface still does; rule 3 now true as written
 - [A window-focus change doesn't dismiss an active popup grab](./resolved/popup-grab-focus-divergence-done.md)
   — RESOLVED 2026-09-16 (PR #55): grab semantics unchanged, but `msg windows`
   now reports `popup_grab` per window so an agent can tell focus from where
