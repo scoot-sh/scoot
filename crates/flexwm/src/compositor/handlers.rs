@@ -14,7 +14,7 @@ use smithay::reexports::wayland_server::protocol::wl_output::WlOutput;
 use smithay::reexports::wayland_server::protocol::wl_seat;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::{Client, Resource, protocol::wl_buffer};
-use smithay::utils::Serial;
+use smithay::utils::{IsAlive, Serial};
 use smithay::wayland::buffer::BufferHandler;
 use smithay::wayland::compositor::{
     CompositorClientState, CompositorHandler, CompositorState, get_parent, get_role,
@@ -125,6 +125,13 @@ impl CompositorHandler for State {
     ///   cleared: a replacement grab is dispatched adjacently to the
     ///   destroy, so waiting for the reap would file it too late -- see
     ///   `popup.rs`.
+    /// - the dead entries of `mapped_layers`: a surface whose `wl_surface`
+    ///   dies before its layer role object (the implicit-disconnect order)
+    ///   never sees `layer_destroyed`, so nothing else removes it -- see
+    ///   `layer_shell.rs`. Memory-only either way: a server-side `ObjectId`
+    ///   compares its client id and generation serial as well as the bare
+    ///   id (wayland-backend 0.3.17 `rs/server_impl/mod.rs`), so a stale
+    ///   entry can never equal a live surface.
     fn destroyed(&mut self, surface: &WlSurface) {
         if self.cursor.forget_surface(surface) && self.tty.is_some() {
             // The cursor's shape just changed to the fallback; only `--tty`
@@ -141,6 +148,14 @@ impl CompositorHandler for State {
             self.lock_transition();
         }
         self.forget_idle_inhibitor(surface);
+        // Alongside `forget_dead_clicked_layer` (which runs on every focus
+        // refresh): without this, a layer surface whose `wl_surface` died
+        // first keeps its dead entry here until its role object goes too --
+        // and if the client keeps the role and the connection alive, that
+        // is indefinitely. Per surface death, not per frame or per event:
+        // one walk over the handful of mapped layer surfaces plus an
+        // aliveness probe each, so no hot-path concern.
+        self.mapped_layers.retain(|mapped| mapped.alive());
         // A surface going away while a popup grab is live tears the chain
         // down or replaces it: toolkits destroy the old popup before
         // grabbing the new one in the same flush, so the replacement grab is
