@@ -499,15 +499,17 @@ popup grabs landed — take the keyboard.
   is an ordinary `xdg_popup` too, and handing one the keyboard would take it
   away from the window you are typing into. Menus and combo boxes that want
   keys take a grab; that is what the request is for.
-- **The grab's serial is not checked against a real interaction, yet.**
-  Unlike `xdg-activation-v1`'s token (see Focus handoff below), any same-uid
-  client can map a popup and grab the keyboard with any serial it names —
-  there is no proof-of-interaction gate here today. The other bounds still
-  apply (locking or an exclusive layer surface dismisses the grab, any click
-  outside dismisses it, keybindings still fire), so this is narrower than it
-  sounds, but a client that was never focused can still take the keyboard on
-  its own say-so. Filed as
-  `docs/backlog/protocols/popup-grab-serial-validation.md`.
+- **The grab's serial has to name a real interaction.** Like
+  `xdg-activation-v1`'s token (see Focus handoff below), a grab is refused --
+  dismissed, with a warning in the compositor log naming the client and
+  serial, since the protocol posts no error -- unless its serial is a recent
+  key, button or focus `enter` actually delivered to the client asking, so a
+  client that was never focused cannot take the keyboard on its own say-so.
+  A grab that continues the client's own open menu (a nested submenu, or a
+  menu replacing the one just closed) is not refused for reusing its opening
+  serial past that window. The other bounds still apply on top (locking or an
+  exclusive layer surface dismisses the grab, any click outside dismisses it,
+  keybindings still fire).
 
 What doesn't, yet:
 

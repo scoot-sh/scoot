@@ -245,6 +245,37 @@ impl State {
             })
         };
         let serial = SERIAL_COUNTER.next_serial();
+        // The keyboard half of the popup-grab history (`popup.rs`): when
+        // this `set_focus` below actually delivers an `enter`, that serial
+        // is what a toolkit passes to `xdg_popup.grab` if the menu was
+        // opened without a newer button or key event. Recorded under the
+        // entered client, like everything else in `interaction_serials`.
+        //
+        // Two guards, each load-bearing:
+        // - the focus must really move. A redundant derivation mints a
+        //   serial but sends nothing, and filing it would put a serial the
+        //   client never saw under its name -- guessable from the one it
+        //   did see, which is exactly the hole the client half of each
+        //   entry exists to close.
+        // - no popup grab may be live. Smithay's `PopupKeyboardGrab`
+        //   swallows a `set_focus` while it holds the seat, so nothing is
+        //   delivered -- and the install path in `popup.rs` deliberately
+        //   sets focus to the popup with the *grab's own* serial, which must
+        //   never be filed as fresh evidence for the grabbing client.
+        //   (`has_ended` without a preceding `cleanup` can over-report a
+        //   grab as live; that only skips recording, the safe direction.)
+        //   An input-method grab, by contrast, forwards `set_focus`, so an
+        //   enter delivered through one is recorded normally.
+        //
+        // Costs one seat lock and a surface-handle clone per focus
+        // derivation -- not per event or per frame, so no hot-path concern.
+        if self.popup_grab.as_ref().is_none_or(|grab| grab.has_ended())
+            && keyboard.current_focus().as_ref() != surface.as_ref()
+            && let Some(ref entered) = surface
+            && let Some(client) = self.client_of(entered)
+        {
+            self.interaction_serials.record_focus(serial, client);
+        }
         keyboard.set_focus(self, surface, serial);
     }
 

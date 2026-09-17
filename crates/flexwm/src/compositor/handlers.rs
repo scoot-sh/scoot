@@ -102,7 +102,8 @@ impl CompositorHandler for State {
     ///
     /// Three things this compositor keeps a `WlSurface` in outside
     /// `self.space`/`self.windows` (both already driven by their own
-    /// xdg-shell destruction paths) need clearing here:
+    /// xdg-shell destruction paths) need clearing here, plus the grab
+    /// session, which needs filing rather than clearing:
     ///
     /// - the cursor's image status, which nothing upstream clears when the
     ///   surface behind it dies -- see `Cursor::forget_surface`;
@@ -115,6 +116,10 @@ impl CompositorHandler for State {
     ///   session awake -- see `idle.rs`. A dead client can never destroy
     ///   anything explicitly, so without this the recompute would keep
     ///   seeing its surface forever.
+    /// - the popup-grab session (`last_popup_grab`), filed rather than
+    ///   cleared: a replacement grab is dispatched adjacently to the
+    ///   destroy, so waiting for the reap would file it too late -- see
+    ///   `popup.rs`.
     fn destroyed(&mut self, surface: &WlSurface) {
         if self.cursor.forget_surface(surface) && self.tty.is_some() {
             // The cursor's shape just changed to the fallback; only `--tty`
@@ -131,6 +136,31 @@ impl CompositorHandler for State {
             self.lock_transition();
         }
         self.forget_idle_inhibitor(surface);
+        // A surface going away while a popup grab is live tears the chain
+        // down or replaces it: toolkits destroy the old popup before
+        // grabbing the new one in the same flush, so the replacement grab is
+        // dispatched adjacently -- file the session *now*, synchronously,
+        // rather than waiting for a reap, which runs on a later dispatch and
+        // would file it a dispatch too late for the grace half of
+        // `grab_session_continues` to see.
+        //
+        // Gated on the dying surface belonging to the grabbing client, not
+        // merely on a grab being held: another client's churn (closing a
+        // window, swapping a cursor) must not refresh someone else's
+        // timestamp. Same-client over-filing (a cursor surface, a toplevel
+        // going away with the menu still up) only stamps a moment the
+        // session was in fact live -- and the grace then permits a re-grab
+        // at most two seconds past the last such moment, which is the grace
+        // semantic itself, not an extension of it.
+        if self.popup_grab.is_some()
+            && let Some(holder) = self
+                .popup_grab
+                .as_ref()
+                .and_then(|grab| self.grab_holder_client(grab))
+            && self.client_of(surface).as_ref() == Some(&holder)
+        {
+            self.last_popup_grab = Some((holder, std::time::Instant::now()));
+        }
     }
 }
 

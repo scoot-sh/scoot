@@ -33,7 +33,7 @@ use wayland_client::protocol::{
     wl_buffer, wl_callback, wl_compositor, wl_keyboard, wl_output, wl_pointer, wl_registry,
     wl_seat, wl_shm, wl_shm_pool, wl_surface,
 };
-use wayland_client::{Connection, Dispatch, QueueHandle, WEnum};
+use wayland_client::{Connection, Dispatch, EventQueue, QueueHandle, WEnum};
 use wayland_protocols::ext::session_lock::v1::client::{
     ext_session_lock_manager_v1, ext_session_lock_v1,
 };
@@ -56,6 +56,7 @@ mod frames;
 mod input;
 mod layout;
 mod popup;
+mod popup_serial;
 
 /// The framebuffer these tests render into. Square and small: every
 /// assertion below is a pixel coordinate, and a small canvas keeps them
@@ -244,15 +245,27 @@ enum Step {
         parent: PopupParent,
         color: [u8; 4],
         /// Whether to ask for an explicit grab (`xdg_popup.grab`) on the way
-        /// up. Sent *before* the first commit, which is the only time it is
-        /// legal: the pinned rev's `PopupSurface::pre_commit_hook` answers a
-        /// grab requested after the popup has a buffer with `invalid_grab`
-        /// and kills the client.
-        grab: bool,
+        /// up, and with which serial. Sent *before* the first commit, which
+        /// is the only time it is legal: the pinned rev's
+        /// `PopupSurface::pre_commit_hook` answers a grab requested after
+        /// the popup has a buffer with `invalid_grab` and kills the client.
+        grab: Option<GrabSource>,
     },
+    /// Report the input serials this client has actually been sent -- the
+    /// only honest way for a test to name "a real key serial" without
+    /// re-deriving the compositor's counter.
+    ReportSerials,
     /// Destroy the popup [`Step::MapPopup`] made last: `xdg_popup.destroy` +
     /// `xdg_surface.destroy` + `wl_surface.destroy`.
     DestroyPopup,
+    /// Destroy the mapped popup and map a grabbing replacement for it in
+    /// the *same* client turn: the destroy and the new grab leave in one
+    /// flush, the way a toolkit replacing its menu sends them, so the
+    /// compositor dispatches them adjacently with no reap in between. The
+    /// replacement hangs off the window -- the old menu is gone, so nothing
+    /// nests. How the serial-gate tests reproduce a menubar hover-switch
+    /// exactly.
+    ReplacePopup { color: [u8; 4], serial: u32 },
     /// Report how many `xdg_surface.configure` events the mapped popup has
     /// received in total -- the compositor must send exactly one (later
     /// commits stay quiet, as a non-reactive positioner requires).
@@ -271,6 +284,18 @@ enum Step {
     /// locked the moment the request is accepted (see `session_lock.rs`'s
     /// note on `owner`), which is the transition under test.
     LockSession,
+}
+
+/// Which serial a [`Step::MapPopup`] grab passes to `xdg_popup.grab`.
+#[derive(Clone, Copy)]
+enum GrabSource {
+    /// The last `wl_keyboard.key` serial this client was sent -- what a
+    /// toolkit passes after a key-driven menu open.
+    Key,
+    /// A caller-chosen serial: a fabricated one, another client's, or an
+    /// enter serial read back through [`Step::ReportSerials`]. How the
+    /// serial-gate tests name exactly the serial under test.
+    Serial(u32),
 }
 
 /// What an `xdg_popup` hangs off: a window's `xdg_toplevel`, or a layer
@@ -301,6 +326,9 @@ enum Ack {
     Pointer(Option<Focused>),
     /// [`Step::ReportKeyboard`]'s answer.
     Keyboard(KeyboardReport),
+    /// [`Step::ReportSerials`]'s answer: the input serials this client has
+    /// actually been sent.
+    Serials(SerialReport),
     /// [`Step::ReportFrames`]'s answer: per requested callback, how many
     /// `done` events arrived.
     Frames(Vec<u32>),
@@ -333,6 +361,20 @@ struct KeyboardReport {
     /// "focus never moved" apart from "it left and came straight back".
     enters: u32,
     leaves: u32,
+}
+
+/// The input serials one client has actually been sent, by event kind --
+/// the vocabulary the serial-gate tests grab with.
+#[derive(Clone, Copy, Debug, Default)]
+struct SerialReport {
+    /// Last `wl_keyboard.key` serial, if any.
+    key: Option<u32>,
+    /// Last `wl_pointer.button` serial, if any.
+    button: Option<u32>,
+    /// Last `wl_pointer.enter` serial, if any.
+    pointer_enter: Option<u32>,
+    /// Last `wl_keyboard.enter` serial, if any.
+    keyboard_enter: Option<u32>,
 }
 
 /// How big a window's buffer is. Deliberately smaller than any placement
@@ -372,6 +414,16 @@ struct TestClient {
     /// both track the last button/key/touch serial for exactly that).
     /// `None` until the client has actually been sent a key.
     last_key_serial: Option<u32>,
+    /// The serial of the last `wl_pointer.button` this client was sent.
+    /// `None` until it has actually been sent one.
+    last_button_serial: Option<u32>,
+    /// The serials of the last `wl_pointer.enter` and `wl_keyboard.enter`
+    /// this client was sent. A toolkit whose last-seen event was an enter
+    /// (Qt updates its grab serial on pointer enters; a hover-opened menu
+    /// has no newer event at all) passes one of these to `xdg_popup.grab`,
+    /// so the serial-gate tests need to name them exactly.
+    last_pointer_enter_serial: Option<u32>,
+    last_keyboard_enter_serial: Option<u32>,
     /// `xdg_popup.popup_done` events received, cumulative across every popup
     /// -- the compositor dismissing a popup is invisible on the wire
     /// otherwise.
@@ -464,9 +516,10 @@ impl Dispatch<wl_seat::WlSeat, ()> for TestClient {
     }
 }
 
-/// Only `enter`/`leave` are recorded: which surface the pointer is on is the
-/// whole question a popup hit test raises, and motion/button/axis add
-/// nothing to it.
+/// Only `enter`/`leave`/`button` are recorded: which surface the pointer is
+/// on is the whole question a popup hit test raises, and motion/axis add
+/// nothing to it -- while the button serial is what a toolkit passes to
+/// `xdg_popup.grab` for a click-opened menu.
 impl Dispatch<wl_pointer::WlPointer, ()> for TestClient {
     fn event(
         client: &mut Self,
@@ -477,8 +530,16 @@ impl Dispatch<wl_pointer::WlPointer, ()> for TestClient {
         _: &QueueHandle<Self>,
     ) {
         match event {
-            wl_pointer::Event::Enter { surface, .. } => client.pointer_focus = Some(surface),
+            wl_pointer::Event::Enter {
+                surface, serial, ..
+            } => {
+                client.pointer_focus = Some(surface);
+                client.last_pointer_enter_serial = Some(serial);
+            }
             wl_pointer::Event::Leave { .. } => client.pointer_focus = None,
+            wl_pointer::Event::Button { serial, .. } => {
+                client.last_button_serial = Some(serial);
+            }
             _ => {}
         }
     }
@@ -494,9 +555,12 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for TestClient {
         _: &QueueHandle<Self>,
     ) {
         match event {
-            wl_keyboard::Event::Enter { surface, .. } => {
+            wl_keyboard::Event::Enter {
+                surface, serial, ..
+            } => {
                 client.keyboard_focus = Some(surface);
                 client.enters += 1;
+                client.last_keyboard_enter_serial = Some(serial);
             }
             wl_keyboard::Event::Leave { .. } => {
                 client.keyboard_focus = None;
@@ -677,6 +741,131 @@ fn describe_layer(layer: &zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, spec: Layer
     layer.set_keyboard_interactivity(spec.keyboard);
     let (top, right, bottom, left) = spec.margin;
     layer.set_margin(top, right, bottom, left);
+}
+
+/// One mapped popup: its surface, `xdg_surface`, `xdg_popup`, and
+/// serial-slot index into [`TestClient::window_serials`], so a destroy can
+/// tear it down and a configure count can find it.
+type PopupEntry = (
+    wl_surface::WlSurface,
+    xdg_surface::XdgSurface,
+    xdg_popup::XdgPopup,
+    usize,
+);
+
+/// Tears down the mapped popup [`Step::MapPopup`] made last:
+/// `xdg_popup.destroy` + `xdg_surface.destroy` + `wl_surface.destroy`.
+fn destroy_popup(popups: &mut Vec<PopupEntry>) -> Result<(), String> {
+    let (surface, xdg, popup, _) = popups.pop().ok_or("no mapped popup to destroy")?;
+    popup.destroy();
+    xdg.destroy();
+    surface.destroy();
+    Ok(())
+}
+
+/// Creates an `xdg_popup` on `parent` and drives it through configure, ack,
+/// attach and a frame request, reporting whether the compositor ever
+/// configured it.
+///
+/// Shared by [`Step::MapPopup`] and [`Step::ReplacePopup`] rather than
+/// written out twice: the two differ only in what runs before (nothing, or
+/// a destroy in the same flush) and which serial the grab names.
+///
+/// `grab` is the serial to ask with, or `None` for no grab. It is sent
+/// *before* the first commit, which is the only time it is legal: the pinned
+/// rev's `PopupSurface::pre_commit_hook` answers a grab requested after the
+/// popup has a buffer with `invalid_grab` and kills the client.
+#[allow(clippy::too_many_arguments)]
+fn map_popup(
+    queue: &mut EventQueue<TestClient>,
+    client: &mut TestClient,
+    qh: &QueueHandle<TestClient>,
+    compositor: &wl_compositor::WlCompositor,
+    shm: &wl_shm::WlShm,
+    wm_base: &xdg_wm_base::XdgWmBase,
+    seat: &wl_seat::WlSeat,
+    layers: &[(
+        wl_surface::WlSurface,
+        zwlr_layer_surface_v1::ZwlrLayerSurfaceV1,
+        LayerSpec,
+    )],
+    toplevels: &[xdg_surface::XdgSurface],
+    popups: &mut Vec<PopupEntry>,
+    popup_surfaces: &mut Vec<wl_surface::WlSurface>,
+    frames: &mut Vec<wl_callback::WlCallback>,
+    parent: PopupParent,
+    color: [u8; 4],
+    grab: Option<u32>,
+) -> Result<Ack, String> {
+    let surface = compositor.create_surface(qh, ());
+    let index = client.window_serials.len();
+    client.window_serials.push(None);
+    client.window_configures.push(0);
+    let xdg = wm_base.get_xdg_surface(&surface, qh, SurfaceIndex(index));
+    let positioner = wm_base.create_positioner(qh, ());
+    // Both are required before `get_popup`, or the compositor
+    // rightly answers with `invalid_positioner`.
+    positioner.set_size(50, 50);
+    positioner.set_anchor_rect(0, 0, 10, 10);
+    // A layer-parented popup names *no* xdg parent here and gets
+    // one from `zwlr_layer_surface_v1.get_popup` instead, which
+    // is how the two protocols are specified to meet.
+    let popup = match parent {
+        PopupParent::Window => {
+            let parent = toplevels.first().ok_or("no toplevel to hang a popup on")?;
+            xdg.get_popup(Some(parent), &positioner, qh, ())
+        }
+        PopupParent::Layer(index) => {
+            let (_, layer, _) = layers.get(index).ok_or("no such layer surface")?;
+            let popup = xdg.get_popup(None, &positioner, qh, ());
+            layer.get_popup(&popup);
+            popup
+        }
+        PopupParent::Popup(index) => {
+            let (_, parent, ..) = popups.get(index).ok_or("no such popup")?;
+            xdg.get_popup(Some(parent), &positioner, qh, ())
+        }
+    };
+    if let Some(serial) = grab {
+        popup.grab(seat, serial);
+    }
+    surface.commit();
+    // Ten round trips is far more than the one a configure needs
+    // when a compositor sends it: `MapWindow` above gets its
+    // toplevel's configure inside `wait_for`'s first few.
+    for _ in 0..10 {
+        queue.roundtrip(client).map_err(|e| e.to_string())?;
+        if client.window_serials[index].is_some() {
+            break;
+        }
+    }
+    let configured = client.window_serials[index].is_some();
+    if configured {
+        // The same attach-after-ack sequence `MapWindow` runs:
+        // only a mapped popup proves the configure was usable,
+        // not just sent.
+        let serial = client.window_serials[index].ok_or("a popup serial")?;
+        xdg.ack_configure(serial);
+        let buffer = solid_buffer(shm, qh, 50, 50, color);
+        surface.attach(Some(&buffer), 0, 0);
+        surface.damage(0, 0, 50, 50);
+        // A frame callback before the attach commit, the way
+        // [`Step::RequestLayerFrame`] does it -- kept alive in
+        // `frames` for the same reason.
+        let tag = FrameTag(client.frame_dones.len());
+        client.frame_dones.push(0);
+        let callback = surface.frame(qh, tag);
+        surface.commit();
+        frames.push(callback);
+        popup_surfaces.push(surface.clone());
+        popups.push((surface, xdg, popup, index));
+    } else {
+        popup.destroy();
+        xdg.destroy();
+        surface.destroy();
+    }
+    positioner.destroy();
+    Ok(Ack::PopupConfigured(configured))
 }
 
 /// Runs the client half: binds the globals, then executes whatever steps the
@@ -896,88 +1085,56 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 color,
                 grab,
             } => {
-                let surface = compositor.create_surface(&qh, ());
-                let index = client.window_serials.len();
-                client.window_serials.push(None);
-                client.window_configures.push(0);
-                let xdg = wm_base.get_xdg_surface(&surface, &qh, SurfaceIndex(index));
-                let positioner = wm_base.create_positioner(&qh, ());
-                // Both are required before `get_popup`, or the compositor
-                // rightly answers with `invalid_positioner`.
-                positioner.set_size(50, 50);
-                positioner.set_anchor_rect(0, 0, 10, 10);
-                // A layer-parented popup names *no* xdg parent here and gets
-                // one from `zwlr_layer_surface_v1.get_popup` instead, which
-                // is how the two protocols are specified to meet.
-                let popup = match parent {
-                    PopupParent::Window => {
-                        let parent = toplevels.first().ok_or("no toplevel to hang a popup on")?;
-                        xdg.get_popup(Some(parent), &positioner, &qh, ())
-                    }
-                    PopupParent::Layer(index) => {
-                        let (_, layer, _) = layers.get(*index).ok_or("no such layer surface")?;
-                        let popup = xdg.get_popup(None, &positioner, &qh, ());
-                        layer.get_popup(&popup);
-                        popup
-                    }
-                    PopupParent::Popup(index) => {
-                        let (_, parent, ..) = popups.get(*index).ok_or("no such popup")?;
-                        xdg.get_popup(Some(parent), &positioner, &qh, ())
-                    }
-                };
-                if *grab {
-                    // Before the first commit, and with the serial of a key
-                    // this client was actually sent: a grab requested after
-                    // the popup has a buffer is `invalid_grab`, and a real
-                    // toolkit passes its last input serial.
-                    let serial = client.last_key_serial.ok_or(
-                        "a grab needs an input serial; press a key into this client first",
-                    )?;
-                    popup.grab(&seat, serial);
-                }
-                surface.commit();
-                // Ten round trips is far more than the one a configure needs
-                // when a compositor sends it: `MapWindow` above gets its
-                // toplevel's configure inside `wait_for`'s first few.
-                for _ in 0..10 {
-                    queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
-                    if client.window_serials[index].is_some() {
-                        break;
-                    }
-                }
-                let configured = client.window_serials[index].is_some();
-                if configured {
-                    // The same attach-after-ack sequence `MapWindow` runs:
-                    // only a mapped popup proves the configure was usable,
-                    // not just sent.
-                    let serial = client.window_serials[index].ok_or("a popup serial")?;
-                    xdg.ack_configure(serial);
-                    let buffer = solid_buffer(&shm, &qh, 50, 50, *color);
-                    surface.attach(Some(&buffer), 0, 0);
-                    surface.damage(0, 0, 50, 50);
-                    // A frame callback before the attach commit, the way
-                    // [`Step::RequestLayerFrame`] does it -- kept alive in
-                    // `frames` for the same reason.
-                    let tag = FrameTag(client.frame_dones.len());
-                    client.frame_dones.push(0);
-                    let callback = surface.frame(&qh, tag);
-                    surface.commit();
-                    frames.push(callback);
-                    popup_surfaces.push(surface.clone());
-                    popups.push((surface, xdg, popup, index));
-                } else {
-                    popup.destroy();
-                    xdg.destroy();
-                    surface.destroy();
-                }
-                positioner.destroy();
-                outcome = Ack::PopupConfigured(configured);
+                // The key-driven shape reads the serial the client was sent;
+                // an explicit serial passes straight through.
+                let serial = grab
+                    .map(|source| match source {
+                        GrabSource::Key => client.last_key_serial.ok_or(
+                            "a grab needs an input serial; press a key into this client first",
+                        ),
+                        GrabSource::Serial(serial) => Ok(serial),
+                    })
+                    .transpose()?;
+                outcome = map_popup(
+                    &mut queue,
+                    &mut client,
+                    &qh,
+                    &compositor,
+                    &shm,
+                    &wm_base,
+                    &seat,
+                    &layers,
+                    &toplevels,
+                    &mut popups,
+                    &mut popup_surfaces,
+                    &mut frames,
+                    *parent,
+                    *color,
+                    serial,
+                )?;
+            }
+            Step::ReplacePopup { color, serial } => {
+                destroy_popup(&mut popups)?;
+                outcome = map_popup(
+                    &mut queue,
+                    &mut client,
+                    &qh,
+                    &compositor,
+                    &shm,
+                    &wm_base,
+                    &seat,
+                    &layers,
+                    &toplevels,
+                    &mut popups,
+                    &mut popup_surfaces,
+                    &mut frames,
+                    PopupParent::Window,
+                    *color,
+                    Some(*serial),
+                )?;
             }
             Step::DestroyPopup => {
-                let (surface, xdg, popup, _) = popups.pop().ok_or("no mapped popup to destroy")?;
-                popup.destroy();
-                xdg.destroy();
-                surface.destroy();
+                destroy_popup(&mut popups)?;
             }
             Step::ReportPopupConfigures => {
                 let (_, _, _, index) = popups.last().ok_or("no mapped popup to report")?;
@@ -986,6 +1143,14 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 );
             }
             Step::ReportPopupDone => outcome = Ack::PopupDone(client.popup_dones),
+            Step::ReportSerials => {
+                outcome = Ack::Serials(SerialReport {
+                    key: client.last_key_serial,
+                    button: client.last_button_serial,
+                    pointer_enter: client.last_pointer_enter_serial,
+                    keyboard_enter: client.last_keyboard_enter_serial,
+                });
+            }
             Step::ReportPointer => {
                 outcome = Ack::Pointer(client.pointer_focus.as_ref().map(|focused| {
                     if let Some(index) = layers.iter().position(|(s, ..)| s == focused) {
@@ -1082,6 +1247,16 @@ impl Fixture {
         let map = smithay::desktop::layer_map_for_output(output);
         let layer = map.layers().next().expect("a mapped layer surface");
         smithay::desktop::PopupManager::popups_for_surface(layer.wl_surface()).count()
+    }
+
+    /// The input serials the client has actually been sent, by kind -- the
+    /// only honest source of "a real key/button/enter serial" for the
+    /// serial-gate tests.
+    fn serials(&mut self) -> SerialReport {
+        let Ack::Serials(report) = self.run(Step::ReportSerials) else {
+            panic!("the serial probe should report what the client saw");
+        };
+        report
     }
 
     /// Total `xdg_popup.popup_done` events the client has been sent.

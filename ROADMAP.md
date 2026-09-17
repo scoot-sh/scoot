@@ -165,9 +165,20 @@ gap jumped the queue — each item's own file records why it landed when it did.
   (PR #55, 2026-09-16) — a window-focus change still does not dismiss an
   active popup grab (that deliberate guarantee stands), but `msg windows`
   now reports `popup_grab` per window, read off the held grab's root, so an
-  agent can tell "window B is focused" from "B is focused but A's menu holds
-  the keyboard". Additive field, no version bump; README's computer-use
-  section states the agent rule and the asymmetric-`false` cases.
+   agent can tell "window B is focused" from "B is focused but A's menu holds
+   the keyboard". Additive field, no version bump; README's computer-use
+   section states the agent rule and the asymmetric-`false` cases.
+- **[Popup grab serial validation](docs/backlog/resolved/popup-grab-serial-validation-done.md)**
+  (PR #56, 2026-09-16) — filed from PR #44's own review: a grab now has to
+  name a real, recent key/button/`enter` event delivered to the grabbing
+  client (or continue its own open menu), so a background client can no
+  longer take the keyboard on its own say-so. The `enter` half is the
+  load-bearing subtlety — Qt passes its last-seen serial, which for a
+  hover-opened menu is an enter — and the session half (nested submenus and
+  same-flush menu replacements reusing the opening serial past the window)
+  was measured live against real Qt and GTK menus, both proven still
+  taking the keyboard. `start_drag` needs its own analysis and stays open
+  as [its own item](docs/backlog/protocols/dnd-grab-serial-validation.md).
 
 ## What's next
 
@@ -187,12 +198,14 @@ actually open.
 2. **Medium-priority protocol gaps**, mostly what's left of the DMS/Noctalia
    probes (see "Shell enablement" below for their recommended order):
    [screencopy's toplevel half](docs/backlog/protocols/screencopy-toplevel-capture.md)
-   (the output half shipped — see "Recently shipped" above),
-   plus one filed from PR #44's own review —
-   [popup grab serial validation](docs/backlog/protocols/popup-grab-serial-validation.md)
-   (its sibling, [a window-focus change doesn't dismiss an active popup
-   grab](docs/backlog/resolved/popup-grab-focus-divergence-done.md), shipped
-   as an IPC `popup_grab` field in PR #55 — see "Recently shipped" above).
+   (the output half shipped — see "Recently shipped" above).
+   [Popup grab serial validation](docs/backlog/resolved/popup-grab-serial-validation-done.md)
+   is also done — a grab now has to name a real, recent key/button/enter
+   event delivered to the grabbing client (or continue its own open menu).
+   It was filed from PR #44's own review alongside
+   [a window-focus change doesn't dismiss an active popup
+   grab](docs/backlog/resolved/popup-grab-focus-divergence-done.md), which
+   shipped as an IPC `popup_grab` field in PR #55.
 3. **[IPC connection cap and the half-closed-connection
    leak](docs/backlog/resolved/ipc-connection-cap-resolved.md)** — RESOLVED
    2026-09-16: 64 concurrent connections, refused with a reason past that,
@@ -241,8 +254,10 @@ probes' recommended order:
    own dropdown is not dismissed by the bar that opened it.
    Layer-parented popups turned out already to work; implementing the
    handler the entry asked for would have put two tree nodes on one
-   surface (measured). Follow-up filed:
-   [grab serial validation](docs/backlog/protocols/popup-grab-serial-validation.md).
+   surface (measured). Follow-up filed, and since resolved:
+   [grab serial validation](docs/backlog/resolved/popup-grab-serial-validation-done.md)
+   — a grab now names a real, recent key/button/enter event or continues
+   its own open menu, proven live against real Qt and GTK menus.
    Neither probed shell exercises any of this directly: DMS and Noctalia
    both route their own menus through layer surfaces, with zero
    `xdg_popup` wire traffic in either probe — the first real client for
