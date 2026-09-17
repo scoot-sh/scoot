@@ -211,14 +211,23 @@ things worth knowing:
 
 ### What the control socket refuses
 
-Seven bounds an agent driving flexwm over IPC can actually hit. The first
-five are refusals with a reason — an ordinary `error` response, which
+Eight bounds an agent driving flexwm over IPC can actually hit. The first
+six are refusals with a reason — an ordinary `error` response, which
 `flexwm msg` prints and exits non-zero on — rather than a silent drop or a
 delay. The last two can't be: one drops a peer that is by definition not
 reading its socket, and the other shortens a wait rather than refusing it.
 
 - **One request line may be at most 1 MiB.** Past that the connection is
   told so and closed; there is no resynchronizing mid-line.
+- **`type` text is limited to 16,384 characters per request.** Each
+  character becomes key events typed synchronously on the thread that
+  serves every other client, so a megabyte of text would stall the whole
+  compositor for seconds; past the cap the request is refused with a
+  message naming the limit instead. Split the text across several `type`
+  requests. A few hundred characters -- a shell command line -- costs
+  under a millisecond and never notices this. Counted in characters, not
+  bytes; even the longest encodings land far under the 1 MiB line limit
+  above, so this cap always fires first.
 - **One screenshot per connection per 16ms frame.** A capture costs a render
   and framebuffer read-back on the thread that serves every other client, so
   a second one inside the same frame is refused rather than queued. Retry
