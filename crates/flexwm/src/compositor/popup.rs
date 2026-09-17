@@ -217,11 +217,15 @@ impl State {
     ///
     /// - no grab is held at all;
     /// - the held grab has ended but [`State::settle_popup_grab`] has not
-    ///   reaped it yet (a client's destroy is seen on the display source,
-    ///   an IPC request can land first) -- the keyboard is already back
-    ///   where Smithay's teardown put it, not in any menu;
+    ///   reaped it yet -- defensive only: destroy processing and the reap
+    ///   run in the same display-source callback on the thread that also
+    ///   serves IPC, so no request can land between them, and `has_ended`
+    ///   is only answerable after `cleanup()` anyway. The keyboard is
+    ///   already back where Smithay's teardown put it, not in any menu;
     /// - the grab is rooted at a layer surface (a bar's own dropdown), which
-    ///   [`State::id_of`] maps to no window.
+    ///   [`State::id_of`] maps to no window;
+    /// - the session is locked: keys go to the lock surface, so no window
+    ///   is reported as holding them.
     ///
     /// Costs a grab-state read and one walk of the window map, no
     /// allocation, and the one caller resolves it once per `windows`
