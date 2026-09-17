@@ -66,8 +66,13 @@ mod tests;
 pub(super) const HIGH_WATER_BYTES: usize = 1 << 20;
 
 /// Bytes of replies written but not yet accepted by the socket.
+///
+/// `pub(crate)` rather than `pub(super)`: a screenshot reply finished on the
+/// encode worker goes out through a clone of its connection's socket, not
+/// through the connection itself, so `screenshot.rs` writes it with this
+/// same queue rather than a second one (see `PendingShot`).
 #[derive(Default)]
-pub(super) struct Outbound {
+pub(crate) struct Outbound {
     /// The queued reply (or replies), of which the first `sent` bytes have
     /// already gone out. Empty whenever nothing is waiting.
     buffer: Vec<u8>,
@@ -94,7 +99,7 @@ pub(super) struct Outbound {
 
 impl Outbound {
     /// How many bytes are still waiting to go out.
-    pub(super) fn pending(&self) -> usize {
+    pub(crate) fn pending(&self) -> usize {
         // Saturating, not a plain subtraction, even though `sent` is never
         // greater than `buffer.len()` at any of the three sites that touch
         // either. That is an invariant spread across methods, and the cost of
@@ -107,13 +112,13 @@ impl Outbound {
         self.buffer.len().saturating_sub(self.sent)
     }
 
-    pub(super) fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.pending() == 0
     }
 
     /// How many bytes this queue has ever got out. See [`Outbound::total_sent`]
     /// for why the write-stall deadline watches this rather than `pending`.
-    pub(super) fn total_sent(&self) -> u64 {
+    pub(crate) fn total_sent(&self) -> u64 {
         self.total_sent
     }
 
@@ -126,7 +131,7 @@ impl Outbound {
 
     /// Whether enough is queued that the caller should stop reading requests
     /// until it drains. See [`HIGH_WATER_BYTES`].
-    pub(super) fn over_high_water(&self) -> bool {
+    pub(crate) fn over_high_water(&self) -> bool {
         self.pending() > HIGH_WATER_BYTES
     }
 
@@ -135,7 +140,7 @@ impl Outbound {
     /// `line` is taken by value so the queue can adopt its allocation instead
     /// of copying it: a screenshot reply is megabytes, and a memcpy of that on
     /// the event-loop thread is exactly the cost this module exists to avoid.
-    pub(super) fn send<W: Write>(&mut self, socket: &mut W, line: String) -> io::Result<()> {
+    pub(crate) fn send<W: Write>(&mut self, socket: &mut W, line: String) -> io::Result<()> {
         if !self.is_empty() {
             // Something is still queued, so this reply has to go behind it --
             // writing it now would interleave two responses on the wire. Drop
@@ -175,7 +180,7 @@ impl Outbound {
     }
 
     /// Pushes out as much of the queue as the socket will take.
-    pub(super) fn flush<W: Write>(&mut self, socket: &mut W) -> io::Result<()> {
+    pub(crate) fn flush<W: Write>(&mut self, socket: &mut W) -> io::Result<()> {
         if self.is_empty() {
             return Ok(());
         }

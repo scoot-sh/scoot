@@ -803,7 +803,8 @@ fn frame_tick(_now: std::time::Instant, _metadata: &mut (), state: &mut State) -
     // behaviour `ensure_ticking` exists for. See `screencopy.rs`.
     state.service_captures();
     state.settle_idle_waiters();
-    if state.needs_render || !state.pending_idle.is_empty() {
+    state.settle_shots();
+    if state.needs_render || !state.pending_idle.is_empty() || state.shots_draining() {
         TimeoutAction::ToDuration(FRAME_INTERVAL)
     } else {
         state.timer_armed = false;
