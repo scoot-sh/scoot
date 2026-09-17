@@ -186,16 +186,11 @@ actionable.
   probes must pin `--socket` + `WAYLAND_DISPLAY`. Adjacent code-traced
   present-skip damage finding filed as
   [present-skip eats frame damage](./rendering/present-skip-eats-frame-damage.md).
-- [A held pointer lock survives a session lock, so a client keeps pointer input while locked](./protocols/pointer-lock-survives-session-lock.md)
-  — **HIGH**, filed 2026-09-17 by a retrospective audit of PRs #73–#89;
-  regression from PR #89. The lock transition's pointer-focus refresh is a
-  zero-delta move, which a held constraint resolves to `Held` (delivers
-  nothing), so deltas, clicks and scroll keep reaching the locking client
-  and the lock surface never gets an `enter`. PR #89's review saw it and
-  pinned it in a test as intended, so the decision wants re-taking — and
-  the basis it was accepted on (close the window with a chord) is false
-  while locked, since every binding but `ChangeVt` is forwarded to the
-  locker.
+- [A held pointer lock survives a session lock, so a client keeps pointer input while locked](./resolved/pointer-lock-session-lock-done.md)
+  — RESOLVED: the lock transition deactivates the held constraint (game sees
+  `unlocked`), focus lands on the lock surface, and unlock re-arms through
+  the ordinary arrival path. Confinement needed no fix (fail-open +
+  leave-deactivation already handled it; pinned).
 - [Lock manager global offered to every client](./protocols/session-lock-global-restriction.md)
 - [First click on a fresh lock screen reaches nobody](./resolved/session-lock-first-click-done.md)
   — RESOLVED 2026-09-17 (PR #76): pointer focus is re-derived on the commit

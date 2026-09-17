@@ -96,13 +96,17 @@
 //! constraint and reports `PointerLeave`/`unlocked`/`unconfined`), and it
 //! keeps the persistent entry: only `Oneshot` entries are removed, so a
 //! disarmed persistent constraint re-arms through the same engage path on
-//! re-entry into its region. Two shapes this takes in practice, both
-//! pinned by tests: a held pointer (lock, or a confine-escape) freezes
-//! focus as well as position, so no leave ever fires -- a session-lock
-//! round trip leaves the lock active throughout, with no event either way;
-//! a gated-out regional confinement can still be teleported off its
-//! surface, which deactivates it, and re-entering inside the region
-//! re-arms it with no new request from the client.
+//! re-entry into its region. A held pointer (lock, or a confine-escape)
+//! freezes focus as well as position, so no leave ever fires while one is
+//! active -- which is why a session lock deactivates first and re-derives
+//! focus second: [`State::lock_transition`](super::State::lock_transition)
+//! deactivates the focus surface's held constraint (the client sees
+//! `unlocked`/`unconfined`) so the transition's focus refresh behaves like
+//! the unconstrained case, and the still-registered persistent entry
+//! re-arms through the engage path when focus returns on unlock. A gated-out
+//! regional confinement needs no such help: it can still be teleported off
+//! its surface, which deactivates it, and re-entering inside the region
+//! re-arms it with no new request from the client -- both pinned by tests.
 //!
 //! Because a locked pointer never moves absolute, there is no position to
 //! restore on unlock, so `cursor_position_hint` keeps its default
@@ -135,7 +139,12 @@
 //!   freezes: keybindings still fire, so closing the offending window
 //!   (whose surface destruction removes its constraints) frees the pointer
 //!   with one chord, no VT switch needed. No pixels cross either: what is
-//!   on screen is unchanged by a lock.
+//!   on screen is unchanged by a lock. That chord argument covers the
+//!   unlocked session only: while the session is locked every binding but
+//!   `ChangeVt` is forwarded to the locker instead of executed, which is
+//!   why a held lock does not survive a lock transition -- the transition
+//!   deactivates it first (see above) rather than relying on a recovery
+//!   chord that cannot run.
 //! - The threat needs a malicious client already running as the user --
 //!   the same trust domain as keylogging through the input-method and
 //!   data-control globals this compositor already advertises without a
@@ -236,17 +245,30 @@ pub(super) fn absolute_target(
     let Some(focus) = focus else {
         return AbsoluteTarget::Free;
     };
-    let constrained = with_pointer_constraint(focus, pointer, |constraint| {
-        let constraint = constraint?;
+    // Phase one: what kind of active constraint, if any, is on the focus
+    // surface. Borrowed, never cloned: the pre-fix shape copied
+    // `constraint.region()` (a `Vec` inside `RegionAttributes`) into an
+    // owned `Option` on every focused move with an active constraint -- a
+    // per-event heap allocation on an input path -- and the confined arm
+    // only ever asked `contains` of it.
+    //
+    // The confine arm deliberately does NOT run inside this lookup. The
+    // map lock is held for the closure's duration, while the origin and
+    // clamp hit tests it needs run under Smithay's `with_states`, which
+    // holds the surface's user-data mutex -- a non-reentrant `MutexGuard`
+    // -- so re-entering it from in here deadlocks the event loop on any
+    // surface the hit test touches, the focus surface first among them
+    // (Smithay's own constraint commit hook carries the same warning).
+    // Phase two below re-takes the lookup once the origin is known and
+    // returns only `Copy` data.
+    let locked = with_pointer_constraint(focus, pointer, |constraint| {
+        let constraint = constraint.as_deref()?;
         if !constraint.is_active() {
             return None;
         }
-        Some((
-            matches!(&*constraint, PointerConstraint::Locked(_)),
-            constraint.region().cloned(),
-        ))
+        Some(matches!(constraint, PointerConstraint::Locked(_)))
     });
-    let Some((locked, region)) = constrained else {
+    let Some(locked) = locked else {
         return AbsoluteTarget::Free;
     };
     if locked {
@@ -266,21 +288,54 @@ pub(super) fn absolute_target(
             None => return AbsoluteTarget::Free,
         },
     };
-    if !region
-        .as_ref()
-        .is_none_or(|region| region.contains((from - origin).to_i32_round()))
-    {
-        return AbsoluteTarget::Free;
+    // Phase two: the region answers against the now-known origin, borrowed.
+    // No allocation on any arm: the gate and the per-axis clamp only ask
+    // `contains`, and the owned decision is built outside afterwards.
+    //
+    // The kind is re-checked rather than trusted from phase one. Nothing on
+    // this thread can change it in between -- constraint state moves on
+    // wayland dispatch (client requests, commit hooks) and this function
+    // dispatches nothing -- so the fallbacks are unreachable; they fail in
+    // the safe direction (a lock holds, anything else frees) rather than
+    // wedging the pointer on an assumption.
+    enum Clamp {
+        /// Anvil's gate: the region does not contain the pointer's current
+        /// position, so the constraint does not apply to this move.
+        Free,
+        /// The move resolves against a lock after all: hold.
+        Held,
+        /// The move with each out-of-region axis zeroed.
+        Delta(Point<f64, Logical>),
     }
-    let mut delta = to - from;
-    if let Some(region) = region {
-        if !region.contains((from + Point::from((delta.x, 0.0)) - origin).to_i32_round()) {
-            delta.x = 0.0;
+    let clamp = with_pointer_constraint(focus, pointer, |constraint| {
+        let constraint = constraint.as_deref()?;
+        if !constraint.is_active() {
+            return Some(Clamp::Free);
         }
-        if !region.contains((from + Point::from((0.0, delta.y)) - origin).to_i32_round()) {
-            delta.y = 0.0;
+        if matches!(constraint, PointerConstraint::Locked(_)) {
+            return Some(Clamp::Held);
         }
-    }
+        let region = constraint.region();
+        if !region.is_none_or(|region| region.contains((from - origin).to_i32_round())) {
+            return Some(Clamp::Free);
+        }
+        let mut delta = to - from;
+        if let Some(region) = region {
+            if !region.contains((from + Point::from((delta.x, 0.0)) - origin).to_i32_round()) {
+                delta.x = 0.0;
+            }
+            if !region.contains((from + Point::from((0.0, delta.y)) - origin).to_i32_round()) {
+                delta.y = 0.0;
+            }
+        }
+        Some(Clamp::Delta(delta))
+    })
+    .unwrap_or(Clamp::Free);
+    let delta = match clamp {
+        Clamp::Free => return AbsoluteTarget::Free,
+        Clamp::Held => return AbsoluteTarget::Held,
+        Clamp::Delta(delta) => delta,
+    };
     let clamped = from + delta;
     match state
         .surface_under(clamped)
@@ -291,6 +346,56 @@ pub(super) fn absolute_target(
             under,
         },
         None => AbsoluteTarget::Held,
+    }
+}
+
+impl State {
+    /// Deactivates the active pointer constraint on the current
+    /// pointer-focus surface, if any.
+    ///
+    /// Called from [`State::lock_transition`](super::State::lock_transition)
+    /// before the focus refresh, so the refresh behaves like the
+    /// unconstrained case. Without this, a zero-delta refresh against a
+    /// held lock resolves to [`AbsoluteTarget::Held`], which delivers no
+    /// `leave` and no `enter` -- so seat pointer focus never leaves the
+    /// locking client, device deltas, buttons and axis keep streaming to
+    /// it across the session lock, and the lock surface gets nothing (the
+    /// password-leak class `session_lock.rs` rejects for the keyboard).
+    ///
+    /// Deactivating -- rather than bypassing `Held` for one move -- is
+    /// Smithay's own story for losing a lock: the client sees
+    /// `unlocked`/`unconfined`, the persistent entry stays registered, and
+    /// the ordinary arrival path (`engage_pending_constraint` in
+    /// `input.rs`) re-arms it on unlock with no new request from the
+    /// client -- the same leave/re-enter story as a pointer physically
+    /// leaving the surface.
+    ///
+    /// Only the focus surface's constraint is deactivated, and that is
+    /// exhaustive rather than approximate: activation is focus-gated both
+    /// at creation ([`new_constraint`](PointerConstraintsHandler)) and on
+    /// arrival (`engage_pending_constraint`), and Smithay deactivates on
+    /// pointer-leave, so an active constraint implies its surface holds
+    /// the seat's single pointer focus. Inactive constraints elsewhere are
+    /// untouched by the lookup (deactivating one is a no-op that sends
+    /// nothing and keeps the entry), which is correct: they hold no focus
+    /// and stream nothing, and a lock requested while locked must stay
+    /// inactive until unlock engages it.
+    ///
+    /// Read-only on flexwm state: the one seat lookup plus one
+    /// constraint-map lookup on a transition that has already decided to
+    /// re-derive focus and redraw; nothing on any per-event path.
+    pub(super) fn deactivate_pointer_constraint(&self) {
+        let Some(pointer) = self.seat.get_pointer() else {
+            return;
+        };
+        let Some(focus) = pointer.current_focus() else {
+            return;
+        };
+        with_pointer_constraint(&focus, &pointer, |constraint| {
+            if let Some(constraint) = constraint {
+                constraint.deactivate();
+            }
+        });
     }
 }
 

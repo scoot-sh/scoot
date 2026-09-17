@@ -23,12 +23,12 @@ use std::sync::mpsc::{Receiver, Sender};
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface as ServerSurface;
 use smithay::utils::{Logical, Point};
 use wayland_client::protocol::{
-    wl_buffer, wl_compositor, wl_pointer, wl_region, wl_registry, wl_seat, wl_shm, wl_shm_pool,
-    wl_surface,
+    wl_buffer, wl_compositor, wl_output, wl_pointer, wl_region, wl_registry, wl_seat, wl_shm,
+    wl_shm_pool, wl_surface,
 };
 use wayland_client::{Connection, Dispatch, Proxy, QueueHandle};
 use wayland_protocols::ext::session_lock::v1::client::{
-    ext_session_lock_manager_v1, ext_session_lock_v1,
+    ext_session_lock_manager_v1, ext_session_lock_surface_v1, ext_session_lock_v1,
 };
 use wayland_protocols::wp::pointer_constraints::zv1::client::{
     zwp_confined_pointer_v1, zwp_locked_pointer_v1, zwp_pointer_constraints_v1,
@@ -40,6 +40,7 @@ use wayland_protocols::xdg::shell::client::{xdg_surface, xdg_toplevel, xdg_wm_ba
 
 use crate::compositor::decorations::Appearance;
 use crate::compositor::test_support::{Harness, wait_for};
+use flexwm_ipc::PointerButton;
 
 /// The framebuffer square every test here renders into (nothing here reads
 /// it back, but the headless backend behind it is what gives the compositor
@@ -89,6 +90,14 @@ enum Step {
     /// `unlock_and_destroy` on the session lock, waiting for `finished`.
     /// Only the locker script answers this.
     ReleaseSessionLock,
+    /// `get_lock_surface` on the locker's lock for the one output, ack its
+    /// configure and attach a fullscreen buffer. Only the locker answers
+    /// this: it is what gives the locked session a surface pointer focus
+    /// can land on.
+    MapLockSurface,
+    /// Hand back what the locker's pointer has seen since the last report.
+    /// Only the locker answers this.
+    LockerReport,
 }
 
 /// What a client answers a [`Step`] with.
@@ -109,6 +118,8 @@ enum Ack {
         unlocked: bool,
         confined: bool,
         unconfined: bool,
+        buttons: u32,
+        axis: u32,
     },
     /// The `locked` event arrived.
     Locked,
@@ -121,6 +132,14 @@ enum Ack {
     /// refused lock -- so the test proves the unlock by locking again
     /// afterwards: a still-locked session would refuse with `finished`.
     SessionReleased,
+    /// What the locker's pointer has seen since the last report (locker
+    /// client only).
+    LockerReport {
+        enters: u32,
+        motions: Vec<(f64, f64)>,
+        buttons: u32,
+        axis: u32,
+    },
     /// Anything else a step answers when there is nothing to count.
     Done,
 }
@@ -167,6 +186,8 @@ impl Fixture {
             unlocked,
             confined,
             unconfined,
+            buttons,
+            axis,
         } = self.run_on(index, Step::Report)
         else {
             panic!("client {index} answered a report with something else");
@@ -179,6 +200,27 @@ impl Fixture {
             unlocked,
             confined,
             unconfined,
+            buttons,
+            axis,
+        }
+    }
+
+    /// What the locker client's pointer has seen since its last report.
+    fn locker_report(&mut self, index: usize) -> LockerReport {
+        let Ack::LockerReport {
+            enters,
+            motions,
+            buttons,
+            axis,
+        } = self.run_on(index, Step::LockerReport)
+        else {
+            panic!("client {index} answered a locker report with something else");
+        };
+        LockerReport {
+            enters,
+            motions,
+            buttons,
+            axis,
         }
     }
 
@@ -223,7 +265,7 @@ struct Run {
 }
 
 /// A drained [`Ack::Report`], named so assertions read as field accesses.
-#[derive(Default)]
+#[derive(Debug, Default)]
 struct Report {
     enters: u32,
     motions: Vec<(f64, f64)>,
@@ -233,6 +275,17 @@ struct Report {
     unlocked: bool,
     confined: bool,
     unconfined: bool,
+    buttons: u32,
+    axis: u32,
+}
+
+/// A drained [`Ack::LockerReport`]: what the locker's pointer saw.
+#[derive(Debug)]
+struct LockerReport {
+    enters: u32,
+    motions: Vec<(f64, f64)>,
+    buttons: u32,
+    axis: u32,
 }
 
 /// A compositor point inside client `index`'s window: the window's space
@@ -318,6 +371,8 @@ struct TestClient {
     unlocked_seen: bool,
     confined_seen: bool,
     unconfined_seen: bool,
+    buttons: u32,
+    axis: u32,
 }
 
 impl Dispatch<wl_registry::WlRegistry, ()> for TestClient {
@@ -379,6 +434,8 @@ impl TestClient {
             unlocked: std::mem::take(&mut self.unlocked_seen),
             confined: std::mem::take(&mut self.confined_seen),
             unconfined: std::mem::take(&mut self.unconfined_seen),
+            buttons: std::mem::take(&mut self.buttons),
+            axis: std::mem::take(&mut self.axis),
         };
         self.enters = 0;
         report
@@ -413,6 +470,8 @@ impl Dispatch<wl_pointer::WlPointer, ()> for TestClient {
                 surface_y,
                 ..
             } => client.motions.push((surface_x, surface_y)),
+            wl_pointer::Event::Button { .. } => client.buttons += 1,
+            wl_pointer::Event::Axis { .. } => client.axis += 1,
             _ => {}
         }
     }
@@ -724,7 +783,10 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
             Step::ArmRegion { rects } => {
                 confine_with_region(&mut client, &qh, rects)?;
             }
-            Step::TakeSessionLock | Step::ReleaseSessionLock => {
+            Step::TakeSessionLock
+            | Step::ReleaseSessionLock
+            | Step::MapLockSurface
+            | Step::LockerReport => {
                 return Err("the game client cannot take a session lock".to_string());
             }
         }
@@ -735,15 +797,28 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
 }
 
 /// The locker end of a second test connection: just enough of a screen
-/// locker to take and release the session lock around a pointer-lock test.
-/// Maps no surfaces at all -- focus leaves the game window for bare desktop
-/// while locked, which is the whole of what the round-trip test needs.
+/// locker to take and release the session lock around a pointer-lock test,
+/// map the fullscreen lock surface pointer focus must land on, and report
+/// what its own pointer was told -- so the tests can assert the lock
+/// surface really received the `enter`, the motion and the click, rather
+/// than inferring it from the game client's silence.
 #[derive(Default)]
 struct LockerClient {
+    compositor: Option<wl_compositor::WlCompositor>,
+    shm: Option<wl_shm::WlShm>,
+    seat: Option<wl_seat::WlSeat>,
+    output: Option<wl_output::WlOutput>,
+    pointer: Option<wl_pointer::WlPointer>,
     lock_manager: Option<ext_session_lock_manager_v1::ExtSessionLockManagerV1>,
     lock: Option<ext_session_lock_v1::ExtSessionLockV1>,
     locked_seen: bool,
     finished_seen: bool,
+    /// The size and serial the compositor configured the lock surface to.
+    lock_configure: Option<(u32, u32, u32)>,
+    enters: u32,
+    motions: Vec<(f64, f64)>,
+    buttons: u32,
+    axis: u32,
 }
 
 impl Dispatch<wl_registry::WlRegistry, ()> for LockerClient {
@@ -765,6 +840,14 @@ impl Dispatch<wl_registry::WlRegistry, ()> for LockerClient {
         };
         if interface == ext_session_lock_manager_v1::ExtSessionLockManagerV1::interface().name {
             client.lock_manager = Some(registry.bind(name, version.min(1), qh, ()));
+        } else if interface == wl_compositor::WlCompositor::interface().name {
+            client.compositor = Some(registry.bind(name, version.min(1), qh, ()));
+        } else if interface == wl_shm::WlShm::interface().name {
+            client.shm = Some(registry.bind(name, version.min(1), qh, ()));
+        } else if interface == wl_seat::WlSeat::interface().name {
+            client.seat = Some(registry.bind(name, version.min(5), qh, ()));
+        } else if interface == wl_output::WlOutput::interface().name {
+            client.output = Some(registry.bind(name, version.min(1), qh, ()));
         }
     }
 }
@@ -787,6 +870,78 @@ impl Dispatch<ext_session_lock_v1::ExtSessionLockV1, ()> for LockerClient {
 }
 
 wayland_client::delegate_noop!(LockerClient: ignore ext_session_lock_manager_v1::ExtSessionLockManagerV1);
+wayland_client::delegate_noop!(LockerClient: ignore wl_compositor::WlCompositor);
+wayland_client::delegate_noop!(LockerClient: ignore wl_surface::WlSurface);
+wayland_client::delegate_noop!(LockerClient: ignore wl_shm::WlShm);
+wayland_client::delegate_noop!(LockerClient: ignore wl_shm_pool::WlShmPool);
+wayland_client::delegate_noop!(LockerClient: ignore wl_buffer::WlBuffer);
+wayland_client::delegate_noop!(LockerClient: ignore wl_output::WlOutput);
+wayland_client::delegate_noop!(LockerClient: ignore wl_seat::WlSeat);
+
+impl Dispatch<wl_pointer::WlPointer, ()> for LockerClient {
+    fn event(
+        client: &mut Self,
+        _: &wl_pointer::WlPointer,
+        event: wl_pointer::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        match event {
+            wl_pointer::Event::Enter { .. } => client.enters += 1,
+            wl_pointer::Event::Motion {
+                surface_x,
+                surface_y,
+                ..
+            } => client.motions.push((surface_x, surface_y)),
+            wl_pointer::Event::Button { .. } => client.buttons += 1,
+            wl_pointer::Event::Axis { .. } => client.axis += 1,
+            _ => {}
+        }
+    }
+}
+
+impl Dispatch<ext_session_lock_surface_v1::ExtSessionLockSurfaceV1, ()> for LockerClient {
+    fn event(
+        client: &mut Self,
+        _: &ext_session_lock_surface_v1::ExtSessionLockSurfaceV1,
+        event: ext_session_lock_surface_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let ext_session_lock_surface_v1::Event::Configure {
+            serial,
+            width,
+            height,
+        } = event
+        {
+            client.lock_configure = Some((serial, width, height));
+        }
+    }
+}
+
+/// A fullscreen `wl_buffer` of opaque pixels for the lock surface, over a
+/// real memfd. The configure's size is an exact requirement, so this is
+/// built at exactly that size by the caller.
+fn locker_buffer(
+    shm: &wl_shm::WlShm,
+    qh: &QueueHandle<LockerClient>,
+    width: i32,
+    height: i32,
+) -> Result<wl_buffer::WlBuffer, String> {
+    let stride = width * 4;
+    let len = (stride * height) as usize;
+    let fd = rustix::fs::memfd_create("flexwm-locker-test", rustix::fs::MemfdFlags::CLOEXEC)
+        .map_err(|e| e.to_string())?;
+    let mut file = std::fs::File::from(fd);
+    file.write_all(&vec![0xffu8; len])
+        .map_err(|e| e.to_string())?;
+    let pool = shm.create_pool(file.as_fd(), len as i32, qh, ());
+    let buffer = pool.create_buffer(0, width, height, stride, wl_shm::Format::Argb8888, qh, ());
+    pool.destroy();
+    Ok(buffer)
+}
 
 fn run_locker(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> Result<(), String> {
     let conn = Connection::from_socket(stream).map_err(|e| e.to_string())?;
@@ -799,6 +954,8 @@ fn run_locker(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
         .lock_manager
         .clone()
         .ok_or("no ext_session_lock_manager_v1")?;
+    let seat = client.seat.clone().ok_or("no wl_seat")?;
+    client.pointer = Some(seat.get_pointer(&qh, ()));
 
     while let Ok(step) = steps.recv() {
         queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
@@ -808,6 +965,14 @@ fn run_locker(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                     .lock_manager
                     .clone()
                     .ok_or("no ext_session_lock_manager_v1")?;
+                // Fresh flags, not sticky ones: this connection takes (and
+                // releases, and re-takes) the session lock several times per
+                // test, and waiting on a `locked` left over from the
+                // previous lock would ack a lock that was never confirmed --
+                // whose `unlock_and_destroy` the compositor then rightly
+                // refuses with `InvalidUnlock`, killing this client.
+                client.locked_seen = false;
+                client.finished_seen = false;
                 let lock = manager.lock(&qh, ());
                 client.lock = Some(lock);
                 // Exactly one of the two must arrive, and the protocol says
@@ -827,10 +992,52 @@ fn run_locker(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
             Step::ReleaseSessionLock => {
                 let lock = client.lock.take().ok_or("no session lock to release")?;
                 lock.unlock_and_destroy();
+                // Flush the request before acknowledging: wayland-client
+                // buffers it until a roundtrip, and the ack below is sent
+                // over a channel, not the wire -- without this the
+                // compositor would only see the unlock when some later
+                // step happens to roundtrip (the shape the old round-trip
+                // test relied on implicitly via its re-lock proof).
+                queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
                 // Event-silent by protocol (see `Ack::SessionReleased`):
                 // the ack below means requested-and-flushed, and the test
                 // proves the unlock by locking again.
                 acks.send(Ack::SessionReleased).map_err(|e| e.to_string())?;
+                continue;
+            }
+            Step::MapLockSurface => {
+                let lock = client.lock.clone().ok_or("no session lock to surface")?;
+                let compositor = client.compositor.clone().ok_or("no wl_compositor")?;
+                let shm = client.shm.clone().ok_or("no wl_shm")?;
+                let output = client.output.clone().ok_or("no wl_output")?;
+                let surface = compositor.create_surface(&qh, ());
+                let lock_surface = lock.get_lock_surface(&surface, &output, &qh, ());
+                let (serial, width, height) =
+                    wait_for(&mut queue, &mut client, "a lock configure", |seen| {
+                        seen.lock_configure
+                    })?;
+                lock_surface.ack_configure(serial);
+                let buffer = locker_buffer(&shm, &qh, width as i32, height as i32)?;
+                surface.attach(Some(&buffer), 0, 0);
+                surface.damage(0, 0, width as i32, height as i32);
+                surface.commit();
+                // Flush the commit before acknowledging, for the same
+                // reason as `ReleaseSessionLock` below: without this the
+                // map (and its pointer `enter`) only lands whenever some
+                // later step roundtrips.
+                queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                acks.send(Ack::Done).map_err(|e| e.to_string())?;
+                continue;
+            }
+            Step::LockerReport => {
+                let report = Ack::LockerReport {
+                    enters: client.enters,
+                    motions: std::mem::take(&mut client.motions),
+                    buttons: std::mem::take(&mut client.buttons),
+                    axis: std::mem::take(&mut client.axis),
+                };
+                client.enters = 0;
+                acks.send(report).map_err(|e| e.to_string())?;
                 continue;
             }
             _ => return Err("the locker cannot map windows or lock pointers".to_string()),
@@ -1502,86 +1709,450 @@ fn engage_respects_the_region_on_arrival_and_reentry() {
 }
 
 #[test]
-fn a_persistent_lock_survives_a_session_lock_round_trip() {
-    // A held pointer freezes focus as well as position (anvil's shape), so
-    // the session lock's focus refresh delivers no `leave` to the game
-    // surface: Smithay never deactivates the lock, the client sees no
-    // `unlocked`, and on unlock there is nothing to re-arm -- the same
-    // lock is still active, still holding, still streaming. That freeze
-    // is the whole of what this pins: no event, no focus excursion, no
-    // movement, before, during and after.
+fn a_session_lock_deactivates_a_held_pointer_lock() {
+    // BEHAVIOR CORRECTION. This replaces
+    // `a_persistent_lock_survives_a_session_lock_round_trip`, which pinned
+    // the buggy behavior as intended: no `unlocked` to the game, no `enter`
+    // to the lock surface, the stream continuing across the lock. That
+    // assertion was wrong, and its stated basis was false: the module doc
+    // justified the freeze with "closing the offending window frees the
+    // pointer with one chord", but while the session is locked every
+    // keybinding except `ChangeVt` is forwarded to the locker
+    // (`input.rs`), so the chord never executes and a VT switch was the
+    // only recovery -- while deltas, buttons and axis kept streaming to
+    // the game underneath, the password-leak class `session_lock.rs`
+    // rejects for the keyboard. The fixed behavior: locking deactivates
+    // the held constraint (the game sees `unlocked`), the lock
+    // transition's focus refresh lands on the lock surface, and nothing
+    // pointer-shaped reaches the game until unlock re-derives focus onto
+    // it and the still-registered persistent lock re-arms through the
+    // ordinary arrival path (the game sees `locked` with no new request --
+    // the protocol's own leave/re-enter story, the same one the
+    // regional-confinement test pins).
     let (mut fixture, run) = Fixture::start();
     fixture.focus(0, run.surface);
     let (fx, fy) = window_point(&fixture, 0, run.surface);
     let Ack::Locked = fixture.run_on(0, Step::Lock) else {
         panic!("locking answered with something other than `locked`");
     };
-    fixture.spawn(run_locker);
-    fixture.send_step(1, Step::TakeSessionLock);
+    let locker = fixture.spawn(run_locker);
+    fixture.send_step(locker, Step::TakeSessionLock);
     // The fresh lock confirms on its first blanked frame, which nothing
     // has drawn yet: render one explicitly rather than hoping the frame
     // timer fires mid-dispatch.
     fixture.render();
-    let Ack::SessionLocked = fixture.wait_for_ack(1) else {
+    let Ack::SessionLocked = fixture.wait_for_ack(locker) else {
         panic!("the session lock answered with something other than `locked`");
     };
     fixture.settle();
+    // The lock surface the locked session's pointer focus must land on.
+    fixture.run_on(locker, Step::MapLockSurface);
+    // Locking deactivated the held constraint: the game saw `unlocked`,
+    // and focus left it (a `leave`, so no new `enter` here).
     let during = fixture.report(0);
     assert!(
-        !during.unlocked,
-        "the session lock deactivated a held pointer lock"
+        during.unlocked,
+        "the session lock left a held pointer lock active"
     );
     assert_eq!(
         during.enters, 0,
-        "pointer focus left the locked surface under session lock"
+        "pointer focus re-entered the game surface under session lock"
+    );
+    // ...and landed on the lock surface at map-commit time.
+    let locker_during = fixture.locker_report(locker);
+    assert!(
+        locker_during.enters >= 1,
+        "the lock surface never received pointer focus under session lock"
+    );
+    // A held mouse while locked: motion, click and scroll. None of it may
+    // reach the game; all of it reaches the lock surface.
+    locked_input(&mut fixture, fx, fy);
+    let silent = fixture.report(0);
+    assert!(
+        silent.relatives.is_empty(),
+        "device deltas streamed to the game across the lock: {:?}",
+        silent.relatives
+    );
+    assert!(
+        silent.motions.is_empty(),
+        "absolute motion reached the game across the lock: {:?}",
+        silent.motions
     );
     assert_eq!(
-        fixture.pointer_at(),
-        (fx, fy),
-        "the pointer moved under session lock"
+        silent.buttons, 0,
+        "buttons reached the game across the lock"
     );
-    fixture.send_step(1, Step::ReleaseSessionLock);
-    let Ack::SessionReleased = fixture.wait_for_ack(1) else {
+    assert_eq!(silent.axis, 0, "axis reached the game across the lock");
+    let heard = fixture.locker_report(locker);
+    assert!(
+        !heard.motions.is_empty(),
+        "locked motion reached nobody: not the game, not the lock surface"
+    );
+    assert_eq!(
+        heard.buttons, 2,
+        "the locked click did not reach the lock surface"
+    );
+    assert!(
+        heard.axis >= 1,
+        "locked scroll did not reach the lock surface"
+    );
+    // Absolute motion while locked lands on the lock surface -- held off
+    // the game, not frozen in place.
+    assert_eq!(
+        fixture.pointer_at(),
+        (fx + 10.0, fy + 10.0),
+        "locked motion did not land on the lock surface"
+    );
+    // Unlock: focus returns to the game surface, and the persistent lock
+    // -- deactivated, never destroyed -- re-arms on arrival with no new
+    // request from the client.
+    fixture.send_step(locker, Step::ReleaseSessionLock);
+    let Ack::SessionReleased = fixture.wait_for_ack(locker) else {
         panic!("the session unlock answered with something unexpected");
     };
     fixture.settle();
-    // The unlock is event-silent, so prove it by locking again: a
-    // still-locked session would refuse with `finished` instead.
-    fixture.send_step(1, Step::TakeSessionLock);
-    fixture.render();
-    let Ack::SessionLocked = fixture.wait_for_ack(1) else {
-        panic!("re-locking after unlock did not confirm the unlock");
-    };
-    fixture.send_step(1, Step::ReleaseSessionLock);
-    let Ack::SessionReleased = fixture.wait_for_ack(1) else {
-        panic!("the final session unlock answered with something unexpected");
-    };
-    fixture.settle();
     let back = fixture.report(0);
-    assert_eq!(
-        back.enters, 0,
-        "focus left and re-entered across the round trip; the freeze did not hold"
+    assert!(
+        back.locked,
+        "unlocking did not re-arm the game's persistent lock"
     );
     assert!(
-        !back.locked,
-        "a second `locked` arrived for a lock that never went away"
+        back.enters >= 1,
+        "pointer focus did not return to the game surface on unlock"
+    );
+    // And the stream resumes from there, absolute still held: relative
+    // flows, nothing leaks through.
+    let (px, py) = fixture.pointer_at();
+    let (x, y) = window_point(&fixture, 0, run.surface);
+    fixture.state.pointer_move(x + 20.0, y + 20.0);
+    let _ = fixture.state.display_handle.flush_clients();
+    let resumed = fixture.report(0);
+    assert_eq!(
+        resumed.relatives,
+        vec![(x + 20.0 - px, y + 20.0 - py, x + 20.0 - px, y + 20.0 - py)],
+        "the re-armed lock lost its relative stream"
+    );
+    assert!(
+        resumed.motions.is_empty(),
+        "absolute motion leaked through the re-armed lock: {:?}",
+        resumed.motions
     );
     assert_eq!(
         fixture.pointer_at(),
-        (fx, fy),
-        "the pointer moved across the round trip"
+        (px, py),
+        "the re-armed lock did not hold the absolute position"
     );
-    // And it holds after, with no re-lock request in between: relative
-    // flows, absolute stays.
-    let report = move_by(&mut fixture, 0, run.surface, 20.0, 20.0);
-    assert_eq!(
-        report.relatives,
-        vec![(20.0, 20.0, 20.0, 20.0)],
-        "the surviving lock lost its relative stream"
+}
+
+/// Motion, click and scroll from where the pointer is, the way a hand on
+/// the mouse (or an attacker holding it) behaves while the session is
+/// locked. The caller drains both clients' reports before and after, so
+/// this only moves the pointer and flushes.
+fn locked_input(fixture: &mut Fixture, x: f64, y: f64) {
+    fixture.state.pointer_move(x + 10.0, y + 10.0);
+    let _ = fixture.state.display_handle.flush_clients();
+    fixture.state.pointer_button(PointerButton::Left, true);
+    fixture.state.pointer_button(PointerButton::Left, false);
+    fixture.state.scroll(0.0, 10.0);
+    let _ = fixture.state.display_handle.flush_clients();
+}
+
+/// Locks the session around a mapped lock surface: the three steps every
+/// session-lock test below repeats (take, confirm on a blanked frame,
+/// map), returning the locker's client index.
+fn lock_session_with_surface(fixture: &mut Fixture) -> usize {
+    let locker = fixture.spawn(run_locker);
+    fixture.send_step(locker, Step::TakeSessionLock);
+    fixture.render();
+    let Ack::SessionLocked = fixture.wait_for_ack(locker) else {
+        panic!("the session lock answered with something other than `locked`");
+    };
+    fixture.settle();
+    fixture.run_on(locker, Step::MapLockSurface);
+    locker
+}
+
+/// Proves the unlock the way the old round-trip test did: the unlock event
+/// is silent by protocol, so a fresh lock afterwards must confirm -- a
+/// still-locked session would refuse it with `finished`.
+fn unlock_session(fixture: &mut Fixture, locker: usize) {
+    fixture.send_step(locker, Step::ReleaseSessionLock);
+    let Ack::SessionReleased = fixture.wait_for_ack(locker) else {
+        panic!("the session unlock answered with something unexpected");
+    };
+    fixture.settle();
+}
+
+#[test]
+fn a_session_lock_deactivates_a_held_confinement() {
+    // The ticket's confine question, answered NO and pinned: a held
+    // confine does *not* freeze focus at lock, so it needs no new
+    // treatment. The lock-time refresh is a zero-delta move whose origin
+    // re-derivation runs under the locked hit test, which finds nothing
+    // (no lock surface mapped yet) -- so `absolute_target` takes its
+    // fail-open (`Free`) rather than `Held`, the refresh delivers a `leave`
+    // to the game, and Smithay's own leave path deactivates the
+    // confinement. The game therefore already sees `unconfined` and the
+    // lock surface already takes focus; unlock re-arms through the
+    // ordinary arrival path. This test pins that correct behavior so the
+    // lock fix cannot regress it.
+    let (mut fixture, run) = Fixture::start();
+    fixture.focus(0, run.surface);
+    let (fx, fy) = window_point(&fixture, 0, run.surface);
+    let Ack::Confined = fixture.run_on(0, Step::Confine) else {
+        panic!("confining answered with something other than `confined`");
+    };
+    let locker = lock_session_with_surface(&mut fixture);
+    let during = fixture.report(0);
+    assert!(
+        during.unconfined,
+        "the session lock left a held confinement active"
     );
     assert!(
+        fixture.locker_report(locker).enters >= 1,
+        "the lock surface never received pointer focus under session lock"
+    );
+    locked_input(&mut fixture, fx, fy);
+    let silent = fixture.report(0);
+    assert!(
+        silent.relatives.is_empty()
+            && silent.motions.is_empty()
+            && silent.buttons == 0
+            && silent.axis == 0,
+        "pointer input streamed to the game across the lock: {silent:?}"
+    );
+    unlock_session(&mut fixture, locker);
+    let back = fixture.report(0);
+    assert!(
+        back.confined,
+        "unlocking did not re-arm the game's persistent confinement"
+    );
+    assert!(
+        back.enters >= 1,
+        "pointer focus did not return to the game surface on unlock"
+    );
+    // And it confines from there: a move far off the surface reports the
+    // full vector while absolute stays put.
+    fixture.state.pointer_move(1500.0, 900.0);
+    let _ = fixture.state.display_handle.flush_clients();
+    let held = fixture.report(0);
+    let (dx, dy) = (1500.0 - (fx + 10.0), 900.0 - (fy + 10.0));
+    assert_eq!(
+        held.relatives,
+        vec![(dx, dy, dx, dy)],
+        "the re-armed confinement lost its relative stream"
+    );
+    assert!(
+        held.motions.is_empty(),
+        "absolute motion escaped the re-armed confinement: {:?}",
+        held.motions
+    );
+}
+
+#[test]
+fn locking_with_no_active_constraint_changes_nothing() {
+    // The fix must not move what was never frozen: a focused game with no
+    // lock or confinement takes the ordinary lock path -- focus to the
+    // lock surface, silence for the game, focus back on unlock -- exactly
+    // as before this change.
+    let (mut fixture, run) = Fixture::start();
+    fixture.focus(0, run.surface);
+    let (fx, fy) = window_point(&fixture, 0, run.surface);
+    let locker = lock_session_with_surface(&mut fixture);
+    let during = fixture.report(0);
+    assert!(
+        !during.unlocked && !during.unconfined,
+        "locking deactivated a constraint that was never active"
+    );
+    assert_eq!(
+        during.enters, 0,
+        "pointer focus re-entered the game surface under session lock"
+    );
+    assert!(
+        fixture.locker_report(locker).enters >= 1,
+        "the lock surface never received pointer focus under session lock"
+    );
+    locked_input(&mut fixture, fx, fy);
+    let silent = fixture.report(0);
+    assert!(
+        silent.relatives.is_empty()
+            && silent.motions.is_empty()
+            && silent.buttons == 0
+            && silent.axis == 0,
+        "pointer input reached the unfocused game under session lock: {silent:?}"
+    );
+    let heard = fixture.locker_report(locker);
+    assert!(
+        !heard.motions.is_empty() && heard.buttons == 2 && heard.axis >= 1,
+        "locked input did not reach the lock surface: {heard:?}"
+    );
+    unlock_session(&mut fixture, locker);
+    let back = fixture.report(0);
+    assert!(
+        back.enters >= 1,
+        "pointer focus did not return to the game surface on unlock"
+    );
+    // No lock was ever taken, so motion after unlock moves absolute as
+    // well as reporting relative.
+    let (px, py) = fixture.pointer_at();
+    let (x, y) = window_point(&fixture, 0, run.surface);
+    fixture.state.pointer_move(x + 20.0, y + 20.0);
+    let _ = fixture.state.display_handle.flush_clients();
+    let report = fixture.report(0);
+    let (dx, dy) = (x + 20.0 - px, y + 20.0 - py);
+    assert_eq!(
+        report.relatives,
+        vec![(dx, dy, dx, dy)],
+        "relative motion stopped after an unconstrained lock round trip"
+    );
+    assert!(
+        !report.motions.is_empty(),
+        "absolute motion did not resume after an unconstrained lock round trip"
+    );
+}
+
+#[test]
+fn a_lock_requested_while_locked_stays_inactive_until_unlock() {
+    // Lock-wins: between the lock request and the lock transition there is
+    // no dispatch, so the only race is a client asking *after* the session
+    // locked. Activation is focus-gated, and while locked nothing but a
+    // lock surface can hold focus, so the request sits inactive -- no
+    // `locked`, no stream to the game -- and the ordinary arrival path
+    // engages it on unlock.
+    let (mut fixture, run) = Fixture::start();
+    fixture.focus(0, run.surface);
+    let (fx, fy) = window_point(&fixture, 0, run.surface);
+    let locker = lock_session_with_surface(&mut fixture);
+    let Ack::Done = fixture.run_on(0, Step::Arm) else {
+        panic!("arming the lock answered with something else");
+    };
+    let armed = fixture.report(0);
+    assert!(
+        !armed.locked,
+        "a lock requested under session lock activated"
+    );
+    locked_input(&mut fixture, fx, fy);
+    let silent = fixture.report(0);
+    assert!(
+        silent.relatives.is_empty()
+            && silent.motions.is_empty()
+            && silent.buttons == 0
+            && silent.axis == 0,
+        "pointer input reached the game before its lock engaged: {silent:?}"
+    );
+    unlock_session(&mut fixture, locker);
+    let back = fixture.report(0);
+    assert!(
+        back.locked,
+        "unlocking did not engage the lock requested while locked"
+    );
+    assert!(
+        back.enters >= 1,
+        "pointer focus did not return to the game surface on unlock"
+    );
+    let (px, py) = fixture.pointer_at();
+    let (x, y) = window_point(&fixture, 0, run.surface);
+    fixture.state.pointer_move(x + 20.0, y + 20.0);
+    let _ = fixture.state.display_handle.flush_clients();
+    let report = fixture.report(0);
+    let (dx, dy) = (x + 20.0 - px, y + 20.0 - py);
+    assert!(
         report.motions.is_empty(),
-        "absolute motion leaked through the surviving lock: {:?}",
+        "absolute motion leaked through the engaged lock: {:?}",
         report.motions
+    );
+    assert_eq!(
+        report.relatives,
+        vec![(dx, dy, dx, dy)],
+        "the engaged lock lost its relative stream"
+    );
+}
+
+#[test]
+fn unlocking_with_the_locked_game_client_gone_does_not_panic() {
+    // The deactivation sends `unlocked` to a live client at lock time, but
+    // nothing is owed afterwards: the game disconnects mid-lock, and the
+    // unlock must neither send to the dead client nor wedge the session.
+    let (mut fixture, run) = Fixture::start();
+    fixture.focus(0, run.surface);
+    let Ack::Locked = fixture.run_on(0, Step::Lock) else {
+        panic!("locking answered with something other than `locked`");
+    };
+    let locker = lock_session_with_surface(&mut fixture);
+    assert!(
+        fixture.report(0).unlocked,
+        "the session lock left a held pointer lock active"
+    );
+    fixture.disconnect(0);
+    fixture.settle();
+    unlock_session(&mut fixture, locker);
+    // The session is usable afterwards: a fresh lock confirms instead of
+    // refusing with `finished`.
+    fixture.send_step(locker, Step::TakeSessionLock);
+    fixture.render();
+    let Ack::SessionLocked = fixture.wait_for_ack(locker) else {
+        panic!("re-locking after the unlock did not confirm it");
+    };
+    unlock_session(&mut fixture, locker);
+}
+
+#[test]
+fn a_session_lock_deactivates_only_the_focused_constraint() {
+    // Lock means nobody gets the pointer but the locker -- and it takes
+    // exactly one deactivation to get there. Only a focused surface can
+    // hold an *active* constraint (activation is focus-gated at creation
+    // and on arrival; Smithay deactivates on leave), and the seat holds a
+    // single focus, so the focused client's lock is the only active one.
+    // The second client's armed-but-inactive lock must be left alone: no
+    // `unlocked` for what never activated, no `locked` without an arrival.
+    let (mut fixture, run_a) = Fixture::start();
+    fixture.spawn(run_client);
+    let Ack::Started { .. } = fixture.wait_for_ack(1) else {
+        panic!("the second client reported being mapped before its globals");
+    };
+    let Ack::Mapped { .. } = fixture.wait_for_ack(1) else {
+        panic!("the second client reported observations before being mapped");
+    };
+    fixture.focus(0, run_a.surface);
+    let (fx, fy) = window_point(&fixture, 0, run_a.surface);
+    let Ack::Locked = fixture.run_on(0, Step::Lock) else {
+        panic!("locking answered with something other than `locked`");
+    };
+    let Ack::Done = fixture.run_on(1, Step::Arm) else {
+        panic!("arming the second lock answered with something else");
+    };
+    assert!(
+        !fixture.report(1).locked,
+        "an unfocused lock activated at creation time"
+    );
+    let locker = lock_session_with_surface(&mut fixture);
+    assert!(
+        fixture.report(0).unlocked,
+        "the session lock left the focused lock active"
+    );
+    let other = fixture.report(1);
+    assert!(
+        !other.unlocked && !other.locked,
+        "the session lock touched the unfocused client's inactive lock"
+    );
+    locked_input(&mut fixture, fx, fy);
+    for (index, what) in [(0, "focused"), (1, "unfocused")] {
+        let silent = fixture.report(index);
+        assert!(
+            silent.relatives.is_empty()
+                && silent.motions.is_empty()
+                && silent.buttons == 0
+                && silent.axis == 0,
+            "pointer input reached the {what} game under session lock: {silent:?}"
+        );
+    }
+    unlock_session(&mut fixture, locker);
+    assert!(
+        fixture.report(0).locked,
+        "unlocking did not re-arm the focused client's lock"
+    );
+    assert!(
+        !fixture.report(1).locked,
+        "unlocking engaged a lock whose surface was never entered"
     );
 }
