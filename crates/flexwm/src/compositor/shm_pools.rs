@@ -51,10 +51,16 @@
 //! Claimed in `dispatch.rs` before delegation, released in its destruction
 //! hook -- which is also what drains a disconnect (whose cleanup destroys
 //! every object) and a protocol-error kill. A refused creation is never
-//! counted, and sizes the per-pool cap or upstream already refuse (`<= 0`,
-//! `> 512 MiB`) never reach the claim, so every counted pool is a pool
-//! Smithay actually created and every destroyed one releases exactly once:
-//! the count cannot leak on a path that counts but never creates.
+//! counted: sizes the per-pool cap or upstream already refuse (`<= 0`,
+//! `> 512 MiB`) return before the claim, and fds Smithay cannot map are
+//! probed first (an unmappable fd is refused with Smithay's own `InvalidFd`,
+//! uncounted -- without that probe the never-initialized pool's no-op
+//! `destroyed` would leak one unit per connection, attacker-paced). So
+//! every counted pool is a pool whose mapping succeeded at claim time, and
+//! every destroyed one releases exactly once; the one exception is a
+//! mapping that stops succeeding between the probe and Smithay's own call
+//! (a cross-thread TOCTOU -- see `dispatch.rs`), which leaks a single unit
+//! for an already-dead client.
 //!
 //! Release is `saturating_sub`, because a destroy the count never saw would
 //! be a bookkeeping bug, not a client one -- and a compositor must not panic
@@ -94,9 +100,11 @@ pub(super) const MAX_POOLS_PER_CLIENT: u32 = 128;
 pub struct ShmPools {
     /// Live pools per client. An entry exists only while the client holds at
     /// least one -- the empty count is removed on release -- so this is
-    /// bounded by live protocol objects the same way wayland-backend already
-    /// bounds them, and a counter that only grows (the same leak in a new
-    /// place) is impossible by construction.
+    /// bounded by live pool objects, each counted creation pairing with
+    /// exactly one destruction the same way wayland-backend already bounds
+    /// them. The single exception is the probe/Smithay TOCTOU (see the
+    /// module doc): at most one phantom unit per such event, for a client
+    /// that is already dead -- never attacker-paced growth of live entries.
     live_per_client: HashMap<ClientId, u32>,
 }
 
@@ -108,17 +116,16 @@ impl ShmPools {
     /// refusal itself (the protocol error on `wl_shm`) stays with the caller
     /// in `dispatch.rs`, which holds the object this module never sees.
     ///
-    /// Called *before* delegation, so a refused pool is never created and a
-    /// counted one always is: every size this sees (1 through the per-pool
-    /// cap -- anything else returns before the claim) makes Smithay's
-    /// `create_pool` initialise the object unconditionally, with one
-    /// exception past that. If the `mmap` itself fails, Smithay posts its
-    /// own error and the client is killed -- and the claim for that
-    /// never-created pool leaks one unit for a dead client, which no
-    /// destruction will release. That path needs real memory pressure to
-    /// reach (a valid fd whose mapping fails), leaks ~one map entry per
-    /// such event rather than per client or per pool, and is invisible to
-    /// every live client -- stated here rather than claimed exact.
+    /// Called *before* delegation, so a refused pool is never created. The
+    /// caller probes fd mappability first (see `dispatch.rs`): every size
+    /// this sees (1 through the per-pool cap on a mappable fd) makes
+    /// Smithay's `create_pool` initialise the object unconditionally, with
+    /// one nanosecond-wide exception past that -- a mapping that stops
+    /// succeeding between the probe and Smithay's own call, which leaks a
+    /// single unit for an already-dead client. The deterministic leak this
+    /// probe closes (any unmappable fd, e.g. `/dev/null`, attacker-paced,
+    /// no memory pressure) is pinned by
+    /// `an_unmappable_fd_create_consumes_no_count_budget`.
     pub(super) fn refuse_pool_creation(&mut self, client: &Client) -> bool {
         let live = self.live_per_client.entry(client.id()).or_insert(0);
         if *live >= MAX_POOLS_PER_CLIENT {

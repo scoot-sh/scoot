@@ -23,5 +23,8 @@ IPC one (bounded table, refused-with-reason past it), or a global pool/fd
 ceiling across connections -- needs deciding which, and what a legitimate
 client past it observes (there is no protocol channel for refusing a
 Wayland connection gracefully; the IPC cap's refused-with-reason has no
-equivalent here). Per-connection accounting stays as is either way; this
+equivalent here). The blast radius standard is harsher than the IPC cap's:
+a Wayland connection cap denies *shells* -- bars and panels bind at
+startup, so a miscount kills the user's taskbar, not an attacker's agent
+socket. Per-connection accounting stays as is either way; this
 is the multiplier on top of it, not a replacement for it.

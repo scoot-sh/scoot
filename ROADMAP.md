@@ -353,8 +353,10 @@ gap jumped the queue — each item's own file records why it landed when it did.
   pools exhaust a 1024-fd `RLIMIT_NOFILE` for everyone), not bytes. Sized
   from wire measurement (`foot` 2×512 MiB arenas, Qt 2×~4 MiB, idle shell
   0; ~40 reasoned for a heavy multi-window app), refused with
-  `InvalidStride` like the per-pool cap. Seven fail-first harness tests
-  (flood, headroom, isolation, composition ×2, drain, resize-pin); one
+  `InvalidStride` like the per-pool cap. Eight fail-first harness tests
+  (flood, headroom, isolation, composition ×2, bad-fd, drain, resize-pin --
+  the bad-fd one pins review's deterministic leak: a probe mapping the exact
+  call Smithay is about to make now gates the claim); one
   harness race found and fixed (pools read vs disconnect cleanup).
   Residual filed as its own item: Wayland connections are unbounded, so
   per-connection bounds multiply ([Wayland connection

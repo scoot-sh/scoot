@@ -80,9 +80,15 @@ before delegation, released in its `destroyed` hook -- which also drains
 disconnects (whose cleanup destroys every object) and protocol-error
 kills. A refused creation is never counted. The count is exact rather
 than approximate: only sizes that *will* create a pool reach the claim
-(`1..=MAX_SHM_POOL_BYTES`, checked in the guard itself rather than leaned
-on chain order -- see bug-bash), and every counted pool pairs with exactly
-one destruction.
+(`1..=MAX_SHM_POOL_BYTES` on an fd that maps -- sizes checked in the
+guard itself rather than leaned on chain order, fds probed with the exact
+mapping Smithay is about to make; see bug-bash), and every counted pool
+pairs with exactly one destruction. The probe closes the deterministic
+leak review found on the way (valid size, unmappable fd: Smithay posts
+`InvalidFd` without initialising, whose no-op `destroyed` never reaches
+the hook -- one dead unit per connection, attacker-paced, no memory
+pressure at all); what remains is a cross-thread TOCTOU between the probe
+and Smithay's own call, stated with the probe in `dispatch.rs`.
 
 What the count bounds per connection is fds and mappings, not bytes: each
 live pool holds at least one compositor fd (`InnerPool` owns an `OwnedFd`)
@@ -159,7 +165,15 @@ need a lock, while a State-side map keyed by `ClientId` needs none.
   close and none is claimed. A shrink attempt never reaches accounting:
   upstream kills the client for it (`InvalidSize`), whose cleanup drains
   through the same hook. Pinned by test (130 successive grows hold a
-  count of one).
+  count of one). (Precision note for the byte-total half: the interceptor
+  *can* read the resize size -- it already does for the per-pool cap --
+  but that saves nothing, because with create-time id-to-size binding
+  impossible there is no per-pool entry a resize could update, and
+  destroy-time size is unreadable. Any attribution would be order-based
+  and drift fail-open: create 512, create 1, destroy the 1-pool, and a
+  FIFO pops 512 -- releasing 512 for 1 freed, understating the total
+  repeatably back toward zero while real usage persists. The conclusion
+  stands: no honest partial byte bound.)
 - **Zero-size (and negative) creations consume nothing.** Upstream refuses
   them with `InvalidStride` and kills the client, creating no pool -- so
   counting one would leak a unit no destruction could release, one dead
@@ -174,7 +188,7 @@ need a lock, while a State-side map keyed by `ClientId` needs none.
 
 ## Tests
 
-Seven new real-client tests in `dispatch/tests.rs` (plus a `PoolClient`
+Eight new real-client tests in `dispatch/tests.rs` (plus a `PoolClient`
 helper holding one connection open across create/destroy/disconnect
 steps, and a `drive_both` two-connection form so the first connection can
 stay up -- holding its pools -- while the second runs):
@@ -188,6 +202,9 @@ stay up -- holding its pools -- while the second runs):
   its first pool: both succeed (the anti-shared-table property);
 - a per-pool-over-cap creation consumes no budget (count still zero);
 - a zero-size creation consumes no budget (count still zero);
+- a valid-size creation on an unmappable fd (`/dev/null`, which cannot be
+  mapped `SHARED`) is refused with Smithay's own `InvalidFd` and consumes
+  no budget (count still zero);
 - three pools created then the connection dropped without destroying:
   count drains to zero;
 - one pool grown 130 times: count holds at one.
@@ -206,6 +223,10 @@ VM side per the 9p index-lock gotcha):
   oversized still passes, correctly -- the per-pool guard short-circuits
   first in chain order, which is what protects it; the guard's own
   re-check is belt-and-braces against reorder.
+- the bad-fd test failed before the probe existed (`pools == 1`, the
+  deterministic leak, confirmed end to end) and passes after -- the
+  probe's own fail-first run. No toggle was needed: the pre-probe tree
+  *was* the neutered state.
 - isolation, composition and resize pins pass neutered, which is the
   expected split (they pin shapes, not the refusal): isolation fails iff
   the key globalises, composition iff refused-oversize starts counting,
@@ -227,8 +248,8 @@ against commit `ae870bf7f5835070280ed2ed38f1137839423a85` (the code + tests + RE
 ROADMAP entry followed as a second commit with no executable change):
 
 ```
-cargo test -p flexwm            TEST EXIT=0  761 passed; 0 failed; 1 ignored
-cargo nextest run --workspace   NEXTEST EXIT=0  860 run: 860 passed, 1 skipped
+cargo test -p flexwm            TEST EXIT=0  762 passed; 0 failed; 1 ignored
+cargo nextest run --workspace   NEXTEST EXIT=0  861 run: 861 passed, 1 skipped
 cargo clippy -p flexwm --all-targets -- -D warnings   CLIPPY EXIT=0 (0 warnings)
 cargo fmt --check -p flexwm     FMT EXIT=0 (formatted Mac-side; VM cannot write through 9p)
 MODE=--headless scripts/smoke-test.sh   SMOKE EXIT=0 (15 `ok:` lines)
@@ -236,8 +257,8 @@ MODE=--headless scripts/smoke-test.sh   SMOKE EXIT=0 (15 `ok:` lines)
 
 Baseline before the change was 753 passed at PR #74's commit, 754 past
 its review-fix commit (which added a test alongside the refused-stop
-dedup), and 761 here -- the +7 is exactly the new suite. The dispatch
-suite alone went 7 -> 14 and ran 10/10 green after the drain fix.
+dedup), and 762 here -- the +8 is exactly the new suite. The dispatch
+suite alone went 7 -> 15 and ran 10/10 green after the drain fix.
 
 ### Benchmark: the added per-`create_pool` cost
 
@@ -252,9 +273,14 @@ claim+release pair: 1.50/1.74/1.60us/iter
 
 i.e. roughly 0.75-0.9us per `create_pool` and per pool destroy in a debug
 build -- the same shape as the capture-frame guard's measured 0.7-0.9us
-(PR #70), noise against requests that are socket-I/O-dominated and arrive
-at most in the hundreds per client lifetime (even a 129-pool flood pays
-~0.2ms total). Every other interface's cost is a `TypeId` comparison both
+(PR #70). The fd-mappability probe adds one `mmap`+`munmap` per creation,
+measured separately the same way (200k probes of a 4 KiB memfd, three
+runs: 2.82/2.80/2.83us per probe, debug) -- noise against requests that
+are socket-I/O-dominated and arrive at most in the hundreds per client
+lifetime (even a 129-pool flood pays ~0.5ms total, probe included).
+Crucially, the probe does not false-refuse sparse-but-mappable pools: the
+`creating_a_pool_up_to_the_cap_is_accepted` suite maps 512 MiB on a
+one-byte backing through the probe on every run. Every other interface's cost is a `TypeId` comparison both
 sides of which are compile-time constants once monomorphized, folded away
 exactly like the five guards before it. Merged on bound-not-performance
 grounds all the same.

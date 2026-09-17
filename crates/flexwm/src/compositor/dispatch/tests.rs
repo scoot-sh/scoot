@@ -540,6 +540,35 @@ fn a_zero_size_create_consumes_no_count_budget() {
     );
 }
 
+/// Same for a valid size on an unmappable fd: Smithay's own `mmap` fails
+/// (`InvalidFd`, client killed, pool never created), so claiming one would
+/// leak a unit no destruction could release -- the never-initialized object
+/// keeps `UninitObjectData`, whose `destroyed` is a no-op that never reaches
+/// the blanket hook. `/dev/null` cannot be mapped `SHARED`, deterministically.
+#[test]
+fn an_unmappable_fd_create_consumes_no_count_budget() {
+    let report = drive(|stream| {
+        let conn = Connection::from_socket(stream).expect("a client connection");
+        let mut queue = conn.new_event_queue();
+        let qh = queue.handle();
+        let mut client = TestClient::default();
+        conn.display().get_registry(&qh, ());
+        queue.roundtrip(&mut client)?;
+
+        let shm = client.shm.clone().expect("the wl_shm global");
+        let null = std::fs::File::open("/dev/null").expect("/dev/null exists");
+        let _pool = shm.create_pool(null.as_fd(), 4096, &qh, ());
+        queue.roundtrip(&mut client)?;
+        Ok(())
+    });
+    assert_shm_protocol_error(&report.resize, "wl_shm", wl_shm::Error::InvalidFd);
+    assert_survivor_still_served(&report);
+    assert_eq!(
+        report.pools, 0,
+        "a pool Smithay never created must not be counted"
+    );
+}
+
 /// Disconnecting with live pools drains the count to zero: the destruction
 /// hook runs for every object in cleanup, so no entry outlives the client
 /// it names.

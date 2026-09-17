@@ -333,6 +333,7 @@
 //! backend mutex any differently than the delegated request already could.
 
 use std::any::{Any, TypeId};
+use std::os::fd::{AsFd, AsRawFd, BorrowedFd};
 
 use smithay::reexports::wayland_protocols::ext::image_copy_capture::v1::server::{
     ext_image_copy_capture_frame_v1, ext_image_copy_capture_session_v1,
@@ -545,9 +546,21 @@ where
 /// leaning on the chain order is what keeps that true however the guards
 /// are ordered.
 ///
+/// A third never-creates shape needs its own check: a valid size on an
+/// fd Smithay cannot map (`/dev/null`, an `O_RDONLY` fd with a `WRITE`
+/// mapping, ...). Smithay posts `InvalidFd` and returns without
+/// initialising the pool, whose `UninitObjectData::destroyed` is a no-op --
+/// so no destruction hook ever runs for it, disconnect cleanup included,
+/// and a claim would leak one unit per connection, attacker-paced, with no
+/// memory pressure at all. [`pool_fd_mappable`] probes the exact mapping
+/// first (same call Smithay is about to make), and a probe failure is
+/// refused with Smithay's own code and message, uncounted.
+///
 /// The refusal is `InvalidStride` on `wl_shm`, the same code (and object)
 /// the per-pool cap's own creation refusal uses: one consistent answer for
-/// "this pool cannot be opened", whichever bound said so.
+/// "this pool cannot be opened", whichever bound said so. (The probe
+/// failure above is the exception: `InvalidFd`, matching what Smithay
+/// posts for the same fd.)
 ///
 /// Folds away for every interface other than `wl_shm`, for the same
 /// monomorphization reason as the guards above -- which matters here too:
@@ -565,7 +578,7 @@ where
     if TypeId::of::<I::Request>() != TypeId::of::<wl_shm::Request>() {
         return false;
     }
-    let Some(wl_shm::Request::CreatePool { size, .. }) =
+    let Some(wl_shm::Request::CreatePool { size, fd, .. }) =
         (request as &dyn Any).downcast_ref::<wl_shm::Request>()
     else {
         return false;
@@ -573,10 +586,74 @@ where
     if *size <= 0 || *size > MAX_SHM_POOL_BYTES {
         return false;
     }
+    if !pool_fd_mappable(fd.as_fd(), *size as usize) {
+        // Same code *and message* Smithay's own `create_pool` posts when
+        // its identical mapping fails, so whichever side refused, the
+        // client learns one thing: this fd cannot back a pool.
+        resource.post_error(
+            wl_shm::Error::InvalidFd,
+            format!("Failed to mmap fd {}", fd.as_raw_fd()),
+        );
+        return true;
+    }
     if !state.shm_pools.refuse_pool_creation(client) {
         return false;
     }
     resource.post_error(wl_shm::Error::InvalidStride, too_many_pools());
+    true
+}
+
+/// Probes whether `fd` can be mapped exactly the way Smithay's
+/// `create_pool` is about to: `mmap(NULL, size, READ|WRITE, SHARED, fd, 0)`,
+/// unmapped straight away.
+///
+/// Parameter-for-parameter replication of `0ff0098`
+/// `src/wayland/shm/pool.rs`'s `map()` -- which is what makes a probe
+/// failure (or success) predictive rather than heuristic: the two syscalls
+/// run back-to-back in one dispatch, same thread, same open file
+/// description, same size, so they agree unless another thread sharing the
+/// fd changes its mappability in between. Both directions of that race are
+/// safe-shaped: a probe failure refuses *without claiming* (no leak on any
+/// path), and a probe success Smithay then fails to repeat kills the
+/// client with at most one phantom unit for a dead connection -- the
+/// pre-probe leak, now reachable only through a nanosecond TOCTOU instead
+/// of a deterministic loop. A false refusal of a legitimate client needs
+/// the same race in reverse (e.g. transient `ENOMEM` healing between the
+/// two calls).
+///
+/// Costs one `mmap`+`munmap` per `create_pool` -- lazy mappings, no page
+/// tables until touched -- and runs nowhere else (the `wl_shm` `TypeId`
+/// gate above already excluded every other interface, and `resize` carries
+/// no fd: its pool object already exists, so a failed `remap` kills a
+/// client whose pools drain through the normal hook, exactly).
+fn pool_fd_mappable(fd: BorrowedFd<'_>, size: usize) -> bool {
+    if size == 0 {
+        return false;
+    }
+    // SAFETY: `addr` is null (the kernel chooses the address), `length` is
+    // nonzero (checked above), and `fd` is a valid borrowed fd. The mapping
+    // is never touched through the returned pointer -- no read, no write,
+    // so no SIGBUS from short backing and no aliasing -- it exists only to
+    // learn whether the call succeeds, and is unmapped below.
+    let mapped = unsafe {
+        rustix::mm::mmap(
+            std::ptr::null_mut(),
+            size,
+            rustix::mm::ProtFlags::READ | rustix::mm::ProtFlags::WRITE,
+            rustix::mm::MapFlags::SHARED,
+            fd,
+            0,
+        )
+    };
+    let Ok(ptr) = mapped else {
+        return false;
+    };
+    // SAFETY: `ptr`/`size` are exactly what the successful `mmap` above
+    // returned/was given, unmapped here before anything else runs, so this
+    // cannot double-unmap or unmap anything else's. A just-made mapping
+    // cannot fail to unmap (Smithay's own `unmap` says the same); the
+    // result is irrelevant either way.
+    let _ = unsafe { rustix::mm::munmap(ptr, size) };
     true
 }
 
