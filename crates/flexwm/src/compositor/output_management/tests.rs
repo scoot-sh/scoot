@@ -142,6 +142,19 @@ fn announced(head: u32, first_mode: u32, modes: &[i32], current: usize, version:
     seen
 }
 
+/// One `wl_output.mode` event, as the client saw it: the size plus which of
+/// the two defined flag bits were set. Recorded for *every* event rather than
+/// snapshotted like [`OutputRecord::current_mode`], so a test can tell what an
+/// already-bound client was told by a resize apart from what a later bind saw.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct WlMode {
+    width: i32,
+    height: i32,
+    refresh: i32,
+    current: bool,
+    preferred: bool,
+}
+
 /// What `wl_output` itself said, for the cross-check.
 #[derive(Clone, Debug, Default, PartialEq)]
 struct OutputRecord {
@@ -155,6 +168,8 @@ struct OutputRecord {
     scale: Option<i32>,
     /// `(width, height, refresh)` of whichever mode carried the `current` flag.
     current_mode: Option<(i32, i32, i32)>,
+    /// Every `mode` event in arrival order, with its flags.
+    modes: Vec<WlMode>,
 }
 
 #[derive(Default)]
@@ -373,10 +388,20 @@ impl Dispatch<wl_output::WlOutput, ()> for TestClient {
                 height,
                 refresh,
             } => {
-                if flags
-                    .into_result()
-                    .is_ok_and(|flags| flags.contains(wl_output::Mode::Current))
-                {
+                let (current, preferred) = flags.into_result().map_or((false, false), |flags| {
+                    (
+                        flags.contains(wl_output::Mode::Current),
+                        flags.contains(wl_output::Mode::Preferred),
+                    )
+                });
+                record.modes.push(WlMode {
+                    width,
+                    height,
+                    refresh,
+                    current,
+                    preferred,
+                });
+                if current {
                     record.current_mode = Some((width, height, refresh));
                 }
             }
@@ -717,6 +742,114 @@ fn a_resize_sends_the_new_mode_and_a_fresh_serial() {
             Seen::CurrentMode(0, 1),
             Seen::Done(2),
         ]
+    );
+}
+
+#[test]
+fn wl_output_tells_an_already_bound_client_the_resized_mode_is_preferred() {
+    // `headless::set_mode` must mark the new mode preferred *before* Smithay's
+    // `change_current_state` sends it to already-bound `wl_output` clients:
+    // that call snapshots the preferred mode synchronously (verified against
+    // the pinned rev's `wayland/output/mod.rs`), so the old order told a
+    // client bound before the resize about the new mode with no `preferred`
+    // bit, and nothing ever resent it. A client binding *after* the resize
+    // gets the full state at bind time either way (pinned below).
+    let mut fixture = Fixture::new();
+    fixture.run(Step::BindOutput);
+    fixture.run(Step::BindManager(4));
+    fixture.take_log();
+    let before = fixture.take_output();
+    assert!(
+        before
+            .modes
+            .iter()
+            .any(|mode| (mode.width, mode.height) == (CANVAS, CANVAS)
+                && mode.current
+                && mode.preferred),
+        "the bind-time mode should arrive current and preferred: {before:?}"
+    );
+
+    fixture.state.resize_output(RESIZED, RESIZED);
+    fixture.settle();
+
+    // The management protocol agrees: its snapshot is taken after `set_mode`
+    // has fully returned, so it was correct even before the fix -- asserting
+    // both here pins the two protocols to each other across a resize.
+    assert_eq!(
+        fixture.take_log(),
+        vec![
+            Seen::Mode(0, 1),
+            Seen::ModeSize(1, RESIZED, RESIZED),
+            Seen::ModeRefresh(1, REFRESH),
+            Seen::ModePreferred(1),
+            Seen::CurrentMode(0, 1),
+            Seen::Done(2),
+        ]
+    );
+    let after = fixture.take_output();
+    assert!(
+        after.modes.contains(&WlMode {
+            width: RESIZED,
+            height: RESIZED,
+            refresh: REFRESH,
+            current: true,
+            preferred: true,
+        }),
+        "the already-bound client should hear the resized mode as current \
+         *and* preferred: {after:?}"
+    );
+}
+
+#[test]
+fn wl_output_reports_preferred_to_a_client_bound_after_resize() {
+    // Regression pin: the bind path sends the whole current state, preferred
+    // bit included, so this passed before the fix too -- stated, not assumed.
+    let mut fixture = Fixture::new();
+    fixture.run(Step::BindManager(4));
+    fixture.take_log();
+    fixture.state.resize_output(RESIZED, RESIZED);
+    fixture.settle();
+    fixture.take_log();
+
+    fixture.run(Step::BindOutput);
+    let output = fixture.take_output();
+    assert!(
+        output.modes.contains(&WlMode {
+            width: RESIZED,
+            height: RESIZED,
+            refresh: REFRESH,
+            current: true,
+            preferred: true,
+        }),
+        "a client binding after the resize should see the mode as current \
+         and preferred: {output:?}"
+    );
+}
+
+#[test]
+fn resizing_to_the_same_mode_keeps_it_current_and_preferred() {
+    // Same-size edge: the preferred mode already names this mode, so even the
+    // old order sent both bits here. Pins that the swap changes nothing about
+    // the no-op resize both backends can produce (a hotplug re-probe landing
+    // on the size it is already on never reaches `set_mode`, but a nested
+    // host configuring exactly `--width`x`--height` does reach this shape at
+    // startup... and is acked-and-ignored before it; this is the direct call).
+    let mut fixture = Fixture::new();
+    fixture.run(Step::BindOutput);
+    fixture.take_output();
+
+    fixture.state.resize_output(CANVAS, CANVAS);
+    fixture.settle();
+    let output = fixture.take_output();
+    assert!(
+        output
+            .modes
+            .last()
+            .is_some_and(|mode| (mode.width, mode.height) == (CANVAS, CANVAS)
+                && mode.current
+                && mode.preferred),
+        "a same-mode resize should still report the mode as current and \
+         preferred: {output:?}"
     );
 }
 
