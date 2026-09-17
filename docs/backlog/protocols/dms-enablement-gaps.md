@@ -161,9 +161,17 @@ list behind that.
 - **HALF-RESOLVED 2026-09-16 (PR #52).** `ext-image-copy-capture-v1` with
   `ext-image-capture-source-v1` is advertised, so the **overview live
   preview** (an output source) has something to consume. The **launcher
-  window thumbnails** are a per-window source and still do not — that half
-  needs a second render target per session and is filed as
-  [`screencopy-toplevel-capture.md`](./screencopy-toplevel-capture.md). See
+  window thumbnails** are a per-window source and still do not — and the
+  toplevel half was **CLOSED UNREACHABLE 2026-09-17 without building it**:
+  stock quickshell 0.3.1 routes a `Toplevel` `ScreencopyView` source
+  exclusively to `hyprland-toplevel-export-v1` (wire evidence + version-exact
+  source in
+  [`resolved/screencopy-toplevel-capture-done.md`](../resolved/screencopy-toplevel-capture-done.md)).
+  The fallback (region crop out of the output) is filed as
+  [`screencopy-shell-thumbnails-fallback.md`](./screencopy-shell-thumbnails-fallback.md) —
+  note its first measurement also covers why the overview preview still shows
+  nothing in a quickshell shell despite PR #52 (the client's dmabuf
+  readiness gate). See
   [`resolved/screencopy-capture-done.md`](../resolved/screencopy-capture-done.md).
 
 ### 7. DMS does not recognize flexwm ("No compositor detected") — mostly upstream work

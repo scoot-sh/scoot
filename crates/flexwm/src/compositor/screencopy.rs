@@ -40,9 +40,10 @@
 //! output framebuffer -- plus its own constraint-refresh path (a window
 //! resizes far more often than the output does), its own mid-session
 //! teardown (the window closes), and its own answer for a locked session. That
-//! is the whole of this module again, so it is
-//! [its own backlog item](../../../../docs/backlog/protocols/screencopy-toplevel-capture.md)
-//! rather than a half-implementation here.
+//! is the whole of this module again, so it was
+//! [its own backlog item](../../../../docs/backlog/resolved/screencopy-toplevel-capture-done.md)
+//! — probed and closed unreachable without building it — rather than a
+//! half-implementation here.
 //!
 //! The toplevel global is not advertised at all rather than advertised and
 //! refused: a client that can create a source and is then told `stopped` has
