@@ -408,16 +408,27 @@ impl State {
         if self.output.as_ref() != Some(output) {
             return;
         }
-        let Some(client) = wl_output.client() else {
-            return;
-        };
+        let bound = wl_output.id();
         for manager in &self.ext_workspace.managers {
             // Load-bearing, not tidiness: wayland-backend *panics* when an
             // event carries an object belonging to a different client than
             // the one it is sent to ("Attempting to send an event with
-            // objects from wrong client", `rs/server_impl/client.rs`), and a
-            // panic here takes every client's session down with it.
-            if manager.manager.client().as_ref() != Some(&client) {
+            // objects from wrong client", `rs/server_impl/client.rs`), and
+            // a panic here takes every client's session down with it.
+            //
+            // Compared as ids rather than through `Resource::client`,
+            // because this runs once per manager per `wl_output` bind and
+            // any client may provoke it: `same_client_as` is a comparison
+            // of the two `ObjectId`s' stored client ids, while `client()`
+            // takes the backend's state mutex twice and clones an
+            // `Arc<dyn ClientData>` to answer the same question. It is
+            // also the *exact* question -- the panic above is literally
+            // `o.id.client_id != self.id` on the object argument. A manager
+            // that has since died is skipped under the system backend and
+            // harmlessly kept under the Rust one, where the event is
+            // swallowed as `InvalidId` rather than sent (same file's
+            // `get_object`, whose `?` the generated `let _ =` eats).
+            if !manager.manager.id().same_client_as(&bound) {
                 continue;
             }
             let Ok(group) = manager.group.upgrade() else {
