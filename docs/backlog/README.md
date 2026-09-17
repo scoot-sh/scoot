@@ -186,6 +186,16 @@ actionable.
   probes must pin `--socket` + `WAYLAND_DISPLAY`. Adjacent code-traced
   present-skip damage finding filed as
   [present-skip eats frame damage](./rendering/present-skip-eats-frame-damage.md).
+- [A held pointer lock survives a session lock, so a client keeps pointer input while locked](./protocols/pointer-lock-survives-session-lock.md)
+  — **HIGH**, filed 2026-09-17 by a retrospective audit of PRs #73–#89;
+  regression from PR #89. The lock transition's pointer-focus refresh is a
+  zero-delta move, which a held constraint resolves to `Held` (delivers
+  nothing), so deltas, clicks and scroll keep reaching the locking client
+  and the lock surface never gets an `enter`. PR #89's review saw it and
+  pinned it in a test as intended, so the decision wants re-taking — and
+  the basis it was accepted on (close the window with a chord) is false
+  while locked, since every binding but `ChangeVt` is forwarded to the
+  locker.
 - [Lock manager global offered to every client](./protocols/session-lock-global-restriction.md)
 - [First click on a fresh lock screen reaches nobody](./resolved/session-lock-first-click-done.md)
   — RESOLVED 2026-09-17 (PR #76): pointer focus is re-derived on the commit
@@ -230,7 +240,14 @@ actionable.
   config-parse time with a warning (`"A"` means plain `a`, not `shift+a`);
   `msg key A` still refuses.
 - [Per-frame `Vec` alloc in the cursor fallback path](./rendering/cursor-element-per-frame-alloc.md)
-- [A `present()` skipped for an in-flight flip consumes that frame's damage](./rendering/present-skip-eats-frame-damage.md) — code-traced only, never observed; scanout (not the read-back image) goes stale until next damage; candidate fix touches the hot present path, so correctly waiting on a live observation
+- [A `present()` skipped for an in-flight flip consumes that frame's damage](./rendering/present-skip-eats-frame-damage.md) — code-traced only, never observed; scanout (not the read-back image) goes stale until next damage; candidate fix touches the hot present path, so correctly waiting on a live observation. Note: an independent trace during the 2026-09-17 audit disputes this entry's stated mechanism (slot age after a skip is ≥2, so the tracker's history returns the skipped frame's damage and the retry presents) — worth re-deriving before anyone acts on it.
+- [A screencopy frame parked for a lock's blank is never re-armed after the vblank confirm](./rendering/screencopy-parked-across-lock-confirm.md)
+  — filed 2026-09-17 by a retrospective audit of PRs #73–#89; regression
+  from PR #84. A parked capture is not one of `frame_tick`'s three re-arm
+  conditions, and neither confirm path calls `ensure_ticking`, so the frame
+  is neither delivered nor failed until something else wakes the ticker —
+  the locker's first commit normally, never for an abandoned lock.
+  `wait-idle` and `msg screenshot` are unaffected.
 - [Cursor frames while VT-paused](./resolved/cursor-frame-callback-when-paused-done.md)
   — RESOLVED 2026-09-17: `render()` (and the frame-callback dispatch) is
   skipped while the `--tty` session holds no DRM master, so a paused
@@ -245,7 +262,17 @@ actionable.
   protection.
 
 ### Security
-- [Live `wl_shm` pools per client](./resolved/shm-pool-count-cap-done.md) — RESOLVED 2026-09-17: at most 128 live pools per Wayland client (refused with `InvalidStride`, released on destroy/disconnect); the byte total stays open behind an upstream size accessor (proven unknowable at the pinned rev)
+- [Live `wl_shm` pools per client](./resolved/shm-pool-count-cap-done.md) — RESOLVED 2026-09-17: at most 128 live pools per Wayland client (refused with `InvalidStride`, released on destroy/disconnect); the byte total stays open behind an upstream size accessor (proven unknowable at the pinned rev). **But see the entry below: the fd/mapping bound it documents is not the bound it has.**
+- [The live-pool cap does not bound fds or mappings, which is what its docs claim](./security/shm-pool-cap-misses-retained-fds.md)
+  — **HIGH**, filed 2026-09-17 by a retrospective audit of PRs #73–#89.
+  `wl_shm_pool.destroy` decrements the count but does not release the
+  mapping or fd while any `wl_buffer` from that pool lives (the protocol
+  mandates this), so create-pool → create-buffer → destroy in a loop grows
+  compositor fds without bound at a live count of zero — the exact harm
+  `shm_pools.rs:25` and README say 128 pools prevents. The count cap still
+  bounds naive hoarding; the documented `RLIMIT_NOFILE` protection is the
+  part that does not hold, and the doc correction should not wait for the
+  (upstream-gated) real fix.
 - [No cap on Wayland connection count](./security/wayland-connection-cap.md) — per-connection bounds (frames, binds, pools) multiply across connections; ~8 maxed connections exhaust the compositor's fds
 
 ### Packaging / tooling
