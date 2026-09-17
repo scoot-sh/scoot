@@ -749,6 +749,32 @@ fn a_wl_output_bound_after_the_manager_still_enters_the_group() {
 }
 
 #[test]
+fn an_output_bound_by_one_client_never_enters_another_clients_group() {
+    // The cross-client half of the `output_bound` hook: the second client
+    // binds its manager first and its `wl_output` after, so the hook fires
+    // while the first client's manager is registered. Without the
+    // same-client filter the first client's group would be sent an
+    // `output_enter` carrying the other client's object, which is a panic
+    // inside wayland-backend -- i.e. the whole compositor, not a failed
+    // assertion -- which is why this is a cross-client test and not a
+    // second manager on the same connection.
+    let mut fixture = Fixture::bound();
+    let second = fixture.spawn(run_client);
+    fixture.run_on(second, Step::BindManager);
+    fixture.run_on(second, Step::BindOutput);
+    // Nothing leaked across: the first client saw no event at all.
+    assert_eq!(fixture.take_log(), &[]);
+    // ...and the second client got exactly its own world: the bind-time
+    // burst (no output in it -- it bound the manager first), then the
+    // `output_bound` hook's answer to its own bind.
+    let mut expected = vec![Seen::Group(0), Seen::GroupCapabilities(0, 0)];
+    expected.extend(created(0, 0, 1, true));
+    expected.push(Seen::Done(0));
+    expected.extend([Seen::OutputEnter(0), Seen::Done(0)]);
+    assert_eq!(fixture.take_log_on(second), expected);
+}
+
+#[test]
 fn no_workspace_is_given_a_stable_id() {
     // Deliberate, not an omission: flexwm's workspaces are positions that the
     // next window closing can renumber, and this protocol's `id` is for

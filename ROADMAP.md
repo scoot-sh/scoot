@@ -265,6 +265,17 @@ gap jumped the queue — each item's own file records why it landed when it did.
   Measured live on the dev VM: sequential no-op latency ~1.6–1.8x better,
   flood throughput ~20k to ~38k req/s. No README change (purely internal
   latency, same non-difference PR #54 accepted).
+- **[`ext-workspace-v1`'s cross-client check took two backend locks per
+  manager, per `wl_output` bind](docs/backlog/resolved/ext-workspace-client-lookup-per-bind-done.md)**
+  (PR #68, 2026-09-17) — filed from PR #50's review, fixed exactly as
+  filed: the filter is now `ObjectId::same_client_as` (a lock-free field
+  comparison, and the exact predicate the wayland-backend panic tests),
+  copying `wlr_toplevel_output_bound`'s shape including its comment. Pinned
+  by a cross-client test proven fail-first (neutered filter panics in
+  `wayland-backend`, not a failed assertion). Measured ~10x on the
+  predicate but ~300ns absolute — noise at session scale, so merged on
+  correctness-clarity grounds, not a performance claim. No README change
+  (same events, same order, same clients).
 ## What's next
 
 The backlog is the source of truth for what to pick up; this is the current
