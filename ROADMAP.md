@@ -309,6 +309,20 @@ gap jumped the queue — each item's own file records why it landed when it did.
   Pinned byte-identical over opaque backgrounds, proven still-forcing over
   translucent ones. Measured on the dev VM: ~4.7% off a release `grim`
   capture in the default configuration. `Argb8888` untouched.
+- **[An `exclusive` layer surface's own popup
+  grab](docs/backlog/resolved/popup-grab-exclusive-self-dismiss-done.md)**
+  — filed from PR #44's review: a launcher's own dropdown flashed open
+  and instantly closed, refused and pre-empted by the very surface that
+  opened it. Both checks now compare against the grab's root (the grant
+  site reuses `find_popup_root_surface`; the pre-emption site reads the
+  held grab's start-data focus the way PR #55 does), so a *different*
+  exclusive surface still wins while the root itself never outranks its
+  own menu. Fail-first harness tests for grant, pre-emption (incl. a
+  nested submenu off the same root) and both unmap edges (no resurrection
+  once dismissed, the root's own unmap leaving its menu up); README's
+  rule-3 caveat removed now the claim is true as written. No hot-path
+  benchmark (per-grab path plus one `Option` compare per focus
+  derivation).
 ## What's next
 
 The backlog is the source of truth for what to pick up; this is the current

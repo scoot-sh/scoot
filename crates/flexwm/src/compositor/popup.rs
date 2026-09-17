@@ -23,9 +23,13 @@
 //!    layer-shell lock screen. `layer_shell.rs` documents this as "takes the
 //!    keyboard the moment it maps and keeps it until it unmaps", and that
 //!    rule wins here rather than fighting: a launcher opened over a menu
-//!    must be typeable.
-//! 3. **The popup grab**, over the focused window and over a layer surface
-//!    that only got the keyboard from a click. That is the whole point of
+//!    must be typeable. The one thing it does not win over is the surface's
+//!    *own* menu: a grab rooted on the exclusive surface itself is neither
+//!    refused nor pre-empted, so a launcher's dropdown is not dismissed by
+//!    the launcher that opened it.
+//! 3. **The popup grab**, over the focused window, over a layer surface
+//!    that only got the keyboard from a click, and over the `exclusive`
+//!    surface the menu itself hangs off. That is the whole point of
 //!    the request.
 //!
 //! Losing is spelled `popup_done`, not "unset the seat grab": the protocol
@@ -101,6 +105,7 @@ use smithay::input::Seat;
 use smithay::input::pointer::Focus;
 use smithay::reexports::wayland_server::backend::ClientId;
 use smithay::reexports::wayland_server::protocol::wl_seat;
+use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{SERIAL_COUNTER, Serial};
 use smithay::wayland::shell::xdg::PopupSurface;
 
@@ -174,7 +179,7 @@ impl State {
             return;
         };
 
-        if self.popup_grab_outranked() {
+        if self.popup_grab_outranked(&root) {
             // Checked *here* and not only on the next focus refresh: a
             // client can ask for a grab at any moment, including while the
             // screen is locked or a launcher is up, and a grant followed by
@@ -314,18 +319,46 @@ impl State {
         self.last_popup_grab = None;
     }
 
-    /// Whether something outranks a popup grab for the keyboard right now --
-    /// the session lock, or an `exclusive` layer surface.
+    /// Whether something outranks a popup grab rooted on `root` for the
+    /// keyboard right now -- the session lock, or an `exclusive` layer
+    /// surface that is not the grab's own root.
+    ///
+    /// The root exception is the whole point of the parameter: a launcher's
+    /// own dropdown is not dismissed by the launcher that opened it, so an
+    /// `exclusive` surface outranks every grab but one rooted on itself. A
+    /// grab rooted on a window while a launcher is up is still refused, and
+    /// so is one asked for while locked.
     ///
     /// Reads the same two sources [`State::refresh_keyboard_focus`] does, so
     /// the grant-time answer and the pre-emption answer cannot drift apart.
     /// Costs a layer-map walk, which is why only the two grab paths call it
     /// and not the per-event ones.
-    fn popup_grab_outranked(&self) -> bool {
+    fn popup_grab_outranked(&self, root: &WlSurface) -> bool {
         self.session_lock.is_locked()
             || self
                 .layer_keyboard_focus()
-                .is_some_and(|found| found.exclusive)
+                .is_some_and(|found| found.exclusive && &found.surface != root)
+    }
+
+    /// Whether the live popup grab (if any) is rooted on `surface`.
+    ///
+    /// The pre-emption half of the root exception above, for
+    /// [`State::refresh_keyboard_focus`], which has no grab request in hand:
+    /// the held grab's own start data names its root for the grab's whole
+    /// life (see [`State::popup_grab_holder`]), so there is no second copy
+    /// of "who grabbed" to keep in sync. A grab that has ended but not yet
+    /// been reaped still names its root; sparing it from dismissal is
+    /// harmless, since reaping it is `settle_popup_grab`'s job either way.
+    /// No grab at all answers false, and so does a root that is already
+    /// gone -- not because the stored focus clears (it never does), but
+    /// because `layer_keyboard_focus` only ever returns a live mapped
+    /// surface, necessarily a different object from a dead root. Either
+    /// way false is the dismissing direction, which is the safe one here.
+    pub(super) fn popup_grab_rooted_on(&self, surface: &WlSurface) -> bool {
+        self.popup_grab
+            .as_ref()
+            .and_then(|grab| grab.keyboard_grab_start_data().focus.as_ref())
+            == Some(surface)
     }
 
     /// Which window's popup tree currently holds the keyboard through an

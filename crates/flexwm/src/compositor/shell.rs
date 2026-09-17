@@ -234,7 +234,16 @@ impl State {
             // guard-discipline note in `layer_shell.rs`.
             let layer = self.layer_keyboard_focus();
             self.keyboard_on_layer = layer.is_some();
-            if layer.as_ref().is_some_and(|found| found.exclusive) {
+            // An `exclusive` surface pre-empts a grab -- unless the grab is
+            // its own menu (see `popup.rs`): the launcher that opened the
+            // dropdown does not dismiss it. The root comes from the held
+            // grab's own start data, since no grab request is in hand here;
+            // a grab rooted anywhere else is still dismissed.
+            let pre_empted = match &layer {
+                Some(found) if found.exclusive => !self.popup_grab_rooted_on(&found.surface),
+                _ => false,
+            };
+            if pre_empted {
                 self.dismiss_popup_grab();
             }
             layer.map(|found| found.surface).or_else(|| {
