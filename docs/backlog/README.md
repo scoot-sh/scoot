@@ -172,7 +172,14 @@ actionable.
 - [Lock surfaces are per-output; flexwm has one output](./protocols/lock-surfaces-per-output.md)
 - [Unbounded lock surfaces via duplicate `wl_output` binds](./protocols/lock-surface-duplicate-wl-output.md)
 - [Lock blanks immediately instead of waiting for the first surface](./protocols/session-lock-blank-timing.md)
-- [`locked` sent on rendered frame, not confirmed vblank](./protocols/session-lock-vblank-confirm.md)
+- [`locked` sent on rendered frame, not confirmed vblank](./resolved/session-lock-vblank-confirm-done.md)
+  — RESOLVED 2026-09-17 (PR #84): `locked` waits for the vblank of the flip carrying
+  the blanked frame under `--tty` (sequence-tracked; one-second fallback
+  confirms anyway rather than hanging the locker); headless/nested confirm
+  on render unchanged
+- [A lock surface mapped after the confirming frame never appears on live `--tty`](./protocols/session-lock-surface-not-drawn-live.md)
+  — found verifying the item above: pre-existing (identical on the
+  pre-change binary), harness-green, damage-under-buffer-age suspected
 - [Lock manager global offered to every client](./protocols/session-lock-global-restriction.md)
 - [First click on a fresh lock screen reaches nobody](./resolved/session-lock-first-click-done.md)
   — RESOLVED 2026-09-17 (PR #76): pointer focus is re-derived on the commit
