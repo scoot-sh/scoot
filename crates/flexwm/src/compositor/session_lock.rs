@@ -990,6 +990,47 @@ impl State {
         });
     }
 
+    /// Re-derives pointer focus on a lock surface's commit, if it was one.
+    ///
+    /// Called from `CompositorHandler::commit` for every commit that is
+    /// neither a window's nor a layer surface's. `new_surface` already
+    /// re-derives, but it runs while the lock surface is still unmapped, so
+    /// the hit test finds nothing; the commit that maps it is what makes it
+    /// hit-testable, and without this the lock surface gets `wl_pointer.enter`
+    /// only on the first mouse move -- with the click before that reaching
+    /// nobody. Pointer focus only: the keyboard goes to a lock surface on
+    /// liveness, not mapped-ness, so `new_surface`'s keyboard refresh already
+    /// covered it, and a commit is not a lock transition, so no grab is
+    /// dropped (a grab outlives focus changes by design).
+    ///
+    /// The recognition is deliberately cheap, because this sits on the
+    /// commit path: while unlocked it is one `Option::is_some` and nothing
+    /// else. While locked it adds one `with_states` typemap probe for a
+    /// surface that never had a lock role (the `get` misses, nothing is
+    /// allocated), and the refresh itself runs only for surfaces that did.
+    /// No allocation on any path. Ordinary window commits never reach here
+    /// at all (`id_of` claims them first), and layer-surface commits never
+    /// reach the probe (`commit_layer_surface` claims them first).
+    ///
+    /// Precedence needs no special case: the refresh runs the same locked
+    /// hit test every other derivation runs, which sees lock surfaces only --
+    /// so an exclusive layer surface or a popup grab cannot steal it, and
+    /// nothing behind the lock can receive it. An unmapped lock surface is
+    /// skipped by that hit test exactly like everywhere else, so a commit
+    /// that attaches no buffer takes no focus.
+    pub(super) fn refresh_lock_pointer_focus(&mut self, surface: &WlSurface) {
+        if !self.session_lock.is_locked() {
+            return;
+        }
+        let is_lock_surface = with_states(surface, |states| {
+            states.data_map.get::<LockSurfaceData>().is_some()
+        });
+        if !is_lock_surface {
+            return;
+        }
+        self.refresh_pointer_focus();
+    }
+
     /// Confirms a pending lock now that a blanked frame has been drawn.
     ///
     /// Called from `headless.rs::render` after a successful frame, which is

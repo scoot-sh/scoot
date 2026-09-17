@@ -52,6 +52,7 @@ use crate::compositor::test_support::{self, Harness, contains, wait_for};
 // that is shared with the other real-client suites.
 mod abandoned;
 mod blanking;
+mod first_click;
 mod input;
 mod lifecycle;
 mod teardown;

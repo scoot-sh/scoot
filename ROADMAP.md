@@ -362,6 +362,19 @@ gap jumped the queue — each item's own file records why it landed when it did.
   per-connection bounds multiply ([Wayland connection
   cap](docs/backlog/security/wayland-connection-cap.md)). README carries
   the new bound.
+- **[The first click on a fresh lock screen, before the mouse has moved,
+  reaches nobody](docs/backlog/resolved/session-lock-first-click-done.md)**
+  (PR #76) — fixed as filed: pointer focus is re-derived on the commit
+  that maps a lock surface (`new_surface`'s own derivation runs while it
+  is still unmapped, so the hit test found nothing and `wl_pointer.enter`
+  waited for the first mouse move, +4975ms on real `--tty`). Recognition
+  is one branch per non-window, non-layer commit while unlocked plus one
+  typemap probe while locked; zero new state. Four harness tests (two
+  fail-first, one pinning the already-working unlock symmetry, one pinning
+  no focus before mapped); window-commit throughput unchanged
+  (before/after ranges overlapping). No live `--tty` re-measurement —
+  stated as an environment call in the resolved record, with harness wire
+  evidence instead. README's not-guaranteed bullet removed.
 ## What's next
 
 The backlog is the source of truth for what to pick up; this is the current

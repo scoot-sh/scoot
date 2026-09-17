@@ -164,7 +164,11 @@ actionable.
 - [Lock blanks immediately instead of waiting for the first surface](./protocols/session-lock-blank-timing.md)
 - [`locked` sent on rendered frame, not confirmed vblank](./protocols/session-lock-vblank-confirm.md)
 - [Lock manager global offered to every client](./protocols/session-lock-global-restriction.md)
-- [First click on a fresh lock screen reaches nobody](./protocols/session-lock-first-click.md)
+- [First click on a fresh lock screen reaches nobody](./resolved/session-lock-first-click-done.md)
+  — RESOLVED 2026-09-17 (PR #76): pointer focus is re-derived on the commit
+  that maps the lock surface, so the first click lands on it without the
+  mouse having to move; recognition is one branch plus one typemap probe,
+  zero new state
 - [Smaller/general protocol gaps (bundled)](./protocols/protocol-gaps-general.md)
 - [Niche protocol gaps (bundled)](./protocols/protocol-gaps-niche.md)
 
