@@ -233,7 +233,12 @@ actionable.
 - [A `present()` skipped for an in-flight flip consumes that frame's damage](./rendering/present-skip-eats-frame-damage.md) — code-traced only, never observed; scanout (not the read-back image) goes stale until next damage; candidate fix touches the hot present path, so correctly waiting on a live observation
 - [Cursor frames still tick while VT-paused](./rendering/cursor-frame-callback-when-paused.md)
 - [`wl_surface.offset` doesn't move the cursor hotspot](./rendering/cursor-surface-offset-hotspot.md)
-- [The pointer starts at the output's origin, not centred](./rendering/pointer-starts-at-origin.md)
+- [The pointer starts at the output's origin, not centred](./resolved/pointer-starts-at-origin-done.md)
+  — RESOLVED 2026-09-17: centred once at startup through
+  `pointer_move_quietly` (no idle-timer reset, no focus, no interaction
+  serial); resize and VT-switch reactivation leave it where the user left
+  it; the smoke test's park-the-pointer workaround stays as harmless
+  protection.
 
 ### Security
 - [Live `wl_shm` pools per client](./resolved/shm-pool-count-cap-done.md) — RESOLVED 2026-09-17: at most 128 live pools per Wayland client (refused with `InvalidStride`, released on destroy/disconnect); the byte total stays open behind an upstream size accessor (proven unknowable at the pinned rev)

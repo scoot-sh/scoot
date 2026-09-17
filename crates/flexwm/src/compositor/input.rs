@@ -163,6 +163,30 @@ impl State {
         !pointer.is_grabbed()
     }
 
+    /// Centres the pointer on the output, once, at startup.
+    ///
+    /// Called from `headless::init_named` -- the one init point every
+    /// backend (`--headless`, `--nested`, `--tty`) reaches -- so the cursor
+    /// does not sit wedged in the top-left corner until the first motion.
+    /// Reads the *logical* extent off the output itself (the same rectangle
+    /// the core and the `Space` lay out in, and the space the pointer lives
+    /// in), not a hardcoded rect, so a scale other than 1 -- or a future
+    /// second output -- cannot silently misplace it. No output yet (the
+    /// `None` arm, unreachable once `init_named` has run) centres on
+    /// nothing, i.e. the origin Smithay starts at.
+    ///
+    /// Goes through [`State::pointer_move_quietly`], never the announcing
+    /// path: startup placement is not a user at the machine, so it must not
+    /// reset the idle timers, and with no client under it yet it derives no
+    /// focus and mints no interaction serial. Deliberately *not* repeated
+    /// on resize or VT-switch reactivation -- both leave the pointer where
+    /// the user left it (`resize_output` never touches it, and neither does
+    /// `session_event`'s reactivation arm).
+    pub(super) fn place_pointer_at_output_centre(&mut self) {
+        let (width, height) = self.output.as_ref().map(logical_size).unwrap_or((0, 0));
+        self.pointer_move_quietly(f64::from(width) / 2.0, f64::from(height) / 2.0);
+    }
+
     /// Re-runs the hit test where the pointer already is, so pointer focus
     /// follows a change in *what is on screen* rather than waiting for the
     /// user to move the mouse.

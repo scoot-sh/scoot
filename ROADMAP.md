@@ -436,7 +436,17 @@ gap jumped the queue — each item's own file records why it landed when it did.
   RESOLVED 2026-09-17: every socket, log, screenshot, config and scratch
   path derives from `$SMOKE_PREFIX` (unset = byte-identical legacy
   defaults, so existing `SOCKET`/`LOG` callers see no change); two
-  concurrent prefixed runs proven green with fully disjoint file sets.
+   concurrent prefixed runs proven green with fully disjoint file sets.
+- **[The pointer starts at the output's origin, not
+  centred](docs/backlog/resolved/pointer-starts-at-origin-done.md)** —
+  RESOLVED 2026-09-17: `State::place_pointer_at_output_centre`, called
+  once from `headless::init_named` so all three backends place it at the
+  same init point, through `pointer_move_quietly` (no idle-timer reset,
+  no focus derived, no interaction serial minted). Logical extent, so a
+  scale other than 1 centres correctly; resize and VT-switch
+  reactivation deliberately leave the pointer alone. Live `--tty`
+  screenshot proves the cursor bitmap at the output centre; the smoke
+  test's park-the-pointer workaround stays.
 ## What's next
 
 The backlog is the source of truth for what to pick up; this is the current
