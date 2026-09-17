@@ -273,9 +273,9 @@ gap jumped the queue — each item's own file records why it landed when it did.
   copying `wlr_toplevel_output_bound`'s shape including its comment. Pinned
   by a cross-client test proven fail-first (neutered filter panics in
   `wayland-backend`, not a failed assertion). Measured ~10x on the
-   predicate but ~300ns absolute — noise at session scale, so merged on
-   correctness-clarity grounds, not a performance claim. No README change
-   (same events, same order, same clients).
+  predicate but ~300ns absolute — noise at session scale, so merged on
+  correctness-clarity grounds, not a performance claim. No README change
+  (same events, same order, same clients).
 - **[A large `msg type` blocks the event
   loop](docs/backlog/resolved/msg-type-blocks-event-loop-resolved.md)** —
   RESOLVED 2026-09-17: `type` text capped at 16,384 characters per request,
