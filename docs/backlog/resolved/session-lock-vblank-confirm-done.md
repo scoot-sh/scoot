@@ -37,7 +37,21 @@ search. The pieces:
   vblank confirms. A stale vblank for a flip the scanout bookkeeping has
   since discarded (VT switch back, hotplug modeset — both discard the
   in-flight number without a completion) settles to `None` and likewise
-  matches nothing. `DrmEvent::Error` settles the buffers but deliberately
+  matches nothing — but only when no fresh flip is in flight at the
+  moment the stale event is read. `settled()` reports whatever number is
+  in flight (a vblank carries no flip identity, only a crtc), so a stale
+  completion for flip 7 arriving *after* the re-presented flip 8 went out
+  settles to `Some(8)` and matches: `locked` goes out up to one vblank
+  early. That needs a discard, a re-present, and a still-queued stale
+  completion all landing inside the ~16ms lock window, and its worst case
+  is exactly the pre-PR behavior rather than a new failure mode — so the
+  corner is accepted, not fixed. Distrusting the match (refusing to
+  confirm whenever a discard came first) would be the wrong fix:
+  `settled()` consumes via `take()`, so a dropped match eats the fresh
+  flip's number too and its real vblank later settles to `None`, trading
+  a bounded-early confirm for a wait only the timeout ends. A correct fix
+  needs discard generations on the presentation path, which this corner
+  is too narrow and too bounded to carry. `DrmEvent::Error` settles the buffers but deliberately
   drops the number: an untrackable completion must not confirm a lock.
 - Invariant, stated on the field: `blank_flip` is `Some` only while
   `pending` is `Some`. Both are installed and cleared together at every
@@ -75,10 +89,10 @@ branches.
 
 ## Evidence
 
-- Fail-first, dev VM: the eight `vblank_confirm` harness tests plus five
+- Fail-first, dev VM: the nine `vblank_confirm` harness tests plus five
   `flip_tracker` unit tests fail pre-fix (the API does not exist), pass
   post-fix. Neuter check (temporarily `confirm_on_vblank → false`,
-  `poll_blank_timeout → false`): the five confirm/timeout-dependent tests
+  `poll_blank_timeout → false`): the six confirm/timeout-dependent tests
   fail, the three no-confirm guards still pass — the expected split.
 - Vblank feasibility, dev VM QEMU/virtio-gpu: 1 modeset + 2 page flips
   for two pointer-move renders — the second flip proves the first's
@@ -91,7 +105,7 @@ branches.
   confirmed: the blanked frame reached scanout` ~20ms after the request,
   the fallback `without its vblank` never fires, and a locked IPC
   screenshot plus `locked: true` on replies confirm the session state.
-- Full set green post-fix: `cargo test -p flexwm` (807 passed: 794 + 13
+- Full set green post-fix: `cargo test -p flexwm` (808 passed: 794 + 14
   new), `cargo nextest run --workspace` (912 passed), `cargo clippy -p
   flexwm --all-targets -- -D warnings` clean, `cargo fmt --check -p
   flexwm` clean, `scripts/smoke-test.sh` exit 0, 17 ok.
