@@ -210,19 +210,16 @@ actually open.
    [`[tty] gpu` config key](docs/backlog/tty/tty-gpu-config-key.md).
 2. **Medium-priority protocol gaps**, mostly what's left of the DMS/Noctalia
    probes (see "Shell enablement" below for their recommended order):
-   [screencopy's toplevel half](docs/backlog/resolved/screencopy-toplevel-capture-done.md)
-   is CLOSED UNREACHABLE (phase-1 probe, no build — stock quickshell routes
-   per-window thumbnails only to `hyprland-toplevel-export-v1`); the remaining
-    thumbnail fallback is
-    [shell thumbnails without a toplevel protocol](docs/backlog/protocols/screencopy-shell-thumbnails-fallback.md)
-    (the output half shipped — see "Recently shipped" above — and its gating
-    measurement landed YES 2026-09-17: a minimal `zwp_linux_dmabuf_v1`
-    advertisement flips quickshell 0.3.1's readiness flag and the ext output
-    path displays over shm, honesty verdict in that file). The overview
-    preview now wants only the
-    [advertisement itself](docs/backlog/resolved/linux-dmabuf-advertisement-done.md)
-    — SHIPPED 2026-09-17 (PR #60, see "Recently shipped" above); the per-window thumbnail
-    half stays open behind it.
+    [screencopy's toplevel half](docs/backlog/resolved/screencopy-toplevel-capture-done.md)
+    is CLOSED UNREACHABLE (phase-1 probe, no build — stock quickshell routes
+    per-window thumbnails only to `hyprland-toplevel-export-v1`); the
+    thumbnail fallback
+    [shell thumbnails without a toplevel protocol](docs/backlog/resolved/screencopy-shell-thumbnails-fallback-done.md)
+    is CLOSED NEEDS-UPSTREAM 2026-09-17 (measured, no build — the overview
+    preview lights up on shipped `main`, the screen-source + clip-crop
+    recipe is proven live pixel-for-pixel, and DMS's `TileItem.qml`
+    hard-requires a `Toplevel` source, so the shells must change; current
+    Noctalia has no per-window live-thumbnail view at all).
    [Popup grab serial validation](docs/backlog/resolved/popup-grab-serial-validation-done.md)
    is also done — a grab now has to name a real, recent key/button/enter
    event delivered to the grabbing client (or continue its own open menu).
@@ -318,13 +315,14 @@ probes' recommended order:
     workspace-overview preview half. The per-window thumbnail half was
     [probed and closed unreachable](docs/backlog/resolved/screencopy-toplevel-capture-done.md)
     rather than built (stock quickshell 0.3.1 speaks only
-    `hyprland-toplevel-export-v1` for a `Toplevel` source); its fallback is
-    [shell thumbnails without a toplevel protocol](docs/backlog/protocols/screencopy-shell-thumbnails-fallback.md),
-    whose readiness-gate measurement landed YES 2026-09-17 (minimal
-    `zwp_linux_dmabuf_v1` advertisement flips the flag; overview path
-    displays over shm) with the
-    [advertisement itself](docs/backlog/resolved/linux-dmabuf-advertisement-done.md)
-    — SHIPPED 2026-09-17 (PR #60).
+    `hyprland-toplevel-export-v1` for a `Toplevel` source); its fallback,
+    [shell thumbnails without a toplevel protocol](docs/backlog/resolved/screencopy-shell-thumbnails-fallback-done.md),
+    is CLOSED NEEDS-UPSTREAM 2026-09-17 (measured, no build): the overview
+    preview lights up with real pixels on shipped `main` (PR #60's
+    advertisement, re-driven), and the screen-source + clip-crop recipe for
+    per-window thumbnails is proven live pixel-for-pixel — but DMS's
+    `TileItem.qml` hard-requires a `Toplevel` source and current Noctalia
+    has no per-window live-thumbnail view, so the change belongs upstream.
     IPC screenshots stay regardless.
 6. DMS unlock-path re-probe — done 2026-09-14 (see the re-probe note
    in the DMS gaps entry): lock → auth → unlock teardown survives on

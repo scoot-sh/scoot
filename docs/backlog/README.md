@@ -97,12 +97,20 @@ actionable.
   quickshell 0.3.1 routes a `Toplevel` capture source exclusively to
   `hyprland-toplevel-export-v1`, so the ext toplevel-source manager would
   never be bound. Fallback filed as
-  [shell thumbnails without a toplevel protocol](./protocols/screencopy-shell-thumbnails-fallback.md).
+  [shell thumbnails without a toplevel protocol](./resolved/screencopy-shell-thumbnails-fallback-done.md).
 - [Minimal, honest `zwp_linux_dmabuf_v1`](./resolved/linux-dmabuf-advertisement-done.md)
   — RESOLVED 2026-09-17 (PR #60): the readiness-gate follow-up — default
   feedback with the real scanout `dev_t` plus the two LINEAR formats shm
   serves, imports answered `failed`; quickshell's overview preview displays
   over shm on headless, no-node, `--nested` and `--tty`.
+- [Shell window thumbnails without a toplevel protocol](./resolved/screencopy-shell-thumbnails-fallback-done.md)
+  — CLOSED NEEDS-UPSTREAM 2026-09-17 (measured, no build): the overview
+  preview lights up with real pixels on shipped `main`, and the
+  screen-source + clip-crop recipe for per-window thumbnails is proven
+  live pixel-for-pixel — but DMS's `TileItem.qml` hard-requires a
+  `Toplevel` source and current Noctalia has no per-window
+  live-thumbnail view, so the change belongs upstream. No compositor
+  work follows; `hyprland-toplevel-export-v1` stays out of scope.
 - [Screen capture: the session count is unbounded](./protocols/screencopy-session-cap.md)
   — found building the output half; why a cap was not simply added
 - [Screen capture forces `Xrgb8888`'s undefined fourth byte opaque](./protocols/screencopy-xrgb-alpha-forcing.md)

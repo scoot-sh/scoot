@@ -167,9 +167,12 @@ list behind that.
   exclusively to `hyprland-toplevel-export-v1` (wire evidence + version-exact
   source in
   [`resolved/screencopy-toplevel-capture-done.md`](../resolved/screencopy-toplevel-capture-done.md)).
-  The fallback (region crop out of the output) is filed as
-  [`screencopy-shell-thumbnails-fallback.md`](./screencopy-shell-thumbnails-fallback.md) —
-  note its first measurement also covers why the overview preview still shows
+  The fallback (region crop out of the output) is
+  [`screencopy-shell-thumbnails-fallback.md`](../resolved/screencopy-shell-thumbnails-fallback-done.md) —
+  CLOSED NEEDS-UPSTREAM 2026-09-17 (measured, no build): the overview
+  preview lights up on shipped `main`, the crop recipe is proven live,
+  and DMS's `TileItem.qml` hard-requires a `Toplevel` source, so the
+  shells must change. Note its first measurement also covers why the overview preview still shows
   nothing in a quickshell shell despite PR #52 (the client's dmabuf
   readiness gate). See
   [`resolved/screencopy-capture-done.md`](../resolved/screencopy-capture-done.md).

@@ -1,7 +1,7 @@
 ---
-title: "Shell window thumbnails without a toplevel capture protocol (region crop + quickshell's dmabuf readiness gate)."
-status: "open"
-area: "protocols"
+title: "Shell window thumbnails without a toplevel capture protocol — CLOSED: overview verified on shipped main, thumbnails need upstream (measured, no build)."
+status: "resolved"
+area: "resolved"
 priority: "medium"
 blocked: null
 ---
@@ -196,3 +196,145 @@ path is what DMS/Noctalia thumbnails actually need, file it as its own item
 with that justification — do not smuggle it into this one.
 
 Rough size: S for the measurement; unknown for whatever follows it.
+
+## CLOSED 2026-09-17 — overview YES on shipped `main`, thumbnails (c) NEEDS-UPSTREAM (docs-only, no build)
+
+Step 1 re-drove the PR #58 quickshell shapes against current `main`
+(`42c17f0`, which carries the shipped PR #60 advertisement — no probe
+scaffolding): the overview-shape view lights up with real pixels. Step 2
+proved the client-side crop mechanism live on that same tree and read the
+shell-side sources at their current upstream revisions: the compositor
+serves everything a crop needs, and both shells need to change to use it —
+DMS hard-requires a `Toplevel` source, and current Noctalia has no
+per-window live-thumbnail view at all. No compositor work follows (not
+outcome (b)), and `hyprland-toplevel-export-v1` stays unimplemented per
+the standing rule. No README user-facing change: behavior is exactly what
+PR #60 shipped; this entry only measures it.
+
+### Step-1 re-drive evidence (all live `--headless` on the dev VM)
+
+- Base: clean `42c17f0` through the 9p mount, force-clean built
+  (`cargo clean -p flexwm && cargo build -p flexwm`: real `Compiling
+  flexwm` line, `Finished in 28.99s`), copied out before driving:
+  `/var/tmp/flexwm-ship-redrive`, sha256 `0542b95d…6cc52fa36e`.
+- Client: the exact PR #58 build — quickshell 0.3.1
+  (`/nix/store/hnw9kk48z8jqp0pqha5gwnpyawpcxq34-quickshell-0.3.1`,
+  `.quickshell-wrapped` sha256 `784914e5…b78b4`); windows `foot`
+  1.28.0. Drive: `/var/tmp/qs-toplevel-probe.sh` reused as-is
+  (`/var/tmp/qs-toplevel-probe.sh /var/tmp/flexwm-ship-redrive
+  ship-redrive`, 20 s, `WAYLAND_DEBUG=1`). Compositor log
+  `/tmp/flexwm-tlprobe-ship-redrive.log`, wire
+  `/tmp/qs-tlprobe-wire-ship-redrive.log`.
+- quickshell binds `zwp_linux_dmabuf_v1` v5 on the Default Queue and
+  receives the full default feedback through `done()`
+  (`format_table(fd, 32)` = the 2 shipped entries × 16 bytes); mesa
+  binds v4 on its own queue. Compositor startup logs the real scanout
+  device (`dmabuf feedback main device device=57856
+  source="/dev/dri/card0"`).
+- `QS: outview hasContent=true sourceSize=QSize(1200, 800)` — the
+  overview shape displays at full output size, via the shipped ext path
+  (`create_source` → `create_session` → `buffer_size(1200, 800)` →
+  `shm_format` → `create_frame`/`ready`) into
+  `wl_shm_pool.create_buffer(…, 1200, 800, 4864, 1)` (wl_shm,
+  `Xrgb8888`, 64 bytes row padding).
+- Still standing: one surviving `no recording context is ready` (the
+  `Toplevel` view, `shell.qml:22`, plus its `non captureable object`),
+  zero `create_params`/`create_immed` wire lines — PR #58's toplevel
+  verdict unchanged.
+- Pixel proof, not just `hasContent`: IPC screenshots mid-session
+  (`/tmp/flexwm-shot-ship.png` vs control `/tmp/flexwm-shot-control.png`
+  from the still-present pre-advertisement binary
+  `/var/tmp/flexwm-dmabuf-control`; both fetched locally and compared
+  pixel by pixel). Control
+  outview/winview rects are flat `#303030` (the blank panel); ship
+  outview rect holds 13 distinct colors (terminal grays on dark) while
+  the winview rect stays flat `#303030`. The overview preview shows
+  real captured pixels on shipped `main`.
+
+### Step-2 verdict: (c) NEEDS-UPSTREAM, with the recipe proven live
+
+What a shell must do (all of it already servable, measured below): bind
+a screen-source `ScreencopyView` (`Quickshell.screens[0]`, the shipped
+ext output path), place it full-output-size inside a clipped container
+positioned at the window's rect with the view offset by `(-x, -y)`, and
+read the rect from `wlr-foreign-toplevel-management` (live —
+`ToplevelManager` populated 2/2 in every session here) or
+`flexwm msg windows` (exact `rect` per window, verified live). No
+`ScreencopyView` crop property exists to use instead (version-exact
+`view.hpp` at quickshell tag `v0.3.1`: `captureSource`, `paintCursor`,
+`live`, `hasContent`, `sourceSize`, `constraintSize`, `captureFrame()`
+— no region/sourceRect), so the clip+offset container *is* the
+client-side crop, and it needs no compositor help.
+
+That recipe was driven live, not reasoned (`/var/tmp/qs-crop-probe.sh`,
+kept on the dev VM; fullscreen transparent `PanelWindow`,
+`ExclusionMode.Ignore`, clip `Item` at the `msg windows` rect of
+`alpha` (12, 12, 582×776) holding a 1200×800 screen-source view;
+`foot -o cursor.blink=no` for pixel-stable windows; wire
+`/tmp/qs-crop-wire-crop2.log` runs the shipped path with zero warnings):
+
+- `QS: cropview hasContent=true sourceSize=QSize(1200, 800)`.
+- Stale-frame proof: after the view's captures, `msg action
+  focus-window-id 1` + `msg type "HELLO-THUMBNAIL"` + `msg key Return`
+  changed the live window; three IPC screenshots compared pixel by
+  pixel over the 451,632-px rect (`/tmp/flexwm-crop-crop2-preref.png`
+  clean pre-typing, `/tmp/flexwm-crop-crop2.png` in-session,
+  `/tmp/flexwm-crop-crop2-postref.png` clean post-typing):
+  in-session ≡ pre-ref with **0 px differ** (the view shows its capture
+  faithfully), while in-session vs post-ref differs by exactly the 973
+  typed-glyph px in rows 12–51 — the same 973 px pre-ref vs post-ref
+  differs by. The view displays real captured window pixels, stale
+  across the later content change: the crop mechanism works end to
+  end on flexwm as-shipped.
+- Method note: crop-probe v1 used an opaque red backing rect to locate
+  the crop and photographed its own backing (solid-red region,
+  correctly diagnosed from the pixel grid, not mistaken for a
+  compositor finding); v2 is transparent and the staleness comparison
+  above is what carries the verdict.
+
+Why that still closes as needs-upstream rather than shell-config:
+
+- DMS (quickshell-based, read at master HEAD 2026-09-17):
+  `quickshell/Modals/DankLauncherV2/TileItem.qml:90` binds
+  `captureSource: root.waylandToplevel`, where `waylandToplevel`
+  (lines 28–34) is `pluginInstance.getToplevelById(toplevelId)` and
+  `hasScreencopy` (line 36) is `waylandToplevel !== null`. There is no
+  screen-source path and no config knob: on flexwm the wlr
+  `ToplevelManager` populates (so icons hide), the `Toplevel` source
+  hits quickshell's hyprland-only route ("non captureable object"),
+  and tiles render blank. DMS must adopt the screen-source + clip crop
+  above (or equivalent) — a shell change.
+- Noctalia (current upstream is the native C++ `noctalia-dev/noctalia`
+  monorepo; no QML remains): the taskbar is icon-based
+  (`taskbar_widget`), `ThumbnailService` decodes image files (not live
+  windows), and the capture stack (`src/capture/screencopy_capture.*`)
+  speaks only `zwp_screencopy_manager_v1` (`capture_output(_region)`)
+  for screenshots — a global flexwm deliberately does not advertise
+  (ext-only, per the measured PR #52 call). There is no per-window
+  live-thumbnail view to feed; its screen-source overview/lockscreen
+  path is servable over the shipped ext protocol.
+- quickshell 0.3.1 itself (both shells' toolkit where QML applies):
+  `ScreencopyManager::createContext` routes a `Toplevel` source
+  exclusively to `hyprland-toplevel-export-v1` (PR #58 leg 2 stands,
+  re-confirmed against the live `non captureable object` above), which
+  stays out of scope without its own measured justification.
+
+No (b) follow-up is filed: nothing in the recipe wants compositor work
+— pixels (ext output capture), readiness (PR #60 advertisement), and
+geometry (`wlr-foreign-toplevel-management` live plus `msg windows`
+exact rects) are all shipped and all re-verified on the closing tree.
+
+### What was NOT run (stated, not implied)
+
+- The full DMS / Noctalia shells were never driven live (deps beyond
+  this ticket); the shell-side verdict rests on their shipped sources
+  at stated revisions plus the quickshell mechanism probes above.
+- `--nested` / `--tty` re-drives of the crop: the crop is a client-side
+  arrangement of the already-shipped output path (proven on all four
+  backends by PR #60); backend-specific re-proof would re-execute
+  byte-identical dispatch.
+- No benchmark: probe, not a hot path.
+- Incidental observation, not filed: `flexwm msg windows` with its
+  stdout reader gone (missing `python3` on the dev VM broke the pipe)
+  panics in the *client* (`failed printing to stdout: Broken pipe`) —
+  cosmetic, compositor unaffected, noted for triage.

@@ -62,7 +62,7 @@ build.
 
 The fallback the ticket names — per-window thumbnails as a region capture out
 of the output (`wlr-screencopy` has no toplevel source either) — is filed as
-[`../protocols/screencopy-shell-thumbnails-fallback.md`](../protocols/screencopy-shell-thumbnails-fallback.md),
+[`screencopy-shell-thumbnails-fallback-done.md`](./screencopy-shell-thumbnails-fallback-done.md),
 with the second measurement this probe turned up (quickshell's buffer-readiness
 gate, below) as its own "measure first".
 
