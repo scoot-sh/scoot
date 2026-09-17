@@ -66,12 +66,20 @@ frame clears `needs_render` rather than leaving it set (see the audit).
   state all live in the seat, untouched by the skipped tail, which contains
   no grab-dismissal path (those run in input/commit handlers, still live
   while paused).
-- **Lock interplay.** A lock arriving while paused sets `pending` and asks
-  for a render that is now skipped; the wait stays owned by the fallback
-  deadline (`PauseSession` already discards in-flight flips for exactly
-  this reason) and confirms on the reactivation render. No live lock client
-  exists on the dev VM (no swaylock), so this half is construction-verified
-  only — stated, not papered over.
+- **Lock interplay.** A lock arriving while paused runs `lock()`
+  (`pending=Some`) → `lock_transition()` → `request_render()`, but the
+  timer's `render()` hits the gate and returns before the tail — so
+  `await_vblank`, the sole site arming `blank_deadline`, never runs, and
+  neither does the fallback-timer arming beside it. The wait stays
+  bare-`pending` with no deadline until the switch-back, when the
+  reactivation render confirms it via vblank or the fallback (both intact
+  there — no wedge). Timing delta, stated honestly on this
+  security-sensitive path: pre-PR the locker got `locked` via the fallback
+  about a second after requesting it, with no blanked frame on scanout;
+  post-PR `locked` waits for the switch-back, when one actually reaches
+  scanout — arguably more protocol-correct, but a behaviour change, not a
+  non-change. No live lock client exists on the dev VM (no swaylock), so
+  this half is construction-verified only — stated, not papered over.
 - **Headless/nested.** The gate reads `None` there (`tty_blocks_render(None)
   == false`), provably a no-op: no test harness can construct a `Tty`, so
   the entire existing suite pins the unblocked path.
@@ -145,7 +153,10 @@ sessions.
 ### Not verified live (stated plainly)
 
 - Lock-while-paused confirmation on real scanout (no lock client on the
-  VM); the mechanism is traced and the fallback deadline owns the wait.
+  VM); the mechanism is traced — bare-`pending` with no deadline until the
+  reactivation render confirms via vblank or fallback — and `locked` now
+  waits for the switch-back instead of arriving via the fallback ~1s after
+  the request.
 - Popup grab / IME composition held across a pause (no menu/IME client on
   the VM); dismissal paths audited as outside the skipped tail.
 - The failed-reactivation render skip (no way to fail `drm.activate` on

@@ -270,9 +270,17 @@ impl State {
         // `Tty::active`'s doc for why the two differ.
         //
         // What this defers, all harmlessly: a session that locks while paused
-        // confirms on the reactivation render (the pending wait is owned by
-        // the fallback deadline until then -- see `session_event`'s
-        // `PauseSession` arm); popup grabs, IME composition and keyboard
+        // stays bare-`pending` with no deadline armed -- `await_vblank`,
+        // the sole site arming `blank_deadline`, and the fallback timer
+        // beside it both live in the render tail past this gate, so neither
+        // runs -- and confirms on the reactivation render, via vblank or
+        // the fallback, both of which are intact there. No wedge: the wait
+        // simply waits. Note the timing delta on this security-sensitive
+        // path: pre-PR the locker got `locked` via the fallback about a
+        // second after requesting it, with no blanked frame on scanout;
+        // now `locked` waits for the switch-back, when one actually reaches
+        // scanout -- arguably more protocol-correct, but a behaviour change
+        // worth naming, not implying away; popup grabs, IME composition and keyboard
         // focus are seat state, untouched by withholding frame callbacks, and
         // only their *pacing* pauses (the same shape as a minimized window in
         // most compositors: no protocol promises a callback by any deadline);
