@@ -917,8 +917,12 @@ What to know before pointing a client at it:
   `hyprland-toplevel-export-v1`): the global is not advertised at all, so a
   client takes its fallback path immediately instead of discovering a refusal
   at runtime. The remaining thumbnail fallback (region crop out of the
-  output) is
-  `docs/backlog/protocols/screencopy-shell-thumbnails-fallback.md`.
+  output) was measured and closed as needs-upstream, with the shell-side
+  recipe proven live
+  (`docs/backlog/resolved/screencopy-shell-thumbnails-fallback-done.md`):
+  a screen-source `ScreencopyView` in a clipped container at the window's
+  rect needs no compositor work — DMS's `TileItem.qml` hard-requires a
+  `Toplevel` source, so the shells must change.
 - **`wl_shm` buffers only, `Xrgb8888` or `Argb8888`.** flexwm renders on the
   CPU with pixman and has no GPU or dma-buf path, so no capture session
   offers a dma-buf (`BufferConstraints::dma` is always `None`), and every

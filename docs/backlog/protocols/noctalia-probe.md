@@ -229,7 +229,8 @@ anything.
   `hyprland-toplevel-export-v1`; see
   [`resolved/screencopy-toplevel-capture-done.md`](../resolved/screencopy-toplevel-capture-done.md)).
   Fallback:
-  [`screencopy-shell-thumbnails-fallback.md`](./screencopy-shell-thumbnails-fallback.md).
+  [`screencopy-shell-thumbnails-fallback.md`](../resolved/screencopy-shell-thumbnails-fallback-done.md)
+  — CLOSED NEEDS-UPSTREAM 2026-09-17 (measured, no build).
   See [`resolved/screencopy-capture-done.md`](../resolved/screencopy-capture-done.md).
 
 ### 7. Compositor recognition — NOT a gap for Noctalia (biggest delta in the shell's favor)

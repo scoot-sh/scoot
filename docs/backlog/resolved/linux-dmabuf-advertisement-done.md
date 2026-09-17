@@ -11,7 +11,7 @@ blocked: null
 ## The entry as filed
 
 Filed from the measurement that closed the gating question of
-[`screencopy-shell-thumbnails-fallback.md`](../protocols/screencopy-shell-thumbnails-fallback.md)
+[`screencopy-shell-thumbnails-fallback.md`](./screencopy-shell-thumbnails-fallback-done.md)
 as YES on 2026-09-17: advertising the global flips quickshell 0.3.1's
 `WlBufferManager::isReady`, and the already-shipped ext output-capture path
 then displays over shm — with an advertisement whose every datum is true but
