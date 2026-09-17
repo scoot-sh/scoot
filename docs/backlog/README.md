@@ -236,13 +236,10 @@ actionable.
   `msg key A` still refuses.
 - [Per-frame `Vec` alloc in the cursor fallback path](./rendering/cursor-element-per-frame-alloc.md)
 - [A `present()` skipped for an in-flight flip consumes that frame's damage](./rendering/present-skip-eats-frame-damage.md) — code-traced only, never observed; scanout (not the read-back image) goes stale until next damage; candidate fix touches the hot present path, so correctly waiting on a live observation. Note: an independent trace during the 2026-09-17 audit disputes this entry's stated mechanism (slot age after a skip is ≥2, so the tracker's history returns the skipped frame's damage and the retry presents) — worth re-deriving before anyone acts on it.
-- [A screencopy frame parked for a lock's blank is never re-armed after the vblank confirm](./rendering/screencopy-parked-across-lock-confirm.md)
-  — filed 2026-09-17 by a retrospective audit of PRs #73–#89; regression
-  from PR #84. A parked capture is not one of `frame_tick`'s three re-arm
-  conditions, and neither confirm path calls `ensure_ticking`, so the frame
-  is neither delivered nor failed until something else wakes the ticker —
-  the locker's first commit normally, never for an abandoned lock.
-  `wait-idle` and `msg screenshot` are unaffected.
+- [A screencopy frame parked for a lock's blank is never re-armed after the vblank confirm](./resolved/screencopy-parked-across-lock-confirm-done.md)
+  — RESOLVED 2026-09-17 (PR #93): `confirm_lock` itself owns one
+  `ensure_ticking()` (structural — future confirm paths inherit it);
+  parked frames deliver post-confirm, pixel-verified blank.
 - [Cursor frames while VT-paused](./resolved/cursor-frame-callback-when-paused-done.md)
   — RESOLVED 2026-09-17: `render()` (and the frame-callback dispatch) is
   skipped while the `--tty` session holds no DRM master, so a paused
