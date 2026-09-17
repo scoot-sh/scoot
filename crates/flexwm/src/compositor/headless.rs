@@ -317,6 +317,12 @@ impl State {
         // this function); every other frame leaves it for the tail to
         // ignore.
         let mut blank_seq: Option<u64> = None;
+        // Whether this frame reached the host under `--nested`, if `present`
+        // committed it. Like `blank_seq` above, this is what tells the tail
+        // the frame actually went out rather than merely rendered: only a
+        // presented frame may stamp presentation feedback (see
+        // `presentation_time.rs`).
+        let mut host_committed = false;
         // Read once, here, so every branch below -- elements, clear colour,
         // frame callbacks -- is answering the same question about the same
         // frame.
@@ -591,7 +597,11 @@ impl State {
                                     Ok(mapping) => match renderer.map_texture(&mapping) {
                                         Ok(pixels) => {
                                             if let Some(host) = &mut self.host {
-                                                host.present(pixels, region.size.w, region.size.h);
+                                                host_committed = host.present(
+                                                    pixels,
+                                                    region.size.w,
+                                                    region.size.h,
+                                                );
                                             }
                                             if let Some(tty) = &mut self.tty {
                                                 blank_seq =
@@ -671,6 +681,33 @@ impl State {
             } else {
                 self.confirm_lock();
             }
+        }
+
+        // Presentation feedback for the frame that just went out, before the
+        // frame callbacks below (Smithay's ordering: drain feedback first,
+        // then tell clients to draw next). Taken if and only if something
+        // was actually shown: a `--tty` flip issued, a `--nested` commit
+        // handed to the host, or -- with no presenter at all -- a frame
+        // drawn into the framebuffer, which *is* the final image there. A
+        // rendered-but-dropped frame (busy CRTC, no free host buffer, size
+        // mismatch, failed bind or draw) leaves pending feedback queued for
+        // the next presented frame rather than stamping a time nothing was
+        // shown at; while locked only the lock surfaces are stamped (see
+        // `presentation_time.rs` for the rule and the per-backend timestamp
+        // semantics).
+        //
+        // `vsync` is the backend, not the flip: `--tty` page flips are
+        // vblank-synchronized whenever one is issued, and this arm only runs
+        // when one was.
+        let presented = if self.host.is_some() {
+            host_committed
+        } else if self.tty.is_some() {
+            blank_seq.is_some()
+        } else {
+            drew_a_frame
+        };
+        if presented {
+            self.present_feedback(&output, self.tty.is_some(), cursor_surface.as_ref());
         }
 
         let time = self.start_time.elapsed();

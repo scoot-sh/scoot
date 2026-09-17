@@ -85,7 +85,10 @@ tiny — see Output scaling below),
 without allocating a shm pool (see Single-pixel buffers below),
 `zwp_relative_pointer_manager_v1` with `zwp_pointer_constraints_v1`, so a
 game or 3D app can lock or confine the pointer and read raw unaccelerated
-deltas (see Relative pointer below), plus a
+deltas (see Relative pointer below),
+`wp_presentation`, so a video player or animation client learns exactly when
+each of its frames reached the screen (see Presentation-time feedback
+below), plus a
 hardened control socket (owner-only
 permissions, a same-user peer check, a 1 MiB cap on a single request,
 screenshots rate-limited to one per connection per frame, at most 64
@@ -1572,8 +1575,38 @@ What to know before pointing a client at it:
   lock taken on the focused surface is active, the cursor does not move (the
   relative stream keeps flowing). A confinement keeps the pointer on its
   surface, clamped per axis to its region. A lock taken while unfocused
-  stays inactive. Destroying a persistent lock or confinement is silent (no
-  `unlocked`/`unconfined` event) and frees the pointer immediately.
+ stays inactive. Destroying a persistent lock or confinement is silent (no
+ `unlocked`/`unconfined` event) and frees the pointer immediately.
+
+## Presentation-time feedback (`wp_presentation`)
+
+flexwm implements `wp_presentation` (version 2): a client requests feedback
+on its surface and learns, per content update, either exactly when that
+update reached the screen (`presented`, with a `CLOCK_MONOTONIC` timestamp,
+the output's refresh, a frame sequence and flags) or that the update was
+superseded before it ever got there (`discarded`).
+
+What to know before pointing a client at it:
+
+- **The timestamp is the frame handoff, and each backend hands off
+  somewhere else.** With no presenter (`--headless` under IPC-only control)
+  the framebuffer is the final image, so the timestamp is when the frame
+  finished rendering. Under `--nested` it is when the frame was committed
+  to the host compositor (when the host scans it out is the host's
+  business). Under `--tty` it is when the page flip was issued to DRM, up
+  to one vblank before the photons -- and the `vsync` flag is set there,
+  because the flip is vblank-synchronized; the other backends report no
+  flags, because there is no retrace to synchronize to and no zero-copy
+  path behind a pixman copy.
+- **`seq` counts damaged frames**, not DRM flips: it orders distinct images.
+- **Only displayed surfaces are stamped.** Mapped windows, layer surfaces,
+  popups and the client cursor get feedback for a frame that showed them;
+  while locked, only the lock surfaces do. Anything else keeps its feedback
+  queued until it is shown or superseded (`discarded`).
+- **A rendered-but-dropped frame stamps nothing.** A flip skipped for a
+  busy CRTC, or a host commit dropped for lack of a free buffer, leaves
+  pending feedback for the next presented frame rather than stamping a time
+  nothing was shown at.
 
 ## Configuration
 

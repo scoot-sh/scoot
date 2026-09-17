@@ -140,6 +140,14 @@ impl Host {
     /// renderer reading its own output back into a byte slice could present
     /// through this exact same call.
     ///
+    /// Returns whether the frame reached the host. Anything else -- the
+    /// surface not configured yet, a size mismatch against a resize still in
+    /// flight, no free host buffer -- silently drops the frame (does not
+    /// block) and returns `false`, so the caller knows this frame presented
+    /// nothing: `render()` leaves pending presentation feedback queued on
+    /// `false` rather than stamping it with a time nothing was shown at (see
+    /// `presentation_time.rs`).
+    ///
     /// Silently does nothing (does not block) if the surface hasn't been
     /// configured yet, or if the frame's dimensions don't match what
     /// `buffers` is currently sized for (a resize was requested but hasn't
@@ -148,13 +156,13 @@ impl Host {
     /// time -- `present_skipped` is set so a release re-triggers a render
     /// instead of leaving the host window stale, see `nested_dispatch`'s
     /// `Dispatch<HostBuffer>`).
-    pub fn present(&mut self, pixels: &[u8], width: i32, height: i32) {
+    pub fn present(&mut self, pixels: &[u8], width: i32, height: i32) -> bool {
         if !self.configured || (width, height) != self.size {
-            return;
+            return false;
         }
         let Some(buffer) = self.buffers.write_free(pixels) else {
             self.present_skipped = true;
-            return;
+            return false;
         };
         self.present_skipped = false;
         self.surface.attach(Some(buffer), 0, 0);
@@ -167,6 +175,7 @@ impl Host {
         // this connection flushes on its own -- skip this and the window
         // just never updates, with no error anywhere.
         let _ = self.conn.flush();
+        true
     }
 
     /// Applies a size the host proposed (its first configure, per v1 scope --

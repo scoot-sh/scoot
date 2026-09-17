@@ -479,7 +479,18 @@ gap jumped the queue — each item's own file records why it landed when it did.
   `wayland-info` + `foot` prove the advertisement, `foot` binds neither
   (it uses neither protocol). Motion-path benchmark: release unfocused
   noise, focused +~190ns/event (~1.2% of one 16ms frame per second at
-  1000Hz).
+   1000Hz).
+- **[`presentation-time` (`wp_presentation`)](docs/backlog/resolved/presentation-time-done.md)**
+  — the last child of the general-gaps bundle: precise frame-timing
+  feedback for smooth video/animation clients (Smithay carries the whole
+  protocol at the pinned rev, same three-lines-plus shape). Each presented
+  frame is stamped with its backend's honest handoff time
+  (render-complete on headless, host-commit on nested, flip-issue on tty),
+  only displayed surfaces are stamped, and a rendered-but-dropped frame
+  stamps nothing. Seven fail-first harness tests (sane fields, monotonic
+  timestamps, supersede-discarded, unmapped/locked absence, disconnect);
+  live `foot` proves the advertisement. The bundle
+  (`docs/backlog/protocols/protocol-gaps-general.md`) is now fully done.
 ## What's next
 
 The backlog is the source of truth for what to pick up; this is the current
