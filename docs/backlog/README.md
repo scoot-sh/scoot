@@ -158,7 +158,7 @@ actionable.
 - [The accept loop swallows `EMFILE` and can spin the event loop](./ipc/accept-loop-swallows-emfile.md) — pre-existing, found reviewing the cap
 - [The connection cap turns one client's leak into everyone's refusal](./ipc/connection-cap-denies-the-same-user.md) — accepted tradeoff, recorded so a future "the bar cannot connect" has somewhere to land
 - [A large `msg type` blocks the event loop](./ipc/msg-type-blocks-event-loop.md)
-- [`flexwm msg` panics when its stdout reader goes away](./ipc/msg-client-broken-pipe.md) — `println!` on EPIPE (exit 101) instead of a quiet exit; compositor unaffected
+- [`flexwm msg` panics when its stdout reader goes away](./resolved/msg-client-broken-pipe-done.md) — RESOLVED 2026-09-17 (PR #62): per-write EPIPE handling at every client-binary stdio site, quiet exit 0; compositor unaffected
 
 ### Input
 - [`msg key` hard-codes `_L` modifier keysyms](./input/msg-key-modifier-resolution.md)
