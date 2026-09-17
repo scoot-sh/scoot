@@ -1327,6 +1327,15 @@ break the one case this protocol exists for. A client the user really did
 interact with can still activate itself off that interaction — the user just
 clicked it, which is the protocol working as intended.
 
+An app flexwm itself started — a keybinding or `msg action spawn` — gets its
+token a different way: `State::spawn` mints one from the compositor and hands
+it to the child in `$XDG_ACTIVATION_TOKEN`, so the child can activate its own
+window when it maps one. That covers the slow cold start, where focus has
+moved elsewhere before the window appears. The token lives under the same two
+bounds above (30 seconds from spawn, one of the same 64 slots, swept the
+same way); a spawn past a full table simply gets no token, and the window is
+still focused on map.
+
 What a refused token costs depends on what was being activated. For a **fresh
 spawn** it is invisible: the app maps a window, and mapping focuses it, which
 is where a launched app's focus came from before this protocol existed. For

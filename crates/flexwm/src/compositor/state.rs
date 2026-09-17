@@ -811,7 +811,14 @@ impl State {
     }
 
     /// Runs a command inside this session.
-    pub fn spawn(&self, command: &[String]) {
+    ///
+    /// The child inherits `WAYLAND_DISPLAY` and the IPC socket path, and --
+    /// unless the token table is full -- a fresh activation token in
+    /// `XDG_ACTIVATION_TOKEN`, so it can activate its own window when it maps
+    /// one (see [`State::mint_spawn_token`] for which bounds apply and what a
+    /// full table means). Takes `&mut` for the token table; both callers
+    /// (`act`, `run`) already hold it mutably.
+    pub fn spawn(&mut self, command: &[String]) {
         let Some((program, args)) = command.split_first() else {
             return;
         };
@@ -820,9 +827,26 @@ impl State {
         if let Some(path) = &self.ipc_path {
             child.env(flexwm_ipc::SOCKET_ENV, path);
         }
+        // Removed rather than overwritten: the compositor itself may have been
+        // started with one (a launcher client, a nested session), and that
+        // token is a receipt for someone else's user action -- handing it to
+        // this child would let it spend an interaction it was never given.
+        child.env_remove(State::ACTIVATION_TOKEN_ENV);
+        let token = self.mint_spawn_token(program);
+        if let Some(token) = &token {
+            child.env(State::ACTIVATION_TOKEN_ENV, token.as_str());
+        }
         match child.spawn() {
             Ok(_) => tracing::info!(?command, "spawned"),
-            Err(error) => tracing::warn!(?command, %error, "could not spawn"),
+            Err(error) => {
+                // The child never started, so nothing will ever redeem this:
+                // pull it back out rather than occupying a slot until the
+                // sweep finds it.
+                if let Some(token) = token {
+                    self.xdg_activation.remove_token(&token);
+                }
+                tracing::warn!(?command, %error, "could not spawn");
+            }
         }
     }
 }

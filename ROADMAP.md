@@ -245,7 +245,17 @@ gap jumped the queue — each item's own file records why it landed when it did.
   IME, creation + redemption end to end), each confirmed to fail with the
   not-recording behavior temporarily in place. No README change (no
   user-facing behavior changes).
-
+- **[`spawn` hands its child no `XDG_ACTIVATION_TOKEN`](docs/backlog/resolved/activation-token-for-spawned-children-done.md)**
+  (PR #65, 2026-09-17) — `State::spawn` (every keybinding and IPC `spawn`)
+  mints via `create_external_token` and sets it on the child's `Command`,
+  under both existing bounds: 30s freshness stamped at spawn, one of the
+  same 64 slots swept the same way, and a full table meaning no token rather
+  than an eviction (so an agent loop spawning apps cannot break interactive
+  tokens). Inherited values are removed first; a spawn that never starts
+  pulls its token back out. Seven harness tests around a real spawned child
+  (env presence, slow-cold-start redeem, single-use, cap, sweep, failure,
+  lock refusal), each behavior-changing one confirmed to fail unfixed; the
+  smoke test asserts a live `foot`'s environ carries the token.
 ## What's next
 
 The backlog is the source of truth for what to pick up; this is the current

@@ -103,10 +103,16 @@
 //! interact with can activate itself off that interaction -- including more
 //! than once, since one serial may be named by several tokens, bounded only
 //! by [`MAX_TOKENS`] and [`TOKEN_LIFETIME`]. That is the protocol working as
-//! intended: the user just clicked it. Nor does any of this touch
-//! `XdgActivationState::create_external_token`, which the compositor would
-//! use to hand a token to a process it spawned itself: upstream does not
-//! route those through [`XdgActivationHandler::token_created`] at all.
+//! intended: the user just clicked it. A token the compositor mints itself
+//! ([`State::mint_spawn_token`], handed to a process it spawned in
+//! `$XDG_ACTIVATION_TOKEN`) also bypasses this gate -- upstream never routes
+//! `create_external_token` through [`XdgActivationHandler::token_created`].
+//! That is safe for the same reason the gate binds the asker rather than the
+//! redeemer: the serial rule answers "did this client earn a token", and the
+//! compositor is not a client that can be tricked into asking -- minting one
+//! is its own focus decision, delegated to the child. What still binds a
+//! minted token is everything else: the cap, the lifetime, the single-use
+//! removal and the lock gate all run at redemption (see that method).
 //!
 //! What the compositor does *not* do with a refused request is also
 //! deliberate: nothing. There is no urgency hint to raise instead -- flexwm
@@ -300,5 +306,67 @@ impl XdgActivationHandler for State {
         // them) come first.
         self.clicked_layer = None;
         self.act(Action::FocusWindowId(id));
+    }
+}
+
+impl State {
+    /// The environment variable a launcher sets for the process it starts, so
+    /// the child can activate its own window when it maps one.
+    /// [`State::spawn`] sets it for every child it mints a token for; a
+    /// toolkit reads the literal name, so this is the one spelling.
+    pub(super) const ACTIVATION_TOKEN_ENV: &str = "XDG_ACTIVATION_TOKEN";
+
+    /// Mints the activation token a process flexwm spawned itself carries in
+    /// [`Self::ACTIVATION_TOKEN_ENV`].
+    ///
+    /// Upstream never routes this through [`XdgActivationHandler::token_created`]
+    /// -- no serial gate, no sweep, no cap -- so this method applies the two
+    /// resource bounds itself, uniformly with client-minted tokens:
+    ///
+    /// - **Freshness** ([`TOKEN_LIFETIME`]). The token is stamped with the
+    ///   spawn time as its event time (the `Default` data's `Instant::now()`),
+    ///   and `request_activation` refuses it past 30s exactly like a
+    ///   launcher's. No longer lifetime: the motivating slow cold start is
+    ///   seconds, which is the case the 30s figure was sized for, and a
+    ///   second per-token lifetime would need a table this method refuses to
+    ///   build.
+    /// - **The shared cap** ([`MAX_TOKENS`]). Expired tokens are swept first,
+    ///   the way `token_created` does -- including expired spawn tokens, so a
+    ///   burst of dead spawns cannot wedge what follows -- and a genuinely
+    ///   full table mints nothing: the spawn proceeds without a token, which
+    ///   is today's behavior (mapping focuses the new window itself), never
+    ///   an eviction. The eviction direction is the whole point: rapid spawns
+    ///   (an agent loop starting apps) must not break interactive tokens, so
+    ///   a spawn never removes anyone else's live entry. The reverse -- 64
+    ///   live spawn tokens refusing one interactive mint -- is bounded and
+    ///   self-healing (every spawn token is redeemed once or expires within
+    ///   30s), where a separate uncapped table would be an unbounded leak.
+    ///
+    /// `app_id` names the spawned program, for the debug lines at both ends.
+    /// `None` is "no token for this child", never an error: the caller still
+    /// spawns, and the child still gets focused on map.
+    pub(super) fn mint_spawn_token(&mut self, program: &str) -> Option<XdgActivationToken> {
+        self.xdg_activation
+            .retain_tokens(|_, data| data.timestamp.elapsed() < TOKEN_LIFETIME);
+        if self.xdg_activation.tokens().count() >= MAX_TOKENS {
+            tracing::debug!(
+                max = MAX_TOKENS,
+                program,
+                "not minting an xdg-activation token for a spawned child: too many are already outstanding"
+            );
+            return None;
+        }
+        let data = XdgActivationTokenData {
+            app_id: Some(program.to_owned()),
+            ..XdgActivationTokenData::default()
+        };
+        let (token, _) = self.xdg_activation.create_external_token(data);
+        let token = token.clone();
+        tracing::debug!(
+            token = token.as_str(),
+            program,
+            "xdg-activation token minted for a spawned child"
+        );
+        Some(token)
     }
 }

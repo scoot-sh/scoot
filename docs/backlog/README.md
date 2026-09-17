@@ -125,7 +125,12 @@ actionable.
   pinned by two harness tests (real `grab_keyboard`, token creation plus
   redemption) rather than changed. The ticket's three options were each worse
   than the status quo.
-- [`spawn` hands its child no `XDG_ACTIVATION_TOKEN`](./protocols/activation-token-for-spawned-children.md)
+- [`spawn` hands its child no `XDG_ACTIVATION_TOKEN`](./resolved/activation-token-for-spawned-children-done.md)
+  — RESOLVED 2026-09-17 (PR #65): `State::spawn` mints via
+  `create_external_token` and sets it on the child's `Command`, under both
+  existing bounds (30s from spawn, one of the same 64 slots, swept the same
+  way); a full table means no token, never an eviction. Pinned by seven
+  harness tests around a real spawned child.
 - [Popup input](./resolved/xdg-popup-input-resolved.md)
   — RESOLVED 2026-09-16: `xdg_popup.grab` is honoured, with a stated focus
   precedence (lock > `exclusive` layer surface > popup grab > window /
