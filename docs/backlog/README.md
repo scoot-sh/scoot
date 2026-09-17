@@ -231,7 +231,11 @@ actionable.
   `msg key A` still refuses.
 - [Per-frame `Vec` alloc in the cursor fallback path](./rendering/cursor-element-per-frame-alloc.md)
 - [A `present()` skipped for an in-flight flip consumes that frame's damage](./rendering/present-skip-eats-frame-damage.md) — code-traced only, never observed; scanout (not the read-back image) goes stale until next damage; candidate fix touches the hot present path, so correctly waiting on a live observation
-- [Cursor frames still tick while VT-paused](./rendering/cursor-frame-callback-when-paused.md)
+- [Cursor frames while VT-paused](./resolved/cursor-frame-callback-when-paused-done.md)
+  — RESOLVED 2026-09-17: `render()` (and the frame-callback dispatch) is
+  skipped while the `--tty` session holds no DRM master, so a paused
+  session neither renders frames `present()` would drop nor wakes clients
+  to paint them; reactivation still mode-sets and repaints fully.
 - [`wl_surface.offset` doesn't move the cursor hotspot](./rendering/cursor-surface-offset-hotspot.md)
 - [The pointer starts at the output's origin, not centred](./resolved/pointer-starts-at-origin-done.md)
   — RESOLVED 2026-09-17: centred once at startup through
