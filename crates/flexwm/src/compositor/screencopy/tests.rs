@@ -50,6 +50,7 @@ use crate::compositor::decorations::{Appearance, Color};
 use crate::compositor::test_support::{Harness, wait_for};
 
 use super::MAX_FRAMES_PER_CLIENT;
+use super::xrgb_needs_forcing;
 
 /// The framebuffer these tests render into. Small on purpose: every capture
 /// here is a whole-framebuffer copy that a test then compares byte for byte.
@@ -82,6 +83,15 @@ fn appearance() -> Appearance {
         focus_ring_inactive_color: Color::new(1.0, 0.0, 1.0, 1.0),
         background_color: Color::new(0.07058824, 0.20392157, 0.3372549, 0.5),
         ..Appearance::default()
+    }
+}
+
+/// The same palette as [`appearance`] but with an opaque background: the
+/// shape that proves skipping the forcing pass changes no byte.
+fn opaque_appearance() -> Appearance {
+    Appearance {
+        background_color: Color::new(0.07058824, 0.20392157, 0.3372549, 1.0),
+        ..appearance()
     }
 }
 
@@ -202,6 +212,14 @@ impl Fixture {
         fixture.spawn(run_client);
         fixture
     }
+
+    /// The same, but with an opaque background -- the configuration in which
+    /// the forcing pass is skipped.
+    fn start_opaque() -> Self {
+        let mut fixture = Harness::headless(opaque_appearance(), CANVAS);
+        fixture.spawn(run_client);
+        fixture
+    }
 }
 
 /// How long a `PollFrame` gives the compositor before reporting
@@ -306,6 +324,61 @@ fn an_xrgb_capture_is_opaque_even_over_a_translucent_background() {
     );
 }
 
+#[test]
+fn forcing_fires_below_opaque_and_only_there() {
+    // The threshold `write_capture`'s conditional hangs off, pinned
+    // directly: exact `< 1.0`, no epsilon. `254 / 255` is the nearest value
+    // below opaque any `"#rrggbbaa"` config can spell, and the last line is
+    // the largest `f32` below `1.0` -- both must still force, or the
+    // guarantee dies for a background that reads back translucent.
+    assert!(!xrgb_needs_forcing(1.0));
+    assert!(xrgb_needs_forcing(0.5));
+    assert!(xrgb_needs_forcing(0.0));
+    assert!(xrgb_needs_forcing(254.0 / 255.0));
+    assert!(xrgb_needs_forcing(f32::from_bits(0x3F7F_FFFF)));
+}
+
+#[test]
+fn an_xrgb_capture_over_an_opaque_background_is_the_framebuffer_byte_for_byte() {
+    // The byte-identity half of the conditional-forcing change: with an
+    // opaque background the forcing pass is skipped, and the capture must be
+    // exactly what a plain row copy hands over -- which is also exactly what
+    // the old unconditional pass produced, since it OR'd `0xff` onto bytes
+    // that already were `0xff`. A window is mapped so this pins content, not
+    // just a blank background.
+    let mut fixture = Fixture::start_opaque();
+    fixture.run(Step::MapWindow(WINDOW_BGRA));
+    fixture.run(Step::StartSession {
+        paint_cursors: false,
+    });
+    let (outcome, captured) = fixture
+        .run(Step::Capture {
+            width: CANVAS,
+            height: CANVAS,
+            format: wl_shm::Format::Xrgb8888,
+        })
+        .frame();
+    assert_eq!(outcome, Outcome::Ready);
+
+    let framebuffer = fixture.pixels();
+    assert!(
+        framebuffer.chunks_exact(4).all(|pixel| pixel[3] == 0xFF),
+        "the premise this test pins: over an opaque background no framebuffer \
+         pixel carries alpha -- windows composite source-over onto an opaque \
+         destination, so only the clear color could have put any there"
+    );
+    assert!(
+        captured
+            .chunks_exact(4)
+            .any(|pixel| pixel == WINDOW_BGRA.as_slice()),
+        "the window that was on screen has to be in the capture"
+    );
+    assert_eq!(
+        captured, framebuffer,
+        "skipping the forcing pass over an opaque background must change no \
+         byte: an Xrgb8888 capture is the framebuffer as-is"
+    );
+}
 #[test]
 fn an_xrgb_capture_is_opaque_at_a_width_the_wide_step_cannot_divide() {
     // `write_capture` forces the X byte four pixels at a time, so a width that

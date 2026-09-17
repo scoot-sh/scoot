@@ -938,7 +938,9 @@ What to know before pointing a client at it:
   dmabuf import is answered `failed` (see the next bullet). `Xrgb8888` is offered first: if `[appearance]
   background_color` has an alpha below 1.0 then the framebuffer really is
   translucent, and an `Xrgb8888` capture forces the fourth byte opaque so you
-  get a screenshot rather than a translucent image. An `Argb8888` capture
+  get a screenshot rather than a translucent image. With the default opaque
+  background the framebuffer already is opaque everywhere, so that pass is
+  skipped — same bytes either way. An `Argb8888` capture
   hands you the framebuffer's own alpha, which is what that format means.
 - **`zwp_linux_dmabuf_v1` is advertised (version 6), but no dmabuf can be
   imported.** The global exists so dmabuf-aware clients reach their

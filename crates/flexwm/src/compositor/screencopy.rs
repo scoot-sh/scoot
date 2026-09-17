@@ -177,8 +177,11 @@
 //! means. `Xrgb8888` is offered first on purpose: `[appearance]
 //! background_color` may have an alpha below 255, and a client that took that
 //! alpha at face value would render a translucent "screenshot" of an opaque
-//! screen. A capture into an `Xrgb8888` buffer has that byte forced to `0xff`;
-//! a client that asks for `Argb8888` gets the framebuffer's own alpha, which is
+//! screen. A capture into an `Xrgb8888` buffer has that byte forced to `0xff`
+//! while the background is actually translucent; over the default opaque
+//! background the framebuffer already carries `0xff` everywhere, so the
+//! forcing pass is skipped outright (see [`xrgb_needs_forcing`]). A client
+//! that asks for `Argb8888` gets the framebuffer's own alpha, which is
 //! what that format means.
 
 use std::collections::HashMap;
@@ -253,6 +256,37 @@ pub(super) const MAX_FRAMES_PER_CLIENT: u32 = 16;
 /// framebuffer they are read back from.
 const BYTES_PER_PIXEL: i32 = 4;
 
+/// Whether an `Xrgb8888` capture's undefined fourth byte has to be forced
+/// opaque on this tick.
+///
+/// True exactly while `[appearance] background_color`'s alpha is below 1.0.
+/// Read off [`State::appearance`](super::State) once per frame tick in
+/// [`State::service_captures`], not cached anywhere: there is
+/// no config reload today (nothing writes `appearance` after `State::new`),
+/// so any read is current -- but a startup-cached bool would go stale the
+/// moment a reload exists, and a per-tick read cannot.
+///
+/// Exact `< 1.0`, no epsilon, and that is deliberate rather than lazy.
+/// `Color::parse` produces `byte / 255.0`, so the only opaque value a config
+/// can spell is exactly `1.0`; the nearest translucent one is `254 / 255`
+/// (~0.996), nowhere near float dust. An epsilon band would misclassify a
+/// directly-constructed `0.9999999` as opaque while the framebuffer pixman
+/// cleared with it stayed translucent -- the exact failure this exists to
+/// prevent. `1.0` means the clear left `0xff` in every background pixel (see
+/// below), anything else means it did not.
+///
+/// Why the background alpha alone decides this, rather than anything about
+/// the windows: every window composites onto the framebuffer with
+/// Porter-Duff source-over, and over an opaque destination that operation is
+/// alpha-preserving-opaque -- the result is `0xff` whatever the source's own
+/// alpha was. Only the clear color writes raw alpha into the framebuffer, so
+/// an opaque background means every pixel the read-back sees already carries
+/// `0xff` and the forcing pass below would OR `0xff` onto `0xff`: a no-op
+/// worth skipping.
+fn xrgb_needs_forcing(background_alpha: f32) -> bool {
+    background_alpha < 1.0
+}
+
 /// How many pixels the `Xrgb8888` opacity pass covers per step.
 ///
 /// Four, i.e. sixteen bytes at a time. Measured rather than picked -- see
@@ -323,10 +357,13 @@ const PIXELS_PER_STEP: usize = 4;
 /// The row this table does not have is the one that would dwarf all of them:
 /// **not forcing the byte at all** is ~13% off a release capture and ~77% off
 /// a debug one, because `Xrgb8888`'s fourth byte is undefined by the format
-/// and a conforming client never reads it. That is a *behaviour* question
-/// rather than a performance one, so it is
-/// [filed as its own item](../../../../docs/backlog/protocols/screencopy-xrgb-alpha-forcing.md)
-/// rather than decided here.
+/// and a conforming client never reads it. That was a *behaviour* question
+/// rather than a performance one, so it was
+/// [filed as its own item](../../../../docs/backlog/resolved/screencopy-xrgb-alpha-forcing-done.md)
+/// rather than decided here -- and resolved as the conditional this module
+/// now implements: force only while the background alpha is below 1.0 (see
+/// [`xrgb_needs_forcing`]), which costs nothing in the default opaque
+/// configuration and keeps the guarantee where it was actually needed.
 const OPAQUE: u128 = 0xFF00_0000_FF00_0000_FF00_0000_FF00_0000;
 
 /// Everything this compositor keeps for `ext-image-copy-capture-v1`.
@@ -684,11 +721,18 @@ impl State {
             return;
         };
         let presented = Duration::from(self.screencopy.clock.now());
+        // Read here, on the tick the captures are served on, rather than
+        // cached: see `xrgb_needs_forcing`. No TOCTOU between this and the
+        // writes below -- this whole tick is synchronous on the one event-loop
+        // thread, nothing dispatches in the middle of it, and nothing writes
+        // `appearance` at all today.
+        let force_xrgb_alpha = xrgb_needs_forcing(self.appearance.background_color.a);
         deliver(
             &mut backend,
             &mut self.screencopy.sessions,
             serial,
             presented,
+            force_xrgb_alpha,
         );
         self.backend = Some(backend);
         // `render()` flushes at its end, and `post_dispatch` flushes after
@@ -746,7 +790,13 @@ fn constraints(backend: &Backend) -> BufferConstraints {
 /// fresh pixman image every call (confirmed in the pinned rev's
 /// `PixmanRenderer`), so doing it per session would cost a full extra copy of
 /// the screen for each client watching.
-fn deliver(backend: &mut Backend, sessions: &mut [Capture], serial: u64, presented: Duration) {
+fn deliver(
+    backend: &mut Backend,
+    sessions: &mut [Capture],
+    serial: u64,
+    presented: Duration,
+    force_xrgb_alpha: bool,
+) {
     let (width, height) = backend.size;
     let region: Rectangle<i32, BufferCoords> = Rectangle::from_size((width, height).into());
     let Backend {
@@ -833,7 +883,14 @@ fn deliver(backend: &mut Backend, sessions: &mut [Capture], serial: u64, present
         // *before* handing it over if none is, and `attach_buffer` is ignored
         // once `capture` has been seen -- so a frame that reached this list
         // has a buffer, and nothing can take it away again.
-        match write_capture(&frame.buffer(), pixels, width, height, stride) {
+        match write_capture(
+            &frame.buffer(),
+            pixels,
+            width,
+            height,
+            stride,
+            force_xrgb_alpha,
+        ) {
             Ok(()) => {
                 capture.delivered = Some(serial);
                 // Full damage every time, not the damage tracker's. A session
@@ -887,6 +944,7 @@ fn write_capture(
     width: i32,
     height: i32,
     stride: usize,
+    force_xrgb_alpha: bool,
 ) -> Result<(), CaptureFailureReason> {
     let row = width as i64 * BYTES_PER_PIXEL as i64;
     with_buffer_contents_mut(buffer, |ptr, len, data| {
@@ -901,7 +959,13 @@ fn write_capture(
             return Err(CaptureFailureReason::BufferConstraints);
         }
         let opaque = match data.format {
-            wl_shm::Format::Xrgb8888 => true,
+            // Forced only while the background is actually translucent (see
+            // `xrgb_needs_forcing`): over the default opaque background the
+            // framebuffer already carries `0xff` everywhere, so the pass
+            // would be a no-op -- and an `Argb8888` capture never forces,
+            // getting the framebuffer's own alpha, which is what that format
+            // means.
+            wl_shm::Format::Xrgb8888 => force_xrgb_alpha,
             wl_shm::Format::Argb8888 => false,
             _ => return Err(CaptureFailureReason::BufferConstraints),
         };
