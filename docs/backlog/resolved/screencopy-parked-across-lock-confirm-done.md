@@ -62,12 +62,19 @@ blocked: null
 
 ## Resolution
 
-Decided **(a): one `ensure_ticking()` on the confirm path**, in the
-confirming branch of each of `note_flip_completed` and `note_blank_timeout`
-— i.e. exactly the paths that can clear `awaiting_blank`, and only when
-they actually confirm. A vblank that matches nothing (stale completion,
-previous frame, untrackable error) and a timeout polled before its bound
-arm nothing, so non-confirming calls add zero behavior change.
+Decided **(a): re-arm the frame ticker on the confirm path** — and, on
+independent review, the arm was hoisted from the two confirming branches
+into `confirm_lock` itself, gated on actually taking a `pending`. The two
+deferred paths (`note_flip_completed`, `note_blank_timeout`) arm exactly as
+before, but so does any future wait-clearing path that calls
+`confirm_lock`, by construction — which is the structural half of what
+option (b) offered, without its cost. A vblank that matches nothing (stale
+completion, previous frame, untrackable error) and a timeout polled before
+its bound arm nothing, so non-confirming calls add zero behavior change.
+Inside the render tail the arm is a no-op branch (`frame_tick` only runs
+while the timer is armed); the only out-of-tick confirm (an out-of-tick
+`render()` that confirms — today only the IPC-screenshot path) buys one
+extra tick that finds nothing and drops itself.
 
 **(b) — a parked capture in `frame_tick`'s re-arm set — was weighed and
 rejected**, for a reason stronger than taste. The naive form (any parked or
@@ -78,9 +85,10 @@ a static desktop would pin the timer at 60Hz forever. The scoped form
 (parked *and* awaiting) avoids that but still burns up to ~60 wakeups/s
 across a one-second fallback wait, couples `frame_tick` to lock-plus-capture
 state, and buys nothing the re-arm doesn't already cover. The
-re-forgettable objection stands, and is answered by the pin tests below plus
+re-forgettable objection stands, and is answered by the pin tests below, the
+hoist into `confirm_lock` (future clearing paths inherit the re-arm), plus
 a pointer comment at the park site (`screencopy.rs`, at the
-`awaiting_blank` early return) naming the confirm paths that schedule the
+`awaiting_blank` early return) naming the confirm as scheduling the
 follow-up tick.
 
 Two things the implementation trace established, both load-bearing for why
