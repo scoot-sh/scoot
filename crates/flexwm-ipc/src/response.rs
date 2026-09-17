@@ -81,6 +81,29 @@ pub struct WindowSnapshot {
     pub rect: Rect,
     pub visible: bool,
     pub focused: bool,
+    /// Whether this window's popup tree currently holds the keyboard through
+    /// an explicit `xdg_popup.grab` -- a menu, combo box or typeahead the
+    /// client opened and asked input be routed to.
+    ///
+    /// This is the field that tells "window B is focused" apart from
+    /// "window B is focused but window A's menu holds the keyboard":
+    /// compositor focus (`focused`) still moves while a grab is live --
+    /// keybindings keep firing, by design -- but every keystroke reaches
+    /// the grabbing popup instead. An agent that only reads `focused`
+    /// would inject its next key at the wrong target with no error; one
+    /// that checks this field first will not.
+    ///
+    /// Defaulted rather than required, like `icon` above and for the same
+    /// wire reason: adding it does not change the internally-tagged
+    /// `Response` discriminant an older client keys on, and serde ignores
+    /// an unknown one -- which is why it does *not* bump
+    /// `PROTOCOL_VERSION`. Read it asymmetrically: `true` is always
+    /// truthful, while `false` means "no grab, or a server predating the
+    /// field". A grab rooted at a layer surface (a bar's own dropdown)
+    /// belongs to no window and leaves every window `false`; likewise a
+    /// grab that just ended but has not been reaped yet.
+    #[serde(default)]
+    pub popup_grab: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

@@ -2,8 +2,8 @@
 //! `PROTOCOL_VERSION` bump.
 
 use flexwm_ipc::{
-    Action, Horizontal, OutputSnapshot, PointerButton, Rect, Request, Response, Screenshot, decode,
-    encode,
+    Action, Horizontal, OutputSnapshot, PointerButton, Rect, Request, Response, Screenshot,
+    WindowSnapshot, decode, encode,
 };
 use serde_json::{Value, json};
 
@@ -258,4 +258,71 @@ fn an_ok_from_before_locked_still_decodes() {
     }
     let old: OldResponse = decode(r#"{"type":"ok","locked":true}"#).unwrap();
     assert_eq!(old, OldResponse::Ok);
+}
+
+/// `popup_grab` is additive and defaulted like `icon` before it: an older
+/// server's window snapshot still decodes (as "no grab"), and a new server's
+/// reply still decodes for an older client -- which is what keeps the field
+/// off the `PROTOCOL_VERSION`-bump list.
+#[test]
+fn a_window_snapshot_from_before_popup_grab_still_decodes() {
+    let snapshot: WindowSnapshot = decode(
+        r#"{"id":1,"app_id":"foot","title":"zsh","output":1,"rect":{"x":0,"y":0,"width":800,"height":600},"visible":true,"focused":true}"#,
+    )
+    .expect("an older server's window snapshot still decodes");
+    assert!(!snapshot.popup_grab);
+}
+
+#[test]
+fn a_window_snapshot_carries_its_popup_grab_on_the_wire() {
+    let snapshot = WindowSnapshot {
+        id: 1,
+        app_id: "foot".into(),
+        title: "zsh".into(),
+        icon: None,
+        output: 1,
+        rect: Rect {
+            x: 0,
+            y: 0,
+            width: 800,
+            height: 600,
+        },
+        visible: true,
+        focused: false,
+        popup_grab: true,
+    };
+    assert_eq!(
+        json_of(&snapshot),
+        json!({
+            "id": 1,
+            "app_id": "foot",
+            "title": "zsh",
+            "icon": null,
+            "output": 1,
+            "rect": { "x": 0, "y": 0, "width": 800, "height": 600 },
+            "visible": true,
+            "focused": false,
+            "popup_grab": true,
+        })
+    );
+    assert_eq!(
+        decode::<WindowSnapshot>(&encode(&snapshot).unwrap()).unwrap(),
+        snapshot
+    );
+
+    // ...and an older client, decoding with a struct that lacks the field,
+    // ignores it rather than failing.
+    #[derive(serde::Deserialize, PartialEq, Debug)]
+    struct OldWindowSnapshot {
+        id: u64,
+        focused: bool,
+    }
+    let old: OldWindowSnapshot = decode(&encode(&snapshot).unwrap()).unwrap();
+    assert_eq!(
+        old,
+        OldWindowSnapshot {
+            id: 1,
+            focused: false,
+        }
+    );
 }
