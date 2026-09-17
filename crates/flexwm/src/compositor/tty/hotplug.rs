@@ -404,13 +404,17 @@ impl Tty {
     /// onto state that may have been reconfigured behind us -- is safe to
     /// issue next.
     ///
-    /// `flip_pending` is cleared even though a flip really may still be in
+    /// `flips` is discarded even though a flip really may still be in
     /// flight. Both directions have a cost and they are not symmetric:
-    /// leaving it set when the flip's `VBlank` never arrives (its
+    /// leaving it armed when the flip's `VBlank` never arrives (its
     /// framebuffer having been destroyed, or its CRTC re-modeset underneath
     /// it) freezes the screen permanently with no error anywhere, while
-    /// clearing it costs at worst one rejected flip, which `present` logs
-    /// and retries from the next `VBlank` (see its error arm).
+    /// discarding it costs at worst one rejected flip, which `present` logs
+    /// and retries from the next `VBlank` (see its error arm). Discarding
+    /// also retires the number a session-lock wait may have recorded for
+    /// that flip, so a late vblank for it cannot confirm a lock whose
+    /// blanked frame never scanned out -- the wait stays, owned by the
+    /// fallback deadline, until the next render records a fresh flip.
     ///
     /// `mark_all_free` likewise frees the slot the CRTC may still be
     /// scanning out, so the next `write_region` can write into live scanout
@@ -425,7 +429,7 @@ impl Tty {
     /// the CRTC is holding. This is pre-existing behaviour from
     /// `reactivate`, restated here rather than newly chosen.
     pub(super) fn invalidate_scanout(&mut self) {
-        self.flip_pending = false;
+        self.flips.discard();
         self.needs_modeset = true;
         self.buffers.mark_all_free();
         self.buffers.invalidate_ages();

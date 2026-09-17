@@ -4,7 +4,7 @@
 //! see the screen is a screenshot over IPC.
 
 use std::error::Error;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use flexwm_core::{Event as CoreEvent, OutputId, Rect};
 use pixman::Image;
@@ -27,6 +27,7 @@ use super::State;
 use super::cursor::CursorElement;
 use super::layer_shell;
 use super::output_scale::smithay_scale;
+use super::session_lock::LOCK_VBLANK_TIMEOUT;
 use super::tty::Tty;
 
 // What kinds of thing `render()` can draw. Which one covers which is decided
@@ -256,6 +257,12 @@ impl State {
         // sending `locked` before a blanked frame exists (see
         // `session_lock.rs`).
         let mut drew_a_frame = false;
+        // The flip this frame went out on under `--tty`, if `present`
+        // issued one. Only meaningful for a locked frame with a pending
+        // lock (see the `confirm_lock`/`await_vblank` split at the end of
+        // this function); every other frame leaves it for the tail to
+        // ignore.
+        let mut blank_seq: Option<u64> = None;
         // Read once, here, so every branch below -- elements, clear colour,
         // frame callbacks -- is answering the same question about the same
         // frame.
@@ -533,7 +540,8 @@ impl State {
                                                 host.present(pixels, region.size.w, region.size.h);
                                             }
                                             if let Some(tty) = &mut self.tty {
-                                                tty.present(pixels, region, (width, height));
+                                                blank_seq =
+                                                    tty.present(pixels, region, (width, height));
                                             }
                                         }
                                         Err(error) => tracing::warn!(
@@ -570,8 +578,45 @@ impl State {
         // lock that could not be confirmed stays pending and stays *locked*;
         // the alternative, giving up and unlocking, would turn a renderer
         // failure into an unrequested unlock (see `session_lock.rs`).
+        //
+        // Where there is a scanout to wait for (`--tty`), confirmation
+        // additionally waits for the vblank of the flip carrying the blanked
+        // frame (see `SessionLock::await_vblank`): the previous, possibly
+        // unlocked, frame can otherwise stay on scanout for up to one more
+        // vblank after `locked` has gone out. Headless and nested have no
+        // scanout, so the drawn frame *is* the shown one and confirms at
+        // once, exactly as before.
         if drew_a_frame {
-            self.confirm_lock();
+            if self.session_lock.awaiting_blank() && self.tty.is_some() {
+                let now = Instant::now();
+                if self.session_lock.await_vblank(blank_seq, now) {
+                    // This frame needs a timer watching the fallback
+                    // deadline: a newly armed wait has none yet, and a
+                    // freshly issued flip restarted the bound out from
+                    // under the previous one (see `await_vblank`). One
+                    // shot each, dropped when they fire: the vblank path
+                    // takes the wait first in the ordinary case, so a timer
+                    // only ever fires for a vblank that never came -- and a
+                    // stale one finds no wait and drops.
+                    if let Err(error) = self
+                        .loop_handle
+                        .insert_source(Timer::from_duration(LOCK_VBLANK_TIMEOUT), blank_timeout)
+                    {
+                        // error!, not warn!: without this timer a lock whose
+                        // vblank never arrives hangs its locker forever --
+                        // the one failure mode this wait exists to prevent.
+                        // The vblank path itself still works; only the
+                        // fallback is gone.
+                        tracing::error!(
+                            %error,
+                            "could not arm the session-lock vblank fallback timer; \
+                             a lock whose vblank never arrives will hang its locker"
+                        );
+                    }
+                }
+            } else {
+                self.confirm_lock();
+            }
         }
 
         let time = self.start_time.elapsed();
@@ -818,6 +863,19 @@ fn frame_tick(_now: std::time::Instant, _metadata: &mut (), state: &mut State) -
         state.timer_armed = false;
         TimeoutAction::Drop
     }
+}
+
+/// Fires [`LOCK_VBLANK_TIMEOUT`] after a blanked frame rendered under `--tty`
+/// without its vblank confirming the lock: the fallback half of the vblank
+/// wait (see `SessionLock::await_vblank`). One shot, always dropped -- a
+/// re-presented flip arms its own timer against its own restarted bound, so
+/// a timer only ever fires for a vblank that never came, and a stale one
+/// finds no live deadline and drops. `Instant::now()` rather than the
+/// timer's own timestamp, so the bound is measured against the same clock
+/// the wait was armed with.
+fn blank_timeout(_now: std::time::Instant, _metadata: &mut (), state: &mut State) -> TimeoutAction {
+    state.note_blank_timeout(Instant::now());
+    TimeoutAction::Drop
 }
 
 /// Appends the render elements of every mapped layer surface on `layers`,

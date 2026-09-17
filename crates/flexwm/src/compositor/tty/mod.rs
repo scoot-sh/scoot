@@ -27,6 +27,7 @@
 //! that module's doc for what a hotplug does and deliberately does not do.
 
 mod buffers;
+mod flip_tracker;
 mod gpu;
 mod hotplug;
 
@@ -51,6 +52,7 @@ use smithay::reexports::input::Libinput;
 use smithay::utils::{Buffer as BufferSpace, DeviceFd, Physical, Rectangle, Size, Transform};
 
 use self::buffers::BufferPool;
+use self::flip_tracker::FlipTracker;
 use super::State;
 use super::keybindings::Keybindings;
 use super::output_scale::logical_size;
@@ -159,7 +161,14 @@ pub struct Tty {
     /// matching `VBlank`. `present()` skips (setting `present_skipped`
     /// instead of blocking) rather than flip again while this is set --
     /// flipping while a previous flip is still pending fails with EBUSY.
-    flip_pending: bool,
+    ///
+    /// This is the presenter's half of the session-lock vblank wait (see
+    /// `session_lock.rs`): the number identifies *which* flip is out, so a
+    /// completion can be matched against the flip that actually carries the
+    /// blanked frame rather than against merely "a flip finished". One field
+    /// for both facts -- `is_busy()` is "a flip is in flight" -- so the two
+    /// can never disagree.
+    flips: FlipTracker,
     /// `true` for the very first frame and again right after a session
     /// reactivation, when the CRTC's state is unknown and only a full
     /// modeset (`commit`), not a `page_flip`, is safe to issue.
@@ -251,7 +260,7 @@ pub fn init(
         height,
         active: true,
         session_paused: false,
-        flip_pending: false,
+        flips: FlipTracker::new(),
         needs_modeset: true,
         showing: None,
         pending_free: None,
@@ -567,16 +576,27 @@ impl Tty {
     /// total size, independent of how small `region` is, and is what's
     /// checked against this backend's fixed mode size.
     ///
+    /// Returns the issued flip's sequence number (see `flip_tracker.rs`),
+    /// or `None` when no flip went out: the session is paused, or a
+    /// reactivation attempt failed to reacquire the DRM device (`active` is
+    /// `false` in either case -- see `reactivate`), `frame_size` doesn't
+    /// match the size of the mode currently being scanned out, a previous
+    /// flip hasn't been confirmed by a `VBlank` yet (flipping again before
+    /// that would fail with EBUSY), or the commit itself failed. The
+    /// session-lock vblank wait matches on `Some` (see
+    /// `session_lock.rs`): only an issued flip can carry the blanked frame
+    /// to scanout, so a skip -- whatever its reason -- records no number.
+    ///
     /// Does nothing if the session is paused, or a reactivation attempt
     /// failed to reacquire the DRM device (`active` is `false` in either
     /// case -- see `reactivate`), if `frame_size` doesn't match the size of
     /// the mode currently being scanned out, or if a previous flip hasn't
-    /// been confirmed by a `VBlank` yet (`flip_pending`) -- flipping again
-    /// before that would fail with EBUSY.
+    /// been confirmed by a `VBlank` yet -- flipping again before that would
+    /// fail with EBUSY.
     ///
     /// Only the last of those three sets `present_skipped`, and it is the
-    /// only one that needs to: `flip_pending` is the one case where a
-    /// *different*, already-in-flight frame is what will eventually confirm
+    /// only one that needs to: an in-flight flip is the one case where a
+    /// *different*, already-out frame is what will eventually confirm
     /// (a `VBlank`) that it's safe to try again, so the flag is what makes
     /// that confirmation retry the render instead of leaving the screen
     /// stale. The other two don't need it. `!active` means the session is
@@ -599,19 +619,19 @@ impl Tty {
         pixels: &[u8],
         region: Rectangle<i32, Physical>,
         frame_size: (i32, i32),
-    ) {
+    ) -> Option<u64> {
         if !self.active {
-            return;
+            return None;
         }
         if frame_size != (self.width, self.height) {
-            return;
+            return None;
         }
-        if self.flip_pending {
+        if self.flips.is_busy() {
             self.present_skipped = true;
-            return;
+            return None;
         }
         let Some((index, fb)) = self.buffers.write_region(pixels, region) else {
-            // Unlike the flip_pending skip above -- an ordinary, frequent,
+            // Unlike the in-flight skip above -- an ordinary, frequent,
             // harmless throttle; exactly one slot is always free whenever a
             // flip isn't in flight -- reaching here means neither slot was
             // free even though no flip is pending, which should never
@@ -627,7 +647,7 @@ impl Tty {
                  with no flip pending)"
             );
             self.present_skipped = true;
-            return;
+            return None;
         };
         self.present_skipped = false;
 
@@ -667,10 +687,11 @@ impl Tty {
         match result {
             Ok(()) => {
                 self.needs_modeset = false;
-                self.flip_pending = true;
+                let seq = self.flips.issued();
                 // Whatever was showing before this flip becomes free once
                 // this flip's VBlank confirms it's off screen.
                 self.pending_free = self.showing.replace(index);
+                Some(seq)
             }
             Err(error) => {
                 tracing::warn!(%error, "drm commit/page flip failed");
@@ -684,27 +705,33 @@ impl Tty {
                 // unrelated happens to damage it again.
                 //
                 // Newly reachable rather than newly wrong: `hotplug.rs`'s
-                // `invalidate_scanout` clears `flip_pending` while a flip
-                // really may still be in flight (see its doc for why that
+                // `invalidate_scanout` discards the in-flight flip while one
+                // really may still be out (see its doc for why that
                 // is the safer of the two mistakes), which can put one
                 // EBUSY-rejected flip between the hotplug and the first
                 // frame at the new mode. Self-limiting: nothing re-reads
                 // this except a `VBlank` or a `DrmEvent::Error`, both of
                 // which only arrive for a flip that *was* accepted.
                 self.present_skipped = true;
+                None
             }
         }
     }
 
-    /// Clears `flip_pending` for a `VBlank` on this surface's own crtc
+    /// Settles the in-flight flip for a `VBlank` on this surface's own crtc
     /// (`DrmEvent::VBlank` doesn't say which surface, only which crtc --
     /// this is a single-output backend, but checking costs nothing) and
     /// frees the buffer that was showing before this flip. Returns whether
     /// a render should be re-triggered because a previous `present()` had
-    /// been skipped.
-    fn on_vblank(&mut self, crtc: crtc::Handle) -> bool {
+    /// been skipped, plus the finished flip's sequence number -- `None` when
+    /// the vblank names another crtc, or when nothing was in flight (a stale
+    /// vblank for a flip the scanout bookkeeping has since discarded). The
+    /// number is what the session-lock vblank wait matches on (see
+    /// `session_lock.rs`): only the completion of the flip carrying the
+    /// blanked frame confirms the lock.
+    fn on_vblank(&mut self, crtc: crtc::Handle) -> (bool, Option<u64>) {
         if crtc != self.surface.crtc() {
-            return false;
+            return (false, None);
         }
         self.flip_settled()
     }
@@ -720,13 +747,17 @@ impl Tty {
     /// `Error` arm didn't, and the CRTC-mismatch check in `on_vblank` has no
     /// equivalent need here -- a `DrmEvent::Error` isn't scoped to a crtc).
     /// Returns whether a render should be re-triggered because a previous
-    /// `present()` had been skipped.
-    fn flip_settled(&mut self) -> bool {
-        self.flip_pending = false;
+    /// `present()` had been skipped, plus the finished flip's number for the
+    /// session-lock wait. The `Error` arm's caller deliberately drops the
+    /// number: an error means the completion is untrackable, so it must not
+    /// confirm a lock -- the fallback deadline owns that wait instead (see
+    /// `session_lock.rs`).
+    fn flip_settled(&mut self) -> (bool, Option<u64>) {
+        let completed = self.flips.settled();
         if let Some(index) = self.pending_free.take() {
             self.buffers.mark_free(index);
         }
-        std::mem::take(&mut self.present_skipped)
+        (std::mem::take(&mut self.present_skipped), completed)
     }
 
     /// Re-evaluates the CRTC's state and forces a full modeset on the next
@@ -803,7 +834,12 @@ fn session_event(event: SessionEvent, _: &mut (), state: &mut State) {
                 tty.session_paused = true;
                 tty.drm.pause();
                 tty.libinput.suspend();
-                tty.flip_pending = false;
+                // The device is gone with the session: no completion will
+                // arrive for whatever was out, so its number must not linger
+                // to match a lock wait recorded after it (see
+                // `flip_tracker.rs`). The wait itself stays, owned by the
+                // fallback deadline until the switch back re-renders.
+                tty.flips.discard();
                 hotplug::Reconfigured::Nothing
             }
             SessionEvent::ActivateSession => {
@@ -845,7 +881,7 @@ fn session_event(event: SessionEvent, _: &mut (), state: &mut State) {
 }
 
 fn drm_event(event: DrmEvent, _: &mut Option<DrmEventMetadata>, state: &mut State) {
-    let needs_render = {
+    let (needs_render, completed) = {
         let Some(tty) = &mut state.tty else {
             return;
         };
@@ -868,10 +904,19 @@ fn drm_event(event: DrmEvent, _: &mut Option<DrmEventMetadata>, state: &mut Stat
                 // screen. If the device really is wedged, the next
                 // page_flip fails synchronously and is already logged at
                 // its own call site.
-                tty.flip_settled()
+                //
+                // The finished flip's number is deliberately dropped with it:
+                // an untrackable completion must not confirm a session lock
+                // (see `flip_settled` and `session_lock.rs`) -- the fallback
+                // deadline owns that wait.
+                let (needs_render, _) = tty.flip_settled();
+                (needs_render, None)
             }
         }
     };
+    // The session-lock vblank wait, if any, matches on the finished flip
+    // (see `State::note_flip_completed`): a no-op with no wait recorded.
+    state.note_flip_completed(completed);
     if needs_render {
         state.request_render();
     }

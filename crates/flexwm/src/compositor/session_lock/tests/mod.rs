@@ -65,6 +65,7 @@ mod ime_popup;
 mod input;
 mod lifecycle;
 mod teardown;
+mod vblank_confirm;
 
 /// The framebuffer these tests render into.
 const CANVAS: i32 = 120;

@@ -1167,20 +1167,19 @@ its connection and its `wl_surface`s are still perfectly alive.
   will not reach a window, because a window you cannot see must not be
   focused or closed from behind the lock screen. That is the same gate every
   `flexwm msg action` request already sits behind.
-- **The `locked` event is sent once a blanked frame has been *rendered*, not
-  once a vblank has confirmed it on screen.** Under `--headless`/`--nested`
-  that is exact — there is no scanout at all, and the framebuffer a screenshot
-  reads *is* that frame. Under `--tty` it is weaker than this section used to
-  claim: the frame is rendered, and then copied into a scanout buffer with a
-  page flip requested *only if the presenter can take it right then*. It takes
-  neither step while the session is inactive (you switched VT away) or while a
-  previous page flip hasn't been confirmed by a vblank yet — and that second
-  case is ordinary, frequent throttling, not a rare edge. So under real
-  contention the previous, possibly unlocked, frame can remain on the scanout
-  buffer for up to one more vblank after `locked` has gone out. A client that
-  suspends the machine the instant it sees `locked` is racing that. Closing it
-  properly means confirming from the vblank handler instead; it's on the
-  backlog rather than done.
+- **The `locked` event is sent once a blanked frame is confirmed on screen,
+  not merely rendered.** Under `--headless`/`--nested` the render is the
+  confirmation — there is no scanout at all, and the framebuffer a screenshot
+  reads *is* that frame. Under `--tty` the render hands the frame to the
+  presenter, and `locked` waits for the vblank confirming the page flip that
+  carries it, so the previous, possibly unlocked, frame can no longer outstay
+  the event by a vblank. That costs up to one vblank of lock latency under
+  contention (the lock raced a flip already in flight and its frame goes out
+  on the next one). If no vblank can arrive at all — you switched VT away, a
+  modeset discarded the flip — the lock is confirmed anyway after one second
+  (logged as a warning) rather than hanging the locker forever: a locker left
+  waiting might never prompt for the password at all, which is worse than the
+  bounded staleness the fallback accepts.
 - **Up to one frame of the unlocked screen can still be on the display**
   between the lock request and the first blanked frame. That is inherent (the
   protocol's `locked` ordering exists precisely because of it), not something

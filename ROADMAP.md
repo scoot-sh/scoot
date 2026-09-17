@@ -418,6 +418,17 @@ gap jumped the queue — each item's own file records why it landed when it did.
   arrange on-screen test saturate instead of overflowing, each pinned by a
   fail-first test; window-count-derived products audited and left under the
   existing `MAX_GAP` disclosure.
+- **[`locked` waits for vblank confirmation, not just a
+  render](docs/backlog/resolved/session-lock-vblank-confirm-done.md)** —
+  resolved 2026-09-17: under `--tty` `locked` waits for the vblank of the
+  flip carrying the blanked frame (flip-sequence tracked, so a lock raced
+  with an in-flight flip confirms on the next one), with a one-second
+  fallback confirming anyway rather than hanging a switched-away locker;
+  headless/nested confirm on render unchanged. Verified live on the dev
+  VM (completions fire; three consecutive locks each vblank-confirmed).
+  Found alongside, pre-existing and filed separately: a lock surface
+  mapped after the confirming frame never appears on live `--tty`
+  ([surface-not-drawn-live](docs/backlog/protocols/session-lock-surface-not-drawn-live.md)).
 ## What's next
 
 The backlog is the source of truth for what to pick up; this is the current
