@@ -504,6 +504,20 @@ gap jumped the queue — each item's own file records why it landed when it did.
   correction. Confinement needed no fix (fail-open + leave-deactivation;
   pinned), and the adjacent per-event region clone is gone (two short
   borrows; overlapping bench ranges, structurally allocation-free).
+- **[A screencopy frame parked for a session lock's blank was never re-armed
+  once the vblank
+  confirms](docs/backlog/resolved/screencopy-parked-across-lock-confirm-done.md)**
+  (PR #93, 2026-09-17) — the regression PR #84 introduced moving lock
+  confirmation onto the DRM vblank: the blank tick drops the frame timer
+  (a parked capture is none of its re-arm conditions) and neither confirm
+  path restarted it, so the parked frame sat undelivered until some later
+  commit re-armed the ticker — forever, for a lock-and-never-commit locker.
+  Fixed as one `ensure_ticking()` in each confirming branch (the parked-in-
+  the-re-arm-set alternative would pin the timer at 60Hz for every static-
+  desktop preview); five fail-first harness tests pin the re-arm on both
+  paths, the one-tick steady-state cost, multi-session delivery and the
+  abandoned-locker shape. No README change (bug fix within protocol-
+  permitted behavior, no user-facing surface).
 ## What's next
 
 The backlog is the source of truth for what to pick up; this is the current

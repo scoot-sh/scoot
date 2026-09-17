@@ -710,7 +710,11 @@ impl State {
         // the desktop in the framebuffer while `is_locked()` already answers
         // true. Nothing is failed and nothing is answered: the frames stay
         // parked and are serviced on the tick after `confirm_lock`. See this
-        // module's doc.
+        // module's doc. Under `--tty` that tick is scheduled by the confirm
+        // itself (`State::confirm_lock` re-arms the frame ticker whenever it
+        // takes a wait): the tick that rendered the blank drops the timer,
+        // so without the re-arm nothing would serve the parked frames
+        // afterwards.
         if self.session_lock.awaiting_blank() {
             return;
         }
