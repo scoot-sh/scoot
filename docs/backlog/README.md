@@ -153,7 +153,12 @@ actionable.
   keys actually go; relevant to computer-use targeting fidelity
 - [An IME keyboard grab blocks every popup grab](./protocols/popup-grab-blocked-by-ime-grab.md) — no context menu opens anywhere while an IME holds the seat
 - [Layer surface with no buffer still holds its exclusive zone](./protocols/layer-surface-bufferless-exclusive-zone.md)
-- [Unbounded `ext_workspace_manager_v1` binds per client](./protocols/ext-workspace-object-binding-cap.md)
+- [Unbounded `ext_workspace_manager_v1` binds per client](./resolved/ext-workspace-object-binding-cap-done.md)
+  — RESOLVED 2026-09-17 (PR #74): one shared `BindBudget` — 8 binds per
+  client across all four globals (ext-workspace, ext/wlr toplevel lists,
+  output management), refused with each global's own `finished`; includes
+  re-homing the ext list off Smithay state and an idle-deferred refusal
+  (backend panics on in-bind destructor events)
 - [Lock surfaces are per-output; flexwm has one output](./protocols/lock-surfaces-per-output.md)
 - [Unbounded lock surfaces via duplicate `wl_output` binds](./protocols/lock-surface-duplicate-wl-output.md)
 - [Lock blanks immediately instead of waiting for the first surface](./protocols/session-lock-blank-timing.md)
