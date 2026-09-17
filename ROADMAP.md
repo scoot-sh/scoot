@@ -179,8 +179,8 @@ gap jumped the queue — each item's own file records why it landed when it did.
   hover-opened menu is an enter — and the session half (nested submenus and
   same-flush menu replacements reusing the opening serial past the window)
   was measured live against real Qt and GTK menus, both proven still
-    taking the keyboard. `start_drag` needed its own analysis and has since
-    landed as [its own item](docs/backlog/resolved/dnd-grab-serial-validation-done.md).
+  taking the keyboard. `start_drag` needed its own analysis and has since
+  landed as [its own item](docs/backlog/resolved/dnd-grab-serial-validation-done.md).
 - **[Screenshot encode off the event loop](docs/backlog/resolved/screenshot-encode-off-thread-resolved.md)**
   (PR #57, 2026-09-17) — the PNG encode (plus swizzle and reply framing)
   moved to a single FIFO worker; render and read-back stay on-loop. Loop
@@ -221,9 +221,9 @@ gap jumped the queue — each item's own file records why it landed when it did.
   explicit per-write handling rather than a process-wide SIGPIPE
   disposition, which would have handed the co-resident compositor a
   crash-on-disconnect. A dead *socket* peer still exits 1. Fail-first
-   integration test (fake server, ~1 MiB reply, reader closed); no protocol,
-   IPC, or compositor changes, no README change (the error-response
-   contract is untouched).
+  integration test (fake server, ~1 MiB reply, reader closed); no protocol,
+  IPC, or compositor changes, no README change (the error-response
+  contract is untouched).
 - **[`wl_data_device.start_drag` serial validation](docs/backlog/resolved/dnd-grab-serial-validation-done.md)**
   — the DnD half the popup gate (PR #56) deliberately left open. A drag now
   has to name the live implicit grab's press serial as delivered to the
