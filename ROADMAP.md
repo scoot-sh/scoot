@@ -479,8 +479,9 @@ actually open.
    closed as an accepted tradeoff (no workload has hit it; kept as the landing spot).
 4. Small, unblocked low-priority fixes: [`msg key` modifier
     resolution](docs/backlog/resolved/msg-key-modifier-resolution-done.md)
-    (resolved — modifiers resolve through the keymap probe like `type_text`;
-    toggle-option layouts accept combos, `msg key A` still refuses),
+    (PR #83, resolved — modifiers resolve through the keymap probe like
+    `type_text`; toggle-option layouts accept combos, `msg key A` still
+    refuses),
    [`[binds]` capital
    letters](docs/backlog/resolved/binds-capital-letter-done.md) (resolved —
    single-ASCII-letter fold at parse time, warn on normalize, `msg key A`

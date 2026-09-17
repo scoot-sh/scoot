@@ -6,7 +6,7 @@ priority: null
 blocked: null
 ---
 
-# `flexwm msg key`'s modifier resolution hard-codes `Shift_L`/`Control_L`/ `Alt_L`/`Super_L` and requires each at level 0, so a layout that moves a real modifier off its `_L` key breaks `msg key` combos entirely (LOW, pre-existing). — RESOLVED
+# `flexwm msg key`'s modifier resolution hard-codes `Shift_L`/`Control_L`/ `Alt_L`/`Super_L` and requires each at level 0, so a layout that moves a real modifier off its `_L` key breaks `msg key` combos entirely (LOW, pre-existing). — RESOLVED (PR #83)
 
 ## What it said
 
