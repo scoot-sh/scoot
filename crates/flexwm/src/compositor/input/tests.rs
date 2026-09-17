@@ -95,6 +95,103 @@ fn clamp_to_extent_keeps_values_inside_the_output() {
 // `modifiers/tests.rs` (the name table itself).
 
 // -------------------------------------------------------------------------
+// Startup pointer placement
+// -------------------------------------------------------------------------
+
+/// A fresh `State` straight out of `headless::init`, before any motion: the
+/// pointer is at the output's centre, not at Smithay's default origin.
+///
+/// Fail-first for `pointer-starts-at-origin`: before the placement landed,
+/// this read `(0.0, 0.0)`.
+#[test]
+fn a_fresh_session_starts_with_the_pointer_at_the_output_centre() {
+    let mut event_loop: EventLoop<'static, State> = EventLoop::try_new().expect("an event loop");
+    let display: Display<State> = Display::new().expect("a wayland display");
+    let mut state = State::new(
+        &mut event_loop,
+        display,
+        Config::default(),
+        Keybindings::default(),
+        Appearance::default(),
+        1.0,
+    )
+    .expect("a compositor state with a wayland socket");
+    headless::init(&mut state, CANVAS, CANVAS).expect("a headless backend");
+
+    let pointer = state.seat.get_pointer().expect("a pointer");
+    let location = pointer.current_location();
+    assert_eq!(
+        (location.x, location.y),
+        (f64::from(CANVAS) / 2.0, f64::from(CANVAS) / 2.0),
+        "the pointer starts at the output's origin, not its centre"
+    );
+    // The placement is not user input: nothing was under the pointer at
+    // startup (no client exists yet), so no focus was derived, and the
+    // quiet path records no interaction serial -- nothing here is spendable
+    // for activation or a popup grab. (No idle-timer reset is observable
+    // post-hoc -- no notification can exist before the first client -- so
+    // that half is pinned by the path itself: the placement goes through
+    // `pointer_move_quietly`, which never calls `announce_activity`.)
+    assert!(
+        pointer.current_focus().is_none(),
+        "startup placed pointer focus with no surface under it"
+    );
+    assert!(
+        state.interaction_serials.latest().is_none(),
+        "startup minted an interaction serial with no user behind it"
+    );
+
+    // Motion afterwards still works normally.
+    state.pointer_move(10.0, 20.0);
+    let location = state
+        .seat
+        .get_pointer()
+        .expect("a pointer")
+        .current_location();
+    assert_eq!(
+        (location.x, location.y),
+        (10.0, 20.0),
+        "a motion event after startup placement went somewhere else"
+    );
+}
+
+/// A later output resize -- the path a VT-switch reactivation takes when the
+/// mode changed underneath (`session_event`'s reactivation arm ends in
+/// `Reconfigured::finish`, i.e. `resize_output`) -- leaves the pointer where
+/// the user left it instead of re-centring it.
+#[test]
+fn a_later_resize_leaves_the_pointer_where_the_user_left_it() {
+    let mut event_loop: EventLoop<'static, State> = EventLoop::try_new().expect("an event loop");
+    let display: Display<State> = Display::new().expect("a wayland display");
+    let mut state = State::new(
+        &mut event_loop,
+        display,
+        Config::default(),
+        Keybindings::default(),
+        Appearance::default(),
+        1.0,
+    )
+    .expect("a compositor state with a wayland socket");
+    headless::init(&mut state, CANVAS, CANVAS).expect("a headless backend");
+
+    state.pointer_move(10.0, 20.0);
+    assert!(
+        state.resize_output(CANVAS / 2, CANVAS / 2),
+        "the resize itself failed"
+    );
+    let location = state
+        .seat
+        .get_pointer()
+        .expect("a pointer")
+        .current_location();
+    assert_eq!(
+        (location.x, location.y),
+        (10.0, 20.0),
+        "the resize moved the pointer"
+    );
+}
+
+// -------------------------------------------------------------------------
 // A live compositor and a live client with a real keyboard
 // -------------------------------------------------------------------------
 

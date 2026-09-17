@@ -163,6 +163,13 @@ pub fn init_named(
         })
         .unwrap_or_else(|| Rect::new(0, 0, width, height));
     state.output = Some(output);
+    // The cursor's startup position: centred, not at the origin Smithay
+    // leaves it at. Here rather than per-backend, so all three backends
+    // place it at the same init point -- the cursor draws only under `--tty`
+    // today, but the position is backend-independent seat state. See
+    // `place_pointer_at_output_centre` for the quiet-path and no-replace
+    // reasoning.
+    state.place_pointer_at_output_centre();
     // The head a display-configuration client sees. After `state.output` is
     // set, because that is where the advertised state is read from -- and
     // before `apply()`, so a client that bound the manager during `State::new`

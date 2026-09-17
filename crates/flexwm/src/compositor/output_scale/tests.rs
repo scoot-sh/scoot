@@ -220,6 +220,36 @@ fn relative_pointer_motion_is_clamped_to_the_logical_extent() {
     );
 }
 
+/// Startup placement centres in *logical* coordinates too: at scale 2 the
+/// 200px framebuffer is a 100x100 desktop, so the centre is (50, 50), not
+/// the (100, 100) the physical size would give.
+#[test]
+fn startup_placement_centres_on_the_logical_extent() {
+    let mut event_loop: EventLoop<'static, State> = EventLoop::try_new().expect("an event loop");
+    let display: Display<State> = Display::new().expect("a wayland display");
+    let mut state = State::new(
+        &mut event_loop,
+        display,
+        Config::default(),
+        crate::compositor::keybindings::Keybindings::default(),
+        crate::compositor::decorations::Appearance::default(),
+        2.0,
+    )
+    .expect("a compositor state with a wayland socket");
+    crate::compositor::headless::init(&mut state, CANVAS, CANVAS).expect("a headless backend");
+
+    let location = state
+        .seat
+        .get_pointer()
+        .expect("a pointer")
+        .current_location();
+    assert_eq!(
+        (location.x, location.y),
+        (50.0, 50.0),
+        "the pointer was centred on the physical extent, not the logical one"
+    );
+}
+
 // -------------------------------------------------------------------------
 // A live compositor, a live client, real pixels
 // -------------------------------------------------------------------------
