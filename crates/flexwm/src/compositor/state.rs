@@ -28,6 +28,8 @@ use smithay::wayland::idle_inhibit::IdleInhibitManagerState;
 use smithay::wayland::idle_notify::IdleNotifierState;
 use smithay::wayland::input_method::InputMethodManagerState;
 use smithay::wayland::output::OutputManagerState;
+use smithay::wayland::pointer_constraints::PointerConstraintsState;
+use smithay::wayland::relative_pointer::RelativePointerManagerState;
 use smithay::wayland::selection::data_device::DataDeviceState;
 use smithay::wayland::selection::ext_data_control::DataControlState as ExtDataControlState;
 use smithay::wayland::selection::primary_selection::PrimarySelectionState;
@@ -401,6 +403,22 @@ pub struct State {
     /// protocol objects and the snapshot of what clients have been told.
     /// Read-only: every configuration a client builds is refused.
     pub output_management: OutputManagement,
+    /// `zwp_pointer_constraints_v1` (version 1): pointer lock and confinement,
+    /// the half of the games/3D-app pair `relative_pointer.rs` documents.
+    /// Held only to keep the global alive -- the constraints themselves live
+    /// in Smithay's per-pointer map, activated from
+    /// [`PointerConstraintsHandler::new_constraint`](super::relative_pointer)
+    /// when the surface already has pointer focus, and honoured by the motion
+    /// core in `input.rs` (a locked pointer moves nothing absolute; a
+    /// confined one is clamped to its region).
+    #[allow(dead_code)]
+    pub pointer_constraints_state: PointerConstraintsState,
+    /// `zwp_relative_pointer_manager_v1` (version 1): raw unaccelerated
+    /// pointer deltas for constrained-pointer clients. Held only to keep the
+    /// global alive -- Smithay owns the objects (see `relative_pointer.rs`),
+    /// and the motion core in `input.rs` feeds them on every focused motion.
+    #[allow(dead_code)]
+    pub relative_pointer_manager_state: RelativePointerManagerState,
     /// The shared per-client budget for binding the manager/list globals
     /// above (`ext_workspace`, `foreign_toplevels`,
     /// `foreign_toplevel_management`, `output_management`). Counted in each
@@ -563,6 +581,8 @@ impl State {
         let input_method_manager_state = InputMethodManagerState::new::<Self, _>(&dh, |_| true);
         let gamma_control = GammaControlState::new(&dh);
         let output_management = OutputManagement::new(&dh);
+        let pointer_constraints_state = PointerConstraintsState::new::<Self>(&dh);
+        let relative_pointer_manager_state = RelativePointerManagerState::new::<Self>(&dh);
         let idle_notifier = IdleNotifierState::new(&dh, event_loop.handle());
         let idle_inhibit_manager_state = IdleInhibitManagerState::new::<Self>(&dh);
 
@@ -640,6 +660,8 @@ impl State {
             xdg_activation,
             gamma_control,
             output_management,
+            pointer_constraints_state,
+            relative_pointer_manager_state,
             bind_budget: BindBudget::default(),
             shm_pools: ShmPools::default(),
             idle_notifier,

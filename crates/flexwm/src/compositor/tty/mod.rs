@@ -948,7 +948,15 @@ fn libinput_event(event: InputEvent<LibinputInputBackend>, _: &mut (), state: &m
             state.key(event.key_code(), event.state());
         }
         InputEvent::PointerMotion { event } => {
-            state.pointer_move_relative(event.delta_x(), event.delta_y());
+            // Both pairs: the accelerated delta moves the absolute position,
+            // the pre-accel one is what relative-pointer clients read as the
+            // unaccelerated vector (see `relative_pointer.rs`).
+            state.pointer_move_relative(
+                event.delta_x(),
+                event.delta_y(),
+                event.delta_x_unaccel(),
+                event.delta_y_unaccel(),
+            );
         }
         // Absolute pointing devices -- a USB tablet, or the "Virtual USB
         // Digitizer" that Apple's Virtualization.framework (vfkit) exposes,
