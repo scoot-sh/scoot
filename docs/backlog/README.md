@@ -118,7 +118,14 @@ actionable.
   of a release capture and ~77% of a debug one, to set a byte the format says
   is undefined and `grim` demonstrably ignores
 - [`xdg-toplevel-icon-v1` pixel-buffer icons are not exposed](./protocols/toplevel-icon-buffers.md) — only the icon name reaches IPC
-- [An IME popup over a lock screen is tracked but never drawn](./protocols/ime-popup-over-lock-screen.md)
+- [An IME popup over a lock screen is tracked but never drawn](./resolved/ime-popup-over-lock-screen-done.md)
+  — RESOLVED 2026-09-17: the locked path gathers each current lock surface's
+  popup tree and sends it frame callbacks, with the trust decision recorded
+  (an IME is trusted with pixels for the focused field's candidate window,
+  which shows it nothing composition doesn't already route through it).
+  Five harness tests: inclusion + caret placement + frames, background-xdg
+  and background-IME exclusion, unlock restore over two cycles, disable
+  dismiss.
 - [An IME keyboard grab makes the activation gate credit a client that received nothing](./resolved/interaction-serial-ime-grab-done.md)
   — RESOLVED 2026-09-17 (decide + pin, no behavior change): crediting the
   focused window is the intended outcome, so the decision is recorded and

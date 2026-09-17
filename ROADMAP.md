@@ -375,6 +375,15 @@ gap jumped the queue — each item's own file records why it landed when it did.
   (before/after ranges overlapping). No live `--tty` re-measurement —
   stated as an environment call in the resolved record, with harness wire
   evidence instead. README's not-guaranteed bullet removed.
+- **[An IME popup over a lock screen](docs/backlog/resolved/ime-popup-over-lock-screen-done.md)**
+  — the locked render path gathers each current lock surface's popup tree
+  and sends it frame callbacks, so a passphrase that needs an IME gets its
+  candidate window at the caret. The trust call is recorded, not implicit:
+  an IME is trusted with pixels for the focused field's candidate window
+  (composition already routes every keystroke through it), while background
+  xdg and IME popups stay hidden and callback-starved — the PR #44 password
+  guarantee through the new element source, pinned by exclusion tests
+  alongside the inclusion one.
 ## What's next
 
 The backlog is the source of truth for what to pick up; this is the current

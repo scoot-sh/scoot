@@ -38,15 +38,17 @@
 //! # How the popup gets drawn
 //!
 //! Through [`PopupManager`], not through a list of this module's own. An
-//! input-method popup is a [`PopupKind::InputMethod`], and both of the things
-//! this compositor renders surfaces from already draw their own popups: a
-//! `Window`'s render elements include `PopupManager::popups_for_surface`, and
-//! so do a `LayerSurface`'s (checked in the pinned rev's
-//! `desktop/space/wayland/{window,layer}.rs`). So tracking the popup against
-//! its parent is the whole of "make it appear" -- and, just as importantly,
-//! frame callbacks and output enter/leave follow the same path, so an
-//! animated IME popup is not stalled by this module forgetting to do
-//! something the window path already does.
+//! input-method popup is a [`PopupKind::InputMethod`], and every one of the
+//! things this compositor renders surfaces from already draws its own
+//! popups: a `Window`'s render elements include
+//! `PopupManager::popups_for_surface`, so does a `LayerSurface`'s (checked
+//! in the pinned rev's `desktop/space/wayland/{window,layer}.rs`), and so
+//! does each current session-lock surface's while the session is locked
+//! (see `session_lock.rs`'s "Popups over the lock screen"). So tracking the
+//! popup against its parent is the whole of "make it appear" -- and, just
+//! as importantly, frame callbacks and output enter/leave follow the same
+//! path, so an animated IME popup is not stalled by this module forgetting
+//! to do something the window path already does.
 //!
 //! The parent matters and is not always a window. Text-input focus follows
 //! *keyboard* focus, and in flexwm the keyboard can be on a layer surface --
@@ -149,10 +151,10 @@ impl InputMethodHandler for State {
     /// the protocol's own callers do with no parent at all: the popup is
     /// tracked and positioned at the origin. That covers a text field on a
     /// surface this compositor does not lay out -- a session-lock surface's
-    /// password box, most concretely, where the popup is in fact never drawn
-    /// at all (the locked render path replaces the element list wholesale
-    /// rather than gathering popups; see `session_lock.rs` and
-    /// `docs/backlog/protocols/ime-popup-over-lock-screen.md`).
+    /// password box, most concretely. The locked render path draws the popups
+    /// parented to each current lock surface at that origin-relative offset
+    /// (see `session_lock.rs`'s "Popups over the lock screen"), so the
+    /// candidate window lands at the raw surface-local caret.
     fn parent_geometry(&self, parent: &WlSurface) -> Rectangle<i32, Logical> {
         if let Some(window) = self.id_of(parent).and_then(|id| self.window(id)) {
             return window.geometry();

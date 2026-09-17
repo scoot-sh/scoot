@@ -50,13 +50,16 @@
 //! exclusivity if anything else is still in the list:
 //!
 //! - **Rendering** (`headless.rs::render`): the element list is built from
-//!   this module alone -- an opaque full-output backdrop plus the mapped lock
-//!   surfaces -- so a window, a bar, a wallpaper or a focus ring is never
-//!   gathered at all. A screenshot over IPC reads that same framebuffer, so
-//!   it shows what the lock screen shows and nothing behind it.
-//! - **Frame callbacks** (`headless.rs::render`): only lock surfaces get
-//!   them, so ordinary clients stop drawing while the session is locked --
-//!   the protocol's "the compositor must stop rendering ... normal clients".
+//!   this module alone -- an opaque full-output backdrop, the mapped lock
+//!   surfaces, and the popups parented to those surfaces (see "Popups over
+//!   the lock screen") -- so a window, a bar, a wallpaper or a focus ring is
+//!   never gathered at all. A screenshot over IPC reads that same
+//!   framebuffer, so it shows what the lock screen shows and nothing behind
+//!   it.
+//! - **Frame callbacks** (`headless.rs::render`): lock surfaces and their
+//!   popups get them, so ordinary clients stop drawing while the session is
+//!   locked -- the protocol's "the compositor must stop rendering ...
+//!   normal clients".
 //! - **Keyboard focus** (`shell.rs::refresh_keyboard_focus`): a lock surface,
 //!   or nobody. Never a window, never a layer surface.
 //! - **Pointer focus** (`state.rs::surface_under`, and the explicit
@@ -178,6 +181,58 @@
 //! while it is live, so leaving one installed across a lock would route the
 //! user's password into whatever had a menu open, the keystroke twin of the
 //! pointer leak above.
+//!
+//! ## Popups over the lock screen
+//!
+//! A lock surface can hold a text field -- that is what a password box is --
+//! so an input method can be active against it, and its candidate window is
+//! a popup parented to the lock surface. The locked render path therefore
+//! gathers [`PopupManager::popups_for_surface`] for every current lock
+//! surface, and sends those popups frame callbacks alongside the lock
+//! surfaces' own. Without both halves the candidate window is tracked and
+//! positioned but never drawn, and an animated one stalls for want of frame
+//! callbacks: someone whose passphrase needs an IME could not see what they
+//! are composing.
+//!
+//! This is the one deliberate exception to "never gathered", and it stays an
+//! exception rather than a hole because of *who can parent a popup to a lock
+//! surface*:
+//!
+//! - An `xdg_popup` names its parent by object id, and object ids live in
+//!   per-connection namespaces: a client can only ever name its own
+//!   surfaces. A popup whose root is a lock surface is therefore the lock
+//!   client's own, through the whole parent chain -- and the lock client
+//!   already draws fullscreen and receives the password, so its own menu
+//!   grants it nothing it does not have.
+//! - An input-method popup's parent is assigned by the compositor, never by
+//!   client naming: Smithay parents it to the focused text field on creation
+//!   and re-parents it on activation. While locked, keyboard (and with it
+//!   text-input) focus is a current lock surface or nobody, so an IME popup
+//!   in a lock surface's tree is there because the compositor put it there
+//!   in service of the focused password field -- never because a background
+//!   client asked for it. A background window's own IME popup stays parented
+//!   to that window (and is dismissed outright when focus leaves it), which
+//!   the locked path never gathers.
+//!
+//! The remaining trust is explicit and narrow: the IME client is trusted
+//! with pixels over the lock screen *for the focused field's candidate
+//! window*, because composition already routes every composed keystroke
+//! through it -- the candidate window shows it nothing it does not already
+//! know. Nothing else of any other client is gathered: no windows, no layer
+//! surfaces, no xdg popups from background clients. Locking still dismisses
+//! an open xdg grab and refuses new ones (see `popup.rs`), so a menu left
+//! open at lock time can neither draw nor receive the password.
+//!
+//! The gather loop asks no focus question of its own, and needs none: the
+//! two parenting constraints above hold regardless of how many lock surfaces
+//! exist. Single-output is real but single-surface is not --
+//! [`SessionLockHandler::new_surface`] performs no per-output duplicate
+//! check, so a lock client calling `get_lock_surface` twice yields two
+//! current surfaces, and an xdg popup on the second (unfocused --
+//! `keyboard_focus` takes the first current surface) can arise and is
+//! gathered. Harmless either way: it is still the lock client's own surface,
+//! and IME popups stay pinned to the focused field by the
+//! compositor-assigned parenting above.
 
 use std::collections::HashMap;
 use std::time::Duration;
@@ -189,8 +244,8 @@ use smithay::backend::renderer::element::surface::{
     WaylandSurfaceRenderElement, render_elements_from_surface_tree,
 };
 use smithay::backend::renderer::{Color32F, ImportAll, Renderer, Texture};
-use smithay::desktop::WindowSurfaceType;
 use smithay::desktop::utils::{send_frames_surface_tree, under_from_surface_tree};
+use smithay::desktop::{PopupManager, WindowSurfaceType};
 use smithay::input::pointer::CursorImageStatus;
 use smithay::output::Output;
 use smithay::reexports::wayland_protocols::ext::session_lock::v1::server::ext_session_lock_v1::ExtSessionLockV1;
@@ -198,7 +253,7 @@ use smithay::reexports::wayland_server::backend::ObjectId;
 use smithay::reexports::wayland_server::protocol::wl_output::WlOutput;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::{DisplayHandle, Resource};
-use smithay::utils::{Logical, Physical, Point, SERIAL_COUNTER};
+use smithay::utils::{Logical, Physical, Point, SERIAL_COUNTER, Scale};
 use smithay::wayland::compositor::{BufferAssignment, SurfaceAttributes, with_states};
 use smithay::wayland::session_lock::{
     LockSurface, LockSurfaceConfigure, LockSurfaceData, SessionLockHandler,
@@ -425,13 +480,30 @@ impl SessionLock {
         }
     }
 
-    /// The render elements of every *mapped* lock surface, front-most first.
+    /// The render elements of every *mapped* lock surface, front-most first,
+    /// each preceded by the popups parented to it.
     ///
     /// Mapped-ness here is `last_acked`, which Smithay's own pre-commit hook
     /// maintains as "has a buffer" (`session_lock/surface.rs`), the same test
     /// `layer_shell.rs` uses for a layer surface. An unmapped one produces no
     /// elements and the backdrop shows through, which is exactly what the
     /// protocol asks for while a lock client is still starting up.
+    ///
+    /// The popups are the input method's candidate window over the password
+    /// field, or the lock client's own popups -- and nothing else can be
+    /// (see this module's "Popups over the lock screen" for why each
+    /// parentage there is safe and what can never appear). They come before
+    /// their parent's own elements in the list, which is what puts them in
+    /// front of it: the damage tracker draws the list back-to-front, so the
+    /// first entry ends up on top (the same order `Window`'s own render
+    /// elements use for its popups).
+    ///
+    /// Costs what every window already pays per frame on the unlocked path:
+    /// one [`PopupManager::popups_for_surface`] walk per lock surface (one
+    /// surface per output), plus Smithay's own per-popup element `Vec`. No
+    /// new allocation shape -- with no popup the walk finds an empty tree
+    /// and appends nothing, which is the byte-identical no-IME behaviour the
+    /// blanking tests pin.
     fn surface_elements<R>(
         &self,
         renderer: &mut R,
@@ -447,6 +519,26 @@ impl SessionLock {
             if !is_mapped(surface) {
                 continue;
             }
+            for (popup, popup_offset) in PopupManager::popups_for_surface(surface.wl_surface()) {
+                // The layer-surface shape (`space/wayland/layer.rs`), not
+                // the window one: a lock surface is drawn at `origin`
+                // directly, so there is no parent geometry to add back --
+                // and for an IME popup the two coincide anyway, because
+                // `parent_geometry` answers the default rectangle for a
+                // lock surface (see `input_method.rs`).
+                let offset = (popup_offset - popup.geometry().loc)
+                    .to_f64()
+                    .to_physical(Scale::from(scale))
+                    .to_i32_round();
+                elements.extend(render_elements_from_surface_tree(
+                    renderer,
+                    popup.wl_surface(),
+                    origin + offset,
+                    scale,
+                    1.0,
+                    Kind::Unspecified,
+                ));
+            }
             elements.extend(render_elements_from_surface_tree(
                 renderer,
                 surface.wl_surface(),
@@ -459,13 +551,23 @@ impl SessionLock {
         elements
     }
 
-    /// Sends this frame's callbacks to every current lock surface.
+    /// Sends this frame's callbacks to every current lock surface and the
+    /// popups parented to it.
     ///
     /// Sent to all of them rather than only the ones that produced an
     /// element, matching `render()`'s window, cursor and layer-surface loops
     /// and for the same reason: a client may legitimately ask for a callback
     /// before its first attach, and withholding it would stall the very frame
-    /// that unsticks it -- here, the first frame of the lock screen itself.
+    /// that unsticks it -- here, the first frame of the lock screen itself,
+    /// or of the candidate window. The popup set is the same trees
+    /// [`SessionLock::surface_elements`] gathers, so a popup with elements
+    /// is never stalled -- except popups of not-yet-mapped lock surfaces,
+    /// which are woken but not drawn: `surface_elements` skips a lock
+    /// surface with no buffer yet, while this sends to every current
+    /// surface, so a popup that commits before its lock surface's first
+    /// buffer gets callbacks with no elements yet. Harmless -- the same
+    /// client's own unseen buffer, redrawn the same way `window.send_frame`
+    /// (see `headless.rs::render`) wakes every window unconditionally.
     fn send_frames(&self, output: &Output, time: Duration) {
         for surface in self.current() {
             send_frames_surface_tree(
@@ -475,6 +577,15 @@ impl SessionLock {
                 Some(Duration::ZERO),
                 |_, _| Some(output.clone()),
             );
+            for (popup, _) in PopupManager::popups_for_surface(surface.wl_surface()) {
+                send_frames_surface_tree(
+                    popup.wl_surface(),
+                    output,
+                    time,
+                    Some(Duration::ZERO),
+                    |_, _| Some(output.clone()),
+                );
+            }
         }
     }
 
@@ -1133,7 +1244,8 @@ impl State {
     }
 
     /// This frame's lock elements, front-most first: the mapped lock
-    /// surfaces, then the opaque backdrop behind them.
+    /// surfaces each preceded by the popups parented to it, then the opaque
+    /// backdrop behind them.
     ///
     /// The whole element list while locked, by construction -- the caller
     /// adds only the cursor in front of it. Nothing else is gathered, so
