@@ -420,7 +420,7 @@ gap jumped the queue — each item's own file records why it landed when it did.
   existing `MAX_GAP` disclosure.
 - **[`locked` waits for vblank confirmation, not just a
   render](docs/backlog/resolved/session-lock-vblank-confirm-done.md)** —
-  resolved 2026-09-17: under `--tty` `locked` waits for the vblank of the
+  resolved 2026-09-17 (PR #84): under `--tty` `locked` waits for the vblank of the
   flip carrying the blanked frame (flip-sequence tracked, so a lock raced
   with an in-flight flip confirms on the next one), with a one-second
   fallback confirming anyway rather than hanging a switched-away locker;
