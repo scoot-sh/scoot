@@ -119,7 +119,12 @@ actionable.
   is undefined and `grim` demonstrably ignores
 - [`xdg-toplevel-icon-v1` pixel-buffer icons are not exposed](./protocols/toplevel-icon-buffers.md) — only the icon name reaches IPC
 - [An IME popup over a lock screen is tracked but never drawn](./protocols/ime-popup-over-lock-screen.md)
-- [An IME keyboard grab makes the activation gate credit a client that received nothing](./protocols/interaction-serial-ime-grab.md)
+- [An IME keyboard grab makes the activation gate credit a client that received nothing](./resolved/interaction-serial-ime-grab-done.md)
+  — RESOLVED 2026-09-17 (decide + pin, no behavior change): crediting the
+  focused window is the intended outcome, so the decision is recorded and
+  pinned by two harness tests (real `grab_keyboard`, token creation plus
+  redemption) rather than changed. The ticket's three options were each worse
+  than the status quo.
 - [`spawn` hands its child no `XDG_ACTIVATION_TOKEN`](./protocols/activation-token-for-spawned-children.md)
 - [Popup input](./resolved/xdg-popup-input-resolved.md)
   — RESOLVED 2026-09-16: `xdg_popup.grab` is honoured, with a stated focus

@@ -64,13 +64,21 @@
 //!   is not exposed, so `key()` tracks held keycodes itself to tell the
 //!   difference (see [`State::key`]).
 //!
-//! The one place the claim is not yet literal is an input method holding a
-//! keyboard grab (`zwp_input_method_v2.grab_keyboard`): Smithay's grab sends
-//! keys to the IME alone and leaves the seat's focus untouched, so the
-//! focused client is credited for keys it did not receive. That is not an
-//! escalation -- the window the user is typing into is still the one credited,
-//! which is the gate's intent -- but it is a divergence, filed as
-//! `docs/backlog/protocols/interaction-serial-ime-grab.md`.
+//! The one place "delivered" names the intended recipient rather than the
+//! wire recipient is an input method holding a keyboard grab
+//! (`zwp_input_method_v2.grab_keyboard`): Smithay's grab sends keys to the
+//! IME alone and leaves the seat's focus untouched, so the focused client is
+//! credited for keys it did not receive. That is deliberate, not a gap:
+//! the window the user is typing into is the interacting party -- the
+//! keystrokes are on their way to it as composed text -- which is who the
+//! gate means to credit. Not recording under a grab would strip
+//! token-minting from users typing through an IME, exactly the population
+//! that most needs it; crediting the grab's client instead would strip it
+//! from the focused window the user aimed at; and naming the grab's delivery
+//! properly needs an upstream grab-identity API that does not exist.
+//! `activation/tests/ime_grab.rs` pins this: a keypress under a real grab
+//! still records a serial the focused window's client -- and nobody else --
+//! can spend for an activation token.
 //!
 //! # Why a ring rather than "the last serial"
 //!

@@ -52,6 +52,7 @@ use crate::compositor::input::interaction;
 use crate::compositor::state::ClientState;
 use crate::compositor::test_support::Harness;
 
+mod ime_grab;
 mod keyboard;
 
 /// The one output every test here gives the core, so there is somewhere for
@@ -335,6 +336,12 @@ enum Ack {
     /// The locker client unlocked again after the test told it to (see
     /// `keyboard.rs`, the only script that sends this).
     Unlocked,
+    /// The IME client took its keyboard grab (see `ime_grab.rs`, the only
+    /// script that sends this).
+    ImeGrabbed,
+    /// How many diverted `key` events the IME's grab object has seen so far
+    /// (see `ime_grab.rs`, the only script that sends this).
+    ImeKeys(u32),
     /// The script ran to the end. Boxed because a `Run` owns a `Connection`
     /// and is far larger than the other variant.
     Done(Box<Run>),
