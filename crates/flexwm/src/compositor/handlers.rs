@@ -86,14 +86,15 @@ impl CompositorHandler for State {
                 }
                 send_initial_configure(self, &root);
                 self.observe_frame(id);
-            } else {
-                // Not a window, so it may be a layer surface: its first
-                // commit is what earns it a configure, and any later one may
-                // have changed the area it reserves. Checked only after
-                // `id_of` fails, so an ordinary window's commit never pays
-                // for the layer-map lookup. `commit_layer_surface` reports
-                // whether it was one; nothing else needs to know yet.
-                let _ = self.commit_layer_surface(&root);
+            } else if !self.commit_layer_surface(&root) {
+                // Neither a window nor a layer surface. The layer map was
+                // still checked first, so an ordinary window's commit never
+                // pays for its lookup and a layer surface's never reaches
+                // the lock probe below. What remains may be a lock surface
+                // commit, which re-derives pointer focus (see
+                // `refresh_lock_pointer_focus`); nothing else needs to know
+                // yet.
+                self.refresh_lock_pointer_focus(&root);
             }
         }
 

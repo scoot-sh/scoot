@@ -1059,7 +1059,9 @@ real `--tty` hardware by screenshot and by what clients were actually sent:
 - **Only the lock surface receives input.** Keyboard focus moves to it (or to
   nobody, if the client hasn't created one yet) the instant the lock request
   arrives, and pointer focus is moved with it, so a click can't land in the
-  window that happened to be under the pointer. Any grab in flight is
+  window that happened to be under the pointer. Pointer focus is re-derived
+  again on the commit that maps the lock surface, so the first click lands on
+  it without the mouse having to move first. Any grab in flight is
   dropped as well — not only when the lock is taken, but at every transition
   that changes which lock surfaces count (a lock surface destroyed, a lock
   given up, a locker that died), because a grab outlives focus changes by
@@ -1171,14 +1173,6 @@ its connection and its `wl_surface`s are still perfectly alive.
   between the lock request and the first blanked frame. That is inherent (the
   protocol's `locked` ordering exists precisely because of it), not something
   flexwm defers.
-- **The first click on a fresh lock screen, before the mouse has moved,
-  reaches nobody.** Pointer focus is re-derived when the lock surface is
-  created, which is before it has drawn anything, so the hit test finds
-  nothing and the click goes nowhere; one pointer motion fixes it for the rest
-  of the session. It fails safe — "nobody" is nobody, never the window that
-  was under the pointer before the lock — and a locker is a keyboard-first
-  thing, so it's a papercut rather than a hole, but it is on the backlog
-  rather than fixed.
 - **flexwm blanks immediately rather than waiting for the lock client to
   draw.** Some compositors wait up to a second for lock surfaces so the
   transition doesn't flash black; flexwm doesn't, deliberately — waiting means
