@@ -211,18 +211,41 @@ things worth knowing:
 
 ### What the control socket refuses
 
-Five bounds an agent driving flexwm over IPC can actually hit. The first
-three are refusals with a reason — an ordinary `error` response, which
+Seven bounds an agent driving flexwm over IPC can actually hit. The first
+five are refusals with a reason — an ordinary `error` response, which
 `flexwm msg` prints and exits non-zero on — rather than a silent drop or a
 delay. The last two can't be: one drops a peer that is by definition not
 reading its socket, and the other shortens a wait rather than refusing it.
 
 - **One request line may be at most 1 MiB.** Past that the connection is
   told so and closed; there is no resynchronizing mid-line.
-- **One screenshot per connection per 16ms frame.** A capture costs a full
-  render and PNG encode on the thread that serves every other client, so a
-  second one inside the same frame is refused rather than queued. Retry
-  after a frame.
+- **One screenshot per connection per 16ms frame.** A capture costs a render
+  and framebuffer read-back on the thread that serves every other client, so
+  a second one inside the same frame is refused rather than queued. Retry
+  after a frame. Note the reply order for that pair: the refusal is answered
+  immediately, while the capture it follows is still encoding (see below) --
+  so the *second* request's reply arrives *first*. A client pipelining
+  screenshots matches replies by content, not by position.
+- **One capture in flight per connection.** The PNG encode runs on a worker
+  thread, so other connections are answered while it runs -- but the
+  capture's own reply still has to go out before any later reply on that
+  same connection, or a client reading replies in request order sees them
+  swap. Any other request arriving on a connection with a capture in flight
+  is therefore refused with a retry rather than answered out of order.
+  `flexwm msg` sends one request per connection and never meets this; nor
+  does a capture refuse one on *another* connection. A capture whose earlier
+  replies are still going out is refused the same way, for the same framing
+  reason -- retry once the queue has drained.
+- **Four captures in flight at once, across every client.** Each one holds a
+  full frame of raw pixels on its way through the worker, so past four the
+  next capture is refused with a retry rather than queued without bound.
+  Measured at 1600x1000 in a release build: the event-loop stall per capture
+  is down to the render and read-back (~2ms -- the encode's ~10ms share of
+  the ticket's ~12ms figure no longer blocks anyone), and a `version` round
+  trip during a capture flood answers in ~8ms instead of ~11ms. Under N concurrent
+  capturers the render share is still paid per capture, so a bystander waits
+  longer than that; what no longer happens is N encodes stacking end to end
+  on the loop.
 - **At most 64 connections at once**, across every client. A 65th is
   refused with a message naming the limit and closed immediately, not
   queued behind the others. This is what keeps the per-connection bounds
@@ -251,7 +274,8 @@ reading its socket, and the other shortens a wait rather than refusing it.
   waits, so an unbounded wait from a client that then exits would hold that
   slot for the rest of the session. The default is 5 seconds and the request
   is meant for hundreds of milliseconds, so this is well out of the way of
-  any real use.
+  any real use. A capture in flight neither extends nor shortens a wait: it
+  touches no commit clock, and parks no waiter.
 
 `--tty` needs a seat (`seatd` or logind) with a DRM device on it. On a modern
 kernel, on every non-root `--tty` run, Smithay logs `Unable to become drm

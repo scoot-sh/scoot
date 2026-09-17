@@ -22,6 +22,7 @@ use super::slots::Slot;
 use super::{PendingIdle, screenshot_throttled};
 use crate::compositor::State;
 use crate::compositor::headless::FRAME_INTERVAL;
+use crate::compositor::screenshot::ShotStart;
 
 #[cfg(test)]
 mod tests;
@@ -143,11 +144,15 @@ impl Limits {
 ///
 /// The socket must already be non-blocking; [`super::accept`] does that, and
 /// says why there rather than here. `slot` is this connection's claim on one of
-/// `slots::MAX_CONNECTIONS`, released when the source is dropped.
+/// `slots::MAX_CONNECTIONS`, released when the source is dropped. `conn`
+/// identifies the connection to `State` for as long as it lives -- it is what
+/// a screenshot parked by this connection is filed under, so its reply finds
+/// its way back after `serve` has returned.
 pub(super) fn source(
     stream: UnixStream,
     slot: Slot,
     limits: Limits,
+    conn: u64,
 ) -> std::io::Result<ConnectionSource> {
     Ok(ConnectionSource {
         // A second fd on the same socket: this one is polled, the one inside
@@ -158,6 +163,7 @@ pub(super) fn source(
             lines: Lines::new(stream.try_clone()?),
             outbound: Outbound::default(),
             last_screenshot: None,
+            conn,
             closing: false,
             slot: Some(slot),
             idle_wait: limits.idle_wait,
@@ -401,6 +407,11 @@ pub(super) struct Connection {
     /// if it never has. Per connection, not global: one client hammering the
     /// request must not make another client's first one fail.
     last_screenshot: Option<Instant>,
+    /// What `State` files this connection's parked screenshots under (see
+    /// `screenshot.rs`). Assigned once in `accept`, never reused within a
+    /// process -- so a late completion can never be mistaken for another
+    /// connection's capture.
+    conn: u64,
     /// Whether no further request will be read from this connection: its peer
     /// has closed its write half, or it sent something that cannot be
     /// recovered from. The connection stays in the event loop only until
@@ -629,6 +640,26 @@ impl Connection {
             }
         };
 
+        // A capture in flight answers nothing else first: that connection's
+        // screenshot reply has to go out before any later request's, or a
+        // client reading replies in request order sees them swap -- and a
+        // `WaitIdle` hand-off would be the worst such swap, parking the
+        // connection while its capture's answer is still owed. So any other
+        // request arriving meanwhile is refused with a retry -- the same
+        // "refused rather than delayed" shape the screenshot rate limit
+        // already has, and for the same reason: this runs on the event-loop
+        // thread, where waiting would stall every other client in order to
+        // keep one. `flexwm msg` sends one request per connection and never
+        // meets this. Screenshots themselves are exempt: they have their own
+        // checks below (the rate limit first, so its message is unchanged).
+        let screenshot = matches!(request, Request::Screenshot { .. });
+        if !screenshot && state.shot_inflight(self.conn) {
+            return self.answer(&Response::error(
+                "a screenshot from this connection is still being encoded; \
+                 retry in a few milliseconds",
+            ));
+        }
+
         // Waiting is answered later, from the render loop, so the connection
         // leaves this source and lives on in `pending_idle`.
         if let Request::WaitIdle {
@@ -695,16 +726,16 @@ impl Connection {
             return Step::Close;
         }
 
-        // A screenshot is the one request that costs a full render, a
-        // framebuffer read-back and a PNG encode, all on the single thread
-        // that also runs wayland dispatch, input and every other IPC
-        // connection (see `screenshot.rs`). Served back-to-back it starves
-        // everything else, so a connection that was handed one less than a
-        // frame ago is told to come back rather than served a second one at
-        // that price. Per request, not per wakeup: several screenshot requests
-        // arriving in one write are throttled exactly as if they had arrived
-        // one at a time.
-        let screenshot = matches!(request, Request::Screenshot { .. });
+        // A screenshot is the one request whose capture costs a full render
+        // and a framebuffer read-back on the single thread that also runs
+        // wayland dispatch, input and every other IPC connection (see
+        // `screenshot.rs`). Served back-to-back it starves everything else,
+        // so a connection that was handed one less than a frame ago is told
+        // to come back rather than served a second one at that price. Per
+        // request, not per wakeup: several screenshot requests arriving in
+        // one write are throttled exactly as if they had arrived one at a
+        // time. The PNG encode itself no longer runs here at all -- it is on
+        // the screenshot worker by the time this returns.
         if screenshot && screenshot_throttled(self.last_screenshot, Instant::now()) {
             return self.answer(&Response::error(format!(
                 "screenshots are limited to one per connection per {}ms, the \
@@ -715,22 +746,62 @@ impl Connection {
             )));
         }
 
-        let response = state.handle_request(request);
+        // Connection::step() intercepts and answers the two async requests
+        // itself (see above) before handle_request is ever called: `WaitIdle`
+        // waits on pending_idle, and a screenshot waits on the encode
+        // worker, instead of being returned immediately like every other
+        // request.
         if screenshot {
-            // Stamped once the capture is done, not when the request
-            // arrived: the whole point is to leave the event loop a frame's
-            // worth of room for everything else *after* a capture, and a
-            // capture can easily take longer than a frame itself, which
-            // would leave a start-stamped window already expired by the time
-            // it mattered (measured: ~170ms for 800x600 in a debug build --
-            // the throttle never once fired that way). Recorded whether or
-            // not the capture succeeded: `screenshot()` renders before it
-            // can fail, so the expensive part was spent either way.
-            self.last_screenshot = Some(Instant::now());
+            // A capture's reply goes out later, through a clone of this
+            // socket -- so it must not be dispatched while earlier replies
+            // are still queued here, or the completion would land in the
+            // middle of a half-written response. The same hazard the
+            // `wait-idle` hand-off avoids by taking the queue with it; here
+            // the connection stays, so the capture is refused with a retry
+            // instead. Rare in practice -- the queue is empty whenever the
+            // peer is reading -- and a retry costs a millisecond.
+            if !self.outbound.is_empty() {
+                return self.answer(&Response::error(
+                    "earlier replies to this connection are still going out; \
+                     retry in a few milliseconds",
+                ));
+            }
+            // The socket clone carries the reply back after `serve` has
+            // returned (see `screenshot.rs`): it shares the connection's
+            // file status flags, so it is non-blocking like the original --
+            // the same sharing `PendingIdle` relies on for its own hand-off.
+            let stream = match self.lines.socket().try_clone() {
+                Ok(stream) => stream,
+                Err(error) => {
+                    return self.answer(&Response::error(format!(
+                        "could not take a screenshot: {error}"
+                    )));
+                }
+            };
+            match state.start_screenshot(self.conn, stream) {
+                ShotStart::Dispatched => {
+                    // Stamped at dispatch, like the synchronous capture was
+                    // stamped at completion: the event-loop cost (render and
+                    // read-back) has just been spent, and that is what the
+                    // window leaves room for.
+                    self.last_screenshot = Some(Instant::now());
+                    Step::Continue
+                }
+                ShotStart::Failed(message) => {
+                    // The capture ran and failed expensively (see
+                    // `ShotStart`): stamped for the same reason.
+                    self.last_screenshot = Some(Instant::now());
+                    self.answer(&Response::error(message))
+                }
+                // Refused before any work: the window stays as it was, so a
+                // refusal is never itself what throttles the retry.
+                ShotStart::Refused(message) => self.answer(&Response::error(message)),
+            }
+        } else {
+            // The wayland-side flush this used to do per request is now done once
+            // per wakeup, by `step`, for every request it served.
+            self.answer(&state.handle_request(request))
         }
-        // The wayland-side flush this used to do per request is now done once
-        // per wakeup, by `step`, for every request it served.
-        self.answer(&response)
     }
 
     /// Sends one reply, closing the connection if even queueing it failed.

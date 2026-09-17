@@ -288,6 +288,32 @@ if [ "$ring_ok" -ne 1 ]; then
     exit 1
 fi
 
+echo "--- clients killed mid-screenshot do not wedge the compositor ---"
+# Each iteration asks for a screenshot and is killed at once: depending on
+# the race the client dies before connecting, mid-encode (the orphaned
+# capture is dropped when its reply finds a dead peer), or after its reply
+# already arrived. All three are safe by construction; what must hold
+# afterwards is that the compositor still answers. The harness suite pins
+# the mid-encode case deterministically (a_client_that_disconnects_mid_encode);
+# this hammers every interleaving end to end instead.
+for _ in $(seq 1 20); do
+    "$FLEXWM" msg screenshot --out /tmp/flexwm-smoke-killed.png >/dev/null 2>&1 &
+    killer=$!
+    killed="${killed-} $killer"
+    kill -9 "$killer" 2>/dev/null || true
+done
+# Only these: a bare `wait` would also wait for the compositor itself, which
+# never exits on its own, and hang the script.
+# shellcheck disable=SC2086
+wait $killed 2>/dev/null || true
+rm -f /tmp/flexwm-smoke-killed.png
+"$FLEXWM" msg version >/dev/null || {
+    echo "BUG: the compositor stopped answering after clients were killed mid-screenshot"
+    tail -30 "$LOG"
+    exit 1
+}
+echo "ok: the compositor still answers after 20 clients killed mid-screenshot"
+
 echo "--- checking foot no longer falls back to client-side decorations ---"
 # Every prior smoke-test run on this project has shown foot logging this on
 # startup (it's stderr, captured into $LOG along with everything else foot

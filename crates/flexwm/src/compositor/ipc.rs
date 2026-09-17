@@ -36,6 +36,7 @@ use std::io::Write;
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::sync::LazyLock;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use flexwm_core::Action;
@@ -47,7 +48,7 @@ use smithay::reexports::calloop::generic::Generic;
 use smithay::reexports::calloop::{EventLoop, Interest, Mode, PostAction};
 
 use self::connection::Limits;
-use self::outbound::Outbound;
+pub(crate) use self::outbound::Outbound;
 use self::slots::{MAX_CONNECTIONS, Slot, Slots};
 use super::State;
 use super::headless::FRAME_INTERVAL;
@@ -87,6 +88,17 @@ pub struct PendingIdle {
     /// how it moves out of the connection handing over; always `Some` here.
     _slot: Option<Slot>,
 }
+
+/// Identifies an IPC connection to `State` for as long as it lives.
+///
+/// What a screenshot parked by a connection is filed under (see
+/// `screenshot.rs`), so its reply finds its way back after `serve` has
+/// returned. Never reused within a process -- a wrapping counter could hand
+/// a late completion to a connection that happened to inherit its number, so
+/// this starts at 1 and a `u64` simply never wraps in practice. Relaxed
+/// ordering: assigned once per accept, never read-modify-written against
+/// anything else.
+static NEXT_CONN: AtomicU64 = AtomicU64::new(1);
 
 /// What a client past [`MAX_CONNECTIONS`] is told, encoded once.
 ///
@@ -198,7 +210,12 @@ fn accept(
     state
         .loop_handle
         .insert_source(
-            connection::source(stream, slot, limits)?,
+            connection::source(
+                stream,
+                slot,
+                limits,
+                NEXT_CONN.fetch_add(1, Ordering::Relaxed),
+            )?,
             |_readiness, connection, state: &mut State| connection.step(state),
         )
         // The message rather than the error itself: an `InsertError` carries
@@ -274,10 +291,21 @@ impl State {
                 self.act(Action::from(action));
                 self.ok()
             }
-            Request::Screenshot { .. } => match self.screenshot() {
-                Ok(screenshot) => Response::Screenshot(screenshot),
-                Err(error) => Response::error(error),
-            },
+            // Connection::step() intercepts and answers this variant itself
+            // (see above) before handle_request is ever called: a capture is
+            // dispatched to the encode worker in `serve`, and its reply comes
+            // back through the completion channel after `serve` has returned.
+            // If this ever fires, that interception was bypassed -- answer an
+            // error rather than aborting over it (an abort here would take
+            // every client's unsaved state with it over a routing bug), and
+            // fail loudly in debug builds so a test catches the bypass.
+            Request::Screenshot { .. } => {
+                debug_assert!(
+                    false,
+                    "Screenshot reached handle_request; Connection::serve must intercept it"
+                );
+                Response::error("could not take a screenshot: internal routing error")
+            }
             Request::PointerMove { x, y } => {
                 self.pointer_move(x, y);
                 self.ok()

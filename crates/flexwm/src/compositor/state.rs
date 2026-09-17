@@ -58,6 +58,7 @@ use super::nested::Host;
 use super::output_management::OutputManagement;
 use super::popup::ActivePopupGrab;
 use super::screencopy::Screencopy;
+use super::screenshot::{Encoder, PendingShot, ShotSink};
 use super::session_lock::SessionLock;
 use super::tty::Tty;
 
@@ -475,6 +476,21 @@ pub struct State {
     /// When a client last committed, which is what `wait-idle` waits on.
     pub last_commit: Instant,
     pub pending_idle: Vec<PendingIdle>,
+    /// The screenshot encode worker, if one has been needed yet. `None`
+    /// until the first capture spawns it lazily (see `screenshot.rs`):
+    /// a session that never screenshots pays for no thread and no event
+    /// source. Dropped and respawned if the worker ever goes away.
+    pub screenshot_encoder: Option<Encoder>,
+    /// The completion channel screenshot workers answer through. Created
+    /// once, alongside its event source, and kept across worker respawns --
+    /// so a restart reuses the one registered source rather than abandoning
+    /// one per generation. `None` until the first capture, like the worker.
+    pub screenshot_sink: Option<ShotSink>,
+    /// Captures accepted but not yet fully written out -- either still
+    /// encoding on the worker or draining a reply the socket would not take
+    /// in one write. Serviced by the completion channel's callback and, for
+    /// the draining half, by the frame tick (see `screenshot.rs`).
+    pub pending_shots: Vec<PendingShot>,
 }
 
 impl State {
@@ -619,6 +635,9 @@ impl State {
             timer_armed: false,
             last_commit: Instant::now(),
             pending_idle: Vec::new(),
+            screenshot_encoder: None,
+            screenshot_sink: None,
+            pending_shots: Vec::new(),
         })
     }
 

@@ -215,9 +215,13 @@ actually open.
    parked waiters from a since-crashed agent wedged the whole control
    channel. The third concern that entry bundled — [capture and encode on
    the event-loop
-   thread](docs/backlog/ipc/screenshot-encode-on-event-loop.md) — is re-filed
-   and still open (medium priority), as are two adjacent things found while
-   reviewing it: [the accept loop and
+   thread](docs/backlog/resolved/screenshot-encode-off-thread-resolved.md) —
+   is RESOLVED 2026-09-17: the PNG encode (plus swizzle and reply framing)
+   moved to a single FIFO worker, with per-connection ordering held by
+   refusing anything else on a connection with a capture in flight, a bound
+   of four captures across the compositor, and `wait-idle` untouched. Two
+   adjacent things found while reviewing the cap work are still open:
+   [the accept loop and
    `EMFILE`](docs/backlog/ipc/accept-loop-swallows-emfile.md) and [what a
    shared connection table costs an innocent
    client](docs/backlog/ipc/connection-cap-denies-the-same-user.md).
