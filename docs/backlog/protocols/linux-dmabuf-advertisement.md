@@ -45,6 +45,11 @@ its capture globals.
   with the global advertised — expected `failed` → shm fallback, proven on
   the wire rather than assumed. `foot` (shm) and `grim` already proven
   unaffected; they are the floor, not the matrix.
+- The probe VM had `/dev/dri/card0`, so the `renderD128 → 0` fallback ladder
+  never fired — yet `main_device=0` (no DRM node) is plausibly *the*
+  production shape on GPU-less container targets (webtop). Exercise the
+  no-node path explicitly, plus a `--nested` and a `--tty` re-drive of the
+  acceptance above, before calling the advertisement done.
 - `README.md`'s protocol inventory gains one row: what is advertised, what
   `failed` means here, and the one-sentence honesty statement from the
   measurement record. No config knob, no CLI flag, no IPC surface.
