@@ -97,19 +97,59 @@ cross-client tests (`two_clients_are_kept_in_step_independently`,
 which is the other half of "a test that would have panicked before still
 cannot panic after".
 
-### The dead-manager edge is not constructible — stated, not tested
+### The dead-manager edge is reachable but harmless (review correction)
 
-A dead manager sitting in `managers` at `output_bound` time cannot be
-built through real client behavior: `stop` removes the entry before
-`finished`, client-side destroy and disconnect both run the same
-`retain` in `destroyed`, the refresh path drops dead clients in
-`retain_mut`, and everything runs on the single event-loop thread, so no
-bind can interleave between a death and its prune. The old `client() →
-None → skip` arm and the new backend-dependent dead arm were both
-unreachable defense-in-depth. Under the live Rust backend a hypothetically
-kept dead manager still could not panic: its group `Weak` would fail to
-upgrade first, and even past that the send dies as `InvalidId` (see
-below), never at the client-id panic check.
+The as-filed record said a dead manager in `managers` at `output_bound`
+time was not constructible. Independent review showed that is wrong: it
+is reachable, through wayland-backend's batching, and harmless in every
+direction. Each clause below was re-verified against the cited source,
+not relayed.
+
+The mechanism (wayland-backend 0.3.17, `rs/server_impl/common_poll.rs`):
+`dispatch_all_clients` (epoll impl, `:81-107`) dispatches every ready
+client through `dispatch_events_for` — skipping errors, so one client's
+disconnect does not stop the batch (`:98`) — and runs `cleanup()` once
+*after* the batch (`:102-103`). `cleanup()`
+(`rs/server_impl/handle.rs:45-61`) collects killed clients into
+`dead_clients` and drops them in the returned closure (`:59`), which is
+where their objects' `destroyed` callbacks — the `retain` doing the
+prune — finally run. A single `dispatch_events_for` pass likewise drains
+a connection's whole pipelined queue (`:152-326`) before any cleanup.
+`State::output_bound`, meanwhile, runs synchronously inside the bind
+(`DispatchAction::Bind` invokes `handler.bind` inline, `:309-318`, and
+Smithay's bind ends in `state.output_bound(..)` — see `handlers.rs`'s
+guard-discipline note). So a bind always sees the manager list as of
+before the batch's cleanup, dead entries included. Two concrete shapes:
+
+- One client pipelines a manager death and a `wl_output` bind with no
+  round-trip: both are processed in one pass, the bind's `output_bound`
+  walks the entry whose `destroyed` is still queued for cleanup.
+- A disconnect races another client's bind in the same epoll batch: the
+  dead client's drop (and its entries' `destroyed`) waits for the
+  post-batch closure while the other client's bind is dispatched inside
+  it.
+
+Why neither can panic, per direction (live backend is the Rust one; the
+sys half is documented for completeness):
+
+- Different-client dead id → `same_client_as` is false → skipped. The
+  Rust impl (`rs/server_impl/mod.rs:36-38`) compares stored client ids
+  unconditionally — dead or alive, different ids compare false.
+- Same-client dead id (Rust) → the field compare stays true → kept →
+  `group.output_enter(wl_output)` is a legal alive-alive same-client send
+  (passes the `:193` check, `get_object` succeeds) → `manager.done()` on
+  the dead object dies in `get_object` first (`client.rs:129`, before any
+  panic check) as `InvalidId`, which the generated `let _ =`
+  (wayland-scanner 0.31.11 `src/server_gen.rs:267`, re-verified) swallows.
+- Sys backend → either side dead means `same_client_as` is false
+  (`sys/server_impl/mod.rs:97-105`, re-verified) → skipped.
+
+Tiny behavioral delta vs the old code, noted, no action: the old form
+silently skipped a dead same-client manager (`client()` → `None`); the
+new form still delivers `output_enter` to its *live* group. That send is
+legal — same client, both objects alive — and arguably more correct (the
+group is real and the output is real); the `manager.done()` beside it is
+swallowed as above. Nothing to fix.
 
 ### Upstream claims, re-derived against the pinned revs (not assumed)
 
