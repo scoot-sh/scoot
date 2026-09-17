@@ -1612,9 +1612,10 @@ so `"H"` and `"h"` name the same key (only single letters fold: `"OE"` and
 Binds are matched against a key's *unshifted* symbol, with Shift tracked as
 an ordinary modifier, so **a capital letter names the unshifted key, not
 Shift plus that key**: `"A"` means plain `a`, exactly like `"a"` — write
-`"shift+a"` for the Shift chord. Folding a capital logs a warning naming
+`"shift+a"` for the Shift chord. Folding a bare capital logs a warning naming
 the bind (config loading warns rather than silently reinterpreting what was
-written). Note `flexwm msg key A` is a different story on purpose: it keeps
+written); with Shift named there is nothing ambiguous, so `"shift+A"` folds
+quietly. Note `flexwm msg key A` is a different story on purpose: it keeps
 refusing, because pressing `A` with nothing held would type a different
 character — name `shift+a` there, or use `msg type`.
 

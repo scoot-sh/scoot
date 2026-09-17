@@ -395,8 +395,8 @@ gap jumped the queue — each item's own file records why it landed when it did.
   harness test asserting the `wl_output` and `wlr-output-management`
   resize batches agree. Live `--nested` steady state confirmed under cage;
   the transient itself is harness wire evidence (external clients cannot
-   win the bind-before-configure race — stated, not papered over). No
-   README change (no probed client reads the bit).
+  win the bind-before-configure race — stated, not papered over). No
+  README change (no probed client reads the bit).
 - **[`[binds]` capital
   letters](docs/backlog/resolved/binds-capital-letter-done.md)** — a
   `[binds]` entry naming a capital letter (`"A" = "close"`) now binds the

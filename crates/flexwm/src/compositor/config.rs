@@ -22,6 +22,7 @@
 //! saying what's wrong in the log is strictly better than that, even though
 //! it means a typo can go unnoticed until someone reads the log.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::ffi::OsString;
 use std::fmt;
@@ -499,8 +500,11 @@ fn parse_bind(key: &str, value: &str) -> Result<(Modifiers, Keysym, Bound), Stri
 ///
 /// Folding changes what the bind means -- `"A"` is the unshifted `a` key,
 /// *not* `shift+a` -- so it warns, naming the bind and the spelling for
-/// Shift, rather than applying silently. A lone lowercase letter needs no
-/// warning: nothing was changed.
+/// Shift, rather than applying silently. Only an actually ambiguous fold
+/// warns: a letter that changed case on a combo that does *not* name Shift.
+/// With Shift named (`"shift+A"`) there is no question what was meant --
+/// the chord is shift+a either way -- so folding warns about nothing. A
+/// lone lowercase letter needs no warning either: nothing was changed.
 fn parse_combo(s: &str) -> Result<(Modifiers, Keysym), String> {
     let combo: flexwm_ipc::KeyCombo =
         s.parse().map_err(|error: flexwm_ipc::ParseKeyComboError| {
@@ -515,28 +519,44 @@ fn parse_combo(s: &str) -> Result<(Modifiers, Keysym), String> {
             flexwm_ipc::Modifier::Alt => mods.alt = true,
         }
     }
+    let (name, warn) = fold_letter(&combo.key, mods.shift);
+    if warn {
+        tracing::warn!(
+            bind = s,
+            "a single capital letter in [binds] names the unshifted key -- \
+             this bind means plain `{}`, not `shift+{}`; write `shift+{}` \
+             if Shift was meant",
+            name,
+            name,
+            name,
+        );
+    }
+    let keysym = keysym_named(&name).ok_or_else(|| format!("unknown key `{}`", combo.key))?;
+    Ok((mods, keysym))
+}
+
+/// Folds a single ASCII letter to lowercase for `[binds]` matching (see
+/// `parse_combo`), reporting alongside whether the fold is worth a warning.
+///
+/// The `bool` is the warn decision, factored out so tests can pin it
+/// without a tracing subscriber: only a letter that actually changed case,
+/// on a combo that does *not* hold Shift, is ambiguous enough to warn
+/// about. Everything else -- an already-lowercase letter, a digit, a
+/// multi-character name, a non-ASCII name, or any letter with Shift named
+/// -- resolves quietly.
+fn fold_letter(key: &str, shift_held: bool) -> (Cow<'_, str>, bool) {
     // One byte: a single ASCII letter is exactly one byte, so this also
     // excludes every non-ASCII letter without naming an encoding.
-    let folded;
-    let name: &str = if combo.key.len() == 1 && combo.key.as_bytes()[0].is_ascii_alphabetic() {
-        folded = combo.key.to_ascii_lowercase();
-        if folded != combo.key {
-            tracing::warn!(
-                bind = s,
-                "a single capital letter in [binds] names the unshifted key -- \
-                 this bind means plain `{}`, not `shift+{}`; write `shift+{}` \
-                 if Shift was meant",
-                folded,
-                folded,
-                folded,
-            );
+    if key.len() == 1 && key.as_bytes()[0].is_ascii_alphabetic() {
+        let folded = key.to_ascii_lowercase();
+        if folded == key {
+            (Cow::Borrowed(key), false)
+        } else {
+            (Cow::Owned(folded), !shift_held)
         }
-        &folded
     } else {
-        &combo.key
-    };
-    let keysym = keysym_named(name).ok_or_else(|| format!("unknown key `{}`", combo.key))?;
-    Ok((mods, keysym))
+        (Cow::Borrowed(key), false)
+    }
 }
 
 #[cfg(test)]
@@ -845,6 +865,53 @@ mod tests {
             Some(Bound::Action(Action::CloseFocused)),
             "`shift+a` must fire with Shift held"
         );
+    }
+
+    #[test]
+    fn a_capital_with_shift_named_binds_shift_quietly() {
+        // The review catch on the warn: `"shift+A"` folds the key but means
+        // shift+a either way, so warning "this bind means plain `a`, not
+        // `shift+a`" would be factually wrong -- a fully-correct config
+        // scolded at every startup. Only an ambiguous fold warns.
+        let (_dir, path) = write_temp(
+            r#"
+            [binds]
+            "shift+A" = "close"
+        "#,
+        );
+        let loaded = load_from(&path, true).expect("valid toml");
+        assert_eq!(
+            loaded
+                .keybindings
+                .match_key(Keysym::a, Modifiers::default()),
+            None,
+            "an unshifted `a` must not fire a `shift+A` bind"
+        );
+        assert_eq!(
+            loaded.keybindings.match_key(
+                Keysym::a,
+                Modifiers {
+                    shift: true,
+                    ..Modifiers::default()
+                }
+            ),
+            Some(Bound::Action(Action::CloseFocused)),
+            "`shift+A` must fire with Shift held"
+        );
+        // The warn decision itself, pinned without a tracing subscriber:
+        // `parse_combo` warns exactly when `fold_letter` says so.
+        let (name, warn) = fold_letter("A", false);
+        assert_eq!(name.as_ref(), "a");
+        assert!(warn, "a bare capital is ambiguous: warn");
+        let (name, warn) = fold_letter("A", true);
+        assert_eq!(name.as_ref(), "a");
+        assert!(!warn, "Shift named means shift+a either way: stay quiet");
+        let (name, warn) = fold_letter("a", false);
+        assert_eq!(name.as_ref(), "a");
+        assert!(!warn, "nothing changed: stay quiet");
+        let (name, warn) = fold_letter("OE", false);
+        assert_eq!(name.as_ref(), "OE");
+        assert!(!warn, "never folded: stay quiet");
     }
 
     #[test]

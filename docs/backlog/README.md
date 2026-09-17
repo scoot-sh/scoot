@@ -209,7 +209,10 @@ actionable.
 
 ### Core / config / rendering
 - [`--width`/`--height` are unbounded `i32`s](./core/width-height-unbounded.md)
-- [`[binds]` capital letter parses but never fires](./config/binds-capital-letter.md)
+- [`[binds]` capital letter parses but never fires](./resolved/binds-capital-letter-done.md)
+  — RESOLVED 2026-09-17: single ASCII letters fold to lowercase at
+  config-parse time with a warning (`"A"` means plain `a`, not `shift+a`);
+  `msg key A` still refuses.
 - [Per-frame `Vec` alloc in the cursor fallback path](./rendering/cursor-element-per-frame-alloc.md)
 - [Cursor frames still tick while VT-paused](./rendering/cursor-frame-callback-when-paused.md)
 - [`wl_surface.offset` doesn't move the cursor hotspot](./rendering/cursor-surface-offset-hotspot.md)

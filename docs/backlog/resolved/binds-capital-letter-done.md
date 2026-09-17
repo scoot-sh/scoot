@@ -58,6 +58,17 @@ per skipped bind). A lone lowercase letter warns about nothing: nothing was
 changed. The pre-existing silent-fold precedent (a lone `"Super+H"`)
 argued the other way and lost on the bare-letter impact above.
 
+**Review fix (pre-merge): the warn was factually wrong for
+modifier-qualified capitals.** `"shift+A"` folded and warned "this bind
+means plain `a`, not `shift+a`" — but that bind *does* mean `shift+a`, so
+a fully-correct config was scolded at every startup. The warn is now gated
+on ambiguity: only a changed letter with no Shift named warns
+(`fold_letter` returns the decision alongside the name, pinned by
+`a_capital_with_shift_named_binds_shift_quietly`, which also asserts
+`"shift+A"` fires on shift+a). With Shift named the chord is shift+a
+either way; lone lowercase, digits, multi-character and non-ASCII names
+resolve quietly as before.
+
 **`keysym_named` untouched — `msg key A` still refuses.** The refusal is
 the contract the dead-keys entry's "Adjacent" section records (review
 measured `key exclam` typing `1` as the same bug and fixed it by refusing):
