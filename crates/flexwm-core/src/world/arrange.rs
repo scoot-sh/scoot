@@ -66,8 +66,13 @@ impl World {
         let widths = self.column_widths(ws, usable.w);
         let (starts, _) = layout::starts(&widths, gap);
         for ((column, start), width) in ws.columns.iter().zip(starts).zip(widths) {
-            let x = usable.x + start - ws.view_x;
-            let on_screen = x < usable.right() && x + width > usable.x;
+            // Saturating: a saturated strip (`layout::starts`) plus a
+            // nonzero `usable.x` can put this past `i32::MAX` -- reachable
+            // today only through an absurd configured proportion (which
+            // saturates `column_width`'s float cast first), but a panic
+            // there would take the session down all the same.
+            let x = usable.x.saturating_add(start).saturating_sub(ws.view_x);
+            let on_screen = x < usable.right() && x.saturating_add(width) > usable.x;
             let mut y = usable.y;
             for (&id, height) in column
                 .windows

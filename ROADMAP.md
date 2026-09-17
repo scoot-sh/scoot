@@ -405,8 +405,19 @@ gap jumped the queue — each item's own file records why it landed when it did.
   (whole-name silently redirected `"OE"`/Œ to `"oe"`/œ — measured), warns
   naming the bind (`"A"` means plain `a`, not `shift+a`), and leaves
   `keysym_named` untouched so `flexwm msg key A` keeps refusing. Fail-first
-  unit tests per direction plus a permanent smoke-test section (live
-  `--headless`: warn logged, injected `a` closes the window).
+   unit tests per direction plus a permanent smoke-test section (live
+   `--headless`: warn logged, injected `a` closes the window).
+- **[`--width`/`--height`
+  bounds](docs/backlog/resolved/width-height-bounded-done.md)**
+  (PR #82, 2026-09-17) — refused
+  past 65535 per axis at parse (the most DRM itself can report for a mode
+  axis, with room to spare past 16K hardware), which closes the chain that
+  made item 12(b)'s output-derived `min_size` limit vacuous at ~2×10⁹
+  (worst case now 131070 a side at the output-scale floor, ~15000x inside
+  `i32`). `Rect::inset`/`right()`/`bottom()`, `scroll_into_view` and the
+  arrange on-screen test saturate instead of overflowing, each pinned by a
+  fail-first test; window-count-derived products audited and left under the
+  existing `MAX_GAP` disclosure.
 ## What's next
 
 The backlog is the source of truth for what to pick up; this is the current
@@ -473,7 +484,8 @@ actually open.
    single-ASCII-letter fold at parse time, warn on normalize, `msg key A`
    still refuses),
    [`--width/--height`
-   bounds](docs/backlog/core/width-height-unbounded.md).
+   bounds](docs/backlog/resolved/width-height-bounded-done.md) (resolved —
+   refused past 65535 per axis at parse, layout siblings saturate).
 5. [Rename `flexwm` → `flex`, split out
    `flexctl`](docs/backlog/meta/rename-flex-family.md) — decided, explicitly
    scheduled **last** in the burn-down, per the entry's own frontmatter.

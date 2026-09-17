@@ -181,6 +181,13 @@ Add `--config PATH` to any of the three to load a TOML config; see
 Configuration below for the full schema and default keybindings. Run
 `flexwm --help` for the full request/action list.
 
+`--width`/`--height` (the `--headless`/`--nested` output size) accept
+1–65,535 per axis — whatever DRM itself can report for a mode
+(`drm_mode_modeinfo` stores each axis in a `u16`), with room to spare past
+any real display. Anything else is a startup error naming the flag and the
+expected range (`invalid --width: '70000' (expected 1-65535)`), not a
+silently different size.
+
 `flexwm msg type TEXT` types text the way a person would, on whatever
 keyboard layout the session is running: for each character it finds the key
 that carries it and holds down whatever modifiers that key's level needs —
