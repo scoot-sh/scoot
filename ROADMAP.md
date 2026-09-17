@@ -297,7 +297,18 @@ gap jumped the queue — each item's own file records why it landed when it did.
   per-client accounting whenever the sibling entries land it. Fail-first
   harness tests (flood refusal, innocent-second-client, cycling drain,
   frames-outliving-session), ~1us added per `create_frame` measured noise,
-  live `grim` unaffected. README's capture section carries the new bound.
+   live `grim` unaffected. README's capture section carries the new bound.
+- **[Screen capture's `Xrgb8888` alpha forcing, now
+  conditional](docs/backlog/resolved/screencopy-xrgb-alpha-forcing-done.md)**
+  (PR #71, 2026-09-17) — the ticket PR #52's review filed rather than decided
+  mid-review: the `u128` opacity pass was most of what an `Xrgb8888` capture
+  cost. Resolved as the ticket's third option — force the fourth byte only
+  while `[appearance] background_color`'s alpha is below 1.0 (exact `< 1.0`,
+  no epsilon; read per frame tick, not cached), which costs nothing in the
+  default opaque configuration and keeps the guarantee where it was needed.
+  Pinned byte-identical over opaque backgrounds, proven still-forcing over
+  translucent ones. Measured on the dev VM: ~4.7% off a release `grim`
+  capture in the default configuration. `Argb8888` untouched.
 ## What's next
 
 The backlog is the source of truth for what to pick up; this is the current
