@@ -145,9 +145,10 @@ pub(super) fn advertise(dh: &DisplayHandle) -> DmabufState {
 ///
 /// `/dev/dri/card0` first, `renderD128` where there is no primary node, `0`
 /// where there is no DRM node at all -- plausibly *the* production shape on
-/// GPU-less containers -- each logged once, here, at startup. `0` is what the
-/// protocol reserves for "no device", so the fallback ladder degrades to the
-/// spec's own answer rather than to a guess.
+/// GPU-less containers -- each logged once, here, at startup. `0` is the
+/// `dev_t`/kernel convention for "no device" (and the ticket's own
+/// prescription), so the fallback ladder degrades to that rather than to
+/// a guess.
 fn main_device() -> libc::dev_t {
     /// Bound to `PathBuf` (rather than `&str`) so the ladder below reads as
     /// data, not as three near-identical `metadata` calls.

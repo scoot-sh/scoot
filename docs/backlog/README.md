@@ -98,6 +98,11 @@ actionable.
   `hyprland-toplevel-export-v1`, so the ext toplevel-source manager would
   never be bound. Fallback filed as
   [shell thumbnails without a toplevel protocol](./protocols/screencopy-shell-thumbnails-fallback.md).
+- [Minimal, honest `zwp_linux_dmabuf_v1`](./resolved/linux-dmabuf-advertisement-done.md)
+  — RESOLVED 2026-09-17 (PR #60): the readiness-gate follow-up — default
+  feedback with the real scanout `dev_t` plus the two LINEAR formats shm
+  serves, imports answered `failed`; quickshell's overview preview displays
+  over shm on headless, no-node, `--nested` and `--tty`.
 - [Screen capture: the session count is unbounded](./protocols/screencopy-session-cap.md)
   — found building the output half; why a cap was not simply added
 - [Screen capture forces `Xrgb8888`'s undefined fourth byte opaque](./protocols/screencopy-xrgb-alpha-forcing.md)

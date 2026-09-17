@@ -181,6 +181,17 @@ gap jumped the queue — each item's own file records why it landed when it did.
   was measured live against real Qt and GTK menus, both proven still
   taking the keyboard. `start_drag` needs its own analysis and stays open
   as [its own item](docs/backlog/protocols/dnd-grab-serial-validation.md).
+- **[Minimal, honest `zwp_linux_dmabuf_v1`](docs/backlog/resolved/linux-dmabuf-advertisement-done.md)**
+  (PR #60, 2026-09-17) — the follow-up the dmabuf-readiness probe gated:
+  default feedback with the real scanout `dev_t` (`0` where no DRM node
+  exists, logged once) plus the two LINEAR formats the shm pipeline serves,
+  and imports answered `failed` — the protocol's own non-fatal fallback,
+  which is the only truthful answer a pixman/shm compositor has. Measured
+  on headless, no-node, `--nested` and `--tty`: quickshell's overview
+  `ScreencopyView` displays over shm in all four. A genuinely
+  dmabuf-allocating third-party client could not run on the GPU-less dev VM,
+  so that half of the matrix is wire-test proven, not live — recorded as an
+  environment limit, with GPU hardware as the scenario that would revisit it.
 
 ## What's next
 
@@ -209,8 +220,8 @@ actually open.
     advertisement flips quickshell 0.3.1's readiness flag and the ext output
     path displays over shm, honesty verdict in that file). The overview
     preview now wants only the
-    [advertisement itself](docs/backlog/protocols/linux-dmabuf-advertisement.md),
-    filed as its own S-sized implementation item; the per-window thumbnail
+    [advertisement itself](docs/backlog/resolved/linux-dmabuf-advertisement-done.md)
+    — SHIPPED 2026-09-17 (PR #60, see "Recently shipped" above); the per-window thumbnail
     half stays open behind it.
    [Popup grab serial validation](docs/backlog/resolved/popup-grab-serial-validation-done.md)
    is also done — a grab now has to name a real, recent key/button/enter
@@ -312,8 +323,8 @@ probes' recommended order:
     whose readiness-gate measurement landed YES 2026-09-17 (minimal
     `zwp_linux_dmabuf_v1` advertisement flips the flag; overview path
     displays over shm) with the
-    [advertisement itself](docs/backlog/protocols/linux-dmabuf-advertisement.md)
-    filed as the follow-up.
+    [advertisement itself](docs/backlog/resolved/linux-dmabuf-advertisement-done.md)
+    — SHIPPED 2026-09-17 (PR #60).
     IPC screenshots stay regardless.
 6. DMS unlock-path re-probe — done 2026-09-14 (see the re-probe note
    in the DMS gaps entry): lock → auth → unlock teardown survives on
