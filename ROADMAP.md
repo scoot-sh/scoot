@@ -165,9 +165,20 @@ gap jumped the queue — each item's own file records why it landed when it did.
   (PR #55, 2026-09-16) — a window-focus change still does not dismiss an
   active popup grab (that deliberate guarantee stands), but `msg windows`
   now reports `popup_grab` per window, read off the held grab's root, so an
-  agent can tell "window B is focused" from "B is focused but A's menu holds
-  the keyboard". Additive field, no version bump; README's computer-use
-  section states the agent rule and the asymmetric-`false` cases.
+   agent can tell "window B is focused" from "B is focused but A's menu holds
+   the keyboard". Additive field, no version bump; README's computer-use
+   section states the agent rule and the asymmetric-`false` cases.
+- **[Popup grab serial validation](docs/backlog/resolved/popup-grab-serial-validation-done.md)**
+  (PR #56, 2026-09-16) — filed from PR #44's own review: a grab now has to
+  name a real, recent key/button/`enter` event delivered to the grabbing
+  client (or continue its own open menu), so a background client can no
+  longer take the keyboard on its own say-so. The `enter` half is the
+  load-bearing subtlety — Qt passes its last-seen serial, which for a
+  hover-opened menu is an enter — and the session half (nested submenus and
+  same-flush menu replacements reusing the opening serial past the window)
+  was measured live against real Qt and GTK menus, both proven still
+  taking the keyboard. `start_drag` needs its own analysis and stays open
+  as [its own item](docs/backlog/protocols/dnd-grab-serial-validation.md).
 
 ## What's next
 
