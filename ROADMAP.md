@@ -303,12 +303,18 @@ actually open.
    is RESOLVED 2026-09-17: the PNG encode (plus swizzle and reply framing)
    moved to a single FIFO worker, with per-connection ordering held by
    refusing anything else on a connection with a capture in flight, a bound
-   of four captures across the compositor, and `wait-idle` untouched. Two
-   adjacent things found while reviewing the cap work are still open:
+   of four captures across the compositor, and `wait-idle` untouched. The
+   first of the two adjacent things found while reviewing the cap work --
    [the accept loop and
-   `EMFILE`](docs/backlog/ipc/accept-loop-swallows-emfile.md) and [what a
+   `EMFILE`](docs/backlog/resolved/accept-loop-emfile-resolved.md) -- is
+   RESOLVED 2026-09-17: the loop matches on the error kind
+   (`WouldBlock`/`Interrupted` end it quietly as before, anything else is
+   loud), fd exhaustion sheds one pending connection per turn through a spare
+   fd (no back-off, no added delay once pressure lifts), and a dead listener
+   deregisters rather than spinning. The other -- [what a
    shared connection table costs an innocent
-   client](docs/backlog/ipc/connection-cap-denies-the-same-user.md).
+   client](docs/backlog/ipc/connection-cap-denies-the-same-user.md) -- is
+   still open.
 4. Small, unblocked low-priority fixes: [`msg key` modifier
    resolution](docs/backlog/input/msg-key-modifier-resolution.md),
    [`[binds]` capital
