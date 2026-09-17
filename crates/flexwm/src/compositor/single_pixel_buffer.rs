@@ -4,11 +4,12 @@
 //! The whole implementation is Smithay's at the pinned rev
 //! (`SinglePixelBufferState`, created in [`State::new`](super::State::new) and
 //! held on [`State`](super::State) only to keep the global alive): buffers
-//! report 1x1 through `buffer_dimensions`, skip texture import in
-//! `update_surface` (there is nothing to import), and render as a `SolidColor`
-//! element, which the pixman backend draws with `draw_solid` -- so a 1x1
-//! buffer composited here renders sanely with no flexwm-side import or blit
-//! path of its own.
+//! report 1x1 through `buffer_dimensions` (and `SinglePixel` through
+//! `buffer_type`), and `WaylandSurfaceRenderElement::from_state` turns one
+//! into a `SolidColor` element without ever touching the texture import --
+//! which the pixman backend draws with `draw_solid`. So a 1x1 buffer
+//! composited here renders sanely with no flexwm-side import or blit path
+//! of its own.
 //!
 //! ## Edge cases, stated rather than re-derived
 //!
