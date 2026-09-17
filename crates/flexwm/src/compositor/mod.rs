@@ -9,6 +9,7 @@ mod config;
 mod cursor;
 mod decorations;
 mod dispatch;
+mod dmabuf;
 mod ext_workspace;
 mod foreign_toplevel;
 mod foreign_toplevel_management;

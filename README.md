@@ -879,14 +879,15 @@ Worth knowing before you write against it:
 flexwm implements `ext-image-copy-capture-v1` (version 1) together with
 `ext-image-capture-source-v1` (version 1), which is what `grim`, a shell's
 workspace-overview live preview, a screen recorder or a conferencing
-screen-share uses to read the screen. Two globals are advertised:
+screen-share uses to read the screen. Three globals are advertised:
 
 | Global | What it is for |
 | ------ | -------------- |
 | `ext_image_copy_capture_manager_v1` | Creating a capture session and its frames |
 | `ext_output_image_capture_source_manager_v1` | Turning a `wl_output` into a capture source |
+| `zwp_linux_dmabuf_v1` | Format feedback for dmabuf-aware clients; every import answered `failed` (see below) |
 
-Both are available to every client, no privilege or allow-list (flexwm has no
+All three are available to every client, no privilege or allow-list (flexwm has no
 security-context support to distinguish a privileged client from any other, so
 an allow-list would be theatre — see the trust note under Screen locking
 below). Screen capture is the most obviously sensitive protocol that applies
@@ -919,12 +920,30 @@ What to know before pointing a client at it:
   output) is
   `docs/backlog/protocols/screencopy-shell-thumbnails-fallback.md`.
 - **`wl_shm` buffers only, `Xrgb8888` or `Argb8888`.** flexwm renders on the
-  CPU with pixman and has no GPU or dma-buf path, so no `dmabuf_device` or
-  `dmabuf_format` is advertised. `Xrgb8888` is offered first: if `[appearance]
+  CPU with pixman and has no GPU or dma-buf path, so no capture session
+  offers a dma-buf (`BufferConstraints::dma` is always `None`), and every
+  dmabuf import is answered `failed` (see the next bullet). `Xrgb8888` is offered first: if `[appearance]
   background_color` has an alpha below 1.0 then the framebuffer really is
   translucent, and an `Xrgb8888` capture forces the fourth byte opaque so you
   get a screenshot rather than a translucent image. An `Argb8888` capture
   hands you the framebuffer's own alpha, which is what that format means.
+- **`zwp_linux_dmabuf_v1` is advertised (version 6), but no dmabuf can be
+  imported.** The global exists so dmabuf-aware clients reach their
+  readiness gate: quickshell's buffer manager, for example, instantiates no
+  capture context at all -- not even the `wl_shm` one -- until it has seen
+  real dmabuf feedback, so without this advertisement every quickshell
+  `ScreencopyView` stays blank despite the capture protocol above working.
+  The feedback names this machine's real scanout device as `main_device`
+  (`/dev/dri/card0`, else `renderD128`, else `0` where no DRM node exists)
+  and exactly the two formats above with the `LINEAR` layout shm buffers
+  really have. Every datum in it is true, but its tranche structure implies
+  a dmabuf *import* capability flexwm does not have; any import attempt is
+  answered `failed` -- the protocol's own "cannot import for
+  implementation-dependent reasons", the only truthful answer a pixman/shm
+  compositor has -- and the client falls back to the `wl_shm` path above.
+  There is deliberately no empty table and no omitted device: a client maps
+  the table Smithay always sends, and a zero-length map aborts it rather
+  than merely not flipping it.
 - **The buffer size is the framebuffer's, and it is re-advertised on a
   resize.** If `--tty` follows a hotplug to a new mode (see `--tty` follows
   the display above), every live session gets a fresh `buffer_size` +

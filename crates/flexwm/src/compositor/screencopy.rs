@@ -145,8 +145,14 @@
 //! ## Buffer formats
 //!
 //! `wl_shm` only: flexwm renders on the CPU with pixman and has no GPU or
-//! dma-buf path at all, so there is no DRM node to advertise and
-//! `BufferConstraints::dma` is always `None`.
+//! dma-buf path at all, so `BufferConstraints::dma` is always `None` and every
+//! dmabuf import is answered `failed` (see [`dmabuf`](super::dmabuf)).
+//!
+//! The one dmabuf datum this compositor does advertise is feedback's
+//! `main_device` -- this machine's real scanout `dev_t`, or `0` where no DRM
+//! node exists. That is a description of the machine, not an import promise:
+//! a format table has to name *a* device, and the scanout node is the only
+//! true answer to which one.
 //!
 //! `Xrgb8888` is offered first and `Argb8888` second. Both are the same four
 //! bytes in the same order in memory -- the compositor's own framebuffer is
@@ -168,6 +174,7 @@ use smithay::reexports::wayland_server::DisplayHandle;
 use smithay::reexports::wayland_server::protocol::wl_buffer::WlBuffer;
 use smithay::reexports::wayland_server::protocol::wl_shm;
 use smithay::utils::{Buffer as BufferCoords, Clock, IsAlive, Monotonic, Rectangle, Transform};
+use smithay::wayland::dmabuf::DmabufState;
 use smithay::wayland::image_capture_source::{
     ImageCaptureSource, ImageCaptureSourceHandler, OutputCaptureSourceHandler,
     OutputCaptureSourceState,
@@ -179,6 +186,7 @@ use smithay::wayland::image_copy_capture::{
 use smithay::wayland::shm::with_buffer_contents_mut;
 
 use super::State;
+use super::dmabuf;
 use super::headless::Backend;
 
 #[cfg(test)]
@@ -187,7 +195,12 @@ mod tests;
 /// The shm formats every session is offered, in the order a client sees them.
 ///
 /// See this module's doc for why `Xrgb8888` comes first.
-const FORMATS: [wl_shm::Format; 2] = [wl_shm::Format::Xrgb8888, wl_shm::Format::Argb8888];
+///
+/// `pub(super)` rather than private: [`dmabuf`](super::dmabuf)'s feedback
+/// table names these same formats, and its test pins the two lists to each
+/// other -- which it can only do if it can read this one.
+pub(super) const FORMATS: [wl_shm::Format; 2] =
+    [wl_shm::Format::Xrgb8888, wl_shm::Format::Argb8888];
 
 /// Bytes per pixel in both formats [`FORMATS`] offers, and in the `Argb8888`
 /// framebuffer they are read back from.
@@ -284,6 +297,15 @@ pub struct Screencopy {
     /// The `ext_image_copy_capture_manager_v1` global plus Smithay's own
     /// session/frame bookkeeping. Read on every session and every frame.
     capture: ImageCopyCaptureState,
+    /// The `zwp_linux_dmabuf_v1` delegate type Smithay routes the dmabuf
+    /// global through.
+    ///
+    /// The advertisement itself lives in [`dmabuf`](super::dmabuf): this
+    /// field is only where the state the ticket names keeps the delegate so
+    /// [`DmabufHandler::dmabuf_state`](smithay::wayland::dmabuf::DmabufHandler::dmabuf_state)
+    /// has one field to return. Built once in [`Screencopy::new`], never
+    /// touched per frame, per bind or per hotplug event.
+    pub(super) dmabuf: DmabufState,
     /// One entry per live capture session, in creation order.
     ///
     /// The owned [`Session`] lives here and nowhere else: dropping one sends
@@ -339,8 +361,9 @@ impl Capture {
 }
 
 impl Screencopy {
-    /// Creates the `ext_image_copy_capture_manager_v1` and
-    /// `ext_output_image_capture_source_manager_v1` globals.
+    /// Creates the `ext_image_copy_capture_manager_v1`,
+    /// `ext_output_image_capture_source_manager_v1` and `zwp_linux_dmabuf_v1`
+    /// globals.
     ///
     /// No client filter, for the same reason the session-lock, data-control
     /// and input-method globals have none: flexwm has no security-context
@@ -349,11 +372,14 @@ impl Screencopy {
     /// sensitive of those -- a client that can reach this socket can read the
     /// screen -- so this is a deliberate consistency with the trust model the
     /// whole compositor already states, not an oversight about what the
-    /// protocol can do.
+    /// protocol can do. The dmabuf global extends that note rather than
+    /// widening it: it hands out no pixels by itself, only format feedback,
+    /// and answers every import `failed` (see [`dmabuf`](super::dmabuf)).
     pub(super) fn new(dh: &DisplayHandle) -> Self {
         Self {
             output_sources: OutputCaptureSourceState::new::<State>(dh),
             capture: ImageCopyCaptureState::new::<State>(dh),
+            dmabuf: dmabuf::advertise(dh),
             sessions: Vec::new(),
             clock: Clock::new(),
         }
