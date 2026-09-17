@@ -1605,15 +1605,18 @@ case-insensitive: `ctrl`/`control`, `shift`, `alt`, and `super`/`logo`/
 tables and this doc call it "Super"). The key is an xkb keysym name (`h`,
 `Return`, `F5`, ...), resolved by trying the name exactly as written first
 and then case-insensitively — so `"return"` and `"RETURN"` both find
-`Return`.
+`Return`. A single ASCII letter is folded to lowercase before that lookup,
+so `"H"` and `"h"` name the same key (only single letters fold: `"OE"` and
+`"oe"` are distinct keysyms and stay that way).
 
 Binds are matched against a key's *unshifted* symbol, with Shift tracked as
-an ordinary modifier, so **write the lowercase letter and name Shift
-separately**: `"shift+a"`, not `"A"`. A single capital resolves exactly, to
-the distinct `A` keysym, which is not what any keypress reports at the level
-binds match on — so `"A" = "close"` parses and loads but can never fire
-(verified on `--headless`; `"shift+a" = "close"` fires as expected). See the
-`docs/backlog/config/binds-capital-letter.md` for the accept-it-anyway fix.
+an ordinary modifier, so **a capital letter names the unshifted key, not
+Shift plus that key**: `"A"` means plain `a`, exactly like `"a"` — write
+`"shift+a"` for the Shift chord. Folding a capital logs a warning naming
+the bind (config loading warns rather than silently reinterpreting what was
+written). Note `flexwm msg key A` is a different story on purpose: it keeps
+refusing, because pressing `A` with nothing held would type a different
+character — name `shift+a` there, or use `msg type`.
 
 Action strings use exactly the grammar `flexwm --help`'s ACTIONS section
 documents — one parser handles both `flexwm msg action ...` and a config
