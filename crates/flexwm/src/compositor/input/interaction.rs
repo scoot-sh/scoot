@@ -1,13 +1,28 @@
 //! The recent input events that count as the user asking for something, and
 //! *who* received each one.
 //!
-//! One consumer today: `xdg-activation-v1`. The protocol lets a client attach
-//! the seat and serial of the input event that caused it to ask for a token
-//! (`xdg_activation_token_v1.set_serial`), and the compositor is meant to
-//! refuse a token whose serial does not name a real, recent interaction --
-//! that is the only thing standing between "a launcher hands focus to the app
-//! it just started" and "any background client takes the keyboard whenever it
-//! likes". See `activation.rs` for the policy this feeds.
+//! Two consumers, with deliberately different bars:
+//!
+//! - `xdg-activation-v1` (`activation.rs`) spends only key and button
+//!   serials. The protocol lets a client attach the seat and serial of the
+//!   input event that caused it to ask for a token
+//!   (`xdg_activation_token_v1.set_serial`), and the compositor is meant to
+//!   refuse a token whose serial does not name a real, recent interaction --
+//!   that is the only thing standing between "a launcher hands focus to the app
+//!   it just started" and "any background client takes the keyboard whenever it
+//!   likes". See `activation.rs` for the policy this feeds.
+//! - `xdg_popup.grab` (`popup.rs`) spends those *and* pointer/keyboard
+//!   `enter` serials. Qt's `QWaylandInputDevice::serial()` -- which is what a
+//!   Qt client passes to `grab` -- is updated on `pointer_enter` (verified
+//!   against Qt 6.8's `qwaylandinputdevice.cpp`: `Pointer::pointer_enter`
+//!   assigns `mParent->mSerial`; `keyboard_key`, `pointer_button` and
+//!   `touch_down` do the same, while `keyboard_enter` and `modifiers`
+//!   deliberately do not), so a strict key-and-button check refuses a
+//!   legitimate Qt menu whenever the toolkit last saw an enter -- typically a
+//!   menu opened by hovering, which has had no button or key event to draw a
+//!   fresh serial from. A refused grab is silent (no protocol error), so that
+//!   failure mode is "this app's menus don't take the keyboard and nobody
+//!   knows why".
 //!
 //! # Why the client identity is stored too, and is not optional
 //!
@@ -77,11 +92,41 @@
 //! So what has to be remembered is a short *history* of qualifying events,
 //! and a token is honored if its serial and client are one of them, and it is
 //! recent (see [`INTERACTION_WINDOW`]). Exact match against remembered
-//! values, never a range: serials from events that do *not* qualify (pointer
-//! motion) and from the compositor's own focus changes (`shell.rs`'s
-//! `set_focus`) are drawn from the same global counter and fall between them,
-//! so "between the oldest and the newest" would quietly admit the passive
-//! events this exists to exclude.
+//! values, never a range: pointer-motion serials that delivered no `enter`
+//! are drawn from the same global counter and fall between the remembered
+//! ones, so "between the oldest and the newest" would quietly admit the
+//! passive events this exists to exclude.
+//!
+//! # Why `enter` serials are recorded at all, and what that costs
+//!
+//! An `enter` is *not* a user action, and recording it weakens the check --
+//! eyes open. What remains closed, and what does not:
+//!
+//! - A client that was never given anything -- never focused, never under
+//!   the pointer -- still has nothing to spend, however many numbers it
+//!   guesses. The client half of every entry is what closes the
+//!   configure-serial guessing attack, and enters keep it: an enter names the
+//!   client that actually received it, resolved at delivery time like every
+//!   other entry.
+//! - What an enter *does* buy is any client that merely received one: mapping
+//!   a window earns a keyboard `enter` (flexwm focuses every new window
+//!   itself), and moving the pointer across one earns a pointer `enter`. For
+//!   up to [`INTERACTION_WINDOW`] afterwards that client can take the keyboard
+//!   through a popup grab with no click or keystroke.
+//! - That is accepted because the grab itself is bounded in ways activation
+//!   is not: the session lock and an `exclusive` layer surface pre-empt and
+//!   refuse it, clicking outside dismisses it, keybindings run before it, and
+//!   a refusal is silent while a *grant* is visible (a menu appears, and
+//!   `flexwm msg windows` reports `popup_grab` on its holder). Activation
+//!   keeps the stricter bar -- a focus serial there spends nothing -- because
+//!   a stolen activation is invisible and leaves no such trace.
+//!
+//! Motion serials stay excluded: motion is continuous (libinput reports it at
+//! 500-1000Hz, and `refresh_pointer_focus` synthesizes it with no user
+//! involvement), so recording them would hand every client a
+//! permanently-refreshing serial. Only a motion that actually *changes* focus
+//! -- i.e. delivers an `enter` -- is recorded, and only the enter's serial,
+//! which is bounded by focus changes rather than by the event rate.
 //!
 //! Fixed-size and stored inline in [`State`], with no heap indirection of
 //! its own: this is written from the input path, on every key and button
@@ -117,7 +162,11 @@ use smithay::utils::Serial;
 /// [`State::press`]: super::State::press
 pub(crate) const CAPACITY: usize = 16;
 
-/// How long after the event itself a token may still be minted from it.
+/// How long after the event itself a grab or token may still be minted
+/// from it.
+///
+/// `pub(crate)` so the popup-grab grace (`popup.rs`) can state its bound
+/// relative to this one rather than as a bare number.
 ///
 /// The count bound above cannot do this job: it only evicts when *newer*
 /// qualifying input arrives, and a session can go hours without any. That is
@@ -133,7 +182,7 @@ pub(crate) const CAPACITY: usize = 16;
 /// needs -- a launcher mints its token inside its own input handler, within
 /// milliseconds -- with room for a client that was descheduled or waiting on
 /// something slow, while keeping "the user just did this" true.
-const INTERACTION_WINDOW: Duration = Duration::from_secs(10);
+pub(crate) const INTERACTION_WINDOW: Duration = Duration::from_secs(10);
 
 /// One qualifying event: which serial it carried, who it was delivered to,
 /// and when.
@@ -141,7 +190,24 @@ const INTERACTION_WINDOW: Duration = Duration::from_secs(10);
 struct Delivered {
     serial: Serial,
     client: ClientId,
+    kind: Kind,
     at: Instant,
+}
+
+/// What kind of delivery an entry records: a real user action, or a focus
+/// change the client legitimately saw but the user never made.
+///
+/// The distinction is the two consumers' different bars (see the module
+/// doc): activation spends [`Kind::Input`] only, while a popup grab spends
+/// either. There is deliberately no third kind for pointer motion without a
+/// focus change -- that is continuous and passive, and recording it would
+/// hand every client a permanently-refreshing serial.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Kind {
+    /// A key or button press or release delivered to the client.
+    Input,
+    /// A pointer or keyboard `enter` delivered to the client.
+    Focus,
 }
 
 /// The most recent qualifying input events, newest overwriting oldest.
@@ -170,20 +236,64 @@ impl Recent {
     /// clock read per key or button event pays for not having to reason about
     /// that.
     pub(crate) fn record(&mut self, serial: Serial, client: ClientId) {
+        self.push(serial, client, Kind::Input);
+    }
+
+    /// Remembers a focus `enter` delivered to `client` carrying `serial`.
+    ///
+    /// The popup-grab half of this history (see the module doc): a toolkit
+    /// opens a menu with the last serial it saw, which for a hover-opened
+    /// menu is an `enter`. Never spent by the activation gate -- see
+    /// [`Self::contains`].
+    ///
+    /// The call sites guarantee this names an `enter` that was actually
+    /// sent: `shell.rs` records only when the keyboard focus really moves to
+    /// a new surface, and `input.rs` only when the pointer really enters one
+    /// -- both skip redundant derivations (which mint a serial but send
+    /// nothing) and anything delivered while a grab holds the seat (whose
+    /// recipient the call site cannot name).
+    pub(crate) fn record_focus(&mut self, serial: Serial, client: ClientId) {
+        self.push(serial, client, Kind::Focus);
+    }
+
+    fn push(&mut self, serial: Serial, client: ClientId, kind: Kind) {
         self.events[self.next] = Some(Delivered {
             serial,
             client,
+            kind,
             at: Instant::now(),
         });
         self.next = (self.next + 1) % CAPACITY;
     }
 
-    /// Whether `client` was given an event carrying `serial`, recently
-    /// enough to still be worth something.
+    /// Whether `client` was given a key or button event carrying `serial`,
+    /// recently enough to still be worth something.
+    ///
+    /// The activation gate, and deliberately only it: a focus `enter` spends
+    /// nothing here (see the module doc for why the popup grab differs).
     ///
     /// A linear scan of sixteen entries, on a path that runs once per
     /// activation token (a user action), not per input event.
     pub(crate) fn contains(&self, serial: Serial, client: &ClientId) -> bool {
+        self.events.iter().flatten().any(|known| {
+            known.kind == Kind::Input
+                && known.serial == serial
+                && known.client == *client
+                && known.at.elapsed() < INTERACTION_WINDOW
+        })
+    }
+
+    /// Whether `client` was given an event carrying `serial` -- a key,
+    /// button, or focus `enter` -- recently enough to still be worth
+    /// something.
+    ///
+    /// The popup-grab gate: strictly looser than [`Self::contains`], for the
+    /// toolkit shape the module doc describes. Same bounds otherwise (exact
+    /// match, same count cap, same age window, same per-client binding).
+    ///
+    /// A linear scan of sixteen entries, on a path that runs once per menu
+    /// opened, not per input event or per frame.
+    pub(crate) fn contains_seen(&self, serial: Serial, client: &ClientId) -> bool {
         self.events.iter().flatten().any(|known| {
             known.serial == serial
                 && known.client == *client
@@ -390,6 +500,53 @@ mod tests {
 
         assert!(!recent.contains(serial(5), &one), "the old one survived");
         assert!(recent.contains(serial(6), &one), "the new one aged out too");
+    }
+
+    #[test]
+    fn a_focus_serial_is_seen_but_not_a_user_action() {
+        // The two gates' different bars, in one place: a popup grab may
+        // spend an `enter` (the Qt hover-menu shape), while an activation
+        // token may not.
+        let (_display, [one, _two], _kept) = two_clients();
+        let mut recent = Recent::default();
+        recent.record_focus(serial(9), one.clone());
+
+        assert!(
+            recent.contains_seen(serial(9), &one),
+            "a delivered enter should be spendable for a grab"
+        );
+        assert!(
+            !recent.contains(serial(9), &one),
+            "a delivered enter must not be spendable for activation"
+        );
+    }
+
+    #[test]
+    fn a_focus_serial_is_still_bound_to_its_recipient() {
+        // Widening to enters must not reopen the guessing attack the client
+        // half of each entry exists to close: knowing the number is not
+        // enough without having received it.
+        let (_display, [one, two], _kept) = two_clients();
+        let mut recent = Recent::default();
+        recent.record_focus(serial(9), one.clone());
+
+        assert!(!recent.contains_seen(serial(9), &two));
+    }
+
+    #[test]
+    fn a_focus_serial_ages_out_like_any_other_entry() {
+        // The weakening an enter buys is bounded by the same window: this
+        // morning's hover is not tonight's keyboard.
+        let (_display, [one, _two], _kept) = two_clients();
+        let mut recent = Recent::default();
+        recent.record_focus(serial(9), one.clone());
+        assert!(recent.contains_seen(serial(9), &one));
+
+        recent.backdate(INTERACTION_WINDOW);
+        assert!(
+            !recent.contains_seen(serial(9), &one),
+            "an enter exactly at the window is still spendable"
+        );
     }
 
     #[test]

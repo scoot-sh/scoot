@@ -102,7 +102,8 @@ impl CompositorHandler for State {
     ///
     /// Three things this compositor keeps a `WlSurface` in outside
     /// `self.space`/`self.windows` (both already driven by their own
-    /// xdg-shell destruction paths) need clearing here:
+    /// xdg-shell destruction paths) need clearing here, plus the grab
+    /// session, which needs filing rather than clearing:
     ///
     /// - the cursor's image status, which nothing upstream clears when the
     ///   surface behind it dies -- see `Cursor::forget_surface`;
@@ -115,6 +116,10 @@ impl CompositorHandler for State {
     ///   session awake -- see `idle.rs`. A dead client can never destroy
     ///   anything explicitly, so without this the recompute would keep
     ///   seeing its surface forever.
+    /// - the popup-grab session (`last_popup_grab`), filed rather than
+    ///   cleared: a replacement grab is dispatched adjacently to the
+    ///   destroy, so waiting for the reap would file it too late -- see
+    ///   `popup.rs`.
     fn destroyed(&mut self, surface: &WlSurface) {
         if self.cursor.forget_surface(surface) && self.tty.is_some() {
             // The cursor's shape just changed to the fallback; only `--tty`
@@ -131,6 +136,27 @@ impl CompositorHandler for State {
             self.lock_transition();
         }
         self.forget_idle_inhibitor(surface);
+        // A surface going away while a popup grab is live tears the chain
+        // down or replaces it: toolkits destroy the old popup before
+        // grabbing the new one in the same flush, so the replacement grab is
+        // dispatched adjacently -- file the session *now*, synchronously,
+        // rather than waiting for `settle_popup_grab`, which only runs on a
+        // later dispatch and would file it a dispatch too late for the grace
+        // half of `grab_session_continues` to see. Gated on a grab being
+        // held at all, like `settle_popup_grab` itself; over-filing (an
+        // unrelated surface dying mid-grab) only extends a session that is
+        // still live anyway, which the live half already covers.
+        if self.popup_grab.is_some() {
+            let holder = self.popup_grab.as_ref().and_then(|grab| {
+                grab.keyboard_grab_start_data()
+                    .focus
+                    .as_ref()
+                    .and_then(|root| self.client_of(root))
+            });
+            if let Some(client) = holder {
+                self.last_popup_grab = Some((client, std::time::Instant::now()));
+            }
+        }
     }
 }
 

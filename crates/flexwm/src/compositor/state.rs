@@ -173,6 +173,17 @@ pub struct State {
     ///
     /// [`PopupGrab`]: smithay::desktop::PopupGrab
     pub popup_grab: Option<ActivePopupGrab>,
+    /// The serial half of the grab gate (`interaction_serials`) answers
+    /// "did this client recently interact", which a menu session outlasts:
+    /// a menu read for a minute, then hovered deeper, reuses a serial older
+    /// than the interaction window.
+    /// Toolkits also destroy the old popup before grabbing its replacement
+    /// in the same input handler, so the new grab never nests inside the
+    /// old one. This answers the other half -- "was the keyboard this
+    /// client's moments ago" -- so those continuations are not refused.
+    /// Written only where a grab ends (`dismiss_popup_grab`,
+    /// `settle_popup_grab`); read only by the grab gate. See `popup.rs`.
+    pub last_popup_grab: Option<(ClientId, Instant)>,
     pub output: Option<Output>,
     /// The output scale resolved from `[output] scale` (see
     /// `output_scale.rs`), fixed for the process's lifetime. Read by
@@ -390,16 +401,19 @@ pub struct State {
     pub idle_inhibit_manager_state: IdleInhibitManagerState,
     pub seat: Seat<State>,
     /// The recent input events that count as the user asking for something --
-    /// key and button presses and releases, never pointer motion -- each with
-    /// the client it was delivered to.
+    /// key and button presses and releases, plus the pointer and keyboard
+    /// `enter` serials those deliveries produced -- each with the client it
+    /// was delivered to.
     ///
-    /// Written only by `input.rs` (`key` and `pointer_button`, the two
-    /// qualifying serial sources; `pointer_move_quietly`'s motion serial is
-    /// deliberately not among them) and read only by `activation.rs`, which
-    /// refuses an `xdg-activation-v1` token unless its claimed serial is one
-    /// of these *and* was delivered to the client that asked. See
-    /// `input/interaction.rs` for why this is a short history rather than a
-    /// single "last serial", and why the client identity is part of it.
+    /// Written by `input.rs` (`key`, `pointer_button`, and the focus-change
+    /// halves of `pointer_move_quietly` and `shell.rs`'s
+    /// `refresh_keyboard_focus`; plain motion serials are deliberately not
+    /// among them) and read by `activation.rs` (key and button events only)
+    /// and `popup.rs` (any of them). A token or grab is refused unless its
+    /// claimed serial is one of these *and* was delivered to the client that
+    /// asked. See `input/interaction.rs` for why this is a short history
+    /// rather than a single "last serial", why the client identity is part
+    /// of it, and why the two readers spend different halves.
     pub interaction_serials: input::interaction::Recent,
 
     pub keybindings: Keybindings,
@@ -545,6 +559,7 @@ impl State {
             space: Space::default(),
             popups: PopupManager::default(),
             popup_grab: None,
+            last_popup_grab: None,
             output: None,
             output_scale: scale,
             integer_scale: super::output_scale::integer_scale(scale),

@@ -31,8 +31,42 @@
 //! Losing is spelled `popup_done`, not "unset the seat grab": the protocol
 //! lets a compositor dismiss a popup whenever it likes, and a menu left
 //! mapped with its input taken away is a menu the user cannot get rid of.
-//! So both the refusal path ([`State::grab_popup`]) and the pre-emption path
+//! So both the refusal paths ([`State::grab_popup`]) and the pre-emption path
 //! ([`State::dismiss_popup_grab`]) dismiss the popup tree outright.
+//!
+//! ## The grab serial is validated
+//!
+//! `xdg_popup.grab` carries the serial of the input event that caused the
+//! client to open the menu, and the protocol says it must name a user action
+//! (a compositor "may ignore" a grab whose serial is not one). The serial
+//! has to be a recent key, button *or focus `enter`* actually delivered to
+//! the client asking -- see `input/interaction.rs` for why `enter` counts
+//! here while it spends nothing at the activation gate, and what attack that
+//! leaves open. A refusal dismisses the popup like every other refusal, and
+//! -- since the protocol posts no error for it -- is logged at `warn` with
+//! the client and serial, so a menu that never takes the keyboard is
+//! diagnosable instead of silent.
+//!
+//! ## A grab that continues its own menu session is not refused
+//!
+//! The serial half above answers "did this client recently interact", which
+//! a menu session outlasts: a menu read for a minute, then hovered deeper,
+//! reuses the opening serial, long past the interaction window -- and
+//! toolkits destroy the old popup before grabbing its replacement in the
+//! same input handler, so the new grab never nests inside the old one
+//! either. Both shapes were measured against a real Qt client, which reuses
+//! its opening button serial across a menubar hover-switch (and would be
+//! refused for it once the window lapses).
+//!
+//! So a grab is also granted when it continues the requesting client's own
+//! session: it holds the live grab (a nested submenu, or a second grab
+//! while one is up), or its previous grab ended within
+//! [`GRAB_REOPEN_GRACE`] (a menu replacing the one just closed). Either way
+//! the keyboard was this client's moments ago, so granting captures nothing
+//! new -- and a *different* client grabbing off the back of someone else's
+//! menu still faces the serial check. [`State::last_popup_grab`] is the
+//! ended half of that answer; the live half is read off the held grab's own
+//! root, like [`State::popup_grab_holder`].
 //!
 //! ## Who gets the last word when a grab ends
 //!
@@ -52,6 +86,8 @@
 //! away from the window the user is typing into. niri, sway and mutter all
 //! draw the same line. See the resolution doc for the full reasoning.
 
+use std::time::{Duration, Instant};
+
 use flexwm_core::WindowId;
 use smithay::desktop::{
     PopupGrab, PopupKeyboardGrab, PopupKind, PopupManager, PopupPointerGrab, PopupUngrabStrategy,
@@ -59,19 +95,34 @@ use smithay::desktop::{
 };
 use smithay::input::Seat;
 use smithay::input::pointer::Focus;
+use smithay::reexports::wayland_server::backend::ClientId;
 use smithay::reexports::wayland_server::protocol::wl_seat;
 use smithay::utils::{SERIAL_COUNTER, Serial};
 use smithay::wayland::shell::xdg::PopupSurface;
 
 use super::State;
 
-// Tests live in `layer_shell/tests/popup.rs`, not beside this file: every
-// question here ("did the client get `wl_keyboard.enter` on the popup",
-// "did it get `popup_done`") is a claim about the wire, and the real-client
-// harness that can ask it already exists there -- along with the layer
-// surfaces half these cases need. A second copy of that harness is exactly
-// what `docs/backlog/testing/large-test-file-organization.md` exists to
-// stop.
+// Tests live in `layer_shell/tests/popup.rs` (grabs and focus) and
+// `layer_shell/tests/popup_serial.rs` (the serial gate and the session
+// rule below), not beside this file: every question here ("did the client
+// get `wl_keyboard.enter` on the popup, "did it get `popup_done`") is a
+// claim about the wire, and the real-client harness that can ask it already
+// exists there -- along with the layer surfaces half these cases need. A
+// second copy of that harness is exactly what
+// `docs/backlog/testing/large-test-file-organization.md` exists to stop.
+
+/// How long after its popup grab ends a client may open the next one on the
+/// ended grab's serial.
+///
+/// Covers a client replacing its menu: toolkits destroy the old popup
+/// before grabbing the new one, in the same input handler, so destroy and
+/// grab are dispatched adjacently. Two seconds is that with orders of
+/// magnitude of slop, and still five times below
+/// [`INTERACTION_WINDOW`](super::input::interaction::INTERACTION_WINDOW), so
+/// it cannot stretch a stale serial into a standing permit: the keyboard was
+/// this client's moments ago, and after the grace the serial check is the
+/// whole answer again.
+const GRAB_REOPEN_GRACE: Duration = Duration::from_secs(2);
 
 impl State {
     /// A client asked for an explicit grab on `surface`
@@ -94,6 +145,17 @@ impl State {
         let Some(seat) = Seat::<Self>::from_resource(&seat) else {
             return;
         };
+        // Whose popup this is, resolved before `surface` moves into the
+        // grab below: `SERIAL_COUNTER` is process-global and a client can
+        // read its live value for free (an `xdg_surface.configure` serial
+        // comes out of the same counter), so the serial check that follows
+        // has to be on the pair, not the number -- see
+        // `input/interaction.rs`. `None` only for a client that disconnected
+        // between sending the request and its dispatch; its popup goes with
+        // it, so there is nothing to dismiss.
+        let Some(client) = self.client_of(surface.wl_surface()) else {
+            return;
+        };
         let popup = PopupKind::Xdg(surface);
         // `Err` means the popup has no parent, which the role's own
         // pre-commit check has already refused with `not_constructed` -- so
@@ -109,6 +171,42 @@ impl State {
             // an immediate revoke would flicker the keyboard through the
             // menu on its way back.
             tracing::debug!("refusing a popup grab: something outranks it for the keyboard");
+            let _ = PopupManager::dismiss_popup(&root, &popup);
+            return;
+        }
+
+        // The serial is only meaningful against the seat that issued it, and
+        // a client-named seat is resolved rather than assumed -- the same
+        // check `activation.rs` applies to a token's `set_serial`. In
+        // practice flexwm has exactly one seat, so this never fires; it is
+        // here so a second seat one day does not silently inherit this
+        // seat's history.
+        if seat != self.seat {
+            tracing::warn!(
+                "refusing a popup grab: its serial names a seat this compositor does not own"
+            );
+            let _ = PopupManager::dismiss_popup(&root, &popup);
+            return;
+        }
+        // Checked after the outranked refusal above: while locked or under a
+        // launcher the answer is dismissal either way, and that refusal is
+        // the expected one rather than something worth a `warn`.
+        //
+        // ...or the grab continues the requesting client's own menu
+        // session, in which case the serial's age is beside the point (see
+        // `grab_session_continues`): the keyboard was this client's moments
+        // ago, so granting captures nothing new.
+        if !self.grab_session_continues(&client)
+            && !self.interaction_serials.contains_seen(serial, &client)
+        {
+            // `warn`, not `debug`: the protocol posts no error for this, so
+            // the log is the only way to tell "no recent interaction" apart
+            // from a broken menu.
+            tracing::warn!(
+                ?serial,
+                ?client,
+                "refusing a popup grab: its serial is not a recent key, button or focus event this client received"
+            );
             let _ = PopupManager::dismiss_popup(&root, &popup);
             return;
         }
@@ -244,6 +342,65 @@ impl State {
         self.id_of(root)
     }
 
+    /// Whether `client`'s grab request continues its own menu session rather
+    /// than capturing the keyboard fresh.
+    ///
+    /// Two shapes, both measured against a real Qt client:
+    ///
+    /// - it holds the live grab: a nested submenu opening while its parent
+    ///   menu is up, or a second grab while one is held. Read off the held
+    ///   grab's own root, like [`State::popup_grab_holder`] -- but as the
+    ///   *client*, since a layer-rooted menu (a bar's dropdown) is a window
+    ///   to nothing and still a session to someone. A different client
+    ///   grabbing off the back of this menu answers false here and faces
+    ///   the serial check.
+    /// - its previous grab ended within [`GRAB_REOPEN_GRACE`]: a menu
+    ///   replacing the one just closed. Toolkits destroy the old popup
+    ///   before grabbing the new one in the same input handler, so the new
+    ///   grab never nests inside the old one -- without this the replacement
+    ///   reuses the opening serial, which may long predate the interaction
+    ///   window, and a menubar hover-switch a minute in reads as an attack.
+    ///
+    /// `cleanup` first, so `has_ended` is the grab's real state rather than
+    /// whatever reaping last ran: an ended-but-unreaped grab must read as
+    /// ended (the grace half, via [`State::last_popup_grab` once
+    /// `settle_popup_grab` records it), never as a live session. Reaping
+    /// here is what `settle_popup_grab` does on its own path; doing it twice
+    /// is idempotent.
+    fn grab_session_continues(&mut self, client: &ClientId) -> bool {
+        self.popups.cleanup();
+        if let Some(grab) = self.popup_grab.as_ref()
+            && !grab.has_ended()
+            && grab
+                .keyboard_grab_start_data()
+                .focus
+                .as_ref()
+                .and_then(|surface| self.client_of(surface))
+                .as_ref()
+                == Some(client)
+        {
+            return true;
+        }
+        self.last_popup_grab
+            .as_ref()
+            .is_some_and(|(holder, ended)| holder == client && ended.elapsed() < GRAB_REOPEN_GRACE)
+    }
+
+    /// Files who held the grab that just ended, and when, so a menu
+    /// replacing it within [`GRAB_REOPEN_GRACE`] is recognized as the same
+    /// session (see [`State::grab_session_continues`]).
+    ///
+    /// Read off the ended grab's own start data, like
+    /// [`State::popup_grab_holder`]: there is no other record of who held
+    /// it. Nothing is filed when the root is already gone (a torn-down
+    /// client): a replacement then needs a fresh serial, the safe direction.
+    fn note_popup_grab_end(&mut self, grab: &ActivePopupGrab) {
+        if let Some(surface) = grab.keyboard_grab_start_data().focus.as_ref()
+            && let Some(client) = self.client_of(surface)
+        {
+            self.last_popup_grab = Some((client, Instant::now()));
+        }
+    }
     /// Ends the active popup grab, if any, dismissing its popups.
     ///
     /// The unsets are serial-guarded because the seat's grab may no longer
@@ -260,6 +417,10 @@ impl State {
         let Some(mut grab) = self.popup_grab.take() else {
             return;
         };
+        // Filed before the ungrab below dismisses anything: a menu opened
+        // off the back of this one -- the replacement half of
+        // `grab_session_continues` -- is recognized from here.
+        self.note_popup_grab_end(&grab);
         // `popup_done` for the whole chain, innermost first. This also takes
         // the popups out of the parent's `PopupTree`, so they stop being
         // drawn on the very next frame rather than when the client gets
@@ -307,7 +468,12 @@ impl State {
         {
             return;
         }
-        self.popup_grab = None;
+        // `take`, not `= None`, so the ended grab can file its session
+        // before it is dropped (see `dismiss_popup_grab`).
+        let Some(grab) = self.popup_grab.take() else {
+            return;
+        };
+        self.note_popup_grab_end(&grab);
         self.refresh_keyboard_focus();
         // The dismissed popup's pixels are gone from the tree; nothing else
         // marks the screen dirty for a destroy.

@@ -4,7 +4,8 @@ use flexwm_core::Action;
 use flexwm_ipc::{KeyCombo, Modifier, PointerButton};
 use smithay::backend::input::{Axis, AxisSource, ButtonState, InputTime, KeyState};
 use smithay::input::keyboard::{FilterResult, KeyboardHandle, Keycode, Keysym, xkb};
-use smithay::input::pointer::{AxisFrame, ButtonEvent, MotionEvent};
+use smithay::input::pointer::{AxisFrame, ButtonEvent, MotionEvent, PointerHandle};
+use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{Logical, Point, SERIAL_COUNTER};
 
 use super::State;
@@ -83,6 +84,35 @@ impl State {
         // this" would hand every client a permanent, self-refreshing
         // activation serial and defeat the gate in `activation.rs`.
         let serial = SERIAL_COUNTER.next_serial();
+        // The one exception, for the popup-grab gate (`popup.rs`): a motion
+        // that actually *changes* pointer focus delivers an `enter` carrying
+        // this serial, which is what a toolkit passes to `xdg_popup.grab`
+        // when a menu was opened by hovering. Recorded under the entered
+        // client, like everything else in `interaction_serials` -- and only
+        // then: every other motion delivers nothing new, and crediting one
+        // would file a serial its client never saw under its name.
+        //
+        // Three guards, each load-bearing:
+        // - the focus must really move (`current_focus` read before `motion`
+        //   below updates it). A redundant motion mints a serial but sends
+        //   no `enter`.
+        // - no grab may hold the pointer. Under one the recipient is the
+        //   grab's own logic, not `under` -- crediting `under` would file an
+        //   entry for a client that never received it, the exact hole the
+        //   client half of each entry exists to close.
+        // - `under` must name a surface at all: leaving for bare desktop
+        //   sends a `leave` only, which is evidence for no one.
+        //
+        // Costs one seat lock and a surface-handle clone per motion event on
+        // the common no-change path (the grab check runs only when focus
+        // actually moved) -- noise next to the hit test above and the client
+        // socket write below, both of which this path already pays per event.
+        if Self::pointer_entered(&pointer, &under)
+            && let Some((surface, _)) = &under
+            && let Some(client) = self.client_of(surface)
+        {
+            self.interaction_serials.record_focus(serial, client);
+        }
         let time = InputTime::from_millis(self.millis());
         pointer.motion(
             self,
@@ -105,6 +135,25 @@ impl State {
         if self.tty.is_some() {
             self.request_render();
         }
+    }
+
+    /// Whether this motion will deliver a pointer `enter` to a client
+    /// surface: focus really moves somewhere, and no grab holds the pointer.
+    ///
+    /// Under a grab the recipient is the grab's own logic, not `under` -- a
+    /// popup grab confines the pointer to its own tree, an implicit button
+    /// grab confines it to the pressed surface -- so `under` names a client
+    /// that will never see this serial. Read before
+    /// [`PointerHandle::motion`] runs: afterwards the seat's focus already
+    /// names `under` and the move is unobservable.
+    fn pointer_entered(
+        pointer: &PointerHandle<Self>,
+        under: &Option<(WlSurface, Point<f64, Logical>)>,
+    ) -> bool {
+        if pointer.current_focus().as_ref() == under.as_ref().map(|(surface, _)| surface) {
+            return false;
+        }
+        !pointer.is_grabbed()
     }
 
     /// Re-runs the hit test where the pointer already is, so pointer focus

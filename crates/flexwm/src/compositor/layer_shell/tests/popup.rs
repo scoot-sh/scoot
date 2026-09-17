@@ -40,7 +40,7 @@ fn an_xdg_popup_configures_maps_draws_and_tears_down() {
     let Ack::PopupConfigured(configured) = fixture.run(Step::MapPopup {
         parent: PopupParent::Window,
         color: POPUP_BGRA,
-        grab: false,
+        grab: None,
     }) else {
         panic!("the popup step should report whether a configure arrived");
     };
@@ -99,7 +99,7 @@ fn window_with_grabbing_popup(fixture: &mut Fixture) -> (f64, f64) {
     let Ack::PopupConfigured(configured) = fixture.run(Step::MapPopup {
         parent: PopupParent::Window,
         color: POPUP_BGRA,
-        grab: true,
+        grab: Some(GrabSource::Key),
     }) else {
         panic!("the popup step should report whether a configure arrived");
     };
@@ -170,7 +170,7 @@ fn a_click_over_a_popup_reaches_the_popup() {
     fixture.run(Step::MapPopup {
         parent: PopupParent::Window,
         color: POPUP_BGRA,
-        grab: false,
+        grab: None,
     });
 
     let pixels = fixture.render();
@@ -322,7 +322,7 @@ fn a_popup_grab_is_refused_while_a_launcher_holds_the_keyboard() {
     fixture.run(Step::MapPopup {
         parent: PopupParent::Window,
         color: POPUP_BGRA,
-        grab: true,
+        grab: Some(GrabSource::Key),
     });
     assert!(
         fixture.state.popup_grab.is_none(),
@@ -388,7 +388,7 @@ fn locking_the_session_takes_the_keyboard_off_a_popup_grab() {
     fixture.run(Step::MapPopup {
         parent: PopupParent::Window,
         color: POPUP_BGRA,
-        grab: true,
+        grab: Some(GrabSource::Key),
     });
     assert!(
         fixture.state.popup_grab.is_none(),
@@ -428,7 +428,7 @@ fn a_clicked_layer_surface_does_not_pre_empt_a_popup_grab() {
     fixture.run(Step::MapPopup {
         parent: PopupParent::Layer(0),
         color: POPUP_BGRA,
-        grab: true,
+        grab: Some(GrabSource::Key),
     });
     assert!(
         fixture.state.popup_grab.is_some(),
@@ -484,7 +484,7 @@ fn a_bar_that_wants_no_keyboard_does_not_keep_one_when_its_menu_closes() {
     fixture.run(Step::MapPopup {
         parent: PopupParent::Layer(0),
         color: POPUP_BGRA,
-        grab: true,
+        grab: Some(GrabSource::Key),
     });
     assert_eq!(
         fixture.keyboard().focused,
@@ -563,7 +563,7 @@ fn a_nested_popup_grab_unwinds_to_its_parent() {
     fixture.run(Step::MapPopup {
         parent: PopupParent::Popup(0),
         color: WALLPAPER_BGRA,
-        grab: true,
+        grab: Some(GrabSource::Key),
     });
     assert_eq!(
         fixture.keyboard().focused,
@@ -638,7 +638,7 @@ fn a_layer_parented_popup_configures_maps_and_draws() {
     let Ack::PopupConfigured(configured) = fixture.run(Step::MapPopup {
         parent: PopupParent::Layer(0),
         color: POPUP_BGRA,
-        grab: false,
+        grab: None,
     }) else {
         panic!("the popup step should report whether a configure arrived");
     };
@@ -775,7 +775,7 @@ fn windows_reports_no_popup_grab_without_an_active_grab() {
     fixture.run(Step::MapPopup {
         parent: PopupParent::Window,
         color: POPUP_BGRA,
-        grab: false,
+        grab: None,
     });
     fixture.run(Step::MapWindow);
 
@@ -807,7 +807,7 @@ fn windows_reports_no_popup_grab_holder_for_a_layer_rooted_grab() {
     let Ack::PopupConfigured(configured) = fixture.run(Step::MapPopup {
         parent: PopupParent::Layer(0),
         color: POPUP_BGRA,
-        grab: true,
+        grab: Some(GrabSource::Key),
     }) else {
         panic!("the popup step should report whether a configure arrived");
     };
