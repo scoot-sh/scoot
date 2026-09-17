@@ -2,6 +2,7 @@
 
 mod cli;
 mod msg;
+mod output;
 
 #[cfg(target_os = "linux")]
 mod compositor;
@@ -13,7 +14,11 @@ fn main() -> ExitCode {
     match run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            eprintln!("flexwm: {error}");
+            // Infallible by design: if stderr is closed too, there is
+            // nowhere to report to, and `eprintln!` would panic (exit 101)
+            // on the EPIPE -- the same class of bug `output` fixes on
+            // stdout. The process still exits FAILURE either way.
+            output::warn(format_args!("flexwm: {error}"));
             ExitCode::FAILURE
         }
     }
@@ -22,7 +27,10 @@ fn main() -> ExitCode {
 fn run() -> Result<(), Box<dyn Error>> {
     match cli::parse(std::env::args().skip(1))? {
         cli::Command::Help => {
-            print!("{}", cli::USAGE);
+            // `cli::USAGE` already ends in a newline, so `write_str`, not
+            // `print_line`. A closed pipe is a quiet success here too:
+            // `flexwm --help | head -1` exits 0.
+            output::write_str(cli::USAGE)?;
             Ok(())
         }
         cli::Command::Msg { request, out } => msg::run(&request, out.as_deref()),

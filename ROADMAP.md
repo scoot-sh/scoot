@@ -213,6 +213,17 @@ gap jumped the queue — each item's own file records why it landed when it did.
   dmabuf-allocating third-party client could not run on the GPU-less dev VM,
   so that half of the matrix is wire-test proven, not live — recorded as an
   environment limit, with GPU hardware as the scenario that would revisit it.
+- **[`flexwm msg` EPIPE panic](docs/backlog/resolved/msg-client-broken-pipe-done.md)**
+  (PR #62, 2026-09-17) — `msg ... | head` died with exit 101
+  (`println!` panics on EPIPE; Rust ignores SIGPIPE). New `output.rs` maps
+  a closed stdout to a quiet exit 0 at all six client-binary stdio sites
+  (reply, screenshot bytes/summary, warning, `--help`, error report) —
+  explicit per-write handling rather than a process-wide SIGPIPE
+  disposition, which would have handed the co-resident compositor a
+  crash-on-disconnect. A dead *socket* peer still exits 1. Fail-first
+  integration test (fake server, ~1 MiB reply, reader closed); no protocol,
+  IPC, or compositor changes, no README change (the error-response
+  contract is untouched).
 
 ## What's next
 
