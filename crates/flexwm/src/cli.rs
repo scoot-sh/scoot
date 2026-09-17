@@ -36,6 +36,28 @@ ACTIONS:
     focus-window-id ID | focus-workspace-index N | cycle-column-width | close | spawn COMMAND... | quit
 ";
 
+/// The largest `--width`/`--height` a `--headless`/`--nested` output may ask
+/// for, per axis.
+///
+/// Two reasons for this exact number, both about what a mode can report
+/// rather than taste:
+///
+/// - **Nothing real can use more.** DRM reports each mode axis in a `u16`
+///   (`drm_mode_modeinfo`'s `hdisplay`/`vdisplay` in the kernel's uAPI
+///   headers), so no connector can list anything past 65535 -- and neither
+///   can `--mode WxH`, which parses as `(u16, u16)` in this same file. Real
+///   hardware sits far below that (8K is 7680 wide; the widest 16K
+///   prototype is 15360), so the bound has room to spare with margin.
+/// - **It keeps every output-derived sum in the layout far from overflow.**
+///   The largest one, `available + gap` in `flexwm_core`'s `column_width`,
+///   tops out at `ceil(65535 / MIN_SCALE) + Config::MAX_GAP` -- 131070 +
+///   10,000 at the `[output] scale` floor of 0.5 -- over four orders of
+///   magnitude inside `i32`.
+///
+/// [`CompositorOptions::width`]/[`CompositorOptions::height`] below carry
+/// the range into the type docs; `dimension` enforces it at parse.
+pub const MAX_OUTPUT_DIMENSION: i32 = 65535;
+
 #[derive(Debug, PartialEq)]
 pub enum Command {
     Help,
@@ -50,7 +72,8 @@ pub enum Command {
 pub struct CompositorOptions {
     /// The requested size. Under `--nested`, the host's first configure can
     /// override this; under `--headless` it's authoritative, there being no
-    /// host to negotiate with.
+    /// host to negotiate with. Each axis is in `1..=MAX_OUTPUT_DIMENSION`;
+    /// `parse` refuses anything else.
     pub width: i32,
     pub height: i32,
     /// Where to listen for IPC; the default path when `None`.
@@ -160,8 +183,8 @@ fn compositor(
     };
     while let Some(arg) = args.next() {
         match arg.as_str() {
-            "--width" => options.width = number("--width", args.next())?,
-            "--height" => options.height = number("--height", args.next())?,
+            "--width" => options.width = dimension("--width", args.next())?,
+            "--height" => options.height = dimension("--height", args.next())?,
             "--socket" => {
                 let path = args.next().ok_or(Error::Missing("a path after --socket"))?;
                 options.socket = Some(PathBuf::from(path));
@@ -382,6 +405,26 @@ fn vertical(args: &mut impl Iterator<Item = String>) -> Result<Vertical, Error> 
     }
 }
 
+/// A `--width`/`--height` value: a positive pixel count no DRM mode could
+/// exceed (see [`MAX_OUTPUT_DIMENSION`]). Refused rather than clamped --
+/// every other invalid flag in this file is an `Error::Invalid`, and a
+/// typo'd size silently running at a different size would be the worse
+/// surprise. The error echoes the flag's own spelling, the way `number`
+/// does for unparsable input.
+fn dimension(what: &'static str, value: Option<String>) -> Result<i32, Error> {
+    let raw = value.ok_or(Error::Missing(what))?;
+    let invalid = || Error::Invalid {
+        what,
+        value: raw.clone(),
+    };
+    let size: i32 = raw.parse().map_err(|_| invalid())?;
+    if (1..=MAX_OUTPUT_DIMENSION).contains(&size) {
+        Ok(size)
+    } else {
+        Err(invalid())
+    }
+}
+
 fn number<T: std::str::FromStr>(what: &'static str, value: Option<String>) -> Result<T, Error> {
     let value = value.ok_or(Error::Missing(what))?;
     value.parse().map_err(|_| Error::Invalid {
@@ -427,6 +470,46 @@ mod tests {
         assert_eq!(options.height, 600);
         assert_eq!(options.command, vec!["foot", "-e", "sh"]);
         assert!(!options.nested);
+    }
+
+    #[test]
+    fn width_and_height_refuse_what_no_mode_can_report() {
+        // DRM reports each mode axis in a `u16` (`drm_mode_modeinfo`), so
+        // nothing real is wider than 65535: anything past it is a typo or a
+        // probe, refused the way `--mode` refuses its own bad input rather
+        // than silently running at a different size.
+        for bad in ["0", "-1", "-1600", "65536", "2000000000"] {
+            assert_eq!(
+                parse_args(&["--headless", "--width", bad]),
+                Err(Error::Invalid {
+                    what: "--width",
+                    value: bad.to_owned(),
+                }),
+                "--width {bad}"
+            );
+            assert_eq!(
+                parse_args(&["--headless", "--height", bad]),
+                Err(Error::Invalid {
+                    what: "--height",
+                    value: bad.to_owned(),
+                }),
+                "--height {bad}"
+            );
+        }
+    }
+
+    #[test]
+    fn width_and_height_accept_the_whole_legal_range() {
+        // One pixel, today's sizes, 8K/16K, and exactly the DRM maximum.
+        for good in ["1", "800", "1920", "7680", "15360", "65535"] {
+            let expected: i32 = good.parse().unwrap();
+            let Ok(Command::Compositor(options)) =
+                parse_args(&["--headless", "--width", good, "--height", good])
+            else {
+                panic!("expected compositor for {good}");
+            };
+            assert_eq!((options.width, options.height), (expected, expected));
+        }
     }
 
     #[test]

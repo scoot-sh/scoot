@@ -42,25 +42,35 @@ impl Rect {
         Size::new(self.w, self.h)
     }
 
+    /// The first column past the rect's right edge. Saturates rather than
+    /// overflowing: a rect running off the end of the coordinate space ends
+    /// at `i32::MAX`, which is what keeps the on-screen test and
+    /// [`Rect::contains`] total over every input.
     pub const fn right(&self) -> i32 {
-        self.x + self.w
+        self.x.saturating_add(self.w)
     }
 
+    /// The first row past the rect's bottom edge. Saturates, like
+    /// [`Rect::right`].
     pub const fn bottom(&self) -> i32 {
-        self.y + self.h
+        self.y.saturating_add(self.h)
     }
 
     pub const fn contains(&self, p: Point) -> bool {
         p.x >= self.x && p.x < self.right() && p.y >= self.y && p.y < self.bottom()
     }
 
-    /// Shrinks every side by `by`, never below zero size.
+    /// Shrinks every side by `by`, never below zero size. Saturates rather
+    /// than overflowing, the same discipline as [`Rect::right`]: an origin
+    /// past `i32::MAX` clamps to it, and a margin wider than the rect --
+    /// whose doubled width alone can overflow `i32` -- leaves an empty rect
+    /// there. A negative `by` still grows the rect.
     pub fn inset(&self, by: i32) -> Rect {
         Rect::new(
-            self.x + by,
-            self.y + by,
-            (self.w - 2 * by).max(0),
-            (self.h - 2 * by).max(0),
+            self.x.saturating_add(by),
+            self.y.saturating_add(by),
+            self.w.saturating_sub(by.saturating_mul(2)).max(0),
+            self.h.saturating_sub(by.saturating_mul(2)).max(0),
         )
     }
 
@@ -68,7 +78,7 @@ impl Rect {
     /// they don't overlap or either one is itself empty.
     ///
     /// Deliberately not written in terms of [`Rect::right`]/[`Rect::bottom`],
-    /// whose `x + w` is an unchecked `i32` add: both operands here can come
+    /// whose `x + w` saturates at `i32::MAX`: both operands here can come
     /// from a client (a layer-shell surface's exclusive zone and margins are
     /// raw `i32`s off the wire) or from a platform's own output geometry, so
     /// the far edges are computed in `i64` instead of being trusted to fit. A
@@ -149,5 +159,46 @@ mod tests {
         // Idempotent even at the edges of the coordinate space.
         let everywhere = Rect::new(i32::MIN, i32::MIN, i32::MAX, i32::MAX);
         assert_eq!(everywhere.intersection(everywhere), everywhere);
+    }
+
+    #[test]
+    fn far_edges_saturate_instead_of_overflowing() {
+        // `(i32::MAX - 100) + 200` panics in debug and wraps negative in
+        // release today.
+        let r = Rect::new(i32::MAX - 100, i32::MIN + 100, 200, 200);
+        assert_eq!(r.right(), i32::MAX);
+        assert_eq!(r.bottom(), i32::MIN + 300);
+        // A saturated edge still contains what it should: the last real
+        // column is inside, and nothing past the saturation point is.
+        assert!(r.contains(Point::new(i32::MAX - 1, i32::MIN + 299)));
+        assert!(!r.contains(Point::new(i32::MAX, i32::MIN + 299)));
+    }
+
+    #[test]
+    fn inset_saturates_the_origin_instead_of_overflowing() {
+        // `x + by` past `i32::MAX` panics in debug and wraps in release
+        // today, while the `w`/`h` arms already floor at 0.
+        let r = Rect::new(i32::MAX - 1, i32::MAX - 1, 10, 10).inset(10);
+        assert_eq!((r.x, r.y), (i32::MAX, i32::MAX));
+        assert_eq!(r.size(), Size::new(0, 0));
+    }
+
+    #[test]
+    fn inset_with_an_enormous_margin_leaves_an_empty_rect() {
+        // `2 * by` overflows on its own for this input today, before the
+        // `.max(0)` floor ever runs.
+        let r = Rect::new(0, 0, 1600, 1000).inset(i32::MAX);
+        assert_eq!(r.size(), Size::new(0, 0));
+        assert_eq!((r.x, r.y), (i32::MAX, i32::MAX));
+    }
+
+    #[test]
+    fn inset_with_a_negative_margin_still_grows() {
+        // Pins the existing grow direction so the saturation above cannot
+        // silently turn shrinking inside out.
+        assert_eq!(
+            Rect::new(10, 10, 100, 100).inset(-5),
+            Rect::new(5, 5, 110, 110)
+        );
     }
 }

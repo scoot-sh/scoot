@@ -249,6 +249,29 @@ fn reservations_are_per_output() {
     assert_eq!(placement(&world, 2).rect, Rect::new(1010, 10, 385, 580));
 }
 
+/// An absurd configured proportion saturates `column_width`'s float-to-int
+/// cast to `i32::MAX`, and two such columns saturate the strip: arranging
+/// them must saturate `usable.x + start` rather than panic (debug) or wrap
+/// (release). Operator-supplied, like the flags -- a config file can spell
+/// any finite positive proportion -- so this is the same LOW family, found
+/// by the ticket's sibling audit rather than the flags themselves.
+#[test]
+fn absurd_column_proportions_saturate_instead_of_overflowing() {
+    let mut world = World::new(Config {
+        gap: 10,
+        column_widths: vec![1e18],
+        default_column_width: 0,
+    });
+    add_output(&mut world, 1, SCREEN);
+    open(&mut world, 1);
+    open(&mut world, 2);
+    let arrangement = world.arrange();
+    assert_eq!(arrangement.placements.len(), 2);
+    for placed in &arrangement.placements {
+        assert!(placed.rect.w >= 1 && placed.rect.h >= 1, "{placed:?}");
+    }
+}
+
 /// A newly added output starts with everything usable, so a platform that
 /// reserves nothing behaves exactly as it did before reservations existed.
 #[test]

@@ -26,12 +26,13 @@ pub fn starts(widths: &[i32], gap: i32) -> (Vec<i32>, i32) {
 
 /// The scroll offset that brings `[start, start + len)` into a viewport of
 /// `view_len` currently at `view`, moving as little as possible and never past
-/// either end of a strip of `strip_len`.
+/// either end of a strip of `strip_len`. The edge sums saturate rather than
+/// overflowing, the same discipline as `starts` below.
 pub fn scroll_into_view(view: i32, view_len: i32, start: i32, len: i32, strip_len: i32) -> i32 {
     let wanted = if start < view || len >= view_len {
         start
-    } else if start + len > view + view_len {
-        start + len - view_len
+    } else if start.saturating_add(len) > view.saturating_add(view_len) {
+        start.saturating_add(len).saturating_sub(view_len)
     } else {
         view
     };
@@ -128,5 +129,17 @@ mod tests {
         assert_eq!(scroll_into_view(100, 100, 20, 50, 300), 20);
         // Never scroll beyond the end of the strip.
         assert_eq!(scroll_into_view(250, 100, 0, 50, 80), 0);
+    }
+
+    #[test]
+    fn scroll_into_view_saturates_instead_of_overflowing() {
+        // `start + len` here is `i32::MAX + 100`, a debug panic and a
+        // release wrap today. Saturation changes the branch taken (the
+        // saturated far edge is no longer past the saturated viewport end)
+        // but both paths land on the same final clamp.
+        assert_eq!(
+            scroll_into_view(i32::MAX - 60, 200, i32::MAX - 50, 150, i32::MAX),
+            i32::MAX - 200
+        );
     }
 }

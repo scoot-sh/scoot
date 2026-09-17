@@ -208,7 +208,10 @@ actionable.
 - [`--tty` quit sometimes logs a DRM "restore previous state" EPERM](./tty/drm-teardown-restore-eperm.md)
 
 ### Core / config / rendering
-- [`--width`/`--height` are unbounded `i32`s](./core/width-height-unbounded.md)
+- [`--width`/`--height` are unbounded `i32`s](./resolved/width-height-bounded-done.md)
+  — RESOLVED 2026-09-17: refused past 65535 per axis at parse (the most DRM
+  itself can report for a mode axis); `Rect::inset`/`right()`/`bottom()`,
+  `scroll_into_view` and the arrange on-screen test saturate.
 - [`[binds]` capital letter parses but never fires](./resolved/binds-capital-letter-done.md)
   — RESOLVED 2026-09-17: single ASCII letters fold to lowercase at
   config-parse time with a warning (`"A"` means plain `a`, not `shift+a`);

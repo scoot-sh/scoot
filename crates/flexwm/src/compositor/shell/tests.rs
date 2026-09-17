@@ -126,6 +126,34 @@ fn one_absurd_axis_does_not_affect_the_other() {
     );
 }
 
+/// The ticket's chain, pinned at both ends: `hint_limit` caps to the output,
+/// not to any absolute bound, so the bound that keeps 12(b)'s limit real
+/// lives one layer up, in the CLI's `--width`/`--height` range check.
+#[test]
+fn the_limit_follows_the_output_so_only_the_flag_bound_bounds_it() {
+    // A 2e9-wide area yields a ~2e9 limit that bounds nothing real. This is
+    // the vacuous clamp the ticket diagnoses: reachable before the CLI
+    // bound, unreachable after (anything past 65535 is refused at parse).
+    assert_eq!(
+        hint_limit(
+            [Rect::new(0, 0, 2_000_000_000, 2_000_000_000)].into_iter(),
+            GAP
+        ),
+        Size::new(1_999_999_976, 1_999_999_976)
+    );
+    // ...while the largest output the flags can still spell leaves a limit
+    // every layout sum stays four orders of magnitude inside `i32` in (the
+    // logical area can double the flag at the `[output] scale` floor of 0.5,
+    // to 131070 a side, and the largest dimension-derived sum past that is
+    // `available + gap` at ~141000 -- still ~15000x below `i32::MAX`).
+    let limit = hint_limit([Rect::new(0, 0, 65535, 65535)].into_iter(), GAP);
+    assert_eq!(limit, Size::new(65511, 65511));
+    assert_eq!(
+        clamp_hint(Size::new(i32::MAX, i32::MAX), limit),
+        Size::new(65511, 65511)
+    );
+}
+
 // -------------------------------------------------------------------------
 // A live compositor and a live client
 // -------------------------------------------------------------------------

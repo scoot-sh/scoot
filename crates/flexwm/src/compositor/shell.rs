@@ -356,6 +356,13 @@ impl State {
 /// a window could legitimately fill its own screen with. With the one output
 /// this compositor creates today the two bounds are identical.
 ///
+/// The other end of the chain is the CLI: `--width`/`--height` are refused
+/// past 65535 (`cli::MAX_OUTPUT_DIMENSION`, the most DRM itself can report
+/// for a mode axis), so the largest area that can reach this limit is
+/// 65535x65535 -- 131070 a side at the `[output] scale` floor of 0.5 -- and
+/// the limit is at most that per axis. That is what keeps this clamp a real
+/// bound rather than the ~2x10^9 no-op a flag-spelled output used to make it.
+///
 /// With no outputs at all the limit is zero, which drops the hint entirely.
 /// That is unreachable today (`headless::init` adds the output before the
 /// event loop starts, and nothing removes one), and if output removal ever
