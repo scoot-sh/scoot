@@ -202,7 +202,8 @@ actionable.
 - [The pointer starts at the output's origin, not centred](./rendering/pointer-starts-at-origin.md)
 
 ### Security
-- [Unbounded total shm reservation per client](./security/shm-total-per-client-unbounded.md)
+- [Live `wl_shm` pools per client](./resolved/shm-pool-count-cap-done.md) — RESOLVED 2026-09-17: at most 128 live pools per Wayland client (refused with `InvalidStride`, released on destroy/disconnect); the byte total stays open behind an upstream size accessor (proven unknowable at the pinned rev)
+- [No cap on Wayland connection count](./security/wayland-connection-cap.md) — per-connection bounds (frames, binds, pools) multiply across connections; ~8 maxed connections exhaust the compositor's fds
 
 ### Packaging / tooling
 - [Nix `src = self` invalidates the build on doc-only edits](./packaging/nix-src-fileset.md)

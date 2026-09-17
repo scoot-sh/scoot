@@ -340,6 +340,26 @@ gap jumped the queue — each item's own file records why it landed when it did.
   before/after (64 binds × 50 windows: 64 registered before, 8 after) and
   live quickshell (1 bind per connection, window list unaffected). README
   carries the per-global refusal semantics.
+- **[No upper bound on *total* shm reservation per
+  client](docs/backlog/resolved/shm-pool-count-cap-done.md)** — half
+  landed, half proven unimplementable at the pinned rev. The byte total the
+  ticket asked for cannot be built: the new pool's id is sealed inside
+  `New<WlShmPool>`, `ShmPoolUserData` exposes no size, `Pool` is
+  unexported, and no server API enumerates a client's objects (all
+  re-verified in source) — closed as NEEDS-UPSTREAM behind a size
+  accessor. What landed instead is a per-client *live-pool count* (128,
+  claimed at `create_pool`, released on destroy/disconnect): it caps
+  per-connection fds and mappings (one fd minimum per live pool; ~1000
+  pools exhaust a 1024-fd `RLIMIT_NOFILE` for everyone), not bytes. Sized
+  from wire measurement (`foot` 2×512 MiB arenas, Qt 2×~4 MiB, idle shell
+  0; ~40 reasoned for a heavy multi-window app), refused with
+  `InvalidStride` like the per-pool cap. Seven fail-first harness tests
+  (flood, headroom, isolation, composition ×2, drain, resize-pin); one
+  harness race found and fixed (pools read vs disconnect cleanup).
+  Residual filed as its own item: Wayland connections are unbounded, so
+  per-connection bounds multiply ([Wayland connection
+  cap](docs/backlog/security/wayland-connection-cap.md)). README carries
+  the new bound.
 ## What's next
 
 The backlog is the source of truth for what to pick up; this is the current
