@@ -3,7 +3,7 @@ title: "The `ext_session_lock_manager_v1` global is offered to every client"
 status: "open"
 area: "protocols"
 priority: "low"
-blocked: null
+blocked: "wp_security_context_v1 support (no entry filed yet — this needs a client-privilege primitive before any filter has anything to key on)"
 ---
 
 # The `ext_session_lock_manager_v1` global is offered to every client
