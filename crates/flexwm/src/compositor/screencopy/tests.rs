@@ -47,6 +47,7 @@ use wayland_protocols::ext::session_lock::v1::client::{
 use wayland_protocols::xdg::shell::client::{xdg_surface, xdg_toplevel, xdg_wm_base};
 
 use crate::compositor::decorations::{Appearance, Color};
+use crate::compositor::session_lock::LOCK_VBLANK_TIMEOUT;
 use crate::compositor::test_support::{Harness, wait_for};
 
 use super::MAX_FRAMES_PER_CLIENT;
@@ -177,6 +178,11 @@ enum Step {
     DestroySession,
     /// Lock the session and give it a solid [`LOCK_BGRA`] lock surface.
     Lock,
+    /// The same, but return once the surface commit is on the wire without
+    /// waiting for `locked` -- for the cases where the confirmation under
+    /// test arrives later, through [`State::note_flip_completed`] or
+    /// [`State::note_blank_timeout`], rather than with the render.
+    LockNoWait,
 }
 
 /// What a client answers a [`Step`] with.
@@ -496,6 +502,388 @@ fn a_capture_parked_before_a_lock_is_served_from_the_locked_frame() {
             .any(|pixel| pixel == LOCK_BGRA.as_slice()),
         "and it must carry the lock screen that replaced it"
     );
+}
+
+// ---------------------------------------------------------------------------
+// A parked capture across a vblank-deferred lock confirmation (PR #84)
+// ---------------------------------------------------------------------------
+//
+// PR #84 moved lock confirmation out of `render()` and onto the DRM vblank
+// under `--tty`. The tick that rendered the blank then drops its timer -- a
+// parked screencopy frame is none of `frame_tick`'s re-arm conditions -- and
+// neither confirm path re-armed it, so a capture parked across the wait was
+// never delivered unless some later commit happened to restart the ticker.
+//
+// These tests drive that shape without DRM hardware: the render target is
+// taken away so the lock's own render draws nothing and confirms nothing
+// (the headless stand-in for `--tty` deferring confirmation to the flip's
+// vblank), the wait `render()` would have recorded is recorded by hand, and
+// the blank tick consuming the dirty flag -- which drops the timer -- is a
+// `needs_render = false` plus a real tick.
+//
+// Two things a headless harness cannot reproduce, and how these tests stay
+// honest about both:
+//
+// - The blank is never drawn here (any successful locked render would
+//   confirm headless-style and clear `pending`), so the parked frame is not
+//   even due at confirm time and the backdrop stays stale. On `--tty` the
+//   blank tick both paints the backdrop and bumps `frame_serial` (making the
+//   parked frame due), and the re-armed tick delivers straight from that
+//   framebuffer -- its `render()` early-outs on the consumed dirty flag, and
+//   no post-confirm render is needed. Here the delivering render is
+//   `refresh_lock_state`'s catch-up (`session_lock.rs`): the stale backdrop
+//   re-arms on the first display dispatch after the restore, and that tick
+//   draws the lock screen the capture is then served from.
+// - Because of that second re-arm, delivery alone cannot discriminate the
+//   fix headless: it happens pre-fix too. What fails pre-fix is the pin each
+//   test takes first -- `timer_armed` immediately after the confirm call,
+//   with zero dispatches in between, so nothing but the confirm path itself
+//   could have armed it. That pin is the regression test; the delivery and
+//   pixel assertions after it prove the re-armed ticker actually serves a
+//   parked frame, with post-blank content, and then goes idle again.
+
+/// Parks a capture, locks with confirmation deferred the way `--tty` defers
+/// it, and leaves the compositor exactly where the blank tick left it: the
+/// timer dropped, the wait recorded, the render target back in place.
+///
+/// Returns the `Instant` the wait was armed at, for the fallback-confirmation
+/// test.
+fn park_across_deferred_lock(fixture: &mut Fixture) -> Instant {
+    fixture.run(Step::MapWindow(WINDOW_BGRA));
+    fixture.run(Step::StartSession {
+        paint_cursors: false,
+    });
+    // One capture delivered, so the next one parks on a static screen: the
+    // protocol lets the compositor wait for a change, and this one does.
+    let (outcome, _) = fixture
+        .run(Step::Capture {
+            width: CANVAS,
+            height: CANVAS,
+            format: wl_shm::Format::Argb8888,
+        })
+        .frame();
+    assert_eq!(outcome, Outcome::Ready);
+    fixture.run(Step::CaptureWithoutWaiting);
+    let (outcome, _) = fixture.run(Step::PollFrame).frame();
+    assert_eq!(outcome, Outcome::Waiting);
+
+    // No render target: the lock's own render draws nothing and -- headless
+    // confirming on render -- confirms nothing either. `pending` survives,
+    // the way it survives a `--tty` render that defers to the vblank.
+    let backend = fixture.state.backend.take().expect("a backend");
+    fixture.run(Step::LockNoWait);
+    assert!(
+        fixture.state.session_lock.is_locked(),
+        "the lock has to have taken for this test to mean anything"
+    );
+    assert!(
+        fixture.state.session_lock.awaiting_blank(),
+        "with no frame drawn, the blanked frame is still outstanding"
+    );
+    // What `--tty`'s render records once its blanked frame presents as flip
+    // 7. The fallback timer the real path arms alongside is deliberately not
+    // armed here: the test drives the deadline by hand.
+    let t0 = Instant::now();
+    let _ = fixture.state.session_lock.await_vblank(Some(7), t0);
+    // The blank tick consuming the dirty flag: nothing in the re-arm set is
+    // left, so a real tick drops the timer -- the mechanism under test.
+    fixture.state.needs_render = false;
+    fixture.tick(Duration::from_millis(50));
+    assert!(
+        !fixture.state.timer_armed,
+        "the blank tick must have dropped the timer: a parked capture is \
+         none of frame_tick's re-arm conditions"
+    );
+    fixture.state.backend = Some(backend);
+    t0
+}
+
+#[test]
+fn a_parked_capture_is_delivered_once_a_vblank_confirms_the_lock() {
+    // The regression itself: pending capture + lock + vblank confirm, with
+    // zero further client commits anywhere after the confirm.
+    let mut fixture = Fixture::start();
+    park_across_deferred_lock(&mut fixture);
+
+    // The DRM vblank handler's own call, for flip 7's completion.
+    fixture.state.note_flip_completed(Some(7));
+    assert!(
+        !fixture.state.session_lock.awaiting_blank(),
+        "the tracked flip's vblank confirms the lock"
+    );
+    // The pin that fails pre-fix: nothing has been dispatched since the
+    // confirm call, so an armed ticker is the confirm path's own doing.
+    // (`PollFrame` below cannot discriminate headless -- the stale backdrop
+    // re-arms through `refresh_lock_state` on its display dispatch either
+    // way, as the module doc above explains.)
+    assert!(
+        fixture.state.timer_armed,
+        "confirming the lock must re-arm the frame ticker, or nothing runs \
+         `service_captures` again and the parked frame is stuck"
+    );
+    let (outcome, captured) = fixture.run(Step::PollFrame).frame();
+    assert_eq!(
+        outcome,
+        Outcome::Ready,
+        "a vblank-confirmed lock must deliver the capture it parked"
+    );
+    assert_eq!(
+        captured,
+        fixture.pixels(),
+        "the delivered frame is the framebuffer the re-armed tick drew"
+    );
+    assert!(
+        captured
+            .chunks_exact(4)
+            .any(|pixel| pixel == LOCK_BGRA.as_slice()),
+        "and that framebuffer is the lock screen, not the parked desktop"
+    );
+    assert!(
+        !captured
+            .chunks_exact(4)
+            .any(|pixel| pixel == WINDOW_BGRA.as_slice()),
+        "no pixel of the pre-blank desktop may reach a capture parked across the lock"
+    );
+
+    // Steady-state cost: the re-arm was one tick, not a hot timer.
+    fixture.settle();
+    assert!(
+        !fixture.state.timer_armed,
+        "after delivery the timer must be dropped again -- it fires only \
+         when work exists"
+    );
+}
+
+#[test]
+fn a_parked_capture_is_delivered_once_the_fallback_confirms_the_lock() {
+    // The same re-arm through the other confirm path: the vblank never
+    // arrives (switched away, discarded flip, silent driver) and the
+    // one-second fallback confirms instead.
+    let mut fixture = Fixture::start();
+    let t0 = park_across_deferred_lock(&mut fixture);
+
+    fixture.state.note_blank_timeout(t0 + LOCK_VBLANK_TIMEOUT);
+    assert!(
+        !fixture.state.session_lock.awaiting_blank(),
+        "the fallback confirms the lock without any vblank"
+    );
+    // The same pin through the other confirm path (see the vblank test for
+    // why the pin, not the delivery, discriminates headless).
+    assert!(
+        fixture.state.timer_armed,
+        "a fallback confirm must re-arm the frame ticker too"
+    );
+    let (outcome, captured) = fixture.run(Step::PollFrame).frame();
+    assert_eq!(
+        outcome,
+        Outcome::Ready,
+        "a fallback-confirmed lock must deliver the capture it parked"
+    );
+    assert_eq!(
+        captured,
+        fixture.pixels(),
+        "the delivered frame is the framebuffer the re-armed tick drew"
+    );
+    assert!(
+        !captured
+            .chunks_exact(4)
+            .any(|pixel| pixel == WINDOW_BGRA.as_slice()),
+        "no pixel of the pre-blank desktop may reach a capture parked across the lock"
+    );
+
+    fixture.settle();
+    assert!(
+        !fixture.state.timer_armed,
+        "after delivery the timer must be dropped again -- it fires only \
+         when work exists"
+    );
+}
+
+#[test]
+fn a_confirm_with_no_parked_capture_costs_one_tick() {
+    // The re-arm buys exactly one tick, even with nothing waiting on it: a
+    // confirm with no parked capture must not keep the timer alive.
+    let mut fixture = Fixture::start();
+    fixture.run(Step::MapWindow(WINDOW_BGRA));
+
+    let backend = fixture.state.backend.take().expect("a backend");
+    fixture.run(Step::LockNoWait);
+    assert!(fixture.state.session_lock.awaiting_blank());
+    let _ = fixture
+        .state
+        .session_lock
+        .await_vblank(Some(7), Instant::now());
+    fixture.state.needs_render = false;
+    fixture.tick(Duration::from_millis(50));
+    assert!(!fixture.state.timer_armed);
+    fixture.state.backend = Some(backend);
+
+    fixture.state.note_flip_completed(Some(7));
+    assert!(
+        !fixture.state.session_lock.awaiting_blank(),
+        "the tracked flip's vblank confirms the lock"
+    );
+    // The one re-armed tick runs -- a render nobody asked for -- and then
+    // the timer is dropped again rather than ticking on idle. That single
+    // wakeup per lock is the whole steady-state cost of the fix.
+    assert!(
+        fixture.state.timer_armed,
+        "the confirm path re-arms unconditionally; the re-arm set decides \
+         whether the tick after it keeps the timer"
+    );
+    fixture.tick(Duration::from_millis(50));
+    assert!(
+        !fixture.state.timer_armed,
+        "a confirm with nothing parked must not keep the timer alive"
+    );
+    assert!(
+        fixture.state.session_lock.is_locked(),
+        "the session is still locked; only the wait was taken"
+    );
+}
+
+#[test]
+fn parked_captures_on_two_sessions_are_all_delivered_by_one_confirm() {
+    // One confirm re-arms one tick, and one tick's `service_captures` serves
+    // every session that is due -- not just the first.
+    let mut fixture = Fixture::start();
+    let other = fixture.spawn(run_client);
+    for client in [0, other] {
+        fixture.run_on(
+            client,
+            Step::StartSession {
+                paint_cursors: false,
+            },
+        );
+        let (outcome, _) = fixture
+            .run_on(
+                client,
+                Step::Capture {
+                    width: CANVAS,
+                    height: CANVAS,
+                    format: wl_shm::Format::Argb8888,
+                },
+            )
+            .frame();
+        assert_eq!(outcome, Outcome::Ready);
+        fixture.run_on(client, Step::CaptureWithoutWaiting);
+    }
+    fixture.run(Step::MapWindow(WINDOW_BGRA));
+    // Re-park after the window mapped: the mapping was the change that would
+    // otherwise have served them.
+    for client in [0, other] {
+        fixture.run_on(client, Step::CaptureWithoutWaiting);
+        let (outcome, _) = fixture.run_on(client, Step::PollFrame).frame();
+        assert_eq!(outcome, Outcome::Waiting);
+    }
+
+    let backend = fixture.state.backend.take().expect("a backend");
+    fixture.run(Step::LockNoWait);
+    assert!(fixture.state.session_lock.awaiting_blank());
+    let _ = fixture
+        .state
+        .session_lock
+        .await_vblank(Some(7), Instant::now());
+    fixture.state.needs_render = false;
+    fixture.tick(Duration::from_millis(50));
+    assert!(!fixture.state.timer_armed);
+    fixture.state.backend = Some(backend);
+
+    fixture.state.note_flip_completed(Some(7));
+    assert!(
+        fixture.state.timer_armed,
+        "the confirm must re-arm the ticker whatever is parked"
+    );
+    for client in [0, other] {
+        let (outcome, captured) = fixture.run_on(client, Step::PollFrame).frame();
+        assert_eq!(
+            outcome,
+            Outcome::Ready,
+            "one confirm must deliver every parked session, not just the first"
+        );
+        assert!(
+            !captured
+                .chunks_exact(4)
+                .any(|pixel| pixel == WINDOW_BGRA.as_slice()),
+            "client {client}: no pixel of the pre-blank desktop"
+        );
+    }
+
+    fixture.settle();
+    assert!(!fixture.state.timer_armed);
+}
+
+#[test]
+fn a_parked_capture_outlives_a_locker_that_dies_mid_wait() {
+    // "Unlock before confirm" has no protocol shape -- Smithay routes
+    // `unlock_and_destroy` only once `locked` has been sent, which is what
+    // clears `pending` (see `SessionLockHandler::unlock`) -- so the reachable
+    // form of a lock ending mid-wait is the locker dying: the session stays
+    // locked and reads as abandoned. The parked capture is still owed the
+    // lock framebuffer, not a failure and not the desktop.
+    let mut fixture = Fixture::start();
+    fixture.run(Step::MapWindow(WINDOW_BGRA));
+    fixture.run(Step::StartSession {
+        paint_cursors: false,
+    });
+    let (outcome, _) = fixture
+        .run(Step::Capture {
+            width: CANVAS,
+            height: CANVAS,
+            format: wl_shm::Format::Argb8888,
+        })
+        .frame();
+    assert_eq!(outcome, Outcome::Ready);
+    fixture.run(Step::CaptureWithoutWaiting);
+
+    let locker = fixture.spawn(run_client);
+    let backend = fixture.state.backend.take().expect("a backend");
+    fixture.run_on(locker, Step::LockNoWait);
+    assert!(fixture.state.session_lock.awaiting_blank());
+    let _ = fixture
+        .state
+        .session_lock
+        .await_vblank(Some(7), Instant::now());
+    fixture.disconnect(locker);
+    assert!(
+        fixture.state.session_lock.is_locked(),
+        "a dead locker leaves the session locked, not unlocked"
+    );
+    fixture.state.needs_render = false;
+    fixture.tick(Duration::from_millis(50));
+    assert!(!fixture.state.timer_armed);
+    fixture.state.backend = Some(backend);
+
+    fixture.state.note_flip_completed(Some(7));
+    assert!(
+        !fixture.state.session_lock.awaiting_blank(),
+        "a dead locker's vblank still takes the wait"
+    );
+    assert!(
+        fixture.state.timer_armed,
+        "the confirm must re-arm the ticker for a dead locker's capture too"
+    );
+    let (outcome, captured) = fixture.run(Step::PollFrame).frame();
+    assert_eq!(
+        outcome,
+        Outcome::Ready,
+        "a dead locker's vblank still confirms, and the parked capture is \
+         still owed the locked framebuffer"
+    );
+    assert_eq!(
+        captured,
+        fixture.pixels(),
+        "the delivered frame is the framebuffer the re-armed tick drew"
+    );
+    assert!(
+        !captured
+            .chunks_exact(4)
+            .any(|pixel| pixel == WINDOW_BGRA.as_slice()),
+        "no pixel of the pre-blank desktop may reach a capture parked across the lock"
+    );
+
+    fixture.settle();
+    assert!(!fixture.state.timer_armed);
 }
 
 #[test]
@@ -1050,6 +1438,15 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
     let mut held: Option<CaptureBuffer> = None;
     let mut windows: Vec<wl_surface::WlSurface> = Vec::new();
     let mut locks: Vec<ext_session_lock_v1::ExtSessionLockV1> = Vec::new();
+    // What `Step::LockNoWait` mapped and must stay mapped: unlike `Step::Lock`
+    // -- whose delivery happens before the next client roundtrip flushes the
+    // arm-end destroys -- a deferred confirmation delivers an earthly delay
+    // later, so dropping these at the arm's end would unmap the lock screen
+    // before the capture under test is served. A real locker keeps its
+    // surface mapped the same way.
+    let mut lock_surfaces: Vec<wl_surface::WlSurface> = Vec::new();
+    let mut lock_roles: Vec<ext_session_lock_surface_v1::ExtSessionLockSurfaceV1> = Vec::new();
+    let mut lock_buffers: Vec<CaptureBuffer> = Vec::new();
     // Frames created by [`Step::HoldFrames`] and deliberately never destroyed,
     // so they outlive whatever the script does next. Held here rather than in
     // `frame` so no later step reaps them: dropping a client-side proxy sends
@@ -1304,6 +1701,48 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                     client.locked.then_some(())
                 })?;
                 locks.push(lock);
+                Ack::Done
+            }
+            Step::LockNoWait => {
+                // `Step::Lock` up to the surface commit, without the wait for
+                // `locked`: the commit is on the wire (and a round trip has
+                // flushed it), but confirmation is whatever the test drives
+                // next by hand.
+                let manager = client
+                    .lock_manager
+                    .clone()
+                    .ok_or("no ext_session_lock_manager_v1")?;
+                let lock = manager.lock(&qh, ());
+                let surface = compositor.create_surface(&qh, ());
+                client.lock_configure = None;
+                // No commit before the ack: `ext-session-lock-v1` sends the
+                // first `configure` off `get_lock_surface` itself, and a
+                // commit ahead of acking it is `commit_before_first_ack`.
+                let role = lock.get_lock_surface(&surface, &output, &qh, ());
+                let (serial, width, height) =
+                    wait_for(&mut queue, &mut client, "a lock configure", |client| {
+                        client.lock_configure
+                    })?;
+                role.ack_configure(serial);
+                let buffer = solid_buffer(
+                    &shm,
+                    &qh,
+                    width as i32,
+                    height as i32,
+                    LOCK_BGRA,
+                    wl_shm::Format::Argb8888,
+                );
+                surface.attach(Some(buffer.as_ref()), 0, 0);
+                surface.damage_buffer(0, 0, width as i32, height as i32);
+                surface.commit();
+                queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                locks.push(lock);
+                // Kept mapped (see the declaration): the capture this step
+                // sets up is served after a deferred confirmation, not in
+                // this step's own settle.
+                lock_surfaces.push(surface);
+                lock_roles.push(role);
+                lock_buffers.push(buffer);
                 Ack::Done
             }
         };

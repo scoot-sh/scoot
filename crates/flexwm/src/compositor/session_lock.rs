@@ -1364,10 +1364,19 @@ impl State {
     /// `locked`. Anything else -- a vblank for the previous frame, a stale
     /// one for a discarded flip, an untrackable error -- leaves the wait
     /// alone for the fallback timer.
+    ///
+    /// A confirm re-arms the frame ticker. The tick that rendered the blank
+    /// drops it -- a parked screencopy frame is none of `frame_tick`'s
+    /// re-arm conditions -- so without this nothing would run
+    /// `service_captures` again and a capture parked across the wait would
+    /// sit undelivered until some later commit happened to restart the
+    /// ticker (see `screencopy.rs`). Only the confirming branch re-arms: a
+    /// vblank that matches nothing arms nothing.
     pub(super) fn note_flip_completed(&mut self, completed: Option<u64>) {
         if self.session_lock.confirm_on_vblank(completed) {
             tracing::debug!("session lock confirmed: the blanked frame reached scanout");
             self.confirm_lock();
+            self.ensure_ticking();
         }
     }
 
@@ -1380,6 +1389,10 @@ impl State {
     /// after a discarded flip, or on hardware whose completions never arrive
     /// -- and that is exactly the event an operator debugging a lock screen
     /// needs at the default log level.
+    ///
+    /// Re-arms the frame ticker for the same reason
+    /// [`State::note_flip_completed`] does: whichever path clears the wait
+    /// has to schedule the tick that serves what the wait was parking.
     pub(super) fn note_blank_timeout(&mut self, now: Instant) {
         if self.session_lock.poll_blank_timeout(now) {
             tracing::warn!(
@@ -1388,6 +1401,7 @@ impl State {
                 TIMEOUT = LOCK_VBLANK_TIMEOUT,
             );
             self.confirm_lock();
+            self.ensure_ticking();
         }
     }
 
