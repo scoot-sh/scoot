@@ -345,15 +345,11 @@ fn gamma_size_then_accept() {
         harness.wait_for(handle).as_deref(),
         Ok("gamma_size advertised and a valid ramp accepted"),
     );
-    // The destroy restored the default: nothing current, nothing stored.
+    // The destroy restored the default: nothing current.
     harness.settle();
     assert!(
         harness.state.gamma_control.current.is_none(),
         "destroying the current control must retire it"
-    );
-    assert!(
-        harness.state.gamma_control.stored.is_none(),
-        "destroying the current control must forget the stored ramp"
     );
 }
 
@@ -411,8 +407,9 @@ fn gamma_oversized_fd_refused() {
         conn.client.failed.push(false);
         let control = manager.get_gamma_control(&output, &qh, ControlIndex(0));
         wait_for_event(&mut conn, "gamma_size", |client| client.sizes[0].is_some())?;
-        // A megabyte where 1536 bytes belong: refused after reading only the
-        // first `expected + 1` bytes, not mapped wholesale.
+        // A megabyte where 1536 bytes belong: refused after reading only a
+        // bounded prefix (`expected` plus one 4096-byte chunk -- positioned
+        // reads overshoot the stop by less than a chunk), not mapped wholesale.
         let file = sized_fd(1024 * 1024);
         control.set_gamma(file.as_fd());
         for _ in 0..50 {
@@ -466,6 +463,68 @@ fn gamma_second_control_transfers() {
 }
 
 #[test]
+fn gamma_destroying_superseded_control_restores_nothing() {
+    let mut harness = Harness::new();
+    let handle = harness.run_client(|mut conn| {
+        let qh = conn.queue.handle();
+        let (manager, output) = manager_and_output(&conn)?;
+        conn.client.sizes.push(None);
+        conn.client.failed.push(false);
+        let first = manager.get_gamma_control(&output, &qh, ControlIndex(0));
+        wait_for_event(&mut conn, "gamma_size", |client| client.sizes[0].is_some())?;
+        let file = ramp_fd(FALLBACK_GAMMA_SIZE, 0x1111);
+        first.set_gamma(file.as_fd());
+        conn.roundtrip()?;
+        conn.client.sizes.push(None);
+        conn.client.failed.push(false);
+        let second = manager.get_gamma_control(&output, &qh, ControlIndex(1));
+        wait_for_event(&mut conn, "failed on the first control", |client| {
+            client.failed[0]
+        })?;
+        wait_for_event(&mut conn, "gamma_size on the second control", |client| {
+            client.sizes[1].is_some()
+        })?;
+        let file = ramp_fd(FALLBACK_GAMMA_SIZE, 0x2222);
+        second.set_gamma(file.as_fd());
+        conn.roundtrip()?;
+        conn.roundtrip()?;
+        if conn.client.failed[1] {
+            return Err("a valid set_gamma on the new control was answered with failed".into());
+        }
+        // Destroying the superseded control must not restore the default
+        // over the live one's ramp: the destroy gate restores only for the
+        // current control. The proof is a third control -- if the second is
+        // still live when it arrives, the transfer fails the second; if a
+        // restore already retired it, nothing fails.
+        first.destroy();
+        conn.roundtrip()?;
+        conn.client.sizes.push(None);
+        conn.client.failed.push(false);
+        let third = manager.get_gamma_control(&output, &qh, ControlIndex(2));
+        wait_for_event(&mut conn, "gamma_size on the third control", |client| {
+            client.sizes[2].is_some()
+        })?;
+        wait_for_event(
+            &mut conn,
+            "failed on the still-live second control",
+            |client| client.failed[1],
+        )?;
+        third.destroy();
+        Ok("destroying the superseded control left the live one alone".into())
+    });
+    assert_eq!(
+        harness.wait_for(handle).as_deref(),
+        Ok("destroying the superseded control left the live one alone"),
+    );
+    // Destroying the live third control restored the default: nothing current.
+    harness.settle();
+    assert!(
+        harness.state.gamma_control.current.is_none(),
+        "destroying the current control must retire it"
+    );
+}
+
+#[test]
 fn gamma_disconnect_restores_default() {
     let mut harness = Harness::new();
     let handle = harness.run_client(|mut conn| {
@@ -481,20 +540,16 @@ fn gamma_disconnect_restores_default() {
         // Return with the connection still open: dropping `conn` here
         // disconnects mid-control, which must restore the default exactly
         // like an explicit destroy.
-        Ok("disconnecting with a live control and a stored ramp".into())
+        Ok("disconnecting with a live control".into())
     });
     assert_eq!(
         harness.wait_for(handle).as_deref(),
-        Ok("disconnecting with a live control and a stored ramp"),
+        Ok("disconnecting with a live control"),
     );
     harness.settle();
     assert!(
         harness.state.gamma_control.current.is_none(),
         "a disconnect must retire the live control"
-    );
-    assert!(
-        harness.state.gamma_control.stored.is_none(),
-        "a disconnect must forget the stored ramp"
     );
 }
 

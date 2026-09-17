@@ -1244,7 +1244,7 @@ What actually happens to the ramp depends on the backend:
   hardware measured so far); anything the DRM device refuses retires the
   control with `failed` and the session keeps running.
 - **Under `--headless`/`--nested`** there is no hardware LUT, so the ramp is
-  accepted and stored but changes nothing on screen — and a `flexwm msg
+  accepted but changes nothing on screen — and a `flexwm msg
   screenshot` reads the framebuffer, which is pre-LUT, so captures show the
   unmodified frame either way. `gamma_size` is 256 there.
 
