@@ -453,6 +453,291 @@ fn focusing_over_ipc_takes_the_keyboard_back_from_a_clicked_taskbar() {
 }
 
 #[test]
+fn already_focused_actions_spend_the_click_without_an_apply() {
+    // The no-op half of the fast path `handle_request` shares with
+    // `ext_workspace.rs` and `wlr_toplevel_activate`: the target is already
+    // there, so there is no `act` -- no arrange, no configure per window, no
+    // render -- but the click is still spent and the keyboard half still
+    // runs. `needs_render` is the deterministic witness, the way
+    // `activating_the_window_that_is_already_focused_does_no_work_at_all`
+    // uses it: it is set by `apply`'s `request_render` and by nothing else
+    // on this path, and nothing dispatches between the reset and the
+    // assertion. Without the fast path each of these runs a full apply and
+    // the `!needs_render` below fails -- which is the fail-first pin for
+    // this half.
+    let mut fixture = Fixture::drive();
+    let focused = fixture.state.focus.expect("a focused window");
+    let output = fixture
+        .state
+        .world
+        .focused_output()
+        .expect("a focused output");
+    let active = fixture
+        .state
+        .world
+        .workspaces(output)
+        .expect("a workspace list")
+        .active;
+    assert_eq!(
+        active, 0,
+        "the Up step below is only a no-op from the first workspace"
+    );
+    let noop = [
+        flexwm_ipc::Action::FocusWindowId { id: focused.0 },
+        flexwm_ipc::Action::FocusWorkspaceIndex { index: active },
+        flexwm_ipc::Action::FocusWorkspace {
+            direction: flexwm_ipc::Vertical::Up,
+        },
+    ];
+    for (n, action) in noop.into_iter().enumerate() {
+        fixture.click_taskbar();
+        fixture.state.needs_render = false;
+        let response = fixture.state.handle_request(Request::Action(action));
+        assert!(
+            matches!(response, Response::Ok { locked: false }),
+            "no-op focus action {n} was not served"
+        );
+        assert_eq!(
+            fixture.state.focus,
+            Some(focused),
+            "a no-op focus action {n} moved window focus"
+        );
+        fixture.assert_keyboard_follows_focus(&format!("no-op focus action {n}"));
+        assert!(
+            !fixture.state.needs_render,
+            "no-op focus action {n} ran a full apply"
+        );
+    }
+}
+
+#[test]
+fn real_focus_moves_over_ipc_still_apply() {
+    // The contrast the test above needs: the same assertions, but for moves
+    // that really go somewhere -- these must still run the full `apply`.
+    // Passes with and without the fast path, by design: it pins what the
+    // no-op split must *not* swallow.
+    let mut fixture = Fixture::drive();
+    let focused = fixture.state.focus.expect("a focused window");
+    let other = *fixture
+        .state
+        .windows
+        .keys()
+        .find(|id| **id != focused)
+        .expect("two windows");
+
+    // Across windows: focus, keyboard and layout all move.
+    fixture.click_taskbar();
+    fixture.state.needs_render = false;
+    let response =
+        fixture
+            .state
+            .handle_request(Request::Action(flexwm_ipc::Action::FocusWindowId {
+                id: other.0,
+            }));
+    assert!(
+        matches!(response, Response::Ok { locked: false }),
+        "the focus action was not served"
+    );
+    assert_eq!(fixture.state.focus, Some(other));
+    fixture.assert_keyboard_follows_focus("a real window-focus move");
+    assert!(
+        fixture.state.needs_render,
+        "a real window-focus move laid nothing out"
+    );
+
+    // Across workspaces, onto the trailing empty one: focus legitimately
+    // empties, and the keyboard follows it to nothing.
+    fixture.click_taskbar();
+    fixture.state.needs_render = false;
+    let response =
+        fixture
+            .state
+            .handle_request(Request::Action(flexwm_ipc::Action::FocusWorkspace {
+                direction: flexwm_ipc::Vertical::Down,
+            }));
+    assert!(
+        matches!(response, Response::Ok { locked: false }),
+        "the workspace step was not served"
+    );
+    assert_eq!(
+        fixture.state.focus, None,
+        "stepping onto the empty workspace should empty focus"
+    );
+    fixture.assert_keyboard_follows_focus("a real workspace move");
+    assert!(
+        fixture.state.needs_render,
+        "a real workspace move laid nothing out"
+    );
+
+    // Across workspaces by index, back to a non-active one: the step above
+    // left workspace 1 active, so naming index 0 is a real switch -- this
+    // leg pins the index arm against a wrong predicate (e.g. `active >=
+    // index`), which would silently skip the move while the no-op test's
+    // index-==-active case still passed.
+    fixture.click_taskbar();
+    fixture.state.needs_render = false;
+    let response =
+        fixture
+            .state
+            .handle_request(Request::Action(flexwm_ipc::Action::FocusWorkspaceIndex {
+                index: 0,
+            }));
+    assert!(
+        matches!(response, Response::Ok { locked: false }),
+        "the workspace index switch was not served"
+    );
+    let output = fixture
+        .state
+        .world
+        .focused_output()
+        .expect("a focused output");
+    assert_eq!(
+        fixture
+            .state
+            .world
+            .workspaces(output)
+            .expect("a workspace list")
+            .active,
+        0,
+        "switching to workspace index 0 did not move the active workspace"
+    );
+    fixture.assert_keyboard_follows_focus("a real workspace index switch");
+    assert!(
+        fixture.state.needs_render,
+        "a real workspace index switch laid nothing out"
+    );
+}
+
+#[test]
+fn unknown_window_id_is_not_a_noop() {
+    // The edge `focus_action_is_noop` is written around: an id that names no
+    // window can never equal `State::focus`, so it stays on the full path
+    // and keeps whatever handling `act` gives it today (which currently
+    // still runs an `apply`). Focus does not move, but the click -- this is
+    // still a focus-family action -- is spent, and the keyboard is
+    // re-derived onto the window that kept focus.
+    let mut fixture = Fixture::drive();
+    let focused = fixture.state.focus.expect("a focused window");
+
+    fixture.click_taskbar();
+    fixture.state.needs_render = false;
+    let response =
+        fixture
+            .state
+            .handle_request(Request::Action(flexwm_ipc::Action::FocusWindowId {
+                id: 999,
+            }));
+    assert!(
+        matches!(response, Response::Ok { locked: false }),
+        "the unknown-id action was not served"
+    );
+    assert_eq!(
+        fixture.state.focus,
+        Some(focused),
+        "an unknown window id moved window focus"
+    );
+    fixture.assert_keyboard_follows_focus("an unknown window id");
+    assert!(
+        fixture.state.needs_render,
+        "an unknown window id skipped the apply it has always run"
+    );
+}
+
+#[test]
+fn out_of_range_workspace_index_is_not_a_noop() {
+    // Same edge one list over: no workspace 99 exists, and `active < count`
+    // always, so the index can never compare equal -- full path, `apply`
+    // included, active workspace unchanged.
+    let mut fixture = Fixture::drive();
+    let output = fixture
+        .state
+        .world
+        .focused_output()
+        .expect("a focused output");
+    let before = fixture
+        .state
+        .world
+        .workspaces(output)
+        .expect("a workspace list");
+
+    fixture.click_taskbar();
+    fixture.state.needs_render = false;
+    let response =
+        fixture
+            .state
+            .handle_request(Request::Action(flexwm_ipc::Action::FocusWorkspaceIndex {
+                index: 99,
+            }));
+    assert!(
+        matches!(response, Response::Ok { locked: false }),
+        "the out-of-range action was not served"
+    );
+    assert_eq!(
+        fixture.state.world.workspaces(output),
+        Some(before),
+        "an out-of-range workspace index switched workspaces"
+    );
+    assert!(
+        fixture.state.needs_render,
+        "an out-of-range workspace index skipped the apply it has always run"
+    );
+}
+
+#[test]
+fn relative_steps_stay_on_the_full_path() {
+    // The deliberate scope cut in `focus_action_is_noop`, pinned: a relative
+    // step the core itself would no-op (left from the leftmost column, up
+    // from the top of a one-window stack) still runs the full `apply`,
+    // because no-op-ness there needs column/stack positions `World` does
+    // not expose. If detection is ever added for these two variants, this
+    // test and the helper's docs change together.
+    let mut fixture = Fixture::drive();
+    let focused = fixture.state.focus.expect("a focused window");
+    let leftmost = *fixture.state.windows.keys().min().expect("two windows");
+    // Park on the leftmost column first, so the Left step below is a core
+    // no-op rather than a real move.
+    if focused != leftmost {
+        let response =
+            fixture
+                .state
+                .handle_request(Request::Action(flexwm_ipc::Action::FocusWindowId {
+                    id: leftmost.0,
+                }));
+        assert!(matches!(response, Response::Ok { .. }));
+    }
+    assert_eq!(fixture.state.focus, Some(leftmost));
+
+    for (n, action) in [
+        flexwm_ipc::Action::FocusColumn {
+            direction: flexwm_ipc::Horizontal::Left,
+        },
+        flexwm_ipc::Action::FocusWindow {
+            direction: flexwm_ipc::Vertical::Up,
+        },
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        fixture.click_taskbar();
+        fixture.state.needs_render = false;
+        let response = fixture.state.handle_request(Request::Action(action));
+        assert!(
+            matches!(response, Response::Ok { locked: false }),
+            "relative step {n} was not served"
+        );
+        assert_eq!(
+            fixture.state.focus,
+            Some(leftmost),
+            "relative step {n} moved window focus"
+        );
+        fixture.assert_keyboard_follows_focus(&format!("relative step {n}"));
+        assert!(
+            fixture.state.needs_render,
+            "relative step {n} skipped the apply it still runs"
+        );
+    }
+}
+#[test]
 fn a_layout_action_over_ipc_leaves_a_clicked_taskbars_keyboard_alone() {
     // The boundary the predicate above draws: an action that changes
     // arrangement rather than where focus is reported to be must not spend a
