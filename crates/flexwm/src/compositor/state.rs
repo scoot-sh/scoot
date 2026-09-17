@@ -36,6 +36,7 @@ use smithay::wayland::shell::wlr_layer::WlrLayerShellState;
 use smithay::wayland::shell::xdg::XdgShellState;
 use smithay::wayland::shell::xdg::decoration::XdgDecorationState;
 use smithay::wayland::shm::ShmState;
+use smithay::wayland::single_pixel_buffer::SinglePixelBufferState;
 use smithay::wayland::socket::ListeningSocketSource;
 use smithay::wayland::text_input::TextInputManagerState;
 use smithay::wayland::viewporter::ViewporterState;
@@ -320,6 +321,13 @@ pub struct State {
     /// Held only to keep the xdg-output global alive.
     #[allow(dead_code)]
     pub output_manager_state: OutputManagerState,
+    /// `wp_single_pixel_buffer_manager_v1` (version 1): solid-color 1x1
+    /// buffers with no shm behind them, for cheap toolkit fills. Held only
+    /// to keep the global alive -- Smithay owns the buffers (see
+    /// `single_pixel_buffer.rs`), and the render path draws them as solid
+    /// fills with no flexwm-side import step.
+    #[allow(dead_code)]
+    pub single_pixel_buffer_state: SinglePixelBufferState,
     pub seat_state: SeatState<State>,
     pub data_device_state: DataDeviceState,
     /// `zwlr_data_control_manager_v1` (version 2): clipboard managers
@@ -539,6 +547,7 @@ impl State {
         let cursor_shape_manager_state = CursorShapeManagerState::new::<Self>(&dh);
         let viewporter_state = super::output_scale::viewporter(&dh);
         let shm_state = ShmState::new::<Self>(&dh, vec![]);
+        let single_pixel_buffer_state = SinglePixelBufferState::new::<Self>(&dh);
         let output_manager_state = OutputManagerState::new_with_xdg_output::<Self>(&dh);
         let data_device_state = DataDeviceState::new::<Self>(&dh);
         // Construction order is load-bearing: both data-control states borrow
@@ -618,6 +627,7 @@ impl State {
             viewporter_state,
             xdg_decoration_state,
             shm_state,
+            single_pixel_buffer_state,
             output_manager_state,
             seat_state,
             data_device_state,

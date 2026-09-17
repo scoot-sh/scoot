@@ -80,7 +80,9 @@ output scaling (`[output] scale` over `wl_output.scale`,
 `wp_fractional_scale_v1`, `wl_surface.preferred_buffer_scale` and
 `wp_viewporter`, so a HiDPI panel gets
 correctly-sized clients and text instead of everything rendered physically
-tiny — see Output scaling below), plus a
+tiny — see Output scaling below),
+`wp_single_pixel_buffer_manager_v1`, so a toolkit can paint a solid fill
+without allocating a shm pool (see Single-pixel buffers below), plus a
 hardened control socket (owner-only
 permissions, a same-user peer check, a 1 MiB cap on a single request,
 screenshots rate-limited to one per connection per frame, at most 64
@@ -1504,10 +1506,34 @@ Notes, because they are real limits rather than polish:
   `flexwm msg screenshot` captures the framebuffer at full physical
   resolution, while `flexwm msg windows`/`outputs` report logical rectangles.
   An agent converts with `physical = logical * scale`, rounded down where a
-  rectangle's edge lands mid-pixel (the logical size is `ceil(physical /
-  scale)`, so a full-output `logical * scale` can overshoot by under one
-  pixel). `flexwm msg outputs` reports each output's `scale` for exactly that
-  (older servers omit it, which decodes as `1.0`).
+   rectangle's edge lands mid-pixel (the logical size is `ceil(physical /
+   scale)`, so a full-output `logical * scale` can overshoot by under one
+   pixel). `flexwm msg outputs` reports each output's `scale` for exactly that
+   (older servers omit it, which decodes as `1.0`).
+
+## Single-pixel buffers (`wp_single_pixel_buffer_manager_v1`)
+
+flexwm implements `wp_single_pixel_buffer_manager_v1` (version 1), so a
+client can mint a solid-color 1x1 buffer straight from four `u32` channels
+instead of allocating a shm pool for a single pixel — the cheap fill some
+toolkits reach for. The buffer is what the channels say (the full `uint`
+range is valid per channel, read as a percentage), reports 1x1, and renders
+as a solid fill; a client that wants it bigger scales it through
+`wp_viewporter` (advertised alongside, as the spec suggests) rather than by
+uploading a larger buffer.
+
+What to know before pointing a client at it:
+
+- **No shm, no pool budget.** These buffers allocate nothing, so the
+  per-client `wl_shm` pool count (see Status above) never moves for them —
+  there is no fd, no mapping and no reservation to bound, and no limit being
+  bypassed either.
+- **Destroying the manager leaves its buffers working.** The spec says the
+  child objects are unaffected, and they are: a buffer outlives its manager
+  and still attaches, commits and draws afterwards.
+- **Destroying an attached buffer is legal and safe.** Wayland lets a client
+  destroy a `wl_buffer` its surface still names; nothing panics and nobody is
+  disconnected for it.
 
 ## Configuration
 
