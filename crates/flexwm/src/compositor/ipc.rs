@@ -393,6 +393,11 @@ impl State {
 
     pub(super) fn window_snapshots(&self) -> Vec<WindowSnapshot> {
         let arrangement = self.world.arrange();
+        // Resolved once per request, not per window: which window's popup
+        // tree holds the keyboard, if a live grab names one. A `windows`
+        // request is an agent asking for a list, not a per-frame path, and
+        // the lookup itself allocates nothing (see `popup.rs`).
+        let grab_holder = self.popup_grab_holder();
         arrangement
             .placements
             .iter()
@@ -416,6 +421,7 @@ impl State {
                     rect: wire(placement.rect),
                     visible: placement.visible,
                     focused: arrangement.focused == Some(placement.id),
+                    popup_grab: grab_holder == Some(placement.id),
                 }
             })
             .collect()

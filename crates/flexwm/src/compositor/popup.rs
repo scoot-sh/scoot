@@ -52,6 +52,7 @@
 //! away from the window the user is typing into. niri, sway and mutter all
 //! draw the same line. See the resolution doc for the full reasoning.
 
+use flexwm_core::WindowId;
 use smithay::desktop::{
     PopupGrab, PopupKeyboardGrab, PopupKind, PopupManager, PopupPointerGrab, PopupUngrabStrategy,
     find_popup_root_surface,
@@ -203,6 +204,40 @@ impl State {
             || self
                 .layer_keyboard_focus()
                 .is_some_and(|found| found.exclusive)
+    }
+
+    /// Which window's popup tree currently holds the keyboard through an
+    /// explicit `xdg_popup.grab`, if any -- the answer `flexwm msg windows`
+    /// reports per window as `popup_grab` (see `ipc.rs`).
+    ///
+    /// Read off the held grab's own root surface, so there is no second copy
+    /// of "who grabbed" to keep in sync and nothing to clear when the grab
+    /// ends: a dead root simply maps to no window. Three cases report
+    /// nothing, each honestly:
+    ///
+    /// - no grab is held at all;
+    /// - the held grab has ended but [`State::settle_popup_grab`] has not
+    ///   reaped it yet (a client's destroy is seen on the display source,
+    ///   an IPC request can land first) -- the keyboard is already back
+    ///   where Smithay's teardown put it, not in any menu;
+    /// - the grab is rooted at a layer surface (a bar's own dropdown), which
+    ///   [`State::id_of`] maps to no window.
+    ///
+    /// Costs a grab-state read and one walk of the window map, no
+    /// allocation, and the one caller resolves it once per `windows`
+    /// request -- not per window, and not on any per-frame path.
+    pub(super) fn popup_grab_holder(&self) -> Option<WindowId> {
+        let grab = self.popup_grab.as_ref()?;
+        if grab.has_ended() {
+            return None;
+        }
+        // The start data names the grab's root -- the toplevel or layer
+        // surface the popup chain hangs off -- for the grab's whole life,
+        // unlike `current_grab`, which names the topmost popup itself (and
+        // the root once the grab has ended, which the check above already
+        // excluded). Only the root maps onto a window.
+        let root = grab.keyboard_grab_start_data().focus.as_ref()?;
+        self.id_of(root)
     }
 
     /// Ends the active popup grab, if any, dismissing its popups.

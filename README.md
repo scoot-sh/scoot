@@ -545,6 +545,29 @@ launcher (which is usually what you want), while `flexwm msg windows` still
 names the window behind it. There is no IPC request that reports a layer
 surface yet.
 
+A popup menu holding the keyboard is the subtler case of the same split. An
+explicit `xdg_popup.grab` routes every keystroke to the menu until it is
+dismissed, and compositor focus still moves underneath it — focus
+keybindings keep firing with a menu open, by design. So after such a
+keybinding, `flexwm msg windows` can report window B as `"focused": true`
+while every key still reaches window A's menu, possibly off-screen, with no
+error. Each window therefore also reports `"popup_grab"` while its own
+popup tree holds the keyboard:
+
+```json
+{ "id": 1, ..., "focused": false, "popup_grab": true }
+```
+
+The agent rule: if any window reports `"popup_grab": true`, keystrokes go
+to that window's menu, not to the focused window — wait for the menu to
+close (Escape or a click dismisses it) before typing at anything else.
+`false` means no grab, or a server predating the field (like `icon`, it is
+a defaulted additive field and does not bump `PROTOCOL_VERSION`). Two
+limits, both deliberate: a grab rooted at a layer surface — a bar's own
+dropdown — belongs to no window and leaves every window `false`; and while
+the session is locked there is never a grab to report, because locking
+dismisses any open one and refuses new ones.
+
 The other: a bar redraws on its own schedule, and
 `flexwm msg wait-idle` waits for *nothing on screen* to have redrawn.
 Measured on real hardware with a `waybar` clock ticking once a second,

@@ -9,6 +9,8 @@
 //! wire, not about a field in `State`.
 
 use super::*;
+use flexwm_core::{Action, WindowId};
+use flexwm_ipc::{Request, Response};
 
 /// An `xdg_popup` gets its initial configure, maps, draws and tears down
 /// without taking the compositor with it.
@@ -678,6 +680,153 @@ fn a_layer_parented_popup_configures_maps_and_draws() {
         fixture.usable(),
         Rect::new(0, 30, CANVAS, CANVAS - 30),
         "the bar's own reservation should be untouched by its popup"
+    );
+    fixture.disconnect_client();
+}
+
+// -------------------------------------------------------------------------
+// IPC visibility: which window's popup holds the keyboard
+// -------------------------------------------------------------------------
+
+/// `flexwm msg windows` reports the popup-grab holder alongside `focused`.
+///
+/// The divergence
+/// `docs/backlog/protocols/popup-grab-survives-window-focus-change.md` files:
+/// a focus-changing action moves compositor focus to window B while the
+/// seat's real keyboard stays on window A's grabbing popup. An agent that
+/// only reads `focused` would inject its next keystroke at B and silently
+/// reach A's menu instead; `popup_grab` is the field that tells the two
+/// apart, without changing the grab semantics
+/// `keybindings_still_fire_while_a_popup_grabs_the_keyboard` pins.
+#[test]
+fn windows_reports_the_popup_grab_holder_alongside_focus() {
+    let mut fixture = Fixture::new();
+    fixture.run(Step::MapWindow);
+    let grabbed: WindowId = fixture
+        .state
+        .focus
+        .expect("mapping the only window focuses it");
+    window_with_grabbing_popup(&mut fixture);
+
+    // The ticket's trigger in miniature: window focus moves elsewhere while
+    // the grab lives on. An explicit focus action here; a `Super+h`-style
+    // keybinding does the same -- see
+    // `keybindings_still_fire_while_a_popup_grabs_the_keyboard`.
+    fixture.run(Step::MapWindow);
+    let other = *fixture
+        .state
+        .windows
+        .keys()
+        .find(|id| **id != grabbed)
+        .expect("two mapped windows");
+    fixture.state.act(Action::FocusWindowId(other));
+    fixture.settle();
+    assert_eq!(
+        fixture.state.focus,
+        Some(other),
+        "compositor focus should have moved to the other window"
+    );
+
+    // ...while the real keyboard never left the menu.
+    assert_eq!(
+        fixture.keyboard().focused,
+        Some(Focused::Popup(0)),
+        "the grab should still hold the keyboard after the focus move"
+    );
+
+    let Response::Windows { windows } = fixture.state.handle_request(Request::Windows) else {
+        panic!("a windows request answers with its windows");
+    };
+    assert_eq!(windows.len(), 2, "both windows are listed");
+    let holder = windows
+        .iter()
+        .find(|snapshot| snapshot.id == grabbed.0)
+        .expect("the grabbing window is listed");
+    let focused = windows
+        .iter()
+        .find(|snapshot| snapshot.id == other.0)
+        .expect("the focused window is listed");
+    assert!(
+        !holder.focused,
+        "compositor focus moved to the other window"
+    );
+    assert!(
+        holder.popup_grab,
+        "the grabbing window reports the keyboard its menu holds"
+    );
+    assert!(focused.focused);
+    assert!(
+        !focused.popup_grab,
+        "the focused window claims no grab -- keys sent at it would reach the menu instead"
+    );
+    fixture.disconnect_client();
+}
+
+/// No grab, no report: without an active `xdg_popup.grab` every window reads
+/// `popup_grab: false` -- including one with a mapped popup that never
+/// grabbed, which is the "only the grabbing one matters" half of the
+/// contract. An agent can rely on all-false meaning no window's menu holds
+/// the keyboard.
+#[test]
+fn windows_reports_no_popup_grab_without_an_active_grab() {
+    let mut fixture = Fixture::new();
+    fixture.run(Step::MapWindow);
+    // A mapped but non-grabbing popup (a tooltip, say): visible, keyboardless.
+    fixture.run(Step::MapPopup {
+        parent: PopupParent::Window,
+        color: POPUP_BGRA,
+        grab: false,
+    });
+    fixture.run(Step::MapWindow);
+
+    let Response::Windows { windows } = fixture.state.handle_request(Request::Windows) else {
+        panic!("a windows request answers with its windows");
+    };
+    assert_eq!(windows.len(), 2, "both windows are listed");
+    assert!(
+        windows.iter().all(|snapshot| !snapshot.popup_grab),
+        "nothing grabbed the keyboard, so no window may claim the grab"
+    );
+    fixture.disconnect_client();
+}
+
+/// A grab rooted at a layer surface (a bar's own dropdown) holds the keyboard
+/// without belonging to any window, so every window honestly reports
+/// `popup_grab: false` -- the field names the grabbing *window*, and there
+/// is none.
+#[test]
+fn windows_reports_no_popup_grab_holder_for_a_layer_rooted_grab() {
+    let mut fixture = Fixture::new();
+    fixture.run(Step::MapWindow);
+    fixture.run(Step::CreateLayer(LayerSpec::bar(30)));
+    fixture.run(Step::MapLayer {
+        index: 0,
+        color: BAR_BGRA,
+    });
+    fixture.press_a_key();
+    let Ack::PopupConfigured(configured) = fixture.run(Step::MapPopup {
+        parent: PopupParent::Layer(0),
+        color: POPUP_BGRA,
+        grab: true,
+    }) else {
+        panic!("the popup step should report whether a configure arrived");
+    };
+    assert!(
+        configured,
+        "a layer-parented popup should still be configured"
+    );
+    assert!(
+        fixture.state.popup_grab.is_some(),
+        "the compositor should be holding the layer-rooted grab -- \
+         otherwise this test passes vacuously"
+    );
+
+    let Response::Windows { windows } = fixture.state.handle_request(Request::Windows) else {
+        panic!("a windows request answers with its windows");
+    };
+    assert!(
+        windows.iter().all(|snapshot| !snapshot.popup_grab),
+        "a bar's dropdown holds the keyboard, and no window may claim it"
     );
     fixture.disconnect_client();
 }
