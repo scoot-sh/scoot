@@ -30,9 +30,12 @@ mechanism in the resolved file). So today **every** quickshell
 workspace-overview preview for buffer reasons despite its protocol working
 (`grim` proves it).
 
-Measure before anything else whether a minimal, truthful
-`zwp_linux_dmabuf_v1` advertisement can flip that readiness flag on this
-compositor — and whether the ext output-capture path then actually displays
+Measure before anything else whether a minimal `zwp_linux_dmabuf_v1`
+advertisement can flip that readiness flag on this compositor — *and*
+whether such an advertisement can be truthful at all given flexwm has no
+render node to describe (if readiness genuinely requires importing dmabufs
+the compositor cannot produce, "minimal" is not honest and the answer is
+no) — and whether the ext output-capture path then actually displays
 over shm (quickshell falls back to shm buffer creation once ready, so in
 principle nothing needs a real render node past the flag). If yes, the
 overview preview lights up with no further protocol work, and the thumbnail

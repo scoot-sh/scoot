@@ -153,7 +153,8 @@ It was driven with a QML session shaped like the motivating clients — a
 over `Quickshell.screens[0]` (the overview shape) as a positive control —
 inside a real `PanelWindow`, with two real `foot` windows mapped, for 20s,
 under `WAYLAND_DEBUG=1`. Full drive script kept on the dev VM as
-`/var/tmp/qs-toplevel-probe.sh` (takes the flexwm binary and a tag:
+`/var/tmp/qs-toplevel-probe.sh` (convenience copy, not archive — the QML
+below is the record; takes the flexwm binary and a tag:
 `/var/tmp/qs-toplevel-probe.sh /var/tmp/flexwm-toplevel-probe probe`); the
 QML it drives:
 
@@ -354,10 +355,13 @@ bound. The SHM fallback the warning names applies to *buffer creation*
 downstream of readiness, not to readiness itself; no environment variable
 bypasses the dmabuf half of `isReady()`.
 
-So the wire absence is over-determined: legs 1 and 2 each suffice, and leg 3
-explains why leg 1 looks the way it does. The verdict does not rest on the
-live leg alone — legs 2 (exact-version source) and the binary inventory break
-the tie the confound leaves. The confound is itself a finding with wider
+So the wire absence is over-determined: leg 1 suffices for "no binds were
+observed in a live thumbnail session", while leg 2 (exact-version source)
+plus the binary inventory is what entails "no code path exists" — the
+verdict does not rest on the live leg alone. The wall was double: the
+18-global bind list contains `zwlr_foreign_toplevel_manager_v1` but neither
+ext global, so even a manager bind could not have produced the ext handle
+`create_source` takes. The confound is itself a finding with wider
 blast radius than this ticket: **quickshell's workspace-overview
 `ScreencopyView` cannot display on flexwm either**, even though the output
 protocol it needs shipped in PR #52 and `grim` proves the protocol works. The
