@@ -550,6 +550,16 @@ impl Tty {
         self.drm.set_gamma(self.surface.crtc(), red, green, blue)
     }
 
+    /// Whether this process currently holds DRM master -- the same question
+    /// `present()` gates on. Read by `headless::render`, which skips the
+    /// whole render (and the frame-callback dispatch) while this is `false`:
+    /// every frame it could draw would be dropped by `present()` anyway, so
+    /// drawing it only burns compositor CPU and wakes clients to paint
+    /// frames nobody shows.
+    pub(super) fn is_active(&self) -> bool {
+        self.active
+    }
+
     /// The buffer age `headless::render` should pass `render_output` for
     /// this frame -- see `buffers.rs`'s module doc on why it isn't always
     /// the same value, and `BufferPool::next_age`'s doc for what it means.

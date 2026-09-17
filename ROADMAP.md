@@ -447,6 +447,15 @@ gap jumped the queue — each item's own file records why it landed when it did.
   reactivation deliberately leave the pointer alone. Live `--tty`
   screenshot proves the cursor bitmap at the output centre; the smoke
   test's park-the-pointer workaround stays.
+- **[Cursor frames while
+  VT-paused](docs/backlog/resolved/cursor-frame-callback-when-paused-done.md)**
+  — RESOLVED 2026-09-17: `render()` and the frame-callback loops are gated
+  on DRM master, so a VT-paused `--tty` session renders nothing and wakes
+  no clients (paused burn under a 600-motion driver: 10–12 → 7–8 jiffies
+  release, 31–39 → 21–24 debug; frozen-framebuffer A/B proves no render
+  runs while paused). Reactivation still mode-sets and repaints
+  byte-identically; lock-while-paused and grab/IME-across-pause are
+  construction-verified (no live clients for either on the dev VM).
 ## What's next
 
 The backlog is the source of truth for what to pick up; this is the current

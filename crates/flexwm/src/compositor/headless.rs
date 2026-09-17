@@ -244,6 +244,45 @@ impl State {
         if !self.needs_render {
             return;
         }
+        // While the `--tty` session holds no DRM master (`Tty::active` is
+        // `false` -- VT-switched away, or a reactivation whose `drm.activate`
+        // itself failed), `present()` drops every frame, so rendering one and
+        // waking clients with frame callbacks is pure waste: compositor CPU
+        // plus clients painting frames nobody shows. Skip both.
+        //
+        // `needs_render` is cleared, not left set: nothing can be shown until
+        // a successful `reactivate()`, and that path unconditionally asks for
+        // a fresh render (`session_event`'s `ActivateSession` arm maps even
+        // `Reconfigured::Nothing` to `Render`), so no repaint is lost. With
+        // the flag cleared the frame timer drops itself instead of ticking
+        // 60-odd times a second to find the session still paused, and the
+        // compositor idles until a client commit or the switch back re-arms
+        // it. Damage needs no special handling: neither the damage tracker
+        // (no `render_output` call advances its history) nor the dumb-buffer
+        // ages (no `advance_generation`) move while renders are skipped, and
+        // `reactivate()` invalidates the ages, so the first post-reactivate
+        // render is a full repaint.
+        //
+        // Gated on `active` (no DRM master), deliberately *not*
+        // `session_paused`: the failed-reactivation state (session active
+        // again, master not reacquired) drops frames in `present()` exactly
+        // like a paused one, so rendering there is the same waste. See
+        // `Tty::active`'s doc for why the two differ.
+        //
+        // What this defers, all harmlessly: a session that locks while paused
+        // confirms on the reactivation render (the pending wait is owned by
+        // the fallback deadline until then -- see `session_event`'s
+        // `PauseSession` arm); popup grabs, IME composition and keyboard
+        // focus are seat state, untouched by withholding frame callbacks, and
+        // only their *pacing* pauses (the same shape as a minimized window in
+        // most compositors: no protocol promises a callback by any deadline);
+        // dead-layer/popup cleanup and `flush_clients` wait for the next live
+        // render. An IPC screenshot taken while paused reads back the last
+        // pre-pause framebuffer -- the last thing anyone saw.
+        if tty_blocks_render(self.tty.as_ref().map(Tty::is_active)) {
+            self.needs_render = false;
+            return;
+        }
         // Order matters: `backend.take()` must not run unless `output` is
         // also present, or a None output would leave it taken and never put
         // back -- silently and permanently losing the backend on the next
@@ -930,6 +969,21 @@ fn layer_elements(
     }
 }
 
+/// Whether `render()` must skip this frame because no presenter can show
+/// it: `Some(false)` is a `--tty` session holding no DRM master (paused or a
+/// failed reactivation -- see `Tty::active`), `Some(true)` is one holding it,
+/// `None` is every other backend (headless, nested, and every test harness,
+/// none of which has a `Tty` at all).
+///
+/// A free function over the flag rather than a method on `Tty` so the truth
+/// table is unit-testable: no test harness can construct a `Tty` (it needs a
+/// live DRM device), so a method could only ever be pinned live on `--tty`
+/// hardware. The `map(Tty::is_active)` call at the `render()` gate is the
+/// only caller.
+fn tty_blocks_render(tty_active: Option<bool>) -> bool {
+    tty_active.is_some_and(|active| !active)
+}
+
 /// The smallest rectangle containing every rect in `rects`. Pulled out of
 /// `render()` so it's testable without a live renderer, same rationale as
 /// `input.rs`'s `clamp_to_extent`. `rects` must be non-empty --
@@ -989,5 +1043,27 @@ mod tests {
         let outer = rect(0, 0, 100, 100);
         let inner = rect(40, 40, 10, 10);
         assert_eq!(union_bbox(&[inner, outer]), outer);
+    }
+
+    #[test]
+    fn no_tty_never_blocks_a_render() {
+        // Headless, nested, and every test harness: no `Tty` exists, so the
+        // gate is a no-op and the whole existing suite pins the unblocked
+        // path without knowing about this predicate.
+        assert!(!tty_blocks_render(None));
+    }
+
+    #[test]
+    fn an_active_tty_never_blocks_a_render() {
+        assert!(!tty_blocks_render(Some(true)));
+    }
+
+    #[test]
+    fn a_masterless_tty_blocks_a_render() {
+        // Paused (VT-switched away) and failed-reactivation alike: both mean
+        // `present()` drops every frame, so there is nothing a render could
+        // show. This is the fail-first pin for the gate -- negate the
+        // predicate body and this fails.
+        assert!(tty_blocks_render(Some(false)));
     }
 }
