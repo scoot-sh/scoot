@@ -17,8 +17,8 @@
 //! on a client-only path would leave a future refactor one move away from
 //! handing the compositor a crash-on-disconnect. Per-write handling keeps
 //! the two halves' failure modes separate with safe code and no new
-//! dependencies (`msg` builds on macOS too, where the Linux-only `libc`
-//! dependency is unavailable).
+//! dependencies (the alternative needs `unsafe` to set a process-wide
+//! disposition for what is really a per-write concern).
 //!
 //! Quiet exit 0 (rather than death-by-SIGPIPE's 141) follows the
 //! established Rust CLI convention (ripgrep, fd, bat): the truncated

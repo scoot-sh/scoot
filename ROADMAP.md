@@ -212,7 +212,7 @@ gap jumped the queue — each item's own file records why it landed when it did.
   `ScreencopyView` displays over shm in all four. A genuinely
   dmabuf-allocating third-party client could not run on the GPU-less dev VM,
   so that half of the matrix is wire-test proven, not live — recorded as an
-   environment limit, with GPU hardware as the scenario that would revisit it.
+  environment limit, with GPU hardware as the scenario that would revisit it.
 - **[`flexwm msg` EPIPE panic](docs/backlog/resolved/msg-client-broken-pipe-done.md)**
   (PR #62, 2026-09-17) — `msg ... | head` died with exit 101
   (`println!` panics on EPIPE; Rust ignores SIGPIPE). New `output.rs` maps
