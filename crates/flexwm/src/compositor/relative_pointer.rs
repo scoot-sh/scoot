@@ -90,12 +90,23 @@
 //! anvil's own post-motion check). Without the second half, a lock taken
 //! before first focus -- a game arming its mouse mode at startup -- would
 //! sit inactive forever, since Smithay reports `locked`/`confined` only
-//! from an explicit `activate`. Deactivation on pointer-leave is Smithay's
-//! own (`WlSurface::leave` deactivates and reports `PointerLeave`), and
-//! nothing here re-arms afterwards. Because a locked pointer never moves
-//! absolute, there is no position to restore on unlock, so
-//! `cursor_position_hint` keeps its default (ignored) rather than tracked
-//! state nobody reads.
+//! from an explicit `activate`.
+//!
+//! Deactivation is Smithay's own (`WlSurface::leave` deactivates an active
+//! constraint and reports `PointerLeave`/`unlocked`/`unconfined`), and it
+//! keeps the persistent entry: only `Oneshot` entries are removed, so a
+//! disarmed persistent constraint re-arms through the same engage path on
+//! re-entry into its region. Two shapes this takes in practice, both
+//! pinned by tests: a held pointer (lock, or a confine-escape) freezes
+//! focus as well as position, so no leave ever fires -- a session-lock
+//! round trip leaves the lock active throughout, with no event either way;
+//! a gated-out regional confinement can still be teleported off its
+//! surface, which deactivates it, and re-entering inside the region
+//! re-arms it with no new request from the client.
+//!
+//! Because a locked pointer never moves absolute, there is no position to
+//! restore on unlock, so `cursor_position_hint` keeps its default
+//! (ignored) rather than tracked state nobody reads.
 //!
 //! ## Trust model
 //!
@@ -105,19 +116,49 @@
 //! ever pins the locking client's own focused surface, and relative deltas
 //! only ever reach the focused client.
 //!
+//! Lock activation additionally carries no interaction-serial requirement,
+//! deliberately, and unlike the activation/popup/drag gates (PRs #42, #56)
+//! this is an accepted risk rather than an oversight -- weighed, not
+//! hand-waved:
+//!
+//! - The protocol gives nothing to gate on. `lock_pointer` carries no
+//!   serial, only (surface, pointer, region, lifetime), so any gate would
+//!   be a heuristic recency check ("did this client recently interact"),
+//!   not the exact serial match those gates enforce -- with false refusals
+//!   on legitimate flows (a game locking on hover-enter minutes after its
+//!   last keypress) and no protocol error to refuse with honestly.
+//! - Anvil and wlroots both activate freely; a gate would be a bespoke
+//!   deviation from the ecosystem, not the standard.
+//! - The blast radius is the pointer position only. Constraint state is
+//!   consulted on exactly one path -- absolute pointer motion (the three
+//!   call sites in this module and `input.rs`) -- so the keyboard never
+//!   freezes: keybindings still fire, so closing the offending window
+//!   (whose surface destruction removes its constraints) frees the pointer
+//!   with one chord, no VT switch needed. No pixels cross either: what is
+//!   on screen is unchanged by a lock.
+//! - The threat needs a malicious client already running as the user --
+//!   the same trust domain as keylogging through the input-method and
+//!   data-control globals this compositor already advertises without a
+//!   filter.
+//!
+//! The residual exposure is self-DoS of the cursor by a client the user
+//! ran: a pre-armed persistent lock plus an arrival freezes the pointer
+//! until that window closes. That is what the sentence above says is
+//! acceptable, and why.
+//!
 //! ## Cost
 //!
 //! Unfocused motion pays one `current_focus` read. Focused motion pays one
 //! `current_location` read, one constraint-map lookup, and -- only with a
 //! live relative pointer for that client -- the per-object socket writes.
 //! The empty-list mutex inside Smithay's dispatch is the only per-event cost
-//! with no relative pointers at all. Measured, not reasoned about, on the
-//! dev VM (debug build, 200k events x 5 reps): unfocused 3129-3426 ns/event
-//! after vs 3415-3623 before (overlapping, no regression); focused with no
-//! relative pointers 10688-11501 vs 8555-9090 before. The focused delta is
-//! debug-inflated locking and refcounting (~2.2ms/s at a real 1000Hz device
-//! rate); a session with a live relative pointer pays per-object socket
-//! writes beside it either way.
+//! with no relative pointers at all. Measured before/after on the dev VM
+//! (200k events x 5 reps, temporary bench since removed): debug unfocused
+//! 3129-3426 ns/event after vs 3415-3623 before (overlapping, no
+//! regression), debug focused 10688-11501 vs 8555-9090 before; release
+//! unfocused 336-388 vs 354-362 before (noise), release focused 950-998 vs
+//! 757-823 before -- a ~190ns residual, ~190us/s at 1000Hz, ~1.2% of one
+//! 16ms frame per second. See `move_absolute`'s doc for the full table.
 
 use smithay::input::pointer::PointerHandle;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;

@@ -100,18 +100,21 @@ impl State {
     /// vector. A locked pointer moves nothing absolute at all
     /// ([`AbsoluteTarget::Held`]); the event and the frame still go out.
     ///
-    /// Cost on the hot path, measured on the dev VM (debug build, 200k
-    /// `pointer_move` events x 5 reps): unfocused 3129-3426 ns/event after
-    /// vs 3415-3623 before -- ranges overlapping, no measurable regression,
-    /// and the baseline is the hit test plus idle announce plus socket
-    /// work, not this check (an unfocused move never reads the location
-    /// and never touches the constraint map). Focused with no relative
-    /// pointers bound pays more: 10688-11501 vs 8555-9090 before -- one
-    /// `current_location` read, one constraint-map lookup and Smithay's
-    /// empty-list lock per event, all debug-inflated (uncontended mutexes
-    /// and refcount bumps dominate at -O0). At a real 1000Hz device rate
-    /// that delta is ~2.2ms/s, and a session with a live relative pointer
-    /// already pays per-object socket writes beside it.
+    /// Cost on the hot path, measured before/after on the dev VM (200k
+    /// `pointer_move` events x 5 reps, temporary bench since removed).
+    /// Debug: unfocused 3129-3426 ns/event after vs 3415-3623 before --
+    /// ranges overlapping, no measurable regression; focused with no
+    /// relative pointers bound 10688-11501 vs 8555-9090 before. Release
+    /// (the profile that ships): unfocused 336-388 after vs 354-362
+    /// before -- overlapping, noise; focused 950-998 vs 757-823 before,
+    /// a ~190ns residual: one `current_location` read, one
+    /// constraint-map lookup and Smithay's empty-list lock per event.
+    /// At a real 1000Hz device rate that residual is ~190us/s -- about
+    /// 1.2% of a single 16ms frame per second, 0.02% of a core -- and a
+    /// session with a live relative pointer pays per-object socket writes
+    /// beside it either way. The baseline everywhere is the hit test plus
+    /// idle announce plus socket work, not this check (an unfocused move
+    /// never reads the location and never touches the constraint map).
     fn move_absolute(
         &mut self,
         x: f64,
@@ -203,7 +206,7 @@ impl State {
         }
         match target {
             AbsoluteTarget::Free => {
-                if self.record_pointer_enter(&pointer, &under, serial) {
+                if self.record_pointer_enter(&pointer, &focus, &under, serial) {
                     // Focus just landed on a new surface: engage a
                     // still-inactive constraint waiting on it (see below).
                     // Gated on the enter, not run per move: activation is a
@@ -214,7 +217,7 @@ impl State {
                 self.move_pointer_to(&pointer, under, location, serial, time);
             }
             AbsoluteTarget::Clamped { point, under } => {
-                self.record_pointer_enter(&pointer, &Some(under.clone()), serial);
+                self.record_pointer_enter(&pointer, &focus, &Some(under.clone()), serial);
                 self.move_pointer_to(&pointer, Some(under), point, serial, time);
             }
             AbsoluteTarget::Held => {
@@ -237,13 +240,22 @@ impl State {
     /// elsewhere, and never anything on the held path, which delivers no
     /// motion at all. Answers whether focus moved, so the free arm knows
     /// whether a pending constraint wants engaging.
+    ///
+    /// `focus` is the pre-move focus `move_absolute` already read, passed
+    /// in rather than re-read: nothing between that read and this call can
+    /// move seat focus (`current_location` and `absolute_target` are
+    /// read-only, and `relative_motion` routes by focus without setting
+    /// it), so the re-read the reviewer flagged observed exactly this
+    /// value. What remains read here is only the grab check, which has no
+    /// cheaper source.
     fn record_pointer_enter(
         &mut self,
         pointer: &PointerHandle<Self>,
+        focus: &Option<WlSurface>,
         under: &Option<(WlSurface, Point<f64, Logical>)>,
         serial: Serial,
     ) -> bool {
-        let entered = Self::pointer_entered(pointer, under);
+        let entered = Self::pointer_entered(pointer, focus, under);
         if entered
             && let Some((surface, _)) = &under
             && let Some(client) = self.client_of(surface)
@@ -333,14 +345,15 @@ impl State {
     /// Under a grab the recipient is the grab's own logic, not `under` -- a
     /// popup grab confines the pointer to its own tree, an implicit button
     /// grab confines it to the pressed surface -- so `under` names a client
-    /// that will never see this serial. Read before
-    /// [`PointerHandle::motion`] runs: afterwards the seat's focus already
-    /// names `under` and the move is unobservable.
+    /// that will never see this serial. `focus` is read by the caller
+    /// before [`PointerHandle::motion`] runs: afterwards the seat's focus
+    /// already names `under` and the move is unobservable.
     fn pointer_entered(
         pointer: &PointerHandle<Self>,
+        focus: &Option<WlSurface>,
         under: &Option<(WlSurface, Point<f64, Logical>)>,
     ) -> bool {
-        if pointer.current_focus().as_ref() == under.as_ref().map(|(surface, _)| surface) {
+        if focus.as_ref() == under.as_ref().map(|(surface, _)| surface) {
             return false;
         }
         !pointer.is_grabbed()

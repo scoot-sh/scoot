@@ -472,12 +472,14 @@ gap jumped the queue — each item's own file records why it landed when it did.
   move. Two corrections to the bundle entry's assumptions, both verified
   in source: the constraints global was never advertised (only the trait
   bound existed), and relative events are focus-gated per the protocol,
-  not lock-gated. Twelve fail-first harness tests pin exact vectors
+  not lock-gated. Sixteen fail-first harness tests pin exact vectors
   (lock hold/resume, confine hold/resume, pre-accel pairs, edge
-  unclipping, per-client streams, lock-before-focus engagement); live
+  unclipping, per-client streams, lock-before-focus engagement, regional
+  per-axis clamp and gating, session-lock round-trip freeze-through); live
   `wayland-info` + `foot` prove the advertisement, `foot` binds neither
-  (it uses neither protocol). Motion-path benchmark: unfocused unchanged,
-  focused +~2.2µs debug per event.
+  (it uses neither protocol). Motion-path benchmark: release unfocused
+  noise, focused +~190ns/event (~1.2% of one 16ms frame per second at
+  1000Hz).
 ## What's next
 
 The backlog is the source of truth for what to pick up; this is the current

@@ -100,13 +100,16 @@ position change there.
   `feat/relative-pointer-v1`, `state.rs` stashed to a pre-fix tree): 10 of
   11 fail -- `both_manager_globals_are_advertised` panics on `no
   zwp_relative_pointer_manager_v1 -- the global is missing`, the
-  delta/lock/confine/stream tests on empty streams or client lock errors;
-  `a_teleport_onto_a_surface_reports_no_relative_motion` passes trivially
-  (it asserts emptiness). The engage test additionally proven to pin its
-  own call: with the call neutered it fails on `arriving focus did not
-  engage the waiting lock`.
-- Post-fix, same VM: `cargo test -p flexwm` 831 + 3 pass (12 new),
-  `cargo nextest run --workspace` 936 pass 1 skipped,
+   delta/lock/confine/stream tests on empty streams or client lock errors;
+   `a_teleport_onto_a_surface_reports_no_relative_motion` passes trivially
+   (it asserts emptiness). The engage test additionally proven to pin its
+   own call: with the call neutered it fails on `arriving focus did not
+   engage the waiting lock`. The three regional tests each proven
+   fail-first the same way: neutered per-axis clamp lands at the target
+   instead of the clamped point; neutered region gate freezes instead of
+   freeing; neutered engage gate activates on a region-missing arrival.
+- Post-fix, same VM: `cargo test -p flexwm` 835 + 3 pass (16 new),
+  `cargo nextest run --workspace` 940 pass 1 skipped,
   `cargo clippy -p flexwm --all-targets -- -D warnings` clean,
   `cargo fmt --check -p flexwm` clean (Mac-side),
   `scripts/smoke-test.sh` (`SMOKE_PREFIX=/tmp/smoke-relptr`, `--headless`)
@@ -119,22 +122,53 @@ position change there.
   bind/create/event flow is harness-proven, not live-proven; stated as an
   environment limit.
 - Benchmark (the motion hot path is touched, so measured before/after on
-  the dev VM, debug build, 200k `pointer_move` events x 5 reps, temporary
-  bench since removed): unfocused 3129-3426 ns/event after vs 3415-3623
-  before -- ranges overlapping, no measurable regression. Focused with no
-  relative pointers bound 10688-11501 vs 8555-9090 before -- one
-  `current_location` read, one constraint-map lookup and Smithay's
-  empty-list lock per event, all debug-inflated; ~2.2ms/s at a real 1000Hz
-  device rate, beside the per-object socket writes a live relative
-  pointer pays anyway.
+  the dev VM, 200k `pointer_move` events x 5 reps, temporary bench since
+  removed). Debug: unfocused 3129-3426 ns/event after vs 3415-3623 before
+  -- ranges overlapping, no measurable regression; focused with no
+  relative pointers bound 10688-11501 vs 8555-9090 before. Release (the
+  profile that ships): unfocused 336-388 after vs 354-362 before --
+  overlapping, noise; focused 950-998 vs 757-823 before -- a ~190ns
+  residual (one `current_location` read, one constraint-map lookup,
+  Smithay's empty-list lock). At 1000Hz that is ~190us/s, ~1.2% of one
+  16ms frame per second: noise against the frame budget, which is the
+  review gate this evidence supplies. A focused re-read the review
+  flagged (`current_focus` read twice per move) was eliminated first by
+  passing the already-read focus into `record_pointer_enter` -- verified
+  no semantic difference (nothing between the read and the use can move
+  seat focus), though the release delta sits inside noise either way.
+- Review round (PR #89): one blocking finding (release evidence above),
+  four non-blocking, all addressed in place -- regional confinement
+  tests (per-axis clamp, outside-region free, engage gate, each proven
+  fail-first by neutering), the agent-facing success-while-frozen line in
+  README, the corrected re-arm account below with a session-lock
+  round-trip test, and the accepted-risk note on lock activation.
 
 ## What this deliberately leaves open
 
 - Nothing on relative-pointer itself. Its bundle neighbour
   (`presentation-time`) is untouched and stays in
   `docs/backlog/protocols/protocol-gaps-general.md`.
-- Constraint re-arming after pointer-leave deactivation is not implemented
-  (Smithay deactivates; nothing re-arms): a lock whose surface loses focus
-  stays disarmed until the client re-locks. Anvil-equivalent behavior
-  would re-engage on re-entry; filed implicitly here rather than as its own
-  item, since no shipped client has asked for it.
+- Re-arming works as follows (corrected from the first version of this
+  record, which wrongly said nothing re-arms): a held pointer freezes
+  focus as well as position, so a session-lock round trip leaves an
+  active lock active throughout -- no `leave`, no `unlocked`, nothing to
+  re-arm, pinned by `a_persistent_lock_survives_a_session_lock_round_trip`.
+  A gated-out regional confinement *can* be teleported off its surface,
+  which deactivates it to inactive-but-kept (the client sees
+  `unconfined`), and re-entering inside the region re-arms it with no new
+  request -- pinned by the second half of the region-gate test. An
+  *active* persistent lock is therefore never deactivated while held;
+  only `Oneshot` entries are removed on deactivate (Smithay's call, so no
+  flexwm test pins it -- stated, not tested).
+- Lock activation carries no interaction-serial requirement, as an
+  explicit accepted risk (see `relative_pointer.rs`'s trust-model note
+  for the full weighing: no serial in the request to gate on, anvil and
+  wlroots parity, pointer-position-only blast radius with the keyboard
+  always live to close the window). Not a separate item: the decision is
+  recorded, not deferred.
+- Session-lock interplay, considered: while a game holds a pointer lock
+  across a session lock, pointer button events still reach the locked
+  surface (focus never leaves it). Clicks only -- no keystrokes (the
+  keyboard is the lock client's) and no pixels (the screen is blanked).
+  Breaking the lock at the session boundary would be the alternative;
+  anvil and wlroots keep it, so this does too.

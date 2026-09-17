@@ -311,6 +311,14 @@ reading its socket, and the other shortens a wait rather than refusing it.
   any real use. A capture in flight neither extends nor shortens a wait: it
   touches no commit clock, and parks no waiter.
 
+One thing this list does not bound, because it is not a refusal: while a
+client holds an active pointer lock (`zwp_pointer_constraints_v1`, see
+Relative pointer below), `pointer move` and `click` still answer `ok` but
+move nothing -- the lock owns the pointer until its client releases it. An
+agent driving the pointer during a game or 3D session sees success replies
+with a frozen cursor; clicks still reach whatever surface holds pointer
+focus.
+
 `--tty` needs a seat (`seatd` or logind) with a DRM device on it. On a modern
 kernel, on every non-root `--tty` run, Smithay logs `Unable to become drm
 master, assuming unprivileged mode` at startup — expected, not a failure: the

@@ -21,10 +21,15 @@ use std::os::unix::net::UnixStream;
 use std::sync::mpsc::{Receiver, Sender};
 
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface as ServerSurface;
+use smithay::utils::{Logical, Point};
 use wayland_client::protocol::{
-    wl_buffer, wl_compositor, wl_pointer, wl_registry, wl_seat, wl_shm, wl_shm_pool, wl_surface,
+    wl_buffer, wl_compositor, wl_pointer, wl_region, wl_registry, wl_seat, wl_shm, wl_shm_pool,
+    wl_surface,
 };
 use wayland_client::{Connection, Dispatch, Proxy, QueueHandle};
+use wayland_protocols::ext::session_lock::v1::client::{
+    ext_session_lock_manager_v1, ext_session_lock_v1,
+};
 use wayland_protocols::wp::pointer_constraints::zv1::client::{
     zwp_confined_pointer_v1, zwp_locked_pointer_v1, zwp_pointer_constraints_v1,
 };
@@ -70,6 +75,20 @@ enum Step {
     Confine,
     /// Destroy the confined pointer, releasing the confinement.
     Unconfine,
+    /// `confine_pointer` with an explicit region (surface-local rects),
+    /// waiting for the `confined` event. An empty list confines with no
+    /// region, like [`Step::Confine`].
+    ConfineRegion { rects: Vec<(i32, i32, i32, i32)> },
+    /// `confine_pointer` with an explicit region like
+    /// [`Step::ConfineRegion`], but without waiting: for arming a
+    /// confinement with no focus, where no `confined` event can arrive yet.
+    ArmRegion { rects: Vec<(i32, i32, i32, i32)> },
+    /// `ext_session_lock_manager_v1.lock`, waiting for the `locked` event.
+    /// Only the locker script answers this (see `run_locker`).
+    TakeSessionLock,
+    /// `unlock_and_destroy` on the session lock, waiting for `finished`.
+    /// Only the locker script answers this.
+    ReleaseSessionLock,
 }
 
 /// What a client answers a [`Step`] with.
@@ -95,6 +114,13 @@ enum Ack {
     Locked,
     /// The `confined` event arrived.
     Confined,
+    /// The session `locked` event arrived (locker client only).
+    SessionLocked,
+    /// The session unlock was requested and flushed (locker client only).
+    /// Unlocking itself is event-silent -- `finished` arrives only on a
+    /// refused lock -- so the test proves the unlock by locking again
+    /// afterwards: a still-locked session would refuse with `finished`.
+    SessionReleased,
     /// Anything else a step answers when there is nothing to count.
     Done,
 }
@@ -238,6 +264,31 @@ fn window_point(fixture: &Fixture, index: usize, surface: u32) -> (f64, f64) {
     (f64::from(window.x) + 30.0, f64::from(window.y) + 30.0)
 }
 
+/// The surface origin behind a compositor point: what region rects are
+/// measured in. Resolved through the compositor's own hit test rather than
+/// re-derived from the layout, so a decoration offset can never silently
+/// skew a rect.
+fn surface_origin(fixture: &Fixture, x: f64, y: f64) -> (f64, f64) {
+    let (_, origin) = fixture
+        .state
+        .surface_under(Point::<f64, Logical>::from((x, y)))
+        .expect("the aim point is over no surface");
+    (origin.x, origin.y)
+}
+
+/// Asserts exact integrality: every rect and vector in the region tests is
+/// small-integer arithmetic, so a fractional layout would make `assert_eq`
+/// on floats meaningless rather than approximately right. Fails loudly
+/// instead of flaking.
+fn whole(value: f64, what: &str) -> i32 {
+    assert_eq!(
+        value.fract(),
+        0.0,
+        "{what} is fractional; these tests need integer geometry"
+    );
+    value as i32
+}
+
 /// The client end of one test connection: enough of a toolkit to map a
 /// painted toplevel, hold a `wl_pointer` and a relative-pointer object on
 /// it, and take locks and confinements.
@@ -252,6 +303,10 @@ struct TestClient {
     constraints: Option<zwp_pointer_constraints_v1::ZwpPointerConstraintsV1>,
     locked: Option<zwp_locked_pointer_v1::ZwpLockedPointerV1>,
     confined: Option<zwp_confined_pointer_v1::ZwpConfinedPointerV1>,
+    /// The `wl_region` a region confinement was built from, held alive for
+    /// the step's duration: the compositor copies the attributes at
+    /// request time, but holding it removes any lifetime question.
+    region: Option<wl_region::WlRegion>,
     /// The relative-pointer manager, bound at registry time; the relative
     /// object itself is created once the pointer exists (see `run_client`).
     /// `None` is what the advertisement test fails on.
@@ -451,12 +506,48 @@ impl Dispatch<xdg_surface::XdgSurface, ()> for TestClient {
 
 wayland_client::delegate_noop!(TestClient: ignore wl_compositor::WlCompositor);
 wayland_client::delegate_noop!(TestClient: ignore wl_surface::WlSurface);
+wayland_client::delegate_noop!(TestClient: ignore wl_region::WlRegion);
 wayland_client::delegate_noop!(TestClient: ignore xdg_toplevel::XdgToplevel);
 wayland_client::delegate_noop!(TestClient: ignore wl_shm::WlShm);
 wayland_client::delegate_noop!(TestClient: ignore wl_shm_pool::WlShmPool);
 wayland_client::delegate_noop!(TestClient: ignore wl_buffer::WlBuffer);
 wayland_client::delegate_noop!(TestClient: ignore zwp_relative_pointer_manager_v1::ZwpRelativePointerManagerV1);
 wayland_client::delegate_noop!(TestClient: ignore zwp_pointer_constraints_v1::ZwpPointerConstraintsV1);
+
+/// `confine_pointer` with an explicit region built from surface-local
+/// rects, for [`Step::ConfineRegion`] and [`Step::ArmRegion`]. An empty
+/// list confines with no region. The region object is held on the client
+/// for the step's duration (see the field doc).
+fn confine_with_region(
+    client: &mut TestClient,
+    qh: &QueueHandle<TestClient>,
+    rects: Vec<(i32, i32, i32, i32)>,
+) -> Result<(), String> {
+    let constraints = client.constraints.clone().ok_or("no constraints global")?;
+    let surface = client.surface.clone().ok_or("no surface to confine")?;
+    let pointer = client.pointer.clone().ok_or("no pointer to confine")?;
+    let region = if rects.is_empty() {
+        None
+    } else {
+        let compositor = client.compositor.clone().ok_or("no wl_compositor")?;
+        let region = compositor.create_region(qh, ());
+        for (x, y, width, height) in rects {
+            region.add(x, y, width, height);
+        }
+        client.region = Some(region.clone());
+        Some(region)
+    };
+    let confined = constraints.confine_pointer(
+        &surface,
+        &pointer,
+        region.as_ref(),
+        zwp_pointer_constraints_v1::Lifetime::Persistent,
+        qh,
+        (),
+    );
+    client.confined = Some(confined);
+    Ok(())
+}
 
 /// A `SURFACE`x`SURFACE` `wl_buffer` of opaque pixels, over a real memfd --
 /// the same path any toolkit takes (the shape `activation/tests.rs` uses).
@@ -622,9 +713,128 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 let confined = client.confined.take().ok_or("no confinement to release")?;
                 confined.destroy();
             }
+            Step::ConfineRegion { rects } => {
+                confine_with_region(&mut client, &qh, rects)?;
+                wait_for_flag(&mut queue, &mut client, "the confined event", |seen| {
+                    seen.confined_seen
+                })?;
+                acks.send(Ack::Confined).map_err(|e| e.to_string())?;
+                continue;
+            }
+            Step::ArmRegion { rects } => {
+                confine_with_region(&mut client, &qh, rects)?;
+            }
+            Step::TakeSessionLock | Step::ReleaseSessionLock => {
+                return Err("the game client cannot take a session lock".to_string());
+            }
         }
         queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
         acks.send(Ack::Done).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// The locker end of a second test connection: just enough of a screen
+/// locker to take and release the session lock around a pointer-lock test.
+/// Maps no surfaces at all -- focus leaves the game window for bare desktop
+/// while locked, which is the whole of what the round-trip test needs.
+#[derive(Default)]
+struct LockerClient {
+    lock_manager: Option<ext_session_lock_manager_v1::ExtSessionLockManagerV1>,
+    lock: Option<ext_session_lock_v1::ExtSessionLockV1>,
+    locked_seen: bool,
+    finished_seen: bool,
+}
+
+impl Dispatch<wl_registry::WlRegistry, ()> for LockerClient {
+    fn event(
+        client: &mut Self,
+        registry: &wl_registry::WlRegistry,
+        event: wl_registry::Event,
+        _: &(),
+        _: &Connection,
+        qh: &QueueHandle<Self>,
+    ) {
+        let wl_registry::Event::Global {
+            name,
+            interface,
+            version,
+        } = event
+        else {
+            return;
+        };
+        if interface == ext_session_lock_manager_v1::ExtSessionLockManagerV1::interface().name {
+            client.lock_manager = Some(registry.bind(name, version.min(1), qh, ()));
+        }
+    }
+}
+
+impl Dispatch<ext_session_lock_v1::ExtSessionLockV1, ()> for LockerClient {
+    fn event(
+        client: &mut Self,
+        _: &ext_session_lock_v1::ExtSessionLockV1,
+        event: ext_session_lock_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        match event {
+            ext_session_lock_v1::Event::Locked => client.locked_seen = true,
+            ext_session_lock_v1::Event::Finished => client.finished_seen = true,
+            _ => {}
+        }
+    }
+}
+
+wayland_client::delegate_noop!(LockerClient: ignore ext_session_lock_manager_v1::ExtSessionLockManagerV1);
+
+fn run_locker(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> Result<(), String> {
+    let conn = Connection::from_socket(stream).map_err(|e| e.to_string())?;
+    let mut queue = conn.new_event_queue();
+    let qh = queue.handle();
+    let mut client = LockerClient::default();
+    conn.display().get_registry(&qh, ());
+    queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+    client
+        .lock_manager
+        .clone()
+        .ok_or("no ext_session_lock_manager_v1")?;
+
+    while let Ok(step) = steps.recv() {
+        queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+        match step {
+            Step::TakeSessionLock => {
+                let manager = client
+                    .lock_manager
+                    .clone()
+                    .ok_or("no ext_session_lock_manager_v1")?;
+                let lock = manager.lock(&qh, ());
+                client.lock = Some(lock);
+                // Exactly one of the two must arrive, and the protocol says
+                // so in as many words: "In response to the creation of this
+                // object the compositor must send either the locked or
+                // finished event." A `finished` here is a refusal, which
+                // fails the test rather than hanging it.
+                wait_for(&mut queue, &mut client, "locked or finished", |seen| {
+                    (seen.locked_seen || seen.finished_seen).then_some(())
+                })?;
+                if !client.locked_seen {
+                    return Err("the session lock was refused".to_string());
+                }
+                acks.send(Ack::SessionLocked).map_err(|e| e.to_string())?;
+                continue;
+            }
+            Step::ReleaseSessionLock => {
+                let lock = client.lock.take().ok_or("no session lock to release")?;
+                lock.unlock_and_destroy();
+                // Event-silent by protocol (see `Ack::SessionReleased`):
+                // the ack below means requested-and-flushed, and the test
+                // proves the unlock by locking again.
+                acks.send(Ack::SessionReleased).map_err(|e| e.to_string())?;
+                continue;
+            }
+            _ => return Err("the locker cannot map windows or lock pointers".to_string()),
+        }
     }
     Ok(())
 }
@@ -1054,5 +1264,324 @@ fn two_focused_clients_each_get_their_own_stream() {
         quiet_a.relatives.is_empty(),
         "the first client heard the second client's motion: {:?}",
         quiet_a.relatives
+    );
+}
+
+#[test]
+fn confine_region_clamps_per_axis_against_a_sub_rectangle() {
+    // An L of two rects through the focus row: the full-width strip the
+    // pointer sits in, plus a bar down its right side. A move deep into the
+    // bar's column but past the strip keeps its x (the x-step alone lands
+    // in the strip) and loses its y (the y-step alone lands in neither) --
+    // the per-axis shape, not an all-or-nothing clamp.
+    let (mut fixture, run) = Fixture::start();
+    fixture.focus(0, run.surface);
+    let (fx, fy) = window_point(&fixture, 0, run.surface);
+    let (ox, oy) = surface_origin(&fixture, fx, fy);
+    let (ox, oy) = (whole(ox, "surface origin x"), whole(oy, "surface origin y"));
+    let (flx, fly) = (whole(fx, "focus x") - ox, whole(fy, "focus y") - oy);
+    let fy0 = fly - 8;
+    let fx1 = (flx + 18).min(48);
+    let (tx, ty) = (fx1 + 8, fy0 + 40);
+    assert!(
+        fy0 >= 0 && tx < 64 && ty < 64 && flx < fx1,
+        "focus at ({flx}, {fly}) does not fit the L shape; the layout moved"
+    );
+    let Ack::Confined = fixture.run_on(
+        0,
+        Step::ConfineRegion {
+            rects: vec![(0, fy0, 64, 16), (fx1, fy0, 16, 48)],
+        },
+    ) else {
+        panic!("confining with a region answered with something other than `confined`");
+    };
+    fixture
+        .state
+        .pointer_move(f64::from(ox + tx), f64::from(oy + ty));
+    let _ = fixture.state.display_handle.flush_clients();
+    let report = fixture.report(0);
+    assert_eq!(
+        report.relatives,
+        vec![(
+            f64::from(tx - flx),
+            f64::from(ty - fly),
+            f64::from(tx - flx),
+            f64::from(ty - fly)
+        )],
+        "the relative vector was clipped with the absolute position"
+    );
+    assert!(
+        report.confined,
+        "the confinement was not active while that move ran"
+    );
+    assert!(!report.motions.is_empty(), "the clamped move never landed");
+    // x kept, y zeroed: the absolute position is the target's column on
+    // the focus row.
+    assert_eq!(
+        fixture.pointer_at(),
+        (f64::from(ox + tx), fy),
+        "the move was not clamped per axis"
+    );
+}
+
+#[test]
+fn a_constraint_whose_region_misses_the_pointer_does_not_apply() {
+    // The region gate (anvil's): a constraint whose region does not contain
+    // the pointer's current position constrains nothing, even while active.
+    // Creation-time activation itself ignores the region -- the client does
+    // get `confined` -- so this pins active-but-not-applying, not inactive.
+    let (mut fixture, run) = Fixture::start();
+    fixture.focus(0, run.surface);
+    let Ack::Confined = fixture.run_on(
+        0,
+        Step::ConfineRegion {
+            rects: vec![(0, 0, 10, 10)],
+        },
+    ) else {
+        panic!("confining with a region answered with something other than `confined`");
+    };
+    let report = move_by(&mut fixture, 0, run.surface, 20.0, 20.0);
+    assert!(
+        report.confined,
+        "the confinement was not active while that move ran"
+    );
+    assert_eq!(
+        report.relatives,
+        vec![(20.0, 20.0, 20.0, 20.0)],
+        "an inapplicable confinement disturbed the relative stream"
+    );
+    assert!(
+        !report.motions.is_empty(),
+        "an inapplicable confinement held absolute motion"
+    );
+    let (x, y) = window_point(&fixture, 0, run.surface);
+    assert_eq!(
+        fixture.pointer_at(),
+        (x + 20.0, y + 20.0),
+        "an inapplicable confinement moved the pointer somewhere else"
+    );
+    // Leaving while gated out deactivates (the constraint is active, so
+    // the leave tears it down to inactive-but-kept): the client sees
+    // `unconfined`, and the entry persists for a later re-entry.
+    fixture.state.pointer_move(1500.0, 900.0);
+    let _ = fixture.state.display_handle.flush_clients();
+    let left = fixture.report(0);
+    assert!(
+        left.unconfined,
+        "leaving with an active-but-gated confinement sent no `unconfined`"
+    );
+    // Re-entering inside the region re-arms through `engage_pending_constraint`:
+    // no new confine request in between.
+    let (ox, oy) = surface_origin(&fixture, x, y);
+    let (ox, oy) = (whole(ox, "surface origin x"), whole(oy, "surface origin y"));
+    fixture
+        .state
+        .pointer_move(f64::from(ox + 5), f64::from(oy + 5));
+    let _ = fixture.state.display_handle.flush_clients();
+    let reentry = fixture.report(0);
+    assert!(
+        reentry.enters >= 1,
+        "the pointer never re-entered the window"
+    );
+    assert!(
+        reentry.confined,
+        "re-entering inside the region did not re-arm the confinement"
+    );
+    // And the re-armed confinement holds: the full vector reports while
+    // the absolute position stays put.
+    fixture
+        .state
+        .pointer_move(f64::from(ox + 505), f64::from(oy + 5));
+    let _ = fixture.state.display_handle.flush_clients();
+    let held = fixture.report(0);
+    assert_eq!(
+        held.relatives,
+        vec![(500.0, 0.0, 500.0, 0.0)],
+        "the re-armed confinement lost its relative stream"
+    );
+    assert_eq!(
+        fixture.pointer_at(),
+        (f64::from(ox + 5), f64::from(oy + 5)),
+        "the re-armed confinement let the pointer escape"
+    );
+}
+
+#[test]
+fn engage_respects_the_region_on_arrival_and_reentry() {
+    // The engage gate in both directions: arriving outside the armed
+    // region stays disarmed, and leaving and re-entering inside it arms.
+    let (mut fixture, run) = Fixture::start();
+    let before = fixture.report(0);
+    assert_eq!(
+        before.enters, 0,
+        "the pointer is already over the window; this test proves nothing about unfocused arming"
+    );
+    let Ack::Done = fixture.run_on(
+        0,
+        Step::ArmRegion {
+            rects: vec![(50, 50, 10, 10)],
+        },
+    ) else {
+        panic!("arming a regional confinement answered with something else");
+    };
+    let armed = fixture.report(0);
+    assert!(
+        !armed.confined,
+        "an unfocused confinement activated at creation time"
+    );
+    // Arrival outside the region: still disarmed.
+    let arrival = fixture.focus(0, run.surface);
+    assert!(
+        !arrival.confined,
+        "arrival outside the region engaged the confinement"
+    );
+    // A move within the surface to the region's doorstep: no enter, no
+    // engage, and the move itself is free (the gate sees the pointer
+    // outside the region).
+    let (fx, fy) = window_point(&fixture, 0, run.surface);
+    let (ox, oy) = surface_origin(&fixture, fx, fy);
+    let (ox, oy) = (whole(ox, "surface origin x"), whole(oy, "surface origin y"));
+    fixture
+        .state
+        .pointer_move(f64::from(ox + 55), f64::from(oy + 55));
+    let _ = fixture.state.display_handle.flush_clients();
+    let inside = fixture.report(0);
+    assert!(
+        !inside.confined,
+        "a same-surface move engaged the confinement"
+    );
+    assert_eq!(
+        fixture.pointer_at(),
+        (f64::from(ox + 55), f64::from(oy + 55)),
+        "a move outside an inapplicable region did not land"
+    );
+    // Leave and re-enter inside the region: engages.
+    fixture.state.pointer_move(1500.0, 900.0);
+    let _ = fixture.state.display_handle.flush_clients();
+    assert!(
+        fixture
+            .state
+            .seat
+            .get_pointer()
+            .expect("a pointer")
+            .current_focus()
+            .is_none(),
+        "the pointer never left the surface; the re-entry proves nothing"
+    );
+    fixture.report(0);
+    fixture
+        .state
+        .pointer_move(f64::from(ox + 55), f64::from(oy + 55));
+    let _ = fixture.state.display_handle.flush_clients();
+    let reentry = fixture.report(0);
+    assert!(
+        reentry.enters >= 1,
+        "the pointer never re-entered the window"
+    );
+    assert!(
+        reentry.confined,
+        "re-entering inside the region did not engage the confinement"
+    );
+    // And it holds from there: the full vector still reports while the
+    // absolute position stays put.
+    fixture
+        .state
+        .pointer_move(f64::from(ox + 555), f64::from(oy + 55));
+    let _ = fixture.state.display_handle.flush_clients();
+    let held = fixture.report(0);
+    assert_eq!(
+        held.relatives,
+        vec![(500.0, 0.0, 500.0, 0.0)],
+        "the engaged regional confinement lost its relative stream"
+    );
+    assert_eq!(
+        fixture.pointer_at(),
+        (f64::from(ox + 55), f64::from(oy + 55)),
+        "the engaged regional confinement let the pointer escape"
+    );
+}
+
+#[test]
+fn a_persistent_lock_survives_a_session_lock_round_trip() {
+    // A held pointer freezes focus as well as position (anvil's shape), so
+    // the session lock's focus refresh delivers no `leave` to the game
+    // surface: Smithay never deactivates the lock, the client sees no
+    // `unlocked`, and on unlock there is nothing to re-arm -- the same
+    // lock is still active, still holding, still streaming. That freeze
+    // is the whole of what this pins: no event, no focus excursion, no
+    // movement, before, during and after.
+    let (mut fixture, run) = Fixture::start();
+    fixture.focus(0, run.surface);
+    let (fx, fy) = window_point(&fixture, 0, run.surface);
+    let Ack::Locked = fixture.run_on(0, Step::Lock) else {
+        panic!("locking answered with something other than `locked`");
+    };
+    fixture.spawn(run_locker);
+    fixture.send_step(1, Step::TakeSessionLock);
+    // The fresh lock confirms on its first blanked frame, which nothing
+    // has drawn yet: render one explicitly rather than hoping the frame
+    // timer fires mid-dispatch.
+    fixture.render();
+    let Ack::SessionLocked = fixture.wait_for_ack(1) else {
+        panic!("the session lock answered with something other than `locked`");
+    };
+    fixture.settle();
+    let during = fixture.report(0);
+    assert!(
+        !during.unlocked,
+        "the session lock deactivated a held pointer lock"
+    );
+    assert_eq!(
+        during.enters, 0,
+        "pointer focus left the locked surface under session lock"
+    );
+    assert_eq!(
+        fixture.pointer_at(),
+        (fx, fy),
+        "the pointer moved under session lock"
+    );
+    fixture.send_step(1, Step::ReleaseSessionLock);
+    let Ack::SessionReleased = fixture.wait_for_ack(1) else {
+        panic!("the session unlock answered with something unexpected");
+    };
+    fixture.settle();
+    // The unlock is event-silent, so prove it by locking again: a
+    // still-locked session would refuse with `finished` instead.
+    fixture.send_step(1, Step::TakeSessionLock);
+    fixture.render();
+    let Ack::SessionLocked = fixture.wait_for_ack(1) else {
+        panic!("re-locking after unlock did not confirm the unlock");
+    };
+    fixture.send_step(1, Step::ReleaseSessionLock);
+    let Ack::SessionReleased = fixture.wait_for_ack(1) else {
+        panic!("the final session unlock answered with something unexpected");
+    };
+    fixture.settle();
+    let back = fixture.report(0);
+    assert_eq!(
+        back.enters, 0,
+        "focus left and re-entered across the round trip; the freeze did not hold"
+    );
+    assert!(
+        !back.locked,
+        "a second `locked` arrived for a lock that never went away"
+    );
+    assert_eq!(
+        fixture.pointer_at(),
+        (fx, fy),
+        "the pointer moved across the round trip"
+    );
+    // And it holds after, with no re-lock request in between: relative
+    // flows, absolute stays.
+    let report = move_by(&mut fixture, 0, run.surface, 20.0, 20.0);
+    assert_eq!(
+        report.relatives,
+        vec![(20.0, 20.0, 20.0, 20.0)],
+        "the surviving lock lost its relative stream"
+    );
+    assert!(
+        report.motions.is_empty(),
+        "absolute motion leaked through the surviving lock: {:?}",
+        report.motions
     );
 }
