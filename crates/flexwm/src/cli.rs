@@ -10,8 +10,8 @@ pub const USAGE: &str = "\
 flexwm -- a scrolling-tiling Wayland compositor
 
 USAGE:
-    flexwm --headless [--width W] [--height H] [--socket PATH] [--config PATH] [-- COMMAND...]
-    flexwm --nested [--width W] [--height H] [--socket PATH] [--config PATH] [-- COMMAND...]
+    flexwm --headless [--width 1-65535] [--height 1-65535] [--socket PATH] [--config PATH] [-- COMMAND...]
+    flexwm --nested [--width 1-65535] [--height 1-65535] [--socket PATH] [--config PATH] [-- COMMAND...]
     flexwm --tty [--gpu PATH] [--mode WxH] [--socket PATH] [--config PATH] [-- COMMAND...]
     flexwm msg REQUEST
     flexwm --help
@@ -144,7 +144,16 @@ impl Default for CompositorOptions {
 pub enum Error {
     Unknown(String),
     Missing(&'static str),
-    Invalid { what: &'static str, value: String },
+    Invalid {
+        what: &'static str,
+        value: String,
+    },
+    OutOfRange {
+        what: &'static str,
+        value: String,
+        min: i32,
+        max: i32,
+    },
 }
 
 impl fmt::Display for Error {
@@ -153,6 +162,12 @@ impl fmt::Display for Error {
             Self::Unknown(what) => write!(f, "unknown argument `{what}` (try --help)"),
             Self::Missing(what) => write!(f, "missing {what} (try --help)"),
             Self::Invalid { what, value } => write!(f, "invalid {what}: `{value}`"),
+            Self::OutOfRange {
+                what,
+                value,
+                min,
+                max,
+            } => write!(f, "invalid {what}: `{value}` (expected {min}-{max})"),
         }
     }
 }
@@ -409,19 +424,23 @@ fn vertical(args: &mut impl Iterator<Item = String>) -> Result<Vertical, Error> 
 /// exceed (see [`MAX_OUTPUT_DIMENSION`]). Refused rather than clamped --
 /// every other invalid flag in this file is an `Error::Invalid`, and a
 /// typo'd size silently running at a different size would be the worse
-/// surprise. The error echoes the flag's own spelling, the way `number`
-/// does for unparsable input.
+/// surprise. Unparsable input keeps the plain `Invalid` shape; a parsed
+/// number outside the range echoes the range it was refused for.
 fn dimension(what: &'static str, value: Option<String>) -> Result<i32, Error> {
     let raw = value.ok_or(Error::Missing(what))?;
-    let invalid = || Error::Invalid {
+    let size: i32 = raw.parse().map_err(|_| Error::Invalid {
         what,
         value: raw.clone(),
-    };
-    let size: i32 = raw.parse().map_err(|_| invalid())?;
+    })?;
     if (1..=MAX_OUTPUT_DIMENSION).contains(&size) {
         Ok(size)
     } else {
-        Err(invalid())
+        Err(Error::OutOfRange {
+            what,
+            value: raw,
+            min: 1,
+            max: MAX_OUTPUT_DIMENSION,
+        })
     }
 }
 
@@ -477,24 +496,27 @@ mod tests {
         // DRM reports each mode axis in a `u16` (`drm_mode_modeinfo`), so
         // nothing real is wider than 65535: anything past it is a typo or a
         // probe, refused the way `--mode` refuses its own bad input rather
-        // than silently running at a different size.
+        // than silently running at a different size. The refusal echoes the
+        // range, so the operator sees the fix, not just the failure.
         for bad in ["0", "-1", "-1600", "65536", "2000000000"] {
-            assert_eq!(
-                parse_args(&["--headless", "--width", bad]),
-                Err(Error::Invalid {
-                    what: "--width",
-                    value: bad.to_owned(),
-                }),
-                "--width {bad}"
-            );
-            assert_eq!(
-                parse_args(&["--headless", "--height", bad]),
-                Err(Error::Invalid {
-                    what: "--height",
-                    value: bad.to_owned(),
-                }),
-                "--height {bad}"
-            );
+            for flag in ["--width", "--height"] {
+                let err = parse_args(&["--headless", flag, bad])
+                    .expect_err("an absurd size should not parse");
+                assert_eq!(
+                    err,
+                    Error::OutOfRange {
+                        what: flag,
+                        value: bad.to_owned(),
+                        min: 1,
+                        max: MAX_OUTPUT_DIMENSION,
+                    },
+                    "{flag} {bad}"
+                );
+                assert!(
+                    err.to_string().contains("expected 1-65535"),
+                    "refusal for {flag} {bad} did not echo the range: {err}"
+                );
+            }
         }
     }
 

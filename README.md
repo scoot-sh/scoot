@@ -184,7 +184,8 @@ Configuration below for the full schema and default keybindings. Run
 `--width`/`--height` (the `--headless`/`--nested` output size) accept
 1–65,535 per axis — whatever DRM itself can report for a mode
 (`drm_mode_modeinfo` stores each axis in a `u16`), with room to spare past
-any real display. Anything else is a startup error naming the flag, not a
+any real display. Anything else is a startup error naming the flag and the
+expected range (`invalid --width: '70000' (expected 1-65535)`), not a
 silently different size.
 
 `flexwm msg type TEXT` types text the way a person would, on whatever

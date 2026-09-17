@@ -47,9 +47,11 @@ so one grammar for "a display size" covers every flag.
 **Refuse, not clamp** — every other invalid flag in `cli.rs` is an
 `Error::Invalid`, `--mode` refuses its own `0`, and a typo'd size
 silently running at a different size is the worse surprise. `0`,
-negatives, `65536` and `2000000000` are all `invalid --width` with exit 1
-(proven live on the built binary); `1`, `800`, `7680`, `15360` and `65535`
-parse untouched.
+negatives, `65536` and `2000000000` are all refused with the range echoed
+(`invalid --width: '2000000000' (expected 1-65535)`) and exit 1 (proven
+live on the built binary); unparsable input keeps the plain `invalid`
+shape. `1`, `800`, `7680`, `15360` and `65535`
+parse untouched, and `--help` states the range on both flag lines.
 
 **The chain closes, with the worst case stated.** The largest flaggable
 output is 65535x65535, doubled to 131070 a side at the `[output] scale`
@@ -73,9 +75,17 @@ the identity where nothing overflows.
 
 **Audited and deliberately left alone.** `gap * (windows - 1)`,
 `distribute`'s taken-sum and the `y` accumulation are window-*count*
-derived, not dimension derived — bounded by live Wayland objects (memory
-DoS arrives thousands of windows before the arithmetic does), the same
-standing disclosure `Config::MAX_GAP`'s docs already carry. The other two
+derived, not dimension derived -- and a pure Wayland client cannot drive
+the count side: every client-created window opens as its own single-window
+column (`place_window` goes through `insert_column`, and so does the only
+other call site, workspace-to-workspace moves), and the only path that co-locates windows
+into one column is `consume_or_expel`'s join branch, reachable solely
+through `Action::ConsumeOrExpel` -- a keybinding or an IPC action, both
+operator-equivalent (IPC access already offers `spawn` and `quit`).
+Overflowing the product past a maxed-out gap of 10,000 needs 214,750+
+windows in a *single* column (10000 x 214748 still fits `i32`), unreachable
+by a lesser-privileged attacker; the deferral stands on that, not on memory
+pressure. The other two
 output-size sources: `--tty` hotplug is DRM-reported, hence `u16`-bounded
 by construction; `--nested`'s first host configure trusts its host (the
 user's own compositor, the same trust as every other configure value),
