@@ -181,8 +181,12 @@ pub struct State {
     /// in the same input handler, so the new grab never nests inside the
     /// old one. This answers the other half -- "was the keyboard this
     /// client's moments ago" -- so those continuations are not refused.
-    /// Written only where a grab ends (`dismiss_popup_grab`,
-    /// `settle_popup_grab`); read only by the grab gate. See `popup.rs`.
+    /// Written in exactly one place -- `handlers.rs`'s `destroyed()`, gated
+    /// on the dying surface belonging to the grabbing client -- and cleared
+    /// on every grant; read only by the grab gate. Dismissals (click
+    /// outside, lock, `exclusive` layer) and reaps deliberately file
+    /// nothing, so an ended-by-others session cannot lend its serial to a
+    /// reopen. See `popup.rs`.
     pub last_popup_grab: Option<(ClientId, Instant)>,
     pub output: Option<Output>,
     /// The output scale resolved from `[output] scale` (see

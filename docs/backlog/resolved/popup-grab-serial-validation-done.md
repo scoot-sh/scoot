@@ -89,15 +89,20 @@ So a grab is also granted when it continues the requester's own session
 requester -- nested submenu, second grab while one is up), or its previous
 grab ended within `GRAB_REOPEN_GRACE` (2s). Either way the keyboard was
 this client's moments ago; a *different* client grabbing off someone
-else's menu still faces the serial check. The ended half is filed in three
-places: `dismiss_popup_grab`, `settle_popup_grab`, and -- the one the live
-run forced -- `CompositorHandler::destroyed`, because toolkits destroy the
-old popup before grabbing the new one *in the same flush*: destroy and
-grab dispatch adjacently with no reap in between, so reap-time filing
-lands a dispatch too late. Pinned by `ReplacePopup` (same-flush destroy +
-re-grab), which fails with reap-only filing and passes with destroy-time
-filing, while the separate-steps grace test passes under both -- proving
-the two paths are genuinely different.
+else's menu still faces the serial check. The ended half is filed in one
+place only -- `CompositorHandler::destroyed`, gated on the dying surface
+belonging to the grabbing client -- because toolkits destroy the old popup
+before grabbing the new one *in the same flush*: destroy and grab dispatch
+adjacently with no reap in between, so reap-time filing lands a dispatch
+too late. Deliberately not filed at dismiss (click outside, lock,
+`exclusive` layer) or at reap: a session the user or the compositor ended
+must not lend its serial to a reopen, and another client's surface churn
+must not refresh someone else's timestamp; a grant clears whatever stamp
+came before, so the grace cannot renew across sessions. Pinned by
+`ReplacePopup` (same-flush destroy + re-grab), which fails with reap-only
+filing and passes with destroy-time filing, while the separate-steps grace
+test passes under both -- and by the click-outside dismiss test, which pins
+that a dismissed menu's stale serial is refused on reopen.
 
 ## Verified against real toolkits, not only in tests
 

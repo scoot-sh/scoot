@@ -140,22 +140,26 @@ impl CompositorHandler for State {
         // down or replaces it: toolkits destroy the old popup before
         // grabbing the new one in the same flush, so the replacement grab is
         // dispatched adjacently -- file the session *now*, synchronously,
-        // rather than waiting for `settle_popup_grab`, which only runs on a
-        // later dispatch and would file it a dispatch too late for the grace
-        // half of `grab_session_continues` to see. Gated on a grab being
-        // held at all, like `settle_popup_grab` itself; over-filing (an
-        // unrelated surface dying mid-grab) only extends a session that is
-        // still live anyway, which the live half already covers.
-        if self.popup_grab.is_some() {
-            let holder = self.popup_grab.as_ref().and_then(|grab| {
-                grab.keyboard_grab_start_data()
-                    .focus
-                    .as_ref()
-                    .and_then(|root| self.client_of(root))
-            });
-            if let Some(client) = holder {
-                self.last_popup_grab = Some((client, std::time::Instant::now()));
-            }
+        // rather than waiting for a reap, which runs on a later dispatch and
+        // would file it a dispatch too late for the grace half of
+        // `grab_session_continues` to see.
+        //
+        // Gated on the dying surface belonging to the grabbing client, not
+        // merely on a grab being held: another client's churn (closing a
+        // window, swapping a cursor) must not refresh someone else's
+        // timestamp. Same-client over-filing (a cursor surface, a toplevel
+        // going away with the menu still up) only stamps a moment the
+        // session was in fact live -- and the grace then permits a re-grab
+        // at most two seconds past the last such moment, which is the grace
+        // semantic itself, not an extension of it.
+        if self.popup_grab.is_some()
+            && let Some(holder) = self
+                .popup_grab
+                .as_ref()
+                .and_then(|grab| self.grab_holder_client(grab))
+            && self.client_of(surface).as_ref() == Some(&holder)
+        {
+            self.last_popup_grab = Some((holder, std::time::Instant::now()));
         }
     }
 }

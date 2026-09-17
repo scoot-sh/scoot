@@ -448,6 +448,66 @@ fn a_replacement_grab_after_the_grace_needs_a_fresh_serial() {
     fixture.disconnect_client();
 }
 
+/// A menu dismissed by clicking outside cannot be reopened on its stale
+/// serial: an explicit dismiss ends the session rather than lending it.
+///
+/// The counterpart to the grace tests above, and the line the narrowed
+/// filing draws: only a destroy the holder itself performs files a session
+/// (`handlers.rs`'s `destroyed`). A click-outside dismiss reaps through
+/// `settle_popup_grab` without filing, so the immediate re-grab below faces
+/// the serial check alone -- and loses it, the serial having aged out.
+#[test]
+fn a_menu_dismissed_by_clicking_outside_cannot_be_reopened_on_its_stale_serial() {
+    let mut fixture = Fixture::new();
+    fixture.run(Step::MapWindow);
+    fixture.press_a_key();
+    let key = fixture
+        .serials()
+        .key
+        .expect("the client should have been sent a key");
+    assert!(
+        grab_with(&mut fixture, key),
+        "the menu should grab with its fresh serial"
+    );
+
+    // Age out the opening serial while the menu is still open.
+    fixture
+        .state
+        .interaction_serials
+        .backdate(std::time::Duration::from_secs(3600));
+
+    fixture.click(ON_DESKTOP.0, ON_DESKTOP.1);
+    assert_eq!(
+        fixture.popup_dones(),
+        1,
+        "clicking outside the menu should dismiss it"
+    );
+    assert!(
+        fixture.state.popup_grab.is_none(),
+        "the dismissed menu should have been reaped"
+    );
+    assert!(
+        fixture.state.last_popup_grab.is_none(),
+        "a dismissed session must file nothing to reopen from"
+    );
+
+    assert!(
+        !grab_with(&mut fixture, key),
+        "a dismissed menu must not reopen on its stale serial"
+    );
+    assert_eq!(
+        fixture.popup_dones(),
+        2,
+        "the refused replacement should be dismissed, not left up with no input"
+    );
+    assert_eq!(
+        fixture.keyboard().focused,
+        Some(Focused::Window(0)),
+        "the keyboard should never have left the window"
+    );
+    fixture.disconnect_client();
+}
+
 /// An enter from long ago spends nothing: the weakening that recording
 /// enters buys is bounded by the same age window as every other entry, so
 /// this morning's hover is not tonight's keyboard.

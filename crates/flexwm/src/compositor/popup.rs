@@ -65,8 +65,12 @@
 //! the keyboard was this client's moments ago, so granting captures nothing
 //! new -- and a *different* client grabbing off the back of someone else's
 //! menu still faces the serial check. [`State::last_popup_grab`] is the
-//! ended half of that answer; the live half is read off the held grab's own
-//! root, like [`State::popup_grab_holder`].
+//! ended half of that answer, filed only when the holder itself tears down
+//! (see `handlers.rs`'s `destroyed`); the live half is read off the held
+//! grab's own root, like [`State::popup_grab_holder`]. A session the user
+//! dismissed (click outside) or the compositor pre-empted (lock,
+//! `exclusive` layer) files nothing, so it cannot be re-entered on a stale
+//! serial within the grace.
 //!
 //! ## Who gets the last word when a grab ends
 //!
@@ -86,7 +90,7 @@
 //! away from the window the user is typing into. niri, sway and mutter all
 //! draw the same line. See the resolution doc for the full reasoning.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use flexwm_core::WindowId;
 use smithay::desktop::{
@@ -118,10 +122,16 @@ use super::State;
 /// before grabbing the new one, in the same input handler, so destroy and
 /// grab are dispatched adjacently. Two seconds is that with orders of
 /// magnitude of slop, and still five times below
-/// [`INTERACTION_WINDOW`](super::input::interaction::INTERACTION_WINDOW), so
-/// it cannot stretch a stale serial into a standing permit: the keyboard was
-/// this client's moments ago, and after the grace the serial check is the
-/// whole answer again.
+/// [`INTERACTION_WINDOW`](super::input::interaction::INTERACTION_WINDOW).
+///
+/// The bound this states is deliberate and narrow: the grace bridges a
+/// destroy the holder itself just performed, full stop. Stamps are filed
+/// only at destroy, never at dismiss or reap, and a grant clears whatever
+/// stamp came before -- so the grace cannot renew itself across sessions,
+/// and a re-grab more than two seconds after the destroy is refused on its
+/// stale serial exactly like a first grab would be. The click-outside
+/// dismiss followed by an immediate stale re-grab is the test that pins
+/// the dismiss side of that line.
 const GRAB_REOPEN_GRACE: Duration = Duration::from_secs(2);
 
 impl State {
@@ -201,7 +211,15 @@ impl State {
         {
             // `warn`, not `debug`: the protocol posts no error for this, so
             // the log is the only way to tell "no recent interaction" apart
-            // from a broken menu.
+            // from a broken menu -- and the ticket explicitly requires a
+            // debuggable refusal for exactly that reason. `activation.rs`
+            // stays at `debug` because a refused token is routine there
+            // (launchers mint speculatively); a refused menu grab is always
+            // user-visible breakage. Rate is one line per menu opened, not
+            // per event or frame, and log volume from a same-uid client is
+            // already untrusted (it can already spin mapping, configure and
+            // shm traffic that all log), so there is no new spam vector
+            // worth throttling for.
             tracing::warn!(
                 ?serial,
                 ?client,
@@ -288,6 +306,12 @@ impl State {
         // and end it on its own terms (`dismiss_popup_grab`); neither is
         // answerable through the seat, which hands back only a `&dyn` grab.
         self.popup_grab = Some(grab);
+        // A new session supersedes whatever ended before it: without this, a
+        // stamp filed by a destroy moments ago would survive a grant made on
+        // another serial and offer its grace to a later grab that is no
+        // continuation of anything. The live half above covers this session
+        // from here until it ends.
+        self.last_popup_grab = None;
     }
 
     /// Whether something outranks a popup grab for the keyboard right now --
@@ -363,21 +387,15 @@ impl State {
     ///
     /// `cleanup` first, so `has_ended` is the grab's real state rather than
     /// whatever reaping last ran: an ended-but-unreaped grab must read as
-    /// ended (the grace half, via [`State::last_popup_grab` once
-    /// `settle_popup_grab` records it), never as a live session. Reaping
-    /// here is what `settle_popup_grab` does on its own path; doing it twice
-    /// is idempotent.
+    /// ended (the grace half, via [`State::last_popup_grab`] filed at
+    /// destroy), never as a live session. Reaping here is what
+    /// `settle_popup_grab` does on its own path; doing it twice is
+    /// idempotent.
     fn grab_session_continues(&mut self, client: &ClientId) -> bool {
         self.popups.cleanup();
         if let Some(grab) = self.popup_grab.as_ref()
             && !grab.has_ended()
-            && grab
-                .keyboard_grab_start_data()
-                .focus
-                .as_ref()
-                .and_then(|surface| self.client_of(surface))
-                .as_ref()
-                == Some(client)
+            && self.grab_holder_client(grab).as_ref() == Some(client)
         {
             return true;
         }
@@ -386,20 +404,14 @@ impl State {
             .is_some_and(|(holder, ended)| holder == client && ended.elapsed() < GRAB_REOPEN_GRACE)
     }
 
-    /// Files who held the grab that just ended, and when, so a menu
-    /// replacing it within [`GRAB_REOPEN_GRACE`] is recognized as the same
-    /// session (see [`State::grab_session_continues`]).
-    ///
-    /// Read off the ended grab's own start data, like
-    /// [`State::popup_grab_holder`]: there is no other record of who held
-    /// it. Nothing is filed when the root is already gone (a torn-down
-    /// client): a replacement then needs a fresh serial, the safe direction.
-    fn note_popup_grab_end(&mut self, grab: &ActivePopupGrab) {
-        if let Some(surface) = grab.keyboard_grab_start_data().focus.as_ref()
-            && let Some(client) = self.client_of(surface)
-        {
-            self.last_popup_grab = Some((client, Instant::now()));
-        }
+    /// Who holds `grab`, read off its own start data like
+    /// [`State::popup_grab_holder`]: there is no other record of it.
+    /// `None` when the root is already gone (a torn-down client).
+    pub(super) fn grab_holder_client(&self, grab: &ActivePopupGrab) -> Option<ClientId> {
+        grab.keyboard_grab_start_data()
+            .focus
+            .as_ref()
+            .and_then(|surface| self.client_of(surface))
     }
     /// Ends the active popup grab, if any, dismissing its popups.
     ///
@@ -417,10 +429,6 @@ impl State {
         let Some(mut grab) = self.popup_grab.take() else {
             return;
         };
-        // Filed before the ungrab below dismisses anything: a menu opened
-        // off the back of this one -- the replacement half of
-        // `grab_session_continues` -- is recognized from here.
-        self.note_popup_grab_end(&grab);
         // `popup_done` for the whole chain, innermost first. This also takes
         // the popups out of the parent's `PopupTree`, so they stop being
         // drawn on the very next frame rather than when the client gets
@@ -468,12 +476,7 @@ impl State {
         {
             return;
         }
-        // `take`, not `= None`, so the ended grab can file its session
-        // before it is dropped (see `dismiss_popup_grab`).
-        let Some(grab) = self.popup_grab.take() else {
-            return;
-        };
-        self.note_popup_grab_end(&grab);
+        self.popup_grab = None;
         self.refresh_keyboard_focus();
         // The dismissed popup's pixels are gone from the tree; nothing else
         // marks the screen dirty for a destroy.
