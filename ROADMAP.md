@@ -408,7 +408,8 @@ gap jumped the queue — each item's own file records why it landed when it did.
    unit tests per direction plus a permanent smoke-test section (live
    `--headless`: warn logged, injected `a` closes the window).
 - **[`--width`/`--height`
-  bounds](docs/backlog/resolved/width-height-bounded-done.md)** — refused
+  bounds](docs/backlog/resolved/width-height-bounded-done.md)**
+  (PR #82, 2026-09-17) — refused
   past 65535 per axis at parse (the most DRM itself can report for a mode
   axis, with room to spare past 16K hardware), which closes the chain that
   made item 12(b)'s output-derived `min_size` limit vacuous at ~2×10⁹
