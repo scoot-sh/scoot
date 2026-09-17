@@ -198,13 +198,21 @@ fn set_mode(
         size: (width, height).into(),
         refresh: 60_000,
     };
+    // `set_preferred` first: `change_current_state` sends the new mode to
+    // already-bound `wl_output` clients synchronously, with the `preferred`
+    // bit exactly when the mode it is told about already is the preferred
+    // one (see `wl_change_current_state` at the pinned Smithay rev -- no
+    // batching, call order is what the wire sees). The other order told a
+    // client bound before a resize about the new mode with no `preferred`
+    // bit, and nothing ever resent it; see
+    // `docs/backlog/resolved/wl-output-preferred-flag-on-late-mode-done.md`.
+    output.set_preferred(mode);
     output.change_current_state(
         Some(mode),
         Some(Transform::Normal),
         Some(smithay_scale(scale)),
         location,
     );
-    output.set_preferred(mode);
 }
 
 /// Builds the CPU render target at a given size: a pixman renderer, an

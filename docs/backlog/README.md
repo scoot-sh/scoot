@@ -84,8 +84,11 @@ actionable.
 - [`wlr-output-management` reconfiguration: `apply`/`test` always fail](./protocols/output-management-reconfiguration.md)
   — the deliberately-deferred other half of the entry above; gated on
   multi-output support, since nothing a configuration asks for exists yet
-- [An already-bound `wl_output` client is never told a `--nested` resize's new mode is preferred](./protocols/wl-output-preferred-flag-on-late-mode.md)
-  — pre-existing, found reviewing the entry above's own (correct) handling of the same event
+- [An already-bound `wl_output` client is never told a `--nested` resize's new mode is preferred](./resolved/wl-output-preferred-flag-on-late-mode-done.md)
+  — RESOLVED 2026-09-17: fixed as filed — `set_mode` now marks the new mode
+  preferred *before* `change_current_state` sends it (no batching at the
+  pinned rev, verified in source), one fix covering `--nested` and `--tty`,
+  pinned by a fail-first harness test asserting both protocols agree
 - [Screen capture for clients (`wlr-screencopy` / `ext-image-copy-capture`)](./resolved/screencopy-capture-done.md)
   — HALF-RESOLVED 2026-09-16: `ext-image-copy-capture-v1` +
   `ext-image-capture-source-v1` for **output** capture, so `grim` and a

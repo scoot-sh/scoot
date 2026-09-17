@@ -71,14 +71,16 @@
 //!   not by uevent traffic: a re-probe that lands on a size already in the
 //!   list adds nothing, and `plan` in `tty/hotplug.rs` does not even reach
 //!   `set_mode` unless the size changed. `wl_output` advertises every known mode for the same
-//!   reason this protocol does, but the `preferred` flag does not track it
-//!   the same way on both: this protocol's snapshot is taken once `set_mode`
-//!   has fully returned, so a newly-added mode is correctly `preferred`
-//!   here, while an already-bound `wl_output` client is told about the new
-//!   mode by the earlier `change_current_state` call -- before
-//!   `set_preferred` runs -- so it is never told the new mode is preferred
-//!   at all, not even briefly (see
-//!   `docs/backlog/protocols/wl-output-preferred-flag-on-late-mode.md`).
+//!   reason this protocol does, and the `preferred` flag tracks it the same
+//!   way on both: `headless.rs`'s `set_mode` marks the new mode preferred
+//!   *before* `change_current_state` sends it to already-bound `wl_output`
+//!   clients (that call snapshots the preferred mode synchronously, so the
+//!   order is what the wire sees), while this protocol's snapshot is taken
+//!   once `set_mode` has fully returned -- either way the newly-added mode
+//!   is `preferred`. Pinned by
+//!   `wl_output_tells_an_already_bound_client_the_resized_mode_is_preferred`
+//!   in `output_management/tests.rs`, which binds both on one connection and
+//!   asserts the resize batch agrees.
 //!
 //! Two properties are deliberately *not* sent, which the protocol explicitly
 //! allows:

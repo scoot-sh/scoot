@@ -384,6 +384,19 @@ gap jumped the queue — each item's own file records why it landed when it did.
   xdg and IME popups stay hidden and callback-starved — the PR #44 password
   guarantee through the new element source, pinned by exclusion tests
   alongside the inclusion one.
+- **[An already-bound `wl_output` client is never told a `--nested` resize's
+  new mode is
+  preferred](docs/backlog/resolved/wl-output-preferred-flag-on-late-mode-done.md)**
+  — fixed as filed: `set_mode` marks the new mode preferred *before*
+  `change_current_state` sends it (the ticket's batching alternative checked
+  against the pinned rev and ruled out — the send is synchronous, so call
+  order is what the wire sees). One fix covers `--nested` and `--tty`
+  (both reach `set_mode` through `resize_output`); pinned by a fail-first
+  harness test asserting the `wl_output` and `wlr-output-management`
+  resize batches agree. Live `--nested` steady state confirmed under cage;
+  the transient itself is harness wire evidence (external clients cannot
+  win the bind-before-configure race — stated, not papered over). No
+  README change (no probed client reads the bit).
 ## What's next
 
 The backlog is the source of truth for what to pick up; this is the current
