@@ -401,10 +401,10 @@ impl State {
 
 impl PointerConstraintsHandler for State {
     /// Activate at creation when the surface already has pointer focus --
-    /// anvil's policy at the pinned rev, and the only moment activation is
-    /// decided here. A lock taken while unfocused stays inactive until Smithay
-    /// tears it down on pointer-leave; nothing re-arms it afterwards (see the
-    /// module doc). The `with_pointer_constraint` lookup cannot miss: Smithay
+    /// anvil's policy at the pinned rev. A lock taken while unfocused stays
+    /// inactive until focus arrives, at which point `engage_pending_constraint`
+    /// activates it (see below) — and once Smithay tears it down on
+    /// pointer-leave, nothing re-arms it afterwards (see the module doc). The `with_pointer_constraint` lookup cannot miss: Smithay
     /// calls this because the constraint was just created.
     fn new_constraint(&mut self, surface: &WlSurface, pointer: &PointerHandle<Self>) {
         let focused = pointer.current_focus().as_ref() == Some(surface);
