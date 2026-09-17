@@ -244,11 +244,15 @@ use smithay::backend::renderer::element::surface::{
     WaylandSurfaceRenderElement, render_elements_from_surface_tree,
 };
 use smithay::backend::renderer::{Color32F, ImportAll, Renderer, Texture};
-use smithay::desktop::utils::{send_frames_surface_tree, under_from_surface_tree};
+use smithay::desktop::utils::{
+    OutputPresentationFeedback, send_frames_surface_tree, take_presentation_feedback_surface_tree,
+    under_from_surface_tree,
+};
 use smithay::desktop::{PopupManager, WindowSurfaceType};
 use smithay::input::pointer::CursorImageStatus;
 use smithay::output::Output;
 use smithay::reexports::wayland_protocols::ext::session_lock::v1::server::ext_session_lock_v1::ExtSessionLockV1;
+use smithay::reexports::wayland_protocols::wp::presentation_time::server::wp_presentation_feedback;
 use smithay::reexports::wayland_server::backend::ObjectId;
 use smithay::reexports::wayland_server::protocol::wl_output::WlOutput;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
@@ -713,6 +717,37 @@ impl SessionLock {
                     time,
                     Some(Duration::ZERO),
                     |_, _| Some(output.clone()),
+                );
+            }
+        }
+    }
+
+    /// Takes every current lock surface's (and its popups') committed
+    /// presentation feedback into `output_feedback` -- the take half of what
+    /// [`SessionLock::send_frames`] is the frame-callback half of, over the
+    /// same surface set: while locked these are the only client surfaces any
+    /// frame shows, so they are the only ones any locked frame may stamp.
+    /// `flags` is the presenting frame's flags, applied to every surface
+    /// alike (there is no per-surface zero-copy path behind a pixman copy).
+    pub(super) fn take_presentation_feedback(
+        &self,
+        output: &Output,
+        output_feedback: &mut OutputPresentationFeedback,
+        flags: wp_presentation_feedback::Kind,
+    ) {
+        for surface in self.current() {
+            take_presentation_feedback_surface_tree(
+                surface.wl_surface(),
+                output_feedback,
+                |_, _| Some(output.clone()),
+                |_, _| flags,
+            );
+            for (popup, _) in PopupManager::popups_for_surface(surface.wl_surface()) {
+                take_presentation_feedback_surface_tree(
+                    popup.wl_surface(),
+                    output_feedback,
+                    |_, _| Some(output.clone()),
+                    |_, _| flags,
                 );
             }
         }

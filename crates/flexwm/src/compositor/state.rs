@@ -29,6 +29,7 @@ use smithay::wayland::idle_notify::IdleNotifierState;
 use smithay::wayland::input_method::InputMethodManagerState;
 use smithay::wayland::output::OutputManagerState;
 use smithay::wayland::pointer_constraints::PointerConstraintsState;
+use smithay::wayland::presentation::PresentationState;
 use smithay::wayland::relative_pointer::RelativePointerManagerState;
 use smithay::wayland::selection::data_device::DataDeviceState;
 use smithay::wayland::selection::ext_data_control::DataControlState as ExtDataControlState;
@@ -419,6 +420,13 @@ pub struct State {
     /// and the motion core in `input.rs` feeds them on every focused motion.
     #[allow(dead_code)]
     pub relative_pointer_manager_state: RelativePointerManagerState,
+    /// `wp_presentation` (version 2): frame-timing feedback for smooth
+    /// video/animation clients. Held only to keep the global alive --
+    /// Smithay owns the feedback objects (see `presentation_time.rs`), and
+    /// the frame handoff in `headless.rs::render` takes and marks them
+    /// presented with this backend's timestamp semantics.
+    #[allow(dead_code)]
+    pub presentation_state: PresentationState,
     /// The shared per-client budget for binding the manager/list globals
     /// above (`ext_workspace`, `foreign_toplevels`,
     /// `foreign_toplevel_management`, `output_management`). Counted in each
@@ -583,6 +591,14 @@ impl State {
         let output_management = OutputManagement::new(&dh);
         let pointer_constraints_state = PointerConstraintsState::new::<Self>(&dh);
         let relative_pointer_manager_state = RelativePointerManagerState::new::<Self>(&dh);
+        // `CLOCK_MONOTONIC`: the one clock whose readings the frame handoff
+        // stamps feedback with (see `presentation_time.rs`), so it is the id
+        // the bind handshake must report. `Clock::new` allocates nothing --
+        // it is a marker for `clock_gettime` -- so no field is kept for it.
+        let presentation_state = PresentationState::new::<Self>(
+            &dh,
+            smithay::utils::Clock::<smithay::utils::Monotonic>::new().id() as u32,
+        );
         let idle_notifier = IdleNotifierState::new(&dh, event_loop.handle());
         let idle_inhibit_manager_state = IdleInhibitManagerState::new::<Self>(&dh);
 
@@ -662,6 +678,7 @@ impl State {
             output_management,
             pointer_constraints_state,
             relative_pointer_manager_state,
+            presentation_state,
             bind_budget: BindBudget::default(),
             shm_pools: ShmPools::default(),
             idle_notifier,

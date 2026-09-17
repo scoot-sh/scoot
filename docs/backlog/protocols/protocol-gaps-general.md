@@ -1,6 +1,6 @@
 ---
 title: "Smaller/general-client-compatibility protocol gaps, lower urgency, bundled here as one entry since none has design work done and none is blocking anything else on this list."
-status: "open"
+status: "resolved"
 area: "protocols"
 priority: "low"
 blocked: null
@@ -12,8 +12,14 @@ Smaller/general-client-compatibility protocol gaps, lower urgency,
 bundled here as one entry since none has design work done and none is
 blocking anything else on this list. User request, 2026-09-13,
 recorded so they don't get lost rather than because any is scheduled:
-- `wp_presentation` (presentation-time) — precise frame-timing
-  feedback, mainly useful for smooth video/animation clients.
+- `wp_presentation` (presentation-time) — ~~precise frame-timing
+  feedback, mainly useful for smooth video/animation clients.~~ — **DONE**
+  (`docs/backlog/resolved/presentation-time-done.md`); Smithay carries the
+  whole protocol at the pinned rev, so flexwm advertises its
+  `PresentationState` and stamps each presented frame with this backend's
+  handoff time (render-complete on headless, host-commit on nested,
+  flip-issue on tty -- see the resolved record for why none of the three is
+  fiction).
 - `wp_viewporter` — ~~lets a client crop/scale its own buffer; some
   clients assume this exists~~ — **DONE**, implemented with output scaling
   (`docs/backlog/resolved/output-scaling-done.md`); the render path reads
