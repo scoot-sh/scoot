@@ -975,12 +975,14 @@ What to know before pointing a client at it:
   parked this way is served the moment anything redraws.
 - **At most one *outstanding capture* per session** — a second `capture`
   request before the first has been answered is failed rather than queued.
-  That is flexwm's own throttle, not quite the protocol's: the protocol's
-  own rule is at most one frame *object* per session (a second `create_frame`
-  while the first object still exists is `duplicate_frame`), which is
-  stricter and checked earlier than flexwm's rule. The distinction rarely
-  matters to a well-behaved client, which never has a reason to hold two
-  frame objects open anyway.
+  And at most sixteen live frame *objects* per client, across all of its
+  sessions: a further `create_frame` is refused with the protocol's own
+  `duplicate_frame` error, which disconnects the client that overflowed. The
+  protocol's own rule is stricter still (one frame object per *session*),
+  which the pinned Smithay rev never enforces and exposes no hook to enforce
+  per session — so the bound is per client, set far above anything legitimate
+  (`grim` holds one frame per run; a persistent preview holds one per
+  session). A client that never stockpiles unclaimed frames never sees it.
 - **While the session is locked, a capture sees the lock screen** — never the
   windows behind it, and never a half-drawn transition. This is the same
   guarantee `flexwm msg screenshot` gives, and it comes from the same place:

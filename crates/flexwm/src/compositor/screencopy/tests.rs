@@ -49,6 +49,8 @@ use wayland_protocols::xdg::shell::client::{xdg_surface, xdg_toplevel, xdg_wm_ba
 use crate::compositor::decorations::{Appearance, Color};
 use crate::compositor::test_support::{Harness, wait_for};
 
+use super::MAX_FRAMES_PER_CLIENT;
+
 /// The framebuffer these tests render into. Small on purpose: every capture
 /// here is a whole-framebuffer copy that a test then compares byte for byte.
 const CANVAS: i32 = 60;
@@ -147,6 +149,20 @@ enum Step {
     /// With a frame already outstanding, create and capture a second one on
     /// the same session and report *its* outcome.
     CaptureAgain,
+    /// Create `count` frames on the session, deliberately never attaching,
+    /// capturing or destroying any of them, and hold them all: the
+    /// `create_frame`-loop leak shape. Never acknowledged -- a bounded
+    /// compositor answers with `duplicate_frame`, which ends the client, so
+    /// this step is only ever run via
+    /// [`Harness::run_expecting_disconnect`](crate::compositor::test_support::Harness::run_expecting_disconnect).
+    FloodFrames { count: u32 },
+    /// Create `count` frames and keep them alive past this step, so a later
+    /// `DestroySession` ends the session while its frames are still live --
+    /// legal per the protocol, and what must not dangle the bookkeeping.
+    HoldFrames { count: u32 },
+    /// Create and destroy one frame per round, round-tripping both halves, so
+    /// the bookkeeping has to drain as fast as it fills.
+    CycleFrames { rounds: u32 },
     /// `ext_image_copy_capture_session_v1.destroy`.
     DestroySession,
     /// Lock the session and give it a solid [`LOCK_BGRA`] lock surface.
@@ -679,6 +695,140 @@ fn a_second_outstanding_capture_on_one_session_is_refused() {
 }
 
 #[test]
+fn a_create_frame_flood_is_refused_with_duplicate_frame() {
+    let mut fixture = Fixture::start();
+    fixture.run(Step::StartSession {
+        paint_cursors: false,
+    });
+
+    // More frames than any well-behaved client holds at once, none of them
+    // ever captured or destroyed: the `create_frame`-loop leak shape. The
+    // compositor must refuse with the protocol's own `duplicate_frame`
+    // error, which ends this client -- and nothing else.
+    let error = fixture.run_expecting_disconnect(Step::FloodFrames {
+        count: MAX_FRAMES_PER_CLIENT + 5,
+    });
+    assert!(
+        error.contains("duplicate_frame"),
+        "a second live frame on crowded state must be the protocol's own \
+         `duplicate_frame` error, got: {error}"
+    );
+    assert_eq!(
+        fixture.state.screencopy.frames_in_flight(),
+        0,
+        "killing the flooding client has to drain the bookkeeping with it"
+    );
+    assert_eq!(
+        fixture.state.screencopy.session_count(),
+        (0, 0),
+        "the dead client's session must leave both lists, like any disconnect"
+    );
+}
+
+#[test]
+fn a_frame_flood_from_one_client_does_not_deny_another() {
+    let mut fixture = Fixture::start();
+    let other = fixture.spawn(run_client);
+    fixture.run(Step::StartSession {
+        paint_cursors: false,
+    });
+    fixture.run_on(
+        other,
+        Step::StartSession {
+            paint_cursors: false,
+        },
+    );
+
+    // Client 0 floods itself into a protocol error. Client 1, which never
+    // misbehaved, must still capture afterwards -- the anti-`connection-cap-
+    // denies-the-same-user` property, pinned for this protocol: the bound is
+    // per client, so one client's greed can only ever kill that client.
+    let error = fixture.run_expecting_disconnect(Step::FloodFrames {
+        count: MAX_FRAMES_PER_CLIENT + 5,
+    });
+    assert!(
+        error.contains("duplicate_frame"),
+        "the flood must end in `duplicate_frame`, got: {error}"
+    );
+    let (outcome, captured) = fixture
+        .run_on(
+            other,
+            Step::Capture {
+                width: CANVAS,
+                height: CANVAS,
+                format: wl_shm::Format::Argb8888,
+            },
+        )
+        .frame();
+    assert_eq!(
+        outcome,
+        Outcome::Ready,
+        "the innocent client must still be served after another was refused"
+    );
+    assert_eq!(captured, fixture.pixels());
+}
+
+#[test]
+fn rapid_create_destroy_cycling_leaves_no_frame_bookkeeping() {
+    let mut fixture = Fixture::start();
+    fixture.run(Step::StartSession {
+        paint_cursors: false,
+    });
+
+    fixture.run(Step::CycleFrames { rounds: 50 });
+    assert_eq!(
+        fixture.state.screencopy.frames_in_flight(),
+        0,
+        "every destroyed frame has to release its bookkeeping slot"
+    );
+
+    // And the session is still fully usable afterwards: cycling must not
+    // wedge it.
+    let (outcome, captured) = fixture
+        .run(Step::Capture {
+            width: CANVAS,
+            height: CANVAS,
+            format: wl_shm::Format::Argb8888,
+        })
+        .frame();
+    assert_eq!(outcome, Outcome::Ready);
+    assert_eq!(captured, fixture.pixels());
+}
+
+#[test]
+fn frames_outliving_their_session_leave_no_frame_bookkeeping() {
+    let mut fixture = Fixture::start();
+    fixture.run(Step::StartSession {
+        paint_cursors: false,
+    });
+
+    // Three live frames, then the session goes away under them -- legal per
+    // the protocol ("this request doesn't affect ... frame ... objects
+    // created by this object"). The frames still count until *they* die;
+    // what must not happen is the session's entry dangling afterwards.
+    fixture.run(Step::HoldFrames { count: 3 });
+    assert_eq!(fixture.state.screencopy.frames_in_flight(), 3);
+    fixture.run(Step::DestroySession);
+    assert_eq!(
+        fixture.state.screencopy.session_count(),
+        (0, 0),
+        "the session must leave both lists even with frames outstanding"
+    );
+    assert_eq!(
+        fixture.state.screencopy.frames_in_flight(),
+        3,
+        "live frames still count after their session is gone"
+    );
+
+    fixture.disconnect(0);
+    assert_eq!(
+        fixture.state.screencopy.frames_in_flight(),
+        0,
+        "the frames dying with their client has to drain the bookkeeping"
+    );
+}
+
+#[test]
 fn a_destroyed_session_leaves_the_compositors_list() {
     let mut fixture = Fixture::start();
     fixture.run(Step::StartSession {
@@ -827,6 +977,11 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
     let mut held: Option<CaptureBuffer> = None;
     let mut windows: Vec<wl_surface::WlSurface> = Vec::new();
     let mut locks: Vec<ext_session_lock_v1::ExtSessionLockV1> = Vec::new();
+    // Frames created by [`Step::HoldFrames`] and deliberately never destroyed,
+    // so they outlive whatever the script does next. Held here rather than in
+    // `frame` so no later step reaps them: dropping a client-side proxy sends
+    // `destroy`, which would drain exactly the leak shape under test.
+    let mut leaked: Vec<ext_image_copy_capture_frame_v1::ExtImageCopyCaptureFrameV1> = Vec::new();
     // Buffers that share a pool with a capture buffer and are never attached to
     // anything -- the "sibling the compositor must not have touched" in
     // `Step::CaptureAtOffset`. Held so the `wl_buffer` objects stay alive for
@@ -996,6 +1151,52 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                     session.destroy();
                 }
                 queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                Ack::Done
+            }
+            Step::FloodFrames { count } => {
+                let session = session.as_ref().ok_or("no session")?;
+                // Deliberately never attached, captured or destroyed -- the
+                // leak shape. Held locally so the proxies stay alive until
+                // the refusal lands: dropping one would send `destroy`.
+                let mut flood = Vec::new();
+                for _ in 0..count {
+                    flood.push(session.create_frame(&qh, FrameSlot { extra: true }));
+                }
+                // The refusal arrives as a protocol error on a round trip,
+                // not necessarily the first: the requests flush together and
+                // the compositor answers while this loop keeps reading.
+                let deadline = Instant::now() + Duration::from_secs(5);
+                loop {
+                    match queue.roundtrip(&mut client) {
+                        Err(error) => return Err(error.to_string()),
+                        Ok(_) => {
+                            if Instant::now() >= deadline {
+                                return Err(format!(
+                                    "the compositor accepted {count} live frames \
+                                     with no refusal"
+                                ));
+                            }
+                            thread::sleep(Duration::from_millis(1));
+                        }
+                    }
+                }
+            }
+            Step::HoldFrames { count } => {
+                let session = session.as_ref().ok_or("no session")?;
+                for _ in 0..count {
+                    leaked.push(session.create_frame(&qh, FrameSlot { extra: true }));
+                }
+                queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                Ack::Done
+            }
+            Step::CycleFrames { rounds } => {
+                let session = session.as_ref().ok_or("no session")?;
+                for _ in 0..rounds {
+                    let live = session.create_frame(&qh, FrameSlot { extra: true });
+                    queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                    live.destroy();
+                    queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                }
                 Ack::Done
             }
             Step::Lock => {
