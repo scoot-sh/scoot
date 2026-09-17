@@ -519,7 +519,8 @@ probes' recommended order:
 
 Small follow-ups already filed alongside:
 [`gamma-control`](docs/backlog/protocols/gamma-control-followups.md),
-[`layer-destroy`](docs/backlog/protocols/layer-destroy-review-followup.md).
+[`layer-destroy`](docs/backlog/resolved/layer-destroy-review-followup-done.md)
+(resolved, PR #77).
 
 Item 6 (the GPU pipeline) remains the one *ordered* milestone still open; it
 has never been ahead of the daily-drivability and correctness work the backlog

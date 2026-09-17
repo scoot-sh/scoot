@@ -65,6 +65,7 @@ mod input;
 mod layout;
 mod popup;
 mod popup_serial;
+mod teardown;
 
 /// The framebuffer these tests render into. Square and small: every
 /// assertion below is a pixel coordinate, and a small canvas keeps them
@@ -209,6 +210,13 @@ enum Step {
     MapLayer { index: usize, color: [u8; 4] },
     /// `zwlr_layer_surface_v1.destroy` on the `index`-th layer surface.
     DestroyLayer { index: usize },
+    /// `wl_surface.destroy` on the `index`-th layer surface while keeping
+    /// its `zwlr_layer_surface_v1` role object and the whole connection
+    /// alive: the explicit form of the implicit-disconnect order where the
+    /// surface dies before its role, so `layer_destroyed` never runs for
+    /// it. What the `mapped_layers` sweep in `CompositorHandler::destroyed`
+    /// exists for.
+    DestroyLayerWlSurface { index: usize },
     /// `wl_surface.frame` on the `index`-th layer surface, followed by a
     /// commit so the callback moves from pending to current server-side.
     /// The client keeps the `wl_callback` proxy alive -- a careful client
@@ -1040,6 +1048,10 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
             Step::DestroyLayer { index } => {
                 let (surface, layer, _) = layers.get(*index).ok_or("no such layer surface")?;
                 layer.destroy();
+                surface.destroy();
+            }
+            Step::DestroyLayerWlSurface { index } => {
+                let (surface, ..) = layers.get(*index).ok_or("no such layer surface")?;
                 surface.destroy();
             }
             Step::RequestLayerFrame { index } => {

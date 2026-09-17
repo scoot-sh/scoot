@@ -148,7 +148,10 @@ pub struct State {
     /// role's size validation exactly like a post-destroy one does. A
     /// surface that was never mapped is left alone, so committing with no
     /// description at all still fails loudly with `invalid_size`.
-    /// Removed on `layer_destroyed`, so this never outlives the surface.
+    /// Removed on `layer_destroyed`, and swept for dead entries in
+    /// `CompositorHandler::destroyed` for the teardown order where the
+    /// `wl_surface` dies before its role object and `layer_destroyed` never
+    /// runs, so this never outlives the surface.
     pub mapped_layers: HashSet<WlSurface>,
 
     /// `xdg_toplevel_icon_v1` objects that have been handed to a toplevel and
