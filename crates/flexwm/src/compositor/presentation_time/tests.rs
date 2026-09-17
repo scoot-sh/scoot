@@ -33,6 +33,8 @@ use wayland_protocols::xdg::shell::client::{xdg_surface, xdg_toplevel, xdg_wm_ba
 use crate::compositor::decorations::Appearance;
 use crate::compositor::test_support::{Harness, wait_for};
 
+use super::presented_frame;
+
 /// The framebuffer these tests render into. Small on purpose: nothing here
 /// reads pixels except the disconnect test's liveness check.
 const CANVAS: i32 = 320;
@@ -579,6 +581,75 @@ fn run_locker(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
 }
 
 // -------------------------------------------------------------------------
+// `presented_frame`: which backend stamps what (unit level)
+// -------------------------------------------------------------------------
+
+// A committed nested frame stamps zero: nested output is self-refreshing
+// with no queryable count, so the protocol requires zero.
+#[test]
+fn a_committed_nested_frame_stamps_zero() {
+    assert_eq!(
+        presented_frame(true, true, false, None, true),
+        Some(0),
+        "a frame the host accepted must stamp seq zero, not a counter"
+    );
+}
+
+// A nested frame the host never accepted stamps nothing at all -- dropped
+// for lack of a free buffer, a size mismatch, or a flush a dead host
+// refused (see `Host::present`): a time nothing was shown at must not go
+// out. A live host connection is unconstructible in-harness (its surface,
+// shm and buffers are registry-bound against a real host compositor), so
+// this arm -- the bool plumbing `Host::present`'s return feeds -- is the
+// unit-level pin for that path, verified in code at its single call site.
+#[test]
+fn a_dropped_nested_frame_stamps_nothing() {
+    assert_eq!(
+        presented_frame(true, false, false, None, true),
+        None,
+        "a frame the host never accepted must leave feedback queued"
+    );
+}
+
+// A tty flip stamps its issued number: the per-scanout counter the backend
+// has in hand.
+#[test]
+fn an_issued_tty_flip_stamps_its_number() {
+    assert_eq!(
+        presented_frame(false, false, true, Some(7), true),
+        Some(7),
+        "a tty flip must stamp its issued number, not a frame counter"
+    );
+}
+
+// A tty frame that issued no flip stamps nothing -- busy CRTC, paused
+// session, size mismatch, failed commit.
+#[test]
+fn an_unflipped_tty_frame_stamps_nothing() {
+    assert_eq!(
+        presented_frame(false, false, true, None, true),
+        None,
+        "a tty frame with no flip must leave feedback queued"
+    );
+}
+
+// Plain headless stamps zero for a drawn frame (no retrace to count) and
+// nothing when the draw itself failed.
+#[test]
+fn headless_stamps_zero_for_a_drawn_frame_and_nothing_otherwise() {
+    assert_eq!(
+        presented_frame(false, false, false, None, true),
+        Some(0),
+        "a drawn headless frame must stamp seq zero"
+    );
+    assert_eq!(
+        presented_frame(false, false, false, None, false),
+        None,
+        "an undrawn headless frame must leave feedback queued"
+    );
+}
+
+// -------------------------------------------------------------------------
 // The tests
 // -------------------------------------------------------------------------
 
@@ -629,9 +700,12 @@ fn a_committed_surface_is_presented_with_sane_fields() {
 }
 
 #[test]
-fn timestamps_and_sequence_increase_across_frames() {
-    // Each `present_once` owns its report: two consecutive presented
-    // frames must order themselves in both time and sequence.
+fn timestamps_increase_and_seq_is_zero_on_headless() {
+    // Each `present_once` owns its report. `--headless` has no vertical
+    // retrace and no refresh cycle of its own, so the protocol requires
+    // `seq` zero ("If the output does not have a concept of vertical
+    // retrace or a refresh cycle ... then seq_hi/seq_lo MUST be zero") --
+    // while the timestamps must still order the two frames.
     let mut fixture = Fixture::start();
     let a = fixture.present_once();
     let b = fixture.present_once();
@@ -642,11 +716,50 @@ fn timestamps_and_sequence_increase_across_frames() {
         tb > ta,
         "the second presented timestamp {tb:?} is not after {ta:?}"
     );
+    for (which, presented) in [("first", pa), ("second", pb)] {
+        assert_eq!(
+            presented.seq, 0,
+            "the {which} headless presented seq is {}: headless has no retrace, so seq MUST be zero",
+            presented.seq
+        );
+    }
+}
+
+#[test]
+fn an_explicit_seq_reaches_the_wire_verbatim() {
+    // Pins that the caller's seq -- the tty flip number, or zero elsewhere
+    // per `presented_frame` -- is what the `presented` event carries, rather
+    // than anything the take path invents (it used to be the damaged-frame
+    // counter). Calls `present_feedback` directly instead of rendering so
+    // the asserted number can be one no frame would produce.
+    //
+    // Sequenced deterministically against the frame timer: the first
+    // feedback is consumed and reported (slate clean), then the harness
+    // idles past the timer's own deadline so it fires and drops itself --
+    // after that no auto-render can interleave before the direct call,
+    // which runs with no settle between the ack and the take.
+    use std::time::Duration;
+
+    let mut fixture = Fixture::start();
+    let first = fixture.present_once();
     assert!(
-        pb.seq > pa.seq,
-        "the second presented seq {} is not after {}",
-        pb.seq,
-        pa.seq
+        Fixture::only_presented(&first).seq == 0,
+        "slate not clean: the first frame did not present with seq zero"
+    );
+    fixture.tick(Duration::from_millis(30));
+    fixture.send_step(0, Step::RequestFeedback);
+    let Ack::Done = fixture.wait_for_ack(0) else {
+        panic!("a feedback request answered with something else");
+    };
+    let output = fixture.state.output.clone().expect("an output");
+    fixture.state.present_feedback(&output, false, None, 42);
+    let Ack::Feedback { events } = fixture.run_on(0, Step::ReportFeedback) else {
+        panic!("a feedback report answered with something else");
+    };
+    assert_eq!(
+        Fixture::only_presented(&events).seq,
+        42,
+        "the presented seq is not the number the frame handed over"
     );
 }
 

@@ -1598,7 +1598,14 @@ What to know before pointing a client at it:
   because the flip is vblank-synchronized; the other backends report no
   flags, because there is no retrace to synchronize to and no zero-copy
   path behind a pixman copy.
-- **`seq` counts damaged frames**, not DRM flips: it orders distinct images.
+- **`refresh` is the mode flexwm advertises, not the panel's.** It is always
+  60 Hz -- including under `--tty` on a faster panel, the same known
+  inaccuracy as `wl_output`'s own mode (see Display information). A client
+  pacing frames should trust the timestamps, not `refresh` plus arithmetic.
+- **`seq` is zero except on `--tty`.** Headless has no vertical retrace to
+  count and nested output is self-refreshing with no queryable count, so the
+  protocol requires zero there; `--tty` reports the issued flip's number
+  (a per-flip counter, not the kernel's refresh count).
 - **Only displayed surfaces are stamped.** Mapped windows, layer surfaces,
   popups and the client cursor get feedback for a frame that showed them;
   while locked, only the lock surfaces do. Anything else keeps its feedback

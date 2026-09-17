@@ -50,11 +50,22 @@
 //! nothing at all all leave pending feedback queued for the next presented
 //! frame rather than stamping it with a time nothing was shown at.
 //!
-//! `seq` is the compositor's frame serial (one per damaged frame -- see
-//! `frame_serial`), not the DRM flip count: it orders distinct images,
-//! which is what the protocol asks a sequence for. `refresh` is the output
-//! mode's own refresh (60 Hz on every backend today), or zero when the mode
-//! is unknown.
+//! `seq` is the output's own retrace count where one exists, and zero where
+//! the protocol says it must be: headless has no vertical retrace and no
+//! refresh cycle of its own (a 16ms frame timer is not scanout), and nested
+//! is self-refreshing with no queryable count, so both send zero --
+//! *"If the output does not have a concept of vertical retrace or a refresh
+//! cycle, or the output device is self-refreshing without a way to query
+//! the refresh count, then seq_hi/seq_lo MUST be zero"* (the `presented`
+//! event's own doc). `--tty` sends the issued-flip number
+//! (`FlipTracker::issued`, the flip this frame went out on). That counts
+//! flips handed to DRM, not kernel MSC or every vblank -- stated rather
+//! than claimed otherwise: it orders presented frames against the scanout
+//! path that showed them, which is what the number is for here, but it is
+//! not the kernel's own refresh counter.
+//!
+//! `refresh` is the output mode's own refresh (60 Hz on every backend today),
+//! or zero when the mode is unknown.
 //!
 //! ## Edge cases, stated rather than re-derived
 //!
@@ -69,10 +80,19 @@
 //!   frame; there is no amplification (no per-request event, no linear scan
 //!   it feeds), so a client spamming them only spends its own socket budget.
 //! - **Cost.** One monotonic read per presented frame, plus the per-feedback
-//!   socket writes only for surfaces that asked. Nothing runs per
-//!   frame-render beyond the take walk over mapped surfaces, and nothing at
-//!   all on frames that present nothing -- so no benchmark: this lands on
-//!   the per-present path, not the per-frame-render hot path.
+//!   socket writes only for surfaces that asked -- and the take walk itself,
+//!   which runs on every presented frame whether or not any feedback is
+//!   pending: every mapped window, layer surface and cursor tree is visited
+//!   for its committed state. Measured on the dev VM (16 mapped windows,
+//!   60 full-redraw frames x 5 reps, temporary bench since removed): 690-760
+//!   us/frame with the walk vs 664-816 us without -- ranges fully
+//!   overlapping, the walk unmeasurable against the pixman redraw. So no
+//!   early-out: Smithay exposes no "any feedback pending" query cheaper
+//!   than the walk itself (`PresentationFeedbackCachedState` is per-surface
+//!   double-buffered state, reachable only through per-surface `with_states`
+//!   -- pinned-rev `src/wayland/presentation/mod.rs`), and a flexwm-side
+//!   skip would cost its own bookkeeping to save nothing measurable.
+//!   Nothing at all runs on frames that present nothing.
 //!
 //! ## Trust model
 //!
@@ -115,12 +135,15 @@ impl State {
     /// the `presented` flags verbatim. `cursor` is the client cursor surface
     /// the frame drew, if any -- the same surface `render()` sends frame
     /// callbacks to, so an animated cursor's pacing feedback and its draw
-    /// pacing come from the same frame.
+    /// pacing come from the same frame. `seq` is the frame's sequence number
+    /// as [`presented_frame`] decided it: the issued-flip number on `--tty`,
+    /// zero everywhere else (see the module doc for why).
     pub(super) fn present_feedback(
         &mut self,
         output: &Output,
         vsync: bool,
         cursor: Option<&WlSurface>,
+        seq: u64,
     ) {
         let flags = if vsync {
             wp_presentation_feedback::Kind::Vsync
@@ -167,11 +190,40 @@ impl State {
             .filter(|mode| mode.refresh > 0)
             .map(|mode| Refresh::fixed(Duration::from_secs_f64(1_000f64 / f64::from(mode.refresh))))
             .unwrap_or(Refresh::Unknown);
-        feedback.presented(
-            Clock::<Monotonic>::new().now(),
-            refresh,
-            self.frame_serial,
-            flags,
-        );
+        feedback.presented(Clock::<Monotonic>::new().now(), refresh, seq, flags);
+    }
+}
+
+/// Whether the just-drawn frame was actually shown, and the presentation
+/// `seq` it carries if so.
+///
+/// Pure over its inputs so every backend's arm pins in unit tests (see
+/// `tests`): `Some(seq)` means stamp this frame's feedback with `seq`,
+/// `None` means stamp nothing -- a rendered-but-dropped frame leaves pending
+/// feedback queued for the next presented frame rather than dating a time
+/// nothing was shown at.
+///
+/// - With a host backend (`--nested`), only a frame the host accepted counts
+///   (`host_committed`, the new `bool` on `Host::present`), and its `seq` is
+///   zero: nested output is self-refreshing with no queryable count.
+/// - With a tty backend, only a frame that issued a flip counts
+///   (`flip_seq`, `Tty::present`'s return), and its `seq` is that flip's
+///   issued number.
+/// - With neither (plain `--headless`), the drawn framebuffer *is* the final
+///   image, so a drawn frame counts -- with `seq` zero, since headless has
+///   no retrace to count.
+pub(super) fn presented_frame(
+    has_host: bool,
+    host_committed: bool,
+    has_tty: bool,
+    flip_seq: Option<u64>,
+    drew_a_frame: bool,
+) -> Option<u64> {
+    if has_host {
+        host_committed.then_some(0)
+    } else if has_tty {
+        flip_seq
+    } else {
+        drew_a_frame.then_some(0)
     }
 }

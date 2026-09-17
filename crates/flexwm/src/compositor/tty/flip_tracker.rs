@@ -92,6 +92,20 @@ mod tests {
     }
 
     #[test]
+    fn issued_numbers_count_issued_flips_from_zero() {
+        // Newly load-bearing: these are the `seq` values presentation-time
+        // reports on `--tty` (see `presentation_time.rs`). They count flips
+        // handed to DRM from zero -- not kernel MSC, not every vblank --
+        // which is why the doc there states the limit instead of claiming
+        // kernel truth.
+        let mut tracker = FlipTracker::new();
+        for expected in 0..3u64 {
+            assert_eq!(tracker.issued(), expected);
+            assert_eq!(tracker.settled(), Some(expected));
+        }
+    }
+
+    #[test]
     fn sequence_numbers_are_distinct_and_ordered() {
         let mut tracker = FlipTracker::new();
         let first = tracker.issued();

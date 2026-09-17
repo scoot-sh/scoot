@@ -142,11 +142,11 @@ impl Host {
     ///
     /// Returns whether the frame reached the host. Anything else -- the
     /// surface not configured yet, a size mismatch against a resize still in
-    /// flight, no free host buffer -- silently drops the frame (does not
-    /// block) and returns `false`, so the caller knows this frame presented
-    /// nothing: `render()` leaves pending presentation feedback queued on
-    /// `false` rather than stamping it with a time nothing was shown at (see
-    /// `presentation_time.rs`).
+    /// flight, no free host buffer, or a flush the dead host refused --
+    /// silently drops the frame (does not block) and returns `false`, so
+    /// the caller knows this frame presented nothing: `render()` leaves
+    /// pending presentation feedback queued on `false` rather than stamping
+    /// it with a time nothing was shown at (see `presentation_time.rs`).
     ///
     /// Silently does nothing (does not block) if the surface hasn't been
     /// configured yet, or if the frame's dimensions don't match what
@@ -174,8 +174,11 @@ impl Host {
         // conn.flush() actually writes them to the socket. Nothing else on
         // this connection flushes on its own -- skip this and the window
         // just never updates, with no error anywhere.
-        let _ = self.conn.flush();
-        true
+        //
+        // The result is the return, not ignored: a dead host refuses the
+        // flush, which means nothing left this process -- stamping that
+        // frame `presented` would date pixels nobody will ever scan out.
+        self.conn.flush().is_ok()
     }
 
     /// Applies a size the host proposed (its first configure, per v1 scope --

@@ -59,9 +59,10 @@ and `README.md`'s new section, which say the same thing in both places):
   feedback object before the `presented` addressing it goes out (take and
   mark are atomic inside one render today, so that window does not exist).
 
-`seq` is the compositor's frame serial (one per damaged frame), not the DRM
-flip count: it orders distinct images. `refresh` is the output mode's own
-(60 Hz fixed on every backend today). Flags are `vsync` on `--tty` only --
+`seq` is zero on headless and nested (the protocol requires zero with no
+retrace to count) and the issued-flip number on `--tty` -- corrected in
+review from the frame serial first shipped here; see "Review round" below.
+`refresh` is the output mode's own (60 Hz fixed on every backend today). Flags are `vsync` on `--tty` only --
 the flip is vblank-synchronized; the other backends have no retrace and no
 zero-copy path behind a pixman copy, so they report none.
 
@@ -105,11 +106,12 @@ zero-copy path behind a pixman copy, so they report none.
   likewise construction-verified (the hook sits on each present path, and
   the headless tests pin the shared take/mark machinery), not
   live-measured -- stated as an environment limit.
-- Cost (stated, not benchmarked): one monotonic read per presented frame,
-  plus the take walk over mapped surfaces and the per-feedback socket
-  writes only for surfaces that asked. Nothing runs on frames that present
-  nothing. This lands on the per-present path, not the per-frame-render hot
-  path, so no benchmark -- the same call the task's own acceptance makes.
+- Cost: one monotonic read per presented frame, plus the take walk over
+  mapped surfaces and the per-feedback socket writes only for surfaces that
+  asked -- and, since review, measured: 16 windows, 60 frames x 5 reps,
+  690-760 us with the walk vs 664-816 us without (fully overlapping, kept
+  as-is; see "Review round" item 2). Nothing at all runs on frames that
+  present nothing.
 
 ## Bug bash (found while testing, fixed in place)
 
@@ -132,6 +134,44 @@ rather than a typo:
    *same* object the locked frame reported as pending. Reports now advance
    a cursor over a never-cleared vector, plus a `ReportAll` snapshot step
    for re-reading an old object's later outcome.
+
+## Review round (PR #90): one blocking finding, three smaller items
+
+1. **BLOCKING: `seq` violated the protocol's explicit contract.** The
+   `presented` event's own doc requires zero with no retrace, and the
+   shipped frame serial was nonzero on headless/nested; tty already had a
+   per-scanout counter in hand (`FlipTracker::issued`) and now reports it.
+   Fixed as prescribed: `presented_frame` (new pure function in
+   `presentation_time.rs`) maps tty flip / 0 / 0, and `render()` stamps
+   its answer. The module doc's "orders distinct images" defense was the
+   misreading -- corrected. Fail-first: the rewritten headless test failed
+   pre-fix (`seq is 1 ... MUST be zero`); the six new tests (five
+   `presented_frame` arms incl. nested committed/dropped, one wire
+   passthrough at seq 42) fail pre-fix too (stashed-impl run:
+   `unresolved import super::presented_frame`, 3-args-vs-4). `FlipTracker`
+   gained an exact-numbering unit test (0,1,2 across settle cycles) pinning
+   the values tty reports, with the issued-not-MSC limit stated in the doc.
+   Nested-zero and the dropped-frame arms are unit-level (`presented_frame`
+   takes no backend): a live host connection is unconstructible in-harness
+   (registry-bound surface/shm/buffers against a real host compositor), so
+   the harness covers headless end to end and the units cover every arm.
+2. **Take-walk benchmark.** Temporary bench (16 mapped windows, 60
+   full-redraw frames x 5 reps, removed after): 690-760 us/frame with the
+   walk vs 664-816 us neutered -- fully overlapping, unmeasurable against
+   the pixman redraw. No early-out added: Smithay exposes no cheaper global
+   query (`PresentationFeedbackCachedState` is per-surface only, pinned-rev
+   `src/wayland/presentation/mod.rs`), and flexwm-side bookkeeping would
+   spend to save nothing measurable. Numbers recorded in the module doc.
+3. **Nested `present()` ignored a dead host's flush refusal**
+   (`let _ = flush(); true`). The flush result is now the return, so a
+   frame that never left stamps nothing. Single caller verified by grep
+   (`headless.rs` only). No harness test: same unconstructible-Host reason
+   as above, stated not papered over -- the dropped-frame unit arm
+   (`presented_frame(true, false, ...) == None`) pins the compositional
+   half (any `false` from `present()` stamps nothing).
+4. **README refresh caveat.** The presentation section now cross-references
+   Display information's known 60-Hz-on-faster-panels inaccuracy and tells
+   pacing clients to trust timestamps, not `refresh` arithmetic.
 
 ## What this deliberately leaves open
 

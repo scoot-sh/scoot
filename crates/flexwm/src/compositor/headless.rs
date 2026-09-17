@@ -699,15 +699,19 @@ impl State {
         // `vsync` is the backend, not the flip: `--tty` page flips are
         // vblank-synchronized whenever one is issued, and this arm only runs
         // when one was.
-        let presented = if self.host.is_some() {
-            host_committed
-        } else if self.tty.is_some() {
-            blank_seq.is_some()
-        } else {
-            drew_a_frame
-        };
-        if presented {
-            self.present_feedback(&output, self.tty.is_some(), cursor_surface.as_ref());
+        //
+        // `seq` is per-backend per the protocol's `presented` contract (see
+        // `presented_frame`): the issued-flip number on `--tty`, zero
+        // everywhere else -- headless has no retrace to count and nested
+        // output is self-refreshing with no queryable count.
+        if let Some(seq) = super::presentation_time::presented_frame(
+            self.host.is_some(),
+            host_committed,
+            self.tty.is_some(),
+            blank_seq,
+            drew_a_frame,
+        ) {
+            self.present_feedback(&output, self.tty.is_some(), cursor_surface.as_ref(), seq);
         }
 
         let time = self.start_time.elapsed();
