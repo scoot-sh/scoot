@@ -173,7 +173,7 @@ actionable.
 - [Unbounded lock surfaces via duplicate `wl_output` binds](./protocols/lock-surface-duplicate-wl-output.md)
 - [Lock blanks immediately instead of waiting for the first surface](./protocols/session-lock-blank-timing.md)
 - [`locked` sent on rendered frame, not confirmed vblank](./resolved/session-lock-vblank-confirm-done.md)
-  — RESOLVED 2026-09-17: `locked` waits for the vblank of the flip carrying
+  — RESOLVED 2026-09-17 (PR #84): `locked` waits for the vblank of the flip carrying
   the blanked frame under `--tty` (sequence-tracked; one-second fallback
   confirms anyway rather than hanging the locker); headless/nested confirm
   on render unchanged
