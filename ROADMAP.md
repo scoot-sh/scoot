@@ -456,6 +456,14 @@ gap jumped the queue — each item's own file records why it landed when it did.
   runs while paused). Reactivation still mode-sets and repaints
   byte-identically; lock-while-paused and grab/IME-across-pause are
   construction-verified (no live clients for either on the dev VM).
+- **[`single-pixel-buffer-v1`](docs/backlog/resolved/single-pixel-buffer-done.md)**
+  — RESOLVED 2026-09-17: `wp_single_pixel_buffer_manager_v1` advertised
+  (Smithay carries the whole protocol at the pinned rev, so this is three
+  lines of state plus docs and tests, no hand-rolled handler). Five
+  fail-first harness tests around a real client (RGBA read-back, 1x1
+  dimensions, viewport-scaled render pinned pixel-for-pixel, manager
+  destroy, attached-buffer destroy, zero shm-pool budget claimed); real
+  `foot` binds the global live.
 ## What's next
 
 The backlog is the source of truth for what to pick up; this is the current

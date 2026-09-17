@@ -34,6 +34,7 @@ mod selection;
 mod session_lock;
 mod shell;
 mod shm_pools;
+mod single_pixel_buffer;
 mod state;
 mod toplevel_icon;
 mod tty;

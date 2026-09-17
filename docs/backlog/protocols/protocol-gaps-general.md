@@ -18,9 +18,12 @@ recorded so they don't get lost rather than because any is scheduled:
   clients assume this exists~~ — **DONE**, implemented with output scaling
   (`docs/backlog/resolved/output-scaling-done.md`); the render path reads
   each surface's viewport destination.
-- `single-pixel-buffer-v1` — a trivial protocol for a client to get
+- `single-pixel-buffer-v1` — ~~a trivial protocol for a client to get
   a solid-color 1x1 buffer without allocating a real one; some toolkits
-  use it for cheap fills.
+  use it for cheap fills.~~ — **DONE**
+  (`docs/backlog/resolved/single-pixel-buffer-done.md`); Smithay carries
+  the whole protocol at the pinned rev, so flexwm advertises its
+  `SinglePixelBufferState` and renders the buffers as solid fills.
 - `relative-pointer-unstable-v1` — raw, unaccelerated pointer deltas;
   pairs with the `pointer_constraints` support already present, and
   games/3D apps expect both together, not just pointer lock/confinement
