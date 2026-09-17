@@ -314,6 +314,32 @@ rm -f /tmp/flexwm-smoke-killed.png
 }
 echo "ok: the compositor still answers after 20 clients killed mid-screenshot"
 
+echo "--- checking clients see zwp_linux_dmabuf_v1 ---"
+# The dmabuf advertisement (see dmabuf.rs) is bind-time state with no IPC
+# surface, so the only end-to-end proof the global is really advertised is
+# asking the registry itself. The Wayland socket name is auto-assigned and
+# logged at startup ("flexwm is up" carries it as `wayland="..."`).
+if command -v wayland-info >/dev/null 2>&1; then
+    # `|| true`: with `pipefail` an empty grep would exit the script here,
+    # before the BUG message below gets its say. The first pattern tolerates
+    # the ANSI escapes tracing writes between a field name and its value;
+    # the second then pulls the bare socket name out of that match.
+    wayland_socket=$(grep -o 'wayland[^"]*"[^"]*"' "$LOG" | head -1 | grep -o 'wayland-[0-9]*' || true)
+    if [ -z "$wayland_socket" ]; then
+        echo "BUG: could not find the Wayland socket name in $LOG"
+        tail -30 "$LOG"
+        exit 1
+    fi
+    if ! WAYLAND_DISPLAY="$wayland_socket" wayland-info | grep -q 'zwp_linux_dmabuf_v1'; then
+        echo "BUG: zwp_linux_dmabuf_v1 is not advertised -- the dmabuf global is missing"
+        WAYLAND_DISPLAY="$wayland_socket" wayland-info | grep -c interface
+        exit 1
+    fi
+    echo "ok: zwp_linux_dmabuf_v1 is advertised"
+else
+    echo "wayland-info not found -- skipping the dmabuf advertisement check"
+fi
+
 echo "--- checking foot no longer falls back to client-side decorations ---"
 # Every prior smoke-test run on this project has shown foot logging this on
 # startup (it's stderr, captured into $LOG along with everything else foot
