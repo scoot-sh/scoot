@@ -633,6 +633,37 @@ fn a_key_named_above_the_unmodified_level_is_refused_instead_of_typing_another()
     );
 }
 
+/// The binds-capital-letter ticket's boundary on the other side: the
+/// config-parse fold must not leak into `keysym_named` itself, so
+/// `flexwm msg key A` keeps refusing rather than silently becoming `a`.
+/// (The parametrized test above also covers `"A"`; this pins the ticket's
+/// exact requirement on its own so it can't be lost in the list.)
+#[test]
+fn msg_key_capital_letter_still_refused() {
+    let mut fixture = Fixture::new();
+    let error = fixture
+        .press("A")
+        .expect_err("`A` is only above level 0 on a US layout");
+    assert!(
+        error.contains("`A`"),
+        "the refusal should name the key asked for: {error}"
+    );
+    assert!(
+        error.contains("unmodified level"),
+        "the refusal should say why it can't be pressed bare: {error}"
+    );
+    assert!(
+        error.contains("type"),
+        "the refusal should point at the call that can type it: {error}"
+    );
+    let typed = fixture.run(Step::Report);
+    assert_eq!(
+        (typed.text.as_str(), typed.keys),
+        ("", 0),
+        "a refused combination must not send any key at all"
+    );
+}
+
 /// The other half: what the refusal tells the caller to write instead
 /// really does deliver the character, as four key events -- the modifier's
 /// own press and release around the key's.

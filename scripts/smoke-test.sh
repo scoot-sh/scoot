@@ -466,6 +466,72 @@ EOF
 }
 ( run_config_bind_test ) || exit 1
 
+echo "=== config file: a capital-letter bind fires on the unshifted key ==="
+run_capital_bind_test() {
+    local socket="/run/user/$(id -u)/flexwm-smoke-capital.sock"
+    local log="/tmp/flexwm-smoke-capital.log"
+    local cfg
+    cfg=$(mktemp /tmp/flexwm-smoke-capital-XXXXXX.toml)
+    # A lone "A" names the unshifted `a` key, not shift+a (see the [binds]
+    # reference): injecting a bare `a` must close the window, and loading
+    # the file must log the warning that says so.
+    cat >"$cfg" <<'EOF'
+[binds]
+"A" = "close"
+EOF
+    rm -f "$socket" "$log"
+
+    "$FLEXWM" --headless --width 1200 --height 800 --socket "$socket" --config "$cfg" \
+        >"$log" 2>&1 &
+    # Not `local` -- and EXIT, not RETURN -- see run_config_bind_test's
+    # identical trap for why.
+    pid=$!
+    trap 'kill "$pid" 2>/dev/null || true' EXIT
+    export FLEXWM_SOCKET="$socket"
+
+    for _ in $(seq 1 60); do
+        [ -S "$socket" ] && break
+        sleep 0.1
+    done
+    if [ ! -S "$socket" ]; then
+        echo "capital-bind test: the control socket never appeared; compositor log:"
+        tail -20 "$log"
+        return 1
+    fi
+
+    if ! grep -q "a single capital letter in \[binds\]" "$log"; then
+        echo "BUG: no warning about the capital-letter bind -- the fold happened with no signal"
+        tail -30 "$log"
+        return 1
+    fi
+    echo "ok: the capital-letter fold was logged"
+
+    "$FLEXWM" msg action spawn foot
+    local mapped=0
+    for _ in $(seq 1 100); do
+        if [ "$("$FLEXWM" msg windows | jq '.windows | length')" -eq 1 ]; then
+            mapped=1
+            break
+        fi
+        sleep 0.2
+    done
+    if [ "$mapped" -ne 1 ]; then
+        echo "capital-bind test: the window never mapped; compositor log:"
+        tail -30 "$log"
+        return 1
+    fi
+
+    "$FLEXWM" msg key a
+    "$FLEXWM" msg wait-idle --quiet-ms 300 --timeout-ms 10000
+    if [ "$("$FLEXWM" msg windows | jq '.windows | length')" -ne 0 ]; then
+        echo "BUG: the config file's \"A\" -> close bind did not fire on an unshifted 'a'"
+        "$FLEXWM" msg windows
+        return 1
+    fi
+    echo "ok: the config file's \"A\" bind (close) fired on an unshifted 'a'"
+}
+( run_capital_bind_test ) || exit 1
+
 echo "=== config file: a malformed file falls back to defaults instead of blocking startup ==="
 run_broken_config_test() {
     local socket="/run/user/$(id -u)/flexwm-smoke-broken.sock"

@@ -397,6 +397,16 @@ gap jumped the queue — each item's own file records why it landed when it did.
   the transient itself is harness wire evidence (external clients cannot
   win the bind-before-configure race — stated, not papered over). No
   README change (no probed client reads the bit).
+- **[`[binds]` capital
+  letters](docs/backlog/resolved/binds-capital-letter-done.md)** — a
+  `[binds]` entry naming a capital letter (`"A" = "close"`) now binds the
+  unshifted key instead of parsing, loading, and never firing. The fold
+  already existed whole-name; this scopes it to single ASCII letters only
+  (whole-name silently redirected `"OE"`/Œ to `"oe"`/œ — measured), warns
+  naming the bind (`"A"` means plain `a`, not `shift+a`), and leaves
+  `keysym_named` untouched so `flexwm msg key A` keeps refusing. Fail-first
+  unit tests per direction plus a permanent smoke-test section (live
+  `--headless`: warn logged, injected `a` closes the window).
 ## What's next
 
 The backlog is the source of truth for what to pick up; this is the current
@@ -459,7 +469,9 @@ actually open.
 4. Small, unblocked low-priority fixes: [`msg key` modifier
    resolution](docs/backlog/input/msg-key-modifier-resolution.md),
    [`[binds]` capital
-   letters](docs/backlog/config/binds-capital-letter.md),
+   letters](docs/backlog/resolved/binds-capital-letter-done.md) (resolved —
+   single-ASCII-letter fold at parse time, warn on normalize, `msg key A`
+   still refuses),
    [`--width/--height`
    bounds](docs/backlog/core/width-height-unbounded.md).
 5. [Rename `flexwm` → `flex`, split out

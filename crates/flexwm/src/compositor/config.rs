@@ -22,6 +22,7 @@
 //! saying what's wrong in the log is strictly better than that, even though
 //! it means a typo can go unnoticed until someone reads the log.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::ffi::OsString;
 use std::fmt;
@@ -473,18 +474,37 @@ fn parse_bind(key: &str, value: &str) -> Result<(Modifiers, Keysym, Bound), Stri
 /// well-tested there -- rather than writing a second parser for the same
 /// `mod+mod+key` syntax.
 ///
-/// The key name is lowercased before resolving it. xkb gives single Latin
-/// letters two *different* valid keysyms depending on case (`h` and `H` are
-/// both real, distinct keysyms), but `keybindings.rs`'s whole table -- like
-/// niri and sway -- binds by the unshifted (level-0) keysym only, tracking
-/// Shift as an ordinary modifier (see that module's doc). Without
-/// lowercasing first, `"Super+H"` would resolve to `Keysym::H`: a
-/// syntactically valid bind that can never fire, since no real keypress
-/// ever reports that keysym under this project's matching scheme -- exactly
-/// the silently-wrong-config class this loader exists to avoid. Multi-
-/// character names (`Return`, `F1`) are unaffected: lowercasing them just
-/// takes `keysym_named`'s existing case-insensitive fallback path, the same
-/// one already used for e.g. `"return"`.
+/// A single ASCII letter is folded to lowercase before resolving it. xkb
+/// gives single Latin letters two *different* valid keysyms depending on
+/// case (`h` and `H` are both real, distinct keysyms), but
+/// `keybindings.rs`'s whole table -- like niri and sway -- binds by the
+/// unshifted (level-0) keysym only, tracking Shift as an ordinary modifier
+/// (see that module's doc). Without folding first, `"Super+H"` would
+/// resolve to `Keysym::H`: a syntactically valid bind that can never fire,
+/// since no real keypress ever reports that keysym under this project's
+/// matching scheme -- exactly the silently-wrong-config class this loader
+/// exists to avoid.
+///
+/// The fold is deliberately scoped to single ASCII letters, not the whole
+/// name the way this function used to do it: some multi-character names
+/// are cased pairs of *distinct* keysyms (`OE`/`oe` are Œ/œ), and folding
+/// those would silently redirect the bind to another key. Multi-character
+/// names resolve exactly as written, through `keysym_named`'s existing
+/// case-insensitive fallback -- the same one already used for e.g.
+/// `"return"` -- and non-ASCII passes through unfolded, since keysym case
+/// semantics outside ASCII are murky (e.g. Turkish dotted/dotless I): a
+/// name the lookup doesn't know stays an unknown key, skipped with a
+/// warning by `apply_binds`, rather than a folded guess at another keysym.
+/// `keysym_named` itself is untouched, so `flexwm msg key A` keeps refusing
+/// rather than silently becoming `a`.
+///
+/// Folding changes what the bind means -- `"A"` is the unshifted `a` key,
+/// *not* `shift+a` -- so it warns, naming the bind and the spelling for
+/// Shift, rather than applying silently. Only an actually ambiguous fold
+/// warns: a letter that changed case on a combo that does *not* name Shift.
+/// With Shift named (`"shift+A"`) there is no question what was meant --
+/// the chord is shift+a either way -- so folding warns about nothing. A
+/// lone lowercase letter needs no warning either: nothing was changed.
 fn parse_combo(s: &str) -> Result<(Modifiers, Keysym), String> {
     let combo: flexwm_ipc::KeyCombo =
         s.parse().map_err(|error: flexwm_ipc::ParseKeyComboError| {
@@ -499,9 +519,44 @@ fn parse_combo(s: &str) -> Result<(Modifiers, Keysym), String> {
             flexwm_ipc::Modifier::Alt => mods.alt = true,
         }
     }
-    let keysym = keysym_named(&combo.key.to_ascii_lowercase())
-        .ok_or_else(|| format!("unknown key `{}`", combo.key))?;
+    let (name, warn) = fold_letter(&combo.key, mods.shift);
+    if warn {
+        tracing::warn!(
+            bind = s,
+            "a single capital letter in [binds] names the unshifted key -- \
+             this bind means plain `{}`, not `shift+{}`; write `shift+{}` \
+             if Shift was meant",
+            name,
+            name,
+            name,
+        );
+    }
+    let keysym = keysym_named(&name).ok_or_else(|| format!("unknown key `{}`", combo.key))?;
     Ok((mods, keysym))
+}
+
+/// Folds a single ASCII letter to lowercase for `[binds]` matching (see
+/// `parse_combo`), reporting alongside whether the fold is worth a warning.
+///
+/// The `bool` is the warn decision, factored out so tests can pin it
+/// without a tracing subscriber: only a letter that actually changed case,
+/// on a combo that does *not* hold Shift, is ambiguous enough to warn
+/// about. Everything else -- an already-lowercase letter, a digit, a
+/// multi-character name, a non-ASCII name, or any letter with Shift named
+/// -- resolves quietly.
+fn fold_letter(key: &str, shift_held: bool) -> (Cow<'_, str>, bool) {
+    // One byte: a single ASCII letter is exactly one byte, so this also
+    // excludes every non-ASCII letter without naming an encoding.
+    if key.len() == 1 && key.as_bytes()[0].is_ascii_alphabetic() {
+        let folded = key.to_ascii_lowercase();
+        if folded == key {
+            (Cow::Borrowed(key), false)
+        } else {
+            (Cow::Owned(folded), !shift_held)
+        }
+    } else {
+        (Cow::Borrowed(key), false)
+    }
 }
 
 #[cfg(test)]
@@ -726,13 +781,147 @@ mod tests {
     }
 
     #[test]
+    fn a_lone_capital_letter_bind_fires_on_the_unshifted_key() {
+        // The binds-capital-letter ticket: `"A" = "close"` used to parse
+        // and load but never fire, because the exact lookup yields the
+        // distinct `A` keysym while matching only ever sees the unshifted
+        // `a`. The parse-time fold below must make this bind the `a` key.
+        let (_dir, path) = write_temp(
+            r#"
+            [binds]
+            "A" = "close"
+        "#,
+        );
+        let loaded = load_from(&path, true).expect("valid toml");
+        assert_eq!(
+            loaded
+                .keybindings
+                .match_key(Keysym::a, Modifiers::default()),
+            Some(Bound::Action(Action::CloseFocused)),
+            "`\"A\"` must bind the unshifted `a` key"
+        );
+    }
+
+    #[test]
+    fn only_a_single_ascii_letter_is_case_folded() {
+        // The fold is scoped to single ASCII letters: `"A"` folds to `a`,
+        // and an already-lowercase `"a"` resolves identically.
+        assert_eq!(parse_combo("A").unwrap().1, Keysym::a);
+        assert_eq!(parse_combo("a").unwrap().1, Keysym::a);
+        assert_eq!(parse_combo("Z").unwrap().1, Keysym::z);
+        // Digits and symbols pass through untouched.
+        assert_eq!(parse_combo("1").unwrap().1, keysym_named("1").unwrap());
+        // Multi-character names resolve exactly as written -- including via
+        // the case-insensitive fallback -- never folded first. That matters
+        // because some are cased pairs of distinct keysyms: folding the
+        // whole name would silently redirect "OE" (Œ) to "oe" (œ).
+        assert_ne!(
+            keysym_named("OE"),
+            keysym_named("oe"),
+            "premise: OE/oe must really be distinct keysyms for this test to mean anything"
+        );
+        assert_eq!(parse_combo("OE").unwrap().1, keysym_named("OE").unwrap());
+        assert_eq!(parse_combo("F1").unwrap().1, Keysym::F1);
+        assert_eq!(parse_combo("Return").unwrap().1, Keysym::Return);
+        assert_eq!(parse_combo("RETURN").unwrap().1, Keysym::Return);
+        // Non-ASCII passes through unfolded: keysym case semantics outside
+        // ASCII are murky (e.g. Turkish dotted/dotless I), so a name the
+        // lookup doesn't know stays an unknown key -- skipped with a warning
+        // by `apply_binds` -- rather than a folded guess at another keysym.
+        assert_eq!(
+            parse_combo("É"),
+            Err("unknown key `É`".into()),
+            "`É` is not an xkb keysym name and must not fold into one"
+        );
+    }
+
+    #[test]
+    fn shift_plus_lowercase_still_requires_shift() {
+        // The other direction: naming Shift explicitly still means Shift.
+        // A lone `"A"` (previous test) must not grow a Shift requirement,
+        // and `"shift+a"` must not lose its one.
+        let (_dir, path) = write_temp(
+            r#"
+            [binds]
+            "shift+a" = "close"
+        "#,
+        );
+        let loaded = load_from(&path, true).expect("valid toml");
+        assert_eq!(
+            loaded
+                .keybindings
+                .match_key(Keysym::a, Modifiers::default()),
+            None,
+            "an unshifted `a` must not fire a `shift+a` bind"
+        );
+        assert_eq!(
+            loaded.keybindings.match_key(
+                Keysym::a,
+                Modifiers {
+                    shift: true,
+                    ..Modifiers::default()
+                }
+            ),
+            Some(Bound::Action(Action::CloseFocused)),
+            "`shift+a` must fire with Shift held"
+        );
+    }
+
+    #[test]
+    fn a_capital_with_shift_named_binds_shift_quietly() {
+        // The review catch on the warn: `"shift+A"` folds the key but means
+        // shift+a either way, so warning "this bind means plain `a`, not
+        // `shift+a`" would be factually wrong -- a fully-correct config
+        // scolded at every startup. Only an ambiguous fold warns.
+        let (_dir, path) = write_temp(
+            r#"
+            [binds]
+            "shift+A" = "close"
+        "#,
+        );
+        let loaded = load_from(&path, true).expect("valid toml");
+        assert_eq!(
+            loaded
+                .keybindings
+                .match_key(Keysym::a, Modifiers::default()),
+            None,
+            "an unshifted `a` must not fire a `shift+A` bind"
+        );
+        assert_eq!(
+            loaded.keybindings.match_key(
+                Keysym::a,
+                Modifiers {
+                    shift: true,
+                    ..Modifiers::default()
+                }
+            ),
+            Some(Bound::Action(Action::CloseFocused)),
+            "`shift+A` must fire with Shift held"
+        );
+        // The warn decision itself, pinned without a tracing subscriber:
+        // `parse_combo` warns exactly when `fold_letter` says so.
+        let (name, warn) = fold_letter("A", false);
+        assert_eq!(name.as_ref(), "a");
+        assert!(warn, "a bare capital is ambiguous: warn");
+        let (name, warn) = fold_letter("A", true);
+        assert_eq!(name.as_ref(), "a");
+        assert!(!warn, "Shift named means shift+a either way: stay quiet");
+        let (name, warn) = fold_letter("a", false);
+        assert_eq!(name.as_ref(), "a");
+        assert!(!warn, "nothing changed: stay quiet");
+        let (name, warn) = fold_letter("OE", false);
+        assert_eq!(name.as_ref(), "OE");
+        assert!(!warn, "never folded: stay quiet");
+    }
+
+    #[test]
     fn a_multi_character_key_name_is_also_case_insensitive() {
         // Unlike a single letter, "return" isn't itself a distinct valid
         // keysym -- exact-case lookup fails and falls back to
         // case-insensitive, landing on the same `Keysym::Return` either way
-        // -- so lowercasing it first (see `parse_combo`'s doc) is a no-op
-        // here. This is what exercises that fallback path, as opposed to
-        // the single-letter test above exercising the exact-match path.
+        // -- and multi-character names are never folded (see `parse_combo`'s
+        // doc), so this exercises the fallback path as-is, as opposed to
+        // the single-letter test above exercising the fold.
         assert_eq!(
             parse_combo("super+Return").unwrap(),
             parse_combo("super+return").unwrap()
