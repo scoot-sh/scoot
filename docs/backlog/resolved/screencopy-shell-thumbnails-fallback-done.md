@@ -247,7 +247,8 @@ PR #60 shipped; this entry only measures it.
   `/var/tmp/flexwm-dmabuf-control`; both fetched locally and compared
   pixel by pixel). Control
   outview/winview rects are flat `#303030` (the blank panel); ship
-  outview rect holds 13 distinct colors (terminal grays on dark) while
+  outview rect holds 16 distinct colors (13 substantive terminal grays
+  plus white and two singletons) while
   the winview rect stays flat `#303030`. The overview preview shows
   real captured pixels on shipped `main`.
 
@@ -294,7 +295,9 @@ kept on the dev VM; fullscreen transparent `PanelWindow`,
 
 Why that still closes as needs-upstream rather than shell-config:
 
-- DMS (quickshell-based, read at master HEAD 2026-09-17):
+- DMS (quickshell-based, read at master HEAD 2026-09-17,
+  `AvengeMedia/DankMaterialShell@641d65cb`, `captureSource` line re-verified
+  at `:90` on that SHA):
   `quickshell/Modals/DankLauncherV2/TileItem.qml:90` binds
   `captureSource: root.waylandToplevel`, where `waylandToplevel`
   (lines 28–34) is `pluginInstance.getToplevelById(toplevelId)` and
@@ -305,7 +308,7 @@ Why that still closes as needs-upstream rather than shell-config:
   and tiles render blank. DMS must adopt the screen-source + clip crop
   above (or equivalent) — a shell change.
 - Noctalia (current upstream is the native C++ `noctalia-dev/noctalia`
-  monorepo; no QML remains): the taskbar is icon-based
+  monorepo at `8c52cb71`; no QML remains): the taskbar is icon-based
   (`taskbar_widget`), `ThumbnailService` decodes image files (not live
   windows), and the capture stack (`src/capture/screencopy_capture.*`)
   speaks only `zwp_screencopy_manager_v1` (`capture_output(_region)`)
@@ -313,7 +316,8 @@ Why that still closes as needs-upstream rather than shell-config:
   (ext-only, per the measured PR #52 call). There is no per-window
   live-thumbnail view to feed; its screen-source overview/lockscreen
   path is servable over the shipped ext protocol.
-- quickshell 0.3.1 itself (both shells' toolkit where QML applies):
+- quickshell 0.3.1 itself (both shells' toolkit where QML applies;
+  `outfoxxed/quickshell` tag `v0.3.1`):
   `ScreencopyManager::createContext` routes a `Toplevel` source
   exclusively to `hyprland-toplevel-export-v1` (PR #58 leg 2 stands,
   re-confirmed against the live `non captureable object` above), which

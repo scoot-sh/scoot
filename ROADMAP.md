@@ -181,6 +181,27 @@ gap jumped the queue — each item's own file records why it landed when it did.
   was measured live against real Qt and GTK menus, both proven still
   taking the keyboard. `start_drag` needs its own analysis and stays open
   as [its own item](docs/backlog/protocols/dnd-grab-serial-validation.md).
+- **[Screenshot encode off the event loop](docs/backlog/resolved/screenshot-encode-off-thread-resolved.md)**
+  (PR #57, 2026-09-17) — the PNG encode (plus swizzle and reply framing)
+  moved to a single FIFO worker; render and read-back stay on-loop. Loop
+  stall per capture ~12ms → ~2ms derived, total latency unchanged by
+  design. New, disclosed semantics: per-connection ordering via
+  refused-with-retry, four captures max globally, `wait-idle` untouched.
+- **[Toplevel screen capture, closed unreachable](docs/backlog/resolved/screencopy-toplevel-capture-done.md)**
+  (PR #58, 2026-09-17) — phase-1 probe, no build: stock quickshell 0.3.1
+  routes a `Toplevel` capture source exclusively to
+  `hyprland-toplevel-export-v1` (version-exact source + binary inventory +
+  live wire evidence), so the ext toplevel-source manager would never be
+  bound. Fallback filed as shell thumbnails without a toplevel protocol
+  (below). A second, wider gate found by the same probe: quickshell never
+  instantiates *any* capture manager without `linux_dmabuf` feedback.
+- **[Dmabuf-readiness probe: YES](docs/backlog/resolved/screencopy-shell-thumbnails-fallback-done.md)**
+  (PR #59, 2026-09-17) — measurement only, zero executable change: a
+  minimal `zwp_linux_dmabuf_v1` advertisement flips quickshell's readiness
+  flag and the shipped ext output-capture path displays over shm. Honesty
+  verdict independently re-derived from the protocol XML (answering
+  `failed` is the designed fallback, not a violation); full blast-radius
+  matrix deferred to the follow-up's acceptance, measured not reasoned.
 - **[Minimal, honest `zwp_linux_dmabuf_v1`](docs/backlog/resolved/linux-dmabuf-advertisement-done.md)**
   (PR #60, 2026-09-17) — the follow-up the dmabuf-readiness probe gated:
   default feedback with the real scanout `dev_t` (`0` where no DRM node

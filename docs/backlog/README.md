@@ -126,8 +126,13 @@ actionable.
   precedence (lock > `exclusive` layer surface > popup grab > window /
   click-focused layer surface). Layer-parented popups turned out already to
   work; implementing the handler this entry asked for would have
-  double-tracked them. Follow-up: the grab serial is still unvalidated.
-- [`xdg_popup.grab` accepts any serial](./protocols/popup-grab-serial-validation.md) — any client can take the keyboard with no user action
+  double-tracked them. Follow-up: the grab serial is now validated (next
+  entry).
+- [`xdg_popup.grab` accepts any serial](./resolved/popup-grab-serial-validation-done.md)
+  — RESOLVED 2026-09-16 (PR #56): the grab must name a real, recent
+  key/button/`enter` event delivered to the grabbing client (or continue
+  its own open menu); background clients can no longer take the keyboard
+  unprompted. `start_drag` needs its own analysis and stays open separately.
 - [An `exclusive` layer surface's own popup grab dismisses itself](./protocols/popup-grab-exclusive-self-dismiss.md)
 - [A window-focus change doesn't dismiss an active popup grab](./resolved/popup-grab-focus-divergence-done.md)
   — RESOLVED 2026-09-16 (PR #55): grab semantics unchanged, but `msg windows`
@@ -149,10 +154,11 @@ actionable.
 - [Targeted input injection without moving seat focus](./ipc/targeted-input-injection.md) — the computer-use gap (research)
 - [IPC bundle: usable rect, focus-workspace-index, ambient locked](./resolved/protocol-bundle-resolved.md) — RESOLVED 2026-09-15, no bump needed
 - [No cap on concurrent IPC connections, and a half-closed client leaks one](./resolved/ipc-connection-cap-resolved.md) — RESOLVED 2026-09-16: 64 connections, refused with a reason past that, and a write-stall deadline that drops a peer which has stopped reading
-- [Screenshot capture and encode run on the event-loop thread](./ipc/screenshot-encode-on-event-loop.md) — split out of the entry above; the ~12ms stall itself, which no bound closes
+- [Screenshot capture and encode run on the event-loop thread](./resolved/screenshot-encode-off-thread-resolved.md) — RESOLVED 2026-09-17 (PR #57): PNG encode moved to a single FIFO worker; per-connection ordering via refused-with-retry, 4 captures max globally, `wait-idle` unchanged
 - [The accept loop swallows `EMFILE` and can spin the event loop](./ipc/accept-loop-swallows-emfile.md) — pre-existing, found reviewing the cap
 - [The connection cap turns one client's leak into everyone's refusal](./ipc/connection-cap-denies-the-same-user.md) — accepted tradeoff, recorded so a future "the bar cannot connect" has somewhere to land
 - [A large `msg type` blocks the event loop](./ipc/msg-type-blocks-event-loop.md)
+- [`flexwm msg` panics when its stdout reader goes away](./ipc/msg-client-broken-pipe.md) — `println!` on EPIPE (exit 101) instead of a quiet exit; compositor unaffected
 
 ### Input
 - [`msg key` hard-codes `_L` modifier keysyms](./input/msg-key-modifier-resolution.md)
