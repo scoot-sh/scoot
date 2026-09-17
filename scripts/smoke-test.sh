@@ -128,6 +128,17 @@ if [ "$mapped" -ne 1 ]; then
 fi
 "$FLEXWM" msg windows
 
+echo "--- checking the spawned terminal got an activation token ---"
+# State::spawn mints an xdg-activation token per child
+# (XDG_ACTIVATION_TOKEN). Exactly one foot exists this early in the script,
+# so the newest match is unambiguous.
+foot_pid=$(pgrep -n -x foot)
+if ! tr '\0' '\n' <"/proc/$foot_pid/environ" | grep -q '^XDG_ACTIVATION_TOKEN=.\+$'; then
+    echo "BUG: the foot State::spawn started carries no XDG_ACTIVATION_TOKEN"
+    exit 1
+fi
+echo "ok: the spawned terminal carries XDG_ACTIVATION_TOKEN"
+
 echo "--- typing ---"
 "$FLEXWM" msg type 'hello from flexwm'
 "$FLEXWM" msg wait-idle --quiet-ms 500 --timeout-ms 10000

@@ -54,6 +54,7 @@ use crate::compositor::test_support::Harness;
 
 mod ime_grab;
 mod keyboard;
+mod spawn;
 
 /// The one output every test here gives the core, so there is somewhere for
 /// windows to be arranged.
