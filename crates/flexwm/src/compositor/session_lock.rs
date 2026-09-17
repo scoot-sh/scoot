@@ -223,11 +223,16 @@
 //! an open xdg grab and refuses new ones (see `popup.rs`), so a menu left
 //! open at lock time can neither draw nor receive the password.
 //!
-//! The gather loop asks no focus question of its own: with one output there
-//! is one lock surface and it holds the keyboard, and an IME popup can only
-//! ever be parented to the focused field anyway (see above), so a "popup on
-//! an unfocused lock surface" cannot arise through either path that reaches
-//! this list.
+//! The gather loop asks no focus question of its own, and needs none: the
+//! two parenting constraints above hold regardless of how many lock surfaces
+//! exist. Single-output is real but single-surface is not --
+//! [`SessionLockHandler::new_surface`] performs no per-output duplicate
+//! check, so a lock client calling `get_lock_surface` twice yields two
+//! current surfaces, and an xdg popup on the second (unfocused --
+//! `keyboard_focus` takes the first current surface) can arise and is
+//! gathered. Harmless either way: it is still the lock client's own surface,
+//! and IME popups stay pinned to the focused field by the
+//! compositor-assigned parenting above.
 
 use std::collections::HashMap;
 use std::time::Duration;
@@ -556,7 +561,13 @@ impl SessionLock {
     /// that unsticks it -- here, the first frame of the lock screen itself,
     /// or of the candidate window. The popup set is the same trees
     /// [`SessionLock::surface_elements`] gathers, so a popup with elements
-    /// is never stalled and none is woken that the frame did not draw.
+    /// is never stalled -- except popups of not-yet-mapped lock surfaces,
+    /// which are woken but not drawn: `surface_elements` skips a lock
+    /// surface with no buffer yet, while this sends to every current
+    /// surface, so a popup that commits before its lock surface's first
+    /// buffer gets callbacks with no elements yet. Harmless -- the same
+    /// client's own unseen buffer, redrawn the same way `window.send_frame`
+    /// (see `headless.rs::render`) wakes every window unconditionally.
     fn send_frames(&self, output: &Output, time: Duration) {
         for surface in self.current() {
             send_frames_surface_tree(
