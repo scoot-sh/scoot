@@ -478,7 +478,10 @@ actually open.
    client](docs/backlog/resolved/connection-cap-denies-the-same-user-done.md) -- is
    closed as an accepted tradeoff (no workload has hit it; kept as the landing spot).
 4. Small, unblocked low-priority fixes: [`msg key` modifier
-   resolution](docs/backlog/input/msg-key-modifier-resolution.md),
+    resolution](docs/backlog/resolved/msg-key-modifier-resolution-done.md)
+    (PR #83, resolved — modifiers resolve through the keymap probe like
+    `type_text`; toggle-option layouts accept combos, `msg key A` still
+    refuses),
    [`[binds]` capital
    letters](docs/backlog/resolved/binds-capital-letter-done.md) (resolved —
    single-ASCII-letter fold at parse time, warn on normalize, `msg key A`

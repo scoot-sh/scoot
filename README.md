@@ -222,7 +222,12 @@ things worth knowing:
   characters can't be named as a combination at all (`@` on a German layout
   needs AltGr, which `key` has no name for); `flexwm msg type` is the one
   that works the modifiers out from the layout, and the one to reach for
-  when the goal is text rather than a chord.
+  when the goal is text rather than a chord. The modifiers themselves are
+  resolved from the active layout the same way — whichever key actually
+  holds Shift/Control/Alt/Super is what gets held (either hand's key, or
+  the one a layout option like `grp:lshift_toggle` left in place) — so a
+  combo is refused for its modifier only when no key on the layout can
+  hold it.
 
 ### What the control socket refuses
 

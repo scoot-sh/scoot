@@ -28,6 +28,7 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use flexwm_core::Config;
+use smithay::input::keyboard::XkbConfig;
 use smithay::reexports::calloop::EventLoop;
 use smithay::reexports::wayland_server::Display;
 use smithay::reexports::wayland_server::backend::ClientId;
@@ -85,13 +86,13 @@ fn clamp_to_extent_keeps_values_inside_the_output() {
     assert_eq!(clamp_to_extent(50.0, 0), 0.0);
 }
 
-#[test]
-fn modifier_keysyms_are_the_left_variant() {
-    assert_eq!(modifier_keysym(Modifier::Ctrl), Keysym::Control_L);
-    assert_eq!(modifier_keysym(Modifier::Shift), Keysym::Shift_L);
-    assert_eq!(modifier_keysym(Modifier::Alt), Keysym::Alt_L);
-    assert_eq!(modifier_keysym(Modifier::Super), Keysym::Super_L);
-}
+// `modifier_keysyms_are_the_left_variant` lived here and pinned the
+// hard-coded `_L` table `resolve_combo` used: it is deleted, not moved,
+// because that table is the bug this change removes. Its coverage moves to
+// the toggle-layout tests below (shift/ctrl end to end),
+// `alt_and_super_resolve_through_the_probe_on_a_plain_layout` (the Mod1/Mod4
+// mapping), and `ipc_modifiers_name_the_modifiers_clients_decode` in
+// `modifiers/tests.rs` (the name table itself).
 
 // -------------------------------------------------------------------------
 // A live compositor and a live client with a real keyboard
@@ -479,6 +480,28 @@ impl Fixture {
         self.settle();
         Ok(self.run(Step::Report))
     }
+
+    /// Replaces the seat keyboard's keymap -- the way a session started with
+    /// e.g. `XKB_DEFAULT_OPTIONS=grp:lshift_toggle` would have compiled it
+    /// at startup -- and lets the client learn the new one before anything
+    /// is pressed through it.
+    fn set_layout(&mut self, layout: &str, variant: &str, options: Option<&str>) {
+        let keyboard = self.state.seat.get_keyboard().expect("a keyboard");
+        keyboard
+            .set_xkb_config(
+                &mut self.state,
+                XkbConfig {
+                    rules: "",
+                    model: "",
+                    layout,
+                    variant,
+                    options: options.map(str::to_owned),
+                },
+            )
+            .expect("xkeyboard-config should compile the layout");
+        self.settle();
+        self.run(Step::Report);
+    }
 }
 
 impl Drop for Fixture {
@@ -722,6 +745,103 @@ fn a_repeated_modifier_is_resolved_and_pressed_once() {
     let typed = fixture.press(&combo).expect("a repeated modifier is legal");
     assert_eq!(typed.text, "!");
     assert_eq!(typed.keys, 4, "one Shift press, not a thousand");
+}
+
+/// The ticket's concrete failure, end to end: on a layout where
+/// `grp:lshift_toggle` has taken `Shift_L` off the keymap, `msg key
+/// shift+a` was refused with "no key for `shift` in this layout", while
+/// `msg type "A"` still worked. The modifier must resolve through the
+/// keymap's probe -- which finds the real Shift on the right-hand key --
+/// the way `type_text` already does.
+#[test]
+fn a_combo_with_a_toggled_modifier_presses_the_key_that_still_holds_it() {
+    let mut fixture = Fixture::new();
+    fixture.set_layout("us", "", Some("grp:lshift_toggle"));
+    // The contrast the ticket draws: the probe path `type_text` already
+    // used worked here before the fix, and keeps working unchanged.
+    let typed = fixture.type_text("A");
+    assert_eq!((typed.text.as_str(), typed.keys), ("A", 4));
+    let typed = fixture
+        .press("shift+a")
+        .expect("Shift lives on the right-hand key on this layout");
+    assert_eq!((typed.text.as_str(), typed.keys), ("AA", 8));
+    let typed = fixture
+        .press("shift+1")
+        .expect("Shift lives on the right-hand key on this layout");
+    assert_eq!((typed.text.as_str(), typed.keys), ("AA!", 12));
+
+    // The character position keeps its exact-then-fallback semantics: a
+    // capital with a probed modifier is still refused, even though the
+    // modifier half now resolves. The two halves must not interact.
+    let error = fixture
+        .press("shift+A")
+        .expect_err("`A` is only above level 0 on a US layout");
+    assert!(
+        error.contains("`A`") && error.contains("type"),
+        "the refusal should name the key and point at `type`: {error}"
+    );
+    // ... and so is the toggle key's own old name: nothing carries
+    // `Shift_L` here, and the probe does not invent one.
+    let error = fixture
+        .press("Shift_L")
+        .expect_err("nothing carries `Shift_L` on this layout");
+    assert!(
+        error.contains("no key for `Shift_L`"),
+        "an absent modifier key should say so plainly: {error}"
+    );
+    let typed = fixture.run(Step::Report);
+    assert_eq!(
+        (typed.text.as_str(), typed.keys),
+        ("AA!", 12),
+        "refused combinations must not send any key at all"
+    );
+}
+
+/// The `ctrl` half of the same failure: with `grp:lctrl_toggle`,
+/// `msg key ctrl+c` was refused, so an agent on such a session could not
+/// send Ctrl+C at all.
+#[test]
+fn ctrl_c_reaches_the_client_when_the_left_control_is_a_group_toggle() {
+    let mut fixture = Fixture::new();
+    fixture.set_layout("us", "", Some("grp:lctrl_toggle"));
+    let typed = fixture
+        .press("ctrl+c")
+        .expect("Control lives on the right-hand key on this layout");
+    assert_eq!(typed.keys, 4, "Control down, `c` down, `c` up, Control up");
+}
+
+/// A bare modifier position is not a pressable key, before or after the
+/// probe-based resolution: `shift` is no keysym name at all, while the real
+/// key's own name still presses bare -- two events, no text.
+#[test]
+fn a_bare_modifier_name_is_not_a_pressable_key() {
+    let mut fixture = Fixture::new();
+    let error = fixture.press("shift").expect_err("`shift` names no key");
+    assert!(
+        error.contains("unknown key"),
+        "a modifier position should say so plainly: {error}"
+    );
+    let typed = fixture
+        .press("Shift_L")
+        .expect("`Shift_L` is on a US layout");
+    assert_eq!((typed.text.as_str(), typed.keys), ("", 2));
+}
+
+/// The other two IPC modifiers on a plain layout: `alt` must hold the key
+/// that sets `Mod1`, `super` the one that sets `Mod4` -- the names
+/// toolkits decode -- not just any key the probe found. Four key events
+/// each, and the text proves the right modifier was held: `alt+Tab` still
+/// types a tab (Alt changes no keysym), while a wrongly-held Shift would
+/// have produced `ISO_Left_Tab` and no text at all. (`super+z`, not
+/// `super+h`: the latter is a default keybinding, which would swallow the
+/// press before any client saw it.)
+#[test]
+fn alt_and_super_resolve_through_the_probe_on_a_plain_layout() {
+    let mut fixture = Fixture::new();
+    let typed = fixture.press("alt+Tab").expect("`alt+Tab` is pressable");
+    assert_eq!((typed.text.as_str(), typed.keys), ("\t", 4));
+    let typed = fixture.press("super+z").expect("`super+z` is pressable");
+    assert_eq!((typed.text.as_str(), typed.keys), ("\tz", 8));
 }
 
 // -------------------------------------------------------------------------
