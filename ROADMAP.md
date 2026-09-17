@@ -285,6 +285,19 @@ gap jumped the queue — each item's own file records why it landed when it did.
   sub-second). Counted in characters, not bytes; the other injected-input
   requests were audited and need no cap (`key` is one combo, `spawn` is one
   process). README's refusal list carries the new bound.
+- **[Unbounded screencopy sessions and frames](docs/backlog/resolved/screencopy-session-cap-done.md)**
+  (PR #70, 2026-09-17) — split as filed. Frames per session are capped: a
+  `create_frame` past 16 live frames per client is refused pre-delegation
+  with the protocol's own `duplicate_frame` error (per client, not per
+  session — the pinned Smithay rev exposes no session identity
+  pre-delegation — and a protocol error, not a silent ignore, which would
+  leave an uninitialized object that panics the compositor). Sessions per
+  client are closed as won't-fix on the per-surface precedent, with the
+  residual cross-client walk latency stated honestly; they join the shared
+  per-client accounting whenever the sibling entries land it. Fail-first
+  harness tests (flood refusal, innocent-second-client, cycling drain,
+  frames-outliving-session), ~1us added per `create_frame` measured noise,
+  live `grim` unaffected. README's capture section carries the new bound.
 ## What's next
 
 The backlog is the source of truth for what to pick up; this is the current
