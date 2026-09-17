@@ -131,6 +131,27 @@ fn pending_connections_are_served_then_the_loop_ends() {
 }
 
 #[test]
+fn a_shed_that_finds_no_backlog_re_arms_the_spare() {
+    // The disarm this pins (found by review): outer EMFILE spends the spare,
+    // then the inner accept finds the backlog raced away -- WouldBlock on an
+    // idle listener here -- and without a re-arm the mitigation stays
+    // silently disarmed, so the *next* real exhaustion goes Stuck instead of
+    // shedding. On the unfixed code the last assertion fails: the spare is
+    // gone and nothing says so.
+    let (_dir, socket) = bound(); // idle: nothing pending
+    let spare = Spare::new();
+    assert!(spare.is_armed(), "setup: the spare starts armed");
+    assert!(
+        matches!(shed_one(&socket, &spare), ShedOutcome::BacklogEmpty),
+        "an idle listener sheds into an empty backlog"
+    );
+    assert!(
+        spare.is_armed(),
+        "a BacklogEmpty shed must re-arm the spare it spent"
+    );
+}
+
+#[test]
 fn a_dead_listener_is_deregistered_not_spun_on() {
     // `EINVAL`: `accept` on a live fd that is not a listener -- one end of a
     // socket pair, which will never listen. `EBADF` (a closed listener fd)

@@ -46,8 +46,25 @@ cap's slot-taken `debug`) and on the wire (a cap refusal still gets its
 reason; a shed connection gets an immediate EOF -- there is no fd to serve
 even the refusal with). A dead listener (`EBADF`/`EINVAL`) deregisters the
 source rather than waking into the same failure forever; anything else
-unexpected is logged loudly but leaves the listener registered, so a
-transient error cannot cost the whole control socket.
+ unexpected is logged loudly but leaves the listener registered, so a
+ transient error cannot cost the whole control socket.
+
+ Independent review found two things pre-merge, both fixed on the PR branch:
+
+ - A shed that found no backlog (`WouldBlock`/`Interrupted` on the inner
+   accept -- the outer `EMFILE` raced a disconnect) spent the spare and never
+   re-armed it, silently disarming the mitigation until the next exhaustion
+   went `Stuck`. The inner path now re-arms with a raw `libc::open` (never
+   `File::open`, which would allocate and break the fork-child test), warns
+   loudly if that fails, and is pinned by
+   `a_shed_that_finds_no_backlog_re_arms_the_spare`.
+ - The `Stuck` corner (persistent exhaustion with no spare) was misdescribed
+   as stalling rather than spinning: with the backlog pending under a level
+   trigger it busy-spins, and the per-turn error log -- deliberately not
+   rate-limited -- is the canary. The doc now says so, narrows the
+   close-to-accept steal window honestly (process-global table, reachable by
+   any thread doing `open`, e.g. PR #57's worker), and notes the re-arm above
+   is what makes the corner genuinely narrow.
 
 Two things found while testing, both recorded in the code rather than fixed
 around:

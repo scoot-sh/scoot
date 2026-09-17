@@ -27,13 +27,21 @@
 //!   innocent client's once fds free up again. The trick serves that client
 //!   with no added delay the moment pressure lifts.
 //!
-//! With no spare to spend (it was never armed, or a previous shed left it
-//! disarmed -- see [`shed_one`]), the accept is still attempted: pressure that
-//! has lifted meanwhile lets it succeed, which re-arms the spare on the spot.
-//! Only an exhaustion that persists *with* no spare leaves the backlog
-//! pending, and the loop still yields to the event loop every turn it cannot
-//! make progress, so even that corner stalls rather than hangs, and recovers
-//! the instant fds free up.
+//! With no spare to spend -- never armed, or a previous shed's re-arm failed
+//! (its freed fd was stolen in the window; see [`shed_one`]) -- the accept
+//! is still attempted: pressure that has lifted meanwhile lets it succeed,
+//! which re-arms the spare on the spot. If exhaustion persists *with* no
+//! spare, the loop returns `Continue` with the backlog still pending, and the
+//! level trigger re-reports it on the very next turn: that is a busy-spin,
+//! not a stall -- each turn still yields to the event loop first, so every
+//! other source is served and the compositor stays alive, and the error
+//! logged per turn is the canary that names the cause. That per-turn error is
+//! deliberately not rate-limited: this corner is already narrow (below), and
+//! throttling the log would throttle the one trace a starving compositor
+//! leaves. It recovers the instant fds free up. Reaching this corner takes
+//! both halves at once -- a lost close-to-accept race *and* exhaustion that
+//! never lifts -- and with the spare armed, which is the steady state, every
+//! shed consumes one backlog entry, so the loop provably terminates.
 //!
 //! What the shed client sees is an immediate EOF with no refusal line. That is
 //! exhaustion, not the connection cap, and the two stay distinguishable both
@@ -50,17 +58,20 @@
 //! may not allocate or take locks (another thread may hold them frozen), so
 //! [`drain`], [`shed_one`] and [`classify`] -- and everything they call --
 //! must stay allocation- and lock-free on the paths the child exercises. That
-//! is why there is no reopen here: the shed-accepted socket *becomes* the new
-//! spare (see [`shed_one`]), so no `File::open`, no path lookup, no `CString`
-//! is ever needed past startup. Keep it that way: a `format!` or an `open` on
-//! this path turns the exhaustion test from deterministic into hanging when
-//! the fork lands badly. (`tracing`'s macros are fine -- with no subscriber
-//! installed, as in the test, they evaluate nothing.)
+//! is why the shed-accepted socket *becomes* the new spare (see [`shed_one`])
+//! instead of being dropped and reopened with `File::open` -- the latter
+//! builds a `CString`, which allocates -- and why the one reopen this module
+//! does (a shed that found no backlog, same function) is a raw `libc::open`
+//! on a static path, the same call the test child's own fill loop uses.
+//! Keep it that way: a `format!` or a `File::open` on this path turns the
+//! exhaustion test from deterministic into hanging when the fork lands badly.
+//! (`tracing`'s macros are fine -- with no subscriber installed, as in the
+//! test, they evaluate nothing.)
 
 use std::cell::Cell;
 use std::fs::File;
 use std::io::{self, ErrorKind};
-use std::os::fd::OwnedFd;
+use std::os::fd::{FromRawFd, OwnedFd};
 use std::os::unix::net::{UnixListener, UnixStream};
 
 use smithay::reexports::calloop::PostAction;
@@ -72,9 +83,10 @@ mod tests;
 ///
 /// Created once at startup, never read or written: when `accept` fails with
 /// `EMFILE`/`ENFILE`, closing this frees exactly the one fd the next `accept`
-/// needs to consume the pending connection out of the backlog. Reopened
-/// straight afterwards (see [`shed_one`]), so the cost is one fd held for the
-/// session and nothing per connection.
+/// needs to consume the pending connection out of the backlog. Kept armed by
+/// [`shed_one`] -- repurposed from the shed connection, or raw-reopened when
+/// the backlog raced away -- so the cost is one fd held for the session and
+/// nothing per connection.
 pub(super) struct Spare {
     slot: Cell<Option<File>>,
 }
@@ -93,6 +105,17 @@ impl Spare {
         Self {
             slot: Cell::new(spare),
         }
+    }
+
+    /// Whether a spare is currently held. Test-only: `Cell` has no peek and
+    /// a `File` cannot be cloned without spending a new fd, so this takes the
+    /// spare out and puts it straight back.
+    #[cfg(test)]
+    pub(super) fn is_armed(&self) -> bool {
+        let spare = self.slot.take();
+        let armed = spare.is_some();
+        self.slot.set(spare);
+        armed
     }
 }
 
@@ -134,7 +157,9 @@ pub(super) enum ShedOutcome {
     /// error raced a client going away. Quiet -- there is nothing to report.
     BacklogEmpty,
     /// No progress: still failing with the spare spent. Carries the error
-    /// that refused to clear, so the caller can log what it actually was.
+    /// that refused to clear, so the caller can log what it actually was --
+    /// every turn it recurs, which is the canary for the corner the module
+    /// doc describes (deliberately not rate-limited: see there).
     Stuck(io::Error),
 }
 
@@ -145,13 +170,23 @@ pub(super) enum ShedOutcome {
 /// hands over exactly the fd the trick just spent, with no `open`, no path
 /// lookup and no allocation -- so this stays runnable in the forked child the
 /// exhaustion test uses (see the module doc), where allocating could deadlock
-/// against another thread's frozen lock. A spare that was never armed (or
-/// that a previous shed left disarmed) changes nothing: the accept is
-/// attempted anyway, and success re-arms from the freed fd on the spot.
+/// against another thread's frozen lock. A spare that was never armed changes
+/// nothing: the accept is attempted anyway, and success re-arms from the
+/// freed fd on the spot.
+///
+/// The one path that reopens is a shed that found no backlog: the spent spare
+/// has to come back from somewhere, or the mitigation stays silently disarmed
+/// and the *next* exhaustion goes `Stuck` instead of shedding. That reopen is
+/// a raw `libc::open` on a static path -- the same call the test child's fill
+/// loop uses -- never `File::open`, which would allocate.
 pub(super) fn shed_one(listener: &UnixListener, spare: &Spare) -> ShedOutcome {
     // The whole trick: this close frees exactly one fd, which is what the
-    // accept below spends. Single-threaded, so nothing interleaves between
-    // the two and takes it first.
+    // accept below spends. No code on this thread runs between the two -- but
+    // the fd table is process-global, so another thread (since PR #57, the
+    // screenshot worker does its own opens) can still steal it in that
+    // window. Narrow, and self-resolving -- the next shed attempt succeeds
+    // the moment pressure lifts and re-arms on the spot -- but not
+    // impossible, which is the shape the `Stuck` corner has.
     drop(spare.slot.take());
     match listener.accept() {
         Ok((pending, _)) => {
@@ -159,6 +194,20 @@ pub(super) fn shed_one(listener: &UnixListener, spare: &Spare) -> ShedOutcome {
             ShedOutcome::Consumed
         }
         Err(error) if matches!(error.kind(), ErrorKind::WouldBlock | ErrorKind::Interrupted) => {
+            // Nothing came back for the spent spare, so re-arm straight away.
+            // Raw `open`, not `File::open`: see above.
+            let fd = unsafe { libc::open(c"/dev/null".as_ptr(), libc::O_RDONLY | libc::O_CLOEXEC) };
+            if fd >= 0 {
+                // SAFETY: `open` just returned this fd; it is open and owned.
+                spare.slot.set(Some(unsafe { File::from_raw_fd(fd) }));
+            } else {
+                // The freed fd was stolen in the window (or `/dev/null`
+                // would not open): disarmed, loudly rather than silently.
+                tracing::warn!(
+                    "could not re-arm the ipc accept loop's spare fd; \
+                     further fd exhaustion will be logged but not shed"
+                );
+            }
             ShedOutcome::BacklogEmpty
         }
         Err(error) => ShedOutcome::Stuck(error),
