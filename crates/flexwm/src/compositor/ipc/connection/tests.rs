@@ -1370,14 +1370,24 @@ fn a_capture_is_refused_while_the_encoder_is_full() {
     // than queued without bound. Parked deterministically through the
     // test-only helper (relying on a real burst to fill the queue would be
     // timing, not testing).
+    // The encoder is spawned first, with a real capture: entries parked
+    // without a live encoder are orphans by construction, and the next
+    // request reaps those instead of refusing past them (see below).
     let mut harness = Harness::with_output(32, 32);
+    let mut seeder = harness.connect(None);
+    let shot = request_line(&Request::Screenshot { output: None });
+    seeder.send(shot.as_bytes());
+    assert!(
+        matches!(seeder.expect_reply(&mut harness), Response::Screenshot(_)),
+        "the seeding capture failed"
+    );
     for conn in 0..MAX_IN_FLIGHT_SHOTS as u64 {
         harness.state.park_test_shot(1000 + conn);
     }
     assert_eq!(harness.state.pending_shot_count(), MAX_IN_FLIGHT_SHOTS);
 
     let mut client = harness.connect(None);
-    client.send(request_line(&Request::Screenshot { output: None }).as_bytes());
+    client.send(shot.as_bytes());
     match client.expect_reply(&mut harness) {
         Response::Error { message } => {
             assert!(message.contains("busy"), "wrong refusal: {message}")
@@ -1389,6 +1399,49 @@ fn a_capture_is_refused_while_the_encoder_is_full() {
         MAX_IN_FLIGHT_SHOTS,
         "a refused capture parked itself anyway"
     );
+}
+
+#[test]
+fn respawning_the_encoder_reaps_captures_its_predecessor_left_behind() {
+    use crate::compositor::screenshot::MAX_IN_FLIGHT_SHOTS;
+
+    // The latent wedge: entries parked by a worker that then dies can never
+    // complete, and counting them toward the bound would refuse every future
+    // screenshot until restart. The respawn answers them with an error and
+    // releases them instead -- pinned deterministically (the parked entries
+    // never complete on their own), through the same `drop_encoder` hook the
+    // respawn test uses. Same setup as the full-encoder test above, except
+    // the worker is gone when the new capture arrives.
+    let mut harness = Harness::with_output(32, 32);
+    let mut seeder = harness.connect(None);
+    let shot = request_line(&Request::Screenshot { output: None });
+    seeder.send(shot.as_bytes());
+    assert!(
+        matches!(seeder.expect_reply(&mut harness), Response::Screenshot(_)),
+        "the seeding capture failed"
+    );
+    for conn in 0..MAX_IN_FLIGHT_SHOTS as u64 {
+        harness.state.park_test_shot(1000 + conn);
+    }
+    harness.state.drop_encoder();
+
+    // Without the reap this is refused as busy: four orphans still counted.
+    // Exactly one pump: the new capture is dispatched (and parked), while a
+    // completion -- real or orphaned -- needs another turn to be processed,
+    // so the count here is reap-plus-dispatch and nothing else.
+    let mut client = harness.connect(None);
+    client.send(shot.as_bytes());
+    harness.pump();
+    assert_eq!(
+        harness.state.pending_shot_count(),
+        1,
+        "the orphans were not reaped, or the new capture was not parked"
+    );
+    assert!(
+        matches!(client.expect_reply(&mut harness), Response::Screenshot(_)),
+        "no capture arrived after the encoder went away with a full queue"
+    );
+    assert_eq!(harness.state.pending_shot_count(), 0);
 }
 
 #[test]

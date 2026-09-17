@@ -56,7 +56,7 @@ drains from the frame tick, with the same progress-not-total-time give-up
 the other two write paths have (10s, mirroring `WRITE_STALL_TIMEOUT`).
 
 **Ordering: strict per-connection.** A connection with a capture in flight
-answers nothing else until the capture's reply has gone out — any other
+answers nothing else until the capture's reply has gone out -- any other
 request meanwhile is refused with a retry, the "refused rather than delayed"
 shape the rate limit already has. That includes `wait-idle` (parking behind
 a capture would leave the capture's answer arriving on a handed-over
@@ -65,9 +65,12 @@ also refused while its connection's own earlier replies are still queued:
 the completion writes through a socket clone and would otherwise land
 mid-queue. One visible consequence, documented in `README.md`: the refusal
 to a throttled second screenshot is answered immediately, so it arrives
-*before* the first capture's reply — pipelining clients match those two by
-content, not position. `flexwm msg` sends one request per connection and
-never meets any of this.
+*before* the first capture's reply -- pipelining clients match those two by
+content, not position. `flexwm msg` sends one request per connection, so it
+never meets the ordering gate -- but concurrent `msg screenshot` processes
+can meet the 4-global busy refusal below, which surfaces as an ordinary
+error (non-zero exit, no retry inside `msg`), consistent with the
+rate-limit refusal.
 
 **Disconnect mid-encode** holds nothing borrowed and no slot: the completion
 write fails against the dead peer and the entry is dropped. Pinned by a
@@ -131,8 +134,13 @@ pids, with a comment saying why.
 
 ## Adjacent, named rather than fixed here
 
-None found in the code around this beyond what the two bug-bash items above
-already folded in. The two the cap work filed stay open:
-[the accept loop and `EMFILE`](../ipc/accept-loop-swallows-emfile.md) and
-[what a shared connection table costs an innocent
-client](../ipc/connection-cap-denies-the-same-user.md).
+The 4-global cap's starvation shape belongs with the entry the cap work
+already filed: four slow or non-reading consumers can deny screenshots to
+everyone else -- each drain cycle giving up only after its own 10s
+no-progress window -- which is the same shared-table class as [what a
+shared connection table costs an innocent
+client](../ipc/connection-cap-denies-the-same-user.md). Cited there rather
+than fixed here: the bound is doing its job (finite memory, refused not
+queued), and the unfairness is the documented price of sharing it.
+[The accept loop and `EMFILE`](../ipc/accept-loop-swallows-emfile.md) from
+the same review stays open too.

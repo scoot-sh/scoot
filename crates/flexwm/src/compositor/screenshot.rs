@@ -153,8 +153,25 @@ struct ShotDone {
 /// completion receiver in the event loop -- so dropping this (with `State`)
 /// disconnects both, which is what lets the worker exit on its own: nothing
 /// ever joins it, so shutdown never waits on an encode.
+///
+/// Dropped and recreated if the worker ever goes away (see `try_send`'s
+/// `Disconnected` arm in `start_screenshot`); the completion half below is
+/// kept across that, so a respawn reuses the one registered event source
+/// rather than accumulating a dead one per restart.
 pub struct Encoder {
     jobs: SyncSender<ShotJob>,
+}
+
+/// The completion half of `State`: the sending end of the channel the
+/// worker's framed lines come back over.
+///
+/// Created once, alongside the event source that receives it, and never
+/// dropped while `State` lives -- so every worker generation, original or
+/// respawned, answers through the same channel, and there is exactly one
+/// completion source no matter how many times the worker restarts. Held,
+/// never read directly: each worker gets its own clone at spawn.
+pub struct ShotSink {
+    done: channel::Sender<ShotDone>,
 }
 
 /// A capture accepted but not yet fully written out: the connection it came
@@ -238,6 +255,15 @@ impl State {
                     .to_string(),
             );
         }
+        // Entries parked without a live encoder are orphans: no worker holds
+        // their jobs any more, so they can never complete -- but they would
+        // still count toward the bound below and refuse every screenshot
+        // until restart. Reap them before measuring, so the bound counts only
+        // live work. No-op on the first capture (nothing parked) and whenever
+        // the encoder is alive (entries are live then).
+        if self.screenshot_encoder.is_none() {
+            self.reap_orphaned_shots();
+        }
         if self.pending_shots.len() >= MAX_IN_FLIGHT_SHOTS {
             return ShotStart::Refused(format!(
                 "the screenshot encoder is busy ({} captures already in flight); \
@@ -306,34 +332,118 @@ impl State {
     }
 
     /// Spawns the encode worker and wires its completions into the event
-    /// loop, once. Lazy -- a session that never screenshots pays for no
-    /// thread and no event source -- and idempotent afterwards.
+    /// loop. Lazy -- a session that never screenshots pays for no thread
+    /// and no event source -- and idempotent while the worker lives.
+    ///
+    /// A spawn here after the worker went away is a respawn, and it heals
+    /// rather than merely restarting: `start_screenshot` reaps the dead
+    /// worker's orphaned entries before measuring the bound (see
+    /// `reap_orphaned_shots`), so nothing uncompletable counts toward it.
     fn ensure_encoder(&mut self) -> Result<(), String> {
         if self.screenshot_encoder.is_some() {
             return Ok(());
         }
         let (job_tx, job_rx) = sync_channel::<ShotJob>(MAX_IN_FLIGHT_SHOTS);
-        let (done_tx, done_rx) = channel::channel::<ShotDone>();
+        // One completion channel per `State`, not per worker generation:
+        // every respawn answers through the same registered source, so an
+        // abandoned source can never accumulate.
+        if self.screenshot_sink.is_none() {
+            let (done_tx, done_rx) = channel::channel::<ShotDone>();
+            self.loop_handle
+                .insert_source(done_rx, |event, _, state: &mut State| {
+                    match event {
+                        ChannelEvent::Msg(done) => state.finish_shot(done),
+                        // The worker exited, which only happens when the job
+                        // channel disconnected -- i.e. this `State` (and its
+                        // encoder) is already gone, so there is nothing to
+                        // clean up here. A worker that died any other way
+                        // shows up as `Disconnected` on the next `try_send`,
+                        // which respawns it. Either way this event needs no
+                        // action.
+                        ChannelEvent::Closed => {}
+                    }
+                })
+                .map_err(|error| error.to_string())?;
+            self.screenshot_sink = Some(ShotSink { done: done_tx });
+        }
+        let done_tx = self
+            .screenshot_sink
+            .as_ref()
+            .expect("the sink was just ensured")
+            .done
+            .clone();
         thread::Builder::new()
             .name("flexwm-shot".to_string())
             .spawn(move || run_encoder(job_rx, done_tx))
             .map_err(|error| error.to_string())?;
-        self.loop_handle
-            .insert_source(done_rx, |event, _, state: &mut State| {
-                match event {
-                    ChannelEvent::Msg(done) => state.finish_shot(done),
-                    // The worker exited, which only happens when the job
-                    // channel disconnected -- i.e. this `State` (and its
-                    // encoder) is already gone, so there is nothing to clean
-                    // up here. A worker that died any other way shows up as
-                    // `Disconnected` on the next `try_send`, which respawns
-                    // it. Either way this event needs no action.
-                    ChannelEvent::Closed => {}
-                }
-            })
-            .map_err(|error| error.to_string())?;
         self.screenshot_encoder = Some(Encoder { jobs: job_tx });
         Ok(())
+    }
+
+    /// Answers and releases captures a dead worker left behind.
+    ///
+    /// A still-encoding entry whose encoder is gone can never complete: no
+    /// worker holds its job any more (or ever will -- a respawned worker
+    /// reads a fresh job channel). Left parked it would count toward
+    /// [`MAX_IN_FLIGHT_SHOTS`] forever, refusing every future screenshot,
+    /// so it is answered with an error here instead. A *draining* entry is
+    /// kept: its reply bytes are already framed and sitting in its
+    /// [`Outbound`], so the worker's death took nothing from it.
+    ///
+    /// No-op unless the encoder is being (re)spawned with entries parked,
+    /// which is exactly the orphan shape: entries are only ever parked by a
+    /// successful `try_send`, which requires a live encoder.
+    fn reap_orphaned_shots(&mut self) {
+        if self.pending_shots.is_empty() {
+            return;
+        }
+        let mut draining = Vec::new();
+        let mut orphaned = Vec::new();
+        for shot in self.pending_shots.drain(..) {
+            if shot.outbound.is_empty() {
+                orphaned.push(shot);
+            } else {
+                draining.push(shot);
+            }
+        }
+        self.pending_shots = draining;
+        if orphaned.is_empty() {
+            return;
+        }
+        tracing::warn!(
+            count = orphaned.len(),
+            "the screenshot encoder went away with captures in flight; \
+             answering them with an error"
+        );
+        let now = Instant::now();
+        for mut shot in orphaned {
+            let Ok(line) = encode(&Response::error(
+                "the screenshot encoder restarted; retry in a few milliseconds",
+            )) else {
+                // `Response::Error` is a `String`; serde cannot fail on it.
+                continue;
+            };
+            // Disjoint fields: the socket is borrowed, the queue is mutated.
+            let PendingShot {
+                stream,
+                outbound,
+                progress,
+                last_progress,
+                ..
+            } = &mut shot;
+            *last_progress = now;
+            // A write error means the peer is gone too: the work is dropped,
+            // cleanly, by falling through without re-parking it.
+            if outbound.send(&mut &*stream, line).is_ok() {
+                *progress = outbound.total_sent();
+                // Fully written means nothing left to come back for; only a
+                // remainder is parked (and the tick woken for it).
+                if !outbound.is_empty() {
+                    self.pending_shots.push(shot);
+                    self.ensure_ticking();
+                }
+            }
+        }
     }
 
     /// Writes a finished encode out through its connection's cloned socket.
@@ -468,9 +578,12 @@ impl State {
     }
 
     /// Drops the encoder without touching anything parked, so the next
-    /// request respawns it. Only a test uses this: the worker exits when its
-    /// job channel disconnects, which is what proves a respawned worker
-    /// serves again rather than hanging every screenshot after it.
+    /// request respawns it -- and reaps what the dead worker left behind
+    /// (see `reap_orphaned_shots`). Only a test uses this: the worker exits
+    /// when its job channel disconnects, which is what proves a respawned
+    /// worker serves again rather than hanging every screenshot after it.
+    /// The completion sink is deliberately kept: the respawn answers through
+    /// the same registered source, never a new one per restart.
     #[cfg(test)]
     pub fn drop_encoder(&mut self) {
         self.screenshot_encoder = None;
@@ -481,6 +594,11 @@ impl State {
     /// bound) open deterministically, without depending on how fast the real
     /// worker encodes -- which is the only way to test "refused while in
     /// flight" without a race.
+    ///
+    /// Parked without a live encoder these are orphans by construction (no
+    /// worker could own them), so a test that wants them to count toward the
+    /// bound must spawn the encoder first -- with a real capture -- or the
+    /// next request reaps them instead of refusing past them.
     #[cfg(test)]
     pub fn park_test_shot(&mut self, conn: u64) {
         let (a, _b) = UnixStream::pair().expect("a socket pair");

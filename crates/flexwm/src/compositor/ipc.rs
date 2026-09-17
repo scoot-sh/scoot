@@ -295,11 +295,16 @@ impl State {
             // (see above) before handle_request is ever called: a capture is
             // dispatched to the encode worker in `serve`, and its reply comes
             // back through the completion channel after `serve` has returned.
-            // If this ever fires, that interception was bypassed -- a bug
-            // worth a loud failure, not a request that quietly appears to
-            // work while answering wrong.
+            // If this ever fires, that interception was bypassed -- answer an
+            // error rather than aborting over it (an abort here would take
+            // every client's unsaved state with it over a routing bug), and
+            // fail loudly in debug builds so a test catches the bypass.
             Request::Screenshot { .. } => {
-                unreachable!("Screenshot is answered by Connection::serve")
+                debug_assert!(
+                    false,
+                    "Screenshot reached handle_request; Connection::serve must intercept it"
+                );
+                Response::error("could not take a screenshot: internal routing error")
             }
             Request::PointerMove { x, y } => {
                 self.pointer_move(x, y);

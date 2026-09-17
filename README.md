@@ -267,15 +267,15 @@ reading its socket, and the other shortens a wait rather than refusing it.
   that actually went out, not from when the reply was queued, so draining a
   multi-megabyte screenshot over a minute costs nothing.
 - **`wait-idle` waits at most 60 seconds**, whatever `--timeout-ms` asks
-for. A longer request isn't refused, it's shortened: the answer comes back
-as usual, at the minute mark at the latest. A waiting `wait-idle` keeps
-its connection (and one of the 64 slots above) for as long as it waits,
-and — uniquely on this socket — cannot notice its client dying while it
-waits, so an unbounded wait from a client that then exits would hold that
-slot for the rest of the session. The default is 5 seconds and the request
-is meant for hundreds of milliseconds, so this is well out of the way of
-any real use. A capture in flight neither extends nor shortens a wait: it
-touches no commit clock, and parks no waiter.
+  for. A longer request isn't refused, it's shortened: the answer comes back
+  as usual, at the minute mark at the latest. A waiting `wait-idle` keeps
+  its connection (and one of the 64 slots above) for as long as it waits,
+  and — uniquely on this socket — cannot notice its client dying while it
+  waits, so an unbounded wait from a client that then exits would hold that
+  slot for the rest of the session. The default is 5 seconds and the request
+  is meant for hundreds of milliseconds, so this is well out of the way of
+  any real use. A capture in flight neither extends nor shortens a wait: it
+  touches no commit clock, and parks no waiter.
 
 `--tty` needs a seat (`seatd` or logind) with a DRM device on it. On a modern
 kernel, on every non-root `--tty` run, Smithay logs `Unable to become drm
