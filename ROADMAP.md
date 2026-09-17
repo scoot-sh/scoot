@@ -235,6 +235,16 @@ gap jumped the queue — each item's own file records why it landed when it did.
   harness tests pinning the refusal and the dispatch floor beneath it. No
   README change (a refused drag is silent by protocol; the only
   legitimate-hit shape is a press held past the 10s window).
+- **[An IME keyboard grab makes the activation gate credit a client that
+  received nothing](docs/backlog/resolved/interaction-serial-ime-grab-done.md)**
+  — RESOLVED 2026-09-17 as decide + pin, no behavior change: crediting the
+  focused window is the intended outcome (the user is typing into it; the
+  keystrokes arrive as composed text), and each of the ticket's three options
+  was worse than the status quo. Pinned by two harness tests driving a real
+  `grab_keyboard` (token creation for the focused window, refusal for the
+  IME, creation + redemption end to end), each confirmed to fail with the
+  not-recording behavior temporarily in place. No README change (no
+  user-facing behavior changes).
 
 ## What's next
 
