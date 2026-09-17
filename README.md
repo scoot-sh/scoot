@@ -1429,6 +1429,10 @@ ordinary window. What flexwm owns is the input method's **popup** — the
 candidate window beside the text cursor — which is tracked against whichever
 surface has the field and drawn with that surface's own popups, so it follows
 the window, gets frame callbacks, and disappears when the field is disabled.
+That includes a lock screen's password field: while the session is locked the
+candidate window is drawn over the lock screen at the caret, with frame
+callbacks — and only that popup is: background windows' popups stay hidden
+and callback-starved until unlock.
 
 Same trust note as the other privileged globals: there is no client filter on
 `zwp_input_method_manager_v2`, because an allow-list would be theatre without

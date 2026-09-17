@@ -33,18 +33,26 @@ use std::time::{Duration, Instant};
 
 use flexwm_ipc::{KeyCombo, Modifier, PointerButton, Request, Response};
 use wayland_client::protocol::{
-    wl_buffer, wl_compositor, wl_keyboard, wl_output, wl_pointer, wl_registry, wl_seat, wl_shm,
-    wl_shm_pool, wl_surface,
+    wl_buffer, wl_callback, wl_compositor, wl_keyboard, wl_output, wl_pointer, wl_registry,
+    wl_seat, wl_shm, wl_shm_pool, wl_surface,
 };
 use wayland_client::{Connection, Dispatch, QueueHandle, WEnum};
 use wayland_protocols::ext::session_lock::v1::client::{
     ext_session_lock_manager_v1, ext_session_lock_surface_v1, ext_session_lock_v1,
 };
-use wayland_protocols::xdg::shell::client::{xdg_surface, xdg_toplevel, xdg_wm_base};
+use wayland_protocols::wp::text_input::zv3::client::{
+    zwp_text_input_manager_v3, zwp_text_input_v3,
+};
+use wayland_protocols::xdg::shell::client::{
+    xdg_popup, xdg_positioner, xdg_surface, xdg_toplevel, xdg_wm_base,
+};
+use wayland_protocols_misc::zwp_input_method_v2::client::{
+    zwp_input_method_manager_v2, zwp_input_method_v2, zwp_input_popup_surface_v2,
+};
 use wayland_protocols_wlr::layer_shell::v1::client::{zwlr_layer_shell_v1, zwlr_layer_surface_v1};
 
 use crate::compositor::decorations::{Appearance, Color};
-use crate::compositor::test_support::{self, Harness, contains, wait_for};
+use crate::compositor::test_support::{self, Harness, assert_pixel, contains, wait_for};
 
 // The tests themselves, split by concern; everything below is the harness
 // they share. See `docs/backlog/resolved/large-test-file-organization-done.md`
@@ -53,6 +61,7 @@ use crate::compositor::test_support::{self, Harness, contains, wait_for};
 mod abandoned;
 mod blanking;
 mod first_click;
+mod ime_popup;
 mod input;
 mod lifecycle;
 mod teardown;
@@ -78,6 +87,13 @@ const RED_BGRA: [u8; 4] = [0x00, 0x00, 0xFF, 0xFF];
 /// *unlocked* empty session shows, and therefore the one a locked frame must
 /// never contain.
 const BACKGROUND_BGRA: [u8; 4] = [0x56, 0x34, 0x12, 0xFF];
+/// A background window's `xdg_popup`, deliberately unlike every colour above
+/// so its presence over a lock screen reads unambiguously.
+const XDG_POPUP_BGRA: [u8; 4] = [0xE0, 0xE0, 0x20, 0xFF];
+/// An input-method candidate window, likewise unmistakable.
+const IME_BGRA: [u8; 4] = [0x20, 0xE0, 0xE0, 0xFF];
+/// Both popup kinds' buffers: small enough to sit anywhere on the canvas.
+const POPUP_BUFFER: i32 = 24;
 
 /// A palette nothing else in this compositor defaults to, so a pixel
 /// assertion can only pass because the thing it names was actually drawn --
@@ -178,6 +194,37 @@ enum Step {
     /// buffer and commit *without* acking the configure -- the by-design
     /// `CommitBeforeFirstAck` kill, which must keep working.
     LockSurfaceNoAckWithBuffer { lock: usize },
+    /// Map a non-grabbing `xdg_popup` on the `window`-th toplevel, with a
+    /// solid [`XDG_POPUP_BGRA`] buffer. No grab deliberately: a grabbed menu
+    /// is dismissed by the lock itself (see `input.rs`), while a mapped
+    /// tooltip-style popup survives it -- still tracked against its window --
+    /// which is exactly the shape the locked render path must not draw.
+    MapXdgPopup { window: usize },
+    /// Bind `zwp_text_input_manager_v3`'s text input and
+    /// `zwp_input_method_manager_v2`'s input method on the seat. Run before
+    /// focus lands where the field will be: Smithay only delivers
+    /// `zwp_text_input_v3.enter` while an input-method instance already
+    /// exists (see `input_method/tests.rs`).
+    SetupIme,
+    /// `zwp_text_input_v3.enable` + `commit`: this client's text field is
+    /// ready, which is what activates the input method against it.
+    EnableTextInput,
+    /// `zwp_text_input_v3.disable` + `commit`: the field went away.
+    DisableTextInput,
+    /// Move the text cursor within the field, which the IME popup follows.
+    /// Surface-local, like the protocol defines it.
+    SetCursorRectangle { x: i32, y: i32, w: i32, h: i32 },
+    /// `zwp_input_method_v2.get_input_popup_surface` plus a solid
+    /// [`IME_BGRA`] buffer of `POPUP_BUFFER` square, committed at once.
+    CreateImePopup,
+    /// `wl_surface.frame` on the IME popup: arms [`ImeReport::ime_frame`].
+    RequestImeFrame,
+    /// `wl_surface.frame` on the `popup`-th xdg popup: arms that slot of
+    /// [`ImeReport::xdg_frames`].
+    RequestXdgPopupFrame { popup: usize },
+    /// Hand back the IME state: activation, and which popup frame callbacks
+    /// have arrived since they were last armed.
+    ImeStatus,
     /// Hand back everything this client has seen.
     Report,
 }
@@ -196,6 +243,17 @@ impl Step {
 enum Ack {
     Done,
     Report(Report),
+    ImeStatus(ImeReport),
+}
+
+/// Everything one client knows about its IME half: whether the compositor
+/// told its input method it is active, and which popup frame callbacks have
+/// arrived since they were last armed.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct ImeReport {
+    activated: bool,
+    ime_frame: bool,
+    xdg_frames: Vec<u32>,
 }
 
 #[derive(Default)]
@@ -223,6 +281,33 @@ struct TestClient {
     lock_configures: Vec<Option<(u32, u32, u32)>>,
     /// ...and the same for each layer surface.
     layer_configures: Vec<Option<(u32, u32)>>,
+    /// ...and the serial of each xdg popup's latest unacked configure.
+    popup_configures: Vec<Option<u32>>,
+    text_input_manager: Option<zwp_text_input_manager_v3::ZwpTextInputManagerV3>,
+    input_method_manager: Option<zwp_input_method_manager_v2::ZwpInputMethodManagerV2>,
+    text_input: Option<zwp_text_input_v3::ZwpTextInputV3>,
+    input_method: Option<zwp_input_method_v2::ZwpInputMethodV2>,
+    /// Whether the compositor told the input method it is now active.
+    activated: bool,
+    /// The IME popup's surface, once [`Step::CreateImePopup`] ran.
+    ime_popup: Option<wl_surface::WlSurface>,
+    /// Its in-flight frame callback, kept alive so the compositor's answer
+    /// has somewhere to arrive.
+    ime_frame: Option<wl_callback::WlCallback>,
+    /// Whether that callback's `done` arrived since it was last armed.
+    ime_frame_done: bool,
+    /// One in-flight frame callback per xdg popup, and how many `done`
+    /// events each has collected.
+    xdg_frames: Vec<Option<wl_callback::WlCallback>>,
+    xdg_frame_dones: Vec<u32>,
+}
+
+/// Which `wl_callback.done` arrived: the IME popup's, or an xdg popup's by
+/// creation order.
+#[derive(Clone, Copy)]
+enum FrameWhich {
+    Ime,
+    Xdg(usize),
 }
 
 impl Dispatch<wl_registry::WlRegistry, ()> for TestClient {
@@ -255,6 +340,12 @@ impl Dispatch<wl_registry::WlRegistry, ()> for TestClient {
             "wl_output" => client.output = Some(registry.bind(name, version.min(3), qh, ())),
             "ext_session_lock_manager_v1" => {
                 client.lock_manager = Some(registry.bind(name, version.min(1), qh, ()));
+            }
+            "zwp_text_input_manager_v3" => {
+                client.text_input_manager = Some(registry.bind(name, version.min(1), qh, ()));
+            }
+            "zwp_input_method_manager_v2" => {
+                client.input_method_manager = Some(registry.bind(name, version.min(1), qh, ()));
             }
             _ => {}
         }
@@ -434,6 +525,66 @@ impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, SurfaceIndex> for TestC
     }
 }
 
+impl Dispatch<zwp_input_method_v2::ZwpInputMethodV2, ()> for TestClient {
+    fn event(
+        client: &mut Self,
+        _: &zwp_input_method_v2::ZwpInputMethodV2,
+        event: zwp_input_method_v2::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        match event {
+            zwp_input_method_v2::Event::Activate => client.activated = true,
+            zwp_input_method_v2::Event::Deactivate => client.activated = false,
+            _ => {}
+        }
+    }
+}
+
+/// An xdg popup's own index in creation order, distinct from
+/// [`SurfaceIndex`] so a popup configure lands in [`TestClient::popup_configures`].
+struct PopupIndex(usize);
+
+impl Dispatch<xdg_surface::XdgSurface, PopupIndex> for TestClient {
+    fn event(
+        client: &mut Self,
+        _: &xdg_surface::XdgSurface,
+        event: xdg_surface::Event,
+        index: &PopupIndex,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let xdg_surface::Event::Configure { serial } = event
+            && let Some(slot) = client.popup_configures.get_mut(index.0)
+        {
+            *slot = Some(serial);
+        }
+    }
+}
+
+impl Dispatch<wl_callback::WlCallback, FrameWhich> for TestClient {
+    fn event(
+        client: &mut Self,
+        _: &wl_callback::WlCallback,
+        event: wl_callback::Event,
+        which: &FrameWhich,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let wl_callback::Event::Done { .. } = event {
+            match *which {
+                FrameWhich::Ime => client.ime_frame_done = true,
+                FrameWhich::Xdg(index) => {
+                    if let Some(slot) = client.xdg_frame_dones.get_mut(index) {
+                        *slot += 1;
+                    }
+                }
+            }
+        }
+    }
+}
+
 wayland_client::delegate_noop!(TestClient: ignore wl_compositor::WlCompositor);
 wayland_client::delegate_noop!(TestClient: ignore wl_surface::WlSurface);
 wayland_client::delegate_noop!(TestClient: ignore wl_shm::WlShm);
@@ -443,6 +594,16 @@ wayland_client::delegate_noop!(TestClient: ignore wl_output::WlOutput);
 wayland_client::delegate_noop!(TestClient: ignore zwlr_layer_shell_v1::ZwlrLayerShellV1);
 wayland_client::delegate_noop!(
     TestClient: ignore ext_session_lock_manager_v1::ExtSessionLockManagerV1
+);
+wayland_client::delegate_noop!(TestClient: ignore xdg_popup::XdgPopup);
+wayland_client::delegate_noop!(TestClient: ignore xdg_positioner::XdgPositioner);
+wayland_client::delegate_noop!(TestClient: ignore zwp_text_input_manager_v3::ZwpTextInputManagerV3);
+wayland_client::delegate_noop!(TestClient: ignore zwp_text_input_v3::ZwpTextInputV3);
+wayland_client::delegate_noop!(
+    TestClient: ignore zwp_input_method_manager_v2::ZwpInputMethodManagerV2
+);
+wayland_client::delegate_noop!(
+    TestClient: ignore zwp_input_popup_surface_v2::ZwpInputPopupSurfaceV2
 );
 
 /// A `width`x`height` `wl_buffer` filled with `color`, over a real memfd --
@@ -485,8 +646,17 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
         .clone()
         .ok_or("no ext_session_lock_manager_v1 -- the global is missing")?;
     let output = client.output.clone().ok_or("no wl_output")?;
+    let seat = client.seat.clone().ok_or("no wl_seat")?;
 
     let mut windows: Vec<wl_surface::WlSurface> = Vec::new();
+    // The `xdg_surface` under each window, so a popup can name its parent.
+    let mut toplevels: Vec<xdg_surface::XdgSurface> = Vec::new();
+    // Mapped xdg popups: surface, `xdg_surface` and `xdg_popup`.
+    let mut xdg_popups: Vec<(
+        wl_surface::WlSurface,
+        xdg_surface::XdgSurface,
+        xdg_popup::XdgPopup,
+    )> = Vec::new();
     let mut locks: Vec<ext_session_lock_v1::ExtSessionLockV1> = Vec::new();
     let mut lock_surfaces: Vec<(
         wl_surface::WlSurface,
@@ -513,6 +683,96 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 surface.damage(0, 0, WINDOW_BUFFER, WINDOW_BUFFER);
                 surface.commit();
                 windows.push(surface);
+                toplevels.push(xdg);
+            }
+            Step::MapXdgPopup { window } => {
+                let parent = toplevels.get(window).cloned().ok_or("no such toplevel")?;
+                let surface = compositor.create_surface(&qh, ());
+                let index = client.popup_configures.len();
+                client.popup_configures.push(None);
+                let xdg = wm_base.get_xdg_surface(&surface, &qh, PopupIndex(index));
+                let positioner = wm_base.create_positioner(&qh, ());
+                // Both are required before `get_popup`, or the compositor
+                // rightly answers with `invalid_positioner`.
+                positioner.set_size(POPUP_BUFFER, POPUP_BUFFER);
+                positioner.set_anchor_rect(0, 0, 10, 10);
+                let popup = xdg.get_popup(Some(&parent), &positioner, &qh, ());
+                positioner.destroy();
+                surface.commit();
+                let serial = wait_for(
+                    &mut queue,
+                    &mut client,
+                    "an xdg popup configure",
+                    |client| client.popup_configures[index],
+                )?;
+                xdg.ack_configure(serial);
+                let buffer = solid_buffer(&shm, &qh, POPUP_BUFFER, POPUP_BUFFER, XDG_POPUP_BGRA);
+                surface.attach(Some(&buffer), 0, 0);
+                surface.damage(0, 0, POPUP_BUFFER, POPUP_BUFFER);
+                surface.commit();
+                client.xdg_frames.push(None);
+                client.xdg_frame_dones.push(0);
+                xdg_popups.push((surface, xdg, popup));
+            }
+            Step::SetupIme => {
+                let text_inputs = client
+                    .text_input_manager
+                    .clone()
+                    .ok_or("no zwp_text_input_manager_v3")?;
+                let input_methods = client
+                    .input_method_manager
+                    .clone()
+                    .ok_or("no zwp_input_method_manager_v2")?;
+                client.text_input = Some(text_inputs.get_text_input(&seat, &qh, ()));
+                client.input_method = Some(input_methods.get_input_method(&seat, &qh, ()));
+            }
+            Step::EnableTextInput => {
+                let text_input = client.text_input.clone().ok_or("no text input")?;
+                text_input.enable();
+                text_input.commit();
+            }
+            Step::DisableTextInput => {
+                let text_input = client.text_input.clone().ok_or("no text input")?;
+                text_input.disable();
+                text_input.commit();
+            }
+            Step::SetCursorRectangle { x, y, w, h } => {
+                let text_input = client.text_input.clone().ok_or("no text input")?;
+                text_input.set_cursor_rectangle(x, y, w, h);
+                text_input.commit();
+            }
+            Step::CreateImePopup => {
+                let input_method = client.input_method.clone().ok_or("no input method")?;
+                let popup = compositor.create_surface(&qh, ());
+                input_method.get_input_popup_surface(&popup, &qh, ());
+                let buffer = solid_buffer(&shm, &qh, POPUP_BUFFER, POPUP_BUFFER, IME_BGRA);
+                popup.attach(Some(&buffer), 0, 0);
+                popup.damage(0, 0, POPUP_BUFFER, POPUP_BUFFER);
+                popup.commit();
+                client.ime_popup = Some(popup);
+            }
+            Step::RequestImeFrame => {
+                let popup = client.ime_popup.clone().ok_or("no IME popup")?;
+                client.ime_frame_done = false;
+                client.ime_frame = Some(popup.frame(&qh, FrameWhich::Ime));
+                // The callback lands in the surface's *pending* state; only a
+                // commit moves it to current, where the compositor's frame
+                // pass drains it. A bare commit: no buffer, no damage, legal
+                // on both popup roles.
+                popup.commit();
+            }
+            Step::RequestXdgPopupFrame { popup } => {
+                let (surface, _, _) = xdg_popups.get(popup).ok_or("no such xdg popup")?;
+                client.xdg_frame_dones[popup] = 0;
+                client.xdg_frames[popup] = Some(surface.frame(&qh, FrameWhich::Xdg(popup)));
+                surface.commit();
+            }
+            Step::ImeStatus => {
+                outcome = Ack::ImeStatus(ImeReport {
+                    activated: client.activated,
+                    ime_frame: client.ime_frame_done,
+                    xdg_frames: client.xdg_frame_dones.clone(),
+                });
             }
             Step::Lock => {
                 let seen = client.locked + client.finished;
