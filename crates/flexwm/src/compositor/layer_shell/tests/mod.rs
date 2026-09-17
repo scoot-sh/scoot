@@ -40,6 +40,14 @@ use wayland_protocols::ext::session_lock::v1::client::{
 use wayland_protocols::xdg::shell::client::{
     xdg_popup, xdg_positioner, xdg_surface, xdg_toplevel, xdg_wm_base,
 };
+// The client half of `zwp_input_method_v2`, for the real IME keyboard grab
+// [`Step::ImeGrabKeyboard`] holds: Smithay already enables the matching
+// "server" side for its own input-method support, so this adds a feature
+// to a crate already in the tree, not a new dependency -- the same shape
+// `activation/tests/ime_grab.rs` already uses.
+use wayland_protocols_misc::zwp_input_method_v2::client::{
+    zwp_input_method_keyboard_grab_v2, zwp_input_method_manager_v2, zwp_input_method_v2,
+};
 use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_surface_v1::KeyboardInteractivity;
 use wayland_protocols_wlr::layer_shell::v1::client::{zwlr_layer_shell_v1, zwlr_layer_surface_v1};
 
@@ -284,6 +292,18 @@ enum Step {
     /// locked the moment the request is accepted (see `session_lock.rs`'s
     /// note on `owner`), which is the transition under test.
     LockSession,
+    /// `get_input_method` + `grab_keyboard` through the real protocol, and
+    /// hold the grab: the seat's keyboard is grabbed the way fcitx5 holds
+    /// it while active (see
+    /// `docs/backlog/protocols/popup-grab-blocked-by-ime-grab.md`), so a
+    /// popup grab asked for afterwards meets the `taken` refusal in
+    /// `State::grab_popup` (`compositor/popup.rs`).
+    ImeGrabKeyboard,
+    /// Send `release` on the grab [`Step::ImeGrabKeyboard`] holds, letting
+    /// the seat go. Explicit rather than a drop: dropping the proxy sends
+    /// nothing on the wire. The input-method object itself stays, the way
+    /// an IME outlives one activation.
+    ImeUngrabKeyboard,
 }
 
 /// Which serial a [`Step::MapPopup`] grab passes to `xdg_popup.grab`.
@@ -402,6 +422,22 @@ struct TestClient {
     /// `ext_session_lock_manager_v1`, bound only so [`Step::LockSession`]
     /// can take a lock.
     lock_manager: Option<ext_session_lock_manager_v1::ExtSessionLockManagerV1>,
+    /// `zwp_input_method_manager_v2`, bound only so
+    /// [`Step::ImeGrabKeyboard`] can take a real IME keyboard grab through
+    /// the protocol.
+    input_method_manager: Option<zwp_input_method_manager_v2::ZwpInputMethodManagerV2>,
+    /// The input-method object and its held keyboard grab, kept alive for as
+    /// long as the test wants the seat grabbed: sending `release` on the
+    /// grab object lets it go, which is exactly what
+    /// [`Step::ImeUngrabKeyboard`] does. (A bare drop sends nothing --
+    /// measured with `WAYLAND_DEBUG=1`: no `release` on the wire and the
+    /// seat stays grabbed -- so the ungrab step calls `release()`
+    /// explicitly.)
+    /// An IME is always somebody else's client; here the harness plays both
+    /// parts, which the `taken` check under test cannot tell apart -- it
+    /// only asks whether *a* grab holds the seat, not whose.
+    input_method: Option<zwp_input_method_v2::ZwpInputMethodV2>,
+    ime_grab: Option<zwp_input_method_keyboard_grab_v2::ZwpInputMethodKeyboardGrabV2>,
     /// The surface the outstanding `wl_keyboard.enter` named. Stored as the
     /// raw `wl_surface` because this handler has no idea which of the
     /// script's surfaces it is; [`run_client`] resolves it at report time.
@@ -486,6 +522,9 @@ impl Dispatch<wl_registry::WlRegistry, ()> for TestClient {
             "wl_seat" => client.seat = Some(registry.bind(name, version.min(5), qh, ())),
             "ext_session_lock_manager_v1" => {
                 client.lock_manager = Some(registry.bind(name, version.min(1), qh, ()));
+            }
+            "zwp_input_method_manager_v2" => {
+                client.input_method_manager = Some(registry.bind(name, version.min(1), qh, ()));
             }
             _ => {}
         }
@@ -701,6 +740,14 @@ wayland_client::delegate_noop!(
 // tests lock only to take input away, and `session_lock/tests.rs` owns
 // everything about the lock's own lifecycle.
 wayland_client::delegate_noop!(TestClient: ignore ext_session_lock_v1::ExtSessionLockV1);
+// An IME's own objects are held, never read: the grab diverts keys to the
+// grab object, and what matters here is only that the seat *is* grabbed,
+// which the test asserts compositor-side.
+wayland_client::delegate_noop!(TestClient: ignore zwp_input_method_manager_v2::ZwpInputMethodManagerV2);
+wayland_client::delegate_noop!(TestClient: ignore zwp_input_method_v2::ZwpInputMethodV2);
+wayland_client::delegate_noop!(
+    TestClient: ignore zwp_input_method_keyboard_grab_v2::ZwpInputMethodKeyboardGrabV2
+);
 
 /// A `width`x`height` `wl_buffer` filled with `color`, over a real memfd --
 /// the same path any toolkit takes.
@@ -1173,6 +1220,25 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 // destroys the lock object, which is a legal way to abandon a
                 // lock and would change what is under test.
                 locks.push(manager.lock(&qh, ()));
+            }
+            Step::ImeGrabKeyboard => {
+                let manager = client
+                    .input_method_manager
+                    .clone()
+                    .ok_or("no zwp_input_method_manager_v2 -- the global is missing")?;
+                let method = manager.get_input_method(&seat, &qh, ());
+                // Held in the client struct so the seat stays grabbed:
+                // letting go is `release()`, which is what
+                // [`Step::ImeUngrabKeyboard`] sends.
+                client.ime_grab = Some(method.grab_keyboard(&qh, ()));
+                client.input_method = Some(method);
+            }
+            Step::ImeUngrabKeyboard => {
+                let grab = client
+                    .ime_grab
+                    .take()
+                    .ok_or("no held IME grab to release")?;
+                grab.release();
             }
         }
         queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
