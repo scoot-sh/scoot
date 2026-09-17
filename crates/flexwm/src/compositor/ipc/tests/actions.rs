@@ -568,6 +568,44 @@ fn real_focus_moves_over_ipc_still_apply() {
         fixture.state.needs_render,
         "a real workspace move laid nothing out"
     );
+
+    // Across workspaces by index, back to a non-active one: the step above
+    // left workspace 1 active, so naming index 0 is a real switch -- this
+    // leg pins the index arm against a wrong predicate (e.g. `active >=
+    // index`), which would silently skip the move while the no-op test's
+    // index-==-active case still passed.
+    fixture.click_taskbar();
+    fixture.state.needs_render = false;
+    let response =
+        fixture
+            .state
+            .handle_request(Request::Action(flexwm_ipc::Action::FocusWorkspaceIndex {
+                index: 0,
+            }));
+    assert!(
+        matches!(response, Response::Ok { locked: false }),
+        "the workspace index switch was not served"
+    );
+    let output = fixture
+        .state
+        .world
+        .focused_output()
+        .expect("a focused output");
+    assert_eq!(
+        fixture
+            .state
+            .world
+            .workspaces(output)
+            .expect("a workspace list")
+            .active,
+        0,
+        "switching to workspace index 0 did not move the active workspace"
+    );
+    fixture.assert_keyboard_follows_focus("a real workspace index switch");
+    assert!(
+        fixture.state.needs_render,
+        "a real workspace index switch laid nothing out"
+    );
 }
 
 #[test]
