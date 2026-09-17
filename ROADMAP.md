@@ -507,7 +507,7 @@ gap jumped the queue — each item's own file records why it landed when it did.
 - **[A screencopy frame parked for a session lock's blank was never re-armed
   once the vblank
   confirms](docs/backlog/resolved/screencopy-parked-across-lock-confirm-done.md)**
-  (PR #NN, 2026-09-17) — the regression PR #84 introduced moving lock
+  (PR #93, 2026-09-17) — the regression PR #84 introduced moving lock
   confirmation onto the DRM vblank: the blank tick drops the frame timer
   (a parked capture is none of its re-arm conditions) and neither confirm
   path restarted it, so the parked frame sat undelivered until some later
