@@ -341,6 +341,102 @@ fn a_popup_grab_is_refused_while_a_launcher_holds_the_keyboard() {
     fixture.disconnect_client();
 }
 
+/// While an input method holds the seat's keyboard
+/// (`zwp_input_method_v2.grab_keyboard`), a popup grab is refused and
+/// dismissed -- and the refusal clears the moment the IME lets go.
+///
+/// The `taken` check in `grab_popup` cannot tell an IME grab from any other
+/// grab, and must not steal it: taking it would interrupt composition in
+/// whatever field the IME is active in. What that costs is measured live in
+/// `docs/backlog/protocols/popup-grab-blocked-by-ime-grab.md` (fcitx5 holds
+/// the grab for the whole active span, idle or composing); what this pins
+/// is the compositor half -- refusal while held, grant once released.
+/// Same-window only: the check is seat-global, so a second window would run
+/// the identical path for no new coverage.
+#[test]
+fn a_popup_grab_is_refused_while_an_ime_holds_the_keyboard() {
+    let mut fixture = Fixture::new();
+    fixture.run(Step::MapWindow);
+    // The serial has to predate the IME grab: with the keyboard grabbed the
+    // client is sent no key to name, the way a toolkit's last-seen serial
+    // predates the menu it opens.
+    fixture.press_a_key();
+    fixture.run(Step::ImeGrabKeyboard);
+    fixture.settle();
+    assert!(
+        fixture
+            .state
+            .seat
+            .get_keyboard()
+            .expect("a keyboard")
+            .is_grabbed(),
+        "the IME's grab_keyboard never took effect on the seat"
+    );
+
+    let Ack::PopupConfigured(configured) = fixture.run(Step::MapPopup {
+        parent: PopupParent::Window,
+        color: POPUP_BGRA,
+        grab: Some(GrabSource::Key),
+    }) else {
+        panic!("the popup step should report whether a configure arrived");
+    };
+    assert!(
+        !configured,
+        "a refused popup is never configured: the grab is refused at commit, before any configure"
+    );
+    assert!(
+        fixture.state.popup_grab.is_none(),
+        "the grab should have been refused outright"
+    );
+    assert_eq!(
+        fixture.popup_dones(),
+        1,
+        "refusal means dismissal, not a menu left up with no input"
+    );
+    assert_eq!(
+        fixture.keyboard().focused,
+        Some(Focused::Window(0)),
+        "the keyboard should never have left the window"
+    );
+
+    // ...and the refusal clears the moment the IME releases: the same
+    // serial grabs fine, so a refusal files no session-continuation stamp
+    // either. (No destroy in between: the refused popup was never
+    // configured, so the step already tore its objects down.)
+    fixture.run(Step::ImeUngrabKeyboard);
+    fixture.settle();
+    assert!(
+        !fixture
+            .state
+            .seat
+            .get_keyboard()
+            .expect("a keyboard")
+            .is_grabbed(),
+        "destroying the IME grab object should have released the seat"
+    );
+    let Ack::PopupConfigured(configured) = fixture.run(Step::MapPopup {
+        parent: PopupParent::Window,
+        color: POPUP_BGRA,
+        grab: Some(GrabSource::Key),
+    }) else {
+        panic!("the popup step should report whether a configure arrived");
+    };
+    assert!(
+        configured,
+        "the replacement popup should still be configured"
+    );
+    assert!(
+        fixture.state.popup_grab.is_some(),
+        "with the IME gone the same serial should grab fine"
+    );
+    assert_eq!(
+        fixture.keyboard().focused,
+        Some(Focused::Popup(0)),
+        "the replacement menu should hold the keyboard"
+    );
+    fixture.disconnect_client();
+}
+
 /// An `exclusive` layer surface's *own* popup grab is accepted: the launcher
 /// that opened the menu is not outranked by itself.
 ///
