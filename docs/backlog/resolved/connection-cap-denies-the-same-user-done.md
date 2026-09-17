@@ -1,12 +1,14 @@
 ---
-title: "The IPC connection cap turns one client's leak into everyone's refusal (LOW, accepted tradeoff)"
-status: "open"
-area: "ipc"
-priority: "low"
+title: "The IPC connection cap turns one client's leak into everyone's refusal — CLOSED (accepted tradeoff, kept as a landing spot)."
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
 ---
 
-# The IPC connection cap turns one client's leak into everyone's refusal (LOW, accepted tradeoff)
+# The IPC connection cap turns one client's leak into everyone's refusal — CLOSED (accepted tradeoff, kept as a landing spot).
+
+## The entry as filed
 
 Filed 2026-09-16 alongside
 [the connection cap](../resolved/ipc-connection-cap-resolved.md), which
@@ -40,3 +42,15 @@ peer in an invisible PID namespace, and pids are reused), every client here
 is the same uid by construction, and a sub-cap invented for one hypothetical
 client is the kind of speculative structure this project keeps out. Revisit
 if a real workload ever hits it.
+
+## Resolution (closed without code, 2026-09-17)
+
+No real workload has hit this since the cap landed — no "the bar cannot
+connect" report, no starvation observed across eighteen merged PRs of live
+dev-VM testing with agents driving IPC throughout. The revisit condition
+("if a real workload ever hits it") has not fired, so per the entry's own
+terms this closes as an accepted tradeoff, not a deferred defect. The
+per-pid sub-cap stays unbuilt for exactly the stated reasons (unstable
+identity, same-uid-by-construction, speculative structure). This record is
+kept so the future report still has somewhere to land: reopen if a real
+workload ever holds all 64 slots against innocent clients.

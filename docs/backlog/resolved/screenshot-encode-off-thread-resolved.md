@@ -139,7 +139,7 @@ already filed: four slow or non-reading consumers can deny screenshots to
 everyone else -- each drain cycle giving up only after its own 10s
 no-progress window -- which is the same shared-table class as [what a
 shared connection table costs an innocent
-client](../ipc/connection-cap-denies-the-same-user.md). Cited there rather
+client](../resolved/connection-cap-denies-the-same-user-done.md). Cited there rather
 than fixed here: the bound is doing its job (finite memory, refused not
 queued), and the unfairness is the documented price of sharing it.
 [The accept loop and `EMFILE`](../ipc/accept-loop-swallows-emfile.md) from

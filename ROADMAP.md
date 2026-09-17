@@ -366,8 +366,8 @@ actually open.
    fd (no back-off, no added delay once pressure lifts), and a dead listener
    deregisters rather than spinning. The other -- [what a
    shared connection table costs an innocent
-   client](docs/backlog/ipc/connection-cap-denies-the-same-user.md) -- is
-   still open.
+   client](docs/backlog/resolved/connection-cap-denies-the-same-user-done.md) -- is
+   closed as an accepted tradeoff (no workload has hit it; kept as the landing spot).
 4. Small, unblocked low-priority fixes: [`msg key` modifier
    resolution](docs/backlog/input/msg-key-modifier-resolution.md),
    [`[binds]` capital

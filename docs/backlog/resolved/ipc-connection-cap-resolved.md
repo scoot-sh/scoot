@@ -147,5 +147,5 @@ Two things this work found in the code around it, both pre-existing, both
 filed rather than folded in:
 [the accept loop swallowing `EMFILE`](../ipc/accept-loop-swallows-emfile.md)
 and [what a shared connection table means for an innocent
-client](../ipc/connection-cap-denies-the-same-user.md) when another of the
+client](../resolved/connection-cap-denies-the-same-user-done.md) when another of the
 same user holds every slot.

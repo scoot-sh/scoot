@@ -94,7 +94,7 @@ once and creates without bound. Building per-client session accounting here
 would be a fifth independent mechanism, contradicting the entry's own
 direction that sessions fold into whatever shared mechanism closes the
 sibling entries (`ext-workspace-object-binding-cap.md`, the IPC
-`connection-cap-denies-the-same-user.md`, `shm-total-per-client-
+`connection-cap-denies-the-same-user-done.md`, `shm-total-per-client-
 unbounded.md`). When that mechanism lands, sessions join it; until then no
 sessions-only cap.
 
