@@ -21,6 +21,7 @@
 //! multi-group tests below are the ones that can tell those apart.
 
 use super::*;
+use flexwm_ipc::Modifier;
 
 /// Compiles one of xkeyboard-config's real layouts, with the default rules
 /// and model (what `XkbConfig::default` -- and so flexwm's own seat -- uses).
@@ -672,4 +673,122 @@ fn a_modifier_past_the_real_ones_is_unproducible_rather_than_a_panic() {
     assert_eq!(probed.hold(xkb::ModMask::MAX), None);
     // The empty mask is the everyday case: hold nothing.
     assert_eq!(probed.hold(0).map(|held| held.len), Some(0));
+}
+
+// -------------------------------------------------------------------------
+// Modifiers that moved off their `_L` key (`msg-key-modifier-resolution`)
+// -------------------------------------------------------------------------
+
+/// The ticket's concrete failure, at the keymap level: `grp:lshift_toggle`
+/// turns the left Shift into a group-switch key, so no key in the layout
+/// carries `Shift_L` at any level -- the hard-coded lookup `resolve_combo`
+/// used answers `Absent`, and every `msg key shift+...` combo is refused --
+/// while the probe still finds the real Shift on the right-hand key.
+///
+/// Single-group `us` reproduces it: the toggle does not need a second group
+/// to take `Shift_L` off the keymap.
+#[test]
+fn shift_is_still_holdable_when_the_left_shift_becomes_a_group_toggle() {
+    let toggled = keymap_with("us", "", Some("grp:lshift_toggle"));
+    assert_eq!(
+        named_key(&toggled, FIRST, Keysym::Shift_L),
+        NamedKey::Absent,
+        "with `grp:lshift_toggle`, no key carries `Shift_L`, which is what the hard-coded lookup refused on"
+    );
+    let probed = ModifierKeys::probe(&toggled, FIRST);
+    let index = toggled.mod_get_index("Shift") as usize;
+    let shift = probed.keys[index].expect("Shift must still be holdable");
+    assert!(
+        syms_of(&toggled, shift).contains(&Keysym::Shift_R),
+        "the remaining Shift should be the right-hand key"
+    );
+}
+
+/// The `ctrl` half of the same bug: `grp:lctrl_toggle` takes `Control_L`
+/// off the keymap, leaving the real Control on the right-hand key only.
+#[test]
+fn control_is_still_holdable_when_the_left_control_becomes_a_group_toggle() {
+    let toggled = keymap_with("us", "", Some("grp:lctrl_toggle"));
+    assert_eq!(
+        named_key(&toggled, FIRST, Keysym::Control_L),
+        NamedKey::Absent,
+        "with `grp:lctrl_toggle`, no key carries `Control_L`, which is what the hard-coded lookup refused on"
+    );
+    let probed = ModifierKeys::probe(&toggled, FIRST);
+    let index = toggled.mod_get_index("Control") as usize;
+    let control = probed.keys[index].expect("Control must still be holdable");
+    assert!(
+        syms_of(&toggled, control).contains(&Keysym::Control_R),
+        "the remaining Control should be the right-hand key"
+    );
+}
+
+/// Both shifts present: the probe records the lowest keycode first, which is
+/// the left-hand key -- the same choice a person makes without thinking.
+/// Pinned so a future change to the walk order is a deliberate one.
+#[test]
+fn with_both_shifts_present_the_probe_holds_the_left_hand_key() {
+    let us = keymap("us", "");
+    let probed = ModifierKeys::probe(&us, FIRST);
+    let index = us.mod_get_index("Shift") as usize;
+    let shift = probed.keys[index].expect("Shift is holdable on `us`");
+    assert!(
+        syms_of(&us, shift).contains(&Keysym::Shift_L),
+        "with both present, the probed Shift should be the left-hand key"
+    );
+}
+
+/// The name table behind [`modifier_key`]: each IPC modifier means the real
+/// modifier clients decode under the same name. `Shift`/`Control` are xkb's
+/// own; `Alt` is `Mod1` and `Super` is `Mod4` -- the names Smithay's own
+/// `ModifiersState` reads, so the probed key sets precisely what a toolkit
+/// calls that modifier. A wrong arm here refuses (no key for that real
+/// modifier) or holds the wrong key, which the live `alt+Tab` / `super+h`
+/// test in the parent module would catch as wrong text.
+#[test]
+fn ipc_modifiers_name_the_modifiers_clients_decode() {
+    assert_eq!(real_mod_name(Modifier::Ctrl), xkb::MOD_NAME_CTRL);
+    assert_eq!(real_mod_name(Modifier::Shift), xkb::MOD_NAME_SHIFT);
+    assert_eq!(real_mod_name(Modifier::Alt), xkb::MOD_NAME_ALT);
+    assert_eq!(real_mod_name(Modifier::Super), xkb::MOD_NAME_LOGO);
+}
+
+/// A modifier with no holdable key resolves to nothing -- the `None` the
+/// caller turns into its honest "no key" refusal. No stock xkeyboard-config
+/// layout in the sweep above drops a whole modifier (even the toggles leave
+/// the other hand), so this pins the path with a probe that found nothing
+/// rather than with a layout that cannot be compiled here.
+#[test]
+fn a_modifier_with_no_holdable_key_resolves_to_nothing() {
+    let us = keymap("us", "");
+    let mut empty = Some(ModifierKeys {
+        layout: FIRST,
+        keys: [None; REAL_MODIFIERS],
+    });
+    for modifier in [
+        Modifier::Ctrl,
+        Modifier::Shift,
+        Modifier::Alt,
+        Modifier::Super,
+    ] {
+        assert_eq!(
+            modifier_key(&us, FIRST, &mut empty, modifier),
+            None,
+            "{modifier:?} should resolve to nothing against an empty probe"
+        );
+    }
+    // ... while the same keymap with a real probe resolves all four, so the
+    // `None` above is the empty table, not the lookup.
+    let mut probed = None;
+    for modifier in [
+        Modifier::Ctrl,
+        Modifier::Shift,
+        Modifier::Alt,
+        Modifier::Super,
+    ] {
+        assert!(
+            modifier_key(&us, FIRST, &mut probed, modifier).is_some(),
+            "{modifier:?} should resolve on a plain `us` layout"
+        );
+    }
 }

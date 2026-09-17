@@ -45,6 +45,7 @@
 //! result is a fixed-size, `Copy` value, so typing a string costs no heap
 //! traffic on the IPC path however long the string is.
 
+use flexwm_ipc::Modifier;
 use smithay::input::keyboard::{Keycode, Keysym, xkb};
 
 #[cfg(test)]
@@ -250,6 +251,66 @@ impl ModifierKeys {
             held.push(code);
         }
         (held.len == mask.count_ones() as usize).then_some(held)
+    }
+}
+
+/// Which key holds an IPC modifier down, on `layout` of `keymap` -- the
+/// question [`super::State::press`] asks of its modifiers, answered the way
+/// [`plan`] answers its own: by asking the keymap which key *actually*
+/// depresses the modifier, rather than by naming a `_L` keysym and hoping.
+/// A `grp:lshift_toggle` layout carries no `Shift_L` at any level, but its
+/// right-hand key still depresses the real Shift, and that is what this
+/// finds.
+///
+/// Each [`Modifier`] means the real modifier clients decode under the same
+/// name: `Shift`/`Control` are xkb's own, while `Alt` is `Mod1` and `Super`
+/// is `Mod4` -- exactly the names Smithay's `ModifiersState` reads, so the
+/// key found here sets precisely what a toolkit calls that modifier. A
+/// keymap with no such modifier at all (`mod_get_index` answering
+/// `MOD_INVALID`) resolves to nothing, which the caller refuses with the
+/// same honest "no key" error it always gave.
+///
+/// There is deliberately no level requirement on the key found. The probe
+/// presses keys and watches the depressed mask without ever consulting
+/// keysyms, so a modifier reached from anywhere but level 0 -- or on a key
+/// carrying no nameable keysym at all -- is accepted all the same. What
+/// disqualifies a key is behavior, not position: latching or locking its
+/// modifier instead of holding it, depressing anything else alongside it, or
+/// switching the group (which is why a toggled left Shift is skipped while
+/// the right-hand one is found).
+///
+/// `modifier_keys` is the caller's probe cache, shared across one combo's
+/// modifiers (or one string's characters, for [`plan`]): at most one keymap
+/// walk per request, however many modifiers name it. Keyed on the probed
+/// layout, like [`plan`]'s, for the same reason.
+pub(super) fn modifier_key(
+    keymap: &xkb::Keymap,
+    layout: xkb::LayoutIndex,
+    modifier_keys: &mut Option<ModifierKeys>,
+    modifier: Modifier,
+) -> Option<Keycode> {
+    let index = keymap.mod_get_index(real_mod_name(modifier));
+    if index == xkb::MOD_INVALID {
+        return None;
+    }
+    let modifier_keys = match modifier_keys {
+        Some(probed) if probed.layout == layout => probed,
+        slot => slot.insert(ModifierKeys::probe(keymap, layout)),
+    };
+    // `get`, not `[]`: an index past the real modifiers is a modifier
+    // nothing here can produce (see `hold`), not a panic.
+    modifier_keys.keys.get(index as usize).copied().flatten()
+}
+
+/// The keymap modifier each IPC [`Modifier`] names. Matched exhaustively
+/// rather than cast, so adding a modifier is a compile error here instead
+/// of a mask that silently aliases another one's.
+fn real_mod_name(modifier: Modifier) -> &'static str {
+    match modifier {
+        Modifier::Ctrl => xkb::MOD_NAME_CTRL,
+        Modifier::Shift => xkb::MOD_NAME_SHIFT,
+        Modifier::Alt => xkb::MOD_NAME_ALT,
+        Modifier::Super => xkb::MOD_NAME_LOGO,
     }
 }
 

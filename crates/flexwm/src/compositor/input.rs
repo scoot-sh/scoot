@@ -300,8 +300,8 @@ impl State {
     /// carry one: every `ChangeVt` binding is keyed on an `F1`..`F12` keysym
     /// (see `Keybindings::vt_switch_bindings`, the only place that
     /// constructs one -- `tty::init` only applies it),
-    /// never on a modifier's own keysym (`Control_L`/`Shift_L`/`Alt_L`/
-    /// `Super_L`), so pressing one of this combo's modifiers on its own --
+    /// never on a modifier's own keysym (whichever hand it is on), so
+    /// pressing one of this combo's modifiers on its own --
     /// the loop below -- structurally cannot match one, no matter what's
     /// configured in `[binds]`. Accumulated across *every* press below
     /// (via `Option::or`, so the first hit wins) rather than read from just
@@ -354,6 +354,13 @@ impl State {
             // is a compile error here instead of a bit that silently
             // aliases another one's.
             let mut seen = 0u8;
+            // The probe walks the whole keymap (a few hundred FFI calls,
+            // no heap -- see `ModifierKeys::probe`), so it is built lazily
+            // and shared by every modifier in the combo, the same way
+            // `type_text` shares one across a whole string. `msg key` is
+            // per-request IPC, not a per-frame path, so this adds no new
+            // cost class over what `type` already pays.
+            let mut modifier_keys = None;
             for &modifier in &combo.modifiers {
                 let bit = match modifier {
                     Modifier::Ctrl => 1 << 0,
@@ -365,8 +372,14 @@ impl State {
                     continue;
                 }
                 seen |= bit;
-                let keysym = modifier_keysym(modifier);
-                held.push(unmodified_key(keymap, layout, keysym, modifier.name())?);
+                // Asked of the keymap, not of a hard-coded `_L` keysym: a
+                // layout that moved the real modifier elsewhere (or never
+                // had it on the left-hand key) still resolves, and one with
+                // no holdable key for it is refused with the same honest
+                // error as before.
+                let code = modifiers::modifier_key(keymap, layout, &mut modifier_keys, modifier)
+                    .ok_or_else(|| format!("no key for `{}` in this layout", modifier.name()))?;
+                held.push(code);
             }
             Ok((code, held))
         })
@@ -722,15 +735,6 @@ fn unmodified_key(
              which works the modifiers out from the layout"
         )),
         NamedKey::Absent => Err(format!("no key for `{name}` in this layout")),
-    }
-}
-
-fn modifier_keysym(modifier: Modifier) -> Keysym {
-    match modifier {
-        Modifier::Ctrl => Keysym::Control_L,
-        Modifier::Shift => Keysym::Shift_L,
-        Modifier::Alt => Keysym::Alt_L,
-        Modifier::Super => Keysym::Super_L,
     }
 }
 
