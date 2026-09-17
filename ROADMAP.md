@@ -187,12 +187,14 @@ actually open.
 2. **Medium-priority protocol gaps**, mostly what's left of the DMS/Noctalia
    probes (see "Shell enablement" below for their recommended order):
    [screencopy's toplevel half](docs/backlog/protocols/screencopy-toplevel-capture.md)
-   (the output half shipped — see "Recently shipped" above),
-   plus one filed from PR #44's own review —
-   [popup grab serial validation](docs/backlog/protocols/popup-grab-serial-validation.md)
-   (its sibling, [a window-focus change doesn't dismiss an active popup
-   grab](docs/backlog/resolved/popup-grab-focus-divergence-done.md), shipped
-   as an IPC `popup_grab` field in PR #55 — see "Recently shipped" above).
+   (the output half shipped — see "Recently shipped" above).
+   [Popup grab serial validation](docs/backlog/resolved/popup-grab-serial-validation-done.md)
+   is also done — a grab now has to name a real, recent key/button/enter
+   event delivered to the grabbing client (or continue its own open menu).
+   It was filed from PR #44's own review alongside
+   [a window-focus change doesn't dismiss an active popup
+   grab](docs/backlog/resolved/popup-grab-focus-divergence-done.md), which
+   shipped as an IPC `popup_grab` field in PR #55.
 3. **[IPC connection cap and the half-closed-connection
    leak](docs/backlog/resolved/ipc-connection-cap-resolved.md)** — RESOLVED
    2026-09-16: 64 concurrent connections, refused with a reason past that,
@@ -241,8 +243,10 @@ probes' recommended order:
    own dropdown is not dismissed by the bar that opened it.
    Layer-parented popups turned out already to work; implementing the
    handler the entry asked for would have put two tree nodes on one
-   surface (measured). Follow-up filed:
-   [grab serial validation](docs/backlog/protocols/popup-grab-serial-validation.md).
+   surface (measured). Follow-up filed, and since resolved:
+   [grab serial validation](docs/backlog/resolved/popup-grab-serial-validation-done.md)
+   — a grab now names a real, recent key/button/enter event or continues
+   its own open menu, proven live against real Qt and GTK menus.
    Neither probed shell exercises any of this directly: DMS and Noctalia
    both route their own menus through layer surfaces, with zero
    `xdg_popup` wire traffic in either probe — the first real client for
