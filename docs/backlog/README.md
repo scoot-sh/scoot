@@ -113,7 +113,10 @@ actionable.
   double-tracked them. Follow-up: the grab serial is still unvalidated.
 - [`xdg_popup.grab` accepts any serial](./protocols/popup-grab-serial-validation.md) — any client can take the keyboard with no user action
 - [An `exclusive` layer surface's own popup grab dismisses itself](./protocols/popup-grab-exclusive-self-dismiss.md)
-- [A window-focus change doesn't dismiss an active popup grab](./protocols/popup-grab-survives-window-focus-change.md) — `windows`' `focused` can diverge from where keys go; relevant to computer-use targeting fidelity
+- [A window-focus change doesn't dismiss an active popup grab](./resolved/popup-grab-focus-divergence-done.md)
+  — RESOLVED 2026-09-16 (PR #55): grab semantics unchanged, but `msg windows`
+  now reports `popup_grab` per window so an agent can tell focus from where
+  keys actually go; relevant to computer-use targeting fidelity
 - [An IME keyboard grab blocks every popup grab](./protocols/popup-grab-blocked-by-ime-grab.md) — no context menu opens anywhere while an IME holds the seat
 - [Layer surface with no buffer still holds its exclusive zone](./protocols/layer-surface-bufferless-exclusive-zone.md)
 - [Unbounded `ext_workspace_manager_v1` binds per client](./protocols/ext-workspace-object-binding-cap.md)

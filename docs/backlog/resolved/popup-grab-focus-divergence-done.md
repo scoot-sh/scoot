@@ -1,12 +1,14 @@
 ---
-title: "A window-focus change (e.g. a keybinding) does not dismiss an active popup grab, so `flexwm msg windows`' `focused` diverges from where keys actually go."
-status: "open"
-area: "protocols"
-priority: "medium"
+title: "A window-focus change does not dismiss an active popup grab, so `focused` diverges from where keys go — RESOLVED (exposed over IPC, grab untouched)."
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
 ---
 
-# A window-focus change (e.g. a keybinding) does not dismiss an active popup grab, so `flexwm msg windows`' `focused` diverges from where keys actually go.
+# A window-focus change does not dismiss an active popup grab, so `focused` diverges from where keys go — RESOLVED (exposed over IPC, grab untouched).
+
+## The entry as filed
 
 Found by independent review of `docs/backlog/resolved/xdg-popup-input-resolved.md`
 (PR #44). Deliberate and tested (`keybindings_still_fire_while_a_popup_grabs_the_keyboard`
@@ -71,3 +73,28 @@ disruption:
 Whichever is chosen, `README.md`'s IPC/computer-use section should say so
 explicitly either way, since this is exactly the kind of silent-wrong-target
 failure that section exists to warn about.
+
+## Resolution (PR #55, merged 2026-09-16 as `4334d68`)
+
+Option 2, by coordinator decision: dismissing the grab (option 1) would
+overturn the deliberate `keybindings_still_fire_...` guarantee for human
+users to serve agents — the wrong tradeoff for a daily-drive compositor —
+and documenting alone (option 3) leaves agents guessing.
+
+What shipped: `WindowSnapshot.popup_grab: bool` (`#[serde(default)]`, no
+`PROTOCOL_VERSION` bump per the `icon`/`usable`/`locked` additive-field
+precedent, wire tests both directions); `State::popup_grab_holder()` reads
+the held grab's root via `keyboard_grab_start_data().focus` (stable for the
+grab's life, unlike `current_grab`), gated on `!has_ended()`, mapped
+through `State::id_of`; `window_snapshots()` sets the flag per window.
+Grab semantics untouched — no diff on any install/dismiss/focus path, and
+the keybinding guarantee passes unmodified. `README.md`'s IPC
+computer-use section states the scenario, the agent rule, the asymmetric
+`false` (layer-rooted grabs, locked sessions, old servers), and the
+limits. Three new tests (holder alongside focus, layer-rooted all-false,
+wire compat); full set green (657 / 753). Independent review came back
+with no blocking findings and a live headless spot-check confirming
+`"popup_grab": false` on the wire. Post-merge follow-up on `main`
+(`f2f7c87`, comment-only): the ended-unreaped sliver the code comment
+described is unreachable single-threaded, and the rustdoc now lists the
+locked-session false the README already named.

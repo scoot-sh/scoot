@@ -161,6 +161,13 @@ gap jumped the queue — each item's own file records why it landed when it did.
   the path agrees with IPC `FocusWorkspaceIndex` rather than differing by
   transport. The agent-facing IPC half was already fixed, so no agent loop
   silently mistypes; this closes the panel-that-stays-mapped exposure.
+- **[Popup-grab keyboard holder over IPC](docs/backlog/resolved/popup-grab-focus-divergence-done.md)**
+  (PR #55, 2026-09-16) — a window-focus change still does not dismiss an
+  active popup grab (that deliberate guarantee stands), but `msg windows`
+  now reports `popup_grab` per window, read off the held grab's root, so an
+  agent can tell "window B is focused" from "B is focused but A's menu holds
+  the keyboard". Additive field, no version bump; README's computer-use
+  section states the agent rule and the asymmetric-`false` cases.
 
 ## What's next
 
@@ -181,10 +188,11 @@ actually open.
    probes (see "Shell enablement" below for their recommended order):
    [screencopy's toplevel half](docs/backlog/protocols/screencopy-toplevel-capture.md)
    (the output half shipped — see "Recently shipped" above),
-   plus two filed from PR #44's own review —
+   plus one filed from PR #44's own review —
    [popup grab serial validation](docs/backlog/protocols/popup-grab-serial-validation.md)
-   and [a window-focus change doesn't dismiss an active popup
-   grab](docs/backlog/protocols/popup-grab-survives-window-focus-change.md).
+   (its sibling, [a window-focus change doesn't dismiss an active popup
+   grab](docs/backlog/resolved/popup-grab-focus-divergence-done.md), shipped
+   as an IPC `popup_grab` field in PR #55 — see "Recently shipped" above).
 3. **[IPC connection cap and the half-closed-connection
    leak](docs/backlog/resolved/ipc-connection-cap-resolved.md)** — RESOLVED
    2026-09-16: 64 concurrent connections, refused with a reason past that,
