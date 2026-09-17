@@ -491,6 +491,16 @@ impl Dispatch2<ExtForeignToplevelListV1, State> for ListData {
     ) {
         match request {
             ext_foreign_toplevel_list_v1::Request::Stop => {
+                // Retracted before anything else: if this list was refused
+                // for being over budget, its `finished` is still queued for
+                // loop idle (see `bind_budget.rs`) -- and `finished` here is
+                // a plain event, not a destructor, so without the retraction
+                // the idle send would be a live duplicate. (The other three
+                // capped globals need no equivalent: their `finished` events
+                // destroy the object first, so a second send dies swallowed.)
+                // Idempotent with the `destroyed` release -- removing an
+                // absent id is a no-op.
+                state.bind_budget.undefer_bind_refusal(&list.id());
                 // Released synchronously rather than left to `destroyed`: a
                 // stop-and-rebind in one batch must see the freed slot without
                 // waiting for post-batch cleanup. Idempotent with the

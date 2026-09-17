@@ -118,7 +118,7 @@ use smithay::reexports::wayland_protocols::ext::workspace::v1::server::ext_works
 use smithay::reexports::wayland_protocols_wlr::foreign_toplevel::v1::server::zwlr_foreign_toplevel_manager_v1::ZwlrForeignToplevelManagerV1;
 use smithay::reexports::wayland_protocols_wlr::output_management::v1::server::zwlr_output_manager_v1::ZwlrOutputManagerV1;
 use smithay::reexports::wayland_server::backend::{ClientId, ObjectId};
-use smithay::reexports::wayland_server::Client;
+use smithay::reexports::wayland_server::{Client, Resource};
 
 use super::State;
 
@@ -209,6 +209,31 @@ impl BindBudget {
         self.held.get(client).map(HashSet::len).unwrap_or(0)
     }
 
+    /// Retracts a deferred refusal whose object was stopped before the idle
+    /// callback ran, so it is not finished twice.
+    ///
+    /// This cannot suppress a *legitimate* `finished`, and the three clauses
+    /// are all load-bearing rather than belt-and-braces:
+    ///
+    /// - The queue holds *only* over-budget refusals: entries are added
+    ///   solely on the [`Self::refuse_bind`]-true path in the four capped
+    ///   binds, so removing one removes a refusal and nothing else.
+    /// - Removal is by exact [`ObjectId`] -- serial included -- so only the
+    ///   refused object itself matches, never another bind reusing its
+    ///   numeric protocol id.
+    /// - The ordinary stop-then-`finished` flow never consults this queue:
+    ///   its `finished` is sent inline in the request handler,
+    ///   unconditionally. Withdrawing a queued refusal therefore cannot take
+    ///   away an event the normal flow would have sent -- which the
+    ///   per-protocol stop tests (exactly one `finished` each, all passing)
+    ///   pin from the other side.
+    pub(super) fn undefer_bind_refusal(&mut self, id: &ObjectId) {
+        if self.refused.is_empty() {
+            return;
+        }
+        self.refused.retain(|refused| refused.id() != *id);
+    }
+
     /// Sends every deferred refusal's `finished`. Runs on loop idle (see
     /// [`State::defer_bind_refusal`]), never in `bind` -- by then the bind
     /// epilogue has assigned the objects their user data, so a destructor
@@ -236,10 +261,17 @@ impl BindBudget {
 /// normally in the same pass, later under a saturated one -- and the client
 /// still learns of the refusal on its next round trip.
 ///
-/// A client that destroys the refused object before the callback runs is
-/// harmless: the send lands on a dead object and is swallowed as `InvalidId`
-/// (the generated `let _ =`), and the `destroyed` release finds nothing to
-/// remove.
+/// A client that stops the refused object before the callback runs still gets
+/// exactly one `finished`: `stop` retracts the queued refusal first (see
+/// [`BindBudget::undefer_bind_refusal`]) and then sends its own. Only the
+/// ext list needs the retraction on the wire -- its `finished` is a plain
+/// event, so without it the idle send would be a live duplicate. The other
+/// three globals' `finished` events are destructors: stopping a refused bind
+/// there destroys the object first, and the idle send lands on a dead object
+/// and is swallowed as `InvalidId` (the generated `let _ =`) before any byte
+/// is written. A refusal that outlives its object any other way -- the client
+/// disconnects mid-batch, where no hook runs before cleanup -- likewise ends
+/// swallowed, and the `destroyed` release finds nothing to remove.
 #[derive(Debug)]
 pub(super) enum RefusedBind {
     Workspace(ExtWorkspaceManagerV1),
@@ -252,6 +284,18 @@ pub(super) enum RefusedBind {
 }
 
 impl RefusedBind {
+    /// The refused object itself, for retracting the refusal if the client
+    /// stops or destroys it before the idle send (see
+    /// [`BindBudget::undefer_bind_refusal`]).
+    fn id(&self) -> ObjectId {
+        match self {
+            Self::Workspace(manager) => manager.id(),
+            Self::ToplevelList(list) => list.id(),
+            Self::WlrToplevel(manager) => manager.id(),
+            Self::OutputManager(manager, _) => manager.id(),
+        }
+    }
+
     /// Sends the refusal: each global's own teardown, never a protocol
     /// error. A miscount must not kill a legitimate shell -- and per-client
     /// by construction, since only the overflowing client's object is told.

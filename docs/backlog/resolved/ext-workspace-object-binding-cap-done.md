@@ -65,6 +65,12 @@ released idempotently on its `stop` and in its `destroyed` hook.
   at that window count. A tighter number would bound a few more small objects
   per abuser; the failure mode of a false positive is a shell permanently
   missing its taskbar or workspace list, so the margin errs generous.
+- **Per connection, not per machine.** The budget is keyed by `ClientId`, and
+  Wayland connections are unbounded: one abuser opening N connections holds
+  up to 8N binds x windows. Stated rather than solved -- still strictly better
+  than unbounded per connection, the same per-connection shape as the
+  capture-frame cap, and cross-connection abuse is connection-count territory,
+  not a bigger bind budget.
 - **Why not lower/higher.** The dead-but-unpruned analysis below leaves one
   transient (a disconnect racing a bind in the same batch briefly counts both)
   that doubles a count momentarily -- the budget must exceed 2x steady-state

@@ -82,6 +82,9 @@ enum Step {
     StopOutput(usize),
     StopWsAndBindWs(usize),
     DestroyListAndBindList(usize),
+    /// Bind another list and `stop` it with no round trip in between: both
+    /// land in one dispatch batch.
+    BindListAndStopList,
     TakeLog,
 }
 
@@ -331,12 +334,25 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 acks.send(Ack::Done).map_err(|e| e.to_string())?;
             }
             Step::DestroyListAndBindList(index) => {
-                // Same, but the free is only visible at post-batch cleanup:
-                // the rebind briefly counts both generations.
+                // No round trip between the two, like the step above -- but
+                // unlike `stop`, `destroy` needs no synchronous release to
+                // make this succeed: it is the interface's destructor request
+                // (the XML marks only `destroy` as such), so `destroyed` runs
+                // inline in the same dispatch and the rebind already sees the
+                // freed slot.
                 client.lists[index].destroy();
                 client
                     .lists
                     .push(registry.bind(list_name, list_version.min(1), &qh, ()));
+                queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                acks.send(Ack::Done).map_err(|e| e.to_string())?;
+            }
+            Step::BindListAndStopList => {
+                client
+                    .lists
+                    .push(registry.bind(list_name, list_version.min(1), &qh, ()));
+                let last = client.lists.len() - 1;
+                client.lists[last].stop();
                 queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
                 acks.send(Ack::Done).map_err(|e| e.to_string())?;
             }
@@ -640,6 +656,33 @@ fn stop_and_rebind_in_one_batch_succeeds_at_the_cap() {
             .any(|seen| matches!(seen, Seen::WsFinished(key) if *key == MAX_BINDS_PER_CLIENT)),
         "the same-batch rebind was refused: {log:?}"
     );
+    assert_eq!(fixture.held(0), MAX_BINDS_PER_CLIENT as usize);
+}
+
+/// A refused list stopped before the idle callback runs is finished exactly
+/// once: `stop` retracts the queued refusal before sending its own, so the
+/// idle send has nothing left to do. (Without the retraction the client would
+/// see two `finished` events on a live object -- benign under the XML, which
+/// only forbids `toplevel` after `finished`, but unpinned and sloppy.)
+#[test]
+fn refused_list_stopped_before_idle_gets_exactly_one_finished() {
+    let mut fixture = Fixture::new();
+    for _ in 0..MAX_BINDS_PER_CLIENT {
+        fixture.run(Step::BindList);
+    }
+    fixture.take_log();
+    // The ninth bind is refused, and the `stop` lands in the same batch,
+    // before loop idle can send the deferred `finished`.
+    fixture.run(Step::BindListAndStopList);
+    assert_eq!(
+        fixture.take_log(),
+        vec![Seen::ListFinished(MAX_BINDS_PER_CLIENT)]
+    );
+    // Still connected, and nothing was counted: one stop of an allowed bind
+    // plus one rebind prove the budget is where it was.
+    fixture.run(Step::StopList(0));
+    fixture.run(Step::BindList);
+    assert_eq!(fixture.take_log(), vec![Seen::ListFinished(0)]);
     assert_eq!(fixture.held(0), MAX_BINDS_PER_CLIENT as usize);
 }
 
