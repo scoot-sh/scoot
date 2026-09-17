@@ -159,15 +159,19 @@
 //! hit test while leaving it holding pointer focus would still deliver it
 //! every click.
 //!
-//! ## Every lock transition does the same three things
+//! ## Every lock transition does the same four things
 //!
 //! Re-deriving both focuses is only two of them. The third is dropping a
-//! pointer grab, and it is the one a call site can silently forget: a grab
+//! pointer grab, and the fourth is deactivating a held pointer constraint
+//! -- and either is the one a call site can silently forget: a grab
 //! outlives focus changes *by design*, so a transition that re-derived focus
 //! and stopped there would leave the grabbing client -- a drag-and-drop
 //! started before the transition -- receiving exactly the pointer events the
-//! focus change was meant to take away from it. [`State::lock_transition`] is
-//! the three together, and every transition calls it rather than repeating
+//! focus change was meant to take away from it; and a held pointer lock
+//! freezes the focus refresh itself (a zero-delta move resolves to holding),
+//! so a transition that forgot it would leave pointer focus, deltas, buttons
+//! and axis on the locking client across the lock. [`State::lock_transition`] is
+//! the four together, and every transition calls it rather than repeating
 //! them: [`SessionLockHandler::lock`], [`State::refresh_lock_state`],
 //! [`State::lock_post_frame`]'s caller in the render loop, and both
 //! destruction hooks (`handlers.rs` for a destroyed `wl_surface`,
@@ -1043,15 +1047,18 @@ impl SessionLockHandler for State {
 
 impl State {
     /// Everything the compositor has to catch up when the set of lock
-    /// surfaces that may be drawn and focused has just changed: any input
-    /// grab dropped, both focuses re-derived, the screen marked dirty.
+    /// surfaces that may be drawn and focused has just changed: a held
+    /// pointer constraint deactivated, any input grab dropped, both focuses
+    /// re-derived, the screen marked dirty.
     ///
-    /// One function rather than the same three calls repeated, because the
-    /// three are not independent and the *asymmetry* is what goes wrong: a
+    /// One function rather than the same four calls repeated, because the
+    /// four are not independent and the *asymmetry* is what goes wrong: a
     /// transition that re-derived focus but left a grab installed would leave
     /// the grabbing client receiving pointer events the focus change was
-    /// supposed to take away from it, and that mistake is invisible at the
-    /// call site that forgot it. The callers are
+    /// supposed to take away from it, and a transition that re-derived focus
+    /// but left a held pointer lock active would never move focus at all --
+    /// and both mistakes are invisible at the call site that forgot them.
+    /// The callers are
     /// [`SessionLockHandler::lock`] (a fresh lock or a takeover),
     /// [`State::refresh_lock_state`] (a `destroy`/disconnect observed on the
     /// wayland connection), [`State::lock_post_frame`]'s caller (the render
@@ -1067,6 +1074,14 @@ impl State {
         // to whatever the pointer had pending, so re-deriving afterwards is
         // what gets the final word.
         self.drop_input_grabs();
+        // Deactivate a held pointer lock or confinement before the refresh
+        // below: a zero-delta refresh against either resolves to holding
+        // focus in place, so without this the lock transition would leave
+        // pointer focus -- and with it deltas, buttons and axis -- on the
+        // locking client across the lock. See
+        // `relative_pointer.rs::deactivate_pointer_constraint` for why only
+        // the focus surface's constraint needs it.
+        self.deactivate_pointer_constraint();
         self.refresh_keyboard_focus();
         self.refresh_pointer_focus();
         self.request_render();

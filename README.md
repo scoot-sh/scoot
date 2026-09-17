@@ -320,7 +320,11 @@ Relative pointer below), `pointer move` and `click` still answer `ok` but
 move nothing -- the lock owns the pointer until its client releases it. An
 agent driving the pointer during a game or 3D session sees success replies
 with a frozen cursor; clicks still reach whatever surface holds pointer
-focus.
+focus. A session lock ends that freeze: locking deactivates the held
+constraint, so injected motion and clicks reach the lock surface exactly
+like a real mouse, and unlocking re-arms the game's lock. An agent must
+not assume a lock it observed survives a session lock -- after one, the
+game holds its pointer again and the stream has resumed.
 
 `--tty` needs a seat (`seatd` or logind) with a DRM device on it. On a modern
 kernel, on every non-root `--tty` run, Smithay logs `Unable to become drm
@@ -1575,8 +1579,17 @@ What to know before pointing a client at it:
   lock taken on the focused surface is active, the cursor does not move (the
   relative stream keeps flowing). A confinement keeps the pointer on its
   surface, clamped per axis to its region. A lock taken while unfocused
- stays inactive. Destroying a persistent lock or confinement is silent (no
- `unlocked`/`unconfined` event) and frees the pointer immediately.
+  stays inactive. Destroying a persistent lock or confinement is silent (no
+  `unlocked`/`unconfined` event) and frees the pointer immediately.
+- **A session lock deactivates a held lock or confinement.** Locking the
+  session sends `unlocked`/`unconfined` to the holding client and moves
+  pointer focus to the lock surface, so no pointer input -- deltas, buttons
+  or scroll -- reaches the game while locked. The persistent entry stays
+  registered: unlocking returns focus to the game surface and re-arms it
+  there with no new request (the client sees `locked`/`confined` again),
+  and the relative stream resumes with absolute still held. A lock
+  requested while the session is already locked stays inactive until unlock
+  engages it the same way.
 
 ## Presentation-time feedback (`wp_presentation`)
 

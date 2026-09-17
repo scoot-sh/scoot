@@ -491,6 +491,19 @@ gap jumped the queue — each item's own file records why it landed when it did.
   timestamps, supersede-discarded, unmapped/locked absence, disconnect);
   live `foot` proves the advertisement. The bundle
   (`docs/backlog/protocols/protocol-gaps-general.md`) is now fully done.
+- **[A held pointer lock across a session
+  lock](docs/backlog/resolved/pointer-lock-session-lock-done.md)** (PR #92,
+  2026-09-17) — the password-leak-class regression PR #89 introduced: the
+  lock transition's focus refresh is a zero-delta move, which a held
+  constraint resolves to `Held`, so deltas, buttons and axis kept streaming
+  to the game while the lock surface never got `enter` (and the cited
+  chord recovery never runs while locked). The transition now deactivates
+  the focus surface's held constraint first — the game sees `unlocked`,
+  the persistent entry re-arms on unlock with no new request — and the test
+  that pinned the freeze as intended is rewritten as an explicit behavior
+  correction. Confinement needed no fix (fail-open + leave-deactivation;
+  pinned), and the adjacent per-event region clone is gone (two short
+  borrows; overlapping bench ranges, structurally allocation-free).
 ## What's next
 
 The backlog is the source of truth for what to pick up; this is the current
