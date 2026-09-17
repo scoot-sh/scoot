@@ -1,7 +1,7 @@
 ---
-title: "Screen capture forces `Xrgb8888`'s undefined fourth byte opaque, and that is most of what a capture costs."
-status: "open"
-area: "protocols"
+title: "Screen capture forces `Xrgb8888`'s undefined fourth byte opaque, and that is most of what a capture costs — RESOLVED (conditional)."
+status: "resolved"
+area: "resolved"
 priority: "low"
 blocked: null
 ---
@@ -68,3 +68,34 @@ the other end.
   only because it is a behaviour change filed mid-review.
 
 Rough size: S.
+
+## Resolution
+
+Decided as the ticket's third option: force the fourth byte only while
+`[appearance] background_color`'s alpha is actually below 1.0. Costs nothing
+in the default opaque configuration, keeps the guarantee exactly where it was
+needed. `Argb8888` stays advertised second and is untouched (it never forced).
+
+What shipped (`screencopy.rs`): `xrgb_needs_forcing(alpha)` — exact
+`< 1.0`, no epsilon (a config parses to `byte/255.0`, so `1.0` is the only
+opaque value spellable and `254/255` the nearest translucent one) — read off
+`State::appearance` once per frame tick in `service_captures` and threaded
+through `deliver` into `write_capture`, where `opaque` is now
+`is-Xrgb && force`. No config reload exists today (nothing writes
+`appearance` after `State::new`), so the per-tick read is trivially current;
+it also cannot go stale if a reload ever lands. The tick is synchronous on
+the event-loop thread, so no TOCTOU between the check and the writes.
+
+Byte-identity argument (pinned by test, not reasoned): windows composite
+source-over onto the framebuffer, which preserves opaqueness of the
+destination — so with an opaque background every read-back pixel already
+carries `0xff` and the old pass OR'd `0xff` onto `0xff`. The new
+`an_xrgb_capture_over_an_opaque_background_is_the_framebuffer_byte_for_byte`
+asserts both the premise (framebuffer all-`0xff`) and the conclusion
+(capture == framebuffer). The existing translucent-background tests
+(including the offset+stride combined one) still force and still pass; a
+fail-first neuter of the conditional fails exactly those three.
+
+Evidence: see the PR (benchmark table: micro row-memcpy vs forcing at opt 0
+and opt 3, plus release `--headless` end-to-end `grim` before/after with
+opaque background and post-change with translucent background).
