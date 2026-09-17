@@ -28,18 +28,19 @@
 //! The fd is read with a bounded non-blocking read, not `mmap`: a client can
 //! truncate or never fill what it passed, and `mmap` would turn that into a
 //! `SIGBUS` inside the compositor (Smithay's `SIGBUS` handler only covers its
-//! own `wl_shm` pools) or an unbounded mapping. The read takes at most
-//! `6 * size + 1` bytes -- and `size` itself is clamped at construction -- so
-//! a malicious fd can cost neither memory nor a blocked event loop: a pipe
-//! that never delivers simply reads short (or empty) and is refused.
+//! own `wl_shm` pools) or an unbounded mapping. The read is bounded at
+//! `6 * size` plus one 4096-byte chunk -- and `size` itself is clamped at
+//! construction -- so a malicious fd can cost neither memory nor a blocked
+//! event loop: a pipe that never delivers simply reads short (or empty) and
+//! is refused.
 //!
 //! ## Backends
 //!
-//! The ramp is accepted and stored on every backend. It is *applied* only
+//! The ramp is accepted on every backend. It is *applied* only
 //! under `--tty`, where there is a real CRTC gamma LUT to push it to (see
 //! [`Tty::set_gamma_ramp`](super::tty::Tty::set_gamma_ramp)). Under
-//! `--headless`/`--nested` there is no hardware LUT: the ramp is stored and
-//! the request succeeds, but nothing on screen changes -- and an IPC
+//! `--headless`/`--nested` there is no hardware LUT: the request succeeds
+//! but nothing on screen changes -- and an IPC
 //! screenshot reads the framebuffer, which is pre-LUT, so it shows the
 //! unmodified frame either way. `README.md` says this where a user will find
 //! it.
@@ -94,11 +95,10 @@ pub(crate) struct GammaControlState {
     size: u32,
     /// The live control, if any. Compared by object identity on destroy, so
     /// tearing down a superseded (already `failed`) control cannot clear a
-    /// newer one.
+    /// newer one. This is the only ramp record: `None` is the default linear
+    /// ramp, `Some` is a client ramp still in force -- there is deliberately
+    /// no copy of the ramp itself, nothing reads it back (see `set_gamma`).
     current: Option<ZwlrGammaControlV1>,
-    /// The last accepted ramp, `3 * size` entries (red, green, blue). `None`
-    /// is the default linear ramp -- nothing stored, nothing to restore.
-    stored: Option<Vec<u16>>,
 }
 
 impl GammaControlState {
@@ -112,7 +112,6 @@ impl GammaControlState {
             manager_global,
             size: FALLBACK_GAMMA_SIZE,
             current: None,
-            stored: None,
         }
     }
 
@@ -280,7 +279,7 @@ fn get_gamma_control(
     control.gamma_size(state.gamma_control.size);
 }
 
-/// Reads, validates, stores and (on `--tty`) applies one `set_gamma`.
+/// Reads, validates and (on `--tty`) applies one `set_gamma`.
 ///
 /// Anything about the fd that is not exactly `3 * size` little-endian `u16`
 /// entries -- short, long, empty, unreadable -- is `invalid_gamma`
@@ -302,6 +301,15 @@ fn set_gamma(state: &mut State, resource: &ZwlrGammaControlV1, fd: OwnedFd) {
             return;
         }
     };
+    // Nowhere to apply to outside `--tty` (headless/nested have no LUT):
+    // the length check above is the whole validation and the request
+    // succeeds. The accepted bytes are deliberately not kept -- nothing
+    // reads a stored ramp back (a future "report the current ramp" surface
+    // would need a real consumer first; see the follow-ups record), so
+    // keeping one would retain ~4.6 KB per ramp until destroy for nobody.
+    let Some(tty) = state.tty.as_ref() else {
+        return;
+    };
     let ramp: Vec<u16> = bytes
         .chunks_exact(2)
         .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
@@ -312,29 +320,24 @@ fn set_gamma(state: &mut State, resource: &ZwlrGammaControlV1, fd: OwnedFd) {
     // rather than a silent slice.
     debug_assert_eq!(ramp.len(), state.gamma_control.size as usize * 3);
 
-    if let Some(tty) = state.tty.as_ref() {
-        let size = state.gamma_control.size as usize;
-        if tty
-            .set_gamma_ramp(&ramp[..size], &ramp[size..2 * size], &ramp[2 * size..])
-            .is_err()
-        {
-            // The object is dead from here: `failed` means "no longer valid"
-            // and the client should destroy it. The stored ramp is left as it
-            // was -- the hardware still shows it, so the record of what is on
-            // screen stays true.
-            state.gamma_control.current = None;
-            resource.failed();
-            return;
-        }
+    let size = state.gamma_control.size as usize;
+    if tty
+        .set_gamma_ramp(&ramp[..size], &ramp[size..2 * size], &ramp[2 * size..])
+        .is_err()
+    {
+        // The object is dead from here: `failed` means "no longer valid"
+        // and the client should destroy it. The hardware keeps showing the
+        // last ramp it accepted; there is no record to update, so nothing
+        // can go stale.
+        state.gamma_control.current = None;
+        resource.failed();
     }
-    state.gamma_control.stored = Some(ramp);
 }
 
 /// Restores the default linear ramp when the current control goes away --
-/// explicit destroy or client disconnect -- and forgets the stored ramp.
+/// explicit destroy or client disconnect.
 fn restore_default(state: &mut State) {
     state.gamma_control.current = None;
-    state.gamma_control.stored = None;
     if let Some(tty) = state.tty.as_ref() {
         // Nothing to signal failure on: the object this would be about is
         // already gone. A failed restore leaves the last ramp on the hardware
@@ -351,16 +354,16 @@ fn restore_default(state: &mut State) {
     }
 }
 
-/// Reads at most `limit + 1` bytes from `fd`, without ever blocking the event
-/// loop.
+/// Reads a bounded prefix of `fd`, without ever blocking the event loop.
 ///
 /// `NONBLOCK` is set first: for a memfd or regular file (what every real
 /// client sends) it changes nothing, and for a pipe or socket (what a
 /// malicious or broken client sends) it turns "wait for EOF" into "return
 /// what is there", so a drip-fed fd reads short and is refused instead of
-/// parking the compositor. Reads stop at `limit + 1` -- the extra byte is the
-/// oversize detector, and stopping there bounds the allocation no matter what
-/// the fd claims to hold.
+/// parking the compositor. Reads stop once past `limit` -- anything beyond it
+/// is the oversize detector, and stopping there bounds the allocation to at
+/// most `limit + 4096` (4096-byte chunk reads) no matter what the fd claims
+/// to hold.
 ///
 /// Takes the fd by value: it arrived over the socket for this one read, and
 /// nothing else ever needs it afterwards.
@@ -388,9 +391,12 @@ fn read_bounded(fd: OwnedFd, limit: usize) -> Option<Vec<u8>> {
     read_positioned(&file, limit).or_else(|| read_sequential(&file, limit))
 }
 
-/// Positioned read of at most `limit + 1` bytes from offset zero. Returns
-/// `None` on an unreadable fd -- or on `ESPIPE`, which is the caller's cue to
-/// try [`read_sequential`] instead rather than a refusal.
+/// Positioned read of at most `limit + 4096` bytes from offset zero: whole
+/// 4096-byte chunks are appended until past `limit`, so one chunk overshoots
+/// the stop. Returns `None` on an unreadable fd -- or on `ESPIPE`, which is
+/// the caller's cue to try [`read_sequential`] instead rather than a refusal.
+/// ([`read_sequential`] is exact at `limit + 1` -- `take` stops mid-chunk --
+/// so its own bound comment needs no such correction.)
 fn read_positioned(file: &std::fs::File, limit: usize) -> Option<Vec<u8>> {
     use std::os::unix::fs::FileExt;
 

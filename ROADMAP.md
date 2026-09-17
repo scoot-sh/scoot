@@ -518,7 +518,8 @@ probes' recommended order:
    Both shells' destroy kills are now proven fixed, not inferred.
 
 Small follow-ups already filed alongside:
-[`gamma-control`](docs/backlog/protocols/gamma-control-followups.md),
+[`gamma-control`](docs/backlog/resolved/gamma-control-followups-done.md)
+(resolved, PR #78),
 [`layer-destroy`](docs/backlog/resolved/layer-destroy-review-followup-done.md)
 (resolved, PR #77).
 
