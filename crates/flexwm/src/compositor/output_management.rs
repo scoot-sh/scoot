@@ -611,6 +611,11 @@ impl State {
             None => true,
         };
         if !announced {
+            // Counted at bind but never registered, so the claim is given
+            // back: the client is gone, and a leak here would be a counter
+            // that only grows.
+            self.bind_budget
+                .release_bind(&client.id(), &entry.manager.id());
             return;
         }
         entry.manager.done(serial);
@@ -644,6 +649,20 @@ impl GlobalDispatch2<ZwlrOutputManagerV1, State> for ManagerGlobalData {
         data_init: &mut DataInit<'_, State>,
     ) {
         let manager = data_init.init(resource, ManagerData);
+        if state.bind_budget.refuse_bind(client, &manager.id()) {
+            // Over the shared per-client budget (see `bind_budget.rs`):
+            // deferred, not sent here -- `finished` is a destructor event,
+            // and sending one inside `bind` panics wayland-backend's bind
+            // epilogue. Not counted, not registered, so no later refresh
+            // walks it. The serial is the current one, unwound by no refresh:
+            // this manager will never build a configuration, so it is purely
+            // informational.
+            let serial = state.output_management.serial;
+            state.defer_bind_refusal(super::bind_budget::RefusedBind::OutputManager(
+                manager, serial,
+            ));
+            return;
+        }
         state.announce_output_heads(dh, client, manager);
     }
 }
@@ -652,7 +671,7 @@ impl Dispatch2<ZwlrOutputManagerV1, State> for ManagerData {
     fn request(
         &self,
         state: &mut State,
-        _client: &Client,
+        client: &Client,
         manager: &ZwlrOutputManagerV1,
         request: zwlr_output_manager_v1::Request,
         _dh: &DisplayHandle,
@@ -668,6 +687,12 @@ impl Dispatch2<ZwlrOutputManagerV1, State> for ManagerData {
                 data_init.init(id, configuration::ConfigurationData::default());
             }
             zwlr_output_manager_v1::Request::Stop => {
+                // Released synchronously rather than left to `destroyed`: a
+                // stop-and-rebind in one batch must see the freed slot without
+                // waiting for post-batch cleanup. Idempotent with the
+                // `destroyed` release -- `finished` queues it, and removing an
+                // absent id is a no-op.
+                state.bind_budget.release_bind(&client.id(), &manager.id());
                 // Unregistered first: `finished` is a destructor event, so the
                 // object is gone as soon as it is sent (wayland-backend
                 // removes it from the client's object map and queues its
@@ -693,9 +718,12 @@ impl Dispatch2<ZwlrOutputManagerV1, State> for ManagerData {
         }
     }
 
-    fn destroyed(&self, state: &mut State, _client: ClientId, manager: &ZwlrOutputManagerV1) {
+    fn destroyed(&self, state: &mut State, client: ClientId, manager: &ZwlrOutputManagerV1) {
         // The path an ordinary client disconnect takes, and the only thing
-        // that stops a dead client's entry from being walked on every refresh.
+        // that stops a dead client's entry from being walked on every refresh
+        // -- and the path its budget claim takes back, including for a bare
+        // destroy with no `stop` before it.
+        state.bind_budget.release_bind(&client, &manager.id());
         state
             .output_management
             .managers

@@ -61,8 +61,9 @@ impl State {
     ///
     /// Called only from `XdgShellHandler`'s `title_changed`/`app_id_changed`,
     /// which the pinned Smithay rev raises only when the value really changed
-    /// -- which is what lets the foreign-toplevel publish below send one
-    /// `done` per real change without comparing anything itself.
+    /// -- and each foreign-toplevel publish compares once more against what
+    /// its own handles were last sent, so only the field that moved goes out
+    /// with the `done` that closes it.
     pub fn refresh_window(&mut self, id: WindowId) {
         let info = self.info_of(id);
         // Before `info` moves into the event below.

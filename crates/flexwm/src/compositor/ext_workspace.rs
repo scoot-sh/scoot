@@ -462,6 +462,10 @@ impl State {
         );
         let Ok(group) = created else {
             tracing::warn!("could not create an ext_workspace_group_handle_v1");
+            // Counted at bind but never registered (see below), so the claim
+            // is given back: the client is gone, and a leak here would be a
+            // counter that only grows.
+            self.bind_budget.release_bind(&client.id(), &manager.id());
             // Still closed with a `done`: a client that waits for one before
             // drawing would otherwise wait forever. `finished` for the same
             // reason as in `Manager::apply`: this manager is never registered,
@@ -491,6 +495,8 @@ impl State {
             );
             let Ok(handle) = created else {
                 tracing::warn!(index, "could not create an ext_workspace_handle_v1");
+                // Same give-back as above: counted, never registered.
+                self.bind_budget.release_bind(&client.id(), &manager.id());
                 // Deliberately not registered: a manager holding a short list
                 // would address every later workspace by the wrong index. So,
                 // as above, the incomplete batch is closed and then the object
@@ -584,6 +590,15 @@ impl GlobalDispatch2<ExtWorkspaceManagerV1, State> for ManagerGlobalData {
         data_init: &mut DataInit<'_, State>,
     ) {
         let manager = data_init.init(resource, ManagerData);
+        if state.bind_budget.refuse_bind(client, &manager.id()) {
+            // Over the shared per-client budget (see `bind_budget.rs`):
+            // deferred, not sent here -- `finished` is a destructor event,
+            // and sending one inside `bind` panics wayland-backend's bind
+            // epilogue. Not counted, not registered, so no later refresh
+            // walks it.
+            state.defer_bind_refusal(super::bind_budget::RefusedBind::Workspace(manager));
+            return;
+        }
         state.announce_workspaces(dh, client, manager);
     }
 }
@@ -592,7 +607,7 @@ impl Dispatch2<ExtWorkspaceManagerV1, State> for ManagerData {
     fn request(
         &self,
         state: &mut State,
-        _client: &Client,
+        client: &Client,
         manager: &ExtWorkspaceManagerV1,
         request: ext_workspace_manager_v1::Request,
         _dh: &DisplayHandle,
@@ -603,6 +618,12 @@ impl Dispatch2<ExtWorkspaceManagerV1, State> for ManagerData {
                 state.commit_workspace_requests(manager);
             }
             ext_workspace_manager_v1::Request::Stop => {
+                // Released synchronously rather than left to `destroyed`: a
+                // stop-and-rebind in one batch must see the freed slot without
+                // waiting for post-batch cleanup. Idempotent with the
+                // `destroyed` release -- `finished` queues it, and removing an
+                // absent id is a no-op.
+                state.bind_budget.release_bind(&client.id(), &manager.id());
                 // Unregistered first: `finished` is a destructor event, so
                 // the object is gone as soon as it is sent (wayland-backend
                 // removes it from the client's object map and queues its
@@ -624,10 +645,12 @@ impl Dispatch2<ExtWorkspaceManagerV1, State> for ManagerData {
         }
     }
 
-    fn destroyed(&self, state: &mut State, _client: ClientId, manager: &ExtWorkspaceManagerV1) {
+    fn destroyed(&self, state: &mut State, client: ClientId, manager: &ExtWorkspaceManagerV1) {
         // The path an ordinary client disconnect takes, and the only thing
         // that stops a dead client's entry from being walked on every
-        // refresh.
+        // refresh -- and the path its budget claim takes back, including for
+        // a bare destroy with no `stop` before it.
+        state.bind_budget.release_bind(&client, &manager.id());
         state
             .ext_workspace
             .managers

@@ -509,6 +509,9 @@ impl State {
                 // server's own id allocation for a new object cannot fail, so
                 // object-id exhaustion is not a failure mode here.
                 //
+                // Counted at bind but never registered, so the claim is given
+                // back: a leak here would be a counter that only grows.
+                //
                 // Nothing is sent in answer: there is nobody left to hear a
                 // `finished`. The manager is simply not registered, so no later
                 // window walks it, and whatever handles were created before
@@ -518,6 +521,7 @@ impl State {
                     "could not create a zwlr_foreign_toplevel_handle_v1; \
                      the client is gone, dropping its manager"
                 );
+                self.bind_budget.release_bind(&client.id(), &manager.id());
                 return;
             };
             manager.toplevel(&handle);
@@ -654,6 +658,15 @@ impl GlobalDispatch2<ZwlrForeignToplevelManagerV1, State> for ManagerGlobalData 
         data_init: &mut DataInit<'_, State>,
     ) {
         let manager = data_init.init(resource, ManagerData);
+        if state.bind_budget.refuse_bind(client, &manager.id()) {
+            // Over the shared per-client budget (see `bind_budget.rs`):
+            // deferred, not sent here -- `finished` is a destructor event,
+            // and sending one inside `bind` panics wayland-backend's bind
+            // epilogue. Not counted, not registered, so no later window
+            // walks it.
+            state.defer_bind_refusal(super::bind_budget::RefusedBind::WlrToplevel(manager));
+            return;
+        }
         state.announce_wlr_toplevels(dh, client, manager);
     }
 }
@@ -662,7 +675,7 @@ impl Dispatch2<ZwlrForeignToplevelManagerV1, State> for ManagerData {
     fn request(
         &self,
         state: &mut State,
-        _client: &Client,
+        client: &Client,
         manager: &ZwlrForeignToplevelManagerV1,
         request: zwlr_foreign_toplevel_manager_v1::Request,
         _dh: &DisplayHandle,
@@ -675,6 +688,12 @@ impl Dispatch2<ZwlrForeignToplevelManagerV1, State> for ManagerData {
         // certainly not panicked on, which is what `unreachable!()` would make
         // of a future protocol version.
         if let zwlr_foreign_toplevel_manager_v1::Request::Stop = request {
+            // Released synchronously rather than left to `destroyed`: a
+            // stop-and-rebind in one batch must see the freed slot without
+            // waiting for post-batch cleanup. Idempotent with the `destroyed`
+            // release -- `finished` queues it, and removing an absent id is a
+            // no-op.
+            state.bind_budget.release_bind(&client.id(), &manager.id());
             // Unregistered first: `finished` is a destructor event, so the
             // object is gone as soon as it is sent (wayland-backend removes it
             // from the client's object map and queues its `destroyed`
@@ -697,12 +716,14 @@ impl Dispatch2<ZwlrForeignToplevelManagerV1, State> for ManagerData {
     fn destroyed(
         &self,
         state: &mut State,
-        _client: ClientId,
+        client: ClientId,
         manager: &ZwlrForeignToplevelManagerV1,
     ) {
         // The path an ordinary client disconnect takes, and the only thing that
         // stops a dead client's manager from being walked on every window
-        // opening.
+        // opening -- and the path its budget claim takes back, including for
+        // a bare destroy with no `stop` before it.
+        state.bind_budget.release_bind(&client, &manager.id());
         state
             .foreign_toplevel_management
             .managers

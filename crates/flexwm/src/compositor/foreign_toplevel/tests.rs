@@ -468,7 +468,7 @@ impl Fixture {
 
     /// How many windows the compositor is keeping a handle for.
     fn tracked(&self) -> usize {
-        self.state.foreign_toplevels.handles.len()
+        self.state.foreign_toplevels.toplevels.len()
     }
 }
 

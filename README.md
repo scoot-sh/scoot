@@ -96,7 +96,12 @@ across many pools from one client isn't bounded yet, see
 `docs/backlog/security/shm-total-per-client-unbounded.md`), a client's
 declared minimum window size can't exceed the largest
 output's usable area on each axis, and `gap` and `cursor_size` each have an
-upper bound as well as a lower one. A missing `$XDG_RUNTIME_DIR` is a one-line
+upper bound as well as a lower one. One client may also hold at most 8
+manager/list binds across the workspace, window-list and display globals
+combined (see Workspaces for bars below) — past that the excess bind is
+closed with `finished` (plus the `done` that batching requires, where the
+protocol has one) and announced nothing, so a greedy client costs itself
+its ninth subscription, never another client's. A missing `$XDG_RUNTIME_DIR` is a one-line
 startup error, not a crash. Verified
 end-to-end on every backend — a real
 client maps, tiles, receives synthetic input, and a screenshot proves it. Not
@@ -668,6 +673,15 @@ Worth knowing before you write against it:
 - **Multiple outputs will change the shape of this** — a group per output is
   what the protocol is built for — but flexwm has exactly one output today, so
   there is exactly one group.
+- **One connection may hold at most 8 binds across the workspace manager,
+  both window-list globals below and the display manager**, counted per
+  client: a ninth bind is answered `done` and then `finished` rather than
+  announced, and a client that over-binds denies nothing to any other client.
+  A bar binds this global once — stock quickshell binds one window-list
+  manager per connection and nothing else here — so legitimate use sits at a
+  quarter of the budget or less; see
+  `docs/backlog/resolved/ext-workspace-object-binding-cap-done.md` for the
+  sizing and the refusal form of each global.
 
 ## Window lists for bars (two protocols)
 
@@ -707,6 +721,10 @@ What a client sees:
   handles the client already has keep reporting title and app id changes
   until it destroys them, which is what the protocol's own teardown sequence
   (stop, wait for `finished`, then destroy the handles) requires.
+- **Binding the list counts against the same 8-bind per-client budget as the
+  workspace manager above** — a ninth bind of any of the four globals is
+  answered `finished` (after which no `toplevel` events arrive; destroy the
+  object) rather than announced.
 
 **The identifier is `<generation>-<window id>`** — e.g. `a3e689a2-1`: eight
 hex digits of per-session randomness (the "opaque generation value" the
@@ -764,6 +782,9 @@ What a client sees, per window, on a `zwlr_foreign_toplevel_handle_v1`:
 - **`stop` is answered with `finished`**, and means "no more *new* windows":
   handles the client already has keep reporting until it destroys them,
   which is what the protocol's own teardown sequence requires.
+- **Binding the manager counts against the same 8-bind per-client budget as
+  the workspace manager above** — a ninth bind of any of the four globals is
+  answered `finished` rather than announced.
 
 What a client can ask for:
 
@@ -851,6 +872,9 @@ What a client sees:
 - **`stop` is answered with `finished`**, after which the head and mode
   objects the client already has stay valid until it destroys them — the
   protocol's own teardown order.
+- **Binding the manager counts against the same 8-bind per-client budget as
+  the workspace manager above** — a ninth bind of any of the four globals is
+  answered `done` and then `finished` rather than announced.
 
 Worth knowing before you write against it:
 
