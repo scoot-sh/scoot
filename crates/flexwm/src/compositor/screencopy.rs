@@ -279,7 +279,12 @@ const BYTES_PER_PIXEL: i32 = 4;
 /// the windows: every window composites onto the framebuffer with
 /// Porter-Duff source-over, and over an opaque destination that operation is
 /// alpha-preserving-opaque -- the result is `0xff` whatever the source's own
-/// alpha was. Only the clear color writes raw alpha into the framebuffer, so
+/// alpha was. (`Xrgb8888` windows take the `Src` path instead, where the
+/// destination is irrelevant — but pixman normalizes a no-alpha source to
+/// opaque on store, measured live, so that path lands on `0xff` too. This
+/// second half is renderer-specific to the pixman pipeline: a future GPU
+/// sampler must re-derive it rather than inherit this paragraph.) Only the
+/// clear color writes raw alpha into the framebuffer, so
 /// an opaque background means every pixel the read-back sees already carries
 /// `0xff` and the forcing pass below would OR `0xff` onto `0xff`: a no-op
 /// worth skipping.
