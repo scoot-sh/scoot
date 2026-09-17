@@ -514,13 +514,12 @@ popup grabs landed — take the keyboard.
   2. **An `exclusive` layer surface on `top`/`overlay` wins** — a launcher
      opened over a menu is typeable, and the menu is dismissed rather than
      left on screen holding input it can no longer use.
-  3. **The menu wins over everything else**: over the focused window, and
-     over a layer surface that got the keyboard from a click — so an
-     `on_demand` bar's own dropdown is not dismissed by the bar that opened
-     it. An `exclusive` bar's own dropdown is the one case this doesn't hold
-     for yet: rule 2 above dismisses it too, even though it is the very
-     surface that opened it. Filed as
-     `docs/backlog/protocols/popup-grab-exclusive-self-dismiss.md`.
+  3. **The menu wins over everything else**: over the focused window, over
+     a layer surface that got the keyboard from a click, and over the
+     `exclusive` surface the menu itself hangs off — so a bar's own
+     dropdown is not dismissed by the bar that opened it, whichever
+     keyboard interactivity the bar asked for. A *different* `exclusive`
+     surface still wins per rule 2.
 
   Losing is always spelled `popup_done` (the protocol lets a compositor
   dismiss a popup at any time), never "leave it up but take its input away".
@@ -540,9 +539,10 @@ popup grabs landed — take the keyboard.
   client that was never focused cannot take the keyboard on its own say-so.
   A grab that continues the client's own open menu (a nested submenu, or a
   menu replacing the one just closed) is not refused for reusing its opening
-  serial past that window. The other bounds still apply on top (locking or an
-  exclusive layer surface dismisses the grab, any click outside dismisses it,
-  keybindings still fire).
+   serial past that window. The other bounds still apply on top (locking
+   dismisses the grab, as does a *different* exclusive layer surface — never
+   the one the menu hangs off — any click outside dismisses it, and
+   keybindings still fire).
 
 What doesn't, yet:
 

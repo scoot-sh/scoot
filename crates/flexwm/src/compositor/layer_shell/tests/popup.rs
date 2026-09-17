@@ -341,6 +341,225 @@ fn a_popup_grab_is_refused_while_a_launcher_holds_the_keyboard() {
     fixture.disconnect_client();
 }
 
+/// An `exclusive` layer surface's *own* popup grab is accepted: the launcher
+/// that opened the menu is not outranked by itself.
+///
+/// The failure `docs/backlog/protocols/popup-grab-exclusive-self-dismiss.md`
+/// files: `popup_grab_outranked()` refused a new grab whenever
+/// `layer_keyboard_focus()` reported `exclusive: true`, without checking
+/// whether the exclusive surface *is* the grab's own root -- so a dropdown
+/// opened by an `exclusive` launcher flashed open and instantly closed,
+/// dismissed by the very surface that opened it. A *different* exclusive
+/// surface still refuses one; see
+/// `a_popup_grab_is_refused_while_a_launcher_holds_the_keyboard`.
+#[test]
+fn an_exclusive_layer_surfaces_own_popup_grab_is_accepted() {
+    let mut fixture = Fixture::new();
+    fixture.run(Step::MapWindow);
+    fixture.run(Step::CreateLayer(LayerSpec::launcher(60)));
+    fixture.run(Step::MapLayer {
+        index: 0,
+        color: BAR_BGRA,
+    });
+    assert_eq!(
+        fixture.keyboard().focused,
+        Some(Focused::Layer(0)),
+        "the launcher should hold the keyboard before its menu exists"
+    );
+    // The key goes to the launcher, which is what gives the client a serial
+    // to grab with -- the same shape every other grab test opens with.
+    fixture.press_a_key();
+
+    let Ack::PopupConfigured(configured) = fixture.run(Step::MapPopup {
+        parent: PopupParent::Layer(0),
+        color: POPUP_BGRA,
+        grab: Some(GrabSource::Key),
+    }) else {
+        panic!("the popup step should report whether a configure arrived");
+    };
+    assert!(
+        configured,
+        "the launcher's own menu should still be configured"
+    );
+    assert!(
+        fixture.state.popup_grab.is_some(),
+        "the compositor should be holding the launcher's own grab"
+    );
+    assert_eq!(
+        fixture.popup_dones(),
+        0,
+        "the launcher must not dismiss the menu it just opened"
+    );
+    assert_eq!(
+        fixture.keyboard().focused,
+        Some(Focused::Popup(0)),
+        "the launcher's menu should hold the keyboard"
+    );
+
+    // ...and typed keys really arrive there, which is the point of the menu.
+    let before = fixture.keyboard().keys;
+    fixture.press_a_key();
+    assert_eq!(
+        fixture.keyboard().keys,
+        before + 2,
+        "the press and release should both reach the launcher's menu"
+    );
+    fixture.disconnect_client();
+}
+
+/// An `exclusive` layer surface does not pre-empt its *own* popup grab --
+/// including a nested submenu off the same root -- when a later refresh
+/// re-derives focus.
+///
+/// The second half of the same ticket: `refresh_keyboard_focus` dismissed an
+/// existing grab whenever an `exclusive` surface was up, even when that
+/// surface was the root the grab belonged to. Mapping a window is what forces
+/// the refresh here, the way real session churn does. A grab rooted on a
+/// window while a *different* exclusive surface is up is still pre-empted;
+/// see `an_exclusive_layer_surface_pre_empts_an_open_popup_grab`.
+#[test]
+fn an_exclusive_layer_surface_does_not_pre_empt_its_own_popup_grab() {
+    let mut fixture = Fixture::new();
+    fixture.run(Step::MapWindow);
+    fixture.run(Step::CreateLayer(LayerSpec::launcher(60)));
+    fixture.run(Step::MapLayer {
+        index: 0,
+        color: BAR_BGRA,
+    });
+    fixture.press_a_key();
+    let Ack::PopupConfigured(configured) = fixture.run(Step::MapPopup {
+        parent: PopupParent::Layer(0),
+        color: POPUP_BGRA,
+        grab: Some(GrabSource::Key),
+    }) else {
+        panic!("the popup step should report whether a configure arrived");
+    };
+    assert!(
+        configured,
+        "the launcher's own menu should still be configured"
+    );
+
+    // A nested submenu off the same root: same chain, same root, so the
+    // refresh below must spare it too.
+    fixture.run(Step::MapPopup {
+        parent: PopupParent::Popup(0),
+        color: WALLPAPER_BGRA,
+        grab: Some(GrabSource::Key),
+    });
+    assert_eq!(
+        fixture.keyboard().focused,
+        Some(Focused::Popup(1)),
+        "the submenu should take the keyboard from its parent menu"
+    );
+
+    fixture.run(Step::MapWindow);
+    assert_eq!(
+        fixture.popup_dones(),
+        0,
+        "re-deriving focus must not dismiss the launcher's own menu chain"
+    );
+    assert!(
+        fixture.state.popup_grab.is_some(),
+        "the launcher's own grab should survive the refresh"
+    );
+    assert_eq!(
+        fixture.keyboard().focused,
+        Some(Focused::Popup(1)),
+        "the submenu should still hold the keyboard"
+    );
+    fixture.disconnect_client();
+}
+
+/// Dismissing a window-rooted menu for a *different* exclusive surface stays
+/// dismissed when that surface goes away: the root check narrows dismissal,
+/// it never re-grants one.
+///
+/// The unmap edge of the same ticket: once `popup_done` is sent the popup is
+/// out of its parent's tree, and nothing -- including the pre-empting surface
+/// unmapping -- may bring the grab back.
+#[test]
+fn unmapping_the_pre_empting_launcher_does_not_resurrect_a_dismissed_grab() {
+    let mut fixture = Fixture::new();
+    fixture.run(Step::MapWindow);
+    window_with_grabbing_popup(&mut fixture);
+    fixture.run(Step::CreateLayer(LayerSpec::launcher(60)));
+    fixture.run(Step::MapLayer {
+        index: 0,
+        color: BAR_BGRA,
+    });
+    assert_eq!(
+        fixture.popup_dones(),
+        1,
+        "the launcher should have dismissed the window's menu"
+    );
+    assert!(fixture.state.popup_grab.is_none());
+
+    fixture.run(Step::UnmapLayer { index: 0 });
+    assert_eq!(
+        fixture.popup_dones(),
+        1,
+        "nothing re-grants a dismissed menu"
+    );
+    assert!(
+        fixture.state.popup_grab.is_none(),
+        "no grab comes back with the dismissal's cause gone"
+    );
+    assert_eq!(
+        fixture.keyboard().focused,
+        Some(Focused::Window(0)),
+        "the keyboard goes back to the window, not to a menu"
+    );
+    fixture.disconnect_client();
+}
+
+/// Unmapping the exclusive root mid-grab neither dismisses its own menu
+/// nor disturbs it: the unmap path never dismissed a grab (an unmapped
+/// surface stops being `exclusive` rather than becoming a third party), and
+/// the root check keeps that answer rather than changing it.
+///
+/// The other half of the unmap edge above: there the pre-empting surface
+/// goes away after dismissing someone else's menu, here the menu's own
+/// root goes away while the menu is up.
+#[test]
+fn unmapping_the_exclusive_root_mid_grab_leaves_its_own_menu_up() {
+    let mut fixture = Fixture::new();
+    fixture.run(Step::MapWindow);
+    fixture.run(Step::CreateLayer(LayerSpec::launcher(60)));
+    fixture.run(Step::MapLayer {
+        index: 0,
+        color: BAR_BGRA,
+    });
+    fixture.press_a_key();
+    let Ack::PopupConfigured(configured) = fixture.run(Step::MapPopup {
+        parent: PopupParent::Layer(0),
+        color: POPUP_BGRA,
+        grab: Some(GrabSource::Key),
+    }) else {
+        panic!("the popup step should report whether a configure arrived");
+    };
+    assert!(
+        configured,
+        "the launcher's own menu should still be configured"
+    );
+
+    fixture.run(Step::UnmapLayer { index: 0 });
+    assert_eq!(
+        fixture.popup_dones(),
+        0,
+        "unmapping the root must not dismiss its own menu"
+    );
+    assert!(
+        fixture.state.popup_grab.is_some(),
+        "the launcher's own grab should survive its root unmapping"
+    );
+    assert_eq!(
+        fixture.keyboard().focused,
+        Some(Focused::Popup(0)),
+        "the menu should still hold the keyboard"
+    );
+    fixture.disconnect_client();
+}
+
 /// Locking the session takes the keyboard off a menu.
 ///
 /// The security-relevant one: `PopupKeyboardGrab` ignores `set_focus` while
