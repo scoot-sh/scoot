@@ -202,9 +202,16 @@ actually open.
    [screencopy's toplevel half](docs/backlog/resolved/screencopy-toplevel-capture-done.md)
    is CLOSED UNREACHABLE (phase-1 probe, no build — stock quickshell routes
    per-window thumbnails only to `hyprland-toplevel-export-v1`); the remaining
-   thumbnail fallback is
-   [shell thumbnails without a toplevel protocol](docs/backlog/protocols/screencopy-shell-thumbnails-fallback.md)
-   (the output half shipped — see "Recently shipped" above).
+    thumbnail fallback is
+    [shell thumbnails without a toplevel protocol](docs/backlog/protocols/screencopy-shell-thumbnails-fallback.md)
+    (the output half shipped — see "Recently shipped" above — and its gating
+    measurement landed YES 2026-09-17: a minimal `zwp_linux_dmabuf_v1`
+    advertisement flips quickshell 0.3.1's readiness flag and the ext output
+    path displays over shm, honesty verdict in that file). The overview
+    preview now wants only the
+    [advertisement itself](docs/backlog/protocols/linux-dmabuf-advertisement.md),
+    filed as its own S-sized implementation item; the per-window thumbnail
+    half stays open behind it.
    [Popup grab serial validation](docs/backlog/resolved/popup-grab-serial-validation-done.md)
    is also done — a grab now has to name a real, recent key/button/enter
    event delivered to the grabbing client (or continue its own open menu).
@@ -301,7 +308,12 @@ probes' recommended order:
     [probed and closed unreachable](docs/backlog/resolved/screencopy-toplevel-capture-done.md)
     rather than built (stock quickshell 0.3.1 speaks only
     `hyprland-toplevel-export-v1` for a `Toplevel` source); its fallback is
-    [shell thumbnails without a toplevel protocol](docs/backlog/protocols/screencopy-shell-thumbnails-fallback.md).
+    [shell thumbnails without a toplevel protocol](docs/backlog/protocols/screencopy-shell-thumbnails-fallback.md),
+    whose readiness-gate measurement landed YES 2026-09-17 (minimal
+    `zwp_linux_dmabuf_v1` advertisement flips the flag; overview path
+    displays over shm) with the
+    [advertisement itself](docs/backlog/protocols/linux-dmabuf-advertisement.md)
+    filed as the follow-up.
     IPC screenshots stay regardless.
 6. DMS unlock-path re-probe — done 2026-09-14 (see the re-probe note
    in the DMS gaps entry): lock → auth → unlock teardown survives on
