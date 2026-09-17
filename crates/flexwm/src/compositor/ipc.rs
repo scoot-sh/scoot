@@ -40,7 +40,7 @@ use std::sync::LazyLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-use flexwm_core::Action;
+use flexwm_core::{Action, WindowId};
 use flexwm_ipc::{
     OutputSnapshot, PROTOCOL_VERSION, Rect as WireRect, Request, Response, WindowSnapshot, encode,
     socket_path,
@@ -292,6 +292,19 @@ impl State {
                 ) {
                     self.clicked_layer = None;
                 }
+                // The already-there fast path `ext_workspace.rs`'s
+                // `commit_workspace_requests` and `wlr_toplevel_activate`
+                // already have: a client repeating a focus action for the
+                // target it is already on would otherwise drive a full
+                // `apply` -- an arrange, a configure per window, a render --
+                // as fast as it can write to its socket. Skipped is only
+                // `act`; the click above is spent and the keyboard half
+                // below runs on both halves, so the two agree about the
+                // same gesture. The reply is `ok()` either way.
+                if self.focus_action_is_noop(&action) {
+                    self.refresh_keyboard_focus();
+                    return self.ok();
+                }
                 self.act(Action::from(action));
                 self.ok()
             }
@@ -457,6 +470,60 @@ impl State {
                 }
             })
             .collect()
+    }
+
+    /// Whether an IPC focus action would move nothing, so `handle_request`
+    /// can skip `act`'s full `apply` and run only the keyboard half.
+    ///
+    /// What "already there" means is defined per variant, each read off the
+    /// state the core's own action would resolve against -- a wrong answer
+    /// here silently drops a focus change, which is worse than a redundant
+    /// arrange, so anything that cannot be answered exactly stays on the
+    /// full path:
+    /// - `FocusWindowId`: `State::focus` already names that window, the
+    ///   same compare `wlr_toplevel_activate`'s fast path makes. An unknown
+    ///   id never equals it (`remove_window` clears `focus`, and ids are
+    ///   never reused), so it stays on the full path and keeps whatever
+    ///   handling `act` gives it today.
+    /// - `FocusWorkspaceIndex`: the focused output's active workspace
+    ///   already is that index. Out of range can never equal `active`
+    ///   (`active < count` always), so it stays on the full path too. Read
+    ///   off the focused output rather than the single `OUTPUT_ID`
+    ///   `ext_workspace.rs` uses because that is the list the core's own
+    ///   `reshape` resolves the index against.
+    /// - `FocusWorkspace`: the step clamps -- up from the first workspace,
+    ///   or down from the last. The same lookup as the index case; the core
+    ///   then only re-sets the index it already has and re-normalises an
+    ///   already-normalised tree, which is the reasoning PR #54's fast path
+    ///   states for skipping `act` there.
+    /// - `FocusColumn` / `FocusWindow`: relative steps whose no-op-ness
+    ///   needs the focused column's position in its workspace (and the
+    ///   stack position within it), which `World` does not expose.
+    ///   Deliberately left on the full path rather than guessed; resolving
+    ///   them would mean new core accessors for a socket-speed micro-opt,
+    ///   and they keep today's behavior exactly, clear included.
+    ///
+    /// No allocation: an enum match plus, for the workspace variants, two
+    /// `Copy` reads off the core.
+    fn focus_action_is_noop(&self, action: &flexwm_ipc::Action) -> bool {
+        match action {
+            flexwm_ipc::Action::FocusWindowId { id } => self.focus == Some(WindowId(*id)),
+            flexwm_ipc::Action::FocusWorkspaceIndex { index } => self
+                .world
+                .focused_output()
+                .and_then(|output| self.world.workspaces(output))
+                .is_some_and(|workspaces| workspaces.active == *index),
+            flexwm_ipc::Action::FocusWorkspace { direction } => self
+                .world
+                .focused_output()
+                .and_then(|output| self.world.workspaces(output))
+                .is_some_and(|workspaces| {
+                    (*direction == flexwm_ipc::Vertical::Up && workspaces.active == 0)
+                        || (*direction == flexwm_ipc::Vertical::Down
+                            && workspaces.active + 1 >= workspaces.count)
+                }),
+            _ => false,
+        }
     }
 
     /// Success, carrying the session-lock state the response was built

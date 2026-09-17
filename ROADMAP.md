@@ -256,6 +256,15 @@ gap jumped the queue — each item's own file records why it landed when it did.
   (env presence, slow-cold-start redeem, single-use, cap, sweep, failure,
   lock refusal), each behavior-changing one confirmed to fail unfixed; the
   smoke test asserts a live `foot`'s environ carries the token.
+- **[IPC focus actions run a full `apply` even when nothing moves](docs/backlog/resolved/focus-action-no-op-fast-path-done.md)**
+  (PR #67, 2026-09-17) — the fast path PR #54 gave `ext-workspace-v1`,
+  mirrored per IPC focus variant: an already-there action spends the
+  clicked-layer click and runs only the keyboard half instead of `act`.
+  `FocusColumn`/`FocusWindow` steps deliberately stay on the full path
+  (their no-op-ness needs column/stack positions the core doesn't expose).
+  Measured live on the dev VM: sequential no-op latency ~1.6–1.8x better,
+  flood throughput ~20k to ~38k req/s. No README change (purely internal
+  latency, same non-difference PR #54 accepted).
 ## What's next
 
 The backlog is the source of truth for what to pick up; this is the current
