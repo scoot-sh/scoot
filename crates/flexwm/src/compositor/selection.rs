@@ -24,4 +24,6 @@
 //! covers instead).
 
 #[cfg(test)]
+mod dnd;
+#[cfg(test)]
 mod tests;

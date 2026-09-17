@@ -136,7 +136,8 @@ Dev VM, headless, IPC-driven, `WAYLAND_DEBUG=1` on the clients:
   and NOT covered here. It needs its own analysis (a DnD grab requires a
   live implicit button grab, so the threat is narrower but different, and
   the serial semantics are the implicit-grab serial, not an event serial).
-  Filed as `docs/backlog/protocols/dnd-grab-serial-validation.md`.
+  Filed as `docs/backlog/protocols/dnd-grab-serial-validation.md`, since
+  resolved as `resolved/dnd-grab-serial-validation-done.md`.
 
 ## What this deliberately does not cover
 

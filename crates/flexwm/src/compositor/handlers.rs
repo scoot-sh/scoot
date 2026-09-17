@@ -1,11 +1,15 @@
 //! The Wayland protocol handlers Smithay dispatches into.
 
+use std::any::Any;
+
 use smithay::backend::renderer::utils::on_commit_buffer_handler;
 use smithay::input::dnd::{DnDGrab, DndGrabHandler, GrabType, Source};
 use smithay::input::pointer::Focus;
 use smithay::input::tablet::TabletSeatHandler;
 use smithay::input::{Seat, SeatHandler, SeatState};
 use smithay::output::Output;
+use smithay::reexports::wayland_server::backend::ClientId;
+use smithay::reexports::wayland_server::protocol::wl_data_source::WlDataSource;
 use smithay::reexports::wayland_server::protocol::wl_output::WlOutput;
 use smithay::reexports::wayland_server::protocol::wl_seat;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
@@ -457,12 +461,104 @@ impl WaylandDndGrabHandler for State {
                 let Some(start_data) = pointer.grab_start_data() else {
                     return source.cancel();
                 };
+                // The serial is only meaningful against the seat that issued
+                // it, and a second seat one day must not silently inherit
+                // this seat's history -- the same check `popup.rs` applies to
+                // a grab's seat. In practice flexwm owns exactly one seat, so
+                // this never fires; Smithay already resolved `seat` from the
+                // data device's own `wl_seat` before calling this at all.
+                if seat != self.seat {
+                    tracing::warn!("refusing a drag: it names a seat this compositor does not own");
+                    return source.cancel();
+                }
+                // Whose drag this is: the data source's own client, which no
+                // client can forge -- not a surface owner like the popup
+                // gate's `client_of`. See `dnd_source_client`.
+                let Some(client) = dnd_source_client(&source) else {
+                    tracing::warn!("refusing a drag: its source names no known client");
+                    return source.cancel();
+                };
+                // The serial has to name a real, recent key or button event
+                // actually delivered to the client asking -- the strict
+                // `contains` half of `input/interaction.rs`, byte-for-byte
+                // the activation gate, deliberately *not* the popup gate's
+                // looser `contains_seen`:
+                //
+                // - The protocol's serial is "the serial number of the
+                //   implicit grab on the origin" (`wayland.xml`,
+                //   `wl_data_device.start_drag`), i.e. the button press being
+                //   converted -- and Smithay's dispatch only calls this with
+                //   a serial that already equals the live grab's
+                //   (`pointer.has_grab(serial)`, "in response to a pointer
+                //   implicit grab"). A focus `enter` can only be a live
+                //   grab's serial while someone's explicit popup grab holds
+                //   the seat, and spending that here would bless converting
+                //   an explicit grab into a drag. No real toolkit needs it:
+                //   GTK mints the drag from the press, Qt from its last-seen
+                //   serial, which a press has just overwritten.
+                // - That dispatch check is also why this gate is not
+                //   vacuous: `has_grab` compares the serial alone, and
+                //   serials are process-global numbers any client can read
+                //   off a configure and spray for free (a wrong guess is a
+                //   silent dispatch deny). What it cannot do is bind the
+                //   serial to who received the press -- so without the pair
+                //   check below, any client naming the victim's live press
+                //   serial while the user holds any button starts a drag
+                //   from its own source. The press is recorded under whoever
+                //   the pointer focus named (bare-desktop presses under no
+                //   one), so only that client can spend it.
+                //
+                // One accepted limitation, stated not hidden: the ring's age
+                // bound applies, so a press held past `INTERACTION_WINDOW`
+                // (10s) is refused even still held -- motion deliberately
+                // refreshes nothing. Real drags cross their motion threshold
+                // within milliseconds of the press; a menu-style session
+                // rule would only re-open the cross-client hole above, so
+                // there is none.
+                if !self.interaction_serials.contains(serial, &client) {
+                    // `warn`, not `debug`: cancelling the source posts no
+                    // protocol error, so the log is the only way to tell "no
+                    // recent interaction" apart from a broken drag source --
+                    // the same debuggability the popup gate logs for.
+                    // Rate is one line per drag requested, not per event or
+                    // frame.
+                    tracing::warn!(
+                        ?serial,
+                        ?client,
+                        "refusing a drag: its serial is not a recent key or button event this client received"
+                    );
+                    return source.cancel();
+                }
                 let grab = DnDGrab::new_pointer(&self.display_handle, start_data, source, seat);
                 pointer.set_grab(self, grab, serial, Focus::Keep);
             }
             GrabType::Touch => source.cancel(),
         }
     }
+}
+
+/// Who asked for a drag: the data source's own client.
+///
+/// `dnd_requested` is generic over `S: Source`, which carries no client
+/// accessor, so this downcasts to the two concrete sources Smithay's
+/// dispatch can pass: the `WlDataSource` the client offered, or the origin
+/// `WlSurface` when `source` was NULL (a client-internal drag, whose owner
+/// is still the client that must have received the press). Both are
+/// `Resource`s, so the id names a client no sender can forge.
+///
+/// Anything else -- a compositor-internal source type flexwm does not have
+/// today -- resolves to nothing and fails closed at the call site: the only
+/// producer of these calls is Smithay's dispatch with the two types above,
+/// so an unknown type is unexpected, not a third legitimate shape.
+fn dnd_source_client<S: Source>(source: &S) -> Option<ClientId> {
+    let any = source as &dyn Any;
+    any.downcast_ref::<WlDataSource>()
+        .and_then(|owned| owned.client())
+        .or_else(|| {
+            any.downcast_ref::<WlSurface>()
+                .and_then(|owned| owned.client())
+        })
+        .map(|client| client.id())
 }
 
 /// A client binding a `wl_output` is the second half of
