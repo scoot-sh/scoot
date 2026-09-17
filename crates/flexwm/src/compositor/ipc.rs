@@ -24,6 +24,7 @@
 //! ([`State::handle_request`]); [`connection`] holds the event-loop machinery
 //! that gets requests in and replies out.
 
+mod accept;
 mod connection;
 mod line;
 mod listener;
@@ -45,7 +46,7 @@ use flexwm_ipc::{
     socket_path,
 };
 use smithay::reexports::calloop::generic::Generic;
-use smithay::reexports::calloop::{EventLoop, Interest, Mode, PostAction};
+use smithay::reexports::calloop::{EventLoop, Interest, Mode};
 
 use self::connection::Limits;
 pub(crate) use self::outbound::Outbound;
@@ -133,15 +134,18 @@ pub fn init(
     // else's business, and every live connection holds its own claim on it
     // (see `slots`).
     let slots = Slots::new();
+    // The spare fd the accept loop spends to shed a pending connection when
+    // the process is out of fds (see `accept`): one fd held for the session,
+    // owned here for the same reason as the slots.
+    let spare = accept::Spare::new();
     event_loop.handle().insert_source(
         Generic::new(listener, Interest::READ, Mode::Level),
         move |_, listener, state: &mut State| {
-            while let Ok((stream, _)) = listener.accept() {
+            Ok(accept::drain(listener, &spare, &mut |stream| {
                 if let Err(error) = accept(state, stream, &slots, Limits::REAL) {
                     tracing::warn!(%error, "could not take an ipc client");
                 }
-            }
-            Ok(PostAction::Continue)
+            }))
         },
     )?;
 
