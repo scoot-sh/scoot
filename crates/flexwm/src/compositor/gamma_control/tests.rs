@@ -18,7 +18,7 @@
 //!   named is the compositor's own, which always validates -- so the `failed`
 //!   branch is defence for a multi-output future, not a reachable path today.
 //! - Applying to real hardware: headless has no LUT, so everything here
-//!   asserts accept/store/retire semantics. The `--tty` apply path is
+//!   asserts accept/retire semantics. The `--tty` apply path is
 //!   exercised on the dev VM (see the PR description), not in this file.
 //!
 //! These need a writable `$XDG_RUNTIME_DIR` for the same reason the other

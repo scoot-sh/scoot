@@ -279,7 +279,7 @@ fn get_gamma_control(
     control.gamma_size(state.gamma_control.size);
 }
 
-/// Reads, validates, stores and (on `--tty`) applies one `set_gamma`.
+/// Reads, validates and (on `--tty`) applies one `set_gamma`.
 ///
 /// Anything about the fd that is not exactly `3 * size` little-endian `u16`
 /// entries -- short, long, empty, unreadable -- is `invalid_gamma`
