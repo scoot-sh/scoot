@@ -4,14 +4,18 @@ use flexwm_core::Action;
 use flexwm_ipc::{KeyCombo, Modifier, PointerButton};
 use smithay::backend::input::{Axis, AxisSource, ButtonState, InputTime, KeyState};
 use smithay::input::keyboard::{FilterResult, KeyboardHandle, Keycode, Keysym, xkb};
-use smithay::input::pointer::{AxisFrame, ButtonEvent, MotionEvent, PointerHandle};
+use smithay::input::pointer::{
+    AxisFrame, ButtonEvent, MotionEvent, PointerHandle, RelativeMotionEvent,
+};
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-use smithay::utils::{Logical, Point, SERIAL_COUNTER};
+use smithay::utils::{Logical, Point, SERIAL_COUNTER, Serial};
+use smithay::wayland::pointer_constraints::with_pointer_constraint;
 
 use super::State;
 use super::keybindings::Bound;
 use super::layer_shell;
 use super::output_scale::logical_size;
+use super::relative_pointer::{AbsoluteTarget, absolute_target};
 use super::tty::VtSwitchOutcome;
 use modifiers::{HeldKeys, NamedKey, Untypable};
 
@@ -71,6 +75,52 @@ impl State {
     /// libinput (`pointer_move_relative`), the host (`nested_dispatch`),
     /// IPC injection -- goes through `pointer_move`.
     fn pointer_move_quietly(&mut self, x: f64, y: f64) {
+        self.move_absolute(x, y, None);
+    }
+
+    /// The absolute-motion core every pointer source reaches: `pointer_move`
+    /// (IPC, `--nested`, absolute tablets), `pointer_move_relative` (`--tty`
+    /// libinput) after clamping, and the two quiet re-derivations above.
+    ///
+    /// `device` is `Some((delta, unaccel))` only on the libinput path, which
+    /// is the one source that reports relative device motion rather than an
+    /// absolute position: the accelerated pair moves the absolute position
+    /// (after clamping, by the caller), the pre-accel pair is what the
+    /// relative event reports as unaccelerated. `None` derives both from the
+    /// position change itself -- every absolute source applies no
+    /// acceleration of its own, so delta and unaccelerated delta are the
+    /// same number there (see `relative_pointer.rs`).
+    ///
+    /// Relative motion is emitted against pre-move focus on every focused
+    /// move with a nonzero delta, *before* the absolute motion (Smithay
+    /// routes by the seat's current focus, so this order is what credits the
+    /// surface the pointer is leaving; see `relative_pointer.rs`). It is --
+    /// this is the point of the protocol -- unclipped: a move the output
+    /// edge or an active lock/confinement trims still reports the full
+    /// vector. A locked pointer moves nothing absolute at all
+    /// ([`AbsoluteTarget::Held`]); the event and the frame still go out.
+    ///
+    /// Cost on the hot path, measured before/after on the dev VM (200k
+    /// `pointer_move` events x 5 reps, temporary bench since removed).
+    /// Debug: unfocused 3129-3426 ns/event after vs 3415-3623 before --
+    /// ranges overlapping, no measurable regression; focused with no
+    /// relative pointers bound 10688-11501 vs 8555-9090 before. Release
+    /// (the profile that ships): unfocused 336-388 after vs 354-362
+    /// before -- overlapping, noise; focused 950-998 vs 757-823 before,
+    /// a ~190ns residual: one `current_location` read, one
+    /// constraint-map lookup and Smithay's empty-list lock per event.
+    /// At a real 1000Hz device rate that residual is ~190us/s -- about
+    /// 1.2% of a single 16ms frame per second, 0.02% of a core -- and a
+    /// session with a live relative pointer pays per-object socket writes
+    /// beside it either way. The baseline everywhere is the hit test plus
+    /// idle announce plus socket work, not this check (an unfocused move
+    /// never reads the location and never touches the constraint map).
+    fn move_absolute(
+        &mut self,
+        x: f64,
+        y: f64,
+        device: Option<(Point<f64, Logical>, Point<f64, Logical>)>,
+    ) {
         let Some(pointer) = self.seat.get_pointer() else {
             return;
         };
@@ -90,18 +140,19 @@ impl State {
         // when a menu was opened by hovering. Recorded under the entered
         // client, like everything else in `interaction_serials` -- and only
         // then: every other motion delivers nothing new, and crediting one
-        // would file a serial its client never saw under its name.
+        // would file a serial its client never saw under its name. Recorded
+        // per arm below rather than here, because a move a lock or
+        // confinement holds delivers no `enter` at all: recording one would
+        // file a serial under a client that never received it, the exact
+        // hole the client half of each entry exists to close.
         //
-        // Three guards, each load-bearing:
+        // Two guards, each load-bearing (see `record_pointer_enter`):
         // - the focus must really move (`current_focus` read before `motion`
         //   below updates it). A redundant motion mints a serial but sends
         //   no `enter`.
         // - no grab may hold the pointer. Under one the recipient is the
         //   grab's own logic, not `under` -- crediting `under` would file an
-        //   entry for a client that never received it, the exact hole the
-        //   client half of each entry exists to close.
-        // - `under` must name a surface at all: leaving for bare desktop
-        //   sends a `leave` only, which is evidence for no one.
+        //   entry for a client that never received it.
         //
         // Costs, on the common no-change path that real motion takes at
         // 500-1000Hz: one seat lock plus a surface-handle clone
@@ -114,13 +165,157 @@ impl State {
         // 4575-4902 ns/event across five reps each -- ranges overlapping, no
         // measurable regression; the ~4.7us baseline is hit test, idle
         // announce and socket work, not this check.
-        if Self::pointer_entered(&pointer, &under)
+        let time = InputTime::from_millis(self.millis());
+        // The move the absolute position actually makes, resolved against
+        // the pre-move focus surface's lock/confinement; the relative event
+        // below still carries the full vector either way. Location and
+        // deltas are read only with a focus to credit or a constraint to
+        // resolve -- both need one -- so an unfocused move skips straight
+        // to delivery with one `current_focus` read as its whole added
+        // cost (see the measured ranges in this function's doc above).
+        let focus = pointer.current_focus();
+        let (target, delta, unaccel) = match &focus {
+            Some(_) => {
+                let from = pointer.current_location();
+                let derived = location - from;
+                let (delta, unaccel) = device.unwrap_or((derived, derived));
+                let target =
+                    absolute_target(self, &pointer, focus.as_ref(), from, location, &under);
+                (target, delta, unaccel)
+            }
+            None => (
+                AbsoluteTarget::Free,
+                Point::from((0.0, 0.0)),
+                Point::from((0.0, 0.0)),
+            ),
+        };
+        // Focus-gated, not lock-gated (see `relative_pointer.rs`): whoever
+        // holds pointer focus gets the deltas, locked or not, and nobody
+        // else does. Zero deltas stay silent -- a focus re-derivation at a
+        // standstill is not motion, and the wire has enough of it already.
+        if focus.is_some() && (delta.x != 0.0 || delta.y != 0.0) {
+            pointer.relative_motion(
+                self,
+                under.clone(),
+                &RelativeMotionEvent {
+                    delta,
+                    delta_unaccel: unaccel,
+                    time,
+                },
+            );
+        }
+        match target {
+            AbsoluteTarget::Free => {
+                if self.record_pointer_enter(&pointer, &focus, &under, serial) {
+                    // Focus just landed on a new surface: engage a
+                    // still-inactive constraint waiting on it (see below).
+                    // Gated on the enter, not run per move: activation is a
+                    // creation/arrival event, and a redundant move has no
+                    // new surface to arm.
+                    self.engage_pending_constraint(&pointer, &under, location);
+                }
+                self.move_pointer_to(&pointer, under, location, serial, time);
+            }
+            AbsoluteTarget::Clamped { point, under } => {
+                self.record_pointer_enter(&pointer, &focus, &Some(under.clone()), serial);
+                self.move_pointer_to(&pointer, Some(under), point, serial, time);
+            }
+            AbsoluteTarget::Held => {
+                // Locked (or confined off its surface): relative went out
+                // above, absolute moves nothing, and the cursor bitmap sits
+                // where it was, so there is nothing to redraw either. The
+                // frame still goes: it is what releases the relative event.
+                // No `enter` is recorded either: nothing was delivered.
+                pointer.frame(self);
+            }
+        }
+    }
+
+    /// Records a focus-changing motion's `enter` serial for the popup-grab
+    /// gate, or records nothing when the motion delivers no `enter`.
+    ///
+    /// Split out of [`State::move_absolute`] so each resolution arm records
+    /// against the surface its motion is actually delivered with -- not, in
+    /// particular, the target hit test of a move confinement clamped
+    /// elsewhere, and never anything on the held path, which delivers no
+    /// motion at all. Answers whether focus moved, so the free arm knows
+    /// whether a pending constraint wants engaging.
+    ///
+    /// `focus` is the pre-move focus `move_absolute` already read, passed
+    /// in rather than re-read: nothing between that read and this call can
+    /// move seat focus (`current_location` and `absolute_target` are
+    /// read-only, and `relative_motion` routes by focus without setting
+    /// it), so the re-read the reviewer flagged observed exactly this
+    /// value. What remains read here is only the grab check, which has no
+    /// cheaper source.
+    fn record_pointer_enter(
+        &mut self,
+        pointer: &PointerHandle<Self>,
+        focus: &Option<WlSurface>,
+        under: &Option<(WlSurface, Point<f64, Logical>)>,
+        serial: Serial,
+    ) -> bool {
+        let entered = Self::pointer_entered(pointer, focus, under);
+        if entered
             && let Some((surface, _)) = &under
             && let Some(client) = self.client_of(surface)
         {
             self.interaction_serials.record_focus(serial, client);
         }
-        let time = InputTime::from_millis(self.millis());
+        entered
+    }
+
+    /// Activates a still-inactive lock or confinement on a newly entered
+    /// surface -- the late half of
+    /// [`new_constraint`](super::relative_pointer::PointerConstraintsHandler),
+    /// which only fires at creation time.
+    ///
+    /// Without this, a lock taken before first focus (a game arming its
+    /// mouse mode at startup, ahead of any pointer motion) would sit
+    /// inactive forever: Smithay reports `locked`/`confined` only from an
+    /// explicit `activate`, and nothing else ever calls it. The region gate
+    /// is anvil's: a constraint whose region does not contain the arrival
+    /// point stays disarmed. Called only on focus-changing moves (see the
+    /// free arm above), so the steady-state motion path never pays for it.
+    fn engage_pending_constraint(
+        &mut self,
+        pointer: &PointerHandle<Self>,
+        under: &Option<(WlSurface, Point<f64, Logical>)>,
+        location: Point<f64, Logical>,
+    ) {
+        let Some((surface, origin)) = under else {
+            return;
+        };
+        with_pointer_constraint(surface, pointer, |constraint| {
+            let Some(constraint) = constraint else {
+                return;
+            };
+            if constraint.is_active() {
+                return;
+            }
+            if constraint
+                .region()
+                .is_none_or(|region| region.contains((location - *origin).to_i32_round()))
+            {
+                constraint.activate();
+            }
+        });
+    }
+
+    /// Delivers one absolute motion and its frame, redrawing the cursor on
+    /// `--tty` (the only backend that draws one) when the pointer moved.
+    ///
+    /// Split out of [`State::move_absolute`] so the free and clamped arms
+    /// share the delivery: both move the pointer, both end the frame, and
+    /// only they redraw. The held arm does neither (see above).
+    fn move_pointer_to(
+        &mut self,
+        pointer: &PointerHandle<Self>,
+        under: Option<(WlSurface, Point<f64, Logical>)>,
+        location: Point<f64, Logical>,
+        serial: Serial,
+        time: InputTime,
+    ) {
         pointer.motion(
             self,
             under,
@@ -150,14 +345,15 @@ impl State {
     /// Under a grab the recipient is the grab's own logic, not `under` -- a
     /// popup grab confines the pointer to its own tree, an implicit button
     /// grab confines it to the pressed surface -- so `under` names a client
-    /// that will never see this serial. Read before
-    /// [`PointerHandle::motion`] runs: afterwards the seat's focus already
-    /// names `under` and the move is unobservable.
+    /// that will never see this serial. `focus` is read by the caller
+    /// before [`PointerHandle::motion`] runs: afterwards the seat's focus
+    /// already names `under` and the move is unobservable.
     fn pointer_entered(
         pointer: &PointerHandle<Self>,
+        focus: &Option<WlSurface>,
         under: &Option<(WlSurface, Point<f64, Logical>)>,
     ) -> bool {
-        if pointer.current_focus().as_ref() == under.as_ref().map(|(surface, _)| surface) {
+        if focus.as_ref() == under.as_ref().map(|(surface, _)| surface) {
             return false;
         }
         !pointer.is_grabbed()
@@ -214,7 +410,17 @@ impl State {
     /// already uses. Kept backend-neutral like every other method here:
     /// nothing about it is `--tty`-specific, it just happens to be the one
     /// caller that needs it today.
-    pub fn pointer_move_relative(&mut self, dx: f64, dy: f64) {
+    ///
+    /// Two pairs, not one: `(dx, dy)` is the accelerated delta libinput
+    /// reports (what the absolute position moves by, after clamping), and
+    /// `(dx_unaccel, dy_unaccel)` is the pre-acceleration device delta --
+    /// what `zwp_relative_pointer_v1.relative_motion` reports as the
+    /// unaccelerated vector (see `relative_pointer.rs`). Passing the
+    /// accelerated pair twice would label accelerated motion unaccelerated,
+    /// which is exactly the misreport the protocol exists to let clients
+    /// avoid.
+    pub fn pointer_move_relative(&mut self, dx: f64, dy: f64, dx_unaccel: f64, dy_unaccel: f64) {
+        self.announce_activity();
         let Some(pointer) = self.seat.get_pointer() else {
             return;
         };
@@ -230,7 +436,16 @@ impl State {
         let current = pointer.current_location();
         let x = clamp_to_extent(current.x + dx, width);
         let y = clamp_to_extent(current.y + dy, height);
-        self.pointer_move(x, y);
+        // The absolute core, not `pointer_move`: activity was announced
+        // above, and the relative deltas here are the raw device pairs, not
+        // the clamped position change -- the relative event reports the
+        // unclipped vector even when the absolute position stops at the
+        // output edge (see `move_absolute`).
+        self.move_absolute(
+            x,
+            y,
+            Some((Point::from((dx, dy)), Point::from((dx_unaccel, dy_unaccel)))),
+        );
     }
 
     pub fn pointer_button(&mut self, button: PointerButton, pressed: bool) {

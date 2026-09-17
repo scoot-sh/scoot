@@ -24,10 +24,16 @@ recorded so they don't get lost rather than because any is scheduled:
   (`docs/backlog/resolved/single-pixel-buffer-done.md`); Smithay carries
   the whole protocol at the pinned rev, so flexwm advertises its
   `SinglePixelBufferState` and renders the buffers as solid fills.
-- `relative-pointer-unstable-v1` — raw, unaccelerated pointer deltas;
+- `relative-pointer-unstable-v1` — ~~raw, unaccelerated pointer deltas;
   pairs with the `pointer_constraints` support already present, and
   games/3D apps expect both together, not just pointer lock/confinement
-  alone.
+  alone.~~ — **DONE**
+  (`docs/backlog/resolved/relative-pointer-done.md`); both globals are
+  Smithay's at the pinned rev, so flexwm advertises the two states and
+  feeds relative motion from its motion core on every focused move.
+  (Two corrections to the entry this replaces: the constraints global was
+  not in fact already advertised, and relative events are focus-gated per
+  the protocol, not lock-gated -- see the resolved record.)
 - `fractional-scale-v1` — ~~crisp non-integer output scaling. Not
   urgent while flexwm has exactly one output and no real scale
   configuration story yet, but relevant once multi-output/HiDPI does.~~

@@ -464,6 +464,22 @@ gap jumped the queue — each item's own file records why it landed when it did.
   dimensions, viewport-scaled render pinned pixel-for-pixel, manager
   destroy, attached-buffer destroy, zero shm-pool budget claimed); real
   `foot` binds the global live.
+- **[`relative-pointer-unstable-v1` + pointer
+  constraints](docs/backlog/resolved/relative-pointer-done.md)** —
+  RESOLVED 2026-09-17: `zwp_relative_pointer_manager_v1` advertised
+  (Smithay carries both halves at the pinned rev, same three-lines-plus
+  shape), with the motion core feeding unclipped deltas on every focused
+  move. Two corrections to the bundle entry's assumptions, both verified
+  in source: the constraints global was never advertised (only the trait
+  bound existed), and relative events are focus-gated per the protocol,
+  not lock-gated. Sixteen fail-first harness tests pin exact vectors
+  (lock hold/resume, confine hold/resume, pre-accel pairs, edge
+  unclipping, per-client streams, lock-before-focus engagement, regional
+  per-axis clamp and gating, session-lock round-trip freeze-through); live
+  `wayland-info` + `foot` prove the advertisement, `foot` binds neither
+  (it uses neither protocol). Motion-path benchmark: release unfocused
+  noise, focused +~190ns/event (~1.2% of one 16ms frame per second at
+  1000Hz).
 ## What's next
 
 The backlog is the source of truth for what to pick up; this is the current

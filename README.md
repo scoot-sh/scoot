@@ -82,7 +82,10 @@ output scaling (`[output] scale` over `wl_output.scale`,
 correctly-sized clients and text instead of everything rendered physically
 tiny — see Output scaling below),
 `wp_single_pixel_buffer_manager_v1`, so a toolkit can paint a solid fill
-without allocating a shm pool (see Single-pixel buffers below), plus a
+without allocating a shm pool (see Single-pixel buffers below),
+`zwp_relative_pointer_manager_v1` with `zwp_pointer_constraints_v1`, so a
+game or 3D app can lock or confine the pointer and read raw unaccelerated
+deltas (see Relative pointer below), plus a
 hardened control socket (owner-only
 permissions, a same-user peer check, a 1 MiB cap on a single request,
 screenshots rate-limited to one per connection per frame, at most 64
@@ -307,6 +310,14 @@ reading its socket, and the other shortens a wait rather than refusing it.
   is meant for hundreds of milliseconds, so this is well out of the way of
   any real use. A capture in flight neither extends nor shortens a wait: it
   touches no commit clock, and parks no waiter.
+
+One thing this list does not bound, because it is not a refusal: while a
+client holds an active pointer lock (`zwp_pointer_constraints_v1`, see
+Relative pointer below), `pointer move` and `click` still answer `ok` but
+move nothing -- the lock owns the pointer until its client releases it. An
+agent driving the pointer during a game or 3D session sees success replies
+with a frozen cursor; clicks still reach whatever surface holds pointer
+focus.
 
 `--tty` needs a seat (`seatd` or logind) with a DRM device on it. On a modern
 kernel, on every non-root `--tty` run, Smithay logs `Unable to become drm
@@ -1534,6 +1545,35 @@ What to know before pointing a client at it:
 - **Destroying an attached buffer is legal and safe.** Wayland lets a client
   destroy a `wl_buffer` its surface still names; nothing panics and nobody is
   disconnected for it.
+
+## Relative pointer (`zwp_relative_pointer_manager_v1`, `zwp_pointer_constraints_v1`)
+
+flexwm implements `zwp_relative_pointer_manager_v1` (version 1) together
+with `zwp_pointer_constraints_v1` (version 1), the pair games and 3D apps
+expect: the client locks or confines the pointer to its surface and reads
+raw relative motion deltas off its relative-pointer object.
+
+What to know before pointing a client at it:
+
+- **Relative events are gated on pointer focus, not on the lock.** A client
+  whose surface has pointer focus receives `relative_motion` whether or not
+  it locked; a client without focus receives nothing. That is the protocol's
+  own rule ("will only emit events when it has focus"), not a flexwm policy.
+- **Unaccelerated means pre-libinput-acceleration on `--tty`.** A `--tty`
+  mouse reports both an accelerated and a raw device delta, and the relative
+  event carries each as its own (`dx`/`dy` vs `dx_unaccel`/`dy_unaccel`).
+  Every absolute source (IPC injection, `--nested` host motion, tablets)
+  applies no acceleration of its own, so both pairs carry the same position
+  change there.
+- **Relative deltas are unclipped.** Motion stopped by the output edge, a
+  lock, or a confinement still reports the full vector; only the absolute
+  position stops.
+- **A lock holds the absolute position; a confinement clamps it.** While a
+  lock taken on the focused surface is active, the cursor does not move (the
+  relative stream keeps flowing). A confinement keeps the pointer on its
+  surface, clamped per axis to its region. A lock taken while unfocused
+  stays inactive. Destroying a persistent lock or confinement is silent (no
+  `unlocked`/`unconfined` event) and frees the pointer immediately.
 
 ## Configuration
 

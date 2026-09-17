@@ -21,7 +21,6 @@ use smithay::wayland::compositor::{
     is_sync_subsurface, with_states,
 };
 use smithay::wayland::output::OutputHandler;
-use smithay::wayland::pointer_constraints::PointerConstraintsHandler;
 use smithay::wayland::selection::SelectionHandler;
 use smithay::wayland::selection::data_device::{
     DataDeviceHandler, DataDeviceState, WaylandDndGrabHandler, set_data_device_focus,
@@ -404,8 +403,6 @@ impl SeatHandler for State {
         set_primary_focus(handle, seat, client);
     }
 }
-
-impl PointerConstraintsHandler for State {}
 
 /// `wp_cursor_shape_v1` reaches a tablet tool as well as a pointer, so its
 /// dispatch is bounded on this trait whether or not a compositor offers

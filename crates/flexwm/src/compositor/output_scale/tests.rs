@@ -210,7 +210,7 @@ fn relative_pointer_motion_is_clamped_to_the_logical_extent() {
     .expect("a compositor state with a wayland socket");
     crate::compositor::headless::init(&mut state, CANVAS, CANVAS).expect("a headless backend");
 
-    state.pointer_move_relative(1000.0, 1000.0);
+    state.pointer_move_relative(1000.0, 1000.0, 1000.0, 1000.0);
     let pointer = state.seat.get_pointer().expect("a pointer");
     let location = pointer.current_location();
     assert_eq!(
