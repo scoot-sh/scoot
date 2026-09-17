@@ -70,9 +70,13 @@ The serial gate is untouched: `create_external_token` never reaches
 `token_created`, and that is safe because the gate binds whoever *asked* --
 the compositor is not a client that can be tricked into asking; minting is
 its own focus decision, delegated to the child. Redemption still runs the
-full `request_activation` path (freshness, non-window refusal, lock gate,
-`clicked_layer` spend, single-use removal), which the tests below verify a
-spawn token through rather than assuming.
+shared `request_activation` path (freshness, non-window refusal, lock gate,
+`clicked_layer` spend, single-use removal), unchanged by this change — the
+tests below verify a spawn token through env-presence, focus-move,
+single-use, cap, sweep, failure, and lock-refusal; expiry-refusal,
+non-window-refusal, and the `clicked_layer` spend ride on the shared
+function and are pinned by its own suites rather than re-exercised
+per-origin.
 
 ## Tests
 
