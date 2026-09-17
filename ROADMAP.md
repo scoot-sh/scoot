@@ -305,10 +305,10 @@ gap jumped the queue — each item's own file records why it landed when it did.
   cost. Resolved as the ticket's third option — force the fourth byte only
   while `[appearance] background_color`'s alpha is below 1.0 (exact `< 1.0`,
   no epsilon; read per frame tick, not cached), which costs nothing in the
-   default opaque configuration and keeps the guarantee where it was needed.
-   Pinned byte-identical over opaque backgrounds, proven still-forcing over
-   translucent ones. Measured on the dev VM: ~4.7% off a release `grim`
-   capture in the default configuration. `Argb8888` untouched.
+  default opaque configuration and keeps the guarantee where it was needed.
+  Pinned byte-identical over opaque backgrounds, proven still-forcing over
+  translucent ones. Measured on the dev VM: ~4.7% off a release `grim`
+  capture in the default configuration. `Argb8888` untouched.
 - **[An `exclusive` layer surface's own popup
   grab](docs/backlog/resolved/popup-grab-exclusive-self-dismiss-done.md)**
   — filed from PR #44's review: a launcher's own dropdown flashed open
@@ -318,9 +318,11 @@ gap jumped the queue — each item's own file records why it landed when it did.
   held grab's start-data focus the way PR #55 does), so a *different*
   exclusive surface still wins while the root itself never outranks its
   own menu. Fail-first harness tests for grant, pre-emption (incl. a
-  nested submenu off the same root) and the unmap edge; README's rule-3
-  caveat removed now the claim is true as written. No hot-path benchmark
-  (per-grab path plus one `Option` compare per focus derivation).
+  nested submenu off the same root) and both unmap edges (no resurrection
+  once dismissed, the root's own unmap leaving its menu up); README's
+  rule-3 caveat removed now the claim is true as written. No hot-path
+  benchmark (per-grab path plus one `Option` compare per focus
+  derivation).
 ## What's next
 
 The backlog is the source of truth for what to pick up; this is the current

@@ -42,7 +42,7 @@ doesn't hold for yet" caveat — the claim is now true as written.
 
 ## Tests
 
-Three new in `layer_shell/tests/popup.rs`, all real `exclusive` layer
+Four new in `layer_shell/tests/popup.rs`, all real `exclusive` layer
 surface + real `xdg_popup` grab + seat-keyboard assertions, no hand-set
 fields:
 
@@ -52,12 +52,18 @@ fields:
   pre-emption: the own grab plus a nested submenu off the same root both
   survive a `refresh_keyboard_focus` forced by mapping a window.
 - `unmapping_the_pre_empting_launcher_does_not_resurrect_a_dismissed_grab`
-  — the unmap edge: a window-rooted menu dismissed by a *different*
-  launcher stays dismissed (`popup_done` stays 1, no grab) once that
-  launcher unmaps; the keyboard goes back to the window.
+  — the third-party unmap edge: a window-rooted menu dismissed by a
+  *different* launcher stays dismissed (`popup_done` stays 1, no grab)
+  once that launcher unmaps; the keyboard goes back to the window.
+- `unmapping_the_exclusive_root_mid_grab_leaves_its_own_menu_up` — the
+  own-root unmap edge: unmapping the root mid-grab neither dismisses its
+  menu (`popup_done` stays 0) nor moves the keyboard off it.
 
-Fail-first: the first two FAIL unfixed (keyboard stuck on `Layer(0)`,
-`left: Some(Layer(0))` vs `Some(Popup(1))`), the third passes unfixed —
+Fail-first: the first, second and fourth FAIL unfixed — the fourth at its
+grant assert, since the refusal dismisses with `popup_done` before the
+unmap step ever runs (`configured` false, and `popup_done` already 1).
+The first two fail with the keyboard stuck on `Layer(0)`
+(`left: Some(Layer(0))` vs `Some(Popup(1))`). The third passes unfixed —
 it pins behavior that must keep working. The preserved shape the other
 way (a different exclusive surface still refuses and pre-empts) was
 already pinned by `a_popup_grab_is_refused_while_a_launcher_holds_the_keyboard`

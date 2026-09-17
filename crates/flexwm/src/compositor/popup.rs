@@ -349,8 +349,11 @@ impl State {
     /// of "who grabbed" to keep in sync. A grab that has ended but not yet
     /// been reaped still names its root; sparing it from dismissal is
     /// harmless, since reaping it is `settle_popup_grab`'s job either way.
-    /// No grab at all, or a root that is already gone, answers false -- the
-    /// dismissing direction, which is the safe one here.
+    /// No grab at all answers false, and so does a root that is already
+    /// gone -- not because the stored focus clears (it never does), but
+    /// because `layer_keyboard_focus` only ever returns a live mapped
+    /// surface, necessarily a different object from a dead root. Either
+    /// way false is the dismissing direction, which is the safe one here.
     pub(super) fn popup_grab_rooted_on(&self, surface: &WlSurface) -> bool {
         self.popup_grab
             .as_ref()
