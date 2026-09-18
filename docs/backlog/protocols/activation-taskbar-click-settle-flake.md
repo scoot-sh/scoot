@@ -9,7 +9,7 @@ blocked: null
 # Flake: activation taskbar-click precondition misses under extreme parallel load
 
 Found 2026-09-18 while stressing the
-[screencopy parked-poll flake fix](../rendering/screencopy-parked-poll-flake.md):
+[screencopy parked-poll flake fix](../resolved/screencopy-parked-poll-flake-done.md):
 one full-binary run out of twelve failed in
 `activation::tests::keyboard::an_activation_takes_the_keyboard_back_from_a_clicked_taskbar`
 (`activation/tests/keyboard.rs:304`):
