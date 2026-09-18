@@ -954,7 +954,7 @@ fn socket_error(error: BindError) -> String {
         BindError::PermissionDenied => {
             "no wayland socket: $XDG_RUNTIME_DIR is not writable".to_string()
         }
-        // `ListeningSocketSource::new_auto` tries `wayland-1` through
+        // `WaylandListener::bind_auto` tries `wayland-1` through
         // `wayland-32` (1..33, verified in the pinned rev's
         // `wayland/socket.rs`), so reaching this means all 32 are taken.
         BindError::AlreadyInUse => {

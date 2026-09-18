@@ -100,7 +100,7 @@ if a real workload ever wedges innocents this way -- the same condition as
 
 ## Tests
 
-Five new tests in `wayland_accept/tests.rs`, mirroring `ipc/accept/tests.rs`
+Four new tests in `wayland_accept/tests.rs`, mirroring `ipc/accept/tests.rs`
 (including its forked-child exhaustion choreography and the serial lock that
 keeps this module's own fd churn out of the count-to-fork window -- learned
 the hard way: the first green run left a hung child behind when a sibling

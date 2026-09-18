@@ -8,7 +8,7 @@
 //! in wayland-server 0.31.14) -- propagates as `Err` out of `process_events`,
 //! through calloop's `dispatch_events` (`loop_logic.rs:527`, `?`), out of
 //! `EventLoop::run` (`loop_logic.rs:657+`, `?`), out of `compositor::run`
-//! (`mod.rs:192`, `?`), and `main` prints it and exits `FAILURE`. An `EMFILE`
+//! (`mod.rs:193`, `?`), and `main` prints it and exits `FAILURE`. An `EMFILE`
 //! on this socket does not take the socket down. It takes the whole
 //! compositor down -- every client's unsaved state with it -- which is the
 //! crash/hang severity class, and exactly what the per-connection fd bounds
