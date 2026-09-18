@@ -663,10 +663,10 @@ gap jumped the queue — each item's own file records why it landed when it did.
   of `CompositorHandler::commit`) decrements by this commit's
   `buffer_delta`, saturating rather than wrapping (both operands are
   client-controlled `i32`) and gated on the active cursor surface. Four
-   fail-first harness tests around a real client (offset + accumulation
-   incl. negative hotspot, post-re-set, `i32::MIN` saturation, other-surface
-   negative control); no README change (protocol fix, no user-facing
-   surface).
+  fail-first harness tests around a real client (offset + accumulation
+  incl. negative hotspot, post-re-set, `i32::MIN` saturation, other-surface
+  negative control); no README change (protocol fix, no user-facing
+  surface).
 - **[`Cursor::element`'s one-element fallback
   `Vec`](docs/backlog/resolved/cursor-element-per-frame-alloc-done.md)**
   — CLOSED DELIBERATE 2026-09-18 with measured numbers (PR #106's triage
