@@ -680,6 +680,18 @@ gap jumped the queue — each item's own file records why it landed when it did.
   per-frame `Vec`s regardless. Pinned by two capacity tests (fail-first
   proven against a wasteful variant); no compositor code changed, no README
   change (no user-facing surface).
+- **[Parked-captures poll flake](docs/backlog/resolved/screencopy-parked-poll-flake-done.md)**
+  — RESOLVED 2026-09-18 (PR #110, test-only, no production change): the filed
+  mechanism was corrected by per-step serial instrumentation — the trip is
+  `Ready` at an *unmoving* serial (a `delivered`-lag at park time, the
+  pre-map frame consumed by an earlier tick), not an advance between park
+  and poll, so serving it is correct behavior. Fixed with a quiescence wait
+  plus a synchronize-then-assert retry (one retry proven max, bounded at
+  three); the delivered-frames pin still fails with the re-arm neutered.
+  Post-fix: 40/40 targeted + 12/12 full-binary under the oversubscription
+  that tripped 6/40 + 1/12 pre-fix, full set green, smoke 17 ok. Found
+  alongside and filed separately (low, load-only): an activation
+  taskbar-click settle flake under the same abusive load.
 ## What's next
 
 The backlog is the source of truth for what to pick up; this is the current
