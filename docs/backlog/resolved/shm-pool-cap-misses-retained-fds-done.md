@@ -119,9 +119,9 @@ different refusal sites).
   double-buffered, reused across typing *and* resizes (zero destroys in
   the whole session), 2 pools / 2 `create_buffer` / max-concurrent 2
   (`WAYLAND_DEBUG=1` wire log, dev VM, 2026-09-17). quickshell: not
-  installed on the dev VM, so reasoned not measured (a panel of a handful
-  of layer surfaces, double-buffered each -- under 10; stated as an
-  environment limit). Video-ish: a few queued frames on top of UI buffers.
+  re-measured in this pass, so reasoned not measured (a panel of a handful
+  of layer surfaces, double-buffered each -- under 10; a real measurement
+  wants a real shell config -- follow-up work). Video-ish: a few queued frames on top of UI buffers.
   Heaviest reasoned: ~60 (20-window browser, triple-buffered). 512 is ~8x
   that and 256x the measured floor -- death-penalty sizing, same doctrine
   as the frame cap (16 for a legitimate 1). Per-connection fd arithmetic:
@@ -164,7 +164,7 @@ different refusal sites).
 - The ≤1 phantom unit per killing connection (dead entries only; see
   above). No disconnect sweep exists or is needed: phantoms attach only to
   dead clients, and live-client accounting is exact.
-- quickshell's exact buffer concurrency (unmeasured -- environment limit,
+- quickshell's exact buffer concurrency (not re-measured -- follow-up,
   reasoned instead, 50x headroom).
 
 ## Tests
@@ -280,9 +280,10 @@ concurrent live 2, zero destroys across typing and a tiled-resize
 churn (`/tmp/bufmeas-foot.log` on the Mac, since removed with the VM
 processes). No separate `--tty` run: the guard is backend-agnostic
 dispatch code, and the smoke suite is the backend-agnostic net.
-quickshell's buffer concurrency is unmeasured (not installed on the dev
-VM) -- stated as an environment limit in the sizing above, with 50x
-reasoned headroom.
+quickshell's buffer concurrency was not re-measured in this pass (a live
+quickshell binary exists on the dev VM, but a real measurement wants a
+real shell config -- follow-up work), with 50x reasoned headroom in the
+sizing above.
 
 ### VM state
 

@@ -107,10 +107,12 @@ its pool object, retaining both, so those are bounded by the live-buffer
 count below), and one client may hold at most 512 live `wl_buffer`s at
 once whatever created them (pool, dmabuf, single-pixel — past that the
 excess creation gets a protocol error on the creating object; each
-surviving buffer is what actually retains a compositor fd and mapping, so
-this is the bound that caps per-connection fds and mappings — see
+surviving shm or dmabuf buffer is what actually retains a compositor fd
+and mapping (single-pixel buffers retain neither but are counted
+uniformly — the hook can't observe buffer kind — so this is the bound
+that caps per-connection fds and mappings — see
 `docs/backlog/resolved/shm-pool-count-cap-done.md` and
-`docs/backlog/resolved/shm-retained-fd-buffer-cap-done.md`), a client's
+`docs/backlog/resolved/shm-pool-cap-misses-retained-fds-done.md`), a client's
 declared minimum window size can't exceed the largest
 output's usable area on each axis, and `gap` and `cursor_size` each have an
 upper bound as well as a lower one. One client may also hold at most 8
@@ -1548,10 +1550,14 @@ uploading a larger buffer.
 
 What to know before pointing a client at it:
 
-- **No shm, no pool budget.** These buffers allocate nothing, so the
+- **No shm, no pool budget — but inside the buffer bound.** These buffers allocate nothing, so the
   per-client `wl_shm` pool count (see Status above) never moves for them —
-  there is no fd, no mapping and no reservation to bound, and no limit being
-  bypassed either.
+  there is no fd, no mapping and no reservation to bound. They still count
+  against the 512-live-`wl_buffer` bound above (uniform accounting — the
+  hook can't observe buffer kind, and excluding them would let cheap
+  destroys drain retaining units), so a client already holding 512 buffers
+  of any kind is refused further creations with a bare code-0 error on the
+  manager.
 - **Destroying the manager leaves its buffers working.** The spec says the
   child objects are unaffected, and they are: a buffer outlives its manager
   and still attaches, commits and draws afterwards.
