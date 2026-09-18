@@ -160,8 +160,23 @@ evidence, which points to "the shape is fine here":
   config file:
   `/dev/dri/by-path/platform-soc:display-subsystem-card -> ../card2`
   (with `platform-206400000.gpu-card -> ../card1` for the render node).
-  `[tty] gpu` takes any path the session can open, so this works today with
-  no code change — `README.md`'s sample now shows the `by-path` form.
+  This works today with no code change — `README.md`'s sample now shows the
+  `by-path` form.
+
+  Traced rather than assumed, since it is a recommendation: `gpu.rs::open`
+  hands the path straight to `session.open` without canonicalizing or
+  shape-checking it; libseat's **logind** backend `stat()`s it (following the
+  symlink) and passes the resulting `major`/`minor` to `TakeDevice`, so the
+  symlink never reaches logind; libseat's **seatd** backend `realpath()`s it
+  *first*, then prefix-checks and opens with `O_NOFOLLOW` (safe precisely
+  because realpath already resolved it). The exact statement is therefore
+  "any path that **resolves to** a DRM node under `/dev/dri/`", not "any path
+  the session can open" — under seatd the canonicalized path is prefix-checked,
+  so an alias living outside `/dev/dri/` would be refused even though it
+  resolves to a real device. This one resolves to `/dev/dri/card2` and is fine.
+  It also does **not** trip the "not in udev's list for this seat" warning:
+  that check and the hotplug matcher both key on `dev_t`, not on the path
+  string, so the alias and the `cardN` node are the same device to both.
 
 So the key needs no reshaping, but that is now a supported statement about
 this hardware rather than the bare assertion it replaced.

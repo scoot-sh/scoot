@@ -37,22 +37,6 @@ gap jumped the queue — each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
-- **Both Apple-Silicon-blocked questions, answered on the reporter's own
-  hardware** (2026-09-18, docs-only — Apple M2 `apple,t8112`, NixOS aarch64;
-  runbook and evidence in [`Asahi.md`](Asahi.md)).
-  [The `--tty` DRM device search](docs/backlog/resolved/tty-gpu-config-key-done.md)
-  **works there unattended** — it rejects the `asahi` render node
-  (`os error 95`) and drives the `apple-drm` display controller, in a
-  daily-driven session with no `--gpu` and no `[tty] gpu` — so the residual
-  that key carried is closed and `--gpu` is *not* the first thing to reach
-  for on Apple Silicon.
-  [Ghostty at `[output] scale = 1.5`](docs/backlog/resolved/ghostty-fails-at-1-5-done.md)
-  is **RESOLVED as not reproducible**: refuted under `--headless` at both
-  scales on the real AGX GPU and then in the original `--tty`-on-`eDP-1`
-  configuration itself. The cause was never captured, so it closes with a
-  revisit condition rather than a diagnosis.
-  Still open and still needing that machine: issue #48's connector fallback,
-  which needs an external display (this one has only `eDP-1`).
 - **[`ext-idle-notify-v1` + `idle-inhibit-unstable-v1`](docs/backlog/resolved/ext-idle-notify-resolved.md)**
   (PR #38, 2026-09-15) — the automatic trigger session-lock had no other way
   to get. A `swayidle`-style daemon can now idle, resume and re-idle the
@@ -823,6 +807,23 @@ gap jumped the queue — each item's own file records why it landed when it did.
   `wayland-info` advertisement; no tablet-tool hardware on the dev VM
   (its QEMU tablet is pointer-only), so the libinput arms are
   review-verified and real tool types untested -- stated in the record.
+- **Both Apple-Silicon-blocked questions, answered on the reporter's own
+  hardware** (2026-09-18, docs-only — Apple M2 `apple,t8112`, NixOS aarch64;
+  runbook and evidence in [`Asahi.md`](Asahi.md)).
+  [The `--tty` DRM device search](docs/backlog/resolved/tty-gpu-config-key-done.md)
+  **works there unattended** — it rejects the `asahi` render node
+  (`os error 95`) and drives the `apple-drm` display controller, in a
+  daily-driven session with no `--gpu` and no `[tty] gpu` — so the residual
+  that key carried is closed and `--gpu` is *not* the first thing to reach
+  for on Apple Silicon.
+  [Ghostty at `[output] scale = 1.5`](docs/backlog/resolved/ghostty-fails-at-1-5-done.md)
+  is **RESOLVED as not reproducible**: refuted under `--headless` at both
+  scales on the real AGX GPU and then in the original `--tty`-on-`eDP-1`
+  configuration itself. The cause was never captured, so it closes with a
+  revisit condition rather than a diagnosis.
+  Still open and still needing that machine: issue #48's connector fallback,
+  which needs an external display (this one has only `eDP-1`).
+
 ## What's next
 
 The backlog is the source of truth for what to pick up; this is the current
@@ -900,7 +901,7 @@ medium priority — the effective top of what's actually open.
    through the session-locale table, per-char atomic, prefix-typed;
    inactive groups, lock/latch, `Multi_key` and plain-`us` `é` stay loud
    refusals).
-5. [Rename `flexwm` → `flex`, split out
+4. [Rename `flexwm` → `flex`, split out
    `flexctl`](docs/backlog/meta/rename-flex-family.md) — decided, explicitly
    scheduled **last** in the burn-down, per the entry's own frontmatter.
 

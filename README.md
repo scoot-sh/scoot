@@ -196,7 +196,7 @@ a seat — see `vm/README.md` for a Mac-native NixOS VM that provides one.
 flexwm --headless --width 1280 --height 800 -- foot   # start, spawn a terminal
 flexwm --nested --width 1280 --height 800 -- foot     # inside your existing compositor
 flexwm --tty -- foot                                  # on a real DRM/KMS seat
-flexwm --tty --gpu /dev/dri/card1 -- foot             # ...naming the DRM device yourself
+flexwm --tty --gpu /dev/dri/card0 -- foot             # ...naming the DRM device yourself
 flexwm --tty --mode 1920x1080 -- foot                 # ...naming the display mode (see below)
 flexwm msg windows                                     # in another shell
 flexwm msg action focus-column left
@@ -406,10 +406,11 @@ the same KMS probe every automatic candidate does. [`Asahi.md`](Asahi.md)
 records that run and remains the runbook for re-checking it on a different
 Apple Silicon model.
 
-If the automatic search still picks wrong, name the device:
+If the automatic search still picks wrong, name the device — the one that
+owns the connectors, never a render-only node:
 
 ```sh
-flexwm --tty --gpu /dev/dri/card1 -- foot
+flexwm --tty --gpu /dev/dri/card0 -- foot
 ```
 
 `--gpu PATH` replaces the search entirely — exactly that device, no
@@ -428,7 +429,7 @@ file saves retyping the flag on every launch:
 
 ```toml
 [tty]
-gpu = "/dev/dri/card1"
+gpu = "/dev/dri/card0"
 ```
 
 `[tty] gpu` names the same device the same way — exactly that device, no

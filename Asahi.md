@@ -86,7 +86,7 @@ risky part comes last:
   and did its job — the GL stack was exercised over dmabuf and the GL
   hypothesis was refuted. Refuting it did promote `--headless`-vs-`--tty` to
   the largest remaining variable, so that was then tested too, as a real
-  session; see Test 1.s result note. Nothing is left outstanding here.)*
+  session; see Test 1's result note. Nothing is left outstanding here.)*
 - **Test 2 may need no VT either** — if flexwm is already your desktop
   session, the read-only shortcut in that section answers it from inside the
   session you are in. Check before booking a VT.
