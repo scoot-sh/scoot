@@ -184,7 +184,14 @@ actionable.
   output management), refused with each global's own `finished`; includes
   re-homing the ext list off Smithay state and an idle-deferred refusal
   (backend panics on in-bind destructor events)
-- [Lock surfaces are per-output; flexwm has one output](./protocols/lock-surfaces-per-output.md)
+- [Lock surfaces are per-output; flexwm has one output](./resolved/session-lock-per-output-done.md)
+  — RESOLVED 2026-09-18 (PR #103, pin + document, no behavior change): the first
+  blanked frame on the one output confirms the lock whatever the surface
+  count (zero-surface half already pinned), every admitted surface shares
+  that output's size (pinned by a new two-surface suite, first-created on
+  top, keyboard on the first, resize reaching all), and `OUTPUT_ID`'s doc
+  now lists the four session-lock sites multi-output must revisit. The
+  duplicate-bind admission question stays with its own open entry below.
 - [Unbounded lock surfaces via duplicate `wl_output` binds](./protocols/lock-surface-duplicate-wl-output.md)
 - [Lock blanks immediately instead of waiting for the first surface](./resolved/session-lock-blank-timing-done.md)
   — RESOLVED 2026-09-18 (decide + pin, no behavior change): the accept →

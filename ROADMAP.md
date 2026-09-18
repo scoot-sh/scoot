@@ -602,6 +602,14 @@ gap jumped the queue — each item's own file records why it landed when it did.
   allow-list (it marks sandboxes, not lockers) — so the ticket's own
   `blocked:` line was wrong. Ordinary-client lock + second-client
   takeover stay pinned by the existing harness suite.
+- **[Lock surfaces are per-output; flexwm has one
+  output](docs/backlog/resolved/session-lock-per-output-done.md)** —
+  RESOLVED 2026-09-18 (PR #103, pin + document, no behavior change): first blanked
+  frame on the one output confirms whatever the surface count, every
+  admitted surface shares its size (new two-surface suite: first on top,
+  keyboard on first, resize reaching all), `OUTPUT_ID`'s doc lists the four
+  sites multi-output must revisit. Duplicate-bind admission stays open as
+  its own entry.
 ## What's next
 
 The backlog is the source of truth for what to pick up; this is the current
