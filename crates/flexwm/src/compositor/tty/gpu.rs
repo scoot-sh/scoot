@@ -84,13 +84,120 @@ pub struct OpenGpu {
     pub name: String,
 }
 
+/// An explicitly named DRM device: the path, and where the name came from.
+///
+/// `--gpu PATH` wins over `[tty] gpu` when both name one (an explicit flag
+/// beats a file, the way `--config` beats the default path); the source is
+/// also whose name the startup error uses when the named device cannot be
+/// driven (see [`unusable_device_error`]) -- a user who set the config key
+/// and never typed `--gpu` must not be told the device came from `--gpu`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExplicitGpu<'a> {
+    /// `--gpu PATH` on the command line.
+    Flag(&'a Path),
+    /// `[tty] gpu` in the config file.
+    Config(&'a Path),
+}
+
+impl<'a> ExplicitGpu<'a> {
+    /// The named device.
+    pub fn path(self) -> &'a Path {
+        match self {
+            Self::Flag(path) | Self::Config(path) => path,
+        }
+    }
+
+    /// Whose name the startup error uses: `--gpu PATH` for the flag,
+    /// `[tty] gpu = "PATH"` for the config key. Quoted in the config
+    /// form (unlike the flag form, where the path starts its own clause
+    /// below) because there it sits mid-sentence, where a path with a
+    /// space in it would otherwise dissolve into the prose around it.
+    fn describe(self) -> String {
+        match self {
+            Self::Flag(path) => format!("`--gpu {}`", path.display()),
+            Self::Config(path) => format!("`[tty] gpu = \"{}\"`", path.display()),
+        }
+    }
+}
+
+/// Picks the explicitly named device, if any: `--gpu PATH` wins over
+/// `[tty] gpu` when both name one, and no source at all means the automatic
+/// search picks (see [`candidates`]).
+///
+/// An explicitly-set-but-empty path in *either* source is a hard startup
+/// error rather than something the session is asked to open or, worse,
+/// silently dropped in favour of the automatic pick. An empty path can
+/// never name a device, so refusing it changes no working configuration --
+/// it only turns a session-layer `ENOENT` (or a silent fallback) into a
+/// refusal that names the surface that actually set it.
+pub fn resolve<'a>(
+    flag: Option<&'a Path>,
+    config: Option<&'a Path>,
+) -> Result<Option<ExplicitGpu<'a>>, EmptyGpuPath> {
+    match (flag, config) {
+        (Some(path), _) if path.as_os_str().is_empty() => Err(EmptyGpuPath::flag()),
+        (Some(path), _) => Ok(Some(ExplicitGpu::Flag(path))),
+        (None, Some(path)) if path.as_os_str().is_empty() => Err(EmptyGpuPath::config()),
+        (None, Some(path)) => Ok(Some(ExplicitGpu::Config(path))),
+        (None, None) => Ok(None),
+    }
+}
+
+/// An explicitly-set-but-empty DRM device path: `--gpu` with nothing after
+/// it, or `gpu = ""` under `[tty]`. The one config-adjacent failure that
+/// stops startup -- see [`resolve`].
+#[derive(Debug, PartialEq, Eq)]
+pub struct EmptyGpuPath {
+    source: EmptySource,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EmptySource {
+    Flag,
+    Config,
+}
+
+impl EmptyGpuPath {
+    fn flag() -> Self {
+        Self {
+            source: EmptySource::Flag,
+        }
+    }
+
+    fn config() -> Self {
+        Self {
+            source: EmptySource::Config,
+        }
+    }
+}
+
+impl fmt::Display for EmptyGpuPath {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.source {
+            EmptySource::Flag => write!(
+                f,
+                "`--gpu` names an empty device path; pass a DRM device \
+                 (e.g. `--gpu /dev/dri/card1`) or drop the flag"
+            ),
+            EmptySource::Config => write!(
+                f,
+                "`[tty] gpu` is set but empty; name a DRM device \
+                 (e.g. `gpu = \"/dev/dri/card1\"`) or remove the key"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for EmptyGpuPath {}
+
 /// Every device worth trying, best guess first.
 ///
-/// `explicit` (a `--gpu PATH`) replaces the search outright: exactly that
-/// one path, no fallback, because the whole point of the flag is to be
-/// obeyed on hardware whose automatic choice is wrong. Nothing here checks
-/// that the path exists -- [`open`] reports what the session says about
-/// it, which is both more accurate and free of a check-then-open race.
+/// `explicit` (a `--gpu PATH` or a `[tty] gpu`) replaces the search
+/// outright: exactly that one path, no fallback, because the whole point
+/// of naming a device is to be obeyed on hardware whose automatic choice is
+/// wrong. Nothing here checks that the path exists -- [`open`] reports what
+/// the session says about it, which is both more accurate and free of a
+/// check-then-open race.
 ///
 /// Otherwise: `primary_gpu()`'s pick first (it is the correct answer on
 /// ordinary hardware, and the fallback must not demote it there), then
@@ -101,9 +208,9 @@ pub struct OpenGpu {
 ///
 /// The tail is best-effort: see [`assemble`] for why enumerating it is
 /// allowed to fail without taking the primary down with it.
-pub fn candidates(seat: &str, explicit: Option<&Path>) -> io::Result<Vec<PathBuf>> {
-    if let Some(path) = explicit {
-        return Ok(vec![path.to_owned()]);
+pub fn candidates(seat: &str, explicit: Option<ExplicitGpu<'_>>) -> io::Result<Vec<PathBuf>> {
+    if let Some(named) = explicit {
+        return Ok(vec![named.path().to_owned()]);
     }
     assemble(primary_gpu(seat)?, all_gpus(seat))
 }
@@ -521,28 +628,40 @@ fn connector_mode(
 /// Which advice goes above that list depends on [`Rejection`]: a list that
 /// is *entirely* session-open failures is a seat problem, where naming a
 /// device cannot help, so it is not offered.
-/// An explicit `--gpu` gets its own wording: there is exactly one device
+/// An explicit device gets its own wording: there is exactly one device
 /// and the user chose it, so a list of one and an offer of the flag they
 /// already passed would both be noise. (It gets no seat-specific hint
 /// either, unlike the list form below: one [`Rejection::SessionOpen`] on a
 /// path the user typed is far more likely to be a path that does not exist
 /// than a seat that is busy, and the session's own errno already says
-/// which.)
+/// which.) The wording names the surface that actually named the device --
+/// `--gpu PATH` or `[tty] gpu = "PATH"` (see
+/// [`ExplicitGpu::describe`]) -- so a config-file user is never told to
+/// re-check a flag they never passed.
 pub fn unusable_device_error(
     seat: &str,
-    explicit: Option<&Path>,
+    explicit: Option<ExplicitGpu<'_>>,
     failures: &[(PathBuf, Rejection)],
 ) -> String {
-    if let Some(path) = explicit {
+    if let Some(named) = explicit {
         let reason = failures
             .iter()
-            .find(|(failed, _)| failed == path)
+            .find(|(failed, _)| *failed == named.path())
             .map_or("is not usable", |(_, reason)| reason.reason());
         // Quoted, unlike the list form below where the path starts its own
         // indented line: here it sits mid-sentence, where a path with a
-        // space in it -- or the empty string, which `--gpu ""` really does
-        // reach -- would otherwise dissolve into the prose around it.
-        return format!("the device given by `--gpu {}` {reason}", path.display());
+        // space in it -- or the empty string, which an explicit path could
+        // once reach the session as -- would otherwise dissolve into the
+        // prose around it. (`resolve` refuses empty paths before any
+        // session is opened, so the empty case below is defensive, kept so
+        // a `map_or` that produced an empty tail would still read as a
+        // sentence rather than a truncated one.)
+        return match named {
+            ExplicitGpu::Flag(_) => format!("the device given by {} {reason}", named.describe()),
+            ExplicitGpu::Config(_) => {
+                format!("the device named by {} {reason}", named.describe())
+            }
+        };
     }
     if failures.is_empty() {
         return format!(
@@ -687,8 +806,79 @@ mod tests {
     fn an_explicit_gpu_replaces_the_search() {
         let chosen = Path::new("/dev/dri/card3");
         assert_eq!(
-            candidates("seat0", Some(chosen)).expect("explicit paths need no seat"),
+            candidates("seat0", Some(ExplicitGpu::Flag(chosen)))
+                .expect("explicit paths need no seat"),
             paths(&["/dev/dri/card3"]),
+        );
+    }
+
+    #[test]
+    fn an_explicit_gpu_from_the_config_file_replaces_the_search_too() {
+        // `[tty] gpu` reaches `candidates` as the same single-candidate
+        // list a `--gpu` does: explicit means exactly that device, no
+        // fallback, whichever surface named it.
+        let chosen = Path::new("/dev/dri/card1");
+        assert_eq!(
+            candidates("seat0", Some(ExplicitGpu::Config(chosen)))
+                .expect("explicit paths need no seat"),
+            paths(&["/dev/dri/card1"]),
+        );
+    }
+
+    #[test]
+    fn resolve_prefers_the_flag_over_the_config_file() {
+        let flag = Path::new("/dev/dri/card0");
+        let config = Path::new("/dev/dri/card1");
+        assert_eq!(
+            resolve(Some(flag), Some(config)),
+            Ok(Some(ExplicitGpu::Flag(flag))),
+            "an explicit --gpu must beat [tty] gpu the way an explicit flag should"
+        );
+    }
+
+    #[test]
+    fn resolve_uses_the_config_file_when_the_flag_is_absent() {
+        let config = Path::new("/dev/dri/card1");
+        assert_eq!(
+            resolve(None, Some(config)),
+            Ok(Some(ExplicitGpu::Config(config)))
+        );
+    }
+
+    #[test]
+    fn resolve_with_neither_source_names_no_device() {
+        assert_eq!(resolve(None, None), Ok(None));
+    }
+
+    #[test]
+    fn resolve_refuses_an_empty_path_from_either_source() {
+        // Fail-closed, not fail-open: an explicitly-set-but-empty path can
+        // never name a device, so it is a startup error rather than
+        // something the session is asked to open (or, worse, silently
+        // ignored in favour of the automatic pick).
+        let empty = Path::new("");
+        let real = Path::new("/dev/dri/card1");
+        assert!(
+            resolve(Some(empty), Some(real)).is_err(),
+            "an empty --gpu must not silently win over a real [tty] gpu"
+        );
+        assert!(
+            resolve(Some(empty), None).is_err(),
+            "an empty --gpu must fail, not reach the session"
+        );
+        assert!(
+            resolve(None, Some(empty)).is_err(),
+            "an empty [tty] gpu must fail, not fall back to the automatic pick"
+        );
+        let error = resolve(None, Some(empty)).expect_err("empty [tty] gpu is an error");
+        assert!(
+            error.to_string().contains("[tty] gpu"),
+            "the refusal must name the key, not the flag: {error}"
+        );
+        let error = resolve(Some(empty), None).expect_err("empty --gpu is an error");
+        assert!(
+            error.to_string().contains("--gpu"),
+            "the refusal must name the flag: {error}"
         );
     }
 
@@ -885,12 +1075,39 @@ mod tests {
             chosen.clone(),
             refused("could not be opened through the session (No such file or directory)"),
         )];
-        let message = unusable_device_error("seat0", Some(&chosen), &failures);
+        let message = unusable_device_error(
+            "seat0",
+            Some(ExplicitGpu::Flag(chosen.as_path())),
+            &failures,
+        );
         assert_eq!(
             message,
             "the device given by `--gpu /dev/dri/card9` could not be opened \
              through the session (No such file or directory)"
         );
+    }
+
+    #[test]
+    fn an_explicit_gpu_from_the_config_file_is_blamed_as_the_key_not_the_flag() {
+        // A user who set `[tty] gpu` and never typed `--gpu` must not be
+        // told the device came from `--gpu`: the wording names the surface
+        // that actually named it.
+        let chosen = PathBuf::from("/dev/dri/card1");
+        let failures = vec![(
+            chosen.clone(),
+            unusable("has no connected connector with a usable mode"),
+        )];
+        let message = unusable_device_error(
+            "seat0",
+            Some(ExplicitGpu::Config(chosen.as_path())),
+            &failures,
+        );
+        assert_eq!(
+            message,
+            "the device named by `[tty] gpu = \"/dev/dri/card1\"` \
+             has no connected connector with a usable mode"
+        );
+        assert!(!message.contains("--gpu"), "{message}");
     }
 
     #[test]
@@ -900,19 +1117,21 @@ mod tests {
         // produced an empty tail would read as a truncated sentence.
         let chosen = PathBuf::from("/dev/dri/card9");
         assert_eq!(
-            unusable_device_error("seat0", Some(&chosen), &[]),
+            unusable_device_error("seat0", Some(ExplicitGpu::Flag(chosen.as_path())), &[]),
             "the device given by `--gpu /dev/dri/card9` is not usable"
         );
     }
 
     #[test]
     fn an_empty_explicit_path_is_still_visible_in_the_message() {
-        // `--gpu ""` parses, reaches the session, and is refused there. The
-        // quoting is what keeps the resulting sentence from reading as if
-        // no path had been named at all.
+        // Defensive: `resolve` refuses empty paths before any session is
+        // opened, so this arm is unreachable through `init` today -- but a
+        // `map_or` that produced an empty tail would read as a truncated
+        // sentence. The quoting is what keeps the resulting sentence from
+        // reading as if no path had been named at all.
         let chosen = PathBuf::new();
         assert_eq!(
-            unusable_device_error("seat0", Some(&chosen), &[]),
+            unusable_device_error("seat0", Some(ExplicitGpu::Flag(chosen.as_path())), &[]),
             "the device given by `--gpu ` is not usable"
         );
     }

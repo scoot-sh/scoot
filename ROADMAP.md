@@ -731,9 +731,13 @@ was already filed individually under `docs/backlog/protocols/` at
 medium priority — the effective top of what's actually open.
 
 1. **Confirm `--gpu` fixes the Asahi Linux `--tty` failure** — needs the
-   user's own hardware, not the dev VM (no split GPU/display-controller
-   topology there). Unblocks the
-   [`[tty] gpu` config key](docs/backlog/tty/tty-gpu-config-key.md).
+    user's own hardware, not the dev VM (no split GPU/display-controller
+    topology there). The
+    [`[tty] gpu` config key](docs/backlog/resolved/tty-gpu-config-key-done.md)
+    itself is landed (parse, validate, plumb, select — verified live
+    single-GPU on the dev VM); what still wants that hardware is the
+    end-to-end confirmation on split-GPU topology, kept as the record's
+    stated residual and revisit condition.
 2. **Medium-priority protocol gaps**, mostly what's left of the DMS/Noctalia
    probes (see "Shell enablement" below for their recommended order):
     [screencopy's toplevel half](docs/backlog/resolved/screencopy-toplevel-capture-done.md)

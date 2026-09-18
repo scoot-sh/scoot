@@ -32,6 +32,8 @@ mod gpu;
 mod hotplug;
 mod present_retry;
 
+pub(crate) use self::gpu::{ExplicitGpu, resolve};
+
 use std::error::Error;
 use std::path::Path;
 
@@ -213,16 +215,17 @@ pub struct Tty {
 /// (`HDMI-A-1`, `Virtual-1`), which the caller gives the `wl_output` so
 /// clients see the screen under the name every other compositor would use.
 ///
-/// `gpu` is `--gpu PATH`: `None` (the normal case) means try every device
-/// on the seat, best guess first, until one works; `Some` means try
-/// exactly that one. See `gpu.rs` for the ordering and for what "works"
-/// means. `mode` is `--mode WxH`, applied to whichever device is chosen;
-/// see `gpu::find_connector_and_mode` for the fallback when the connector
-/// has no mode of that size.
+/// `gpu` is the explicitly named DRM device (`--gpu PATH`, or `[tty] gpu`
+/// when the flag is absent -- see [`resolve`]): `None` (the normal case)
+/// means try every device on the seat, best guess first, until one works;
+/// `Some` means try exactly that one. See `gpu.rs` for the ordering and for
+/// what "works" means. `mode` is `--mode WxH`, applied to whichever device
+/// is chosen; see `gpu::find_connector_and_mode` for the fallback when the
+/// connector has no mode of that size.
 pub fn init(
     loop_handle: LoopHandle<'static, State>,
     state: &mut State,
-    gpu: Option<&Path>,
+    gpu: Option<ExplicitGpu<'_>>,
     mode: Option<(u16, u16)>,
 ) -> Result<(i32, i32, String), Box<dyn Error>> {
     let (mut session, notifier) = LibSeatSession::new()?;

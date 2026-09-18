@@ -21,6 +21,14 @@
 //! typo is a hard lockout on real hardware. Starting with defaults and
 //! saying what's wrong in the log is strictly better than that, even though
 //! it means a typo can go unnoticed until someone reads the log.
+//!
+//! One deliberate exception: `[tty] gpu`, when the file names a device,
+//! behaves like `--gpu PATH` -- exactly that device, no fallback, and a
+//! startup error when it cannot be driven. Falling back to the automatic
+//! pick there would be fail-open (silently driving a device the user
+//! explicitly ruled out), so the fail-closed refusal wins over the
+//! never-block-startup rule for this one key. See [`LoadedConfig::gpu`]
+//! and `tty::gpu::resolve`.
 
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -186,6 +194,21 @@ impl AppearanceConfig {
     }
 }
 
+/// `[tty]`. One field today: `gpu`, the DRM device `--tty` drives when
+/// the automatic choice is wrong (see `tty::gpu`). `Option`-everything for
+/// the same reason [`LayoutConfig`] is: a partial table leaves the rest at
+/// their defaults.
+///
+/// An empty `gpu = ""` is *not* normalized to `None` here: silently
+/// dropping what the user wrote would be fail-open (driving the automatic
+/// pick while the config names a device). It parses to `Some("")` and
+/// `tty::gpu::resolve` refuses it with a hard startup error naming the key.
+#[derive(Debug, Default, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+struct TtyConfig {
+    gpu: Option<PathBuf>,
+}
+
 /// The whole file. `binds`' values are parsed lazily, one at a time (see
 /// [`apply_binds`]), so one bad bind can't take the rest down with it.
 #[derive(Debug, Default, Deserialize, PartialEq)]
@@ -197,6 +220,8 @@ struct FileConfig {
     appearance: Option<AppearanceConfig>,
     #[serde(default)]
     output: Option<OutputConfig>,
+    #[serde(default)]
+    tty: Option<TtyConfig>,
     #[serde(default)]
     binds: HashMap<String, String>,
 }
@@ -210,6 +235,16 @@ pub struct LoadedConfig {
     pub appearance: Appearance,
     /// The resolved `[output] scale`, already clamped (or the default 1.0).
     pub scale: f64,
+    /// The `[tty] gpu` device path, when the file names one. `None` (the
+    /// normal case) means the automatic search picks; `Some` means drive
+    /// exactly that device, the way `--gpu PATH` does -- including its
+    /// fail-closed refusal when the device cannot be driven. `--gpu` wins
+    /// over this when both name one (see `tty::gpu::resolve`), and an
+    /// explicitly-set-but-empty path in either is a hard startup error,
+    /// not a silent fallback. Meaningless outside `--tty`, where
+    /// `compositor::run` ignores it with a warning, for the same reason as
+    /// `--gpu` itself.
+    pub gpu: Option<PathBuf>,
 }
 
 impl LoadedConfig {
@@ -219,6 +254,7 @@ impl LoadedConfig {
             keybindings: Keybindings::default(),
             appearance: Appearance::default(),
             scale: 1.0,
+            gpu: None,
         }
     }
 
@@ -229,6 +265,7 @@ impl LoadedConfig {
             .unwrap_or_default()
             .into_appearance(Config::clamp_gap(config.gap));
         let scale = file.output.unwrap_or_default().into_scale();
+        let gpu = file.tty.and_then(|tty| tty.gpu);
         let mut keybindings = Keybindings::default();
         apply_binds(&mut keybindings, file.binds);
         Self {
@@ -236,6 +273,7 @@ impl LoadedConfig {
             keybindings,
             appearance,
             scale,
+            gpu,
         }
     }
 }
@@ -1453,5 +1491,69 @@ mod tests {
         .expect("valid toml");
         let loaded = LoadedConfig::from_file(file);
         assert_eq!(loaded.appearance.cursor_theme, None);
+    }
+
+    // -- [tty] ------------------------------------------------------------
+
+    #[test]
+    fn a_tty_gpu_key_round_trips() {
+        let file: FileConfig =
+            toml::from_str("[tty]\ngpu = \"/dev/dri/card1\"\n").expect("valid toml");
+        assert_eq!(
+            file.tty,
+            Some(TtyConfig {
+                gpu: Some(PathBuf::from("/dev/dri/card1")),
+            })
+        );
+        assert_eq!(
+            LoadedConfig::from_file(file).gpu,
+            Some(PathBuf::from("/dev/dri/card1"))
+        );
+    }
+
+    #[test]
+    fn a_missing_tty_table_or_gpu_key_means_no_explicit_device() {
+        let file: FileConfig = toml::from_str("").unwrap();
+        assert_eq!(file.tty, None);
+        assert_eq!(LoadedConfig::from_file(file).gpu, None);
+
+        let file: FileConfig = toml::from_str("[tty]\n").expect("valid toml");
+        assert_eq!(file.tty, Some(TtyConfig { gpu: None }));
+        assert_eq!(LoadedConfig::from_file(file).gpu, None);
+    }
+
+    #[test]
+    fn deny_unknown_fields_rejects_a_tty_typo() {
+        let toml = "[tty]\ngpus = \"/dev/dri/card1\"\n";
+        assert!(toml::from_str::<FileConfig>(toml).is_err());
+    }
+
+    #[test]
+    fn a_tty_gpu_of_the_wrong_type_is_a_whole_file_fallback() {
+        // Same rule as any other type mismatch (see the module doc): the
+        // file is discarded, not the key.
+        let (_dir, path) = write_temp("[layout]\ngap = 20\n\n[tty]\ngpu = 5\n");
+        let loaded = load_from(&path, true).expect("a parse failure must never fail startup");
+        assert_eq!(loaded.gpu, None);
+        assert_eq!(
+            loaded.config.gap,
+            Config::default().gap,
+            "the whole file is discarded, including a valid [layout]"
+        );
+    }
+
+    /// An empty `gpu = ""` parses to `Some("")`, not `None`: the loader
+    /// must not silently swallow what the user wrote (that would be
+    /// fail-open -- driving the automatic pick while the config names a
+    /// device). Refusing it is `gpu::resolve`'s job at startup, where a
+    /// hard error can name the key; see that function's doc.
+    #[test]
+    fn an_empty_tty_gpu_is_preserved_for_resolve_to_refuse() {
+        let file: FileConfig = toml::from_str("[tty]\ngpu = \"\"\n").expect("valid toml");
+        assert_eq!(
+            LoadedConfig::from_file(file).gpu,
+            Some(PathBuf::from("")),
+            "an empty gpu must survive loading so resolve can refuse it loudly"
+        );
     }
 }
