@@ -68,9 +68,13 @@ actionable.
 - [`ext_workspace.rs`'s cross-client check takes two backend locks per manager, per `wl_output` bind](./protocols/ext-workspace-client-lookup-per-bind.md)
   — pre-existing, same review; `ObjectId::same_client_as` answers the exact
   same question without locking
-- [Flake: activation taskbar-click precondition misses under extreme parallel load](./protocols/activation-taskbar-click-settle-flake.md)
-  — open, low, load-only (single `settle()` insufficient under 3×
-  oversubscription; 5/5 isolated green)
+- [Flake: activation taskbar-click precondition misses under extreme parallel load](./resolved/activation-taskbar-click-settle-flake-done.md)
+  — RESOLVED 2026-09-18 (test-only): verify-first found three distinct
+  load-only trip mechanisms at the same test, not one (settle-insufficiency,
+  a racing `activate` spending the click before the assert, and
+  `focus_before` read after the racing dispatch) — settle-until-hittable on
+  the click's own hit test plus synchronous press-asserts, production pin
+  untouched
 - [`ext-workspace-v1` workspace activation moves window focus but leaves the keyboard on a clicked layer surface](./resolved/ext-workspace-clicked-layer-keyboard-done.md)
   — RESOLVED 2026-09-16 (PR #54): confirmed real, not not-a-bug — two
   fail-first tests proved the switch path consults `clicked_layer`, and the

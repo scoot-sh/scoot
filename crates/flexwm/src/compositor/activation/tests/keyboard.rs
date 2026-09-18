@@ -38,6 +38,7 @@ use wayland_protocols::ext::session_lock::v1::client::{
 use wayland_protocols_wlr::layer_shell::v1::client::{zwlr_layer_shell_v1, zwlr_layer_surface_v1};
 
 use super::*;
+use crate::compositor::layer_shell::ABOVE_WINDOWS;
 use crate::compositor::test_support::wait_for;
 use smithay::desktop::{LayerSurface, Window};
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
@@ -225,6 +226,35 @@ fn click(fixture: &mut Fixture, x: f64, y: f64) {
     fixture.settle();
 }
 
+/// Settles until the compositor has dispatched the taskbar's buffer commit,
+/// so a click at [`TASKBAR_POINT`] really lands on it.
+///
+/// The ack only proves the *client* finished its own round trip, not that
+/// the compositor has dispatched the buffer commit yet -- without this a
+/// click can run against a layer map that does not have the taskbar's
+/// surface in it yet and land on whatever is behind it instead. A single
+/// `settle()` held until it didn't (a 2-in-80 trip under deliberately
+/// abusive multi-process oversubscription, always at the `clicked_layer`
+/// precondition, never past it -- settle-insufficiency in the test, not a
+/// production race). The wait is on the exact hit test the click itself
+/// uses (`State::layer_under`, the same `layer_hit` `focus_under_pointer`
+/// clicks through), so it proves the click's precondition rather than
+/// hoping a fixed dispatch count covers it; bounded so a taskbar that never
+/// maps still fails loudly instead of hanging the suite.
+fn settle_until_taskbar_hit(fixture: &mut Fixture) {
+    for _ in 0..100 {
+        fixture.settle();
+        if fixture
+            .state
+            .layer_under(&ABOVE_WINDOWS, TASKBAR_POINT.into())
+            .is_some()
+        {
+            return;
+        }
+    }
+    panic!("the taskbar never became hittable -- check TASKBAR_POINT against the layout");
+}
+
 /// The `wl_surface` the seat's keyboard focus is actually on, which is the
 /// only unambiguous answer to "where do keystrokes go".
 fn keyboard_surface(fixture: &Fixture) -> Option<WlSurface> {
@@ -280,11 +310,10 @@ fn drive_with_taskbar() -> (Fixture, Run, Option<WindowId>) {
     let Ack::TaskbarMapped = fixture.wait_for_ack(1) else {
         panic!("the taskbar client never mapped its layer surface");
     };
-    // The ack only proves the *client* finished its own round trip, not that
-    // the compositor has dispatched the buffer commit yet -- without this a
-    // click can run against a layer map that does not have the taskbar in it
-    // yet and land on whatever is behind it instead.
-    fixture.settle();
+    // Settle-until-hittable, not settle-once: the ack only proves the
+    // *client* finished its own round trip, not that the compositor has
+    // dispatched the buffer commit yet.
+    settle_until_taskbar_hit(&mut fixture);
     // Mapping the second window focused it, and mapping the taskbar never
     // steals anything -- so this is the window the key press below reaches,
     // and the one the activation later has to move focus away from.
@@ -299,8 +328,19 @@ fn drive_with_taskbar() -> (Fixture, Run, Option<WindowId>) {
     // input handler.
     press_a_key(&mut fixture);
     // Then the launcher gesture itself: a real click on the taskbar, which
-    // takes the keyboard without moving window focus.
-    click(&mut fixture, TASKBAR_POINT.0, TASKBAR_POINT.1);
+    // takes the keyboard without moving window focus. Pressed and asserted
+    // synchronously, with no dispatch in between: the window client fires
+    // its `activate` the moment the key press above reaches it, and any
+    // dispatch before these assertions would let the compositor spend the
+    // click under test -- exactly the production behavior the test below
+    // goes on to pin -- before they run. That is a second, distinct
+    // load-only trip at this same line (1-in-40 under the oversubscription
+    // that caught the settle half, after the settle half had already proven
+    // the click hittable on the same thread with no dispatch since), not a
+    // missed click and not a production race: the click landed, the
+    // activation spent it, and the assertion looked too late.
+    fixture.state.pointer_move(TASKBAR_POINT.0, TASKBAR_POINT.1);
+    fixture.state.pointer_button(PointerButton::Left, true);
     assert!(
         fixture.state.clicked_layer.is_some(),
         "the click never reached the taskbar -- check TASKBAR_POINT against the layout"
@@ -319,7 +359,15 @@ fn drive_with_taskbar() -> (Fixture, Run, Option<WindowId>) {
         Some(WindowId(2)),
         "clicking a bar must not move *window* focus"
     );
+    // Read before the release, not after the settle: the window client fires
+    // its `activate` the moment the key press reaches it, and any dispatch
+    // past this point -- the release's settle, the `Done` wait -- may already
+    // have moved focus to the first window, which would make `focus_before`
+    // lie about what the activation had to move away from. Same racing client
+    // as the press-assert ordering above, third trip at the same test.
     let focus_before = fixture.state.focus;
+    fixture.state.pointer_button(PointerButton::Left, false);
+    fixture.settle();
     // Flushed explicitly because the client is blocked reading rather than
     // writing, and the display source only pushes events out when the
     // *client* writes.
@@ -619,9 +667,10 @@ fn drive_locked_with_taskbar() -> (Fixture, LayerSurface) {
     let Ack::TaskbarMapped = fixture.wait_for_ack(1) else {
         panic!("the taskbar client never mapped its layer surface");
     };
-    // As in `drive_with_taskbar`: the ack only proves the *client* finished,
-    // not that the compositor dispatched the commits yet.
-    fixture.settle();
+    // As in `drive_with_taskbar`: settle-until-hittable, not settle-once --
+    // the ack only proves the *client* finished, not that the compositor
+    // dispatched the commits yet.
+    settle_until_taskbar_hit(&mut fixture);
     // The second window mapped last, so it has window focus -- the one the
     // refused activation below must leave alone.
     assert_eq!(

@@ -99,5 +99,5 @@ unrelated suite:
 isolation on the same tree; never observed under the standard suite. Same
 family (a single `settle()` insufficient under load — the file already
 names the shape), different test. Filed as
-[`activation-taskbar-click-settle-flake`](../protocols/activation-taskbar-click-settle-flake.md)
+[`activation-taskbar-click-settle-flake`](../resolved/activation-taskbar-click-settle-flake-done.md)
 (low, load-only).
