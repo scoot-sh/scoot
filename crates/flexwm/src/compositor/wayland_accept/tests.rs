@@ -13,13 +13,19 @@
 //! is allocation- and lock-free by construction. No `assert!` in the child:
 //! explicit checks that write to stderr and `_exit`.
 
+use std::io::Read;
 use std::os::fd::AsRawFd;
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
 
-use smithay::reexports::calloop::PostAction;
-use smithay::reexports::wayland_server::ListeningSocket;
+use flexwm_core::Config;
+use smithay::reexports::calloop::{EventLoop, PostAction};
+use smithay::reexports::wayland_server::{Display, ListeningSocket};
+
+use crate::compositor::decorations::Appearance;
+use crate::compositor::keybindings::Keybindings;
 
 use super::super::ipc::accept::Spare;
 use super::*;
@@ -311,4 +317,112 @@ fn an_exhausted_listener_sheds_and_clears_the_backlog() {
     let (end, served) = drain_all(&socket, &spare);
     assert!(matches!(end, PostAction::Continue));
     assert_eq!(served, 1, "a post-recovery connection is served, not shed");
+}
+
+// --- pressure shed, through `admit` -----------------------------------------
+
+/// A real compositor state to admit into (or shed before), with no backend:
+/// nothing here renders, and nothing is dispatched either -- the peer
+/// observation below needs no dispatch to tell the arms apart.
+fn admit_state() -> (EventLoop<'static, State>, State) {
+    let mut event_loop = EventLoop::try_new().expect("an event loop");
+    let display = Display::new().expect("a wayland display");
+    let state = State::new(
+        &mut event_loop,
+        display,
+        Config::default(),
+        Keybindings::default(),
+        Appearance::default(),
+        1.0,
+    )
+    .expect("a compositor state");
+    (event_loop, state)
+}
+
+/// Expects the peer of a shed stream: EOF with nothing before it. Retried
+/// briefly rather than read once -- a local FIN lands immediately, but a
+/// debug build on a loaded VM should not fail a correct shed on scheduling.
+fn expect_eof(peer: UnixStream) {
+    let mut peer = peer;
+    peer.set_nonblocking(true).expect("a non-blocking peer");
+    let mut byte = [0u8; 1];
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        match peer.read(&mut byte) {
+            Ok(0) => return,
+            Ok(_) => panic!("a shed peer got bytes before EOF; no arm writes"),
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                assert!(
+                    Instant::now() < deadline,
+                    "the peer is still open: the pressured newcomer was admitted, not shed"
+                );
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            Err(error) => panic!("peer read failed: {error}"),
+        }
+    }
+}
+
+/// Expects the peer of an admitted stream: still open, with nothing to
+/// read. A single read, not a wait: nothing is written before dispatch, so
+/// an admitted peer has nothing to read by construction, and waiting would
+/// only burn suite time proving a negative.
+fn expect_held(peer: UnixStream) {
+    let mut peer = peer;
+    peer.set_nonblocking(true).expect("a non-blocking peer");
+    let mut byte = [0u8; 1];
+    match peer.read(&mut byte) {
+        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
+        Ok(0) => panic!("the peer is at EOF: the calm newcomer was shed, not admitted"),
+        Ok(_) => panic!("an admitted peer got bytes; no arm writes"),
+        Err(error) => panic!("peer read failed: {error}"),
+    }
+}
+
+#[test]
+fn a_pressured_newcomer_gets_eof() {
+    // A table with nothing free: the newcomer is shed before `insert_client`
+    // ever sees it, and its peer reads EOF with no bytes first -- the same
+    // wire shape as the `EMFILE` shed.
+    let _serial = serial();
+    let (_event_loop, mut state) = admit_state();
+    let (server, peer) = UnixStream::pair().expect("a socket pair");
+    admit(
+        &mut state,
+        server,
+        Some(Table {
+            used: 1024,
+            soft: 1024,
+        }),
+    );
+    expect_eof(peer);
+}
+
+#[test]
+fn a_calm_table_admits() {
+    // An observed table with headroom: the newcomer is inserted, and its
+    // peer stays open.
+    let _serial = serial();
+    let (_event_loop, mut state) = admit_state();
+    let (server, peer) = UnixStream::pair().expect("a socket pair");
+    admit(
+        &mut state,
+        server,
+        Some(Table {
+            used: 14,
+            soft: 1024,
+        }),
+    );
+    expect_held(peer);
+}
+
+#[test]
+fn an_unknown_table_admits() {
+    // Fail open: a broken gauge must not deny innocents (the `EMFILE` shed
+    // still catches real exhaustion underneath).
+    let _serial = serial();
+    let (_event_loop, mut state) = admit_state();
+    let (server, peer) = UnixStream::pair().expect("a socket pair");
+    admit(&mut state, server, None);
+    expect_held(peer);
 }

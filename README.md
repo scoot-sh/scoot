@@ -117,7 +117,17 @@ and mapping (single-pixel buffers retain neither but are counted
 uniformly — the hook can't observe buffer kind — so this is the bound
 that caps per-connection fds and mappings — see
 `docs/backlog/resolved/shm-pool-count-cap-done.md` and
-`docs/backlog/resolved/shm-pool-cap-misses-retained-fds-done.md`), a client's
+`docs/backlog/resolved/shm-pool-cap-misses-retained-fds-done.md`).
+Per-connection bounds still multiply across connections, so a
+compositor-wide ceiling sits above them: while fewer than 128 fds stand
+free, newcomers shed (a Wayland connection gets an immediate EOF — there
+is no protocol channel for a reason — an IPC one is refused with a
+message naming the pressure and closed), and a client already holding
+past 128 live buffers or 64 live pools is refused its next creation with
+the same protocol error. A client under those graces — every legitimate
+client, at dozens of times the measured single-window floor — is never
+refused for another client's greed (see
+`docs/backlog/resolved/wayland-global-fd-ceiling-done.md`), a client's
 declared minimum window size can't exceed the largest
 output's usable area on each axis, and `gap` and `cursor_size` each have an
 upper bound as well as a lower one. One client may also hold at most 8
@@ -268,8 +278,8 @@ characters now type on every one of the fourteen swept Latin layouts (`us`,
 
 ### What the control socket refuses
 
-Eight bounds an agent driving flexwm over IPC can actually hit. The first
-six are refusals with a reason — an ordinary `error` response, which
+Nine bounds an agent driving flexwm over IPC can actually hit. The first
+seven are refusals with a reason — an ordinary `error` response, which
 `flexwm msg` prints and exits non-zero on — rather than a silent drop or a
 delay. The last two can't be: one drops a peer that is by definition not
 reading its socket, and the other shortens a wait rather than refusing it.
@@ -317,9 +327,19 @@ reading its socket, and the other shortens a wait rather than refusing it.
   queued behind the others. This is what keeps the per-connection bounds
   above meaningful — otherwise reconnecting resets them — so an agent that
   wants many requests should pipeline them on *one* connection rather than
-  open a connection per request. `flexwm msg` opens one per invocation and
-  closes it as soon as it has its answer, so ordinary scripted use never
-  approaches this.
+   open a connection per request. `flexwm msg` opens one per invocation and
+   closes it as soon as it has its answer, so ordinary scripted use never
+   approaches this.
+- **A newcomer under file-descriptor pressure is refused, too.** While
+   fewer than 128 fds stand free process-wide, a new IPC connection is
+   refused with a message naming the pressure and closed immediately — no
+   slot taken, living connections untouched. Retry in a moment: pressure
+   lifts as soon as whoever is holding fds lets go, and ordinary use (an
+   idle compositor holds 14 fds, a `foot` window 17) never comes near it.
+   The Wayland half of the same ceiling gets an EOF instead — there is no
+   protocol channel for a reason there — and creations past a per-client
+   grace (128 live buffers, 64 live pools) are refused with a protocol
+   error while pressure holds; see the paragraph above.
 - **A connection whose peer stops reading is dropped**, ten to twenty
   seconds after the last byte it took (the check runs on a deadline of its
   own, so the exact moment falls in that range rather than on the ten

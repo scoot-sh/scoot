@@ -374,7 +374,7 @@ actionable.
   "upstream-gated" expectation proved wrong -- buffers are fully
   observable, unlike pool internals.
 - [No cap on Wayland connection count](./resolved/wayland-connection-cap-done.md) — RESOLVED 2026-09-18: the EMFILE-on-accept kill is fixed (Wayland listener sheds like the IPC one; pre-fix binary proven dead live, post-fix alive), and the count itself is closed as an accepted tradeoff (any usable count admits the two greedy connections that fill the table, so a count denies shells while stopping nothing)
-- [A global fd/buffer ceiling across Wayland connections](./security/wayland-global-fd-ceiling.md) — the verdict's deferred half (low): per-connection bounds still multiply, but a shared ceiling would kill innocents for others' greed and needs its own refusal-form design first
+- [A global fd/buffer ceiling across Wayland connections](./resolved/wayland-global-fd-ceiling-done.md) — RESOLVED 2026-09-18: a compositor-wide pressure ceiling with a shed strategy — newcomers shed past 128 free fds (Wayland EOF, IPC refused with a reason naming the pressure), past-grace creations (128 buffers / 64 pools) refused with the interfaces' own protocol errors, under-grace clients never refused for another's greed; sized from live measurement (idle 14, +foot 17), proven live with a 374-connection horde plus shed/survive/recover
 - [Every compositor fd must carry close-on-exec](./security/spawn-fd-cloexec-audit.md) — split from the `O_CLOEXEC` verdict (low): `State::spawn` provably inherits any fd lacking the bit, so each fd source needs verifying at creation; seatd/std/memfd sources already known-good
 
 ### Packaging / tooling

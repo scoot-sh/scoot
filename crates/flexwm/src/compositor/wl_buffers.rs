@@ -136,13 +136,17 @@
 //! handlers' error-before-init shape on every Smithay bump: the exactness
 //! argument above leans on it.
 //!
-//! ## Per connection, not per machine
+//! ## Per connection, plus a compositor-wide ceiling
 //!
 //! Wayland connections are unbounded, so N connections hold up to 512N
-//! buffers. Stated rather than solved -- still strictly better than
-//! unbounded per connection, the same per-connection shape as the pool
-//! count, the capture-frame cap and the bind budget, and cross-connection
-//! abuse is connection-count territory, not a smaller buffer count.
+//! buffers -- which the per-connection cap alone cannot stop. The
+//! compositor-wide ceiling (`fd_pressure`, enforced in `dispatch.rs`)
+//! closes it: while the process table is pressured (fewer than 128 fds
+//! free), a client already holding past the 128-buffer grace is refused
+//! its next creation with the same protocol error. A client under grace --
+//! every legitimate client, at 64x the measured floor -- is never refused
+//! for another's greed; the kill always lands on a contributor, whose
+//! disconnect then frees what it held.
 
 use std::collections::HashMap;
 
@@ -221,6 +225,14 @@ impl WlBuffers {
                 self.live_per_client.remove(client);
             }
         }
+    }
+
+    /// How many live buffers `client` holds right now. Zero for a client
+    /// with no entry rather than `None`: the global pressure guard
+    /// (`fd_pressure`) compares this against its grace, and a client that
+    /// never created anything is trivially under it.
+    pub(super) fn live_for(&self, client: &Client) -> u32 {
+        self.live_per_client.get(&client.id()).copied().unwrap_or(0)
     }
 
     /// How many buffers all clients hold between them. Test-only: the flood

@@ -625,6 +625,14 @@ where
 /// failure above is the exception: `InvalidFd`, matching what Smithay
 /// posts for the same fd.)
 ///
+/// Past [`PRESSURE_GRACE_POOLS`](super::fd_pressure::PRESSURE_GRACE_POOLS)
+/// live pools *and* a pressured process table, the same refusal answers
+/// for the compositor-wide ceiling instead of the per-client one (see
+/// `fd_pressure` for why the grace makes this a ceiling rather than a
+/// lottery). Checked before the claim, so a pressure refusal never takes a
+/// count unit it would then have to give back: the bookkeeping stays
+/// balanced by construction, not by a compensating release.
+///
 /// Folds away for every interface other than `wl_shm`, for the same
 /// monomorphization reason as the guards above -- which matters here too:
 /// this runs on every request of every interface.
@@ -656,6 +664,16 @@ where
         resource.post_error(
             wl_shm::Error::InvalidFd,
             format!("Failed to mmap fd {}", fd.as_raw_fd()),
+        );
+        return true;
+    }
+    if pressure_refusal(
+        state.shm_pools.live_for(client),
+        super::fd_pressure::PRESSURE_GRACE_POOLS,
+    ) {
+        resource.post_error(
+            wl_shm::Error::InvalidStride,
+            too_many_pools_under_pressure(),
         );
         return true;
     }
@@ -762,6 +780,11 @@ where
 /// object argument as the pool guards: returning without initialising the
 /// request's `New` is safe only because `post_error` kills synchronously.
 ///
+/// Past [`PRESSURE_GRACE_BUFFERS`](super::fd_pressure::PRESSURE_GRACE_BUFFERS)
+/// live buffers *and* a pressured process table, the same refusal answers
+/// for the compositor-wide ceiling (see `fd_pressure`, and the pool guard
+/// above for the check-before-claim shape that keeps the count balanced).
+///
 /// Folds away for every interface other than the three factories, for the
 /// same monomorphization reason as the guards above -- which matters here
 /// too: this runs on every request of every interface.
@@ -781,6 +804,16 @@ where
         else {
             return false;
         };
+        if pressure_refusal(
+            state.wl_buffers.live_for(client),
+            super::fd_pressure::PRESSURE_GRACE_BUFFERS,
+        ) {
+            resource.post_error(
+                wl_shm::Error::InvalidStride,
+                too_many_buffers_under_pressure(),
+            );
+            return true;
+        }
         if !state.wl_buffers.claim_buffer_creation(client) {
             return false;
         }
@@ -793,6 +826,16 @@ where
         else {
             return false;
         };
+        if pressure_refusal(
+            state.wl_buffers.live_for(client),
+            super::fd_pressure::PRESSURE_GRACE_BUFFERS,
+        ) {
+            resource.post_error(
+                zwp_linux_buffer_params_v1::Error::InvalidWlBuffer,
+                too_many_buffers_under_pressure(),
+            );
+            return true;
+        }
         if !state.wl_buffers.claim_buffer_creation(client) {
             return false;
         }
@@ -808,6 +851,13 @@ where
         else {
             return false;
         };
+        if pressure_refusal(
+            state.wl_buffers.live_for(client),
+            super::fd_pressure::PRESSURE_GRACE_BUFFERS,
+        ) {
+            resource.post_error(0u32, too_many_buffers_under_pressure());
+            return true;
+        }
         if !state.wl_buffers.claim_buffer_creation(client) {
             return false;
         }
@@ -1131,12 +1181,38 @@ fn too_large(size: i32) -> String {
     format!("wl_shm pool size {size} exceeds flexwm's maximum of {MAX_SHM_POOL_BYTES} bytes")
 }
 
+/// Whether a creation holding `live` counted units against a `grace` must
+/// be refused for compositor-wide fd pressure: past the grace *and* the
+/// table pressured (see `fd_pressure`).
+///
+/// The grace lookup short-circuits the table observation, so creations
+/// under grace cost one `HashMap` lookup and no syscall -- which is every
+/// legitimate creation, since no legitimate client holds past grace (see
+/// the grace sizing in `fd_pressure`). Checked before the per-client
+/// claim, so a pressure refusal never takes a count unit it would then
+/// have to give back.
+fn pressure_refusal(live: u32, grace: u32) -> bool {
+    live > grace && super::fd_pressure::table().is_some_and(|table| table.pressured())
+}
+
 /// The message the live-pool-count refusal carries: which bound said no and
 /// what it is. Same allocation rule as [`too_large`] -- refusal path only.
 fn too_many_pools() -> String {
     format!(
         "wl_shm pool refused: this client already holds the maximum of {} live pools",
         super::shm_pools::MAX_POOLS_PER_CLIENT,
+    )
+}
+
+/// The message the pressure-grace pool refusal carries: the table is
+/// pressured *and* this client holds past its grace, so the kill lands on
+/// a contributor, never an innocent. Same allocation rule as [`too_large`]
+/// -- refusal path only.
+fn too_many_pools_under_pressure() -> String {
+    format!(
+        "wl_shm pool refused: compositor-wide file-descriptor pressure, and this client \
+         holds more than the {}-pool pressure grace",
+        super::fd_pressure::PRESSURE_GRACE_POOLS,
     )
 }
 
@@ -1149,5 +1225,16 @@ fn too_many_buffers() -> String {
     format!(
         "wl_buffer refused: this client already holds the maximum of {} live buffers",
         super::wl_buffers::MAX_BUFFERS_PER_CLIENT,
+    )
+}
+
+/// The message the pressure-grace buffer refusal carries, for all three
+/// factories for the same shared-count reason as [`too_many_buffers`].
+/// Same allocation rule as [`too_large`] -- refusal path only.
+fn too_many_buffers_under_pressure() -> String {
+    format!(
+        "wl_buffer refused: compositor-wide file-descriptor pressure, and this client \
+         holds more than the {}-buffer pressure grace",
+        super::fd_pressure::PRESSURE_GRACE_BUFFERS,
     )
 }

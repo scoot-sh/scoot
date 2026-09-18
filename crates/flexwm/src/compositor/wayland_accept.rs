@@ -52,6 +52,7 @@ use std::fs::File;
 use std::io;
 use std::os::fd::{FromRawFd, OwnedFd};
 use std::os::unix::net::UnixStream;
+use std::sync::Arc;
 
 use smithay::reexports::calloop::generic::Generic;
 use smithay::reexports::calloop::{
@@ -59,7 +60,9 @@ use smithay::reexports::calloop::{
 };
 use smithay::reexports::wayland_server::{BindError, ListeningSocket};
 
+use super::fd_pressure::Table;
 use super::ipc::accept::{Disposition, ShedOutcome, Spare, classify};
+use super::state::{ClientState, State};
 
 #[cfg(test)]
 mod tests;
@@ -144,6 +147,50 @@ impl EventSource for WaylandListener {
 
     fn unregister(&mut self, poll: &mut Poll) -> smithay::reexports::calloop::Result<()> {
         self.socket.unregister(poll)
+    }
+}
+
+/// Takes one accepted stream into the compositor, or sheds it under
+/// compositor-wide fd pressure.
+///
+/// A shed stream is dropped: the client sees an immediate EOF, the same
+/// wire shape as the `EMFILE` shed in [`drain`] -- there is no protocol
+/// channel for refusing a Wayland connection gracefully, and serving it
+/// would spend fds the table does not have. An unknown table (`None`)
+/// admits: shedding on a broken gauge would deny innocents for a faulty
+/// observation, and the `EMFILE` shed still catches real exhaustion
+/// underneath. No double-shed with [`drain`]: the two are mutually
+/// exclusive per backlog entry (an entry is either accepted, reaching
+/// here, or its `accept` fails, reaching the shed arm), and this path
+/// never touches the spare, so a pressure that deepens into exhaustion
+/// still finds it armed.
+///
+/// Takes the observed `table` rather than reading it so tests can drive
+/// every shape with a canned reading; the one production caller (the
+/// `listen` callback in `state.rs`) passes `fd_pressure::table()`.
+/// Allocation is fine here: this runs on the loop thread in the accept
+/// callback, never in a forked exhaustion-test child (which drives
+/// [`drain`] directly with its own stub).
+pub(super) fn admit(state: &mut State, stream: UnixStream, table: Option<Table>) {
+    if let Some(observed) = table.filter(|observed| observed.pressured()) {
+        tracing::warn!(
+            used = observed.used,
+            soft = observed.soft,
+            free = observed.free(),
+            "out of file descriptors; shed a pending wayland connection \
+             (fd pressure, not a cap: there is no protocol channel for \
+             refusing a wayland connection, so a shed one gets EOF)"
+        );
+        return;
+    }
+    // A new connection can fail under fd/id exhaustion; that's the
+    // misbehaving-client's problem; a single bad file descriptor
+    // shouldn't take down every other client's session.
+    if let Err(error) = state
+        .display_handle
+        .insert_client(stream, Arc::new(ClientState::default()))
+    {
+        tracing::warn!(%error, "could not accept a new wayland client");
     }
 }
 
