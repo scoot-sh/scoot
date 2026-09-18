@@ -285,9 +285,10 @@ actionable.
   (exactly that device, no fallback, fail-closed startup error; `--gpu`
   wins when both name one), verified live on the dev VM single-GPU
   (byte-identical default path, fail-closed refusal, flag precedence).
-  Residual, still needing the user's own hardware: confirming `--gpu`
-  fixes the Asahi Linux `--tty` failure (no split-GPU topology on the dev
-  VM) — the gate the open ticket carried, kept as the revisit condition.
+  The residual it carried -- confirming the Apple Silicon case on the
+  reporter's own hardware -- is CLOSED 2026-09-18: the automatic search
+  works there unattended, so `--gpu` is a convenience on that machine and
+  not a requirement.
 - [Background color not painted where no window covers](./resolved/tty-background-not-painted-done.md)
   — RESOLVED 2026-09-16: it always was painted. The smoke test's background
   sample pixel sat on the cursor, which only `--tty` draws. Closes the
@@ -383,8 +384,9 @@ actionable.
   "upstream-gated" expectation proved wrong -- buffers are fully
   observable, unlike pool internals.
 - [No cap on Wayland connection count](./resolved/wayland-connection-cap-done.md) — RESOLVED 2026-09-18: the EMFILE-on-accept kill is fixed (Wayland listener sheds like the IPC one; pre-fix binary proven dead live, post-fix alive), and the count itself is closed as an accepted tradeoff (any usable count admits the two greedy connections that fill the table, so a count denies shells while stopping nothing)
-- [A global fd/buffer ceiling across Wayland connections](./security/wayland-global-fd-ceiling.md) — the verdict's deferred half (low): per-connection bounds still multiply, but a shared ceiling would kill innocents for others' greed and needs its own refusal-form design first
-- [Every compositor fd must carry close-on-exec](./security/spawn-fd-cloexec-audit.md) — split from the `O_CLOEXEC` verdict (low): `State::spawn` provably inherits any fd lacking the bit, so each fd source needs verifying at creation; seatd/std/memfd sources already known-good
+- [A global fd/buffer ceiling across Wayland connections](./resolved/wayland-global-fd-ceiling-done.md) — RESOLVED 2026-09-18: a compositor-wide pressure ceiling with a shed strategy — newcomers shed past 128 free fds (Wayland EOF, IPC refused with a reason naming the pressure), past-grace creations (128 buffers / 64 pools) refused with the interfaces' own protocol errors, under-grace clients never refused for another's greed; sized from live measurement (idle 14, +foot 17), proven live with a 374-connection horde plus shed/survive/recover
+- [Every compositor fd must carry close-on-exec](./resolved/spawn-fd-cloexec-audit-done.md) — RESOLVED 2026-09-18 (audit + test-only pin, no production change): every fd source verified at creation — event-loop, channel, listener/spare/accepted-socket, seatd, shm/dmabuf receipt, sealed memfds, libinput/udev, transient file reads — measured live on headless and `--tty` (every non-stdio fd carries the bit; an IPC-spawned child inherits none) with pinned sources re-verified where libraries create the fd; the spawn pin now also covers socket, `try_clone` and eventfd markers, each proven sensitive by neutering
+- [Pin the fd-pressure grace conjunction's boundaries](./security/fd-pressure-grace-boundary-pins.md) — split from PR #123 review (low): `pressure_refusal`'s `>`/`&&` and the 128/129, 64/65 boundaries have zero tests; the shipped operator is correct, this is pinning, not fixing
 
 ### Packaging / tooling
 - [Nix `src = self` invalidates the build on doc-only edits](./resolved/nix-src-fileset-done.md)

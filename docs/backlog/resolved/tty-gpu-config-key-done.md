@@ -37,12 +37,13 @@ deliberately **not** held for the Asahi hardware confirmation the ticket
 gated on: the gate conflated two separable things — the config key (parse,
 validate, plumb, select; fully buildable and testable without split-GPU
 hardware) and the hardware confirmation (does `--gpu` fix the Asahi
-machine, which needs the user's own hardware, not the dev VM). The first
-is done here; the second stays open as a stated residual below, with its
-revisit condition. If the Asahi probe ever shows a device path is the
-wrong shape of persistent setting, the key is small enough to reshape —
-but there is no evidence for that today, and holding a daily-drive
-usability key for it kept every multi-GPU user retyping the flag.
+machine, which needed the user's own hardware, not the dev VM). The first
+was done here; the second was recorded as a residual below — and has since
+been answered on that hardware (2026-09-18), so both halves are now closed.
+Splitting them is what let the usability key ship instead of every multi-GPU
+user retyping the flag for four more days, and the eventual answer vindicated
+it: the search was already correct on that machine, so waiting would have
+held the key for a confirmation that changed nothing about it.
 
 ### What changed
 
@@ -142,17 +143,115 @@ allocates one `String` per failed explicit device on the startup-failure
 path only. Nothing on any per-frame, per-event, or IPC-dispatch path
 changed or grew an allocation.
 
+### The Asahi residual — CLOSED (2026-09-18)
+
+The hardware confirmation this entry deferred is **done, and the answer is
+that the automatic search already works on Apple Silicon.** `--gpu` is a
+convenience on this machine, not a requirement.
+
+On the **"is a device path the wrong shape of persistent setting"** question
+the gate actually asked: this run does not answer it directly, because it
+never needed to set `[tty] gpu` at all. What it does supply is the relevant
+evidence, which points to "the shape is fine here":
+
+- `cardN` minor numbers were **stable across four consecutive boots** —
+  `asahi` minor 1, `apple` minor 2, every time (`journalctl -b -3 … -b 0`).
+- A stable alias exists regardless, and is the better thing to put in a
+  config file:
+  `/dev/dri/by-path/platform-soc:display-subsystem-card -> ../card2`
+  (with `platform-206400000.gpu-card -> ../card1` for the render node).
+  This works today with no code change — `README.md`'s sample now shows the
+  `by-path` form.
+
+  Traced rather than assumed, since it is a recommendation: `gpu.rs::open`
+  hands the path straight to `session.open` without canonicalizing or
+  shape-checking it; libseat's **logind** backend `stat()`s it (following the
+  symlink) and passes the resulting `major`/`minor` to `TakeDevice`, so the
+  symlink never reaches logind; libseat's **seatd** backend `realpath()`s it
+  *first*, then prefix-checks and opens with `O_NOFOLLOW` (safe precisely
+  because realpath already resolved it). The exact statement is therefore
+  "any path that **resolves to** a DRM node under `/dev/dri/`", not "any path
+  the session can open" — under seatd the canonicalized path is prefix-checked,
+  so an alias living outside `/dev/dri/` would be refused even though it
+  resolves to a real device. This one resolves to `/dev/dri/card2` and is fine.
+  It also does **not** trip the "not in udev's list for this seat" warning:
+  that check and the hotplug matcher both key on `dev_t`, not on the path
+  string, so the alias and the `cardN` node are the same device to both.
+
+So the key needs no reshaping, but that is now a supported statement about
+this hardware rather than the bare assertion it replaced.
+
+Measured on the reporter's Apple M2 (`apple,t8112`, j413), NixOS aarch64,
+per [`Asahi.md`](../../../Asahi.md) Test 2. The split is exactly the one the
+key was designed for:
+
+| node | driver | role |
+| --- | --- | --- |
+| `/dev/dri/card1` | `asahi` | render / AGX, **no KMS** |
+| `/dev/dri/card2` | `apple-drm` | display controller, owns `eDP-1` |
+| `/dev/dri/renderD128` | `asahi` | render node |
+
+**The evidence is stronger than the probe this entry asked for: it is the
+user's live, daily-driven session, not a test run.** flexwm runs as their
+desktop via greetd (`flexwm --tty -- noctalia`, pid 1700, seat0/vc1) with
+**no `--gpu` flag and no `[tty] gpu` key set** — and its only open DRM fd is
+`/dev/dri/card2`. So the fallback probed the `asahi` render node, rejected
+it, and landed on the `apple-drm` display controller unattended.
+`flexwm msg outputs` against that live session reports `eDP-1`, 1280×800
+logical at scale 2.0.
+
+Independent corroboration from the same boot: the greeter (niri) hit the
+exact failure this fallback routes around —
+
+```
+niri::backend::tty: error adding primary node device, display-only devices
+may not work: DRM access error: Error loading resource handles on device
+`Some("/dev/dri/card1")` (Operation not supported (os error 95))
+```
+
+— the `os error 95` signature this entry predicted, on the very device
+flexwm rejected, from a compositor whose primary-node heuristic lacks the
+fallback.
+
+**Re-confirmed on `f688ac9` itself.** The first measurement was taken against
+an older build that happened to be what the session was running. The machine
+was then rebuilt onto `f688ac9` and logged back in, and the new session
+(different pid, same story) again opens exactly one DRM fd — `/dev/dri/card2`
+— with no `--gpu` and no `[tty] gpu`, on `eDP-1`. Worth having, because that
+delta included PR #122, which touches `tty/mod.rs`: the additions are tablet
+event arms and two `has_capability(TabletTool)` guards, and this confirms
+they left device selection alone.
+
+**The log lines, captured on the next reboot.** Initially they were not: the
+session's stderr went to `/dev/tty1` uncaptured, and retrieving it would have
+meant restarting the desktop that was hosting the measurement. That gap was
+then closed at the source — the nixos-config session entry now runs flexwm
+through a small `flexwm-session` wrapper that redirects to
+`~/.local/state/flexwm/session.log` — and the next boot produced exactly what
+this entry originally asked for:
+
+```
+WARN flexwm::compositor::tty::gpu: drm: device unusable path=/dev/dri/card1
+     reason=has no usable KMS pipeline -- loading its DRM resources failed
+     (Operation not supported (os error 95))
+INFO flexwm::compositor::tty: drm: driving this device path=/dev/dri/card2
+     connector=eDP-1 width=2560 height=1600
+```
+
+The render node rejected *with its reason*, then the display controller
+accepted — the working-fallback shape, from the machine itself rather than
+inferred from open file descriptors. The `os error 95` is the exact signature
+predicted for loading KMS resources from a render-only device.
+
+**What stays untested, and why it no longer blocks:** the `[tty] gpu` key and
+`--gpu` flag themselves on *this* hardware. They did not need to run, because
+the mispick they exist to work around does not occur here — which is the
+finding. Their behavior remains unit-test proven plus dev-VM verified above.
+If some future Apple Silicon topology *does* mispick, this is the machine to
+retest on.
+
 ### Not verified live (stated plainly)
 
-- **The Asahi multi-GPU confirmation the ticket gated on.** The dev VM has
-  one GPU (`card0` + `renderD128`); there is no topology here where the
-  automatic pick is wrong, so the fallback-to-second-device and the
-  explicit-override-on-split-hardware shapes are unit-test proven only.
-  Revisit condition: the user's own Asahi hardware — run with and without
-  `[tty] gpu` set and confirm the named device is driven (the `drm:
-  driving this device` line names it). If that probe shows a device path
-  is the wrong persistent shape after all, reshape the key then; until
-  then this stands.
 - A lock, capture, or hotplug held across a config-named device choice;
   the legacy (non-atomic) probe of a named device (dev VM is atomic).
 - Two agents racing the `--tty` seat while one of them uses the key —

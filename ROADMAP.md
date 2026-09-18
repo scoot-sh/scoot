@@ -807,6 +807,40 @@ gap jumped the queue — each item's own file records why it landed when it did.
   `wayland-info` advertisement; no tablet-tool hardware on the dev VM
   (its QEMU tablet is pointer-only), so the libinput arms are
   review-verified and real tool types untested -- stated in the record.
+- **[A global fd/buffer ceiling across Wayland connections](docs/backlog/resolved/wayland-global-fd-ceiling-done.md)** —
+  RESOLVED 2026-09-18: the connection-cap verdict's deferred half -- a
+  compositor-wide pressure ceiling with a designed refusal form. Past 128
+  free fds newcomers shed (Wayland EOF, IPC refused with a reason naming
+  the pressure), and past-grace creations (128 live buffers, 64 live
+  pools) are refused with the interfaces' own protocol errors, so the kill
+  always lands on a contributor and never an innocent bar. Thirteen
+  fail-first tests; proven live with a 374-connection horde (52 sheds,
+  foot untouched, immediate recovery on drain).
+- **[Every compositor fd carries close-on-exec](docs/backlog/resolved/spawn-fd-cloexec-audit-done.md)** —
+  RESOLVED 2026-09-18 (audit + test-only, no production change): the
+  per-source close-on-exec audit PR #114 filed — every fd source verified
+  at creation (event-loop, channel, listener/spare/accepted-socket, seatd,
+  shm/dmabuf receipt, sealed memfds, libinput/udev, transient file reads),
+  measured live on headless and `--tty` with an IPC-spawned child
+  inheriting nothing; the spawn pin now covers socket, `try_clone` and
+  eventfd markers, each proven sensitive by neutering.
+- **Both Apple-Silicon-blocked questions, answered on the reporter's own
+  hardware** (2026-09-18, docs-only — Apple M2 `apple,t8112`, NixOS aarch64;
+  runbook and evidence in [`Asahi.md`](Asahi.md)).
+  [The `--tty` DRM device search](docs/backlog/resolved/tty-gpu-config-key-done.md)
+  **works there unattended** — it rejects the `asahi` render node
+  (`os error 95`) and drives the `apple-drm` display controller, in a
+  daily-driven session with no `--gpu` and no `[tty] gpu` — so the residual
+  that key carried is closed and `--gpu` is *not* the first thing to reach
+  for on Apple Silicon.
+  [Ghostty at `[output] scale = 1.5`](docs/backlog/resolved/ghostty-fails-at-1-5-done.md)
+  is **RESOLVED as not reproducible**: refuted under `--headless` at both
+  scales on the real AGX GPU and then in the original `--tty`-on-`eDP-1`
+  configuration itself. The cause was never captured, so it closes with a
+  revisit condition rather than a diagnosis.
+  Still open and still needing that machine: issue #48's connector fallback,
+  which needs an external display (this one has only `eDP-1`).
+
 ## What's next
 
 The backlog is the source of truth for what to pick up; this is the current
@@ -823,15 +857,7 @@ resolved/upstream/deliberate, nothing new filed). What's left of both
 was already filed individually under `docs/backlog/protocols/` at
 medium priority — the effective top of what's actually open.
 
-1. **Confirm `--gpu` fixes the Asahi Linux `--tty` failure** — needs the
-    user's own hardware, not the dev VM (no split GPU/display-controller
-    topology there). The
-    [`[tty] gpu` config key](docs/backlog/resolved/tty-gpu-config-key-done.md)
-    itself is landed (parse, validate, plumb, select — verified live
-    single-GPU on the dev VM); what still wants that hardware is the
-    end-to-end confirmation on split-GPU topology, kept as the record's
-    stated residual and revisit condition.
-2. **Medium-priority protocol gaps**, mostly what's left of the DMS/Noctalia
+1. **Medium-priority protocol gaps**, mostly what's left of the DMS/Noctalia
    probes (see "Shell enablement" below for their recommended order):
     [screencopy's toplevel half](docs/backlog/resolved/screencopy-toplevel-capture-done.md)
     is CLOSED UNREACHABLE (phase-1 probe, no build — stock quickshell routes
@@ -850,7 +876,7 @@ medium priority — the effective top of what's actually open.
    [a window-focus change doesn't dismiss an active popup
    grab](docs/backlog/resolved/popup-grab-focus-divergence-done.md), which
    shipped as an IPC `popup_grab` field in PR #55.
-3. **[IPC connection cap and the half-closed-connection
+2. **[IPC connection cap and the half-closed-connection
    leak](docs/backlog/resolved/ipc-connection-cap-resolved.md)** — RESOLVED
    2026-09-16: 64 concurrent connections, refused with a reason past that,
    a write-stall deadline that drops a peer which has stopped reading (the
@@ -875,7 +901,7 @@ medium priority — the effective top of what's actually open.
    shared connection table costs an innocent
    client](docs/backlog/resolved/connection-cap-denies-the-same-user-done.md) -- is
    closed as an accepted tradeoff (no workload has hit it; kept as the landing spot).
-4. Small, unblocked low-priority fixes: [`msg key` modifier
+3. Small, unblocked low-priority fixes: [`msg key` modifier
     resolution](docs/backlog/resolved/msg-key-modifier-resolution-done.md)
     (PR #83, resolved — modifiers resolve through the keymap probe like
     `type_text`; toggle-option layouts accept combos, `msg key A` still
@@ -892,7 +918,7 @@ medium priority — the effective top of what's actually open.
    through the session-locale table, per-char atomic, prefix-typed;
    inactive groups, lock/latch, `Multi_key` and plain-`us` `é` stay loud
    refusals).
-5. [Rename `flexwm` → `flex`, split out
+4. [Rename `flexwm` → `flex`, split out
    `flexctl`](docs/backlog/meta/rename-flex-family.md) — decided, explicitly
    scheduled **last** in the burn-down, per the entry's own frontmatter.
 

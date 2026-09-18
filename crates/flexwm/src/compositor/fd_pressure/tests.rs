@@ -1,0 +1,115 @@
+//! Tests for the global fd ceiling's observation and predicate.
+//!
+//! The decision core is pure ([`Table::pressured`] over a hand-built
+//! [`Table`](super::Table)), so every boundary is pinned exactly; the one
+//! live test asserts the observer agrees with the kernel about this very
+//! process. Enforcement-site wiring (what a shed/refusal does on the wire)
+//! is pinned at each site, not here.
+
+use super::*;
+
+/// A table at the dev-VM size, `free` fds standing free.
+fn table_with_free(free: u64) -> Table {
+    Table {
+        used: 1024 - free,
+        soft: 1024,
+    }
+}
+
+#[test]
+fn plenty_free_is_calm() {
+    assert!(!table_with_free(1024).pressured());
+    assert!(!table_with_free(129).pressured());
+}
+
+#[test]
+fn the_reserve_boundary_trips_exactly() {
+    // One free fd below the reserve sheds; exactly the reserve does not.
+    // The boundary is `<`, not `<=`: `RESERVE_FDS` free means the reserve
+    // is intact.
+    assert!(!table_with_free(RESERVE_FDS).pressured());
+    assert!(table_with_free(RESERVE_FDS - 1).pressured());
+}
+
+#[test]
+fn a_full_table_is_pressured() {
+    assert!(table_with_free(0).pressured());
+}
+
+#[test]
+fn used_past_soft_reads_as_zero_free_not_a_wrap() {
+    // A limit shrunk under current use (or a racing count) must read as
+    // pressured, never as `u64::MAX` free via wrap.
+    let table = Table {
+        used: 2000,
+        soft: 1024,
+    };
+    assert_eq!(table.free(), 0);
+    assert!(table.pressured());
+}
+
+#[test]
+fn a_small_table_is_calm_whatever_it_holds() {
+    // Mirrors `table()`'s `None` for the same table: below `MIN_TABLE_FDS`
+    // there is no guard, so the predicate must not fire either, or a
+    // hand-built reading and the observer would disagree about identical
+    // input.
+    for soft in [0, 1, 64, MIN_TABLE_FDS - 1] {
+        assert!(
+            !Table { used: soft, soft }.pressured(),
+            "soft {soft} must read calm"
+        );
+        assert!(
+            !Table {
+                used: soft + 1000,
+                soft
+            }
+            .pressured(),
+            "soft {soft} overfull must still read calm"
+        );
+    }
+    assert!(
+        Table {
+            used: MIN_TABLE_FDS,
+            soft: MIN_TABLE_FDS
+        }
+        .pressured()
+    );
+}
+
+#[test]
+fn free_is_soft_minus_used() {
+    let table = Table {
+        used: 896,
+        soft: 1024,
+    };
+    assert_eq!(table.free(), 128);
+    assert!(!table.pressured(), "128 free is the intact reserve");
+    let table = Table {
+        used: 897,
+        soft: 1024,
+    };
+    assert_eq!(table.free(), 127);
+    assert!(table.pressured(), "127 free spends the reserve");
+}
+
+#[test]
+fn the_live_observer_agrees_with_the_kernel() {
+    let table = table().expect("the observer works on this machine");
+    assert!(
+        table.soft >= MIN_TABLE_FDS,
+        "a guarded table is what the observer returns: {table:?}"
+    );
+    // The process holds at least this test's own stack of fds; and the
+    // count cannot exceed the limit it is measured against by more than
+    // racing noise -- `used <= soft` up to the counting dir fd itself.
+    assert!(table.used >= 1, "an empty table reading is a broken gauge");
+    assert!(
+        table.used <= table.soft + 8,
+        "the count overshoots the limit it was read against: {table:?}"
+    );
+    // Cross-check one independent primitive: the soft limit the observer
+    // reports is the one `prlimit` reports for this process.
+    let soft = soft_limit().expect("getrlimit works on this machine");
+    assert_eq!(table.soft, soft);
+}
