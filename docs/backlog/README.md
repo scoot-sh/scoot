@@ -165,7 +165,14 @@ actionable.
   — RESOLVED 2026-09-16 (PR #55): grab semantics unchanged, but `msg windows`
   now reports `popup_grab` per window so an agent can tell focus from where
   keys actually go; relevant to computer-use targeting fidelity
-- [An IME keyboard grab blocks every popup grab](./protocols/popup-grab-blocked-by-ime-grab.md) — no context menu opens anywhere while an IME holds the seat
+- [An IME keyboard grab blocks every popup grab](./resolved/popup-grab-blocked-by-ime-grab-done.md)
+  — RESOLVED 2026-09-18: verify-first found the reverse order unhandled (an
+  IME grabbing while a menu held the keyboard left it mapped with no
+  keyboard) — a live grab displaced by a foreign keyboard grab is now
+  dismissed with `popup_done` on the next dispatch, so either order ends
+  with no menu while the IME holds the seat. Precedence pinned
+  (lock > exclusive layer > IME grab > popup grab) and documented in the
+  README; lock and serial-gate interplay pinned alongside.
 - [Layer surface with no buffer still holds its exclusive zone](./protocols/layer-surface-bufferless-exclusive-zone.md)
 - [Unbounded `ext_workspace_manager_v1` binds per client](./resolved/ext-workspace-object-binding-cap-done.md)
   — RESOLVED 2026-09-17 (PR #74): one shared `BindBudget` — 8 binds per
