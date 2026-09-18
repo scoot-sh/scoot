@@ -21,7 +21,9 @@ use smithay::reexports::wayland_server::backend::{
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::{BindError, Display, DisplayHandle, Resource};
 use smithay::utils::{Logical, Point};
+use smithay::wayland::alpha_modifier::AlphaModifierState;
 use smithay::wayland::compositor::{CompositorClientState, CompositorState};
+use smithay::wayland::content_type::ContentTypeState;
 use smithay::wayland::cursor_shape::CursorShapeManagerState;
 use smithay::wayland::fractional_scale::FractionalScaleManagerState;
 use smithay::wayland::idle_inhibit::IdleInhibitManagerState;
@@ -325,6 +327,19 @@ pub struct State {
     /// Held only to keep the xdg-output global alive.
     #[allow(dead_code)]
     pub output_manager_state: OutputManagerState,
+    /// `wp_alpha_modifier_v1` (version 1): a client-controlled whole-surface
+    /// opacity factor. Held only to keep the global alive -- Smithay's
+    /// `from_surface` multiplies the factor into every surface-tree element
+    /// it builds (see `alpha_modifier.rs`), so there is no flexwm-side
+    /// render work and nothing reads this field again after `new`.
+    #[allow(dead_code)]
+    pub alpha_modifier_state: AlphaModifierState,
+    /// `wp_content_type_manager_v1` (version 1): a client labeling what kind
+    /// of pixels a surface holds. Held only to keep the global alive --
+    /// nothing on a CPU/pixman renderer consumes the hint (see
+    /// `content_type.rs`), so nothing reads this field again after `new`.
+    #[allow(dead_code)]
+    pub content_type_state: ContentTypeState,
     /// `wp_single_pixel_buffer_manager_v1` (version 1): solid-color 1x1
     /// buffers with no shm behind them, for cheap toolkit fills. Held only
     /// to keep the global alive -- Smithay owns the buffers (see
@@ -583,6 +598,8 @@ impl State {
         let viewporter_state = super::output_scale::viewporter(&dh);
         let shm_state = ShmState::new::<Self>(&dh, vec![]);
         let single_pixel_buffer_state = SinglePixelBufferState::new::<Self>(&dh);
+        let alpha_modifier_state = AlphaModifierState::new::<Self>(&dh);
+        let content_type_state = ContentTypeState::new::<Self>(&dh);
         let output_manager_state = OutputManagerState::new_with_xdg_output::<Self>(&dh);
         let data_device_state = DataDeviceState::new::<Self>(&dh);
         // Construction order is load-bearing: both data-control states borrow
@@ -673,6 +690,8 @@ impl State {
             xdg_decoration_state,
             shm_state,
             single_pixel_buffer_state,
+            alpha_modifier_state,
+            content_type_state,
             output_manager_state,
             seat_state,
             data_device_state,
