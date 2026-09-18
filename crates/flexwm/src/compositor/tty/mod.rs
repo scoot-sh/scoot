@@ -42,8 +42,10 @@ use smithay::backend::drm::{
     DrmDevice, DrmDeviceFd, DrmDeviceNotifier, DrmEvent, DrmEventMetadata, PlaneConfig, PlaneState,
 };
 use smithay::backend::input::{
-    AbsolutePositionEvent, Axis, ButtonState, InputEvent, KeyboardKeyEvent, PointerAxisEvent,
-    PointerButtonEvent, PointerMotionEvent,
+    AbsolutePositionEvent, Axis, ButtonState, Event, InputEvent, KeyboardKeyEvent,
+    PointerAxisEvent, PointerButtonEvent, PointerMotionEvent, ProximityState,
+    TabletToolButtonEvent, TabletToolEvent, TabletToolProximityEvent, TabletToolTipEvent,
+    TabletToolTipState,
 };
 use smithay::backend::libinput::{LibinputInputBackend, LibinputSessionInterface};
 use smithay::backend::session::libseat::LibSeatSession;
@@ -53,6 +55,10 @@ use smithay::reexports::calloop::LoopHandle;
 use smithay::reexports::drm::control::{Mode, connector, crtc};
 use smithay::reexports::input::Libinput;
 use smithay::utils::{Buffer as BufferSpace, DeviceFd, Physical, Rectangle, Size, Transform};
+
+use smithay::input::tablet::TabletDescriptor;
+use smithay::input::tablet::tool::AxisFrame;
+use smithay::reexports::input::DeviceCapability as LibinputCapability;
 
 use self::buffers::BufferPool;
 use self::flip_tracker::FlipTracker;
@@ -1042,9 +1048,18 @@ fn libinput_event(event: InputEvent<LibinputInputBackend>, _: &mut (), state: &m
     match event {
         InputEvent::DeviceAdded { device } => {
             tracing::info!(name = %device.name(), "libinput device added");
+            // A tablet-tool device announces its tablet now; its tools
+            // announce themselves on first proximity (see below). The
+            // anvil shape at the pinned rev.
+            if device.has_capability(LibinputCapability::TabletTool) {
+                state.tablet_added(&TabletDescriptor::from(&device));
+            }
         }
         InputEvent::DeviceRemoved { device } => {
             tracing::info!(name = %device.name(), "libinput device removed");
+            if device.has_capability(LibinputCapability::TabletTool) {
+                state.tablet_removed(&TabletDescriptor::from(&device));
+            }
         }
         InputEvent::Keyboard { event } => {
             state.key(event.key_code(), event.state());
@@ -1084,8 +1099,82 @@ fn libinput_event(event: InputEvent<LibinputInputBackend>, _: &mut (), state: &m
             let dy = event.amount(Axis::Vertical).unwrap_or(0.0);
             state.scroll(dx, dy);
         }
+        // Drawing-tablet tools, the `tablet.rs` half: positions map onto
+        // the output's *logical* size exactly like the absolute-pointer
+        // arm above, and every event then runs through the same
+        // pointer/button paths -- a pen moves the cursor and clicks, it
+        // does not grow a second focus system.
+        InputEvent::TabletToolProximity { event } => {
+            let position = tablet_position(state, &event);
+            state.tablet_proximity(
+                &TabletDescriptor::from(&event.device()),
+                &event.tool(),
+                event.state() == ProximityState::In,
+                position.x,
+                position.y,
+                axis_frame(&event),
+            );
+        }
+        InputEvent::TabletToolAxis { event } => {
+            let position = tablet_position(state, &event);
+            state.tablet_motion(&event.tool(), position.x, position.y, axis_frame(&event));
+        }
+        InputEvent::TabletToolTip { event } => {
+            let position = tablet_position(state, &event);
+            // Fully qualified: the concrete event carries an inherent
+            // `tip_state` (the input crate's `TipState`) that shadows the
+            // Smithay trait method in method-call syntax.
+            let down = TabletToolTipEvent::tip_state(&event) == TabletToolTipState::Down;
+            state.tablet_tip(&event.tool(), down, position.x, position.y);
+        }
+        InputEvent::TabletToolButton { event } => {
+            // Fully qualified, same shadowing as the tip arm above: the
+            // inherent `button_state` answers the input crate's
+            // `ButtonState`, not Smithay's.
+            let pressed = TabletToolButtonEvent::button_state(&event) == ButtonState::Pressed;
+            state.tablet_button(&event.tool(), event.button(), pressed);
+        }
         _ => {}
     }
+}
+
+/// Maps one tablet-tool event's device position onto the output's logical
+/// size -- the same space `pointer_move`, the core and every surface lay
+/// out in. Shared by the proximity/axis/tip arms above so the three cannot
+/// disagree about where the tool is; the button arm carries no position.
+fn tablet_position(
+    state: &State,
+    event: &impl TabletToolEvent<LibinputInputBackend>,
+) -> smithay::utils::Point<f64, smithay::utils::Logical> {
+    let (width, height) = state.output.as_ref().map(logical_size).unwrap_or((0, 0));
+    event.position_transformed((width, height).into())
+}
+
+/// The axis changes one libinput tool event carries, as the Smithay frame
+/// the tool half batches them in. Only changed axes are set -- an
+/// unchanged axis is `None`, not a restated zero, which is what keeps a
+/// hovering pen from pinning pressure at whatever it last touched at.
+fn axis_frame(event: &impl TabletToolEvent<LibinputInputBackend>) -> AxisFrame {
+    let mut frame = AxisFrame::new();
+    if event.pressure_has_changed() {
+        frame = frame.pressure(event.pressure());
+    }
+    if event.distance_has_changed() {
+        frame = frame.distance(event.distance());
+    }
+    if event.tilt_has_changed() {
+        frame = frame.tilt(event.tilt_x(), event.tilt_y());
+    }
+    if event.rotation_has_changed() {
+        frame = frame.rotation(event.rotation());
+    }
+    if event.slider_has_changed() {
+        frame = frame.slider(event.slider_position());
+    }
+    if event.wheel_has_changed() {
+        frame = frame.wheel(event.wheel_delta(), event.wheel_delta_discrete());
+    }
+    frame
 }
 
 /// Linux input event `BTN_*` codes, matching `input.rs`'s `code()` in

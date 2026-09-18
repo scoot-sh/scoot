@@ -13,9 +13,10 @@ blocked: null
   2026-09-13 — **TRIAGED PER SUB-ITEM 2026-09-18, see
   `../resolved/protocol-gaps-niche-done.md`:**
   - **`tablet-v2`** — drawing-tablet (Wacom-style) input support. **Filed
-    separately** as [`../input/tablet-v2.md`](../input/tablet-v2.md): an
-    input epic (libinput plumbing, `TabletSeat`, tool focus/cursor), not
-    a bare advertisement.
+    separately** as `../input/tablet-v2.md`, since implemented and
+    recorded as [`../resolved/tablet-v2-done.md`](../resolved/tablet-v2-done.md):
+    an input epic (libinput plumbing, `TabletSeat`, tool focus/cursor),
+    not a bare advertisement.
   - **`wlr-screencopy-unstable-v1`/a newer `ext-image-copy-capture-v1`** —
     ~~lets third-party tools (`grim`, `wf-recorder`, screen-sharing in video
     conferencing apps) capture the screen directly, rather than going
