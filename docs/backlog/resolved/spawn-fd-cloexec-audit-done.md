@@ -61,7 +61,7 @@ compositor build use the same toolchain).
 | 6 | IPC accepted streams | std `accept`, drained by `ipc/accept.rs` | std | probe (same call as #3) |
 | 7 | Spare fds, IPC + Wayland (2 held) | `File::open("/dev/null")` at `Spare::new`; re-arm is raw `libc::open(O_RDONLY \| O_CLOEXEC)` (`ipc/accept.rs:228`, `wayland_accept.rs:243`) | explicit + std | measured live (fds 11/23, `02400000`) + probe |
 | 8 | wayland-backend server epoll (`Display`) | `epoll::create(CreateFlags::CLOEXEC)` (`rs/server_impl/common_poll.rs:38`) | explicit, atomic | measured live (fd 6, `02000002`) + source |
-| 9 | SCM_RIGHTS receipt — shm pool fds, dmabuf plane fds, data-device pipes | `recvmsg(DONTWAIT \| CMSG_CLOEXEC)` (`rs/socket.rs:77`), plus a redundant `fcntl_setfd(CLOEXEC)` belt-and-braces (`:97`) | explicit, atomic at receive | measured live (foot shm memfds `02400002`) + source. This is the row the whole client-fd inventory rests on. |
+| 9 | SCM_RIGHTS receipt — shm pool fds, dmabuf plane fds, data-device pipes | `recvmsg(DONTWAIT \| CMSG_CLOEXEC)` (`rs/socket.rs:77`; the `fcntl_setfd(CLOEXEC)` loop at `:97` is macOS/Redox-only, so on Linux the guarantee is `CMSG_CLOEXEC` alone) | explicit, atomic at receive | measured live (foot shm memfds `02400002`) + source. This is the row the whole client-fd inventory rests on. |
 | 10 | calloop `Poll` (epoll + notifier eventfd + timerfd) | polling 3.11.0: `epoll_create1(CLOEXEC)`, `eventfd(CLOEXEC \| NONBLOCK)`, `timerfd(CLOEXEC \| NONBLOCK)` | explicit, atomic | measured live (fds 3/4/5) + source |
 | 11 | calloop channel ping — screenshot completion channel, libseat session notifier | `eventfd(0, CLOEXEC \| NONBLOCK)` (`sources/ping/eventfd.rs`) | explicit, atomic | measured live (fds 12 session channel, 17/28 screenshot channel — the screenshot added exactly one eventfd, causal) + source |
 | 12 | calloop `Timer` sources (frame tick, stall deadlines, lock timeout) | no fd: `TimerWheel`, in-process, woken by poll timeout | n/a — nothing to leak | source (`sources/timer.rs` creates no fd) |
@@ -99,7 +99,9 @@ the binary is the audited code):
   foot added the accepted socket (25), two shm pools (26/27) and the
   completion channel (28), exactly as predicted.
 - Every non-stdio fd in both tables reports the `02000000` bit in
-  `/proc/<pid>/fdinfo/<n>` `flags`. Raw dumps are in the PR description.
+  `/proc/<pid>/fdinfo/<n>` `flags` (fd-numbered tables summarized above;
+  PR #124 review independently re-ran both end-to-ends live at the merge
+  HEAD and confirmed zero inheritance on both backends).
 - End-to-end (both backends): an IPC-spawned child listing `/proc/self/fd`
   holds only stdio plus its own listing fd — zero of the compositor's
   15 (headless) / 25 (`--tty`) non-stdio fds appear, with targets
