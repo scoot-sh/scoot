@@ -287,7 +287,7 @@ launcher just as it fetched Adwaita earlier in this doc:
   second `foot` afterward: two-column tiling and both focus rings rendered
   correctly, proving the render/input path is actually live again, not just
   the process. This exact scenario surfaced a second, independent, *pre-existing*
-  finding — see `docs/backlog/tty/drm-teardown-restore-eperm.md`.
+  finding — see `docs/backlog/resolved/drm-teardown-restore-eperm-done.md`.
 - **`xdg-activation-v1`, end to end, with a real launcher.** `nix build
   nixpkgs#fuzzel` (1.14.1) — confirmed via `strings` to link real
   `xdg_activation_v1`/`get_activation_token` support, unlike anything

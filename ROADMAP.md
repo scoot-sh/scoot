@@ -703,7 +703,7 @@ gap jumped the queue — each item's own file records why it landed when it did.
   deterministically quiet. Fail-first live (6/6 quits logged it pre-fix,
   0/6 post-fix) plus quit-while-paused and pause/reactivate repaint
   edges; no unit test (no `Tty` outside `--tty`), no README change (a log
-  line disappearing is not a user-facing surface).
+  line disappearing is not a user-facing surface). (PR #111)
 ## What's next
 
 The backlog is the source of truth for what to pick up; this is the current
