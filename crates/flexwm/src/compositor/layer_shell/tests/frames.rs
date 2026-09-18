@@ -38,7 +38,7 @@ fn a_frame_callback_on_a_mapped_layer_surface_is_completed() {
 /// sequence DankMaterialShell sends when an overlay is dismissed), and a
 /// `done` arriving for an object it no longer knows kills its whole
 /// connection (measured 4/4 with Quickshell, exit 255 -- see
-/// `docs/backlog/protocols/dms-enablement-gaps.md`, gap 1).
+/// `docs/backlog/resolved/dms-reprobe-done.md`, gap 1).
 ///
 /// Read as a delta, not an absolute: whatever frames were already sent
 /// before the teardown was dispatched are legitimate and counted in both
