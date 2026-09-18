@@ -8,6 +8,16 @@ blocked: null
 
 # No upper bound on *total* shm reservation per client — RESOLVED (live-pool count capped; byte total needs upstream).
 
+> Correction pointer (2026-09-17, not a rewrite of the record below): this
+> entry's "What the count bounds per connection is fds and mappings"
+> conclusion is wrong -- a buffer outlives its pool object, retaining both
+> (see [the follow-up](./shm-pool-cap-misses-retained-fds-done.md),
+> resolved in
+> [shm-pool-cap-misses-retained-fds-done.md](./shm-pool-cap-misses-retained-fds-done.md)
+> with a per-client live-`wl_buffer` cap). What the 128-count bounds is
+> live pool objects plus the address-space envelope, not fds or mappings.
+> Everything else below stands as written.
+
 ## The entry as filed
 
 No upper bound on *total* shm reservation per client (LOW/MEDIUM).

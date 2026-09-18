@@ -255,17 +255,15 @@ actionable.
 
 ### Security
 - [Live `wl_shm` pools per client](./resolved/shm-pool-count-cap-done.md) — RESOLVED 2026-09-17: at most 128 live pools per Wayland client (refused with `InvalidStride`, released on destroy/disconnect); the byte total stays open behind an upstream size accessor (proven unknowable at the pinned rev). **But see the entry below: the fd/mapping bound it documents is not the bound it has.**
-- [The live-pool cap does not bound fds or mappings, which is what its docs claim](./security/shm-pool-cap-misses-retained-fds.md)
-  — **HIGH**, filed 2026-09-17 by a retrospective audit of PRs #73–#89.
-  `wl_shm_pool.destroy` decrements the count but does not release the
-  mapping or fd while any `wl_buffer` from that pool lives (the protocol
-  mandates this), so create-pool → create-buffer → destroy in a loop grows
-  compositor fds without bound at a live count of zero — the exact harm
-  `shm_pools.rs:25` and README say 128 pools prevents. The count cap still
-  bounds naive hoarding; the documented `RLIMIT_NOFILE` protection is the
-  part that does not hold, and the doc correction should not wait for the
-  (upstream-gated) real fix.
-- [No cap on Wayland connection count](./security/wayland-connection-cap.md) — per-connection bounds (frames, binds, pools) multiply across connections; ~8 maxed connections exhaust the compositor's fds
+- [The live-pool cap does not bound fds or mappings, which is what its docs claim](./resolved/shm-pool-cap-misses-retained-fds-done.md)
+  — RESOLVED 2026-09-17: claims corrected everywhere (pool count bounds
+  live objects + the address-space envelope, not fds/mappings), and the
+  real fix landed as a per-client live-`wl_buffer` cap (512, refused with
+  a protocol error per creating interface, released on destroy/disconnect)
+  that catches exactly the bypass shape. The open ticket's
+  "upstream-gated" expectation proved wrong -- buffers are fully
+  observable, unlike pool internals.
+- [No cap on Wayland connection count](./security/wayland-connection-cap.md) — per-connection bounds (frames, binds, pools, buffers) multiply across connections; ~2 maxed connections exhaust the compositor's fds
 
 ### Packaging / tooling
 - [Nix `src = self` invalidates the build on doc-only edits](./packaging/nix-src-fileset.md)
