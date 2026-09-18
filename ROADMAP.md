@@ -816,6 +816,14 @@ gap jumped the queue — each item's own file records why it landed when it did.
   always lands on a contributor and never an innocent bar. Thirteen
   fail-first tests; proven live with a 374-connection horde (52 sheds,
   foot untouched, immediate recovery on drain).
+- **[Every compositor fd carries close-on-exec](docs/backlog/resolved/spawn-fd-cloexec-audit-done.md)** —
+  RESOLVED 2026-09-18 (audit + test-only, no production change): the
+  per-source close-on-exec audit PR #114 filed — every fd source verified
+  at creation (event-loop, channel, listener/spare/accepted-socket, seatd,
+  shm/dmabuf receipt, sealed memfds, libinput/udev, transient file reads),
+  measured live on headless and `--tty` with an IPC-spawned child
+  inheriting nothing; the spawn pin now covers socket, `try_clone` and
+  eventfd markers, each proven sensitive by neutering.
 ## What's next
 
 The backlog is the source of truth for what to pick up; this is the current
