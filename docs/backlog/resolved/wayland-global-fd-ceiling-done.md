@@ -59,7 +59,11 @@ two things a ceiling must do:
   IPC newcomer is refused with a reason naming the pressure (the same
   shape as the 64-slot cap refusal -- IPC has a channel for it). No slot
   is claimed, nothing established is touched, and recovery is immediate
-  when pressure lifts: no back-off, nothing disabled.
+  when pressure lifts for held connections: no back-off, nothing disabled.
+  (Connect-and-instantly-die bursts reap slowly -- minutes for a
+  several-hundred-deep pile, all fds eventually returned via pre-existing
+  Smithay cleanup this PR doesn't touch -- so newcomers keep shedding
+  through that lag. Review-observed on PR #123, not a regression.)
 - *Creations refuse past a per-client grace, never onto innocents.*
   While the table is pressured, a client already holding past **128 live
   buffers** or **64 live pools** is refused its next creation with the

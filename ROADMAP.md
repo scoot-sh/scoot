@@ -782,9 +782,9 @@ gap jumped the queue — each item's own file records why it landed when it did.
   buttons are tool-only). Pads/strips/rings stay deferred upstream
   (Smithay carries no pad objects at the pinned rev). Eight fail-first
   harness tests with synthetic tool events (6 fail unadvertised), live
-   `wayland-info` advertisement; no tablet-tool hardware on the dev VM
-   (its QEMU tablet is pointer-only), so the libinput arms are
-   review-verified and real tool types untested -- stated in the record.
+  `wayland-info` advertisement; no tablet-tool hardware on the dev VM
+  (its QEMU tablet is pointer-only), so the libinput arms are
+  review-verified and real tool types untested -- stated in the record.
 - **[A global fd/buffer ceiling across Wayland connections](docs/backlog/resolved/wayland-global-fd-ceiling-done.md)** —
   RESOLVED 2026-09-18: the connection-cap verdict's deferred half -- a
   compositor-wide pressure ceiling with a designed refusal form. Past 128

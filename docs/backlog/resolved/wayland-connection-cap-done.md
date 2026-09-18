@@ -179,11 +179,10 @@ no config, flag, binding, or IPC surface moved.
 ## Adjacent, named rather than fixed here
 
 - [A global fd/buffer ceiling across
-  connections](../security/wayland-global-fd-ceiling.md) (new, low): the
-  ticket's second option, decided against for now -- a shared ceiling would
-  kill an innocent client for another's greed (harsher than the IPC
-  refusal-with-reason, and the shape `bind_budget.rs` deliberately refused
-  to build). Needs its own refusal-form design, not half of this PR.
+  connections](./wayland-global-fd-ceiling-done.md) (resolved by PR #123):
+  the ticket's second option, built there with the refusal-form design it
+  needed (shed newcomers + refuse past-grace creations only, so the kill
+  lands on a contributor, never an innocent).
 - `ipc/accept/tests.rs`'s exhaustion child carries the same theoretical
   undercount-hang this module just fixed (its reads block); observed in the
   sibling, fixed here, untouched there -- same suite, same binary, worth
