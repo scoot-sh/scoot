@@ -35,7 +35,7 @@
 //! is at most ~640 fds from one connection against a 1024-fd
 //! `RLIMIT_NOFILE`: one connection alone cannot exhaust the table, two
 //! can -- the multiplier on top is connection-count territory (see
-//! `docs/backlog/security/wayland-connection-cap.md`), not a smaller
+//! `docs/backlog/resolved/wayland-connection-cap-done.md`), not a smaller
 //! buffer count.
 //!
 //! ## How it is counted

@@ -360,7 +360,7 @@ gap jumped the queue — each item's own file records why it landed when it did.
   harness race found and fixed (pools read vs disconnect cleanup).
   Residual filed as its own item: Wayland connections are unbounded, so
   per-connection bounds multiply ([Wayland connection
-  cap](docs/backlog/security/wayland-connection-cap.md)). README carries
+   cap](docs/backlog/resolved/wayland-connection-cap-done.md)). README carries
   the new bound.
 - **[The first click on a fresh lock screen, before the mouse has moved,
   reaches nobody](docs/backlog/resolved/session-lock-first-click-done.md)**
@@ -551,8 +551,21 @@ gap jumped the queue — each item's own file records why it landed when it did.
   protocol error per interface, released on destroy/disconnect) that
   catches exactly the create-pool/create-buffer/destroy-pool bypass. Sized
   from wire measurement (`foot` holds 2 live buffers steady); the
-  per-connection retained-fd bound is now 512 buffers + 128 pools, and
-  `wayland-connection-cap`'s math is updated to say so.
+   per-connection retained-fd bound is now 512 buffers + 128 pools, and
+   `wayland-connection-cap`'s math is updated to say so.
+- **[No cap on Wayland connection
+  count](docs/backlog/resolved/wayland-connection-cap-done.md)** —
+  RESOLVED 2026-09-18: verify-first re-derivation found the ticket
+  undersold the bug — an `EMFILE` on the Wayland listener did not deny
+  sockets, it exited the whole compositor (Smithay's source propagates
+  `accept` errors out of `run()`; proven live pre-fix with prlimit).
+  Fixed as a Wayland accept source that sheds like the IPC one (shared
+  spare/classify primitives, EOF to the shed client, immediate recovery),
+  fail-first suite plus live pre/post kill pair. The count itself is
+  closed as an accepted tradeoff mirroring the IPC sibling (any usable
+  count admits the two greedy connections that fill the 1024-fd table);
+  a global fd/buffer ceiling is filed as its own low-priority follow-up
+  since it would kill innocents for others' greed.
 ## What's next
 
 The backlog is the source of truth for what to pick up; this is the current

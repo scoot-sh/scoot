@@ -24,7 +24,7 @@
 //! ([`State::handle_request`]); [`connection`] holds the event-loop machinery
 //! that gets requests in and replies out.
 
-mod accept;
+pub(super) mod accept;
 mod connection;
 mod line;
 mod listener;

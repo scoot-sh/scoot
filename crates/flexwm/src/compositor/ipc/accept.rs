@@ -67,6 +67,13 @@
 //! exhaustion test from deterministic into hanging when the fork lands badly.
 //! (`tracing`'s macros are fine -- with no subscriber installed, as in the
 //! test, they evaluate nothing.)
+//!
+//! [`Spare`], [`classify`], [`Disposition`] and [`ShedOutcome`] are shared
+//! with the Wayland listener (`super::super::wayland_accept`), which sheds
+//! the same way over a different socket type: everything the sharing relies
+//! on -- the take/put pair below, the classification, the outcome -- stays
+//! under the same allocation- and lock-free discipline, for the same
+//! forked-child reason.
 
 use std::cell::Cell;
 use std::fs::File;
@@ -87,12 +94,19 @@ mod tests;
 /// [`shed_one`] -- repurposed from the shed connection, or raw-reopened when
 /// the backlog raced away -- so the cost is one fd held for the session and
 /// nothing per connection.
-pub(super) struct Spare {
+///
+/// Shared with the Wayland listener: its shed spends and re-arms through
+/// [`Spare::take`] / [`Spare::put`] rather than reimplementing the slot.
+///
+/// No `Debug`: `Cell<Option<File>>` is only `Debug` for `Copy` contents, and
+/// a peek that takes the spare out and puts it back belongs in the test-only
+/// [`Spare::is_armed`], not in a formatting impl.
+pub(crate) struct Spare {
     slot: Cell<Option<File>>,
 }
 
 impl Spare {
-    pub(super) fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let spare = File::open("/dev/null").ok();
         if spare.is_none() {
             // The mitigation below is disarmed from the start. Exhaustion is
@@ -111,16 +125,31 @@ impl Spare {
     /// a `File` cannot be cloned without spending a new fd, so this takes the
     /// spare out and puts it straight back.
     #[cfg(test)]
-    pub(super) fn is_armed(&self) -> bool {
+    pub(crate) fn is_armed(&self) -> bool {
         let spare = self.slot.take();
         let armed = spare.is_some();
         self.slot.set(spare);
         armed
     }
+
+    /// Spends the spare: the fd the next `accept` needs. The spender owns
+    /// what comes back and must hand a replacement to [`Spare::put`] --
+    /// the accepted socket's own fd, or a raw reopen when the backlog raced
+    /// away. Allocation- and lock-free (a `Cell` take), so the Wayland shed
+    /// can call it from its own forked exhaustion child.
+    pub(crate) fn take(&self) -> Option<File> {
+        self.slot.take()
+    }
+
+    /// Re-arms the spare with a replacement fd. Same discipline as
+    /// [`Spare::take`]: a `Cell` set, nothing more.
+    pub(crate) fn put(&self, spare: File) {
+        self.slot.set(Some(spare));
+    }
 }
 
 /// What an `accept` error means for the loop.
-pub(super) enum Disposition {
+pub(crate) enum Disposition {
     /// `WouldBlock`/`Interrupted`: nothing to do -- leave, and the level
     /// trigger reports again if anything is still pending.
     Done,
@@ -138,7 +167,7 @@ pub(super) enum Disposition {
 /// what `ErrorKind` groups together is not what this loop acts on (`EMFILE`
 /// is not an allocation failure in any sense this loop could use), and the
 /// exact constant is what the man page promises.
-pub(super) fn classify(error: &io::Error) -> Disposition {
+pub(crate) fn classify(error: &io::Error) -> Disposition {
     match error.kind() {
         ErrorKind::WouldBlock | ErrorKind::Interrupted => Disposition::Done,
         _ => match error.raw_os_error() {
@@ -150,7 +179,7 @@ pub(super) fn classify(error: &io::Error) -> Disposition {
 }
 
 /// What one mitigation attempt did.
-pub(super) enum ShedOutcome {
+pub(crate) enum ShedOutcome {
     /// A pending connection was accepted and dropped: the backlog shrank.
     Consumed,
     /// Nothing was pending after all (or a signal got in first): the earlier
