@@ -388,6 +388,27 @@ in udev's list for this seat, so display changes on it will not be
 noticed` — and the session otherwise runs exactly as it always did, with
 the mode it started on.
 
+On hardware where the automatic search picks wrong every time, the config
+file saves retyping the flag on every launch:
+
+```toml
+[tty]
+gpu = "/dev/dri/card1"
+```
+
+`[tty] gpu` names the same device the same way — exactly that device, no
+fallback, and the same clean startup error (naming the key, not the flag)
+when it cannot be driven. `--gpu` wins when both name one: an explicit
+flag beats a file, the way `--config` beats the default path. An
+explicitly-set-but-empty path in either (`--gpu ""`, `gpu = ""`) is a
+startup error naming the surface that set it, not something the session is
+asked to open — on every backend, including `--headless`/`--nested`
+(a malformed key is refused before the backend branch, so a shared config
+file with an empty value fails fast everywhere rather than silently
+differing by backend). A set non-empty value, like `--gpu`, is ignored
+with a warning outside `--tty`. See the `[tty]` reference under
+Configuration.
+
 The output's size is the connector's preferred mode. When that is the wrong
 size — under Apple's Virtualization framework (vfkit, UTM) the "preferred"
 mode is just the host window's size in backing pixels, so it doubles or
@@ -1705,8 +1726,8 @@ the other is stored and honestly ignored.
 `--config PATH` loads a TOML file explicitly. Without it, flexwm looks for
 `$XDG_CONFIG_HOME/flexwm/config.toml`, falling back to
 `~/.config/flexwm/config.toml` if `$XDG_CONFIG_HOME` is unset or empty, and runs on
-built-in defaults if neither exists. Four optional tables: `[layout]`,
-`[appearance]`, `[output]`, `[binds]`. Every field in every table is itself
+built-in defaults if neither exists. Five optional tables: `[layout]`,
+`[appearance]`, `[output]`, `[tty]`, `[binds]`. Every field in every table is itself
 optional and defaults independently, so a config that only sets `gap` leaves
 everything else — including the rest of `[layout]` — at its built-in default.
 
@@ -1714,7 +1735,8 @@ everything else — including the rest of `[layout]` — at its built-in default
 `--config PATH` that doesn't exist or can't be read is a hard startup
 error — you pointed at it on purpose, so silently ignoring it would be worse
 than failing loud. Every other problem falls back to defaults and logs
-instead of blocking startup:
+instead of blocking startup, with one deliberate exception (`[tty] gpu`,
+below):
 
 - No file at the *default* path: silent, not even a log line (a fresh
   install, not a mistake).
@@ -1724,13 +1746,17 @@ instead of blocking startup:
 - Malformed TOML, an unknown/misspelled field name, or a field given the
   wrong type (a string where a number is expected, a negative number for a
   field that's unsigned) **anywhere in the file** (`[layout]`,
-  `[appearance]`, `[binds]`, or the top level): logged as an error, and the
+  `[appearance]`, `[tty]`, `[binds]`, or the top level): logged as an error, and the
   *entire* file is discarded for full built-in defaults — a single bad field
   in `[layout]` also throws away an otherwise-valid `[binds]` table
   elsewhere in the same file.
 - One bad `[appearance]` color string, or one bad `[binds]` entry: logged as
   a warning, and only that field/bind falls back — every other field and
   bind in the file still applies.
+- A set-but-unusable `[tty] gpu` (a wrong path, or an empty one): a hard
+  startup error naming the key, not a silent fallback to the automatic
+  pick — the one place failing loud wins over never blocking startup
+  (see `[tty]` below for why falling back there would be fail-open).
 
 This is deliberate: on `--tty`, the real deployment target, flexwm *is* the
 session — there's no other window manager to fall back to and often no easy
@@ -1793,6 +1819,12 @@ all.)
 | Field | Type | Default | Meaning |
 |---|---|---|---|
 | `scale` | float | `1.0` | Output scale advertised to clients and rendered at. `1.0` renders identically to no setting at all; anything else advertises `ceil(scale)` on `wl_output` and `wl_surface.preferred_buffer_scale`, and the exact value through `wp_fractional_scale_v1`/`wp_viewporter` (see Output scaling above). Clamped into `0.5..=4.0` with a warning, and a non-finite value falls back to `1.0`; startup-only. `--nested` ignores a non-1.0 value with a warning. |
+
+### `[tty]`
+
+| Field | Type | Default | Meaning |
+|---|---|---|---|
+| `gpu` | string (device path) | unset | Which DRM device `--tty` drives, when the automatic choice is wrong — the config-file form of `--gpu PATH` (see Which DRM device `--tty` drives above). Unset means the automatic search picks: Smithay's primary GPU first, then every other DRM device on the seat until one works. Set means exactly that device, no fallback: a wrong path is a clean startup error naming the key and what failed, not a silent fall back to something else — falling back would mean silently driving a device the config explicitly ruled out, so this key is fail-closed where every other config field degrades gracefully. `--gpu` wins when both name one; an empty value (`gpu = ""`) is a startup error naming the key. Only means anything under `--tty`; on `--headless` or `--nested` a set non-empty value is ignored with a warning, exactly like `--gpu` (an empty value is a startup error on every backend — see above). Startup-only, like every other setting here. |
 
 ### `[binds]`
 
@@ -1917,6 +1949,13 @@ prefer_no_csd = true
 # 1.0 is correct for a non-HiDPI display; raise it (e.g. 2.0) on a HiDPI
 # panel, or text and widgets render far too small. See the reference above.
 scale = 1.0
+
+# [tty]
+# Uncomment on hardware where the automatic DRM device search picks wrong
+# (e.g. Apple Silicon under Asahi Linux, where the 3D GPU and the display
+# controller are separate devices). Unset means the automatic search picks;
+# --gpu PATH on the command line wins over this when both name one.
+# gpu = "/dev/dri/card1"
 
 [binds]
 "super+n" = "focus-column right"

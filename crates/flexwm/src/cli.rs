@@ -101,7 +101,9 @@ pub struct CompositorOptions {
     /// `primary_gpu` first, then every other device on the seat as a
     /// fallback. A path here replaces that search entirely -- exactly one
     /// candidate, no fallback -- so a user on hardware both heuristics get
-    /// wrong can name the right device instead. Meaningless outside
+    /// wrong can name the right device instead. It also wins over the
+    /// config file's `[tty] gpu` when both name one (an explicit flag beats
+    /// a file, the way `--config` beats the default path). Meaningless outside
     /// `--tty`, where `compositor::run` ignores it *with a warning* --
     /// unlike `width`/`height` under `--tty`, which are dropped silently.
     /// The difference is deliberate: a size has a sensible reading on a

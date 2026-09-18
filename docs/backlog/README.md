@@ -267,7 +267,14 @@ actionable.
 - [`zwp_tablet_manager_v2` (drawing-tablet input)](./input/tablet-v2.md)
 
 ### --tty / backend
-- [Config-file key for the DRM device](./tty/tty-gpu-config-key.md) — **gated on Asahi confirmation**
+- [Config-file key for the DRM device](./resolved/tty-gpu-config-key-done.md)
+  — RESOLVED 2026-09-18: `[tty] gpu` names the device `--gpu` would
+  (exactly that device, no fallback, fail-closed startup error; `--gpu`
+  wins when both name one), verified live on the dev VM single-GPU
+  (byte-identical default path, fail-closed refusal, flag precedence).
+  Residual, still needing the user's own hardware: confirming `--gpu`
+  fixes the Asahi Linux `--tty` failure (no split-GPU topology on the dev
+  VM) — the gate the open ticket carried, kept as the revisit condition.
 - [Background color not painted where no window covers](./resolved/tty-background-not-painted-done.md)
   — RESOLVED 2026-09-16: it always was painted. The smoke test's background
   sample pixel sat on the cursor, which only `--tty` draws. Closes the

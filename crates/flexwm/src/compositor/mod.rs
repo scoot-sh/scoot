@@ -110,13 +110,16 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
     // `--tty` also names the output after its connector; the other two
     // backends have no connector, and keep the name clients have always
     // seen from them.
+    //
+    // The explicitly named DRM device, if any: `--gpu PATH` wins over
+    // `[tty] gpu` when both name one, and an explicitly-set-but-empty path
+    // in either is a hard startup error here rather than something the
+    // session is asked to open (see `tty::resolve`). Resolved once so
+    // both the `--tty` init below and the not-`--tty` warnings read the
+    // same answer.
+    let gpu = tty::resolve(options.gpu.as_deref(), loaded.gpu.as_deref())?;
     let (width, height, output_name) = if options.tty {
-        tty::init(
-            state.loop_handle.clone(),
-            &mut state,
-            options.gpu.as_deref(),
-            options.mode,
-        )?
+        tty::init(state.loop_handle.clone(), &mut state, gpu, options.mode)?
     } else {
         // Not silently dropped the way `--width`/`--height` are under
         // `--tty`: those have a sensible reading on the backend that
@@ -125,6 +128,9 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
         // are on `--tty` and is not.
         if options.gpu.is_some() {
             tracing::warn!("--gpu names the DRM device for --tty; ignoring it on this backend");
+        }
+        if loaded.gpu.is_some() {
+            tracing::warn!("[tty] gpu names the DRM device for --tty; ignoring it on this backend");
         }
         if options.mode.is_some() {
             tracing::warn!("--mode picks the display mode for --tty; ignoring it on this backend");
