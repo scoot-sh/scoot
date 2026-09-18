@@ -94,7 +94,7 @@ three trips.
   recorded, not hidden.)
 - **Production pin still discriminates:** with `request_activation`'s
   `clicked_layer = None` temporarily neutered, the fixed test fails at the
-  delivered assert (`keyboard.rs:384`, "activating a window left the
+  delivered assert (`keyboard.rs:406`, "activating a window left the
   keyboard on the taskbar"), past every precondition; the lock-gate sibling
   stays green; reverted after (`git diff` confirms production clean).
 - **Intermediate cuts trip distinctly:** settle-half-only tree trips 1/40 +
