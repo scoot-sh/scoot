@@ -887,6 +887,47 @@ impl Tty {
     }
 }
 
+/// Shutdown is quiet by construction: the DRM device is paused before any
+/// of its pieces drop, so Smithay's restore-on-drop never fires.
+///
+/// Why this exists: Smithay's `AtomicDrmDevice::drop` (and its legacy twin)
+/// issues one best-effort atomic commit restoring the pre-flexwm state --
+/// "so that getty will be visible" -- whenever its `active` flag is still
+/// set. That flag does *not* die with `Tty`: it lives behind
+/// `Arc<DrmDeviceInternal>`, which `DrmDevice::new` clones into both the
+/// device and the `DrmDeviceNotifier`, and `create_surface` clones once
+/// more into the surface. At steady state the count is three (`Tty.drm`,
+/// `Tty.surface`, and the notifier registered with the event loop in
+/// `init`), so the restore runs when the *last* clone drops -- the
+/// notifier's, during event-loop teardown -- which is *after* the libseat
+/// notifier living in that same loop has dropped and closed the seatd
+/// socket. seatd revokes DRM master on disconnect, so the restore is a race
+/// against seatd's own disconnect handling that our teardown can only lose
+/// sometimes: `ERROR drm_atomic ... Failed to restore previous state.
+/// Error: Permission denied (os error 13)` on an otherwise clean quit
+/// (strace-proven: our `close` of the seatd socket precedes the failing
+/// `DRM_IOCTL_MODE_ATOMIC`; the errno is `EACCES`, not `EPERM` despite the
+/// ticket's shorthand -- non-master callers fail atomic commits with
+/// `EACCES`). Reordering flexwm's own locals cannot fix it: any order still
+/// drops the loop's notifier clone last.
+///
+/// `DrmDevice::pause()` is Smithay's supported "don't touch the fd on drop"
+/// (`pause`'s own doc: "This will cause the `DrmDevice` to avoid making
+/// calls to the file descriptor e.g. on drop" -- just `set_active(false)`
+/// plus surface bookkeeping here, since this backend runs unprivileged and
+/// no master ioctls are issued). Pausing first makes the skip
+/// deterministic, and the hardware outcome is byte-for-byte the already
+/// field-observed failure case: the last frame stays scanned out until the
+/// VT switch on session close repaints, which the dev VM's console does on
+/// its own -- nothing is stuck either way. Idempotent with the
+/// `PauseSession` arm's own `drm.pause()` (quit while paused was already
+/// quiet), and panic-safe: no allocation, no ioctls, nothing that can fail.
+impl Drop for Tty {
+    fn drop(&mut self) {
+        self.drm.pause();
+    }
+}
+
 fn session_event(event: SessionEvent, _: &mut (), state: &mut State) {
     // Scoped so the mutable borrow of `state.tty` ends before the
     // `Reconfigured::finish` call below needs `state` whole again -- same

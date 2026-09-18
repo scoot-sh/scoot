@@ -692,6 +692,18 @@ gap jumped the queue — each item's own file records why it landed when it did.
   that tripped 6/40 + 1/12 pre-fix, full set green, smoke 17 ok. Found
   alongside and filed separately (low, load-only): an activation
   taskbar-click settle flake under the same abusive load.
+- **[`--tty` quit's DRM "restore previous state"
+  EPERM](docs/backlog/resolved/drm-teardown-restore-eperm-done.md)**
+  — RESOLVED 2026-09-18: strace-proven to be our own teardown racing
+  itself, not seatd acting first — the restore-on-drop lives behind an
+  `Arc` cloned into the event loop's DRM notifier, so it runs after the
+  seat socket closes and seatd revokes master (the errno is `EACCES`, not
+  `EPERM`). `Tty` now pauses the device in its own `Drop`, which is
+  Smithay's supported don't-touch-the-fd-on-drop, making shutdown
+  deterministically quiet. Fail-first live (6/6 quits logged it pre-fix,
+  0/6 post-fix) plus quit-while-paused and pause/reactivate repaint
+  edges; no unit test (no `Tty` outside `--tty`), no README change (a log
+  line disappearing is not a user-facing surface). (PR #111)
 ## What's next
 
 The backlog is the source of truth for what to pick up; this is the current
