@@ -46,8 +46,8 @@ blocked: null
 ## Resolution (2026-09-18, PR #114)
 
 Remove + pin, exactly the shape the entry's last paragraph asked for: the
-dead flag is gone, and something in flexwm's own code now catches the leak
-it warned about.
+dead flag is gone, and the spawn side of the chain is now pinned; the
+seatd-fd premise itself remains measurement-backed (see Residuals).
 
 ### Verify-first: what the pinned rev actually says
 
