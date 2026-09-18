@@ -82,7 +82,7 @@ fn a_lock_surface_with_no_buffer_yet_shows_the_backdrop() {
 /// `locked` goes out only once the blanked frame exists.
 ///
 /// This is the ordering the blank-timing ticket asked about
-/// (`docs/backlog/protocols/session-lock-blank-timing.md`): there *is* a
+/// (`docs/backlog/resolved/session-lock-blank-timing-done.md`): there *is* a
 /// window in which the desktop is still in the framebuffer while input is
 /// already locked -- between the accept and the first frame -- and that
 /// direction is deliberate. The reverse (blank pixels on screen while
