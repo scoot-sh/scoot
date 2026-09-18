@@ -43,7 +43,7 @@ frame clears `needs_render` rather than leaving it set (see the audit).
   `advance_generation`, which runs post-`render_output`) moves while
   renders are skipped. The old behaviour was the worse shape — render ran,
   `present` dropped the pixels, damage consumed (the same hole as
-  [present-skip-eats-frame-damage](../rendering/present-skip-eats-frame-damage.md),
+   [present-skip-eats-frame-damage](../resolved/present-skip-eats-frame-damage-done.md),
   which this incidentally fixes for the paused case).
 - **Reactivate correctness.** `reactivate()` calls `invalidate_scanout()`
   (ages invalidated → next render is a full repaint, `needs_modeset` →
@@ -91,7 +91,8 @@ The gate runs *before* `present()`: a paused frame never reaches
 `present_skipped=true` carried through a pause resolves the pre-existing
 way (next vblank re-renders). The paused-render hole above (damage
 consumed, scanout stale) is closed for the paused case; the in-flight-flip
-case in `present-skip-eats-frame-damage` is untouched and still open.
+case in `present-skip-eats-frame-damage` is untouched and still open
+(since resolved by PR #107 — see the resolved record).
 
 ### Tests
 

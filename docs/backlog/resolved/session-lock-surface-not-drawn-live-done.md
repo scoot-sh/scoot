@@ -80,7 +80,9 @@ sockets were swept post-investigation (see below); future probes must pin
 `--socket` + `WAYLAND_DISPLAY` and record both.
 
 Adjacent finding, code-traced only (NOT observed live, NOT fixed, filed
-separately as `docs/backlog/rendering/present-skip-eats-frame-damage.md`):
+separately as `docs/backlog/rendering/present-skip-eats-frame-damage.md`
+— since resolved by PR #107, see
+`docs/backlog/resolved/present-skip-eats-frame-damage-done.md`):
 a `present()` skipped for an in-flight flip consumes that frame's damage
 in `render_output`, and the retry re-renders with damage `None` — scanout
 keeps stale pixels until unrelated damage arrives. Cannot explain black

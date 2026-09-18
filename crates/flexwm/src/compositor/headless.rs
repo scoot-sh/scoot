@@ -333,6 +333,12 @@ impl State {
         // this function); every other frame leaves it for the tail to
         // ignore.
         let mut blank_seq: Option<u64> = None;
+        // Whether this frame's `present` was refused after the pixels were
+        // already written (a commit/page-flip the kernel rejected -- the
+        // only present skip no completion event can retry, since nothing is
+        // in flight). The tail re-arms the frame timer for it below, after
+        // `needs_render` is cleared so the request isn't clobbered.
+        let mut retry_render = false;
         // Whether this frame reached the host under `--nested`, if `present`
         // committed it. Like `blank_seq` above, this is what tells the tail
         // the frame actually went out rather than merely rendered: only a
@@ -622,6 +628,7 @@ impl State {
                                             if let Some(tty) = &mut self.tty {
                                                 blank_seq =
                                                     tty.present(pixels, region, (width, height));
+                                                retry_render = tty.take_retry_render();
                                             }
                                         }
                                         Err(error) => tracing::warn!(
@@ -650,6 +657,17 @@ impl State {
         }
         self.backend = Some(backend);
         self.needs_render = false;
+        // A refused `--tty` flip (see `retry_render` above): nothing is in
+        // flight, so no `VBlank` will ever arrive to retry it the way
+        // `present_skipped` retries an in-flight skip -- re-arm the frame
+        // timer directly so the re-presented frame goes out on the next
+        // tick instead of waiting for unrelated damage. After the flag
+        // clear above, so this request survives it; bounded at the source
+        // (`present_retry.rs`), so a device that keeps refusing goes quiet
+        // instead of pinning the loop.
+        if retry_render {
+            self.request_render();
+        }
 
         // The frame a pending session lock has been waiting for. Only after
         // one has actually been drawn -- never after a failed bind or a
@@ -1130,5 +1148,73 @@ mod tests {
         // show. This is the fail-first pin for the gate -- negate the
         // predicate body and this fails.
         assert!(tty_blocks_render(Some(false)));
+    }
+
+    /// The damage-tracker contract `Tty`'s failed-flip retry relies on,
+    /// verified against the pinned Smithay source rather than assumed:
+    /// `damage_output_internal` extends an unchanged frame's (empty) new
+    /// damage with `old_damage.take(age - 1)`, so age 1 asks for nothing
+    /// and reports `None`, while age 0 takes the full-redraw branch and
+    /// reports the whole output. A retry that reads as age 1 therefore
+    /// presents nothing on a quiet screen (the loss this fix closes); a
+    /// retry at age 0 always re-presents.
+    #[test]
+    fn an_unchanged_frame_reports_no_damage_at_age_one_but_full_damage_at_age_zero() {
+        use smithay::backend::renderer::element::Kind;
+        use smithay::backend::renderer::element::solid::{
+            SolidColorBuffer, SolidColorRenderElement,
+        };
+
+        let mut renderer = PixmanRenderer::new().expect("a cpu renderer");
+        let mut image = renderer
+            .create_buffer(Fourcc::Argb8888, (64, 64).into())
+            .expect("an image");
+        let mut tracker = OutputDamageTracker::new((64, 64), 1.0, Transform::Normal);
+        let buffer = SolidColorBuffer::new((64, 64), [1.0, 0.0, 1.0, 1.0]);
+        let element =
+            SolidColorRenderElement::from_buffer(&buffer, (0, 0), 1.0, 1.0, Kind::Unspecified);
+        let mut framebuffer = renderer.bind(&mut image).expect("a framebuffer");
+        let first = tracker
+            .render_output(
+                &mut renderer,
+                &mut framebuffer,
+                0,
+                &[element],
+                [0.0, 0.0, 0.0, 1.0],
+            )
+            .expect("a first render");
+        assert!(first.damage.is_some());
+        drop(first);
+        // Unchanged, at the age a failed flip's retry would read without
+        // the age clear: nothing new, and no history requested either.
+        let mut framebuffer = renderer.bind(&mut image).expect("a framebuffer");
+        let element =
+            SolidColorRenderElement::from_buffer(&buffer, (0, 0), 1.0, 1.0, Kind::Unspecified);
+        let second = tracker
+            .render_output(
+                &mut renderer,
+                &mut framebuffer,
+                1,
+                &[element],
+                [0.0, 0.0, 0.0, 1.0],
+            )
+            .expect("a second render");
+        assert!(second.damage.is_none());
+        drop(second);
+        // The same unchanged frame at age 0 -- what the cleared slot reads
+        // as -- redraws the whole output.
+        let mut framebuffer = renderer.bind(&mut image).expect("a framebuffer");
+        let element =
+            SolidColorRenderElement::from_buffer(&buffer, (0, 0), 1.0, 1.0, Kind::Unspecified);
+        let third = tracker
+            .render_output(
+                &mut renderer,
+                &mut framebuffer,
+                0,
+                &[element],
+                [0.0, 0.0, 0.0, 1.0],
+            )
+            .expect("a third render");
+        assert!(third.damage.is_some());
     }
 }

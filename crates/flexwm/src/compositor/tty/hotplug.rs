@@ -410,7 +410,8 @@ impl Tty {
     /// framebuffer having been destroyed, or its CRTC re-modeset underneath
     /// it) freezes the screen permanently with no error anywhere, while
     /// discarding it costs at worst one rejected flip, which `present` logs
-    /// and retries from the next `VBlank` (see its error arm). Discarding
+    /// and retries from the frame timer (`retry_armed` — see its error arm;
+    /// no `VBlank` is owed since nothing is in flight). Discarding
     /// also retires the number a session-lock wait may have recorded for
     /// that flip, so a late vblank for it cannot confirm a lock whose
     /// blanked frame never scanned out -- the wait stays, owned by the

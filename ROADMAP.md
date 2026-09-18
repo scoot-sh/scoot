@@ -636,11 +636,23 @@ gap jumped the queue — each item's own file records why it landed when it did.
   honest dispositions. `wp_alpha_modifier_v1` and
   `wp_content_type_manager_v1` implemented (Smithay carries both; the
   factor blends end to end through pixman, the hint is stored and honestly
-  ignored), each with fail-first harness tests; `tablet-v2` filed as its
-  own entry ([tablet-v2](docs/backlog/input/tablet-v2.md)); screencopy,
-  output-management and the VT-pause cursor item already resolved;
-  security-context and the cursor `Vec` closed deliberate; cursor-hotspot
-  offset closed needs-upstream.
+   ignored), each with fail-first harness tests; `tablet-v2` filed as its
+   own entry ([tablet-v2](docs/backlog/input/tablet-v2.md)); screencopy,
+   output-management and the VT-pause cursor item already resolved;
+   security-context and the cursor `Vec` closed deliberate; cursor-hotspot
+   offset closed needs-upstream.
+- **[A `present()` skipped for an in-flight flip consumes that frame's
+  damage](docs/backlog/resolved/present-skip-eats-frame-damage-done.md)**
+  — RESOLVED 2026-09-18: verify-first found the filed shape self-heals
+  (an unwritten skip's retry re-reads a larger age, so the damage history
+  still covers it — pinned, not "fixed"), while the adjacent refused-flip
+  shape loses twice (the freed slot keeps a fresh age so the retry reads
+  age 1 and draws nothing, and no vblank is owed so no retry is even
+  triggered). The commit-failure arm now clears the failed slot's age and
+  arms a bounded timer retry (3 consecutive refusals, then quiet until
+  genuine damage); the in-flight path is untouched. Fail-first unit tests
+  plus a Smithay-contract pin; headless render throughput unchanged
+  (overlapping before/after ranges).
 ## What's next
 
 The backlog is the source of truth for what to pick up; this is the current
