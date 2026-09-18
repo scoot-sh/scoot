@@ -584,9 +584,16 @@ gap jumped the queue — each item's own file records why it landed when it did.
   kills only the offending client with `NoBuffer`, icon buffers claim
   against the same 512 live-buffer budget as every other `wl_buffer`,
   and neither foreign-toplevel list protocol has an icon event to expose
-  pixels through). Name-only IPC stands as the honest scope; four
+   pixels through). Name-only IPC stands as the honest scope; four
   fail-first harness tests pin the buffer half (counting, kill
   containment, disconnect drain, cap fill).
+- **[Lock blanks immediately instead of waiting for the first
+  surface](docs/backlog/resolved/session-lock-blank-timing-done.md)** —
+  RESOLVED 2026-09-18 (decide + pin, no behavior change): the accept →
+  input-captured → first-frame-blanks → `locked`-after-blank ordering
+  verified in-harness (the desktop-visible-while-input-locked window is
+  the deliberate, secure direction; the niri-shape wait stays declined),
+  pinned by a new combined fail-first test.
 ## What's next
 
 The backlog is the source of truth for what to pick up; this is the current
