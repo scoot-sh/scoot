@@ -566,7 +566,11 @@ impl State {
             return;
         };
         // The mirror of the `taken` check in `grab_popup`: the seat is
-        // grabbed by something this popup chain is not nested inside. Only
+        // grabbed by something this popup chain is not nested inside. The
+        // `previous_serial` disjunct never decides here (post-install the
+        // seat always holds this grab's own serial, so the first compare
+        // settles it) -- it is defensive mirroring of the grant-time check,
+        // where it is load-bearing. Only
         // the keyboard is read -- a button press installs its own *pointer*
         // grab, which never displaces this one.
         let displaced = self.popup_grab.as_ref().is_some_and(|grab| {

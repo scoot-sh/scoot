@@ -614,6 +614,7 @@ fn locking_while_an_ime_holds_the_keyboard_leaves_keys_with_nobody() {
     );
     fixture.disconnect_client();
 }
+/// An 'exclusive' layer surface's *own* popup grab is accepted: the launcher
 /// that opened the menu is not outranked by itself.
 ///
 /// The failure `docs/backlog/protocols/popup-grab-exclusive-self-dismiss.md`

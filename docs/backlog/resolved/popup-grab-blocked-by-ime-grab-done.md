@@ -26,7 +26,7 @@ serial check and no hook back into the compositor — while the popups stayed
 mapped: `popup_done` 0, the grab still held in `State`, the client's keyboard
 focus still naming the menu, keys flowing to the IME's grab object instead.
 A menu Escape cannot close. The new test failed exactly that way unfixed
-(`popup_dones` 0 vs 1) and passes fixed.
+(`popup_dones` 0 vs the asserted 2 for the nested chain) and passes fixed.
 
 **The fix, one check in the existing reap path:** `settle_popup_grab`
 already runs on the display-source dispatch *after* the IME request that
