@@ -689,6 +689,35 @@ fn pen_proximity_announces_tablet_and_tool() {
     );
 }
 
+/// A pen lifting and approaching again does not re-announce the tablet:
+/// the client sees one `tablet_added` for the physical device, then a
+/// second `proximity_in` on the already-known tool. Re-adding per approach
+/// would make clients watch one device vanish (`removed`) and reappear on
+/// every pen lift.
+#[test]
+fn second_proximity_in_does_not_reannounce_the_tablet() {
+    let (mut fixture, run) = Fixture::start();
+    assert!(run.manager);
+    let (x, y) = window_point(&fixture, 0, run.surface);
+    fixture.proximity(true, x, y, AxisFrame::new());
+    let first = fixture.report(0);
+    assert_eq!(first.tablets, 1, "no tablet_added for the pen's tablet");
+    assert_eq!(first.tools, 1, "no tool_added for the pen");
+    fixture.proximity(false, x, y, AxisFrame::new());
+    let _ = fixture.report(0);
+    fixture.proximity(true, x, y, AxisFrame::new());
+    let second = fixture.report(0);
+    assert_eq!(
+        second.tablets, 0,
+        "the second approach re-announced the tablet"
+    );
+    assert_eq!(second.tools, 0, "the second approach re-announced the tool");
+    assert_eq!(
+        second.proximity_in, 1,
+        "the second approach produced no proximity_in"
+    );
+}
+
 /// Motion after proximity reports the tool's movement at surface-local
 /// coordinates and keeps the cursor with it. The pressure axis rides along
 /// only when it changed: a hover motion carries no pressure event.

@@ -13,7 +13,15 @@
 //!
 //! A tablet tool is a cursor *and* a clicker, not a third focus system. Every
 //! tool event runs through the same paths pointer events already use, so the
-//! pen cannot disagree with the mouse about what is focused:
+//! pen cannot disagree with the mouse about what is focused -- with one
+//! stated exception: under a held pointer lock/confinement (the `Held`
+//! absolute target in `relative_pointer.rs`), `pointer_move`
+//! keeps pointer focus (and keyboard, and clicks) on the locked surface
+//! while the tool's own proximity/motion/axis events still go to whatever
+//! `surface_under` finds at the raw coordinates. That leak is
+//! informational only -- no focus, keyboard, or click escapes the lock,
+//! which all travel the shared paths -- but it is a real divergence, and
+//! routing tool focus through the held target is deferred, not decided.
 //!
 //! - proximity and motion run [`State::pointer_move`]: the cursor follows the
 //!   tool, pointer focus (and `enter` serials, constraints, relative motion)
@@ -308,8 +316,13 @@ impl State {
         let dh: DisplayHandle = self.display_handle.clone();
         // The tablet first: a tool arriving on an unannounced tablet would
         // otherwise leave clients with a tool and no tablet for it to be
-        // in proximity with.
-        tablet_seat.add_wp_tablet(&dh, tablet);
+        // in proximity with. Gated on never-seen: re-adding an announced
+        // tablet would make clients watch one physical device vanish and
+        // reappear on every pen lift (`removed` + `tablet_added` per
+        // proximity-in).
+        if tablet_seat.get_tablet(tablet).is_none() {
+            tablet_seat.add_wp_tablet(&dh, tablet);
+        }
         if let Some(handle) = tablet_seat.get_tool(tool) {
             handle
         } else {

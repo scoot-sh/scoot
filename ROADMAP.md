@@ -769,9 +769,9 @@ gap jumped the queue — each item's own file records why it landed when it did.
   throws at `legacyPackages.x86_64-darwin` before any per-system
   definition is reached, so the system is dropped rather than repinning
   the whole tree to 26.05; the Darwin client path is one
-   arch-independent `cfg(not(target_os = "linux"))`, so `cargo build`
-   from source stays open on Intel Macs. `nix flake check --all-systems`
-   is green on the three remaining systems.
+  arch-independent `cfg(not(target_os = "linux"))`, so `cargo build`
+  from source stays open on Intel Macs. `nix flake check --all-systems`
+  is green on the three remaining systems.
 - **[Drawing-tablet input](docs/backlog/resolved/tablet-v2-done.md)** —
   RESOLVED 2026-09-18: `zwp_tablet_manager_v2` (version 1, Smithay's
   maximum at the pinned rev) advertised honestly, with the input epic the
