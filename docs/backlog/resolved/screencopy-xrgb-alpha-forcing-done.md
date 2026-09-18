@@ -2,7 +2,7 @@
 title: "Screen capture forces `Xrgb8888`'s undefined fourth byte opaque, and that is most of what a capture costs — RESOLVED (conditional)."
 status: "resolved"
 area: "resolved"
-priority: "low"
+priority: null
 blocked: null
 ---
 

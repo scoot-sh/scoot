@@ -9,7 +9,7 @@ blocked: null
 # A held pointer lock deactivates across a session lock — DONE
 
 Resolves
-[`docs/backlog/protocols/pointer-lock-survives-session-lock.md`](../protocols/pointer-lock-survives-session-lock.md)
+`docs/backlog/protocols/pointer-lock-survives-session-lock.md`
 (filed 2026-09-17 by a retrospective audit of PRs #73–#89; regression from
 PR #89). That file is deleted by this change; this record replaces it.
 
