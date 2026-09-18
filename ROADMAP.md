@@ -714,6 +714,15 @@ gap jumped the queue — each item's own file records why it landed when it did.
   pin the outcome plumbing; the switch itself is unverified live
   (single-CRTC dev VM) and the legacy blind-probe limit is stated in the
   record.
+- **[`--tty`'s `O_CLOEXEC` request was a no-op at the libseat
+  layer](docs/backlog/resolved/tty-o-cloexec-noop-done.md)**
+  — RESOLVED 2026-09-18 (PR #114): the dead flag is removed
+  (`LibSeatSession::open` takes `_flags` at the pinned rev, re-verified in
+  source), and the guarantee it appeared to give is pinned by a real-spawn
+  test — a close-on-exec marker never reaches the child, while a marker
+  without the bit provably does (kept as the test's permanent positive
+  control, which is also the fail-first record). Residual filed separately:
+  a per-source close-on-exec audit (low).
 ## What's next
 
 The backlog is the source of truth for what to pick up; this is the current

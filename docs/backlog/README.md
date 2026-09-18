@@ -280,7 +280,14 @@ actionable.
   sample pixel sat on the cursor, which only `--tty` draws. Closes the
   duplicate `testing/` entry that had the right diagnosis all along.
 - [Same-VT no-op VT-switch warning](./tty/vt-switch-same-vt-warning.md)
-- [`O_CLOEXEC` request is a no-op at the libseat layer](./tty/tty-o-cloexec-noop.md) (informational)
+- [`O_CLOEXEC` request is a no-op at the libseat layer](./resolved/tty-o-cloexec-noop-done.md)
+  — RESOLVED 2026-09-18: the flag was dead (`LibSeatSession::open` takes
+  `_flags` at the pinned rev, re-verified in source) and is removed; the
+  guarantee it appeared to give still holds via libseat's
+  `MSG_CMSG_CLOEXEC` receive, now pinned by a real-spawn test that also
+  proves the bit load-bearing (a marker without it IS inherited — kept as
+  the test's permanent positive control). Per-source audit filed under
+  Security.
 - [`--tty` quit sometimes logs a DRM "restore previous state" EPERM](./resolved/drm-teardown-restore-eperm-done.md)
   — RESOLVED 2026-09-18: strace-proven our own teardown racing itself (the
   restore-on-drop lives behind an `Arc` cloned into the event loop's DRM
@@ -358,6 +365,7 @@ actionable.
   observable, unlike pool internals.
 - [No cap on Wayland connection count](./resolved/wayland-connection-cap-done.md) — RESOLVED 2026-09-18: the EMFILE-on-accept kill is fixed (Wayland listener sheds like the IPC one; pre-fix binary proven dead live, post-fix alive), and the count itself is closed as an accepted tradeoff (any usable count admits the two greedy connections that fill the table, so a count denies shells while stopping nothing)
 - [A global fd/buffer ceiling across Wayland connections](./security/wayland-global-fd-ceiling.md) — the verdict's deferred half (low): per-connection bounds still multiply, but a shared ceiling would kill innocents for others' greed and needs its own refusal-form design first
+- [Every compositor fd must carry close-on-exec](./security/spawn-fd-cloexec-audit.md) — split from the `O_CLOEXEC` verdict (low): `State::spawn` provably inherits any fd lacking the bit, so each fd source needs verifying at creation; seatd/std/memfd sources already known-good
 
 ### Packaging / tooling
 - [Nix `src = self` invalidates the build on doc-only edits](./packaging/nix-src-fileset.md)
