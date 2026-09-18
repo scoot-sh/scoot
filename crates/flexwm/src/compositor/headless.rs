@@ -80,7 +80,7 @@ render_elements! {
 /// map.
 ///
 /// The same holds for `session_lock.rs`, whose four per-output sites are the
-/// subject of `docs/backlog/protocols/lock-surfaces-per-output.md` (resolved
+/// subject of `docs/backlog/resolved/session-lock-per-output-done.md` (resolved
 /// as single-output pins, not as multi-output): `new_surface` honours the
 /// client's named `wl_output` but falls back to the single output;
 /// `configure_all` sizes every surface to that one output together;

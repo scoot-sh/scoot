@@ -153,7 +153,7 @@ enum Step {
     LockSurface { lock: usize, color: Option<[u8; 4]> },
     /// The same, but naming the one physical output through the client's
     /// *second* `wl_output` bind. Smithay refuses the same resource twice
-    /// (`already_locked`) while accepting a different resource for the same
+    /// (`DuplicateOutput`, "Output is already locked") while accepting a
     /// output, so this -- and only this -- is how a second surface comes to
     /// exist on one output. The admission itself belongs to the
     /// duplicate-bind ticket; this step exists so the per-output suite can
