@@ -77,16 +77,21 @@ rendering), all low priority, none blocking:**
   item 8 just makes the cursor share it. Not new, not specific to cursors.
   **ALREADY RESOLVED** (`../resolved/cursor-frame-callback-when-paused-done.md`).
 - **`wl_surface.offset` on a cursor surface doesn't move the hotspot (LOW,
-  upstream gap).** Per `wayland.xml`, `hotspot_x`/`hotspot_y` should
-  decrement on `wl_surface.offset` requests to a cursor surface. At the
-  pinned Smithay rev, `CursorImageAttributes.hotspot` is only ever written
-  by `wl_pointer.set_cursor` (and the tablet-tool equivalent) — nothing
-  adjusts it on offset/commit — and flexwm reads it verbatim. A client
-  using `wl_surface.offset` on its cursor gets a misplaced image. Not a
-  regression (nothing rendered for `Surface` before item 8), and real
-  toolkits don't appear to do this in practice. **Re-verified at the
-  pinned rev 2026-09-18 and closed NEEDS-UPSTREAM** (the fix belongs in
-  Smithay's set_cursor/commit path).
+   upstream gap).** Per `wayland.xml`, `hotspot_x`/`hotspot_y` should
+   decrement on `wl_surface.offset` requests to a cursor surface. At the
+   pinned Smithay rev, `CursorImageAttributes.hotspot` is only ever written
+   by `wl_pointer.set_cursor` (and the tablet-tool equivalent) — nothing
+   adjusts it on offset/commit — and flexwm reads it verbatim. A client
+   using `wl_surface.offset` on its cursor gets a misplaced image. Not a
+   regression (nothing rendered for `Surface` before item 8), and real
+   toolkits don't appear to do this in practice. **Re-verified at the
+   pinned rev 2026-09-18 and closed NEEDS-UPSTREAM** (the fix belongs in
+   Smithay's set_cursor/commit path). **OVERTURNED 2026-09-18 — fixed
+   flexwm-side** ([record](../resolved/cursor-surface-offset-hotspot-done.md)):
+   the NEEDS-UPSTREAM half-truth was that *core* never adjusts it;
+   Smithay's own anvil does the decrement compositor-side in its shell
+   commit hook, which is exactly where flexwm's `Cursor::note_surface_commit`
+   now does it (saturating).
 
 (Note: this file always ended mid-sentence at "none blocking:" -- the
 reviewer items above were recovered from the pre-split `ROADMAP.md`, `git

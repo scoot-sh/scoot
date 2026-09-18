@@ -71,7 +71,7 @@ use smithay::backend::renderer::{ImportAll, ImportMem, Renderer, Texture};
 use smithay::input::pointer::{CursorIcon, CursorImageStatus, CursorImageSurfaceData};
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{IsAlive, Logical, Physical, Point, Transform};
-use smithay::wayland::compositor::with_states;
+use smithay::wayland::compositor::{SurfaceAttributes, with_states};
 
 use super::decorations::{Appearance, Color};
 use shapes::Shape;
@@ -274,6 +274,60 @@ impl Cursor {
             // stale one here is exactly the bug the invariant exists to stop.
             CursorImageStatus::Surface(_) | CursorImageStatus::Hidden => None,
         };
+    }
+
+    /// Applies this commit's `wl_surface.offset` to the cursor hotspot, if
+    /// the committed surface is the active cursor image.
+    ///
+    /// `wayland.xml` (`wl_pointer.set_cursor`): "On wl_surface.offset
+    /// requests to the pointer surface, hotspot_x and hotspot_y are
+    /// decremented by the x and y parameters passed to the request. The
+    /// offset must be applied by wl_surface.commit as usual."
+    ///
+    /// Smithay core stores the offset as `SurfaceAttributes::buffer_delta`
+    /// (double-buffered, so it sits in `current` exactly when this commit
+    /// applies) and writes the hotspot only from `set_cursor` -- nothing in
+    /// core adjusts it. Smithay's own `anvil` does this same decrement in
+    /// its shell commit hook (`anvil/src/shell/mod.rs`, "decrementing
+    /// cursor hotspot"); this is that hook for flexwm, called from
+    /// `CompositorHandler::commit`, which also already requests the redraw
+    /// the moved hotspot needs.
+    ///
+    /// Saturating, not wrapping or panicking: both operands are
+    /// client-controlled `i32` (`set_cursor` takes the hotspot raw,
+    /// `wl_surface.offset` takes the delta raw), so `i32::MIN - 1` is one
+    /// malicious commit away -- and a plain `-=` panics a debug build,
+    /// taking every client's unsaved state down with the compositor.
+    pub fn note_surface_commit(&self, surface: &WlSurface) {
+        let CursorImageStatus::Surface(active) = &self.status else {
+            return;
+        };
+        if active != surface {
+            return;
+        }
+        with_states(surface, |states| {
+            let delta = states
+                .cached_state
+                .get::<SurfaceAttributes>()
+                .current()
+                .buffer_delta
+                .take();
+            let Some(delta) = delta else {
+                return;
+            };
+            // `set_cursor` always inserts this before the status can become
+            // `Surface`, so its absence is impossible in practice -- but a
+            // missing hotspot reads as "no adjustment", never as a panic,
+            // the same stance as `surface_hotspot` below.
+            let Some(attributes) = states.data_map.get::<CursorImageSurfaceData>() else {
+                return;
+            };
+            let Ok(mut attributes) = attributes.lock() else {
+                return;
+            };
+            attributes.hotspot.x = attributes.hotspot.x.saturating_sub(delta.x);
+            attributes.hotspot.y = attributes.hotspot.y.saturating_sub(delta.y);
+        });
     }
 
     /// Drops `surface` as the active cursor image if that's what it was,
