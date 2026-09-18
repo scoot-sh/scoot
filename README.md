@@ -369,7 +369,9 @@ and tested, but no one has yet confirmed it end to end on Apple Silicon —
 `--gpu` is the first thing to try there until someone does. It is not a
 guarantee: naming a device skips the *search*, not the checks, so the device
 named still has to open through the session and pass the same KMS probe every
-automatic candidate does.)
+automatic candidate does.) [`Asahi.md`](Asahi.md) is the runbook for
+confirming this on such a machine, along with the other two things that need
+one.
 
 If the automatic search still picks wrong, name the device:
 
