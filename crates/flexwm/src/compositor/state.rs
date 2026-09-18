@@ -42,6 +42,7 @@ use smithay::wayland::shell::xdg::XdgShellState;
 use smithay::wayland::shell::xdg::decoration::XdgDecorationState;
 use smithay::wayland::shm::ShmState;
 use smithay::wayland::single_pixel_buffer::SinglePixelBufferState;
+use smithay::wayland::tablet_manager::TabletManagerState;
 use smithay::wayland::text_input::TextInputManagerState;
 use smithay::wayland::viewporter::ViewporterState;
 use smithay::wayland::xdg_activation::XdgActivationState;
@@ -347,6 +348,13 @@ pub struct State {
     /// fills with no flexwm-side import step.
     #[allow(dead_code)]
     pub single_pixel_buffer_state: SinglePixelBufferState,
+    /// `zwp_tablet_manager_v2` (version 1): drawing-tablet input. Held
+    /// only to keep the global alive -- the seat's tools live in Smithay's
+    /// `TabletSeat` behind `seat.tablet_seat()`, and the event plumbing is
+    /// `tablet.rs`. See that module for what a pen does and what stays
+    /// deferred (pads: Smithay carries none at the pinned rev).
+    #[allow(dead_code)]
+    pub tablet_manager_state: TabletManagerState,
     pub seat_state: SeatState<State>,
     pub data_device_state: DataDeviceState,
     /// `zwlr_data_control_manager_v1` (version 2): clipboard managers
@@ -645,6 +653,7 @@ impl State {
         let output_management = OutputManagement::new(&dh);
         let pointer_constraints_state = PointerConstraintsState::new::<Self>(&dh);
         let relative_pointer_manager_state = RelativePointerManagerState::new::<Self>(&dh);
+        let tablet_manager_state = TabletManagerState::new::<Self>(&dh);
         // `CLOCK_MONOTONIC`: the one clock whose readings the frame handoff
         // stamps feedback with (see `presentation_time.rs`), so it is the id
         // the bind handshake must report. `Clock::new` allocates nothing --
@@ -734,6 +743,7 @@ impl State {
             output_management,
             pointer_constraints_state,
             relative_pointer_manager_state,
+            tablet_manager_state,
             presentation_state,
             bind_budget: BindBudget::default(),
             shm_pools: ShmPools::default(),

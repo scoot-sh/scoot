@@ -2,9 +2,10 @@
 
 use std::any::Any;
 
+use smithay::backend::input::TabletToolDescriptor;
 use smithay::backend::renderer::utils::on_commit_buffer_handler;
 use smithay::input::dnd::{DnDGrab, DndGrabHandler, GrabType, Source};
-use smithay::input::pointer::Focus;
+use smithay::input::pointer::{CursorImageStatus, Focus};
 use smithay::input::tablet::TabletSeatHandler;
 use smithay::input::{Seat, SeatHandler, SeatState};
 use smithay::output::Output;
@@ -421,19 +422,23 @@ impl SeatHandler for State {
 }
 
 /// `wp_cursor_shape_v1` reaches a tablet tool as well as a pointer, so its
-/// dispatch is bounded on this trait whether or not a compositor offers
-/// `zwp_tablet_manager_v2` -- which this one does not. Implementing it
-/// advertises no global on its own (only `TabletManagerState::new` does
-/// that), so no client can ever construct the `zwp_tablet_tool_v2` the
-/// tablet half of `get_tablet_tool_v2` needs; the type exists here purely to
-/// satisfy the bound so the *pointer* half compiles.
+/// dispatch is bounded on this trait -- and since `zwp_tablet_manager_v2`
+/// is advertised, tools really exist here: a client names a shape for its
+/// tool (or uploads a cursor surface for it) and
+/// [`State::set_tool_cursor_image`] lands it in the same cursor status the
+/// pointer half uses.
 ///
 /// `ToolFocus` is `WlSurface` to match the three focus types in
 /// [`SeatHandler`] above: the trait requires the same `WaylandFocus` bound
-/// they satisfy, and picking a different type here would only invent a second
-/// notion of focus for a device this compositor has no input path for.
+/// they satisfy, and the tool events in `tablet.rs` are addressed to
+/// whatever `surface_under` finds -- the same surfaces pointer focus
+/// names, not a second notion of focus.
 impl TabletSeatHandler for State {
     type ToolFocus = WlSurface;
+
+    fn tablet_tool_image(&mut self, _tool: &TabletToolDescriptor, image: CursorImageStatus) {
+        self.set_tool_cursor_image(image);
+    }
 }
 
 impl SelectionHandler for State {

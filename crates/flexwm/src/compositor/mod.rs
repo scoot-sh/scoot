@@ -40,6 +40,7 @@ mod shell;
 mod shm_pools;
 mod single_pixel_buffer;
 mod state;
+mod tablet;
 mod toplevel_icon;
 mod tty;
 mod wayland_accept;

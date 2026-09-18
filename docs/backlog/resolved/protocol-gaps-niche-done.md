@@ -54,7 +54,8 @@ the three bounds moves.
 ## Per-sub-item verdicts
 
 1. **`tablet-v2` -- FILED SEPARATELY** as
-   `docs/backlog/input/tablet-v2.md`. Advertising `TabletManagerState`
+   `docs/backlog/input/tablet-v2.md`, since implemented and recorded as
+   `docs/backlog/resolved/tablet-v2-done.md`. Advertising `TabletManagerState`
    alone would be the dishonest version: clients would bind it and get
    zero tools, because flexwm has no tablet input path (no libinput
    tablet-event plumbing, no `TabletSeat`, no tool focus/cursor
@@ -133,8 +134,9 @@ today, the same way the `foot` record bounded the cursor-theme work.
 
 ## What this deliberately leaves open
 
-- **`tablet-v2`** is now its own entry (`docs/backlog/input/tablet-v2.md`)
-  rather than a line in this bundle.
+- **`tablet-v2`** was its own entry (`docs/backlog/input/tablet-v2.md`)
+  rather than a line in this bundle, and is now implemented and recorded
+  as `docs/backlog/resolved/tablet-v2-done.md`.
 - **Content-type has no reader.** If a future GPU tier grows one
   (overlay planes, adaptive-sync timing), the stored value is already
   where it looks; until then the README says ignored, not "used".
