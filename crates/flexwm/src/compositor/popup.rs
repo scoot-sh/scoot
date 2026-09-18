@@ -27,7 +27,19 @@
 //!    *own* menu: a grab rooted on the exclusive surface itself is neither
 //!    refused nor pre-empted, so a launcher's dropdown is not dismissed by
 //!    the launcher that opened it.
-//! 3. **The popup grab**, over the focused window, over a layer surface
+//! 3. **An input method's keyboard grab** (`zwp_input_method_v2.grab_keyboard`).
+//!    A real IME holds it for the whole active span, idle or composing --
+//!    measured live against fcitx5, see
+//!    `docs/backlog/resolved/popup-grab-blocked-by-ime-grab-done.md` -- so this
+//!    is not a corner case. A grab asked for while the IME holds the seat is
+//!    refused outright (the `taken` check in [`State::grab_popup`] cannot
+//!    tell an IME grab from any other grab, and must not steal it); a grab
+//!    already held when the IME takes the keyboard is dismissed, because
+//!    Smithay installs the IME grab with an unconditional `set_grab` -- no
+//!    serial check, no hook back into the compositor -- and a mapped menu
+//!    with no keyboard is a menu Escape cannot close. Either order ends the
+//!    same way: no menu survives while the IME holds the seat.
+//! 4. **The popup grab**, over the focused window, over a layer surface
 //!    that only got the keyboard from a click, and over the `exclusive`
 //!    surface the menu itself hangs off. That is the whole point of
 //!    the request.
@@ -491,9 +503,11 @@ impl State {
     /// that never asked for keys.
     ///
     /// Called from the wayland display source (a client's destroy is seen
-    /// there and nowhere else) and after a pointer button (which is what
-    /// dismisses a menu by clicking outside it). Both are gated on there
-    /// being a grab at all, so an ordinary session pays one `Option` check.
+    /// there and nowhere else, and so is an input method's `grab_keyboard`,
+    /// which Smithay installs with no hook back into the compositor) and
+    /// after a pointer button (which is what dismisses a menu by clicking
+    /// outside it). Both are gated on there being a grab at all, so an
+    /// ordinary session pays one `Option` check.
     pub(super) fn settle_popup_grab(&mut self) {
         if self.popup_grab.is_none() {
             return;
@@ -507,6 +521,9 @@ impl State {
             .as_ref()
             .is_some_and(|grab| grab.has_ended())
         {
+            // Still live -- unless someone else has taken the keyboard since
+            // it was granted (see `dismiss_displaced_popup_grab`).
+            self.dismiss_displaced_popup_grab();
             return;
         }
         self.popup_grab = None;
@@ -514,6 +531,59 @@ impl State {
         // The dismissed popup's pixels are gone from the tree; nothing else
         // marks the screen dirty for a destroy.
         self.request_render();
+    }
+
+    /// Dismisses the held popup grab if the seat's keyboard grab is no longer
+    /// its own.
+    ///
+    /// An input method's `grab_keyboard` installs via an unconditional
+    /// `set_grab`: no serial check, and no hook back into the compositor.
+    /// The popup grab is silently displaced -- its popups stay mapped, but
+    /// keys now flow to the IME's grab object instead of the menu, so Escape
+    /// cannot close it and arrows do nothing. The protocol resolves the tie:
+    /// `xdg_popup.grab` promises the topmost grabbing popup always has
+    /// keyboard focus while its grab is live, while `input-method-v2` only
+    /// asks that the compositor send keyboard events to the grab holder
+    /// ("should", not "must", and it may withhold particular events) -- so
+    /// the menu that lost the keyboard is dismissed with `popup_done`, the
+    /// same verb every other precedence loss uses, rather than left up
+    /// holding input it can no longer use.
+    ///
+    /// [`State::dismiss_popup_grab`] is serial-guarded, so the IME's grab
+    /// survives the dismissal: only the popup object ends, and the refresh
+    /// below re-derives focus *through* the foreign grab (an IME grab
+    /// forwards `set_focus`, so the window is entered normally and that
+    /// enter records like any other -- see `input/interaction.rs`). A grab
+    /// that was never this popup's -- a serial this check does not know --
+    /// can therefore never win by default here: this path only ever ends a
+    /// grab, it never grants one.
+    ///
+    /// Costs one `Option` check when no menu is open, and one seat lock plus
+    /// two serial compares when one is -- on the display-source dispatch
+    /// path, not on any per-event or per-frame path.
+    fn dismiss_displaced_popup_grab(&mut self) {
+        let Some(keyboard) = self.seat.get_keyboard() else {
+            return;
+        };
+        // The mirror of the `taken` check in `grab_popup`: the seat is
+        // grabbed by something this popup chain is not nested inside. The
+        // `previous_serial` disjunct never decides here (post-install the
+        // seat always holds this grab's own serial, so the first compare
+        // settles it) -- it is defensive mirroring of the grant-time check,
+        // where it is load-bearing. Only
+        // the keyboard is read -- a button press installs its own *pointer*
+        // grab, which never displaces this one.
+        let displaced = self.popup_grab.as_ref().is_some_and(|grab| {
+            let serial = grab.serial();
+            let nested = grab.previous_serial().unwrap_or(serial);
+            keyboard.is_grabbed() && !(keyboard.has_grab(serial) || keyboard.has_grab(nested))
+        });
+        if !displaced {
+            return;
+        }
+        tracing::debug!("dismissing a popup grab displaced by another keyboard grab");
+        self.dismiss_popup_grab();
+        self.refresh_keyboard_focus();
     }
 }
 

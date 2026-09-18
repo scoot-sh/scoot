@@ -348,7 +348,7 @@ fn a_popup_grab_is_refused_while_a_launcher_holds_the_keyboard() {
 /// The `taken` check in `grab_popup` cannot tell an IME grab from any other
 /// grab, and must not steal it: taking it would interrupt composition in
 /// whatever field the IME is active in. What that costs is measured live in
-/// `docs/backlog/protocols/popup-grab-blocked-by-ime-grab.md` (fcitx5 holds
+/// `docs/backlog/resolved/popup-grab-blocked-by-ime-grab-done.md` (fcitx5 holds
 /// the grab for the whole active span, idle or composing); what this pins
 /// is the compositor half -- refusal while held, grant once released.
 /// Same-window only: the check is seat-global, so a second window would run
@@ -437,7 +437,184 @@ fn a_popup_grab_is_refused_while_an_ime_holds_the_keyboard() {
     fixture.disconnect_client();
 }
 
-/// An `exclusive` layer surface's *own* popup grab is accepted: the launcher
+/// An input method grabbing the keyboard while a menu holds it dismisses the
+/// menu.
+///
+/// The other order -- IME first, popup second -- is refused at grant time
+/// (see `a_popup_grab_is_refused_while_an_ime_holds_the_keyboard`). This is
+/// the reverse: Smithay installs the IME's `grab_keyboard` with an
+/// unconditional `set_grab`, no serial check and no hook back into the
+/// compositor, so the popup grab is silently displaced while its popups stay
+/// mapped. A mapped menu with no keyboard is a menu Escape cannot close, and
+/// the protocol says the topmost grabbing popup always has keyboard focus
+/// while its grab is live -- so the takeover dismisses it with `popup_done`,
+/// the same verb every other precedence loss uses, rather than leaving it up
+/// holding input it can no longer use. Either order ends the same way: no
+/// menu survives while the IME holds the seat.
+#[test]
+fn an_ime_grab_while_a_popup_grabs_dismisses_the_menu() {
+    let mut fixture = Fixture::new();
+    fixture.run(Step::MapWindow);
+    window_with_grabbing_popup(&mut fixture);
+    // A nested submenu off the same chain: the seat's grab serial is now the
+    // submenu's, with the parent's kept as the previous serial -- so the
+    // takeover below exercises both halves of the displacement check, not
+    // just the topmost serial.
+    fixture.run(Step::MapPopup {
+        parent: PopupParent::Popup(0),
+        color: WALLPAPER_BGRA,
+        grab: Some(GrabSource::Key),
+    });
+    assert_eq!(
+        fixture.keyboard().focused,
+        Some(Focused::Popup(1)),
+        "the submenu should hold the keyboard before the IME arrives"
+    );
+
+    fixture.run(Step::ImeGrabKeyboard);
+    fixture.settle();
+    assert!(
+        fixture
+            .state
+            .seat
+            .get_keyboard()
+            .expect("a keyboard")
+            .is_grabbed(),
+        "the IME's grab_keyboard never took effect on the seat"
+    );
+    assert_eq!(
+        fixture.popup_dones(),
+        2,
+        "the IME takeover should dismiss the whole menu chain, not leave it mapped with no keyboard"
+    );
+    assert!(
+        fixture.state.popup_grab.is_none(),
+        "the displaced grab should not be held"
+    );
+    assert_eq!(
+        fixture.keyboard().focused,
+        Some(Focused::Window(0)),
+        "the keyboard should fall back to the window, through the IME grab"
+    );
+    assert!(
+        !contains(&fixture.render(), POPUP_BGRA),
+        "a dismissed menu should stop being drawn"
+    );
+    assert!(
+        !contains(&fixture.render(), WALLPAPER_BGRA),
+        "a dismissed submenu should stop being drawn too"
+    );
+
+    // Keys reach the IME, not the dismissed menu: the client's own keyboard
+    // object hears nothing. (That both halves of the diversion actually land
+    // in the IME's grab object is pinned by `activation/tests/ime_grab.rs`.)
+    let before = fixture.keyboard().keys;
+    fixture.press_a_key();
+    assert_eq!(
+        fixture.keyboard().keys,
+        before,
+        "keys under an IME grab must not reach the window's menu"
+    );
+
+    // ...and when the IME lets go nothing is stuck: the window keeps the
+    // keyboard and is typeable again.
+    fixture.run(Step::ImeUngrabKeyboard);
+    fixture.settle();
+    assert!(
+        !fixture
+            .state
+            .seat
+            .get_keyboard()
+            .expect("a keyboard")
+            .is_grabbed(),
+        "releasing the IME grab object should have released the seat"
+    );
+    assert_eq!(
+        fixture.keyboard().focused,
+        Some(Focused::Window(0)),
+        "the window should still hold the keyboard once the IME lets go"
+    );
+    let before = fixture.keyboard().keys;
+    fixture.press_a_key();
+    assert_eq!(
+        fixture.keyboard().keys,
+        before + 2,
+        "the press and release should both reach the window again"
+    );
+
+    // The takeover dismissal files no session-continuation stamp either: the
+    // same serial grabs fine once the seat is free, the way a refusal does.
+    let Ack::PopupConfigured(configured) = fixture.run(Step::MapPopup {
+        parent: PopupParent::Window,
+        color: POPUP_BGRA,
+        grab: Some(GrabSource::Key),
+    }) else {
+        panic!("the popup step should report whether a configure arrived");
+    };
+    assert!(
+        configured,
+        "the replacement popup should still be configured"
+    );
+    assert!(
+        fixture.state.popup_grab.is_some(),
+        "with the IME gone the same serial should grab fine"
+    );
+    assert_eq!(
+        fixture.keyboard().focused,
+        Some(Focused::Popup(2)),
+        "the replacement menu should hold the keyboard"
+    );
+    fixture.disconnect_client();
+}
+
+/// Locking while an IME holds the keyboard takes the keyboard off everything.
+///
+/// The popup half (if a menu is up when the IME arrives, the test above has
+/// already dismissed it) and the IME half compose here: the lock dismisses
+/// any open grab and re-derives focus to nobody, while the IME's own grab --
+/// which no compositor hook can release without desyncing the IME -- keeps
+/// diverting keys to the input method, never to a client behind the lock.
+#[test]
+fn locking_while_an_ime_holds_the_keyboard_leaves_keys_with_nobody() {
+    let mut fixture = Fixture::new();
+    fixture.run(Step::MapWindow);
+    window_with_grabbing_popup(&mut fixture);
+    fixture.run(Step::ImeGrabKeyboard);
+    fixture.settle();
+    assert!(
+        fixture
+            .state
+            .seat
+            .get_keyboard()
+            .expect("a keyboard")
+            .is_grabbed(),
+        "the IME's grab_keyboard never took effect on the seat"
+    );
+
+    fixture.run(Step::LockSession);
+    assert!(
+        fixture.state.session_lock.is_locked(),
+        "the lock should have been accepted"
+    );
+    assert!(fixture.state.popup_grab.is_none());
+    assert_eq!(
+        fixture.keyboard().focused,
+        None,
+        "nothing but a lock surface may hold the keyboard while locked"
+    );
+
+    // And no keystroke reaches the client behind the lock -- the IME's grab
+    // diverts them to the input method instead.
+    let before = fixture.keyboard().keys;
+    fixture.press_a_key();
+    assert_eq!(
+        fixture.keyboard().keys,
+        before,
+        "keys must not reach a client behind the lock screen"
+    );
+    fixture.disconnect_client();
+}
+/// An 'exclusive' layer surface's *own* popup grab is accepted: the launcher
 /// that opened the menu is not outranked by itself.
 ///
 /// The failure `docs/backlog/protocols/popup-grab-exclusive-self-dismiss.md`

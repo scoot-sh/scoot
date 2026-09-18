@@ -1,12 +1,92 @@
 ---
-title: "While an input method holds its keyboard grab, every xdg_popup.grab is refused — no context menu opens in a text field with an IME running."
-status: "open"
-area: "protocols"
-priority: "low"
+title: "While an input method holds its keyboard grab, every xdg_popup.grab is refused — no context menu opens in a text field with an IME running — DONE."
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
 ---
 
-# While an input method holds its keyboard grab, every `xdg_popup.grab` is refused — no context menu opens in a text field with an IME running.
+# While an input method holds its keyboard grab, every `xdg_popup.grab` is refused — no context menu opens in a text field with an IME running — DONE.
+
+## Resolution (2026-09-18)
+
+Verify-first found the ticket half-open: the IME-first order (IME holds the
+seat, popup asks) was refused and pinned, but the reverse order (popup holds
+the seat, IME grabs) silently left a mapped menu with no keyboard — and the
+precedence the code enforced was never written down where a user could find
+it. Both are closed here; the per-surface IME-scoping design the ticket's
+"Scoping" section asks for stays open exactly as filed (it needs a
+Smithay-side design that does not exist today), and "no menu while the IME
+holds the seat" stands as the documented behavior, not a bug to work around.
+
+**The hole, reproduced in-harness before fixing:** with a grabbing popup
+holding the keyboard, a real `grab_keyboard` through the protocol displaced
+it — Smithay installs the IME grab with an unconditional `set_grab`, no
+serial check and no hook back into the compositor — while the popups stayed
+mapped: `popup_done` 0, the grab still held in `State`, the client's keyboard
+focus still naming the menu, keys flowing to the IME's grab object instead.
+A menu Escape cannot close. The new test failed exactly that way unfixed
+(`popup_dones` 0 vs the asserted 2 for the nested chain) and passes fixed.
+
+**The fix, one check in the existing reap path:** `settle_popup_grab`
+already runs on the display-source dispatch *after* the IME request that
+displaces the grab, so no new hook into Smithay was needed — it now also
+dismisses a live grab whose seat keyboard serial is neither its own nor its
+nested previous (the mirror of the grant-time `taken` check), then
+re-derives focus through the foreign grab. `dismiss_popup_grab` is
+serial-guarded, so the IME's grab survives the dismissal, and the refresh
+enters the window through it normally. Costs one `Option` check per dispatch
+flush with no menu open; no allocation on any path.
+
+**Why dismissal is the protocol-consistent answer**, cited from the
+protocol XML rather than general knowledge:
+
+- `xdg-shell` (`xdg_popup.grab`): "the top most grabbing popup will always
+  have keyboard focus" during a grab, and "if the compositor denies the
+  grab, the popup will be immediately dismissed" — with locking the screen
+  named as a dismissal cause. A displaced-but-mapped menu violates the
+  first sentence; dismissal is the blessed verb.
+- `input-method-unstable-v2` (`grab_keyboard`): "the compositor *should*
+  send all keyboard events on the seat to the grab holder" (should, not
+  must, and it "may decide not to forward any particular event"), and "must
+  not further process any event after it has been forwarded". Nothing there
+  forbids refusing or dismissing the popup; the IME keeps every key either
+  way.
+
+**Composed edges, each pinned by a harness test:**
+
+- *Focus after both dismiss:* IME takes the keyboard (menu dismissed,
+  keyboard back on the window through the IME grab, keys reaching the IME
+  alone), IME releases (window keeps the keyboard, typeable again, same
+  serial re-grabs fine — the dismissal files no session-continuation stamp,
+  like every other non-destroy dismissal).
+- *Nested menus:* the takeover dismisses the whole chain (`popup_done` × 2,
+  both colors gone from the framebuffer), covering the previous-serial arm.
+- *Lock:* popup + IME + lock composes — the lock dismisses the grab and
+  re-derives focus to nobody, keys reaching no client behind the lock (the
+  IME's own diversion survives, by protocol design and harmlessly: it
+  forwards only to the focused field, and the password guarantee was always
+  about background clients, never the trusted input path).
+- *Serial interplay:* a grab that cannot validate still wins nothing — the
+  new path only ever ends a grab, never grants one, so PR #56's gate is
+  untouched and un-bypassed.
+
+**Tests:** two new in `layer_shell/tests/popup.rs`
+(`an_ime_grab_while_a_popup_grabs_dismisses_the_menu`,
+`locking_while_an_ime_holds_the_keyboard_leaves_keys_with_nobody`), the
+first confirmed to fail unfixed. Precedence documented once in `popup.rs`'s
+module doc (lock > exclusive layer > IME grab > popup grab) and in the
+README's popup section plus the input-method section's new cross-pointer.
+
+**Deliberately not changed:** denying the IME grab itself is unimplementable
+at the pinned rev (Smithay's handler takes only the new id, with no deny
+path), and unsetting the seat grab on lock would desync the IME (its object
+would still believe it holds the keyboard) — the ticket's own "refused menu
+is user-visible, desynced IME corrupts text" reasoning, applied symmetrically.
+
+Original entry, left as written below.
+
+---
 
 Found by independent review of `docs/backlog/resolved/xdg-popup-input-resolved.md`
 (PR #44). Not a flexwm mistake — inherited from the same pattern Smithay's

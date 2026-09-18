@@ -565,7 +565,17 @@ gap jumped the queue — each item's own file records why it landed when it did.
   closed as an accepted tradeoff mirroring the IPC sibling (any usable
   count admits the two greedy connections that fill the 1024-fd table);
   a global fd/buffer ceiling is filed as its own low-priority follow-up
-  since it would kill innocents for others' greed.
+   since it would kill innocents for others' greed.
+- **[An IME keyboard grab blocks every popup
+  grab](docs/backlog/resolved/popup-grab-blocked-by-ime-grab-done.md)** —
+  RESOLVED 2026-09-18: verify-first found the reverse order unhandled (an
+  IME grabbing while a menu held the keyboard left it mapped with no
+  keyboard, `popup_done` never sent). A live grab displaced by a foreign
+  keyboard grab is now dismissed on the next dispatch, so either order ends
+  with no menu while the IME holds the seat; precedence (lock > exclusive
+  layer > IME grab > popup grab) pinned by two fail-first harness tests and
+  documented in the README. The per-surface IME-scoping design stays open
+  as filed (needs a Smithay-side design that does not exist).
 ## What's next
 
 The backlog is the source of truth for what to pick up; this is the current

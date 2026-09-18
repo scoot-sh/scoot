@@ -303,7 +303,7 @@ enum Step {
     /// `get_input_method` + `grab_keyboard` through the real protocol, and
     /// hold the grab: the seat's keyboard is grabbed the way fcitx5 holds
     /// it while active (see
-    /// `docs/backlog/protocols/popup-grab-blocked-by-ime-grab.md`), so a
+    /// `docs/backlog/resolved/popup-grab-blocked-by-ime-grab-done.md`), so a
     /// popup grab asked for afterwards meets the `taken` refusal in
     /// `State::grab_popup` (`compositor/popup.rs`).
     ImeGrabKeyboard,

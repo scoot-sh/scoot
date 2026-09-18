@@ -562,7 +562,16 @@ popup grabs landed — take the keyboard.
   2. **An `exclusive` layer surface on `top`/`overlay` wins** — a launcher
      opened over a menu is typeable, and the menu is dismissed rather than
      left on screen holding input it can no longer use.
-  3. **The menu wins over everything else**: over the focused window, over
+  3. **An input method holding the keyboard wins** — while an IME (fcitx5,
+     or any `zwp_input_method_v2` client holding its keyboard grab, which a
+     real IME does for its whole active span, not just while composing) has
+     the seat, a grab asked for is refused, and a grab already held is
+     dismissed when the IME takes the keyboard. Letting a menu pre-empt an
+     IME mid-compose would silently interrupt composition in an unrelated
+     text field; leaving the menu mapped with no keyboard would leave one
+     Escape cannot close. Either order ends the same way: no menu survives
+     while the IME holds the seat.
+  4. **The menu wins over everything else**: over the focused window, over
      a layer surface that got the keyboard from a click, and over the
      `exclusive` surface the menu itself hangs off — so a bar's own
      dropdown is not dismissed by the bar that opened it, whichever
@@ -589,8 +598,8 @@ popup grabs landed — take the keyboard.
   menu replacing the one just closed) is not refused for reusing its opening
    serial past that window. The other bounds still apply on top (locking
    dismisses the grab, as does a *different* exclusive layer surface — never
-   the one the menu hangs off — any click outside dismisses it, and
-   keybindings still fire).
+   the one the menu hangs off — as does an IME taking the keyboard, any
+   click outside dismisses it, and keybindings still fire).
 
 What doesn't, yet:
 
@@ -1481,7 +1490,11 @@ Same trust note as the other privileged globals: there is no client filter on
 security-context support. An input method is more privileged than a clipboard
 manager — it can grab the keyboard and inject text into the focused client —
 so this is a deliberate consistency with flexwm's existing trust model rather
-than an oversight.
+than an oversight. That grab outranks an `xdg_popup.grab` in both orders:
+a menu asked for while the IME holds the seat is refused, and a menu already
+up is dismissed when the IME takes the keyboard (see the popup precedence
+under Layer shell above) — so no context menu opens in a text field while an
+IME is active there.
 
 ## Output scaling
 
