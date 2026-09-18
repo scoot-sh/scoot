@@ -518,6 +518,16 @@ gap jumped the queue — each item's own file records why it landed when it did.
   paths, the one-tick steady-state cost, multi-session delivery and the
   abandoned-locker shape. No README change (bug fix within protocol-
   permitted behavior, no user-facing surface).
+- **[Noctalia re-probe: gap 1 closed in the
+  field](docs/backlog/resolved/noctalia-reprobe-done.md)** (2026-09-18,
+  probe + docs, no code) — the P0 lock-teardown kill the 09-14 probe
+  field-confirmed now survives two full lock → PAM auth →
+  `unlock_and_destroy` cycles against the real quickshell client (pid
+  unchanged, live screenshots, zero kill-signature lines; the exact
+  fatal destroy + null-commit sequence is on the wire with the
+  connection surviving). Dismissal sweep (12 + Escape), toast, foot,
+  workspace pill all live; gaps 2–8 re-check as resolved, upstream, or
+  deliberate, so the ticket is resolved with nothing new filed.
 - **[The live-pool cap never bounded fds or
   mappings](docs/backlog/resolved/shm-pool-cap-misses-retained-fds-done.md)**
   — RESOLVED 2026-09-17: the pool count's fd/mapping claims corrected
@@ -532,13 +542,16 @@ gap jumped the queue — each item's own file records why it landed when it did.
 ## What's next
 
 The backlog is the source of truth for what to pick up; this is the current
-read of it, not a commitment. The backlog's own "High priority" entries
-([DMS gaps](docs/backlog/protocols/dms-enablement-gaps.md),
-[Noctalia probe](docs/backlog/protocols/noctalia-probe.md)) are stale probe
-reports now: their P0 findings are resolved elsewhere (see "Recently
-shipped" above), and what's left of each is filed individually under
+read of it, not a commitment. The DMS gaps entry
+([DMS gaps](docs/backlog/protocols/dms-enablement-gaps.md)) is a stale
+probe report now: its P0 finding is resolved elsewhere (see "Recently
+shipped" above), and what's left of it is filed individually under
 `docs/backlog/protocols/` at medium priority — the effective top of what's
-actually open.
+actually open. The Noctalia probe has gone one step further and is
+[resolved outright](docs/backlog/resolved/noctalia-reprobe-done.md)
+(re-probed 2026-09-18: the lock-teardown kill survives two full
+lock → auth → unlock cycles in the field, everything else re-checks as
+resolved/upstream/deliberate, nothing new filed).
 
 1. **Confirm `--gpu` fixes the Asahi Linux `--tty` failure** — needs the
    user's own hardware, not the dev VM (no split GPU/display-controller
@@ -608,7 +621,10 @@ actually open.
 
 Two Quickshell shells were probed end to end
 ([DMS gaps](docs/backlog/protocols/dms-enablement-gaps.md),
-[Noctalia results](docs/backlog/protocols/noctalia-probe.md)) after
+[Noctalia results](docs/backlog/resolved/noctalia-reprobe-done.md) —
+re-probed 2026-09-18 and resolved: the lock-teardown kill survives two
+full lock → auth → unlock cycles in the field, everything else
+re-checks as resolved/upstream/deliberate) after
 landing gamma-control, both data-controls and primary selection
 (PR #32) plus two destroy-teardown kill fixes (PRs #34, #36). Both
 shells render fully; Noctalia is the better target (generic

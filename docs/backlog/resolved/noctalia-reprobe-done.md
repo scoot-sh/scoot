@@ -1,12 +1,22 @@
 ---
-title: "Noctalia enablement probe — results 2026-09-14."
-status: "open"
-area: "protocols"
+title: "Noctalia enablement probe — results 2026-09-14, re-probed 2026-09-18 (gap 1 closed, ticket resolved)."
+status: "resolved"
+area: "resolved"
 priority: "high"
 blocked: null
 ---
 
-# Noctalia enablement probe — results 2026-09-14.
+# Noctalia enablement probe — results 2026-09-14, re-probed 2026-09-18.
+
+**RESOLVED 2026-09-18 (re-probe, no build).** The P0 gap 1 is closed in the
+field: two full lock → PAM auth → `unlock_and_destroy` cycles on current
+`main`, shell pid unchanged, live screenshots after, zero kill-signature
+lines in server, shell or wire logs — the exact fatal teardown sequence is
+on the wire and the connection survives it. Every other gap re-checks as
+resolved, upstream, or deliberate (delta table below); nothing new was
+found broken, so no follow-up tickets were filed and this entry moves to
+`resolved/`. Detail is the re-probe section at the end; the original
+2026-09-14 report is left intact below it.
 
 Probe (not a build): does Noctalia (the other Quickshell-based desktop
 shell — bar, notifications, launcher, lock screen, wallpaper; upstream
@@ -319,10 +329,173 @@ decisively — its generic `ext-workspace-v1` backend gives live
 workspace integration where DMS shows nothing. The protocol shopping
 list is otherwise identical (idle, foreign-toplevel, output-mgmt,
 popups, screencopy, blur), so nothing already learned is lost. The
-asterisk: gap 1 means locking kills the shell 1/1, and a shell you
-can't lock isn't daily-drivable — but the kill is now diagnosed to the
-exact Smithay lines, same bug class as the already-fixed #34, so it
-should be a small follow-up, not a research project. Own-overlay
-remains the long-term independence play, but for *validating flexwm
-against a real shell right now*, Noctalia gives more signal per gap
-fixed. Fix gap 1 first either way — it unblocks both shells' clients.
+ asterisk: gap 1 means locking kills the shell 1/1, and a shell you
+ can't lock isn't daily-drivable — but the kill is now diagnosed to the
+ exact Smithay lines, same bug class as the already-fixed #34, so it
+ should be a small follow-up, not a research project. Own-overlay
+ remains the long-term independence play, but for *validating flexwm
+ against a real shell right now*, Noctalia gives more signal per gap
+ fixed. Fix gap 1 first either way — it unblocks both shells' clients.
+
+## Re-probe 2026-09-18 (current `main` — gap 1 closed, ticket resolved)
+
+Probe (not a build): re-drive Noctalia against current `main` per this
+ticket's build order — gap 1 first — using the same drill as "How this
+was measured" above. Verdict: **the shell survives everything, including
+two full lock → PAM auth → `unlock_and_destroy` cycles, and every gap
+2–8 re-checks as resolved, upstream, or deliberate. Nothing new is
+broken; no follow-up tickets filed.** No compositor code changed in this
+pass (pure probe + docs), so there is no cargo test/clippy/fmt delta to
+report and `scripts/smoke-test.sh` was not re-run — the probe below is
+the evidence.
+
+### Setup (same drill, current revisions)
+
+- flexwm at `87aa4fd` (current `main`), rebuilt in the dev VM
+  (`/var/cargo-target/debug/flexwm`, timestamp Sep 18 02:24 UTC:
+  `cargo build --manifest-path /mnt/flexwm/Cargo.toml --bin flexwm`
+  from the 9p mount printed a real `Compiling flexwm` line and
+  `Finished in 9.39s` — not the sub-2s ghost build).
+- `flexwm --headless --width 1600 --height 900 --socket
+  /run/user/1000/flexwm-noctalia.sock` (Wayland `wayland-1`), pid
+  1972865, server log `/tmp/noc-reprobe-server.log`.
+- Noctalia from nixpkgs, ephemeral only, no VM mutation:
+  `nix shell nixpkgs#noctalia-shell nixpkgs#quickshell -c
+  noctalia-shell` — noctalia-shell 4.7.7, noctalia-qs 0.0.12 (same
+  versions as the 09-14 probe, so no client-version skew),
+  `QT_QPA_PLATFORM=wayland`.
+- Driven via `flexwm msg` (`screenshot`, `type`, `key`, `pointer
+  move/click`; `FLEXWM_SOCKET` set since `--socket` names only the IPC
+  socket) and `noctalia-shell ipc call <target> <fn>`. One full session
+  under `WAYLAND_DEBUG=1` (`/tmp/noc-reprobe-wire.log`, 27,016 lines).
+- Screenshots: local `/tmp/noc-reprobe-*.png` on the Mac during the
+  probe, viewed, not committed. VM left clean (probe processes killed,
+  temp sockets/logs/screenshots and `~/.config/noctalia` removed).
+- Shell pid for the whole session: **1973057**, from 02:28 UTC (second
+  start) through 02:37+ UTC across every cycle below.
+
+### First-launch observation (no ticket filed)
+
+The first shell start mapped **zero** layer surfaces in ~4 minutes:
+process alive but idle in poll (`wchan poll_schedule_timeout`, ~0%
+CPU), `~/.config/noctalia/settings.json` generated, ext-workspace
+group/output/workspace-`1`/active events consumed per the qslog, no
+error anywhere, and zero layer-surface lines in the server log — the
+client never attempted to map, so there is nothing compositor-side to
+blame. Kill + restart rendered in ≤20s (705509-byte frame: bar, clock,
+tray, workspace pill `1`, owl wallpaper). Same nixpkgs revisions both
+times. This leans shell-side (first-run init not completing until a
+restart) and the shell runs fine afterwards, so it is recorded here,
+not filed — a flexwm bug report on this evidence would be speculation.
+
+### Primary question: gap 1 closed, twice
+
+- Cycle 1: `ipc call lockScreen lock` → server `locking the session`
+  (02:29:35) → lock screen renders ("Welcome back, flexwm developer!",
+  password field focused, session buttons; 526430-byte shot) →
+  `msg type "dev"` + `msg key Return` → shell log
+  `pam.subprocess: Authenticated successfully` → server `unlocking the
+  session` (02:29:54) → pid 1973057 unchanged → post-unlock shot
+  705515 bytes: live desktop (bar + wallpaper + pill), not the
+  30046-byte all-black kill frame.
+- Cycle 2 (after the full sweep below, with `foot` mapped): lock →
+  auth → unlock (`locking` 02:37:35, `unlocking` 02:37:40), pid
+  unchanged, 426639-byte live shot (desktop + foot).
+- Kill-signature grep across all three logs (server, shell stderr,
+  wire): **0** lines matching `CommitBeforeFirstAck`, `killed by a
+  protocol error`, or `The Wayland connection broke`.
+- The wire carries the exact fatal sequence from the 09-14 report:
+  `ext_session_lock_v1#36.unlock_and_destroy()` then
+  `ext_session_lock_surface_v1#85.destroy()` →
+  `wl_surface#82.attach(nil, 0, 0)` → `wl_surface#82.commit()` — and
+  the connection survives it (traffic continues through cycle 2).
+- The five `discarded [unknown]` lines are the known-benign startup
+  frame-callback discards noted in the original report, without any
+  `delete_id` cascade or connection break.
+
+### Regression sweep (pid 1973057 throughout)
+
+Tally 12 dismissals + 1 Escape (the original 14 included 2 first-run
+modal pointer dismissals; no modals exist once the config is written,
+so there is no counterpart this run): 3 launcher toggle-close cycles,
+1 launcher open + `msg type "foot"` live-filter (search box narrows to
+Foot / Foot Client / Foot Server — keyboard focus reaches the
+overlay; 526591-byte shot) + `msg key Escape` dismiss, 2 calendar
+toggles, 2 control-center toggles, 3 settings toggles — one left open
+for the 553187-byte rendered shot (General→Basics, full sidebar: Bar,
+Dock, Lock Screen, Session Menu, Idle, Audio, Display…).
+
+- Bar + wallpaper + workspace pill render in every shot; clock
+  advances normally (02:28 → 02:36 across the session).
+- Real notification delivery: nixpkgs-libnotify `notify-send "Hello
+  from Noctalia re-probe"` renders a toast top-right (705217-byte
+  shot shows the full text).
+- `foot` coexistence: `msg action spawn foot` maps, tiles (id 1,
+  `12,42 782x846`, focused) and renders beside the shell
+  (426719-byte shot).
+
+### Delta check on gaps 2–8
+
+- **Gap 2 (foreign-toplevel) — resolved, verified live.** The shell
+  binds `zwlr_foreign_toplevel_manager_v1` at startup (`bind(8, …)` at
+  02:28:31, right after the ext-workspace bind) and the foot toplevel
+  arrives complete: `toplevel(new id …)` → `title("")`/`app_id("")` →
+  `output_enter` → `state` → `done`, then `app_id("foot")` +
+  `title("foot")` with `done`. `ext_foreign_toplevel_list_v1` is
+  offered and never bound — re-confirms PR #47's measurement on this
+  exact client. Launcher UI shows Applications only in the views
+  checked; two pointer clicks on the monitor-icon tab did not switch
+  tabs, so a running-windows section was not verified visually, and
+  panel-click focus / close were not re-driven here (both proven live
+  in PR #50's own probe). No new ticket.
+- **Gap 3 (idle) — resolved.** The `Cannot create idle monitor as
+  ext-idle-notify-v1 is not supported` sentence is absent from both
+  shell stderr and the qslog; `IdleService` + `IdleInhibitor` log
+  `Service started`; the shell binds `ext_idle_notifier_v1`
+  (`bind(32, …)` at 02:28:32). Monitors actually firing on real idle
+  was not re-driven — the swayidle field proof stands in
+  `resolved/ext-idle-notify-resolved.md`. No new ticket.
+- **Gap 4 (output-management) — no new ticket.** The Display page was
+  opened by pointer (first click landed on Region — pointer input
+  reaches the settings list fine — second click on Display at 425,645
+  landed): Brightness / Night Light tabs, output read as `headless
+  (1600x900 @ 1x)` — from `wl_output`, because the shell **never
+  binds** `zwlr_output_manager_v1` (zero `bind(28` on the whole wire
+  log). The query half exists for clients that want it; the
+  deliberate reconfiguration refusal is already its own item. No new
+  ticket.
+- **Gap 5 (xdg_popup) — same standing, no new ticket.** Zero
+  `xdg_popup` wire traffic across the session; grabs are implemented
+  but this client routes everything through layer surfaces and never
+  exercises them.
+- **Gap 6 (screencopy) — no new ticket; gate is shell-side.** Both
+  capture managers (globals 9/10) plus `zwp_linux_dmabuf_v1` (11) are
+  advertised, but the shell never binds 9 or 10: the workspace-pill
+  click opened no overview and no `ScreencopyView` was ever
+  instantiated, so no client-side gate (dmabuf readiness or otherwise)
+  was even reached. PR #60 already proved real pixels flow to a
+  quickshell `ScreencopyView` over shm on headless. The toplevel half
+  stays CLOSED UNREACHABLE and the thumbnail fallback NEEDS-UPSTREAM
+  per the resolved records; current Noctalia has no per-window
+  live-thumbnail view at all.
+- **Gap 7 — still not a gap.** Generic `ext-workspace-v1` backend,
+  live pill `1`, qslog shows group creation, output added, workspace
+  `1` with active state.
+- **Gap 8 (cosmetic) — unchanged/deliberate.** `Cannot enable
+  background effect as ext-background-effect-v1 is not supported`
+  still logged (graceful, no blur protocol — deliberate);
+  `wp_cursor_shape_manager_v1` bound at startup;
+  `wp_presentation` bound only on Qt's internal EGL render
+  connections, never the shell's main connection;
+  relative-pointer, single-pixel-buffer and gamma-control unbound;
+  `xdg-activation-v1` bound but launching apps from the shell (focus
+  handoff) still unexercised, same as 09-14.
+
+### What closes, what got filed, next build item
+
+Closes: this ticket (gap 1 field-proven fixed; everything else
+resolved/upstream/deliberate). Filed: nothing — no new breakage
+found. The first-launch no-surfaces observation is recorded above,
+not filed (client-idle, zero server-side evidence). Next build item
+is the orchestrator's pick from the backlog — nothing in this probe
+blocks or redirects it.

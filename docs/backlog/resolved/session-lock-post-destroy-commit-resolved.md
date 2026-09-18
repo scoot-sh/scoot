@@ -15,7 +15,8 @@ with nine sibling tests covering both teardown orders, both by-design
 kills, and the takeover/abandoned paths.
 
 - **Resolution (a) is closed as confirmed fatal.** The Noctalia probe
-  (`docs/backlog/protocols/noctalia-probe.md`, gap 1) field-confirmed it:
+  (`docs/backlog/resolved/noctalia-reprobe-done.md`, gap 1)
+  field-confirmed it:
   real quickshell 0.3.1 (Noctalia 4.7.7) sends `unlock_and_destroy` →
   `ext_session_lock_surface_v1.destroy` → `wl_surface.attach(nil)` →
   `wl_surface.commit` on every unlock, and the server answered
