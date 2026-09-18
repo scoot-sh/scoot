@@ -227,7 +227,7 @@ actionable.
   hundreds of stale probe sockets on the dev VM (since swept); future
   probes must pin `--socket` + `WAYLAND_DISPLAY`. Adjacent code-traced
   present-skip damage finding filed as
-  [present-skip eats frame damage](./rendering/present-skip-eats-frame-damage.md).
+  [present-skip eats frame damage](./resolved/present-skip-eats-frame-damage-done.md).
 - [A held pointer lock survives a session lock, so a client keeps pointer input while locked](./resolved/pointer-lock-session-lock-done.md)
   — RESOLVED: the lock transition deactivates the held constraint (game sees
   `unlocked`), focus lands on the lock surface, and unlock re-arms through
@@ -283,7 +283,14 @@ actionable.
   config-parse time with a warning (`"A"` means plain `a`, not `shift+a`);
   `msg key A` still refuses.
 - [Per-frame `Vec` alloc in the cursor fallback path](./rendering/cursor-element-per-frame-alloc.md)
-- [A `present()` skipped for an in-flight flip consumes that frame's damage](./rendering/present-skip-eats-frame-damage.md) — code-traced only, never observed; scanout (not the read-back image) goes stale until next damage; candidate fix touches the hot present path, so correctly waiting on a live observation. Note: an independent trace during the 2026-09-17 audit disputes this entry's stated mechanism (slot age after a skip is ≥2, so the tracker's history returns the skipped frame's damage and the retry presents) — worth re-deriving before anyone acts on it.
+- [Flake: parked-captures poll sees an extra `frame_serial` advance under full-suite load](./rendering/screencopy-parked-poll-flake.md)
+- [A `present()` skipped for an in-flight flip consumes that frame's damage](./resolved/present-skip-eats-frame-damage-done.md)
+  — RESOLVED 2026-09-18 (PR #107): the filed in-flight shape self-heals
+  (Smithay extends empty damage with history); the real loss was the
+  refused commit/page-flip arm (freed slot kept a fresh age, retry read
+  `None`, no vblank owed) — fixed with `note_write_failed` (free slot +
+  clear age, per-slot) and a bounded frame-timer retry (3 consecutive
+  refusals, then quiet).
 - [A screencopy frame parked for a lock's blank is never re-armed after the vblank confirm](./resolved/screencopy-parked-across-lock-confirm-done.md)
   — RESOLVED 2026-09-17 (PR #93): `confirm_lock` itself owns one
   `ensure_ticking()` (structural — future confirm paths inherit it);

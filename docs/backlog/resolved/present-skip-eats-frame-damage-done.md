@@ -109,8 +109,8 @@ Edge cases, all traced, none needing new code:
   full). Passes pre- and post-fix by design — it pins Smithay's contract
   the fix relies on, not flexwm behavior.
 - Full set green post-fix, dev VM, branch `implementer/present-skip-damage`:
-  `cargo test -p flexwm` (902 passed, 1 ignored), `cargo nextest run
-  --workspace` (1007 passed, 1 skipped), `cargo clippy -p flexwm
+  `cargo test -p flexwm` (901 passed, 1 ignored), `cargo nextest run
+  --workspace` (1006 passed, 1 skipped), `cargo clippy -p flexwm
   --all-targets -- -D warnings` clean, `cargo fmt --check -p flexwm`
   clean, `scripts/smoke-test.sh` (SMOKE_PREFIX=/tmp/smoke-skipdamage)
   exit 0, 17 ok.
