@@ -263,7 +263,8 @@ actionable.
   that catches exactly the bypass shape. The open ticket's
   "upstream-gated" expectation proved wrong -- buffers are fully
   observable, unlike pool internals.
-- [No cap on Wayland connection count](./security/wayland-connection-cap.md) — per-connection bounds (frames, binds, pools, buffers) multiply across connections; ~2 maxed connections exhaust the compositor's fds
+- [No cap on Wayland connection count](./resolved/wayland-connection-cap-done.md) — RESOLVED 2026-09-18: the EMFILE-on-accept kill is fixed (Wayland listener sheds like the IPC one; pre-fix binary proven dead live, post-fix alive), and the count itself is closed as an accepted tradeoff (any usable count admits the two greedy connections that fill the table, so a count denies shells while stopping nothing)
+- [A global fd/buffer ceiling across Wayland connections](./security/wayland-global-fd-ceiling.md) — the verdict's deferred half (low): per-connection bounds still multiply, but a shared ceiling would kill innocents for others' greed and needs its own refusal-form design first
 
 ### Packaging / tooling
 - [Nix `src = self` invalidates the build on doc-only edits](./packaging/nix-src-fileset.md)

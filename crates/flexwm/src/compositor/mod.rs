@@ -40,6 +40,7 @@ mod single_pixel_buffer;
 mod state;
 mod toplevel_icon;
 mod tty;
+mod wayland_accept;
 mod wl_buffers;
 
 /// The harness the real-`wayland-client` test suites share. Not a module of

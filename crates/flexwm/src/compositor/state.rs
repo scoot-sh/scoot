@@ -40,7 +40,6 @@ use smithay::wayland::shell::xdg::XdgShellState;
 use smithay::wayland::shell::xdg::decoration::XdgDecorationState;
 use smithay::wayland::shm::ShmState;
 use smithay::wayland::single_pixel_buffer::SinglePixelBufferState;
-use smithay::wayland::socket::ListeningSocketSource;
 use smithay::wayland::text_input::TextInputManagerState;
 use smithay::wayland::viewporter::ViewporterState;
 use smithay::wayland::xdg_activation::XdgActivationState;
@@ -67,6 +66,7 @@ use super::screenshot::{Encoder, PendingShot, ShotSink};
 use super::session_lock::SessionLock;
 use super::shm_pools::ShmPools;
 use super::tty::Tty;
+use super::wayland_accept::WaylandListener;
 use super::wl_buffers::WlBuffers;
 
 #[cfg(test)]
@@ -734,8 +734,8 @@ impl State {
         // First, before `display` moves into the `Generic` below: this is the
         // failure that actually happens, and nothing else should have been
         // set up by the time it is reported.
-        let socket = ListeningSocketSource::new_auto().map_err(socket_error)?;
-        let name = socket.socket_name().to_os_string();
+        let socket = WaylandListener::bind_auto().map_err(socket_error)?;
+        let name = socket.socket_name();
         let handle = event_loop.handle();
         handle
             .insert_source(socket, |stream, _, state: &mut State| {
@@ -751,7 +751,7 @@ impl State {
             })
             // `InsertError`'s own payload is the source that could not be
             // inserted, which is of no use to an operator and would force
-            // this function's error type to carry a `ListeningSocketSource`;
+            // this function's error type to carry a `WaylandListener`;
             // only the reason is kept.
             .map_err(|error| error.error)?;
         handle
@@ -954,7 +954,7 @@ fn socket_error(error: BindError) -> String {
         BindError::PermissionDenied => {
             "no wayland socket: $XDG_RUNTIME_DIR is not writable".to_string()
         }
-        // `ListeningSocketSource::new_auto` tries `wayland-1` through
+        // `WaylandListener::bind_auto` tries `wayland-1` through
         // `wayland-32` (1..33, verified in the pinned rev's
         // `wayland/socket.rs`), so reaching this means all 32 are taken.
         BindError::AlreadyInUse => {

@@ -128,7 +128,7 @@ different refusal sites).
   512 buffers + 128 live pools ≈ 640 worst case against a 1024-fd table --
   one connection alone cannot exhaust it; two can, which is
   connection-count territory, and
-  [wayland-connection-cap](../security/wayland-connection-cap.md)'s
+  [wayland-connection-cap](../resolved/wayland-connection-cap-done.md)'s
   "8 connections" math is updated to say so.
 - **Relationship to the pool cap: both stay.** Different quantities (live
   pool objects + address-space envelope vs retained fds/mappings), neither

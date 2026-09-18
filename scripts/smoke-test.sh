@@ -380,10 +380,16 @@ echo "--- checking clients see zwp_linux_dmabuf_v1 ---"
 # logged at startup ("flexwm is up" carries it as `wayland="..."`).
 if command -v wayland-info >/dev/null 2>&1; then
     # `|| true`: with `pipefail` an empty grep would exit the script here,
-    # before the BUG message below gets its say. The first pattern tolerates
-    # the ANSI escapes tracing writes between a field name and its value;
-    # the second then pulls the bare socket name out of that match.
-    wayland_socket=$(grep -o 'wayland[^"]*"[^"]*"' "$LOG" | head -1 | grep -o 'wayland-[0-9]*' || true)
+    # before the BUG message below gets its say. The socket is read off the
+    # "flexwm is up" line only: Smithay's own startup lines also match
+    # `wayland...".*"` (e.g. `smithay::wayland::output ... "headless"` sorts
+    # earlier in the log), so an unanchored `head -1` grabs one of those and
+    # the name extraction below comes up empty -- that misread failed the
+    # whole script on any machine with wayland-info installed. The first
+    # pattern tolerates the ANSI escapes tracing writes between a field name
+    # and its value; the second then pulls the bare socket name out of that
+    # match.
+    wayland_socket=$(grep 'flexwm is up' "$LOG" | grep -o 'wayland[^"]*"[^"]*"' | head -1 | grep -o 'wayland-[0-9]*' || true)
     if [ -z "$wayland_socket" ]; then
         echo "BUG: could not find the Wayland socket name in $LOG"
         tail -30 "$LOG"

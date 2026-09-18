@@ -130,7 +130,7 @@ below, not minimised.
   still strictly better than unbounded per connection, the same
   per-connection shape as the capture-frame cap and the bind budget, and
   cross-connection abuse is connection-count territory. Filed as its own
-  item ([Wayland connection cap](../security/wayland-connection-cap.md))
+  item ([Wayland connection cap](../resolved/wayland-connection-cap-done.md))
   rather than left as prose.
 - **Adjacent measurement, recorded because it constrains the future byte
   total:** `foot` alone reserves 1 GiB under any byte cap (2 x 512 MiB),
