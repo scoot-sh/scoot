@@ -85,7 +85,9 @@ tiny — see Output scaling below),
 without allocating a shm pool (see Single-pixel buffers below),
 `zwp_relative_pointer_manager_v1` with `zwp_pointer_constraints_v1`, so a
 game or 3D app can lock or confine the pointer and read raw unaccelerated
-deltas (see Relative pointer below),
+deltas (see Relative pointer below), `zwp_tablet_manager_v2`, so a
+drawing tablet's pen moves the cursor, taps click, and pressure reaches
+tablet-aware clients (see Drawing tablets below),
 `wp_presentation`, so a video player or animation client learns exactly when
 each of its frames reached the screen (see Presentation-time feedback
 below), `wp_alpha_modifier_v1`, so a client can ask for whole-surface
@@ -1676,8 +1678,42 @@ What to know before pointing a client at it:
   registered: unlocking returns focus to the game surface and re-arms it
   there with no new request (the client sees `locked`/`confined` again),
   and the relative stream resumes with absolute still held. A lock
-  requested while the session is already locked stays inactive until unlock
-  engages it the same way.
+   requested while the session is already locked stays inactive until unlock
+   engages it the same way.
+
+## Drawing tablets (`zwp_tablet_manager_v2`)
+
+flexwm implements `zwp_tablet_manager_v2` (version 1 -- the most Smithay
+carries at the pinned revision; the protocol's own version 2 only adds a
+tablet bustype event and pad dials, neither of which flexwm mints, see
+below), so a drawing tablet works on `--tty` hardware: libinput tool
+events reach tablet-aware clients (Krita, Xournal++), and every other
+client gets a pen that moves the cursor and clicks.
+
+What to know before pointing a client at it:
+
+- **A pen moves the cursor and clicks; there is no second focus
+  system.** Tool proximity and motion run the same path mouse motion
+  does, so the cursor follows the pen and pointer focus lands where the
+  tool is. A tip tap is a left click through the same click path: it
+  focuses the window, mints activation like a click, and dismisses a
+  menu tapped outside of.
+- **Pressure, tilt, rotation, slider and wheel ride the tool's axis
+  events**, announced with proximity and updated by motion. Only changed
+  axes are sent: a hovering pen restates no pressure.
+- **Stylus barrel buttons are tool-only.** The tool sees the exact button
+  number; nothing is synthesized onto the pointer, because no mapping
+  from a stylus button onto a mouse button exists to honour.
+- **Pads, strips, rings and dials are not supported.** Smithay carries no
+  pad objects at the pinned revision, so there is nothing for the
+  compositor to drive and `pad_added` never fires. This is deferred
+  upstream, not silently omitted.
+- **A tool cursor is the cursor.** A shape or surface a client names for
+  its tool lands in the same cursor the pointer uses, since the tool is
+  what is driving it.
+- **A tap on the lock screen reaches the locker**, through both the tool
+  and the pointer halves, and moves nothing behind it -- the same two
+  paths every other input takes under lock.
 
 ## Presentation-time feedback (`wp_presentation`)
 

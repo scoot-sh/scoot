@@ -637,7 +637,8 @@ gap jumped the queue — each item's own file records why it landed when it did.
   `wp_content_type_manager_v1` implemented (Smithay carries both; the
   factor blends end to end through pixman, the hint is stored and honestly
    ignored), each with fail-first harness tests; `tablet-v2` filed as its
-   own entry ([tablet-v2](docs/backlog/input/tablet-v2.md)); screencopy,
+   own entry, since implemented and recorded as
+   ([tablet-v2](docs/backlog/resolved/tablet-v2-done.md)); screencopy,
    output-management and the VT-pause cursor item already resolved;
    security-context and the cursor `Vec` closed deliberate; cursor-hotspot
    offset closed needs-upstream (since overturned and fixed flexwm-side —
@@ -771,6 +772,19 @@ gap jumped the queue — each item's own file records why it landed when it did.
   arch-independent `cfg(not(target_os = "linux"))`, so `cargo build`
   from source stays open on Intel Macs. `nix flake check --all-systems`
   is green on the three remaining systems.
+- **[Drawing-tablet input](docs/backlog/resolved/tablet-v2-done.md)** —
+  RESOLVED 2026-09-18: `zwp_tablet_manager_v2` (version 1, Smithay's
+  maximum at the pinned rev) advertised honestly, with the input epic the
+  niche bundle refused to fake -- libinput tool-event plumbing, a
+  `TabletSeat` driving tool lifetimes, and tool focus/cursor routed
+  through the existing pointer/click paths (a pen moves the cursor, a tap
+  clicks like a mouse click, pressure rides the axis events, barrel
+  buttons are tool-only). Pads/strips/rings stay deferred upstream
+  (Smithay carries no pad objects at the pinned rev). Eight fail-first
+  harness tests with synthetic tool events (6 fail unadvertised), live
+  `wayland-info` advertisement; no tablet-tool hardware on the dev VM
+  (its QEMU tablet is pointer-only), so the libinput arms are
+  review-verified and real tool types untested -- stated in the record.
 ## What's next
 
 The backlog is the source of truth for what to pick up; this is the current
