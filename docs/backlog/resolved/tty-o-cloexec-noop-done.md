@@ -94,8 +94,9 @@ All re-verified in source at `0ff0098`, not relayed from the entry:
   ones are close-on-exec-by-construction (`SOCK_CLOEXEC` per `ipc.rs`,
   `MemfdFlags::CLOEXEC` at every creation site); the systematic per-source
   audit is filed separately as [a low-priority security
-  item](../security/spawn-fd-cloexec-audit.md), not sprawled into this
-  one-flag change.
+  item — since completed, see
+  [the audit record](./spawn-fd-cloexec-audit-done.md) — not sprawled into
+  this one-flag change.
 - No live `--tty` re-verification: behavior-identical change (a dead
   argument removed), and the seatd-fd premise reuses the entry's 2026-09-13
   live measurement as cache per `CLAUDE.md`. Full standard set green on

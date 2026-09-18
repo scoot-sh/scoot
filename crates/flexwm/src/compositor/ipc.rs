@@ -52,6 +52,7 @@ use self::connection::Limits;
 pub(crate) use self::outbound::Outbound;
 use self::slots::{MAX_CONNECTIONS, Slot, Slots};
 use super::State;
+use super::fd_pressure::{RESERVE_FDS, Table};
 use super::headless::FRAME_INTERVAL;
 use super::tty::VtSwitchOutcome;
 
@@ -138,6 +139,26 @@ static REFUSAL: LazyLock<String> = LazyLock::new(|| {
     .unwrap_or_default()
 });
 
+/// What a client arriving under compositor-wide fd pressure is told,
+/// encoded once.
+///
+/// The same refused-with-a-reason shape as [`REFUSAL`] above, for the same
+/// reason: unlike a Wayland connection, this channel can carry why. The
+/// advice differs (retry shortly, not close-and-reuse: pressure lifts when
+/// whoever is holding fds lets go, and holding connections is not what
+/// caused it), and so does the log level at the refusal site (`warn`,
+/// matching the accept-loop shed: pressure means the table is nearly full,
+/// not merely that a cap is).
+static PRESSURE_REFUSAL: LazyLock<String> = LazyLock::new(|| {
+    encode(&Response::error(format!(
+        "refused: flexwm is under file-descriptor pressure (fewer than {RESERVE_FDS} \
+         fds free); retry in a moment -- this connection cost nothing, and pressure \
+         lifts as soon as whoever is holding fds lets go"
+    )))
+    // Same infallibility argument as [`REFUSAL`].
+    .unwrap_or_default()
+});
+
 pub fn init(
     event_loop: &mut EventLoop<'static, State>,
     state: &mut State,
@@ -174,12 +195,36 @@ pub fn init(
 /// Takes one accepted socket into the event loop, or refuses it.
 ///
 /// `limits` is [`Limits::REAL`] everywhere but the tests, which pass shorter
-/// deadlines rather than parking a test thread for tens of seconds.
+/// deadlines rather than parking a test thread for tens of seconds. Reads
+/// the live fd table and delegates; the tests drive [`accept_under`]
+/// directly with canned readings.
 fn accept(
     state: &mut State,
     stream: UnixStream,
     slots: &Slots,
     limits: Limits,
+) -> std::io::Result<()> {
+    accept_under(state, stream, slots, limits, super::fd_pressure::table())
+}
+
+/// The testable half of [`accept`]: the same checks against a given table
+/// reading instead of the live one.
+///
+/// Order matters: the peer check first (security, before this connection
+/// costs anything), then non-blocking (every refusal below writes, and
+/// that write must not block the compositor either), then the pressure
+/// refusal (a pressured table must not spend a slot it cannot serve --
+/// and, unlike the cap refusal past it, this one names the pressure
+/// rather than the newcomer's own behaviour), then the slot cap. An
+/// unknown table (`None`) skips the pressure refusal: shedding on a
+/// broken gauge would deny innocents, and the `EMFILE` shed still catches
+/// real exhaustion underneath.
+fn accept_under(
+    state: &mut State,
+    stream: UnixStream,
+    slots: &Slots,
+    limits: Limits,
+    table: Option<Table>,
 ) -> std::io::Result<()> {
     // First, before this connection costs anything: an fd duplicated, a
     // buffer allocated, a place in the event loop -- and long before any
@@ -211,6 +256,22 @@ fn accept(
     // refusal below as well as after it, so that refusal's one write cannot
     // block the compositor either.
     stream.set_nonblocking(true)?;
+
+    if let Some(observed) = table.filter(|observed| observed.pressured()) {
+        // Refused outright like an over-cap connection, and told why like
+        // one: retry shortly, not close-and-reuse -- pressure is nobody's
+        // behaviour, it lifts on its own. Best-effort write for the same
+        // reason as the cap refusal below. No slot is claimed, so the
+        // refusal costs the table nothing.
+        tracing::warn!(
+            used = observed.used,
+            soft = observed.soft,
+            free = observed.free(),
+            "refused an ipc connection: file-descriptor pressure"
+        );
+        let _ = (&stream).write_all(PRESSURE_REFUSAL.as_bytes());
+        return Ok(());
+    }
 
     let Some(slot) = slots.claim() else {
         // Refused outright rather than queued: a client waiting for a slot

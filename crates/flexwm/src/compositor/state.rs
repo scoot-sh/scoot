@@ -5,7 +5,6 @@ use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::path::PathBuf;
 use std::process::Command;
-use std::sync::Arc;
 use std::time::Instant;
 
 use flexwm_core::{Config, Size, WindowId, World};
@@ -798,15 +797,7 @@ impl State {
         let handle = event_loop.handle();
         handle
             .insert_source(socket, |stream, _, state: &mut State| {
-                // A new connection can fail under fd/id exhaustion; that's the
-                // misbehaving-client's problem; a single bad file descriptor
-                // shouldn't take down every other client's session.
-                if let Err(error) = state
-                    .display_handle
-                    .insert_client(stream, Arc::new(ClientState::default()))
-                {
-                    tracing::warn!(%error, "could not accept a new wayland client");
-                }
+                super::wayland_accept::admit(state, stream, super::fd_pressure::table());
             })
             // `InsertError`'s own payload is the source that could not be
             // inserted, which is of no use to an operator and would force

@@ -79,13 +79,15 @@
 //! `u32::MAX` (fd exhaustion at ~2^10 on this machine's limits, hard caps at
 //! ~2^20 anywhere); saturation is belt-and-braces, not the bound.
 //!
-//! ## Per connection, not per machine
+//! ## Per connection, plus a compositor-wide ceiling
 //!
 //! Wayland connections are unbounded, so N connections hold up to 128N
-//! pools. Stated rather than solved -- still strictly better than unbounded
-//! per connection, the same per-connection shape as the capture-frame cap
-//! and the bind budget, and cross-connection abuse is connection-count
-//! territory, not a bigger pool count.
+//! pools -- which the per-connection cap alone cannot stop. The
+//! compositor-wide ceiling (`fd_pressure`, enforced in `dispatch.rs`)
+//! closes it the same way as for buffers: while the process table is
+//! pressured, a client already holding past the 64-pool grace is refused
+//! its next `create_pool` with the same protocol error, and a client under
+//! grace is never refused for another's greed.
 
 use std::collections::HashMap;
 
@@ -165,6 +167,13 @@ impl ShmPools {
                 self.live_per_client.remove(client);
             }
         }
+    }
+
+    /// How many live pools `client` holds right now. Zero for a client
+    /// with no entry, for the same pressure-guard comparison
+    /// (`fd_pressure`) the buffer count's twin serves.
+    pub(super) fn live_for(&self, client: &Client) -> u32 {
+        self.live_per_client.get(&client.id()).copied().unwrap_or(0)
     }
 
     /// How many pools all clients hold between them. Test-only: the flood
