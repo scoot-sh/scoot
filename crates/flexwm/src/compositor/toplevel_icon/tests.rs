@@ -181,10 +181,12 @@ wayland_client::delegate_noop!(TestClient: ignore wl_buffer::WlBuffer);
 /// requires, so that a rejected `add_buffer` is rejected for its timing and
 /// not for its contents.
 ///
-/// Returns the backing file alongside the buffer: the pool creation sends
-/// the fd at flush time, so the client must hold it open until the step's
-/// roundtrip, the way `dispatch/tests.rs`'s `BufferClient` holds its own.
-/// Dropping it earlier hands the server a closed fd.
+/// Returns the backing file alongside the buffer: held past the step's
+/// roundtrip as defense-in-depth (wayland-backend dup's the fd into its
+/// out-queue at send time, so an early drop is harmless in practice --
+/// verified against the locked wayland-backend source during PR #100
+/// review; the `File` is kept regardless, the way `dispatch/tests.rs`'s
+/// `BufferClient` holds its own).
 fn square_shm_buffer(
     shm: &wl_shm::WlShm,
     qh: &QueueHandle<TestClient>,

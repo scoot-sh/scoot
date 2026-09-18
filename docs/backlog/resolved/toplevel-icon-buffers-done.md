@@ -91,13 +91,13 @@ with its property neutered (see Evidence):
   deliberately not taken: pool topology is irrelevant to the scalar
   count, but the per-buffer shape is what the bound is for.
 
-Test-harness note, recorded because it is a real footgun: the client's
-pool backing file must stay open until the step's roundtrip flushes the
-creation -- `square_shm_buffer` now returns the `File` alongside the
-buffer and each step holds it past its roundtrip (the shape
-`dispatch/tests.rs`'s `BufferClient` already uses). The old helper
-dropped it early and only ever worked because its one caller was killed
-for `Immutable` before buffer validity mattered.
+Test-harness note: `square_shm_buffer` returns the pool backing `File`
+alongside the buffer and each step holds it past its roundtrip (the shape
+`dispatch/tests.rs`'s `BufferClient` already uses) as defense-in-depth.
+PR #100 review verified against the locked wayland-backend source that the
+fd is dup'd into the out-queue at request-send time, not at flush — so an
+early drop was never actually buggy, and the identical early-drop pattern
+in `cursor/tests.rs` is equally harmless. The `File` is kept regardless.
 
 ## Evidence
 
