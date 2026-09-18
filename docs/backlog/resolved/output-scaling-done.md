@@ -34,9 +34,10 @@ fractional `preferred_scale`. That gap is fixed in
 (global now v6; `send_surface_state` called from `new_surface`). Note the
 reported symptom that surfaced it — Ghostty failing to load at
 `[output] scale = 1.5` — is **not** confirmed fixed by this, and review found
-GTK4 ignores that event while a fractional object exists; it is tracked
-separately and still open in
-[`./ghostty-fails-at-1-5-done.md`](./ghostty-fails-at-1-5-done.md).
+GTK4 ignores that event while a fractional object exists; it was tracked
+separately and closed as NOT reproducible on 2026-09-18 in
+[`./ghostty-fails-at-1-5-done.md`](./ghostty-fails-at-1-5-done.md), with the
+cause never captured.
 
 The original diagnosis is kept below for history.
 

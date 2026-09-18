@@ -284,9 +284,10 @@ actionable.
   (exactly that device, no fallback, fail-closed startup error; `--gpu`
   wins when both name one), verified live on the dev VM single-GPU
   (byte-identical default path, fail-closed refusal, flag precedence).
-  Residual, still needing the user's own hardware: confirming `--gpu`
-  fixes the Asahi Linux `--tty` failure (no split-GPU topology on the dev
-  VM) — the gate the open ticket carried, kept as the revisit condition.
+  The residual it carried -- confirming the Apple Silicon case on the
+  reporter's own hardware -- is CLOSED 2026-09-18: the automatic search
+  works there unattended, so `--gpu` is a convenience on that machine and
+  not a requirement.
 - [Background color not painted where no window covers](./resolved/tty-background-not-painted-done.md)
   — RESOLVED 2026-09-16: it always was painted. The smoke test's background
   sample pixel sat on the cursor, which only `--tty` draws. Closes the

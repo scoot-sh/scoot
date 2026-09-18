@@ -37,6 +37,22 @@ gap jumped the queue — each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **Both Apple-Silicon-blocked questions, answered on the reporter's own
+  hardware** (2026-09-18, docs-only — Apple M2 `apple,t8112`, NixOS aarch64;
+  runbook and evidence in [`Asahi.md`](Asahi.md)).
+  [The `--tty` DRM device search](docs/backlog/resolved/tty-gpu-config-key-done.md)
+  **works there unattended** — it rejects the `asahi` render node
+  (`os error 95`) and drives the `apple-drm` display controller, in a
+  daily-driven session with no `--gpu` and no `[tty] gpu` — so the residual
+  that key carried is closed and `--gpu` is *not* the first thing to reach
+  for on Apple Silicon.
+  [Ghostty at `[output] scale = 1.5`](docs/backlog/resolved/ghostty-fails-at-1-5-done.md)
+  is **RESOLVED as not reproducible**: refuted under `--headless` at both
+  scales on the real AGX GPU and then in the original `--tty`-on-`eDP-1`
+  configuration itself. The cause was never captured, so it closes with a
+  revisit condition rather than a diagnosis.
+  Still open and still needing that machine: issue #48's connector fallback,
+  which needs an external display (this one has only `eDP-1`).
 - **[`ext-idle-notify-v1` + `idle-inhibit-unstable-v1`](docs/backlog/resolved/ext-idle-notify-resolved.md)**
   (PR #38, 2026-09-15) — the automatic trigger session-lock had no other way
   to get. A `swayidle`-style daemon can now idle, resume and re-idle the
@@ -823,15 +839,7 @@ resolved/upstream/deliberate, nothing new filed). What's left of both
 was already filed individually under `docs/backlog/protocols/` at
 medium priority — the effective top of what's actually open.
 
-1. **Confirm `--gpu` fixes the Asahi Linux `--tty` failure** — needs the
-    user's own hardware, not the dev VM (no split GPU/display-controller
-    topology there). The
-    [`[tty] gpu` config key](docs/backlog/resolved/tty-gpu-config-key-done.md)
-    itself is landed (parse, validate, plumb, select — verified live
-    single-GPU on the dev VM); what still wants that hardware is the
-    end-to-end confirmation on split-GPU topology, kept as the record's
-    stated residual and revisit condition.
-2. **Medium-priority protocol gaps**, mostly what's left of the DMS/Noctalia
+1. **Medium-priority protocol gaps**, mostly what's left of the DMS/Noctalia
    probes (see "Shell enablement" below for their recommended order):
     [screencopy's toplevel half](docs/backlog/resolved/screencopy-toplevel-capture-done.md)
     is CLOSED UNREACHABLE (phase-1 probe, no build — stock quickshell routes
@@ -850,7 +858,7 @@ medium priority — the effective top of what's actually open.
    [a window-focus change doesn't dismiss an active popup
    grab](docs/backlog/resolved/popup-grab-focus-divergence-done.md), which
    shipped as an IPC `popup_grab` field in PR #55.
-3. **[IPC connection cap and the half-closed-connection
+2. **[IPC connection cap and the half-closed-connection
    leak](docs/backlog/resolved/ipc-connection-cap-resolved.md)** — RESOLVED
    2026-09-16: 64 concurrent connections, refused with a reason past that,
    a write-stall deadline that drops a peer which has stopped reading (the
@@ -875,7 +883,7 @@ medium priority — the effective top of what's actually open.
    shared connection table costs an innocent
    client](docs/backlog/resolved/connection-cap-denies-the-same-user-done.md) -- is
    closed as an accepted tradeoff (no workload has hit it; kept as the landing spot).
-4. Small, unblocked low-priority fixes: [`msg key` modifier
+3. Small, unblocked low-priority fixes: [`msg key` modifier
     resolution](docs/backlog/resolved/msg-key-modifier-resolution-done.md)
     (PR #83, resolved — modifiers resolve through the keymap probe like
     `type_text`; toggle-option layouts accept combos, `msg key A` still

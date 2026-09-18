@@ -129,21 +129,36 @@ live cursor block — not a blank backdrop.
 ### Both hypotheses this entry named are now refuted
 
 - **(2) The GPU/GL path — the leading hypothesis — is refuted.** This run went
-  through the real Asahi AGX stack, not software rendering: 88
-  `zwp_linux_dmabuf_v1` references per run, and the Ghostty process holds
-  `/dev/dri/renderD128` (the `asahi` render node) open. That is precisely the
-  path the dev VM structurally could not exercise, and it produced no EGL/GL
-  error and no failure at either scale.
+  through the real Asahi AGX stack, not software rendering. Per log, by
+  `grep -c` so anyone can re-derive them:
+
+  | metric | 1.5 | 2.0 |
+  | --- | --- | --- |
+  | lines matching `dmabuf` | 70 | 70 |
+  | lines matching `zwp_linux_dmabuf_v1` | 24 | 24 |
+  | `create_params` / `create_immed` | 6 / 6 | 6 / 6 |
+
+  Mesa's EGL queue binds `zwp_linux_dmabuf_v1` v4 and attaches the resulting
+  `wl_buffer`s, and the Ghostty process holds `/dev/dri/renderD128` (the
+  `asahi` render node) open. That is precisely the path the dev VM
+  structurally could not exercise, and it produced no EGL/GL error and no
+  failure at either scale.
 - **(1) Ghostty version is refuted.** The reporter's machine runs 1.3.1 — the
-  same version as the dev VM, so version divergence was never the variable.
+  same version as the dev VM. And it ran it *on the day of the report*: NixOS
+  system generation 26, dated 2026-09-14, already carried `ghostty-1.3.1`, as
+  has every generation since. So version divergence was never the variable,
+  and unlike the other rows this one is refuted for the original stack rather
+  than only the current one.
 
 ### Also tested: an older binary, to rule out a recent fix masking the bug
 
 At the time of the run the live session was still on an **older** flexwm
 build than `main` at `f688ac9` (it has since been rebuilt onto `f688ac9`
 itself — see the re-confirmation below). A differential run of that older
-binary at 1.5 also maps Ghostty (409×510, 70 dmabuf references, 42 frames
-presented). So the non-reproduction is not an artifact of recent work masking
+binary at 1.5 also maps Ghostty (409×510, 42 frames presented, and the same
+70 / 24 / 6 dmabuf counts as both runs above — all three logs are identical
+on every one of those metrics). So the non-reproduction is not an artifact of
+recent work masking
 the bug — in particular it is not the dmabuf-import fix (`ce15c09`) that
 landed the same day.
 
@@ -196,24 +211,44 @@ verifying was itself running inside that Ghostty window at 1.5. Logical
 1707×1067 is 2560/1.5 × 1600/1.5, so the fractional scale was genuinely
 applied and not silently rounded.
 
-The session log (now captured; see the revisit condition at the top) is clean
-of anything relevant: no protocol error, no EGL/GL error, no client failure.
-The only flexwm-level warnings are the expected `drm: device unusable` for
-`card1` and a benign Smithay `Failed to destroy old mode property blob` during
-the first modeset.
+The session log (now captured; see the revisit condition at the top) contains
+nothing relevant to this entry: no protocol error, no EGL/GL error, no client
+failure. It carries four warnings at startup, none of them Ghostty-related —
+two from flexwm and two from Smithay:
+
+| source | warning |
+| --- | --- |
+| flexwm | `drm: device unusable path=/dev/dri/card1 … (os error 95)` — expected; the fallback working |
+| flexwm | `crtc reports an unusable gamma size; advertising 256 instead size=0` |
+| Smithay | `Unable to become drm master, assuming unprivileged mode` — expected on any non-root `--tty` |
+| Smithay | `Failed to destroy old mode property blob` — benign, first modeset |
+
+The gamma one is worth extracting as a **separate Apple Silicon finding**:
+`apple-drm` reports a zero-length gamma LUT, so flexwm advertises a 256-entry
+`zwlr_gamma_control` ramp this hardware does not actually have. Irrelevant to
+Ghostty and not a defect this entry covers, but it is exactly the sort of
+hardware-specific fact `Asahi.md` exists to capture, and anyone doing
+night-light/gamma work on Apple Silicon should start from it.
 
 ### Adjacent measurement: fractional scale is not slower to composite
 
 Worth recording because it was the last plausible mechanism for a
 "doesn't load" that was really a "too slow to appear". It isn't one.
-`--headless` at 2560×1600 with an identical fixed-rate (20 fps) client:
+`--headless` at 2560×1600 with an identical fixed-rate (20 fps) `foot` client,
+flexwm's own `utime+stime` from `/proc/<pid>/stat` over a 12 s window after an
+8 s settle:
 
-| scale | flexwm CPU |
-| --- | --- |
-| 2.0 | 11.2% |
-| 1.5 | 11.3% |
+| scale | run 1 | run 2 (independent re-run, review) |
+| --- | --- | --- |
+| 2.0 | 11.2% | 13.1% |
+| 1.5 | 11.3% | 11.9% |
 
-Indistinguishable, and 0.0% at both with a static screen, so damage-limited
+**Read this as "indistinguishable", not as a 0.1-point difference.** These are
+single samples and the run-to-run spread is ~1–2 points — an order of
+magnitude larger than the within-run gap, and the re-run put the *fractional*
+arm cheaper, reversing the sign. The honest claim the data supports is that
+fractional scale costs no more than integer scale, not that it costs 0.1 point
+more. Static screen reproduced exactly at 0.0% in both runs, so damage-limited
 redraw is working and there is no spin. On the live `--tty` session flexwm
 sits around 48% CPU while a client animates continuously at 2560×1600 —
 that is the honest cost of CPU compositing 4.1 megapixels at display refresh,
@@ -223,12 +258,19 @@ it is **not** scale-dependent, and it is not evidence for this entry.
 
 Every mechanism this entry proposed has been tested and eliminated:
 
+A note on how strong these verdicts are. Only the first was tested against
+the **original** 2026-09-14 stack; every other row was measured on the
+2026-09-18 stack, four days and several rebuilds later. "Not reproducible on
+the 2026-09-18 stack" is the honest reading of those, not "could never have
+happened" — which is why this entry closes as not reproducible rather than as
+a misreport.
+
 | candidate | verdict |
 | --- | --- |
-| Ghostty version | refuted — 1.3.1 on both the dev VM and the Asahi machine |
-| GPU/GL path (the leading one) | refuted — real AGX, dmabuf, no EGL/GL error at either scale |
-| `--tty`-specific interaction at fractional scale | refuted — the original configuration was run and works |
-| fractional scale being too slow to appear | refuted — 11.2% vs 11.3% CPU, see the measurement above |
+| Ghostty version | **refuted outright** — 1.3.1 on the dev VM, and generation 26 dated 2026-09-14 (the report day) already carried 1.3.1, as has every generation since |
+| GPU/GL path (the leading one) | not reproducible on the 2026-09-18 stack — real AGX, dmabuf, no EGL/GL error at either scale |
+| `--tty`-specific interaction at fractional scale | not reproducible on the 2026-09-18 stack — the original configuration was run and works |
+| fractional scale being too slow to appear | not supported — CPU cost is indistinguishable between scales, see the measurement above |
 | `wl_output` version / other global differences | ruled out — same build, byte-identical logical geometry |
 
 What remains is unfalsifiable from here: **something environmental at the

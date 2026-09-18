@@ -48,7 +48,8 @@ recorded so they don't get lost rather than because any is scheduled:
   `wl_surface.preferred_buffer_scale` (a v6 `wl_compositor` event) landed as a
   follow-up; see
   `docs/backlog/resolved/fractional-scale-integer-companion-done.md`. (The
-  Ghostty-at-`1.5` symptom that surfaced it is a separate, still-open question:
+  Ghostty-at-`1.5` symptom that surfaced it was a separate question, since
+  closed as NOT reproducible on 2026-09-18:
   `docs/backlog/resolved/ghostty-fails-at-1-5-done.md`.)
 - `text-input-v3`/`input-method-v2` — ~~IME support for non-Latin
   script input, and on-screen keyboards. A real gap for non-US-keyboard

@@ -37,12 +37,13 @@ deliberately **not** held for the Asahi hardware confirmation the ticket
 gated on: the gate conflated two separable things — the config key (parse,
 validate, plumb, select; fully buildable and testable without split-GPU
 hardware) and the hardware confirmation (does `--gpu` fix the Asahi
-machine, which needs the user's own hardware, not the dev VM). The first
-is done here; the second stays open as a stated residual below, with its
-revisit condition. If the Asahi probe ever shows a device path is the
-wrong shape of persistent setting, the key is small enough to reshape —
-but there is no evidence for that today, and holding a daily-drive
-usability key for it kept every multi-GPU user retyping the flag.
+machine, which needed the user's own hardware, not the dev VM). The first
+was done here; the second was recorded as a residual below — and has since
+been answered on that hardware (2026-09-18), so both halves are now closed.
+Splitting them is what let the usability key ship instead of every multi-GPU
+user retyping the flag for four more days, and the eventual answer vindicated
+it: the search was already correct on that machine, so waiting would have
+held the key for a confirmation that changed nothing about it.
 
 ### What changed
 
@@ -146,9 +147,24 @@ changed or grew an allocation.
 
 The hardware confirmation this entry deferred is **done, and the answer is
 that the automatic search already works on Apple Silicon.** `--gpu` is a
-convenience on this machine, not a requirement, and the `[tty] gpu` key
-needs no reshaping — the "device path is the wrong shape" risk did not
-materialize.
+convenience on this machine, not a requirement.
+
+On the **"is a device path the wrong shape of persistent setting"** question
+the gate actually asked: this run does not answer it directly, because it
+never needed to set `[tty] gpu` at all. What it does supply is the relevant
+evidence, which points to "the shape is fine here":
+
+- `cardN` minor numbers were **stable across four consecutive boots** —
+  `asahi` minor 1, `apple` minor 2, every time (`journalctl -b -3 … -b 0`).
+- A stable alias exists regardless, and is the better thing to put in a
+  config file:
+  `/dev/dri/by-path/platform-soc:display-subsystem-card -> ../card2`
+  (with `platform-206400000.gpu-card -> ../card1` for the render node).
+  `[tty] gpu` takes any path the session can open, so this works today with
+  no code change — `README.md`'s sample now shows the `by-path` form.
+
+So the key needs no reshaping, but that is now a supported statement about
+this hardware rather than the bare assertion it replaced.
 
 Measured on the reporter's Apple M2 (`apple,t8112`, j413), NixOS aarch64,
 per [`Asahi.md`](../../../Asahi.md) Test 2. The split is exactly the one the

@@ -66,8 +66,10 @@ Two of the three are Apple-Silicon-specific by construction, not by accident:
   Under Asahi they are not: `asahi`/AGX owns the render node, `apple,dcp`
   owns the CRTCs and connectors, and there is no PCI GPU or VGA BIOS for the
   rule to match. flexwm has a fallback that tries every DRM device on the
-  seat, and `--gpu PATH` to skip the search entirely — **both are built and
-  unit-tested, and neither has ever run on Apple Silicon.**
+  seat, and `--gpu PATH` to skip the search entirely. Both were built and
+  unit-tested long before either had run on Apple Silicon; **the fallback
+  has now run there and is correct** (2026-09-18), and `--gpu` remains
+  unexercised on this topology because nothing required it.
 - **The GPU/GL path.** The dev VM falls back to software rendering (Mesa
   `swrast`/`zink` failures throughout its logs). The leading hypothesis for
   the Ghostty failure is a client-side EGL/GL problem at fractional scale,
@@ -82,9 +84,9 @@ risky part comes last:
   session. Ghostty still uses the real Asahi GL stack, which is the part
   under suspicion, so the backend costs nothing here. *(That reasoning held
   and did its job — the GL stack was exercised over dmabuf and the GL
-  hypothesis was refuted. But refuting it is exactly what makes the backend
-  matter again: with GL eliminated, `--headless`-vs-`--tty` is now the
-  largest untested variable. Test 1's result note says what is left.)*
+  hypothesis was refuted. Refuting it did promote `--headless`-vs-`--tty` to
+  the largest remaining variable, so that was then tested too, as a real
+  session; see Test 1.s result note. Nothing is left outstanding here.)*
 - **Test 2 may need no VT either** — if flexwm is already your desktop
   session, the read-only shortcut in that section answers it from inside the
   session you are in. Check before booking a VT.
@@ -200,8 +202,13 @@ mapped and drew real content at *both* scales — 409×510 logical at 1.5 and
 360×376 at 2.0, matching the dev VM's numbers exactly — with correct
 `preferred_scale` (180 / 240), zero protocol errors and zero EGL/GL errors,
 over dmabuf on the real AGX GPU. Both hypotheses this runbook was built
-around are therefore refuted, and the remaining suspect is `--tty` at 1.5.
-See the backlog entry for the full table and what is left to test.
+around are therefore refuted.
+
+**And then the last suspect, `--tty` at 1.5, was tested too — it also works.**
+The machine was rebuilt with `scale = 1.5` and rebooted into it: Ghostty
+mapped at logical 1707x1067 on the real `eDP-1` and was used interactively.
+That was the original reported configuration, so the entry is closed as NOT
+reproducible. See the backlog entry for the full table.
 
 ---
 
@@ -217,9 +224,13 @@ Apple Silicon, and if not, does `--gpu` fix it?
 > you are already in:
 >
 > ```sh
-> pgrep -ax flexwm                              # was --gpu passed?
-> ls -l /proc/$(pgrep -x flexwm)/fd | grep dri  # which DRM node is open?
-> flexwm msg outputs                            # which connector?
+> pgrep -ax flexwm                       # was --gpu passed?
+> # Pick the --tty one by name: a test instance or a stray `flexwm msg`
+> # makes `$(pgrep -x flexwm)` expand to several pids and the path garbage.
+> for p in $(pgrep -f 'flexwm .*--tty'); do
+>   echo "pid $p:"; ls -l /proc/$p/fd | grep dri
+> done
+> flexwm msg outputs                     # which connector?
 > ```
 >
 > On this machine that gave `--tty` with no `--gpu`, one DRM fd
