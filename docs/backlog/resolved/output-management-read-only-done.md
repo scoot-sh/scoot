@@ -34,7 +34,7 @@ while single-output).
 `compositor/output_management.rs` (plus `configuration.rs` and its test
 suite) implements `zwlr_output_manager_v1` at version 4, read-only. The
 reconfiguration half is split out as its own explicitly-deferred item,
-[`output-management-reconfiguration.md`](../protocols/output-management-reconfiguration.md),
+[`output-management-reconfiguration-done.md`](./output-management-reconfiguration-done.md),
 the same way PR #46 split the connection-cap item and PR #47 split the wlr
 foreign-toplevel one.
 

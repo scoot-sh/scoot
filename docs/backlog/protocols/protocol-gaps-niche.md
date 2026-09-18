@@ -29,8 +29,10 @@ blocked: null
     clients (shell display pages) well ahead of multi-output support, and
     there is no newer successor to prefer. See
     `../resolved/output-management-read-only-done.md`. The reconfigure half
-    is still moot for exactly the reason above, and is re-filed as
-    `output-management-reconfiguration.md`.*
+    is still deliberately refused — closed 2026-09-18 as an accepted
+    tradeoff rather than a deferred defect (no authorization concept in the
+    protocol, per-backend honesty gaps, no shell demand), and is recorded as
+    `../resolved/output-management-reconfiguration-done.md`.*
   - **`security-context-v1`** — lets a compositor scope what a sandboxed
     client (e.g. a Flatpak) is allowed to do. Relevant for hardened setups,
     not a natural fit with this project's current minimalist scope.

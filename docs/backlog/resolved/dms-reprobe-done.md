@@ -145,7 +145,7 @@ list behind that.
   `docs/backlog/resolved/output-management-read-only-done.md`.
   Reconfiguration (the "Settings → display" *writes*, and interface scaling)
   is still refused, deliberately:
-  `docs/backlog/protocols/output-management-reconfiguration.md`.
+  `docs/backlog/resolved/output-management-reconfiguration-done.md`.
 
 ### 5. `xdg_popup` never configured
 

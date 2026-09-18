@@ -81,9 +81,13 @@ actionable.
   hand-written against the generated wlr bindings the way `gamma_control.rs`
   is). One head for flexwm's one output, read from the same `Output` that
   configures `wl_output`.
-- [`wlr-output-management` reconfiguration: `apply`/`test` always fail](./protocols/output-management-reconfiguration.md)
-  — the deliberately-deferred other half of the entry above; gated on
-  multi-output support, since nothing a configuration asks for exists yet
+- [`wlr-output-management` reconfiguration](./resolved/output-management-reconfiguration-done.md)
+  — CLOSED 2026-09-18 as a deliberate refusal (accepted tradeoff, kept as a
+  landing spot): verify-first found no Smithay helper at the pinned rev, no
+  authorization concept in the protocol and no privilege model to attach one
+  to, per-backend honesty gaps (nested is host-constrained, custom modes are
+  unhonorable, disable has no state to land in), and zero write attempts from
+  either probed shell. Revisit conditions are in the record.
 - [An already-bound `wl_output` client is never told a `--nested` resize's new mode is preferred](./resolved/wl-output-preferred-flag-on-late-mode-done.md)
   — RESOLVED 2026-09-17: fixed as filed — `set_mode` now marks the new mode
   preferred *before* `change_current_state` sends it (no batching at the
