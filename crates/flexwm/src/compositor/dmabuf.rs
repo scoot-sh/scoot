@@ -547,6 +547,24 @@ impl DmabufHandler for State {
 /// One idle per batch: `pending` is what keeps a client destroying 512
 /// buffers in one dispatch from queueing 512 scans. The same batching
 /// argument (and pattern) as `bind_budget.rs`'s deferred refusals.
+///
+/// ## Maintenance hazard: `cleanup_texture_cache` is not dmabuf-only
+///
+/// `Renderer::cleanup_texture_cache` reaches `PixmanRenderer::cleanup`, which
+/// retains over **both** of that renderer's caches -- and the second retain
+/// drops every entry whose `dmabuf` is `None` (`pixman/mod.rs:807-815`), i.e.
+/// it evicts `self.buffers` wholesale rather than dropping expired entries
+/// from it. That is free today only because flexwm never populates
+/// `self.buffers`: it is filled solely by `Bind<Dmabuf>`, and every `bind`
+/// call here hands over a `pixman::Image` or a dumb buffer instead
+/// (`headless.rs`, `test_support.rs`), so the extra retain scans an empty
+/// `Vec`.
+///
+/// The moment flexwm binds a dmabuf render target -- a future GPU tier, or a
+/// dmabuf screencopy path -- that stops being free: *every* `wl_buffer`
+/// destruction in the session would then evict the bound-target cache and
+/// force a re-`mmap` on the next frame. Whoever adds that has to narrow this
+/// drain (or upstream's retain) at the same time.
 pub(super) fn schedule_cache_drain(state: &mut State) {
     if !state.imports_dmabufs || state.dmabuf_drain_queued {
         return;

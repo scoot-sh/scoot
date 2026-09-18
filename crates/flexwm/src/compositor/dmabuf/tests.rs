@@ -508,19 +508,23 @@ fn an_import_through_create_immed_is_not_a_client_kill() {
         "create_immed must import; a refusal here is a fatal protocol error \
          on the client, not a fallback"
     );
-    // ...and the buffer object exists and is counted, which is the mechanical
-    // guard on Smithay's error-before-init shape that `wl_buffers.rs`'s
-    // exactness argument leans on: `data_init.init` runs *before*
-    // `dmabuf_imported`, so exactly one live buffer here says the object was
-    // initialised by the time the import ran. It has to be asserted on the
-    // *accepted* path: a refused import now releases its own unit
-    // (`refuse_import`), so a refused `create_immed` lands on zero whether or
-    // not the object was ever initialised and cannot tell the two apart.
+    // ...and the buffer object exists and is counted. This pair is the
+    // mechanical guard on Smithay's error-before-init shape that
+    // `wl_buffers.rs`'s exactness argument leans on -- but it is the *second*
+    // assertion that discriminates, not the first. The `1` below is claimed by
+    // `dispatch.rs`'s guard on the `CreateImmed` request itself, so it would
+    // be there whether or not Smithay ever initialised the object; only the
+    // return to `0` after `ReleaseImportedBuffer` proves a real server-side
+    // `wl_buffer` existed for the destruction hook to fire on. Both halves
+    // have to be asserted on the *accepted* path: a refused import now
+    // releases its own unit (`refuse_import`), so a refused `create_immed`
+    // lands on zero whether or not the object was ever initialised and cannot
+    // tell the two apart.
     assert_eq!(
         fixture.buffers_in_flight(),
         1,
-        "the immed buffer must be initialised -- and therefore counted -- \
-         before the import is attempted"
+        "the immed buffer must be claimed against the cap like any other \
+         creation -- the init-before-import proof is the release below"
     );
     fixture.run(Step::ReleaseImportedBuffer).released();
     assert_eq!(

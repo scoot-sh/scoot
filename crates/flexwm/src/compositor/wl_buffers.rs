@@ -164,9 +164,16 @@
 //! Smithay bump: the exactness argument above leans on it. The mechanical
 //! guard on that shape is
 //! `dmabuf/tests.rs::an_import_through_create_immed_is_not_a_client_kill`,
-//! which asserts a count of exactly **one** after an *accepted* `create_immed`
-//! -- Smithay runs `data_init.init` before `dmabuf_imported`, so the object
-//! has to exist by then for the count to be there. It cannot be guarded on a
+//! which drives an *accepted* `create_immed` and asserts the count is exactly
+//! **one**, then destroys the buffer and asserts it is back to **zero**. The
+//! discriminating half is the second one, not the first: the `1` is claimed by
+//! `dispatch.rs`'s guard on the request itself and would be there whether or
+//! not Smithay ever initialised the object, but the count can only *return* to
+//! zero if a real server-side `wl_buffer` existed for the destruction hook to
+//! fire on. So the pair still guards the shape; a rev that moved
+//! `data_init.init` to after the import would keep passing, which is correct,
+//! because that ordering is harmless -- what must not change silently is
+//! whether an object is created at all. It cannot be guarded on a
 //! *refused* creation any more: a refusal that leaves the client alive now
 //! releases its own unit, so the count lands on zero whether or not the object
 //! was initialised (the dispatch-side test that used to claim otherwise says
