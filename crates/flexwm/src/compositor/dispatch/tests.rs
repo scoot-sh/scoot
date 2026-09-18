@@ -25,8 +25,12 @@ use flexwm_core::Config;
 use smithay::reexports::calloop::EventLoop;
 use smithay::reexports::wayland_server::Display;
 use wayland_client::backend::WaylandError;
-use wayland_client::protocol::{wl_registry, wl_shm, wl_shm_pool};
+use wayland_client::protocol::{wl_buffer, wl_registry, wl_shm, wl_shm_pool};
 use wayland_client::{Connection, Dispatch, DispatchError, EventQueue, Proxy, QueueHandle};
+use wayland_protocols::wp::linux_dmabuf::zv1::client::{
+    zwp_linux_buffer_params_v1, zwp_linux_dmabuf_v1,
+};
+use wayland_protocols::wp::single_pixel_buffer::v1::client::wp_single_pixel_buffer_manager_v1;
 
 use super::MAX_SHM_POOL_BYTES;
 use crate::compositor::State;
@@ -34,6 +38,7 @@ use crate::compositor::decorations::Appearance;
 use crate::compositor::keybindings::Keybindings;
 use crate::compositor::shm_pools::MAX_POOLS_PER_CLIENT;
 use crate::compositor::state::ClientState;
+use crate::compositor::wl_buffers::MAX_BUFFERS_PER_CLIENT;
 
 /// The client end of one test connection.
 #[derive(Default)]
@@ -83,6 +88,9 @@ struct Report {
     /// drains (or holds exactly what is still alive), which only the
     /// compositor side can state.
     pools: usize,
+    /// Same, for `wl_buffer`s. The buffer-count tests below read this the
+    /// way the pool tests read `pools`.
+    buffers: usize,
 }
 
 /// Binds `wl_shm`, makes a one-byte pool and asks for `size`.
@@ -131,6 +139,25 @@ fn create_pool_of(stream: UnixStream, size: i32) -> Result<(), DispatchError> {
     Ok(())
 }
 
+/// Serialises the fd-flood tests below (and the pool-count floods above).
+///
+/// `cargo test` runs tests in threads of one process, sharing one fd
+/// table (`RLIMIT_NOFILE` 1024 on the dev VM). One flood holds ~512
+/// server fds plus its client memfds at peak -- two such floods on two
+/// threads exhaust the table for every test in the process, including
+/// unrelated ones opening a single memfd. The floods each take a second
+/// or two; everything else runs unserialised.
+static FD_FLOOD_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Holds the [`FD_FLOOD_LOCK`] for one flood test. Recovers from poisoning
+/// so one flood's panic fails that test, not every later flood with a
+/// confusing lock error.
+fn hold_flood_lock() -> std::sync::MutexGuard<'static, ()> {
+    FD_FLOOD_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 /// A well-behaved client: connects, binds `wl_shm`, and grows a pool the way
 /// a real toolkit does on its first resize. Proves both that the compositor
 /// is still serving and that the guard didn't break valid resizes.
@@ -160,13 +187,14 @@ fn healthy_client(stream: UnixStream) -> Result<usize, DispatchError> {
 fn drive(
     offender: impl FnOnce(UnixStream) -> Result<(), DispatchError> + Send + 'static,
 ) -> Report {
-    let (resize, survivor, pools) = drive_both(|offender_stream, survivor| {
+    let (resize, survivor, pools, buffers) = drive_both(|offender_stream, survivor| {
         (offender(offender_stream), healthy_client(survivor))
     });
     Report {
         resize,
         survivor,
         pools,
+        buffers,
     }
 }
 
@@ -176,7 +204,7 @@ fn drive(
 /// through [`drive`].
 fn drive_both<A, B>(
     act: impl FnOnce(UnixStream, UnixStream) -> (A, B) + Send + 'static,
-) -> (A, B, usize)
+) -> (A, B, usize, usize)
 where
     A: Send + 'static,
     B: Send + 'static,
@@ -242,7 +270,8 @@ where
     // Read after the drain, so every dispatch the clients provoked --
     // including disconnect cleanup -- has run.
     let pools = state.shm_pools.pools_in_flight();
-    (first, second, pools)
+    let buffers = state.wl_buffers.buffers_in_flight();
+    (first, second, pools, buffers)
 }
 
 /// Asserts the offender was refused with `code` on `interface`, and on the
@@ -457,6 +486,7 @@ impl PoolClient {
 /// zero afterwards, and the survivor never noticed.
 #[test]
 fn creating_pools_past_the_count_cap_kills_only_the_client_that_asked() {
+    let _flood = hold_flood_lock();
     let report = drive(|stream| {
         let mut pools = PoolClient::connect(stream)?;
         pools.create_many(&vec![4096; MAX_POOLS_PER_CLIENT as usize + 1])?;
@@ -475,6 +505,7 @@ fn creating_pools_past_the_count_cap_kills_only_the_client_that_asked() {
 /// every destroy released its unit.
 #[test]
 fn destroying_pools_reopens_headroom() {
+    let _flood = hold_flood_lock();
     let report = drive(|stream| {
         let mut pools = PoolClient::connect(stream)?;
         pools.create_many(&vec![4096; MAX_POOLS_PER_CLIENT as usize])?;
@@ -493,7 +524,8 @@ fn destroying_pools_reopens_headroom() {
 /// own connections; a global count would refuse the second.
 #[test]
 fn a_second_client_is_unaffected_by_the_first_clients_full_cap() {
-    let (first, second, _) = drive_both(|greedy_stream, survivor_stream| {
+    let _flood = hold_flood_lock();
+    let (first, second, _, _) = drive_both(|greedy_stream, survivor_stream| {
         let mut greedy = PoolClient::connect(greedy_stream)
             .expect("the greedy client connects and binds wl_shm");
         let first = greedy.create_many(&vec![4096; MAX_POOLS_PER_CLIENT as usize]);
@@ -624,4 +656,545 @@ fn resizing_a_pool_leaves_the_count_alone() {
     }
     assert_survivor_still_served(&report);
     assert_eq!(report.pools, 0, "the grown pool must drain on disconnect");
+}
+
+// -- the per-client live-buffer count (`wl_buffers.rs`) ---------------------
+
+/// The client end of one buffer-count test connection: binds `wl_shm`, the
+/// dmabuf global and the single-pixel manager up front, so one connection
+/// can exercise all three `wl_buffer` factories.
+#[derive(Default)]
+struct BufferDispatch {
+    shm: Option<wl_shm::WlShm>,
+    dmabuf: Option<zwp_linux_dmabuf_v1::ZwpLinuxDmabufV1>,
+    single_pixel: Option<wp_single_pixel_buffer_manager_v1::WpSinglePixelBufferManagerV1>,
+}
+
+impl Dispatch<wl_registry::WlRegistry, ()> for BufferDispatch {
+    fn event(
+        client: &mut Self,
+        registry: &wl_registry::WlRegistry,
+        event: wl_registry::Event,
+        _: &(),
+        _: &Connection,
+        qh: &QueueHandle<Self>,
+    ) {
+        if let wl_registry::Event::Global {
+            name,
+            interface,
+            version,
+        } = event
+        {
+            if interface == wl_shm::WlShm::interface().name {
+                client.shm = Some(registry.bind(name, version.min(1), qh, ()));
+            } else if interface == zwp_linux_dmabuf_v1::ZwpLinuxDmabufV1::interface().name {
+                client.dmabuf = Some(registry.bind(name, version, qh, ()));
+            } else if interface
+                == wp_single_pixel_buffer_manager_v1::WpSinglePixelBufferManagerV1::interface().name
+            {
+                client.single_pixel = Some(registry.bind(name, version.min(1), qh, ()));
+            }
+        }
+    }
+}
+
+wayland_client::delegate_noop!(BufferDispatch: ignore wl_shm::WlShm);
+wayland_client::delegate_noop!(BufferDispatch: ignore wl_shm_pool::WlShmPool);
+wayland_client::delegate_noop!(BufferDispatch: ignore wl_buffer::WlBuffer);
+wayland_client::delegate_noop!(BufferDispatch: ignore zwp_linux_dmabuf_v1::ZwpLinuxDmabufV1);
+wayland_client::delegate_noop!(BufferDispatch: ignore zwp_linux_buffer_params_v1::ZwpLinuxBufferParamsV1);
+wayland_client::delegate_noop!(BufferDispatch: ignore wp_single_pixel_buffer_manager_v1::WpSinglePixelBufferManagerV1);
+
+/// One client connection that can hold buffers open across round trips.
+///
+/// Pools are 4 KiB (the count is size-agnostic) and buffers are 1x1
+/// `Argb8888` at staggered offsets, so hundreds of iterations stay cheap
+/// while passing Smithay's own parameter validation -- a buffer that fails
+/// validation kills the client, which is a different test below.
+struct BufferClient {
+    /// Held so the socket stays open: dropping the connection is the
+    /// disconnect half of the drain test, and it must happen exactly when
+    /// the test says, not when a helper returns.
+    _conn: Connection,
+    queue: EventQueue<BufferDispatch>,
+    dispatch: BufferDispatch,
+    buffers: Vec<wl_buffer::WlBuffer>,
+    /// The backing files, kept alive until the pools that reference them
+    /// are flushed: a destroyed fd before its `create_pool` goes out would
+    /// hand Smithay an already-closed file.
+    _fds: Vec<OwnedFd>,
+}
+
+impl BufferClient {
+    fn connect(stream: UnixStream) -> Result<Self, DispatchError> {
+        let conn = Connection::from_socket(stream).expect("a client connection");
+        let mut queue = conn.new_event_queue();
+        let qh = queue.handle();
+        let mut dispatch = BufferDispatch::default();
+        conn.display().get_registry(&qh, ());
+        queue.roundtrip(&mut dispatch)?;
+        // The dmabuf and single-pixel globals, like the registry itself,
+        // can arrive after the first batch.
+        queue.roundtrip(&mut dispatch)?;
+        if dispatch.shm.is_none() {
+            panic!("the wl_shm global was never announced");
+        }
+        Ok(Self {
+            _conn: conn,
+            queue,
+            dispatch,
+            buffers: Vec::new(),
+            _fds: Vec::new(),
+        })
+    }
+
+    fn roundtrip(&mut self) -> Result<(), DispatchError> {
+        self.queue.roundtrip(&mut self.dispatch)?;
+        Ok(())
+    }
+
+    /// Opens one 4 KiB pool and holds it (and its fd) open.
+    fn create_pool(&mut self) -> Result<wl_shm_pool::WlShmPool, DispatchError> {
+        let qh = self.queue.handle();
+        let shm = self.dispatch.shm.clone().expect("the wl_shm global");
+        let fd = rustix::fs::memfd_create("flexwm-buffer-test", rustix::fs::MemfdFlags::CLOEXEC)
+            .expect("a memfd");
+        rustix::fs::ftruncate(&fd, 4096).expect("a one-page pool file");
+        let pool = shm.create_pool(fd.as_fd(), 4096, &qh, ());
+        self._fds.push(fd);
+        Ok(pool)
+    }
+
+    /// Creates one 1x1 buffer from `pool` at `offset`, held open.
+    fn create_buffer(
+        &mut self,
+        pool: &wl_shm_pool::WlShmPool,
+        offset: i32,
+    ) -> Result<(), DispatchError> {
+        let qh = self.queue.handle();
+        self.buffers
+            .push(pool.create_buffer(offset, 1, 1, 4, wl_shm::Format::Argb8888, &qh, ()));
+        Ok(())
+    }
+
+    /// One bypass iteration -- `create_pool`, `create_buffer`, destroy the
+    /// pool -- queued without flushing, so a full-cap flood is one batch.
+    /// The buffer stays alive: that retention is what the guard counts.
+    fn bypass_once(&mut self) {
+        let pool = self.create_pool().expect("a pool for the bypass");
+        self.create_buffer(&pool, 0)
+            .expect("a buffer for the bypass");
+        pool.destroy();
+    }
+
+    /// Flushes whatever is queued and drops the backing files flushed with
+    /// it. A flood that held every memfd to the end would need 513 client
+    /// fds next to its 512 retained server ones -- past `RLIMIT_NOFILE` on
+    /// its own. Flushing in chunks keeps the client peak at the chunk size;
+    /// the server already has its own dup of each fd (plus the mapping the
+    /// retained buffer keeps), so closing the client's copy changes
+    /// nothing the count observes.
+    fn flush(&mut self) -> Result<(), DispatchError> {
+        self.roundtrip()?;
+        self._fds.clear();
+        Ok(())
+    }
+
+    /// Destroys every held buffer and flushes, then forgets them
+    /// client-side.
+    fn destroy_all_buffers(&mut self) -> Result<(), DispatchError> {
+        for buffer in self.buffers.drain(..) {
+            buffer.destroy();
+        }
+        self.roundtrip()
+    }
+}
+
+/// Asserts the offender was refused with a bare numeric `code` on
+/// `interface` -- for factories whose protocol defines no error enum (the
+/// single-pixel manager), where there is no named variant to assert.
+fn assert_raw_protocol_error(result: &Result<(), DispatchError>, interface: &str, code: u32) {
+    match result {
+        Err(DispatchError::Backend(WaylandError::Protocol(error))) => {
+            assert_eq!(error.code, code, "wrong protocol error code: {error:?}");
+            assert_eq!(
+                error.object_interface, interface,
+                "the error was posted on the wrong object: {error:?}"
+            );
+        }
+        Err(other) => panic!("expected a protocol error, got {other:?}"),
+        Ok(()) => panic!("the buffer creation was accepted"),
+    }
+}
+
+/// The bypass loop the ticket is about: `create_pool` / `create_buffer` /
+/// `destroy_pool` returns the live-pool count to zero every iteration while
+/// the retained fd+mapping count grows. Past the buffer cap the excess
+/// `create_buffer` is refused with `InvalidStride` on the pool -- the kill
+/// that carries it drains the dead client's 512 buffers, and the survivor
+/// never noticed.
+///
+/// Pre-fix this runs unbounded (513 live buffers, no refusal); the loop is
+/// bounded in-test at one past the cap so it cannot exhaust the machine it
+/// runs on.
+#[test]
+fn retaining_a_buffer_past_its_pool_trips_the_buffer_cap() {
+    let report = drive(|stream| {
+        let _flood = hold_flood_lock();
+        let mut buffers = BufferClient::connect(stream)?;
+        for i in 0..=MAX_BUFFERS_PER_CLIENT {
+            buffers.bypass_once();
+            if i % 64 == 63 {
+                buffers.flush()?;
+            }
+        }
+        buffers.roundtrip()
+    });
+    assert_shm_protocol_error(&report.resize, "wl_shm_pool", wl_shm::Error::InvalidStride);
+    assert_survivor_still_served(&report);
+    assert_eq!(
+        report.buffers, 0,
+        "the killed client's buffers must drain with it, or the count leaks per kill"
+    );
+    assert_eq!(
+        report.pools, 0,
+        "every bypass pool was destroyed before the kill; none may be counted"
+    );
+}
+
+/// Destroying a pool with live buffers keeps every buffer counted: five
+/// buffers outliving their pool, then the rest of the budget filled the
+/// bypass way -- the 512-live total succeeds iff the first five still
+/// count, and the 513rd creation is refused.
+#[test]
+fn destroying_a_pool_with_live_buffers_keeps_every_buffer_counted() {
+    let report = drive(|stream| {
+        let _flood = hold_flood_lock();
+        let mut buffers = BufferClient::connect(stream)?;
+        let pool = buffers.create_pool()?;
+        for i in 0..5 {
+            buffers.create_buffer(&pool, i * 64)?;
+        }
+        buffers.roundtrip()?;
+        pool.destroy();
+        buffers.roundtrip()?;
+        for i in 0..(MAX_BUFFERS_PER_CLIENT - 5) {
+            buffers.bypass_once();
+            if i % 64 == 63 {
+                buffers.flush()?;
+            }
+        }
+        buffers.roundtrip()?;
+        // One more must be refused: 513 live with the first five retained.
+        buffers.bypass_once();
+        buffers.roundtrip()
+    });
+    assert_shm_protocol_error(&report.resize, "wl_shm_pool", wl_shm::Error::InvalidStride);
+    assert_survivor_still_served(&report);
+    assert_eq!(report.buffers, 0, "the killed client's buffers must drain");
+}
+
+/// Legitimate shapes stay far from the cap: double-buffer churn (create a
+/// third, destroy the oldest, twenty times) plus an 8-frame video-ish burst
+/// held at once -- ten live at most against a 512 cap. Nothing refused.
+#[test]
+fn double_buffered_churn_and_a_burst_stay_far_from_the_cap() {
+    let report = drive(|stream| {
+        let mut buffers = BufferClient::connect(stream)?;
+        let pool = buffers.create_pool()?;
+        buffers.create_buffer(&pool, 0)?;
+        buffers.create_buffer(&pool, 64)?;
+        for i in 0..20u32 {
+            buffers.create_buffer(&pool, 128 + (i as i32) * 64)?;
+            buffers.buffers.remove(0).destroy();
+        }
+        buffers.roundtrip()?;
+        for i in 0..8u32 {
+            buffers.create_buffer(&pool, 2048 + (i as i32) * 64)?;
+        }
+        buffers.roundtrip()?;
+        buffers.destroy_all_buffers()?;
+        Ok(())
+    });
+    if let Err(error) = &report.resize {
+        panic!("a double-buffered client with an 8-frame burst was refused: {error:?}");
+    }
+    assert_survivor_still_served(&report);
+    assert_eq!(report.buffers, 0, "destroyed buffers must release");
+}
+
+/// The anti-shared-table property for buffers: one client sitting exactly
+/// at the cap (512 retained buffers, zero live pools -- the bypass shape at
+/// rest) must not deny a second client its first buffer.
+#[test]
+fn a_second_client_buffers_while_the_first_sits_at_the_cap() {
+    let (first, second, _, _) = drive_both(|greedy_stream, survivor_stream| {
+        let _flood = hold_flood_lock();
+        let mut greedy = BufferClient::connect(greedy_stream).expect("the greedy client connects");
+        for i in 0..MAX_BUFFERS_PER_CLIENT {
+            greedy.bypass_once();
+            if i % 64 == 63 {
+                greedy.flush().expect("filling to the cap is served");
+            }
+        }
+        let first = greedy.roundtrip();
+        // `greedy` stays alive -- and its 512 buffers with it -- while the
+        // second client runs: that overlap is the whole assertion.
+        let second = (|| -> Result<(), DispatchError> {
+            let mut survivor = BufferClient::connect(survivor_stream)?;
+            let pool = survivor.create_pool()?;
+            survivor.create_buffer(&pool, 0)?;
+            survivor.roundtrip()
+        })();
+        (first, second)
+    });
+    if let Err(error) = &first {
+        panic!("filling exactly to the cap was refused: {error:?}");
+    }
+    if let Err(error) = &second {
+        panic!(
+            "a second client's first buffer was refused while another sat at the cap: {error:?}"
+        );
+    }
+}
+
+/// A creation Smithay itself refuses still claims: the guard counts before
+/// delegation, and a zero stride kills the client with `InvalidStride`
+/// without ever initialising the buffer -- so no destruction hook can
+/// release it. The unit sits on an entry whose client is already dead (one
+/// per killing connection, never on a live budget); this pins that shape
+/// rather than letting it drift unnoticed.
+#[test]
+fn a_failed_buffer_creation_leaves_only_a_dead_unit() {
+    let report = drive(|stream| {
+        let mut buffers = BufferClient::connect(stream)?;
+        let pool = buffers.create_pool()?;
+        let qh = buffers.queue.handle();
+        buffers
+            .buffers
+            .push(pool.create_buffer(0, 64, 64, 0, wl_shm::Format::Argb8888, &qh, ()));
+        buffers.roundtrip()
+    });
+    assert_shm_protocol_error(&report.resize, "wl_shm_pool", wl_shm::Error::InvalidStride);
+    assert_survivor_still_served(&report);
+    assert_eq!(
+        report.buffers, 1,
+        "a creation Smithay refused must claim exactly one unit on its (dead) entry -- \
+         zero would mean the guard stopped counting, more than one would mean it double-counts"
+    );
+}
+
+/// Disconnecting with live buffers drains the count to zero: the
+/// destruction hook runs for every object in cleanup -- including buffers
+/// whose pool is already gone -- so no entry outlives the client it names.
+#[test]
+fn disconnecting_with_live_buffers_drains_the_count() {
+    let report = drive(|stream| {
+        let mut buffers = BufferClient::connect(stream)?;
+        let pool = buffers.create_pool()?;
+        for i in 0..3 {
+            buffers.create_buffer(&pool, i * 64)?;
+        }
+        buffers.roundtrip()?;
+        // No destroy: dropping `buffers` disconnects with three buffers
+        // (and their pool) live.
+        Ok(())
+    });
+    if let Err(error) = &report.resize {
+        panic!("creating three small buffers was refused: {error:?}");
+    }
+    assert_survivor_still_served(&report);
+    assert_eq!(report.buffers, 0, "live buffers must drain on disconnect");
+    assert_eq!(report.pools, 0, "the live pool must drain on disconnect");
+}
+
+/// A few single-pixel buffers are served normally: counted, released, and
+/// nowhere near the cap. (The flood below proves they are counted at all;
+/// this is the legitimate shape that must stay green.)
+#[test]
+fn a_few_single_pixel_buffers_are_accepted() {
+    let report = drive(|stream| {
+        let mut buffers = BufferClient::connect(stream)?;
+        let manager = buffers
+            .dispatch
+            .single_pixel
+            .clone()
+            .expect("the single-pixel manager global");
+        let qh = buffers.queue.handle();
+        for i in 0..3u32 {
+            buffers.buffers.push(manager.create_u32_rgba_buffer(
+                0xFF * i,
+                0,
+                0,
+                0xFFFF_FFFF,
+                &qh,
+                (),
+            ));
+        }
+        buffers.roundtrip()?;
+        buffers.destroy_all_buffers()?;
+        Ok(())
+    });
+    if let Err(error) = &report.resize {
+        panic!("three single-pixel buffers were refused: {error:?}");
+    }
+    assert_survivor_still_served(&report);
+    assert_eq!(
+        report.buffers, 0,
+        "destroyed single-pixel buffers must release"
+    );
+}
+
+/// Single-pixel buffers count toward the same budget: 513 of them trip the
+/// cap even though each holds no fd. Refused with a bare 0 on the manager
+/// -- the interface defines no error enum -- killing only the flooder.
+#[test]
+fn flooding_single_pixel_buffers_trips_the_same_cap() {
+    let report = drive(|stream| {
+        let mut buffers = BufferClient::connect(stream)?;
+        let manager = buffers
+            .dispatch
+            .single_pixel
+            .clone()
+            .expect("the single-pixel manager global");
+        let qh = buffers.queue.handle();
+        for _ in 0..=MAX_BUFFERS_PER_CLIENT {
+            buffers
+                .buffers
+                .push(manager.create_u32_rgba_buffer(0, 0, 0, 0xFFFF_FFFF, &qh, ()));
+        }
+        buffers.roundtrip()
+    });
+    assert_raw_protocol_error(&report.resize, "wp_single_pixel_buffer_manager_v1", 0);
+    assert_survivor_still_served(&report);
+    assert_eq!(
+        report.buffers, 0,
+        "the killed client's single-pixel buffers must drain with it"
+    );
+}
+
+/// A dmabuf `create_immed` past a full shm budget is refused by the guard
+/// before Smithay ever validates it: the budget is shared across
+/// factories, so the error is the guard's `InvalidWlBuffer` (7), not the
+/// `InvalidFormat` (4) the garbage format below would otherwise earn. That
+/// code difference is what proves the refusal came from the shared budget
+/// rather than the import path.
+#[test]
+fn a_dmabuf_immed_past_a_full_budget_is_refused_before_validation() {
+    let report = drive(|stream| {
+        let _flood = hold_flood_lock();
+        let mut buffers = BufferClient::connect(stream)?;
+        for i in 0..MAX_BUFFERS_PER_CLIENT {
+            buffers.bypass_once();
+            if i % 64 == 63 {
+                buffers.flush()?;
+            }
+        }
+        buffers.roundtrip()?;
+        let dmabuf = buffers.dispatch.dmabuf.clone().expect("the dmabuf global");
+        let qh = buffers.queue.handle();
+        let params = dmabuf.create_params(&qh, ());
+        let size = 32i32;
+        let stride = size * 4;
+        let fd =
+            rustix::fs::memfd_create("flexwm-dmabuf-budget-test", rustix::fs::MemfdFlags::CLOEXEC)
+                .expect("a memfd");
+        rustix::fs::ftruncate(&fd, (stride * size) as u64).expect("a sized memfd");
+        params.add(fd.as_fd(), 0, 0, stride as u32, 0, 0);
+        buffers.buffers.push(params.create_immed(
+            size,
+            size,
+            0xFFFF_FFFF,
+            zwp_linux_buffer_params_v1::Flags::empty(),
+            &qh,
+            (),
+        ));
+        buffers.roundtrip()
+    });
+    assert_raw_protocol_error(&report.resize, "zwp_linux_buffer_params_v1", 7);
+    assert_survivor_still_served(&report);
+    assert_eq!(
+        report.buffers, 0,
+        "the killed client's shm budget must drain with it"
+    );
+}
+
+/// The dmabuf async `create` never claims: past a full shm budget it is
+/// still answered `failed` -- the protocol's own refusal -- with the client
+/// left alive. Claiming it would refuse (and kill) a client whose import
+/// was about to fail harmlessly anyway.
+#[test]
+fn a_dmabuf_create_past_a_full_budget_is_still_answered_failed() {
+    let report = drive(|stream| {
+        let _flood = hold_flood_lock();
+        let mut buffers = BufferClient::connect(stream)?;
+        for i in 0..MAX_BUFFERS_PER_CLIENT {
+            buffers.bypass_once();
+            if i % 64 == 63 {
+                buffers.flush()?;
+            }
+        }
+        buffers.roundtrip()?;
+        let dmabuf = buffers.dispatch.dmabuf.clone().expect("the dmabuf global");
+        let qh = buffers.queue.handle();
+        let params = dmabuf.create_params(&qh, ());
+        let size = 32i32;
+        let stride = size * 4;
+        let fd =
+            rustix::fs::memfd_create("flexwm-dmabuf-create-test", rustix::fs::MemfdFlags::CLOEXEC)
+                .expect("a memfd");
+        rustix::fs::ftruncate(&fd, (stride * size) as u64).expect("a sized memfd");
+        params.add(fd.as_fd(), 0, 0, stride as u32, 0, 0);
+        params.create(
+            size,
+            size,
+            u32::from_ne_bytes(*b"XR24"),
+            zwp_linux_buffer_params_v1::Flags::empty(),
+        );
+        buffers.roundtrip()?;
+        params.destroy();
+        buffers.roundtrip()?;
+        Ok(())
+    });
+    if let Err(error) = &report.resize {
+        panic!("a dmabuf create past a full buffer budget was refused: {error:?}");
+    }
+    assert_survivor_still_served(&report);
+    assert_eq!(report.buffers, 0, "the shm budget must drain on disconnect");
+}
+/// still creates -- and counts -- its buffer object: Smithay initialises
+/// it before the import runs, and the `failed()` answer kills the client
+/// with `InvalidWlBuffer`, leaving the object for disconnect cleanup.
+/// Zero afterwards proves init happened (a never-initialised object would
+/// leave one phantom unit); the kill proves the import path is unchanged.
+#[test]
+fn a_failed_dmabuf_import_creates_a_counted_buffer_then_drains() {
+    let report = drive(|stream| {
+        let mut buffers = BufferClient::connect(stream)?;
+        let dmabuf = buffers.dispatch.dmabuf.clone().expect("the dmabuf global");
+        let qh = buffers.queue.handle();
+        let params = dmabuf.create_params(&qh, ());
+        let size = 32i32;
+        let stride = size * 4;
+        let fd =
+            rustix::fs::memfd_create("flexwm-dmabuf-buffer-test", rustix::fs::MemfdFlags::CLOEXEC)
+                .expect("a memfd");
+        rustix::fs::ftruncate(&fd, (stride * size) as u64).expect("a sized memfd");
+        params.add(fd.as_fd(), 0, 0, stride as u32, 0, 0);
+        buffers.buffers.push(params.create_immed(
+            size,
+            size,
+            u32::from_ne_bytes(*b"XR24"),
+            zwp_linux_buffer_params_v1::Flags::empty(),
+            &qh,
+            (),
+        ));
+        buffers.roundtrip()
+    });
+    assert_raw_protocol_error(&report.resize, "zwp_linux_buffer_params_v1", 7);
+    assert_survivor_still_served(&report);
+    assert_eq!(
+        report.buffers, 0,
+        "the immed buffer was initialised (else one phantom unit) and drained in cleanup"
+    );
 }

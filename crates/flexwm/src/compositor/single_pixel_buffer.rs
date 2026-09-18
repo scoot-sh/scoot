@@ -31,9 +31,15 @@
 //! - **No shm-pool interaction.** These buffers allocate no pool, so
 //!   `dispatch.rs`'s pool guards (all `TypeId`-gated to `wl_shm` /
 //!   `wl_shm_pool`) never see them: nothing to claim against the per-client
-//!   pool budget, and no bypass of a limit that should apply either, since
-//!   there is no fd, no mapping and no reservation to bound. Pinned by the
-//!   pool-count assertion in the RGBA test.
+//!   pool budget. Pinned by the pool-count assertion in the RGBA test.
+//! - **Counted in the live-buffer budget.** The buffer guard *does* see
+//!   them (`create_u32_rgba_buffer` is the third factory it claims), even
+//!   though they hold no fd, mapping or reservation: the release hook
+//!   cannot tell buffer kinds apart, and releasing for unclaimed kinds
+//!   would let cheap destroys drain units claimed by retaining buffers --
+//!   see `wl_buffers.rs` for the drift. Pinned by the buffer-count
+//!   assertion beside the pool one, and by the single-pixel flood in
+//!   `dispatch/tests.rs`.
 //! - **No dmabuf interaction.** No dmabuf object is created, named or
 //!   imported anywhere on this path, so the `zwp_linux_dmabuf_v1` feedback
 //!   (see [`dmabuf`](super::dmabuf)) neither affects nor is affected by it.

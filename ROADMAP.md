@@ -518,6 +518,17 @@ gap jumped the queue — each item's own file records why it landed when it did.
   paths, the one-tick steady-state cost, multi-session delivery and the
   abandoned-locker shape. No README change (bug fix within protocol-
   permitted behavior, no user-facing surface).
+- **[The live-pool cap never bounded fds or
+  mappings](docs/backlog/resolved/shm-pool-cap-misses-retained-fds-done.md)**
+  — RESOLVED 2026-09-17: the pool count's fd/mapping claims corrected
+  everywhere (it bounds live pool objects + the address-space envelope),
+  and the real fix landed as a per-client live-`wl_buffer` cap (512,
+  uniform across shm/dmabuf/single-pixel factories, refused with a
+  protocol error per interface, released on destroy/disconnect) that
+  catches exactly the create-pool/create-buffer/destroy-pool bypass. Sized
+  from wire measurement (`foot` holds 2 live buffers steady); the
+  per-connection retained-fd bound is now 512 buffers + 128 pools, and
+  `wayland-connection-cap`'s math is updated to say so.
 ## What's next
 
 The backlog is the source of truth for what to pick up; this is the current

@@ -67,6 +67,7 @@ use super::screenshot::{Encoder, PendingShot, ShotSink};
 use super::session_lock::SessionLock;
 use super::shm_pools::ShmPools;
 use super::tty::Tty;
+use super::wl_buffers::WlBuffers;
 
 #[cfg(test)]
 mod tests;
@@ -438,6 +439,14 @@ pub struct State {
     /// destruction hook (which also drains disconnects and kills) -- see
     /// `shm_pools.rs`, which owns the policy and the number.
     pub shm_pools: ShmPools,
+    /// How many live `wl_buffer`s each Wayland client holds, whatever
+    /// created them. Counted at each buffer creation before delegation,
+    /// released in `dispatch.rs`'s buffer destruction hook (which also
+    /// drains disconnects and kills) -- see `wl_buffers.rs`, which owns the
+    /// policy and the number. This is the bound that caps retained
+    /// fds/mappings; the pool count above cannot (a buffer outlives its
+    /// pool object).
+    pub wl_buffers: WlBuffers,
     /// `ext_idle_notifier_v1` (version 2): what a `swayidle`-style daemon
     /// binds to learn the seat has been quiet N milliseconds. Read on
     /// every input event (`announce_activity`, see `idle.rs`) and written
@@ -681,6 +690,7 @@ impl State {
             presentation_state,
             bind_budget: BindBudget::default(),
             shm_pools: ShmPools::default(),
+            wl_buffers: WlBuffers::default(),
             idle_notifier,
             idle_inhibitors: idle::Inhibitors::default(),
             idle_inhibit_manager_state,
