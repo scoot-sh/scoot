@@ -23,7 +23,7 @@ shell — bar, notifications, launcher, lock screen, wallpaper; upstream
 `noctalia-dev/noctalia-shell`, GPL-3.0 — nothing copied, so the license
 only matters for future asset/code borrowing) fare better than DMS under
 flexwm? Baseline: the DMS probe report
-(`docs/backlog/protocols/dms-enablement-gaps.md`, 2026-09-14) plus PR #34
+(`docs/backlog/resolved/dms-reprobe-done.md`, 2026-09-14) plus PR #34
 (the layer-surface post-destroy commit kill fix, merged on `main`).
 
 Result: **Noctalia runs and renders fully, and the PR #34 fix holds for

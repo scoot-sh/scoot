@@ -528,6 +528,20 @@ gap jumped the queue — each item's own file records why it landed when it did.
   connection surviving). Dismissal sweep (12 + Escape), toast, foot,
   workspace pill all live; gaps 2–8 re-check as resolved, upstream, or
   deliberate, so the ticket is resolved with nothing new filed.
+- **[DMS re-probe: gap 1 stays closed in the
+  field](docs/backlog/resolved/dms-reprobe-done.md)** (2026-09-18,
+  probe + docs, no code) — the sibling re-probe: the exact spotlight
+  teardown plus two full lock → PAM auth → `unlock_and_destroy`
+  cycles against the real quickshell client (pid unchanged throughout,
+  live screenshots after every step, zero kill-signature lines; both
+  fatal sequences are on the wire with the connection surviving, so
+  DMS's unlock path does not trip the lock-role signature Noctalia
+  died on). Dismissal sweep (spotlight, clipboard, notifications
+  modal, dash), toast, DankDash, two `foot` windows (one IPC-spawned,
+  one DMS-launched and focused — gap 8's launch question answered);
+  gaps 2–8 re-check as resolved, upstream, deliberate, or shell-side
+  presentation, and the 512 live-buffer bound is untouched, so the
+  ticket is resolved with nothing new filed.
 - **[The live-pool cap never bounded fds or
   mappings](docs/backlog/resolved/shm-pool-cap-misses-retained-fds-done.md)**
   — RESOLVED 2026-09-17: the pool count's fd/mapping claims corrected
@@ -542,16 +556,18 @@ gap jumped the queue — each item's own file records why it landed when it did.
 ## What's next
 
 The backlog is the source of truth for what to pick up; this is the current
-read of it, not a commitment. The DMS gaps entry
-([DMS gaps](docs/backlog/protocols/dms-enablement-gaps.md)) is a stale
-probe report now: its P0 finding is resolved elsewhere (see "Recently
-shipped" above), and what's left of it is filed individually under
-`docs/backlog/protocols/` at medium priority — the effective top of what's
-actually open. The Noctalia probe has gone one step further and is
-[resolved outright](docs/backlog/resolved/noctalia-reprobe-done.md)
+read of it, not a commitment. Both shell probes are now resolved
+outright — [DMS gaps](docs/backlog/resolved/dms-reprobe-done.md)
+(re-probed 2026-09-18: the spotlight teardown plus two full lock →
+auth → unlock cycles survive in the field, DMS's unlock path doesn't
+trip the lock-role signature, everything else re-checks as
+resolved/upstream/deliberate/shell-side, nothing new filed) and the
+[Noctalia probe](docs/backlog/resolved/noctalia-reprobe-done.md)
 (re-probed 2026-09-18: the lock-teardown kill survives two full
 lock → auth → unlock cycles in the field, everything else re-checks as
-resolved/upstream/deliberate, nothing new filed).
+resolved/upstream/deliberate, nothing new filed). What's left of both
+was already filed individually under `docs/backlog/protocols/` at
+medium priority — the effective top of what's actually open.
 
 1. **Confirm `--gpu` fixes the Asahi Linux `--tty` failure** — needs the
    user's own hardware, not the dev VM (no split GPU/display-controller
@@ -620,11 +636,11 @@ resolved/upstream/deliberate, nothing new filed).
 ## Shell enablement (DMS / Noctalia probes, 2026-09-14)
 
 Two Quickshell shells were probed end to end
-([DMS gaps](docs/backlog/protocols/dms-enablement-gaps.md),
+([DMS gaps](docs/backlog/resolved/dms-reprobe-done.md),
 [Noctalia results](docs/backlog/resolved/noctalia-reprobe-done.md) —
-re-probed 2026-09-18 and resolved: the lock-teardown kill survives two
-full lock → auth → unlock cycles in the field, everything else
-re-checks as resolved/upstream/deliberate) after
+both re-probed 2026-09-18 and resolved: every overlay dismissal and
+lock → auth → unlock cycle survives in the field, everything else
+re-checks as resolved/upstream/deliberate/shell-side) after
 landing gamma-control, both data-controls and primary selection
 (PR #32) plus two destroy-teardown kill fixes (PRs #34, #36). Both
 shells render fully; Noctalia is the better target (generic
@@ -692,6 +708,13 @@ probes' recommended order:
    in the DMS gaps entry): lock → auth → unlock teardown survives on
    current `main`, and so does a spotlight open/Escape-dismiss cycle.
    Both shells' destroy kills are now proven fixed, not inferred.
+   Re-probed 2026-09-18 and resolved outright
+   ([record](docs/backlog/resolved/dms-reprobe-done.md)): the exact
+   spotlight teardown plus two full lock → auth → unlock cycles
+   survive, DMS's unlock path doesn't trip the lock-role signature,
+   gap 8's launch question is answered (DMS-spawned app maps
+   focused), and "No compositor detected" stands recorded as
+   upstream.
 
 Small follow-ups already filed alongside:
 [`gamma-control`](docs/backlog/resolved/gamma-control-followups-done.md)
