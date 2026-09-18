@@ -125,16 +125,16 @@ impl GammaControlState {
 
     /// Re-records the CRTC's LUT length after `--tty` moves to a different
     /// CRTC (see `tty/hotplug.rs`'s CRTC switch, the only caller). A live
-    /// control was sized for the old CRTC: if the length changed it is told it
-    /// lost control -- the same transfer shape `get_gamma_control` uses, so it
-    /// re-reads `gamma_size` and re-sets -- rather than eating `invalid_gamma`
+    /// control was sized for the old CRTC, so it is told it lost control --
+    /// the same transfer shape `get_gamma_control` uses, so it re-reads
+    /// `gamma_size` and re-sets -- rather than eating `invalid_gamma`
     /// (a protocol error, i.e. a killed night-light) on its next `set_gamma`,
-    /// which is still validated against the new length. Same length:
-    /// untouched, its ramp still describes the new CRTC entry for entry.
+    /// which is still validated against the new length. This holds even
+    /// when the length did not change: nothing pushes the old ramp to the
+    /// new CRTC (a modeset carries plane state, not LUT contents), so a
+    /// kept control would show un-warmed white until the client's next
+    /// periodic set -- failing it makes the client re-push promptly.
     pub(super) fn crtc_changed(&mut self, size: u32) {
-        if size == self.size {
-            return;
-        }
         self.size = size;
         if let Some(current) = self.current.take() {
             current.failed();

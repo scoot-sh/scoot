@@ -78,7 +78,10 @@ All re-verified in source at `0ff0098`, not relayed from the ticket:
   connector is gone; the full commit `invalidate_scanout` arms brings the new
   CRTC up. `on_vblank`'s CRTC check ignores stale vblanks for the old CRTC;
   `invalidate_scanout` retires any in-flight flip exactly like the existing
-  hotplug/reactivate paths (PR #107's retry semantics unchanged).
+  hotplug/reactivate paths (PR #107's retry semantics unchanged) — plus a
+  `PresentRetries` reset: a new CRTC is new device state, so an inherited
+  refusal streak must not answer Quiet on the new hardware (review finding,
+  PR #112).
 
 ### What changed
 
@@ -97,12 +100,14 @@ All re-verified in source at `0ff0098`, not relayed from the ticket:
   untouched, and `session_event`'s `Nothing → Render` mapping passes the new
   variant through.
 - `gamma_control.rs`: new `crtc_changed(size)` — re-records the LUT length
-  and fails the live control (the transfer shape) *only when the length
-  actually changed*, so a same-length CRTC move doesn't blink night-light for
-  nothing. `set_size` keeps its init-only contract.
+  and fails the live control (the transfer shape) on every switch, so the
+  client re-reads `gamma_size` and re-pushes. Review (PR #112) corrected an
+  earlier same-length exception: nothing carries the old ramp to the new
+  CRTC, so keeping the control showed un-warmed white until the client's
+  next periodic set. `set_size` keeps its init-only contract.
 - `README.md`: the `--tty` hotplug bullet no longer carries the one-CRTC
   limit (it describes the CRTC move and the stay-put-and-retry fallback), and
-  the gamma section records the re-read + fail-only-on-change rule.
+  the gamma section records the re-read + fail-on-switch rule.
 
 ### Tests
 

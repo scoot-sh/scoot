@@ -475,14 +475,16 @@ fn switched_crtc_with_new_gamma_fails_live_control() {
 }
 
 #[test]
-fn switched_crtc_with_same_gamma_leaves_live_control_alone() {
+fn switched_crtc_with_same_gamma_fails_live_control_so_ramp_is_repushed() {
     let mut fixture = Fixture::switched();
     fixture.run(Step::Bind);
     assert_eq!(fixture.gamma_size(), FALLBACK_GAMMA_SIZE);
 
     switched_crtc(CANVAS, CANVAS, false, FALLBACK_GAMMA_SIZE).finish(&mut fixture.state);
 
-    // Same length: untouched -- its ramp still describes the new CRTC entry
-    // for entry, so failing it would only make night-light blink for nothing.
-    assert_eq!(fixture.failed(), vec![false]);
+    // Same length but a different CRTC: nothing pushes the old ramp to the
+    // new hardware (a modeset carries plane state, not LUT contents), so
+    // the live control hears `failed` and re-pushes rather than showing
+    // un-warmed white until its next periodic set.
+    assert_eq!(fixture.failed(), vec![true]);
 }

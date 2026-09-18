@@ -101,6 +101,7 @@ current one twice.
   resize, and a two-connector laptop unplug. Issue #48 is therefore
   referenced, not closed, by PR #51.
 - **Connector switching is limited to the CRTC chosen at startup** — see
-  [`../tty/tty-connector-switch-crtc.md`](../tty/tty-connector-switch-crtc.md).
+  [`./tty-connector-switch-crtc-done.md`](./tty-connector-switch-crtc-done.md)
+  (since resolved by PR #112: `retarget` falls through to a CRTC switch).
 - Multi-GPU, multi-output, DPMS and key repeat remain out of scope for this
   backend, unchanged.

@@ -1300,9 +1300,10 @@ What actually happens to the ramp depends on the backend:
 - **Under `--tty`**, the ramp is pushed to the CRTC gamma LUT, so the screen
   really warms. The advertised `gamma_size` is the CRTC's own (256 on the
   hardware measured so far), re-read whenever a hotplug moves the session to
-  a different CRTC; a live control only hears `failed` over that move when
-  the length actually changed, otherwise its ramp still applies entry for
-  entry. Anything the DRM device refuses retires the
+  a different CRTC; a live control hears `failed` over that move either
+  way, so it re-reads `gamma_size` and re-pushes (nothing carries the old
+  ramp to the new CRTC — a modeset moves planes, not LUT contents).
+  Anything the DRM device refuses retires the
   control with `failed` and the session keeps running.
 - **Under `--headless`/`--nested`** there is no hardware LUT, so the ramp is
   accepted but changes nothing on screen — and a `flexwm msg

@@ -702,8 +702,8 @@ gap jumped the queue — each item's own file records why it landed when it did.
   Smithay's supported don't-touch-the-fd-on-drop, making shutdown
   deterministically quiet. Fail-first live (6/6 quits logged it pre-fix,
   0/6 post-fix) plus quit-while-paused and pause/reactivate repaint
-   edges; no unit test (no `Tty` outside `--tty`), no README change (a log
-   line disappearing is not a user-facing surface). (PR #111)
+  edges; no unit test (no `Tty` outside `--tty`), no README change (a log
+  line disappearing is not a user-facing surface). (PR #111)
 - **[`--tty` hotplug follows the connector across CRTCs](docs/backlog/resolved/tty-connector-switch-crtc-done.md)**
   — RESOLVED 2026-09-18: a refused in-place connector move now rebuilds the
   `DrmSurface` on another CRTC (build-first-swap-on-success, so the ticket's

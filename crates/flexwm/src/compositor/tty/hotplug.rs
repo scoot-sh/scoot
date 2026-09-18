@@ -50,6 +50,7 @@ use smithay::backend::udev::{UdevDevices, UdevEvent};
 use smithay::reexports::drm::control::{Device as ControlDevice, Mode, connector, crtc};
 
 use super::buffers::BufferPool;
+use super::present_retry::PresentRetries;
 use super::{State, Tty, gpu};
 
 /// Handles one udev event for the DRM subsystem.
@@ -568,6 +569,11 @@ impl Tty {
             self.width = width;
             self.height = height;
             self.invalidate_scanout();
+            // A new CRTC is new device state: the old connector's refusal
+            // streak (if any) says nothing about the new one, so the first
+            // transient refusal on it must arm a retry rather than answer
+            // Quiet off a streak it never earned.
+            self.retries = PresentRetries::new();
             return Reconfigured::SwitchedCrtc {
                 width,
                 height,
