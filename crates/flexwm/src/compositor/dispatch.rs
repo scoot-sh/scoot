@@ -1220,6 +1220,14 @@ fn too_large(size: i32) -> String {
 /// be refused for compositor-wide fd pressure: past the grace *and* the
 /// table pressured (see `fd_pressure`).
 ///
+/// Both operators are exact. `>` (not `>=`): `live == grace` still passes,
+/// so a client may hold grace+1 units (129 buffers / 65 pools) -- the
+/// refused creation is the one that would take it past grace+1, and any
+/// "two at grace" fd arithmetic understates the permitted maximum by 4
+/// (2 x (129 + 65 + 1) + 14 = 404, not 400). `&&` (not `||`): either half
+/// alone passes, so the kill always lands on a contributor, never on an
+/// under-grace innocent during someone else's pressure.
+///
 /// The grace lookup short-circuits the table observation, so creations
 /// under grace cost one `HashMap` lookup and no syscall -- which is every
 /// legitimate creation, since no legitimate client holds past grace (see
@@ -1227,7 +1235,19 @@ fn too_large(size: i32) -> String {
 /// claim, so a pressure refusal never takes a count unit it would then
 /// have to give back.
 fn pressure_refusal(live: u32, grace: u32) -> bool {
-    live > grace && super::fd_pressure::table().is_some_and(|table| table.pressured())
+    pressure_refusal_for(
+        live,
+        grace,
+        super::fd_pressure::table().is_some_and(|table| table.pressured()),
+    )
+}
+
+/// The pure conjunction inside [`pressure_refusal`], split out so the
+/// operator choice (`>` vs `&&`) is unit-testable without filling the test
+/// process's own fd table: `pressured` is the already-observed table
+/// verdict, not a fresh observation. Pinned in `tests` below.
+fn pressure_refusal_for(live: u32, grace: u32, pressured: bool) -> bool {
+    live > grace && pressured
 }
 
 /// The message the live-pool-count refusal carries: which bound said no and
