@@ -20,7 +20,10 @@
 //! absent or not permitted, those tests report it and pass without asserting
 //! -- a machine with no udmabuf cannot answer the question, and pretending
 //! otherwise would either fail honest builds or hide the answer on the
-//! machines that can.
+//! machines that can. Read [`skipped`] before relying on a green run from an
+//! unfamiliar machine: libtest captures a passing test's output, so the
+//! skip line is only visible under `--nocapture`, and nine of these tests
+//! check nothing without that device.
 //!
 //! Like the other real-client suites here, these need a writable
 //! `$XDG_RUNTIME_DIR`: [`State::new`](crate::compositor::State::new) binds a
@@ -37,7 +40,9 @@ use smithay::backend::renderer::pixman::PixmanRenderer;
 use smithay::reexports::wayland_server::protocol::wl_shm as server_shm;
 use wayland_client::backend::WaylandError;
 use wayland_client::protocol::{wl_buffer, wl_compositor, wl_registry, wl_surface};
-use wayland_client::{Connection, Dispatch, DispatchError, QueueHandle, event_created_child};
+use wayland_client::{
+    Connection, Dispatch, DispatchError, Proxy, QueueHandle, event_created_child,
+};
 use wayland_protocols::wp::linux_dmabuf::zv1::client::{
     zwp_linux_buffer_params_v1, zwp_linux_dmabuf_feedback_v1, zwp_linux_dmabuf_v1,
 };
@@ -81,6 +86,11 @@ enum Step {
     /// GL client re-rendering into one dmabuf actually has, and the only way
     /// to drive `dmabuf::sync_committed_dmabufs` from a test.
     CommitImportedBuffer { repeats: usize },
+    /// Create a `wl_surface`, optionally attach the last imported buffer to
+    /// it, commit once, and report the surface's protocol id -- keeping both
+    /// alive. The measurement test resolves that id server-side so it can
+    /// time the commit-path work directly instead of through round trips.
+    MakeSurface { attach_imported: bool },
 }
 
 /// What a [`Step::Import`] offers the compositor.
@@ -131,6 +141,7 @@ enum Ack {
     ImportError { code: u32, interface: String },
     Released,
     Committed,
+    Surface(u32),
 }
 
 /// The default-feedback events a client saw, as the client saw them.
@@ -231,6 +242,13 @@ impl Ack {
         match self {
             Ack::Committed => {}
             _ => panic!("expected a commit acknowledgement"),
+        }
+    }
+
+    fn surface(self) -> u32 {
+        match self {
+            Ack::Surface(id) => id,
+            _ => panic!("expected a surface id"),
         }
     }
 }
@@ -490,24 +508,49 @@ fn an_import_through_create_immed_is_not_a_client_kill() {
         "create_immed must import; a refusal here is a fatal protocol error \
          on the client, not a fallback"
     );
+    // ...and the buffer object exists and is counted, which is the mechanical
+    // guard on Smithay's error-before-init shape that `wl_buffers.rs`'s
+    // exactness argument leans on: `data_init.init` runs *before*
+    // `dmabuf_imported`, so exactly one live buffer here says the object was
+    // initialised by the time the import ran. It has to be asserted on the
+    // *accepted* path: a refused import now releases its own unit
+    // (`refuse_import`), so a refused `create_immed` lands on zero whether or
+    // not the object was ever initialised and cannot tell the two apart.
+    assert_eq!(
+        fixture.buffers_in_flight(),
+        1,
+        "the immed buffer must be initialised -- and therefore counted -- \
+         before the import is attempted"
+    );
+    fixture.run(Step::ReleaseImportedBuffer).released();
+    assert_eq!(
+        fixture.buffers_in_flight(),
+        0,
+        "and released by the wl_buffer destruction hook like any other kind"
+    );
 }
 
 #[test]
-fn an_imported_mapping_is_released_when_the_buffer_goes_away() {
+fn an_imported_mapping_is_released_without_any_frame() {
     let _mappings = exclusive_mappings();
-    // The item's real leak risk. `PixmanRenderer::import_dmabuf` pushes every
-    // mapping into a cache that outlives the `wl_buffer`, and only
-    // `PixmanRenderer::cleanup` -- which `Renderer::render` calls on entry --
-    // drops the expired ones. If flexwm never rendered, every dmabuf a client
-    // ever committed would keep an mmap and an fd for the process lifetime,
-    // and the per-client buffer cap would not bound it.
+    // The item's real leak risk, in the shape that actually reaches it.
+    // `PixmanRenderer::import_dmabuf` pushes every mapping into a cache that
+    // outlives the `wl_buffer`, and `PixmanRenderer::cleanup` -- the only
+    // thing that drops an expired entry -- is reached from `Renderer::render`
+    // and from `cleanup_texture_cache`, nothing else. Destroying a buffer
+    // causes no damage, `render_output` skips `Renderer::render` when there is
+    // no damage, and `frame_tick` drops the timer once nothing needs a frame:
+    // so "it drains on the next frame" is not a guarantee, and there may be no
+    // next frame at all. Hence **no `fixture.render()` anywhere in this
+    // test** -- the drain has to happen without one, from the `wl_buffer`
+    // destruction hook's queued idle (`dmabuf::schedule_cache_drain`).
     let mut fixture = Fixture::start();
     let before = dmabuf_mappings();
     let outcome = fixture
         .run(Step::Import(Import::new(Backing::Udmabuf)))
         .import();
     if outcome == ImportOutcome::NoUdmabuf {
-        return skipped("an_imported_mapping_is_released_when_the_buffer_goes_away");
+        return skipped("an_imported_mapping_is_released_without_any_frame");
     }
     assert_eq!(outcome, ImportOutcome::Created);
     let mapped = dmabuf_mappings();
@@ -518,16 +561,81 @@ fn an_imported_mapping_is_released_when_the_buffer_goes_away() {
     );
 
     fixture.run(Step::ReleaseImportedBuffer).released();
-    // The frame is the drain: `cleanup` runs from `Renderer::render`, which
-    // flexwm reaches through `OutputDamageTracker::render_output`.
+    assert_eq!(
+        dmabuf_mappings(),
+        before,
+        "once the client's wl_buffer and fds are gone the mapping must be \
+         dropped with no frame in between -- a compositor sitting idle is \
+         exactly when no frame is coming, and an mmap held for the process \
+         lifetime is the leak this item is about"
+    );
+}
+
+#[test]
+fn repeated_import_and_release_without_a_frame_does_not_grow_the_cache() {
+    let _mappings = exclusive_mappings();
+    // The bypass shape spelled out: import, destroy, repeat, never commit
+    // anything. The per-client live-buffer cap cannot see this -- the count
+    // returns to zero on every iteration -- so if the mapping cache did not
+    // drain by itself, this loop would pin one dma-buf's pages per pass for
+    // the process lifetime. Sixteen passes is enough to distinguish "drains"
+    // from "grows"; the assertion is per-iteration so a failure names the
+    // pass it first grew on.
+    let mut fixture = Fixture::start();
+    let before = dmabuf_mappings();
+    for pass in 0..16 {
+        let outcome = fixture
+            .run(Step::Import(Import::new(Backing::Udmabuf)))
+            .import();
+        if outcome == ImportOutcome::NoUdmabuf {
+            return skipped("repeated_import_and_release_without_a_frame_does_not_grow_the_cache");
+        }
+        assert_eq!(outcome, ImportOutcome::Created, "pass {pass}");
+        fixture.run(Step::ReleaseImportedBuffer).released();
+        assert_eq!(
+            dmabuf_mappings(),
+            before,
+            "pass {pass}: the mapping cache grew across an import/destroy \
+             cycle with no frame rendered -- unbounded pinned memory from a \
+             client that has released everything it holds"
+        );
+        assert_eq!(
+            fixture.buffers_in_flight(),
+            0,
+            "pass {pass}: and the live-buffer count is back to zero, which is \
+             why that cap cannot bound the cache"
+        );
+    }
+}
+
+#[test]
+fn a_rendered_frame_also_drains_the_mapping_cache() {
+    let _mappings = exclusive_mappings();
+    // The other half, kept because it is a different mechanism rather than a
+    // weaker version of the one above: `Renderer::render` calls
+    // `PixmanRenderer::cleanup` on entry (`pixman/mod.rs:866`), which flexwm
+    // reaches through `OutputDamageTracker::render_output`. That path is real
+    // and worth pinning -- it is just not sufficient on its own, which is what
+    // the two tests above establish.
+    let mut fixture = Fixture::start();
+    let before = dmabuf_mappings();
+    let outcome = fixture
+        .run(Step::Import(Import::new(Backing::Udmabuf)))
+        .import();
+    if outcome == ImportOutcome::NoUdmabuf {
+        return skipped("a_rendered_frame_also_drains_the_mapping_cache");
+    }
+    assert_eq!(outcome, ImportOutcome::Created);
+    assert!(dmabuf_mappings() > before);
+    fixture
+        .run(Step::CommitImportedBuffer { repeats: 1 })
+        .committed();
+    fixture.run(Step::ReleaseImportedBuffer).released();
     let _ = fixture.render();
     assert_eq!(
         dmabuf_mappings(),
         before,
-        "once the client's wl_buffer and fds are gone, the next rendered \
-         frame must drop the renderer's cached mapping -- a cache that only \
-         grows is an mmap and an fd leaked per buffer, for the process \
-         lifetime"
+        "a frame drawn after the buffer went away must leave no mapping behind"
     );
 }
 
@@ -745,12 +853,80 @@ fn a_garbage_format_kills_only_the_client_that_sent_it() {
     );
 }
 
-/// Says, once and loudly enough to read in a test log, that a test asserted
-/// nothing because this machine has no usable `/dev/udmabuf`.
+/// Prints what the per-commit dmabuf sync costs, for the record CLAUDE.md
+/// asks for whenever a change lands on a per-event path. Asserts nothing --
+/// a wall-clock threshold in CI is a flake, not a guarantee -- so it is
+/// `#[ignore]`d like `cursor/shapes/tests.rs`'s shape dump and run by hand:
 ///
-/// Not a silent pass: a run where these are skipped has not answered the
-/// import question at all, and the log line is what says so. See the module
-/// doc for why a memfd cannot stand in.
+/// ```text
+/// cargo test -p flexwm --bin flexwm commit_sync_cost -- --ignored --nocapture
+/// ```
+///
+/// Three numbers, because three different clients pay three different prices
+/// once any client in the session imports a dmabuf (the gate is session-wide
+/// -- see `State::imports_dmabufs`):
+///
+/// - **gate off** -- every commit in a session with no dmabuf client: one
+///   bool test in `commit`, and this function is not called at all.
+/// - **no buffer attached** -- the floor for an innocent client once the gate
+///   is armed: `is_sync_subsurface`, the `with_surface_tree_downward` walk,
+///   and per node a `data_map` type lookup plus a mutex acquire, then an
+///   early return. An `wl_shm` client pays this plus one failed downcast
+///   (`get_dmabuf` is `buffer.data::<Dmabuf>()`, a pointer compare), so this
+///   is that client's cost to within noise.
+/// - **dmabuf attached** -- the client the work is for: the above plus two
+///   `DMA_BUF_IOCTL_SYNC` calls, one of which waits on the buffer's fences.
+#[test]
+#[ignore = "prints per-commit timings for a human; asserts nothing"]
+fn commit_sync_cost() {
+    const ROUNDS: u32 = 20_000;
+    let _mappings = exclusive_mappings();
+    let mut fixture = Fixture::start();
+    if fixture
+        .run(Step::Import(Import::new(Backing::Udmabuf)))
+        .import()
+        == ImportOutcome::NoUdmabuf
+    {
+        return skipped("commit_sync_cost");
+    }
+
+    for (label, attach_imported) in [("no buffer attached", false), ("dmabuf attached", true)] {
+        let id = fixture.run(Step::MakeSurface { attach_imported }).surface();
+        let surface: smithay::reexports::wayland_server::protocol::wl_surface::WlSurface = fixture
+            .client(0)
+            .object_from_protocol_id(&fixture.state.display_handle, id)
+            .expect("the measured surface");
+        // Warm: the first call faults in the mapping and the type-map entry.
+        super::sync_committed_dmabufs(&surface);
+        let started = std::time::Instant::now();
+        for _ in 0..ROUNDS {
+            super::sync_committed_dmabufs(&surface);
+        }
+        let each = started.elapsed() / ROUNDS;
+        println!("commit sync, {label}: {each:?} per commit ({ROUNDS} rounds)");
+    }
+    println!(
+        "commit sync, gate off: not called -- one bool test in `commit` \
+         (see State::imports_dmabufs)"
+    );
+}
+
+/// Records that a test asserted nothing because this machine has no usable
+/// `/dev/udmabuf`.
+///
+/// **How visible this actually is, stated rather than assumed:** libtest
+/// captures a passing test's stdout and stderr, so on a machine without
+/// `/dev/udmabuf` this line appears only under `cargo test -- --nocapture`
+/// (or `cargo nextest run --no-capture`), or bundled into the output of some
+/// *other* failing test in the same binary. It is not a `#[ignore]` and it
+/// does not colour the summary: nine of this suite's tests will report `ok`
+/// having checked nothing.
+///
+/// That is the deliberate trade -- see the module doc -- but it means
+/// `/dev/udmabuf` is a prerequisite for this suite meaning anything about
+/// import, not an optional extra, and a reviewer confirming the import path
+/// on a new machine should check the count of tests that really ran rather
+/// than the summary line.
 fn skipped(test: &str) {
     eprintln!("{test}: skipped -- no usable /dev/udmabuf on this machine");
 }
@@ -775,6 +951,8 @@ struct TestClient {
     /// provably the last thing holding the dma-buf alive.
     buffer: Option<wl_buffer::WlBuffer>,
     planes: Vec<OwnedFd>,
+    /// Surfaces `Step::MakeSurface` made and deliberately kept alive.
+    surfaces: Vec<wl_surface::WlSurface>,
 }
 
 fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> Result<(), String> {
@@ -874,6 +1052,26 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
                 acks.send(Ack::Committed).map_err(|e| e.to_string())?;
             }
+            Step::MakeSurface { attach_imported } => {
+                let compositor: wl_compositor::WlCompositor = {
+                    let (name, version) = client.compositor_name.ok_or("no wl_compositor")?;
+                    let registry = client.registry.clone().ok_or("no registry")?;
+                    registry.bind(name, version.min(4), &qh, ())
+                };
+                let surface = compositor.create_surface(&qh, ());
+                if attach_imported {
+                    let buffer = client.buffer.clone().ok_or("no imported buffer")?;
+                    surface.attach(Some(&buffer), 0, 0);
+                    surface.damage_buffer(0, 0, IMPORT_SIZE, IMPORT_SIZE);
+                }
+                surface.commit();
+                queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                let id = surface.id().protocol_id();
+                // Kept alive on purpose: the caller times work against this
+                // exact surface tree, server-side.
+                client.surfaces.push(surface);
+                acks.send(Ack::Surface(id)).map_err(|e| e.to_string())?;
+            }
             Step::ReleaseImportedBuffer => {
                 if let Some(buffer) = client.buffer.take() {
                     buffer.destroy();
@@ -937,18 +1135,20 @@ fn import(
     client.import = ImportOutcome::Waiting;
     client.buffer = None;
     if request.immed {
-        params.create_immed(
+        // `create_immed` has no `created` event: the buffer object exists the
+        // moment the request is sent -- which is why a refused import there is
+        // fatal -- and the only thing the compositor can say afterwards is that
+        // it failed. So the proxy is kept here rather than waiting for an
+        // event (`ReleaseImportedBuffer` destroys whatever is kept), the
+        // outcome is optimistic, and only a `failed` event overwrites it.
+        client.buffer = Some(params.create_immed(
             IMPORT_SIZE,
             IMPORT_SIZE,
             format,
             zwp_linux_buffer_params_v1::Flags::empty(),
             qh,
             (),
-        );
-        // `create_immed` has no `created` event: the buffer exists the moment
-        // the request is sent, and the only thing the compositor can say is
-        // that it failed. Surviving the round trip below *is* the success
-        // signal, so the outcome is set here and only `failed` overwrites it.
+        ));
         client.import = ImportOutcome::Created;
     } else {
         params.create(

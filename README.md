@@ -110,12 +110,17 @@ its pool object, retaining both, so those are bounded by the live-buffer
 count below), and one client may hold at most 512 live `wl_buffer`s at
 once whatever created them (pool, dmabuf, single-pixel — past that the
 excess creation gets a protocol error on the creating object; each
-surviving shm or dmabuf buffer is what actually retains a compositor fd
-and mapping (single-pixel buffers retain neither but are counted
-uniformly — the hook can't observe buffer kind — so this is the bound
-that caps per-connection fds and mappings — see
+surviving shm or dmabuf buffer is what retains a compositor fd and, for
+shm, its mapping (single-pixel buffers retain neither but are counted
+uniformly — the hook can't observe buffer kind) — see
 `docs/backlog/resolved/shm-pool-count-cap-done.md` and
-`docs/backlog/resolved/shm-pool-cap-misses-retained-fds-done.md`), a client's
+`docs/backlog/resolved/shm-pool-cap-misses-retained-fds-done.md`). An
+*imported dmabuf's* mapping is the one thing that count does not bound,
+because it lives in the renderer's cache and outlives the `wl_buffer`
+that carried it; it is released instead from the same buffer-destruction
+hook, immediately and without waiting for a frame (see
+`docs/backlog/resolved/dmabuf-advertised-but-never-imported-done.md`).
+A client's
 declared minimum window size can't exceed the largest
 output's usable area on each axis, and `gap` and `cursor_size` each have an
 upper bound as well as a lower one. One client may also hold at most 8

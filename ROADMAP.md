@@ -206,13 +206,20 @@ gap jumped the queue — each item's own file records why it landed when it did.
   (PR #60, 2026-09-17) — the follow-up the dmabuf-readiness probe gated:
   default feedback with the real scanout `dev_t` (`0` where no DRM node
   exists, logged once) plus the two LINEAR formats the shm pipeline serves,
-  and imports answered `failed` — the protocol's own non-fatal fallback,
-  which is the only truthful answer a pixman/shm compositor has. Measured
-  on headless, no-node, `--nested` and `--tty`: quickshell's overview
-  `ScreencopyView` displays over shm in all four. A genuinely
-  dmabuf-allocating third-party client could not run on the GPU-less dev VM,
-  so that half of the matrix is wire-test proven, not live — recorded as an
-  environment limit, with GPU hardware as the scenario that would revisit it.
+  and imports answered `failed`. **⚠️ Superseded, and its central claim was
+  wrong** — see [the dmabuf advertisement killed every GL
+  client](docs/backlog/resolved/dmabuf-advertised-but-never-imported-done.md)
+  below. This entry read `failed` as "the protocol's own non-fatal fallback,
+  which is the only truthful answer a pixman/shm compositor has": true of the
+  asynchronous `create`, false of `create_immed`, where it is a fatal
+  `InvalidWlBuffer` — so the advertisement steered Mesa onto a path that
+  killed every GL client. It was also not the only truthful answer, because
+  `PixmanRenderer` could import all along. What stands from this entry is the
+  measurement: on headless, no-node, `--nested` and `--tty`, quickshell's
+  overview `ScreencopyView` displays over shm in all four. The gap it flagged
+  in its own last sentence — no genuinely dmabuf-allocating client on the
+  GPU-less dev VM, so that half wire-test proven rather than live — is
+  precisely where the regression hid until real GPU hardware ran it.
 - **[`flexwm msg` EPIPE panic](docs/backlog/resolved/msg-client-broken-pipe-done.md)**
   (PR #62, 2026-09-17) — `msg ... | head` died with exit 101
   (`println!` panics on EPIPE; Rust ignores SIGPIPE). New `output.rs` maps

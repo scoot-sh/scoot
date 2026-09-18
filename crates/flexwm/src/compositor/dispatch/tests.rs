@@ -1169,16 +1169,25 @@ fn a_dmabuf_create_past_a_full_budget_is_refused_by_the_shared_budget() {
     );
 }
 
-/// A dmabuf `create_immed` whose import is refused -- this harness builds a
-/// `State` with no backend at all, so there is no renderer to import into --
-/// still creates *and* counts its buffer object: Smithay initialises it
-/// before the import runs, and the `failed()` answer kills the client with
-/// `InvalidWlBuffer`, leaving the object for disconnect cleanup.
-/// Zero afterwards proves init happened (a never-initialised object would
-/// leave one phantom unit); the kill proves a refused immed import is still
-/// fatal, which is the protocol's choice and not this compositor's.
+/// A dmabuf `create_immed` this compositor cannot import -- the harness
+/// builds a `State` with no backend at all, so there is no renderer to import
+/// into -- kills the client with `InvalidWlBuffer`, takes no one else down
+/// with it, and leaves the buffer budget empty.
+///
+/// **What this no longer proves, deliberately stated rather than left to be
+/// assumed:** the final zero used to be read as "Smithay initialised the
+/// buffer object before running the import, else one phantom unit would be
+/// left". That inference died when `dmabuf.rs`'s `refuse_import` started
+/// handing the claimed unit back itself (it has to -- see `wl_buffers.rs`),
+/// because the count now lands on zero either way. The error-before-init
+/// shape is instead guarded by
+/// `dmabuf/tests.rs::an_import_through_create_immed_is_not_a_client_kill`,
+/// which asserts the count is exactly *one* on the accepted path, where
+/// nothing releases it early. What is left here is still worth having, and is
+/// what the assertions below now say: the kill, its blast radius, and the
+/// drain.
 #[test]
-fn a_failed_dmabuf_import_creates_a_counted_buffer_then_drains() {
+fn a_failed_dmabuf_import_kills_only_that_client_and_drains_its_budget() {
     let report = drive(|stream| {
         let mut buffers = BufferClient::connect(stream)?;
         let dmabuf = buffers.dispatch.dmabuf.clone().expect("the dmabuf global");
@@ -1205,6 +1214,7 @@ fn a_failed_dmabuf_import_creates_a_counted_buffer_then_drains() {
     assert_survivor_still_served(&report);
     assert_eq!(
         report.buffers, 0,
-        "the immed buffer was initialised (else one phantom unit) and drained in cleanup"
+        "the killed client's buffer budget must drain with it, whether the \
+         unit came back through `refuse_import` or through disconnect cleanup"
     );
 }

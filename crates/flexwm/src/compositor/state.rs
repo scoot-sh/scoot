@@ -479,6 +479,17 @@ pub struct State {
     /// before dmabuf import existed, a bool test rather than a surface-tree
     /// walk on the hottest handler this compositor has.
     pub imports_dmabufs: bool,
+    /// Whether a dmabuf-cache drain is already sitting on the loop's idle
+    /// queue.
+    ///
+    /// Written only by `dmabuf.rs` -- set in `schedule_cache_drain` (from the
+    /// `wl_buffer` destruction hook), cleared by `drain_cache` when the idle
+    /// runs. It is a *queued-ness* flag, not "the cache is dirty": it exists
+    /// so a client destroying 512 buffers in one dispatch queues one scan
+    /// rather than 512, the same batching `bind_budget.rs` does for deferred
+    /// refusals. A stale `true` could only happen if an idle were dropped
+    /// without running, which calloop does not do.
+    pub dmabuf_drain_queued: bool,
     /// `ext_idle_notifier_v1` (version 2): what a `swayidle`-style daemon
     /// binds to learn the seat has been quiet N milliseconds. Read on
     /// every input event (`announce_activity`, see `idle.rs`) and written
@@ -728,6 +739,7 @@ impl State {
             shm_pools: ShmPools::default(),
             wl_buffers: WlBuffers::default(),
             imports_dmabufs: false,
+            dmabuf_drain_queued: false,
             idle_notifier,
             idle_inhibitors: idle::Inhibitors::default(),
             idle_inhibit_manager_state,

@@ -852,6 +852,16 @@ where
 /// object) and on a protocol-error kill. Fires for buffers of every kind --
 /// which is what keeps the uniform count uniform (see `wl_buffers.rs`).
 ///
+/// Also queues the drain of the renderer's dmabuf mapping cache, which is the
+/// *other* thing a dying `wl_buffer` may have made collectable and which
+/// nothing else in the compositor would notice: a destroyed buffer causes no
+/// damage, so no frame is asked for, so nothing calls the renderer's own
+/// cleanup. See `dmabuf.rs`'s `schedule_cache_drain` -- it is a no-op (one
+/// bool test) until this session imports its first dmabuf, and it queues at
+/// most one idle per dispatch however many buffers died in it. The kind of
+/// the dying buffer is deliberately not consulted, for the same reason the
+/// count above is uniform: the hook cannot observe it.
+///
 /// Folds away for every interface other than `wl_buffer`, which matters in
 /// the same way as the hooks above: this sits on the destruction path of
 /// every object of every interface.
@@ -864,6 +874,7 @@ where
         return;
     }
     state.wl_buffers.forget_buffer(client);
+    super::dmabuf::schedule_cache_drain(state);
 }
 
 /// Posts a protocol error and returns `true` when `request` is a

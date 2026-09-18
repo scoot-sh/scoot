@@ -33,7 +33,7 @@
 //! the advertisement was *causing* every GL client to allocate a dmabuf and
 //! then be killed for it. noctalia v5 died ~100ms into a session that way,
 //! taking the whole shell with it
-//! (`docs/backlog/protocols/dmabuf-advertised-but-never-imported.md`).
+//! (`docs/backlog/resolved/dmabuf-advertised-but-never-imported-done.md`).
 //!
 //! The consequence that survives the fix: **the tranche is a promise with
 //! teeth.** A format or modifier in the feedback table that the renderer then
@@ -79,17 +79,42 @@
 //! Two lifetime facts about that cache, both established against the pinned
 //! source rather than assumed, because both are load-bearing:
 //!
-//! - **The cache drains itself, but only on frames that render.**
+//! - **The cache does not drain on its own, and rendering is not enough.**
 //!   `PixmanRenderer::import_dmabuf` pushes every mapping into `dmabuf_cache`
 //!   and holds the dmabuf only weakly; `PixmanRenderer::cleanup` drops the
-//!   entries whose `WeakDmabuf` has expired, and `Renderer::render` calls
-//!   `cleanup` on entry (`src/backend/renderer/pixman/mod.rs:866`). flexwm
-//!   reaches that through `OutputDamageTracker::render_output`
-//!   (`src/backend/renderer/damage/mod.rs:874`), so every frame this
-//!   compositor actually draws also drains the cache. `render_output` skips
-//!   `Renderer::render` when there is no damage -- which is exactly when no
-//!   buffer has gone away either, so the mapping a dead client left behind is
-//!   released by the very frame that repaints where its window was.
+//!   entries whose `WeakDmabuf` has expired, and it has exactly two call
+//!   sites at the pinned rev -- `Renderer::render`
+//!   (`src/backend/renderer/pixman/mod.rs:866`) and `cleanup_texture_cache`
+//!   (`:892`).
+//!
+//!   Reaching the first one is not guaranteed by a buffer going away, and an
+//!   earlier revision of this module wrongly claimed it was. `render_output`
+//!   returns `skipped` before it ever calls `Renderer::render` when there is
+//!   no damage (`src/backend/renderer/damage/mod.rs:365-367`), and
+//!   `headless::frame_tick` drops the frame timer entirely once nothing needs
+//!   a render -- while destroying a `wl_buffer` produces no damage and asks
+//!   for no frame. So a client that imports a dmabuf, destroys the
+//!   `wl_buffer`, closes its fd and *never commits anything* leaves an
+//!   `mmap` and its pinned pages behind, for the process lifetime, and can
+//!   repeat that unboundedly. `MAX_BUFFERS_PER_CLIENT` does not bound it: the
+//!   live count is back to zero on every iteration, which is exactly the
+//!   bypass shape `wl_buffers.rs` exists to catch.
+//!
+//!   So flexwm drains the cache itself, from the one event that actually
+//!   means a mapping may have expired: [`schedule_cache_drain`] is called
+//!   from `dispatch.rs`'s `wl_buffer` destruction hook and queues one loop
+//!   idle, which calls `cleanup_texture_cache`. An idle rather than the hook
+//!   itself, and the ordering is load-bearing rather than incidental: during
+//!   `ObjectData::destroyed` the object data *still owns* the `Dmabuf`
+//!   (wayland-backend calls `object_data.clone().destroyed(..)` and only
+//!   drops its `pending_destructors` vec afterwards --
+//!   `rs/server_impl/handle.rs:45-60`), so a `cleanup` run there would find
+//!   the `WeakDmabuf` still live and free nothing. `Backend::dispatch_all_clients`
+//!   runs that drop before it returns (`rs/server_impl/common_poll.rs:102-103`),
+//!   and calloop runs idles after `dispatch_events` returns
+//!   (`loop_logic.rs:632-634`, and the same in `run`), so the drain lands in
+//!   the same dispatch as the destroy, one step later. One idle per batch, not
+//!   per buffer.
 //! - **Nothing re-synchronises a cached mapping.** `import_dmabuf` issues
 //!   `DMA_BUF_IOCTL_SYNC(START|READ)` immediately followed by `(END|READ)`
 //!   **once, at import time** (`pixman/mod.rs:772-773`), and `existing_dmabuf`
@@ -178,8 +203,8 @@ use std::path::{Path, PathBuf};
 
 use smithay::backend::allocator::dmabuf::{Dmabuf, DmabufSyncFlags};
 use smithay::backend::allocator::{Buffer, Format, Fourcc, Modifier};
-use smithay::backend::renderer::ImportDma;
 use smithay::backend::renderer::utils::RendererSurfaceStateUserData;
+use smithay::backend::renderer::{ImportDma, Renderer};
 use smithay::reexports::wayland_server::DisplayHandle;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::wayland::compositor::{
@@ -291,38 +316,64 @@ fn node_rdev(path: &Path) -> Option<libc::dev_t> {
     Some(rdev)
 }
 
-/// Re-synchronises every dmabuf a just-committed surface tree holds, so the
-/// frame drawn from it is the frame the client finished rendering.
+/// Waits for the GPU to finish the frame a client just committed, so what the
+/// compositor later reads out of the mapping is a whole frame rather than half
+/// of one.
 ///
-/// The pinned rev gives no such guarantee on its own, and this is the whole of
-/// what stands in for it (see the module doc's cache section):
-/// `PixmanRenderer::import_dmabuf` brackets its *first* read with
-/// `DMA_BUF_IOCTL_SYNC(START|READ)` / `(END|READ)` and `existing_dmabuf`
-/// re-serves the cached mapping on every later commit without syncing at all,
-/// so a client re-rendering into one dmabuf across frames -- the normal GL
-/// case -- would otherwise be composited from stale CPU caches and from a
-/// render the GPU may not have finished. `START|READ` is the one call that
-/// both waits on the buffer's implicit fences and invalidates the CPU's view
-/// of it; `END|READ` closes the access window the kernel expects to be
-/// balanced. Issued as one adjacent pair, exactly as upstream issues it at
-/// import -- the difference is the cadence, not the shape.
+/// The pinned rev does this exactly once per dmabuf and never again:
+/// `PixmanRenderer::import_dmabuf` issues `DMA_BUF_IOCTL_SYNC(START|READ)` and
+/// `(END|READ)` at import (`pixman/mod.rs:772-773`), and `existing_dmabuf`
+/// re-serves the cached mapping on every later commit without syncing at all
+/// (`pixman/mod.rs:1189`) -- so a client re-rendering into one dmabuf across
+/// frames, the normal GL case, is composited from whatever state the buffer
+/// happens to be in. This issues the same pair at the cadence the client
+/// actually rewrites the buffer.
+///
+/// **What the pair does and does not buy, precisely** -- the two halves are
+/// not equal here, and the honest reading matters more than the tidy one:
+///
+/// - `START|READ` enters `dma_buf_begin_cpu_access`, which *waits on the
+///   buffer's reservation fences*. That is the load-bearing half, and it lands
+///   correctly: when it returns, the client's GPU job for that buffer is done,
+///   so the later read cannot see a half-drawn frame.
+/// - The cache-invalidation half does **not** survive to the read. `START`
+///   also invalidates the CPU's view, but `END|READ` closes the access window
+///   immediately afterwards and pixman reads the mapping later, at render. So
+///   this is *not* a correctly bracketed CPU access and must not be described
+///   as one. It is issued as an adjacent pair because that is what upstream
+///   does at import, because the kernel expects begin/end to balance, and
+///   because the half that actually keeps a torn frame off screen is complete
+///   when `START` returns. A genuinely bracketed read would mean holding the
+///   window open from commit across render, for which the renderer's API
+///   offers no seam at the pinned rev. On the coherent mappings a LINEAR
+///   dmabuf gives on this project's hardware the invalidate is a no-op anyway;
+///   on an architecture where it is not, this is the paragraph that says what
+///   would have to change.
 ///
 /// Commit time, not render time, because commit is precisely "the client has
 /// finished writing this buffer": there is one sync per buffer the client
 /// actually rewrote, rather than one per frame per surface (a pointer motion
 /// can redraw an unchanged surface many times over).
 ///
-/// **This blocks the event loop for as long as the client's GPU job takes**,
-/// and that is the point, not an oversight: `dma_buf_begin_cpu_access` waits
-/// on the buffer's reservation fences, which is the *only* mechanism a
-/// CPU-mapping compositor has to not composite a half-drawn frame. The
-/// exposure it buys is a client whose GPU job hangs stalling this loop until
-/// the driver resets it (drivers time out and force-signal; the kernel wait
-/// itself has no deadline). Taking it knowingly, because the alternative --
-/// what the pinned rev does, which is not to wait at all -- is torn pixels
-/// every frame for every GL client. A non-blocking version means polling the
-/// plane fd for readability and deferring the frame, which is machinery this
-/// item does not need and explicit sync would supersede.
+/// **This blocks the event loop for as long as the client's GPU job takes,
+/// while holding that surface's user-data mutex**, and that is a known cost
+/// rather than an oversight. The wait is the whole point (above). The mutex
+/// comes from where the wait happens: `with_surface_tree_downward` runs its
+/// processor closure inside `TreeSurfaceData::map`, which holds
+/// `lock_user_data(surface)` -- and every ancestor's, since it recurses while
+/// holding -- across the call (`wayland/compositor/tree.rs:500-520`). Benign
+/// in this single-threaded design, where nothing else can contend for those
+/// locks while the loop is inside the ioctl, but it is a real widening of
+/// what a hung client GPU job stalls, so it is written down rather than left
+/// to be discovered.
+///
+/// The exposure that buys is a client whose GPU job hangs stalling the loop
+/// until the driver resets it (drivers time out and force-signal; the kernel
+/// wait itself has no deadline). Taken knowingly, because the alternative --
+/// what the pinned rev does, which is not to wait at all -- is a torn frame
+/// for every GL client. A non-blocking version means polling the plane fd for
+/// readability and deferring the frame, machinery this item does not need and
+/// explicit sync would supersede.
 ///
 /// Walks the subtree for the same reason
 /// [`on_commit_buffer_handler`](smithay::backend::renderer::utils::on_commit_buffer_handler)
@@ -333,7 +384,25 @@ fn node_rdev(path: &Path) -> Option<libc::dev_t> {
 ///
 /// Only called when [`State::imports_dmabufs`](super::State) says some import
 /// has actually succeeded in this session, so an shm-only session never pays
-/// for this walk (see that field's doc).
+/// for this walk at all (see that field's doc). That gate is session-wide, not
+/// per client, so once any client imports a dmabuf every commit of every
+/// client walks its own tree -- measured, because a per-event path in this
+/// project gets a number rather than an argument
+/// (`dmabuf/tests.rs::commit_sync_cost`, release build, this machine,
+/// 20k rounds on a one-surface tree):
+///
+/// ```text
+/// gate off (no dmabuf in the session): not called -- one bool test in `commit`
+/// gate armed, surface has no dmabuf:   99ns per commit
+/// gate armed, surface has a dmabuf:    1.39us per commit
+/// ```
+///
+/// The middle row is what an innocent `wl_shm` client pays for a GL
+/// neighbour: 99ns against a commit that already walks this same tree once in
+/// `on_commit_buffer_handler`. Twenty surfaces at 60Hz is ~120us per second,
+/// or 0.01% of a core. The last row is the client the work is for, and is
+/// almost entirely the two ioctls (no fences to wait on in that measurement;
+/// a real GPU job makes it as long as that job takes, by design -- above).
 pub(super) fn sync_committed_dmabufs(surface: &WlSurface) {
     if is_sync_subsurface(surface) {
         return;
@@ -456,6 +525,52 @@ impl DmabufHandler for State {
                 refuse_import(&mut self.wl_buffers, notifier);
             }
         }
+    }
+}
+
+/// Queues the one loop idle that drops expired entries from the renderer's
+/// dmabuf cache, if this session has any and one is not queued already.
+///
+/// Called from `dispatch.rs`'s `wl_buffer` destruction hook -- for buffers of
+/// every kind, because that hook cannot observe which kind died (see
+/// `wl_buffers.rs`), and an extra scan of a short `Vec` is cheaper than the
+/// bookkeeping to find out. Gated on
+/// [`State::imports_dmabufs`](super::State), so a session that has never
+/// imported one never queues anything at all.
+///
+/// Why an idle and not the hook itself, and why this is the whole fix rather
+/// than a belt-and-braces addition to rendering: see the module doc's cache
+/// section. Short version -- the `Dmabuf` is still owned by the object data
+/// whose `destroyed` is running, so a drain there frees nothing; and a
+/// destroyed buffer causes no damage, so nothing guarantees a later frame.
+///
+/// One idle per batch: `pending` is what keeps a client destroying 512
+/// buffers in one dispatch from queueing 512 scans. The same batching
+/// argument (and pattern) as `bind_budget.rs`'s deferred refusals.
+pub(super) fn schedule_cache_drain(state: &mut State) {
+    if !state.imports_dmabufs || state.dmabuf_drain_queued {
+        return;
+    }
+    state.dmabuf_drain_queued = true;
+    state.loop_handle.insert_idle(drain_cache);
+}
+
+/// Drops every dmabuf mapping whose buffer has gone, and clears the flag that
+/// lets the next destruction queue another drain.
+///
+/// `Renderer::cleanup_texture_cache` is `PixmanRenderer::cleanup` with a
+/// `Result` around it (`pixman/mod.rs:891-894`); the pixman implementation
+/// cannot fail, so the error arm is for a renderer this compositor does not
+/// have yet. It logs rather than propagating: there is nothing a caller on
+/// the idle queue could do about it, and a session that cannot drain its
+/// cache is still a session worth keeping up.
+fn drain_cache(state: &mut State) {
+    state.dmabuf_drain_queued = false;
+    let Some(backend) = state.backend.as_mut() else {
+        return;
+    };
+    if let Err(error) = Renderer::cleanup_texture_cache(&mut backend.renderer) {
+        tracing::debug!(%error, "dropping expired dmabuf mappings failed");
     }
 }
 

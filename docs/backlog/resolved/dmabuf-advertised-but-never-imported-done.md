@@ -201,18 +201,45 @@ Each numbered requirement above, and what was actually found:
    own `ImportDma::dmabuf_formats()` rather than against a comment. Pixman's
    set is the larger one, which the test also asserts so it cannot go vacuous.
    Multi-plane and non-`LINEAR` stay refused, with tests for both.
-3. **Mapping lifetime / `cleanup()` -- checked, and the answer is that a
-   flexwm render path already calls it.** `Renderer::render` calls
-   `self.cleanup()` on entry (`pixman/mod.rs:866`) and flexwm reaches it
-   through `OutputDamageTracker::render_output` (`damage/mod.rs:874`), so
-   every frame flexwm actually draws drains the expired cache entries.
-   `render_output` skips `renderer.render` when there is no damage -- which is
-   exactly when no buffer has gone away either. So there is no leak to fix,
-   but the claim is now held by a test rather than by reading:
-   `an_imported_mapping_is_released_when_the_buffer_goes_away` counts this
-   process's `/dmabuf` mappings in `/proc/self/maps` (the only handle a test
-   has on a private field of another crate), imports a real dma-buf, releases
-   it, renders one frame and asserts the count is back where it started.
+3. **Mapping lifetime / `cleanup()` -- the leak is real and is fixed here.**
+   (This section was wrong in the first version of this fix and is rewritten;
+   the error was caught by review.) `PixmanRenderer::cleanup` has exactly two
+   call sites at the pinned rev -- `Renderer::render` (`pixman/mod.rs:866`)
+   and `cleanup_texture_cache` (`:892`) -- and flexwm reached only the first,
+   through `OutputDamageTracker::render_output` (`damage/mod.rs:874`). The
+   first version claimed that was enough, on the reasoning that "`render_output`
+   skips `renderer.render` when there is no damage, which is exactly when no
+   buffer has gone away either". **That second clause is false.** Destroying a
+   `wl_buffer` produces no damage and requests no frame
+   (`forget_destroyed_buffer` only decrements a count), `render_output` returns
+   `skipped` before touching `Renderer::render` when damage is empty
+   (`damage/mod.rs:365-367`), and `headless::frame_tick` drops the frame timer
+   entirely once nothing needs a render. So a client could import a dmabuf,
+   destroy the `wl_buffer`, close its fd, never commit anything, and repeat --
+   pinning one dma-buf's pages per pass for the process lifetime.
+   `MAX_BUFFERS_PER_CLIENT` cannot bound it, because the live count returns to
+   zero on every pass: the exact bypass shape `wl_buffers.rs` exists to catch.
+
+   Fixed by draining from the event that actually means a mapping may have
+   expired: `dmabuf::schedule_cache_drain`, called from `dispatch.rs`'s
+   `wl_buffer` destruction hook, queues one loop idle that calls
+   `cleanup_texture_cache`. An idle rather than the hook itself because during
+   `ObjectData::destroyed` the object data still owns the `Dmabuf`
+   (wayland-backend drops its `pending_destructors` only afterwards --
+   `rs/server_impl/handle.rs:45-60`), so a drain there would free nothing;
+   calloop runs idles after `dispatch_events` returns, by which point
+   `dispatch_all_clients` has done that drop (`common_poll.rs:102-103`). One
+   idle per dispatch however many buffers died in it, and nothing at all until
+   the session's first successful import.
+
+   Three tests, and the first two fail without the fix (verified by disabling
+   the call): `an_imported_mapping_is_released_without_any_frame` and
+   `repeated_import_and_release_without_a_frame_does_not_grow_the_cache` --
+   neither renders a frame anywhere -- plus
+   `a_rendered_frame_also_drains_the_mapping_cache` for the upstream path,
+   which still works and is still not sufficient. All three count this
+   process's `/dmabuf` mappings in `/proc/self/maps`, the only handle a test
+   has on a private field of another crate.
 4. **Per-frame sync -- checked, and the pinned rev guarantees nothing.**
    `PixmanRenderer::import_dmabuf` issues
    `DMA_BUF_IOCTL_SYNC(START|READ)` immediately followed by `(END|READ)` once,
@@ -229,6 +256,23 @@ Each numbered requirement above, and what was actually found:
    can redraw an unchanged surface many times. Gated on
    `State::imports_dmabufs`, latched by the first successful import, so an
    shm-only session keeps the commit path it had before.
+
+   Two honest limits on what that bracket buys, both now written into the
+   function's doc rather than glossed: the `START|READ` half lands correctly
+   and is the load-bearing one (it waits on the buffer's reservation fences,
+   so the read cannot see a half-drawn frame), but the pair does **not**
+   bracket the read -- `END|READ` closes the window at commit while pixman
+   reads at render, so the cache-invalidate half does not survive to the read.
+   And the fence wait blocks the event loop while holding that surface's
+   user-data mutex, because `TreeSurfaceData::map` holds
+   `lock_user_data` across its processor closure
+   (`wayland/compositor/tree.rs:500-520`).
+
+   Measured, since this is a per-event path (`commit_sync_cost`, release,
+   20k rounds, one-surface tree): gate off, not called; gate armed with no
+   dmabuf on the surface, **99ns** per commit; gate armed with a dmabuf,
+   **1.39us**. The middle number is what an `wl_shm` client pays for a GL
+   neighbour -- twenty surfaces at 60Hz is ~120us per second.
 5. **`main_device` names the render node.** The ladder is now
    `/dev/dri/renderD128`, then `card0`, then `0`. (On the reference machine
    `card0` does not even exist -- the Asahi M2 enumerates `card1`/`card2` plus

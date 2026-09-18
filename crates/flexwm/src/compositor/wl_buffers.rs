@@ -13,6 +13,17 @@
 //! quantities (live pool objects + the address-space envelope vs retained
 //! fds/mappings), and neither subsumes the other.
 //!
+//! **One thing this cap does not bound, and the reason is worth carrying
+//! here rather than only in `dmabuf.rs`:** an imported dmabuf's `mmap` lives
+//! in the renderer's own cache, which outlives the `wl_buffer` that carried
+//! it. The live count returns to zero the moment the buffer object dies, so
+//! import/destroy in a loop is the same shape as the pool bypass above -- a
+//! retained mapping with the cap back at zero -- and no buffer count can
+//! catch it. What catches it is `dmabuf.rs`'s `schedule_cache_drain`, hung
+//! off the same destruction hook that releases this count. Delete neither
+//! half without the other, and see that module's cache section for why a
+//! rendered frame is not a substitute.
+//!
 //! ## The number
 //!
 //! [`MAX_BUFFERS_PER_CLIENT`] is 512. The floor is measured, not guessed:
@@ -28,10 +39,11 @@
 //! legitimate session -- the same death-penalty sizing the capture-frame
 //! cap (16 for a legitimate 1) already uses.
 //!
-//! What 512 bounds per connection: 512 live buffers, and with them the
-//! retained fds/mappings -- one fd minimum per surviving shm buffer (its
-//! `Arc<Pool>`'s `OwnedFd`), one client fd per dmabuf buffer, none per
-//! single-pixel buffer (see below). Together with the 128 live pools that
+//! What 512 bounds per connection: 512 live buffers, and with them the fds
+//! and mappings those *objects* retain -- one fd minimum per surviving shm
+//! buffer (its `Arc<Pool>`'s `OwnedFd`), one client fd per dmabuf buffer,
+//! none per single-pixel buffer (see below). Not the renderer-side dmabuf
+//! mapping, which outlives the object (above). Together with the 128 live pools that
 //! is at most ~640 fds from one connection against a 1024-fd
 //! `RLIMIT_NOFILE`: one connection alone cannot exhaust the table, two
 //! can -- the multiplier on top is connection-count territory (see
@@ -149,10 +161,20 @@
 //! delegating) must hook both halves: claim on its creating request in
 //! `dispatch.rs`, release through the existing `wl_buffer` destruction hook.
 //! Re-check the four creation handlers' error-before-init shape on every
-//! Smithay bump: the exactness argument above leans on it. The same goes for
-//! anything that starts *refusing* a creation while leaving the client alive
-//! -- that needs an explicit release, as the async dmabuf `create` above
-//! does.
+//! Smithay bump: the exactness argument above leans on it. The mechanical
+//! guard on that shape is
+//! `dmabuf/tests.rs::an_import_through_create_immed_is_not_a_client_kill`,
+//! which asserts a count of exactly **one** after an *accepted* `create_immed`
+//! -- Smithay runs `data_init.init` before `dmabuf_imported`, so the object
+//! has to exist by then for the count to be there. It cannot be guarded on a
+//! *refused* creation any more: a refusal that leaves the client alive now
+//! releases its own unit, so the count lands on zero whether or not the object
+//! was initialised (the dispatch-side test that used to claim otherwise says
+//! so in its own doc now).
+//!
+//! The same goes for anything that starts *refusing* a creation while leaving
+//! the client alive -- that needs an explicit release, as the async dmabuf
+//! `create` above does.
 //!
 //! ## Per connection, not per machine
 //!
