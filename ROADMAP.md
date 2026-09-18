@@ -807,6 +807,15 @@ gap jumped the queue — each item's own file records why it landed when it did.
   `wayland-info` advertisement; no tablet-tool hardware on the dev VM
   (its QEMU tablet is pointer-only), so the libinput arms are
   review-verified and real tool types untested -- stated in the record.
+- **[A global fd/buffer ceiling across Wayland connections](docs/backlog/resolved/wayland-global-fd-ceiling-done.md)** —
+  RESOLVED 2026-09-18: the connection-cap verdict's deferred half -- a
+  compositor-wide pressure ceiling with a designed refusal form. Past 128
+  free fds newcomers shed (Wayland EOF, IPC refused with a reason naming
+  the pressure), and past-grace creations (128 live buffers, 64 live
+  pools) are refused with the interfaces' own protocol errors, so the kill
+  always lands on a contributor and never an innocent bar. Thirteen
+  fail-first tests; proven live with a 374-connection horde (52 sheds,
+  foot untouched, immediate recovery on drain).
 ## What's next
 
 The backlog is the source of truth for what to pick up; this is the current

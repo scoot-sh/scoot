@@ -37,6 +37,7 @@ use smithay::reexports::wayland_server::Display;
 
 use super::*;
 use crate::compositor::decorations::Appearance;
+use crate::compositor::fd_pressure::Table;
 use crate::compositor::ipc::MAX_TYPE_CHARS;
 use crate::compositor::ipc::slots::{MAX_CONNECTIONS, Slots};
 use crate::compositor::ipc::tests::set_sndbuf;
@@ -145,6 +146,26 @@ impl Harness {
                 ..Limits::REAL
             },
         )
+    }
+
+    /// The same, under a given fd-table reading rather than the live one.
+    /// For the pressure-refusal tests below, which cannot fill the real
+    /// table without starving every sibling test sharing this process's
+    /// fds, so they drive `accept_under` with a canned reading instead.
+    fn connect_under_table(&mut self, table: Option<Table>) -> TestClient {
+        let (server, client) = UnixStream::pair().expect("a socket pair");
+        super::super::accept_under(&mut self.state, server, &self.slots, Limits::REAL, table)
+            .expect("the connection is taken or refused, not failed");
+        // Non-blocking on this side too, for the same deadlock reason as
+        // `connect_limited` above.
+        client
+            .set_nonblocking(true)
+            .expect("a non-blocking test client");
+        TestClient {
+            stream: client,
+            received: Vec::new(),
+            closed: false,
+        }
     }
 
     /// The same, with both deadlines chosen.
@@ -1760,6 +1781,76 @@ fn the_connection_past_the_cap_is_refused_with_a_reason() {
         first.expect_reply(&mut harness),
         Response::Version { .. }
     ));
+}
+
+// --- fd-pressure refusals ----------------------------------------------------
+
+#[test]
+fn a_connection_under_fd_pressure_is_refused_with_a_reason() {
+    // What the global ceiling is for on this socket: the table is nearly
+    // full, so the newcomer is refused outright -- told why, unlike a shed
+    // Wayland connection, because this channel can carry the reason -- and
+    // costs the table nothing.
+    let mut harness = Harness::new();
+    let mut refused = harness.connect_under_table(Some(Table {
+        used: 1024,
+        soft: 1024,
+    }));
+    match refused.expect_reply(&mut harness) {
+        Response::Error { message } => assert!(
+            message.contains("pressure"),
+            "the refusal did not say why: {message}"
+        ),
+        other => panic!("a connection under pressure was served: {other:?}"),
+    }
+    // And it is a refusal, not a queue: the socket is closed straight away.
+    refused.expect_closed(&mut harness);
+
+    // The refusal itself cost nothing -- no slot taken...
+    assert_eq!(
+        harness.slots.live(),
+        0,
+        "a pressure-refused connection took a slot anyway"
+    );
+    // ...and whoever is already connected still works: pressure sheds
+    // newcomers, it never touches the living.
+    let mut fresh = harness.connect_under_table(None);
+    fresh.send(request_line(&Request::Version).as_bytes());
+    assert!(
+        matches!(fresh.expect_reply(&mut harness), Response::Version { .. }),
+        "a calm newcomer was not served after a pressure refusal"
+    );
+}
+
+#[test]
+fn a_calm_fd_table_admits() {
+    // An observed table with headroom is served exactly like a connection
+    // through the live path.
+    let mut harness = Harness::new();
+    let mut fresh = harness.connect_under_table(Some(Table {
+        used: 14,
+        soft: 1024,
+    }));
+    fresh.send(request_line(&Request::Version).as_bytes());
+    assert!(
+        matches!(fresh.expect_reply(&mut harness), Response::Version { .. }),
+        "a calm table did not admit"
+    );
+    assert_eq!(harness.slots.live(), 1);
+}
+
+#[test]
+fn an_unknown_fd_table_admits() {
+    // Fail open: a broken gauge must not deny innocents (the `EMFILE`
+    // shed still catches real exhaustion underneath).
+    let mut harness = Harness::new();
+    let mut fresh = harness.connect_under_table(None);
+    fresh.send(request_line(&Request::Version).as_bytes());
+    assert!(
+        matches!(fresh.expect_reply(&mut harness), Response::Version { .. }),
+        "an unknown table did not admit"
+    );
+    assert_eq!(harness.slots.live(), 1);
 }
 
 #[test]

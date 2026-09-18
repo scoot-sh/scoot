@@ -14,6 +14,7 @@ mod decorations;
 mod dispatch;
 mod dmabuf;
 mod ext_workspace;
+mod fd_pressure;
 mod foreign_toplevel;
 mod foreign_toplevel_management;
 mod gamma_control;
