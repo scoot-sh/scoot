@@ -1,15 +1,43 @@
 # Running flexwm on Apple Silicon (Asahi Linux)
 
-Three things in the backlog are blocked on an Asahi machine and cannot be
+Three things in the backlog were blocked on an Asahi machine and cannot be
 answered anywhere else. This is the runbook for answering them. Written
 against `main` at `1b706b8`; the flags and bindings below are quoted from
-`README.md` at that commit.
+`README.md` at that commit. **Two of the three were answered on 2026-09-18**
+— see the results table and section immediately below; the runbook itself is
+kept intact for re-runs on other Apple Silicon models.
 
-| What it unblocks | Priority | Needs a VT? |
-| --- | --- | --- |
-| [Ghostty fails at `scale = 1.5`](docs/backlog/protocols/ghostty-fails-at-1-5.md) | high | no |
-| [Does `--gpu` actually fix this machine](docs/backlog/resolved/tty-gpu-config-key-done.md) — the residual on a resolved entry | — | yes |
-| Issue #48's unconfirmed connector fallback | — | yes |
+| What it unblocks | Priority | Needs a VT? | Status |
+| --- | --- | --- | --- |
+| [Ghostty fails at `scale = 1.5`](docs/backlog/protocols/ghostty-fails-at-1-5.md) | high → low | no | **did not reproduce** (2026-09-18) |
+| [Does `--gpu` actually fix this machine](docs/backlog/resolved/tty-gpu-config-key-done.md) — the residual on a resolved entry | — | yes | **closed**: not needed, the search works (2026-09-18) |
+| Issue #48's unconfirmed connector fallback | — | yes | still open — needs an external display |
+
+## Results so far (run 2026-09-18, `main` at `f688ac9`)
+
+The machine is an Apple M2 (`apple,t8112`, j413), NixOS aarch64. The DRM
+split is exactly as this document predicted: `card1` → `asahi` (render, no
+KMS), `card2` → `apple-drm` (display, owns `eDP-1`), `renderD128` → render
+node.
+
+- **Test 2 — answered, no VT needed after all.** flexwm was *already the
+  live desktop session* (greetd → `flexwm --tty -- noctalia`), running with
+  no `--gpu` flag and no `[tty] gpu` key, with `/dev/dri/card2` as its only
+  open DRM fd. The automatic search works on Apple Silicon; `--gpu` is a
+  convenience here, not a requirement. Read-only `/proc/<pid>/fd` and
+  `flexwm msg outputs` gave this without restarting anything.
+- **Test 1 — did not reproduce**, at either scale, on the real AGX GPU
+  (dmabuf, `renderD128`), with zero EGL/GL and zero protocol errors, on both
+  current `main` and the older binary the user daily-drives. Both hypotheses
+  this runbook named — Ghostty version and the GPU/GL path — are refuted.
+  One configuration remains untested: `--tty` at 1.5 on the real `eDP-1`.
+- **Test 3 — cannot run.** Only one connector exists (`card2-eDP-1`,
+  connected). Nothing to fall back to until an external display is attached,
+  and it also needs the `--tty` seat the live session holds.
+
+Everything below is the runbook as written, plus traps found while running
+it. Re-running any of it is still worthwhile on a different Asahi model or
+a newer Ghostty.
 
 ## Why this machine
 
@@ -34,8 +62,15 @@ risky part comes last:
 
 - **Test 1 needs no VT at all.** It runs `--headless` inside your normal
   session. Ghostty still uses the real Asahi GL stack, which is the part
-  under suspicion, so the backend costs nothing here.
-- **Tests 2 and 3 take a VT.** Under `--tty`, flexwm binds `Ctrl+Alt+F1`
+  under suspicion, so the backend costs nothing here. *(That reasoning held
+  and did its job — the GL stack was exercised over dmabuf and the GL
+  hypothesis was refuted. But refuting it is exactly what makes the backend
+  matter again: with GL eliminated, `--headless`-vs-`--tty` is now the
+  largest untested variable. Test 1's result note says what is left.)*
+- **Test 2 may need no VT either** — if flexwm is already your desktop
+  session, the read-only shortcut in that section answers it from inside the
+  session you are in. Check before booking a VT.
+- **Tests 2 and 3 take a VT**, absent that shortcut. Under `--tty`, flexwm binds `Ctrl+Alt+F1`
   through `Ctrl+Alt+F12` to VT switching. These are added *after* the config
   file loads and always win over a colliding config bind (logging a warning
   naming what they displaced), precisely so this recovery path cannot be lost
@@ -84,21 +119,33 @@ ghostty --version                   # record this
 Run at 1.5:
 
 ```sh
-WAYLAND_DEBUG=1 ./result/bin/flexwm --headless --width 1280 --height 800 \
+FLEXWM_SOCKET=/tmp/fx/t15.sock WAYLAND_DEBUG=1 \
+  ./result/bin/flexwm --headless --width 1280 --height 800 \
   --config /tmp/fx/s15.toml \
   -- ghostty --gtk-single-instance=false -e sh -c "sleep 60" \
   > /tmp/fx/ghostty-1.5.log 2>&1 &
 
-sleep 10
-./result/bin/flexwm msg windows
-./result/bin/flexwm msg screenshot --out /tmp/fx/g15.png
+sleep 12
+FLEXWM_SOCKET=/tmp/fx/t15.sock ./result/bin/flexwm msg windows
+FLEXWM_SOCKET=/tmp/fx/t15.sock ./result/bin/flexwm msg screenshot --out /tmp/fx/g15.png
 ```
 
-Then the same with `--config /tmp/fx/s20.toml`, writing
-`/tmp/fx/ghostty-2.0.log` and `/tmp/fx/g20.png`.
+Then the same with `--config /tmp/fx/s20.toml` and a *different* socket
+(`/tmp/fx/t20.sock`), writing `/tmp/fx/ghostty-2.0.log` and `/tmp/fx/g20.png`.
 
-**Two traps, both of which produced false failures during the original
-investigation and are recorded so they are not repeated:**
+**Three traps. The first two produced false failures during the original
+investigation; the third was found running this document on 2026-09-18. All
+are recorded so they are not repeated:**
+
+- **Set `FLEXWM_SOCKET` per instance if flexwm might already be running.**
+  `socket_path()` defaults to `$XDG_RUNTIME_DIR/flexwm.sock`, so on a machine
+  where flexwm *is the desktop session* — which is how this one is set up —
+  a bare `flexwm msg windows` talks to **the live session, not the test
+  instance**. That reads the real desktop's window list as if it were
+  Ghostty's and screenshots the real screen, which can look like either a
+  pass or a failure depending on what happens to be open. This is the same
+  class of harness artifact as the two below, and the most dangerous,
+  because the output looks entirely plausible.
 
 - **Don't shorten the sleep.** GTK4/Ghostty need roughly 7 s to map under
   software GL; `foot` needs ~0.5 s. A 4–5 s wait reads as "no windows
@@ -115,12 +162,59 @@ the defect is not flexwm's scaling and the fix (if any) is Ghostty-side or a
 workaround (`scale = 2.0`, or Ghostty's own `window-scale`/font-size
 setting). A Wayland protocol error means the opposite, and is a flexwm bug.
 
+**Don't reach for `--nested` as a middle ground.** It looks like a way to
+test fractional scale against a real compositing backend without taking the
+VT, and it is not — flexwm refuses output scaling there by design, because
+the host compositor owns the window's scale:
+
+```
+WARN flexwm::compositor: output scaling is not supported under --nested
+     (the host compositor owns the window's scale); using 1.0 configured=1.5
+```
+
+The client then sees `preferred_scale(120)` regardless of what the config
+says, so the run cannot say anything about 1.5. Tried and confirmed
+2026-09-18. `--headless` and `--tty` are the only two backends that can test
+this at all.
+
+**Result on this machine (2026-09-18): did not reproduce.** Ghostty 1.3.1
+mapped and drew real content at *both* scales — 409×510 logical at 1.5 and
+360×376 at 2.0, matching the dev VM's numbers exactly — with correct
+`preferred_scale` (180 / 240), zero protocol errors and zero EGL/GL errors,
+over dmabuf on the real AGX GPU. Both hypotheses this runbook was built
+around are therefore refuted, and the remaining suspect is `--tty` at 1.5.
+See the backlog entry for the full table and what is left to test.
+
 ---
 
 ## Test 2 — which DRM device `--tty` drives
 
 **The question.** Does the automatic search find the display controller on
 Apple Silicon, and if not, does `--gpu` fix it?
+
+> **Answered 2026-09-18: yes, the search works; `--gpu` is not needed.**
+> And it needed no VT, because flexwm was already the live session. **Check
+> that first** — if flexwm is already running as your desktop, the cheapest
+> and most authoritative version of this test is read-only, on the session
+> you are already in:
+>
+> ```sh
+> pgrep -ax flexwm                              # was --gpu passed?
+> ls -l /proc/$(pgrep -x flexwm)/fd | grep dri  # which DRM node is open?
+> flexwm msg outputs                            # which connector?
+> ```
+>
+> On this machine that gave `--tty` with no `--gpu`, one DRM fd
+> (`/dev/dri/card2`, the `apple-drm` display controller), and `eDP-1` —
+> i.e. the fallback rejected the `asahi` render node unattended, in a real
+> daily-driven session. That is better evidence than a test run, and it
+> costs nothing. The steps below are for the case where flexwm is *not*
+> already up, or where you want the log lines themselves.
+>
+> Note the log lines are the one thing this shortcut cannot give you: a
+> greetd-launched session's stderr goes to `/dev/tty1` uncaptured, and
+> getting it back means restarting your desktop. Add a redirect to the
+> session command if you need it.
 
 This was originally the gate on the `[tty] gpu` config key. That key shipped
 on 2026-09-18 without waiting, on the reasoning that the gate conflated two
@@ -199,7 +293,24 @@ warning outside `--tty`.
 
 **Only if Test 2 gets a session up**, and only if `--gpu` was not needed (or
 was needed but did not print the udev-list warning — hotplug is not followed
-otherwise).
+otherwise). Test 2 cleared both conditions on 2026-09-18.
+
+> **Not yet run — blocked on hardware, not on software.** This machine
+> currently exposes exactly one connector:
+>
+> ```
+> /sys/class/drm/card2-eDP-1: status=connected enabled=enabled
+> ```
+>
+> There is no second connector to fall back *to*, so the unplug this test
+> describes has no defined outcome to observe. It needs an external display
+> on USB-C (DP alt mode). Check for a second `card2-*` entry after plugging
+> one in — if none appears, that is an Asahi DCP limitation to establish
+> before blaming flexwm.
+>
+> Second constraint: it needs the `--tty` seat, which only one process can
+> hold. If flexwm is already your desktop session, that session *is* the
+> one to test — don't start a second `--tty` instance, it will be refused.
 
 Issue #48 is the last open issue in the repo. PR #51 implemented DRM hotplug
 and deliberately said `Refs #48`, not `Closes`: two of its four code paths
@@ -235,3 +346,20 @@ Raw logs beat a summary here. Both open entries were written after earlier
 investigations went wrong in ways only the raw output showed — a harness
 artifact that looked exactly like the bug in one case, and a test whose own
 trigger refreshed the kernel state it was meant to be reading in another.
+The 2026-09-18 run added a third of the same kind: the default IPC socket
+silently addressing the live session instead of the test instance (Test 1's
+first trap). Assume the next one exists too, and keep the raw output.
+
+## Verification set on this hardware (2026-09-18)
+
+First time the suite had ever run on aarch64/Asahi. All green against `main`
+at `f688ac9`: `cargo test -p flexwm` 964 passed; `cargo nextest run
+--workspace` 1069 passed, 2 skipped; `cargo clippy -p flexwm --all-targets
+-- -D warnings` clean; `cargo fmt --check -p flexwm` clean;
+`scripts/smoke-test.sh` 16/16 `ok`.
+
+One snag worth knowing: `smoke-test.sh` needs `jq`, which the flake's dev
+shell does not provide. Without it the window-count check compares an empty
+string and the script fails with `the second foot never mapped a window` —
+a harness artifact, not a compositor bug. Run it under
+`nix shell nixpkgs#jq --command …` until the dev shell carries `jq`.

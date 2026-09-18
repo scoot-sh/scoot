@@ -1,9 +1,9 @@
 ---
-title: "Ghostty fails to load at `[output] scale = 1.5` (works at 2.0); the integer `wl_surface.preferred_buffer_scale` was missing and is now sent, but that does not explain the symptom"
+title: "Ghostty fails to load at `[output] scale = 1.5` (works at 2.0); did NOT reproduce on the reporter's own Asahi machine, refuting both leading hypotheses — root cause still unidentified"
 status: "open"
 area: "protocols"
-priority: "high"
-blocked: "needs the reporter's Asahi machine to confirm or refute the fix"
+priority: "low"
+blocked: "needs a --tty session at scale 1.5 on the reporter's machine; --headless and --nested are both now exhausted"
 ---
 
 # Ghostty fails to load at `[output] scale = 1.5` (works at 2.0)
@@ -14,6 +14,16 @@ Reported by the user on their Asahi Linux (M2) laptop, 2026-09-14, right after
 - `[output] scale = 2.0` → Ghostty loads and renders correctly.
 - `[output] scale = 1.5` → **Ghostty does not load.**
 - `foot` works at both `1.5` and `2.0`.
+
+## Status after the Asahi run (2026-09-18)
+
+**It did not reproduce on the reporting hardware, and both candidate
+hypotheses below are now refuted.** Priority drops from high to low: the
+symptom is not observable on the machine that produced it, and the user
+already daily-drives the `scale = 2.0` workaround. It is kept open rather
+than resolved only because the root cause was never identified and one
+configuration — the original one — remains untested. See "Asahi hardware run
+(2026-09-18)" below.
 
 ## What was found and fixed (a real, separate protocol gap)
 
@@ -80,37 +90,110 @@ investigation each looked like the bug and were not:
 Anyone re-running this must **poll for the window** and **keep the client
 alive**; a fixed sleep plus a command that exits will produce a false failure.
 
+## Asahi hardware run (2026-09-18) — did NOT reproduce
+
+Run on the reporter's own machine per [`Asahi.md`](../../../Asahi.md) Test 1:
+Apple M2 (`apple,t8112`, j413), NixOS aarch64, Ghostty **1.3.1**, flexwm built
+from `main` at `f688ac9`. `--headless --width 1280 --height 800`, client kept
+alive with `-e sh -c "sleep 60"`, 12 s settle.
+
+| | scale 1.5 | scale 2.0 |
+| --- | --- | --- |
+| window mapped | **yes**, `com.mitchellh.ghostty`, logical 409×510 | yes, 360×376 |
+| `wp_fractional_scale_v1.preferred_scale` | `180` (= 1.5) | `240` (= 2.0) |
+| `wl_surface.preferred_buffer_scale` | `2` | `2` |
+| attach / commit / presented events | 21 / 22 / 42 | 21 / 22 / 42 |
+| `wl_display.error` (protocol errors) | 0 | 0 |
+| client-side EGL/GL errors | none | none |
+
+The logical rects reproduce the dev VM's numbers **exactly** (409×510 and
+360×376), which cross-checks the methodology across two very different
+machines. Screenshots show drawn content — terminal background, focus border,
+live cursor block — not a blank backdrop.
+
+### Both hypotheses this entry named are now refuted
+
+- **(2) The GPU/GL path — the leading hypothesis — is refuted.** This run went
+  through the real Asahi AGX stack, not software rendering: 88
+  `zwp_linux_dmabuf_v1` references per run, and the Ghostty process holds
+  `/dev/dri/renderD128` (the `asahi` render node) open. That is precisely the
+  path the dev VM structurally could not exercise, and it produced no EGL/GL
+  error and no failure at either scale.
+- **(1) Ghostty version is refuted.** The reporter's machine runs 1.3.1 — the
+  same version as the dev VM, so version divergence was never the variable.
+
+### Also tested: the binary the user actually daily-drives
+
+The live session runs an **older** flexwm build than `main` at `f688ac9`. A
+differential run of that older binary at 1.5 also maps Ghostty (409×510, 70
+dmabuf references, 42 frames presented). So the non-reproduction is not an
+artifact of recent work masking the bug — in particular it is not today's
+dmabuf-import fix (`ce15c09`).
+
+That fix could not have been the original cause in any case: the dmabuf
+advertisement that broke GL clients landed 2026-09-17
+([`../resolved/dmabuf-advertised-but-never-imported-done.md`](../resolved/dmabuf-advertised-but-never-imported-done.md)),
+**three days after** this was reported on 2026-09-14.
+
+### The one configuration still untested, stated plainly
+
+The original report was against the user's real **`--tty`** desktop session on
+`eDP-1`. Everything above is `--headless`. That gap mattered less while the
+GL-path hypothesis stood — `Asahi.md` justified `--headless` on the grounds
+that the client's GL stack is identical either way, which is true and is why
+the hypothesis could be refuted there. But with the GL path eliminated, the
+backend difference is now the largest remaining variable rather than a
+negligible one.
+
+**`--nested` cannot substitute.** It was tried on 2026-09-18 and flexwm
+refuses fractional scale there by design:
+
+```
+WARN flexwm::compositor: output scaling is not supported under --nested
+     (the host compositor owns the window's scale); using 1.0 configured=1.5
+```
+
+The client saw only `preferred_scale(120)`, so the run says nothing about 1.5.
+`--headless` and `--tty` are therefore the only two backends that can test
+this at all, and `--headless` is now exhausted.
+
 ## What this narrows it to
 
-The failure is specific to the reporter's machine, so the distinguishing
-variable is not "GTK4 at 1.5" in general. Candidates, roughly:
+With (1) and (2) refuted and the dev VM and Asahi runs agreeing to the pixel,
+what is left is narrow:
 
-1. **Ghostty version.** Dev VM has 1.3.1. An older or newer Ghostty may have
-   different fractional-scale behavior; the reporter's version is unknown.
-2. **The GPU/GL path.** The dev VM falls back to software (Mesa `swrast`/
-   `zink` failures are all over its logs); the Asahi M2 runs a real
-   GPU-accelerated GL/EGL path. A fractional buffer allocation failure in
-   Ghostty's GPU renderer would not reproduce under software rendering —
-   this is the leading hypothesis, and it is the one thing the VM structurally
-   cannot exercise.
-3. **`wl_output` version or other global differences** the VM's flexwm also has,
-   so less likely.
+1. **A `--tty`-specific interaction at fractional scale** — real DRM
+   modesetting and eDP-1's actual geometry (2560×1600 physical; 1706×1066
+   logical at 1.5, versus the 854×534 the headless probe used). Untested.
+2. **Something environmental at the time of the report that has since
+   changed** — a Ghostty config, a GTK/Mesa version, or one of the many
+   compositor changes between 2026-09-14 and 2026-09-18. If so there is
+   nothing left to fix and this closes on the next clean `--tty` run.
+3. **A misreport or a transient** — possible but unevidenced, and not worth
+   assuming over the user's direct observation.
+
+This entry previously carried a third candidate, "`wl_output` version or
+other global differences", marked *less likely*. It is dropped rather than
+lost: the dev VM and the Asahi machine run the same flexwm build and now
+produce byte-identical logical geometry and the same advertised globals, so
+a global-set difference between them is ruled out. A `--headless`-vs-`--tty`
+difference in what `wl_output` reports is *not* ruled out, and is folded
+into candidate 1 above.
 
 ## What to do next
 
-1. **Ask the reporter for their Ghostty version** (`ghostty --version`) and,
-   at 1.5, `WAYLAND_DEBUG=1 ghostty` stderr — specifically the lines after the
-   first `wl_surface.commit`, and any EGL/GL error. That distinguishes (1)
-   from (2) immediately.
-2. If it is the GPU path, the tell will be a Ghostty-side EGL/GL error rather
-   than a Wayland protocol error — in which case flexwm's scaling is not the
-   defect and the fix (if any) is Ghostty-side or a workaround
-   (`scale = 2.0`, or Ghostty's own `window-scale`/font-size setting).
-3. Do not ship a compositor change for this until the stderr names a flexwm
+1. **The cheap decisive test, which only the user can run:** set
+   `[output] scale = 1.5` in `~/.config/flexwm/config.toml` and restart the
+   session. `Ctrl+Alt+F<vt>` remains the recovery path, so this is low-risk.
+   If Ghostty maps, close this entry; if it does not, capture the session's
+   stderr (it goes to the VT — redirect it to a file) and the entry finally
+   has its reproduction.
+2. Do not ship a compositor change for this until that run names a flexwm
    defect. The protocol work (#30, #31) stands on its own merits regardless.
 
 ## Related
 
+- [`Asahi.md`](../../../Asahi.md) — the hardware runbook this entry gated on.
 - `docs/backlog/resolved/output-scaling-done.md` — the scaling feature itself.
 - `docs/backlog/resolved/fractional-scale-integer-companion-done.md` —
   the integer-companion mechanism, fixed and tested; kept there for the

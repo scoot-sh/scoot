@@ -142,17 +142,62 @@ allocates one `String` per failed explicit device on the startup-failure
 path only. Nothing on any per-frame, per-event, or IPC-dispatch path
 changed or grew an allocation.
 
+### The Asahi residual — CLOSED (2026-09-18)
+
+The hardware confirmation this entry deferred is **done, and the answer is
+that the automatic search already works on Apple Silicon.** `--gpu` is a
+convenience on this machine, not a requirement, and the `[tty] gpu` key
+needs no reshaping — the "device path is the wrong shape" risk did not
+materialize.
+
+Measured on the reporter's Apple M2 (`apple,t8112`, j413), NixOS aarch64,
+per [`Asahi.md`](../../../Asahi.md) Test 2. The split is exactly the one the
+key was designed for:
+
+| node | driver | role |
+| --- | --- | --- |
+| `/dev/dri/card1` | `asahi` | render / AGX, **no KMS** |
+| `/dev/dri/card2` | `apple-drm` | display controller, owns `eDP-1` |
+| `/dev/dri/renderD128` | `asahi` | render node |
+
+**The evidence is stronger than the probe this entry asked for: it is the
+user's live, daily-driven session, not a test run.** flexwm runs as their
+desktop via greetd (`flexwm --tty -- noctalia`, pid 1700, seat0/vc1) with
+**no `--gpu` flag and no `[tty] gpu` key set** — and its only open DRM fd is
+`/dev/dri/card2`. So the fallback probed the `asahi` render node, rejected
+it, and landed on the `apple-drm` display controller unattended.
+`flexwm msg outputs` against that live session reports `eDP-1`, 1280×800
+logical at scale 2.0.
+
+Independent corroboration from the same boot: the greeter (niri) hit the
+exact failure this fallback routes around —
+
+```
+niri::backend::tty: error adding primary node device, display-only devices
+may not work: DRM access error: Error loading resource handles on device
+`Some("/dev/dri/card1")` (Operation not supported (os error 95))
+```
+
+— the `os error 95` signature this entry predicted, on the very device
+flexwm rejected, from a compositor whose primary-node heuristic lacks the
+fallback.
+
+**Not captured, and why:** the literal `drm: driving this device` line. The
+session's stderr goes to `/dev/tty1` uncaptured, and retrieving it would mean
+restarting the user's desktop — which was also hosting the session doing the
+measuring, and which only one process can hold the `--tty` seat for. The
+open-fd evidence answers the same question without that cost. Anyone wanting
+the log line can add a redirect to the greetd session command.
+
+**What stays untested, and why it no longer blocks:** the `[tty] gpu` key and
+`--gpu` flag themselves on *this* hardware. They did not need to run, because
+the mispick they exist to work around does not occur here — which is the
+finding. Their behavior remains unit-test proven plus dev-VM verified above.
+If some future Apple Silicon topology *does* mispick, this is the machine to
+retest on.
+
 ### Not verified live (stated plainly)
 
-- **The Asahi multi-GPU confirmation the ticket gated on.** The dev VM has
-  one GPU (`card0` + `renderD128`); there is no topology here where the
-  automatic pick is wrong, so the fallback-to-second-device and the
-  explicit-override-on-split-hardware shapes are unit-test proven only.
-  Revisit condition: the user's own Asahi hardware — run with and without
-  `[tty] gpu` set and confirm the named device is driven (the `drm:
-  driving this device` line names it). If that probe shows a device path
-  is the wrong persistent shape after all, reshape the key then; until
-  then this stands.
 - A lock, capture, or hotplug held across a config-named device choice;
   the legacy (non-atomic) probe of a named device (dev VM is atomic).
 - Two agents racing the `--tty` seat while one of them uses the key —
