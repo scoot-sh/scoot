@@ -745,6 +745,15 @@ gap jumped the queue — each item's own file records why it landed when it did.
   false positive, never a skipped real switch). Live away/back still
   pauses, reactivates with modeset and repaints byte-identically; the
   paused-retry `IgnoredPaused` guard is unregressed.
+- **[`flake.nix` description drift](docs/backlog/resolved/flake-description-drift-done.md)**
+  — RESOLVED 2026-09-18 (flake metadata only, no code): top-level
+  `description` names both (compositor on Linux, `flexwm msg` client on
+  macOS); `meta.description` is per system (Linux reads
+  `crates/flexwm/Cargo.toml`, Darwin names the client), so `nix search` no
+  longer advertises a compositor macOS never runs. A fully single-sourced
+  fix is loader-impossible (top level must be a syntactic attrset,
+  `description` a string literal — both proven live), so the top level stays
+  one literal by fiat. Sibling packaging tickets untouched.
 ## What's next
 
 The backlog is the source of truth for what to pick up; this is the current

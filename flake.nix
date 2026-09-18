@@ -1,5 +1,10 @@
 {
-  description = "flexwm: a scrolling-tiling Wayland compositor that runs without a GPU";
+  # On Linux this flake builds the whole compositor; on macOS the compositor
+  # is cfg'd out and the same package is just `flexwm msg`, the
+  # remote-control client — so the top level names both, and the package's
+  # `meta.description` below says per system which one it is. (This has to
+  # stay a string literal: the flake loader rejects anything else here.)
+  description = "flexwm: a scrolling-tiling Wayland compositor that runs without a GPU (on macOS, the remote-control client only)";
 
   # Pinned to the same nixpkgs revision as vm/, so the dev shell and the VM
   # agree on every library and nothing is downloaded twice.
@@ -15,6 +20,12 @@
         "x86_64-darwin"
       ];
       forEach = f: nixpkgs.lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
+      # The Linux `meta.description` below reads the compositor crate's own
+      # metadata (same `readFile`/`fromTOML` shape as `version`), so those
+      # two can't drift; the flake-level `description` above has to stay a
+      # hand-written literal (see its comment).
+      crateDescription =
+        (builtins.fromTOML (builtins.readFile ./crates/flexwm/Cargo.toml)).package.description;
     in
     {
       # `nix build` / `nix run`, for getting the binary without a dev shell.
@@ -80,7 +91,17 @@
           doCheck = false;
 
           meta = {
-            description = "A scrolling-tiling Wayland compositor that runs without a GPU";
+            # Linux builds the whole compositor, so the crate's own
+            # description is the honest one; on Darwin the compositor is
+            # cfg'd out and the package is just `flexwm msg` (see the
+            # comment on `packages` above and README's Building), so the
+            # metadata says that instead of advertising a compositor macOS
+            # never runs.
+            description =
+              if pkgs.stdenv.hostPlatform.isDarwin then
+                "Remote-control client (`flexwm msg`) for the flexwm scrolling-tiling Wayland compositor"
+              else
+                crateDescription;
             homepage = "https://github.com/yackey-labs/flexwm";
             license = pkgs.lib.licenses.mit;
             mainProgram = "flexwm";

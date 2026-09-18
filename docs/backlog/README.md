@@ -380,7 +380,13 @@ actionable.
 ### Packaging / tooling
 - [Nix `src = self` invalidates the build on doc-only edits](./packaging/nix-src-fileset.md)
 - [`x86_64-darwin` in `systems` breaks `flake check --all-systems`](./packaging/flake-x86-darwin-system.md)
-- [`flake.nix` description drift](./packaging/flake-description-drift.md) (nit)
+- [`flake.nix` description drift](./resolved/flake-description-drift-done.md) (nit)
+  — RESOLVED 2026-09-18: top-level `description` names both (compositor on
+  Linux, `flexwm msg` client on macOS); `meta.description` is per system
+  (Linux reads `crates/flexwm/Cargo.toml`, Darwin names the client). A fully
+  single-sourced fix is loader-impossible (top level must be a syntactic
+  attrset, `description` a string literal — both proven live), so the top
+  level stays one literal by fiat.
 - [`smoke-test.sh` hardcodes temp paths](./resolved/smoke-test-temp-prefix-done.md) — RESOLVED 2026-09-17: every temp path derives from `$SMOKE_PREFIX` (unset = byte-identical legacy defaults); two concurrent runs with different prefixes proven green
 - [`smoke-test.sh` background check samples the cursor under `--tty`](./resolved/tty-background-not-painted-done.md)
   — RESOLVED 2026-09-16, together with the `--tty` entry above that had
