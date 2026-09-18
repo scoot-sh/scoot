@@ -6,7 +6,7 @@ priority: null
 blocked: null
 ---
 
-# Flake: parked-captures poll sees an extra frame_serial advance under full-suite load — DONE
+# Flake: parked-captures poll sees an extra frame_serial advance under full-suite load — DONE (PR #110)
 
 ## The entry as filed
 

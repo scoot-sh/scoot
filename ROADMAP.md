@@ -681,7 +681,7 @@ gap jumped the queue — each item's own file records why it landed when it did.
   proven against a wasteful variant); no compositor code changed, no README
   change (no user-facing surface).
 - **[Parked-captures poll flake](docs/backlog/resolved/screencopy-parked-poll-flake-done.md)**
-  — RESOLVED 2026-09-18 (test-only, no production change): the filed
+  — RESOLVED 2026-09-18 (PR #110, test-only, no production change): the filed
   mechanism was corrected by per-step serial instrumentation — the trip is
   `Ready` at an *unmoving* serial (a `delivered`-lag at park time, the
   pre-map frame consumed by an earlier tick), not an advance between park
