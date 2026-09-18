@@ -279,6 +279,14 @@ actionable.
   restore-on-drop lives behind an `Arc` cloned into the event loop's DRM
   notifier, so it runs after the seat socket closes); `Tty` now pauses the
   device in its own `Drop`. Fail-first live 6/6 → 0/6.
+- [`--tty` hotplug can only switch to a connector its current CRTC can drive](./resolved/tty-connector-switch-crtc-done.md)
+  — RESOLVED 2026-09-18: `retarget` falls through to a CRTC switch
+  (build-first-swap-on-success, no `Option<DrmSurface>` refactor — the
+  ticket's anticipated refactor proved unnecessary once the per-CRTC plane
+  claims were re-verified in source); total failure stays put and retries.
+  Gamma LUT length re-read per CRTC, live control failed only on change.
+  Four fail-first harness tests; the switch itself unverified live
+  (single-CRTC dev VM), legacy blind-probe limit stated in the record.
 
 ### Core / config / rendering
 - [`--width`/`--height` are unbounded `i32`s](./resolved/width-height-bounded-done.md)

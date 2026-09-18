@@ -409,16 +409,13 @@ the display underneath it moves, so nothing here is a once-at-startup
 decision any more:
 
 - **Plug a monitor in or pull one out.** Unplugging the connector flexwm is
-  driving makes it pick another connected one and mode-set onto it. Plugging
-  one back in after everything was unplugged mode-sets back onto it. (The
-  fall-back to a *different* connector works only where the display
-  controller can route that connector to the CRTC flexwm is already on —
-  true of ordinary PC graphics, not guaranteed on SoCs whose encoders are
-  wired to specific CRTCs. flexwm does not currently move to a different
-  CRTC; if the new connector can't be driven from the current one it logs
-  `could not move the surface onto the new connector in either order` and
-  stays put. See
-  [`docs/backlog/tty/tty-connector-switch-crtc.md`](docs/backlog/tty/tty-connector-switch-crtc.md).)
+  driving makes it pick another connected one and mode-set onto it — moving
+  to a different CRTC when the display controller only routes that connector
+  there (ordinary PC graphics route any connector to any CRTC; ARM SoCs often
+  wire encoders to specific CRTCs). If no CRTC on the device can drive the
+  new connector it logs `no other crtc on this device can drive the new
+  connector` and stays put, retrying on the next hotplug. Plugging one back
+  in after everything was unplugged mode-sets back onto it.
 - **Resize, rescale or full-screen a VM window.** Apple's Virtualization
   framework reconfigures the guest display when you do, which reaches the
   guest as a hotplug with a new mode list and a new preferred mode; flexwm
@@ -1302,7 +1299,11 @@ What actually happens to the ramp depends on the backend:
 
 - **Under `--tty`**, the ramp is pushed to the CRTC gamma LUT, so the screen
   really warms. The advertised `gamma_size` is the CRTC's own (256 on the
-  hardware measured so far); anything the DRM device refuses retires the
+  hardware measured so far), re-read whenever a hotplug moves the session to
+  a different CRTC; a live control hears `failed` over that move either
+  way, so it re-reads `gamma_size` and re-pushes (nothing carries the old
+  ramp to the new CRTC — a modeset moves planes, not LUT contents).
+  Anything the DRM device refuses retires the
   control with `failed` and the session keeps running.
 - **Under `--headless`/`--nested`** there is no hardware LUT, so the ramp is
   accepted but changes nothing on screen — and a `flexwm msg

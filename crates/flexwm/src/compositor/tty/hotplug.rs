@@ -47,9 +47,10 @@ mod tests;
 
 use smithay::backend::drm::DrmSurface;
 use smithay::backend::udev::{UdevDevices, UdevEvent};
-use smithay::reexports::drm::control::{Device as ControlDevice, Mode, connector};
+use smithay::reexports::drm::control::{Device as ControlDevice, Mode, connector, crtc};
 
 use super::buffers::BufferPool;
+use super::present_retry::PresentRetries;
 use super::{State, Tty, gpu};
 
 /// Handles one udev event for the DRM subsystem.
@@ -111,6 +112,17 @@ pub(super) enum Reconfigured {
     /// render target, the `wl_output`, layer surfaces and the core's layout
     /// all have to follow.
     Resized(i32, i32),
+    /// The session moved to a different CRTC to follow the display (see
+    /// [`Tty::switch_crtc`](super::Tty::switch_crtc)): `size_changed` is
+    /// whether the mode size moved with it (the `Resized`-vs-`Render`
+    /// question), and `gamma_size` is the new CRTC's LUT length for
+    /// `zwlr_gamma_control_v1` (see `GammaControlState::crtc_changed`).
+    SwitchedCrtc {
+        width: i32,
+        height: i32,
+        size_changed: bool,
+        gamma_size: u32,
+    },
 }
 
 impl Reconfigured {
@@ -121,34 +133,52 @@ impl Reconfigured {
         match self {
             Self::Nothing => {}
             Self::Render => state.request_render(),
-            Self::Resized(width, height) => {
-                if !state.resize_output(width, height) {
-                    // error!, not warn!: the DRM side has already been told
-                    // to change mode, so the render target is now a
-                    // different size from what `Tty::present` will accept
-                    // and every frame from here on is dropped by its size
-                    // guard. `resize_output` has logged what actually
-                    // failed; this says what it costs.
-                    //
-                    // The wording is careful not to promise a retry that
-                    // cannot happen: `Tty::width`/`height` were updated
-                    // before this call, so as far as the next probe is
-                    // concerned this backend is *already* on the new mode.
-                    // Plugging the same display back in re-probes to the same
-                    // size, plans `Unchanged`, and never reaches here again.
-                    // Only a move to a genuinely different mode retries.
-                    tracing::error!(
-                        width,
-                        height,
-                        "drm: the display changed mode but the render target \
-                         could not follow, so every frame from here is dropped \
-                         as the wrong size. Only a change to a *different* mode \
-                         retries this -- the same display coming back at this \
-                         same size will not -- so a restart is the reliable way out"
-                    );
+            Self::Resized(width, height) => apply_resize(state, width, height),
+            Self::SwitchedCrtc {
+                width,
+                height,
+                size_changed,
+                gamma_size,
+            } => {
+                state.gamma_control.crtc_changed(gamma_size);
+                if size_changed {
+                    apply_resize(state, width, height);
+                } else {
+                    state.request_render();
                 }
             }
         }
+    }
+}
+
+/// Moves the render target and everything downstream of it onto a new
+/// mode size: the shared body of `Reconfigured::{Resized, SwitchedCrtc}`'s
+/// size-changing arms.
+fn apply_resize(state: &mut State, width: i32, height: i32) {
+    if !state.resize_output(width, height) {
+        // error!, not warn!: the DRM side has already been told
+        // to change mode, so the render target is now a
+        // different size from what `Tty::present` will accept
+        // and every frame from here on is dropped by its size
+        // guard. `resize_output` has logged what actually
+        // failed; this says what it costs.
+        //
+        // The wording is careful not to promise a retry that
+        // cannot happen: `Tty::width`/`height` were updated
+        // before this call, so as far as the next probe is
+        // concerned this backend is *already* on the new mode.
+        // Plugging the same display back in re-probes to the same
+        // size, plans `Unchanged`, and never reaches here again.
+        // Only a move to a genuinely different mode retries.
+        tracing::error!(
+            width,
+            height,
+            "drm: the display changed mode but the render target \
+             could not follow, so every frame from here is dropped \
+             as the wrong size. Only a change to a *different* mode \
+             retries this -- the same display coming back at this \
+             same size will not -- so a restart is the reliable way out"
+        );
     }
 }
 
@@ -326,6 +356,11 @@ impl Tty {
     /// modeset rather than a page flip onto a CRTC that is no longer
     /// showing what this pool thinks it is.
     ///
+    /// When the current CRTC cannot take the new connector at all --
+    /// encoders wired to specific CRTCs -- the in-place move is refused and
+    /// this falls back to rebuilding the surface on a different CRTC (see
+    /// `switch_crtc`) rather than staying on the connector that went away.
+    ///
     /// Order is load-bearing. The buffers are allocated *first*, before
     /// anything on the DRM side is told to change: a failed allocation then
     /// leaves the display exactly as it was and working, whereas the other
@@ -362,9 +397,12 @@ impl Tty {
         // and it is what the failure path below restores toward.
         let previous = (self.connector, self.surface.pending_mode());
         if !set_pending(&self.surface, (connector, mode), previous) {
-            // `buffers` is dropped here, releasing the dumb buffers that
-            // were allocated for a mode the surface refused.
-            return Reconfigured::Nothing;
+            // The current CRTC cannot drive the new connector with the new
+            // mode -- on hardware whose encoders are wired to specific CRTCs
+            // (see `switch_crtc`) that is a routability refusal, not a mode
+            // problem. Try a different CRTC before giving up; `buffers` moves
+            // along (installed on success, dropped on failure, exactly as here).
+            return self.switch_crtc(connector, mode, name, buffers, size_changed);
         }
         tracing::info!(
             connector = %name,
@@ -396,6 +434,158 @@ impl Tty {
         } else {
             Reconfigured::Render
         }
+    }
+
+    /// Rebuilds the DRM surface on a different CRTC that can drive
+    /// `connector`/`mode`, for when `set_pending` proved the current CRTC
+    /// cannot: a display controller whose encoders are wired to specific
+    /// CRTCs -- common on ARM SoCs, the same family of hardware as the
+    /// split-GPU case `--gpu` exists for -- refuses the move with
+    /// `TestFailed` (atomic) or a silent non-apply (legacy), and staying on
+    /// the connector that just went away is a black screen. Called only from
+    /// `retarget`, and only after the in-place move failed; the common case
+    /// never reaches here.
+    ///
+    /// The live surface stays in place while candidates are tried: every CRTC
+    /// but the current one owns its own primary plane, and
+    /// `DrmDevice::create_surface` at the pinned rev claims exactly that
+    /// plane -- so building the replacement first and swapping on success
+    /// means a failed switch never touches what is on screen: the live
+    /// surface keeps driving the old connector on the old CRTC. The current
+    /// CRTC is not retried: the `set_pending` failure that led here already
+    /// proved it refuses this target, and a fresh surface there would refuse
+    /// it the same way. That is also what makes the take-and-replace refactor
+    /// unnecessary: `surface` is never `None`, and every site that reads it
+    /// (`present`, `on_vblank`, `reactivate`, `gamma_size`) keeps reading a
+    /// live one -- the old CRTC's until the swap, the new one's after.
+    ///
+    /// One side effect a failed candidate does have, stated rather than
+    /// hidden: dropping it runs Smithay's surface `Drop`, which clears that
+    /// *candidate* CRTC's state (disables its current connectors, resets the
+    /// CRTC). In the common single-display case that CRTC is idle and the
+    /// clear is a no-op commit; at worst it drops whatever the firmware or
+    /// console was showing on a display flexwm never drove. What it can never
+    /// touch is the live path: the clear addresses the candidate's own CRTC
+    /// and its current connectors, which are disjoint from the old CRTC and
+    /// the old connector by construction (a connector reports exactly one
+    /// `CRTC_ID`). Each failed candidate also costs its probe's `TEST_ONLY`
+    /// commits (atomic) -- all on the cable-move path, never per-frame.
+    ///
+    /// A candidate is validated before the swap, never trusted from
+    /// construction: neither Smithay implementation checks routability in its
+    /// constructor (atomic records the pending state blindly; legacy assigns
+    /// it), so each candidate is probed with the same two setters
+    /// `set_pending` uses -- connectors first, then the mode. The target's own
+    /// values still exercise both checks: the atomic path test-commits them,
+    /// and the legacy path runs each connector through its encoder and
+    /// `possible_crtcs` check (whose silent non-apply is what `move_connector`
+    /// reads back). Only a surface that takes both replaces the live one.
+    ///
+    /// Honest limit of that probe, on legacy only: a fresh surface's pending
+    /// set already names the target (the constructor put it there), so the
+    /// readback cannot catch the silent non-apply the way it does for the
+    /// live surface -- a legacy candidate that fails its encoder check still
+    /// probes green. The refusal then surfaces at the first real commit,
+    /// through `present`'s existing failure arm (a warning, a bounded timer
+    /// retry, then quiet until new damage), which ties the old behaviour:
+    /// the previous connector is gone either way, so there is no working
+    /// state the swap gives up. The atomic path -- the dev VM included --
+    /// validates honestly, since its `TEST_ONLY` commit fails outright.
+    ///
+    /// `buffers` is the pool `retarget` allocated for the new size (`None`
+    /// when only the connector changed): installed alongside the surface on
+    /// success, dropped on failure exactly as `retarget`'s own failure path
+    /// would. The gamma size is re-read from the new CRTC for the
+    /// `SwitchedCrtc` outcome it returns -- per-CRTC hardware state (see
+    /// `Tty::gamma_size`).
+    ///
+    /// Total failure degrades, never panics and never leaves the backend
+    /// without a surface: it logs and returns `Nothing`, and `reconfigure`
+    /// keeps `nothing_connected` set so the next uevent retries, exactly like
+    /// a refused `set_pending`.
+    fn switch_crtc(
+        &mut self,
+        connector: connector::Handle,
+        mode: Mode,
+        name: &str,
+        buffers: Option<BufferPool>,
+        size_changed: bool,
+    ) -> Reconfigured {
+        let (width, height) = mode_size(mode);
+        let current = self.surface.crtc();
+        // Copied, not borrowed: `create_surface` below needs `&mut self.drm`.
+        // One small `Vec` on a path that runs when a cable moves, matching
+        // `tty::create_surface`'s own shape.
+        let crtcs: Vec<crtc::Handle> = self
+            .drm
+            .crtcs()
+            .iter()
+            .copied()
+            .filter(|&crtc| crtc != current)
+            .collect();
+        for crtc in crtcs {
+            let candidate = match self.drm.create_surface(crtc, mode, &[connector]) {
+                Ok(surface) => surface,
+                Err(error) => {
+                    tracing::debug!(?crtc, %error, "drm: a different crtc cannot take a surface for the new connector");
+                    continue;
+                }
+            };
+            if !move_connector(&candidate, connector) {
+                tracing::debug!(
+                    ?crtc,
+                    "drm: a different crtc cannot drive the new connector"
+                );
+                continue;
+            }
+            if let Err(error) = candidate.use_mode(mode) {
+                tracing::debug!(?crtc, %error, "drm: a different crtc cannot drive the new mode");
+                continue;
+            }
+            tracing::info!(
+                connector = %name,
+                ?crtc,
+                width,
+                height,
+                "drm: display reconfigured onto a different crtc; mode-setting onto it"
+            );
+            // The old surface -- and with it its primary-plane claim -- drops
+            // here, once the replacement is proven. Its `Drop` clears the old
+            // CRTC's state, whose connector is gone anyway; the full commit
+            // `invalidate_scanout` arms below is what brings the new CRTC up
+            // on the new state.
+            self.surface = candidate;
+            self.connector = connector;
+            if let Some(buffers) = buffers {
+                // The old pool -- and the framebuffers in it, one of which the
+                // old CRTC may still be scanning out -- is dropped here, the
+                // same blank-a-plane step `retarget` documents for the mode
+                // change; the modeset below brings it back at the new size.
+                self.buffers = buffers;
+            }
+            // Unconditionally, for the same reason as in `retarget`: these two
+            // are `present`'s size guard and must equal the size the pool was
+            // built at, whichever branch got here.
+            self.width = width;
+            self.height = height;
+            self.invalidate_scanout();
+            // A new CRTC is new device state: the old connector's refusal
+            // streak (if any) says nothing about the new one, so the first
+            // transient refusal on it must arm a retry rather than answer
+            // Quiet off a streak it never earned.
+            self.retries = PresentRetries::new();
+            return Reconfigured::SwitchedCrtc {
+                width,
+                height,
+                size_changed,
+                gamma_size: self.gamma_size(),
+            };
+        }
+        tracing::warn!(
+            connector = %name,
+            "drm: no other crtc on this device can drive the new connector; staying on the current one"
+        );
+        Reconfigured::Nothing
     }
 
     /// The scanout bookkeeping shared by `reactivate` and [`Self::retarget`]:
