@@ -20,7 +20,7 @@
 //! to a silently wrong key.
 //!
 //! Three deliberate boundaries, matching the ticket
-//! (`docs/backlog/input/msg-type-dead-keys-compose.md`):
+//! (`docs/backlog/resolved/msg-type-dead-keys-compose-done.md`):
 //!
 //! - Only two-key sequences whose first key is *dead* are searched. That is
 //!   where the default table's two-key sequences live (a bare apostrophe
@@ -127,7 +127,10 @@ pub(super) fn build_map(
                 if sym == Keysym::NoSymbol {
                     continue;
                 }
-                // The one heap allocation in this module (see above): naming
+                // One of two bounded heap allocations in this module (the
+                // other is the locale `OsString` in
+                // `table_from_session_locale`, once per fallback
+                // request): naming
                 // a keysym to test the `dead_` prefix, once per distinct
                 // keysym per request that needs the fallback. Matching the
                 // raw keysym range instead would avoid it but freeze

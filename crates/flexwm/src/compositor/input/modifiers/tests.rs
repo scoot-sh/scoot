@@ -497,7 +497,7 @@ fn a_probe_taken_in_another_group_is_not_reused() {
 /// among the casualties on four of these. If an xkeyboard-config update
 /// moves one of these characters, this table is what has to be updated
 /// alongside the claim in
-/// `docs/backlog/input/msg-type-dead-keys-compose.md`.
+/// `docs/backlog/resolved/msg-type-dead-keys-compose-done.md`.
 const LATIN_LAYOUTS: [(&str, &str, &str); 14] = [
     ("us", "", ""),
     ("us", "intl", ""),

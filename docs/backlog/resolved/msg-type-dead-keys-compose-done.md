@@ -112,8 +112,8 @@ Dev VM, pre-fix tree (branch at `01e0d8d` + tests, implementation absent):
 - `a_dead_ascii_character_types_via_dead_key_plus_space`: `the text is
   typable: "no key for \`~\` in this layout"`
 
-Post-fix: 106 passed, 0 failed (same filter); full `cargo test -p flexwm`
-942 passed; `cargo nextest run --workspace` 1047 passed; `cargo clippy -p
+Post-fix: 107 passed, 0 failed (same filter); full `cargo test -p flexwm`
+943 passed; `cargo nextest run --workspace` 1048 passed; `cargo clippy -p
 flexwm --all-targets -- -D warnings` clean; `cargo fmt --check -p flexwm`
 clean; `scripts/smoke-test.sh` (prefixed) 17 ok, no BUG.
 
