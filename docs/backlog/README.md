@@ -274,7 +274,11 @@ actionable.
   duplicate `testing/` entry that had the right diagnosis all along.
 - [Same-VT no-op VT-switch warning](./tty/vt-switch-same-vt-warning.md)
 - [`O_CLOEXEC` request is a no-op at the libseat layer](./tty/tty-o-cloexec-noop.md) (informational)
-- [`--tty` quit sometimes logs a DRM "restore previous state" EPERM](./tty/drm-teardown-restore-eperm.md)
+- [`--tty` quit sometimes logs a DRM "restore previous state" EPERM](./resolved/drm-teardown-restore-eperm-done.md)
+  — RESOLVED 2026-09-18: strace-proven our own teardown racing itself (the
+  restore-on-drop lives behind an `Arc` cloned into the event loop's DRM
+  notifier, so it runs after the seat socket closes); `Tty` now pauses the
+  device in its own `Drop`. Fail-first live 6/6 → 0/6.
 
 ### Core / config / rendering
 - [`--width`/`--height` are unbounded `i32`s](./resolved/width-height-bounded-done.md)
