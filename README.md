@@ -402,8 +402,12 @@ when it cannot be driven. `--gpu` wins when both name one: an explicit
 flag beats a file, the way `--config` beats the default path. An
 explicitly-set-but-empty path in either (`--gpu ""`, `gpu = ""`) is a
 startup error naming the surface that set it, not something the session is
-asked to open. Like `--gpu`, the key is ignored with a warning outside
-`--tty`. See the `[tty]` reference under Configuration.
+asked to open — on every backend, including `--headless`/`--nested`
+(a malformed key is refused before the backend branch, so a shared config
+file with an empty value fails fast everywhere rather than silently
+differing by backend). A set non-empty value, like `--gpu`, is ignored
+with a warning outside `--tty`. See the `[tty]` reference under
+Configuration.
 
 The output's size is the connector's preferred mode. When that is the wrong
 size — under Apple's Virtualization framework (vfkit, UTM) the "preferred"
@@ -1820,7 +1824,7 @@ all.)
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
-| `gpu` | string (device path) | unset | Which DRM device `--tty` drives, when the automatic choice is wrong — the config-file form of `--gpu PATH` (see Which DRM device `--tty` drives above). Unset means the automatic search picks: Smithay's primary GPU first, then every other DRM device on the seat until one works. Set means exactly that device, no fallback: a wrong path is a clean startup error naming the key and what failed, not a silent fall back to something else — falling back would mean silently driving a device the config explicitly ruled out, so this key is fail-closed where every other config field degrades gracefully. `--gpu` wins when both name one; an empty value (`gpu = ""`) is a startup error naming the key. Only means anything under `--tty`; on `--headless` or `--nested` it is ignored with a warning, exactly like `--gpu`. Startup-only, like every other setting here. |
+| `gpu` | string (device path) | unset | Which DRM device `--tty` drives, when the automatic choice is wrong — the config-file form of `--gpu PATH` (see Which DRM device `--tty` drives above). Unset means the automatic search picks: Smithay's primary GPU first, then every other DRM device on the seat until one works. Set means exactly that device, no fallback: a wrong path is a clean startup error naming the key and what failed, not a silent fall back to something else — falling back would mean silently driving a device the config explicitly ruled out, so this key is fail-closed where every other config field degrades gracefully. `--gpu` wins when both name one; an empty value (`gpu = ""`) is a startup error naming the key. Only means anything under `--tty`; on `--headless` or `--nested` a set non-empty value is ignored with a warning, exactly like `--gpu` (an empty value is a startup error on every backend — see above). Startup-only, like every other setting here. |
 
 ### `[binds]`
 
