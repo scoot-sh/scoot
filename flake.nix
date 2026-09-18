@@ -17,7 +17,15 @@
         "aarch64-linux"
         "x86_64-linux"
         "aarch64-darwin"
-        "x86_64-darwin"
+        # No `x86_64-darwin`: the pinned nixpkgs (26.11) dropped that
+        # platform entirely -- `legacyPackages.x86_64-darwin` throws at
+        # eval, so no per-system definition can even be reached. Keeping
+        # it would mean repinning the whole tree (and vm/ with it) to
+        # 26.05, whose security fixes end with 2026, for a platform Apple
+        # itself discontinued. Nothing Intel-specific blocks the client:
+        # the Darwin build shares one arch-independent `cfg(not(target_os
+        # = "linux"))` path, so `cargo build` from source still works on
+        # an Intel Mac -- it is just outside what this flake provides.
       ];
       forEach = f: nixpkgs.lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
       # The Linux `meta.description` below reads the compositor crate's own
