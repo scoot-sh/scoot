@@ -577,8 +577,8 @@ gap jumped the queue — each item's own file records why it landed when it did.
   documented in the README. The per-surface IME-scoping design stays open
   as filed (needs a Smithay-side design that does not exist).
 - **[`xdg-toplevel-icon-v1` pixel-buffer
-  icons](docs/backlog/resolved/toplevel-icon-buffers-done.md)** —
-  RESOLVED 2026-09-18: verify-first close, no behavior change. The
+  icons](docs/backlog/resolved/toplevel-icon-buffers-done.md)** (PR #100,
+  2026-09-18) — verify-first close, no behavior change. The
   ticket's three suspicions checked against the pinned sources all came
   back clean (the protocol leaves `release` unused by design, Smithay
   kills only the offending client with `NoBuffer`, icon buffers claim
