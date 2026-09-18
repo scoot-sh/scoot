@@ -427,11 +427,12 @@ pub struct SessionLock {
 impl SessionLock {
     pub(super) fn new(display: &DisplayHandle) -> Self {
         Self {
-            // No client filter: this compositor has no security-context
-            // support to distinguish a privileged lock client from any other,
-            // so restricting the global by client would only be theatre. See
-            // `README.md` and
-            // `docs/backlog/protocols/session-lock-global-restriction.md`.
+            // No client filter: this compositor has no privilege primitive
+            // to distinguish a locker from any other client (peer creds
+            // are spoofable and same-uid anyway; security-context marks
+            // sandboxes, not lockers), so restricting the global by
+            // client would only be theatre. See `README.md` and
+            // `docs/backlog/resolved/session-lock-global-restriction-done.md`.
             manager: SessionLockManagerState::new::<State, _>(display, |_| true),
             owner: None,
             pending: None,
