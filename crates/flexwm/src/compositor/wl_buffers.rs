@@ -1,0 +1,234 @@
+//! How many live `wl_buffer`s one Wayland client may hold at once.
+//!
+//! This is the bound that actually caps the compositor's retained fds and
+//! mappings per connection. `shm_pools.rs` caps live *pool objects*, but a
+//! destroyed pool frees neither its fd nor its mapping while a buffer
+//! created from it survives -- the protocol mandates the retention, and at
+//! the pinned rev a buffer's user data holds an `Arc<Pool>` owning both --
+//! so `create_pool` / `create_buffer` / `destroy_pool` in a loop keeps one
+//! fd and mapping per iteration with the live-pool count back at zero (see
+//! `docs/backlog/resolved/shm-pool-cap-misses-retained-fds-done.md`). Every
+//! iteration of that loop must keep a buffer alive, so a live-buffer cap
+//! catches exactly the bypass shape. Both caps stay: they bound different
+//! quantities (live pool objects + the address-space envelope vs retained
+//! fds/mappings), and neither subsumes the other.
+//!
+//! ## The number
+//!
+//! [`MAX_BUFFERS_PER_CLIENT`] is 512. The floor is measured, not guessed:
+//! one `foot` window holds exactly **2 live buffers** steady -- double-
+//! buffered, reused across typing and resizes rather than churned, zero
+//! destroys in the whole session (`WAYLAND_DEBUG=1` wire log, dev VM,
+//! 2026-09-17; 2 pools, 2 `create_buffer`, max concurrent 2). The shapes
+//! that multiply it are multi-window apps and queued video frames -- a
+//! 20-window browser at triple buffering lands near 60 -- so 512 is ~8x
+//! the heaviest reasoned legitimate use and 256x the measured single-
+//! window floor. The margin errs generous on purpose: tripping this
+//! disconnects the client, so a miscount must not kill a heavy-but-
+//! legitimate session -- the same death-penalty sizing the capture-frame
+//! cap (16 for a legitimate 1) already uses.
+//!
+//! What 512 bounds per connection: 512 live buffers, and with them the
+//! retained fds/mappings -- one fd minimum per surviving shm buffer (its
+//! `Arc<Pool>`'s `OwnedFd`), one client fd per dmabuf buffer, none per
+//! single-pixel buffer (see below). Together with the 128 live pools that
+//! is at most ~640 fds from one connection against a 1024-fd
+//! `RLIMIT_NOFILE`: one connection alone cannot exhaust the table, two
+//! can -- the multiplier on top is connection-count territory (see
+//! `docs/backlog/security/wayland-connection-cap.md`), not a smaller
+//! buffer count.
+//!
+//! ## How it is counted
+//!
+//! Keyed by [`ClientId`](smithay::reexports::wayland_server::backend::ClientId),
+//! in `State` beside `ShmPools` -- not in `ClientState`: `Client::get_data`
+//! hands out only `&Data`, so per-request mutation there would need a lock,
+//! while a `State`-side map keyed the same way needs none. Own counter, not
+//! a second column in `ShmPools`: the two refuse different requests with
+//! different errors, and count different quantities.
+//!
+//! Uniformly across every interface that creates a `wl_buffer`, because the
+//! release side cannot tell them apart and a selective count would drift
+//! fail-open (see below):
+//!
+//! - `wl_shm_pool.create_buffer` -- the bypass shape; claims in
+//!   `dispatch.rs` before delegation.
+//! - `zwp_linux_buffer_params_v1.create_immed` -- claims the same way. The
+//!   buffer object *is* created even though this compositor always answers
+//!   the import `failed`: Smithay inits it first (`data_init.init` before
+//!   `dmabuf_imported`), and `failed()` on an immed import posts
+//!   `InvalidWlBuffer`, killing the client and leaving the object for
+//!   disconnect cleanup (verified in source at the pinned rev, not
+//!   assumed). Its async sibling `create` is never claimed: no object is
+//!   created synchronously, and this compositor's `failed()` answer creates
+//!   none later either. If a future renderer ever calls `successful()` on a
+//!   `create` notifier, that path starts creating buffers and must claim
+//!   here too.
+//! - `wp_single_pixel_buffer_manager_v1.create_u32_rgba_buffer` -- always
+//!   succeeds, so always pairs. These hold no fd, no mapping and no
+//!   reservation, and counting them spends budget on a shape that costs
+//!   nothing -- but *not* counting them while counting everything else is
+//!   worse: see the release paragraph.
+//!
+//! Released in `dispatch.rs`'s destruction hook for every destroyed
+//! `wl_buffer`, which is also what drains a disconnect (whose cleanup
+//! destroys every object) and a protocol-error kill. Release is
+//! `saturating_sub`, because a destroy the count never saw would be a
+//! bookkeeping bug, not a client one.
+//!
+//! The pairing is exact for every *live* client, by a mechanism rather than
+//! by validation: Smithay initialises the buffer or kills the client, never
+//! neither -- every error path in the three creation handlers posts a
+//! protocol error (synchronous kill) and returns before `data_init.init`.
+//! A creation refused by this guard is never counted (over-cap returns
+//! before claiming); a creation Smithay itself refuses still claims -- see
+//! the phantom paragraph. So every buffer a live client holds was claimed
+//! exactly once, and every destroyed one releases exactly once. The one
+//! exception is a creation Smithay refuses: claimed, never initialised,
+//! `UninitObjectData::destroyed` never reaching the hook -- exactly one
+//! phantom unit on an entry whose client is already dead (no failed
+//! creation survives: the kill is synchronous, and already-buffered further
+//! requests never dispatch). Dead entries cost one small map entry per
+//! killing connection -- noise next to the connection itself -- and never
+//! touch a live client's budget. Deliberately no validation replication to
+//! avoid the phantom: duplicating upstream's parameter checks here would
+//! couple this guard to Smithay's handler logic and drift fail-open on a
+//! rev bump; over-counting a dead client is the safe direction.
+//!
+//! Why the release cannot be kind-selective (and therefore why single-pixel
+//! buffers are counted): the blanket `destroyed` hook sees only that *a*
+//! `wl_buffer` died -- the user data kind (`ShmBufferUserData` vs `Dmabuf`
+//! vs `SinglePixelBufferUserData`) is not observable there, and the new
+//! buffer's id is sealed inside `New<WlBuffer>` (no accessor, no `Deref` --
+//! wayland-server 0.31.14 `src/dispatch.rs:136-146`), so exact-id tracking
+//! is unbuildable at the pinned rev. With scalar counting, releasing for
+//! unclaimed kinds would let destroys of cheap buffers drain units claimed
+//! by retaining ones (create 5 shm buffers, create and destroy 5
+//! single-pixel ones, hold 5 retaining buffers against a count of zero) --
+//! a bypass of this very cap. Uniform counting has no such drift: every
+//! initialised buffer of every kind claims once and releases once.
+//!
+//! ## Refusal form
+//!
+//! A protocol error on the creating object, killing only the offending
+//! client -- a silent ignore would leave the uninitialized object that
+//! panics the compositor (the argument `dispatch.rs` already makes for the
+//! pool caps):
+//!
+//! - `wl_shm_pool.create_buffer` past the cap: `wl_shm::Error::InvalidStride`
+//!   on the pool -- the same code on the same object Smithay's own
+//!   bad-parameter refusals and the pool-count refusal use.
+//! - `create_immed` past the cap:
+//!   `zwp_linux_buffer_params_v1::Error::InvalidWlBuffer` on the params --
+//!   the code Smithay's own immed-import failure posts.
+//! - `create_u32_rgba_buffer` past the cap: the interface defines no errors
+//!   at all (verified against the protocol XML -- no `<enum name="error">`),
+//!   so the refusal carries code 0 with an explicit message. Only a client
+//!   already holding 512 live buffers ever sees it, i.e. abuse by
+//!   construction; the kill is the message.
+//!
+//! ## Maintenance hazard
+//!
+//! Any new `wl_buffer` factory Smithay grows (or this compositor starts
+//! delegating -- today `create` never produces an object) must hook both
+//! halves: claim on its creating request in `dispatch.rs`, release through
+//! the existing `wl_buffer` destruction hook. Re-check the three creation
+//! handlers' error-before-init shape on every Smithay bump: the exactness
+//! argument above leans on it.
+//!
+//! ## Per connection, not per machine
+//!
+//! Wayland connections are unbounded, so N connections hold up to 512N
+//! buffers. Stated rather than solved -- still strictly better than
+//! unbounded per connection, the same per-connection shape as the pool
+//! count, the capture-frame cap and the bind budget, and cross-connection
+//! abuse is connection-count territory, not a smaller buffer count.
+
+use std::collections::HashMap;
+
+use smithay::reexports::wayland_server::Client;
+use smithay::reexports::wayland_server::backend::ClientId;
+
+/// How many live `wl_buffer`s one Wayland client may hold at once,
+/// whatever created them.
+///
+/// 512: ~8x the heaviest reasoned legitimate use (~60 buffers for a
+/// 20-window browser at triple buffering) and 256x the measured
+/// single-window floor (2 live buffers for one `foot`) -- see the module
+/// doc. A client past it is refused with a protocol error on the offending
+/// creation request, never silently: a silent ignore would leave an
+/// uninitialized object that panics the compositor the moment the client
+/// touches it (the argument `dispatch.rs` already makes for the pool caps).
+pub(super) const MAX_BUFFERS_PER_CLIENT: u32 = 512;
+
+/// The per-client live-buffer count. See the module doc for the policy; the
+/// only claim site is `dispatch.rs`'s buffer-creation guard, the only
+/// releaser its `wl_buffer` destruction hook.
+#[derive(Debug, Default)]
+pub struct WlBuffers {
+    /// Live buffers per client. An entry exists only while the client holds
+    /// at least one -- the empty count is removed on release -- so this is
+    /// bounded by live buffer objects, except for the at-most-one phantom
+    /// unit per killed connection the module doc states (a failed creation
+    /// claims without ever initialising; its client is already dead, so the
+    /// entry never affects a live budget).
+    live_per_client: HashMap<ClientId, u32>,
+}
+
+impl WlBuffers {
+    /// Counts one more live buffer for `client`, refusing past
+    /// [`MAX_BUFFERS_PER_CLIENT`].
+    ///
+    /// Returns whether the caller must refuse the creation -- and the
+    /// refusal itself (the protocol error on the creating object) stays
+    /// with the caller in `dispatch.rs`, which holds the object this module
+    /// never sees.
+    ///
+    /// Called *before* delegation, so a refused buffer is never created.
+    /// Called unconditionally for every creation request, including ones
+    /// Smithay is about to refuse: a failed creation kills the client
+    /// synchronously, so the phantom unit lands on a dead entry only (see
+    /// the module doc) -- replicating upstream's parameter validation here
+    /// to avoid it would couple this guard to Smithay's handler logic and
+    /// drift fail-open on a rev bump.
+    pub(super) fn claim_buffer_creation(&mut self, client: &Client) -> bool {
+        let live = self.live_per_client.entry(client.id()).or_insert(0);
+        if *live >= MAX_BUFFERS_PER_CLIENT {
+            tracing::debug!(
+                live = *live,
+                max = MAX_BUFFERS_PER_CLIENT,
+                "refusing a wl_buffer past the per-client live count (protocol error)"
+            );
+            return true;
+        }
+        *live = live.saturating_add(1);
+        false
+    }
+
+    /// Forgets one live buffer for the client a dead buffer object belonged
+    /// to.
+    ///
+    /// Called from `dispatch.rs`'s destruction hook for every destroyed
+    /// `wl_buffer` of every kind, which is also what bounds the map: an
+    /// entry leaves it exactly when its last buffer's protocol object does,
+    /// including on client disconnect (whose cleanup destroys every object)
+    /// and on a protocol-error kill. `saturating_sub`, because a destroy
+    /// the count never saw would be a bookkeeping bug, not a client one.
+    pub(super) fn forget_buffer(&mut self, client: &ClientId) {
+        if let Some(live) = self.live_per_client.get_mut(client) {
+            *live = live.saturating_sub(1);
+            if *live == 0 {
+                self.live_per_client.remove(client);
+            }
+        }
+    }
+
+    /// How many buffers all clients hold between them. Test-only: the flood
+    /// and drain tests assert the bookkeeping empties, which a
+    /// compositor-side count states directly -- while Smithay's own buffer
+    /// objects stay private, so no test could read them.
+    #[cfg(test)]
+    pub(super) fn buffers_in_flight(&self) -> usize {
+        self.live_per_client.values().sum::<u32>() as usize
+    }
+}

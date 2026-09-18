@@ -3,15 +3,17 @@
 //! This is a hand-written copy of what `smithay::delegate_dispatch2!(State)`
 //! expands to -- the blanket `Dispatch`/`GlobalDispatch` impls that forward
 //! every request to whichever `Dispatch2` impl the object's user data
-//! carries -- plus six guards on what a client may ask for
+//! carries -- plus seven guards on what a client may ask for
 //! ([`reject_invalid_shm_pool_resize`], [`reject_oversized_shm_pool_creation`],
-//! [`reject_excess_shm_pool`], [`reject_unrepresentable_layer_size`],
+//! [`reject_excess_shm_pool`], [`reject_excess_buffer`],
+//! [`reject_unrepresentable_layer_size`],
 //! [`reject_frozen_toplevel_icon_request`] and
 //! [`reject_excess_capture_frame`]), one pre-delegation
-//! interception ([`prepare_post_destroy_lock_commit`]) and five
+//! interception ([`prepare_post_destroy_lock_commit`]) and six
 //! post-destruction hooks ([`redraw_after_lock_surface_destroyed`],
 //! [`neutralize_destroyed_layer_surface`],
 //! [`forget_destroyed_toplevel_icon`],
+//! [`forget_destroyed_buffer`],
 //! [`forget_destroyed_capture_frame`] and
 //! [`forget_destroyed_shm_pool`]).
 //!
@@ -69,9 +71,12 @@
 //! `shm_pools.rs` rather than re-derived here). What *is* bounded is the
 //! concurrency: [`reject_excess_shm_pool`] refuses a `create_pool` past
 //! [`MAX_POOLS_PER_CLIENT`](super::shm_pools::MAX_POOLS_PER_CLIENT) live
-//! pools for the requesting client -- which caps the per-connection fds and
-//! mappings (one fd minimum per live pool) even though it cannot cap the
-//! bytes. See
+//! pool objects for the requesting client -- which bounds live pool objects
+//! and the address-space envelope (count x 512 MiB sparse), not the fds or
+//! mappings a buffer surviving its pool retains: destroying a pool object
+//! frees neither while its buffers live, so that quantity is bounded
+//! separately by the per-client live-`wl_buffer` count (see `shm_pools.rs`
+//! and `wl_buffers.rs`). See
 //! `docs/backlog/resolved/shm-pool-count-cap-done.md` for the byte
 //! half rather than treating either fix as closing that case too.
 //!
@@ -255,6 +260,52 @@
 //! [`State::refuse_excess_capture_frame`](super::State) for why delegation
 //! after a count cannot leak it. Delete neither half without the other.
 //!
+//! ## Why the sixth guard exists
+//!
+//! The live-pool count ([`reject_excess_shm_pool`]) does not bound fds or
+//! mappings, whatever its first docs said: destroying a pool object frees
+//! neither while a buffer created from it survives, so `create_pool` /
+//! `create_buffer` / `destroy_pool` in a loop retains one fd and mapping
+//! per iteration with the pool count back at zero (see `wl_buffers.rs` and
+//! `docs/backlog/resolved/shm-pool-cap-misses-retained-fds-done.md`). The guard
+//! refuses a buffer creation past
+//! [`MAX_BUFFERS_PER_CLIENT`](super::wl_buffers::MAX_BUFFERS_PER_CLIENT)
+//! live buffers for the requesting client, before Smithay's handler ever
+//! sees it -- every bypass iteration must keep a buffer alive, so the cap
+//! catches exactly the bypass shape, whatever it does with the pool object.
+//!
+//! Three deliberate choices, all worth recording rather than re-deriving:
+//!
+//! - **Every `wl_buffer` factory, not just pools.** The release hook below
+//!   sees only that *a* buffer died -- never which kind -- so a selective
+//!   count would drift fail-open (destroys of uncounted cheap buffers
+//!   draining units claimed by retaining ones). Single-pixel buffers are
+//!   counted too, even though they hold nothing: uniformity is what keeps
+//!   the scalar pairing exact. The dmabuf async `create` is the one
+//!   creation that claims nothing: it creates no object synchronously, and
+//!   this compositor's `failed()` answer creates none later.
+//! - **Claimed unconditionally, exact for live clients by mechanism.**
+//!   Smithay initialises the buffer or kills the client, never neither, so
+//!   a failed creation's phantom unit lands on an already-dead entry only
+//!   (at most one per killing connection; see `wl_buffers.rs`). No
+//!   upstream parameter validation is replicated here -- that would couple
+//!   this guard to Smithay's handler logic and drift fail-open on a rev
+//!   bump, while over-counting a dead client is the safe direction.
+//! - **A protocol error on the creating object, per interface.** `shm` gets
+//!   `InvalidStride` on the pool (Smithay's own code for bad buffer
+//!   parameters there), dmabuf `InvalidWlBuffer` on the params (Smithay's
+//!   own immed-import failure code), single-pixel a bare 0 on the manager
+//!   (the interface defines no errors at all). Same kill-one-client shape
+//!   as every guard above: a silent ignore would leave the uninitialized
+//!   object that panics the compositor.
+//!
+//! A well-behaved client cannot trip this by racing its own buffer
+//! lifecycle: requests on one connection are dispatched in order, so a
+//! `destroy` the client sent always runs before a later `create_buffer`.
+//! `foot` holds 2 live buffers steady (measured); the cap sits at 512.
+//! The count itself lives in `wl_buffers.rs`, counted up here and back down
+//! in the destruction hook below. Delete neither half without the other.
+//!
 //! ## Why the hook exists
 //!
 //! Not a guard at all, and not a workaround for a Smithay bug: a callback
@@ -339,12 +390,14 @@ use smithay::reexports::wayland_protocols::ext::image_copy_capture::v1::server::
     ext_image_copy_capture_frame_v1, ext_image_copy_capture_session_v1,
 };
 use smithay::reexports::wayland_protocols::ext::session_lock::v1::server::ext_session_lock_surface_v1;
+use smithay::reexports::wayland_protocols::wp::linux_dmabuf::zv1::server::zwp_linux_buffer_params_v1;
+use smithay::reexports::wayland_protocols::wp::single_pixel_buffer::v1::server::wp_single_pixel_buffer_manager_v1;
 use smithay::reexports::wayland_protocols::xdg::toplevel_icon::v1::server::{
     xdg_toplevel_icon_manager_v1, xdg_toplevel_icon_v1,
 };
 use smithay::reexports::wayland_protocols_wlr::layer_shell::v1::server::zwlr_layer_surface_v1;
 use smithay::reexports::wayland_server::backend::ClientId;
-use smithay::reexports::wayland_server::protocol::{wl_shm, wl_shm_pool, wl_surface};
+use smithay::reexports::wayland_server::protocol::{wl_buffer, wl_shm, wl_shm_pool, wl_surface};
 use smithay::reexports::wayland_server::{
     Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource,
 };
@@ -369,12 +422,15 @@ mod tests;
 ///   ~2 GiB of address space reserved per pool; this is a quarter of that, and
 ///   leaves the `size as usize` conversion Smithay does trivially in range.
 ///
-/// What it deliberately does *not* claim: a byte total. A client may hold
+/// What it deliberately does *not* claim: a byte total, or an fd/mapping
+/// total. A client may hold
 /// up to [`MAX_POOLS_PER_CLIENT`](super::shm_pools::MAX_POOLS_PER_CLIENT)
-/// pools, and bounding the byte sum would need each pool's size at destroy
-/// time, which is unknowable at the pinned rev (see `shm_pools.rs`). The
-/// concurrency -- and with it the per-connection fds, one minimum per live
-/// pool -- is what [`reject_excess_shm_pool`] bounds. See this module's doc
+/// live pool objects, and bounding the byte sum would need each pool's size
+/// at destroy time, which is unknowable at the pinned rev (see
+/// `shm_pools.rs`) -- and a destroyed pool's fd and mapping outlive it
+/// while its buffers do, so those are bounded by the live-`wl_buffer` count
+/// instead (see `wl_buffers.rs`). The live-object concurrency is what
+/// [`reject_excess_shm_pool`] bounds. See this module's doc
 /// for why an oversized request is refused rather than clamped.
 const MAX_SHM_POOL_BYTES: i32 = 512 * 1024 * 1024;
 
@@ -400,6 +456,7 @@ where
         if reject_invalid_shm_pool_resize(resource, &request)
             || reject_oversized_shm_pool_creation(resource, &request)
             || reject_excess_shm_pool(state, client, resource, &request)
+            || reject_excess_buffer(state, client, resource, &request)
             || reject_unrepresentable_layer_size(resource, &request)
             || reject_frozen_toplevel_icon_request(state, resource, &request)
             || reject_excess_capture_frame(state, client, resource, &request)
@@ -417,6 +474,7 @@ where
         // neither reads nor writes, and `data.destroyed` moves `client`.
         forget_destroyed_capture_frame::<I>(state, &client, resource);
         forget_destroyed_shm_pool::<I>(state, &client, resource);
+        forget_destroyed_buffer::<I>(state, &client, resource);
         data.destroyed(state, client, resource);
         // *After* the delegate, not before: Smithay's own
         // `ExtLockSurfaceUserData::destroyed` is what unmaps the surface, and
@@ -675,6 +733,108 @@ where
         return;
     }
     state.shm_pools.forget_pool(client);
+}
+
+/// Posts a protocol error and returns `true` when `request` is a
+/// `wl_buffer` creation that would push its client past
+/// [`MAX_BUFFERS_PER_CLIENT`](super::wl_buffers::MAX_BUFFERS_PER_CLIENT)
+/// live buffers.
+///
+/// Three creation sites, one budget (see the module doc's "Why the sixth
+/// guard exists" for why the count is uniform): `wl_shm_pool.create_buffer`,
+/// `zwp_linux_buffer_params_v1.create_immed`, and
+/// `wp_single_pixel_buffer_manager_v1.create_u32_rgba_buffer`. The dmabuf
+/// async `create` is deliberately absent: it creates no object
+/// synchronously, and this compositor's `failed()` answer creates none
+/// later -- claiming one would leak a unit no destruction could release.
+/// Every other request of every other interface -- including `wl_shm_pool`
+/// `resize`/`destroy` and params `add`/`destroy` -- falls through.
+///
+/// The refusal is posted on the creating object with that interface's own
+/// code for a creation that cannot be honoured (`InvalidStride` on the
+/// pool, `InvalidWlBuffer` on the params; the single-pixel manager defines
+/// no errors, so a bare 0 with an explicit message). Same uninitialized-
+/// object argument as the pool guards: returning without initialising the
+/// request's `New` is safe only because `post_error` kills synchronously.
+///
+/// Folds away for every interface other than the three factories, for the
+/// same monomorphization reason as the guards above -- which matters here
+/// too: this runs on every request of every interface.
+fn reject_excess_buffer<I>(
+    state: &mut State,
+    client: &Client,
+    resource: &I,
+    request: &I::Request,
+) -> bool
+where
+    I: Resource,
+    I::Request: 'static,
+{
+    if TypeId::of::<I::Request>() == TypeId::of::<wl_shm_pool::Request>() {
+        let Some(wl_shm_pool::Request::CreateBuffer { .. }) =
+            (request as &dyn Any).downcast_ref::<wl_shm_pool::Request>()
+        else {
+            return false;
+        };
+        if !state.wl_buffers.claim_buffer_creation(client) {
+            return false;
+        }
+        resource.post_error(wl_shm::Error::InvalidStride, too_many_buffers());
+        return true;
+    }
+    if TypeId::of::<I::Request>() == TypeId::of::<zwp_linux_buffer_params_v1::Request>() {
+        let Some(zwp_linux_buffer_params_v1::Request::CreateImmed { .. }) =
+            (request as &dyn Any).downcast_ref::<zwp_linux_buffer_params_v1::Request>()
+        else {
+            return false;
+        };
+        if !state.wl_buffers.claim_buffer_creation(client) {
+            return false;
+        }
+        resource.post_error(
+            zwp_linux_buffer_params_v1::Error::InvalidWlBuffer,
+            too_many_buffers(),
+        );
+        return true;
+    }
+    if TypeId::of::<I::Request>() == TypeId::of::<wp_single_pixel_buffer_manager_v1::Request>() {
+        let Some(wp_single_pixel_buffer_manager_v1::Request::CreateU32RgbaBuffer { .. }) =
+            (request as &dyn Any).downcast_ref::<wp_single_pixel_buffer_manager_v1::Request>()
+        else {
+            return false;
+        };
+        if !state.wl_buffers.claim_buffer_creation(client) {
+            return false;
+        }
+        // No `Error` enum exists on this interface (verified against the
+        // protocol XML), so there is no code to name: 0 with a message that
+        // says what happened. Only a client already holding 512 live
+        // buffers ever sees it.
+        resource.post_error(0u32, too_many_buffers());
+        return true;
+    }
+    false
+}
+
+/// Forgets one live `wl_buffer` when its protocol object dies, which is
+/// what keeps [`MAX_BUFFERS_PER_CLIENT`](super::wl_buffers::MAX_BUFFERS_PER_CLIENT)'s
+/// bookkeeping exact: every counted creation is paired with exactly one
+/// destruction, including on client disconnect (whose cleanup destroys every
+/// object) and on a protocol-error kill. Fires for buffers of every kind --
+/// which is what keeps the uniform count uniform (see `wl_buffers.rs`).
+///
+/// Folds away for every interface other than `wl_buffer`, which matters in
+/// the same way as the hooks above: this sits on the destruction path of
+/// every object of every interface.
+fn forget_destroyed_buffer<I>(state: &mut State, client: &ClientId, _resource: &I)
+where
+    I: Resource,
+    I::Request: 'static,
+{
+    if TypeId::of::<I::Request>() != TypeId::of::<wl_buffer::Request>() {
+        return;
+    }
+    state.wl_buffers.forget_buffer(client);
 }
 
 /// Posts a protocol error and returns `true` when `request` is a
@@ -972,5 +1132,17 @@ fn too_many_pools() -> String {
     format!(
         "wl_shm pool refused: this client already holds the maximum of {} live pools",
         super::shm_pools::MAX_POOLS_PER_CLIENT,
+    )
+}
+
+/// The message the live-buffer-count refusal carries: which bound said no
+/// and what it is. Same allocation rule as [`too_large`] -- refusal path
+/// only. One message for all three factories: the count is shared, so the
+/// bound that said no is the same whichever factory the client came
+/// through.
+fn too_many_buffers() -> String {
+    format!(
+        "wl_buffer refused: this client already holds the maximum of {} live buffers",
+        super::wl_buffers::MAX_BUFFERS_PER_CLIENT,
     )
 }

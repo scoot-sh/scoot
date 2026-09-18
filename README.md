@@ -99,12 +99,18 @@ are non-blocking end to end, so no client — however slow, chunked or
 unresponsive — can stall the compositor for anyone else. Sizes a client or a
 config supplies are bounded too: each individual `wl_shm` pool is capped at
 512 MiB (four full-screen 8K frames' worth — a request past it gets a
-protocol error rather than a multi-gigabyte mapping for that pool), and one
-client may hold at most 128 live pools at once (past that the excess
-`create_pool` gets the same protocol error — each live pool costs the
-compositor a mapping and an fd, so this caps per-connection fds and mappings
-even though it cannot cap the byte total; see
-`docs/backlog/resolved/shm-pool-count-cap-done.md`), a client's
+protocol error rather than a multi-gigabyte mapping for that pool), one
+client may hold at most 128 live pool objects at once (past that the excess
+`create_pool` gets the same protocol error — this bounds live pool objects
+and the address-space envelope, *not* fds or mappings: a buffer outlives
+its pool object, retaining both, so those are bounded by the live-buffer
+count below), and one client may hold at most 512 live `wl_buffer`s at
+once whatever created them (pool, dmabuf, single-pixel — past that the
+excess creation gets a protocol error on the creating object; each
+surviving buffer is what actually retains a compositor fd and mapping, so
+this is the bound that caps per-connection fds and mappings — see
+`docs/backlog/resolved/shm-pool-count-cap-done.md` and
+`docs/backlog/resolved/shm-retained-fd-buffer-cap-done.md`), a client's
 declared minimum window size can't exceed the largest
 output's usable area on each axis, and `gap` and `cursor_size` each have an
 upper bound as well as a lower one. One client may also hold at most 8

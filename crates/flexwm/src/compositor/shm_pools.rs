@@ -1,13 +1,23 @@
-//! How many live `wl_shm` pools one Wayland client may hold at once.
+//! How many live `wl_shm_pool` protocol objects one Wayland client may hold
+//! at once.
 //!
 //! `dispatch.rs`'s per-pool cap (512 MiB) bounds one pool; nothing there
-//! bounds how many pools one client holds open concurrently, and each live
-//! pool costs the compositor a mapping, a `Pool` object dropped on a worker
-//! thread, and -- the sharp edge -- one fd of its own (`InnerPool` owns an
-//! `OwnedFd`). With the dev VM's soft `RLIMIT_NOFILE` at 1024, on the order
-//! of a thousand pools from a single connection exhausts the compositor's
-//! fds for every client, not just the hoarder. This caps the concurrency,
-//! not the bytes.
+//! bounds how many pools one client holds open concurrently, so this caps
+//! the concurrency, not the bytes: at most 128 live pool *objects* per
+//! connection, plus the address-space envelope that implies (128 x 512 MiB
+//! sparse, via the per-pool cap).
+//!
+//! What this does *not* bound is the compositor's fds or mappings. A
+//! destroyed pool object frees neither while a `wl_buffer` created from it
+//! is still alive -- the protocol mandates the retention, and at the pinned
+//! rev a buffer's user data holds an `Arc<Pool>` owning both the mapping
+//! and its `OwnedFd` -- so `create_pool` / `create_buffer` / `destroy_pool`
+//! in a loop keeps one fd and mapping per iteration with the live-pool
+//! count back at zero. That quantity is bounded separately, by the
+//! per-client live-`wl_buffer` count (`wl_buffers.rs`), which catches
+//! exactly the bypass shape: every iteration must keep a buffer alive.
+//! (Earlier revisions of this doc said 128 live pools meant 128 fds; see
+//! `docs/backlog/resolved/shm-pool-cap-misses-retained-fds-done.md`.)
 //!
 //! ## The number
 //!
@@ -22,9 +32,9 @@
 //! generous on purpose: tripping this disconnects the client, so a miscount
 //! must not kill a heavy-but-legitimate session.
 //!
-//! What 128 bounds per connection: 128 fds (an eighth of a 1024-fd
-//! `RLIMIT_NOFILE`), 128 mappings/objects, and -- only in the
-//! address-space sense -- 128 x 512 MiB sparse. It does *not* bound bytes
+//! What 128 bounds per connection: 128 live pool objects, and -- only in
+//! the address-space sense -- 128 x 512 MiB sparse. It does *not* bound fds,
+//! mappings (a surviving buffer retains both -- see above), or bytes
 //! the way the ticket that filed this
 //! (`docs/backlog/resolved/shm-pool-count-cap-done.md`) asked: a
 //! byte total needs each pool's size at destroy time, and at the pinned

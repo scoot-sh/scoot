@@ -356,6 +356,14 @@ fn created_buffers_carry_their_rgba_values_and_use_no_shm() {
         0,
         "creating single-pixel buffers must not claim shm pool budget"
     );
+    // But all three buffers count toward the per-client *buffer* budget:
+    // the release hook cannot tell buffer kinds apart, so a selective
+    // count would drift fail-open (see `wl_buffers.rs`).
+    assert_eq!(
+        fixture.state.wl_buffers.buffers_in_flight(),
+        3,
+        "creating single-pixel buffers must claim buffer budget"
+    );
 }
 
 #[test]
