@@ -1231,10 +1231,12 @@ its connection and its `wl_surface`s are still perfectly alive.
   transition doesn't flash black; flexwm doesn't, deliberately — waiting means
   rendering the unlocked session for that whole second.
 - **One output.** A lock surface is configured per `wl_output` and flexwm has
-  exactly one, so every surface one lock puts up shares that output's size
-  (the first-created draws on top and holds the keyboard) and the first
-  blanked frame on it is what sends `locked`; multi-output support has to
-  revisit all four halves.
+  exactly one, so the one live surface a lock may hold is configured to that
+  output's size, and the first blanked frame on it is what sends `locked`;
+  a second `get_lock_surface` for the same output is refused with the
+  protocol's `duplicate_output` error even when it names the output through
+  a different `wl_output` bind (destroying the first surface frees the
+  output for a rebuild). Multi-output support has to revisit all four halves.
 
 ## Idle detection (`ext-idle-notify-v1`, `idle-inhibit-unstable-v1`)
 

@@ -99,3 +99,14 @@ itself is a separate epic and is not built here.
   `cargo nextest run --workspace` (988 passed, 1 skipped),
   `cargo clippy -p flexwm --all-targets -- -D warnings` clean,
   `cargo fmt --check -p flexwm` clean, `scripts/smoke-test.sh` (17 ok).
+
+## Superseded in part (2026-09-18)
+
+The duplicate-bind admission question this record left open is resolved as
+*refuse*: see `session-lock-duplicate-output-done.md`. A second live
+surface for an already-covered output is now refused with the protocol's
+`duplicate_output` error, so the two-surface composition this record
+pinned — first-created on top, keyboard on the first, resize reaching
+all — can no longer arise, and that suite is replaced by a refusal test
+plus a destroy-frees-the-output rebuild test. The single-surface
+per-output pins stand unchanged.

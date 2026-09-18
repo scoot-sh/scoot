@@ -229,14 +229,13 @@
 //!
 //! The gather loop asks no focus question of its own, and needs none: the
 //! two parenting constraints above hold regardless of how many lock surfaces
-//! exist. Single-output is real but single-surface is not --
-//! [`SessionLockHandler::new_surface`] performs no per-output duplicate
-//! check, so a lock client calling `get_lock_surface` twice yields two
-//! current surfaces, and an xdg popup on the second (unfocused --
-//! `keyboard_focus` takes the first current surface) can arise and is
-//! gathered. Harmless either way: it is still the lock client's own surface,
-//! and IME popups stay pinned to the focused field by the
-//! compositor-assigned parenting above.
+//! exist. Single-output is real but single-surface is enforced, not assumed:
+//! [`SessionLockHandler::new_surface`] refuses a second live surface for an
+//! already-covered output with `duplicate_output`, so at most one current
+//! surface exists per output -- and an xdg popup on it can only be the lock
+//! client's own (unfocused popups on a second surface cannot arise), while
+//! IME popups stay pinned to the focused field by the compositor-assigned
+//! parenting above.
 
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
@@ -255,7 +254,9 @@ use smithay::desktop::utils::{
 use smithay::desktop::{PopupManager, WindowSurfaceType};
 use smithay::input::pointer::CursorImageStatus;
 use smithay::output::Output;
-use smithay::reexports::wayland_protocols::ext::session_lock::v1::server::ext_session_lock_v1::ExtSessionLockV1;
+use smithay::reexports::wayland_protocols::ext::session_lock::v1::server::ext_session_lock_v1::{
+    Error as LockError, ExtSessionLockV1,
+};
 use smithay::reexports::wayland_protocols::wp::presentation_time::server::wp_presentation_feedback;
 use smithay::reexports::wayland_server::backend::ObjectId;
 use smithay::reexports::wayland_server::protocol::wl_output::WlOutput;
@@ -381,8 +382,11 @@ pub struct SessionLock {
     blank_deadline: Option<Instant>,
     /// Every lock surface this compositor has been handed and not yet dropped,
     /// in creation order -- the first *current* one holds the keyboard, which
-    /// is the focus rule the protocol itself suggests. One per output per
-    /// lock; flexwm has one output today (see `headless.rs`'s `OUTPUT_ID`).
+    /// is the focus rule the protocol itself suggests. At most one *live*
+    /// surface per output per lock (see [`SessionLock::surface_outputs`):
+    /// a second `get_lock_surface` for an already-covered output is refused
+    /// in [`SessionLockHandler::new_surface`], so with one output this list
+    /// holds at most one current surface.
     ///
     /// Not every entry is necessarily current: see this module's "Which lock
     /// surfaces count". Nothing may read this field directly -- reads go
@@ -393,6 +397,35 @@ pub struct SessionLock {
     /// [`SessionLockHandler::unlock`], and the `retain` in
     /// [`SessionLock::cleanup`] and [`State::forget_lock_surface`].
     surfaces: Vec<LockSurface>,
+    /// The physical output each lock surface was admitted for, keyed by its
+    /// `wl_surface`'s object id -- the key [`SessionLockHandler::new_surface`]
+    /// refuses a second live surface on.
+    ///
+    /// Keyed on the resolved [`Output`], not the `WlOutput` resource the
+    /// client named: one global bound twice is two resources for one output,
+    /// and Smithay's own `locked_outputs` guard compares resource identity,
+    /// so it admits what this map refuses. [`Output`]'s equality is the
+    /// physical output (`Arc::ptr_eq` in `0ff0098/src/output.rs`, the rev
+    /// this project pins), which is exactly the granularity the protocol's
+    /// `duplicate_output` error names.
+    ///
+    /// Live-only, deliberately: entries are consulted solely through
+    /// [`SessionLock::current`], so a surface that stopped counting -- role
+    /// destroyed, client gone, lock taken over -- frees its output for a
+    /// rebuild without any removal here. Stronger than a lifecycle claim:
+    /// [`SessionLock::surface_for_output`] answers with a live
+    /// `&LockSurface`, so a sticky refusal (an entry with no live surface
+    /// behind it) is unrepresentable -- the removal in
+    /// [`State::forget_lock_surface`] is bounded-hygiene, not load-bearing.
+    /// Like [`SessionLock::acked`] this outlives [`SessionLock::surfaces`]
+    /// entries rather than shadowing their lifecycle, and for the same
+    /// reason: the writers are the `insert` in
+    /// [`SessionLockHandler::new_surface`], the `clear` in
+    /// [`SessionLockHandler::lock`] and [`SessionLockHandler::unlock`], and
+    /// the `remove` in [`State::forget_lock_surface`] -- the same three
+    /// sites that write `surfaces`, minus the `retain` passes that need no
+    /// map change because a stale entry is never consulted.
+    surface_outputs: HashMap<ObjectId, Output>,
     /// The last configure every lock surface acked while its role was alive,
     /// keyed by its `wl_surface`'s object id.
     ///
@@ -439,6 +472,7 @@ impl SessionLock {
             blank_flip: None,
             blank_deadline: None,
             surfaces: Vec::new(),
+            surface_outputs: HashMap::new(),
             acked: HashMap::new(),
             backdrop: SolidColorBuffer::default(),
         }
@@ -571,6 +605,22 @@ impl SessionLock {
         self.surfaces
             .iter()
             .filter(move |surface| is_current(owner, surface))
+    }
+
+    /// The current surface admitted for `output`, if any -- the duplicate
+    /// check [`SessionLockHandler::new_surface`] refuses on.
+    ///
+    /// Asked through [`SessionLock::current`], so only live surfaces count:
+    /// destroying one frees its output for a rebuild. The output half comes
+    /// from [`SessionLock::surface_outputs`]; a current surface with no entry
+    /// there simply never matches, which is the safe direction for a lookup
+    /// that only ever refuses.
+    fn surface_for_output(&self, output: &Output) -> Option<&LockSurface> {
+        self.current().find(|surface| {
+            self.surface_outputs
+                .get(&surface.wl_surface().id())
+                .is_some_and(|admitted| admitted == output)
+        })
     }
 
     /// The surface the keyboard goes to while locked: the current lock's first
@@ -930,7 +980,10 @@ impl SessionLockHandler for State {
         // if it gave its lock up rather than died. None of it may be drawn or
         // focused again, so it goes now rather than being filtered forever.
         // (Empty already on the fresh-lock path: `unlock` clears it too.)
+        // The admitted-output map goes with the surfaces: a takeover starts
+        // with no output covered.
         self.session_lock.surfaces.clear();
+        self.session_lock.surface_outputs.clear();
         if already_blanked {
             // The outputs are blank and stay blank across this handover, so
             // the protocol's reason for waiting is satisfied by construction
@@ -976,6 +1029,7 @@ impl SessionLockHandler for State {
         // flip must not confirm anything afterwards.
         self.session_lock.cancel_blank_wait();
         self.session_lock.surfaces.clear();
+        self.session_lock.surface_outputs.clear();
         // Deliberately not [`State::lock_transition`]: this is the one lock
         // transition that hands the session *back*, so a pointer grab has to
         // survive it exactly as it survives any other focus change. Only the
@@ -992,6 +1046,16 @@ impl SessionLockHandler for State {
     /// Smithay sends this surface's first configure the moment this returns,
     /// so the size has to be set here: the configure is an exact requirement
     /// the client's first buffer must match.
+    ///
+    /// At most one live surface per physical output: a second
+    /// `get_lock_surface` for an output the lock already covers is refused
+    /// with the protocol's own `duplicate_output` error, which kills the
+    /// offending client. Smithay already refuses the same `wl_output`
+    /// resource twice before this is ever called; what lands here is the
+    /// shape its resource-identity guard admits, the same physical output
+    /// named through a second bind of the global. The check is against live
+    /// surfaces only (see [`SessionLock::surface_for_output`]), so replacing
+    /// a destroyed surface is still admitted.
     fn new_surface(&mut self, surface: LockSurface, output: WlOutput) {
         // Smithay may call this for a lock this compositor refused, if that
         // refusal and this request cross on the wire; its own docs say to
@@ -1017,8 +1081,19 @@ impl SessionLockHandler for State {
             tracing::warn!("no output for a lock surface");
             return;
         };
+        if self.session_lock.surface_for_output(&output).is_some() {
+            tracing::warn!("refusing a second lock surface for an already-locked output");
+            surface.ext_session_lock().post_error(
+                LockError::DuplicateOutput,
+                "Output already has a lock surface.",
+            );
+            return;
+        }
         let size = logical_size(&output);
         configure(&surface, size);
+        self.session_lock
+            .surface_outputs
+            .insert(surface.wl_surface().id(), output);
         self.session_lock.surfaces.push(surface);
         // The first surface takes the keyboard off nobody, and the pointer
         // has to enter it rather than wait for the user to move the mouse.
@@ -1551,15 +1626,20 @@ impl State {
     ///
     /// Also prunes [`SessionLock::acked`]'s record of the surface, which lives
     /// past the surface list on purpose (see that field) and so needs its own
-    /// removal here. Silent -- it does not affect the return value: a surface
-    /// that was already filtered out of the list needs no focus or redraw
-    /// catch-up when its `wl_surface` finally goes.
+    /// removal here, and [`SessionLock::surface_outputs`]' admission entry --
+    /// bounded-hygiene rather than load-bearing (a forgotten surface is out
+    /// of [`SessionLock::current`], so its entry is never consulted again),
+    /// but without it the map would grow with every surface the session ever
+    /// admitted. Silent -- none of the three affects the return value: a
+    /// surface that was already filtered out of the list needs no focus or
+    /// redraw catch-up when its `wl_surface` finally goes.
     pub(super) fn forget_lock_surface(&mut self, surface: &WlSurface) -> bool {
         let before = self.session_lock.surfaces.len();
         self.session_lock
             .surfaces
             .retain(|lock| lock.wl_surface() != surface);
         self.session_lock.acked.remove(&surface.id());
+        self.session_lock.surface_outputs.remove(&surface.id());
         before != self.session_lock.surfaces.len()
     }
 

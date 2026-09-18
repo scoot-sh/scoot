@@ -610,6 +610,16 @@ gap jumped the queue — each item's own file records why it landed when it did.
   keyboard on first, resize reaching all), `OUTPUT_ID`'s doc lists the four
   sites multi-output must revisit. Duplicate-bind admission stays open as
   its own entry.
+- **[One physical output can hold unboundedly many lock surfaces if the lock
+  client binds `wl_output` more than
+  once](docs/backlog/resolved/session-lock-duplicate-output-done.md)** —
+  RESOLVED 2026-09-18 (refuse, no Smithay patch): the admission question PR
+  #103 punted here. The protocol mandates `duplicate_output` per *output*,
+  Smithay enforces it per *resource*, so flexwm refuses a second live
+  surface for an already-covered output with code 3 on the lock, keyed on
+  the physical `Output`; destroying the surface frees it for a rebuild.
+  Neither probed shell ever holds two at once. Supersedes PR #103's
+  two-surface composition pins; the single-surface per-output pins stand.
 ## What's next
 
 The backlog is the source of truth for what to pick up; this is the current

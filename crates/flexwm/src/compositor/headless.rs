@@ -82,7 +82,10 @@ render_elements! {
 /// The same holds for `session_lock.rs`, whose four per-output sites are the
 /// subject of `docs/backlog/resolved/session-lock-per-output-done.md` (resolved
 /// as single-output pins, not as multi-output): `new_surface` honours the
-/// client's named `wl_output` but falls back to the single output;
+/// client's named `wl_output` but falls back to the single output, and
+/// refuses a second live surface for an already-covered output with the
+/// protocol's `duplicate_output` error (see
+/// `docs/backlog/resolved/session-lock-duplicate-output-done.md`);
 /// `configure_all` sizes every surface to that one output together;
 /// confirmation treats the first blanked frame as "presented on all outputs",
 /// which is true if and only if there is one of them; and the locked render
