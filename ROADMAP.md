@@ -850,7 +850,12 @@ medium priority — the effective top of what's actually open.
    still refuses),
    [`--width/--height`
    bounds](docs/backlog/resolved/width-height-bounded-done.md) (resolved —
-   refused past 65535 per axis at parse, layout siblings saturate).
+   refused past 65535 per axis at parse, layout siblings saturate),
+   [`msg type` dead keys / compose](docs/backlog/resolved/msg-type-dead-keys-compose-done.md)
+   (PR #121, resolved — 2-key dead-led sequences typed person-style
+   through the session-locale table, per-char atomic, prefix-typed;
+   inactive groups, lock/latch, `Multi_key` and plain-`us` `é` stay loud
+   refusals).
 5. [Rename `flexwm` → `flex`, split out
    `flexctl`](docs/backlog/meta/rename-flex-family.md) — decided, explicitly
    scheduled **last** in the burn-down, per the entry's own frontmatter.
