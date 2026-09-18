@@ -691,7 +691,18 @@ gap jumped the queue — each item's own file records why it landed when it did.
   Post-fix: 40/40 targeted + 12/12 full-binary under the oversubscription
   that tripped 6/40 + 1/12 pre-fix, full set green, smoke 17 ok. Found
   alongside and filed separately (low, load-only): an activation
-  taskbar-click settle flake under the same abusive load.
+  taskbar-click settle flake under the same abusive load — since resolved
+  (next entry).
+- **[Activation taskbar-click settle flake](docs/backlog/resolved/activation-taskbar-click-settle-flake-done.md)**
+  — RESOLVED 2026-09-18 (test-only, no production change): verify-first
+  found three distinct load-only trip mechanisms at the same test, not the
+  one filed — settle-insufficiency (fixed with a bounded settle-until loop
+  on the click's own hit test), a racing client `activate` spending the
+  click before the assert (fixed with synchronous press-asserts, no dispatch
+  in between), and `focus_before` read after the racing dispatch (moved
+  before the release). Post-fix: 80/80 targeted + 4/4 full-binary under the
+  oversubscription that tripped 2/80 pre-fix, full set green, smoke 17 ok.
+  No second flake anywhere in the rounds, so nothing new filed.
 - **[`--tty` quit's DRM "restore previous state"
   EPERM](docs/backlog/resolved/drm-teardown-restore-eperm-done.md)**
   — RESOLVED 2026-09-18: strace-proven to be our own teardown racing
