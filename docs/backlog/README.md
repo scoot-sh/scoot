@@ -384,7 +384,12 @@ actionable.
   eval-time); the old working-tree copy also dragged `target/` + `.git`
   along, so `src` drops from ~1.1 GB to ~3.3 MB in-store and doc/target
   edits no longer move the drv. Proven by `nix build` (aarch64-darwin).
-- [`x86_64-darwin` in `systems` breaks `flake check --all-systems`](./packaging/flake-x86-darwin-system.md)
+- [`x86_64-darwin` in `systems` breaks `flake check --all-systems`](./resolved/flake-x86-darwin-system-done.md)
+  — RESOLVED 2026-09-18 as deliberate exclusion: the pinned nixpkgs
+  (26.11) throws at `legacyPackages.x86_64-darwin` before any per-system
+  definition is reached, so the system is dropped (a whole-tree repin to
+  26.05 declined on cost); the Darwin client path is arch-independent,
+  so `cargo build` from source stays open on Intel Macs.
 - [`flake.nix` description drift](./resolved/flake-description-drift-done.md) (nit)
   — RESOLVED 2026-09-18: top-level `description` names both (compositor on
   Linux, `flexwm msg` client on macOS); `meta.description` is per system

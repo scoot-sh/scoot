@@ -161,7 +161,9 @@ of the crate and the same package gives you `flexwm msg`, the client — useful
 for driving a compositor running in a VM, but `flexwm --headless` there exits
 with `the compositor only runs on Linux`. `nix build` deliberately does not
 run the test suite (`flake.nix` says why); `cargo test` below is where that
-runs.
+runs. On macOS the flake covers Apple Silicon (`aarch64-darwin`) only: the
+pinned nixpkgs dropped Intel (`x86_64-darwin`), so an Intel Mac builds the
+same client from source with `cargo build` below instead.
 
 To work on the code:
 

@@ -762,6 +762,15 @@ gap jumped the queue — each item's own file records why it landed when it did.
   drops from ~1.1 GB to ~3.3 MB in-store, and doc/target edits no longer
   move the derivation. Proven by `nix build` (aarch64-darwin); the
   `x86_64-darwin` sibling ticket stays open and untouched.
+- **[`x86_64-darwin` in `systems`](docs/backlog/resolved/flake-x86-darwin-system-done.md)**
+  — RESOLVED 2026-09-18 as deliberate exclusion (`flake.nix` systems
+  list plus one README sentence, no code): the pinned nixpkgs (26.11)
+  throws at `legacyPackages.x86_64-darwin` before any per-system
+  definition is reached, so the system is dropped rather than repinning
+  the whole tree to 26.05; the Darwin client path is one
+  arch-independent `cfg(not(target_os = "linux"))`, so `cargo build`
+  from source stays open on Intel Macs. `nix flake check --all-systems`
+  is green on the three remaining systems.
 ## What's next
 
 The backlog is the source of truth for what to pick up; this is the current
