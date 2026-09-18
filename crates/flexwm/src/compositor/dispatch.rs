@@ -405,8 +405,13 @@ use smithay::wayland::{Dispatch2, GlobalDispatch2};
 
 use super::State;
 
+/// Test-only, and `pub(super)` for one reason: the fd-flood serialisation
+/// lock in `tests` is shared with the icon-buffer flood in
+/// `toplevel_icon/tests.rs`, which holds the same ~512 server fds and
+/// would exhaust the test process's shared fd table running beside one
+/// of these floods.
 #[cfg(test)]
-mod tests;
+pub(super) mod tests;
 
 /// The largest `wl_shm` pool flexwm will map, in bytes (512 MiB).
 ///

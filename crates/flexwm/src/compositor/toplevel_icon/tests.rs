@@ -58,6 +58,29 @@ enum Step {
     RenameAssignedIcon,
     /// `add_buffer` on an already-assigned icon: the same trap, other arm.
     AddBufferToAssignedIcon,
+    /// Build an icon with `name` plus one square shm buffer of `size` px,
+    /// attach it (uncommitted), holding both so a later step can destroy
+    /// the buffer out from under the live icon.
+    AttachIconWithBuffer { name: String, size: i32 },
+    /// Destroy the buffer most recently attached to an icon. Against an
+    /// icon that still exists upstream posts `NoBuffer` and kills this
+    /// client; after the icon itself is gone it is a plain destroy.
+    DestroyIconBuffer,
+    /// Build `count` pixels-only icons (no name -- the shape a client
+    /// that supplies only pixels takes), each with one live square
+    /// buffer held open. Never assigned, so nothing freezes; the buffers
+    /// stay counted until destroyed or the client goes away.
+    AttachManyIconBuffers { count: u32 },
+    /// Destroy every held icon, unregistering upstream's
+    /// buffer-destruction hooks first -- so destroying the buffers after
+    /// this is safe, while destroying them before it is a `NoBuffer`
+    /// kill. The buffers themselves stay alive and counted.
+    DestroyAllIcons,
+    /// Destroy every held icon buffer client-side.
+    DestroyAllIconBuffers,
+    /// Create one more icon buffer past a full budget, expecting the
+    /// refusal. The client is killed for it and never acknowledges.
+    CreateOneMoreBuffer,
 }
 
 #[derive(Default)]
@@ -157,11 +180,16 @@ wayland_client::delegate_noop!(TestClient: ignore wl_buffer::WlBuffer);
 /// A square, shm-backed `wl_buffer` -- what `xdg_toplevel_icon_v1.add_buffer`
 /// requires, so that a rejected `add_buffer` is rejected for its timing and
 /// not for its contents.
+///
+/// Returns the backing file alongside the buffer: the pool creation sends
+/// the fd at flush time, so the client must hold it open until the step's
+/// roundtrip, the way `dispatch/tests.rs`'s `BufferClient` holds its own.
+/// Dropping it earlier hands the server a closed fd.
 fn square_shm_buffer(
     shm: &wl_shm::WlShm,
     qh: &QueueHandle<TestClient>,
     size: i32,
-) -> wl_buffer::WlBuffer {
+) -> (wl_buffer::WlBuffer, std::fs::File) {
     let stride = size * 4;
     let len = (stride * size) as usize;
     let fd = rustix::fs::memfd_create("flexwm-icon-test", rustix::fs::MemfdFlags::CLOEXEC)
@@ -171,7 +199,7 @@ fn square_shm_buffer(
     let pool = shm.create_pool(file.as_fd(), len as i32, qh, ());
     let buffer = pool.create_buffer(0, size, size, stride, wl_shm::Format::Argb8888, qh, ());
     pool.destroy();
-    buffer
+    (buffer, file)
 }
 
 /// Maps one toplevel, reports what the manager advertised, then runs whatever
@@ -212,6 +240,21 @@ fn run_client(
     // The most recently created icon, kept so a step can poke it after it has
     // been assigned.
     let mut last_icon: Option<xdg_toplevel_icon_v1::XdgToplevelIconV1> = None;
+    // The buffer most recently attached to an icon, kept for the same
+    // reason: destroying it out from under a live icon is `NoBuffer`.
+    let mut last_buffer: Option<wl_buffer::WlBuffer> = None;
+    // Every pixels-only icon and its buffer, held open across steps so
+    // the accounting tests observe live buffers, not dead ones. Icons
+    // and buffers are held separately so one step can destroy all the
+    // icons while the buffers stay alive and counted.
+    let mut held_icons: Vec<xdg_toplevel_icon_v1::XdgToplevelIconV1> = Vec::new();
+    let mut held_buffers: Vec<wl_buffer::WlBuffer> = Vec::new();
+    // Backing files for every pool a step created, held until that
+    // step's roundtrip flushes the creation past the server -- see
+    // `square_shm_buffer`. Cleared after each acknowledged step: once
+    // flushed the server holds its own dup and the client's copy is
+    // just fd-table pressure.
+    let mut held_files: Vec<std::fs::File> = Vec::new();
     while let Ok(step) = steps.recv() {
         match step {
             Step::AttachIcon { name } => {
@@ -233,11 +276,54 @@ fn run_client(
                 let icon = last_icon.as_ref().ok_or("no icon to add a buffer to")?;
                 // A real, square, shm-backed buffer, so the only thing wrong
                 // with the request is *when* it is sent.
-                let buffer = square_shm_buffer(&shm, &qh, 16);
+                let (buffer, file) = square_shm_buffer(&shm, &qh, 16);
+                held_files.push(file);
                 icon.add_buffer(&buffer, 1);
+            }
+            Step::AttachIconWithBuffer { name, size } => {
+                let icon = icons.create_icon(&qh, ());
+                icon.set_name(name);
+                let (buffer, file) = square_shm_buffer(&shm, &qh, size);
+                held_files.push(file);
+                icon.add_buffer(&buffer, 1);
+                icons.set_icon(&toplevel, Some(&icon));
+                last_icon = Some(icon);
+                last_buffer = Some(buffer);
+            }
+            Step::DestroyIconBuffer => {
+                let buffer = last_buffer.take().ok_or("no icon buffer to destroy")?;
+                buffer.destroy();
+            }
+            Step::AttachManyIconBuffers { count } => {
+                for _ in 0..count {
+                    let icon = icons.create_icon(&qh, ());
+                    let (buffer, file) = square_shm_buffer(&shm, &qh, 1);
+                    held_files.push(file);
+                    icon.add_buffer(&buffer, 1);
+                    held_icons.push(icon);
+                    held_buffers.push(buffer);
+                }
+            }
+            Step::DestroyAllIcons => {
+                for icon in held_icons.drain(..) {
+                    icon.destroy();
+                }
+                // The buffers stay in `held_buffers`: alive, and still
+                // counted by the live-buffer budget.
+            }
+            Step::DestroyAllIconBuffers => {
+                for buffer in held_buffers.drain(..) {
+                    buffer.destroy();
+                }
+            }
+            Step::CreateOneMoreBuffer => {
+                let (buffer, file) = square_shm_buffer(&shm, &qh, 1);
+                held_files.push(file);
+                held_buffers.push(buffer);
             }
         }
         queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+        held_files.clear();
         acks.send(()).map_err(|e| e.to_string())?;
     }
     Ok(())
@@ -359,6 +445,45 @@ impl Fixture {
 
     fn icon(&self) -> Option<String> {
         self.state.icon_name_of(self.window())
+    }
+
+    /// How many live `wl_buffer`s the compositor counts for all clients
+    /// between them -- the per-client 512 budget's bookkeeping, read
+    /// directly so an icon-destined buffer that escaped counting fails
+    /// here rather than anywhere downstream.
+    fn buffers_in_flight(&self) -> usize {
+        self.state.wl_buffers.buffers_in_flight()
+    }
+
+    /// Closes the step channel and waits for the client thread to exit,
+    /// returning whatever it returned: `Ok` for a client that went away
+    /// cleanly on disconnect, `Err` for one the compositor killed with a
+    /// protocol error.
+    fn join_client(&mut self) -> Result<(), String> {
+        self.steps = None;
+        let handle = self.client.take().expect("the client thread");
+        let deadline = Instant::now() + PATIENCE;
+        while !handle.is_finished() && Instant::now() < deadline {
+            self.pump();
+        }
+        assert!(
+            handle.is_finished(),
+            "the client thread never exited; the compositor stopped dispatching"
+        );
+        handle.join().expect("the client thread is joinable")
+    }
+
+    /// Asserts the compositor is still serving: a fresh client can still
+    /// connect and be answered. The property that matters to every
+    /// *other* client after one misbehaves.
+    fn assert_still_serving(&mut self) {
+        let (server, client_end) = UnixStream::pair().expect("a socket pair");
+        self.state
+            .display_handle
+            .insert_client(server, Arc::new(ClientState::default()))
+            .expect("the compositor still accepts clients");
+        drop(client_end);
+        self.pump();
     }
 
     /// The `icon` field the `windows` IPC request would report for the one
@@ -543,4 +668,147 @@ fn renaming_an_assigned_icon_does_not_take_the_compositor_down() {
 #[test]
 fn adding_a_buffer_to_an_assigned_icon_does_not_take_the_compositor_down() {
     survives_a_frozen_icon_request(Step::AddBufferToAssignedIcon);
+}
+
+/// Icon-destined buffers are ordinary `wl_buffer`s: created with
+/// `wl_shm_pool.create_buffer`, they claim against the per-client live
+/// budget in `dispatch.rs` before Smithay ever sees them, whatever the
+/// client does with them afterwards. Three pixels-only buffers read
+/// back as three live units; destroying their icons leaves the count
+/// untouched (the buffers outlive the icons that named them); and once
+/// the icons are gone the buffers destroy cleanly -- upstream's
+/// buffer-destruction hook went away with them, so no `NoBuffer` kill --
+/// draining the count back to zero with the client still alive.
+#[test]
+fn icon_buffers_are_counted_in_the_live_buffer_budget() {
+    let mut fixture = Fixture::new();
+    assert_eq!(fixture.buffers_in_flight(), 0);
+    fixture.run(Step::AttachManyIconBuffers { count: 3 });
+    assert_eq!(
+        fixture.buffers_in_flight(),
+        3,
+        "icon-destined buffers escaped the live-buffer count"
+    );
+
+    fixture.run(Step::DestroyAllIcons);
+    assert_eq!(
+        fixture.buffers_in_flight(),
+        3,
+        "destroying the icons released buffers that are still alive"
+    );
+
+    fixture.run(Step::DestroyAllIconBuffers);
+    assert_eq!(
+        fixture.buffers_in_flight(),
+        0,
+        "destroyed icon buffers never released their budget units"
+    );
+}
+
+/// The protocol forbids destroying a buffer backing a live icon
+/// (`NoBuffer`), and upstream enforces it by killing that client. What
+/// must not happen -- the PR #75/94 lesson -- is the kill escaping its
+/// one connection: the compositor keeps serving everyone else.
+#[test]
+fn destroying_a_live_icon_buffer_disconnects_only_that_client() {
+    let mut fixture = Fixture::new();
+    fixture.run(Step::AttachIconWithBuffer {
+        name: "org.flexwm.Probe".to_string(),
+        size: 16,
+    });
+    fixture.run(Step::Commit);
+    assert_eq!(fixture.icon(), Some("org.flexwm.Probe".to_string()));
+
+    // The offending destroy. The client dies for it, so -- like the
+    // frozen-icon steps above -- this does not wait for an
+    // acknowledgement that never comes.
+    fixture.send(Step::DestroyIconBuffer);
+    // Pump well past the point the destroy has been dispatched. A panic
+    // in the compositor unwinds *here*, inside `dispatch`, and fails
+    // the test.
+    for _ in 0..50 {
+        fixture.pump();
+    }
+
+    let outcome = fixture.join_client();
+    assert!(
+        outcome.is_err(),
+        "destroying a live icon's buffer should kill that client, but it survived"
+    );
+    fixture.assert_still_serving();
+}
+
+/// Whatever holds icon buffers server-side -- the icon objects, the
+/// surface's cached state -- must not keep their protocol objects alive
+/// past the client's own disconnect: the destruction hook that drains
+/// the live-buffer budget fires for every destroyed `wl_buffer`, and a
+/// count that sticks is a retained-fd leak per disconnect.
+#[test]
+fn icon_buffers_drain_when_their_client_disconnects() {
+    let mut fixture = Fixture::new();
+    fixture.run(Step::AttachManyIconBuffers { count: 5 });
+    assert_eq!(fixture.buffers_in_flight(), 5);
+
+    let outcome = fixture.join_client();
+    assert!(
+        outcome.is_ok(),
+        "a clean disconnect should not look like a protocol kill: {outcome:?}"
+    );
+    let deadline = Instant::now() + PATIENCE;
+    while fixture.buffers_in_flight() != 0 {
+        assert!(
+            Instant::now() < deadline,
+            "the disconnected client's icon buffers never drained: {} still counted",
+            fixture.buffers_in_flight()
+        );
+        fixture.pump();
+    }
+}
+
+/// The ticket's literal question, answered as a pin rather than a
+/// paragraph: 512 pixels-only icon buffers fill the same per-client
+/// budget every other `wl_buffer` shares, and the 513rd creation is
+/// refused -- after which the kill drains the dead client's whole
+/// count, the way `dispatch/tests.rs` pins for the bypass loop.
+///
+/// One shared pool is deliberately *not* used here: per-buffer pools
+/// are the retention shape the budget exists to catch (one fd per
+/// buffer past its pool's destroy), and `dispatch/tests.rs` already
+/// owns that shape at scale. Small pools in 64-step chunks keep this
+/// client's own fd peak at 64; the ~512 retained server fds are the
+/// reason this takes the shared fd-flood lock -- beside a dispatch
+/// flood on another thread the pair would exhaust the test process's
+/// table.
+#[test]
+fn icon_buffers_fill_the_same_live_buffer_budget() {
+    use crate::compositor::dispatch::tests::hold_flood_lock;
+    use crate::compositor::wl_buffers::MAX_BUFFERS_PER_CLIENT;
+
+    let _flood = hold_flood_lock();
+    let mut fixture = Fixture::new();
+    for _ in 0..MAX_BUFFERS_PER_CLIENT / 64 {
+        fixture.run(Step::AttachManyIconBuffers { count: 64 });
+    }
+    assert_eq!(
+        fixture.buffers_in_flight(),
+        MAX_BUFFERS_PER_CLIENT as usize,
+        "512 icon buffers did not fill the live-buffer budget"
+    );
+
+    // Past the cap: refused, and the client killed for it.
+    fixture.send(Step::CreateOneMoreBuffer);
+    for _ in 0..50 {
+        fixture.pump();
+    }
+    let outcome = fixture.join_client();
+    assert!(
+        outcome.is_err(),
+        "the 513rd icon buffer should have been refused with a protocol error"
+    );
+    assert_eq!(
+        fixture.buffers_in_flight(),
+        0,
+        "the killed client's icon buffers never drained"
+    );
+    fixture.assert_still_serving();
 }

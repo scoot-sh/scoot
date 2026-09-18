@@ -139,7 +139,9 @@ fn create_pool_of(stream: UnixStream, size: i32) -> Result<(), DispatchError> {
     Ok(())
 }
 
-/// Serialises the fd-flood tests below (and the pool-count floods above).
+/// Serialises the fd-flood tests below (and the pool-count floods above,
+/// plus the icon-buffer flood in `toplevel_icon/tests.rs`, which shares
+/// this lock through `super::tests`).
 ///
 /// `cargo test` runs tests in threads of one process, sharing one fd
 /// table (`RLIMIT_NOFILE` 1024 on the dev VM). One flood holds ~512
@@ -147,12 +149,12 @@ fn create_pool_of(stream: UnixStream, size: i32) -> Result<(), DispatchError> {
 /// threads exhaust the table for every test in the process, including
 /// unrelated ones opening a single memfd. The floods each take a second
 /// or two; everything else runs unserialised.
-static FD_FLOOD_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+pub(in crate::compositor) static FD_FLOOD_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Holds the [`FD_FLOOD_LOCK`] for one flood test. Recovers from poisoning
 /// so one flood's panic fails that test, not every later flood with a
 /// confusing lock error.
-fn hold_flood_lock() -> std::sync::MutexGuard<'static, ()> {
+pub(in crate::compositor) fn hold_flood_lock() -> std::sync::MutexGuard<'static, ()> {
     FD_FLOOD_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)

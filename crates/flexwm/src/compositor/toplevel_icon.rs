@@ -33,8 +33,14 @@
 //! nothing here reads: handing those to an IPC client would mean re-encoding
 //! shm buffers to PNG per query, the way `screenshot.rs` does for the screen,
 //! and no consumer has asked for it yet. A client that supplies only buffers
-//! therefore reads as having no icon over IPC. Recorded rather than hidden:
-//! see `docs/backlog/protocols/`.
+//! therefore reads as having no icon over IPC. Closed as the honest scope,
+//! with the reasoning verified rather than assumed: see
+//! `docs/backlog/resolved/toplevel-icon-buffers-done.md`. Two facts worth
+//! keeping next to the code: the buffers are ordinary `wl_buffer`s under
+//! the per-client live budget (`wl_buffers.rs` -- creating them past it is
+//! refused, destroying them early kills that client with `NoBuffer`), and
+//! the protocol defines no `release` for them (`add_buffer`'s own XML says
+//! the event is unused), so there is no release to forget.
 
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::XdgToplevel;
 use smithay::reexports::wayland_protocols::xdg::toplevel_icon::v1::server::xdg_toplevel_icon_v1;

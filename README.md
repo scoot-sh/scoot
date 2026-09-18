@@ -1464,6 +1464,16 @@ prefer; and a client that supplies raw pixel buffers instead of a name reads
 as having no icon, since handing those over IPC would mean re-encoding shm
 buffers to PNG per query and no consumer has asked for it.
 
+The buffer half, for the toolkit author: pixel buffers must be square and
+`wl_shm`-backed (anything else is refused with `invalid_buffer`), and they
+are ordinary live `wl_buffer`s under the 512-per-client bound above, so a
+client already at its budget is refused further creations. There is no
+`release` for icon buffers — the protocol leaves the event unused — and a
+buffer destroyed while its icon still lives disconnects that client
+(`no_buffer`); destroying the icon first makes destroying its buffers safe.
+Pixels never leave the compositor: neither foreign-toplevel list protocol
+has an icon event, and IPC carries the name only.
+
 ## Input methods (`text-input-v3`, `input-method-v2`)
 
 flexwm implements `zwp_text_input_manager_v3` (version 1) and
