@@ -22,6 +22,7 @@
 //! `$XDG_RUNTIME_DIR`: [`State::new`] binds a real listening socket. They
 //! also spawn a real `sh`, which the dev VM and any Unix test host have.
 
+use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
@@ -468,4 +469,108 @@ fn a_spawned_childs_token_is_refused_while_locked() {
         Some(first),
         "the spawn token stopped working after the lock cycle"
     );
+}
+
+/// A `State::spawn` child inherits no close-on-exec compositor fd.
+///
+/// `--tty` used to pass `OFlags::CLOEXEC` when opening the DRM fd through
+/// the session, but the pinned Smithay's `LibSeatSession::open` discards its
+/// flags argument entirely (`_flags`, `backend/session/libseat.rs` at the
+/// pinned rev), so the flag was dead code and has been removed. The
+/// guarantee it appeared to provide still holds, and close-on-exec is the
+/// whole of it: every seatd-obtained fd carries the bit from libseat's own
+/// receive path (measured live 2026-09-13: the DRM and input fds all report
+/// it), and `execve` closes such fds in the child. This test pins the
+/// `spawn` side of that chain with the real `State::spawn` and a real child:
+/// a marker fd with close-on-exec set (the seatd-fd shape) must be absent
+/// from the child's `/proc/self/fd`. A second marker deliberately *without*
+/// close-on-exec is the positive control: it must be PRESENT, which proves
+/// the probe observes real inheritance -- and proves the bit is
+/// load-bearing, because `State::spawn` provably inherits any fd lacking it.
+/// (First written asserting both absent, it failed exactly on the plain
+/// marker -- the child's table held it -- which is both the fail-first
+/// record and the reason the control asserts presence, permanently.) If
+/// Rust std ever starts closing every fd at spawn, the control goes red:
+/// revisit then, the guarantee will have moved.
+#[test]
+fn a_spawned_child_inherits_no_close_on_exec_fd() {
+    let mut fixture: Harness<(), ()> = Harness::bare(Appearance::default());
+
+    /// Opens `/dev/null`, with close-on-exec exactly as asked: the
+    /// `cloexec` marker is the seatd-obtained-fd shape, the plain one the
+    /// worst case. `libc::open`, not `std::fs::File`, because std sets
+    /// close-on-exec unconditionally and the plain marker needs it absent.
+    fn open_marker(cloexec: bool) -> OwnedFd {
+        let flags = if cloexec {
+            libc::O_RDONLY | libc::O_CLOEXEC
+        } else {
+            libc::O_RDONLY
+        };
+        let fd = unsafe { libc::open(c"/dev/null".as_ptr(), flags) };
+        assert!(fd >= 0, "could not open the marker fd");
+        unsafe { OwnedFd::from_raw_fd(fd) }
+    }
+    let cloexec_marker = open_marker(true);
+    let plain_marker = open_marker(false);
+    // Fail loud, not weak: if the platform forced close-on-exec onto the
+    // plain marker, the presence control below would go red on a false
+    // premise instead of silently pinning a weaker claim.
+    let flag_of = |fd: &OwnedFd| unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_GETFD) };
+    assert_ne!(
+        flag_of(&cloexec_marker) & libc::FD_CLOEXEC,
+        0,
+        "the close-on-exec marker is missing close-on-exec"
+    );
+    assert_eq!(
+        flag_of(&plain_marker) & libc::FD_CLOEXEC,
+        0,
+        "the worst-case marker unexpectedly carries close-on-exec"
+    );
+
+    static NEXT_ID: AtomicU64 = AtomicU64::new(0);
+    let path = std::env::temp_dir().join(format!(
+        "flexwm-spawn-fds-{}-{}",
+        std::process::id(),
+        NEXT_ID.fetch_add(1, Ordering::Relaxed)
+    ));
+    let _ = std::fs::remove_file(&path);
+    let command = vec![
+        "sh".to_string(),
+        "-c".to_string(),
+        "ls /proc/self/fd > \"$1\"".to_string(),
+        "sh".to_string(),
+        path.to_string_lossy().into_owned(),
+    ];
+    fixture.state.spawn(&command);
+    let child_fds: Vec<i32> = read_probe(&path)
+        .lines()
+        .filter_map(|line| line.trim().parse().ok())
+        .collect();
+    assert!(
+        child_fds.contains(&1),
+        "the child's own stdout (fd 1) is missing from its listing -- \
+         the probe observes nothing, so 'absent' below would pass vacuously: {child_fds:?}"
+    );
+    assert!(
+        !child_fds.contains(&cloexec_marker.as_raw_fd()),
+        "a State::spawn child inherited a close-on-exec compositor fd: {child_fds:?}"
+    );
+    assert!(
+        child_fds.contains(&plain_marker.as_raw_fd()),
+        "the positive control is missing from the child's table -- either the \
+         probe stopped observing inheritance, or Rust std started closing \
+         every fd at spawn and the guarantee moved: {child_fds:?}"
+    );
+    // Both markers must still be open here: had one closed before the child
+    // exec'd, its number could have been reused and "absent"/"present" would
+    // prove nothing. This is also the markers' last use, which is what keeps
+    // them alive across the spawn -- without it they could drop (closing the
+    // fds) before the child even starts.
+    for marker in [&cloexec_marker, &plain_marker] {
+        assert_ne!(
+            flag_of(marker),
+            -1,
+            "a marker fd closed before the child's listing was read"
+        );
+    }
 }

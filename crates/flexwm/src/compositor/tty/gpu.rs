@@ -345,11 +345,18 @@ pub fn open(
     path: &Path,
     requested: Option<(u16, u16)>,
 ) -> Result<OpenGpu, Rejection> {
-    let fd = session
-        .open(path, OFlags::RDWR | OFlags::CLOEXEC)
-        .map_err(|error| {
-            Rejection::SessionOpen(format!("could not be opened through the session ({error})"))
-        })?;
+    // No `OFlags::CLOEXEC`: the pinned Smithay's `LibSeatSession::open`
+    // takes `_flags` and never reads it (`backend/session/libseat.rs` at the
+    // pinned rev forwards only the path to libseat), so requesting the flag
+    // here was dead code. The close-on-exec it appeared to ask for still
+    // holds for every seatd-obtained fd, from libseat's own receive path
+    // (`recvmsg(..., MSG_CMSG_CLOEXEC)`; measured live 2026-09-13: the DRM
+    // and input fds all carry the bit) -- and the bit is load-bearing, not
+    // belt-and-braces: `State::spawn` provably inherits any fd lacking it,
+    // pinned by `a_spawned_child_inherits_no_close_on_exec_fd`.
+    let fd = session.open(path, OFlags::RDWR).map_err(|error| {
+        Rejection::SessionOpen(format!("could not be opened through the session ({error})"))
+    })?;
 
     match probe(fd.as_fd(), requested) {
         Ok((connector, mode, name)) => Ok(OpenGpu {
