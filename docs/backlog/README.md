@@ -212,7 +212,12 @@ actionable.
   `unlocked`), focus lands on the lock surface, and unlock re-arms through
   the ordinary arrival path. Confinement needed no fix (fail-open +
   leave-deactivation already handled it; pinned).
-- [Lock manager global offered to every client](./protocols/session-lock-global-restriction.md)
+- [Lock manager global offered to every client](./resolved/session-lock-global-restriction-done.md)
+  — CLOSED 2026-09-18 as an accepted tradeoff (no code): the protocol
+  defines no privilege, the pinned Smithay filter is hide-from-registry
+  only, and no available primitive (peer creds, security-context, bind
+  budget) keys a locker allow-list without breaking the ordinary-client
+  lock flows both shells use; kept as the landing spot
 - [First click on a fresh lock screen reaches nobody](./resolved/session-lock-first-click-done.md)
   — RESOLVED 2026-09-17 (PR #76): pointer focus is re-derived on the commit
   that maps the lock surface, so the first click lands on it without the

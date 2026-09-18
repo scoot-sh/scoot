@@ -594,6 +594,14 @@ gap jumped the queue — each item's own file records why it landed when it did.
   verified in-harness (the desktop-visible-while-input-locked window is
   the deliberate, secure direction; the niri-shape wait stays declined),
   pinned by a new combined fail-first test.
+- **[Lock manager global offered to every
+  client](docs/backlog/resolved/session-lock-global-restriction-done.md)** —
+  CLOSED 2026-09-18 as an accepted tradeoff (no code): the protocol names
+  no privilege mechanism, the pinned Smithay filter is hide-from-registry
+  only, and even security-context support would not key a locker
+  allow-list (it marks sandboxes, not lockers) — so the ticket's own
+  `blocked:` line was wrong. Ordinary-client lock + second-client
+  takeover stay pinned by the existing harness suite.
 ## What's next
 
 The backlog is the source of truth for what to pick up; this is the current
