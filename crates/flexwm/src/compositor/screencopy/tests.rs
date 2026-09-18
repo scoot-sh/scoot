@@ -771,10 +771,66 @@ fn parked_captures_on_two_sessions_are_all_delivered_by_one_confirm() {
     fixture.run(Step::MapWindow(WINDOW_BGRA));
     // Re-park after the window mapped: the mapping was the change that would
     // otherwise have served them.
+    //
+    // Wait for the screen to go quiescent first: a stable `frame_serial`
+    // across a settle plus several ticks means no commit is still working
+    // its way through the frame timer. Both clients are parked on their
+    // step channels and no timer is armed at idle, so once the serial holds
+    // still there is nothing left that could advance it.
+    let mut serial = fixture.state.frame_serial;
+    for _ in 0..10 {
+        fixture.settle();
+        fixture.tick(Duration::from_millis(50));
+        let next = fixture.state.frame_serial;
+        if next == serial {
+            break;
+        }
+        serial = next;
+    }
+    assert_eq!(
+        fixture.state.frame_serial, serial,
+        "the screen must be quiescent before re-parking: a still-advancing \
+         frame_serial would serve the parked capture this test asserts \
+         `Waiting` on"
+    );
     for client in [0, other] {
-        fixture.run_on(client, Step::CaptureWithoutWaiting);
-        let (outcome, _) = fixture.run_on(client, Step::PollFrame).frame();
-        assert_eq!(outcome, Outcome::Waiting);
+        // Synchronize the session to the current screen, then assert it
+        // parks. A re-parked capture is due -- and correctly served --
+        // whenever its session's last delivery predates the current
+        // `frame_serial`: under full-suite parallel load the pre-map parked
+        // frame can be consumed by an earlier tick than the map's own,
+        // leaving `delivered` behind the serial the re-park observes. The
+        // measured shape is `Ready` at an unmoving serial (park, settle and
+        // poll all read the same value), *not* an advance between park and
+        // poll -- serving that due capture is correct production behavior,
+        // so the test re-syncs instead of asserting against it. The first
+        // poll drains the lag, which re-syncs `delivered` to the current
+        // serial; the re-park off it then waits deterministically, because
+        // nothing after quiescence can advance the serial again. One retry
+        // is the proven max; the loop is bounded at three so a genuinely
+        // advancing screen fails loudly instead of polling forever. The
+        // delivered-frames assertions after the confirm stay exact -- only
+        // this intermediate poll learns to re-sync.
+        let mut outcome = Outcome::Waiting;
+        for attempt in 0..3 {
+            fixture.run_on(client, Step::CaptureWithoutWaiting);
+            (outcome, _) = fixture.run_on(client, Step::PollFrame).frame();
+            if outcome == Outcome::Waiting {
+                break;
+            }
+            eprintln!(
+                "client {client} attempt {attempt}: a re-parked capture came \
+                 back {outcome:?} at serial {} -- draining the lag and \
+                 re-parking",
+                fixture.state.frame_serial
+            );
+        }
+        assert_eq!(
+            outcome,
+            Outcome::Waiting,
+            "client {client}: a capture parked on a quiescent, synchronized \
+             screen must wait"
+        );
     }
 
     let backend = fixture.state.backend.take().expect("a backend");

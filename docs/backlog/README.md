@@ -68,6 +68,9 @@ actionable.
 - [`ext_workspace.rs`'s cross-client check takes two backend locks per manager, per `wl_output` bind](./protocols/ext-workspace-client-lookup-per-bind.md)
   — pre-existing, same review; `ObjectId::same_client_as` answers the exact
   same question without locking
+- [Flake: activation taskbar-click precondition misses under extreme parallel load](./protocols/activation-taskbar-click-settle-flake.md)
+  — open, low, load-only (single `settle()` insufficient under 3×
+  oversubscription; 5/5 isolated green)
 - [`ext-workspace-v1` workspace activation moves window focus but leaves the keyboard on a clicked layer surface](./resolved/ext-workspace-clicked-layer-keyboard-done.md)
   — RESOLVED 2026-09-16 (PR #54): confirmed real, not not-a-bug — two
   fail-first tests proved the switch path consults `clicked_layer`, and the
@@ -289,7 +292,11 @@ actionable.
   `--tty` frames; the ticket's push-into-a-local-`Vec` shape allocates 4x
   the bytes (1792, measured), and a persistent buffer's ripple costs more
   than ~7µs/s saves. Pinned by capacity tests.
-- [Flake: parked-captures poll sees an extra `frame_serial` advance under full-suite load](./rendering/screencopy-parked-poll-flake.md)
+- [Flake: parked-captures poll sees an extra `frame_serial` advance under full-suite load](./resolved/screencopy-parked-poll-flake-done.md)
+  — RESOLVED 2026-09-18 (test-only): the filed mechanism was corrected
+  (`delivered`-lag at park time, measured at an unmoving serial — not an
+  advance between park and poll); quiescence wait plus synchronize-then-assert
+  retry, production pin untouched
 - [A `present()` skipped for an in-flight flip consumes that frame's damage](./resolved/present-skip-eats-frame-damage-done.md)
   — RESOLVED 2026-09-18 (PR #107): the filed in-flight shape self-heals
   (Smithay extends empty damage with history); the real loss was the
