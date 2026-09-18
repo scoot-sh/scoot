@@ -351,7 +351,7 @@ impl State {
     /// when it is dismissed -- destroy the role, attach a null buffer,
     /// commit -- so every overlay dismissal killed its whole client
     /// (measured 4/4 with DankMaterialShell; see
-    /// `docs/backlog/protocols/dms-enablement-gaps.md`, gap 1).
+    /// `docs/backlog/resolved/dms-reprobe-done.md`, gap 1).
     ///
     /// Anchoring everything is the neutral choice, not a lie about geometry:
     /// a zero size with both anchors set is the protocol's own "the

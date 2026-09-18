@@ -1,12 +1,27 @@
 ---
-title: "DMS (DankMaterialShell) enablement gaps — probe results 2026-09-14."
-status: "open"
-area: "protocols"
-priority: "high"
+title: "DMS (DankMaterialShell) enablement gaps — probe results 2026-09-14, re-probed 2026-09-18 (gap 1 closed, ticket resolved)."
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
 ---
 
-# DMS (DankMaterialShell) enablement gaps — probe results 2026-09-14.
+# DMS (DankMaterialShell) enablement gaps — probe results 2026-09-14, re-probed 2026-09-18.
+
+**RESOLVED 2026-09-18 (re-probe, no build).** The P0 gap 1 stays closed
+in the field: the exact spotlight teardown plus two full lock → PAM auth
+→ `unlock_and_destroy` cycles on current `main`, shell pid unchanged
+throughout, live screenshots after every step, zero kill-signature lines
+in server, shell or wire logs — both fatal sequences (layer destroy +
+null-commit, lock-role destroy + null-commit) are on the wire with the
+connection surviving. DMS's unlock path does **not** trip the lock-role
+signature Noctalia died on. Every other gap re-checks as resolved,
+upstream, deliberate, or shell-side presentation; gap 8's unexercised
+launch question is answered (DMS-spawned app maps focused). Nothing new
+was found broken, so no follow-up tickets were filed and this entry
+moves to `resolved/`. Detail is the re-probe section at the end; the
+original 2026-09-14 report (plus its own evening re-probe) is left
+intact below it.
 
 Probe (not a build): can DMS, the Quickshell-based desktop shell (bar,
 notifications, launcher, lock screen, clipboard history), run under flexwm
@@ -237,6 +252,182 @@ rendered; these only limit live data, not protocol conclusions.
   `flexwm msg` needs `FLEXWM_SOCKET=<ipc socket>` — `--socket` sets the
   IPC socket, the Wayland display stays `wayland-1`.
 - Screenshots: local `/tmp/dms-reprobe-*.png` on the Mac, not committed.
+
+## Re-probe 2026-09-18 (current `main` — gap 1 stays closed, ticket resolved)
+
+Probe (not a build): re-drive DMS against current `main` per this
+ticket's remaining live questions — (a) gap 1 stays closed and DMS's
+unlock path doesn't trip the lock-role signature Noctalia died on, (b)
+delta-check gaps 2–8 against everything resolved since (incl. the 512
+live-buffer bound from PR #94), (c) record gap 7's recognition status.
+Verdict: **the shell survives everything, including the exact
+spotlight teardown and two full lock → PAM auth →
+`unlock_and_destroy` cycles, and every gap re-checks as resolved,
+upstream, deliberate, or shell-side presentation. Nothing new is
+broken; no follow-up tickets filed.** No compositor code changed in
+this pass (pure probe + docs), so there is no cargo test/clippy/fmt
+delta to report and `scripts/smoke-test.sh` was not re-run — the probe
+below is the evidence.
+
+### Setup (same drill, current revisions)
+
+- flexwm at `96398c0` (current `main`, incl. PR #95), rebuilt in the
+  dev VM (`/var/cargo-target/debug/flexwm`, timestamp Sep 18 02:46 UTC:
+  an initial `cargo build --manifest-path /mnt/flexwm/Cargo.toml
+  --bin flexwm` from the 9p mount ghost-built (`Finished in 0.74s`,
+  no `Compiling` line), so `cargo clean -p flexwm && cargo build`
+  before trusting it — real build `Compiling flexwm`, `Finished in
+  32.16s`).
+- `flexwm --headless --width 1600 --height 900 --socket
+  /run/user/1000/flexwm-dms.sock` (Wayland `wayland-1`), server log
+  `/tmp/dms-reprobe-server.log`.
+- DMS from nixpkgs, ephemeral only, no VM mutation:
+  `nix shell nixpkgs#dms-shell nixpkgs#quickshell -c dms run` —
+  dms-shell 1.5.3, quickshell 0.3.1 (same quickshell as both prior
+  probes, so no client-version skew), `QT_QPA_PLATFORM=wayland`.
+  (`dms ipc` needs both packages on PATH — with `dms-shell` alone it
+  fails `exec: "qs": executable file not found in $PATH`.)
+- Driven via `flexwm msg` (`screenshot --out`, `type`, `key`,
+  `action spawn`; `FLEXWM_SOCKET` set since `--socket` names only the
+  IPC socket) and `dms ipc call <module> <fn>`. One full session under
+  `WAYLAND_DEBUG=1` (`/tmp/dms-reprobe-wire.log`, 7,398 lines).
+- Screenshots: local `/tmp/dms-reprobe-*.png` on the Mac during the
+  probe, viewed, not committed. VM left clean (probe processes killed,
+  temp sockets/logs/screenshots and the probe-created
+  `~/.config/DankMaterialShell` removed).
+- Shell pid for the whole session: **1974743**, from ~02:47 UTC through
+  02:55+ UTC across every cycle below.
+
+### Primary question (a): gap 1 stays closed, lock-role signature absent
+
+- Overlay dismissal: `dms ipc call spotlight toggle` →
+  `SPOTLIGHT_TOGGLE_SUCCESS`, overlay renders (search box, real VM
+  .desktop entries, Applications 10, no Windows section; 127895-byte
+  shot) → `msg type "foot"` live-filters 10 → 3 (Foot / Foot Client /
+  Foot Server; 98393-byte shot — keyboard focus reaches the overlay)
+  → `msg key Escape` dismisses → 70353-byte shot **byte-identical to
+  the baseline** (`cmp`), pid 1974743 unchanged. This is the exact
+  spotlight teardown that killed DMS 4/4 in the original probe.
+- Lock → auth → unlock, twice: `dms ipc call lock lock` → server
+  `locking the session` (02:49:02) → lock screen renders (clock,
+  password field focused; 89105-byte shot) → `msg type "dev"` +
+  `msg key Return` → shell log `pam.subprocess: Authenticated
+  successfully` → server `unlocking the session` (02:49:18) → pid
+  unchanged → 70366-byte live desktop (bar + wallpaper; 13 bytes off
+  baseline — the clock advanced 2:48 → 2:49, so genuinely live, not a
+  frozen frame). Cycle 2 (02:55:14, with two `foot` windows mapped):
+  same path, pid unchanged, 50368-byte live shot.
+- Kill-signature grep across all three logs (server, shell stderr,
+  wire): **0** lines matching `killed by a protocol error`,
+  `CommitBeforeFirstAck`, or `The Wayland connection broke`.
+- The wire carries both fatal sequences with the connection
+  surviving. Cycle 1: `ext_session_lock_v1#55.unlock_and_destroy()`
+  then `ext_session_lock_surface_v1#57.destroy()` →
+  `wl_surface#53.attach(nil, 0, 0)` → `wl_surface#53.commit()` —
+  traffic continues after (`done(140148)`, `Screen lock active
+  changed: false`). Cycle 2: `unlock_and_destroy()` (#68) →
+  `ext_session_lock_surface_v1#41.destroy()` → `attach(nil)` →
+  `commit()`. **DMS's unlock path does not trip the lock-role
+  signature** — the fix holds for this client too.
+
+### Regression sweep (pid 1974743 throughout)
+
+- Notification delivery: nixpkgs-libnotify `notify-send "Hello from
+  DMS re-probe"` renders a toast top-right (79718-byte shot); the
+  notification-center modal (`notifications toggle` →
+  `NOTIFICATION_MODAL_TOGGLE_SUCCESS`) shows Current (1) + History
+  (2) with the full text (83660-byte shot); `notifications close` →
+  success, shell survives.
+- Clipboard overlay: `clipboard toggle` → `CLIPBOARD_TOGGLE_SUCCESS`,
+  renders ("No recent clipboard entries found"; 75725-byte shot),
+  Escape-dismissed, shell survives.
+- DankDash: `dash toggle overview` → `DASH_TOGGLE_SUCCESS` (a bare
+  `dash toggle` is refused — it takes a tab argument), renders fully
+  (clock, weather, September 2026 calendar, sliders; 124280-byte
+  shot); `dash close` → `DASH_CLOSE_SUCCESS`, shell survives. (A
+  `dashboard toggle` target does not exist — `Target not found`;
+  the target is `dash`.)
+- `foot` coexistence: `msg action spawn foot` maps, tiles (id 1,
+  `12,56 782x832`, focused) and renders beside the shell
+  (55552-byte shot); the bar shows a `foot` task indicator.
+- Second spotlight cycle with foot running: Applications 16, still no
+  Windows section (see gap 2 below).
+
+### Delta check on gaps 2–8 (question b) and 7 (question c)
+
+- **Gap 2 (foreign-toplevel) — resolved, verified live.** The shell
+  binds `zwlr_foreign_toplevel_manager_v1` at startup (02:47:05) and
+  the foot toplevel arrives complete: `app_id("foot")` +
+  `title("foot")` on the wire. `ext_foreign_toplevel_list_v1` is
+  offered and never bound — re-confirms PR #47's measurement on this
+  exact client. Launcher UI caveat (presentation, not protocol): with
+  a real foot running, spotlight still shows Applications only, and
+  searching "foot" shows Applications 3 + Settings 3 — no
+  Windows/running-apps section. The compositor publishes the list
+  (wire-proven); DMS's QML doesn't surface it in this view, and
+  panel-click focus / close were already proven live against the real
+  quickshell in PR #50's own probe. No new ticket.
+- **Gap 3 (idle) — resolved.** The idle error sentence is absent from
+  the shell log; `ext_idle_notifier_v1` (v2) is advertised. The shell
+  never binds it on its main connection (no auto-lock config armed —
+  monitors firing on real idle was not re-driven; the swayidle field
+  proof stands in `resolved/ext-idle-notify-resolved.md`). No new
+  ticket.
+- **Gap 4 (output-management) — no new ticket.** The daemon reports
+  `WlrOutput: found zwlr_output_manager_v1`,
+  `wlr-output-management capability detected`, and `Validating
+  profiles against current outputs` — `Received empty outputs list`
+  is gone. The shell's main connection never binds the manager
+  itself (reads `wl_output`, like Noctalia). The deliberate
+  reconfiguration refusal is already its own item. No new ticket.
+- **Gap 5 (xdg_popup) — same standing, no new ticket.** Zero
+  `xdg_popup` wire traffic across the session; grabs are implemented
+  but this client routes everything through layer surfaces and never
+  exercises them.
+- **Gap 6 (screencopy) — no new ticket; gate is shell-side.** Both
+  capture managers (globals 9/10) plus `zwp_linux_dmabuf_v1` (11)
+  are advertised, but the shell never binds 9 or 10; dmabuf is bound
+  only by Qt's internal EGL connections, never for a
+  `ScreencopyView`. The toplevel half stays CLOSED UNREACHABLE and
+  the thumbnail fallback NEEDS-UPSTREAM per the resolved records. No
+  new ticket.
+- **Buffer cap (PR #94) — not tripped, no finding.** The server log
+  has zero error/refusal lines of any kind across the whole session,
+  and the shell lived throughout — a refusal would kill the client
+  with a protocol error. Wire-log accounting (libwayland connections
+  only; the Go daemon's own connections aren't `WAYLAND_DEBUG`
+  visible): 19 buffers created, 13 destroyed, 6 live at copy time —
+  two orders of magnitude below the 512 live-buffer bound. No new
+  ticket.
+- **Gap 7 (recognition) — still "No compositor detected", recorded,
+  not filed upstream (out of scope).** Shell log still shows
+  `CompositorService: Unrecognized Wayland socket owner: flexwm -
+  falling back to env detection` → `No compositor detected`. Noted:
+  the shell *binds* `ext_workspace_manager_v1` at startup but its
+  CompositorService still doesn't take the generic path — upstream's
+  call, same as 09-14.
+- **Gap 8 — improved: the unexercised launch question is answered.**
+  Pressing Return on the spotlight's Foot entry launches via DMS: a
+  second foot maps (id 2), tiles in the next column, and
+  **focused: true** — activation/focus handoff works end to end
+  (the shell binds `xdg_activation_v1`; 50381-byte shot shows both
+  terminals). Also bound live: `wp_cursor_shape_manager_v1`.
+  Cosmetic remainder unchanged: `Cannot enable background effect as
+  ext-background-effect-v1 is not supported` ×7 (graceful, no blur
+  protocol — deliberate).
+
+### What closes, what got filed, next build item
+
+Closes: this ticket (gap 1 field-proven still closed, with the
+lock-role signature explicitly checked; everything else
+resolved/upstream/deliberate/shell-side, plus gap 8's launch question
+now answered). Filed: nothing — no new breakage found. Not re-driven
+here (stated, not papered over): idle monitors firing on real idle,
+panel-click focus/close from DMS's own UI, overview-preview pixels
+for DMS specifically, and the dmabuf-allocating-client half of PR
+#60's matrix (environment limit, per that record). Next build item
+is the orchestrator's pick from the backlog — nothing in this probe
+blocks or redirects it.
 
 ## Recommended build order
 
