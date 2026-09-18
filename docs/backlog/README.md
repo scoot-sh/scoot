@@ -19,14 +19,14 @@ actionable.
 
 ## High priority
 
-- [**The dmabuf advertisement kills every GL client**](./protocols/dmabuf-advertised-but-never-imported.md)
-  — OPEN, regression from `599be4e`, found live 2026-09-18: flexwm advertises
-  `zwp_linux_dmabuf_v1` but answers every import `failed`, which for
-  `create_immed` is a fatal `InvalidWlBuffer`. Mesa takes the advertised
-  dmabuf path over `wl_shm` and dies, so noctalia v5 cannot start a session
-  at all — a black screen with a cursor. Fix is a real import: Smithay's
-  `PixmanRenderer` already `mmap`s linear dmabufs on the CPU, so this needs
-  no GPU and does not wait on roadmap item 6.
+- [**The dmabuf advertisement killed every GL client**](./resolved/dmabuf-advertised-but-never-imported-done.md)
+  — RESOLVED 2026-09-18, regression from `599be4e` found live: flexwm
+  advertised `zwp_linux_dmabuf_v1` but answered every import `failed`, which
+  for `create_immed` is a fatal `InvalidWlBuffer`. Mesa took the advertised
+  dmabuf path over `wl_shm` and died, so noctalia v5 could not start a
+  session at all — a black screen with a cursor. Fixed by importing for
+  real: Smithay's `PixmanRenderer` `mmap`s linear dmabufs on the CPU, so this
+  needed no GPU and did not wait on roadmap item 6.
 - [**`ext-idle-notify-v1` + `idle-inhibit-unstable-v1`**](./resolved/ext-idle-notify-resolved.md)
   — RESOLVED 2026-09-15: swayidle-style auto-lock trigger, field-proven live.
 - [**Custom/client cursor support**](./resolved/cursor-theme-name-done.md)

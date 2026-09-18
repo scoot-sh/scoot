@@ -54,16 +54,32 @@
 //! - `wl_shm_pool.create_buffer` -- the bypass shape; claims in
 //!   `dispatch.rs` before delegation.
 //! - `zwp_linux_buffer_params_v1.create_immed` -- claims the same way. The
-//!   buffer object *is* created even though this compositor always answers
-//!   the import `failed`: Smithay inits it first (`data_init.init` before
-//!   `dmabuf_imported`), and `failed()` on an immed import posts
+//!   buffer object is created before the import is even attempted: Smithay
+//!   inits it first (`data_init.init` before `dmabuf_imported`), so it
+//!   exists whether the import succeeds or the `failed()` answer posts
 //!   `InvalidWlBuffer`, killing the client and leaving the object for
 //!   disconnect cleanup (verified in source at the pinned rev, not
-//!   assumed). Its async sibling `create` is never claimed: no object is
-//!   created synchronously, and this compositor's `failed()` answer creates
-//!   none later either. If a future renderer ever calls `successful()` on a
-//!   `create` notifier, that path starts creating buffers and must claim
-//!   here too.
+//!   assumed).
+//! - `zwp_linux_buffer_params_v1.create` -- the asynchronous sibling, and it
+//!   claims too. This doc used to say it never would, on the premise that
+//!   flexwm answered every import `failed` and so created no object on that
+//!   path: "*If a future renderer ever calls `successful()` on a `create`
+//!   notifier, that path starts creating buffers and must claim here too.*"
+//!   That future is here -- `dmabuf.rs` imports dmabufs into the pixman
+//!   renderer, and `ImportNotifier::successful` on a `Falliable` notifier
+//!   mints a real, fd-retaining `wl_buffer`. Uncounted, it would be the one
+//!   factory outside this cap entirely.
+//!
+//!   It is also the one creation whose *refusal* leaves the client alive:
+//!   `failed()` on a `Falliable` notifier is the protocol's soft answer --
+//!   no object, no kill. So [`WlBuffers::forget_buffer`] is called from
+//!   `dmabuf.rs`'s `refuse_import` before it answers; otherwise a client
+//!   repeatedly offering buffers the renderer cannot map (multi-plane,
+//!   non-`LINEAR`) would ratchet its own count to the cap and lock itself
+//!   out of creating buffers at all. That release is written to be correct
+//!   on the `create_immed` path too, where it simply lands once more on a
+//!   client already dying: `forget_buffer` saturates, and the entry is a
+//!   dead one either way.
 //! - `wp_single_pixel_buffer_manager_v1.create_u32_rgba_buffer` -- always
 //!   succeeds, so always pairs. These hold no fd, no mapping and no
 //!   reservation, and counting them spends budget on a shape that costs
@@ -130,11 +146,13 @@
 //! ## Maintenance hazard
 //!
 //! Any new `wl_buffer` factory Smithay grows (or this compositor starts
-//! delegating -- today `create` never produces an object) must hook both
-//! halves: claim on its creating request in `dispatch.rs`, release through
-//! the existing `wl_buffer` destruction hook. Re-check the three creation
-//! handlers' error-before-init shape on every Smithay bump: the exactness
-//! argument above leans on it.
+//! delegating) must hook both halves: claim on its creating request in
+//! `dispatch.rs`, release through the existing `wl_buffer` destruction hook.
+//! Re-check the four creation handlers' error-before-init shape on every
+//! Smithay bump: the exactness argument above leans on it. The same goes for
+//! anything that starts *refusing* a creation while leaving the client alive
+//! -- that needs an explicit release, as the async dmabuf `create` above
+//! does.
 //!
 //! ## Per connection, not per machine
 //!

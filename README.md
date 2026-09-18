@@ -998,7 +998,7 @@ screen-share uses to read the screen. Three globals are advertised:
 | ------ | -------------- |
 | `ext_image_copy_capture_manager_v1` | Creating a capture session and its frames |
 | `ext_output_image_capture_source_manager_v1` | Turning a `wl_output` into a capture source |
-| `zwp_linux_dmabuf_v1` | Format feedback for dmabuf-aware clients; every import answered `failed` (see below) |
+| `zwp_linux_dmabuf_v1` | Real dmabuf import (GPU-rendering clients), plus format feedback (see below) |
 
 All three are available to every client, no privilege or allow-list (flexwm has no
 security-context support to distinguish a privileged client from any other, so
@@ -1036,33 +1036,47 @@ What to know before pointing a client at it:
   a screen-source `ScreencopyView` in a clipped container at the window's
   rect needs no compositor work — DMS's `TileItem.qml` hard-requires a
   `Toplevel` source, so the shells must change.
-- **`wl_shm` buffers only, `Xrgb8888` or `Argb8888`.** flexwm renders on the
-  CPU with pixman and has no GPU or dma-buf path, so no capture session
-  offers a dma-buf (`BufferConstraints::dma` is always `None`), and every
-  dmabuf import is answered `failed` (see the next bullet). `Xrgb8888` is offered first: if `[appearance]
+- **`wl_shm` buffers only, `Xrgb8888` or `Argb8888`.** A capture session never
+  offers to write into a dma-buf (`BufferConstraints::dma` is always `None`) —
+  capture is the direction where flexwm does the writing, and `wl_shm` already
+  works everywhere at no extra cost to a CPU renderer. (The other direction,
+  a *client's* dma-buf, is imported — see the next bullet.)
+  `Xrgb8888` is offered first: if `[appearance]
   background_color` has an alpha below 1.0 then the framebuffer really is
   translucent, and an `Xrgb8888` capture forces the fourth byte opaque so you
   get a screenshot rather than a translucent image. With the default opaque
   background the framebuffer already is opaque everywhere, so that pass is
   skipped — same bytes either way. An `Argb8888` capture
   hands you the framebuffer's own alpha, which is what that format means.
-- **`zwp_linux_dmabuf_v1` is advertised (version 6), but no dmabuf can be
-  imported.** The global exists so dmabuf-aware clients reach their
-  readiness gate: quickshell's buffer manager, for example, instantiates no
-  capture context at all -- not even the `wl_shm` one -- until it has seen
-  real dmabuf feedback, so without this advertisement every quickshell
-  `ScreencopyView` stays blank despite the capture protocol above working.
-  The feedback names this machine's real scanout device as `main_device`
-  (`/dev/dri/card0`, else `renderD128`, else `0` where no DRM node exists)
-  and exactly the two formats above with the `LINEAR` layout shm buffers
-  really have. Every datum in it is true, but its tranche structure implies
-  a dmabuf *import* capability flexwm does not have; any import attempt is
-  answered `failed` -- the protocol's own "cannot import for
-  implementation-dependent reasons", the only truthful answer a pixman/shm
-  compositor has -- and the client falls back to the `wl_shm` path above.
-  There is deliberately no empty table and no omitted device: a client maps
-  the table Smithay always sends, and a zero-length map aborts it rather
-  than merely not flipping it.
+- **`zwp_linux_dmabuf_v1` is advertised (version 6), and dmabufs really are
+  imported — a GPU-rendering client works here, with no GPU on the
+  compositor side.** The client renders with the GPU and hands over a
+  dma-buf; flexwm `mmap`s it and composites it with pixman, on the CPU, next
+  to `wl_shm` clients in the same session. No `LIBGL_ALWAYS_SOFTWARE=1`
+  needed, and nothing about the GPU-free requirement changes: the compositor
+  still never touches a GPU.
+
+  What is advertised: `Xrgb8888` then `Argb8888`, `LINEAR` only, single-plane
+  only — exactly what the pixman renderer can map, and no more. A format in
+  the table that could not then be imported would kill the client that
+  believed it (`zwp_linux_buffer_params_v1.create_immed` has no soft
+  refusal), so the table is pinned to the renderer's own importable set by
+  test. A client that ignores the feedback and offers a multi-plane or
+  non-`LINEAR` buffer is refused: `failed` on the asynchronous `create`,
+  which it survives, and a protocol error on `create_immed`, which the
+  protocol prescribes.
+
+  `main_device` names this machine's **render node** (`/dev/dri/renderD128`,
+  else `card0`, else `0` where no DRM node exists) — the device a client
+  should allocate against, since it only needs to render, not to scan out.
+
+  The global also gates screen capture for some shells: quickshell's buffer
+  manager instantiates no capture context at all — not even the `wl_shm` one
+  — until it has seen real dmabuf feedback, so without this advertisement
+  every quickshell `ScreencopyView` stays blank despite the capture protocol
+  above working. There is deliberately no empty table and no omitted device:
+  a client maps the table Smithay always sends, and a zero-length map aborts
+  it rather than merely not flipping it.
 - **The buffer size is the framebuffer's, and it is re-advertised on a
   resize.** If `--tty` follows a hotplug to a new mode (see `--tty` follows
   the display above), every live session gets a fresh `buffer_size` +

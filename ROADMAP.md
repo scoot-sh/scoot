@@ -771,6 +771,21 @@ gap jumped the queue — each item's own file records why it landed when it did.
   arch-independent `cfg(not(target_os = "linux"))`, so `cargo build`
   from source stays open on Intel Macs. `nix flake check --all-systems`
   is green on the three remaining systems.
+- **[The dmabuf advertisement killed every GL client](docs/backlog/resolved/dmabuf-advertised-but-never-imported-done.md)**
+  — RESOLVED 2026-09-18 (branch `fix/dmabuf-real-import`), regression from
+  `599be4e` found live on Asahi: flexwm advertised `zwp_linux_dmabuf_v1`
+  and answered every import `failed`, which for `create_immed` is a fatal
+  `InvalidWlBuffer` — so Mesa took the advertised dmabuf path over `wl_shm`
+  and died, and noctalia v5 could not start a session at all. flexwm now
+  really imports: `PixmanRenderer` `mmap`s a single-plane LINEAR dmabuf on
+  the CPU, so a GPU-rendering client works with no GPU on the compositor
+  side and no `LIBGL_ALWAYS_SOFTWARE=1`. Four cross-site consequences came
+  with it — the per-client buffer cap now claims on the async `create` path
+  (and hands the unit back on a refusal, the one refusal a client survives),
+  the feedback table is pinned by test to what the renderer can actually
+  import, `main_device` names the render node rather than a primary node,
+  and flexwm issues the per-commit `DMA_BUF_IOCTL_SYNC` bracket the pinned
+  rev does not (it syncs once at import and never again).
 ## What's next
 
 The backlog is the source of truth for what to pick up; this is the current

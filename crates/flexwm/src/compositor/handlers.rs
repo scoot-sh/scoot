@@ -71,6 +71,17 @@ impl CompositorHandler for State {
 
     fn commit(&mut self, surface: &WlSurface) {
         on_commit_buffer_handler::<Self>(surface);
+        // Immediately after the buffer handler, which is what makes the newly
+        // attached buffer the surface's current one: this re-synchronises that
+        // buffer with the client's GPU before anything renders from the
+        // mapping the renderer caches. Nothing upstream does it on a
+        // re-commit -- see `dmabuf::sync_committed_dmabufs` for what the
+        // pinned rev does and does not guarantee. The gate is a plain bool in
+        // an shm-only session (see `State::imports_dmabufs`), so the walk is
+        // paid for only where dmabufs actually exist.
+        if self.imports_dmabufs {
+            super::dmabuf::sync_committed_dmabufs(surface);
+        }
         self.last_commit = std::time::Instant::now();
         self.request_render();
 

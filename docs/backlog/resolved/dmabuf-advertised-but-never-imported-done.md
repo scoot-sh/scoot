@@ -1,6 +1,6 @@
 ---
 title: "The `zwp_linux_dmabuf_v1` advertisement answers every import `failed`, which kills any GPU-rendering client outright -- noctalia v5 cannot start a flexwm session at all"
-status: "open"
+status: "resolved"
 area: "protocols"
 priority: "high"
 blocked: null
@@ -174,3 +174,69 @@ The user's `nixos-config` pins the session's shell to llvmpipe
 on the `wl_shm` swrast winsys so no dmabuf is ever allocated. Verified working
 live. It is a per-client bandaid on one machine's config -- every other
 GL client on flexwm is still killed -- and should be removed once this lands.
+
+## Resolution (2026-09-18, branch `fix/dmabuf-real-import`)
+
+`DmabufHandler::dmabuf_imported` now calls
+`ImportDma::import_dmabuf` on `state.backend`'s `PixmanRenderer` and answers
+`successful()`/`failed()` with what the renderer says. The client renders on
+the GPU, flexwm `mmap`s plane 0 and composites it with pixman -- no GPU on the
+compositor side, which is the whole point.
+
+Each numbered requirement above, and what was actually found:
+
+1. **Buffer cap on the `create` path.** `dispatch.rs`'s `reject_excess_buffer`
+   now claims for `zwp_linux_buffer_params_v1.create` as well as
+   `create_immed`. The asymmetry the original note missed: `create` is the one
+   creation whose *refusal* leaves the client alive, so a claim with no
+   matching release would let a client ratchet its own count to the cap just
+   by offering buffers this renderer cannot map. `dmabuf.rs`'s `refuse_import`
+   hands the unit back before answering `failed`, written to be correct on the
+   `create_immed` path too (where it lands once more on a client already
+   dying, and `forget_buffer` saturates). `wl_buffers.rs`'s module doc is
+   rewritten to match.
+2. **Advertise only what can be imported.** `DMABUF_FORMATS` stays
+   `[Xrgb8888, Argb8888] x LINEAR`, now pinned by
+   `every_advertised_format_is_one_pixman_can_import` against the renderer's
+   own `ImportDma::dmabuf_formats()` rather than against a comment. Pixman's
+   set is the larger one, which the test also asserts so it cannot go vacuous.
+   Multi-plane and non-`LINEAR` stay refused, with tests for both.
+3. **Mapping lifetime / `cleanup()` -- checked, and the answer is that a
+   flexwm render path already calls it.** `Renderer::render` calls
+   `self.cleanup()` on entry (`pixman/mod.rs:866`) and flexwm reaches it
+   through `OutputDamageTracker::render_output` (`damage/mod.rs:874`), so
+   every frame flexwm actually draws drains the expired cache entries.
+   `render_output` skips `renderer.render` when there is no damage -- which is
+   exactly when no buffer has gone away either. So there is no leak to fix,
+   but the claim is now held by a test rather than by reading:
+   `an_imported_mapping_is_released_when_the_buffer_goes_away` counts this
+   process's `/dmabuf` mappings in `/proc/self/maps` (the only handle a test
+   has on a private field of another crate), imports a real dma-buf, releases
+   it, renders one frame and asserts the count is back where it started.
+4. **Per-frame sync -- checked, and the pinned rev guarantees nothing.**
+   `PixmanRenderer::import_dmabuf` issues
+   `DMA_BUF_IOCTL_SYNC(START|READ)` immediately followed by `(END|READ)` once,
+   at import (`pixman/mod.rs:772-773`), and `ImportDma::import_dmabuf` returns
+   `existing_dmabuf`'s cached image on every later commit with no sync at all
+   (`pixman/mod.rs:1189`). The only other sync sites in that file are on the
+   *target* dmabuf in `Renderer::render` / `PixmanFrame::finish` /
+   `copy_framebuffer`, never on a source texture. So a GL client re-rendering
+   into one dmabuf across frames would be composited from whatever the CPU's
+   caches held, with no wait on the client's implicit fences. flexwm therefore
+   issues the same bracket itself, per commit, from
+   `dmabuf::sync_committed_dmabufs` -- commit rather than render because
+   commit is exactly "the client finished writing this", and a pointer motion
+   can redraw an unchanged surface many times. Gated on
+   `State::imports_dmabufs`, latched by the first successful import, so an
+   shm-only session keeps the commit path it had before.
+5. **`main_device` names the render node.** The ladder is now
+   `/dev/dri/renderD128`, then `card0`, then `0`. (On the reference machine
+   `card0` does not even exist -- the Asahi M2 enumerates `card1`/`card2` plus
+   `renderD128` -- so the old ladder was already landing on the render node by
+   accident.)
+6. **Docs.** `dmabuf.rs`'s module doc is rewritten around what the module now
+   does; `screencopy.rs`'s "Buffer formats" section and `README.md`'s protocol
+   table and dmabuf bullet no longer say flexwm has no dmabuf path.
+
+The `LIBGL_ALWAYS_SOFTWARE=1` workaround in the user's `nixos-config` can be
+removed once this ships.

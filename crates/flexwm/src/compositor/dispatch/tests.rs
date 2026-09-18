@@ -1121,12 +1121,18 @@ fn a_dmabuf_immed_past_a_full_budget_is_refused_before_validation() {
     );
 }
 
-/// The dmabuf async `create` never claims: past a full shm budget it is
-/// still answered `failed` -- the protocol's own refusal -- with the client
-/// left alive. Claiming it would refuse (and kill) a client whose import
-/// was about to fail harmlessly anyway.
+/// The dmabuf async `create` claims like every other factory now that a
+/// successful import really mints a `wl_buffer` on that path, so past a full
+/// shm budget it is refused by the guard with the same shared-budget
+/// `InvalidWlBuffer` (7) the `create_immed` case above earns.
+///
+/// This test used to assert the opposite -- `create` claiming nothing and
+/// still being answered `failed` -- which was correct only while this
+/// compositor refused every import. See `wl_buffers.rs`: uncounted, the
+/// async path would be the one `wl_buffer` factory outside
+/// `MAX_BUFFERS_PER_CLIENT` entirely.
 #[test]
-fn a_dmabuf_create_past_a_full_budget_is_still_answered_failed() {
+fn a_dmabuf_create_past_a_full_budget_is_refused_by_the_shared_budget() {
     let report = drive(|stream| {
         let _flood = hold_flood_lock();
         let mut buffers = BufferClient::connect(stream)?;
@@ -1153,22 +1159,24 @@ fn a_dmabuf_create_past_a_full_budget_is_still_answered_failed() {
             u32::from_ne_bytes(*b"XR24"),
             zwp_linux_buffer_params_v1::Flags::empty(),
         );
-        buffers.roundtrip()?;
-        params.destroy();
-        buffers.roundtrip()?;
-        Ok(())
+        buffers.roundtrip()
     });
-    if let Err(error) = &report.resize {
-        panic!("a dmabuf create past a full buffer budget was refused: {error:?}");
-    }
+    assert_raw_protocol_error(&report.resize, "zwp_linux_buffer_params_v1", 7);
     assert_survivor_still_served(&report);
-    assert_eq!(report.buffers, 0, "the shm budget must drain on disconnect");
+    assert_eq!(
+        report.buffers, 0,
+        "the killed client's shm budget must drain with it"
+    );
 }
-/// still creates -- and counts -- its buffer object: Smithay initialises
-/// it before the import runs, and the `failed()` answer kills the client
-/// with `InvalidWlBuffer`, leaving the object for disconnect cleanup.
+
+/// A dmabuf `create_immed` whose import is refused -- this harness builds a
+/// `State` with no backend at all, so there is no renderer to import into --
+/// still creates *and* counts its buffer object: Smithay initialises it
+/// before the import runs, and the `failed()` answer kills the client with
+/// `InvalidWlBuffer`, leaving the object for disconnect cleanup.
 /// Zero afterwards proves init happened (a never-initialised object would
-/// leave one phantom unit); the kill proves the import path is unchanged.
+/// leave one phantom unit); the kill proves a refused immed import is still
+/// fatal, which is the protocol's choice and not this compositor's.
 #[test]
 fn a_failed_dmabuf_import_creates_a_counted_buffer_then_drains() {
     let report = drive(|stream| {
