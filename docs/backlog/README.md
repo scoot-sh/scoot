@@ -192,7 +192,14 @@ actionable.
   top, keyboard on the first, resize reaching all), and `OUTPUT_ID`'s doc
   now lists the four session-lock sites multi-output must revisit. The
   duplicate-bind admission question stays with its own open entry below.
-- [Unbounded lock surfaces via duplicate `wl_output` binds](./protocols/lock-surface-duplicate-wl-output.md)
+- [Unbounded lock surfaces via duplicate `wl_output` binds](./resolved/session-lock-duplicate-output-done.md)
+  — RESOLVED 2026-09-18 (refuse, no Smithay patch): a second live surface
+  for an already-covered output is refused with the protocol's own
+  `duplicate_output` error (code 3 on the lock), keyed on the physical
+  `Output` Smithay's resource-identity guard admits past; destroying the
+  surface frees the output for a rebuild. Neither probed shell (DMS,
+  Noctalia) ever holds two at once. Supersedes PR #103's two-surface
+  composition pins; the single-surface per-output pins stand.
 - [Lock blanks immediately instead of waiting for the first surface](./resolved/session-lock-blank-timing-done.md)
   — RESOLVED 2026-09-18 (decide + pin, no behavior change): the accept →
   input-captured → first-frame-blanks → `locked`-after-blank ordering

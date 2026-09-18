@@ -1,115 +1,97 @@
-//! Lock surfaces are per-output, and flexwm has one output.
+//! One live lock surface per physical output.
 //!
-//! The protocol sends `locked` only once a locked frame has been presented on
-//! *all* outputs, and sizes each lock surface to its own output. With exactly
-//! one output both halves collapse: the first blanked frame on the one output
-//! confirms the lock no matter how many surfaces exist, and every surface is
-//! configured to that output's size. What lands here are the pins for the
-//! halves no other test asserts: several surfaces from one lock sharing the
-//! single output (each configured to it, all drawn, the first holding the
-//! keyboard), and a resize reconfiguring every one of them.
+//! The protocol allows exactly one lock surface per output: "Attempting to
+//! create more than one lock surface for a given output is a
+//! `duplicate_output` protocol error." Smithay enforces that per `wl_output`
+//! *resource* (`locked_outputs.contains(&output)` in its `GetLockSurface`
+//! handler -- naming the same bind twice dies there, while naming the same
+//! physical output through a second bind of the global is admitted), so
+//! flexwm enforces it per physical `Output` in `new_surface`: a second
+//! *live* surface for an output the lock already covers is refused with the
+//! protocol's own `duplicate_output` error, which kills the offending client
+//! the way every other protocol error here does.
 //!
-//! The zero-surface confirm half needs no new test: `Step::Lock` waits for
-//! `locked`, so `the_locked_event_waits_for_a_blanked_frame` and
-//! `locking_an_empty_session_blanks_and_keeps_blanking` already prove the
-//! single output's blanked frame confirms with no surface at all. The
-//! multi-output revisit lives in `headless.rs`'s `OUTPUT_ID` doc.
+//! Live, not sticky: destroying the surface -- role *and* `wl_surface`, so
+//! the compositor forgets it -- frees the output for a rebuild. A locker
+//! reconstructing its UI must not die for replacing a surface it tore down;
+//! what stays refused is two surfaces alive at once, whichever binds named
+//! the output. (Same-resource destroy-then-rebuild still dies inside
+//! Smithay's own never-shrinking `locked_outputs` list before flexwm is ever
+//! asked: a pre-existing Smithay-side stickiness this item does not touch.)
+//!
+//! With exactly one output the rule collapses to "one live lock surface":
+//! the first blanked frame confirms whatever the surface state (see
+//! `blanking`), a resize reaches the one surface, and the multi-output
+//! revisit lives in `headless.rs`'s `OUTPUT_ID` doc.
 
 use super::*;
 
-/// Every lock surface one lock puts up is configured to the single output's
-/// size and drawn onto it: the first-created on top, the first holding the
-/// keyboard, and the second revealed whole once the first is destroyed.
-///
-/// Pixel-proven, not struct-proven: a surface configured to any other size
-/// would have its first commit refused with `dimensions_mismatch` (the client
-/// dead, its surface gone), so two fullscreen draws in creation order plus
-/// the keyboard on the first is exactly "both were configured to this
-/// output".
+/// A second live surface for the output the lock already covers -- named
+/// through a different `wl_output` bind, the shape Smithay's
+/// resource-identity guard admits -- is refused with the protocol's own
+/// `duplicate_output` error: the client dies, the session stays locked, and
+/// the compositor keeps serving.
 #[test]
-fn every_lock_surface_is_configured_to_the_single_output() {
+fn a_second_live_surface_for_the_same_output_is_refused() {
     let mut fixture = Fixture::new();
     fixture.run(Step::MapWindow);
     fixture.run(Step::Lock);
     fixture.run(Step::map_lock_surface(0));
-    fixture.run(Step::LockSurfaceSecondBind {
-        lock: 0,
-        color: Some(WINDOW_BGRA),
-    });
-    let pixels = fixture.render();
-    assert_whole_screen_is(
-        &pixels,
-        LOCK_BGRA,
-        "the first-created lock surface draws on top",
-    );
-    let report = fixture.report();
-    assert_eq!(
-        report.keyboard_focus,
-        Some(Which::Lock(0)),
-        "the first current surface holds the keyboard"
-    );
 
-    // The second surface was composited all along underneath: destroying the
-    // first reveals it whole, not the backdrop.
-    fixture.run(Step::DestroyLockSurface { index: 0 });
-    fixture.tick(Duration::from_millis(120));
-    let pixels = fixture.pixels();
-    assert_whole_screen_is(
-        &pixels,
-        WINDOW_BGRA,
-        "the second lock surface, revealed by destroying the first",
+    let error = fixture.run_expecting_disconnect(Step::LockSurfaceSecondBind {
+        lock: 0,
+        color: Some(LOCK_BGRA),
+    });
+    // The refusal is the protocol's own `duplicate_output` (code 3) posted
+    // on the lock object -- the client's own backend reports it as
+    // `Protocol error 3 on object ext_session_lock_v1@N: ...`, so this pins
+    // the exact error, not just "the client is dead". (The object number
+    // varies run to run and is deliberately not pinned.)
+    assert!(
+        error.contains("Protocol error 3 on object ext_session_lock_v1@")
+            && error.contains("Output already has a lock surface"),
+        "the client should die refused with duplicate_output: {error}"
     );
-    let report = fixture.report();
-    assert_eq!(
-        report.keyboard_focus,
-        Some(Which::Lock(1)),
-        "the keyboard falls to the surviving surface"
+    // ...and only the client: the session stays locked and the compositor
+    // keeps serving, which is what makes this a client kill rather than a
+    // compositor crash.
+    assert!(
+        fixture.state.session_lock.is_locked(),
+        "a dead locker must not unlock the session"
     );
+    fixture.render();
 }
 
-/// `configure_all` reaches every surface, not just the first.
-///
-/// Two halves. The pixel half: after a shrink both surfaces ack the resize's
-/// configure and redraw at it (a surface naming any other size is killed for
-/// a mismatch, so two live redraws plus `locked: 1` is the wire proof both
-/// were reconfigured). The iteration half is white-box on purpose: the
-/// harness readback covers the old canvas, so "the *second* surface was
-/// reconfigured" is asserted on the pending sizes `configure_all` wrote --
-/// a surface it missed would still name the old size here.
+/// Destroying the surface frees the output: role and `wl_surface` both gone,
+/// so the compositor forgets it, and putting a replacement up through the
+/// second bind -- the rebuild shape a locker uses after an output hotplug --
+/// is admitted, configured, and drawn like any first surface.
 #[test]
-fn resizing_the_output_reconfigures_every_lock_surface() {
-    const SMALL: i32 = CANVAS / 2;
+fn destroying_the_surface_frees_the_output_for_a_rebuild() {
     let mut fixture = Fixture::new();
+    fixture.run(Step::MapWindow);
     fixture.run(Step::Lock);
     fixture.run(Step::map_lock_surface(0));
+    fixture.run(Step::DestroyLockSurface { index: 0 });
+
     fixture.run(Step::LockSurfaceSecondBind {
         lock: 0,
         color: Some(LOCK_BGRA),
     });
-    fixture.state.resize_output(SMALL, SMALL);
-    fixture.settle();
-    for (index, surface) in fixture.state.session_lock.surfaces.iter().enumerate() {
-        let size = surface.with_pending_state(|state| state.size);
-        assert_eq!(
-            size,
-            Some((SMALL as u32, SMALL as u32).into()),
-            "surface {index} should be reconfigured to the resized output"
-        );
-    }
-    // Each acks the resize's configure and redraws at it; a surface the
-    // resize never reconfigured still names the old size, which no longer
-    // matches and kills the client on commit.
-    fixture.run(Step::RedrawLockSurface { index: 0 });
-    fixture.run(Step::RedrawLockSurface { index: 1 });
     let report = fixture.report();
     assert_eq!(
         report.locked, 1,
-        "the redraws at the reconfigured size must not have killed the client"
+        "the rebuilt surface must not have killed the client"
+    );
+    assert_eq!(
+        report.keyboard_focus,
+        Some(Which::Lock(1)),
+        "the rebuilt surface holds the keyboard"
     );
     let pixels = fixture.render();
-    assert_eq!(
-        test_support::pixel(&pixels, CANVAS, 10, 10),
+    assert_whole_screen_is(
+        &pixels,
         LOCK_BGRA,
-        "both surfaces redrew at the resized output"
+        "the rebuilt lock surface draws whole-screen",
     );
 }

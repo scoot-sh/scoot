@@ -153,11 +153,11 @@ enum Step {
     LockSurface { lock: usize, color: Option<[u8; 4]> },
     /// The same, but naming the one physical output through the client's
     /// *second* `wl_output` bind. Smithay refuses the same resource twice
-    /// (`DuplicateOutput`, "Output is already locked") while accepting a
-    /// output, so this -- and only this -- is how a second surface comes to
-    /// exist on one output. The admission itself belongs to the
-    /// duplicate-bind ticket; this step exists so the per-output suite can
-    /// pin what every admitted surface is configured and drawn as.
+    /// (`DuplicateOutput`, "Output is already locked") while admitting a
+    /// second bind of the same global; flexwm refuses that shape too, per
+    /// physical output (see `per_output`). So this step is how a refusal is
+    /// provoked -- and, after a full destroy of the first surface, how a
+    /// rebuild is admitted.
     LockSurfaceSecondBind { lock: usize, color: Option<[u8; 4]> },
     /// Map a full-output `overlay` layer surface with a solid
     /// [`OVERLAY_BGRA`] buffer -- a bar or a launcher, drawn in front of
@@ -200,13 +200,6 @@ enum Step {
     /// `wl_surface` and commit -- a content commit after whatever teardown
     /// came before it.
     ReattachLockBuffer { index: usize },
-    /// Ack the latest configure on the `index`-th lock surface and redraw
-    /// it at the configured size -- what a real locker does when the output
-    /// it is on is resized. Unlike [`Step::ReattachLockBuffer`], which
-    /// replays the already-acked size, this names the *new* configure, which
-    /// must be acked before the commit or the compositor rightly kills the
-    /// client for committing before its first ack.
-    RedrawLockSurface { index: usize },
     /// `get_lock_surface` for the `index`-th lock object, then attach a
     /// buffer and commit *without* acking the configure -- the by-design
     /// `CommitBeforeFirstAck` kill, which must keep working.
@@ -283,11 +276,10 @@ struct TestClient {
     output: Option<wl_output::WlOutput>,
     /// A second bind of the same `wl_output` global, bound up front so a
     /// step can name the one physical output through a different resource.
-    /// Smithay's one-surface-per-output guard keys on resource identity, so
-    /// this is the only way several lock surfaces can exist on one output
-    /// (see `docs/backlog/protocols/lock-surface-duplicate-wl-output.md`,
-    /// which owns the admission question; the per-output suite owns what
-    /// happens to every surface once admitted).
+    /// Smithay's one-surface-per-output guard keys on resource identity and
+    /// admits this shape; flexwm refuses it per physical output while a live
+    /// surface covers it (see `per_output`) -- so this bind is how a refusal
+    /// is provoked, and, after a full destroy, how a rebuild is admitted.
     output2: Option<wl_output::WlOutput>,
     /// The `wl_output` global's name and version, kept so the second bind
     /// above can be made after the initial roundtrip.
@@ -953,19 +945,6 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                     client.lock_configures.get(index).copied().flatten().ok_or(
                         "the lock surface was never configured, so there is no size to redraw at",
                     )?;
-                let buffer = solid_buffer(&shm, &qh, width as i32, height as i32, LOCK_BGRA);
-                surface.attach(Some(&buffer), 0, 0);
-                surface.damage(0, 0, width as i32, height as i32);
-                surface.commit();
-            }
-            Step::RedrawLockSurface { index } => {
-                let (surface, lock_surface) =
-                    lock_surfaces.get(index).ok_or("no such lock surface")?;
-                let (serial, width, height) =
-                    client.lock_configures.get(index).copied().flatten().ok_or(
-                        "the lock surface was never configured, so there is no size to redraw at",
-                    )?;
-                lock_surface.ack_configure(serial);
                 let buffer = solid_buffer(&shm, &qh, width as i32, height as i32, LOCK_BGRA);
                 surface.attach(Some(&buffer), 0, 0);
                 surface.damage(0, 0, width as i32, height as i32);
