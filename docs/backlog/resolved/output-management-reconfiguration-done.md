@@ -80,6 +80,9 @@ unsafe — on each backend.**
   layer-shell map and the core's own `OutputId(1)` assume one output exists.
   Honoring it is an unrecoverable black screen.
 - `set_adaptive_sync` has no VRR support on any backend.
+- `set_transform` needs unbuilt render-path rotation and shares the
+  hostile-display argument (any client could rotate the panel mid-session);
+  refusal happens property-agnostically at `apply`/`test` regardless.
 
 The partial-success trap on top: with `disable_head` unhonorable and
 nested/custom modes unappliable, `apply` needs atomic all-or-nothing
