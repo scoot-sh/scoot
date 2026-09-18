@@ -99,6 +99,11 @@ impl CompositorHandler for State {
 
         self.popups.commit(surface);
         send_popup_initial_configure(self, surface);
+        // `wl_surface.offset` on the active cursor surface decrements its
+        // hotspot -- see `Cursor::note_surface_commit`. Unconditional, like
+        // the popup lines above: the method itself returns fast unless the
+        // committed surface is the active cursor image.
+        self.cursor.note_surface_commit(surface);
     }
 
     /// Smithay calls this for every `wl_surface` that goes away, whether the

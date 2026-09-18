@@ -640,7 +640,8 @@ gap jumped the queue — each item's own file records why it landed when it did.
    own entry ([tablet-v2](docs/backlog/input/tablet-v2.md)); screencopy,
    output-management and the VT-pause cursor item already resolved;
    security-context and the cursor `Vec` closed deliberate; cursor-hotspot
-   offset closed needs-upstream.
+   offset closed needs-upstream (since overturned and fixed flexwm-side —
+   see below).
 - **[A `present()` skipped for an in-flight flip consumes that frame's
   damage](docs/backlog/resolved/present-skip-eats-frame-damage-done.md)**
   — RESOLVED 2026-09-18: verify-first found the filed shape self-heals
@@ -649,10 +650,23 @@ gap jumped the queue — each item's own file records why it landed when it did.
   shape loses twice (the freed slot keeps a fresh age so the retry reads
   age 1 and draws nothing, and no vblank is owed so no retry is even
   triggered). The commit-failure arm now clears the failed slot's age and
-  arms a bounded timer retry (3 consecutive refusals, then quiet until
-  genuine damage); the in-flight path is untouched. Fail-first unit tests
-  plus a Smithay-contract pin; headless render throughput unchanged
-  (overlapping before/after ranges).
+   arms a bounded timer retry (3 consecutive refusals, then quiet until
+   genuine damage); the in-flight path is untouched. Fail-first unit tests
+   plus a Smithay-contract pin; headless render throughput unchanged
+   (overlapping before/after ranges).
+- **[`wl_surface.offset` on a cursor surface moves the
+  hotspot](docs/backlog/resolved/cursor-surface-offset-hotspot-done.md)**
+  — RESOLVED 2026-09-18: PR #106's NEEDS-UPSTREAM triage re-derived and
+  overturned — Smithay core never adjusts the hotspot, but Smithay's own
+  anvil does the decrement compositor-side in its shell commit hook, so
+  flexwm can too. `Cursor::note_surface_commit` (one call site at the end
+  of `CompositorHandler::commit`) decrements by this commit's
+  `buffer_delta`, saturating rather than wrapping (both operands are
+  client-controlled `i32`) and gated on the active cursor surface. Four
+  fail-first harness tests around a real client (offset + accumulation
+  incl. negative hotspot, post-re-set, `i32::MIN` saturation, other-surface
+  negative control); no README change (protocol fix, no user-facing
+  surface).
 ## What's next
 
 The backlog is the source of truth for what to pick up; this is the current

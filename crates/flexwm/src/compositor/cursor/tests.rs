@@ -272,6 +272,13 @@ enum Step {
     SetCursor { hotspot: (i32, i32) },
     /// `wl_pointer.set_cursor(NULL)`, i.e. hide the cursor.
     HideCursor,
+    /// `wl_surface.offset` on the cursor surface, followed by a commit --
+    /// the request `wayland.xml` says decrements the cursor hotspot.
+    OffsetCursorSurface { x: i32, y: i32 },
+    /// `wl_surface.offset` on the focus (non-cursor) surface, followed by a
+    /// commit -- the negative control proving only the active cursor
+    /// surface's offset moves the hotspot.
+    OffsetFocusSurface { x: i32, y: i32 },
     /// Destroy the cursor surface without setting any replacement.
     DestroyCursorSurface,
     /// `wp_cursor_shape_device_v1.set_shape`: name a shape and let the
@@ -321,7 +328,10 @@ impl Dispatch<wl_registry::WlRegistry, ()> for TestClient {
         };
         match interface.as_str() {
             "wl_compositor" => {
-                client.compositor = Some(registry.bind(name, version.min(4), qh, ()));
+                // Version 5, not 4: `wl_surface.offset` is a version-5
+                // request, and the cursor-offset tests below need it.
+                // Smithay advertises version 5 for this global.
+                client.compositor = Some(registry.bind(name, version.min(5), qh, ()));
             }
             "wl_subcompositor" => {
                 client.subcompositor = Some(registry.bind(name, version.min(1), qh, ()));
@@ -407,6 +417,7 @@ fn run_client(
     // compositor half hands it to `PointerHandle::motion` directly rather
     // than going through the layout, so nothing here depends on it mapping.
     let focus = compositor.create_surface(&qh, ());
+    let focus_surface = focus.clone();
     queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
     ids.send(focus.id().protocol_id())
         .map_err(|e| e.to_string())?;
@@ -444,6 +455,15 @@ fn run_client(
             Step::HideCursor => {
                 let serial = client.enter_serial.ok_or("the pointer never entered")?;
                 pointer.set_cursor(serial, None, 0, 0);
+            }
+            Step::OffsetCursorSurface { x, y } => {
+                let cursor = cursor.as_ref().ok_or("no cursor surface")?;
+                cursor.offset(x, y);
+                cursor.commit();
+            }
+            Step::OffsetFocusSurface { x, y } => {
+                focus_surface.offset(x, y);
+                focus_surface.commit();
             }
             Step::DestroyCursorSurface => {
                 let surface = cursor.take().ok_or("no cursor surface to destroy")?;
@@ -1037,5 +1057,167 @@ fn a_named_shape_replaces_a_client_cursor_surface() {
         canvas.at(50, 50),
         CLIENT_BGRA,
         "the client's own pixels are still being drawn"
+    );
+}
+
+// -------------------------------------------------------------------------
+// `wl_surface.offset` on the cursor surface
+// -------------------------------------------------------------------------
+
+/// `wayland.xml` (`wl_pointer.set_cursor`): "On wl_surface.offset requests
+/// to the pointer surface, hotspot_x and hotspot_y are decremented by the x
+/// and y parameters passed to the request. The offset must be applied by
+/// wl_surface.commit as usual." The image content shifts with the offset
+/// while the hotspot follows it, so the hotspot pixel stays exactly on the
+/// pointer -- without the adjustment the image moves but the click point
+/// does not, and every assertion below fails on the stale position.
+#[test]
+fn a_surface_offset_moves_the_hotspot_with_the_image() {
+    let mut fixture = Fixture::new();
+    fixture.run(Step::CommitCursorBuffer {
+        size: 24,
+        color: CLIENT_BGRA,
+    });
+    fixture.run(Step::SetCursor { hotspot: (4, 6) });
+    assert_eq!(fixture.frame().at(46, 44), CLIENT_BGRA);
+
+    // hotspot (4, 6) - (4, 6) = (0, 0): the 24x24 image moves from
+    // x 46..70, y 44..68 to x 50..74, y 50..74.
+    fixture.run(Step::OffsetCursorSurface { x: 4, y: 6 });
+    let canvas = fixture.frame();
+    // Hotspot (0, 0) means the image's top-left is the hotspot pixel: both
+    // land exactly on the pointer.
+    assert_eq!(canvas.at(46, 44), CLEAR_BGRA, "the old top-left is clear");
+    assert_eq!(
+        canvas.at(50, 50),
+        CLIENT_BGRA,
+        "hotspot and top-left on the pointer"
+    );
+    assert_eq!(
+        canvas.at(73, 73),
+        CLIENT_BGRA,
+        "the image's new bottom-right"
+    );
+    assert_eq!(
+        canvas.at(74, 73),
+        CLEAR_BGRA,
+        "one pixel right of the image"
+    );
+    assert_eq!(canvas.at(49, 50), CLEAR_BGRA, "one pixel left of the image");
+    assert_eq!(canvas.at(50, 49), CLEAR_BGRA, "one pixel above the image");
+
+    // Offsets accumulate across commits: hotspot (0, 0) - (2, 3) = (-2, -3),
+    // so the image moves to x 52..76, y 53..77. A negative hotspot is legal
+    // -- the pointer then aims past the image's top-left, so the pointer's
+    // own pixel is clear while the image still sits exactly at
+    // pointer - hotspot.
+    fixture.run(Step::OffsetCursorSurface { x: 2, y: 3 });
+    let canvas = fixture.frame();
+    assert_eq!(
+        canvas.at(50, 50),
+        CLEAR_BGRA,
+        "the pointer aims 2px left / 3px above the image"
+    );
+    assert_eq!(canvas.at(52, 53), CLIENT_BGRA, "the image's top-left");
+    assert_eq!(canvas.at(75, 76), CLIENT_BGRA, "the image's bottom-right");
+    assert_eq!(canvas.at(51, 53), CLEAR_BGRA, "one pixel left of the image");
+    assert_eq!(canvas.at(52, 52), CLEAR_BGRA, "one pixel above the image");
+}
+
+/// An offset committed after a *new* `set_cursor` applies to the new
+/// hotspot, not the one the surface was first given: `set_cursor` rewrites
+/// the hotspot outright, while offset only decrements whatever is current.
+#[test]
+fn an_offset_after_a_new_hotspot_applies_to_the_new_hotspot() {
+    let mut fixture = Fixture::new();
+    fixture.run(Step::CommitCursorBuffer {
+        size: 24,
+        color: CLIENT_BGRA,
+    });
+    fixture.run(Step::SetCursor { hotspot: (4, 6) });
+    fixture.run(Step::SetCursor { hotspot: (10, 12) });
+    assert_eq!(fixture.frame().at(40, 38), CLIENT_BGRA);
+
+    // hotspot (10, 12) - (2, 2) = (8, 10): the image moves from x 40..64,
+    // y 38..62 to x 42..66, y 40..64.
+    fixture.run(Step::OffsetCursorSurface { x: 2, y: 2 });
+    let canvas = fixture.frame();
+    assert_eq!(
+        canvas.at(50, 50),
+        CLIENT_BGRA,
+        "the hotspot stays on the pointer"
+    );
+    assert_eq!(canvas.at(42, 40), CLIENT_BGRA, "the image's new top-left");
+    assert_eq!(
+        canvas.at(65, 63),
+        CLIENT_BGRA,
+        "the image's new bottom-right"
+    );
+    assert_eq!(
+        canvas.at(40, 38),
+        CLEAR_BGRA,
+        "the pre-offset top-left is clear"
+    );
+    assert_eq!(canvas.at(41, 40), CLEAR_BGRA, "one pixel left of the image");
+}
+
+/// Both operands are client-controlled `i32` (`set_cursor` takes the hotspot
+/// raw, `wl_surface.offset` takes the delta raw), so `i32::MIN - 1` is one
+/// malicious commit away -- and a plain `-=` panics a debug build, taking
+/// every client's unsaved state down with the compositor. The adjustment
+/// saturates instead, which keeps the image off-canvas in either direction
+/// rather than at a wrapped-around coordinate.
+#[test]
+fn an_extreme_offset_saturates_instead_of_panicking() {
+    let mut fixture = Fixture::new();
+    fixture.run(Step::CommitCursorBuffer {
+        size: 24,
+        color: CLIENT_BGRA,
+    });
+    fixture.run(Step::SetCursor {
+        hotspot: (i32::MIN, i32::MIN),
+    });
+    fixture.frame().assert_nothing_drawn();
+
+    fixture.run(Step::OffsetCursorSurface { x: 1, y: 1 });
+    let canvas = fixture.frame();
+    assert_eq!(canvas.count, 1, "the element was skipped, not placed");
+    canvas.assert_nothing_drawn();
+
+    // ...and a sane hotspot afterwards still works, i.e. nothing was left
+    // wedged.
+    fixture.run(Step::SetCursor { hotspot: (4, 6) });
+    assert_eq!(fixture.frame().at(50, 50), CLIENT_BGRA);
+}
+
+/// Only the active cursor surface's own offset moves the hotspot: an offset
+/// committed on any other surface -- here the focus surface the pointer is
+/// over -- must leave the cursor exactly where it was.
+#[test]
+fn an_offset_on_another_surface_leaves_the_cursor_alone() {
+    let mut fixture = Fixture::new();
+    fixture.run(Step::CommitCursorBuffer {
+        size: 24,
+        color: CLIENT_BGRA,
+    });
+    fixture.run(Step::SetCursor { hotspot: (4, 6) });
+    assert_eq!(fixture.frame().at(46, 44), CLIENT_BGRA);
+
+    fixture.run(Step::OffsetFocusSurface { x: 10, y: 10 });
+    let canvas = fixture.frame();
+    assert_eq!(
+        canvas.at(50, 50),
+        CLIENT_BGRA,
+        "the hotspot stays on the pointer"
+    );
+    assert_eq!(
+        canvas.at(46, 44),
+        CLIENT_BGRA,
+        "the image's top-left is unmoved"
+    );
+    assert_eq!(
+        canvas.at(69, 67),
+        CLIENT_BGRA,
+        "the image's bottom-right is unmoved"
     );
 }

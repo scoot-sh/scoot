@@ -300,7 +300,13 @@ actionable.
   skipped while the `--tty` session holds no DRM master, so a paused
   session neither renders frames `present()` would drop nor wakes clients
   to paint them; reactivation still mode-sets and repaints fully.
-- [`wl_surface.offset` doesn't move the cursor hotspot](./rendering/cursor-surface-offset-hotspot.md)
+- [`wl_surface.offset` moves the cursor hotspot](./resolved/cursor-surface-offset-hotspot-done.md)
+  — RESOLVED 2026-09-18: PR #106's NEEDS-UPSTREAM triage re-derived and
+  overturned (Smithay's own anvil does the decrement compositor-side, so
+  flexwm can too). `Cursor::note_surface_commit` decrements the hotspot by
+  this commit's `buffer_delta` (saturating — both operands are
+  client-controlled `i32`), gated on the active cursor surface; four
+  fail-first harness tests.
 - [The pointer starts at the output's origin, not centred](./resolved/pointer-starts-at-origin-done.md)
   — RESOLVED 2026-09-17: centred once at startup through
   `pointer_move_quietly` (no idle-timer reset, no focus, no interaction
