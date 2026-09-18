@@ -626,7 +626,7 @@ gap jumped the queue — each item's own file records why it landed when it did.
   from the buffer-less initial commit the protocol mandates, not the first
   buffer — every healthy bar passes through that state, so windows never
   jump when the first buffer lands. Filtering would mean forking Smithay's
-  `arrange`   geometry (re-verified at the pinned rev: no mapped/buffer check).
+  `arrange` geometry (re-verified at the pinned rev: no mapped/buffer check).
   Three fail-first harness tests pin the edges (never-draws held until
   disconnect, buffer-less destroy, post-buffer zone drop); no timeout by
   design, lifetime bounded by disconnect/destroy.

@@ -261,6 +261,7 @@ actionable.
 ### Input
 - [`msg key` hard-codes `_L` modifier keysyms](./resolved/msg-key-modifier-resolution-done.md) — RESOLVED 2026-09-17 (PR #83): modifiers resolve through the keymap probe like `type_text` (either hand's key; toggle-option layouts work); `msg key A` still refuses
 - [`msg type`: dead keys, compose, inactive layouts](./input/msg-type-dead-keys-compose.md)
+- [`zwp_tablet_manager_v2` (drawing-tablet input)](./input/tablet-v2.md)
 
 ### --tty / backend
 - [Config-file key for the DRM device](./tty/tty-gpu-config-key.md) — **gated on Asahi confirmation**
