@@ -716,7 +716,7 @@ gap jumped the queue — each item's own file records why it landed when it did.
   record.
 - **[`--tty`'s `O_CLOEXEC` request was a no-op at the libseat
   layer](docs/backlog/resolved/tty-o-cloexec-noop-done.md)**
-  — RESOLVED 2026-09-18: the dead flag is removed
+  — RESOLVED 2026-09-18 (PR #114): the dead flag is removed
   (`LibSeatSession::open` takes `_flags` at the pinned rev, re-verified in
   source), and the guarantee it appeared to give is pinned by a real-spawn
   test — a close-on-exec marker never reaches the child, while a marker

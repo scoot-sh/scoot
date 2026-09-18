@@ -43,7 +43,7 @@ blocked: null
 > would silently inherit DRM master and every input device fd, and nothing
 > in flexwm's own code would catch or even notice it.
 
-## Resolution (2026-09-18)
+## Resolution (2026-09-18, PR #114)
 
 Remove + pin, exactly the shape the entry's last paragraph asked for: the
 dead flag is gone, and something in flexwm's own code now catches the leak
