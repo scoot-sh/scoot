@@ -365,17 +365,23 @@ impl State {
             // together:
             //
             // - `Requested`: this exact call just issued a real VT_ACTIVATE
-            //   that libseat didn't reject outright, so this IPC connection
-            //   -- if it's the caller's only input path -- may be about to
-            //   lose the one channel that could switch back (see
+            //   for a VT other than the one displayed (the same-VT no-op
+            //   below is filtered out before libseat is called, so reaching
+            //   libseat already means a change was asked for) that libseat
+            //   didn't reject outright, so this IPC connection -- if it's
+            //   the caller's only input path -- may be about to lose the one
+            //   channel that could switch back (see
             //   `tty::VtSwitchOutcome`'s doc and the backlog item this
             //   closes in `docs/roadmap/05b-vt-switch-eperm.md`). Worded as "requested"/"if it takes
             //   effect," not "this switched" -- libseat's own docs say a
             //   successful switch_session call doesn't guarantee a switch
-            //   happens (confirmed on real hardware: requesting the VT
-            //   already showing is also `Ok(())`, with no pause at all), so
-            //   claiming a definite pause here would overclaim on that
-            //   no-op case.
+            //   happens, so claiming a definite pause here would overclaim.
+            // - `IgnoredSameVt`: the request named the VT already displayed
+            //   -- verified against the kernel before libseat was called, so
+            //   there is nothing to hedge about and nothing to warn about.
+            //   A plain `Ok`: warning here would be the false positive
+            //   `docs/backlog/resolved/vt-switch-same-vt-warning-done.md`
+            //   exists to suppress.
             // - `IgnoredPaused`: the request went nowhere (libseat was never
             //   asked), but *why* matters to an IPC caller specifically --
             //   this is the one-way-door scenario itself: an agent retrying
@@ -421,9 +427,11 @@ impl State {
                 // exactly the shape of bug that made the paused-retry case
                 // silently indistinguishable from success above (see
                 // `VtSwitchOutcome::Ignored`'s doc) -- keeping this
-                // exhaustive means a future fifth `VtSwitchOutcome` variant
+                // exhaustive means a future sixth `VtSwitchOutcome` variant
                 // fails to compile here instead of silently becoming `Ok`.
-                Ok(None) | Ok(Some(VtSwitchOutcome::Ignored)) => self.ok(),
+                Ok(None)
+                | Ok(Some(VtSwitchOutcome::Ignored))
+                | Ok(Some(VtSwitchOutcome::IgnoredSameVt)) => self.ok(),
                 Err(error) => Response::error(error),
             },
             Request::Type { text } => {

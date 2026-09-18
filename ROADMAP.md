@@ -717,12 +717,23 @@ gap jumped the queue — each item's own file records why it landed when it did.
 - **[`--tty`'s `O_CLOEXEC` request was a no-op at the libseat
   layer](docs/backlog/resolved/tty-o-cloexec-noop-done.md)**
   — RESOLVED 2026-09-18 (PR #114): the dead flag is removed
-  (`LibSeatSession::open` takes `_flags` at the pinned rev, re-verified in
-  source), and the guarantee it appeared to give is pinned by a real-spawn
-  test — a close-on-exec marker never reaches the child, while a marker
-  without the bit provably does (kept as the test's permanent positive
-  control, which is also the fail-first record). Residual filed separately:
-  a per-source close-on-exec audit (low).
+   (`LibSeatSession::open` takes `_flags` at the pinned rev, re-verified in
+   source), and the guarantee it appeared to give is pinned by a real-spawn
+   test — a close-on-exec marker never reaches the child, while a marker
+   without the bit provably does (kept as the test's permanent positive
+   control, which is also the fail-first record). Residual filed separately:
+   a per-source close-on-exec audit (low).
+- **[Same-VT no-op VT-switch
+  warning](docs/backlog/resolved/vt-switch-same-vt-warning-done.md)**
+  — RESOLVED 2026-09-18: a same-VT `change_vt` no longer sends the hedged
+  IPC `Warning` — it is answered as a quiet `IgnoredSameVt` (plain `Ok`)
+  without calling libseat, decided per call against the kernel's live
+  displayed VT (`/sys/class/tty/tty0/active`) rather than the ticket's
+  anticipated init-time `Tty` field, so there is no new session-state
+  semantics to audit. Unknown display falls back to asking (the cosmetic
+  false positive, never a skipped real switch). Live away/back still
+  pauses, reactivates with modeset and repaints byte-identically; the
+  paused-retry `IgnoredPaused` guard is unregressed.
 ## What's next
 
 The backlog is the source of truth for what to pick up; this is the current
