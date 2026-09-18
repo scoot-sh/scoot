@@ -207,7 +207,7 @@ a seat — see `vm/README.md` for a Mac-native NixOS VM that provides one.
 flexwm --headless --width 1280 --height 800 -- foot   # start, spawn a terminal
 flexwm --nested --width 1280 --height 800 -- foot     # inside your existing compositor
 flexwm --tty -- foot                                  # on a real DRM/KMS seat
-flexwm --tty --gpu /dev/dri/card1 -- foot             # ...naming the DRM device yourself
+flexwm --tty --gpu /dev/dri/card0 -- foot             # ...naming the DRM device yourself
 flexwm --tty --mode 1920x1080 -- foot                 # ...naming the display mode (see below)
 flexwm msg windows                                     # in another shell
 flexwm msg action focus-column left
@@ -407,20 +407,31 @@ GPU and the display controller are the same DRM device. On Apple Silicon
 under Asahi Linux they are not: `asahi`/AGX has the render node, `apple,dcp`
 owns the CRTCs and connectors, and there is no PCI GPU or VGA BIOS for the
 first rule to match. Picking the render-only device there fails with
-`Operation not supported (os error 95)` loading its KMS resources. (That
-specific machine is where the bug was reported from; the fallback is built
-and tested, but no one has yet confirmed it end to end on Apple Silicon —
-`--gpu` is the first thing to try there until someone does. It is not a
-guarantee: naming a device skips the *search*, not the checks, so the device
-named still has to open through the session and pass the same KMS probe every
-automatic candidate does.) [`Asahi.md`](Asahi.md) is the runbook for
-confirming this on such a machine, along with the other two things that need
-one.
+`Operation not supported (os error 95)` loading its KMS resources.
 
-If the automatic search still picks wrong, name the device:
+**Confirmed working on Apple Silicon (2026-09-18).** On the machine this was
+reported from (Apple M2, `apple,t8112`), the automatic search rejects the
+`asahi` render node and drives the `apple-drm` display controller unattended,
+as a daily-driven `--tty` session with no `--gpu` and no `[tty] gpu`:
+
+```
+drm: device unusable path=/dev/dri/card1 reason=has no usable KMS pipeline
+     -- loading its DRM resources failed (Operation not supported (os error 95))
+drm: driving this device path=/dev/dri/card2 connector=eDP-1 width=2560 height=1600
+```
+
+So **`--gpu` is not needed there** — don't reach for it first on Apple
+Silicon. If you do name a device, it is not a guarantee: naming one skips the
+*search*, not the checks, so it still has to open through the session and pass
+the same KMS probe every automatic candidate does. [`Asahi.md`](Asahi.md)
+records that run and remains the runbook for re-checking it on a different
+Apple Silicon model.
+
+If the automatic search still picks wrong, name the device — the one that
+owns the connectors, never a render-only node:
 
 ```sh
-flexwm --tty --gpu /dev/dri/card1 -- foot
+flexwm --tty --gpu /dev/dri/card0 -- foot
 ```
 
 `--gpu PATH` replaces the search entirely — exactly that device, no
@@ -439,7 +450,7 @@ file saves retyping the flag on every launch:
 
 ```toml
 [tty]
-gpu = "/dev/dri/card1"
+gpu = "/dev/dri/card0"
 ```
 
 `[tty] gpu` names the same device the same way — exactly that device, no
@@ -2045,11 +2056,14 @@ prefer_no_csd = true
 scale = 1.0
 
 # [tty]
-# Uncomment on hardware where the automatic DRM device search picks wrong
-# (e.g. Apple Silicon under Asahi Linux, where the 3D GPU and the display
-# controller are separate devices). Unset means the automatic search picks;
-# --gpu PATH on the command line wins over this when both name one.
-# gpu = "/dev/dri/card1"
+# Uncomment only on hardware where the automatic DRM device search picks
+# wrong. Apple Silicon under Asahi Linux -- where the 3D GPU and the display
+# controller are separate devices -- was the motivating case, but the search
+# was confirmed correct there on 2026-09-18 and needs no key. Unset means the
+# automatic search picks; --gpu PATH on the command line wins over this when
+# both name one. Name the *display controller*, never the render node, and
+# prefer a stable /dev/dri/by-path/... alias over a cardN minor number.
+# gpu = "/dev/dri/by-path/platform-soc:display-subsystem-card"
 
 [binds]
 "super+n" = "focus-column right"

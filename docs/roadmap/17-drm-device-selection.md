@@ -58,7 +58,10 @@ naming the device, no hang and no panic; a plain `--tty` still starts
 after six consecutive failed starts, so a rejected device doesn't leak
 the VT-bound seat. The fallback *iterating* is covered by unit tests
 against `first_usable`, which is why the loop takes its opener as a
-parameter. Whether this actually fixes Asahi Linux needs that machine.
+parameter. Whether this actually fixes Asahi Linux needed that machine, and it does:
+confirmed 2026-09-18 on the reporter's Apple M2 -- the search rejects the
+`asahi` render node and drives `apple-drm`/`eDP-1` unattended. See
+`Asahi.md` and `docs/backlog/resolved/tty-gpu-config-key-done.md`.
 
 **One real fix and five accuracy fixes from review**, all on the same
 branch. The fix: `candidates` `?`-ed *both* udev calls, so a machine

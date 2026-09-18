@@ -1,18 +1,19 @@
 ---
-title: "`--tty` can pick a GPU that can't drive a display at all, and gives up outright instead of trying another one \u2014 DONE as item 17, PR #27; built and verified on the dev VM, and still awaiting confirmation on the Apple Silicon machine it was reported from (which no dev-VM test can stand in for \u2014 see item 17)."
+title: "`--tty` can pick a GPU that can't drive a display at all, and gives up outright instead of trying another one \u2014 DONE as item 17, PR #27; built and verified on the dev VM, and CONFIRMED on the Apple Silicon machine it was reported from (2026-09-18): the search rejects the asahi render node and drives apple-drm unattended."
 status: "resolved"
 area: "resolved"
 priority: null
 blocked: null
 ---
 
-# `--tty` can pick a GPU that can't drive a display at all, and gives up outright instead of trying another one — DONE as item 17, PR #27; built and verified on the dev VM, and still awaiting confirmation on the Apple Silicon machine it was reported from (which no dev-VM test can stand in for — see item 17).
+# `--tty` can pick a GPU that can't drive a display at all, and gives up outright instead of trying another one — DONE as item 17, PR #27; built and verified on the dev VM, and CONFIRMED on the Apple Silicon machine it was reported from (2026-09-18): the search rejects the `asahi` render node and drives `apple-drm` unattended.
 
 ~~`--tty` can pick a GPU that can't drive a display at all, and gives up
 outright instead of trying another one~~ — DONE as item 17, PR #27;
-built and verified on the dev VM, and still awaiting confirmation on the
-Apple Silicon machine it was reported from (which no dev-VM test can
-stand in for — see item 17). Real, reported from the user's own Apple
+built and verified on the dev VM, and CONFIRMED 2026-09-18 on the
+Apple Silicon machine it was reported from: the search rejects the
+`asahi` render node (`os error 95`) and drives `apple-drm`/`eDP-1`
+unattended, with no `--gpu` and no `[tty] gpu` set. Real, reported from the user's own Apple
 Silicon (Asahi Linux, M2) laptop, 2026-09-13. `flexwm --tty` there failed
 immediately:
 
