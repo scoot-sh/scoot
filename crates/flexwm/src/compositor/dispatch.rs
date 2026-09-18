@@ -281,13 +281,17 @@
 //!   count would drift fail-open (destroys of uncounted cheap buffers
 //!   draining units claimed by retaining ones). Single-pixel buffers are
 //!   counted too, even though they hold nothing: uniformity is what keeps
-//!   the scalar pairing exact. The dmabuf async `create` is the one
-//!   creation that claims nothing: it creates no object synchronously, and
-//!   this compositor's `failed()` answer creates none later.
+//!   the scalar pairing exact. The dmabuf async `create` claims like the
+//!   rest since flexwm started importing dmabufs for real: a successful
+//!   import mints a `wl_buffer` on that path too (see `dmabuf.rs`).
 //! - **Claimed unconditionally, exact for live clients by mechanism.**
 //!   Smithay initialises the buffer or kills the client, never neither, so
 //!   a failed creation's phantom unit lands on an already-dead entry only
-//!   (at most one per killing connection; see `wl_buffers.rs`). No
+//!   (at most one per killing connection; see `wl_buffers.rs`). The one
+//!   creation that can be refused with the client left alive -- an async
+//!   dmabuf `create` the renderer will not import -- hands its unit back in
+//!   `dmabuf.rs`'s `refuse_import`, which is where that refusal is decided.
+//!   No
 //!   upstream parameter validation is replicated here -- that would couple
 //!   this guard to Smithay's handler logic and drift fail-open on a rev
 //!   bump, while over-counting a dead client is the safe direction.
@@ -745,22 +749,34 @@ where
 /// [`MAX_BUFFERS_PER_CLIENT`](super::wl_buffers::MAX_BUFFERS_PER_CLIENT)
 /// live buffers.
 ///
-/// Three creation sites, one budget (see the module doc's "Why the sixth
+/// Four creation sites, one budget (see the module doc's "Why the sixth
 /// guard exists" for why the count is uniform): `wl_shm_pool.create_buffer`,
-/// `zwp_linux_buffer_params_v1.create_immed`, and
-/// `wp_single_pixel_buffer_manager_v1.create_u32_rgba_buffer`. The dmabuf
-/// async `create` is deliberately absent: it creates no object
-/// synchronously, and this compositor's `failed()` answer creates none
-/// later -- claiming one would leak a unit no destruction could release.
+/// *both* `zwp_linux_buffer_params_v1.create_immed` and its asynchronous
+/// sibling `create`, and
+/// `wp_single_pixel_buffer_manager_v1.create_u32_rgba_buffer`.
 /// Every other request of every other interface -- including `wl_shm_pool`
 /// `resize`/`destroy` and params `add`/`destroy` -- falls through.
+///
+/// `create` claims because flexwm now really imports dmabufs
+/// (`dmabuf.rs`): `ImportNotifier::successful` on a `Falliable` notifier
+/// mints a real, fd-retaining `wl_buffer`, so leaving that path uncounted
+/// would let a GL client hold unbounded buffers outside
+/// `MAX_BUFFERS_PER_CLIENT` entirely. It is also the one creation whose
+/// *refusal* leaves the client alive, so `dmabuf.rs`'s `refuse_import` hands
+/// the unit back when the renderer says no -- see its doc for why that
+/// release is written to be correct on the `create_immed` path too.
 ///
 /// The refusal is posted on the creating object with that interface's own
 /// code for a creation that cannot be honoured (`InvalidStride` on the
 /// pool, `InvalidWlBuffer` on the params; the single-pixel manager defines
-/// no errors, so a bare 0 with an explicit message). Same uninitialized-
-/// object argument as the pool guards: returning without initialising the
-/// request's `New` is safe only because `post_error` kills synchronously.
+/// no errors, so a bare 0 with an explicit message). `create` is refused the
+/// same fatal way as `create_immed` rather than with the protocol's softer
+/// `failed` event, because the two are one budget with one message and only
+/// a client already holding 512 live buffers ever sees either -- abuse by
+/// construction, where the kill is the message. Same uninitialized-object
+/// argument as the pool guards: returning without initialising the request's
+/// `New` is safe only because `post_error` kills synchronously -- and
+/// `create` has no `New` at all, so it is safer still.
 ///
 /// Folds away for every interface other than the three factories, for the
 /// same monomorphization reason as the guards above -- which matters here
@@ -788,11 +804,19 @@ where
         return true;
     }
     if TypeId::of::<I::Request>() == TypeId::of::<zwp_linux_buffer_params_v1::Request>() {
-        let Some(zwp_linux_buffer_params_v1::Request::CreateImmed { .. }) =
-            (request as &dyn Any).downcast_ref::<zwp_linux_buffer_params_v1::Request>()
-        else {
+        // Both factories on this interface, not just the immediate one: each
+        // produces exactly one `wl_buffer` that the destruction hook will
+        // release (see this function's doc and `dmabuf.rs`).
+        let creates_a_buffer = matches!(
+            (request as &dyn Any).downcast_ref::<zwp_linux_buffer_params_v1::Request>(),
+            Some(
+                zwp_linux_buffer_params_v1::Request::CreateImmed { .. }
+                    | zwp_linux_buffer_params_v1::Request::Create { .. }
+            )
+        );
+        if !creates_a_buffer {
             return false;
-        };
+        }
         if !state.wl_buffers.claim_buffer_creation(client) {
             return false;
         }
@@ -828,6 +852,16 @@ where
 /// object) and on a protocol-error kill. Fires for buffers of every kind --
 /// which is what keeps the uniform count uniform (see `wl_buffers.rs`).
 ///
+/// Also queues the drain of the renderer's dmabuf mapping cache, which is the
+/// *other* thing a dying `wl_buffer` may have made collectable and which
+/// nothing else in the compositor would notice: a destroyed buffer causes no
+/// damage, so no frame is asked for, so nothing calls the renderer's own
+/// cleanup. See `dmabuf.rs`'s `schedule_cache_drain` -- it is a no-op (one
+/// bool test) until this session imports its first dmabuf, and it queues at
+/// most one idle per dispatch however many buffers died in it. The kind of
+/// the dying buffer is deliberately not consulted, for the same reason the
+/// count above is uniform: the hook cannot observe it.
+///
 /// Folds away for every interface other than `wl_buffer`, which matters in
 /// the same way as the hooks above: this sits on the destruction path of
 /// every object of every interface.
@@ -840,6 +874,7 @@ where
         return;
     }
     state.wl_buffers.forget_buffer(client);
+    super::dmabuf::schedule_cache_drain(state);
 }
 
 /// Posts a protocol error and returns `true` when `request` is a

@@ -462,6 +462,34 @@ pub struct State {
     /// fds/mappings; the pool count above cannot (a buffer outlives its
     /// pool object).
     pub wl_buffers: WlBuffers,
+    /// Whether any client has ever handed this session a dmabuf the renderer
+    /// accepted.
+    ///
+    /// One writer (`dmabuf.rs`'s `dmabuf_imported`, on a successful import)
+    /// and one reader (`handlers.rs`'s `commit`, which calls
+    /// `dmabuf::sync_committed_dmabufs` only when it is set). Latching, never
+    /// cleared: it is not "a dmabuf is mapped right now" but "this session is
+    /// one where dmabufs happen", which is the question the commit path is
+    /// actually asking -- re-deriving liveness per commit would cost more
+    /// than the walk it would save, and a stale `true` costs one extra ioctl
+    /// pair per commit while a stale `false` would cost torn frames.
+    ///
+    /// What it buys: a `wl_shm`-only session -- every `--headless` test, and
+    /// every session with no GL client -- keeps exactly the commit path it had
+    /// before dmabuf import existed, a bool test rather than a surface-tree
+    /// walk on the hottest handler this compositor has.
+    pub imports_dmabufs: bool,
+    /// Whether a dmabuf-cache drain is already sitting on the loop's idle
+    /// queue.
+    ///
+    /// Written only by `dmabuf.rs` -- set in `schedule_cache_drain` (from the
+    /// `wl_buffer` destruction hook), cleared by `drain_cache` when the idle
+    /// runs. It is a *queued-ness* flag, not "the cache is dirty": it exists
+    /// so a client destroying 512 buffers in one dispatch queues one scan
+    /// rather than 512, the same batching `bind_budget.rs` does for deferred
+    /// refusals. A stale `true` could only happen if an idle were dropped
+    /// without running, which calloop does not do.
+    pub dmabuf_drain_queued: bool,
     /// `ext_idle_notifier_v1` (version 2): what a `swayidle`-style daemon
     /// binds to learn the seat has been quiet N milliseconds. Read on
     /// every input event (`announce_activity`, see `idle.rs`) and written
@@ -710,6 +738,8 @@ impl State {
             bind_budget: BindBudget::default(),
             shm_pools: ShmPools::default(),
             wl_buffers: WlBuffers::default(),
+            imports_dmabufs: false,
+            dmabuf_drain_queued: false,
             idle_notifier,
             idle_inhibitors: idle::Inhibitors::default(),
             idle_inhibit_manager_state,

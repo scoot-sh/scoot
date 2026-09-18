@@ -1121,12 +1121,18 @@ fn a_dmabuf_immed_past_a_full_budget_is_refused_before_validation() {
     );
 }
 
-/// The dmabuf async `create` never claims: past a full shm budget it is
-/// still answered `failed` -- the protocol's own refusal -- with the client
-/// left alive. Claiming it would refuse (and kill) a client whose import
-/// was about to fail harmlessly anyway.
+/// The dmabuf async `create` claims like every other factory now that a
+/// successful import really mints a `wl_buffer` on that path, so past a full
+/// shm budget it is refused by the guard with the same shared-budget
+/// `InvalidWlBuffer` (7) the `create_immed` case above earns.
+///
+/// This test used to assert the opposite -- `create` claiming nothing and
+/// still being answered `failed` -- which was correct only while this
+/// compositor refused every import. See `wl_buffers.rs`: uncounted, the
+/// async path would be the one `wl_buffer` factory outside
+/// `MAX_BUFFERS_PER_CLIENT` entirely.
 #[test]
-fn a_dmabuf_create_past_a_full_budget_is_still_answered_failed() {
+fn a_dmabuf_create_past_a_full_budget_is_refused_by_the_shared_budget() {
     let report = drive(|stream| {
         let _flood = hold_flood_lock();
         let mut buffers = BufferClient::connect(stream)?;
@@ -1153,24 +1159,35 @@ fn a_dmabuf_create_past_a_full_budget_is_still_answered_failed() {
             u32::from_ne_bytes(*b"XR24"),
             zwp_linux_buffer_params_v1::Flags::empty(),
         );
-        buffers.roundtrip()?;
-        params.destroy();
-        buffers.roundtrip()?;
-        Ok(())
+        buffers.roundtrip()
     });
-    if let Err(error) = &report.resize {
-        panic!("a dmabuf create past a full buffer budget was refused: {error:?}");
-    }
+    assert_raw_protocol_error(&report.resize, "zwp_linux_buffer_params_v1", 7);
     assert_survivor_still_served(&report);
-    assert_eq!(report.buffers, 0, "the shm budget must drain on disconnect");
+    assert_eq!(
+        report.buffers, 0,
+        "the killed client's shm budget must drain with it"
+    );
 }
-/// still creates -- and counts -- its buffer object: Smithay initialises
-/// it before the import runs, and the `failed()` answer kills the client
-/// with `InvalidWlBuffer`, leaving the object for disconnect cleanup.
-/// Zero afterwards proves init happened (a never-initialised object would
-/// leave one phantom unit); the kill proves the import path is unchanged.
+
+/// A dmabuf `create_immed` this compositor cannot import -- the harness
+/// builds a `State` with no backend at all, so there is no renderer to import
+/// into -- kills the client with `InvalidWlBuffer`, takes no one else down
+/// with it, and leaves the buffer budget empty.
+///
+/// **What this no longer proves, deliberately stated rather than left to be
+/// assumed:** the final zero used to be read as "Smithay initialised the
+/// buffer object before running the import, else one phantom unit would be
+/// left". That inference died when `dmabuf.rs`'s `refuse_import` started
+/// handing the claimed unit back itself (it has to -- see `wl_buffers.rs`),
+/// because the count now lands on zero either way. The error-before-init
+/// shape is instead guarded by
+/// `dmabuf/tests.rs::an_import_through_create_immed_is_not_a_client_kill`,
+/// which asserts the count is exactly *one* on the accepted path, where
+/// nothing releases it early. What is left here is still worth having, and is
+/// what the assertions below now say: the kill, its blast radius, and the
+/// drain.
 #[test]
-fn a_failed_dmabuf_import_creates_a_counted_buffer_then_drains() {
+fn a_failed_dmabuf_import_kills_only_that_client_and_drains_its_budget() {
     let report = drive(|stream| {
         let mut buffers = BufferClient::connect(stream)?;
         let dmabuf = buffers.dispatch.dmabuf.clone().expect("the dmabuf global");
@@ -1197,6 +1214,7 @@ fn a_failed_dmabuf_import_creates_a_counted_buffer_then_drains() {
     assert_survivor_still_served(&report);
     assert_eq!(
         report.buffers, 0,
-        "the immed buffer was initialised (else one phantom unit) and drained in cleanup"
+        "the killed client's buffer budget must drain with it, whether the \
+         unit came back through `refuse_import` or through disconnect cleanup"
     );
 }
