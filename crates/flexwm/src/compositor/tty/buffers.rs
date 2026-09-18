@@ -59,21 +59,73 @@ pub struct BufferPool {
     slots: [Slot; COUNT],
     width: i32,
     height: i32,
-    /// Advanced once per [`advance_generation`](Self::advance_generation)
-    /// call -- see the module doc's "per-slot buffer age" section.
-    generation: u64,
+    ages: SlotAges,
 }
 
 struct Slot {
     buffer: DumbBuffer,
     framebuffer: DumbFramebuffer,
     free: bool,
-    /// The pool's `generation` at the time this slot's pixels were last
+}
+
+/// Which `render_output` generations each dumb-buffer slot's pixels reflect.
+///
+/// Split out of [`BufferPool`] so the failure transition -- a write that
+/// reached a slot but never reached scanout, whose age must read as zero
+/// rather than one -- is unit-testable without a live DRM device, the same
+/// rationale as `first_free`/`age` below. `BufferPool` delegates every
+/// generation bookkeeping call here; nothing else touches these counters.
+struct SlotAges {
+    /// Advanced once per [`advance_generation`](BufferPool::advance_generation)
+    /// call -- see the module doc's "per-slot buffer age" section.
+    generation: u64,
+    /// The pool's `generation` at the time each slot's pixels were last
     /// written by [`write_region`](BufferPool::write_region), or `None` if
-    /// never written, or if [`invalidate_ages`](BufferPool::invalidate_ages)
-    /// has since run (forces a full redraw the next time this slot is
-    /// picked -- see [`next_age`](BufferPool::next_age)).
-    last_written: Option<u64>,
+    /// never written, if [`invalidate`](SlotAges::invalidate) has since run,
+    /// or if that write never reached scanout (see
+    /// [`write_failed`](SlotAges::write_failed)).
+    last_written: [Option<u64>; COUNT],
+}
+
+impl SlotAges {
+    /// The buffer age to report for `index` -- see [`age`].
+    fn age_for(&self, index: usize) -> usize {
+        age(self.generation, self.last_written[index])
+    }
+
+    /// Advances the generation -- see
+    /// [`advance_generation`](BufferPool::advance_generation).
+    fn advance(&mut self) {
+        self.generation += 1;
+    }
+
+    /// Records that `index` was written at the current generation -- see
+    /// [`write_region`](BufferPool::write_region).
+    fn recorded(&mut self, index: usize) {
+        self.last_written[index] = Some(self.generation);
+    }
+
+    /// Forces every slot's next pick to report age `0` -- see
+    /// [`invalidate_ages`](BufferPool::invalidate_ages).
+    fn invalidate(&mut self) {
+        self.last_written = [None; COUNT];
+    }
+
+    /// Records that `index`'s write never reached scanout (a commit or page
+    /// flip the kernel refused after the pixels were already copied into the
+    /// slot): the slot keeps whatever bytes the copy left there, but nothing
+    /// vouches for what's actually on screen, so its next pick must be a
+    /// full redraw rather than trusting the fresh `last_written` the copy
+    /// just stored.
+    ///
+    /// Without this the retry reads as age 1 -- one render out of date, only
+    /// this frame's own damage requested -- and a frame with no *new* damage
+    /// comes back `None` from the damage tracker (see `headless.rs`'s
+    /// contract test), so nothing is ever re-presented and scanout stays
+    /// stale until unrelated damage arrives.
+    fn write_failed(&mut self, index: usize) {
+        self.last_written[index] = None;
+    }
 }
 
 impl BufferPool {
@@ -88,7 +140,10 @@ impl BufferPool {
             slots,
             width,
             height,
-            generation: 0,
+            ages: SlotAges {
+                generation: 0,
+                last_written: [None; COUNT],
+            },
         })
     }
 
@@ -104,9 +159,7 @@ impl BufferPool {
     /// see that method's doc for why.
     pub fn next_age(&self) -> usize {
         let index = first_free(self.slots.iter().map(|slot| slot.free));
-        index.map_or(0, |index| {
-            age(self.generation, self.slots[index].last_written)
-        })
+        index.map_or(0, |index| self.ages.age_for(index))
     }
 
     /// Must be called exactly once after every `render_output` call this
@@ -120,7 +173,7 @@ impl BufferPool {
     /// later `next_age` computes an age against the wrong baseline and the
     /// tracker hands back damage for the wrong span of history.
     pub fn advance_generation(&mut self) {
-        self.generation += 1;
+        self.ages.advance();
     }
 
     /// Forces every slot's next pick to report age `0` (a full redraw).
@@ -136,9 +189,7 @@ impl BufferPool {
     /// left showing stale/wrong pixels with no error anywhere) this
     /// project's standards call out as the worst kind.
     pub fn invalidate_ages(&mut self) {
-        for slot in &mut self.slots {
-            slot.last_written = None;
-        }
+        self.ages.invalidate();
     }
 
     /// Writes `pixels` (tightly packed Argb8888/Xrgb8888, exactly
@@ -166,7 +217,6 @@ impl BufferPool {
             return None;
         }
         let index = first_free(self.slots.iter().map(|slot| slot.free))?;
-        let generation = self.generation;
         let slot = &mut self.slots[index];
         // `handle()` returns drm-rs's own `Copy` handle type, not the
         // `Send`-ineligible mapping itself -- this local copy is what
@@ -198,7 +248,7 @@ impl BufferPool {
         let y0 = region.loc.y as usize;
         copy_region_rows(&mut mapping, pitch, x_offset, y0, row_len, pixels);
         slot.free = false;
-        slot.last_written = Some(generation);
+        self.ages.recorded(index);
         Some((index, *slot.framebuffer.as_ref()))
     }
 
@@ -209,6 +259,20 @@ impl BufferPool {
     pub fn mark_free(&mut self, index: usize) {
         if let Some(slot) = self.slots.get_mut(index) {
             slot.free = true;
+        }
+    }
+
+    /// Releases a slot whose write never reached scanout: a commit or page
+    /// flip the kernel refused *after* [`write_region`](Self::write_region)
+    /// already copied the pixels in. The slot becomes reusable, but its age
+    /// is cleared outright (see [`write_failed`](SlotAges::write_failed)) --
+    /// merely freeing it would leave the fresh `last_written` the copy
+    /// stored, and the retry would read as age 1 and draw nothing on a quiet
+    /// screen. The only caller is `Tty::present`'s commit-failure arm.
+    pub fn note_write_failed(&mut self, index: usize) {
+        if let Some(slot) = self.slots.get_mut(index) {
+            slot.free = true;
+            self.ages.write_failed(index);
         }
     }
 
@@ -244,7 +308,6 @@ fn make_slot(
         buffer,
         framebuffer,
         free: true,
-        last_written: None,
     })
 }
 
@@ -358,6 +421,64 @@ mod tests {
         for generation in 0..10u64 {
             assert_eq!(age(generation, Some(0)), (generation + 1) as usize);
         }
+    }
+
+    #[test]
+    fn slot_ages_track_writes_and_advances_like_the_pool_did() {
+        // Parity pin for pulling the counters out of `BufferPool`: one
+        // render (advance) plus one write, and the next pick reads as age 1
+        // -- the same arithmetic `age()` pins above, now through the struct
+        // `next_age`/`advance_generation`/`write_region` delegate to.
+        let mut ages = SlotAges {
+            generation: 0,
+            last_written: [None; COUNT],
+        };
+        assert_eq!(ages.age_for(0), 0);
+        ages.advance();
+        ages.recorded(0);
+        assert_eq!(ages.age_for(0), 1);
+    }
+
+    #[test]
+    fn a_write_that_never_reached_scanout_reads_as_age_zero() {
+        // Fail-first pin for the present-skip damage loss: the copy stored a
+        // fresh `last_written`, but the flip never went out, so the retry
+        // must fully redraw (age 0). Merely freeing the slot -- what the
+        // commit-failure arm did before this fix -- leaves age 1, and an
+        // unchanged frame at age 1 reports no damage at all (see
+        // `headless.rs`'s contract test), so nothing is ever re-presented.
+        // Neuter check: make `write_failed` a no-op and the final assertion
+        // reads 1, not 0.
+        let mut ages = SlotAges {
+            generation: 0,
+            last_written: [None; COUNT],
+        };
+        ages.advance();
+        ages.recorded(0);
+        assert_eq!(ages.age_for(0), 1);
+        ages.write_failed(0);
+        assert_eq!(ages.age_for(0), 0);
+    }
+
+    #[test]
+    fn a_failed_write_leaves_the_other_slots_history_alone() {
+        // Precision pin: only the failed slot is unvouched. The innocent
+        // slot keeps its age, so a retry that picks it still gets the
+        // incremental damage its own history calls for rather than a forced
+        // full redraw.
+        let mut ages = SlotAges {
+            generation: 0,
+            last_written: [None; COUNT],
+        };
+        ages.advance();
+        ages.recorded(0);
+        ages.advance();
+        ages.recorded(1);
+        assert_eq!(ages.age_for(0), 2);
+        assert_eq!(ages.age_for(1), 1);
+        ages.write_failed(1);
+        assert_eq!(ages.age_for(1), 0);
+        assert_eq!(ages.age_for(0), 2);
     }
 
     #[test]

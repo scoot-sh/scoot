@@ -30,6 +30,7 @@ mod buffers;
 mod flip_tracker;
 mod gpu;
 mod hotplug;
+mod present_retry;
 
 use std::error::Error;
 use std::path::Path;
@@ -53,6 +54,7 @@ use smithay::utils::{Buffer as BufferSpace, DeviceFd, Physical, Rectangle, Size,
 
 use self::buffers::BufferPool;
 use self::flip_tracker::FlipTracker;
+use self::present_retry::PresentRetries;
 use super::State;
 use super::keybindings::Keybindings;
 use super::output_scale::logical_size;
@@ -186,6 +188,19 @@ pub struct Tty {
     /// doesn't leave the screen stale until some unrelated redraw happens
     /// to trigger another one.
     present_skipped: bool,
+    /// Whether the last `present()` was a refused commit/page-flip owed a
+    /// timer-driven retry. Two fields rather than one shared with
+    /// `present_skipped` deliberately: a skip owned by a completion event
+    /// (a `VBlank` is owed) and a refusal owned by the frame timer (nothing
+    /// is in flight, so no event will ever arrive) are different facts with
+    /// different consumers, and sharing a flag between them would be the
+    /// fact-in-two-places split this project treats as its own bug class.
+    /// Set only by the commit-failure arm, taken only by the render tail
+    /// (see `take_retry_render`).
+    retry_armed: bool,
+    /// How many consecutive flips the kernel has refused -- bounds the
+    /// timer-driven retries above (see `present_retry.rs`).
+    retries: PresentRetries,
 }
 
 /// Sets up the session, DRM device and surface, and libinput, and extends
@@ -265,6 +280,8 @@ pub fn init(
         showing: None,
         pending_free: None,
         present_skipped: false,
+        retry_armed: false,
+        retries: PresentRetries::new(),
     });
 
     // The gamma protocol's `gamma_size` is per-CRTC hardware state, and the
@@ -604,19 +621,34 @@ impl Tty {
     /// been confirmed by a `VBlank` yet -- flipping again before that would
     /// fail with EBUSY.
     ///
-    /// Only the last of those three sets `present_skipped`, and it is the
-    /// only one that needs to: an in-flight flip is the one case where a
-    /// *different*, already-out frame is what will eventually confirm
-    /// (a `VBlank`) that it's safe to try again, so the flag is what makes
-    /// that confirmation retry the render instead of leaving the screen
-    /// stale. The other two don't need it. `!active` means the session is
-    /// paused or DRM-masterless -- nothing here can retry until
-    /// `reactivate()` runs, and `reactivate()` unconditionally arms a fresh
-    /// modeset and render on its own, `present_skipped` or not. A
-    /// `frame_size` mismatch means a resize is in flight -- `State::
-    /// resize_output` has already asked for a render at the new size before
-    /// this function is ever called with the old one, so there is nothing
-    /// left for a flag to retry.
+    /// Who retries each skip, and why only two of the four arm anything:
+    ///
+    /// - An in-flight flip sets `present_skipped`: a *different*,
+    ///   already-out frame is what will eventually confirm (a `VBlank`)
+    ///   that it's safe to try again, so the flag is what makes that
+    ///   confirmation retry the render instead of leaving the screen
+    ///   stale. Nothing was written, so the damage history still holds
+    ///   this frame's damage and the retry re-presents it.
+    /// - A refused commit/page-flip (the error arm below) arms a
+    ///   timer-driven retry instead (`retry_armed`, bounded by
+    ///   `present_retry.rs`): nothing is in flight, so no `VBlank` will
+    ///   ever arrive to consume `present_skipped`, and the pixels already
+    ///   reached the slot, so the slot's age is cleared outright
+    ///   (`note_write_failed`) -- otherwise the retry would read as age 1
+    ///   and draw nothing on a quiet screen. See
+    ///   `docs/backlog/resolved/present-skip-eats-frame-damage-done.md`.
+    /// - No free buffer slot keeps setting `present_skipped` (a later
+    ///   `VBlank` or `DrmEvent::Error` still converts it), but that arm is
+    ///   only reachable with nothing in flight -- both slots busy and no
+    ///   flip pending is the stuck-slots bug its own `warn!` names -- so
+    ///   the flag is a backstop there, not the recovery.
+    /// - `!active` needs nothing: the session is paused or DRM-masterless,
+    ///   nothing here can retry until `reactivate()` runs, and
+    ///   `reactivate()` unconditionally arms a fresh modeset and render on
+    ///   its own. A `frame_size` mismatch needs nothing either: a resize
+    ///   is in flight, and `State::resize_output` has already asked for a
+    ///   render at the new size before this function is ever called with
+    ///   the old one.
     ///
     /// The size check is a *mismatch* check, not a fixed-size one: the mode
     /// can change while the session runs (`hotplug.rs`), and the frame
@@ -701,31 +733,57 @@ impl Tty {
                 // Whatever was showing before this flip becomes free once
                 // this flip's VBlank confirms it's off screen.
                 self.pending_free = self.showing.replace(index);
+                self.retries.succeeded();
                 Some(seq)
             }
             Err(error) => {
                 tracing::warn!(%error, "drm commit/page flip failed");
                 // Undo the write above -- this slot was never actually
-                // sent to the CRTC, so it must not stay marked busy.
-                self.buffers.mark_free(index);
+                // sent to the CRTC, so it must not stay marked busy -- and
+                // unvouch its age: the pixels reached the slot but never
+                // scanout, and the retry must fully redraw rather than
+                // trust the fresh `last_written` the copy stored (see
+                // `BufferPool::note_write_failed`).
+                self.buffers.note_write_failed(index);
                 // This frame was rendered and never shown, so the screen is
-                // stale by exactly the amount that was damaged -- the same
-                // condition the two skips above set this for. Without it a
-                // rejected flip leaves the screen wrong until something
-                // unrelated happens to damage it again.
+                // stale by exactly the amount that was damaged -- but unlike
+                // the two skips above, no completion event can retry it:
+                // nothing is in flight, so no `VBlank` will ever arrive to
+                // consume `present_skipped`. Arm a timer-driven retry
+                // directly instead (bounded: a device that keeps refusing
+                // must not pin the loop at full redraws).
                 //
                 // Newly reachable rather than newly wrong: `hotplug.rs`'s
                 // `invalidate_scanout` discards the in-flight flip while one
                 // really may still be out (see its doc for why that
                 // is the safer of the two mistakes), which can put one
                 // EBUSY-rejected flip between the hotplug and the first
-                // frame at the new mode. Self-limiting: nothing re-reads
-                // this except a `VBlank` or a `DrmEvent::Error`, both of
-                // which only arrive for a flip that *was* accepted.
-                self.present_skipped = true;
+                // frame at the new mode. Self-limiting: the retry either
+                // issues (resetting the streak) or exhausts its bound and
+                // goes quiet until genuine damage arrives.
+                match self.retries.failed() {
+                    present_retry::Retry::Arm => {
+                        self.retry_armed = true;
+                    }
+                    present_retry::Retry::GiveUp => {
+                        tracing::warn!(
+                            "drm: commit/page flip keeps failing; leaving scanout \
+                             as-is until new damage arrives"
+                        );
+                    }
+                    present_retry::Retry::Quiet => {}
+                }
                 None
             }
         }
+    }
+
+    /// Takes whether the last `present()` was a refused flip owed a
+    /// timer-driven retry (see `present_retry.rs`). Read once per frame by
+    /// the render tail, which re-arms the frame timer for it -- the only
+    /// consumer, since a refused flip has no completion event coming.
+    pub fn take_retry_render(&mut self) -> bool {
+        std::mem::take(&mut self.retry_armed)
     }
 
     /// Settles the in-flight flip for a `VBlank` on this surface's own crtc
