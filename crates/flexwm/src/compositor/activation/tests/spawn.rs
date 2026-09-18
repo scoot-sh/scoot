@@ -23,6 +23,7 @@
 //! also spawn a real `sh`, which the dev VM and any Unix test host have.
 
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
@@ -482,16 +483,24 @@ fn a_spawned_childs_token_is_refused_while_locked() {
 /// receive path (measured live 2026-09-13: the DRM and input fds all report
 /// it), and `execve` closes such fds in the child. This test pins the
 /// `spawn` side of that chain with the real `State::spawn` and a real child:
-/// a marker fd with close-on-exec set (the seatd-fd shape) must be absent
-/// from the child's `/proc/self/fd`. A second marker deliberately *without*
-/// close-on-exec is the positive control: it must be PRESENT, which proves
-/// the probe observes real inheritance -- and proves the bit is
-/// load-bearing, because `State::spawn` provably inherits any fd lacking it.
-/// (First written asserting both absent, it failed exactly on the plain
-/// marker -- the child's table held it -- which is both the fail-first
-/// record and the reason the control asserts presence, permanently.) If
-/// Rust std ever starts closing every fd at spawn, the control goes red:
-/// revisit then, the guarantee will have moved.
+/// marker fds with close-on-exec set must be absent from the child's
+/// `/proc/self/fd`. The markers cover every fd shape the compositor holds
+/// across a spawn, not just plain files: the seatd-fd-shaped `/dev/null`
+/// open, a connected socket pair (the listener/accepted-stream shape -- every
+/// one is a std socket), a `try_clone` of one end (the parked-screenshot and
+/// `PendingIdle` clone shape), and an `eventfd` (the calloop channel-ping
+/// shape behind the screenshot completion channel and the session notifier).
+/// A second marker deliberately *without* close-on-exec is the positive
+/// control: it must be PRESENT, which proves the probe observes real
+/// inheritance -- and proves the bit is load-bearing, because `State::spawn`
+/// provably inherits any fd lacking it.
+/// (First written asserting both `/dev/null` markers absent, it failed
+/// exactly on the plain marker -- the child's table held it -- which is both
+/// the fail-first record and the reason the control asserts presence,
+/// permanently. The socket/clone/eventfd markers were each proven sensitive
+/// the same way, by clearing the bit on one marker and watching exactly that
+/// marker appear in the child.) If Rust std ever starts closing every fd at
+/// spawn, the control goes red: revisit then, the guarantee will have moved.
 #[test]
 fn a_spawned_child_inherits_no_close_on_exec_fd() {
     let mut fixture: Harness<(), ()> = Harness::bare(Appearance::default());
@@ -512,20 +521,44 @@ fn a_spawned_child_inherits_no_close_on_exec_fd() {
     }
     let cloexec_marker = open_marker(true);
     let plain_marker = open_marker(false);
+    // The socket shapes: a connected pair (what every listener, accepted
+    // stream and parked entry is made of) plus a `try_clone` of one end
+    // (the parked-screenshot / `PendingIdle` clone). The eventfd is the
+    // calloop channel-ping shape (screenshot completions, session events).
+    // `libc::eventfd`, not a channel constructor, because the pin is about
+    // the fd flag, and this names the exact flag at creation.
+    let (sock_a, sock_b) = UnixStream::pair().expect("a socket pair");
+    let sock_clone = sock_a.try_clone().expect("a cloned socket");
+    let event = unsafe { libc::eventfd(0, libc::EFD_CLOEXEC | libc::EFD_NONBLOCK) };
+    assert!(event >= 0, "could not create the eventfd marker");
+    // SAFETY: `eventfd` just returned this fd; it is open and owned.
+    let event = unsafe { OwnedFd::from_raw_fd(event) };
     // Fail loud, not weak: if the platform forced close-on-exec onto the
     // plain marker, the presence control below would go red on a false
     // premise instead of silently pinning a weaker claim.
-    let flag_of = |fd: &OwnedFd| unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_GETFD) };
+    let flag_of = |fd: i32| unsafe { libc::fcntl(fd, libc::F_GETFD) };
     assert_ne!(
-        flag_of(&cloexec_marker) & libc::FD_CLOEXEC,
+        flag_of(cloexec_marker.as_raw_fd()) & libc::FD_CLOEXEC,
         0,
         "the close-on-exec marker is missing close-on-exec"
     );
     assert_eq!(
-        flag_of(&plain_marker) & libc::FD_CLOEXEC,
+        flag_of(plain_marker.as_raw_fd()) & libc::FD_CLOEXEC,
         0,
         "the worst-case marker unexpectedly carries close-on-exec"
     );
+    for (what, fd) in [
+        ("socket pair end", sock_a.as_raw_fd()),
+        ("socket pair end", sock_b.as_raw_fd()),
+        ("cloned socket", sock_clone.as_raw_fd()),
+        ("eventfd", event.as_raw_fd()),
+    ] {
+        assert_ne!(
+            flag_of(fd) & libc::FD_CLOEXEC,
+            0,
+            "the {what} marker is missing close-on-exec"
+        );
+    }
 
     static NEXT_ID: AtomicU64 = AtomicU64::new(0);
     let path = std::env::temp_dir().join(format!(
@@ -555,18 +588,36 @@ fn a_spawned_child_inherits_no_close_on_exec_fd() {
         !child_fds.contains(&cloexec_marker.as_raw_fd()),
         "a State::spawn child inherited a close-on-exec compositor fd: {child_fds:?}"
     );
+    for (what, fd) in [
+        ("socket pair end", sock_a.as_raw_fd()),
+        ("socket pair end", sock_b.as_raw_fd()),
+        ("cloned socket", sock_clone.as_raw_fd()),
+        ("eventfd", event.as_raw_fd()),
+    ] {
+        assert!(
+            !child_fds.contains(&fd),
+            "a State::spawn child inherited a close-on-exec {what} (fd {fd}): {child_fds:?}"
+        );
+    }
     assert!(
         child_fds.contains(&plain_marker.as_raw_fd()),
         "the positive control is missing from the child's table -- either the \
          probe stopped observing inheritance, or Rust std started closing \
          every fd at spawn and the guarantee moved: {child_fds:?}"
     );
-    // Both markers must still be open here: had one closed before the child
+    // Every marker must still be open here: had one closed before the child
     // exec'd, its number could have been reused and "absent"/"present" would
     // prove nothing. This is also the markers' last use, which is what keeps
     // them alive across the spawn -- without it they could drop (closing the
     // fds) before the child even starts.
-    for marker in [&cloexec_marker, &plain_marker] {
+    for marker in [
+        cloexec_marker.as_raw_fd(),
+        plain_marker.as_raw_fd(),
+        sock_a.as_raw_fd(),
+        sock_b.as_raw_fd(),
+        sock_clone.as_raw_fd(),
+        event.as_raw_fd(),
+    ] {
         assert_ne!(
             flag_of(marker),
             -1,
