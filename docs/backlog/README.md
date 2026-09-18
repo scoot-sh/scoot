@@ -137,7 +137,7 @@ actionable.
   — RESOLVED (PR #70): frames capped, sessions decided. Found building the
   output half; the entry records why a cap was not simply added
 - [Screen capture forces `Xrgb8888`'s undefined fourth byte opaque](./resolved/screencopy-xrgb-alpha-forcing-done.md)
-  — RESOLVED (conditional). Found measuring a review finding on the output half: the forcing is ~13%
+  — RESOLVED (conditional, PR #71). Found measuring a review finding on the output half: the forcing is ~13%
   of a release capture and ~77% of a debug one, to set a byte the format says
   is undefined and `grim` demonstrably ignores
 - [`xdg-toplevel-icon-v1` pixel-buffer icons are not exposed](./resolved/toplevel-icon-buffers-done.md)
@@ -268,7 +268,7 @@ actionable.
 - [IPC bundle: usable rect, focus-workspace-index, ambient locked](./resolved/protocol-bundle-resolved.md) — RESOLVED 2026-09-15, no bump needed
 - [No cap on concurrent IPC connections, and a half-closed client leaks one](./resolved/ipc-connection-cap-resolved.md) — RESOLVED 2026-09-16: 64 connections, refused with a reason past that, and a write-stall deadline that drops a peer which has stopped reading
 - [Screenshot capture and encode run on the event-loop thread](./resolved/screenshot-encode-off-thread-resolved.md) — RESOLVED 2026-09-17 (PR #57): PNG encode moved to a single FIFO worker; per-connection ordering via refused-with-retry, 4 captures max globally, `wait-idle` unchanged
-- [The accept loop swallows `EMFILE` and can spin the event loop](./resolved/accept-loop-emfile-resolved.md) — RESOLVED 2026-09-17 (PR #57): pending connections shed on `EMFILE` instead of spinning the accept loop; originally pre-existing, found reviewing the cap
+- [The accept loop swallows `EMFILE` and can spin the event loop](./resolved/accept-loop-emfile-resolved.md) — RESOLVED 2026-09-17 (PR #66): pending connections shed on `EMFILE` instead of spinning the accept loop; originally pre-existing, found reviewing the cap
 - [The connection cap turns one client's leak into everyone's refusal](./resolved/connection-cap-denies-the-same-user-done.md) — CLOSED 2026-09-17 as an accepted tradeoff (no workload has hit it; per-pid sub-cap stays unbuilt as speculative); kept as the landing spot for a future "the bar cannot connect"
 - [A large `msg type` blocks the event loop](./resolved/msg-type-blocks-event-loop-resolved.md) — RESOLVED 2026-09-17: `type` text capped at 16,384 characters per request (sized by measurement; worst case ~75ms), refused naming the limit and the split-workaround, counted in characters not bytes
 - [`flexwm msg` panics when its stdout reader goes away](./resolved/msg-client-broken-pipe-done.md) — RESOLVED 2026-09-17 (PR #62): per-write EPIPE handling at every client-binary stdio site, quiet exit 0; compositor unaffected

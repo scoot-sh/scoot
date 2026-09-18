@@ -143,4 +143,4 @@ client](../resolved/connection-cap-denies-the-same-user-done.md). Cited there ra
 than fixed here: the bound is doing its job (finite memory, refused not
 queued), and the unfairness is the documented price of sharing it.
 [The accept loop and `EMFILE`](./accept-loop-emfile-resolved.md) from
-the same review stays open too.
+the same review stayed open too, and has since been resolved (PR #66).
