@@ -1231,10 +1231,15 @@ fn too_large(size: i32) -> String {
 /// The grace lookup short-circuits the table observation, so creations
 /// under grace cost one `HashMap` lookup and no syscall -- which is every
 /// legitimate creation, since no legitimate client holds past grace (see
-/// the grace sizing in `fd_pressure`). Checked before the per-client
-/// claim, so a pressure refusal never takes a count unit it would then
-/// have to give back.
+/// the grace sizing in `fd_pressure`). The guard below is load-bearing for
+/// that: `table()` observes the process fd table (getrlimit + readdir),
+/// so it must only run once a client is already past its grace. Checked
+/// before the per-client claim, so a pressure refusal never takes a count
+/// unit it would then have to give back.
 fn pressure_refusal(live: u32, grace: u32) -> bool {
+    if live <= grace {
+        return false;
+    }
     pressure_refusal_for(
         live,
         grace,
