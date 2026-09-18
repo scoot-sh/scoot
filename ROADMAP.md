@@ -96,7 +96,7 @@ gap jumped the queue — each item's own file records why it landed when it did.
   `wl_output`, with a test that binds both on one connection and compares
   them. **Read-only by design**: `apply`/`test` always answer `failed`, and
   reconfiguration is
-  [its own deferred item](docs/backlog/protocols/output-management-reconfiguration.md)
+  [closed as a deliberate refusal](docs/backlog/resolved/output-management-reconfiguration-done.md)
   — flexwm has one output with a fixed mode, position and scale, so a
   `succeeded` that changed nothing would be a settings page that lies.
 - **[`wlr-foreign-toplevel-management-unstable-v1`](docs/backlog/resolved/wlr-foreign-toplevel-management-done.md)**
@@ -120,9 +120,9 @@ gap jumped the queue — each item's own file records why it landed when it did.
   resizing or rescaling its window is followed rather than scaled. Still one
   output, deliberately: a hotplug re-runs the *same* single-connector choice
   startup makes, it does not start driving a second screen. The mode is no
-  longer fixed for the process's life, which makes `--tty`'s `set_mode` the
-  smallest remaining piece of
-  [output-management reconfiguration](docs/backlog/protocols/output-management-reconfiguration.md).
+  longer fixed for the process's life, which narrows (but, per the
+  [reconfiguration record](docs/backlog/resolved/output-management-reconfiguration-done.md),
+  does not close) the deliberate refusal of client-driven output changes.
   Two paths (a new mode list, and falling back to a *different* connector)
   could not be reproduced on the QEMU dev VM and still want confirmation on
   the vfkit/laptop hardware that filed the issue, which is why #48 is
@@ -699,9 +699,10 @@ probes' recommended order:
    — HALF-RESOLVED 2026-09-16 (PR #49): the query half a shell's display page
    binds is implemented (`wlr-output-management-unstable-v1` v4 — no `ext-`
    successor exists at the pinned rev, so the standing preference had nothing
-   to prefer). Reconfiguration is deliberately refused and re-filed as
-   [its own item](docs/backlog/protocols/output-management-reconfiguration.md),
-   gated on multi-output support: nothing an `apply` could ask for exists yet.
+   to prefer). Reconfiguration is deliberately refused and
+   [closed as an accepted tradeoff](docs/backlog/resolved/output-management-reconfiguration-done.md)
+   (2026-09-18, no code — no authorization concept in the protocol, per-backend
+   honesty gaps, no shell demand): `failed` stays the honest answer.
 5. [`screencopy / image-capture`](docs/backlog/resolved/screencopy-capture-done.md)
     — HALF-RESOLVED 2026-09-16 (PR #52): `ext-image-copy-capture-v1` with
     `ext-image-capture-source-v1` for **output** capture, which is the

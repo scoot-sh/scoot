@@ -889,8 +889,11 @@ a refusal, not a stub: a configuration that reported `succeeded` and changed
 nothing would give you a Display page whose buttons appear to work.
 `wlr-randr --output <name> --pos 100,100` prints `failed to apply
 configuration` and exits non-zero, which is the honest answer. Reconfiguration
-gets implemented alongside real multi-output support; see
-`docs/backlog/protocols/output-management-reconfiguration.md`.
+is closed as a deliberate refusal rather than deferred to multi-output — the
+protocol has no authorization concept, the per-backend honest answers differ
+(nested is host-constrained, custom modes are unhonorable, disabling the only
+output has no state to land in), and neither probed shell attempts a write; see
+`docs/backlog/resolved/output-management-reconfiguration-done.md`.
 
 This is the wlr protocol rather than an `ext-` one only because no `ext-`
 successor exists yet — unlike `ext-workspace-v1` and

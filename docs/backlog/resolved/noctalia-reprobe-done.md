@@ -210,7 +210,7 @@ anything.
   something to bind and read.
   `docs/backlog/resolved/output-management-read-only-done.md`. Changing the
   mode/position/scale from that page is still refused, deliberately:
-  `docs/backlog/protocols/output-management-reconfiguration.md`.
+  `docs/backlog/resolved/output-management-reconfiguration-done.md`.
 
 ### 5. `xdg_popup` never configured — reproduces (untested live, same standing as DMS)
 
