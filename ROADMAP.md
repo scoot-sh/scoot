@@ -630,6 +630,17 @@ gap jumped the queue — each item's own file records why it landed when it did.
   Three fail-first harness tests pin the edges (never-draws held until
   disconnect, buffer-less destroy, post-buffer zone drop); no timeout by
   design, lifetime bounded by disconnect/destroy.
+- **[Niche protocol gaps, triaged per
+  sub-item](docs/backlog/resolved/protocol-gaps-niche-done.md)** —
+  RESOLVED 2026-09-18: all nine sub-items of the niche bundle get minimum
+  honest dispositions. `wp_alpha_modifier_v1` and
+  `wp_content_type_manager_v1` implemented (Smithay carries both; the
+  factor blends end to end through pixman, the hint is stored and honestly
+  ignored), each with fail-first harness tests; `tablet-v2` filed as its
+  own entry ([tablet-v2](docs/backlog/input/tablet-v2.md)); screencopy,
+  output-management and the VT-pause cursor item already resolved;
+  security-context and the cursor `Vec` closed deliberate; cursor-hotspot
+  offset closed needs-upstream.
 ## What's next
 
 The backlog is the source of truth for what to pick up; this is the current

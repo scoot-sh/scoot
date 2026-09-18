@@ -5,8 +5,10 @@
 //! whatever [`Arrangement`](flexwm_core::Arrangement) the core produced.
 
 mod activation;
+mod alpha_modifier;
 mod bind_budget;
 mod config;
+mod content_type;
 mod cursor;
 mod decorations;
 mod dispatch;

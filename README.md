@@ -88,7 +88,10 @@ game or 3D app can lock or confine the pointer and read raw unaccelerated
 deltas (see Relative pointer below),
 `wp_presentation`, so a video player or animation client learns exactly when
 each of its frames reached the screen (see Presentation-time feedback
-below), plus a
+below), `wp_alpha_modifier_v1`, so a client can ask for whole-surface
+opacity and get it blended by the compositor instead of compositing it
+itself, and `wp_content_type_manager_v1`, so a client can label what kind
+of pixels a surface holds (see Rendering hints below), plus a
 hardened control socket (owner-only
 permissions, a same-user peer check, a 1 MiB cap on a single request,
 screenshots rate-limited to one per connection per frame, at most 64
@@ -1672,6 +1675,29 @@ What to know before pointing a client at it:
   busy CRTC, or a host commit dropped for lack of a free buffer, leaves
   pending feedback for the next presented frame rather than stamping a time
   nothing was shown at.
+
+## Rendering hints (`wp_alpha_modifier_v1`, `wp_content_type_manager_v1`)
+
+flexwm implements `wp_alpha_modifier_v1` (version 1) and
+`wp_content_type_manager_v1` (version 1), the two client-to-compositor
+rendering hints. They are a pair only on this page: one of them works, and
+the other is stored and honestly ignored.
+
+- **Alpha does what it says.** A client names a `u32` multiplier on its
+  surface (`0` transparent, `u32::MAX` opaque) and the compositor blends it
+  -- windows, layer surfaces, lock surfaces and client cursor surfaces
+  alike, all through the same render path. Destroying the modifier object
+  is `set_multiplier(u32::MAX)` on the next commit, and destroying the
+  manager leaves existing modifier objects working.
+- **Content type is accepted and has no effect.** A client can label a
+  surface `photo`, `video`, `game` or `none`, and the compositor stores the
+  label and changes no pixel for it -- a CPU/pixman renderer with no
+  adaptive-sync or GPU compositing story has no consumer for the hint, so
+  ignoring it is the only truthful implementation. The label is already
+  where a future GPU tier would look.
+- **Neither touches any bound.** No pool, buffer or fd is created anywhere
+  on either path, so the shm-pool count, the live-buffer count and the
+  manager-bind budget never move for them.
 
 ## Configuration
 
