@@ -754,6 +754,14 @@ gap jumped the queue — each item's own file records why it landed when it did.
   fix is loader-impossible (top level must be a syntactic attrset,
   `description` a string literal — both proven live), so the top level stays
   one literal by fiat. Sibling packaging tickets untouched.
+- **[Nix `src` fileset](docs/backlog/resolved/nix-src-fileset-done.md)**
+  — RESOLVED 2026-09-18 (`flake.nix` only, no code): `src = self` is now
+  a `lib.fileset` union of `Cargo.toml`, `Cargo.lock`, `crates/`, after
+  re-verifying nothing the build reads lives outside it. The old
+  working-tree copy also dragged `target/` and `.git` along, so `src`
+  drops from ~1.1 GB to ~3.3 MB in-store, and doc/target edits no longer
+  move the derivation. Proven by `nix build` (aarch64-darwin); the
+  `x86_64-darwin` sibling ticket stays open and untouched.
 ## What's next
 
 The backlog is the source of truth for what to pick up; this is the current

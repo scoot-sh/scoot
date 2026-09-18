@@ -39,7 +39,28 @@
           pname = "flexwm";
           # Read from where the version already lives, so the two can't drift.
           version = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).workspace.package.version;
-          src = self;
+          # Scoped to exactly what the build reads, so doc-only edits
+          # (README/ROADMAP/CLAUDE, docs/, vm/, scripts/) -- and, worse,
+          # the whole working-tree copy this replaced, which dragged
+          # target/ (~1GB in-store) and .git along -- no longer bust the
+          # derivation's cache and force a full rebuild. Everything else
+          # this flake reads at eval time (./Cargo.toml for `version`,
+          # ./crates/flexwm/Cargo.toml for the description,
+          # ./Cargo.lock for `cargoLock.lockFile`,
+          # ./vm/compositor-deps.nix for buildInputs) resolves against
+          # the flake tree, not `src`, so it stays out of the filter.
+          # Verified to cover the build: no build.rs outside crates/, no
+          # include_str!/include_bytes! of a root-level file, no
+          # .cargo/config or toolchain file, and `license.workspace`
+          # is a string, not a file read.
+          src = pkgs.lib.fileset.toSource {
+            root = ./.;
+            fileset = pkgs.lib.fileset.unions [
+              ./Cargo.toml
+              ./Cargo.lock
+              ./crates
+            ];
+          };
 
           cargoLock = {
             lockFile = ./Cargo.lock;
