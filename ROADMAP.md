@@ -576,6 +576,17 @@ gap jumped the queue — each item's own file records why it landed when it did.
   layer > IME grab > popup grab) pinned by two fail-first harness tests and
   documented in the README. The per-surface IME-scoping design stays open
   as filed (needs a Smithay-side design that does not exist).
+- **[`xdg-toplevel-icon-v1` pixel-buffer
+  icons](docs/backlog/resolved/toplevel-icon-buffers-done.md)** (PR #100,
+  2026-09-18) — verify-first close, no behavior change. The
+  ticket's three suspicions checked against the pinned sources all came
+  back clean (the protocol leaves `release` unused by design, Smithay
+  kills only the offending client with `NoBuffer`, icon buffers claim
+  against the same 512 live-buffer budget as every other `wl_buffer`,
+  and neither foreign-toplevel list protocol has an icon event to expose
+  pixels through). Name-only IPC stands as the honest scope; four
+  fail-first harness tests pin the buffer half (counting, kill
+  containment, disconnect drain, cap fill).
 ## What's next
 
 The backlog is the source of truth for what to pick up; this is the current

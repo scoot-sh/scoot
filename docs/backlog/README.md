@@ -124,7 +124,11 @@ actionable.
   — found measuring a review finding on the output half: the forcing is ~13%
   of a release capture and ~77% of a debug one, to set a byte the format says
   is undefined and `grim` demonstrably ignores
-- [`xdg-toplevel-icon-v1` pixel-buffer icons are not exposed](./protocols/toplevel-icon-buffers.md) — only the icon name reaches IPC
+- [`xdg-toplevel-icon-v1` pixel-buffer icons are not exposed](./resolved/toplevel-icon-buffers-done.md)
+  — RESOLVED 2026-09-18: name-only stands as the honest scope (verified, not
+  assumed — no leak, nothing to release, both list protocols icon-less, no
+  consumer for pixels); four harness tests pin the buffer half against the
+  live-buffer budget.
 - [An IME popup over a lock screen is tracked but never drawn](./resolved/ime-popup-over-lock-screen-done.md)
   — RESOLVED 2026-09-17: the locked path gathers each current lock surface's
   popup tree and sends it frame callbacks, with the trust decision recorded
