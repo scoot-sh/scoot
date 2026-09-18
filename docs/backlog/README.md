@@ -177,7 +177,14 @@ actionable.
   with no menu while the IME holds the seat. Precedence pinned
   (lock > exclusive layer > IME grab > popup grab) and documented in the
   README; lock and serial-gate interplay pinned alongside.
-- [Layer surface with no buffer still holds its exclusive zone](./protocols/layer-surface-bufferless-exclusive-zone.md)
+- [Layer surface with no buffer still holds its exclusive zone](./resolved/layer-surface-bufferless-exclusive-zone-done.md)
+  — RESOLVED 2026-09-18 (decide + pin, no behavior change): the zone applies
+  from the buffer-less initial commit the protocol mandates (so windows never
+  jump when the first buffer lands), not the first buffer; re-verified in the
+  pinned Smithay `arrange` that filtering would mean forking the geometry.
+  Three new harness tests pin the edges (never-draws held until disconnect,
+  buffer-less destroy, post-buffer zone drop), each confirmed fail-first by
+  neutering; no timeout by design, lifetime bounded by disconnect/destroy.
 - [Unbounded `ext_workspace_manager_v1` binds per client](./resolved/ext-workspace-object-binding-cap-done.md)
   — RESOLVED 2026-09-17 (PR #74): one shared `BindBudget` — 8 binds per
   client across all four globals (ext-workspace, ext/wlr toplevel lists,

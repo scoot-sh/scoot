@@ -285,8 +285,8 @@ fn a_layer_surface_that_never_commits_reserves_nothing() {
 /// directions that matter: a client that unmaps has its cached state reset
 /// by Smithay's own pre-commit hook, and one that dies has its surface
 /// unmapped by `layer_destroyed`. See
-/// `docs/backlog/protocols/layer-surface-bufferless-exclusive-zone.md` for the
-/// case this does leave open -- a client that commits and then never attaches
+/// `docs/backlog/resolved/layer-surface-bufferless-exclusive-zone-done.md`
+/// for the case this does leave open -- a client that commits and then never attaches
 /// anything holds the space for as long as it stays connected.
 #[test]
 fn a_bar_reserves_its_zone_from_its_initial_commit_not_its_first_buffer() {
@@ -304,6 +304,85 @@ fn a_bar_reserves_its_zone_from_its_initial_commit_not_its_first_buffer() {
         15,
         BACKGROUND_BGRA,
         "nothing drawn yet",
+    );
+}
+
+/// The open edge the pin above leaves, pinned rather than fixed: a client
+/// that commits and then never attaches a buffer holds the space for as long
+/// as it stays connected. There is deliberately no timeout -- a
+/// mapped-but-frozen bar holds its space forever too, and no layer of this
+/// compositor times out a client. What is bounded is the lifetime: the same
+/// disconnect path that frees a mapped bar's space frees a buffer-less
+/// one's, so a hung bar cannot outlive its client.
+#[test]
+fn a_bar_that_never_draws_holds_its_zone_until_it_disconnects() {
+    let mut fixture = Fixture::new();
+    fixture.run(Step::MapWindow);
+    fixture.run(Step::CreateLayer(LayerSpec::bar(30)));
+
+    assert_eq!(
+        fixture.usable(),
+        Rect::new(0, 30, CANVAS, CANVAS - 30),
+        "held from the initial commit, with nothing ever drawn"
+    );
+
+    fixture.disconnect_client();
+    assert_eq!(fixture.usable(), WHOLE);
+    let pixels = fixture.render();
+    assert_pixel(&pixels, CANVAS / 2, 15, BACKGROUND_BGRA, "the bar is gone");
+}
+
+/// The destroy path for a surface that never drew (PR #34 lineage):
+/// `layer_destroyed` unmaps the surface out of the map and refreshes the
+/// zone, so a bar destroyed between its initial commit and its first buffer
+/// leaves no dead strip behind -- the same guarantee
+/// `destroying_a_bar_returns_its_space` pins for a mapped bar.
+#[test]
+fn destroying_a_bar_that_never_drew_returns_its_space() {
+    let mut fixture = Fixture::new();
+    fixture.run(Step::MapWindow);
+    let before = fixture.window_rect();
+    fixture.run(Step::CreateLayer(LayerSpec::bar(30)));
+    assert_ne!(fixture.window_rect(), before);
+
+    fixture.run(Step::DestroyLayer { index: 0 });
+    assert_eq!(fixture.usable(), WHOLE);
+    assert_eq!(fixture.window_rect(), before);
+    let pixels = fixture.render();
+    assert_pixel(&pixels, CANVAS / 2, 15, BACKGROUND_BGRA, "the bar is gone");
+}
+
+/// The zone stays ordinary double-buffered state after the first buffer: a
+/// mapped bar that commits a smaller zone gives the space back, and windows
+/// move back into it. The bar itself keeps drawing where it is -- the zone
+/// is a reservation against windows, not the surface's own geometry -- so a
+/// bar that drops its zone ends up drawn over the window underneath it,
+/// exactly the `exclusive_zone = 0` overlap
+/// `a_top_layer_surface_draws_in_front_of_a_window` pins from the other end.
+#[test]
+fn a_mapped_bar_may_drop_its_zone_after_its_first_buffer() {
+    let mut fixture = Fixture::new();
+    fixture.run(Step::MapWindow);
+    let before = fixture.window_rect();
+    fixture.run(Step::CreateLayer(LayerSpec::bar(30)));
+    fixture.run(Step::MapLayer {
+        index: 0,
+        color: BAR_BGRA,
+    });
+    assert_eq!(fixture.usable(), Rect::new(0, 30, CANVAS, CANVAS - 30));
+
+    fixture.run(Step::SetLayerExclusiveZone { index: 0, zone: 0 });
+
+    assert_eq!(fixture.usable(), WHOLE);
+    assert_eq!(fixture.window_rect(), before);
+    let pixels = fixture.render();
+    assert_pixel(&pixels, CANVAS / 2, 15, BAR_BGRA, "the bar still draws");
+    assert_pixel(
+        &pixels,
+        before.x + 5,
+        15,
+        BAR_BGRA,
+        "the bar over the window that moved back underneath it",
     );
 }
 

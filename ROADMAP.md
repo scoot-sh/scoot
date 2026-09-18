@@ -618,8 +618,18 @@ gap jumped the queue — each item's own file records why it landed when it did.
   Smithay enforces it per *resource*, so flexwm refuses a second live
   surface for an already-covered output with code 3 on the lock, keyed on
   the physical `Output`; destroying the surface frees it for a rebuild.
-  Neither probed shell ever holds two at once. Supersedes PR #103's
-  two-surface composition pins; the single-surface per-output pins stand.
+   Neither probed shell ever holds two at once. Supersedes PR #103's
+   two-surface composition pins; the single-surface per-output pins stand.
+- **[A layer surface that commits but never attaches a buffer holds its
+  exclusive zone](docs/backlog/resolved/layer-surface-bufferless-exclusive-zone-done.md)** —
+  RESOLVED 2026-09-18 (decide + pin, no behavior change): the zone applies
+  from the buffer-less initial commit the protocol mandates, not the first
+  buffer — every healthy bar passes through that state, so windows never
+  jump when the first buffer lands. Filtering would mean forking Smithay's
+  `arrange` geometry (re-verified at the pinned rev: no mapped/buffer check).
+  Three fail-first harness tests pin the edges (never-draws held until
+  disconnect, buffer-less destroy, post-buffer zone drop); no timeout by
+  design, lifetime bounded by disconnect/destroy.
 ## What's next
 
 The backlog is the source of truth for what to pick up; this is the current

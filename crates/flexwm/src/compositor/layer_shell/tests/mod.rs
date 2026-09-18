@@ -251,6 +251,10 @@ enum Step {
         index: usize,
         keyboard: KeyboardInteractivity,
     },
+    /// `set_exclusive_zone` on an already-created layer surface, followed by
+    /// a commit (the zone is double-buffered like everything else the
+    /// surface asks for). What the post-first-buffer zone-change tests drive.
+    SetLayerExclusiveZone { index: usize, zone: i32 },
     /// Report what the client's own `wl_keyboard` has seen so far.
     ReportKeyboard,
     /// Create an `xdg_popup` on `parent` and drive it through configure,
@@ -1118,6 +1122,12 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 layer.set_keyboard_interactivity(*keyboard);
                 // Double-buffered like everything else the surface asks for:
                 // without this commit the compositor has heard nothing.
+                surface.commit();
+            }
+            Step::SetLayerExclusiveZone { index, zone } => {
+                let (surface, layer, _) = layers.get(*index).ok_or("no such layer surface")?;
+                layer.set_exclusive_zone(*zone);
+                // Double-buffered, same as above: the commit is what applies it.
                 surface.commit();
             }
             Step::ReportKeyboard => {
