@@ -185,7 +185,7 @@ actionable.
   re-homing the ext list off Smithay state and an idle-deferred refusal
   (backend panics on in-bind destructor events)
 - [Lock surfaces are per-output; flexwm has one output](./resolved/session-lock-per-output-done.md)
-  — RESOLVED 2026-09-18 (pin + document, no behavior change): the first
+  — RESOLVED 2026-09-18 (PR #103, pin + document, no behavior change): the first
   blanked frame on the one output confirms the lock whatever the surface
   count (zero-surface half already pinned), every admitted surface shares
   that output's size (pinned by a new two-surface suite, first-created on

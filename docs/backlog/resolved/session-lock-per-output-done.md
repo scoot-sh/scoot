@@ -53,7 +53,7 @@ So the honest resolution is the ticket's option (a): pin single-output
 correctness, record multi-output as the revisit condition. Multi-output
 itself is a separate epic and is not built here.
 
-## Resolution (pin + document, 2026-09-18)
+## Resolution (pin + document, 2026-09-18, PR #103)
 
 - New suite `session_lock::tests::per_output` (2 tests), plus two harness
   steps in the session-lock client: `LockSurfaceSecondBind` (names the one
