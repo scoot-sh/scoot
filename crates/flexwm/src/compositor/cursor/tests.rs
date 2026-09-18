@@ -1221,3 +1221,36 @@ fn an_offset_on_another_surface_leaves_the_cursor_alone() {
         "the image's bottom-right is unmoved"
     );
 }
+
+/// The fallback path's one-element `Vec` is already the minimal allocation
+/// (see `docs/backlog/resolved/cursor-element-per-frame-alloc-done.md`):
+/// exactly one element at exactly capacity one -- a single 448-byte
+/// `CursorElement<PixmanRenderer>` allocation per dirty frame at this
+/// writing, measured ~107ns net per call on the dev VM (release), firing at
+/// most once per 16ms frame tick under `--tty` and never at idle. This pins
+/// that shape so a future refactor can't silently grow it: pushing into a
+/// fresh caller-owned `Vec` -- the ticket's named cheaper shape -- allocates
+/// four elements' worth (1792 bytes, measured) by Rust's minimum non-zero
+/// capacity rule, so only a persistent reused buffer would beat this line,
+/// and that ripple is filed in the record as costing more than it saves.
+#[test]
+fn fallback_element_is_one_exactly_sized_allocation() {
+    let mut renderer = PixmanRenderer::new().expect("a pixman renderer");
+    let cursor = Cursor::new(DEFAULT_SIZE, Color::new(1.0, 1.0, 1.0, 1.0), NO_THEME);
+    let elements = cursor.element(&mut renderer, (0.0, 0.0).into(), 1.0);
+    assert_eq!(elements.len(), 1, "one element for the fallback cursor");
+    assert_eq!(elements.capacity(), 1, "exactly sized, with no slack");
+}
+
+/// The hidden path allocates nothing at all (`Vec::new` with no push): a
+/// hidden cursor costs zero bytes on the render path no matter the frame
+/// rate, which is the other half of the ticket's rate analysis.
+#[test]
+fn hidden_cursor_allocates_nothing() {
+    let mut renderer = PixmanRenderer::new().expect("a pixman renderer");
+    let mut cursor = Cursor::new(DEFAULT_SIZE, Color::new(1.0, 1.0, 1.0, 1.0), NO_THEME);
+    cursor.set_status(CursorImageStatus::Hidden);
+    let elements = cursor.element(&mut renderer, (0.0, 0.0).into(), 1.0);
+    assert!(elements.is_empty(), "a hidden cursor draws nothing");
+    assert_eq!(elements.capacity(), 0, "and allocates nothing to say so");
+}
