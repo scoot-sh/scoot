@@ -64,6 +64,7 @@ mod first_click;
 mod ime_popup;
 mod input;
 mod lifecycle;
+mod per_output;
 mod teardown;
 mod vblank_confirm;
 
@@ -150,6 +151,14 @@ enum Step {
     /// exactly the configured size. Without one, stop after the ack: a lock
     /// client that has not drawn anything yet.
     LockSurface { lock: usize, color: Option<[u8; 4]> },
+    /// The same, but naming the one physical output through the client's
+    /// *second* `wl_output` bind. Smithay refuses the same resource twice
+    /// (`already_locked`) while accepting a different resource for the same
+    /// output, so this -- and only this -- is how a second surface comes to
+    /// exist on one output. The admission itself belongs to the
+    /// duplicate-bind ticket; this step exists so the per-output suite can
+    /// pin what every admitted surface is configured and drawn as.
+    LockSurfaceSecondBind { lock: usize, color: Option<[u8; 4]> },
     /// Map a full-output `overlay` layer surface with a solid
     /// [`OVERLAY_BGRA`] buffer -- a bar or a launcher, drawn in front of
     /// every window.
@@ -191,6 +200,13 @@ enum Step {
     /// `wl_surface` and commit -- a content commit after whatever teardown
     /// came before it.
     ReattachLockBuffer { index: usize },
+    /// Ack the latest configure on the `index`-th lock surface and redraw
+    /// it at the configured size -- what a real locker does when the output
+    /// it is on is resized. Unlike [`Step::ReattachLockBuffer`], which
+    /// replays the already-acked size, this names the *new* configure, which
+    /// must be acked before the commit or the compositor rightly kills the
+    /// client for committing before its first ack.
+    RedrawLockSurface { index: usize },
     /// `get_lock_surface` for the `index`-th lock object, then attach a
     /// buffer and commit *without* acking the configure -- the by-design
     /// `CommitBeforeFirstAck` kill, which must keep working.
@@ -265,6 +281,17 @@ struct TestClient {
     layer_shell: Option<zwlr_layer_shell_v1::ZwlrLayerShellV1>,
     lock_manager: Option<ext_session_lock_manager_v1::ExtSessionLockManagerV1>,
     output: Option<wl_output::WlOutput>,
+    /// A second bind of the same `wl_output` global, bound up front so a
+    /// step can name the one physical output through a different resource.
+    /// Smithay's one-surface-per-output guard keys on resource identity, so
+    /// this is the only way several lock surfaces can exist on one output
+    /// (see `docs/backlog/protocols/lock-surface-duplicate-wl-output.md`,
+    /// which owns the admission question; the per-output suite owns what
+    /// happens to every surface once admitted).
+    output2: Option<wl_output::WlOutput>,
+    /// The `wl_output` global's name and version, kept so the second bind
+    /// above can be made after the initial roundtrip.
+    output_global: Option<(u32, u32)>,
     seat: Option<wl_seat::WlSeat>,
     keyboard: Option<wl_keyboard::WlKeyboard>,
     pointer: Option<wl_pointer::WlPointer>,
@@ -338,7 +365,12 @@ impl Dispatch<wl_registry::WlRegistry, ()> for TestClient {
                 client.layer_shell = Some(registry.bind(name, version.min(4), qh, ()));
             }
             "wl_seat" => client.seat = Some(registry.bind(name, version.min(5), qh, ())),
-            "wl_output" => client.output = Some(registry.bind(name, version.min(3), qh, ())),
+            "wl_output" => {
+                client.output_global = Some((name, version));
+                if client.output.is_none() {
+                    client.output = Some(registry.bind(name, version.min(3), qh, ()))
+                }
+            }
             "ext_session_lock_manager_v1" => {
                 client.lock_manager = Some(registry.bind(name, version.min(1), qh, ()));
             }
@@ -629,6 +661,46 @@ fn solid_buffer(
     buffer
 }
 
+/// One `get_lock_surface` naming `output`, acked and optionally drawn: the
+/// shared body of [`Step::LockSurface`] and [`Step::LockSurfaceSecondBind`],
+/// which differ only in which bind of the one output they name.
+#[allow(clippy::too_many_arguments)]
+fn lock_surface_step(
+    client: &mut TestClient,
+    queue: &mut wayland_client::EventQueue<TestClient>,
+    compositor: &wl_compositor::WlCompositor,
+    shm: &wl_shm::WlShm,
+    qh: &QueueHandle<TestClient>,
+    locks: &[ext_session_lock_v1::ExtSessionLockV1],
+    lock_surfaces: &mut Vec<(
+        wl_surface::WlSurface,
+        ext_session_lock_surface_v1::ExtSessionLockSurfaceV1,
+    )>,
+    lock: usize,
+    output: wl_output::WlOutput,
+    color: Option<[u8; 4]>,
+) -> Result<(), String> {
+    let lock = locks.get(lock).cloned().ok_or("no such lock")?;
+    let surface = compositor.create_surface(qh, ());
+    let index = lock_surfaces.len();
+    client.lock_configures.push(None);
+    let lock_surface = lock.get_lock_surface(&surface, &output, qh, SurfaceIndex(index));
+    // The first configure is sent on binding the interface, and
+    // its size is an *exact* requirement for the first buffer.
+    let (serial, width, height) = wait_for(queue, client, "a lock configure", |client| {
+        client.lock_configures[index]
+    })?;
+    lock_surface.ack_configure(serial);
+    if let Some(color) = color {
+        let buffer = solid_buffer(shm, qh, width as i32, height as i32, color);
+        surface.attach(Some(&buffer), 0, 0);
+        surface.damage(0, 0, width as i32, height as i32);
+    }
+    surface.commit();
+    lock_surfaces.push((surface, lock_surface));
+    Ok(())
+}
+
 /// Runs one client half: binds the globals, then executes whatever steps the
 /// test sends, acknowledging each one once the compositor has seen it.
 fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> Result<(), String> {
@@ -636,8 +708,15 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
     let mut queue = conn.new_event_queue();
     let qh = queue.handle();
     let mut client = TestClient::default();
-    conn.display().get_registry(&qh, ());
+    let registry = conn.display().get_registry(&qh, ());
     queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+    // The second bind of the same global, made up front: the bind request
+    // is flushed by the roundtrips every step starts and ends with, so by
+    // the time any step names `output2` the compositor has seen it.
+    if let Some((name, version)) = client.output_global {
+        client.output2 = Some(registry.bind(name, version.min(3), &qh, ()));
+        queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+    }
 
     let compositor = client.compositor.clone().ok_or("no wl_compositor")?;
     let shm = client.shm.clone().ok_or("no wl_shm")?;
@@ -647,6 +726,7 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
         .clone()
         .ok_or("no ext_session_lock_manager_v1 -- the global is missing")?;
     let output = client.output.clone().ok_or("no wl_output")?;
+    let output2 = client.output2.clone().ok_or("no second wl_output")?;
     let seat = client.seat.clone().ok_or("no wl_seat")?;
 
     let mut windows: Vec<wl_surface::WlSurface> = Vec::new();
@@ -788,26 +868,32 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 })?;
             }
             Step::LockSurface { lock, color } => {
-                let lock = locks.get(lock).cloned().ok_or("no such lock")?;
-                let surface = compositor.create_surface(&qh, ());
-                let index = lock_surfaces.len();
-                client.lock_configures.push(None);
-                let lock_surface =
-                    lock.get_lock_surface(&surface, &output, &qh, SurfaceIndex(index));
-                // The first configure is sent on binding the interface, and
-                // its size is an *exact* requirement for the first buffer.
-                let (serial, width, height) =
-                    wait_for(&mut queue, &mut client, "a lock configure", |client| {
-                        client.lock_configures[index]
-                    })?;
-                lock_surface.ack_configure(serial);
-                if let Some(color) = color {
-                    let buffer = solid_buffer(&shm, &qh, width as i32, height as i32, color);
-                    surface.attach(Some(&buffer), 0, 0);
-                    surface.damage(0, 0, width as i32, height as i32);
-                }
-                surface.commit();
-                lock_surfaces.push((surface, lock_surface));
+                lock_surface_step(
+                    &mut client,
+                    &mut queue,
+                    &compositor,
+                    &shm,
+                    &qh,
+                    &locks,
+                    &mut lock_surfaces,
+                    lock,
+                    output.clone(),
+                    color,
+                )?;
+            }
+            Step::LockSurfaceSecondBind { lock, color } => {
+                lock_surface_step(
+                    &mut client,
+                    &mut queue,
+                    &compositor,
+                    &shm,
+                    &qh,
+                    &locks,
+                    &mut lock_surfaces,
+                    lock,
+                    output2.clone(),
+                    color,
+                )?;
             }
             Step::MapOverlayLayer => {
                 let layer_shell = client.layer_shell.clone().ok_or("no zwlr_layer_shell_v1")?;
@@ -867,6 +953,19 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                     client.lock_configures.get(index).copied().flatten().ok_or(
                         "the lock surface was never configured, so there is no size to redraw at",
                     )?;
+                let buffer = solid_buffer(&shm, &qh, width as i32, height as i32, LOCK_BGRA);
+                surface.attach(Some(&buffer), 0, 0);
+                surface.damage(0, 0, width as i32, height as i32);
+                surface.commit();
+            }
+            Step::RedrawLockSurface { index } => {
+                let (surface, lock_surface) =
+                    lock_surfaces.get(index).ok_or("no such lock surface")?;
+                let (serial, width, height) =
+                    client.lock_configures.get(index).copied().flatten().ok_or(
+                        "the lock surface was never configured, so there is no size to redraw at",
+                    )?;
+                lock_surface.ack_configure(serial);
                 let buffer = solid_buffer(&shm, &qh, width as i32, height as i32, LOCK_BGRA);
                 surface.attach(Some(&buffer), 0, 0);
                 surface.damage(0, 0, width as i32, height as i32);

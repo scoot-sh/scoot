@@ -78,6 +78,19 @@ render_elements! {
 /// `refresh_layer_zone` a zone per output rather than one, and
 /// `layer_keyboard_focus` and `render()`'s pass have to walk more than one
 /// map.
+///
+/// The same holds for `session_lock.rs`, whose four per-output sites are the
+/// subject of `docs/backlog/protocols/lock-surfaces-per-output.md` (resolved
+/// as single-output pins, not as multi-output): `new_surface` honours the
+/// client's named `wl_output` but falls back to the single output;
+/// `configure_all` sizes every surface to that one output together;
+/// confirmation treats the first blanked frame as "presented on all outputs",
+/// which is true if and only if there is one of them; and the locked render
+/// path composites every current surface onto that output at its origin with
+/// the keyboard on the first of them. Per-output, the fallback goes away,
+/// each output gets its own size, `locked` waits for every output's blanked
+/// frame, and the focus rule needs one surface per output rather than the
+/// first of all of them.
 pub(super) const OUTPUT_ID: OutputId = OutputId(1);
 
 /// How often a changed screen is redrawn, while there's something to redraw.
