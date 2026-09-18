@@ -1125,18 +1125,27 @@ fn linux_button(code: u32) -> Option<PointerButton> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum VtSwitchOutcome {
     /// `tty.session.change_vt` was actually called and returned `Ok(())` --
-    /// a real `VT_ACTIVATE` request went out. This is *not* a guarantee the
-    /// switch happens: libseat's own `libseat_switch_session` doc says
-    /// plainly that "a call ... does not imply that a switch will occur,"
-    /// and empirically (verified on the dev VM) requesting the VT this
-    /// session is *already* showing on returns `Ok(())` too, with no pause
-    /// and no VT change at all -- seatd just logs "requested session is
-    /// already active" and does nothing further. `Requested` therefore means
-    /// "asked, and the ask wasn't rejected outright," not "confirmed
-    /// switched" -- see `ipc.rs`'s `Request::Key` handler for how its
-    /// `Warning` message is worded to match that uncertainty rather than
-    /// overclaiming a pause that may not happen.
+    /// a real `VT_ACTIVATE` request went out for a VT *other* than the one
+    /// already displayed (the same-VT no-op below is filtered out before the
+    /// call, so reaching libseat at all already means this asks for a
+    /// change). This is still *not* a guarantee the switch happens:
+    /// libseat's own `libseat_switch_session` doc says plainly that "a call
+    /// ... does not imply that a switch will occur" -- see `ipc.rs`'s
+    /// `Request::Key` handler for how its `Warning` message is worded to
+    /// match that uncertainty rather than overclaiming a pause that may not
+    /// happen.
     Requested,
+    /// The requested VT is the one the kernel is already displaying, so the
+    /// `VT_ACTIVATE` would have been a no-op (libseat returns `Ok(())` for
+    /// it too, verified on the dev VM -- seatd just logs "requested session
+    /// is already active" and does nothing further). Filtered out before
+    /// the libseat call, so unlike `Requested` there is not even a request
+    /// to hedge about: `ipc.rs` answers a plain `Ok`, not a `Warning`.
+    /// Distinct from plain `Ignored` because the reason differs (a verified
+    /// no-op on a live session, not "no backend to ask"), and the
+    /// exhaustive `ipc.rs` match must decide it deliberately rather than
+    /// inherit silence meant for another case.
+    IgnoredSameVt,
     /// No `--tty` backend at all -- there's no session for this request to
     /// mean anything to. A deliberate no-op, already logged by `change_vt`
     /// itself at its own call site. Nothing to warn an IPC caller about:
@@ -1199,6 +1208,18 @@ impl State {
             );
             return VtSwitchOutcome::IgnoredPaused;
         }
+        if same_vt_noop(tty.session_paused, vt, displayed_vt()) {
+            // debug!, not info!: unlike the paused skip above, nothing the
+            // caller asked for is being lost -- the kernel is already
+            // showing exactly what was requested, so there is no action to
+            // trace, only a syscall spared and a warning not sent.
+            tracing::debug!(
+                vt,
+                "change_vt requested for the VT already displayed; skipping \
+                 the libseat call"
+            );
+            return VtSwitchOutcome::IgnoredSameVt;
+        }
         match tty.session.change_vt(vt as i32) {
             Ok(()) => VtSwitchOutcome::Requested,
             Err(error) => {
@@ -1206,5 +1227,114 @@ impl State {
                 VtSwitchOutcome::Failed
             }
         }
+    }
+}
+
+/// Which VT the kernel is currently displaying, read live from sysfs -- or
+/// `None` when that cannot be answered (no sysfs here, unreadable node,
+/// unparsable content). Every `None` shape falls through to the old
+/// behaviour (ask libseat, report the hedged `Requested`): a same-VT
+/// request warned about is cosmetic noise, but a real switch skipped would
+/// be a silent failure, so uncertainty must always resolve toward asking.
+///
+/// Read per `change_vt` call rather than stored on `Tty` at `init`: the
+/// ticket's anticipated init-time query (which VT is this session on?)
+/// has no libseat answer, but the per-call question (which VT is displayed
+/// *right now*?) does, straight from the kernel -- and a session property
+/// that never changes needs no field with write-site semantics to audit
+/// (see `docs/roadmap/05b-vt-switch-eperm.md` for what that audit costs).
+/// `change_vt` runs only on an explicit VT-switch keybind or IPC `key`,
+/// never on a hot path, so one small file read per call is negligible.
+fn displayed_vt() -> Option<u32> {
+    parse_active_vt(&std::fs::read_to_string("/sys/class/tty/tty0/active").ok()?)
+}
+
+/// Parses `/sys/class/tty/tty0/active`'s content -- `ttyN` plus a trailing
+/// newline -- into the displayed VT number. Strict by design: anything that
+/// is not exactly `tty` followed by a nonzero decimal number (`ttyS0` on a
+/// serial console, an empty read, garbage) is `None`, which `change_vt`
+/// treats as "unknown, ask libseat" rather than evidence of anything.
+fn parse_active_vt(content: &str) -> Option<u32> {
+    content
+        .trim()
+        .strip_prefix("tty")?
+        .parse::<u32>()
+        .ok()
+        .filter(|&n| n != 0)
+}
+
+/// Whether a VT-switch request is a provable no-op: the session is active
+/// (so the displayed VT is necessarily its own -- an inactive session's VT
+/// is someone else's by definition) and the request names exactly that VT.
+///
+/// `session_paused` is an explicit parameter rather than read off `Tty` so
+/// this stays a pure predicate with a unit-testable truth table. The
+/// `!session_paused` half is load-bearing, not redundant with `change_vt`'s
+/// own paused gate above it: while paused, an equality between the request
+/// and a displayed-VT read could only be a race, and skipping the call on
+/// that basis would be exactly the one-way-door silence `IgnoredPaused`
+/// exists to prevent -- so a paused session never no-ops here, whatever
+/// the kernel reports.
+fn same_vt_noop(session_paused: bool, requested: u32, displayed: Option<u32>) -> bool {
+    !session_paused && displayed == Some(requested)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn active_vt_content_parses_to_its_number() {
+        // Exactly what the kernel writes: `ttyN` plus a trailing newline.
+        assert_eq!(parse_active_vt("tty1\n"), Some(1));
+        assert_eq!(parse_active_vt("tty12\n"), Some(12));
+    }
+
+    #[test]
+    fn non_vt_consoles_are_unknown_not_zero() {
+        // A serial console (`ttyS0`) is not a switchable VT at all: this
+        // must be "unknown, ask libseat", never a number that could compare
+        // equal to a request. The fail-first pin for the strict parse --
+        // accept a bare numeric suffix and this returns `Some(0)`.
+        assert_eq!(parse_active_vt("ttyS0\n"), None);
+        assert_eq!(parse_active_vt("tty0\n"), None);
+    }
+
+    #[test]
+    fn garbage_content_is_unknown() {
+        assert_eq!(parse_active_vt(""), None);
+        assert_eq!(parse_active_vt("tty\n"), None);
+        assert_eq!(parse_active_vt("console\n"), None);
+        assert_eq!(parse_active_vt("tty4294967297\n"), None);
+        assert_eq!(parse_active_vt("tty1\ntty2\n"), None);
+    }
+
+    #[test]
+    fn an_active_session_requesting_the_displayed_vt_is_a_noop() {
+        // The fail-first pin for the gate -- drop either conjunct and this
+        // fails.
+        assert!(same_vt_noop(false, 1, Some(1)));
+    }
+
+    #[test]
+    fn an_active_session_requesting_another_vt_is_real() {
+        assert!(!same_vt_noop(false, 2, Some(1)));
+    }
+
+    #[test]
+    fn an_unknown_displayed_vt_never_noops() {
+        // Unreadable sysfs, serial console, unparsable content: uncertainty
+        // resolves toward asking libseat (the hedged `Requested`), never
+        // toward a skip that could strand a real switch.
+        assert!(!same_vt_noop(false, 1, None));
+    }
+
+    #[test]
+    fn a_paused_session_never_noops_even_when_the_numbers_match() {
+        // While paused the displayed VT belongs to another session, so an
+        // equality here can only be a stale read -- and skipping the call
+        // on that basis would be the one-way-door silence `IgnoredPaused`
+        // exists to prevent. The paused gate in `change_vt` owns this case.
+        assert!(!same_vt_noop(true, 1, Some(1)));
     }
 }

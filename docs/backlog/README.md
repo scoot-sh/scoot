@@ -279,7 +279,13 @@ actionable.
   — RESOLVED 2026-09-16: it always was painted. The smoke test's background
   sample pixel sat on the cursor, which only `--tty` draws. Closes the
   duplicate `testing/` entry that had the right diagnosis all along.
-- [Same-VT no-op VT-switch warning](./tty/vt-switch-same-vt-warning.md)
+- [Same-VT no-op VT-switch warning](./resolved/vt-switch-same-vt-warning-done.md)
+  — RESOLVED 2026-09-18: `change_vt` compares the request against the
+  kernel's live displayed VT (`/sys/class/tty/tty0/active`, no new `Tty`
+  field) before calling libseat, answering a new quiet `IgnoredSameVt`
+  (plain IPC `Ok`) instead of the hedged `Requested` warning; unknown
+  display falls back to asking. Real switch-away/back (pause/reactivate +
+  modeset + byte-identical repaint) verified live, 5b unregressed.
 - [`O_CLOEXEC` request is a no-op at the libseat layer](./resolved/tty-o-cloexec-noop-done.md)
   — RESOLVED 2026-09-18: the flag was dead (`LibSeatSession::open` takes
   `_flags` at the pinned rev, re-verified in source) and is removed; the
