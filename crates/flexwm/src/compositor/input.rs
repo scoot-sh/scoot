@@ -17,8 +17,9 @@ use super::layer_shell;
 use super::output_scale::logical_size;
 use super::relative_pointer::{AbsoluteTarget, absolute_target};
 use super::tty::VtSwitchOutcome;
-use modifiers::{HeldKeys, NamedKey, Untypable};
+use modifiers::{HeldKeys, KeyPlan, NamedKey, Untypable};
 
+mod compose;
 pub(super) mod interaction;
 mod modifiers;
 #[cfg(test)]
@@ -629,6 +630,15 @@ impl State {
     /// for `A` and `!`, AltGr for a German layout's `@`, nothing at all for
     /// the level-0 characters that make up most text.
     ///
+    /// A character no single keypress produces -- `é` on a `de` layout, `~`
+    /// on a Nordic one -- goes through a second path instead of failing: the
+    /// dead-key sequence from the session-locale compose table (see the
+    /// `compose` module), pressed as the two keypresses a person would
+    /// type. What stays refused, loudly: a character with no sequence on the
+    /// active layout (plain `us` has no dead keys, so `é` is still "no
+    /// key"), one that lives on an inactive layout group, and one only a
+    /// locking or latching modifier reaches.
+    ///
     /// Errors on the first character the layout cannot produce, leaving
     /// everything before it typed. That is deliberate, and the same trade
     /// this function has always made: the alternative is resolving the whole
@@ -650,18 +660,44 @@ impl State {
         // `modifiers::plan`), so a lowercase string never pays for the
         // keymap walk and a mixed one pays for it once, not per character.
         let mut modifier_keys = None;
+        // The compose fallback's per-request table (see `compose`), built on
+        // the first character the direct path cannot type and shared by the
+        // rest of the string. `None` until then, so directly typable text --
+        // the overwhelmingly common case -- never pays for the table build
+        // or the scan; `Some(None)` remembers that this session has no
+        // usable table, so a string of many untypable characters fails fast
+        // after the first lookup instead of re-reading the locale per
+        // character.
+        let mut composed: Option<Option<compose::SequenceMap>> = None;
         for character in text.chars() {
             let keysym = keysym_for_char(character);
-            let plan = self
-                .with_keymap(&keyboard, |keymap, layout| {
-                    modifiers::plan(keymap, layout, keysym, &mut modifier_keys)
-                })
-                .map_err(|reason| match reason {
-                    Untypable::NoKey => format!("no key for `{character}` in this layout"),
-                    Untypable::NoModifiers => {
-                        format!("`{character}` needs a modifier this layout only locks or latches")
+            let direct = self.with_keymap(&keyboard, |keymap, layout| {
+                modifiers::plan(keymap, layout, keysym, &mut modifier_keys)
+            });
+            // Exactly one keypress for the common case; the dead key plus
+            // its base for a composed character. Both halves of a sequence
+            // are resolved before either is pressed (see `plan_sequence`),
+            // so one character is all-or-nothing even though the string as
+            // a whole is prefix-typed.
+            let (first, second) = match direct {
+                Ok(plan) => (plan, None),
+                Err(reason) => {
+                    match self.compose_plan(&keyboard, character, &mut composed, &mut modifier_keys)
+                    {
+                        Some((dead, base)) => (dead, Some(base)),
+                        None => {
+                            return Err(match reason {
+                                Untypable::NoKey => {
+                                    format!("no key for `{character}` in this layout")
+                                }
+                                Untypable::NoModifiers => format!(
+                                    "`{character}` needs a modifier this layout only locks or latches"
+                                ),
+                            });
+                        }
                     }
-                })?;
+                }
+            };
             // A keybinding firing mid-string here would be surprising --
             // `type_text` is meant to simulate typed characters, not chords
             // -- but every character is sent with exactly the modifiers its
@@ -676,20 +712,59 @@ impl State {
             // to decode this character as a capital, which is the same
             // silently-wrong-text failure this whole path exists to stop.
             // Warn rather than let any of it happen with no signal.
-            let mut intercepted = false;
-            for &code in plan.modifiers.as_slice() {
-                intercepted |= self.key(code, KeyState::Pressed).intercepted;
+            let mut intercepted = self.press_plan(&first);
+            if let Some(second) = &second {
+                intercepted |= self.press_plan(second);
             }
-            intercepted |= self.key(plan.code, KeyState::Pressed).intercepted;
             if intercepted {
                 tracing::warn!(%character, "a keybinding intercepted a character from type_text");
             }
-            self.key(plan.code, KeyState::Released);
-            for &code in plan.modifiers.as_slice().iter().rev() {
-                self.key(code, KeyState::Released);
-            }
         }
         Ok(())
+    }
+
+    /// Presses and releases one planned key with its modifiers held around
+    /// it, answering whether a keybinding intercepted any of it. Split out
+    /// of [`State::type_text`] so a composed character's two halves share
+    /// the press/release shape with a direct character's one.
+    fn press_plan(&mut self, plan: &KeyPlan) -> bool {
+        let mut intercepted = false;
+        for &code in plan.modifiers.as_slice() {
+            intercepted |= self.key(code, KeyState::Pressed).intercepted;
+        }
+        intercepted |= self.key(plan.code, KeyState::Pressed).intercepted;
+        self.key(plan.code, KeyState::Released);
+        for &code in plan.modifiers.as_slice().iter().rev() {
+            self.key(code, KeyState::Released);
+        }
+        intercepted
+    }
+
+    /// The dead-key sequence that types `character`, or `None` when the
+    /// active layout has none (in which case the caller reports its direct
+    /// refusal, still the honest answer).
+    ///
+    /// `composed` is the per-request cache described at its declaration:
+    /// built once, on the first character that needs it, from the session
+    /// locale's compose table over the active layout. `modifier_keys` is the
+    /// shared probe cache both resolution paths plan through.
+    fn compose_plan(
+        &mut self,
+        keyboard: &KeyboardHandle<Self>,
+        character: char,
+        composed: &mut Option<Option<compose::SequenceMap>>,
+        modifier_keys: &mut Option<modifiers::ModifierKeys>,
+    ) -> Option<(KeyPlan, KeyPlan)> {
+        if composed.is_none() {
+            *composed = Some(self.with_keymap(keyboard, |keymap, layout| {
+                compose::table_from_session_locale()
+                    .map(|table| compose::build_map(keymap, layout, &table))
+            }));
+        }
+        let map = composed.as_ref()?.as_ref()?;
+        self.with_keymap(keyboard, |keymap, layout| {
+            compose::plan_sequence(keymap, layout, map, character, modifier_keys)
+        })
     }
 
     /// `pub(super)` rather than private: `nested_dispatch.rs` forwards real

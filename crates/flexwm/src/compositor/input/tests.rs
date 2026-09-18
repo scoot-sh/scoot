@@ -237,8 +237,42 @@ struct TestClient {
     /// compositor sent over `wl_keyboard.keymap` -- i.e. the real decoding
     /// path every toolkit uses, not a second copy of the compositor's.
     xkb: Option<xkb::State>,
+    /// What a toolkit runs every keypress through client-side: the compose
+    /// state machine. Without it a dead key followed by its base letter
+    /// decodes as just the base letter, and no end-to-end test could tell
+    /// "typed é" from "typed e". Built from the inline table below rather
+    /// than the session locale, so these tests mean the same thing on any
+    /// machine -- the compositor's own table (from the session locale) is
+    /// what has to *find* a sequence, and this one only proves the keys it
+    /// pressed compose the way a real client decodes them.
+    compose: Option<xkb::compose::State>,
     typed: Typed,
 }
+
+/// The compose sequences the test client understands: exactly the ones the
+/// dead-key tests below need, nothing more. Deliberately minimal rather than
+/// the session's full table -- a fuller one risks a plain-text test tripping
+/// over a sequence it never meant (an apostrophe followed by `e` composes to
+/// nothing here, the way the session table also answers, but only what is
+/// written here is guaranteed on every machine).
+///
+/// Each dead key appears twice: pressing it and then space is the way a
+/// person usually types the bare character, but pressing it twice is the
+/// table's other standard spelling, and which one the compositor finds first
+/// depends on keycode order -- the client has to decode either, the way a
+/// real toolkit does.
+const CLIENT_COMPOSE: &str = r#"
+<dead_acute> <e> : "é" eacute
+<dead_acute> <E> : "É" Eacute
+<dead_acute> <space> : "'" apostrophe
+<dead_acute> <dead_acute> : "´" acute
+<dead_grave> <space> : "`" grave
+<dead_grave> <dead_grave> : "`" grave
+<dead_circumflex> <space> : "^" asciicircum
+<dead_circumflex> <dead_circumflex> : "^" asciicircum
+<dead_tilde> <space> : "~" asciitilde
+<dead_tilde> <dead_tilde> : "~" asciitilde
+"#;
 
 impl Dispatch<wl_registry::WlRegistry, ()> for TestClient {
     fn event(
@@ -345,7 +379,30 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for TestClient {
                     && let Some(xkb_state) = client.xkb.as_ref()
                 {
                     // Wayland carries evdev keycodes; xkb's are those plus 8.
-                    let text = xkb_state.key_get_utf8(Keycode::new(key + 8));
+                    let code = Keycode::new(key + 8);
+                    // What a toolkit does with every press: feed the keysym
+                    // through compose first, and only fall back to the
+                    // keysym's own text when the sequence goes nowhere. A
+                    // dead key on its own yields nothing here (`Composing`),
+                    // and its base letter completes it (`Composed`) -- which
+                    // is the only reason the dead-key tests below can assert
+                    // on text at all. Plain text is untouched: no ordinary
+                    // keysym starts a sequence in the table above, so it
+                    // takes the same `key_get_utf8` path it always did.
+                    let text = match client.compose.as_mut() {
+                        Some(compose) => {
+                            let _ = compose.feed(xkb_state.key_get_one_sym(code));
+                            match compose.status() {
+                                xkb::compose::Status::Composed => {
+                                    compose.utf8().unwrap_or_default()
+                                }
+                                xkb::compose::Status::Composing
+                                | xkb::compose::Status::Cancelled => String::new(),
+                                xkb::compose::Status::Nothing => xkb_state.key_get_utf8(code),
+                            }
+                        }
+                        None => xkb_state.key_get_utf8(code),
+                    };
                     client.typed.text.push_str(&text);
                 }
             }
@@ -400,7 +457,22 @@ fn run_client(
     let conn = Connection::from_socket(stream).map_err(|e| e.to_string())?;
     let mut queue = conn.new_event_queue();
     let qh = queue.handle();
-    let mut client = TestClient::default();
+    let context = xkb::Context::new(xkb::CONTEXT_NO_FLAGS);
+    let table = xkb::compose::Table::new_from_buffer(
+        &context,
+        CLIENT_COMPOSE,
+        "en_US.UTF-8",
+        xkb::compose::FORMAT_TEXT_V1,
+        xkb::compose::COMPILE_NO_FLAGS,
+    )
+    .map_err(|()| "the test client's inline compose table should compile".to_owned())?;
+    let mut client = TestClient {
+        compose: Some(xkb::compose::State::new(
+            &table,
+            xkb::compose::STATE_NO_FLAGS,
+        )),
+        ..TestClient::default()
+    };
     conn.display().get_registry(&qh, ());
     // Twice: the first round trip binds the seat, the second delivers the
     // seat's capabilities -- and the `wl_keyboard` is only created from
@@ -707,6 +779,113 @@ fn an_untypable_character_errors_and_leaves_the_text_before_it_typed() {
     fixture.settle();
     let typed = fixture.run(Step::Report);
     assert_eq!(typed.text, "Hi ");
+}
+
+// -------------------------------------------------------------------------
+// Dead keys and compose sequences (`msg-type-dead-keys-compose`)
+// -------------------------------------------------------------------------
+
+/// `é` on a `de` layout is two keypresses with a state machine in between
+/// (`dead_acute`, then `e`), not a key with a level -- and the client is what
+/// runs that machine, the way a terminal does (see the `compose` field
+/// above). Fail-first for the ticket: refused with ``no key for `é` in this
+/// layout`` before the compose fallback existed.
+#[test]
+fn a_dead_key_sequence_types_the_composed_character() {
+    let mut fixture = Fixture::new();
+    fixture.set_layout("de", "", None);
+    let typed = fixture.type_text("é");
+    assert_eq!(typed.text, "é");
+    assert_eq!(
+        typed.keys, 4,
+        "dead_acute down/up plus `e` down/up, the way a person types it"
+    );
+}
+
+/// The ASCII casualty from the ticket: `~` is `dead_tilde`, not `asciitilde`,
+/// on `se` (and `pt`, `no`, `dk`) -- and shell paths, globs and regexes are
+/// full of it. The session table's first pair for it there is the doubled
+/// press (`dead_tilde` twice, the table's other standard spelling alongside
+/// dead-plus-space), and on `se` that key sits above the unmodified level,
+/// so each half holds a modifier -- eight events for one character, the same
+/// ones a person would send. Fail-first: refused before the fallback.
+#[test]
+fn a_dead_ascii_character_types_via_its_dead_key() {
+    let mut fixture = Fixture::new();
+    fixture.set_layout("se", "", None);
+    let typed = fixture.type_text("~");
+    assert_eq!(typed.text, "~");
+    assert_eq!(
+        typed.keys, 8,
+        "two dead_tilde presses with a held modifier around each"
+    );
+}
+
+/// Direct and composed characters mix in one string: `c`, `a`, `f` come off
+/// their own keys while `é` goes through the sequence, with no state leaking
+/// between the two shapes.
+#[test]
+fn direct_and_composed_characters_mix_in_one_string() {
+    let mut fixture = Fixture::new();
+    fixture.set_layout("de", "", None);
+    let typed = fixture.type_text("café");
+    assert_eq!(typed.text, "café");
+    assert_eq!(
+        typed.keys, 10,
+        "three direct characters at two events each plus one four-event sequence"
+    );
+}
+
+/// Plain `us` has no dead keys and no Compose key, so `é` has no sequence
+/// there -- and the answer stays a loud refusal that types nothing for it,
+/// never a silently wrong `e`. The partner of the existing `Hi é` test,
+/// which always carries a typed prefix; this one proves the refused
+/// character alone sends zero keys.
+#[test]
+fn a_character_with_no_sequence_is_still_refused_loudly() {
+    let mut fixture = Fixture::new();
+    let error = fixture
+        .state
+        .type_text("é")
+        .expect_err("`é` has no sequence on a plain `us` layout");
+    assert!(
+        error.contains('é'),
+        "the error should name the character: {error}"
+    );
+    fixture.settle();
+    let typed = fixture.run(Step::Report);
+    assert_eq!(
+        (typed.text.as_str(), typed.keys),
+        ("", 0),
+        "a refused character must not send any key at all"
+    );
+}
+
+/// Inactive groups are not consulted, even for compose: with `us,de` the
+/// session is in group 0 (`us`), where `ü` is nowhere, and nothing here
+/// switches groups to go and find it -- the session's layout is user state,
+/// and silently changing it (or failing to change it back) is worse than
+/// saying no. A pin, passing before and after: the fallback must not reach
+/// across groups to type what the direct path refuses.
+#[test]
+fn a_character_only_on_an_inactive_group_is_refused() {
+    let mut fixture = Fixture::new();
+    fixture.set_layout("us,de", "", None);
+    let error = fixture
+        .state
+        .type_text("ü")
+        .expect_err("`ü` is not on the active group");
+    assert!(
+        error.contains('ü'),
+        "the error should name the character: {error}"
+    );
+    fixture.settle();
+    let typed = fixture.run(Step::Report);
+    assert_eq!(
+        (typed.text.as_str(), typed.keys),
+        ("", 0),
+        "a refused character must not send any key at all"
+    );
 }
 
 // -------------------------------------------------------------------------

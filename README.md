@@ -214,19 +214,33 @@ keyboard layout the session is running: for each character it finds the key
 that carries it and holds down whatever modifiers that key's level needs —
 Shift for `A` or `!`, AltGr for a German layout's `@` — so a client receives
 the same key *and* modifier events it would see from a real keyboard, not
-just a bare keysym. `\n` and `\t` are sent as `Return` and `Tab`. Three
-things worth knowing:
+just a bare keysym. `\n` and `\t` are sent as `Return` and `Tab`. A
+character no single keypress produces goes through a second path instead of
+failing: the two-key dead-led sequence from the session-locale compose table
+(`dead_acute` then `e` for `é` on a German layout), pressed as the two
+keypresses a person would type, each with its own level's modifiers. That
+covers accented Latin wherever the active layout carries the dead key, and
+it closes the dead-key ASCII gaps below entirely — all 95 printable ASCII
+characters now type on every one of the fourteen swept Latin layouts (`us`,
+`us(intl)`, `gb`, `de`, `de(neo)`, `fr`, `fr(oss)`, `es`, `it`, `pt`, `se`,
+`no`, `dk`, `pl`). Three things worth knowing:
 
 - A character the active layout can't produce is an error naming it (``no
-  key for `é` in this layout``). Dead keys and compose sequences aren't
-  driven, so a character that needs one counts as "no key" too — which is
-  layout-dependent and worth checking before assuming ASCII is safe: `^`
-  and `` ` `` are dead on `de`, `es`, `pt`, `se`, `no` and `dk`, and on the
-  last four `~` is dead too. A character that sits on a level the layout only
-  reaches through a *locking or latching* modifier gets its own, different
+  key for `é` in this layout``). What counts as "can't produce" is now the
+  compose table as well as the keymap: a character with no two-key dead-led
+  sequence there stays refused — plain `us` carries no dead keys and no
+  Compose key, so `é` is still "no key" on it, and three-key `Multi_key`
+  sequences are not driven even on a layout that has a Compose key. A
+  character that lives on an *inactive* layout group is refused too: nothing
+  here switches the session's layout to go and find it. A character that
+  sits on a level the layout only reaches through a *locking or latching*
+  modifier gets its own, different
   message (``[character] needs a modifier this layout only locks or
   latches``) — flexwm will not press Caps Lock to type a capital, since
-  that would leave it on for everything afterwards. In every case the
+  that would leave it on for everything afterwards. The sequences come from
+  the session locale (`LC_ALL`, then `LC_CTYPE`, then `LANG`, as the
+  compositor process sees them — the same source toolkits read), so a
+  missing locale entry falls back the way client toolkits do. In every case the
   characters *before* it in the string have already been typed: the request
   stops at the first character it can't type rather than rolling back.
 - Keybindings still apply to what it types, exactly as they would to a real
