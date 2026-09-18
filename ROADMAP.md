@@ -702,8 +702,18 @@ gap jumped the queue — each item's own file records why it landed when it did.
   Smithay's supported don't-touch-the-fd-on-drop, making shutdown
   deterministically quiet. Fail-first live (6/6 quits logged it pre-fix,
   0/6 post-fix) plus quit-while-paused and pause/reactivate repaint
-  edges; no unit test (no `Tty` outside `--tty`), no README change (a log
-  line disappearing is not a user-facing surface). (PR #111)
+   edges; no unit test (no `Tty` outside `--tty`), no README change (a log
+   line disappearing is not a user-facing surface). (PR #111)
+- **[`--tty` hotplug follows the connector across CRTCs](docs/backlog/resolved/tty-connector-switch-crtc-done.md)**
+  — RESOLVED 2026-09-18: a refused in-place connector move now rebuilds the
+  `DrmSurface` on another CRTC (build-first-swap-on-success, so the ticket's
+  anticipated `Option<DrmSurface>` refactor proved unnecessary and `surface`
+  is never `None`) instead of staying on the connector that went away; total
+  failure keeps today's stay-put-and-retry. Gamma LUT length re-read per
+  CRTC, live control failed only on change. Four fail-first harness tests
+  pin the outcome plumbing; the switch itself is unverified live
+  (single-CRTC dev VM) and the legacy blind-probe limit is stated in the
+  record.
 ## What's next
 
 The backlog is the source of truth for what to pick up; this is the current

@@ -116,10 +116,29 @@ impl GammaControlState {
     }
 
     /// Records the real CRTC size once `--tty` knows it. Called once from
-    /// `tty::init`, never again: the CRTC (and its LUT length) is fixed for
-    /// the process's life.
+    /// `tty::init`, still before any client can bind (see its call site); a
+    /// later CRTC switch goes through [`crtc_changed`](Self::crtc_changed)
+    /// instead, which is the same write plus the live-control question below.
     pub(super) fn set_size(&mut self, size: u32) {
         self.size = size;
+    }
+
+    /// Re-records the CRTC's LUT length after `--tty` moves to a different
+    /// CRTC (see `tty/hotplug.rs`'s CRTC switch, the only caller). A live
+    /// control was sized for the old CRTC: if the length changed it is told it
+    /// lost control -- the same transfer shape `get_gamma_control` uses, so it
+    /// re-reads `gamma_size` and re-sets -- rather than eating `invalid_gamma`
+    /// (a protocol error, i.e. a killed night-light) on its next `set_gamma`,
+    /// which is still validated against the new length. Same length:
+    /// untouched, its ramp still describes the new CRTC entry for entry.
+    pub(super) fn crtc_changed(&mut self, size: u32) {
+        if size == self.size {
+            return;
+        }
+        self.size = size;
+        if let Some(current) = self.current.take() {
+            current.failed();
+        }
     }
 
     /// The expected `set_gamma` fd length in bytes: three ramps of `size`
