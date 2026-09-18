@@ -160,15 +160,18 @@
 //!
 //! ## Buffer formats
 //!
-//! `wl_shm` only: flexwm renders on the CPU with pixman and has no GPU or
-//! dma-buf path at all, so `BufferConstraints::dma` is always `None` and every
-//! dmabuf import is answered `failed` (see [`dmabuf`](super::dmabuf)).
+//! `wl_shm` only for *capture*: `BufferConstraints::dma` is always `None`, so
+//! a capture session never offers to write into a client's dma-buf.
 //!
-//! The one dmabuf datum this compositor does advertise is feedback's
-//! `main_device` -- this machine's real scanout `dev_t`, or `0` where no DRM
-//! node exists. That is a description of the machine, not an import promise:
-//! a format table has to name *a* device, and the scanout node is the only
-//! true answer to which one.
+//! That is a statement about this module, not about the compositor. flexwm
+//! does import the dma-bufs a client hands it, straight into the pixman
+//! renderer (see [`dmabuf`](super::dmabuf)): a GL client's window composites
+//! here like any other. Capture is the other direction, and it stays shm
+//! because here flexwm is the one *writing* -- filling a client's dma-buf
+//! means matching its stride, modifier and sync rules on a path where
+//! `wl_shm` already works everywhere and costs a CPU renderer nothing extra.
+//! If some client ever measurably needs a dma-buf capture, that is its own
+//! item rather than an oversight here.
 //!
 //! `Xrgb8888` is offered first and `Argb8888` second. Both are the same four
 //! bytes in the same order in memory -- the compositor's own framebuffer is
