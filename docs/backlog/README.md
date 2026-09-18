@@ -282,7 +282,13 @@ actionable.
   — RESOLVED 2026-09-17: single ASCII letters fold to lowercase at
   config-parse time with a warning (`"A"` means plain `a`, not `shift+a`);
   `msg key A` still refuses.
-- [Per-frame `Vec` alloc in the cursor fallback path](./rendering/cursor-element-per-frame-alloc.md)
+- [Per-frame `Vec` alloc in the cursor fallback path](./resolved/cursor-element-per-frame-alloc-done.md)
+  — CLOSED DELIBERATE with measured numbers: the fallback `vec![...]` is
+  already the minimal allocation (448 bytes, capacity exactly 1, ~107ns net
+  per call), firing 0 times/sec at idle and at most ~62.5/sec during dirty
+  `--tty` frames; the ticket's push-into-a-local-`Vec` shape allocates 4x
+  the bytes (1792, measured), and a persistent buffer's ripple costs more
+  than ~7µs/s saves. Pinned by capacity tests.
 - [Flake: parked-captures poll sees an extra `frame_serial` advance under full-suite load](./rendering/screencopy-parked-poll-flake.md)
 - [A `present()` skipped for an in-flight flip consumes that frame's damage](./resolved/present-skip-eats-frame-damage-done.md)
   — RESOLVED 2026-09-18 (PR #107): the filed in-flight shape self-heals

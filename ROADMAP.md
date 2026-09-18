@@ -667,6 +667,19 @@ gap jumped the queue — each item's own file records why it landed when it did.
   incl. negative hotspot, post-re-set, `i32::MIN` saturation, other-surface
   negative control); no README change (protocol fix, no user-facing
   surface).
+- **[`Cursor::element`'s one-element fallback
+  `Vec`](docs/backlog/resolved/cursor-element-per-frame-alloc-done.md)**
+  — CLOSED DELIBERATE 2026-09-18 with measured numbers (PR #106's triage
+  re-derived, not relayed): the fallback `vec![...]` is already the minimal
+  allocation (448 bytes at capacity exactly 1, ~90–120ns net per call
+  release on the dev VM), firing 0 times/sec at idle and at most ~62.5/sec
+  during dirty `--tty` frames — ~7µs/s against a 16ms frame budget. The
+  ticket's push-into-a-local-`Vec` shape allocates 4x the bytes (1792,
+  measured: Rust's minimum non-zero capacity), and a persistent buffer's
+  signature ripple costs more than it saves while `render()` keeps several
+  per-frame `Vec`s regardless. Pinned by two capacity tests (fail-first
+  proven against a wasteful variant); no compositor code changed, no README
+  change (no user-facing surface).
 ## What's next
 
 The backlog is the source of truth for what to pick up; this is the current
