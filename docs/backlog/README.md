@@ -378,7 +378,12 @@ actionable.
 - [Every compositor fd must carry close-on-exec](./security/spawn-fd-cloexec-audit.md) — split from the `O_CLOEXEC` verdict (low): `State::spawn` provably inherits any fd lacking the bit, so each fd source needs verifying at creation; seatd/std/memfd sources already known-good
 
 ### Packaging / tooling
-- [Nix `src = self` invalidates the build on doc-only edits](./packaging/nix-src-fileset.md)
+- [Nix `src = self` invalidates the build on doc-only edits](./resolved/nix-src-fileset-done.md)
+  — RESOLVED 2026-09-18: `src` is a `lib.fileset` union of `Cargo.toml`,
+  `Cargo.lock`, `crates/` (every other `./` read in the flake re-verified
+  eval-time); the old working-tree copy also dragged `target/` + `.git`
+  along, so `src` drops from ~1.1 GB to ~3.3 MB in-store and doc/target
+  edits no longer move the drv. Proven by `nix build` (aarch64-darwin).
 - [`x86_64-darwin` in `systems` breaks `flake check --all-systems`](./packaging/flake-x86-darwin-system.md)
 - [`flake.nix` description drift](./resolved/flake-description-drift-done.md) (nit)
   — RESOLVED 2026-09-18: top-level `description` names both (compositor on
