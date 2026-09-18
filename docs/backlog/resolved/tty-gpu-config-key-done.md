@@ -182,6 +182,15 @@ may not work: DRM access error: Error loading resource handles on device
 flexwm rejected, from a compositor whose primary-node heuristic lacks the
 fallback.
 
+**Re-confirmed on `f688ac9` itself.** The first measurement was taken against
+an older build that happened to be what the session was running. The machine
+was then rebuilt onto `f688ac9` and logged back in, and the new session
+(different pid, same story) again opens exactly one DRM fd — `/dev/dri/card2`
+— with no `--gpu` and no `[tty] gpu`, on `eDP-1`. Worth having, because that
+delta included PR #122, which touches `tty/mod.rs`: the additions are tablet
+event arms and two `has_capability(TabletTool)` guards, and this confirms
+they left device selection alone.
+
 **Not captured, and why:** the literal `drm: driving this device` line. The
 session's stderr goes to `/dev/tty1` uncaptured, and retrieving it would mean
 restarting the user's desktop — which was also hosting the session doing the

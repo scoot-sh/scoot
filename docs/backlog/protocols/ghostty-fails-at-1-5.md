@@ -122,18 +122,26 @@ live cursor block — not a blank backdrop.
 - **(1) Ghostty version is refuted.** The reporter's machine runs 1.3.1 — the
   same version as the dev VM, so version divergence was never the variable.
 
-### Also tested: the binary the user actually daily-drives
+### Also tested: an older binary, to rule out a recent fix masking the bug
 
-The live session runs an **older** flexwm build than `main` at `f688ac9`. A
-differential run of that older binary at 1.5 also maps Ghostty (409×510, 70
-dmabuf references, 42 frames presented). So the non-reproduction is not an
-artifact of recent work masking the bug — in particular it is not today's
-dmabuf-import fix (`ce15c09`).
+At the time of the run the live session was still on an **older** flexwm
+build than `main` at `f688ac9` (it has since been rebuilt onto `f688ac9`
+itself — see the re-confirmation below). A differential run of that older
+binary at 1.5 also maps Ghostty (409×510, 70 dmabuf references, 42 frames
+presented). So the non-reproduction is not an artifact of recent work masking
+the bug — in particular it is not the dmabuf-import fix (`ce15c09`) that
+landed the same day.
 
 That fix could not have been the original cause in any case: the dmabuf
 advertisement that broke GL clients landed 2026-09-17
 ([`../resolved/dmabuf-advertised-but-never-imported-done.md`](../resolved/dmabuf-advertised-but-never-imported-done.md)),
 **three days after** this was reported on 2026-09-14.
+
+Later the same day the machine was rebuilt onto `f688ac9` and logged back
+in, so the live session now runs the very binary these measurements were
+taken against. It still comes up on `eDP-1` at `scale = 2.0` — which is the
+workaround, not the test. The `--tty`-at-1.5 question below is therefore
+still open, and is now one `home.nix` edit away rather than a rebuild away.
 
 ### The one configuration still untested, stated plainly
 

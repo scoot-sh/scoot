@@ -27,10 +27,11 @@ node.
   convenience here, not a requirement. Read-only `/proc/<pid>/fd` and
   `flexwm msg outputs` gave this without restarting anything.
 - **Test 1 — did not reproduce**, at either scale, on the real AGX GPU
-  (dmabuf, `renderD128`), with zero EGL/GL and zero protocol errors, on both
-  current `main` and the older binary the user daily-drives. Both hypotheses
-  this runbook named — Ghostty version and the GPU/GL path — are refuted.
-  One configuration remains untested: `--tty` at 1.5 on the real `eDP-1`.
+  (dmabuf, `renderD128`), with zero EGL/GL and zero protocol errors, on
+  `f688ac9` and on the older build the session happened to be running at the
+  time. Both hypotheses this runbook named — Ghostty version and the GPU/GL
+  path — are refuted. One configuration remains untested: `--tty` at 1.5 on
+  the real `eDP-1`.
 - **Test 3 — cannot run.** Only one connector exists (`card2-eDP-1`,
   connected). Nothing to fall back to until an external display is attached,
   and it also needs the `--tty` seat the live session holds.
