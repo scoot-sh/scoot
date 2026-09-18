@@ -69,7 +69,10 @@
 //! means contributing to the pressure, which is what justifies the kill.
 //! Two connections sitting exactly at grace hold 2 x (128 + 64 + 1) + 14
 //! baseline = 400 fds -- pressure still requires someone past grace, so the
-//! refusal always lands on a contributor.
+//! refusal always lands on a contributor. Stated exactly: `live > grace`
+//! admits the grace+1-th unit, so two connections at the permitted maximum
+//! hold 2 x (129 + 65 + 1) + 14 = 404 fds, 4 above the "two at grace"
+//! figure -- negligible, but the pins in `dispatch.rs` hold it there.
 //!
 //! ## Observation cost and disciplines
 //!

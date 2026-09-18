@@ -816,6 +816,16 @@ gap jumped the queue — each item's own file records why it landed when it did.
   always lands on a contributor and never an innocent bar. Thirteen
   fail-first tests; proven live with a 374-connection horde (52 sheds,
   foot untouched, immediate recovery on drain).
+- **[Pin the fd-pressure grace conjunction's boundaries](docs/backlog/resolved/fd-pressure-grace-boundary-pins-done.md)** —
+  RESOLVED 2026-09-18 (pin, no behavior change — filed from PR #123
+  review): `pressure_refusal`'s pure conjunction is now
+  `pressure_refusal_for`, pinned at both operators and both graces (129th
+  buffer / 65th pool first to refuse; either half alone passes, so the
+  kill always lands on a contributor). Five fail-first tests (each
+  operator neuter proven to fail them, the `||` neuter additionally
+  tripping five pre-existing flood canaries); the ceiling record's 400
+  stands as "two at grace", the `>`-permits-grace+1 maximum of 404 now
+  stated in both module docs.
 - **[Every compositor fd carries close-on-exec](docs/backlog/resolved/spawn-fd-cloexec-audit-done.md)** —
   RESOLVED 2026-09-18 (audit + test-only, no production change): the
   per-source close-on-exec audit PR #114 filed — every fd source verified

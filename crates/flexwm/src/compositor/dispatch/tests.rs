@@ -1218,3 +1218,95 @@ fn a_failed_dmabuf_import_kills_only_that_client_and_drains_its_budget() {
          unit came back through `refuse_import` or through disconnect cleanup"
     );
 }
+
+// --- `pressure_refusal_for` boundary pins -----------------------------------
+//
+// Filed from PR #123 review (`fd-pressure-grace-boundary-pins`): the shipped
+// conjunction is correct as written, and these pin it rather than fixing it.
+// An operator flip here (`>` to `>=`, `&&` to `||`) kills under-grace
+// clients during pressure -- the exact catastrophe the grace exists to
+// prevent -- so each operator direction gets its own failing-loud test.
+//
+// The pure conjunction is tested, not `pressure_refusal` itself: the table
+// half reads the test process's own fd table, which no in-suite test can
+// drive to pressure without starving its siblings. All four call sites (the
+// pool claim and the three buffer claims) funnel through this predicate
+// with one of the two grace constants below, so pinning the constants plus
+// the predicate covers every site.
+
+use super::pressure_refusal_for;
+use crate::compositor::fd_pressure::{PRESSURE_GRACE_BUFFERS, PRESSURE_GRACE_POOLS};
+
+#[test]
+fn pressure_graces_are_128_buffers_and_64_pools() {
+    // A silent grace change moves every boundary below; fail loudly here.
+    assert_eq!(PRESSURE_GRACE_BUFFERS, 128);
+    assert_eq!(PRESSURE_GRACE_POOLS, 64);
+}
+
+#[test]
+fn at_grace_passes_even_under_pressure() {
+    // `>` is exact, not `>=`: holding exactly the grace is never a refusal.
+    // `live > grace` permits grace+1 units, so the permitted per-connection
+    // fd maximum is 2 x (129 + 65 + 1) + 14 = 404, not the 400 "two at
+    // grace" holds.
+    for grace in [PRESSURE_GRACE_BUFFERS, PRESSURE_GRACE_POOLS] {
+        assert!(
+            !pressure_refusal_for(0, grace, true),
+            "an empty client is never refused"
+        );
+        assert!(
+            !pressure_refusal_for(grace - 1, grace, true),
+            "one under grace passes under pressure"
+        );
+        assert!(
+            !pressure_refusal_for(grace, grace, true),
+            "at grace passes under pressure"
+        );
+    }
+}
+
+#[test]
+fn one_past_grace_refuses_under_pressure() {
+    // The 129th buffer / 65th pool is the first refusal -- one past grace,
+    // not at it.
+    assert!(
+        pressure_refusal_for(PRESSURE_GRACE_BUFFERS + 1, PRESSURE_GRACE_BUFFERS, true),
+        "129 live buffers refuse under pressure"
+    );
+    assert!(
+        pressure_refusal_for(PRESSURE_GRACE_POOLS + 1, PRESSURE_GRACE_POOLS, true),
+        "65 live pools refuse under pressure"
+    );
+}
+
+#[test]
+fn past_grace_without_pressure_passes() {
+    // `&&` is exact, not `||`: over grace alone, with a calm table, never
+    // refuses. (Past the per-connection 512/128 caps the cap path still
+    // refuses -- this pins only the pressure half.)
+    for grace in [PRESSURE_GRACE_BUFFERS, PRESSURE_GRACE_POOLS] {
+        assert!(
+            !pressure_refusal_for(grace + 1, grace, false),
+            "past grace with a calm table passes"
+        );
+        assert!(
+            !pressure_refusal_for(u32::MAX, grace, false),
+            "any holding with a calm table passes"
+        );
+    }
+}
+
+#[test]
+fn under_grace_with_pressure_passes() {
+    // The other half of `&&` vs `||`: pressure alone, with the client under
+    // grace, never refuses -- this is the innocent-client guarantee.
+    for grace in [PRESSURE_GRACE_BUFFERS, PRESSURE_GRACE_POOLS] {
+        for live in [0, 1, grace - 1, grace] {
+            assert!(
+                !pressure_refusal_for(live, grace, true),
+                "live {live} under a {grace} grace passes under pressure"
+            );
+        }
+    }
+}
