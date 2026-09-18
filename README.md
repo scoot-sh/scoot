@@ -1223,7 +1223,9 @@ its connection and its `wl_surface`s are still perfectly alive.
 - **Up to one frame of the unlocked screen can still be on the display**
   between the lock request and the first blanked frame. That is inherent (the
   protocol's `locked` ordering exists precisely because of it), not something
-  flexwm defers.
+  flexwm defers. Input is already captured during that frame — the keyboard
+  and pointer leave the window the instant the request arrives — so nothing
+  typed in that window reaches the unlocked session.
 - **flexwm blanks immediately rather than waiting for the lock client to
   draw.** Some compositors wait up to a second for lock surfaces so the
   transition doesn't flash black; flexwm doesn't, deliberately — waiting means

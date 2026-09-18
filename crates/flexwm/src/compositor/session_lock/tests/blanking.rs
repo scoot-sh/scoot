@@ -77,6 +77,108 @@ fn a_lock_surface_with_no_buffer_yet_shows_the_backdrop() {
     assert_whole_screen_is(&pixels, BLACK_BGRA, "a lock surface with no buffer");
 }
 
+/// The lock sequence, in order: input is captured the moment the request is
+/// accepted, the framebuffer blanks on the first frame after that, and
+/// `locked` goes out only once the blanked frame exists.
+///
+/// This is the ordering the blank-timing ticket asked about
+/// (`docs/backlog/protocols/session-lock-blank-timing.md`): there *is* a
+/// window in which the desktop is still in the framebuffer while input is
+/// already locked -- between the accept and the first frame -- and that
+/// direction is deliberate. The reverse (blank pixels on screen while
+/// keystrokes still reach the window underneath) would leak the password
+/// into the unlocked session, and delaying the blank until the locker draws
+/// (the niri shape, up to a second) would keep rendering the unlocked
+/// session for that whole wait.
+///
+/// Driven with the render target taken away so no frame tick can blank or
+/// confirm early: after the accept, the stale framebuffer still holds the
+/// desktop, nothing is confirmed, and both focuses have already left the
+/// window.
+#[test]
+fn lock_captures_input_before_the_first_blanked_frame_confirms_it() {
+    let mut fixture = Fixture::new();
+    fixture.run(Step::MapWindow);
+    // The pointer over the window's own buffer, so "the pointer left it"
+    // means something.
+    fixture.state.pointer_move(30.0, 30.0);
+    fixture.settle();
+    let before = fixture.report();
+    assert_eq!(
+        before.keyboard_focus,
+        Some(Which::Window(0)),
+        "the window should have the keyboard before the lock"
+    );
+    assert_eq!(
+        before.pointer_focus,
+        Some(Which::Window(0)),
+        "the pointer should be over the window before the lock"
+    );
+    assert!(
+        contains(&fixture.render(), WINDOW_BGRA),
+        "the window should be on screen before the lock"
+    );
+
+    // No render target: the accept runs, but no frame can blank the screen
+    // or confirm the lock.
+    let backend = fixture.state.backend.take().expect("a backend");
+    fixture.send_step(0, Step::LockNoWait);
+    fixture.settle();
+    let ack = fixture.wait_for_ack(0);
+    assert!(matches!(ack, Ack::Done));
+    assert!(
+        fixture.state.session_lock.is_locked(),
+        "the session locks as soon as the request arrives"
+    );
+    assert!(
+        fixture.state.session_lock.awaiting_blank(),
+        "with no frame drawn, the blanked frame is still outstanding"
+    );
+
+    // Input already captured, before any pixel moved.
+    let accepted = fixture.report();
+    assert_eq!(
+        accepted.keyboard_focus, None,
+        "the window must lose the keyboard at accept, before the first blanked frame"
+    );
+    assert_eq!(
+        accepted.pointer_focus, None,
+        "the pointer must leave the window at accept, before the first blanked frame"
+    );
+    assert_eq!(
+        accepted.locked, 0,
+        "the client must not hear `locked` before a blanked frame exists"
+    );
+    assert_eq!(accepted.finished, 0);
+
+    // The framebuffer still holds the desktop: the accepted-but-unconfirmed
+    // window, read back without rendering anything new.
+    fixture.state.backend = Some(backend);
+    let stale = fixture.pixels();
+    assert!(
+        contains(&stale, WINDOW_BGRA),
+        "no frame has blanked the screen yet, so the desktop pixels are still there"
+    );
+
+    // The first frame blanks, and only then confirms.
+    let blanked = fixture.render();
+    assert_whole_screen_is(
+        &blanked,
+        BLACK_BGRA,
+        "the first frame after the accept blanks the screen",
+    );
+    assert!(
+        fixture.state.session_lock.pending.is_none(),
+        "the first drawn frame should confirm the lock"
+    );
+    let confirmed = fixture.report();
+    assert_eq!(
+        confirmed.locked, 1,
+        "the client should have been told `locked`, but only after the blank"
+    );
+    assert_eq!(confirmed.finished, 0);
+}
+
 /// The protocol's own words: "If a lock surface on an active output is
 /// destroyed before the ext_session_lock_v1.unlock_and_destroy event is sent,
 /// the compositor must fall back to rendering a solid color."

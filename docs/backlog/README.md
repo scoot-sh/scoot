@@ -186,7 +186,13 @@ actionable.
   (backend panics on in-bind destructor events)
 - [Lock surfaces are per-output; flexwm has one output](./protocols/lock-surfaces-per-output.md)
 - [Unbounded lock surfaces via duplicate `wl_output` binds](./protocols/lock-surface-duplicate-wl-output.md)
-- [Lock blanks immediately instead of waiting for the first surface](./protocols/session-lock-blank-timing.md)
+- [Lock blanks immediately instead of waiting for the first surface](./resolved/session-lock-blank-timing-done.md)
+  — RESOLVED 2026-09-18 (decide + pin, no behavior change): the accept →
+  input-captured → first-frame-blanks → `locked`-after-blank ordering
+  verified in-harness and pinned by a new combined test (fail-first
+  proven by neutering the accept-time transition); the niri-shape wait
+  stays declined, revisitable only if the black flash proves annoying in
+  daily use
 - [`locked` sent on rendered frame, not confirmed vblank](./resolved/session-lock-vblank-confirm-done.md)
   — RESOLVED 2026-09-17 (PR #84): `locked` waits for the vblank of the flip carrying
   the blanked frame under `--tty` (sequence-tracked; one-second fallback
