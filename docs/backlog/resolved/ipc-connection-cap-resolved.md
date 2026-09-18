@@ -13,7 +13,7 @@ event-loop thread with no rate limit", and carried three concerns under that
 one title. Two of them are closed here and the title now names them; the
 third is still open and has been re-filed on its own so it is not lost with
 this file:
-[screenshot capture and encode on the event-loop thread](../ipc/screenshot-encode-on-event-loop.md).
+[screenshot capture and encode on the event-loop thread](./screenshot-encode-off-thread-resolved.md).
 
 ## What it said (the two concerns closed here)
 
@@ -145,7 +145,7 @@ connection.
 
 Two things this work found in the code around it, both pre-existing, both
 filed rather than folded in:
-[the accept loop swallowing `EMFILE`](../ipc/accept-loop-swallows-emfile.md)
+[the accept loop swallowing `EMFILE`](./accept-loop-emfile-resolved.md)
 and [what a shared connection table means for an innocent
 client](../resolved/connection-cap-denies-the-same-user-done.md) when another of the
 same user holds every slot.

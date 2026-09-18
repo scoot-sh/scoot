@@ -142,5 +142,5 @@ shared connection table costs an innocent
 client](../resolved/connection-cap-denies-the-same-user-done.md). Cited there rather
 than fixed here: the bound is doing its job (finite memory, refused not
 queued), and the unfairness is the documented price of sharing it.
-[The accept loop and `EMFILE`](../ipc/accept-loop-swallows-emfile.md) from
+[The accept loop and `EMFILE`](./accept-loop-emfile-resolved.md) from
 the same review stays open too.

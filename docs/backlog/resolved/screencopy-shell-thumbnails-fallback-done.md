@@ -24,7 +24,7 @@ toplevel source either, so there is no other protocol to reach for.
 `isReady` readiness flag on GPU-less flexwm, and the already-shipped ext
 output-capture path then displays over shm.** The overview preview half of
 this entry is unblocked pending the advertisement itself, which is filed as
-[its own implementation item](linux-dmabuf-advertisement.md) — a small
+[its own implementation item](./linux-dmabuf-advertisement-done.md) — a small
 honest `linux_dmabuf` advertisement, not capture work. Per-window thumbnails
 (the second half below) stay open behind it. The probe scaffolding was
 reverted before review; the tree carrying this record is docs-only.
@@ -42,7 +42,7 @@ behind coordinator say-so*, not *flips only by lying*.
 
 Base `9d265c2` plus an uncommitted PROBE diff to
 `crates/flexwm/src/compositor/screencopy.rs` (122 insertions, reverted;
-full text in the [follow-up item](linux-dmabuf-advertisement.md)): Smithay's
+full text in the [follow-up item](./linux-dmabuf-advertisement-done.md)): Smithay's
 real `DmabufState` + `DmabufHandler` at the pinned rev, global version 6 via
 `create_global_with_default_feedback`, feedback built by
 `DmabufFeedbackBuilder` with `main_device` = `/dev/dri/card0`'s real rdev
@@ -147,7 +147,7 @@ and took the same feedback — Qt-side probing, inert.)
 
 The brief as filed — kept verbatim below so the answer above can be checked
 against the question asked. Status: ANSWERED YES, 2026-09-17; the remaining
-work is the [advertisement implementation](linux-dmabuf-advertisement.md)
+work is the [advertisement implementation](./linux-dmabuf-advertisement-done.md)
 and the thumbnail half underneath it.
 
 The same probe turned up a second, wider gate: quickshell 0.3.1 never

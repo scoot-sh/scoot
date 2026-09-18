@@ -143,7 +143,7 @@ render with the cursor dropped. `flexwm msg screenshot` has the same property.
 
 How many sessions one client may hold — N sessions with N parked frames cost
 N full-screen copies on a tick the screen changes. Filed as
-[its own item](../protocols/screencopy-session-cap.md) with the reasoning for
+[its own item](./screencopy-session-cap-done.md) with the reasoning for
 why it was not simply capped (the same per-frame work N mapped surfaces
 already demand; and a *global* cap would let one client deny another, which
 Smithay's handler API gives no per-client alternative to).
@@ -505,7 +505,7 @@ forcing the byte at all is ~13% off a release capture and ~77% off a debug
 one, because `Xrgb8888`'s fourth byte is undefined and a conforming client
 (`grim` demonstrably) never reads it. That is a behaviour question rather than
 an optimization, so it is
-[filed](../protocols/screencopy-xrgb-alpha-forcing.md) -- with the probable
+[filed](./screencopy-xrgb-alpha-forcing-done.md) -- with the probable
 answer, which is to force only when `background_color`'s alpha is actually
 below 1.0 -- rather than decided mid-review.
 
