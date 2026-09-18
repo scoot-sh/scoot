@@ -2,7 +2,7 @@
 title: "Noctalia enablement probe — results 2026-09-14, re-probed 2026-09-18 (gap 1 closed, ticket resolved)."
 status: "resolved"
 area: "resolved"
-priority: "high"
+priority: null
 blocked: null
 ---
 
