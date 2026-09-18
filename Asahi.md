@@ -9,7 +9,7 @@ kept intact for re-runs on other Apple Silicon models.
 
 | What it unblocks | Priority | Needs a VT? | Status |
 | --- | --- | --- | --- |
-| [Ghostty fails at `scale = 1.5`](docs/backlog/protocols/ghostty-fails-at-1-5.md) | high → low | no | **did not reproduce** (2026-09-18) |
+| [Ghostty fails at `scale = 1.5`](docs/backlog/resolved/ghostty-fails-at-1-5-done.md) | high → none | no | **RESOLVED, not reproducible** (2026-09-18) |
 | [Does `--gpu` actually fix this machine](docs/backlog/resolved/tty-gpu-config-key-done.md) — the residual on a resolved entry | — | yes | **closed**: not needed, the search works (2026-09-18) |
 | Issue #48's unconfirmed connector fallback | — | yes | still open — needs an external display |
 
@@ -25,13 +25,30 @@ node.
   no `--gpu` flag and no `[tty] gpu` key, with `/dev/dri/card2` as its only
   open DRM fd. The automatic search works on Apple Silicon; `--gpu` is a
   convenience here, not a requirement. Read-only `/proc/<pid>/fd` and
-  `flexwm msg outputs` gave this without restarting anything.
-- **Test 1 — did not reproduce**, at either scale, on the real AGX GPU
-  (dmabuf, `renderD128`), with zero EGL/GL and zero protocol errors, on
-  `f688ac9` and on the older build the session happened to be running at the
-  time. Both hypotheses this runbook named — Ghostty version and the GPU/GL
-  path — are refuted. One configuration remains untested: `--tty` at 1.5 on
-  the real `eDP-1`.
+  `flexwm msg outputs` gave this without restarting anything — and the
+  canonical log lines this section asks for were captured on the next reboot,
+  once the session started logging to a file:
+
+  ```
+  WARN …tty::gpu: drm: device unusable path=/dev/dri/card1
+       reason=has no usable KMS pipeline -- loading its DRM resources failed
+       (Operation not supported (os error 95))
+  INFO …tty: drm: driving this device path=/dev/dri/card2 connector=eDP-1
+       width=2560 height=1600
+  ```
+
+  Rejected candidate with its reason, then the winner — exactly the shape
+  "What to look for in the log" below describes.
+- **Test 1 — RESOLVED, does not reproduce anywhere.** Not under `--headless`
+  at either scale on the real AGX GPU (dmabuf, `renderD128`), with zero
+  EGL/GL and zero protocol errors, on `f688ac9` and on the older build the
+  session happened to be running at the time — which refutes both hypotheses
+  this runbook named, Ghostty version and the GPU/GL path. And **not under
+  `--tty` at 1.5 on the real `eDP-1` either**: the machine was rebuilt with
+  `scale = 1.5` and rebooted into it, and Ghostty mapped and was used
+  interactively at logical 1707×1067. That was the original reported
+  configuration and the last one capable of testing this, so the entry is
+  archived as not reproducible with the cause never captured.
 - **Test 3 — cannot run.** Only one connector exists (`card2-eDP-1`,
   connected). Nothing to fall back to until an external display is attached,
   and it also needs the `--tty` seat the live session holds.

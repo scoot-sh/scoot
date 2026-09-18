@@ -1,9 +1,9 @@
 ---
-title: "Ghostty fails to load at `[output] scale = 1.5` (works at 2.0); did NOT reproduce on the reporter's own Asahi machine, refuting both leading hypotheses — root cause still unidentified"
-status: "open"
-area: "protocols"
-priority: "low"
-blocked: "needs a --tty session at scale 1.5 on the reporter's machine; --headless and --nested are both now exhausted"
+title: "Ghostty fails to load at `[output] scale = 1.5` (works at 2.0) — RESOLVED as NOT REPRODUCIBLE: refuted on the reporter's own Asahi machine under every backend that can test it, including the original `--tty` configuration."
+status: "resolved"
+area: "resolved"
+priority: null
+blocked: null
 ---
 
 # Ghostty fails to load at `[output] scale = 1.5` (works at 2.0)
@@ -15,15 +15,30 @@ Reported by the user on their Asahi Linux (M2) laptop, 2026-09-14, right after
 - `[output] scale = 1.5` → **Ghostty does not load.**
 - `foot` works at both `1.5` and `2.0`.
 
-## Status after the Asahi run (2026-09-18)
+## RESOLVED — not reproducible (2026-09-18)
 
-**It did not reproduce on the reporting hardware, and both candidate
-hypotheses below are now refuted.** Priority drops from high to low: the
-symptom is not observable on the machine that produced it, and the user
-already daily-drives the `scale = 2.0` workaround. It is kept open rather
-than resolved only because the root cause was never identified and one
-configuration — the original one — remains untested. See "Asahi hardware run
-(2026-09-18)" below.
+**Refuted on the reporting hardware under every backend capable of testing
+it, including the original `--tty` one.** Both candidate hypotheses this
+entry named are dead, and the last untested configuration has now been run.
+The root cause was never identified and there is nothing left to investigate
+without a fresh reproduction, so this is archived rather than left open.
+
+The closing evidence, in the order it was obtained:
+
+1. `--headless` at 1.5 and 2.0 on the real AGX GPU — maps and draws at both,
+   zero EGL/GL errors, zero protocol errors. Refutes the GPU/GL hypothesis
+   (the leading one) and the Ghostty-version hypothesis. See "Asahi hardware
+   run" below.
+2. `--nested` — cannot test this at all; flexwm refuses output scaling there
+   by design. Recorded so the attempt is not repeated.
+3. **`--tty` at `scale = 1.5` on the real `eDP-1` — the original
+   configuration — works.** See "The original configuration, finally tested"
+   below.
+
+**Revisit condition:** if the symptom is ever seen again, capture
+`~/.local/state/flexwm/session.log` (the session now logs there; see the
+nixos-config `flexwm-session` wrapper) plus `WAYLAND_DEBUG=1` Ghostty stderr,
+and reopen with both. Without a reproduction there is no next step.
 
 ## What was found and fixed (a real, separate protocol gap)
 
@@ -40,7 +55,7 @@ client receives **both** `preferred_scale` (`1.5`) and
 `preferred_buffer_scale` (`ceil(1.5) = 2`). Regression-tested on the dev VM
 with a real client, red/green.
 
-## Why this entry is still open, not resolved
+## Why the PR #31 fix did not close this (history)
 
 **The fix does not explain the reported symptom, and review found evidence it
 may not fix it.** GTK4's own source
@@ -143,14 +158,14 @@ taken against. It still comes up on `eDP-1` at `scale = 2.0` — which is the
 workaround, not the test. The `--tty`-at-1.5 question below is therefore
 still open, and is now one `home.nix` edit away rather than a rebuild away.
 
-### The one configuration still untested, stated plainly
+### Why `--tty` still had to be tested separately
 
 The original report was against the user's real **`--tty`** desktop session on
-`eDP-1`. Everything above is `--headless`. That gap mattered less while the
+`eDP-1`; everything above is `--headless`. That gap mattered less while the
 GL-path hypothesis stood — `Asahi.md` justified `--headless` on the grounds
 that the client's GL stack is identical either way, which is true and is why
-the hypothesis could be refuted there. But with the GL path eliminated, the
-backend difference is now the largest remaining variable rather than a
+the hypothesis could be refuted there. But refuting it is exactly what made
+the backend difference the largest remaining variable rather than a
 negligible one.
 
 **`--nested` cannot substitute.** It was tried on 2026-09-18 and flexwm
@@ -163,41 +178,75 @@ WARN flexwm::compositor: output scaling is not supported under --nested
 
 The client saw only `preferred_scale(120)`, so the run says nothing about 1.5.
 `--headless` and `--tty` are therefore the only two backends that can test
-this at all, and `--headless` is now exhausted.
+this at all.
 
-## What this narrows it to
+### The original configuration, finally tested — it works
 
-With (1) and (2) refuted and the dev VM and Asahi runs agreeing to the pixel,
-what is left is narrow:
+On 2026-09-18 the machine was rebuilt with `[output] scale = 1.5` in
+`home.nix` and rebooted into it. This is the reported configuration exactly:
+`--tty`, real DRM modesetting, real `eDP-1`, fractional scale.
 
-1. **A `--tty`-specific interaction at fractional scale** — real DRM
-   modesetting and eDP-1's actual geometry (2560×1600 physical; 1706×1066
-   logical at 1.5, versus the 854×534 the headless probe used). Untested.
-2. **Something environmental at the time of the report that has since
-   changed** — a Ghostty config, a GTK/Mesa version, or one of the many
-   compositor changes between 2026-09-14 and 2026-09-18. If so there is
-   nothing left to fix and this closes on the next clean `--tty` run.
-3. **A misreport or a transient** — possible but unevidenced, and not worth
-   assuming over the user's direct observation.
+```
+flexwm msg outputs  ->  eDP-1, scale 1.5, logical 1707x1067
+flexwm msg windows  ->  com.mitchellh.ghostty, "◐ Asahi.md validation"
+```
 
-This entry previously carried a third candidate, "`wl_output` version or
-other global differences", marked *less likely*. It is dropped rather than
-lost: the dev VM and the Asahi machine run the same flexwm build and now
-produce byte-identical logical geometry and the same advertised globals, so
-a global-set difference between them is ruled out. A `--headless`-vs-`--tty`
-difference in what `wl_output` reports is *not* ruled out, and is folded
-into candidate 1 above.
+**Ghostty mapped and was used interactively** — the session doing the
+verifying was itself running inside that Ghostty window at 1.5. Logical
+1707×1067 is 2560/1.5 × 1600/1.5, so the fractional scale was genuinely
+applied and not silently rounded.
 
-## What to do next
+The session log (now captured; see the revisit condition at the top) is clean
+of anything relevant: no protocol error, no EGL/GL error, no client failure.
+The only flexwm-level warnings are the expected `drm: device unusable` for
+`card1` and a benign Smithay `Failed to destroy old mode property blob` during
+the first modeset.
 
-1. **The cheap decisive test, which only the user can run:** set
-   `[output] scale = 1.5` in `~/.config/flexwm/config.toml` and restart the
-   session. `Ctrl+Alt+F<vt>` remains the recovery path, so this is low-risk.
-   If Ghostty maps, close this entry; if it does not, capture the session's
-   stderr (it goes to the VT — redirect it to a file) and the entry finally
-   has its reproduction.
-2. Do not ship a compositor change for this until that run names a flexwm
-   defect. The protocol work (#30, #31) stands on its own merits regardless.
+### Adjacent measurement: fractional scale is not slower to composite
+
+Worth recording because it was the last plausible mechanism for a
+"doesn't load" that was really a "too slow to appear". It isn't one.
+`--headless` at 2560×1600 with an identical fixed-rate (20 fps) client:
+
+| scale | flexwm CPU |
+| --- | --- |
+| 2.0 | 11.2% |
+| 1.5 | 11.3% |
+
+Indistinguishable, and 0.0% at both with a static screen, so damage-limited
+redraw is working and there is no spin. On the live `--tty` session flexwm
+sits around 48% CPU while a client animates continuously at 2560×1600 —
+that is the honest cost of CPU compositing 4.1 megapixels at display refresh,
+it is **not** scale-dependent, and it is not evidence for this entry.
+
+## What is left, after everything above
+
+Every mechanism this entry proposed has been tested and eliminated:
+
+| candidate | verdict |
+| --- | --- |
+| Ghostty version | refuted — 1.3.1 on both the dev VM and the Asahi machine |
+| GPU/GL path (the leading one) | refuted — real AGX, dmabuf, no EGL/GL error at either scale |
+| `--tty`-specific interaction at fractional scale | refuted — the original configuration was run and works |
+| fractional scale being too slow to appear | refuted — 11.2% vs 11.3% CPU, see the measurement above |
+| `wl_output` version / other global differences | ruled out — same build, byte-identical logical geometry |
+
+What remains is unfalsifiable from here: **something environmental at the
+time of the report that has since changed** — a Ghostty config, a GTK/Mesa
+version, or one of the many compositor changes between 2026-09-14 and
+2026-09-18. There is no evidence pointing at any specific one, and no test
+that would distinguish them without a live reproduction.
+
+Recorded plainly, because the alternative framing would be dishonest: the
+user's original observation is not disputed, and this does **not** conclude
+it was a misreport. It concludes that the symptom is gone and its cause was
+never captured. That is a real outcome, not a diagnosis.
+
+## What not to do next
+
+Do not ship a compositor change for this. Nothing in three separate
+investigations named a flexwm defect, and the protocol work (#30, #31) stands
+on its own merits regardless of this symptom.
 
 ## Related
 

@@ -36,7 +36,7 @@ reported symptom that surfaced it — Ghostty failing to load at
 `[output] scale = 1.5` — is **not** confirmed fixed by this, and review found
 GTK4 ignores that event while a fractional object exists; it is tracked
 separately and still open in
-[`../protocols/ghostty-fails-at-1-5.md`](../protocols/ghostty-fails-at-1-5.md).
+[`./ghostty-fails-at-1-5-done.md`](./ghostty-fails-at-1-5-done.md).
 
 The original diagnosis is kept below for history.
 

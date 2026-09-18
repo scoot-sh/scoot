@@ -191,12 +191,26 @@ delta included PR #122, which touches `tty/mod.rs`: the additions are tablet
 event arms and two `has_capability(TabletTool)` guards, and this confirms
 they left device selection alone.
 
-**Not captured, and why:** the literal `drm: driving this device` line. The
-session's stderr goes to `/dev/tty1` uncaptured, and retrieving it would mean
-restarting the user's desktop — which was also hosting the session doing the
-measuring, and which only one process can hold the `--tty` seat for. The
-open-fd evidence answers the same question without that cost. Anyone wanting
-the log line can add a redirect to the greetd session command.
+**The log lines, captured on the next reboot.** Initially they were not: the
+session's stderr went to `/dev/tty1` uncaptured, and retrieving it would have
+meant restarting the desktop that was hosting the measurement. That gap was
+then closed at the source — the nixos-config session entry now runs flexwm
+through a small `flexwm-session` wrapper that redirects to
+`~/.local/state/flexwm/session.log` — and the next boot produced exactly what
+this entry originally asked for:
+
+```
+WARN flexwm::compositor::tty::gpu: drm: device unusable path=/dev/dri/card1
+     reason=has no usable KMS pipeline -- loading its DRM resources failed
+     (Operation not supported (os error 95))
+INFO flexwm::compositor::tty: drm: driving this device path=/dev/dri/card2
+     connector=eDP-1 width=2560 height=1600
+```
+
+The render node rejected *with its reason*, then the display controller
+accepted — the working-fallback shape, from the machine itself rather than
+inferred from open file descriptors. The `os error 95` is the exact signature
+predicted for loading KMS resources from a render-only device.
 
 **What stays untested, and why it no longer blocks:** the `[tty] gpu` key and
 `--gpu` flag themselves on *this* hardware. They did not need to run, because

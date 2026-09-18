@@ -12,7 +12,8 @@ blocked: null
 gap (a v6 client received the fractional value but not its integer companion).
 It is **not** a confirmed fix for the Ghostty-at-`1.5` symptom that surfaced it
 — review found GTK4 ignores this event while a fractional object exists. See
-`../protocols/ghostty-fails-at-1-5.md`, which stays open for that symptom.
+`./ghostty-fails-at-1-5-done.md`, which was later resolved as NOT reproducible
+(2026-09-18) without this event ever being implicated either way.
 
 Reported by the user on their Asahi Linux (M2) laptop, 2026-09-14, right after
 `[output] scale` (PR #30) landed:
@@ -117,4 +118,5 @@ early whenever a `wp_fractional_scale_v1` object exists — which it always does
 now — so a GTK4/Ghostty client likely ignores the event this fix adds. The
 confirmed part is that a v6 client now actually receives the integer
 `preferred_buffer_scale`, closing the diagnosed protocol gap. The Ghostty `1.5`
-failure itself remains open: `../protocols/ghostty-fails-at-1-5.md`.
+failure itself was never explained: it stopped reproducing and closed as NOT
+reproducible on 2026-09-18 -- `./ghostty-fails-at-1-5-done.md`.
