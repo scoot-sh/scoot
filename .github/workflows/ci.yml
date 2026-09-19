@@ -90,9 +90,10 @@ jobs:
           echo "XDG_RUNTIME_DIR=$RUNNER_TEMP/xdg" >>"$GITHUB_ENV"
 
       # Split restore/save rather than `actions/cache`: the combined action
-      # saves only when the job succeeds, so every red run would rebuild
+      # saves only when the job succeeds, so a red run on main would rebuild
       # Smithay from scratch -- exactly when a fast turnaround matters most.
-      # The save step below is `if: always()`.
+      # The save step below therefore runs on failure too, but only on main
+      # and never on cancellation; see its own comment for why.
       - name: Restore the cargo cache
         id: cargo-cache
         uses: actions/cache/restore@v6
@@ -342,7 +343,9 @@ jobs:
         run: cargo check --workspace --all-targets
 
       - name: Save the cargo cache
-        if: always()
+        # Same condition as the Linux job's save -- see the comment there for
+        # why it is not `always()` and not every PR run.
+        if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
         uses: actions/cache/save@v6
         with:
           path: |
