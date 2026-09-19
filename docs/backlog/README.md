@@ -416,6 +416,15 @@ falsify. Read `flexwm` there as `scoot`.
   — RESOLVED 2026-09-16, together with the `--tty` entry above that had
   independently (and wrongly) filed the same failure as a compositor bug.
 - [Enhanced hardware/DRM testing ideas](./testing/hardware-testing-ideas.md) (research)
+- [No CI: every verification run is manual and self-reported](./testing/ci-test-run.md)
+  — LANDED 2026-09-19 (PR #140): `.github/workflows/ci.yml` runs fmt,
+  clippy, `cargo nextest run --workspace`, `cargo test --workspace`, the
+  `--headless` smoke test, and an `ldd` pair asserting the default build
+  links no `libgbm`/`libEGL` while the `--features gpu-scanout` build does
+  — all through `nix develop`; plus a macOS `cargo check` of the `scoot
+  msg` client. 4m30s warm, 8m05s cold. What CI cannot cover (`--tty`, a
+  DRM/VT seat, GPU hardware, `--nested`, performance) is named in the
+  workflow's own header.
 - [Extract a shared test harness; split the largest test files; adopt `cargo-nextest`](./resolved/large-test-file-organization-done.md)
   — RESOLVED 2026-09-16: `compositor/test_support.rs` now carries the
   real-client harness the five largest suites each reimplemented; the two

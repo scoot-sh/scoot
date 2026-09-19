@@ -3,6 +3,8 @@ trailing motion lines](docs/assets/logo.png)
 
 # scoot
 
+[![CI](https://github.com/scoot-sh/scoot/actions/workflows/ci.yml/badge.svg)](https://github.com/scoot-sh/scoot/actions/workflows/ci.yml)
+
 A scrolling-tiling Wayland compositor, in the shape of
 [niri](https://github.com/YaLTeR/niri): lightweight, fast, GPU-optional, and
 built to be driven by a script or an agent as easily as by a keyboard.
@@ -166,8 +168,7 @@ are at the top of [docs/protocols.md](docs/protocols.md).
 ```sh
 nix develop                     # every dependency, on Linux or macOS
 cargo test --workspace          # the compositor only compiles on Linux
-cargo nextest run --workspace   # one process per test; runs no doctests, so
-                                # it is an addition, not a replacement
+cargo nextest run --workspace   # one process per test -- the required runner
 ```
 
 `crates/scoot-core` is the platform-independent layout engine (no Wayland, no
@@ -175,6 +176,16 @@ I/O), `crates/scoot-ipc` the wire protocol and a client over it, `crates/scoot`
 the CLI and the Smithay-based compositor. `vm/README.md` sets up a Mac-native
 NixOS VM to run the Linux-only half in; `CLAUDE.md` has the engineering
 standards.
+
+Every pull request runs `.github/workflows/ci.yml`, which does the above
+plus `cargo fmt`, `cargo clippy -D warnings`, `scripts/smoke-test.sh` under
+`--headless`, an `ldd` check that the default build links no `libgbm` or
+`libEGL` (running with no GPU is a hard requirement, not a preference), and
+a macOS `cargo check` of the `scoot msg` client. It runs everything through
+`nix develop`, so the flake stays the only dependency list. **A green check
+is not full coverage**: a GitHub runner has no seat, no VT, no `/dev/dri`
+and no GPU, so `--tty`, `--nested`, every GPU path and all performance work
+stay manual on the dev VM — the workflow's header says so in full.
 
 ## License
 
