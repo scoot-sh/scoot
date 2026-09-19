@@ -88,14 +88,27 @@ fn pixel(bytes: &[u8], width: i32, x: i32, y: i32) -> [u8; 4] {
 /// hand-written scenes that could differ.
 fn marker_pixels(renderer: RendererKind) -> Vec<u8> {
     let output = test_output(MARKER_CANVAS, MARKER_CANVAS);
-    let mut backend =
-        Backend::new(&output, MARKER_CANVAS, MARKER_CANVAS, renderer).expect("a backend");
+    let mut backend = Backend::new(
+        &output,
+        MARKER_CANVAS,
+        MARKER_CANVAS,
+        renderer,
+        ScanoutHandoff::default(),
+    )
+    .expect("a backend");
     let Backend {
         pipeline, damage, ..
     } = &mut backend;
     match pipeline {
         Pipeline::Pixman(cpu) => draw_markers(&mut cpu.renderer, &mut cpu.image, damage),
         Pipeline::Gles(gpu) => draw_markers(&mut gpu.renderer, &mut gpu.buffer, damage),
+        // Unreachable: `Backend::new` only builds this variant from a
+        // `ScanoutHandoff` carrying a renderer, and the one above is empty.
+        // The scanout tier needs a live DRM device, so no test can build one;
+        // the orientation contract it shares is pinned through the GLES arm,
+        // which is the same `GlesRenderer` drawing the same elements.
+        #[cfg(feature = "gpu-scanout")]
+        Pipeline::Scanout(_) => unreachable!("no test builds a scanout pipeline"),
     }
     backend
         .capture(<[u8]>::to_vec)
@@ -194,7 +207,8 @@ fn both_renderers_lay_the_same_frame_out_the_same_way() {
 fn a_capture_covers_the_whole_target_at_the_backends_own_size() {
     for renderer in [RendererKind::Pixman, RendererKind::Gles] {
         let output = test_output(40, 24);
-        let mut backend = Backend::new(&output, 40, 24, renderer).expect("a backend");
+        let mut backend =
+            Backend::new(&output, 40, 24, renderer, ScanoutHandoff::default()).expect("a backend");
         assert_eq!(backend.size(), (40, 24), "{renderer}");
         assert_eq!(backend.renderer(), renderer, "{renderer}");
         let bytes = backend
@@ -230,12 +244,17 @@ fn the_flag_beats_the_config_file_and_neither_means_pixman() {
     );
 }
 
-/// `--tty` overrides both: there is no GPU scanout path yet, and reading a
-/// GPU frame back only to memcpy it into a dumb buffer would be slower than
-/// compositing on the CPU in the first place. A warning and pixman, never a
-/// refusal to start -- on `--tty`, scoot *is* the session.
+/// Without a scanout tier compiled in, `--tty` overrides both: the only GLES
+/// pipeline that exists there reads the GPU frame back only to memcpy it into
+/// a dumb buffer, which is slower than compositing on the CPU in the first
+/// place. A warning and pixman, never a refusal to start -- on `--tty`, scoot
+/// *is* the session.
+///
+/// `resolve_with` rather than `resolve` so both answers are pinned from
+/// either build: which Cargo features this test binary happens to carry must
+/// not decide which half of the behaviour is covered.
 #[test]
-fn tty_keeps_pixman_however_gles_was_asked_for() {
+fn tty_without_a_scanout_tier_keeps_pixman_however_gles_was_asked_for() {
     use RendererKind::{Gles, Pixman};
     for (flag, file) in [
         (Some(Gles), None),
@@ -243,11 +262,51 @@ fn tty_keeps_pixman_however_gles_was_asked_for() {
         (Some(Gles), Some(Gles)),
         (Some(Gles), Some(Pixman)),
     ] {
-        assert_eq!(resolve(flag, file, true), Pixman, "{flag:?} / {file:?}");
+        let (chosen, warning) = resolve_with(flag, file, true, false);
+        assert_eq!(chosen, Pixman, "{flag:?} / {file:?}");
+        assert!(
+            warning.is_some_and(|text| text.contains("gpu-scanout")),
+            "the refusal must name the missing Cargo feature, not just say no"
+        );
     }
     // ...and asking for nothing under --tty is still the same default, not a
-    // second code path.
-    assert_eq!(resolve(None, None, true), Pixman);
+    // second code path, and warns about nothing.
+    assert_eq!(resolve_with(None, None, true, false), (Pixman, None));
+}
+
+/// With the scanout tier compiled in, `--tty --renderer gles` is a real
+/// choice and resolves to `gles` -- silently, because there is nothing to
+/// warn about. Whether the *device* can actually drive it is `tty::init`'s
+/// question, not this one's, and it falls back there with its own distinct
+/// wording.
+#[test]
+fn tty_with_a_scanout_tier_honours_gles() {
+    use RendererKind::{Gles, Pixman};
+    assert_eq!(resolve_with(Some(Gles), None, true, true), (Gles, None));
+    assert_eq!(resolve_with(None, Some(Gles), true, true), (Gles, None));
+    // An explicit `--renderer pixman` still beats a file asking for gles,
+    // under `--tty` exactly as anywhere else.
+    assert_eq!(
+        resolve_with(Some(Pixman), Some(Gles), true, true),
+        (Pixman, None)
+    );
+    // And the default is still pixman: having the tier available does not
+    // make it the default.
+    assert_eq!(resolve_with(None, None, true, true), (Pixman, None));
+}
+
+/// The scanout tier is a `--tty` thing only: `--headless`/`--nested` are
+/// unaffected by whether the feature is compiled in, in either direction.
+#[test]
+fn the_scanout_feature_changes_nothing_off_tty() {
+    use RendererKind::{Gles, Pixman};
+    for available in [false, true] {
+        assert_eq!(
+            resolve_with(Some(Gles), None, false, available),
+            (Gles, None)
+        );
+        assert_eq!(resolve_with(None, None, false, available), (Pixman, None));
+    }
 }
 
 #[test]

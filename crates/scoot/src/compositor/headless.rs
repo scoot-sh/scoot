@@ -15,7 +15,7 @@ use smithay::utils::Transform;
 
 use super::State;
 use super::output_scale::smithay_scale;
-use super::render::{self, Backend};
+use super::render::{self, Backend, ScanoutHandoff};
 use super::session_lock::LOCK_VBLANK_TIMEOUT;
 use super::tty::Tty;
 
@@ -85,7 +85,7 @@ pub const OUTPUT_NAME: &str = "headless";
 /// two connector-less ones), so this is test-only.
 #[cfg(test)]
 pub fn init(state: &mut State, width: i32, height: i32) -> Result<(), Box<dyn Error>> {
-    init_named(state, OUTPUT_NAME, width, height)
+    init_named(state, OUTPUT_NAME, width, height, ScanoutHandoff::default())
 }
 
 /// Creates the one output and the render target behind it -- pixman's image
@@ -99,6 +99,7 @@ pub fn init_named(
     name: &str,
     width: i32,
     height: i32,
+    scanout: ScanoutHandoff,
 ) -> Result<(), Box<dyn Error>> {
     let output = Output::new(
         name.to_owned(),
@@ -120,10 +121,28 @@ pub fn init_named(
     );
     state.space.map_output(&output, (0, 0));
 
-    // The renderer the session resolved at startup (`render::resolve`), not
-    // a per-call choice: `State::resize_output` rebuilds the backend later
-    // and has to build the same one.
-    state.backend = Some(Backend::new(&output, width, height, state.renderer)?);
+    // The renderer the session resolved at startup (`render::resolve`, then
+    // `tty::init`'s own fallback), not a per-call choice:
+    // `State::resize_output` rebuilds the backend later and has to build the
+    // same one. `scanout` is the already-built GPU scanout renderer on the
+    // one path that has one (see `ScanoutHandoff`).
+    state.backend = Some(Backend::new(
+        &output,
+        width,
+        height,
+        state.renderer,
+        scanout,
+    )?);
+    // The GPU scanout tier's `DrmCompositor` was built before this output
+    // existed (`tty::init` runs first, because `--tty` is where the size
+    // comes from), so it is still tracking a static copy of the mode. Point
+    // it at the real output now, while nothing has been drawn: from here it
+    // follows every `set_mode` on its own, and no second place has to
+    // remember to mirror a mode or scale change into it. A no-op on every
+    // other backend and tier.
+    if let Some(tty) = &mut state.tty {
+        tty.track_output(&output);
+    }
     // What the core is told is the *logical* output rectangle, which is the
     // same rectangle Smithay's `Space` lays windows out in -- see
     // `output_scale.rs`'s `logical_size`. Handing the core the physical
@@ -506,11 +525,35 @@ impl State {
             return false;
         };
         set_mode(&output, width, height, None, self.output_scale);
-        match Backend::new(&output, width, height, self.renderer) {
-            Ok(backend) => self.backend = Some(backend),
-            Err(error) => {
-                tracing::warn!(%error, "could not resize the render target");
-                return false;
+        // The GPU scanout tier is resized, never rebuilt. Its `DrmCompositor`
+        // tracks this same `Output` (see `Tty::track_output`), so `set_mode`
+        // above has already moved its damage tracker onto the new mode, and
+        // `Tty::reconfigure` has already resized its swapchain through
+        // `DrmCompositor::use_mode`. Rebuilding would additionally throw away
+        // a live EGL context, its shaders and its texture cache, plus the
+        // frame in flight, to arrive at exactly the same pipeline. What is
+        // left is the recorded framebuffer size, which capture clients read.
+        if self
+            .backend
+            .as_ref()
+            .is_some_and(super::render::Backend::is_scanout)
+        {
+            if let Some(backend) = &mut self.backend {
+                backend.note_resized(width, height);
+            }
+        } else {
+            match Backend::new(
+                &output,
+                width,
+                height,
+                self.renderer,
+                ScanoutHandoff::default(),
+            ) {
+                Ok(backend) => self.backend = Some(backend),
+                Err(error) => {
+                    tracing::warn!(%error, "could not resize the render target");
+                    return false;
+                }
             }
         }
         // The logical rectangle the core and the `Space` both work in -- see

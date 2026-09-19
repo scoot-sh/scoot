@@ -273,10 +273,7 @@ const DMABUF_FORMATS: [Fourcc; 2] = [Fourcc::Xrgb8888, Fourcc::Argb8888];
 pub(super) fn advertise(dh: &DisplayHandle) -> DmabufState {
     let mut state = DmabufState::new();
     let device = main_device();
-    let formats = DMABUF_FORMATS.iter().map(|code| Format {
-        code: *code,
-        modifier: Modifier::Linear,
-    });
+    let formats = advertised_formats();
     match DmabufFeedbackBuilder::new(device, formats).build() {
         Ok(feedback) => {
             state.create_global_with_default_feedback::<State>(dh, &feedback);
@@ -289,6 +286,20 @@ pub(super) fn advertise(dh: &DisplayHandle) -> DmabufState {
         }
     }
     state
+}
+
+/// Exactly what [`advertise`] puts in the feedback tranche, for anything that
+/// has to check a renderer against the promise this compositor makes.
+///
+/// One function rather than two copies of the list: the tranche is a promise
+/// with teeth (see this module's doc -- a format in it that the renderer then
+/// refuses is a `create_immed` kill), so anything verifying that promise has
+/// to be reading the promise itself.
+pub(super) fn advertised_formats() -> impl Iterator<Item = Format> {
+    DMABUF_FORMATS.iter().map(|code| Format {
+        code: *code,
+        modifier: Modifier::Linear,
+    })
 }
 
 /// The `main_device` for default feedback: this machine's render node.

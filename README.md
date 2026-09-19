@@ -219,16 +219,21 @@ There is one optional Cargo feature, **`gpu-scanout`**, off by default:
 cargo build -p scoot --features gpu-scanout
 ```
 
-It is where the `--tty` GPU scanout tier is being built (Smithay's
-`DrmCompositor` over a GBM swapchain). It is off by default because it is the
-one thing in the tree that adds a **link-time** dependency on `libgbm`: the
-resulting binary carries `libgbm.so.1` in its `DT_NEEDED` list and will not
-start on a machine without it, while the default build has no such entry and
-runs anywhere. Running with no GPU stack at all is a hard requirement here, so
-`cargo build` keeps producing the binary that does. (`--renderer gles` is
-*not* in the same position and needs no feature: libEGL/libGLESv2 are
-`dlopen`ed, so a GPU-less machine only fails when that renderer is asked for,
-at startup, with a message.)
+It compiles the `--tty` **GPU scanout** tier: `--renderer gles` under `--tty`
+then composites straight into the buffer the screen scans out, with no
+read-back (see Which renderer draws the frames below). Without it, `--tty`
+has only the CPU/dumb-buffer path it has always had, and `--renderer gles`
+there warns and uses pixman.
+
+It is off by default because it is the one thing in the tree that adds a
+**link-time** dependency on `libgbm`: the resulting binary carries
+`libgbm.so.1` in its `DT_NEEDED` list and will not start on a machine without
+it, while the default build has no such entry and runs anywhere. Running with
+no GPU stack at all is a hard requirement here, so `cargo build` keeps
+producing the binary that does, and packaging for real hardware is where you
+turn this on. (`--renderer gles` is *not* in the same position and needs no
+feature: libEGL/libGLESv2 are `dlopen`ed, so a GPU-less machine only fails
+when that renderer is asked for, at startup, with a message.)
 
 To actually run the compositor you need a real (or virtual) Linux machine with
 a seat — see `vm/README.md` for a Mac-native NixOS VM that provides one.
@@ -240,6 +245,7 @@ scoot --headless --width 1280 --height 800 -- foot   # start, spawn a terminal
 scoot --nested --width 1280 --height 800 -- foot     # inside your existing compositor
 scoot --headless --renderer gles -- foot             # ...drawing with GLES instead of the CPU
 scoot --tty -- foot                                  # on a real DRM/KMS seat
+scoot --tty --renderer gles -- foot                  # ...scanning out from the GPU (needs --features gpu-scanout)
 scoot --tty --gpu /dev/dri/card0 -- foot             # ...naming the DRM device yourself
 scoot --tty --mode 1920x1080 -- foot                 # ...naming the display mode (see below)
 scoot msg windows                                     # in another shell
@@ -273,16 +279,33 @@ and is not today:
   Every pixel-readback test in the suite — session lock, layer shell, alpha
   modifier, single-pixel buffers, the cursor, output scaling — passes
   byte-identically under either renderer.
-- **What it does not buy you yet.** No speed. The frame is composited into an
-  offscreen buffer and then read back to main memory exactly as pixman's is,
-  so `gles` adds a GPU round trip without removing any CPU copy; on a machine
-  whose "GPU" is a software rasteriser (llvmpipe, which is what a VM or a
-  GPU-less container has) it is several times *slower* than pixman. The
-  scanout path that would make it faster on real hardware is not written yet.
-- **`--headless` and `--nested` only.** `--tty` warns and keeps pixman
-  whichever way `gles` was asked for, because reading a GPU frame back only to
-  memcpy it into a dumb scanout buffer would be strictly worse than
-  compositing on the CPU in the first place.
+- **On `--headless` and `--nested`, it does not buy you speed.** There the
+  frame is composited into an offscreen buffer and then read back to main
+  memory exactly as pixman's is, so `gles` adds a GPU round trip without
+  removing any CPU copy; on a machine whose "GPU" is a software rasteriser
+  (llvmpipe, which is what a VM or a GPU-less container has) it is several
+  times *slower* than pixman.
+- **On `--tty` it is a different thing entirely: GPU scanout.** In a build
+  carrying the `gpu-scanout` Cargo feature (see Building above),
+  `--tty --renderer gles` composites straight into the buffer the screen
+  scans out — Smithay's `DrmCompositor` over a GBM swapchain — so there is no
+  read-back and no memcpy into a dumb buffer at all. Which tier a session came
+  up on is in the startup log, on the line that names the device:
+  `drm: driving this device path=/dev/dri/card0 connector=eDP-1 ...
+  scanout="gpu"` (or `scanout="dumb"`). Scope today: the primary plane only —
+  no cursor or overlay planes, and no direct scan-out of a client's own
+  buffer.
+- **In a build *without* that feature, `--tty --renderer gles` warns and uses
+  pixman**, naming the missing feature, because the only GLES pipeline such a
+  build has reads the GPU frame back only to memcpy it into a dumb buffer,
+  which is strictly worse than compositing on the CPU in the first place.
+- **On `--tty`, a `gles` that cannot be built is a warning, not a refusal to
+  start.** If the device has no usable GBM node, if a GLES renderer cannot be
+  built on it, or if no scan-out format works for both the CRTC's primary
+  plane and the renderer, scoot says so and runs the session on pixman with
+  dumb buffers. That is the opposite of the `--headless`/`--nested` rule
+  below, and deliberately so: on `--tty` scoot *is* your session, and
+  refusing to start would leave you with no desktop at all.
 - **Hardware first.** The EGL device is chosen by preferring a real device
   over a software one and taking the first that yields a working renderer,
   so a box with a GPU uses the GPU. Note that "software" here means only
@@ -292,14 +315,19 @@ and is not today:
   numbers measured there are llvmpipe's. The chosen device is logged at
   startup (`the GLES renderer is up device=/dev/dri/renderD128
   software=false`) — trust that line over the flag name.
-- **A wrong `--renderer gles` is a startup error, not a silent downgrade.** If
-  no EGL device can drive it, scoot says so and names each failure rather than
-  quietly compositing with the other renderer.
+- **On `--headless`/`--nested`, a wrong `--renderer gles` is a startup error,
+  not a silent downgrade.** If no EGL device can drive it, scoot says so and
+  names each failure rather than quietly compositing with the other renderer.
+  Nothing is at stake there, so failing loudly is free.
 - **Known gap: dma-buf clients.** The buffer formats scoot advertises to
   clients are still the CPU renderer's, whichever renderer is active, so a
   client handing over a GPU buffer the active GLES renderer cannot import has
-  it refused (and, through `create_immed`, is disconnected for it). If you use
-  dma-buf clients, stay on `pixman` for now.
+  it refused (and, through `create_immed`, is disconnected for it). On
+  `--headless`/`--nested` with `gles`, stay on `pixman` if you use dma-buf
+  clients. The `--tty` scanout tier does not have that exposure: it refuses to
+  come up at all on a device whose GLES renderer cannot import what scoot
+  advertises, and falls back to pixman, so the tier can never be the reason a
+  dma-buf client is disconnected.
 
 `scoot msg type TEXT` types text the way a person would, on whatever
 keyboard layout the session is running: for each character it finds the key
@@ -2003,7 +2031,7 @@ all.)
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
-| `backend` | string (`"pixman"` or `"gles"`) | `"pixman"` | Which renderer composites each frame — the config-file form of `--renderer` (see Which renderer draws the frames above). This is a different axis from `--headless`/`--nested`/`--tty`, which choose how the compositor *presents* what it drew; this chooses what draws it. `"pixman"` is the CPU renderer and needs no graphics device at all. `"gles"` draws with GLES on an EGL device and is `--headless`/`--nested` only — `--tty` warns and keeps pixman. `--renderer` wins when both name one, including `--renderer pixman` against a file asking for `gles`. A name that is neither is a warning and the default, like any other malformed value; but a name this build *knows* and then cannot build (`"gles"` with no working EGL) is a startup error, because silently drawing with the other renderer would be a session quietly different from the one you asked for. Startup-only, like every other setting here. |
+| `backend` | string (`"pixman"` or `"gles"`) | `"pixman"` | Which renderer composites each frame — the config-file form of `--renderer` (see Which renderer draws the frames above). This is a different axis from `--headless`/`--nested`/`--tty`, which choose how the compositor *presents* what it drew; this chooses what draws it. `"pixman"` is the CPU renderer and needs no graphics device at all. `"gles"` draws with GLES on an EGL device. Under `--headless`/`--nested` that means compositing offscreen and reading the frame back; under `--tty`, in a build carrying the `gpu-scanout` Cargo feature, it means GPU scanout with no read-back at all (and without that feature, `--tty` warns and keeps pixman). `--renderer` wins when both name one, including `--renderer pixman` against a file asking for `gles`. A name that is neither is a warning and the default, like any other malformed value; but a name this build *knows* and then cannot build (`"gles"` with no working EGL) is a startup error on `--headless`/`--nested`, because silently drawing with the other renderer would be a session quietly different from the one you asked for. Under `--tty` that same failure is a warning and a pixman session instead: refusing to start there would leave you with no desktop. Startup-only, like every other setting here. |
 
 ### `[tty]`
 
@@ -2137,10 +2165,12 @@ scale = 1.0
 
 # [renderer]
 # Unset means "pixman", the CPU renderer -- the right answer on a GPU-less
-# box and the default everywhere. "gles" is opt-in, --headless/--nested only,
-# and buys correctness parity rather than speed today (there is no scanout
-# path yet, and on a software rasteriser it is slower). --renderer wins over
-# this when both name one. See the reference above before switching.
+# box and the default everywhere. "gles" is opt-in. On --headless/--nested it
+# buys correctness parity rather than speed (the frame is still read back, and
+# on a software rasteriser it is slower); on --tty, in a build carrying the
+# `gpu-scanout` Cargo feature, it is GPU scanout with no read-back at all.
+# --renderer wins over this when both name one. See the reference above
+# before switching.
 # backend = "gles"
 
 # [tty]
