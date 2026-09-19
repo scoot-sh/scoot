@@ -59,6 +59,10 @@ The rest of this list *is* deliberate:
   cannot be captured on its own; the global is not advertised, so a client
   takes its fallback path immediately instead of discovering a refusal at
   runtime.
+- **`hyprland-toplevel-export-v1`.** The other interface a per-window
+  thumbnail is commonly requested through, and also not advertised. Stock
+  quickshell routes per-window thumbnails here, so it falls back cleanly
+  rather than failing.
 - **Maximized, minimized and fullscreen window states.** scoot has no concept
   of any of them, so the state bits are never sent and the matching requests
   do nothing — a taskbar's minimise button is inert rather than lying.

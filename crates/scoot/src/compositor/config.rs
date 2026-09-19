@@ -227,8 +227,8 @@ struct TtyConfig {
 /// frame -- `"pixman"` (the default, and the only one that needs no graphics
 /// device) or `"gles"`. Named `backend` for the renderer *behind* the
 /// compositor, which is a different axis from `--headless`/`--nested`/`--tty`
-/// (how the compositor presents what it drew); `docs/configuration.md` says
-/// so in as many words.
+/// (how the compositor presents what it drew); `docs/tty.md` says so in as
+/// many words.
 ///
 /// A `String` rather than a `RendererKind` so that an unrecognised name
 /// degrades the way every other malformed value in this file does -- a

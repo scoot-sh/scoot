@@ -3,8 +3,6 @@
 A scrolling-tiling Wayland compositor, in the shape of
 [niri](https://github.com/YaLTeR/niri): lightweight, fast, GPU-optional, and
 built to be driven by a script or an agent as easily as by a keyboard.
-[scoot.sh](https://scoot.sh) ·
-[github.com/scoot-sh/scoot](https://github.com/scoot-sh/scoot)
 
 ![Three scoot columns: htop, vim, and a file tree stacked above a shell
 querying the compositor over IPC](docs/assets/screenshot.png)
@@ -120,8 +118,11 @@ background_color = "#101014"
 ```
 
 Every table, field, default and failure mode is in
-[docs/configuration.md](docs/configuration.md). A config typo never stops
-scoot from starting: it logs and falls back.
+[docs/configuration.md](docs/configuration.md). Almost nothing in it can stop
+scoot starting — a bad value logs a warning and falls back to the default.
+The two exceptions are deliberate, because guessing would be worse than
+refusing: `[tty] gpu` naming a device that will not open, and
+`[renderer] backend = "gles"` on a box with no working EGL.
 
 ## What works
 
