@@ -882,9 +882,12 @@ mod tests {
             "a render target was somehow built at {UNBUILDABLE:?}"
         );
 
+        // The primary output, which is the only one `resize_output` touches
+        // (see its own doc) -- and, under the backends that reach it, the
+        // only one there is.
         let mode = state
-            .output
-            .as_ref()
+            .outputs
+            .primary()
             .expect("an output")
             .current_mode()
             .expect("a current mode");
