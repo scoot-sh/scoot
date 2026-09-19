@@ -1,3 +1,6 @@
+![scoot — a cat swiping three terminal windows sideways across the screen,
+trailing motion lines](docs/assets/logo.png)
+
 # scoot
 
 A scrolling-tiling Wayland compositor, in the shape of
