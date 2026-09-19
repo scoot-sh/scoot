@@ -134,10 +134,12 @@ pub enum Command {
 
 #[derive(Debug, PartialEq)]
 pub struct CompositorOptions {
-    /// The requested size. Under `--nested`, the host's first configure can
-    /// override this; under `--headless` it's authoritative, there being no
-    /// host to negotiate with. Each axis is in `1..=MAX_OUTPUT_DIMENSION`;
-    /// `parse` refuses anything else.
+    /// The requested size. Under `--nested` it is only what scoot asks for:
+    /// the host's first configure decides what the window comes up at, and
+    /// every later one moves it (see `compositor::nested`). Under
+    /// `--headless` it's authoritative, there being no host to negotiate
+    /// with. Each axis is in `1..=MAX_OUTPUT_DIMENSION`; `parse` refuses
+    /// anything else, and so does a host configure naming one.
     pub width: i32,
     pub height: i32,
     /// How many outputs `--headless` creates, each `width` by `height` and

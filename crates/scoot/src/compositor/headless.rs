@@ -561,23 +561,26 @@ impl State {
     /// Recreates the render target at a new size. Returns whether it
     /// actually got there.
     ///
-    /// Two callers: `--nested`, when the host's first configure disagrees
-    /// with the size scoot started at (see `nested::init`), and `--tty`,
-    /// when a DRM hotplug changes the connector's mode (see
-    /// `tty/hotplug.rs`). This function doesn't know `Host` or `Tty` exists
-    /// -- it only touches the render target and the core's notion of output
-    /// geometry; the caller is responsible for resizing its own scanout
-    /// buffers to match, separately.
+    /// Two callers: `--nested`, whenever the host configures scoot's window
+    /// to a size it is not already at (its first configure, and every resize
+    /// after -- see `nested::Host`), and `--tty`, when a DRM hotplug changes
+    /// the connector's mode (see `tty/hotplug.rs`). This function doesn't
+    /// know `Host` or `Tty` exists -- it only touches the render target and
+    /// the core's notion of output geometry; the caller is responsible for
+    /// resizing its own scanout buffers to match, separately.
     ///
     /// `false` means the render target could not be rebuilt and is still at
-    /// the *old* size while the caller has (or is about to) size its scanout
-    /// buffers to the new one. Both callers treat that as fatal-ish rather
-    /// than something to limp on from, because the two sizes disagreeing is
-    /// exactly what `present()`'s size guard silently drops every frame for:
-    /// `--nested` stops the loop, `--tty` logs an error saying the screen
-    /// stays as it is until the next hotplug or a restart. Nothing is
-    /// reverted here -- a failure to build the render target at one size is
-    /// not evidence that rebuilding it at the previous size would work.
+    /// the *old* size. The callers differ on what to do about that, and each
+    /// says why at its own site: `--nested` stops the loop on a first
+    /// configure and keeps the session at the old size on a resize (see
+    /// `Host::apply_first_configure` and `Host::apply_resize`), `--tty` logs
+    /// an error saying the screen stays as it is until the next hotplug or a
+    /// restart. What this function owes all of them is that `false` means
+    /// *nothing changed*: the render target is untouched, and the mode this
+    /// had already advertised is put back, so no client is left believing a
+    /// size nothing renders at. The render target is not rebuilt at the old
+    /// size to get there -- it was never torn down -- which is why the
+    /// restore cannot itself fail.
     ///
     /// It rebuilds whichever renderer the session started with
     /// (`State::renderer`), never a different one: a resize that silently
@@ -607,6 +610,14 @@ impl State {
             tracing::warn!(width, height, "could not resize: there is no output yet");
             return false;
         };
+        // Kept for the failure path below: `set_mode` tells every bound
+        // `wl_output` client the new mode synchronously, so a `Backend::new`
+        // that then fails would otherwise leave them believing a size nothing
+        // will ever render at -- permanently, since nothing resends it. It is
+        // only the advertised metadata that is put back, never the render
+        // target (which was not torn down), so the restore cannot fail the
+        // way rebuilding at the old size could.
+        let previous = output.current_mode();
         set_mode(&output, width, height, None, self.output_scale);
         // The GPU scanout tier is resized, never rebuilt. Its `DrmCompositor`
         // tracks this same `Output` (see `Tty::track_output`), so `set_mode`
@@ -635,6 +646,24 @@ impl State {
                 Ok(backend) => self.backend = Some(backend),
                 Err(error) => {
                     tracing::warn!(%error, "could not resize the render target");
+                    // Back to the mode that is actually being rendered. The
+                    // new one stays in `Output::modes` (that list only grows
+                    // -- see `output_management.rs`), and a client that was
+                    // told about it sees it become current and then current
+                    // again at the old size; what it does not see is a
+                    // current mode that disagrees with every frame it is
+                    // sent. `None` when there is no previous mode is the
+                    // never-resized-before case, which cannot reach here:
+                    // `init_named` sets one before any caller exists.
+                    if let Some(previous) = previous {
+                        set_mode(
+                            &output,
+                            previous.size.w,
+                            previous.size.h,
+                            None,
+                            self.output_scale,
+                        );
+                    }
                     return false;
                 }
             }
@@ -690,12 +719,12 @@ impl State {
         // bar mapped, or a bar whose exclusive zone is unchanged). Without
         // this, a window keeps the size it was configured at before the
         // resize and sits clipped or half off the new output until some
-        // unrelated action happens to call `apply()`. That was harmless while
-        // the only caller was `nested::apply_size` (one call per process, on
-        // the host's first configure, before any window has mapped) and is
-        // not once `--tty` resizes dynamically on hotplug with windows
-        // already up. `apply()` ends in `request_render()`, so the frame is
-        // still requested exactly once.
+        // unrelated action happens to call `apply()`. That was harmless back
+        // when the only caller was `--nested`'s first configure (one call per
+        // process, before any window had mapped) and is not once `--tty`
+        // resizes dynamically on hotplug -- nor once `--nested` follows a
+        // host resize -- with windows already up. `apply()` ends in
+        // `request_render()`, so the frame is still requested exactly once.
         self.apply();
         true
     }
@@ -783,7 +812,13 @@ fn tty_blocks_render(tty_active: Option<bool>) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use scoot_core::Config;
+    use smithay::reexports::calloop::EventLoop;
+    use smithay::reexports::wayland_server::Display;
+
     use super::*;
+    use crate::compositor::decorations::Appearance;
+    use crate::compositor::keybindings::Keybindings;
 
     #[test]
     fn no_tty_never_blocks_a_render() {
@@ -796,6 +831,90 @@ mod tests {
     #[test]
     fn an_active_tty_never_blocks_a_render() {
         assert!(!tty_blocks_render(Some(true)));
+    }
+
+    /// A size no renderer can build a target for. pixman refuses it without
+    /// allocating anything (`_pixman_multiply_overflows_int(width, 32)` in
+    /// its own `create_bits`), and GLES refuses it past
+    /// `GL_MAX_RENDERBUFFER_SIZE` -- so this drives `resize_output`'s failure
+    /// path under either renderer the suite runs with.
+    const UNBUILDABLE: (i32, i32) = (i32::MAX, 1);
+
+    /// A failed resize must not leave clients believing a mode nothing
+    /// renders at.
+    ///
+    /// `set_mode` tells every bound `wl_output` client synchronously, before
+    /// the render target is rebuilt, and nothing resends it afterwards -- so
+    /// a `Backend::new` failure after that point used to publish a size the
+    /// compositor would never draw. It mattered less while every caller
+    /// treated `false` as fatal; `--nested` now keeps the session running
+    /// after a failed resize (see `Host::apply_resize`), which is exactly
+    /// the case that would have to live with it. Fail-first: drop the
+    /// restore in `resize_output` and this reports `2147483647x1`.
+    #[test]
+    fn a_failed_resize_leaves_the_advertised_mode_where_it_was() {
+        const CANVAS: i32 = 200;
+        let mut event_loop: EventLoop<'static, State> =
+            EventLoop::try_new().expect("an event loop");
+        let display: Display<State> = Display::new().expect("a wayland display");
+        let mut state = State::new(
+            &mut event_loop,
+            display,
+            Config::default(),
+            Keybindings::default(),
+            Appearance::default(),
+            1.0,
+            super::super::test_support::test_renderer(),
+        )
+        .expect("a compositor state with a wayland socket");
+        init(&mut state, CANVAS, CANVAS).expect("a headless backend");
+
+        assert!(
+            !state.resize_output(UNBUILDABLE.0, UNBUILDABLE.1),
+            "a render target was somehow built at {UNBUILDABLE:?}"
+        );
+
+        let mode = state
+            .output
+            .as_ref()
+            .expect("an output")
+            .current_mode()
+            .expect("a current mode");
+        assert_eq!(
+            (mode.size.w, mode.size.h),
+            (CANVAS, CANVAS),
+            "a failed resize left the output advertising a mode nothing renders at"
+        );
+    }
+
+    /// The other half of the same guarantee: the render target itself is
+    /// untouched, so the session keeps drawing at the size it was already at
+    /// rather than at neither size.
+    #[test]
+    fn a_failed_resize_leaves_the_render_target_where_it_was() {
+        const CANVAS: i32 = 200;
+        let mut event_loop: EventLoop<'static, State> =
+            EventLoop::try_new().expect("an event loop");
+        let display: Display<State> = Display::new().expect("a wayland display");
+        let mut state = State::new(
+            &mut event_loop,
+            display,
+            Config::default(),
+            Keybindings::default(),
+            Appearance::default(),
+            1.0,
+            super::super::test_support::test_renderer(),
+        )
+        .expect("a compositor state with a wayland socket");
+        init(&mut state, CANVAS, CANVAS).expect("a headless backend");
+
+        assert!(!state.resize_output(UNBUILDABLE.0, UNBUILDABLE.1));
+
+        assert_eq!(
+            state.backend.as_ref().expect("a backend").size(),
+            (CANVAS, CANVAS),
+            "a failed resize replaced the render target with one at another size"
+        );
     }
 
     #[test]

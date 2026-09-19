@@ -1,16 +1,19 @@
 ---
-title: "A clean client disconnect logs at INFO, so an idle webtop session emits two lines a second forever"
-status: "open"
+title: "A clean client disconnect logs at INFO, so an idle webtop session emits two lines a second forever — LANDED 2026-09-19"
+status: "resolved"
 area: "ipc"
 priority: "medium"
 blocked: null
 ---
 
-# A clean client disconnect logs at INFO, so an idle webtop session emits two lines a second forever
+# A clean client disconnect logs at INFO, so an idle webtop session emits two lines a second forever — LANDED 2026-09-19
+
+**What landed is at the bottom of this file** ("What landed", below). The
+diagnosis above it is the original entry, unchanged.
 
 Issue #145, filed 2026-09-19, observed on `7e415b6` — the second thing from
 the same webtop deployment as
-[#144](../core/nested-follow-host-resize.md). Cosmetic in the sense that
+[#144](./nested-follow-host-resize-done.md). Cosmetic in the sense that
 nothing is broken, and not cosmetic in the sense that it makes the log
 unusable for anything else.
 
@@ -68,3 +71,26 @@ same 500 ms loop opens a connection, binds globals and tears down, so
 anything logging at INFO on bind or on global advertisement will flood
 identically on this deployment and nowhere else — which is exactly why it
 was not noticed before someone ran it under Selkies.
+
+## What landed
+
+Exactly the demotion this entry asked for: `state.rs`'s `ConnectionClosed`
+arm is `tracing::debug!`, `ProtocolError` is untouched at `warn!`. No rate
+limiter.
+
+**The "check while in here" audit came back empty, and was checked twice.**
+By reading: every logging site in the workspace is a fully-qualified
+`tracing::` macro (there is no `use tracing::info` anywhere), so the whole
+set is greppable, and `state.rs:1053` was the only INFO on a per-connection
+path. The accept loop (`wayland_accept.rs`) logs only on failure, at
+`warn!`; the bind budget logs at `debug!`; `dmabuf.rs`'s two INFO lines are
+once-per-session by construction (a startup device probe, and a
+first-import-only transition guarded by `imports_dmabufs`). Then by
+measurement, which also covers any INFO a *bind* or a global advertisement
+might have produced that reading missed: ten `wayland-info` runs against a
+live `--headless` session — each a full connect, bind-every-global,
+tear-down cycle, the same shape as Selkies' `wl-paste` poll — added **zero**
+lines to an `info`-level log (7 lines before, 7 after), and the same ten
+produced exactly **10** `DEBUG ... wayland client disconnected` lines under
+`RUST_LOG=scoot=debug`. The information is still there for anyone who wants
+it; it is just no longer in everyone's way.

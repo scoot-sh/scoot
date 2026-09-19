@@ -8,6 +8,13 @@
 //! clients exactly as in `--headless`; this module only adds scoot as a
 //! Wayland *client* of a second, outer compositor.
 //!
+//! The window follows the host's size for as long as it lives: the first
+//! configure builds the render target and the host buffers, and every later
+//! one that proposes a different size rebuilds both together. The two
+//! entry points for that ([`Host::apply_first_configure`] and
+//! [`Host::apply_resize`]) differ only in what a failure means, and that is
+//! the whole reason they are two functions rather than one with a flag.
+//!
 //! Host-side protocol object handling (the `wayland_client::Dispatch` impls)
 //! lives in `nested_dispatch.rs`; this file is the data (`Host`), setup
 //! (`init`), and the one thing `render::draw_frame_with` calls (`Host::present`).
@@ -31,6 +38,7 @@ use wayland_protocols::xdg::shell::client::xdg_wm_base::XdgWmBase as HostWmBase;
 
 use self::buffers::BufferPool;
 use super::State;
+use crate::cli::MAX_OUTPUT_DIMENSION;
 
 /// The connection presenting scoot's own framebuffer as a window in a host
 /// compositor. Everything host-Wayland-specific lives here and in
@@ -59,17 +67,24 @@ pub struct Host {
     buffers: BufferPool,
     /// The size scoot is currently rendering at, i.e. what `buffers` is
     /// sized for. Distinct from the size on the wire in an in-flight
-    /// configure that hasn't been acted on yet (v1 only ever acts on the
-    /// first one -- see `nested_dispatch`).
+    /// configure that hasn't been acted on yet; every configure is compared
+    /// against this and only a *different* size rebuilds anything (see
+    /// [`configure_action`]).
     size: (i32, i32),
     /// xdg-shell forbids attaching a buffer before the first configure.
+    ///
+    /// Also which of the two entry points a configure goes to
+    /// ([`Host::apply_first_configure`] while `false`,
+    /// [`Host::apply_resize`] after), which is the one place the difference
+    /// between "scoot is not up yet" and "scoot is up and the host moved"
+    /// is decided.
     configured: bool,
     /// The size from the most recent `xdg_toplevel::Configure`, applied when
     /// its paired `xdg_surface::Configure` (the one carrying the serial to
     /// ack) arrives -- xdg-shell delivers the two separately by design.
-    /// `None` means "the host proposed 0x0 (its way of saying 'you choose')
-    /// or hasn't sent one yet"; the size scoot started with is kept in that
-    /// case.
+    /// `None` means "the host proposed nothing usable (0x0, its way of saying
+    /// 'you choose', or a size out of range) or hasn't sent one yet"; the
+    /// size scoot is already at is kept in that case.
     pending_size: Option<(i32, i32)>,
     /// Set when `present()` had a frame ready but no host buffer was free to
     /// write it into (both still held by the host). Checked when the host
@@ -142,21 +157,26 @@ impl Host {
     /// what hands the slice over).
     ///
     /// Returns whether the frame reached the host. Anything else -- the
-    /// surface not configured yet, a size mismatch against a resize still in
-    /// flight, no free host buffer, or a flush the dead host refused --
-    /// silently drops the frame (does not block) and returns `false`, so
+    /// surface not configured yet, a frame whose size is not the one the
+    /// buffers are for, no free host buffer, or a flush the dead host refused
+    /// -- silently drops the frame (does not block) and returns `false`, so
     /// the caller knows this frame presented nothing: `render()` leaves
     /// pending presentation feedback queued on `false` rather than stamping
     /// it with a time nothing was shown at (see `presentation_time.rs`).
     ///
     /// Silently does nothing (does not block) if the surface hasn't been
     /// configured yet, or if the frame's dimensions don't match what
-    /// `buffers` is currently sized for (a resize was requested but hasn't
-    /// been acted on yet -- the next frame after that catches up), or if
-    /// neither host buffer is free (the host hasn't released one back in
-    /// time -- `present_skipped` is set so a release re-triggers a render
-    /// instead of leaving the host window stale, see `nested_dispatch`'s
-    /// `Dispatch<HostBuffer>`).
+    /// `buffers` is currently sized for, or if neither host buffer is free
+    /// (the host hasn't released one back in time -- `present_skipped` is set
+    /// so a release re-triggers a render instead of leaving the host window
+    /// stale, see `nested_dispatch`'s `Dispatch<HostBuffer>`).
+    ///
+    /// The size check is a guard on an invariant, not a routine path: the
+    /// render target and `buffers` are only ever changed together, by
+    /// `replace_render_target`, which is also why a *failed* resize does not
+    /// trip it. Dropping a frame is the safe answer if it ever did -- writing
+    /// a frame of one size into a buffer described to the host as another is
+    /// how a compositor hands out garbage or gets killed for it.
     pub fn present(&mut self, pixels: &[u8], width: i32, height: i32) -> bool {
         if !self.configured || (width, height) != self.size {
             return false;
@@ -182,62 +202,127 @@ impl Host {
         self.conn.flush().is_ok()
     }
 
-    /// Applies a size the host proposed (its first configure, per v1 scope --
-    /// see `nested_dispatch`), recreating the render target and the host-side
-    /// buffers together so they can't end up mismatched. `state.host` is
-    /// briefly taken out of `state` for the duration so `state.resize_output`
-    /// (which needs `&mut State` and knows nothing about `Host`) can be
-    /// called without a double-borrow.
+    /// Comes up at the size the host's **first** configure asked for.
     ///
-    /// Returns `Err` if the render target or the host-side buffers couldn't
-    /// be (re)created. The caller (`nested_dispatch`) only calls
-    /// `mark_configured` on `Ok` -- v1 only ever calls this once, gated by
-    /// `is_configured`, so a failure here is equivalent to a fatal startup
-    /// condition, not a transient one to limp on from: `present()`'s size
-    /// guard would otherwise silently and permanently mismatch (one of the
-    /// two having resized successfully while the other stayed at the old
-    /// size), dropping every future frame with nothing but a warning to show
-    /// it -- the same silent-failure shape this project has hit before
-    /// elsewhere.
-    pub(super) fn apply_size(
+    /// A failure here is fatal: it stops the event loop, having logged what
+    /// failed. That is not a judgement `replace_render_target` makes -- it is
+    /// this entry point's whole reason for existing separately from
+    /// [`Host::apply_resize`], which takes the opposite decision for the same
+    /// error. Before the first configure nothing is on screen and no client
+    /// has mapped anything, so there is no session to lose; and a nested
+    /// window whose render target never got built shows the host a blank
+    /// surface forever, with nothing but a log line to say why. Failing
+    /// loudly beats running wrong.
+    ///
+    /// Marks the host surface configured on success and only on success:
+    /// until that happens xdg-shell forbids attaching a buffer, and
+    /// [`Host::present`] honours it.
+    pub(super) fn apply_first_configure(state: &mut State, width: i32, height: i32) {
+        match Self::replace_render_target(state, width, height) {
+            Ok(()) => {
+                if let Some(host) = &mut state.host {
+                    host.mark_configured();
+                }
+            }
+            Err(error) => {
+                tracing::error!(
+                    %error,
+                    "could not set up the nested backend's render target at the host's requested size; stopping"
+                );
+                state.loop_signal.stop();
+            }
+        }
+    }
+
+    /// Follows a **later** configure: the host resized scoot's window (a
+    /// browser window resized under webtop, a tiling host relaying out, an
+    /// interactive drag), so the desktop resizes with it.
+    ///
+    /// A failure here is *not* fatal, deliberately and asymmetrically with
+    /// [`Host::apply_first_configure`] -- the one decision this split exists
+    /// to make explicit rather than leave `replace_render_target` to infer
+    /// from `is_configured()`. Ending a live session with windows open in it,
+    /// because a *bigger* buffer pool could not be allocated, is the
+    /// data-loss case `CLAUDE.md` weighs a crash against, for a failure the
+    /// user neither caused nor can avoid. It is safe to differ because
+    /// `replace_render_target` leaves the losing case *consistent*, not
+    /// half-applied: `state.host` is restored, the new pool is destroyed, and
+    /// the render target and the host buffers are both still at the old size,
+    /// which is a working session. The host letterboxes the difference, which
+    /// is an annoyance; a dead compositor is lost work.
+    ///
+    /// Takes no `Result` for that reason: there is nothing a caller could
+    /// usefully do with one, and a signature that cannot be handled as
+    /// "fatal" is what keeps the two paths from being conflated later.
+    pub(super) fn apply_resize(state: &mut State, width: i32, height: i32) {
+        if let Err(error) = Self::replace_render_target(state, width, height) {
+            tracing::warn!(
+                %error,
+                width,
+                height,
+                "could not follow the host's resize; staying at the previous size"
+            );
+        }
+    }
+
+    /// Recreates the render target and the host-side buffers together, at a
+    /// size the host proposed, so the two can't end up mismatched.
+    ///
+    /// Private, with two public entry points above, because what an `Err`
+    /// *means* differs by when it happens and that belongs at the call site
+    /// rather than here: see [`Host::apply_first_configure`] (fatal) and
+    /// [`Host::apply_resize`] (logged, session kept). What this function
+    /// guarantees to both is the same either way, and `apply_resize` rests
+    /// its whole case on it: **on `Err` nothing has moved.** `state.host` is
+    /// still `Some`, still at its old `size`, still holding the buffers it
+    /// had, and the render target is still at that same old size -- so the
+    /// session keeps working, just at the size it was already at.
+    ///
+    /// The order is what buys that, and it is the reverse of the obvious one:
+    /// allocate the new pool *first*, while nothing is committed, and only
+    /// then touch the render target. Resizing first and allocating second
+    /// would leave the one failure the resize path exists for -- a bigger
+    /// pool that could not be allocated -- with the render target already at
+    /// the new size and the host buffers at the old one. `present()`'s size
+    /// guard drops every frame in that state, silently and permanently: a
+    /// live session whose window never updates again, which is worse than
+    /// either failure policy above was meant to allow.
+    fn replace_render_target(
         state: &mut State,
         width: i32,
         height: i32,
     ) -> Result<(), Box<dyn Error>> {
-        let Some(host) = state.host.take() else {
+        let Some(host) = &state.host else {
             return Ok(());
         };
-        let resized = state.resize_output(width, height);
-        let result = BufferPool::new(&host.shm, &host.qh, width, height);
-        // Put `host` back before propagating any error, so `state.host` is
-        // never left `None` -- the caller stops the event loop on `Err`
-        // regardless, but leaving this `Some` keeps every other path (e.g.
-        // `render()`'s `if let Some(host) = &mut self.host`) simple.
-        state.host = Some(host);
-        // Checked after `state.host` is whole again, and before the buffers
-        // are swapped in: a render target still at the old size with
-        // host-side buffers at the new one is the exact mismatch this
-        // function's doc says must not be limped on from. `resize_output`
-        // has already logged what failed.
-        //
-        // `result`'s buffers are destroyed rather than dropped: a `BufferPool`
-        // here owns host-side `wl_buffer`/`wl_shm_pool` objects that only
-        // `destroy` releases, and letting them fall out of scope would leak
-        // them on the host connection. The caller stops the event loop either
-        // way, but "it is about to exit" is not a reason to write the leaking
-        // version.
-        if !resized {
-            if let Ok(buffers) = result {
-                buffers.destroy();
-            }
+        // Fallible, and deliberately first: this borrow of `state.host` ends
+        // with the call (a `BufferPool` owns its host objects outright and
+        // borrows nothing), which is what lets `state.resize_output` -- which
+        // needs `&mut State` and knows nothing about `Host` -- run below
+        // without a double borrow or a `take()`/put-back dance.
+        let buffers = BufferPool::new(&host.shm, &host.qh, width, height)?;
+        // Every `BufferPool` that does not end up installed is `destroy`ed
+        // rather than dropped: it owns host-side `wl_buffer`/`wl_shm_pool`
+        // objects that only `destroy` releases, so dropping one leaks it on
+        // the host connection. That is no longer only tidiness -- a session
+        // survives a failed resize now, so a leak here would accumulate one
+        // pool per failed resize for the rest of it.
+        if !state.resize_output(width, height) {
+            buffers.destroy();
+            // `resize_output` has already logged what actually failed.
             return Err("could not resize the render target".into());
         }
-        let buffers = result?;
-        if let Some(host) = &mut state.host {
-            let old = std::mem::replace(&mut host.buffers, buffers);
-            old.destroy();
-            host.size = (width, height);
-        }
+        let Some(host) = &mut state.host else {
+            // Unreachable: nothing between the borrow above and here can
+            // clear `state.host`. Written out rather than `unwrap`ed because
+            // a panic on a host event would take every client's unsaved state
+            // with it, and a leaked pool is the cheaper wrong answer.
+            buffers.destroy();
+            return Ok(());
+        };
+        let old = std::mem::replace(&mut host.buffers, buffers);
+        old.destroy();
+        host.size = (width, height);
         Ok(())
     }
 
@@ -249,19 +334,49 @@ impl Host {
         self.configured
     }
 
-    pub(super) fn mark_configured(&mut self) {
+    fn mark_configured(&mut self) {
         self.configured = true;
     }
 
+    /// The size scoot is rendering at right now, which is also what the host
+    /// buffers are sized for -- the two are only ever changed together, by
+    /// `replace_render_target`.
+    pub(super) fn size(&self) -> (i32, i32) {
+        self.size
+    }
+
     /// The host's proposed size, or the size scoot is already at if the
-    /// host never sent one (0x0, "you choose") -- always returns *some*
-    /// size, so callers don't need their own fallback.
+    /// host never sent a usable one -- always returns *some* size, so callers
+    /// don't need their own fallback. Consumed on every configure, not only
+    /// the first: a proposal that has been compared against `size` has been
+    /// acted on, whether or not it turned out to differ.
     pub(super) fn take_pending_size(&mut self) -> (i32, i32) {
         self.pending_size.take().unwrap_or(self.size)
     }
 
+    /// Records a size the host proposed, if it is one this compositor can
+    /// act on -- see [`usable_size`]. An unusable proposal leaves whatever
+    /// was already pending alone rather than overwriting it with nothing.
     pub(super) fn set_pending_size(&mut self, width: i32, height: i32) {
-        self.pending_size = Some((width, height));
+        match usable_size(width, height) {
+            Some(size) => self.pending_size = Some(size),
+            // A zero (or, from a broken host, negative) axis is xdg-shell
+            // saying "you choose" and is entirely ordinary, so it stays
+            // silent. A host that named *both* axes and still got refused
+            // named something out of range, which is worth a trace --
+            // `debug!` rather than `warn!` because a host that proposes it
+            // once proposes it on every configure, and a line per configure
+            // during a drag is the flood
+            // `docs/backlog/resolved/clean-disconnect-log-flood-done.md`
+            // exists about.
+            None if width > 0 && height > 0 => tracing::debug!(
+                width,
+                height,
+                max = MAX_OUTPUT_DIMENSION,
+                "ignoring a host configure: size out of range"
+            ),
+            None => {}
+        }
     }
 
     pub(super) fn keyboard(&self) -> Option<&HostKeyboard> {
@@ -287,9 +402,71 @@ impl Host {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    // Host itself needs a live host compositor to construct, so its
-    // meaningful logic (buffer sizing/free-tracking) is tested directly in
-    // buffers.rs instead, where it doesn't need one.
+/// What an `xdg_surface::Configure` means for this window.
+///
+/// A free function over three plain values rather than a method on [`Host`]
+/// so the decision is unit-testable: `Host` needs a live host compositor to
+/// construct, so a method could only ever be pinned by running nested inside
+/// one. Same rationale as `buffers.rs`'s `first_free` and `headless.rs`'s
+/// `tty_blocks_render`. `nested_dispatch.rs` is the only caller.
+pub(super) fn configure_action(
+    configured: bool,
+    proposed: (i32, i32),
+    current: (i32, i32),
+) -> ConfigureAction {
+    if !configured {
+        // Even when it matches the size scoot started at: nothing has been
+        // built yet, and this is what builds it.
+        return ConfigureAction::FirstConfigure;
+    }
+    if proposed == current {
+        ConfigureAction::Nothing
+    } else {
+        ConfigureAction::Resize
+    }
 }
+
+/// The outcome of [`configure_action`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ConfigureAction {
+    /// Nothing is on screen yet: build the render target and the host buffers
+    /// at this size, and a failure is fatal ([`Host::apply_first_configure`]).
+    FirstConfigure,
+    /// The host moved scoot's window to a different size: rebuild both at it,
+    /// and a failure keeps the session at the old size
+    /// ([`Host::apply_resize`]).
+    Resize,
+    /// A configure proposing the size scoot is already at, which hosts send
+    /// on every state change that is not a resize -- activation, maximize,
+    /// a tiling-edge update. Load-bearing rather than an optimisation:
+    /// without it every focus change in the host would throw away a working
+    /// render target and buffer pool to build an identical pair, and under
+    /// `--renderer gles` that is a whole new EGL context and shader set.
+    Nothing,
+}
+
+/// The size a host configure proposes, or `None` for one that cannot be acted
+/// on.
+///
+/// Two refusals, neither of them speculative:
+///
+/// - **A zero axis** is xdg-shell's "you choose that dimension". scoot keeps
+///   the size it is already at rather than resizing to nothing. A *mixed*
+///   proposal (one axis named, the other zero) is treated the same way --
+///   the whole proposal is dropped rather than half-applied, which is what
+///   this has always done; hosts that resize scoot's window name both axes.
+/// - **An axis past [`MAX_OUTPUT_DIMENSION`]**, the same `1..=65535` window
+///   `--width`/`--height` are parsed into, for the same reason: DRM stores a
+///   mode axis in a `u16`, so nothing real is bigger, and a mode scoot
+///   advertises on `wl_output` should be one a client can believe. It is
+///   *not* what keeps the host buffer pool's byte count inside the `i32`
+///   `wl_shm.create_pool` takes -- 65535x8192 is inside this bound and past
+///   that one -- so `BufferPool::new` checks its own arithmetic rather than
+///   trusting a caller's range.
+pub(super) fn usable_size(width: i32, height: i32) -> Option<(i32, i32)> {
+    let ok = |axis: i32| (1..=MAX_OUTPUT_DIMENSION).contains(&axis);
+    (ok(width) && ok(height)).then_some((width, height))
+}
+
+#[cfg(test)]
+mod tests;

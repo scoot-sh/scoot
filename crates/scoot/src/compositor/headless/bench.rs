@@ -37,6 +37,13 @@
 //! overhead these numbers exist to watch. A change that claims to be free
 //! has to be free here.
 //!
+//! [`resize_cost`] is the second measurement here, and it is about a
+//! different path: [`State::resize_output`](crate::compositor::State), which
+//! `--nested` reaches on every host configure that names a new size (a
+//! browser window resized under webtop, a drag under a floating host). It
+//! used to run once per process on that backend, so what it costs was not
+//! worth knowing; now a drag can reach it per host frame, and it is.
+//!
 //! Like the other suites that drive a real `State`, this needs a writable
 //! `$XDG_RUNTIME_DIR`.
 
@@ -66,6 +73,11 @@ const WARMUP: u32 = 50;
 
 /// How many windows the second scene arranges.
 const RING_WINDOWS: u64 = 8;
+
+/// Resizes per timed run in [`resize_cost`]. Far fewer than [`ROUNDS`]: one
+/// resize rebuilds a whole render target, so this is milliseconds apiece
+/// rather than microseconds.
+const RESIZES: u32 = 40;
 
 /// No client ever connects here, so the step/ack vocabulary is empty.
 type Fixture = Harness<(), ()>;
@@ -102,6 +114,57 @@ fn render_frames(fixture: &mut Fixture, rounds: u32) -> Duration {
         fixture.state.render();
     }
     started.elapsed()
+}
+
+/// What one [`State::resize_output`](crate::compositor::State) costs: a new
+/// render target at the new size, a re-`arrange`d layer map, a re-published
+/// output head and capture constraint set, and a full `apply()` of the core's
+/// arrangement onto the windows.
+///
+/// Two sizes alternating, so every call really rebuilds rather than hitting
+/// any same-size shortcut, and windows in the core so the `apply()` half is
+/// not measured empty.
+///
+/// What it does **not** include, and cannot: the host-side `wl_shm` pool
+/// `--nested` rebuilds alongside this (`nested::buffers::BufferPool` -- a
+/// `memfd_create`, an `ftruncate`, an `mmap` and two `wl_buffer`s), which
+/// needs a live host compositor to construct. Read this as the renderer-side
+/// floor of a nested resize, not its total.
+#[test]
+#[ignore = "prints per-resize timings for a human; asserts nothing"]
+fn resize_cost() {
+    let renderer = test_renderer();
+    let mut fixture = scene(RING_WINDOWS);
+    // Two sizes, neither of them CANVAS, so the first timed call is no
+    // cheaper or dearer than the rest.
+    let sizes = [(CANVAS, CANVAS + 8), (CANVAS + 16, CANVAS)];
+    let mut resize_rounds = |fixture: &mut Fixture, rounds: u32| {
+        let started = Instant::now();
+        for round in 0..rounds {
+            let (width, height) = sizes[round as usize % sizes.len()];
+            assert!(
+                fixture.state.resize_output(width, height),
+                "a resize to {width}x{height} failed"
+            );
+        }
+        started.elapsed()
+    };
+    resize_rounds(&mut fixture, 4);
+    let mut best = Duration::MAX;
+    for run in 1..=RUNS {
+        let total = resize_rounds(&mut fixture, RESIZES);
+        best = best.min(total);
+        println!(
+            "resize [{renderer}], {RING_WINDOWS} windows: {total:?} total, {:?} per resize \
+             ({RESIZES} resizes, ~{CANVAS}x{CANVAS}, run {run}/{RUNS})",
+            total / RESIZES
+        );
+    }
+    println!(
+        "resize [{renderer}], {RING_WINDOWS} windows: BEST {:?} per resize ({RESIZES} \
+         resizes, ~{CANVAS}x{CANVAS})",
+        best / RESIZES
+    );
 }
 
 #[test]

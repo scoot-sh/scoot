@@ -23,7 +23,7 @@ use wayland_protocols::xdg::shell::client::xdg_toplevel::{self, XdgToplevel as H
 use wayland_protocols::xdg::shell::client::xdg_wm_base::{self, XdgWmBase as HostWmBase};
 
 use super::State;
-use super::nested::Host;
+use super::nested::{ConfigureAction, Host, configure_action};
 
 // Objects whose events this compositor has no use for at all: the registry
 // bootstrap (handled by registry_queue_init's GlobalListContents), and two
@@ -45,9 +45,10 @@ impl Dispatch<HostRegistry, GlobalListContents> for State {
         _: &QueueHandle<Self>,
     ) {
         // Globals arriving/leaving after startup (a host compositor
-        // restarting a service) aren't handled -- v1 connects once, to
-        // whatever globals exist at startup, matching this project's stated
-        // scope boundary of not chasing host-side reconfiguration.
+        // restarting a service) aren't handled -- scoot connects once, to
+        // whatever globals exist at startup. A scope boundary about the
+        // host's *globals* only: a host resizing scoot's window afterwards
+        // is followed, through `xdg_surface::Configure` below.
     }
 }
 
@@ -108,38 +109,27 @@ impl Dispatch<HostXdgSurface, ()> for State {
         let xdg_surface::Event::Configure { serial } = event else {
             return;
         };
-        // ack_configure is mandatory on every configure, first or not, per
-        // xdg-shell -- do this before the early-return below, or a host that
-        // sends a second configure before the first render lands would never
-        // get it acked and would stall the surface.
+        // ack_configure is mandatory on every configure, acted on or not, per
+        // xdg-shell -- do this before any of the decisions below, or a host
+        // that sends a second configure before the first render lands would
+        // never get it acked and would stall the surface.
         proxy.ack_configure(serial);
         let Some(host) = &mut state.host else {
             return;
         };
-        if host.is_configured() {
-            // Scope boundary (v1): only the first configure is acted on.
-            // Later ones (a host-side resize) are acked above and otherwise
-            // ignored -- the window keeps its original size instead of
-            // matching the host's new one.
-            return;
-        }
+        // Taken on every configure, not only the first: the proposal has been
+        // reconciled against what scoot is at once it has been compared,
+        // whichever way the comparison went.
         let (width, height) = host.take_pending_size();
-        match Host::apply_size(state, width, height) {
-            Ok(()) => {
-                if let Some(host) = &mut state.host {
-                    host.mark_configured();
-                }
-            }
-            Err(error) => {
-                // See apply_size's doc: this is a fatal startup condition
-                // for the nested backend, not something to silently retry
-                // frame after frame from a mismatched state.
-                tracing::error!(
-                    %error,
-                    "could not set up the nested backend's render target at the host's requested size; stopping"
-                );
-                state.loop_signal.stop();
-            }
+        let action = configure_action(host.is_configured(), (width, height), host.size());
+        // Which failure policy applies is the entry point, not a flag read in
+        // here: a first configure that cannot be built is fatal, a resize
+        // that cannot be built keeps the session at its old size. See each
+        // function's doc for why they differ.
+        match action {
+            ConfigureAction::FirstConfigure => Host::apply_first_configure(state, width, height),
+            ConfigureAction::Resize => Host::apply_resize(state, width, height),
+            ConfigureAction::Nothing => {}
         }
     }
 }
@@ -155,13 +145,12 @@ impl Dispatch<HostToplevel, ()> for State {
     ) {
         match event {
             xdg_toplevel::Event::Configure { width, height, .. } => {
-                // 0x0 means "you choose"; keep whatever's already pending
-                // (the size scoot was started with) rather than resizing to
-                // nothing.
-                if width > 0
-                    && height > 0
-                    && let Some(host) = &mut state.host
-                {
+                // Recorded, not acted on: the paired `xdg_surface::Configure`
+                // above carries the serial to ack and is where the size is
+                // applied -- xdg-shell delivers the two separately by design.
+                // Which proposals are usable at all (0x0's "you choose", a
+                // size out of range) is `set_pending_size`'s own decision.
+                if let Some(host) = &mut state.host {
                     host.set_pending_size(width, height);
                 }
             }

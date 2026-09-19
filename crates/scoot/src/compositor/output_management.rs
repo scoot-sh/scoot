@@ -59,19 +59,22 @@
 //!   `change_current_state` pushes any mode it has not seen and nothing
 //!   calls `delete_mode`. The only production caller that can hand it a
 //!   second mode is [`State::resize_output`], which two backends reach:
-//!   `--nested`'s dispatch loop (`nested_dispatch.rs`) calls it at most
-//!   once per process, gated by `Host::is_configured` (only the host's
-//!   *initial* configure, if it proposes a size other than
-//!   `--width`/`--height`, grows the list; a host resizing scoot's window
-//!   afterwards is acked and otherwise ignored), and `--tty`'s hotplug
+//!   `--nested`'s dispatch loop (`nested_dispatch.rs`) calls it once per
+//!   size the host configures scoot's window to (its first configure and
+//!   every resize after -- a window dragged to resize passes through one
+//!   mode per distinct size that drag touched), and `--tty`'s hotplug
 //!   handler (`tty/hotplug.rs`) calls it once per mode change the display
-//!   underneath actually makes. So under `--tty` the list can grow more
-//!   than once -- a vfkit window moved between a 2x and a 1x screen a few
-//!   times leaves a mode for each distinct size it settled at. It is
-//!   bounded by the number of distinct sizes the connector has offered,
-//!   not by uevent traffic: a re-probe that lands on a size already in the
-//!   list adds nothing, and `plan` in `tty/hotplug.rs` does not even reach
-//!   `set_mode` unless the size changed. `wl_output` advertises every known mode for the same
+//!   underneath actually makes -- a vfkit window moved between a 2x and a
+//!   1x screen a few times leaves a mode for each distinct size it settled
+//!   at. Both are bounded by the number of *distinct sizes* offered, not by
+//!   event traffic: a re-probe that lands on a size already in the list
+//!   adds nothing, `plan` in `tty/hotplug.rs` does not even reach
+//!   `set_mode` unless the size changed, and a `--nested` configure at the
+//!   size scoot is already at is classified `Nothing` before it can reach
+//!   here (see `nested.rs`'s `configure_action`), which is what keeps a
+//!   host's activation and maximize configures -- re-sent at an unchanged
+//!   size on every focus change -- out of this list entirely.
+//!   `wl_output` advertises every known mode for the same
 //!   reason this protocol does, and the `preferred` flag tracks it the same
 //!   way on both: `headless.rs`'s `set_mode` marks the new mode preferred
 //!   *before* `change_current_state` sends it to already-bound `wl_output`

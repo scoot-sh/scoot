@@ -76,6 +76,36 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[The two webtop field reports](docs/backlog/resolved/nested-follow-host-resize-done.md)**
+  (issues #144/#145, 2026-09-19) — shipped together, being one field report
+  from the deployment `README.md` names. **`--nested` now follows the host
+  window's size for the life of the session** instead of acting only on the
+  first configure: every `xdg_surface::Configure` is classified by one pure
+  function into first-configure / resize / nothing-to-do, with the
+  third keeping a host's same-size configures (activation, maximize, a
+  focus change) from rebuilding a working render target. The design
+  question the entry posed is answered *in the code*, as two entry points
+  over one private core rather than one function inferring its own failure
+  policy: `apply_first_configure` stops the loop, `apply_resize` logs and
+  keeps the session — and it returns no `Result`, so "fatal" is not
+  something a caller can reach for by accident.
+  Two latent bugs fell out of writing that down. `replace_render_target`
+  resized the render target *before* allocating the new pool, so the one
+  failure the non-fatal path exists for (a bigger pool that would not
+  allocate) left the two at different sizes — `present()`'s guard drops
+  every frame in that state, i.e. a live session whose window never updates
+  again; the order is now reversed so `Err` really means nothing moved. And
+  `State::resize_output` (shared with `--tty` hotplug) published the new
+  mode to `wl_output` clients before the render target was rebuilt, leaving
+  them believing a size nothing renders at when it failed; the advertised
+  mode is now put back. Both pinned by tests, the second fail-first.
+  **And a clean disconnect now logs at `DEBUG`**, so an idle webtop session
+  stops emitting two lines a second (Selkies polls `wl-paste` every 500 ms,
+  each poll a fresh connection); `ProtocolError` stays at `warn!`, which is
+  where all the diagnostic value was. The audit for other per-connection
+  INFO lines came back empty by reading *and* by measurement — ten
+  `wayland-info` connect/bind/disconnect cycles add zero lines to an
+  `info`-level log.
 - **[`ext-idle-notify-v1` + `idle-inhibit-unstable-v1`](docs/backlog/resolved/ext-idle-notify-resolved.md)**
   (PR #38, 2026-09-15) — the automatic trigger session-lock had no other way
   to get. A `swayidle`-style daemon can now idle, resume and re-idle the
