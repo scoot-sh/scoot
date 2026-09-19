@@ -1,12 +1,12 @@
 ---
-title: "A clean client disconnect logs at INFO, so an idle webtop session emits two lines a second forever — LANDED 2026-09-19"
+title: "A clean client disconnect logs at INFO, so an idle webtop session emits two lines a second forever — LANDED 2026-09-19 (PR #151)"
 status: "resolved"
 area: "ipc"
 priority: "medium"
 blocked: null
 ---
 
-# A clean client disconnect logs at INFO, so an idle webtop session emits two lines a second forever — LANDED 2026-09-19
+# A clean client disconnect logs at INFO, so an idle webtop session emits two lines a second forever — LANDED 2026-09-19 (PR #151)
 
 **What landed is at the bottom of this file** ("What landed", below). The
 diagnosis above it is the original entry, unchanged.
@@ -94,3 +94,14 @@ lines to an `info`-level log (7 lines before, 7 after), and the same ten
 produced exactly **10** `DEBUG ... wayland client disconnected` lines under
 `RUST_LOG=scoot=debug`. The information is still there for anyone who wants
 it; it is just no longer in everyone's way.
+
+**The audit did catch one line, and the sibling change is what made it
+catchable.** `render/gles.rs` logs `the GLES renderer is up` at INFO on
+every successful `GlesBackend::new`, which `State::resize_output` comes
+back through — so once #144 made `--nested` follow host resizes, a
+`--renderer gles` session dragged to resize would emit it at host frame
+rate. Not per *connection*, which is why the reading pass above did not
+reach it, but the same shape and newly reachable at rate. It logs once per
+process now and `debug!`s the rebuilds, matching `dmabuf.rs`'s
+first-import pattern — and the message was wrong on a rebuild anyway: "the
+GLES renderer is up" is news exactly once.

@@ -67,9 +67,10 @@ pub struct Host {
     buffers: BufferPool,
     /// The size scoot is currently rendering at, i.e. what `buffers` is
     /// sized for. Distinct from the size on the wire in an in-flight
-    /// configure that hasn't been acted on yet; every configure is compared
-    /// against this and only a *different* size rebuilds anything (see
-    /// [`configure_action`]).
+    /// configure that hasn't been acted on yet; once `configured`, a
+    /// configure is compared against this and only a *different* size
+    /// rebuilds anything. The *first* configure rebuilds either way, there
+    /// being nothing built yet to keep (see [`configure_action`]).
     size: (i32, i32),
     /// xdg-shell forbids attaching a buffer before the first configure.
     ///

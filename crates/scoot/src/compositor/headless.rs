@@ -586,9 +586,17 @@ impl State {
     /// (`State::renderer`), never a different one: a resize that silently
     /// changed renderers would be a session quietly different from the one
     /// that was asked for. Under `--renderer gles` that means a whole new
-    /// EGL context and shader set per resize, which is wasteful and correct;
-    /// only `--nested`'s host configure and `--tty`'s hotplug get here at
-    /// all.
+    /// EGL context and shader set per resize, which is wasteful and correct.
+    /// What bounds it is the callers: `--tty`'s hotplug handler does not
+    /// reach here unless the connector's mode actually changed, and
+    /// `--nested` classifies a configure at the size it is already at as
+    /// `Nothing` before it can (see `nested.rs`'s `configure_action`) -- so
+    /// this runs once per *distinct* size, not once per event. A host window
+    /// dragged to resize still pays it per distinct size that drag passes
+    /// through, which is the one case where "wasteful" is felt rather than
+    /// theoretical; `--renderer gles` under `--nested` is opt-in, and
+    /// resizing a live GLES target in place instead of rebuilding is the fix
+    /// if that ever matters.
     pub fn resize_output(&mut self, width: i32, height: i32) -> bool {
         // Both halves in one read, so the `OutputChanged` below names the id
         // of the output that was actually resized without a second lookup

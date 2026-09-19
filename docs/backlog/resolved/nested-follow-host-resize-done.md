@@ -1,12 +1,12 @@
 ---
-title: "`--nested` ignores every configure after the first, so a webtop session is stuck at its starting size — LANDED 2026-09-19"
+title: "`--nested` ignores every configure after the first, so a webtop session is stuck at its starting size — LANDED 2026-09-19 (PR #151)"
 status: "resolved"
 area: "core"
 priority: "high"
 blocked: null
 ---
 
-# `--nested` ignores every configure after the first, so a webtop session is stuck at its starting size — LANDED 2026-09-19
+# `--nested` ignores every configure after the first, so a webtop session is stuck at its starting size — LANDED 2026-09-19 (PR #151)
 
 **What landed is at the bottom of this file** ("What landed", below). The
 diagnosis above it is the original entry, unchanged — including one claim

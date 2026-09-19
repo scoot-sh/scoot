@@ -55,6 +55,7 @@
 
 use std::error::Error;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use smithay::backend::allocator::Fourcc;
 use smithay::backend::egl::{EGLContext, EGLDevice, EGLDisplay};
@@ -71,6 +72,17 @@ pub(super) struct GlesBackend {
     pub(super) renderer: GlesRenderer,
     pub(super) buffer: GlesRenderbuffer,
 }
+
+/// Whether "the GLES renderer is up" has already been logged.
+///
+/// Process-global rather than a field, because the thing it describes is:
+/// one compositor process runs one session, whose renderer is fixed for its
+/// life (`State::renderer`), and the backend this guards is *replaced* on
+/// every resize -- a field on it would reset with the rebuild it exists to
+/// stay quiet about. Only ever `swap`ped to `true`, so `Relaxed` is enough:
+/// nothing else is ordered against it, and the worst a race could do is log
+/// the line twice at startup.
+static FIRST_BUILD_LOGGED: AtomicBool = AtomicBool::new(false);
 
 impl GlesBackend {
     /// Builds a GLES renderer and a renderbuffer of exactly `width` x
@@ -102,13 +114,35 @@ impl GlesBackend {
             let software = device.is_software();
             match build(device, width, height) {
                 Ok(backend) => {
-                    tracing::info!(
-                        device = %name,
-                        software,
-                        width,
-                        height,
-                        "the GLES renderer is up"
-                    );
+                    // INFO once, DEBUG for every rebuild after -- the same
+                    // once-per-session shape as `dmabuf.rs`'s first-import
+                    // line, and for the same reason. `State::resize_output`
+                    // comes back through here on every resize, which under
+                    // `--nested` is now once per size the host configures the
+                    // window to: a drag would otherwise emit this line at
+                    // host frame rate, which is exactly the flood
+                    // `docs/backlog/resolved/clean-disconnect-log-flood-done.md`
+                    // is about. It would also be *wrong* after the first:
+                    // "the GLES renderer is up" is news once, and the device
+                    // it names cannot change within a session (see
+                    // `State::renderer`).
+                    if FIRST_BUILD_LOGGED.swap(true, Ordering::Relaxed) {
+                        tracing::debug!(
+                            device = %name,
+                            software,
+                            width,
+                            height,
+                            "rebuilt the GLES renderer at a new size"
+                        );
+                    } else {
+                        tracing::info!(
+                            device = %name,
+                            software,
+                            width,
+                            height,
+                            "the GLES renderer is up"
+                        );
+                    }
                     return Ok(backend);
                 }
                 Err(error) => {
