@@ -40,6 +40,11 @@ use crate::compositor::shm_pools::MAX_POOLS_PER_CLIENT;
 use crate::compositor::state::ClientState;
 use crate::compositor::wl_buffers::MAX_BUFFERS_PER_CLIENT;
 
+/// The framebuffer the fixture's render target is built at. Small on purpose:
+/// nothing in this suite reads a pixel, it exists only so the session has a
+/// renderer at all (see [`drive_both`]).
+const CANVAS: i32 = 32;
+
 /// The client end of one test connection.
 #[derive(Default)]
 struct TestClient {
@@ -223,6 +228,15 @@ where
         crate::compositor::test_support::test_renderer(),
     )
     .expect("a compositor state with a wayland socket");
+    // A real render target, because three of the tests below reach the
+    // `zwp_linux_dmabuf_v1` global and that global now exists only where a
+    // renderer does: it is created by `headless::init` from the renderer whose
+    // importable formats it advertises (see `dmabuf.rs`). Nothing else here
+    // needs the output or the framebuffer -- these tests are about `wl_shm`
+    // pools and the per-client buffer budget -- but building it is what makes
+    // this fixture the same shape as a real session.
+    crate::compositor::headless::init(&mut state, CANVAS, CANVAS)
+        .expect("a headless backend behind the dispatch fixture");
 
     // Both clients are inserted up front, as socket pairs: that skips the
     // listening socket (and so any dependence on which name it got) while
@@ -1170,10 +1184,22 @@ fn a_dmabuf_create_past_a_full_budget_is_refused_by_the_shared_budget() {
     );
 }
 
-/// A dmabuf `create_immed` this compositor cannot import -- the harness
-/// builds a `State` with no backend at all, so there is no renderer to import
-/// into -- kills the client with `InvalidWlBuffer`, takes no one else down
-/// with it, and leaves the buffer budget empty.
+/// A dmabuf `create_immed` this compositor cannot import -- the "dma-buf" the
+/// client offers is a plain memfd, which `DMA_BUF_IOCTL_SYNC` rejects with
+/// `ENOTTY` under pixman and `eglCreateImageKHR` rejects under GLES -- kills
+/// the client with `InvalidWlBuffer`, takes no one else down with it, and
+/// leaves the buffer budget empty.
+///
+/// **The reason the import fails changed, and the assertions did not.** This
+/// used to say "the harness builds a `State` with no backend at all, so there
+/// is no renderer to import into". That stopped being how the fixture works
+/// when the dmabuf global became renderer-derived: the global exists only
+/// where a renderer does, so a fixture that can send `create_immed` at all
+/// necessarily has one (see `drive_both`). The refusal is now the renderer's
+/// own, which is the more realistic path and the one
+/// `dmabuf/tests.rs::a_fake_dmabuf_over_a_plain_memfd_is_refused_not_trusted`
+/// covers from the other side. What this test is *for* -- the kill, its blast
+/// radius, and the budget drain -- is unchanged by that.
 ///
 /// **What this no longer proves, deliberately stated rather than left to be
 /// assumed:** the final zero used to be read as "Smithay initialised the

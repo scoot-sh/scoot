@@ -47,7 +47,8 @@ use wayland_protocols::wp::linux_dmabuf::zv1::client::{
     zwp_linux_buffer_params_v1, zwp_linux_dmabuf_feedback_v1, zwp_linux_dmabuf_v1,
 };
 
-use super::{DMABUF_FORMATS, main_device, main_device_from};
+use super::{DMABUF_CANDIDATES, imports_linear, main_device, main_device_from, tranche};
+use crate::cli::RendererKind;
 use crate::compositor::decorations::Appearance;
 use crate::compositor::screencopy::FORMATS;
 use crate::compositor::test_support::{Harness, wait_for};
@@ -187,7 +188,7 @@ impl Fixture {
     }
 
     /// A compositor with no backend, for the one test about what a
-    /// renderer-less session answers.
+    /// renderer-less session advertises.
     fn renderer_less() -> Self {
         let mut fixture = Harness::bare(Appearance::default());
         fixture.spawn(run_client);
@@ -199,6 +200,18 @@ impl Fixture {
     /// `wl_buffers.rs`).
     fn buffers_in_flight(&self) -> usize {
         self.state.wl_buffers.buffers_in_flight()
+    }
+
+    /// Which renderer this fixture's backend really *built*, which is not the
+    /// same question as which one was asked for (see `Backend::renderer`).
+    /// The advertisement is derived from the built one, so a test that pins a
+    /// renderer-specific answer has to branch on the built one too.
+    fn renderer(&self) -> RendererKind {
+        self.state
+            .backend
+            .as_ref()
+            .expect("a headless backend behind the fixture")
+            .renderer()
     }
 }
 
@@ -316,8 +329,9 @@ fn the_dmabuf_global_is_advertised_at_version_6() {
 }
 
 #[test]
-fn default_feedback_names_a_device_and_both_advertised_formats() {
+fn default_feedback_names_a_device_and_the_renderers_own_formats() {
     let mut fixture = Fixture::start();
+    let expected = expected_table(&fixture);
     // v5: quickshell's own bind version, per the probe record.
     let seen = fixture.run(Step::ReadFeedback { version: 5 }).feedback();
     assert!(seen.done, "the feedback batch must be closed by `done`");
@@ -327,20 +341,36 @@ fn default_feedback_names_a_device_and_both_advertised_formats() {
         "main_device is a dev_t, eight bytes on the wire"
     );
     assert_eq!(
-        seen.table,
-        vec![
-            (u32::from_ne_bytes(*b"XR24"), 0),
-            (u32::from_ne_bytes(*b"AR24"), 0),
-        ],
-        "the table is exactly the two formats this compositor imports and \
-         serves, opaque first, LINEAR (modifier 0)"
+        seen.table, expected,
+        "the table on the wire must be exactly what the session's own renderer \
+         can import, in candidate order, LINEAR (modifier 0)"
     );
-    assert_eq!(seen.tranches, 1, "one tranche carries both formats");
+    assert_eq!(seen.tranches, 1, "one tranche carries the whole table");
+    // Under the default renderer the derivation has a known answer, so pin the
+    // literal bytes too rather than only the derived ones -- this is the
+    // assertion the pixman-only version of this test used to make, and it is
+    // what would catch the table's *encoding* going wrong (a swapped pair, a
+    // modifier that is not LINEAR) rather than only its contents.
+    if fixture.renderer() == RendererKind::Pixman {
+        assert_eq!(
+            seen.table,
+            vec![
+                (u32::from_ne_bytes(*b"XR24"), 0),
+                (u32::from_ne_bytes(*b"AR24"), 0),
+            ],
+            "pixman imports both candidates, so its session advertises exactly \
+             them, opaque first, LINEAR (modifier 0)"
+        );
+    }
 }
 
 #[test]
 fn a_v1_client_gets_format_events_not_feedback() {
     let mut fixture = Fixture::start();
+    let expected: Vec<u32> = expected_table(&fixture)
+        .into_iter()
+        .map(|(code, _modifier)| code)
+        .collect();
     let seen = fixture.run(Step::ReadFeedback { version: 1 }).feedback();
     assert!(
         !seen.done,
@@ -351,44 +381,217 @@ fn a_v1_client_gets_format_events_not_feedback() {
         "a v1 bind has no feedback object and therefore no format table"
     );
     assert_eq!(
-        seen.legacy_formats,
-        vec![u32::from_ne_bytes(*b"XR24"), u32::from_ne_bytes(*b"AR24"),],
-        "a v1 client is told the same two formats through the deprecated events"
+        seen.legacy_formats, expected,
+        "a v1 client is told the same formats through the deprecated events"
     );
 }
 
 #[test]
-fn every_advertised_format_is_one_pixman_can_import() {
-    // The promise with teeth: a `create_immed` the compositor then refuses is
-    // a client kill, so nothing may be in the tranche that
-    // `PixmanRenderer::import_dmabuf` would turn down. Pinned against the
-    // renderer's own `dmabuf_formats()` rather than against a comment, so a
-    // Smithay bump that drops a format from `SUPPORTED_FORMATS` fails here
-    // instead of in someone's session.
+fn every_advertised_format_is_one_the_renderer_imports() {
+    // The promise with teeth, pinned where the promise is actually made: on
+    // the wire, against the renderer this session really built. A
+    // `create_immed` the compositor then refuses is a client kill, so nothing
+    // a client can read out of the feedback table may be something the
+    // importer would turn down.
+    //
+    // This replaced a pixman-only version of the same pin. It has to be
+    // per-renderer now that the table is derived from the active one (see
+    // `dmabuf.rs`): under `SCOOT_TEST_RENDERER=gles` it asserts against
+    // `GlesRenderer`'s EGL display, which the old one could not see at all.
+    //
+    // It asks `imports_linear`, the same rule `tranche` filters by, rather
+    // than `imports_dmabuf_format({code, Linear})` directly -- and that is
+    // not the test weakening itself to match the code. A renderer whose
+    // import set carries only `{code, Invalid}` still imports a linear
+    // dma-buf of that code (see `imports_linear`'s doc for the chain through
+    // the pinned rev), so the direct check is *wrong* about such a driver in
+    // the direction that matters: it would fail this test on a session that
+    // is behaving correctly.
+    let mut fixture = Fixture::start();
+    let seen = fixture.run(Step::ReadFeedback { version: 5 }).feedback();
+    assert!(
+        !seen.table.is_empty(),
+        "this renderer advertised nothing at all, so this test would assert \
+         nothing -- on a machine whose renderer really can import neither \
+         candidate that is the correct behaviour, and this assertion is how \
+         you find out that is where you are"
+    );
+    let backend = fixture
+        .state
+        .backend
+        .as_ref()
+        .expect("a headless backend behind the fixture");
+    for (code, modifier) in seen.table {
+        let code = Fourcc::try_from(code).expect("an advertised fourcc is a real one");
+        assert_eq!(
+            Modifier::from(modifier),
+            Modifier::Linear,
+            "only LINEAR is ever advertised, whatever the evidence for it was"
+        );
+        assert!(
+            imports_linear(code, &|format| backend.imports_dmabuf_format(format)),
+            "the feedback table advertises {code:?} at LINEAR, which this \
+             session's renderer will not import -- a client that allocates it \
+             and calls create_immed would be killed for believing the \
+             advertisement"
+        );
+    }
+}
+
+#[test]
+fn pixmans_own_importable_set_still_contains_both_candidates() {
+    // The other half of the pin above, and the one that would otherwise be
+    // lost: the wire test asserts the table is *honest*, this asserts it is
+    // not *empty for the default renderer*. A Smithay bump that dropped
+    // `Xrgb8888` or `Argb8888` from pixman's `SUPPORTED_FORMATS` would not
+    // fail the wire test at all -- scoot would quietly advertise one format,
+    // or none -- and every `wl_shm`-less GL client on the project's own
+    // default configuration would silently lose its dmabuf path.
     let renderer = PixmanRenderer::new().expect("a pixman renderer");
     let importable = ImportDma::dmabuf_formats(&renderer);
-    for code in DMABUF_FORMATS {
+    for code in DMABUF_CANDIDATES {
         let format = Format {
             code,
             modifier: Modifier::Linear,
         };
         assert!(
             importable.contains(&format),
-            "the feedback table advertises {format:?}, which this renderer \
-             cannot import -- a client that allocates it and calls \
-             create_immed would be killed for believing the advertisement"
+            "pixman, the default renderer, can no longer import {format:?}, so \
+             scoot would stop advertising it"
         );
     }
     // The converse is deliberately *not* asserted: pixman imports far more
     // fourccs than these two, and advertising fewer than can be imported
     // costs a client nothing (it falls back to shm), while advertising one
-    // that cannot is fatal. See `DMABUF_FORMATS`.
+    // that cannot is fatal. See `DMABUF_CANDIDATES`.
     assert!(
-        importable.iter().count() > DMABUF_FORMATS.len(),
+        importable.iter().count() > DMABUF_CANDIDATES.len(),
         "this test only makes sense while pixman's importable set is the \
          larger one; if it ever shrinks to exactly the advertised pair, say \
          so here rather than leaving a vacuous assertion"
     );
+}
+
+#[test]
+fn a_renderer_that_imports_nothing_is_advertised_as_nothing() {
+    // The hazard this whole stage exists for, and the one no machine here can
+    // produce on demand: an EGL display with no dma-buf import capability at
+    // all. Advertising the candidates against it would kill every client that
+    // believed the feedback, so the tranche has to come out empty -- which is
+    // what makes `advertise` skip the global entirely rather than offer an
+    // empty table.
+    let advertised: Vec<Format> = tranche(|_| false).collect();
+    assert!(
+        advertised.is_empty(),
+        "a renderer that can import nothing must be advertised as importing \
+         nothing"
+    );
+}
+
+#[test]
+fn a_renderer_missing_one_candidate_advertises_only_the_other() {
+    // The partial case, which is the realistic one: a driver that imports
+    // opaque `XR24` but not `AR24`. The survivor keeps its place in the
+    // candidate order rather than the list being rebuilt in some other one --
+    // the order is load-bearing (`Xrgb8888` first; see `screencopy.rs`).
+    let opaque = Format {
+        code: Fourcc::Xrgb8888,
+        modifier: Modifier::Linear,
+    };
+    let advertised: Vec<Format> = tranche(|format| format == opaque).collect();
+    assert_eq!(advertised, vec![opaque]);
+
+    let alpha = Format {
+        code: Fourcc::Argb8888,
+        modifier: Modifier::Linear,
+    };
+    let advertised: Vec<Format> = tranche(|format| format == alpha).collect();
+    assert_eq!(advertised, vec![alpha]);
+
+    let both: Vec<Format> = tranche(|_| true).collect();
+    assert_eq!(
+        both,
+        vec![opaque, alpha],
+        "a renderer that imports both is advertised both, opaque first"
+    );
+}
+
+#[test]
+fn a_renderer_listing_only_the_invalid_modifier_still_advertises_linear() {
+    // The regression review caught in PR #147 before it could reach anyone,
+    // and the reason `imports_linear` exists rather than a direct
+    // `has_dmabuf_format({code, Linear})`.
+    //
+    // Smithay inserts `{fourcc, Invalid}` unconditionally and explicit
+    // modifiers only when `QueryDmaBufModifiersEXT` returned a non-zero count
+    // -- which stays zero on a display with no modifiers extension, on a
+    // driver that answers `EGL_BAD_PARAMETER` for its own enumerated format
+    // (NVIDIA >= 520, named in upstream's own comment), and on a driver that
+    // reports no modifiers. Such a renderer *does* import a linear dma-buf.
+    // Requiring the explicit entry would have advertised nothing at all
+    // there, dropping every GL client to software rendering and leaving a
+    // dmabuf-gated shell unable to capture the screen.
+    let invalid_only = |format: Format| format.modifier == Modifier::Invalid;
+    let advertised: Vec<Format> = tranche(invalid_only).collect();
+    assert_eq!(
+        advertised,
+        vec![
+            Format {
+                code: Fourcc::Xrgb8888,
+                modifier: Modifier::Linear,
+            },
+            Format {
+                code: Fourcc::Argb8888,
+                modifier: Modifier::Linear,
+            },
+        ],
+        "a renderer that lists only the Invalid modifier must still be \
+         advertised both candidates, and advertised them at LINEAR -- what is \
+         on the wire is what a client allocates, and it is never `Invalid`"
+    );
+}
+
+#[test]
+fn a_renderer_with_only_other_explicit_modifiers_advertises_nothing() {
+    // The other half of the same rule, and what keeps the widening above from
+    // becoming "advertise anything". Evidence is `Linear` *or* `Invalid` and
+    // nothing else: a driver that imports a tiled layout for these fourccs
+    // and neither of those two says nothing about whether it would take the
+    // linear buffer a client allocates from this table -- and a tiled buffer
+    // is one pixman cannot map and no consumer of scoot's framebuffer layout
+    // expects.
+    let tiled = Modifier::from(1u64); // I915_FORMAT_MOD_X_TILED, as a stand-in
+    let advertised: Vec<Format> = tranche(|format| format.modifier == tiled).collect();
+    assert!(
+        advertised.is_empty(),
+        "only LINEAR or Invalid is evidence, so a renderer that imports \
+         neither must be advertised nothing"
+    );
+}
+
+/// The `(fourcc, modifier)` pairs this fixture's *own* renderer should put on
+/// the wire, derived the same way `advertise` derives them.
+///
+/// Not a second copy of the expected answer: the point of comparing this
+/// against the wire is that the global really carries what the derivation
+/// produced, in order, through Smithay's format-table memfd -- a step with
+/// several ways to lose the ordering or the modifier and none to notice it.
+///
+/// This needs no widening of its own for the `Modifier::Invalid` case
+/// `imports_linear` handles, and that is worth stating rather than leaving as
+/// an absence: the rule lives *inside* `tranche`, so the closure here is
+/// called once per candidate per modifier `tranche` considers evidence, and
+/// the backend answers each honestly. A copy of the rule here would be a
+/// second place for it to drift.
+fn expected_table(fixture: &Fixture) -> Vec<(u32, u64)> {
+    let backend = fixture
+        .state
+        .backend
+        .as_ref()
+        .expect("a headless backend behind the fixture");
+    tranche(|format| backend.imports_dmabuf_format(format))
+        .map(|format| (format.code as u32, u64::from(format.modifier)))
+        .collect()
 }
 
 #[test]
@@ -409,7 +612,7 @@ fn the_feedback_table_matches_the_shm_capture_formats() {
         .collect();
     assert_eq!(
         shm.as_slice(),
-        &DMABUF_FORMATS,
+        &DMABUF_CANDIDATES,
         "the dmabuf feedback table must name exactly the formats the shm \
          capture path serves, in the same order"
     );
@@ -454,7 +657,35 @@ fn the_no_drm_node_ladder_ends_at_zero() {
          \"no device\" answer"
     );
     // ...while the real ladder never panics, whatever this machine has.
-    let _ = main_device();
+    let _ = main_device(None);
+}
+
+#[test]
+fn the_renderers_own_device_beats_the_path_ladder() {
+    // The rung the path ladder cannot check: a renderer that names its own
+    // EGL device is naming the only device an import can succeed against, so
+    // nothing below it is consulted -- including `/dev/dri/renderD128`, which
+    // on a two-GPU machine may be the *other* card's node.
+    //
+    // `0xdead_beef` stands in for a real `dev_t`: nothing here stats it, and
+    // using a value no machine can have is what makes a fallthrough to the
+    // ladder visible instead of coincidentally equal.
+    assert_eq!(
+        main_device(Some(0xdead_beef)),
+        0xdead_beef,
+        "a renderer that names its own device must be believed over any path"
+    );
+    // And a renderer with no device of its own (pixman, or software EGL)
+    // falls through to exactly what the ladder says about this machine.
+    assert_eq!(
+        main_device(None),
+        main_device_from(
+            std::path::Path::new("/dev/dri/renderD128"),
+            std::path::Path::new("/dev/dri/card0")
+        )
+        .0,
+        "with no renderer device the path ladder is the whole answer"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -810,22 +1041,37 @@ fn a_multi_plane_import_is_refused() {
 }
 
 #[test]
-fn a_session_with_no_renderer_answers_failed() {
-    let _mappings = exclusive_mappings();
-    // The bare harness has `backend: None`. There is nothing to import into,
-    // so the honest answer is the protocol's own refusal -- and, crucially,
-    // not a panic on an `unwrap` of a backend that isn't there.
+fn a_session_with_no_renderer_advertises_no_dmabuf_global() {
+    // The bare harness has `backend: None`. There is no renderer, so there is
+    // nothing whose importable formats a tranche could be derived from, and
+    // the honest advertisement is none at all -- a client is steered onto
+    // `wl_shm` instead of onto a dmabuf path that could only ever answer
+    // `failed`.
+    //
+    // This test used to drive a real import through the global and assert the
+    // refusal. That is no longer reachable *through the protocol*: the global
+    // is created from `headless::init_named`, which is also what creates the
+    // renderer, so a session with one and not the other cannot be spoken to.
+    // `dmabuf_imported`'s no-backend branch stays regardless -- it is the
+    // difference between a refusal and a panic for any future front-end that
+    // has a renderer at startup and loses it -- but the structural guarantee
+    // asserted here is the stronger of the two.
     let mut fixture = Fixture::renderer_less();
-    let outcome = fixture
-        .run(Step::Import(Import::new(Backing::Udmabuf)))
-        .import();
-    if outcome == ImportOutcome::NoUdmabuf {
-        return skipped("a_session_with_no_renderer_answers_failed");
-    }
-    assert_eq!(
-        outcome,
-        ImportOutcome::Failed,
-        "a compositor with no renderer must refuse, not crash"
+    let globals = fixture.run(Step::ReportGlobals).globals();
+    assert!(
+        !globals
+            .iter()
+            .any(|(interface, _)| interface == "zwp_linux_dmabuf_v1"),
+        "a compositor with no renderer must not advertise a dmabuf global it \
+         could only refuse every import on: {globals:?}"
+    );
+    // ...and it is specifically the dmabuf global that is missing, not the
+    // whole session: everything else is still advertised.
+    assert!(
+        globals
+            .iter()
+            .any(|(interface, _)| interface == "wl_compositor"),
+        "the rest of the session must be unaffected: {globals:?}"
     );
 }
 

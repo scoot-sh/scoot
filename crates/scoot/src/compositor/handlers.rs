@@ -45,6 +45,7 @@ use smithay::wayland::shm::{ShmHandler, ShmState};
 
 use super::State;
 use super::output_scale::send_preferred_buffer_scale;
+use super::render::Backend;
 use super::state::ClientState;
 
 impl CompositorHandler for State {
@@ -80,7 +81,22 @@ impl CompositorHandler for State {
         // pinned rev does and does not guarantee. The gate is a plain bool in
         // an shm-only session (see `State::imports_dmabufs`), so the walk is
         // paid for only where dmabufs actually exist.
-        if self.imports_dmabufs {
+        //
+        // Two conditions, not one, and they ask different questions: the flag
+        // is "do dmabufs happen in this session at all", the backend's is "is
+        // an imported dmabuf a CPU mapping only this process synchronises".
+        // Only pixman answers yes to the second -- a GLES tier never maps the
+        // buffer here, so its implicit fences are the driver's to honour, and
+        // the ioctl pair would be per-commit cost (including a blocking wait
+        // on the client's GPU job) for a mapping that does not exist. The flag
+        // comes first because it is the cheaper test and the one that is false
+        // in almost every session.
+        if self.imports_dmabufs
+            && self
+                .backend
+                .as_ref()
+                .is_some_and(Backend::maps_dmabufs_on_the_cpu)
+        {
             super::dmabuf::sync_committed_dmabufs(surface);
         }
         self.last_commit = std::time::Instant::now();

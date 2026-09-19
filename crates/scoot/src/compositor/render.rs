@@ -47,8 +47,8 @@
 use std::error::Error;
 use std::fmt;
 
-use smithay::backend::allocator::Fourcc;
 use smithay::backend::allocator::dmabuf::Dmabuf;
+use smithay::backend::allocator::{Format, Fourcc};
 use smithay::backend::renderer::damage::OutputDamageTracker;
 use smithay::backend::renderer::{
     Bind, Color32F, ExportMem, ImportAll, ImportDma, ImportMem, Renderer, Texture,
@@ -333,7 +333,9 @@ impl Backend {
             // buffer.
             #[cfg(feature = "gpu-scanout")]
             Pipeline::Scanout(gpu) => {
-                let scanout::ScanoutBackend { renderer, captures } = &mut **gpu;
+                let scanout::ScanoutBackend {
+                    renderer, captures, ..
+                } = &mut **gpu;
                 let Some(frame) = captures.frame_mut() else {
                     return Err(CaptureError::new(
                         CaptureStage::Bind,
@@ -367,6 +369,81 @@ impl Backend {
             Pipeline::Scanout(gpu) => ImportDma::import_dmabuf(&mut gpu.renderer, dmabuf, None)
                 .map(|_texture| ())
                 .map_err(|error| error.to_string()),
+        }
+    }
+
+    /// Whether this session's renderer can really import a dma-buf of
+    /// `format`.
+    ///
+    /// The question `zwp_linux_dmabuf_v1`'s feedback tranche is built from:
+    /// a format advertised here and then refused at import kills the client
+    /// that believed it, because `create_immed`'s only failure reply is a
+    /// fatal protocol error (see `dmabuf.rs`). So the answer has to come from
+    /// the renderer that will actually do the importing -- this one -- rather
+    /// than from a list, from `State::renderer` (what was *asked* for, not
+    /// what was built) or from a probe of some other EGL display.
+    ///
+    /// Startup-only: `dmabuf.rs::advertise` calls it once per candidate
+    /// format, never per import and never per frame.
+    pub(super) fn imports_dmabuf_format(&self, format: Format) -> bool {
+        match &self.pipeline {
+            Pipeline::Pixman(cpu) => ImportDma::has_dmabuf_format(&cpu.renderer, format),
+            Pipeline::Gles(gpu) => ImportDma::has_dmabuf_format(&gpu.renderer, format),
+            #[cfg(feature = "gpu-scanout")]
+            Pipeline::Scanout(gpu) => ImportDma::has_dmabuf_format(&gpu.renderer, format),
+        }
+    }
+
+    /// Whether an imported dma-buf becomes a **CPU mapping this compositor
+    /// reads itself**, rather than something the driver samples.
+    ///
+    /// True for pixman alone, which `mmap`s plane 0 and composites out of that
+    /// mapping -- so nothing but scoot synchronises it, and `dmabuf.rs`'s
+    /// `sync_committed_dmabufs` has to issue the `DMA_BUF_IOCTL_SYNC` bracket
+    /// itself on every commit. Both GLES tiers hand the buffer to the driver
+    /// as an `EGLImage` instead and never map it here, so the buffer's
+    /// implicit fences are the driver's to honour when it samples -- the
+    /// arrangement every GL compositor relies on, none of which issues a
+    /// per-commit `DMA_BUF_IOCTL_SYNC`. Running it there would not be free
+    /// either: the `START` half *blocks the event loop* until the client's GPU
+    /// job finishes, while holding that surface's user-data locks (see
+    /// `sync_committed_dmabufs`), which is a cost with no CPU mapping left to
+    /// justify it.
+    ///
+    /// Deliberately *not* folded into
+    /// [`State::imports_dmabufs`](super::State), which answers a different
+    /// question ("has any import succeeded in this session") and has a second
+    /// reader that must stay renderer-agnostic -- the cache drain, which every
+    /// renderer needs.
+    pub(super) fn maps_dmabufs_on_the_cpu(&self) -> bool {
+        match &self.pipeline {
+            Pipeline::Pixman(_) => true,
+            Pipeline::Gles(_) => false,
+            #[cfg(feature = "gpu-scanout")]
+            Pipeline::Scanout(_) => false,
+        }
+    }
+
+    /// The DRM render node this session's renderer is on, where it has one.
+    ///
+    /// `None` for pixman, which has no device at all: it `mmap`s whatever
+    /// dma-buf it is handed, whichever node allocated it. Both GLES tiers
+    /// answer with their own device's render node, which is what a client
+    /// has to allocate on for the import to have a chance of succeeding --
+    /// see `dmabuf.rs`'s `main_device`.
+    ///
+    /// The scanout tier has a second rung because its EGL display often
+    /// cannot answer at all: it is made through `PLATFORM_GBM_KHR`, whose
+    /// `EGLDevice` need not carry `EGL_EXT_device_drm`, so the GBM device it
+    /// was made on is asked instead (see [`scanout::ScanoutBackend::node`]).
+    /// The two name the same device by construction, so this is a fallback,
+    /// not a preference.
+    pub(super) fn render_node(&self) -> Option<libc::dev_t> {
+        match &self.pipeline {
+            Pipeline::Pixman(_) => None,
+            Pipeline::Gles(gpu) => gles::render_node(&gpu.renderer),
+            #[cfg(feature = "gpu-scanout")]
+            Pipeline::Scanout(gpu) => gles::render_node(&gpu.renderer).or(gpu.node),
         }
     }
 
@@ -607,7 +684,9 @@ fn draw_frame_scanout(
     } else {
         state.appearance.background_color.into()
     };
-    let scanout::ScanoutBackend { renderer, captures } = gpu;
+    let scanout::ScanoutBackend {
+        renderer, captures, ..
+    } = gpu;
     let (elements, cursor_surface) = state.gather_elements(renderer, output, &frame, ring_elements);
     outcome.cursor_surface = cursor_surface;
 

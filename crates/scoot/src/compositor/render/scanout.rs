@@ -70,6 +70,23 @@ const SLOT_POOL: usize = 4;
 pub(crate) struct ScanoutBackend {
     pub(super) renderer: GlesRenderer,
     pub(super) captures: Captures,
+    /// This tier's DRM **render** node, for `zwp_linux_dmabuf_v1`'s
+    /// `main_device` -- the device a client should allocate the buffers this
+    /// renderer imports against (see `dmabuf.rs`).
+    ///
+    /// Taken from the GBM device rather than from the EGL display, because on
+    /// this tier the EGL display frequently cannot answer: it is created
+    /// through `PLATFORM_GBM_KHR`, and its `EGLDevice` need not carry
+    /// `EGL_EXT_device_drm` at all. Measured, not assumed -- on the dev VM's
+    /// virtio-gpu it carries neither that nor
+    /// `EGL_EXT_device_drm_render_node`, while the *same* Mesa answers both
+    /// for the offscreen tier's enumerated device.
+    ///
+    /// `None` where the GBM device is not a DRM node this can reason about,
+    /// or has no render node of its own -- the split render/display case
+    /// (Apple Silicon: `apple,dcp` owns the CRTCs and has no render node) is
+    /// the realistic one. `dmabuf.rs`'s path ladder answers then.
+    pub(super) node: Option<libc::dev_t>,
 }
 
 /// The dma-bufs a capture reads, and the pool they are exported into once per
@@ -113,25 +130,13 @@ impl ScanoutBackend {
         // anywhere; `GlesRenderer` is neither `Send` nor `Sync` and lives in
         // `State`, which is single-threaded (see `state.rs`).
         let renderer = unsafe { GlesRenderer::new(context) }?;
-        // Before anything else can depend on this renderer: a tier that
-        // cannot import what this compositor *promises* clients it can
-        // import is a tier that kills dmabuf clients, and it must not come
-        // up at all.
-        if let Some(refused) = first_unimportable(&renderer) {
-            return Err(format!(
-                "this device's gles renderer cannot import {:?}/{:?}, which \
-                 zwp_linux_dmabuf_v1 advertises to every client -- coming up on \
-                 it would disconnect them",
-                refused.code, refused.modifier
-            )
-            .into());
-        }
         Ok(Self {
             renderer,
             captures: Captures {
                 exported: Vec::with_capacity(SLOT_POOL),
                 frame: None,
             },
+            node: render_node(gbm),
         })
     }
 
@@ -141,9 +146,48 @@ impl ScanoutBackend {
     ///
     /// Read from the renderer that will actually draw the frames, not from a
     /// probe: a format table that described a *different* EGL context would
-    /// be a promise nothing keeps. Deliberately not related to what
-    /// `zwp_linux_dmabuf_v1` advertises to clients -- that is stage 4's, and
-    /// this value never reaches it.
+    /// be a promise nothing keeps. Deliberately unrelated to what
+    /// `zwp_linux_dmabuf_v1` advertises to clients: these are the formats this
+    /// renderer can *render into* for scanout, that one is what it can
+    /// *import* from a client, and the two sets differ.
+    ///
+    /// # What used to be here, and why it is gone
+    ///
+    /// `ScanoutBackend::new` used to refuse to come up at all on a device
+    /// whose renderer could not import both formats `dmabuf.rs` advertised --
+    /// the price of being the first `--tty` tier to route client imports
+    /// through GLES, back when the advertisement was a hard-coded pixman pair
+    /// that this tier could contradict. It cannot contradict it any more: the
+    /// tranche is now derived from the renderer the session actually built
+    /// (`dmabuf::advertise`, run from `headless::init_named` with this very
+    /// backend), so a format this renderer cannot import is never advertised
+    /// in the first place.
+    ///
+    /// Keeping both would have left two mechanisms computing one predicate --
+    /// "can this renderer import what we advertise" -- and disagreeing about
+    /// what to do with it: one narrowing the table, one refusing the tier. The
+    /// narrower is the one that cannot kill a client, so it is the one that
+    /// stayed.
+    ///
+    /// **What the guard was also doing, which is worth naming because it is
+    /// what makes removing it safe or not.** It was a net under a *false
+    /// negative* in that predicate: a renderer wrongly judged unable to import
+    /// lost the tier but kept a working dmabuf path, because the session fell
+    /// back to pixman. With the guard gone the same false negative ends in no
+    /// `zwp_linux_dmabuf_v1` global at all -- GL clients on software
+    /// rendering, and a dmabuf-gated shell unable to capture the screen. The
+    /// predicate had exactly such a false negative when this was first
+    /// written (it required an explicit `LINEAR` entry, which a driver
+    /// reporting only `Modifier::Invalid` does not have); that is fixed in
+    /// `dmabuf::imports_linear`, and its doc is the place to check before
+    /// narrowing the rule again.
+    ///
+    /// The consequence that remains, stated rather than discovered: on a
+    /// device whose GLES renderer really can import neither candidate, the
+    /// session now comes up on this tier with no global (GL clients fall back
+    /// to `wl_shm`) where before it fell back to pixman and dumb buffers. No
+    /// machine this project can reach produces that configuration, and
+    /// `dmabuf::advertise` warns loudly when it happens.
     pub(crate) fn renderer_formats(&self) -> Vec<smithay::backend::allocator::Format> {
         self.renderer
             .egl_context()
@@ -154,32 +198,25 @@ impl ScanoutBackend {
     }
 }
 
-/// The first format this compositor advertises to dmabuf clients that
-/// `renderer` cannot actually import, if any.
+/// The DRM render node belonging to the same device as `gbm`, if it has one.
 ///
-/// Not a nicety and not stage 4. `zwp_linux_dmabuf_v1`'s feedback tranche is
-/// a promise with teeth: a client that allocates from it and then has the
-/// import refused is killed outright, because `create_immed`'s only failure
-/// reply is a fatal protocol error (see `dmabuf.rs`'s module doc and
-/// `docs/backlog/resolved/dmabuf-advertised-but-never-imported-done.md`,
-/// where exactly that took down a whole shell). Under `--tty` the renderer
-/// has always been pixman, which imports a linear dma-buf by mmapping it and
-/// essentially never refuses, whereas GLES *can*. This tier is not the first
-/// path to route client imports through GLES -- `render.rs`'s
-/// `Pipeline::Gles` arm already does, and `docs/tty.md` documents that gap --
-/// but it is the first under `--tty`, where refusing means killing a client
-/// on the user's own session rather than in a nested window. So the check is
-/// the price of adding the tier, not a feature of it.
+/// The *render* node specifically, converted from whichever node the GBM
+/// device was opened on (a primary one, under `--tty`): the device
+/// `zwp_linux_dmabuf_v1` names is what a client allocates against, and a
+/// client that only renders has no business on a primary node. The
+/// conversion is a minor-number lookup plus a `stat` of the matching path
+/// (`DrmNode::node_with_type`), so it answers `None` rather than guessing
+/// when the device has no render node at all.
 ///
-/// What it deliberately does **not** do is change what is advertised --
-/// deriving the tranche from the active renderer is stage 4, and is a
-/// different (and larger) change. This only refuses to come up on a
-/// configuration where the existing advertisement would be a lie.
-fn first_unimportable(renderer: &GlesRenderer) -> Option<smithay::backend::allocator::Format> {
-    use smithay::backend::renderer::ImportDma;
+/// Every failure is `None` and none of them is an error worth a log line
+/// here: the caller's ladder has a further rung, and `dmabuf.rs` logs which
+/// rung actually answered. Startup-only, once per session.
+fn render_node(gbm: &GbmDevice<DrmDeviceFd>) -> Option<libc::dev_t> {
+    use smithay::backend::drm::{DrmNode, NodeType};
 
-    crate::compositor::dmabuf::advertised_formats()
-        .find(|format| !renderer.has_dmabuf_format(*format))
+    let node = DrmNode::from_file(gbm).ok()?;
+    let render = node.node_with_type(NodeType::Render)?.ok()?;
+    Some(render.dev_id())
 }
 
 impl Captures {

@@ -25,7 +25,7 @@ docs/backlog`, `rg -l 'area: "protocols"' docs/roadmap`.
 | 4b | [Window decorations](docs/roadmap/04b-decorations.md) | done |
 | 5 | [Cursor rendering for `--tty`](docs/roadmap/05-cursor-rendering.md) | done |
 | 5b | [VT-switch-back `EPERM`](docs/roadmap/05b-vt-switch-eperm.md) | done |
-| 6 | [Real GPU rendering pipeline](docs/roadmap/06-gpu-pipeline.md) | **in progress (stage 3 of 4)** |
+| 6 | [Real GPU rendering pipeline](docs/roadmap/06-gpu-pipeline.md) | **in progress (stage 4 of 4)** |
 | 7–18 | [Backlog-driven hardening and protocol work](docs/roadmap/) | done |
 
 Item 6 (a **GLES** renderer as an optional alternative to pixman, selected
@@ -35,13 +35,21 @@ remaining item on the original ordered list. Two of its four stages have landed
 zero behaviour change; PR #130: the GLES pipeline behind
 `--renderer pixman|gles` and `[renderer] backend`, off by default, every
 pixel-readback suite passing byte-identically under both renderers) and
-stage 3 is in flight, split in two because the `DrmCompositor` path and the
+stage 3 landed split in two, because the `DrmCompositor` path and the
 structural room it needs are not reviewable as one diff: PR #133 (the
 `gpu-scanout` Cargo feature, off by default because `backend_gbm` is a
 link-time libgbm dependency and GPU-free operation is a hard requirement, plus
 the dumb presenter lifted out of `Tty`) and PR #135 stacked on it (GPU scanout
 for `--tty --renderer gles`: the frame composited straight into the buffer the
-CRTC scans out, with no read-back and no dumb-buffer memcpy). Two claims that entry used to
+CRTC scans out, with no read-back and no dumb-buffer memcpy). Stage 4, the
+last, is in flight: the `zwp_linux_dmabuf_v1` tranche is derived from whatever
+renderer the session actually built rather than hard-coded to what the CPU
+renderer can map — which closes the case of an EGL display with no dma-buf
+import capability at all, where the old fixed pair would have been advertised
+and every GL client killed through `create_immed` for believing it. It also
+moves the global's creation from `State::new` (where no renderer exists yet)
+to `headless::init_named`, which no client can observe because nothing
+dispatches wayland in between. Two claims that entry used to
 make were checked and corrected in the same PR: the "render-target/presentation
 split" it called the seam a GPU renderer slots into **did not exist** (one
 monolithic `State::render()` hard-wired to pixman three ways), and the pinned
@@ -1072,15 +1080,20 @@ Small follow-ups already filed alongside:
 (resolved, PR #77).
 
 Item 6 (the GPU pipeline) remains the one *ordered* milestone still open, now
-three of four stages in: the renderer seam (PR #129, merged), the GLES
-pipeline behind `--renderer` (PR #130, merged), and `DrmCompositor` scanout
-for `--tty` (PRs #133 and #135, in flight). It has never been ahead of
+on its last stage: the renderer seam (PR #129, merged), the GLES pipeline
+behind `--renderer` (PR #130, merged), `DrmCompositor` scanout for `--tty`
+(PRs #133 and #135, merged), and the renderer-derived `zwp_linux_dmabuf_v1`
+tranche (stage 4, in flight). It has never been ahead of
 the daily-drivability and correctness work the backlog keeps producing, and
 that trade can be revisited at any time — stage 1 was picked up when it was
 because it is a pure refactor with no behaviour change, so it cost the backlog
 nothing and removed the one thing that made every later stage unreviewable,
 and stages 2 and 3 are opt-in and off by default for the same reason —
-stage 3 doubly so, behind both a Cargo feature and a flag.
+stage 3 doubly so, behind both a Cargo feature and a flag. Stage 4 is the one
+that is *not* opt-in, because it cannot be: what a compositor promises its
+dma-buf clients is a promise every session makes, and the point of the stage
+is that the promise stops being one renderer's answer given on another
+renderer's behalf.
 
 ## History
 

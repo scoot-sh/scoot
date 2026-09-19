@@ -225,11 +225,20 @@ running with no GPU at all is a hard requirement here, not a fallback tier.
 - **A wrong `--renderer gles` is a startup error, not a silent downgrade.**
   If no EGL device can drive it, scoot says so and names each failure rather
   than quietly compositing with the other renderer.
-- **Known gap: dma-buf clients.** The buffer formats scoot advertises to
-  clients are still the CPU renderer's, whichever renderer is active, so a
-  client handing over a GPU buffer the active GLES renderer cannot import has
-  it refused (and, through `create_immed`, is disconnected for it). If you
-  use dma-buf clients, stay on `pixman` for now.
+- **dma-buf clients follow the renderer.** This used to be a known gap — the
+  advertised buffer formats were the CPU renderer's whichever renderer was
+  active, so a GPU buffer the GLES renderer could not import was refused, and
+  through `create_immed` that disconnects the client. Since the stage-4
+  change the `zwp_linux_dmabuf_v1` feedback names only what the *active*
+  renderer can really import, so there is nothing left to stay on `pixman`
+  for. Two consequences worth knowing: on a renderer that can import neither
+  of the formats scoot serves, no dmabuf global is advertised at all (GL
+  clients fall back to `wl_shm`, and a shell that waits for dmabuf feedback
+  before capturing — quickshell does — stays waiting), and `main_device` in
+  that feedback is the renderer's own DRM render node rather than a guessed
+  path, which is what makes a client's allocation land on the device the
+  import will happen on. See
+  [protocols.md](protocols.md#screen-capture-ext-image-copy-capture-v1).
 
 ### The `gpu-scanout` build feature
 
