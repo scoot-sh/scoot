@@ -24,46 +24,6 @@ use super::tty::Tty;
 #[cfg(test)]
 mod bench;
 
-/// The core's id for the one output this compositor creates.
-///
-/// Every site that reports output geometry to [`scoot_core`] uses it, so the
-/// "there is exactly one output" assumption lives in one named place rather
-/// than as a bare `OutputId(1)` repeated at each of them. Multi-output
-/// support replaces this with a real per-output id.
-///
-/// It is not the only thing multi-output has to touch, though, so this is not
-/// a "change the constant and you're done" marker. `layer_shell.rs`'s
-/// `new_layer_surface` already honours a client's requested `wl_output`
-/// (`layer_map_for_output(requested.or(self.output))`), while six sites
-/// unconditionally reach for `self.output` instead: `layer_destroyed`,
-/// `commit_layer_surface`, `refresh_layer_zone`, `layer_hit`,
-/// `layer_keyboard_focus` and `render()`'s frame-callback/cleanup pass.
-/// Unreachable today -- exactly one `Output` exists, so "the one the client
-/// asked for" and "the one we have" are the same object -- but every one of
-/// them has to become per-output once there is more than one, and not all in
-/// the same way: `layer_destroyed` and `commit_layer_surface` want the
-/// surface's *own* output, `layer_hit` the one under the pointer,
-/// `refresh_layer_zone` a zone per output rather than one, and
-/// `layer_keyboard_focus` and `render()`'s pass have to walk more than one
-/// map.
-///
-/// The same holds for `session_lock.rs`, whose four per-output sites are the
-/// subject of `docs/backlog/resolved/session-lock-per-output-done.md` (resolved
-/// as single-output pins, not as multi-output): `new_surface` honours the
-/// client's named `wl_output` but falls back to the single output, and
-/// refuses a second live surface for an already-covered output with the
-/// protocol's `duplicate_output` error (see
-/// `docs/backlog/resolved/session-lock-duplicate-output-done.md`);
-/// `configure_all` sizes every surface to that one output together;
-/// confirmation treats the first blanked frame as "presented on all outputs",
-/// which is true if and only if there is one of them; and the locked render
-/// path composites every current surface onto that output at its origin with
-/// the keyboard on the first of them. Per-output, the fallback goes away,
-/// each output gets its own size, `locked` waits for every output's blanked
-/// frame, and the focus rule needs one surface per output rather than the
-/// first of all of them.
-pub(super) const OUTPUT_ID: OutputId = OutputId(1);
-
 /// How often a changed screen is redrawn, while there's something to redraw.
 ///
 /// Visible to the rest of the compositor because it is also the natural unit
@@ -88,12 +48,18 @@ pub fn init(state: &mut State, width: i32, height: i32) -> Result<(), Box<dyn Er
     init_named(state, OUTPUT_NAME, width, height, ScanoutHandoff::default())
 }
 
-/// Creates the one output and the render target behind it -- pixman's image
-/// or, under `--renderer gles`, a GLES renderbuffer (see `render`). `name` is
-/// what clients see as `wl_output.name` (and `model`): a connector name
-/// such as `HDMI-A-1` or `Virtual-1` under `--tty`, so a bar or shell
+/// Creates the primary output and the render target behind it -- pixman's
+/// image or, under `--renderer gles`, a GLES renderbuffer (see `render`).
+/// `name` is what clients see as `wl_output.name` (and `model`): a connector
+/// name such as `HDMI-A-1` or `Virtual-1` under `--tty`, so a bar or shell
 /// labels the screen the way it would under any other compositor, or
 /// [`OUTPUT_NAME`] where there is no connector.
+///
+/// The output this creates is the one [`Outputs::primary`] hands back, and
+/// the only one with a [`Backend`] behind it; [`add_output`] puts further
+/// headless outputs beside it and refuses to run before it.
+///
+/// [`Outputs::primary`]: super::outputs::Outputs::primary
 pub fn init_named(
     state: &mut State,
     name: &str,
@@ -101,25 +67,7 @@ pub fn init_named(
     height: i32,
     scanout: ScanoutHandoff,
 ) -> Result<(), Box<dyn Error>> {
-    let output = Output::new(
-        name.to_owned(),
-        PhysicalProperties {
-            size: (0, 0).into(),
-            subpixel: Subpixel::Unknown,
-            make: "scoot".into(),
-            model: name.to_owned(),
-            serial_number: "0".into(),
-        },
-    );
-    output.create_global::<State>(&state.display_handle);
-    set_mode(
-        &output,
-        width,
-        height,
-        Some((0, 0).into()),
-        state.output_scale,
-    );
-    state.space.map_output(&output, (0, 0));
+    let output = create_output(state, name, width, height, (0, 0));
 
     // The renderer the session resolved at startup (`render::resolve`, then
     // `tty::init`'s own fallback), not a per-call choice:
@@ -141,6 +89,20 @@ pub fn init_named(
         &mut state.screencopy.dmabuf,
         &backend,
     );
+    // One backend, one output, and `state.backend` is *replaced* while
+    // `state.outputs` is *appended to* -- so calling this twice would leave
+    // `primary()` naming output 1 while the backend belongs to output 2.
+    // Every capture and gamma path compares against `primary()`, so they
+    // would then refuse the one output that actually has pixels, and
+    // `render()` would draw output 1's geometry into output 2's target.
+    // Unreachable today (one call, at startup) and cheap to keep that way;
+    // `Outputs::add` got a structural guard for the same reason.
+    debug_assert!(
+        state.outputs.is_empty(),
+        "the headless backend was initialised twice: the second output would \
+         be appended while the backend is replaced, leaving primary() and the \
+         backend naming different outputs"
+    );
     state.backend = Some(backend);
     // The GPU scanout tier's `DrmCompositor` was built before this output
     // existed (`tty::init` runs first, because `--tty` is where the size
@@ -152,15 +114,137 @@ pub fn init_named(
     if let Some(tty) = &mut state.tty {
         tty.track_output(&output);
     }
-    // What the core is told is the *logical* output rectangle, which is the
-    // same rectangle Smithay's `Space` lays windows out in -- see
-    // `output_scale.rs`'s `logical_size`. Handing the core the physical
-    // framebuffer size instead (what this did before output scaling existed)
-    // makes every window, gap and edge land at physical coordinates the
-    // render path then scales a second time.
-    let area = state
+    let area = logical_area(state, &output, width, height);
+    let id = state.outputs.add(output);
+    // The cursor's startup position: centred, not at the origin Smithay
+    // leaves it at. Here rather than per-backend, so all three backends
+    // place it at the same init point -- the cursor draws only under `--tty`
+    // today, but the position is backend-independent seat state. See
+    // `place_pointer_at_output_centre` for the quiet-path and no-replace
+    // reasoning.
+    state.place_pointer_at_output_centre();
+    // The head a display-configuration client sees. After the output is
+    // registered, because that is where the advertised state is read from --
+    // and before `apply()`, so a client that bound the manager during
+    // `State::new` (before there was an output) hears about the head in the
+    // same startup pass everything else is announced in. See
+    // `output_management.rs`.
+    state.refresh_output_heads();
+    state
+        .world
+        .handle_event(CoreEvent::OutputAdded { id, area });
+    // apply() ends in request_render(), which arms the frame timer via
+    // ensure_ticking() -- this is what puts the very first frame on it.
+    state.apply();
+
+    Ok(())
+}
+
+/// Adds another headless output immediately to the right of the last one, and
+/// hands back the core id it was filed under.
+///
+/// This is what `--headless --outputs N` builds outputs 2..N with (see
+/// `cli.rs`). It creates a real `wl_output` global, maps the output into the
+/// `Space` and tells the core about it, so a client can address it and the
+/// core gives it its own scrolling strip -- but it deliberately builds **no
+/// render target**: this compositor composites one framebuffer, the primary
+/// output's, and making the render loop per-output is the multi-output item
+/// rather than this one. Nothing is shown on a headless output in any case.
+///
+/// Refuses before [`init_named`] has run rather than trusting `run`'s call
+/// order: the invariant that [`Outputs::primary`] is the output with the
+/// backend is what lets a capture, a gamma ramp or a screenshot refuse any
+/// *other* output instead of quietly answering from the wrong framebuffer.
+///
+/// [`Outputs::primary`]: super::outputs::Outputs::primary
+pub fn add_output(
+    state: &mut State,
+    name: &str,
+    width: i32,
+    height: i32,
+) -> Result<OutputId, Box<dyn Error>> {
+    if state.outputs.is_empty() || state.backend.is_none() {
+        return Err("an additional output needs the primary one to exist first".into());
+    }
+    // Measured off the previous output's *logical* geometry, not off `width`:
+    // at `[output] scale = 2` a 1600px mode is 800 logical pixels wide, and
+    // stepping by the physical width would leave a gap between the two
+    // outputs that no pointer coordinate belongs to. `Space` and the core
+    // both work in logical coordinates, so this is the one that makes them
+    // adjacent.
+    //
+    // Saturating because the sum is client-independent but not
+    // config-independent: `MAX_OUTPUTS` modes of `MAX_OUTPUT_DIMENSION` at the
+    // `[output] scale` floor come to ~1e6, four orders inside `i32`, and a
+    // saturated edge would merely stack two outputs rather than wrap into
+    // negative coordinates.
+    let x = state
+        .outputs
+        .last()
+        .and_then(|previous| state.space.output_geometry(previous))
+        .map(|geometry| geometry.loc.x.saturating_add(geometry.size.w))
+        .unwrap_or(0);
+    let output = create_output(state, name, width, height, (x, 0));
+    let area = logical_area(state, &output, width, height);
+    let id = state.outputs.add(output);
+    state
+        .world
+        .handle_event(CoreEvent::OutputAdded { id, area });
+    // The core lays out against one more output now, and `apply()` is what
+    // pushes that arrangement onto the windows; it ends in `request_render()`.
+    state.apply();
+    Ok(id)
+}
+
+/// The `wl_output` half of creating an output: the global, its mode and scale,
+/// and its place in the `Space`. Registering it with [`State::outputs`] and
+/// telling the core about it are the caller's, because the two callers do
+/// different work in between (see [`init_named`]).
+///
+/// [`State::outputs`]: super::State::outputs
+fn create_output(
+    state: &mut State,
+    name: &str,
+    width: i32,
+    height: i32,
+    position: (i32, i32),
+) -> Output {
+    let output = Output::new(
+        name.to_owned(),
+        PhysicalProperties {
+            size: (0, 0).into(),
+            subpixel: Subpixel::Unknown,
+            make: "scoot".into(),
+            model: name.to_owned(),
+            serial_number: "0".into(),
+        },
+    );
+    output.create_global::<State>(&state.display_handle);
+    set_mode(
+        &output,
+        width,
+        height,
+        Some(position.into()),
+        state.output_scale,
+    );
+    state.space.map_output(&output, position);
+    output
+}
+
+/// What the core is told an output covers: the *logical* rectangle, which is
+/// the same one Smithay's `Space` lays windows out in -- see
+/// `output_scale.rs`'s `logical_size`. Handing the core the physical
+/// framebuffer size instead (what this did before output scaling existed)
+/// makes every window, gap and edge land at physical coordinates the render
+/// path then scales a second time.
+///
+/// The fallback is for an output the `Space` does not have, which cannot
+/// happen on either path here (both map it first) and would otherwise be a
+/// silent zero-sized output.
+fn logical_area(state: &State, output: &Output, width: i32, height: i32) -> Rect {
+    state
         .space
-        .output_geometry(&output)
+        .output_geometry(output)
         .map(|geometry| {
             Rect::new(
                 geometry.loc.x,
@@ -169,30 +253,7 @@ pub fn init_named(
                 geometry.size.h,
             )
         })
-        .unwrap_or_else(|| Rect::new(0, 0, width, height));
-    state.output = Some(output);
-    // The cursor's startup position: centred, not at the origin Smithay
-    // leaves it at. Here rather than per-backend, so all three backends
-    // place it at the same init point -- the cursor draws only under `--tty`
-    // today, but the position is backend-independent seat state. See
-    // `place_pointer_at_output_centre` for the quiet-path and no-replace
-    // reasoning.
-    state.place_pointer_at_output_centre();
-    // The head a display-configuration client sees. After `state.output` is
-    // set, because that is where the advertised state is read from -- and
-    // before `apply()`, so a client that bound the manager during `State::new`
-    // (before there was an output) hears about the head in the same startup
-    // pass everything else is announced in. See `output_management.rs`.
-    state.refresh_output_heads();
-    state.world.handle_event(CoreEvent::OutputAdded {
-        id: OUTPUT_ID,
-        area,
-    });
-    // apply() ends in request_render(), which arms the frame timer via
-    // ensure_ticking() -- this is what puts the very first frame on it.
-    state.apply();
-
-    Ok(())
+        .unwrap_or_else(|| Rect::new(0, 0, width, height))
 }
 
 /// Updates an already-created output's mode and scale. `location` is only
@@ -284,11 +345,15 @@ impl State {
             self.needs_render = false;
             return;
         }
-        // Order matters: `backend.take()` must not run unless `output` is
+        // The primary output, which is the one this framebuffer shows (see
+        // `Outputs::primary`): a second `--outputs` output has no render
+        // target of its own, and drawing it is the multi-output item.
+        //
+        // Order matters: `backend.take()` must not run unless the output is
         // also present, or a None output would leave it taken and never put
         // back -- silently and permanently losing the backend on the next
         // render attempt.
-        let Some(output) = self.output.clone() else {
+        let Some(output) = self.outputs.primary().cloned() else {
             return;
         };
         let Some(mut backend) = self.backend.take() else {
@@ -522,7 +587,16 @@ impl State {
     /// only `--nested`'s host configure and `--tty`'s hotplug get here at
     /// all.
     pub fn resize_output(&mut self, width: i32, height: i32) -> bool {
-        let Some(output) = self.output.clone() else {
+        // Both halves in one read, so the `OutputChanged` below names the id
+        // of the output that was actually resized without a second lookup
+        // that could come back empty. Only the primary output can be resized:
+        // its two callers are the `--nested` host configure and the `--tty`
+        // hotplug, and both backends have exactly one output.
+        let Some((id, output)) = self
+            .outputs
+            .primary_entry()
+            .map(|(id, output)| (id, output.clone()))
+        else {
             // Logged, not a silent `false`: both callers' comments say
             // "`resize_output` has already logged what failed", and without
             // this that was only true of the `Backend::new` path below.
@@ -597,7 +671,7 @@ impl State {
         // re-advertised is read from it. See `screencopy.rs`.
         self.refresh_capture_constraints();
         self.world.handle_event(CoreEvent::OutputChanged {
-            id: OUTPUT_ID,
+            id,
             area: Rect::new(0, 0, logical.0, logical.1),
         });
         // The core re-clamps its old usable area into the new one on

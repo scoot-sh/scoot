@@ -88,7 +88,6 @@ use smithay::wayland::shell::wlr_layer::{
 };
 
 use super::State;
-use super::headless::OUTPUT_ID;
 
 #[cfg(test)]
 mod tests;
@@ -159,7 +158,7 @@ impl WlrLayerShellHandler for State {
     ///
     /// `output` is the client's request for which screen to appear on. It is
     /// allowed to be `None`, which the protocol defines as "the compositor
-    /// chooses"; scoot has exactly one output, so both cases land on it.
+    /// chooses"; scoot chooses the primary output (see `Outputs::primary`).
     fn new_layer_surface(
         &mut self,
         surface: WlrLayerSurface,
@@ -168,7 +167,7 @@ impl WlrLayerShellHandler for State {
         namespace: String,
     ) {
         let requested = output.as_ref().and_then(Output::from_resource);
-        let Some(output) = requested.or_else(|| self.output.clone()) else {
+        let Some(output) = requested.or_else(|| self.outputs.primary().cloned()) else {
             // No output at all. Unreachable in this compositor (`headless::init`
             // creates one before the event loop starts and nothing removes
             // it), but it is a client-facing path, so it closes the surface
@@ -213,7 +212,13 @@ impl WlrLayerShellHandler for State {
         self.layers_awaiting_neutralize
             .push(surface.wl_surface().clone());
         self.mapped_layers.remove(surface.wl_surface());
-        let Some(output) = self.output.clone() else {
+        // The output whose map actually holds it, not the primary one: a
+        // client may name any output in `get_layer_surface`, and unmapping
+        // from the wrong map would leave the dead surface arranged forever --
+        // holding an `Arc` to it, and leaving `clicked_layer` pointing at a
+        // surface nobody can reach. `render()`'s `cleanup()` is no safety net
+        // for that: it only walks the primary output's map.
+        let Some(output) = self.output_of_layer_role(&surface) else {
             return;
         };
         {
@@ -254,7 +259,12 @@ impl State {
     /// what makes it carry a size that respects what the client just asked
     /// for -- and only then tell the core what is left over.
     pub(super) fn commit_layer_surface(&mut self, surface: &WlSurface) -> bool {
-        let Some(output) = self.output.clone() else {
+        // Which output's map this surface is in, not the primary one: a
+        // client may name any output in `get_layer_surface`, and a commit on
+        // a surface the primary's map does not hold would otherwise be read
+        // as "not a layer surface at all" -- so its initial configure would
+        // never be sent and the client would wait for one forever.
+        let Some(output) = self.output_of_layer(surface) else {
             return false;
         };
         let (found, touches_keyboard, mapped) = {
@@ -365,6 +375,50 @@ impl State {
         }
     }
 
+    /// The output whose [`LayerMap`](smithay::desktop::LayerMap) holds the
+    /// layer surface rooted at `surface`, if any.
+    ///
+    /// The lookup that replaces "the one output there is" wherever a layer
+    /// surface's *own* output is what is wanted -- a commit on it, its
+    /// destruction, or the geometry an IME popup is placed against.
+    ///
+    /// Costs one map lock and one layer scan per output until it hits. That
+    /// is one *extra* lock and scan on the per-commit path even with a single
+    /// output, since the caller then re-takes the map for `arrange()`: an
+    /// uncontended `Mutex` and a walk of a list with a handful of entries,
+    /// against a commit that already locks that same map and walks it. The
+    /// alternative -- handing the found `LayerSurface` back so the caller
+    /// need not re-search -- would mean holding the guard across the caller's
+    /// own `layer_map_for_output`, which is exactly the double-take this
+    /// module's guard discipline forbids.
+    pub(super) fn output_of_layer(&self, surface: &WlSurface) -> Option<Output> {
+        self.outputs
+            .iter()
+            .find(|output| {
+                layer_map_for_output(output)
+                    .layer_for_surface(surface, WindowSurfaceType::TOPLEVEL)
+                    .is_some()
+            })
+            .cloned()
+    }
+
+    /// [`State::output_of_layer`] by role object rather than by `wl_surface`.
+    ///
+    /// `layer_destroyed` needs this one: it runs from the role object's own
+    /// destructor, where the `wl_surface` may already be dead -- and
+    /// `LayerMap::layer_for_surface` answers `None` for a dead surface, which
+    /// would leave the unmap this lookup exists to perform undone.
+    fn output_of_layer_role(&self, role: &WlrLayerSurface) -> Option<Output> {
+        self.outputs
+            .iter()
+            .find(|output| {
+                layer_map_for_output(output)
+                    .layers()
+                    .any(|layer| layer.layer_surface() == role)
+            })
+            .cloned()
+    }
+
     /// Recomputes what layer surfaces have left for windows and tells the
     /// core, if it changed.
     ///
@@ -372,8 +426,17 @@ impl State {
     /// the comparison against what the core already has means a bar that
     /// repeats the same exclusive zone on every frame costs one rectangle
     /// comparison, not a re-layout.
+    ///
+    /// Still the primary output's zone only (see `Outputs::primary`): a zone
+    /// per output is the multi-output item, and until then a bar on a
+    /// secondary output reserves nothing anywhere -- it does not reserve the
+    /// wrong output's edge.
     pub(super) fn refresh_layer_zone(&mut self) {
-        let Some(output) = self.output.clone() else {
+        let Some((id, output)) = self
+            .outputs
+            .primary_entry()
+            .map(|(id, output)| (id, output.clone()))
+        else {
             return;
         };
         // The zone is output-local; the core's rectangles are global. One
@@ -395,13 +458,11 @@ impl State {
         // Nothing to do when it hasn't moved -- and this is the common case,
         // since every commit a bar makes comes through here while its
         // exclusive zone stays exactly the same.
-        if self.world.usable_area(OUTPUT_ID) == Some(area) {
+        if self.world.usable_area(id) == Some(area) {
             return;
         }
-        self.world.handle_event(CoreEvent::OutputUsableAreaChanged {
-            id: OUTPUT_ID,
-            area,
-        });
+        self.world
+            .handle_event(CoreEvent::OutputUsableAreaChanged { id, area });
         self.apply();
     }
 
@@ -442,8 +503,13 @@ impl State {
     /// tree walk that already takes a lock per node, which is why this is one
     /// function rather than two loops: pointer motion runs this at libinput's
     /// rate, and a second walk would have cost far more than the clone.
+    ///
+    /// The primary output's map only (see `Outputs::primary`): hit-testing
+    /// the output the pointer is *on* is the multi-output item. A position
+    /// over another output falls outside this map's extent, so it misses
+    /// rather than hitting the wrong surface.
     fn layer_hit(&self, layers: &[Layer], position: Point<f64, Logical>) -> Option<LayerHit> {
-        let output = self.output.as_ref()?;
+        let output = self.outputs.primary()?;
         let origin = self
             .space
             .output_geometry(output)
@@ -491,8 +557,12 @@ impl State {
     /// protocol's own "mine until I unmap" and pre-empts a menu, while a
     /// click-focused `on_demand` surface does not -- a bar's own menu is
     /// exactly the case that would otherwise fight itself. See `popup.rs`.
+    ///
+    /// The primary output's map only (see `Outputs::primary`): walking every
+    /// output's map, and deciding which one's `exclusive` surface wins, is
+    /// the multi-output item.
     pub(super) fn layer_keyboard_focus(&self) -> Option<LayerKeyboardFocus> {
-        let output = self.output.as_ref()?;
+        let output = self.outputs.primary()?;
         let map = layer_map_for_output(output);
         for &layer in &ABOVE_WINDOWS {
             let exclusive = map

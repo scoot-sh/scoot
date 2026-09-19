@@ -82,6 +82,7 @@ use std::sync::mpsc::{Receiver, SyncSender, TrySendError, sync_channel};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use scoot_core::OutputId;
 use scoot_ipc::{Response, Screenshot, encode};
 use smithay::reexports::calloop::channel::{self, Event as ChannelEvent};
 
@@ -218,6 +219,35 @@ impl State {
     /// replies overtake the screenshot's.
     pub fn shot_inflight(&self, conn: u64) -> bool {
         self.pending_shots.iter().any(|shot| shot.conn == conn)
+    }
+
+    /// Why a `screenshot --output ID` cannot be answered, or `None` if it can.
+    ///
+    /// [`State::capture_pixels`] reads the one framebuffer this compositor
+    /// composites, which is the primary output's (see `Outputs::primary`). An
+    /// id naming any other output therefore has no pixels to hand back, and
+    /// the only honest answer is a refusal: answering it from the primary
+    /// output's framebuffer would hand an agent a picture of one screen
+    /// labelled as another, which is precisely the targeting error this
+    /// protocol exists to avoid. `None` for the id -- `scoot msg screenshot`
+    /// with no `--output` -- always means the composited output.
+    ///
+    /// Reachable only with `--headless --outputs N` (`N > 1`); with one
+    /// output the sole refusable id is one that names no output at all.
+    pub(super) fn screenshot_refusal(&self, output: Option<u64>) -> Option<String> {
+        let asked = OutputId(output?);
+        match self.outputs.primary_id() {
+            Some(primary) if primary == asked => None,
+            Some(primary) => Some(format!(
+                "output {} cannot be captured: scoot composites one output, {}. \
+                 Omit --output, or ask for that one",
+                asked.0, primary.0
+            )),
+            None => Some(format!(
+                "output {} cannot be captured: this session has no output yet",
+                asked.0
+            )),
+        }
     }
 
     /// Renders anything outstanding, then captures the screen's raw pixels.

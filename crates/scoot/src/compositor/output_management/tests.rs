@@ -981,7 +981,12 @@ fn apply_is_always_refused() {
     assert_eq!(fixture.take_log(), vec![Seen::ConfigurationFailed]);
     // And nothing moved: a refusal that silently changed the output would be
     // the worst of both answers.
-    let output = fixture.state.output.clone().expect("the output");
+    let output = fixture
+        .state
+        .outputs
+        .primary()
+        .cloned()
+        .expect("the output");
     assert_eq!(
         output.current_mode().map(|mode| (mode.size.w, mode.size.h)),
         Some((CANVAS, CANVAS)),

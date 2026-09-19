@@ -30,6 +30,7 @@ mod nested;
 mod nested_dispatch;
 mod output_management;
 mod output_scale;
+mod outputs;
 mod popup;
 mod presentation_time;
 mod relative_pointer;
@@ -164,6 +165,27 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
         )
     };
     headless::init_named(&mut state, &output_name, width, height, scanout)?;
+
+    // The extra `--headless --outputs N` outputs, after the primary one --
+    // `add_output` refuses to run before it, so this order is checked rather
+    // than assumed. Warned about and ignored on the other two backends for the
+    // same reason `--gpu` and `--mode` are ignored off `--tty`: `--nested`
+    // presents one window in its host and `--tty` drives one CRTC, so a
+    // second output there would be a session quietly different from the one
+    // that was asked for. Each is named after the first (`headless-2`,
+    // `headless-3`, ...), which is what a client sees as `wl_output.name`.
+    if options.tty || options.nested {
+        if options.outputs != 1 {
+            tracing::warn!(
+                "--outputs adds virtual outputs to --headless; ignoring it on this backend"
+            );
+        }
+    } else {
+        for index in 2..=options.outputs {
+            let name = format!("{output_name}-{index}");
+            headless::add_output(&mut state, &name, width, height)?;
+        }
+    }
 
     // Order matters, and it's load-bearing, not incidental: `--nested`
     // connects to the *host* compositor via the caller's own WAYLAND_DISPLAY

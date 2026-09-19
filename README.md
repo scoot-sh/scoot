@@ -45,7 +45,10 @@ Linux, and daily-driven on `--tty`** (2026-09-18).
 
 ## Not yet
 
-- **One output.** Plug in a second monitor and it stays dark.
+- **One output is composited.** Plug in a second monitor and it stays dark.
+  `--headless --outputs N` now creates several virtual outputs for testing,
+  each with its own geometry and its own scrolling strip, but only the first
+  is drawn and `--tty` still drives one connector.
 - **No XWayland.** X11-only applications do not run.
 - **GPU scanout is new and narrow.** `--tty --renderer gles` scans out from
   the GPU, but only in a `gpu-scanout` build, only on the primary plane (no
@@ -76,6 +79,7 @@ build`.
 
 ```sh
 scoot --headless --width 1280 --height 800 -- foot   # start, spawn a terminal
+scoot --headless --outputs 2 -- foot                 # two virtual screens, side by side
 scoot --nested --width 1280 --height 800 -- foot     # inside your compositor
 scoot --tty -- foot                                  # on a real DRM/KMS seat
 scoot --tty --renderer gles -- foot                  # ...scanning out from the GPU
@@ -89,6 +93,16 @@ scoot msg type "hello"
 `--tty` needs a seat (`seatd` or logind) with a DRM device on it; everything
 about device choice, hotplug and modes is in [docs/tty.md](docs/tty.md). Run
 `scoot --help` for every flag, request and action.
+
+`--headless --outputs N` (1–8) creates N virtual outputs side by side, so
+per-output behaviour is testable with no second monitor: each gets its own
+`wl_output`, its own place in the coordinate space and its own scrolling
+strip. One of them is composited — the first — so `scoot msg screenshot
+--output 2` is refused rather than answered with the first output's pixels.
+`--nested` and `--tty` warn and ignore the flag, having one host window and
+one CRTC respectively. See
+[docs/configuration.md](docs/configuration.md#more-than-one-output) for what a
+second output does and does not do yet.
 
 ## Keys
 

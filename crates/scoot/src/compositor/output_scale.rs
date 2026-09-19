@@ -35,8 +35,10 @@
 //! [`FractionalScaleHandler::new_fractional_scale`] -- the one moment a
 //! surface's fractional-scale object appears -- rather than re-asserted on
 //! every commit the way a compositor that supports live scale changes must.
-//! There is exactly one output (see `headless.rs`'s `OUTPUT_ID`), so there is
-//! one scale for every surface.
+//! Every output shares that one scale -- `headless.rs` creates each with it,
+//! and nothing sets a per-output scale -- so there is one scale for every
+//! surface. A scale per output is part of the multi-output item (see
+//! [`Outputs::primary`](super::outputs::Outputs::primary)).
 //!
 //! `--nested` is explicitly scale-1-only: the host compositor owns the scale
 //! of the window scoot is drawn in, and forward-scaled output would only

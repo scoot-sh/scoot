@@ -9,7 +9,7 @@
 ## Command-line flags
 
 ```
-scoot --headless [--width 1-65535] [--height 1-65535] [--renderer pixman|gles] [--socket PATH] [--config PATH] [-- COMMAND...]
+scoot --headless [--width 1-65535] [--height 1-65535] [--outputs 1-8] [--renderer pixman|gles] [--socket PATH] [--config PATH] [-- COMMAND...]
 scoot --nested   [--width 1-65535] [--height 1-65535] [--renderer pixman|gles] [--socket PATH] [--config PATH] [-- COMMAND...]
 scoot --tty      [--gpu PATH] [--mode WxH] [--renderer pixman|gles] [--socket PATH] [--config PATH] [-- COMMAND...]
 scoot msg REQUEST
@@ -22,6 +22,7 @@ scoot --help
 | `--nested` | Runs as a window inside an existing compositor. |
 | `--tty` | A real DRM/KMS + libseat + libinput session — see [tty.md](tty.md). |
 | `--width N`, `--height N` | The `--headless`/`--nested` output size, 1–65535 per axis — whatever DRM itself can report for a mode (`drm_mode_modeinfo` stores each axis in a `u16`), with room to spare past any real display. Anything else is a startup error naming the flag and the expected range (`invalid --width: '70000' (expected 1-65535)`), not a silently different size. |
+| `--outputs N` | How many outputs `--headless` creates, 1–8 (default 1). Each is `--width` by `--height` and sits immediately right of the last, so two 1280-wide outputs at scale 1 cover x 0–1279 and 1280–2559. Out of range is a startup error naming the range, like `--width`. `--headless` only: `--nested` presents one window in its host and `--tty` drives one CRTC, so both warn and ignore it. See [More than one output](#more-than-one-output) for what a second output does and does not do yet. |
 | `--renderer pixman\|gles` | Which renderer composites each frame. Config-file form: `[renderer] backend`. See [tty.md](tty.md#which-renderer-draws-the-frames). |
 | `--gpu PATH` | Which DRM device `--tty` drives. Config-file form: `[tty] gpu`. Ignored with a warning outside `--tty`. See [tty.md](tty.md#which-drm-device---tty-drives). |
 | `--mode WxH` | Which connector mode `--tty` picks. Ignored with a warning outside `--tty`. |
@@ -39,6 +40,38 @@ it spawns: `$WAYLAND_DISPLAY`, `$SCOOT_SOCKET`, `$XCURSOR_THEME`,
 `$XDG_ACTIVATION_TOKEN`. A token the compositor was itself started with is
 removed rather than passed on: it is a receipt for someone else's user
 action.
+
+### More than one output
+
+`--headless --outputs N` gives a session N virtual outputs with no second
+monitor in the building. It exists so per-output behaviour is testable; it is
+the foundation for multi-output, not the whole of it.
+
+What a second output **is**, today:
+
+- a real `wl_output` global with its own name (`headless`, `headless-2`, ...),
+  its own mode and its own position in the global coordinate space, so a
+  client can address it;
+- its own output in `scoot msg outputs`, with its own id, rectangle and name;
+- its own workspaces and its own scrolling strip in the layout, so a window is
+  on exactly one output and nothing scrolls across a boundary;
+- a layer surface naming it is configured against it and unmapped from it
+  (but not sent frame callbacks: only the first output's layer surfaces are,
+  so an animated bar on a second output stops after its first draw).
+
+What it is **not**, yet — the work tracked in
+`docs/backlog/core/multi-output.md`:
+
+- **nothing is composited on it.** scoot draws one framebuffer, the first
+  output's. Nothing is displayed on a headless output in any case, but the
+  consequence to know is that `scoot msg screenshot --output 2` is *refused*
+  rather than answered from the first output's pixels — a picture of one
+  screen labelled as another would be worse than an error.
+- a bar on a second output reserves no space anywhere (exclusive zones are
+  computed for the first output only), the pointer is hit-tested against the
+  first output's layer surfaces, `wlr-output-management` publishes one head,
+  `ext-workspace` publishes one group, and a session lock covers the first
+  output.
 
 ## The config file
 

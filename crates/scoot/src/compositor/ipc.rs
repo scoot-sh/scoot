@@ -593,8 +593,8 @@ impl State {
     /// - `FocusWorkspaceIndex`: the focused output's active workspace
     ///   already is that index. Out of range can never equal `active`
     ///   (`active < count` always), so it stays on the full path too. Read
-    ///   off the focused output rather than the single `OUTPUT_ID`
-    ///   `ext_workspace.rs` uses because that is the list the core's own
+    ///   off the focused output rather than the primary one
+    ///   `ext_workspace.rs` reads because that is the list the core's own
     ///   `reshape` resolves the index against.
     /// - `FocusWorkspace`: the step clamps -- up from the first workspace,
     ///   or down from the last. The same lookup as the index case; the core
@@ -641,18 +641,23 @@ impl State {
         }
     }
 
-    fn output_snapshots(&self) -> Vec<OutputSnapshot> {
-        let name = self
-            .output
-            .as_ref()
-            .map(|output| output.name())
-            .unwrap_or_default();
+    pub(super) fn output_snapshots(&self) -> Vec<OutputSnapshot> {
         self.world
             .outputs()
             .into_iter()
             .map(|(id, area)| OutputSnapshot {
                 id: id.0,
-                name: name.clone(),
+                // Each output's own `wl_output.name`, looked up by the id the
+                // core reports it under -- the same string a bar or
+                // `wlr-randr` would show. Empty for an id the core has but
+                // this side does not, which nothing can produce today (every
+                // `OutputAdded` is sent from `headless.rs` with the id
+                // `Outputs::add` just returned).
+                name: self
+                    .outputs
+                    .get(id)
+                    .map(|output| output.name())
+                    .unwrap_or_default(),
                 rect: wire(area),
                 scale: self.output_scale,
                 // Unknown output (not in the core's list) reports no

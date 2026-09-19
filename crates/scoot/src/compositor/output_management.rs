@@ -28,8 +28,9 @@
 //!
 //! ## Read-only: enumeration is implemented, reconfiguration is refused
 //!
-//! scoot has exactly one [`Output`], created once at startup and never moved,
-//! rotated, disabled or rescaled (see `headless.rs`'s `OUTPUT_ID`). There is
+//! scoot publishes exactly one [`Output`] here -- the primary one (see
+//! [`Outputs::primary`](super::outputs::Outputs::primary)) -- created once at
+//! startup and never moved, rotated, disabled or rescaled. There is
 //! nothing for `apply` to apply. So the halves are split at the one seam the
 //! protocol gives: `zwlr_output_manager_v1.create_configuration` is the only
 //! way into the write half, and every configuration it hands out answers
@@ -564,7 +565,11 @@ impl State {
     /// [`HeadState`] read and a compare when nothing changed, and sends
     /// nothing at all in that case -- no `done`, no serial bump.
     pub(super) fn refresh_output_heads(&mut self) {
-        let current = self.output.as_ref().map(HeadState::of);
+        // One head, the primary output's (see `Outputs::primary`): a head
+        // per output is the multi-output item. Publishing a secondary output
+        // as a head would offer a display-configuration client a screen this
+        // compositor cannot describe a mode or a position for.
+        let current = self.outputs.primary().map(HeadState::of);
         if self.output_management.published == current {
             return;
         }

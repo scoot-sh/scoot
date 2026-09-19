@@ -1359,7 +1359,9 @@ fn libinput_event(event: InputEvent<LibinputInputBackend>, _: &mut (), state: &m
         // the output's *logical* size, the same space `pointer_move` and the
         // relative path's clamp use.
         InputEvent::PointerMotionAbsolute { event } => {
-            let (width, height) = state.output.as_ref().map(logical_size).unwrap_or((0, 0));
+            // `--tty` has exactly one output, which is the primary one (see
+            // `Outputs::primary`); `--outputs` is `--headless` only.
+            let (width, height) = state.outputs.primary().map(logical_size).unwrap_or((0, 0));
             let position = event.position_transformed((width, height).into());
             state.pointer_move(position.x, position.y);
         }
@@ -1420,7 +1422,7 @@ fn tablet_position(
     state: &State,
     event: &impl TabletToolEvent<LibinputInputBackend>,
 ) -> smithay::utils::Point<f64, smithay::utils::Logical> {
-    let (width, height) = state.output.as_ref().map(logical_size).unwrap_or((0, 0));
+    let (width, height) = state.outputs.primary().map(logical_size).unwrap_or((0, 0));
     event.position_transformed((width, height).into())
 }
 

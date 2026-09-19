@@ -24,7 +24,14 @@ pub enum Request {
     Windows,
     /// Run a window-management action exactly as a keybinding would.
     Action(Action),
-    /// Capture an output as PNG; the first output when `output` is omitted.
+    /// Capture an output as PNG.
+    ///
+    /// Omitting `output` means the one output scoot composites, which is what
+    /// every single-output session wants. Naming any *other* output is
+    /// refused rather than answered from the composited one's pixels -- a
+    /// picture of one screen labelled as another would be worse than an
+    /// error. (Only `--headless --outputs N` can produce another output
+    /// today; compositing more than one is future work.)
     Screenshot {
         #[serde(skip_serializing_if = "Option::is_none")]
         output: Option<u64>,

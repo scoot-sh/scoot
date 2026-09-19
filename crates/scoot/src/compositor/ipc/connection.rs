@@ -752,6 +752,22 @@ impl Connection {
         // worker, instead of being returned immediately like every other
         // request.
         if screenshot {
+            // Which output was asked for, before any of the machinery below:
+            // only the composited one can be captured, and answering another
+            // id from its framebuffer would mislabel a whole screen (see
+            // `State::screenshot_refusal`). After the rate limit above so
+            // that message is unchanged, and before the capture so a refused
+            // id costs no render.
+            let asked = match request {
+                Request::Screenshot { output } => output,
+                // `screenshot` is that variant's own `matches!`, so this is
+                // unreachable; `None` is the "no output named" answer either
+                // way, never a capture of the wrong one.
+                _ => None,
+            };
+            if let Some(message) = state.screenshot_refusal(asked) {
+                return self.answer(&Response::error(message));
+            }
             // A capture's reply goes out later, through a clone of this
             // socket -- so it must not be dispatched while earlier replies
             // are still queued here, or the completion would land in the

@@ -309,7 +309,12 @@ impl State {
         // Cheap: `Output` is a handle around an `Arc`. Cloned so the
         // per-manager loop below can borrow `self.foreign_toplevel_management`
         // mutably at the same time.
-        let output = self.output.clone();
+        //
+        // The primary output only (see `Outputs::primary`): an `output_enter`
+        // per output a window is actually on is the multi-output item, and
+        // announcing a window on an output it is not on would be worse than
+        // announcing it on one.
+        let output = self.outputs.primary().cloned();
         let management = &mut self.foreign_toplevel_management;
         let mut toplevel = Toplevel {
             title: info.title.clone(),
@@ -447,7 +452,10 @@ impl State {
     /// show windows belonging to no output forever. `ext_workspace.rs`'s
     /// `workspace_group_output_bound` is the same hook for the same reason.
     pub(super) fn wlr_toplevel_output_bound(&mut self, output: &Output, wl_output: &WlOutput) {
-        if self.output.as_ref() != Some(output) {
+        // The primary output, not any of them: that is the only one handles
+        // are ever told they entered (see `open_wlr_toplevel`), so a bind of
+        // another must not produce an `output_enter` that was never announced.
+        if self.outputs.primary() != Some(output) {
             return;
         }
         let bound = wl_output.id();
@@ -492,7 +500,7 @@ impl State {
         manager: ZwlrForeignToplevelManagerV1,
     ) {
         let version = manager.version();
-        let output = self.output.clone();
+        let output = self.outputs.primary().cloned();
         let management = &mut self.foreign_toplevel_management;
         for (id, toplevel) in &mut management.toplevels {
             let created = client.create_resource::<ZwlrForeignToplevelHandleV1, _, State>(

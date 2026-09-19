@@ -215,8 +215,9 @@ falsify. Read `flexwm` there as `scoot`.
   blanked frame on the one output confirms the lock whatever the surface
   count (zero-surface half already pinned), every admitted surface shares
   that output's size (pinned by a new two-surface suite, first-created on
-  top, keyboard on the first, resize reaching all), and `OUTPUT_ID`'s doc
-  now lists the four session-lock sites multi-output must revisit. The
+  top, keyboard on the first, resize reaching all), and the single-output
+  marker's doc (now `Outputs::primary`) lists the four session-lock sites
+  multi-output must revisit. The
   duplicate-bind admission question stays with its own open entry below.
 - [Unbounded lock surfaces via duplicate `wl_output` binds](./resolved/session-lock-duplicate-output-done.md)
   — RESOLVED 2026-09-18 (refuse, no Smithay patch): a second live surface
@@ -464,21 +465,18 @@ at the user's direction. The `blocked:` field on each records that ordering;
 none of them is technically blocked, so the sequencing is a choice and can
 be revisited.
 
-- [Multi-output **foundation**: `State.output` becomes a collection, and `--headless --outputs N`](./core/multi-output-foundation.md)
-  — **HIGH**, split out 2026-09-19 and scheduled ahead of the item below.
-  `State` holds `pub output: Option<Output>` — singular, one slot — so there
-  is no headless multi-monitor mode to test with, on any backend. Making it
-  a collection is what turns most of the item below from hardware work into
-  VM-testable work. Start once milestone 6 stage 4 lands; both change
-  `State::new`.
 - [Multi-output: more than one monitor at a time](./core/multi-output.md)
   — **HIGH**, and almost certainly milestone-sized rather than
-  backlog-sized. `README.md`'s "Not yet" list leads with it. The scope is
-  already enumerated by `headless.rs`'s `OUTPUT_ID` doc (layer-shell wants
-  four *different* per-output behaviours, not one) and by
-  `session-lock-per-output-done.md`, which was resolved as single-output
-  *pins* rather than as multi-output — including that `locked` must wait for
-  every output's blanked frame, which is the security-relevant one.
+  backlog-sized. `README.md`'s "Not yet" list leads with it. Its
+  [foundation](./resolved/multi-output-foundation-done.md) landed
+  2026-09-19: `State.output` is now an id-keyed collection, and `--headless
+  --outputs N` gives two virtual screens to test against, so what remains is
+  making the protocols correct across them. The scope is enumerated by
+  `outputs.rs`'s `Outputs::primary` doc (layer-shell wants four *different*
+  per-output behaviours, not one) and by `session-lock-per-output-done.md`,
+  which was resolved as single-output *pins* rather than as multi-output —
+  including that `locked` must wait for every output's blanked frame, which
+  is the security-relevant one.
 - [Workspace shortcuts: no numbered bind, and no move-to-index action at all](./input/workspace-index-keybindings.md)
   — two gaps that look like one. `focus-workspace-index N` exists and simply
   is not bound by default (so `Super+1`..`9` is a keybinding change), but

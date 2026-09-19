@@ -278,9 +278,12 @@ fn get_gamma_control(
     id: New<ZwlrGammaControlV1>,
     output: &smithay::reexports::wayland_server::protocol::wl_output::WlOutput,
 ) {
+    // The primary output only (see `Outputs::primary`): there is one gamma
+    // ramp, on the one `--tty` CRTC, so a control for any other output is
+    // `failed` rather than a second control over the same hardware.
     let known = state
-        .output
-        .as_ref()
+        .outputs
+        .primary()
         .is_some_and(|known| known.owns(output));
     let control: ZwlrGammaControlV1 = data_init.init(id, GammaControlUserData);
     if !known {
