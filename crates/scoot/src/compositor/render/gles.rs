@@ -28,9 +28,17 @@
 //! [`EGLDevice::is_software`] (a stable sort, so enumeration order decides
 //! within each group), and the first device that yields a working renderer
 //! wins. So on a real GPU the real GPU is used, and Mesa's
-//! `EGL_MESA_device_software` device (llvmpipe) is the fallback for a box
-//! that has none -- which is the only kind of box this project's dev VM has,
-//! and the reason `--renderer gles` is testable there at all.
+//! `EGL_MESA_device_software` device -- the one with no device node at all --
+//! is the fallback for a box that has none.
+//!
+//! Worth knowing, because it is what the dev VM does and it looks like a
+//! contradiction otherwise: `is_software()` is only `EGL_MESA_device_software`
+//! being advertised, so a *device node* backed by a software driver answers
+//! `false`. The VM's virtio-gpu render node (`/dev/dri/renderD128`) is picked
+//! as "hardware" here and then served by Mesa's `kms_swrast`, i.e. llvmpipe.
+//! That is the right outcome for this ordering -- it preferred a real device
+//! node -- and it is why the numbers measured there are llvmpipe's, not a
+//! GPU's.
 //!
 //! Enumeration order is not trusted to be availability: a device can be
 //! listed and still refuse a display, a context or a renderbuffer (a render
@@ -78,10 +86,13 @@ impl GlesBackend {
     /// not there" (see that function's doc).
     pub(super) fn new(width: i32, height: i32) -> Result<Self, Box<dyn Error>> {
         let mut candidates: Vec<EGLDevice> = EGLDevice::enumerate()
-            .map_err(|error| format!("could not enumerate EGL devices: {error}"))?
+            .map_err(|error| format!("could not enumerate EGL devices: {error}{FALL_BACK_HINT}"))?
             .collect();
         if candidates.is_empty() {
-            return Err("no EGL device is available for the GLES renderer".into());
+            return Err(format!(
+                "no EGL device is available for the GLES renderer{FALL_BACK_HINT}"
+            )
+            .into());
         }
         candidates.sort_by_key(EGLDevice::is_software);
 
@@ -112,13 +123,19 @@ impl GlesBackend {
             }
         }
         Err(format!(
-            "could not build the GLES renderer on any EGL device ({}); \
-             --renderer pixman, the default, needs no GPU at all",
+            "could not build the GLES renderer on any EGL device ({}){FALL_BACK_HINT}",
             failures.join("; ")
         )
         .into())
     }
 }
+
+/// Tacked onto every way [`GlesBackend::new`] can fail, because all three
+/// reach the operator the same way: as `compositor::run`'s startup error, on
+/// a session that has just refused to start. The one thing that is always
+/// true and always actionable there is that the default renderer needs
+/// nothing this one could not find.
+const FALL_BACK_HINT: &str = "; --renderer pixman, the default, needs no GPU at all";
 
 /// One candidate device, all the way to a renderbuffer that really binds.
 ///

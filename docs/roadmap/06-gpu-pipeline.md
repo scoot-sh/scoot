@@ -3,7 +3,7 @@ item: "6"
 title: "Real GPU rendering pipeline"
 status: "in-progress"
 area: "backend"
-pr: 129
+pr: 130
 commit: null
 ---
 
@@ -218,3 +218,54 @@ does not add the scanout path that would be the win even if there were.
 
 Stage 2 is the first stage with a user-facing surface (`--renderer`), so it
 is the first that owes `README.md` a change.
+
+## Stage 2 benchmark
+
+`crates/scoot/src/compositor/headless/bench.rs`, release, dev VM (4 cores,
+3.8 GiB, llvmpipe):
+
+```
+cargo test --release -p scoot --bin scoot render_frame_cost -- --ignored --nocapture
+SCOOT_TEST_RENDERER=gles cargo test --release -p scoot --bin scoot render_frame_cost -- --ignored --nocapture
+```
+
+**Does selecting `gles` cost the default pixman path anything?** No, and the
+honest form of that answer is "not measurably here". Baseline is `06201e6`
+extracted with `git archive` to `/tmp/scoot-main` and built into the *same*
+`CARGO_TARGET_DIR`; the two builds were run **alternately**, eight rounds
+each, because a single pair would have said the opposite of the truth (the
+first pair happened to catch the baseline's fastest 8-window run and the
+branch's slowest, which looked like a 70% regression and was not).
+
+Per-frame minima, µs, in round order:
+
+| Scene | Build | r1 | r2 | r3 | r4 | r5 | r6 | r7 | r8 | median |
+| ----- | ----- | -- | -- | -- | -- | -- | -- | -- | -- | ------ |
+| empty desktop | `06201e6` | 69.3 | 39.7 | 53.1 | 57.6 | 61.0 | 65.4 | 63.0 | 68.8 | **62.0** |
+| empty desktop | branch, pixman | 62.2 | 63.2 | 65.6 | 55.8 | 59.5 | 67.4 | 72.4 | 75.1 | **64.4** |
+| 8 windows | `06201e6` | 81.6 | 130.6 | 126.6 | 138.3 | 126.4 | 124.5 | 138.5 | 142.6 | **128.6** |
+| 8 windows | branch, pixman | 138.3 | 122.8 | 123.3 | 142.4 | 120.8 | 130.3 | 132.9 | 131.7 | **131.0** |
+
+The medians differ by 2.4µs on both scenes (~4% and ~2%) while each build's
+own spread across identical rounds is 19µs and 61µs. The branch has both the
+faster 8-window run (120.8 vs 124.5 excluding the baseline's 81.6 outlier)
+and the slower empty-desktop tail. **This VM cannot resolve a difference
+smaller than roughly its own ±30% noise, and there is no difference here
+larger than that.** Which matches the code: the pixman arm's work is
+identical, `Pipeline` is the same size (the GLES variant is boxed), and the
+per-frame dispatch is the same single match.
+
+**And what does `gles` itself cost?** On llvmpipe, a great deal -- as
+expected:
+
+| Scene | pixman | gles (llvmpipe) |
+| ----- | ------ | --------------- |
+| empty desktop | 62.2µs | **1.978ms** (32x) |
+| 8 windows | 138.3µs | **2.384ms** (17x) |
+
+This is **not a regression and not a reason to tune anything**. There is no
+GPU on this VM: `gles` here means Mesa's `kms_swrast` rasterising in software
+*and* a GPU-style read-back on top of it, which is the worst of both. The
+case for a GPU renderer is a real GPU plus the stage-3 scanout path that
+removes the read-back, and neither exists here to measure. Chasing these
+numbers would mean optimising for a configuration nobody should run.
