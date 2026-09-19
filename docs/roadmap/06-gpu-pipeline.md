@@ -569,6 +569,23 @@ first `wl_registry`.
   predicate rather than a renderer, so the decision is unit-testable --
   including the case no machine here can produce on demand, a renderer that
   imports nothing.
+- **What counts as evidence is `LINEAR` *or* `Modifier::Invalid`
+  (`imports_linear`), and that is load-bearing.** Review caught the first
+  version requiring an explicit `LINEAR` entry, which is a false negative on
+  real drivers: Smithay inserts `{fourcc, Invalid}` unconditionally and
+  explicit modifiers only when `QueryDmaBufModifiersEXT` returned a non-zero
+  count (`egl/display.rs:962-1001`), and that count stays zero without the
+  modifiers extension, on a driver answering `EGL_BAD_PARAMETER` for its own
+  enumerated format (upstream's comment names NVIDIA >= 520, `:938-953`), or
+  when a driver reports no modifiers. Such a renderer imports a linear
+  dma-buf regardless -- `GlesRenderer::import_dmabuf` never consults the set
+  to admit a buffer (`gles/mod.rs:1268-1274`), `Dmabuf::has_modifier()` is
+  false for `Linear` so the extension guard does not fire
+  (`allocator/dmabuf.rs:229`, `egl/display.rs:754-759`), and no modifier
+  attribute is attached (`:817`). The narrow rule would therefore have
+  advertised nothing on hardware where the old hard-coded pair worked,
+  dropping every GL client to software rendering. The wire still says
+  `LINEAR`; only the evidence is wider.
 - **Narrowing, not replacing.** The renderer's own set is *not* advertised
   wholesale: GLES on a real driver imports dozens of fourccs, many multi-plane
   or YUV, which no other pixel path here speaks. The direction is asymmetric
@@ -599,16 +616,28 @@ first `wl_registry`.
   construction. Without that second rung the scanout tier silently kept the
   old path guess, which is the thing this bullet exists to stop.
 - **Stage 3B's import guard is removed, deliberately.**
-  `ScanoutBackend::new`'s `first_unimportable` computed `advertised ∩
-  has_dmabuf_format` -- the identical predicate `tranche` now computes -- and
-  refused to bring the tier up rather than narrowing the table. Two mechanisms
-  over one predicate disagree by construction; the narrower one is the one
-  that cannot kill a client, so it is the one that stayed. The consequence,
-  stated rather than discovered: on a device whose GLES renderer can import
-  neither candidate, the session now comes up on the scanout tier with no
-  dmabuf global (GL clients fall back to `wl_shm`) where before it fell back
-  to pixman and dumb buffers. No machine this project can reach produces that
-  configuration.
+  `ScanoutBackend::new`'s `first_unimportable` computed the identical
+  predicate `tranche` now computes and refused to bring the tier up rather
+  than narrowing the table. Two mechanisms over one predicate disagree by
+  construction; the narrower one is the one that cannot kill a client, so it
+  is the one that stayed.
+
+  **The guard was also a net under a false negative in that predicate**, and
+  that is the part worth writing down because the first version of this stage
+  had one (above): a renderer wrongly judged unable to import lost the tier
+  but kept a working dmabuf path, since the session fell back to pixman.
+  Without the guard the same false negative ends in no global at all. So the
+  removal is correct *conditional on the rule being right*, which is why the
+  rule now has its own named function, its own derivation against the pinned
+  source, and two unit tests pinning both directions.
+
+  The consequence that remains, stated rather than discovered: on a device
+  whose GLES renderer really can import neither candidate, the session comes
+  up on the scanout tier with no dmabuf global (GL clients fall back to
+  `wl_shm`) where before it fell back to pixman and dumb buffers. No machine
+  this project can reach produces that configuration, and `advertise` warns
+  loudly -- naming the consequence and `--renderer pixman` as the remedy --
+  when it happens.
 - **`sync_committed_dmabufs` is now pixman-only.** It is a CPU-cache
   workaround for a renderer that composites out of an `mmap` nothing else
   synchronises; a GLES tier samples the buffer through an `EGLImage`, which
@@ -618,15 +647,24 @@ first `wl_registry`.
   flag, because `imports_dmabufs`' other reader (the cache drain) is right for
   every renderer.
 - **The pinning test became per-renderer**, not deleted: a promise with teeth
-  needs *a* test.
-  `every_advertised_format_is_one_the_renderer_imports` reads the feedback
-  table off the wire and asserts every entry against the session's own
-  backend, which is strictly stronger than the pixman-only version (under
-  `SCOOT_TEST_RENDERER=gles` it asserts against `GlesRenderer`'s EGL display,
-  which the old test could not see). `pixmans_own_importable_set_still_contains_both_candidates`
-  keeps the other half -- a Smithay bump that dropped a format from pixman's
-  `SUPPORTED_FORMATS` would otherwise silently shrink the default session's
-  table with no test failing.
+  needs *a* test. `every_advertised_format_is_one_the_renderer_imports` reads
+  the feedback table off the wire and asserts every entry against the
+  session's own backend, which the pixman-only version could not do at all
+  under `SCOOT_TEST_RENDERER=gles`.
+
+  **What it does and does not carry, precisely**, because "strictly stronger"
+  is too easy to say and this file said it. Under pixman the assertion is
+  `for all f in filter(P, C): P(f)` -- true by construction, so what it
+  proves *there* is that the derivation survives Smithay's format-table memfd
+  and reaches the wire in the right order at the right modifier. The pin
+  under pixman is
+  the literal `XR24`/`AR24` assertion beside it plus
+  `pixmans_own_importable_set_still_contains_both_candidates`, which catches
+  a Smithay bump dropping a format from `SUPPORTED_FORMATS` -- something the
+  wire test would accept happily by advertising less. Under gles the wire
+  test does carry weight of its own, and `!seen.table.is_empty()` is what
+  stops it passing vacuously. Not weaker than what it replaced; but it is
+  three assertions doing what one used to, not one doing more.
 
 ### What is *not* in it
 
@@ -906,14 +944,14 @@ added runs once at startup.
 - **A multi-GPU machine**, which is where `main_device` naming the renderer's
   own node rather than `renderD128` by path stops being a tidiness argument.
 - **A driver that reports its import formats with `Modifier::Invalid` rather
-  than an explicit `LINEAR`.** `tranche` asks `has_dmabuf_format(Format {
-  code, modifier: Linear })`, i.e. it wants the explicit entry, and the only
-  display probed here (`kms_swrast`, 76 formats) has it. One that does not
-  would yield an empty tranche and therefore **no dmabuf global** under
-  `--renderer gles` -- the designed safe fallback (GL clients drop to
-  `wl_shm`, nothing is killed) and a loud `warn!`, but a capability the old
-  hard-coded pair could not lose. It is the first thing to check on a real
-  GPU: `--renderer gles` should log `dmabuf feedback main device` and must
-  **not** log `can import none of the dma-buf formats this compositor
-  serves`. If it does, the fix is to accept `Modifier::Invalid` as well as
-  `LINEAR` for a candidate, which is a change to `tranche` alone.
+  than an explicit `LINEAR`** -- filed here as unverified when this section
+  was first written, then **found by review to be a live bug rather than a
+  hypothetical** and fixed before merge (see `imports_linear`, above). What
+  stays unverified is only that the *fix* was never exercised on such a
+  driver, because no display here is one: the VM's `kms_swrast` reports 76
+  formats with explicit modifiers, so both the old rule and the new one keep
+  both candidates, and the change is provable against the pinned source plus
+  two unit tests rather than reproducible here. The first-run check on real
+  hardware is unchanged: `--renderer gles` should log `dmabuf feedback main
+  device` and must **not** log `can import none of the dma-buf formats this
+  compositor serves`.

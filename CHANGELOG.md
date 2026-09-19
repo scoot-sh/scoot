@@ -21,9 +21,15 @@ Three things you might notice:
 
 - On a renderer that can import *neither* of the formats scoot serves, there
   is now **no `zwp_linux_dmabuf_v1` global at all** rather than one that would
-  disconnect any client believing it. GL clients fall back to `wl_shm`; a
-  shell that waits for dmabuf feedback before it will capture the screen
-  (quickshell does) will keep waiting on such a machine.
+  disconnect any client believing it. That is the safe answer, but it is not
+  a small one, so scoot says so loudly at startup: every GL client falls back
+  to Mesa's `wl_shm` swrast path — **software rendering**, on a machine you
+  presumably picked `gles` for — and a shell that waits for dmabuf feedback
+  before it will capture the screen (quickshell does) never captures
+  anything, with no error of its own. If you see
+  `can import none of the dma-buf formats this compositor serves` in the log,
+  run `--renderer pixman`: it imports a linear dma-buf by mapping it and
+  refuses essentially nothing.
 - `main_device` in that feedback is the active renderer's own DRM render node
   where it has one, rather than `/dev/dri/renderD128` by path. On a machine
   with more than one GPU that is the difference between allocating on the

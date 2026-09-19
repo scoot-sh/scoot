@@ -164,15 +164,30 @@ impl ScanoutBackend {
     /// in the first place.
     ///
     /// Keeping both would have left two mechanisms computing one predicate --
-    /// `advertised ∩ has_dmabuf_format` -- and disagreeing about what to do
-    /// with it: one narrowing the table, one refusing the tier. The narrower
-    /// is the one that cannot kill a client, so it is the one that stayed.
-    /// The consequence, stated rather than discovered: on a device whose GLES
-    /// renderer can import *neither* candidate, the session now comes up on
-    /// this tier with no `zwp_linux_dmabuf_v1` global at all (GL clients fall
-    /// back to `wl_shm`, which is a slower session and not a dead one), where
-    /// before it fell back to pixman and dumb buffers. No machine this project
-    /// can reach produces that configuration.
+    /// "can this renderer import what we advertise" -- and disagreeing about
+    /// what to do with it: one narrowing the table, one refusing the tier. The
+    /// narrower is the one that cannot kill a client, so it is the one that
+    /// stayed.
+    ///
+    /// **What the guard was also doing, which is worth naming because it is
+    /// what makes removing it safe or not.** It was a net under a *false
+    /// negative* in that predicate: a renderer wrongly judged unable to import
+    /// lost the tier but kept a working dmabuf path, because the session fell
+    /// back to pixman. With the guard gone the same false negative ends in no
+    /// `zwp_linux_dmabuf_v1` global at all -- GL clients on software
+    /// rendering, and a dmabuf-gated shell unable to capture the screen. The
+    /// predicate had exactly such a false negative when this was first
+    /// written (it required an explicit `LINEAR` entry, which a driver
+    /// reporting only `Modifier::Invalid` does not have); that is fixed in
+    /// `dmabuf::imports_linear`, and its doc is the place to check before
+    /// narrowing the rule again.
+    ///
+    /// The consequence that remains, stated rather than discovered: on a
+    /// device whose GLES renderer really can import neither candidate, the
+    /// session now comes up on this tier with no global (GL clients fall back
+    /// to `wl_shm`) where before it fell back to pixman and dumb buffers. No
+    /// machine this project can reach produces that configuration, and
+    /// `dmabuf::advertise` warns loudly when it happens.
     pub(crate) fn renderer_formats(&self) -> Vec<smithay::backend::allocator::Format> {
         self.renderer
             .egl_context()

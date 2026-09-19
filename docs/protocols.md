@@ -452,7 +452,9 @@ What to know before pointing a client at it:
   does the writing, and `wl_shm` already works everywhere at no extra cost to
   a CPU renderer. This is unchanged by the renderer-derived import formats
   below: importing a client's buffer and *rendering into* one are different
-  capabilities, and the second has no code path here. `Xrgb8888` is offered first: if `[appearance]
+  capabilities, and the second has no code path here.
+
+  `Xrgb8888` is offered first: if `[appearance]
   background_color` has an alpha below 1.0 then the framebuffer really is
   translucent, and an `Xrgb8888` capture forces the fourth byte opaque so you
   get a screenshot rather than a translucent image. With the default opaque
@@ -475,20 +477,29 @@ What to know before pointing a client at it:
   asynchronous `create`, which it survives, and a protocol error on
   `create_immed`, which the protocol prescribes.
 
+  "Can import" is read generously on purpose: a driver that lists a format
+  only with `Modifier::Invalid` — which is what a display without
+  `EGL_EXT_image_dma_buf_import_modifiers`, or one that refuses a modifier
+  query for its own format, reports — does import a linear dma-buf, so the
+  format is still offered, still at `LINEAR`.
+
   Two edges of that derivation are worth knowing before you debug one of
   them. If the active renderer can import *neither* format — an EGL display
   with no dma-buf import capability at all — **no dmabuf global is
-  advertised**, which steers GL clients onto `wl_shm` instead of killing
-  them, and which also means a shell that waits for dmabuf feedback before
-  capturing (below) waits forever on such a machine. And a compositor with no
-  renderer at all advertises nothing here for the same reason.
+  advertised**. That steers GL clients onto `wl_shm` rather than killing
+  them, but it is not free: they then render in software, and a shell that
+  waits for dmabuf feedback before capturing (below) waits forever. scoot
+  logs `can import none of the dma-buf formats this compositor serves` when
+  it happens, and `--renderer pixman` is the working session on such a
+  machine. A compositor with no renderer at all advertises nothing here for
+  the same reason.
 
-  `main_device` names a **render node**: the one the active renderer's own
-  EGL display sits on, where it has one, else `/dev/dri/renderD128`, else
-  `card0`, else `0`. The renderer's own device leads because that is the
-  device an import can actually succeed against — on a two-GPU machine a
-  client that allocated against the other node would hand over a buffer this
-  renderer cannot import. Which rung answered is logged once at startup
+  `main_device` names a **render node**: the active renderer's own, where it
+  can name one, else `/dev/dri/renderD128`, else `card0`, else `0`. The
+  renderer's own device leads because that is the device an import can
+  actually succeed against — on a two-GPU machine a client that allocated
+  against the other node would hand over a buffer this renderer cannot
+  import. Which rung answered is logged once at startup
   (`dmabuf feedback main device device=… source=…`).
 
   The global also gates screen capture for some shells: quickshell's buffer

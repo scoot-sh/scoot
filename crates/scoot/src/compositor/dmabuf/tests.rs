@@ -47,7 +47,7 @@ use wayland_protocols::wp::linux_dmabuf::zv1::client::{
     zwp_linux_buffer_params_v1, zwp_linux_dmabuf_feedback_v1, zwp_linux_dmabuf_v1,
 };
 
-use super::{DMABUF_CANDIDATES, main_device, main_device_from, tranche};
+use super::{DMABUF_CANDIDATES, imports_linear, main_device, main_device_from, tranche};
 use crate::cli::RendererKind;
 use crate::compositor::decorations::Appearance;
 use crate::compositor::screencopy::FORMATS;
@@ -396,9 +396,17 @@ fn every_advertised_format_is_one_the_renderer_imports() {
     //
     // This replaced a pixman-only version of the same pin. It has to be
     // per-renderer now that the table is derived from the active one (see
-    // `dmabuf.rs`), and it is the stronger test for it: under
-    // `SCOOT_TEST_RENDERER=gles` this asserts against `GlesRenderer`'s EGL
-    // display, which the old one could not see at all.
+    // `dmabuf.rs`): under `SCOOT_TEST_RENDERER=gles` it asserts against
+    // `GlesRenderer`'s EGL display, which the old one could not see at all.
+    //
+    // It asks `imports_linear`, the same rule `tranche` filters by, rather
+    // than `imports_dmabuf_format({code, Linear})` directly -- and that is
+    // not the test weakening itself to match the code. A renderer whose
+    // import set carries only `{code, Invalid}` still imports a linear
+    // dma-buf of that code (see `imports_linear`'s doc for the chain through
+    // the pinned rev), so the direct check is *wrong* about such a driver in
+    // the direction that matters: it would fail this test on a session that
+    // is behaving correctly.
     let mut fixture = Fixture::start();
     let seen = fixture.run(Step::ReadFeedback { version: 5 }).feedback();
     assert!(
@@ -414,15 +422,18 @@ fn every_advertised_format_is_one_the_renderer_imports() {
         .as_ref()
         .expect("a headless backend behind the fixture");
     for (code, modifier) in seen.table {
-        let format = Format {
-            code: Fourcc::try_from(code).expect("an advertised fourcc is a real one"),
-            modifier: Modifier::from(modifier),
-        };
+        let code = Fourcc::try_from(code).expect("an advertised fourcc is a real one");
+        assert_eq!(
+            Modifier::from(modifier),
+            Modifier::Linear,
+            "only LINEAR is ever advertised, whatever the evidence for it was"
+        );
         assert!(
-            backend.imports_dmabuf_format(format),
-            "the feedback table advertises {format:?}, which this session's \
-             renderer cannot import -- a client that allocates it and calls \
-             create_immed would be killed for believing the advertisement"
+            imports_linear(code, &|format| backend.imports_dmabuf_format(format)),
+            "the feedback table advertises {code:?} at LINEAR, which this \
+             session's renderer will not import -- a client that allocates it \
+             and calls create_immed would be killed for believing the \
+             advertisement"
         );
     }
 }
@@ -506,18 +517,55 @@ fn a_renderer_missing_one_candidate_advertises_only_the_other() {
 }
 
 #[test]
-fn a_non_linear_candidate_is_never_offered() {
-    // The modifier half of the promise. The tranche only ever names `LINEAR`,
-    // whatever the renderer says about anything else: a renderer that
-    // advertised every *other* modifier for the same fourcc must still come
-    // out empty here, because a client allocating a tiled buffer is one
-    // pixman cannot map and one no consumer of scoot's framebuffer layout
+fn a_renderer_listing_only_the_invalid_modifier_still_advertises_linear() {
+    // The regression review caught in PR #147 before it could reach anyone,
+    // and the reason `imports_linear` exists rather than a direct
+    // `has_dmabuf_format({code, Linear})`.
+    //
+    // Smithay inserts `{fourcc, Invalid}` unconditionally and explicit
+    // modifiers only when `QueryDmaBufModifiersEXT` returned a non-zero count
+    // -- which stays zero on a display with no modifiers extension, on a
+    // driver that answers `EGL_BAD_PARAMETER` for its own enumerated format
+    // (NVIDIA >= 520, named in upstream's own comment), and on a driver that
+    // reports no modifiers. Such a renderer *does* import a linear dma-buf.
+    // Requiring the explicit entry would have advertised nothing at all
+    // there, dropping every GL client to software rendering and leaving a
+    // dmabuf-gated shell unable to capture the screen.
+    let invalid_only = |format: Format| format.modifier == Modifier::Invalid;
+    let advertised: Vec<Format> = tranche(invalid_only).collect();
+    assert_eq!(
+        advertised,
+        vec![
+            Format {
+                code: Fourcc::Xrgb8888,
+                modifier: Modifier::Linear,
+            },
+            Format {
+                code: Fourcc::Argb8888,
+                modifier: Modifier::Linear,
+            },
+        ],
+        "a renderer that lists only the Invalid modifier must still be \
+         advertised both candidates, and advertised them at LINEAR -- what is \
+         on the wire is what a client allocates, and it is never `Invalid`"
+    );
+}
+
+#[test]
+fn a_renderer_with_only_other_explicit_modifiers_advertises_nothing() {
+    // The other half of the same rule, and what keeps the widening above from
+    // becoming "advertise anything". Evidence is `Linear` *or* `Invalid` and
+    // nothing else: a driver that imports a tiled layout for these fourccs
+    // and neither of those two says nothing about whether it would take the
+    // linear buffer a client allocates from this table -- and a tiled buffer
+    // is one pixman cannot map and no consumer of scoot's framebuffer layout
     // expects.
-    let advertised: Vec<Format> = tranche(|format| format.modifier != Modifier::Linear).collect();
+    let tiled = Modifier::from(1u64); // I915_FORMAT_MOD_X_TILED, as a stand-in
+    let advertised: Vec<Format> = tranche(|format| format.modifier == tiled).collect();
     assert!(
         advertised.is_empty(),
-        "only LINEAR is ever a candidate, so a renderer that imports \
-         everything else must be advertised nothing"
+        "only LINEAR or Invalid is evidence, so a renderer that imports \
+         neither must be advertised nothing"
     );
 }
 
@@ -528,6 +576,13 @@ fn a_non_linear_candidate_is_never_offered() {
 /// against the wire is that the global really carries what the derivation
 /// produced, in order, through Smithay's format-table memfd -- a step with
 /// several ways to lose the ordering or the modifier and none to notice it.
+///
+/// This needs no widening of its own for the `Modifier::Invalid` case
+/// `imports_linear` handles, and that is worth stating rather than leaving as
+/// an absence: the rule lives *inside* `tranche`, so the closure here is
+/// called once per candidate per modifier `tranche` considers evidence, and
+/// the backend answers each honestly. A copy of the rule here would be a
+/// second place for it to drift.
 fn expected_table(fixture: &Fixture) -> Vec<(u32, u64)> {
     let backend = fixture
         .state

@@ -51,13 +51,23 @@
 //!
 //! So the tranche is **derived**: [`DMABUF_CANDIDATES`] is what this
 //! compositor is willing to serve, and [`tranche`] keeps only those the
-//! session's own renderer answers
-//! [`has_dmabuf_format`](smithay::backend::renderer::ImportDma::has_dmabuf_format)
-//! for. A candidate it cannot import is never offered, so the promise cannot
-//! be broken by a renderer this compositor does not have. Pinned over the
-//! wire, against the session's own backend
+//! session's own renderer will really take. A candidate it cannot import is
+//! never offered, so the promise cannot be broken by a renderer this
+//! compositor does not have. Pinned over the wire, against the session's own
+//! backend
 //! (`dmabuf/tests.rs::every_advertised_format_is_one_the_renderer_imports`),
 //! not by comment.
+//!
+//! **"Will really take" is a wider question than "lists at `LINEAR`", and
+//! getting that wrong is a way to break a working session rather than a
+//! client.** Smithay inserts `{fourcc, Modifier::Invalid}` into a GLES
+//! renderer's import set unconditionally and explicit modifiers only when the
+//! driver answered a modifier query -- so a display with no modifiers
+//! extension, or a driver that refuses the query for its own enumerated
+//! format, lists `{XR24, Invalid}` and not `{XR24, Linear}` while importing a
+//! linear dma-buf perfectly well. Requiring the explicit entry would have
+//! advertised *nothing* there. [`imports_linear`] is the rule, and its doc
+//! carries the chain through the pinned source.
 //!
 //! **The hazard that closes**, which is the reason the stage exists: an EGL
 //! display with *no* dmabuf-import capability has an empty importable set,
@@ -70,6 +80,16 @@
 //! it is closed by construction and by unit test
 //! (`a_renderer_that_imports_nothing_is_advertised_as_nothing`) rather than
 //! by a live reproduction.
+//!
+//! That "no global" outcome is the right answer only when the renderer really
+//! cannot import, which is why the evidence rule above matters so much: a
+//! false negative in it lands a *working* GPU session in the same place, and
+//! there is nothing else left to catch it. `--tty`'s scanout tier used to
+//! carry a second, independent check of the same question (refusing to come
+//! up at all, so the session fell back to pixman and kept a usable dmabuf
+//! path); stage 4 removed it as a duplicate, which is correct only while this
+//! rule has no false negatives. [`advertise`]'s warning is the remaining
+//! safety net, and says what to do.
 //!
 //! **What this deliberately does not fix**, because it never was this: the
 //! seven `dmabuf/tests.rs` import tests that fail under
@@ -353,9 +373,25 @@ const CARD0: &str = "/dev/dri/card0";
 pub(super) fn advertise(dh: &DisplayHandle, state: &mut DmabufState, backend: &Backend) {
     let mut formats = tranche(|format| backend.imports_dmabuf_format(format)).peekable();
     if formats.peek().is_none() {
+        // Loud, and specific about both halves, because this is a
+        // session-shaping degradation an operator has no other way to find
+        // out about: every GL client silently drops to Mesa's `wl_shm`
+        // swrast path -- software GL, on a configuration someone chose *for*
+        // GPU rendering -- and a shell that gates its screen capture on
+        // dmabuf feedback (quickshell does; see this module's doc) never
+        // creates a capture context at all, so its previews stay blank
+        // forever with no error anywhere. Naming the remedy matters as much:
+        // pixman imports a linear dma-buf by mapping it and refuses
+        // essentially nothing, so `--renderer pixman` is a working session
+        // rather than a downgrade to be argued about.
         tracing::warn!(
+            candidates = ?DMABUF_CANDIDATES,
             "this session's renderer can import none of the dma-buf formats this \
-             compositor serves; running without zwp_linux_dmabuf_v1"
+             compositor serves, so zwp_linux_dmabuf_v1 is not advertised at all: \
+             GL clients will fall back to software rendering over wl_shm, and a \
+             shell that waits for dmabuf feedback before capturing the screen \
+             will never capture anything. Run with --renderer pixman for a \
+             session that imports them"
         );
         return;
     }
@@ -393,14 +429,59 @@ pub(super) fn advertise(dh: &DisplayHandle, state: &mut DmabufState, backend: &B
 /// path, framebuffer layout or `screencopy` shm list agrees with -- so the
 /// candidates stay the two that every other pixel path here already speaks
 /// (see [`DMABUF_CANDIDATES`]) and the renderer only ever narrows them.
+///
+/// What the entries say on the wire is always `LINEAR`; what counts as
+/// *evidence* that the renderer will take one is [`imports_linear`], which is
+/// wider and has to be.
 fn tranche(can_import: impl Fn(Format) -> bool) -> impl Iterator<Item = Format> {
     DMABUF_CANDIDATES
         .into_iter()
+        .filter(move |code| imports_linear(*code, &can_import))
         .map(|code| Format {
             code,
             modifier: Modifier::Linear,
         })
-        .filter(move |format| can_import(*format))
+}
+
+/// Whether `can_import` is evidence that this renderer will accept a
+/// single-plane **linear** dma-buf of `code` -- which is *not* the same
+/// question as whether it lists `code` at `Modifier::Linear`.
+///
+/// `Modifier::Invalid` counts, and leaving it out was a real bug in the first
+/// version of this module (caught in review of PR #147, before it could
+/// reach anyone). The chain, all checked against the pinned rev rather than
+/// reasoned about:
+///
+/// - Smithay builds a GLES renderer's import set by inserting
+///   `{fourcc, Invalid}` **unconditionally** for every fourcc it enumerates,
+///   and inserting *explicit* modifiers only when `QueryDmaBufModifiersEXT`
+///   answered a non-zero count (`egl/display.rs:962-1001`).
+/// - That count stays zero on real hardware, not only in theory: a display
+///   without `EGL_EXT_image_dma_buf_import_modifiers` at all, a driver that
+///   answers `EGL_BAD_PARAMETER` for a format it just enumerated (upstream's
+///   own comment names NVIDIA proprietary >= 520, `:938-953`), or a driver
+///   that simply reports no modifiers.
+/// - On such a display the import set therefore contains `{XR24, Invalid}`
+///   and **not** `{XR24, Linear}` -- while the import itself succeeds:
+///   `GlesRenderer::import_dmabuf` never consults the set to admit a buffer
+///   (it reads it only for the `is_external` flag, `gles/mod.rs:1268-1274`),
+///   `Dmabuf::has_modifier()` is false for `Linear` so the
+///   modifiers-extension guard does not fire (`allocator/dmabuf.rs:229`,
+///   `egl/display.rs:754-759`), and no modifier attribute is attached to the
+///   `EGLImage` either (`:817`) -- i.e. exactly the implicit-layout import
+///   such a driver does support.
+///
+/// So requiring an explicit `LINEAR` entry would have thrown away a
+/// capability that genuinely worked, ending in no global at all and every GL
+/// client on software rendering (see [`advertise`]'s warning). Accepting
+/// `Invalid` restores precisely what the hard-coded table did before this
+/// stage and promises nothing more: the advertised modifier is still
+/// `LINEAR`, and a client that allocates one still gets the import that used
+/// to succeed.
+fn imports_linear(code: Fourcc, can_import: &impl Fn(Format) -> bool) -> bool {
+    [Modifier::Linear, Modifier::Invalid]
+        .into_iter()
+        .any(|modifier| can_import(Format { code, modifier }))
 }
 
 /// The `main_device` for default feedback: the device a client should allocate
