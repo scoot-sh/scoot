@@ -71,9 +71,9 @@
 //!
 //! Nothing changes: handles stay, titles keep updating, new windows are still
 //! announced. That matches the IPC side (`scoot msg windows` "still lists
-//! your windows while locked, titles included" -- see `README.md`) and the
-//! trust model the whole compositor already states: a process that can reach
-//! this wayland socket runs as the same user and is inside the boundary
+//! your windows while locked, titles included" -- see `docs/protocols.md`) and
+//! the trust model the whole compositor already states: a process that can
+//! reach this wayland socket runs as the same user and is inside the boundary
 //! already. Sending `closed` for every window on lock would also be a lie --
 //! the windows did not close -- and would burn their identifiers, since the
 //! protocol forbids reusing one when the window came back.
@@ -179,9 +179,9 @@ impl ForeignToplevels {
     ///
     /// No client filter, for the same reason the session-lock, data-control
     /// and input-method globals have none: scoot has no security-context
-    /// support, so an allow-list would be theatre (see `README.md`'s trust
-    /// note). The protocol explicitly leaves this to compositor policy --
-    /// and per-client *accounting* (see `bind_budget.rs`) is not a filter.
+    /// support, so an allow-list would be theatre (see `docs/protocols.md`'s
+    /// trust note). The protocol explicitly leaves this to compositor policy
+    /// -- and per-client *accounting* (see `bind_budget.rs`) is not a filter.
     /// Enumeration-only, so there is no write half to gate either.
     ///
     /// The `GlobalId` is dropped: nothing removes this global for the life of

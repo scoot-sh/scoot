@@ -1479,10 +1479,11 @@ fn both_window_lists_describe_the_same_windows_to_one_client() {
 #[test]
 fn the_window_list_stays_live_while_the_session_is_locked() {
     // Deliberate, and the same answer `scoot msg windows` and the `ext-` list
-    // give (see this module's doc and `README.md`'s lock section): a process
-    // that can reach this socket is inside the trust boundary already, and
-    // sending `closed` for windows that did not close would be a lie a taskbar
-    // could not recover from. The *requests* are refused; see `requests.rs`.
+    // give (see this module's doc and `docs/protocols.md`'s lock section): a
+    // process that can reach this socket is inside the trust boundary already,
+    // and sending `closed` for windows that did not close would be a lie a
+    // taskbar could not recover from. The *requests* are refused; see
+    // `requests.rs`.
     let mut fixture = Fixture::bound();
     fixture.run(Step::MapWindow);
     fixture.take_log();

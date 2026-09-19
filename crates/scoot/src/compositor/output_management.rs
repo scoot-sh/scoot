@@ -192,8 +192,8 @@ impl OutputManagement {
     ///
     /// No client filter, for the same reason the session-lock, gamma-control
     /// and data-control globals have none: scoot has no security-context
-    /// support, so an allow-list would be theatre (see `README.md`'s trust
-    /// note). Nothing here is writable in any case.
+    /// support, so an allow-list would be theatre (see `docs/protocols.md`'s
+    /// trust note). Nothing here is writable in any case.
     ///
     /// The `GlobalId` is dropped: nothing removes this global for the life of
     /// the process, and dropping the id does not remove it either.
