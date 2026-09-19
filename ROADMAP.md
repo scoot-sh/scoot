@@ -25,12 +25,27 @@ docs/backlog`, `rg -l 'area: "protocols"' docs/roadmap`.
 | 4b | [Window decorations](docs/roadmap/04b-decorations.md) | done |
 | 5 | [Cursor rendering for `--tty`](docs/roadmap/05-cursor-rendering.md) | done |
 | 5b | [VT-switch-back `EPERM`](docs/roadmap/05b-vt-switch-eperm.md) | done |
-| 6 | [Real GPU rendering pipeline](docs/roadmap/06-gpu-pipeline.md) | **in progress (stage 4 of 4)** |
+| 6 | [Real GPU rendering pipeline](docs/roadmap/06-gpu-pipeline.md) | **done on paper — unverified on a real GPU** |
 | 7–18 | [Backlog-driven hardening and protocol work](docs/roadmap/) | done |
 
 Item 6 (a **GLES** renderer as an optional alternative to pixman, selected
-per-backend, with GPU-free operation kept as a hard requirement) is the only
-remaining item on the original ordered list. Two of its four stages have landed
+per-backend, with GPU-free operation kept as a hard requirement) was the last
+item on the original ordered list, and all four of its stages have landed —
+which means **every milestone on that list is now built**.
+
+**"Done on paper" is deliberate wording, not modesty.** No part of this
+milestone has ever run on a real GPU. The dev VM's EGL device answers
+`is_software() == false` and is then served by llvmpipe, so every number and
+every green run behind these four stages is a software rasteriser's. Three
+things are consequently claimed rather than shown: that GPU scanout is faster
+than the CPU path (the shape is encouraging — read-back cost 17–32x pixman,
+scanout ~1.5x on the same rasteriser — but that is an extrapolation), that
+the split render/display topology works (AGX has the render node,
+`apple,dcp` owns the connectors; designed for, never exercised), and that the
+`Modifier::Invalid` widening behaves on a driver that actually reports
+`Invalid`-only. `Asahi.md`'s Test 4 and
+`docs/backlog/rendering/gpu-vs-cpu-measured.md` are where that gets settled.
+Scanout is also primary-plane only — no overlay or cursor planes. Two of its four stages have landed
 (PR #129: the renderer seam, pixman still the only implementation, provably
 zero behaviour change; PR #130: the GLES pipeline behind
 `--renderer pixman|gles` and `[renderer] backend`, off by default, every
@@ -42,7 +57,7 @@ link-time libgbm dependency and GPU-free operation is a hard requirement, plus
 the dumb presenter lifted out of `Tty`) and PR #135 stacked on it (GPU scanout
 for `--tty --renderer gles`: the frame composited straight into the buffer the
 CRTC scans out, with no read-back and no dumb-buffer memcpy). Stage 4, the
-last, is in flight: the `zwp_linux_dmabuf_v1` tranche is derived from whatever
+last, has landed (PR #147): the `zwp_linux_dmabuf_v1` tranche is derived from whatever
 renderer the session actually built rather than hard-coded to what the CPU
 renderer can map — which closes the case of an EGL display with no dma-buf
 import capability at all, where the old fixed pair would have been advertised
