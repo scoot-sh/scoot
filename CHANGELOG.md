@@ -9,6 +9,33 @@ scoot has not cut a numbered release yet; entries are dated.
 
 ## Unreleased
 
+### 2026-09-19 — `--headless --outputs N`, and a screenshot that refuses the wrong screen
+
+`scoot --headless --outputs N` (1–8, default 1) creates N virtual outputs
+side by side, each with its own `wl_output` (`headless`, `headless-2`, ...),
+its own place in the coordinate space and its own scrolling strip. It exists
+so per-output behaviour is testable without a second monitor; `--nested` and
+`--tty` warn and ignore it, having one host window and one CRTC respectively.
+
+**Only the first output is composited**, so two things follow that you would
+notice:
+
+- `scoot msg screenshot --output ID` now **refuses** an output scoot does not
+  composite, instead of answering it with the first output's pixels. The `ID`
+  was previously ignored outright, which meant `--output 2` returned a picture
+  of output 1 labelled as output 2 — a mislabel an agent cannot detect.
+  Omitting `--output` still always means the composited output.
+- A bar on a second output reserves no space anywhere, the pointer is
+  hit-tested against the first output's layer surfaces, one
+  `wlr-output-management` head and one `ext-workspace` group are published,
+  and a session lock covers the first output. See
+  [docs/configuration.md](docs/configuration.md#more-than-one-output).
+
+One fix you would only have hit with more than one output: a layer surface
+created on an output other than the first is now configured against that
+output and unmapped from it. Before, its initial configure was never sent
+(the client would wait for one forever) and destroying it left it arranged.
+
 ### 2026-09-19 — dma-buf formats follow the renderer
 
 The `zwp_linux_dmabuf_v1` feedback a client reads now names only what the

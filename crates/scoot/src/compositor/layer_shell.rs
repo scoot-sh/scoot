@@ -380,9 +380,17 @@ impl State {
     ///
     /// The lookup that replaces "the one output there is" wherever a layer
     /// surface's *own* output is what is wanted -- a commit on it, its
-    /// destruction, or the geometry an IME popup is placed against. Costs one
-    /// map lock per output until it hits, and a session has a handful of
-    /// outputs; with one output it is the same single lookup as before.
+    /// destruction, or the geometry an IME popup is placed against.
+    ///
+    /// Costs one map lock and one layer scan per output until it hits. That
+    /// is one *extra* lock and scan on the per-commit path even with a single
+    /// output, since the caller then re-takes the map for `arrange()`: an
+    /// uncontended `Mutex` and a walk of a list with a handful of entries,
+    /// against a commit that already locks that same map and walks it. The
+    /// alternative -- handing the found `LayerSurface` back so the caller
+    /// need not re-search -- would mean holding the guard across the caller's
+    /// own `layer_map_for_output`, which is exactly the double-take this
+    /// module's guard discipline forbids.
     pub(super) fn output_of_layer(&self, surface: &WlSurface) -> Option<Output> {
         self.outputs
             .iter()

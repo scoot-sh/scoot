@@ -55,7 +55,9 @@ What a second output **is**, today:
 - its own output in `scoot msg outputs`, with its own id, rectangle and name;
 - its own workspaces and its own scrolling strip in the layout, so a window is
   on exactly one output and nothing scrolls across a boundary;
-- a layer surface naming it is configured against it and unmapped from it.
+- a layer surface naming it is configured against it and unmapped from it
+  (but not sent frame callbacks: only the first output's layer surfaces are,
+  so an animated bar on a second output stops after its first draw).
 
 What it is **not**, yet — the work tracked in
 `docs/backlog/core/multi-output.md`:
