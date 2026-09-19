@@ -77,3 +77,86 @@ reviewer plus a coordinator re-deriving the numbers catches classes of
 problem no workflow will. The risk to watch for is CI becoming a reason to
 skip that: a green check is evidence the tests passed, not evidence the
 change is right. `CLAUDE.md`'s review gate is unchanged by this item.
+
+## What landed (PR #140, 2026-09-19)
+
+`.github/workflows/ci.yml`. Two jobs, on every `pull_request` and every push
+to `main`; every step runs through `nix develop`, so the flake stays the one
+dependency list.
+
+**Linux (`ubuntu-latest`)**
+
+- `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --
+  -D warnings`. Supersets of the documented `-p scoot` steps: `scoot-core`
+  and `scoot-ipc` cost nothing extra once their dependencies are built here,
+  and nothing else lints them. Both were verified clean at `64f5fea` before
+  widening.
+- `cargo build -p scoot`, then **`ldd` asserting the default binary links no
+  `libgbm` and no `libEGL`**, matching the *soname* field so an unrelated
+  store path containing the string cannot trip it, and covering the whole
+  `DT_NEEDED` closure so a GPU library arriving transitively is caught too.
+  Then `cargo build -p scoot --features gpu-scanout` and the mirror
+  assertion that *that* binary does link `libgbm` — without the positive
+  control, an `ldd` aimed at the wrong binary would leave the no-GPU check
+  passing while testing nothing.
+- `cargo nextest run --workspace`.
+- `cargo test --workspace`, carrying a comment in the file saying why it is
+  not a duplicate of the line above it, because someone will try to delete
+  it as one.
+- `scripts/smoke-test.sh` under `--headless`. Its harness tools (`foot`,
+  `jq`, ImageMagick, `wayland-info`) come from `nix shell --inputs-from .`,
+  pinned to this repo's own `flake.lock` rather than a second floating
+  nixpkgs; `SMOKE_PREFIX` keeps every socket out of `/run/user/<uid>`, which
+  a runner does not have.
+
+**macOS (`macos-latest`, arm64)** — `cargo check --workspace --all-targets`,
+the `scoot msg` half nobody builds between releases.
+
+### Evidence
+
+Run <https://github.com/scoot-sh/scoot/actions/runs/35454377003> (commit
+`44f7d3e`, both jobs green):
+
+- `cargo nextest run --workspace` — `1100 tests run: 1100 passed, 3 skipped`
+- `cargo test --workspace` — `995 passed; 0 failed; 3 ignored` for the
+  `scoot` binary, matching the local baseline exactly
+- `ok: the default build links no libgbm and no libEGL`
+- `ok: --features gpu-scanout links libgbm, so the default build's
+  assertion is a real one`
+- smoke test: every `ok:` line, including the three decoration pixel checks
+  and `zwp_linux_dmabuf_v1 is advertised`
+
+Wall clock, Linux job: **8m05s cold** (empty cargo cache, run 35453015885)
+against **4m30s warm** (run 35454377003) — clippy 2m09s → 11s, build 2m09s
+→ 12s, nextest 2m29s → 53s. macOS: 3m46s cold, 1m33s warm. The cargo cache
+restores in ~1m (1.4 GB) and is saved with `if: always()`, so a red run's
+artifacts survive for the next attempt.
+
+### Two findings from the first runs
+
+1. **`render/tests.rs`'s GLES tests fail on a machine with no EGL at all**,
+   which the dev VM never is. Run 35453015885 died at
+   `a_capture_covers_the_whole_target_at_the_backends_own_size` with
+   `Failed to load LibEGL: libEGL.so.1: cannot open shared object file`,
+   taking 333 unrun tests with it. That module says failing rather than
+   skipping is deliberate, on the reasoning that any machine able to run
+   the suite has Mesa's software EGL — the dev VM resolves the `dlopen`
+   through `/run/current-system/sw/lib`, which is in the binary's `RUNPATH`
+   there and does not exist on a runner. Handled by giving CI the software
+   EGL the suite documents needing (Mesa through `--inputs-from .`), scoped
+   to the two test steps by name, so the smoke test still runs with no
+   loadable EGL at all.
+2. **`magic-nix-cache-action@v15` now requires a FlakeHub account.** It
+   failed to authenticate on every run, cached nothing usable, cost 11s up
+   front and up to 1m51s in its own post step on macOS, and left ~780 small
+   cache entries behind. Removed; the dev shell comes from cache.nixos.org
+   in ~35s of the first `nix develop`. The cargo cache is where the time
+   actually is.
+
+### Still not covered, by construction
+
+`--tty` and everything a DRM/VT seat implies, GPU *hardware* paths (the
+GLES tests run against Mesa's software rasteriser, never a driver; no run
+starts a live compositor with `--renderer gles`), `--nested`, and
+performance. The workflow's header block says so at the top of the file
+rather than leaving a green check to imply otherwise.

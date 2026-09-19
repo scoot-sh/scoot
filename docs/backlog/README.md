@@ -419,12 +419,12 @@ falsify. Read `flexwm` there as `scoot`.
 - [No CI: every verification run is manual and self-reported](./testing/ci-test-run.md)
   — LANDED 2026-09-19 (PR #140): `.github/workflows/ci.yml` runs fmt,
   clippy, `cargo nextest run --workspace`, `cargo test --workspace`, the
-  `--headless` smoke test and an `ldd` assertion that the default build
-  links no `libgbm`/`libEGL`, all through `nix develop`; plus a macOS
-  `cargo check` of the `scoot msg` client. The `--features gpu-scanout`
-  half is written and gated: that feature arrives with PR #135. What CI
-  cannot cover (`--tty`, a DRM/VT seat, any GPU, `--nested`, performance)
-  is named in the workflow's own header.
+  `--headless` smoke test, and an `ldd` pair asserting the default build
+  links no `libgbm`/`libEGL` while the `--features gpu-scanout` build does
+  — all through `nix develop`; plus a macOS `cargo check` of the `scoot
+  msg` client. 4m30s warm, 8m05s cold. What CI cannot cover (`--tty`, a
+  DRM/VT seat, GPU hardware, `--nested`, performance) is named in the
+  workflow's own header.
 - [Extract a shared test harness; split the largest test files; adopt `cargo-nextest`](./resolved/large-test-file-organization-done.md)
   — RESOLVED 2026-09-16: `compositor/test_support.rs` now carries the
   real-client harness the five largest suites each reimplemented; the two
