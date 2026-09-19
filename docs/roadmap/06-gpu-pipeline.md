@@ -905,3 +905,15 @@ added runs once at startup.
   plainly is better than implying it was reproduced.
 - **A multi-GPU machine**, which is where `main_device` naming the renderer's
   own node rather than `renderD128` by path stops being a tidiness argument.
+- **A driver that reports its import formats with `Modifier::Invalid` rather
+  than an explicit `LINEAR`.** `tranche` asks `has_dmabuf_format(Format {
+  code, modifier: Linear })`, i.e. it wants the explicit entry, and the only
+  display probed here (`kms_swrast`, 76 formats) has it. One that does not
+  would yield an empty tranche and therefore **no dmabuf global** under
+  `--renderer gles` -- the designed safe fallback (GL clients drop to
+  `wl_shm`, nothing is killed) and a loud `warn!`, but a capability the old
+  hard-coded pair could not lose. It is the first thing to check on a real
+  GPU: `--renderer gles` should log `dmabuf feedback main device` and must
+  **not** log `can import none of the dma-buf formats this compositor
+  serves`. If it does, the fix is to accept `Modifier::Invalid` as well as
+  `LINEAR` for a candidate, which is a change to `tranche` alone.

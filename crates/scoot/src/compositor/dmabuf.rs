@@ -126,9 +126,20 @@
 //! calloop source, so no connection is accepted, no registry served and no
 //! global announced until `event_loop.run` -- which `compositor::run` reaches
 //! several steps after `init_named`, and after the session's own `--` command
-//! is even spawned. Every test harness has the same shape: `State::new`,
-//! `headless::init`, *then* a client. A global created anywhere in that window
-//! is a global that was there from the client's first `wl_registry`.
+//! is even spawned. Every harness a dmabuf test runs against has the same
+//! shape -- `State::new`, `headless::init`, *then* a client -- so a global
+//! created anywhere in that window is a global that was there from the
+//! client's first `wl_registry`.
+//!
+//! One suite deliberately does *not*, and it is worth knowing which way it
+//! cuts: `output_management/tests.rs`'s
+//! `binding_before_the_output_exists_announces_no_head` connects a client,
+//! binds a manager, and only then calls `headless::init` -- so that client
+//! receives this global as a late `wl_registry.global` event. It passes,
+//! which is a small piece of evidence that a late announcement is served
+//! rather than lost. It is not the argument above, though: that argument is
+//! that no *session* has such a window, not that a late global would be
+//! broken if one did.
 //!
 //! The one visible consequence is the honest one: a `State` with no renderer
 //! at all (the bare test harness; any future front-end that has none)
