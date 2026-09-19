@@ -188,10 +188,30 @@ i.e. a compositor killed by a size the host itself proposed.
 
 ### What it cost, and what grows
 
-A resize rebuilds the render target and the pool, so it is not free — see
-`headless/bench.rs`'s `resize_cost` for the renderer-side number. The mode
-list grows by one per *distinct* size the host has configured the window to
-(`Output::modes` dedupes by value), so a drag through many sizes leaves one
-mode each; `Nothing` keeps same-size configures out of it entirely.
-`docs/protocols.md` and `output_management.rs`'s module doc both say so now,
-where they used to say `--nested` grew the list "at most once".
+A resize rebuilds the render target and the pool, so it is not free.
+`headless/bench.rs` gained a `resize_cost` scene for it (`#[ignore]`d, like
+`render_frame_cost`); measured on the dev VM at 800x800 with 8 windows,
+best of five runs of 40 resizes:
+
+| renderer | per resize |
+| --- | --- |
+| pixman (the default) | **37.3 µs** |
+| gles (llvmpipe on this VM) | **16.6 ms** |
+
+pixman is 0.2% of a 60 Hz frame — a drag is free. `gles` is a whole frame
+apiece, because each rebuild is a new EGL context and shader set, so a
+`--nested --renderer gles` window dragged to resize will stutter until you
+let go. It is once per *distinct* size, not per event, and `gles` is opt-in
+under a backend the CHANGELOG already describes as buying "correctness
+parity rather than speed" — recorded in `docs/tty.md` rather than fixed
+here, with the fix named (resize the GLES target in place instead of
+rebuilding it) if it ever matters.
+
+The one line that *did* flood as a result was fixed: see the sibling entry's
+"What landed" for `render/gles.rs`'s "the GLES renderer is up".
+
+The mode list grows by one per *distinct* size the host has configured the
+window to (`Output::modes` dedupes by value), so a drag through many sizes
+leaves one mode each; `Nothing` keeps same-size configures out of it
+entirely. `docs/protocols.md` and `output_management.rs`'s module doc both
+say so now, where they used to say `--nested` grew the list "at most once".
