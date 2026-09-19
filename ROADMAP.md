@@ -1095,10 +1095,11 @@ Small follow-ups already filed alongside:
 (resolved, PR #77).
 
 Item 6 (the GPU pipeline) remains the one *ordered* milestone still open, now
-on its last stage: the renderer seam (PR #129, merged), the GLES pipeline
-behind `--renderer` (PR #130, merged), `DrmCompositor` scanout for `--tty`
-(PRs #133 and #135, merged), and the renderer-derived `zwp_linux_dmabuf_v1`
-tranche (stage 4, in flight). It has never been ahead of
+through all four stages: the renderer seam (PR #129), the GLES pipeline
+behind `--renderer` (PR #130), `DrmCompositor` scanout for `--tty`
+(PRs #133 and #135), and the renderer-derived `zwp_linux_dmabuf_v1`
+tranche (PR #147) — all merged, none of it yet run on a real GPU. It had
+never been ahead of
 the daily-drivability and correctness work the backlog keeps producing, and
 that trade can be revisited at any time — stage 1 was picked up when it was
 because it is a pure refactor with no behaviour change, so it cost the backlog
