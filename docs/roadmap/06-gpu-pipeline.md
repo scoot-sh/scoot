@@ -3,7 +3,7 @@ item: "6"
 title: "Real GPU rendering pipeline"
 status: "in-progress"
 area: "backend"
-pr: 135
+pr: 147
 commit: null
 ---
 
@@ -660,7 +660,7 @@ See "Stage 4 evidence" at the end of this file.
 | 2 | A `GlesRenderer` implementation behind `--renderer`, offscreen + `ExportMem` read-back, so every backend can use it and the existing pixel suites run under both | PR #130, merged `acbdbe0` |
 | 3A | The `gpu-scanout` Cargo feature (with the no-libgbm `ldd` proof) and the dumb presenter lifted out of `Tty`; zero behaviour change | PR #133 |
 | 3B | `DrmCompositor` scanout for `--tty`: skip the read-back and the dumb-buffer memcpy entirely where a GPU really is present | PR #135, stacked on #133 |
-| 4 | Renderer-derived dmabuf formats: advertise what the *active* renderer can import rather than the hard-coded pixman LINEAR pair | PR #141 |
+| 4 | Renderer-derived dmabuf formats: advertise what the *active* renderer can import rather than the hard-coded pixman LINEAR pair | PR #147 |
 
 Stage 2 is the first stage with a user-facing surface (`--renderer`), so it
 is the first that owes `README.md` a change.
