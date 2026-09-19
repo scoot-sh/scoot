@@ -299,46 +299,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "scoot"
-version = "0.1.0"
-dependencies = [
- "calloop-wayland-source",
- "scoot-core",
- "scoot-ipc",
- "libc",
- "pixman",
- "pkg-config",
- "png",
- "rustix 1.1.4",
- "serde",
- "serde_json",
- "smithay",
- "tempfile",
- "toml",
- "tracing",
- "tracing-subscriber",
- "wayland-client",
- "wayland-protocols",
- "wayland-protocols-misc",
- "wayland-protocols-wlr",
- "xcursor",
-]
-
-[[package]]
-name = "scoot-core"
-version = "0.1.0"
-
-[[package]]
-name = "scoot-ipc"
-version = "0.1.0"
-dependencies = [
- "base64",
- "scoot-core",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "generic-array"
 version = "0.14.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -745,6 +705,46 @@ dependencies = [
  "libc",
  "linux-raw-sys 0.12.1",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "scoot"
+version = "0.1.0"
+dependencies = [
+ "calloop-wayland-source",
+ "libc",
+ "pixman",
+ "pkg-config",
+ "png",
+ "rustix 1.1.4",
+ "scoot-core",
+ "scoot-ipc",
+ "serde",
+ "serde_json",
+ "smithay",
+ "tempfile",
+ "toml",
+ "tracing",
+ "tracing-subscriber",
+ "wayland-client",
+ "wayland-protocols",
+ "wayland-protocols-misc",
+ "wayland-protocols-wlr",
+ "xcursor",
+]
+
+[[package]]
+name = "scoot-core"
+version = "0.1.0"
+
+[[package]]
+name = "scoot-ipc"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "scoot-core",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
