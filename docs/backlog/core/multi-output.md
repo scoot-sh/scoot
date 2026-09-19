@@ -37,7 +37,11 @@ frame, `ext-workspace` groups per output, focus rules across outputs. The
 blocker for the rest.
 
 Do that first. Every other piece of this item is cheaper and safer to build
-against two virtual outputs than against one real monitor and a guess.
+against two virtual outputs than against one real monitor and a guess — so
+it is **split out as its own item**,
+[multi-output-foundation](./multi-output-foundation.md), and scheduled
+ahead of everything here. What remains in *this* entry is making the
+protocols correct across the outputs that item creates.
 
 ## The scope is already written down
 
