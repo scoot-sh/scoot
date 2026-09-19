@@ -719,3 +719,189 @@ GPU on this VM: `gles` here means Mesa's `kms_swrast` rasterising in software
 case for a GPU renderer is a real GPU plus the stage-3 scanout path that
 removes the read-back, and neither exists here to measure. Chasing these
 numbers would mean optimising for a configuration nobody should run.
+
+## Stage 4 evidence
+
+Dev VM (4 cores, 3.8 GiB, llvmpipe / GLES 3.2 / Mesa 26.2.2, virtio-gpu
+`card0` + `renderD128`), `CARGO_TARGET_DIR=/var/cargo-target`,
+`CARGO_INCREMENTAL=0`. Everything below was captured at **`2b725fc`** (the
+merge of `main` into the branch) unless a block says otherwise; the only
+commit after it is this section, which is docs-only.
+
+### The verification set
+
+```
+cargo nextest run --workspace
+    Summary [ 37.157s] 1107 tests run: 1107 passed, 3 skipped
+cargo nextest run --workspace --features gpu-scanout
+    Summary [ 35.668s] 1107 tests run: 1107 passed, 3 skipped
+SCOOT_TEST_RENDERER=gles cargo nextest run --workspace --no-fail-fast
+    Summary [ 54.535s] 1107 tests run: 1100 passed, 7 failed, 3 skipped
+cargo test -p scoot
+    running 1005 tests ... 1002 passed; 0 failed; 3 ignored
+    running 3 tests   ...    3 passed; 0 failed; 0 ignored
+cargo clippy -p scoot --all-targets -- -D warnings                      clean
+cargo clippy -p scoot --all-targets --features gpu-scanout -- -D warnings  clean
+cargo fmt --check -p scoot                                              clean
+```
+
+**Every delta accounted for.** The baseline at `8af76fd` is 1102 passed / 3
+skipped in both flavours and 1095 passed / 7 failed / 3 skipped under `gles`.
+The whole difference is **+5 tests**, all new:
+`pixmans_own_importable_set_still_contains_both_candidates`,
+`a_renderer_that_imports_nothing_is_advertised_as_nothing`,
+`a_renderer_missing_one_candidate_advertises_only_the_other`,
+`a_non_linear_candidate_is_never_offered`,
+`the_renderers_own_device_beats_the_path_ladder`. Three existing tests were
+renamed rather than added or removed
+(`default_feedback_names_a_device_and_both_advertised_formats` ->
+`..._and_the_renderers_own_formats`,
+`every_advertised_format_is_one_pixman_can_import` ->
+`..._is_one_the_renderer_imports`,
+`a_session_with_no_renderer_answers_failed` ->
+`..._advertises_no_dmabuf_global`).
+
+**The seven `gles` failures are the same seven, by name** -- unchanged, which
+is the expected result and not a gap (see "What is *not* in it" above):
+
+```
+compositor::dmabuf::tests::a_real_dmabuf_is_imported_and_the_client_gets_its_buffer
+compositor::dmabuf::tests::a_rendered_frame_also_drains_the_mapping_cache
+compositor::dmabuf::tests::an_accepted_import_claims_and_releases_one_buffer_unit
+compositor::dmabuf::tests::an_import_through_create_immed_is_not_a_client_kill
+compositor::dmabuf::tests::an_imported_dmabuf_survives_being_recommitted_frame_after_frame
+compositor::dmabuf::tests::an_imported_mapping_is_released_without_any_frame
+compositor::dmabuf::tests::repeated_import_and_release_without_a_frame_does_not_grow_the_cache
+```
+
+### End to end, five backend/renderer combinations
+
+`scripts/smoke-test.sh`, each with its own `SMOKE_PREFIX` so nothing
+collides. All five: `rc=0`, **17 ok**.
+
+| run | command | log prefix |
+| --- | ------- | ---------- |
+| headless, pixman | `SMOKE_PREFIX=/tmp/s4g-hlpx scripts/smoke-test.sh` | `/tmp/s4g-hlpx.*` |
+| headless, gles | `RENDERER=gles SMOKE_PREFIX=/tmp/s4g-hlgles ...` | `/tmp/s4g-hlgles.*` |
+| nested, pixman | `WLR_BACKENDS=headless WLR_RENDERER=pixman WLR_LIBINPUT_NO_DEVICES=1 cage -- env MODE=--nested SMOKE_PREFIX=/tmp/s4g-nest ...` | `/tmp/s4g-nest.*` |
+| `--tty`, gles (`--features gpu-scanout`) | `MODE=--tty RENDERER=gles SMOKE_PREFIX=/tmp/s4g-ttyg ...` | `/tmp/s4g-ttyg.*` |
+| `--tty`, pixman | `MODE=--tty SMOKE_PREFIX=/tmp/s4g-ttyd ...` | `/tmp/s4g-ttyd.*` |
+
+The two `--tty` runs really were different tiers:
+
+```
+drm: driving this device path=/dev/dri/card0 connector=Virtual-1 width=1600 height=1000 scanout="gpu"
+drm: driving this device path=/dev/dri/card0 connector=Virtual-1 width=1600 height=1000 scanout="dumb"
+```
+
+### `main_device`: every rung, live
+
+The one `info!` line each session logs, from the five runs above:
+
+```
+--tty  gles    dmabuf feedback main device device=57984 source="the renderer's own device"
+--tty  pixman  dmabuf feedback main device device=57984 source="/dev/dri/renderD128"
+headless pixman dmabuf feedback main device device=57984 source="/dev/dri/renderD128"
+headless gles   dmabuf feedback main device device=57984 source="the renderer's own device"
+nested pixman   dmabuf feedback main device device=57984 source="/dev/dri/renderD128"
+```
+
+`57984` is `/dev/dri/renderD128`'s `rdev` and not `card0`'s, which is the
+cross-check that matters -- the derived rung really lands on the **render**
+node rather than on the primary one the GBM device was opened on:
+
+```
+$ stat -c "%n rdev=%t:%T" /dev/dri/renderD128 /dev/dri/card0
+/dev/dri/renderD128 rdev=e2:80       # 226:128 -> 57984
+/dev/dri/card0      rdev=e2:0        # 226:0   -> 57856
+```
+
+So on this machine the derived answer and the old path guess agree, which is
+what makes it safe to say the ladder is a fallback rather than a difference
+in behaviour here.
+
+### The finding that changed the diff
+
+Captured at `35497f4` (before the fix), `--tty --renderer gles`,
+`--features gpu-scanout`, `RUST_LOG=scoot=debug`:
+
+```
+scoot::compositor::render::gles: this EGL device cannot name a DRM render node
+  error=None of the following EGL extensions is supported by the underlying EGL
+  implementation, at least one is required: ["EGL_EXT_device_drm"]
+scoot::compositor::dmabuf: dmabuf feedback main device device=57984 source="/dev/dri/renderD128"
+```
+
+The scanout tier's EGL display is made through `PLATFORM_GBM_KHR`, and its
+`EGLDevice` carries **neither** `EGL_EXT_device_drm_render_node` **nor**
+`EGL_EXT_device_drm` -- while the same Mesa answers both for the offscreen
+tier's enumerated device, which is why one rung looked like enough and was
+not. `ScanoutBackend` now also records the GBM device's own render node, and
+the same command at `390ebf6` logs `source="the renderer's own device"` with
+the debug line still present on the way past.
+
+### What the commit path costs
+
+**There is no before/after to run here, and manufacturing one would be
+dishonest.** The change on that path is the gate, not the work:
+
+```rust
+if self.imports_dmabufs
+    && self.backend.as_ref().is_some_and(Backend::maps_dmabufs_on_the_cpu)
+```
+
+- An **shm-only session** (every test, and any session with no GL client) is
+  bit-identical: `imports_dmabufs` is the same `bool` that already gated this,
+  and `&&` short-circuits before the second test exists.
+- A **pixman dmabuf session** gains one `Option::as_ref` and one discriminant
+  compare per commit, both perfectly predicted. That is far below what this VM
+  can resolve (its own noise on the frame benchmark is ±25%), and the walk
+  behind the gate is unchanged.
+- A **GLES dmabuf session** stops doing the walk at all. That saving is the
+  only measurable quantity, and it is what `commit_sync_cost` prints:
+
+```
+cargo test --release -p scoot --bin scoot commit_sync_cost -- --ignored --nocapture
+commit sync, no buffer attached: 52ns per commit (20000 rounds)
+commit sync, dmabuf attached:    1.765µs per commit (20000 rounds)
+commit sync, gate off: not called -- one bool test in `commit`
+```
+
+Two caveats on those numbers, both of which a reviewer needs before comparing
+them with the ones in `sync_committed_dmabufs`'s own doc (99ns / 1.39µs):
+
+- **Different codegen.** Run with `CARGO_PROFILE_RELEASE_LTO=false
+  CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16`, because the repository's release
+  profile (`lto = "fat"`, `codegen-units = 1`) **OOM-kills the release *test*
+  binary on this VM**: `rustc ... --test -C lto=fat` died with `signal: 9,
+  SIGKILL` at ~3.84 GiB of 3.89 GiB used. Stage 3B built that same target
+  successfully, so this is an environment change (the binary has grown), not a
+  property of this diff -- recorded so the next person does not misattribute
+  it. The 32 GiB disk resize that landed on `main` today does not help; this is
+  RAM.
+- **Same machine, same test, so the shape is comparable even though the
+  absolute numbers are not.** What a GLES session now saves is on the order of
+  a microsecond per commit per surface carrying a dmabuf, and tens of
+  nanoseconds per commit for its neighbours.
+
+The frame path is untouched: `draw_frame`'s per-frame match is unchanged,
+`Pipeline`'s size is unchanged in the default build (the new field is on
+`ScanoutBackend`, which is boxed and behind `gpu-scanout`), and everything
+added runs once at startup.
+
+### What this stage did *not* verify
+
+- **A real dma-buf client, on any tier.** This VM cannot produce one:
+  `gbm_bo_create` on its render node is refused, so nothing here can allocate
+  a GBM dmabuf at all (recorded in the stage-2 section, unchanged). The
+  advertisement is verified on the wire by test and the import path by the
+  suite's `/dev/udmabuf` buffers; an end-to-end GL client remains an
+  Asahi-only claim.
+- **The empty-tranche path live.** No EGL display available here has an empty
+  import set, so "renderer imports nothing -> no global" is closed by
+  construction and by unit test
+  (`a_renderer_that_imports_nothing_is_advertised_as_nothing`), not by a
+  reproduction. That is the whole hazard the stage exists for, and saying so
+  plainly is better than implying it was reproduced.
+- **A multi-GPU machine**, which is where `main_device` naming the renderer's
+  own node rather than `renderD128` by path stops being a tidiness argument.
