@@ -3,7 +3,7 @@
 //! `wl_output` tells a client what the screen *is*; this protocol is what a
 //! display-configuration tool (`wlr-randr`, `kanshi`) and a shell's
 //! Settings -> Display page read and write. Both Quickshell shells probed
-//! against flexwm hit its absence (see `docs/backlog/protocols/`): DMS logs
+//! against scoot hit its absence (see `docs/backlog/protocols/`): DMS logs
 //! `Received empty outputs list` and Noctalia's Display page renders with
 //! nothing behind it, because their daemon initializes an output-management
 //! client and finds no global to bind.
@@ -28,7 +28,7 @@
 //!
 //! ## Read-only: enumeration is implemented, reconfiguration is refused
 //!
-//! flexwm has exactly one [`Output`], created once at startup and never moved,
+//! scoot has exactly one [`Output`], created once at startup and never moved,
 //! rotated, disabled or rescaled (see `headless.rs`'s `OUTPUT_ID`). There is
 //! nothing for `apply` to apply. So the halves are split at the one seam the
 //! protocol gives: `zwlr_output_manager_v1.create_configuration` is the only
@@ -61,7 +61,7 @@
 //!   `--nested`'s dispatch loop (`nested_dispatch.rs`) calls it at most
 //!   once per process, gated by `Host::is_configured` (only the host's
 //!   *initial* configure, if it proposes a size other than
-//!   `--width`/`--height`, grows the list; a host resizing flexwm's window
+//!   `--width`/`--height`, grows the list; a host resizing scoot's window
 //!   afterwards is acked and otherwise ignored), and `--tty`'s hotplug
 //!   handler (`tty/hotplug.rs`) calls it once per mode change the display
 //!   underneath actually makes. So under `--tty` the list can grow more
@@ -85,13 +85,13 @@
 //! Two properties are deliberately *not* sent, which the protocol explicitly
 //! allows:
 //!
-//! - **`physical_size`**, because flexwm's is `(0, 0)` -- no backend knows a
+//! - **`physical_size`**, because scoot's is `(0, 0)` -- no backend knows a
 //!   panel's millimetres -- and the protocol sends it "only if the head has a
 //!   physical size".
-//! - **`serial_number`**, because flexwm's is the literal `"0"` placeholder
+//! - **`serial_number`**, because scoot's is the literal `"0"` placeholder
 //!   `headless.rs` fills in, not a real serial. The protocol says a compositor
 //!   may never send it, and warns that a false positive is the risk; a client
-//!   keying a saved per-monitor profile off `"0"` would match every flexwm
+//!   keying a saved per-monitor profile off `"0"` would match every scoot
 //!   session on every machine.
 //!
 //! `make` and `model` *are* sent: they are the same strings `wl_output.geometry`
@@ -128,7 +128,7 @@
 //! ## Batching
 //!
 //! Every change goes out as: the events, then one `done` carrying a serial.
-//! The serial is the protocol's handle for `create_configuration`; flexwm
+//! The serial is the protocol's handle for `create_configuration`; scoot
 //! refuses every configuration whatever serial it names, so it is purely
 //! informational here -- but a client that tracks it (`wlr-randr` does) sees
 //! it advance on every real change, which is what the protocol promises.
@@ -191,7 +191,7 @@ impl OutputManagement {
     /// Creates the `zwlr_output_manager_v1` global.
     ///
     /// No client filter, for the same reason the session-lock, gamma-control
-    /// and data-control globals have none: flexwm has no security-context
+    /// and data-control globals have none: scoot has no security-context
     /// support, so an allow-list would be theatre (see `README.md`'s trust
     /// note). Nothing here is writable in any case.
     ///
@@ -203,7 +203,7 @@ impl OutputManagement {
     }
 }
 
-/// The head state flexwm advertises, read whole from the [`Output`].
+/// The head state scoot advertises, read whole from the [`Output`].
 ///
 /// Split in use, not in shape: the first five fields are the head's
 /// *identity*, which the protocol says is sent once per head object and never
@@ -256,7 +256,7 @@ impl HeadState {
     /// Whether `other` is the same head, i.e. whether the properties the
     /// protocol only lets a head object state *once* still hold.
     ///
-    /// Always true today: flexwm creates its one output in
+    /// Always true today: scoot creates its one output in
     /// `headless::init_named` and never renames or replaces it, so only the
     /// mutable half below can ever differ. It is checked rather than assumed
     /// because the alternative failure is silent -- a head object that keeps
@@ -399,7 +399,7 @@ impl Manager {
             modes.push((*mode, object.downgrade()));
         }
         // `enabled` before the four properties it makes meaningful, which the
-        // protocol says are "only sent if the output is enabled". flexwm's one
+        // protocol says are "only sent if the output is enabled". scoot's one
         // output is always enabled: there is no disabled state to reach, and
         // no request that could ask for one.
         head.enabled(1);
@@ -410,7 +410,7 @@ impl Manager {
         head.transform(current.transform.into());
         head.scale(current.scale);
         if version >= 4 {
-            // True, not a placeholder: flexwm has no VRR support on any
+            // True, not a placeholder: scoot has no VRR support on any
             // backend, so adaptive sync is off and nothing can turn it on.
             head.adaptive_sync(AdaptiveSyncState::Disabled);
         }
@@ -571,7 +571,7 @@ impl State {
         let dh = self.display_handle.clone();
         let management = &mut self.output_management;
         // Wrapping: the protocol's serial is a `uint` with no ordering
-        // requirement beyond "a new one per change", and flexwm refuses every
+        // requirement beyond "a new one per change", and scoot refuses every
         // configuration whatever serial it names, so a wrap after 4 billion
         // mode changes costs nothing. It must not panic in a debug build,
         // which a plain `+= 1` eventually would.

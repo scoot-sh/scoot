@@ -5,9 +5,9 @@ use std::ffi::OsString;
 use std::path::PathBuf;
 
 /// Overrides the socket path. Shells set it for the processes they spawn.
-pub const SOCKET_ENV: &str = "FLEXWM_SOCKET";
+pub const SOCKET_ENV: &str = "SCOOT_SOCKET";
 
-const SOCKET_NAME: &str = "flexwm.sock";
+const SOCKET_NAME: &str = "scoot.sock";
 
 pub fn socket_path() -> Option<PathBuf> {
     resolve(env::var_os(SOCKET_ENV), env::var_os("XDG_RUNTIME_DIR"))
@@ -35,7 +35,7 @@ mod tests {
     #[test]
     fn falls_back_to_the_runtime_dir() {
         let path = resolve(None, Some("/run/user/1000".into()));
-        assert_eq!(path, Some(PathBuf::from("/run/user/1000/flexwm.sock")));
+        assert_eq!(path, Some(PathBuf::from("/run/user/1000/scoot.sock")));
     }
 
     #[test]

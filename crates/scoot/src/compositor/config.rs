@@ -1,5 +1,5 @@
 //! Loading `[layout]`/`[binds]` from a TOML config file into the types the
-//! rest of the compositor already uses: [`flexwm_core::Config`] and
+//! rest of the compositor already uses: [`scoot_core::Config`] and
 //! [`Keybindings`].
 //!
 //! # Failure semantics (read this before changing any of them)
@@ -15,7 +15,7 @@
 //!
 //! That second rule is deliberate and easy to "fix" into a hard failure
 //! without understanding the cost of doing so: on `--tty`, the real
-//! deployment target, flexwm *is* the session -- there is no other window
+//! deployment target, scoot *is* the session -- there is no other window
 //! manager to fall back to and no easy remote access the way this project's
 //! dev VM has over SSH. A compositor that refuses to start over a config
 //! typo is a hard lockout on real hardware. Starting with defaults and
@@ -38,7 +38,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use flexwm_core::Config;
+use scoot_core::Config;
 use serde::Deserialize;
 use smithay::input::keyboard::Keysym;
 
@@ -47,7 +47,7 @@ use super::input::keysym_named;
 use super::keybindings::{Bound, Keybindings, Modifiers};
 use super::output_scale::{MAX_SCALE, MIN_SCALE, clamp_scale};
 
-/// `[layout]`. Mirrors `flexwm_core::Config` field-for-field, each optional
+/// `[layout]`. Mirrors `scoot_core::Config` field-for-field, each optional
 /// so a partial table (e.g. just `gap`) leaves the rest at their defaults
 /// rather than requiring every field to be repeated.
 #[derive(Debug, Default, Deserialize, PartialEq)]
@@ -74,7 +74,7 @@ impl LayoutConfig {
     }
 }
 
-/// `[output]`. One field today: `scale`, the output scale flexwm advertises
+/// `[output]`. One field today: `scale`, the output scale scoot advertises
 /// to clients and renders at (see `output_scale.rs`). `Option`-everything for
 /// the same reason [`LayoutConfig`] is: a partial table leaves the rest at
 /// their defaults.
@@ -319,18 +319,18 @@ pub fn load(explicit: Option<&Path>) -> Result<LoadedConfig, ConfigFileError> {
     }
 }
 
-/// `$XDG_CONFIG_HOME/flexwm/config.toml`, else `~/.config/flexwm/config.toml`.
+/// `$XDG_CONFIG_HOME/scoot/config.toml`, else `~/.config/scoot/config.toml`.
 /// A pure function of the two env vars it needs, like
-/// `flexwm_ipc::socket::resolve`, so this is testable without touching real
+/// `scoot_ipc::socket::resolve`, so this is testable without touching real
 /// environment state.
 fn default_path(xdg_config_home: Option<OsString>, home: Option<OsString>) -> Option<PathBuf> {
     let non_empty = |v: &OsString| !v.is_empty();
     xdg_config_home
         .filter(non_empty)
-        .map(|dir| PathBuf::from(dir).join("flexwm/config.toml"))
+        .map(|dir| PathBuf::from(dir).join("scoot/config.toml"))
         .or_else(|| {
             home.filter(non_empty)
-                .map(|dir| PathBuf::from(dir).join(".config/flexwm/config.toml"))
+                .map(|dir| PathBuf::from(dir).join(".config/scoot/config.toml"))
         })
 }
 
@@ -376,7 +376,7 @@ fn load_from(path: &Path, explicit: bool) -> Result<LoadedConfig, ConfigFileErro
 /// `toml` 1.1.6 bounds nesting itself, in two places, both hard-coded at 80
 /// and both active unless the crate's `unbounded` feature is on (it is not;
 /// `unbounded` is a zero-dependency flag so `-e features` can't see it either
-/// way -- `cargo tree -p flexwm --target all -f "{p} | {f}"` is the command
+/// way -- `cargo tree -p scoot --target all -f "{p} | {f}"` is the command
 /// that actually shows it, and prints `toml v1.1.6+spec-1.1.0 | default,
 /// display,parse,serde,std` with no `unbounded` suffix): a `RecursionGuard`
 /// over combined
@@ -397,7 +397,7 @@ fn load_from(path: &Path, explicit: bool) -> Result<LoadedConfig, ConfigFileErro
 ///   via `compositor::run`, so it gets `RLIMIT_STACK`, which is 8 MiB by default
 ///   on Linux and macOS. Two ways to lose that: moving config parsing to a
 ///   spawned thread, which gets Rust's 2 MiB default instead, or launching
-///   flexwm under a reduced `ulimit -s`. A *debug* build has no margin for
+///   scoot under a reduced `ulimit -s`. A *debug* build has no margin for
 ///   either -- under `ulimit -s 2048` it aborts with `fatal runtime error: stack
 ///   overflow` on a 13 KB file a user could paste by accident. A release build
 ///   needs 932 KiB and survives both.
@@ -407,7 +407,7 @@ fn load_from(path: &Path, explicit: bool) -> Result<LoadedConfig, ConfigFileErro
 ///   13,448-byte file. *Parsing* it is cheap -- 476 KiB of stack in a debug
 ///   build, and in a release build under the ~134 KiB floor glibc puts beneath
 ///   any thread stack here, which is as precise as that one gets. The recursive
-///   *drop* of the parsed tree is the real cost: 932 KiB release (flexwm's
+///   *drop* of the parsed tree is the real cost: 932 KiB release (scoot's
 ///   `panic = "abort"` profile; ~1,140 KiB if built to unwind, which is what
 ///   `cargo test --release` produces) and 6,680 KiB debug.
 /// - **The deserialization target.** The cost is a function of the target, not
@@ -493,7 +493,7 @@ fn apply_binds(keybindings: &mut Keybindings, binds: HashMap<String, String>) {
 }
 
 /// Parses one `[binds]` entry: `key` is the TOML key (`"super+h"`), `value`
-/// is an action string in exactly the grammar `flexwm msg action ...` uses
+/// is an action string in exactly the grammar `scoot msg action ...` uses
 /// (`"focus-column left"`, `"close"`, `"spawn" "foot"`, ...) -- see
 /// `cli::action`, reused here rather than duplicated.
 fn parse_bind(key: &str, value: &str) -> Result<(Modifiers, Keysym, Bound), String> {
@@ -507,8 +507,8 @@ fn parse_bind(key: &str, value: &str) -> Result<(Modifiers, Keysym, Bound), Stri
 }
 
 /// Parses a combo string (`"super+shift+t"`) into this table's `Modifiers`
-/// plus a `Keysym`. Reuses `flexwm_ipc::KeyCombo`'s modifier/key-name
-/// splitting -- already parsed the same way for `flexwm msg key ...` and
+/// plus a `Keysym`. Reuses `scoot_ipc::KeyCombo`'s modifier/key-name
+/// splitting -- already parsed the same way for `scoot msg key ...` and
 /// well-tested there -- rather than writing a second parser for the same
 /// `mod+mod+key` syntax.
 ///
@@ -533,7 +533,7 @@ fn parse_bind(key: &str, value: &str) -> Result<(Modifiers, Keysym, Bound), Stri
 /// semantics outside ASCII are murky (e.g. Turkish dotted/dotless I): a
 /// name the lookup doesn't know stays an unknown key, skipped with a
 /// warning by `apply_binds`, rather than a folded guess at another keysym.
-/// `keysym_named` itself is untouched, so `flexwm msg key A` keeps refusing
+/// `keysym_named` itself is untouched, so `scoot msg key A` keeps refusing
 /// rather than silently becoming `a`.
 ///
 /// Folding changes what the bind means -- `"A"` is the unshifted `a` key,
@@ -544,17 +544,17 @@ fn parse_bind(key: &str, value: &str) -> Result<(Modifiers, Keysym, Bound), Stri
 /// the chord is shift+a either way -- so folding warns about nothing. A
 /// lone lowercase letter needs no warning either: nothing was changed.
 fn parse_combo(s: &str) -> Result<(Modifiers, Keysym), String> {
-    let combo: flexwm_ipc::KeyCombo =
-        s.parse().map_err(|error: flexwm_ipc::ParseKeyComboError| {
+    let combo: scoot_ipc::KeyCombo =
+        s.parse().map_err(|error: scoot_ipc::ParseKeyComboError| {
             format!("invalid key combination `{s}`: {error}")
         })?;
     let mut mods = Modifiers::default();
     for modifier in &combo.modifiers {
         match modifier {
-            flexwm_ipc::Modifier::Super => mods.super_ = true,
-            flexwm_ipc::Modifier::Shift => mods.shift = true,
-            flexwm_ipc::Modifier::Ctrl => mods.ctrl = true,
-            flexwm_ipc::Modifier::Alt => mods.alt = true,
+            scoot_ipc::Modifier::Super => mods.super_ = true,
+            scoot_ipc::Modifier::Shift => mods.shift = true,
+            scoot_ipc::Modifier::Ctrl => mods.ctrl = true,
+            scoot_ipc::Modifier::Alt => mods.alt = true,
         }
     }
     let (name, warn) = fold_letter(&combo.key, mods.shift);
@@ -601,7 +601,7 @@ fn fold_letter(key: &str, shift_held: bool) -> (Cow<'_, str>, bool) {
 mod tests {
     use std::io::Write;
 
-    use flexwm_core::{Action, Horizontal};
+    use scoot_core::{Action, Horizontal};
 
     use super::*;
 
@@ -993,7 +993,7 @@ mod tests {
     fn default_path_prefers_xdg_config_home_over_home() {
         assert_eq!(
             default_path(Some("/xdg".into()), Some("/home/u".into())),
-            Some(PathBuf::from("/xdg/flexwm/config.toml"))
+            Some(PathBuf::from("/xdg/scoot/config.toml"))
         );
     }
 
@@ -1001,7 +1001,7 @@ mod tests {
     fn default_path_falls_back_to_home() {
         assert_eq!(
             default_path(None, Some("/home/u".into())),
-            Some(PathBuf::from("/home/u/.config/flexwm/config.toml"))
+            Some(PathBuf::from("/home/u/.config/scoot/config.toml"))
         );
     }
 
@@ -1105,7 +1105,7 @@ mod tests {
     }
 
     /// The ring is measured against the gap the layout will actually use, not
-    /// the raw number in the file: `flexwm_core::Config::validated` caps the
+    /// the raw number in the file: `scoot_core::Config::validated` caps the
     /// gap at `MAX_GAP`, so a ring sized against an out-of-range gap would
     /// otherwise end up wider than half of the real one.
     #[test]
@@ -1461,7 +1461,7 @@ mod tests {
     }
 
     /// The other half of that: a real config is nowhere near any of it. The
-    /// deepest shape flexwm's own schema can produce is a table holding an
+    /// deepest shape scoot's own schema can produce is a table holding an
     /// array (3 levels), so the 80-level limits cost a legitimate config
     /// nothing, whichever TOML spelling it uses.
     #[test]

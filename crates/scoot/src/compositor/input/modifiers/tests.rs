@@ -1,7 +1,7 @@
 //! Tests for the keycode/level/modifier resolution the parent module does.
 //!
 //! These compile *real* keymaps out of xkeyboard-config -- the same data
-//! flexwm's own seat compiles at startup -- rather than hand-building a
+//! scoot's own seat compiles at startup -- rather than hand-building a
 //! fake one. The bug this module exists to fix was precisely a
 //! misunderstanding of what real keymap data says (Smithay's
 //! `raw_syms_for_key_in_layout` is level 0 only, so it can never report a
@@ -21,10 +21,10 @@
 //! multi-group tests below are the ones that can tell those apart.
 
 use super::*;
-use flexwm_ipc::Modifier;
+use scoot_ipc::Modifier;
 
 /// Compiles one of xkeyboard-config's real layouts, with the default rules
-/// and model (what `XkbConfig::default` -- and so flexwm's own seat -- uses).
+/// and model (what `XkbConfig::default` -- and so scoot's own seat -- uses).
 fn keymap(layout: &str, variant: &str) -> xkb::Keymap {
     keymap_with(layout, variant, None)
 }
@@ -574,7 +574,7 @@ fn exactly_the_dead_key_characters_are_refused_on_each_latin_layout() {
 // Naming a key rather than a character
 // -------------------------------------------------------------------------
 
-/// What `flexwm msg key exclam` should get: a refusal. The key carrying
+/// What `scoot msg key exclam` should get: a refusal. The key carrying
 /// `exclam` on a US layout is the `1` key, and pressing it with nothing held
 /// -- which is all `press` promises to do -- types `1`.
 #[test]

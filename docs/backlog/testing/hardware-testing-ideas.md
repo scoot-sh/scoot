@@ -31,9 +31,9 @@ how other projects close a version of this same gap:
   *automated and CI-runnable* instead of always requiring a live VM
   session. Non-trivial setup cost (custom kernel config, `virtme`,
   figuring out what's actually exercisable without display output).
-- Property-based testing for `flexwm-core` specifically (the cheapest,
+- Property-based testing for `scoot-core` specifically (the cheapest,
   most directly actionable idea here, no new infrastructure needed).
-  `flexwm-core` is already pure and I/O-free by design (no Wayland, no
+  `scoot-core` is already pure and I/O-free by design (no Wayland, no
   I/O — see this file's vision note), exactly the shape property testing
   wants: generate random sequences of window-management actions (via the
   `proptest` crate) and assert invariants hold (no window ever gets a
@@ -58,7 +58,7 @@ how other projects close a version of this same gap:
   input-handling code without physical hardware — this project already
   does something in the same spirit (a real `/dev/uinput`-injected
   keystroke was part of item 3's original hardware verification).
-Rough priority if picked up: property-based tests for `flexwm-core` first
+Rough priority if picked up: property-based tests for `scoot-core` first
 (cheap, zero new infrastructure, closes a real gap immediately);
 VKMS-in-CI second (bigger payoff — real automated DRM-path testing
 instead of always needing a live VM session — but real setup cost); WLCS

@@ -1,6 +1,6 @@
 //! Window-management actions as they appear on the wire.
 //!
-//! These mirror `flexwm_core::Action` but are versioned with the protocol, so
+//! These mirror `scoot_core::Action` but are versioned with the protocol, so
 //! the core can evolve without breaking clients.
 
 use serde::{Deserialize, Serialize};
@@ -46,7 +46,7 @@ pub enum Action {
     },
     /// One specific workspace of the focused output, by its position in the
     /// workspace list (0-based; out of range does nothing) -- the wire half
-    /// of `flexwm_core::Action::FocusWorkspaceIndex`, which is what
+    /// of `scoot_core::Action::FocusWorkspaceIndex`, which is what
     /// `ext-workspace-v1`'s `activate` already drives. Stepping
     /// (`FocusWorkspace`) cannot express this: workspaces are renumbered
     /// whenever an empty one is dropped.

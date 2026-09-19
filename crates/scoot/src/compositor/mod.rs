@@ -2,7 +2,7 @@
 //!
 //! It holds no layout of its own. Wayland says what windows exist, IPC and
 //! keybindings say what should happen, and after either the compositor applies
-//! whatever [`Arrangement`](flexwm_core::Arrangement) the core produced.
+//! whatever [`Arrangement`](scoot_core::Arrangement) the core produced.
 
 mod activation;
 mod alpha_modifier;
@@ -73,7 +73,7 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
     let loaded = config::load(options.config.as_deref())?;
 
     // `--nested` cannot honour a non-1.0 output scale: the host compositor
-    // owns the scale of the window flexwm is drawn in, so a scaled output
+    // owns the scale of the window scoot is drawn in, so a scaled output
     // here would double-count it (render at 2x, then the host scales the
     // 2x-sized window again), and host-forwarded pointer coordinates arrive
     // in the host's logical space, which this compositor would then divide by
@@ -148,9 +148,9 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
     // Order matters, and it's load-bearing, not incidental: `--nested`
     // connects to the *host* compositor via the caller's own WAYLAND_DISPLAY
     // (nested::init reads it via Connection::connect_to_env). That has to
-    // happen before the set_var below replaces it with flexwm's own socket
+    // happen before the set_var below replaces it with scoot's own socket
     // name for its own children -- reorder these and nested::init would
-    // silently connect flexwm to itself instead of its host, with no error
+    // silently connect scoot to itself instead of its host, with no error
     // anywhere (this project has a documented history of exactly this shape
     // of bug: something quietly wrong because of missing flush or missing
     // ordering, not a crash). ipc::init has no such constraint; it's grouped
@@ -166,7 +166,7 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
     ipc::init(&mut event_loop, &mut state, options.socket.clone())?;
 
     // Children reach both the compositor and its control socket through the
-    // environment, so `flexwm msg` works from inside the session too.
+    // environment, so `scoot msg` works from inside the session too.
     //
     // Safety: `set_var` is unsound only if another thread could be reading
     // the environment concurrently. At this point in `run`, the event loop
@@ -176,19 +176,19 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
     unsafe {
         std::env::set_var("WAYLAND_DISPLAY", &state.socket_name);
         if let Some(path) = &state.ipc_path {
-            std::env::set_var(flexwm_ipc::SOCKET_ENV, path);
+            std::env::set_var(scoot_ipc::SOCKET_ENV, path);
         }
         // The cursor theme this compositor resolved, so a client that loads a
         // theme *itself* picks the same one. `wp-cursor-shape-v1` covers the
         // clients that ask the compositor to draw for them (see
         // `cursor/theme.rs`), but GTK3 and anything predating that protocol
         // still load their own -- and would otherwise take the session's
-        // default while flexwm drew a different theme's shapes, which is the
+        // default while scoot drew a different theme's shapes, which is the
         // inconsistency the protocol exists to remove.
         //
         // Exported unconditionally rather than only when a theme was found:
-        // `XCURSOR_THEME` names the theme flexwm *would* use, and a client
-        // that has one installed where flexwm found none should still use it
+        // `XCURSOR_THEME` names the theme scoot *would* use, and a client
+        // that has one installed where scoot found none should still use it
         // rather than fall back to something else again.
         std::env::set_var("XCURSOR_THEME", state.cursor.theme().name());
         std::env::set_var("XCURSOR_SIZE", state.cursor.theme().size().to_string());
@@ -199,7 +199,7 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
         state.spawn(&command);
     }
 
-    tracing::info!(wayland = ?state.socket_name, ipc = ?state.ipc_path, "flexwm is up");
+    tracing::info!(wayland = ?state.socket_name, ipc = ?state.ipc_path, "scoot is up");
     event_loop.run(None, &mut state, post_dispatch)?;
     Ok(())
 }

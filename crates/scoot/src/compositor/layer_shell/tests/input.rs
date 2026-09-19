@@ -97,10 +97,10 @@ fn clicking_a_bar_does_not_refocus_the_window_behind_it() {
     fixture.state.pointer_move((first.rect.x + 5) as f64, 15.0);
     fixture
         .state
-        .pointer_button(flexwm_ipc::PointerButton::Left, true);
+        .pointer_button(scoot_ipc::PointerButton::Left, true);
     fixture
         .state
-        .pointer_button(flexwm_ipc::PointerButton::Left, false);
+        .pointer_button(scoot_ipc::PointerButton::Left, false);
     assert_eq!(
         fixture.state.focus, focused,
         "a click on the bar moved window focus"
@@ -112,10 +112,10 @@ fn clicking_a_bar_does_not_refocus_the_window_behind_it() {
         .pointer_move((first.rect.x + 5) as f64, (first.rect.y + 25) as f64);
     fixture
         .state
-        .pointer_button(flexwm_ipc::PointerButton::Left, true);
+        .pointer_button(scoot_ipc::PointerButton::Left, true);
     fixture
         .state
-        .pointer_button(flexwm_ipc::PointerButton::Left, false);
+        .pointer_button(scoot_ipc::PointerButton::Left, false);
     assert_eq!(
         fixture.state.focus,
         Some(first.id),
@@ -188,7 +188,7 @@ fn an_exclusive_overlay_surface_takes_the_keyboard_when_it_maps() {
         "two characters, pressed and released, should have reached the launcher"
     );
     assert_eq!(typed.focused, Some(Focused::Layer(0)));
-    // Window focus -- the ring, `set_activated`, `flexwm msg windows` --
+    // Window focus -- the ring, `set_activated`, `scoot msg windows` --
     // deliberately does not move: it tracks where focus returns to.
     assert!(fixture.state.focus.is_some(), "the window is still focused");
 }
@@ -250,7 +250,7 @@ fn a_layer_surface_with_no_buffer_cannot_hold_the_keyboard() {
 
 /// `exclusive` on `background` is where the spec hands the decision back
 /// ("for the bottom and background layers, the compositor is allowed to use
-/// normal focus semantics"), and flexwm's answer is click-to-focus: nothing
+/// normal focus semantics"), and scoot's answer is click-to-focus: nothing
 /// should be typing into a wallpaper by default.
 #[test]
 fn an_exclusive_background_surface_only_gets_the_keyboard_by_being_clicked() {
@@ -430,7 +430,7 @@ fn a_surface_that_commits_none_gives_the_keyboard_back() {
 /// A click is *spent*, not stored forever. An `on_demand` surface that gave
 /// the keyboard back by committing `none` must not take it again the next
 /// time it asks for `on_demand` -- there has been no new click, and the
-/// focus ring, `set_activated` and `flexwm msg windows` all still name the
+/// focus ring, `set_activated` and `scoot msg windows` all still name the
 /// window, so the keystrokes would go somewhere nothing on screen points at.
 ///
 /// `none` <-> `on_demand` is the normal lifecycle for such a client (a bar
@@ -665,9 +665,9 @@ fn a_keybinding_still_fires_while_a_layer_surface_holds_the_keyboard() {
     );
     fixture
         .state
-        .press(&flexwm_ipc::KeyCombo {
+        .press(&scoot_ipc::KeyCombo {
             key: "h".into(),
-            modifiers: vec![flexwm_ipc::Modifier::Super],
+            modifiers: vec![scoot_ipc::Modifier::Super],
         })
         .expect("a pressable combo");
     fixture.settle();

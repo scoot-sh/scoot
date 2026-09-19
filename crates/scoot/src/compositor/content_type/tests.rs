@@ -132,7 +132,7 @@ impl Dispatch<xdg_wm_base::XdgWmBase, ()> for TestClient {
         _: &Connection,
         _: &QueueHandle<Self>,
     ) {
-        // Nothing in flexwm pings today, but a client that ignores one is a
+        // Nothing in scoot pings today, but a client that ignores one is a
         // client that can be killed for it.
         if let xdg_wm_base::Event::Ping { serial } = event {
             wm_base.pong(serial);
@@ -172,7 +172,7 @@ fn red_buffer(
 ) -> Result<wl_buffer::WlBuffer, String> {
     let stride = SURFACE * 4;
     let len = (stride * SURFACE) as usize;
-    let fd = rustix::fs::memfd_create("flexwm-content-test", rustix::fs::MemfdFlags::CLOEXEC)
+    let fd = rustix::fs::memfd_create("scoot-content-test", rustix::fs::MemfdFlags::CLOEXEC)
         .map_err(|e| e.to_string())?;
     let mut file = std::fs::File::from(fd);
     // Little-endian `Argb8888`: bytes B, G, R, A -- opaque red.

@@ -40,7 +40,7 @@ use wayland_protocols::xdg::shell::client::{xdg_surface, xdg_toplevel, xdg_wm_ba
 
 use crate::compositor::decorations::Appearance;
 use crate::compositor::test_support::{Harness, wait_for};
-use flexwm_ipc::PointerButton;
+use scoot_ipc::PointerButton;
 
 /// The framebuffer square every test here renders into (nothing here reads
 /// it back, but the headless backend behind it is what gives the compositor
@@ -620,7 +620,7 @@ fn solid_buffer(
 ) -> Result<wl_buffer::WlBuffer, String> {
     let stride = SURFACE * 4;
     let len = (stride * SURFACE) as usize;
-    let fd = rustix::fs::memfd_create("flexwm-relative-test", rustix::fs::MemfdFlags::CLOEXEC)
+    let fd = rustix::fs::memfd_create("scoot-relative-test", rustix::fs::MemfdFlags::CLOEXEC)
         .map_err(|e| e.to_string())?;
     let mut file = std::fs::File::from(fd);
     file.write_all(&vec![0xffu8; len])
@@ -932,7 +932,7 @@ fn locker_buffer(
 ) -> Result<wl_buffer::WlBuffer, String> {
     let stride = width * 4;
     let len = (stride * height) as usize;
-    let fd = rustix::fs::memfd_create("flexwm-locker-test", rustix::fs::MemfdFlags::CLOEXEC)
+    let fd = rustix::fs::memfd_create("scoot-locker-test", rustix::fs::MemfdFlags::CLOEXEC)
         .map_err(|e| e.to_string())?;
     let mut file = std::fs::File::from(fd);
     file.write_all(&vec![0xffu8; len])

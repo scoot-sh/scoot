@@ -498,7 +498,7 @@ impl WaylandDndGrabHandler for State {
                 // The serial is only meaningful against the seat that issued
                 // it, and a second seat one day must not silently inherit
                 // this seat's history -- the same check `popup.rs` applies to
-                // a grab's seat. In practice flexwm owns exactly one seat, so
+                // a grab's seat. In practice scoot owns exactly one seat, so
                 // this never fires; Smithay already resolved `seat` from the
                 // data device's own `wl_seat` before calling this at all.
                 if seat != self.seat {
@@ -580,7 +580,7 @@ impl WaylandDndGrabHandler for State {
 /// is still the client that must have received the press). Both are
 /// `Resource`s, so the id names a client no sender can forge.
 ///
-/// Anything else -- a compositor-internal source type flexwm does not have
+/// Anything else -- a compositor-internal source type scoot does not have
 /// today -- resolves to nothing and fails closed at the call site: the only
 /// producer of these calls is Smithay's dispatch with the two types above,
 /// so an unknown type is unexpected, not a third legitimate shape.

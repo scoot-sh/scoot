@@ -62,8 +62,8 @@ pub enum Event {
         requested: Size,
         actual: Size,
     },
-    /// Focus moved for a reason other than a flexwm action: a click, or an app
-    /// activating itself. Shells must not report focus changes flexwm itself
+    /// Focus moved for a reason other than a scoot action: a click, or an app
+    /// activating itself. Shells must not report focus changes scoot itself
     /// requested, or a late echo could undo a newer action.
     FocusObserved {
         id: WindowId,

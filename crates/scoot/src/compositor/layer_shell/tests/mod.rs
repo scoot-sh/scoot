@@ -28,7 +28,7 @@ use std::os::fd::AsFd;
 use std::os::unix::net::UnixStream;
 use std::sync::mpsc::{Receiver, Sender};
 
-use flexwm_core::{Rect, Size};
+use scoot_core::{Rect, Size};
 use wayland_client::protocol::{
     wl_buffer, wl_callback, wl_compositor, wl_keyboard, wl_output, wl_pointer, wl_registry,
     wl_seat, wl_shm, wl_shm_pool, wl_surface,
@@ -195,7 +195,7 @@ impl LayerSpec {
 /// the same harness shape `cursor/tests.rs` established.
 enum Step {
     /// Map an `xdg_toplevel` with a solid `WINDOW_BGRA` buffer of
-    /// [`WINDOW_BUFFER`] square. Becomes one of flexwm's windows.
+    /// [`WINDOW_BUFFER`] square. Becomes one of scoot's windows.
     MapWindow,
     /// Create a layer surface and commit it *without* a buffer, which is what
     /// earns it its initial configure.
@@ -772,7 +772,7 @@ fn solid_buffer(
 ) -> wl_buffer::WlBuffer {
     let stride = width * 4;
     let len = (stride * height) as usize;
-    let fd = rustix::fs::memfd_create("flexwm-layer-test", rustix::fs::MemfdFlags::CLOEXEC)
+    let fd = rustix::fs::memfd_create("scoot-layer-test", rustix::fs::MemfdFlags::CLOEXEC)
         .expect("a memfd");
     let mut file = std::fs::File::from(fd);
     let pixels: Vec<u8> = color.iter().copied().cycle().take(len).collect();
@@ -1021,7 +1021,7 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                     &surface,
                     None,
                     spec.layer,
-                    "flexwm-test".into(),
+                    "scoot-test".into(),
                     &qh,
                     SurfaceIndex(index),
                 );
@@ -1372,7 +1372,7 @@ impl Fixture {
     /// reaches no client and would leave the grab with no serial to use.
     fn press_a_key(&mut self) {
         self.state
-            .press(&flexwm_ipc::KeyCombo {
+            .press(&scoot_ipc::KeyCombo {
                 key: "a".into(),
                 modifiers: Vec::new(),
             })
@@ -1384,9 +1384,9 @@ impl Fixture {
     fn click(&mut self, x: f64, y: f64) {
         self.state.pointer_move(x, y);
         self.state
-            .pointer_button(flexwm_ipc::PointerButton::Left, true);
+            .pointer_button(scoot_ipc::PointerButton::Left, true);
         self.state
-            .pointer_button(flexwm_ipc::PointerButton::Left, false);
+            .pointer_button(scoot_ipc::PointerButton::Left, false);
         self.settle();
     }
 

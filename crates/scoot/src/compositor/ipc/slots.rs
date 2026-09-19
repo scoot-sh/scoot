@@ -36,7 +36,7 @@ mod tests;
 /// `activation::MAX_TOKENS` this is not a memory bound worth tuning -- it is a
 /// bound at all, which is the point. It is far above any real workload: a
 /// session runs a bar, a notifier and an agent or two, each holding one
-/// connection open, and a one-shot `flexwm msg` holds one for the millisecond
+/// connection open, and a one-shot `scoot msg` holds one for the millisecond
 /// it takes to ask and be answered (requests pipeline, so even a busy agent
 /// needs exactly one). A session that ever holds 64 at once has a client in a
 /// loop, not a busy desktop.

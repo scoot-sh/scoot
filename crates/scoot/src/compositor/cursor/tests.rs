@@ -68,7 +68,7 @@ const TRANSPARENT: [u8; 4] = [0, 0, 0, 0];
 /// any container with an icon theme installed) would find a real theme and
 /// make every pixel assertion below depend on which distro's cursors are
 /// present. See `cursor/theme.rs`.
-const NO_THEME: Option<&str> = Some("flexwm-test-no-such-theme");
+const NO_THEME: Option<&str> = Some("scoot-test-no-such-theme");
 
 #[test]
 fn bitmap_hotspot_pixel_is_the_outline_color() {
@@ -93,7 +93,7 @@ fn bitmap_interior_is_the_fill_color() {
     assert_eq!(pixel(&pixels, DEFAULT_SIZE, 1, 3), WHITE);
 }
 
-/// The built-in defaults are what an unconfigured flexwm draws, and they must
+/// The built-in defaults are what an unconfigured scoot draws, and they must
 /// stay the 16x16 white-on-black triangle this module shipped with -- the
 /// literals the three tests above use.
 #[test]
@@ -382,7 +382,7 @@ fn solid_buffer(
 ) -> wl_buffer::WlBuffer {
     let stride = size * 4;
     let len = (stride * size) as usize;
-    let fd = rustix::fs::memfd_create("flexwm-cursor-test", rustix::fs::MemfdFlags::CLOEXEC)
+    let fd = rustix::fs::memfd_create("scoot-cursor-test", rustix::fs::MemfdFlags::CLOEXEC)
         .expect("a memfd");
     let mut file = std::fs::File::from(fd);
     let pixels: Vec<u8> = color.iter().copied().cycle().take(len).collect();

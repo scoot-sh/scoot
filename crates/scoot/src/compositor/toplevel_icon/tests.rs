@@ -22,7 +22,7 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use flexwm_core::{Config, Event, OutputId, Rect};
+use scoot_core::{Config, Event, OutputId, Rect};
 use smithay::reexports::calloop::EventLoop;
 use smithay::reexports::wayland_server::Display;
 use wayland_client::protocol::{
@@ -194,7 +194,7 @@ fn square_shm_buffer(
 ) -> (wl_buffer::WlBuffer, std::fs::File) {
     let stride = size * 4;
     let len = (stride * size) as usize;
-    let fd = rustix::fs::memfd_create("flexwm-icon-test", rustix::fs::MemfdFlags::CLOEXEC)
+    let fd = rustix::fs::memfd_create("scoot-icon-test", rustix::fs::MemfdFlags::CLOEXEC)
         .expect("a memfd");
     let mut file = std::fs::File::from(fd);
     file.write_all(&vec![0u8; len]).expect("a filled pool file");
@@ -531,7 +531,7 @@ fn the_icon_manager_is_advertised() {
 
 #[test]
 fn no_icon_sizes_are_advertised() {
-    // Deliberate, not an omission -- see `State`'s field doc. flexwm draws no
+    // Deliberate, not an omission -- see `State`'s field doc. scoot draws no
     // icon anywhere, so it has no size to prefer, and an empty list is the
     // protocol's own way to say so. This is that decision pinned down: if a
     // future change starts advertising sizes, it should be because something
@@ -559,7 +559,7 @@ fn an_attached_icon_is_not_reported_until_the_surface_commits() {
     // never will.
     let mut fixture = Fixture::new();
     fixture.run(Step::AttachIcon {
-        name: "org.flexwm.Probe".to_string(),
+        name: "org.scoot.Probe".to_string(),
     });
     assert_eq!(
         fixture.icon(),
@@ -568,7 +568,7 @@ fn an_attached_icon_is_not_reported_until_the_surface_commits() {
     );
 
     fixture.run(Step::Commit);
-    assert_eq!(fixture.icon(), Some("org.flexwm.Probe".to_string()));
+    assert_eq!(fixture.icon(), Some("org.scoot.Probe".to_string()));
 }
 
 #[test]
@@ -596,10 +596,10 @@ fn a_replacement_icon_takes_over_on_its_own_commit() {
 fn clearing_the_icon_takes_it_away_again() {
     let mut fixture = Fixture::new();
     fixture.run(Step::AttachIcon {
-        name: "org.flexwm.Probe".to_string(),
+        name: "org.scoot.Probe".to_string(),
     });
     fixture.run(Step::Commit);
-    assert_eq!(fixture.icon(), Some("org.flexwm.Probe".to_string()));
+    assert_eq!(fixture.icon(), Some("org.scoot.Probe".to_string()));
 
     fixture.run(Step::ClearIcon);
     fixture.run(Step::Commit);
@@ -613,12 +613,12 @@ fn the_icon_reaches_the_ipc_window_list() {
     // up in `icon_name_of` but never read by `ipc.rs` fails here.
     let mut fixture = Fixture::new();
     fixture.run(Step::AttachIcon {
-        name: "org.flexwm.Probe".to_string(),
+        name: "org.scoot.Probe".to_string(),
     });
     fixture.run(Step::Commit);
     assert_eq!(
         fixture.icon_over_ipc(),
-        Some("org.flexwm.Probe".to_string())
+        Some("org.scoot.Probe".to_string())
     );
 }
 
@@ -633,10 +633,10 @@ fn the_icon_reaches_the_ipc_window_list() {
 fn survives_a_frozen_icon_request(step: Step) {
     let mut fixture = Fixture::new();
     fixture.run(Step::AttachIcon {
-        name: "org.flexwm.Probe".to_string(),
+        name: "org.scoot.Probe".to_string(),
     });
     fixture.run(Step::Commit);
-    assert_eq!(fixture.icon(), Some("org.flexwm.Probe".to_string()));
+    assert_eq!(fixture.icon(), Some("org.scoot.Probe".to_string()));
 
     // The offending request. The client is killed for it, so its own thread
     // may fail from here on -- which is why this does not go through
@@ -715,11 +715,11 @@ fn icon_buffers_are_counted_in_the_live_buffer_budget() {
 fn destroying_a_live_icon_buffer_disconnects_only_that_client() {
     let mut fixture = Fixture::new();
     fixture.run(Step::AttachIconWithBuffer {
-        name: "org.flexwm.Probe".to_string(),
+        name: "org.scoot.Probe".to_string(),
         size: 16,
     });
     fixture.run(Step::Commit);
-    assert_eq!(fixture.icon(), Some("org.flexwm.Probe".to_string()));
+    assert_eq!(fixture.icon(), Some("org.scoot.Probe".to_string()));
 
     // The offending destroy. The client dies for it, so -- like the
     // frozen-icon steps above -- this does not wait for an

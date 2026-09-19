@@ -8,14 +8,14 @@
 //! `WaylandSurfaceRenderElement::from_surface` multiplies the pending
 //! multiplier into every surface-tree element it builds, and the pixman
 //! backend draws a sub-1.0 element through a solid-alpha mask -- so the
-//! factor reaches the framebuffer on every backend with no flexwm-side
+//! factor reaches the framebuffer on every backend with no scoot-side
 //! render work of its own. Windows, layer surfaces, lock surfaces and client
 //! cursor surfaces all build through that same `from_surface`, so all four
 //! honour it uniformly.
 //!
 //! ## Cost
 //!
-//! Nothing flexwm adds runs per frame or per event: the one cached-state
+//! Nothing scoot adds runs per frame or per event: the one cached-state
 //! lookup per surface per frame already runs inside Smithay's `from_surface`
 //! whether or not this global is advertised, so advertising it adds zero
 //! render-path work. No benchmark: there is no before/after to measure.
@@ -44,7 +44,7 @@
 //! ## Trust model
 //!
 //! No client filter, the same deliberate consistency as every other
-//! advertisement here: flexwm has no security-context support, so an
+//! advertisement here: scoot has no security-context support, so an
 //! allow-list would be theatre (see `README.md`'s trust note). A global
 //! that only dims a client's own surface widens nothing.
 

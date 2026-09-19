@@ -1,9 +1,9 @@
-//! The token a process flexwm spawned itself carries in `$XDG_ACTIVATION_TOKEN`.
+//! The token a process scoot spawned itself carries in `$XDG_ACTIVATION_TOKEN`.
 //!
 //! Whoever starts a process conventionally hands it an activation token, so
 //! the child can activate its own window when it finally maps one.
 //! `State::spawn` (every keybinding and IPC `spawn`) used to set
-//! `WAYLAND_DISPLAY` and `FLEXWM_SOCKET` but no token, so an app flexwm
+//! `WAYLAND_DISPLAY` and `SCOOT_SOCKET` but no token, so an app scoot
 //! itself started could not ask to be focused the way one started by a
 //! launcher client can -- invisible in practice, because mapping focuses the
 //! new window itself, until a slow cold start lets focus move elsewhere
@@ -29,7 +29,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::time::{Duration, Instant};
 
-use flexwm_core::Action;
+use scoot_core::Action;
 use wayland_client::protocol::wl_registry;
 use wayland_client::{Connection, Dispatch, Proxy, QueueHandle};
 use wayland_protocols::ext::session_lock::v1::client::{
@@ -61,7 +61,7 @@ const NO_TOKEN: &str = "SPAWN_MINTED_NO_TOKEN";
 fn spawn_probe(fixture: &mut Fixture) -> PathBuf {
     static NEXT_ID: AtomicU64 = AtomicU64::new(0);
     let path = std::env::temp_dir().join(format!(
-        "flexwm-spawn-token-{}-{}",
+        "scoot-spawn-token-{}-{}",
         std::process::id(),
         NEXT_ID.fetch_add(1, Ordering::Relaxed)
     ));
@@ -300,7 +300,7 @@ fn a_spawn_that_never_starts_leaves_no_token_behind() {
     let (mut fixture, _run) = drive(false, 0, Claim::RealKeyPress);
     fixture
         .state
-        .spawn(&["flexwm-test-no-such-program".to_string()]);
+        .spawn(&["scoot-test-no-such-program".to_string()]);
     assert_eq!(
         fixture.state.xdg_activation.tokens().count(),
         0,
@@ -562,7 +562,7 @@ fn a_spawned_child_inherits_no_close_on_exec_fd() {
 
     static NEXT_ID: AtomicU64 = AtomicU64::new(0);
     let path = std::env::temp_dir().join(format!(
-        "flexwm-spawn-fds-{}-{}",
+        "scoot-spawn-fds-{}-{}",
         std::process::id(),
         NEXT_ID.fetch_add(1, Ordering::Relaxed)
     ));

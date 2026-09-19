@@ -51,7 +51,7 @@
 //! to do something the window path already does.
 //!
 //! The parent matters and is not always a window. Text-input focus follows
-//! *keyboard* focus, and in flexwm the keyboard can be on a layer surface --
+//! *keyboard* focus, and in scoot the keyboard can be on a layer surface --
 //! a launcher with a search field is exactly that, and exactly the case an
 //! IME user would notice (see `layer_shell.rs`). [`State::parent_geometry`]
 //! therefore answers for both, rather than returning an empty rectangle for

@@ -1,4 +1,4 @@
-//! flexwm: the compositor, and the client that drives it.
+//! scoot: the compositor, and the client that drives it.
 
 mod cli;
 mod msg;
@@ -18,7 +18,7 @@ fn main() -> ExitCode {
             // nowhere to report to, and `eprintln!` would panic (exit 101)
             // on the EPIPE -- the same class of bug `output` fixes on
             // stdout. The process still exits FAILURE either way.
-            output::warn(format_args!("flexwm: {error}"));
+            output::warn(format_args!("scoot: {error}"));
             ExitCode::FAILURE
         }
     }
@@ -29,7 +29,7 @@ fn run() -> Result<(), Box<dyn Error>> {
         cli::Command::Help => {
             // `cli::USAGE` already ends in a newline, so `write_str`, not
             // `print_line`. A closed pipe is a quiet success here too:
-            // `flexwm --help | head -1` exits 0.
+            // `scoot --help | head -1` exits 0.
             output::write_str(cli::USAGE)?;
             Ok(())
         }
@@ -45,5 +45,5 @@ fn start_compositor(options: cli::CompositorOptions) -> Result<(), Box<dyn Error
 
 #[cfg(not(target_os = "linux"))]
 fn start_compositor(_options: cli::CompositorOptions) -> Result<(), Box<dyn Error>> {
-    Err("the compositor only runs on Linux; `flexwm msg` works everywhere".into())
+    Err("the compositor only runs on Linux; `scoot msg` works everywhere".into())
 }

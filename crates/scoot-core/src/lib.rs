@@ -1,4 +1,4 @@
-//! The platform-independent heart of flexwm.
+//! The platform-independent heart of scoot.
 //!
 //! [`World`] owns every piece of window-management state and has exactly two
 //! ways in -- [`World::handle_event`] for things a platform observed and
@@ -7,7 +7,7 @@
 //! It never touches a window.
 //!
 //! That boundary is what lets one layout drive both a Wayland compositor on
-//! Linux, where flexwm owns the pixels, and an accessibility-API adapter on
+//! Linux, where scoot owns the pixels, and an accessibility-API adapter on
 //! macOS, where it can only ask other apps to move.
 
 #![forbid(unsafe_code)]

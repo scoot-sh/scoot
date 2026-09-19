@@ -1,13 +1,13 @@
-# flexwm test VM
+# scoot test VM
 
-A NixOS VM (aarch64) for developing **flexwm**, a Wayland window manager, from
+A NixOS VM (aarch64) for developing **scoot**, a Wayland window manager, from
 a Mac. The point is to get a *real* DRM/KMS device, real libinput devices and a
 real seat — the things a compositor needs and macOS cannot provide — while you
 keep editing code on the Mac.
 
 ```
 vm/
-  flake.nix           nixosConfigurations.flexwm-vm + the Mac-native launcher
+  flake.nix           nixosConfigurations.scoot-vm + the Mac-native launcher
   configuration.nix   the guest: qemu-vm settings, wayland/DRM stack, rust, dev user
   run-vm.sh           where VM state lives and what gets shared in
   linux-builder.sh    one-time: the Linux builder that builds the guest closure
@@ -58,15 +58,15 @@ nix run ./vm -- --reset      # throw the VM's disk away and start clean
 nix run ./vm -- -snapshot    # extra args go straight to qemu
 ```
 
-A QEMU window opens — that is the display flexwm will drive. The terminal you
+A QEMU window opens — that is the display scoot will drive. The terminal you
 launched from is the serial console (`Ctrl-a x` quits, `Ctrl-a c` opens the
 qemu monitor).
 
 - login: `dev` / `dev`, or `root` / `root`; `dev` is auto-logged-in on tty1
 - `ssh -p 2222 dev@localhost` from the Mac
-- the directory you ran `nix run` from is shared into the VM at `/mnt/flexwm`
-  (override with `FLEXWM_SRC=/path/to/repo`)
-- the VM's disk lives in `~/.local/state/flexwm-vm/`
+- the directory you ran `nix run` from is shared into the VM at `/mnt/scoot`
+  (override with `SCOOT_SRC=/path/to/repo`)
+- the VM's disk lives in `~/.local/state/scoot-vm/`
 
 ## Is the stack alive?
 
@@ -80,15 +80,15 @@ sway                        # reference compositor; WLR_RENDERER=pixman is quick
 ```
 
 `sway` is there only as a known-good comparison. Nothing claims the display at
-boot, so flexwm can take it.
+boot, so scoot can take it.
 
-## The flexwm loop
+## The scoot loop
 
 Edit on the Mac, build and run in the VM:
 
 ```sh
 ssh -p 2222 dev@localhost
-cd /mnt/flexwm && cargo build          # CARGO_TARGET_DIR is /var/cargo-target,
+cd /mnt/scoot && cargo build          # CARGO_TARGET_DIR is /var/cargo-target,
                                        # i.e. on the guest disk, not over 9p
 ```
 
@@ -105,7 +105,7 @@ whichever VT is in the *foreground at that moment* — normally tty1's autologin
 console — no matter how that client's own process was started. The ssh session
 itself has no seat at all (`loginctl show-session $XDG_SESSION_ID` reports
 `Seat=`, `VTNr=0`, `Remote=yes`), and forcing the logind backend instead fails
-on the spot: `LIBSEAT_BACKEND=logind flexwm --tty` over ssh dies with
+on the spot: `LIBSEAT_BACKEND=logind scoot --tty` over ssh dies with
 `Failed to open session: No data available`.
 
 Two consequences of that VT binding, worth knowing before you debug the
@@ -114,7 +114,7 @@ symptom instead of the cause:
 - The run takes over the foreground VT's display, and seatd allows exactly one
   client on a VT-bound seat at a time. Start a second `--tty` (or sway, or
   anything else on libseat) while one is up and it exits 1 with
-  ``flexwm: the session refused every DRM device on seat `seat0`: the seat is
+  ``scoot: the session refused every DRM device on seat `seat0`: the seat is
   what failed here, not the choice of device …`` and, under it, the device it
   tried and `Failed to open device: Operation not permitted (os error 1)`.
   `journalctl -u seatd` says `seat is VT-bound and has an active client`. See
@@ -136,7 +136,7 @@ VM without rebooting:
 
 ```sh
 NIX_SSHOPTS="-p 2222" nixos-rebuild switch \
-  --flake ./vm#flexwm-vm --target-host root@localhost
+  --flake ./vm#scoot-vm --target-host root@localhost
 ```
 
 ## Why it is built this way
@@ -166,7 +166,7 @@ NIX_SSHOPTS="-p 2222" nixos-rebuild switch \
   enforced by `forwardPorts`' `host.address = "127.0.0.1"` (added after a
   security audit found the port forward binding to every interface by
   default, i.e. reachable from the whole LAN with these exact credentials).
-  This isn't just VM compromise: the shared `/mnt/flexwm` directory is a 9p
+  This isn't just VM compromise: the shared `/mnt/scoot` directory is a 9p
   mount with no read-only option in this NixOS module's `sharedDirectories`
   schema, so anyone who reached the VM over the network had write access to
   the actual host checkout through it. Keep `host.address` set on every
@@ -232,10 +232,10 @@ it rather than trust the log alone (recipe below):
   from an existing holder either (`drm_setmaster_ioctl` returns `EBUSY`).
   Root is what lets seatd open the device node and manage VTs at all. Since
   seatd is normally the only thing that ever opens the GPU node on this VM,
-  in practice it *is* first, and flexwm inherits that already-master file
+  in practice it *is* first, and scoot inherits that already-master file
   along with the fd seatd hands over its socket -- but that is a fact about
   this VM's setup, not a property of "opened by seatd" in general.
-- flexwm's own `SET_MASTER` is then refused with `EACCES`, because the kernel
+- scoot's own `SET_MASTER` is then refused with `EACCES`, because the kernel
   only permits it from the process that owns the file:
   `drm_master_check_perm` (`drivers/gpu/drm/drm_auth.c`) wants
   `was_master && file->pid == current->tgid`, and `drm_file_update_pid`
@@ -253,21 +253,21 @@ To check it for real rather than trusting the log, while `--tty` is running:
 
 ```sh
 sudo cat /sys/kernel/debug/dri/0/clients  # master=y, on the seatd-opened fd
-sudo cat /sys/kernel/debug/dri/0/state    # plane fb=N, "allocated by = flexwm"
+sudo cat /sys/kernel/debug/dri/0/state    # plane fb=N, "allocated by = scoot"
 ```
-`clients` lists the fd under `seatd`'s pid, not flexwm's, for the same
+`clients` lists the fd under `seatd`'s pid, not scoot's, for the same
 `drm_file_update_pid` reason — one open file, two processes. `state` is the
-scanout proof: the CRTC's plane points at a flexwm-allocated framebuffer
+scanout proof: the CRTC's plane points at a scoot-allocated framebuffer
 (`[fbcon]`'s own fb is what it points at when nothing is driving KMS).
 `DRM_IOCTL_MODE_ATOMIC` is master-gated by the kernel, so a `drm: modeset
-(full commit)` line in flexwm's log with no immediately-following `WARN …
+(full commit)` line in scoot's log with no immediately-following `WARN …
 drm commit/page flip failed` (its own error path, not a generic "error") is
 itself proof master was held at that moment.
 
 **Two agents (or two shells) verifying `--tty` at once, and one of them gets an
 errno that has nothing to do with what it was testing.** The seat takes one
-client at a time (see The flexwm loop above), so *anything* holding it — a
-benchmark script, a `timeout 30 flexwm --tty` left running, sway — makes every
+client at a time (see The scoot loop above), so *anything* holding it — a
+benchmark script, a `timeout 30 scoot --tty` left running, sway — makes every
 other `--tty` start fail at `Session::open` with `Operation not permitted`,
 whatever that other run was actually exercising. This has really happened here:
 a benchmark from an unrelated task held the seat while PR #27's `--gpu` cases
@@ -275,25 +275,25 @@ were being reproduced, and the EPERM read as a `--gpu` bug until the holder was
 noticed. Check before you start, and again if an errno surprises you:
 
 ```sh
-pgrep -a flexwm; pgrep -a sway            # nothing should be holding it
+pgrep -a scoot; pgrep -a sway            # nothing should be holding it
 sudo journalctl -u seatd -n 5 --no-pager  # "Removed client N" = seat free now
 ```
 
 Either wait for the other run to finish or coordinate — do not "fix" the
-symptom. (flexwm's own error says the seat is what failed rather than blaming
+symptom. (scoot's own error says the seat is what failed rather than blaming
 device choice, but only when *every* candidate failed that way.)
 
 **A change you just made doesn't show up in the binary you just ran.**
 `CARGO_TARGET_DIR` is set to `/var/cargo-target` globally on this VM (guest
 disk, not the 9p mount — that's deliberate, it's much faster), which means
-every checkout built here writes to the *same* `debug/flexwm`. Build two trees
+every checkout built here writes to the *same* `debug/scoot`. Build two trees
 concurrently, or build in one ssh session while running from another, and the
 binary you run can be the other tree's. Symptom: a log line or error message
 that matches neither the code you edited nor the code you reverted to. Check
 the binary is newer than the edit before trusting any run:
 
 ```sh
-ls -l --time-style=full-iso /var/cargo-target/debug/flexwm
+ls -l --time-style=full-iso /var/cargo-target/debug/scoot
 ```
 
 Same applies to `cargo test` output when two builds race — rerun it once the
@@ -332,7 +332,7 @@ symptom of the real cause). Fix: find and kill the stuck process
 (`ps aux | grep qemu-system-aarch64`, `kill <pid>`), then relaunch with stdio
 fully redirected instead of a bare `&`:
 ```sh
-nix run ./vm </dev/null >/tmp/flexwm-vm.log 2>&1 &
+nix run ./vm </dev/null >/tmp/scoot-vm.log 2>&1 &
 ```
 This runs fine from an interactive shell and survives independent of it. The
 same fix applies to `vm/linux-builder.sh run` if it ever tty-suspends the

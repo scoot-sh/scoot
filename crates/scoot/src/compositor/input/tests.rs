@@ -27,7 +27,7 @@ use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use flexwm_core::Config;
+use scoot_core::Config;
 use smithay::input::keyboard::XkbConfig;
 use smithay::reexports::calloop::EventLoop;
 use smithay::reexports::wayland_server::Display;
@@ -201,7 +201,7 @@ const CANVAS: i32 = 200;
 
 /// One instruction for the client thread.
 enum Step {
-    /// Map an `xdg_toplevel`, which is what flexwm hands keyboard focus to.
+    /// Map an `xdg_toplevel`, which is what scoot hands keyboard focus to.
     MapWindow,
     /// Report everything the client's own `wl_keyboard` has decoded so far.
     Report,
@@ -631,7 +631,7 @@ impl Fixture {
         let _ = self.state.display_handle.flush_clients();
     }
 
-    /// Types a string the way `flexwm msg type` does, then reports what the
+    /// Types a string the way `scoot msg type` does, then reports what the
     /// client made of it.
     fn type_text(&mut self, text: &str) -> Typed {
         self.state.type_text(text).expect("the text is typable");
@@ -639,7 +639,7 @@ impl Fixture {
         self.run(Step::Report)
     }
 
-    /// Presses a combination the way `flexwm msg key` does, then reports
+    /// Presses a combination the way `scoot msg key` does, then reports
     /// what the client made of it. A refusal is returned rather than
     /// asserted away: half these tests are about exactly which names get
     /// refused.
@@ -689,7 +689,7 @@ impl Drop for Fixture {
     }
 }
 
-/// The reported bug, end to end: `flexwm msg type "AbC xyz"` used to deliver
+/// The reported bug, end to end: `scoot msg type "AbC xyz"` used to deliver
 /// `abc xyz`.
 #[test]
 fn mixed_case_text_reaches_the_client_exactly_as_asked_for() {
@@ -893,7 +893,7 @@ fn a_character_only_on_an_inactive_group_is_refused() {
 // -------------------------------------------------------------------------
 
 /// The same bug class as the one above, at `type_text`'s neighbour:
-/// `flexwm msg key exclam` used to press the `1` key with nothing held and
+/// `scoot msg key exclam` used to press the `1` key with nothing held and
 /// deliver `1`, because the key lookup scanned every level while `press`
 /// holds only what its caller named. Measured on a real client: `exclam`,
 /// `at`, `asciitilde`, `underscore`, `question`, `colon`, `bar` and
@@ -934,7 +934,7 @@ fn a_key_named_above_the_unmodified_level_is_refused_instead_of_typing_another()
 
 /// The binds-capital-letter ticket's boundary on the other side: the
 /// config-parse fold must not leak into `keysym_named` itself, so
-/// `flexwm msg key A` keeps refusing rather than silently becoming `a`.
+/// `scoot msg key A` keeps refusing rather than silently becoming `a`.
 /// (The parametrized test above also covers `"A"`; this pins the ticket's
 /// exact requirement on its own so it can't be lost in the list.)
 #[test]
@@ -1267,9 +1267,9 @@ fn a_key_a_binding_intercepts_is_not_recorded() {
 /// be recorded.
 ///
 /// Not a synthetic case: `--nested` forwards key events but not the held-key
-/// array in `wl_keyboard.enter`, so a modifier held as focus enters flexwm's
+/// array in `wl_keyboard.enter`, so a modifier held as focus enters scoot's
 /// window arrives here as a lone release, and `--tty` produces the same shape
-/// when the press landed while the session was paused. Since flexwm focuses
+/// when the press landed while the session was paused. Since scoot focuses
 /// every newly mapped window, crediting the focused client for one of these
 /// would hand a serial to a client that had received nothing at all.
 #[test]

@@ -37,7 +37,7 @@ pub(crate) use self::gpu::{ExplicitGpu, resolve};
 use std::error::Error;
 use std::path::Path;
 
-use flexwm_ipc::PointerButton;
+use scoot_ipc::PointerButton;
 use smithay::backend::drm::{
     DrmDevice, DrmDeviceFd, DrmDeviceNotifier, DrmEvent, DrmEventMetadata, PlaneConfig, PlaneState,
 };
@@ -900,7 +900,7 @@ impl Tty {
 /// of its pieces drop, so Smithay's restore-on-drop never fires.
 ///
 /// Why this exists: Smithay's `AtomicDrmDevice::drop` (and its legacy twin)
-/// issues one best-effort atomic commit restoring the pre-flexwm state --
+/// issues one best-effort atomic commit restoring the pre-scoot state --
 /// "so that getty will be visible" -- whenever its `active` flag is still
 /// set. That flag does *not* die with `Tty`: it lives behind
 /// `Arc<DrmDeviceInternal>`, which `DrmDevice::new` clones into both the
@@ -917,7 +917,7 @@ impl Tty {
 /// (strace-proven: our `close` of the seatd socket precedes the failing
 /// `DRM_IOCTL_MODE_ATOMIC`; the errno is `EACCES`, not `EPERM` despite the
 /// ticket's shorthand -- non-master callers fail atomic commits with
-/// `EACCES`). Reordering flexwm's own locals cannot fix it: any order still
+/// `EACCES`). Reordering scoot's own locals cannot fix it: any order still
 /// drops the loop's notifier clone last.
 ///
 /// `DrmDevice::pause()` is Smithay's supported "don't touch the fd on drop"
@@ -1198,7 +1198,7 @@ fn linux_button(code: u32) -> Option<PointerButton> {
 /// the reply itself whenever this call didn't accomplish what a normal
 /// switch-back would -- see the backlog item this closes
 /// (`docs/roadmap/05b-vt-switch-eperm.md`) and
-/// `flexwm-vision`'s "IPC-first, an agent doing computer-use is a
+/// `scoot-vision`'s "IPC-first, an agent doing computer-use is a
 /// first-class client" goal.
 ///
 /// Originally this collapsed "no `--tty` backend at all" and "session is
@@ -1257,7 +1257,7 @@ pub enum VtSwitchOutcome {
 impl State {
     /// Switches the kernel virtual terminal via the session -- a Linux-
     /// session concern, deliberately not routed through `State::act`/
-    /// `flexwm_core::Action`. See `keybindings::Bound::ChangeVt`'s doc for
+    /// `scoot_core::Action`. See `keybindings::Bound::ChangeVt`'s doc for
     /// why. A no-op (with a debug log) under any backend but `--tty`, since
     /// there's no session to switch, and also while this session is paused
     /// (VT-switched away, [`Tty::session_paused`]) -- `libseat`'s
@@ -1268,7 +1268,7 @@ impl State {
     /// here while paused (`session_event`'s `PauseSession` arm suspends
     /// `libinput` first), but this project's IPC `key` request is a second,
     /// independent input path that bypasses `libinput` entirely (see
-    /// `flexwm-vision`'s "IPC-first" design) and so isn't gated by that
+    /// `scoot-vision`'s "IPC-first" design) and so isn't gated by that
     /// suspension -- reproduced by pausing the session (a real switch-away)
     /// and then sending the switch-back combo over IPC rather than a real
     /// keypress, which hit exactly this `EPERM` before this check existed.

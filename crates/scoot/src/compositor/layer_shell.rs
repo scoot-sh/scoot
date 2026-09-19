@@ -3,9 +3,9 @@
 //! A bar, a dock, a wallpaper, a launcher or a notification popup is not an
 //! `xdg_toplevel` -- it doesn't belong in the scrolling layout, it anchors
 //! itself to screen edges, and it decides whether it sits above or below
-//! ordinary windows. This module is everything flexwm needs for those:
+//! ordinary windows. This module is everything scoot needs for those:
 //! creating them, keeping them arranged, letting the pointer reach them, and
-//! taking whatever they reserve off the area [`flexwm_core`] arranges windows
+//! taking whatever they reserve off the area [`scoot_core`] arranges windows
 //! within.
 //!
 //! ## What does the arranging
@@ -16,19 +16,19 @@
 //! the implied exclusive edge when a surface is anchored to three sides -- and
 //! hands back both each surface's rectangle and
 //! [`LayerMap::non_exclusive_zone`], the part of the output nothing reserved.
-//! flexwm does not reimplement any of that; what it owns is *when* to
+//! scoot does not reimplement any of that; what it owns is *when* to
 //! re-arrange, where the results sit in the render stack, and how that zone
 //! reaches the core.
 //!
 //! ## The zone, and why it can't just be `OutputChanged`
 //!
-//! `flexwm_core` keeps two rectangles per output now: `area` (the whole
-//! screen, which is what `flexwm msg outputs` reports and what a client sees
+//! `scoot_core` keeps two rectangles per output now: `area` (the whole
+//! screen, which is what `scoot msg outputs` reports and what a client sees
 //! through `wl_output`) and `usable` (what windows are arranged within). A
 //! bar shrinks the second, never the first -- pushing the shrunken rectangle
 //! through `OutputChanged` instead would have made the compositor report a
 //! 1600x970 screen to an agent that asked how big the display is. See
-//! [`flexwm_core::Event::OutputUsableAreaChanged`].
+//! [`scoot_core::Event::OutputUsableAreaChanged`].
 //!
 //! ## Keyboard focus
 //!
@@ -54,7 +54,7 @@
 //!   keyboard, so a click focuses a surface exactly once rather than
 //!   outliving the state it was made against.
 //! - It overrides **only the keyboard**. `arrangement.focused`, the focus
-//!   ring, `set_activated` and `flexwm msg windows`' `focused` flag all keep
+//!   ring, `set_activated` and `scoot msg windows`' `focused` flag all keep
 //!   tracking the window -- which is the one focus will return to, and is
 //!   what an agent driving this compositor is asking about. A layer surface
 //!   holding the keyboard is deliberately not a window and does not pretend
@@ -75,7 +75,7 @@
 //! [`State::apply`], which re-enters Smithay through configures and focus
 //! changes.
 
-use flexwm_core::{Event as CoreEvent, Rect};
+use scoot_core::{Event as CoreEvent, Rect};
 use smithay::desktop::{LayerSurface, WindowSurfaceType, layer_map_for_output};
 use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::wl_output::WlOutput;
@@ -159,7 +159,7 @@ impl WlrLayerShellHandler for State {
     ///
     /// `output` is the client's request for which screen to appear on. It is
     /// allowed to be `None`, which the protocol defines as "the compositor
-    /// chooses"; flexwm has exactly one output, so both cases land on it.
+    /// chooses"; scoot has exactly one output, so both cases land on it.
     fn new_layer_surface(
         &mut self,
         surface: WlrLayerSurface,
@@ -285,7 +285,7 @@ impl State {
             // notification daemon closing and re-opening an inline reply)
             // would otherwise take the keyboard straight back on the second
             // transition, with no new click, while the focus ring and
-            // `flexwm msg windows` still name the window.
+            // `scoot msg windows` still name the window.
             //
             // This commit is the only place that transition can be seen:
             // `layer_focus` reads committed state, so it changes only when

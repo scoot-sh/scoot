@@ -64,7 +64,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use flexwm_core::{Arrangement, Rect, WindowId};
+use scoot_core::{Arrangement, Rect, WindowId};
 use smithay::backend::renderer::Color32F;
 use smithay::backend::renderer::element::Kind;
 use smithay::backend::renderer::element::solid::{SolidColorBuffer, SolidColorRenderElement};
@@ -171,7 +171,7 @@ impl From<Color> for Color32F {
 }
 
 /// The validated, ready-to-render form of `config::AppearanceConfig` --
-/// same relationship [`flexwm_core::Config`] has to that module's
+/// same relationship [`scoot_core::Config`] has to that module's
 /// `LayoutConfig`. Colors are already parsed and clamps already applied by
 /// the time one of these exists; nothing downstream needs to re-check either.
 ///
@@ -202,7 +202,7 @@ pub struct Appearance {
     /// the machine's own theme is not the license problem *shipping* one
     /// would be.
     ///
-    /// Only names a theme; it never makes flexwm carry one. A name that
+    /// Only names a theme; it never makes scoot carry one. A name that
     /// matches nothing installed is not an error: named shapes then come from
     /// `cursor/shapes.rs`, exactly as they do on a machine with no themes at
     /// all.
@@ -250,7 +250,7 @@ impl Appearance {
     /// no fill pixel at all. 4 is therefore the smallest size that draws the
     /// shape this module actually describes rather than a couple of stray
     /// dark pixels -- and a pointer that small is indistinguishable from a
-    /// dead pixel on any real display, which on `--tty` (where flexwm *is*
+    /// dead pixel on any real display, which on `--tty` (where scoot *is*
     /// the session) leaves a user with no visible pointer and no other window
     /// manager to fix it from.
     pub const MIN_CURSOR_SIZE: i32 = 4;
@@ -258,7 +258,7 @@ impl Appearance {
     /// The largest [`cursor_size`](Self::cursor_size) a config may ask for.
     ///
     /// Two reasons for this exact number, both arithmetic rather than taste,
-    /// in the same spirit as [`flexwm_core::Config::MAX_GAP`]:
+    /// in the same spirit as [`scoot_core::Config::MAX_GAP`]:
     ///
     /// - **Nothing real can use more.** 256px is a quarter of a 1080p
     ///   display's height; a pointer that size covers 3.2% of such a screen
@@ -278,7 +278,7 @@ impl Appearance {
 
     /// Brings a configured cursor size into the range the bitmap path is safe
     /// for -- see the two constants above. Pure and separately tested, like
-    /// [`flexwm_core::Config::clamp_gap`]; [`Self::clamped`] is what applies
+    /// [`scoot_core::Config::clamp_gap`]; [`Self::clamped`] is what applies
     /// it (and warns) for a real config file, and `cursor::Cursor::new`
     /// applies it again at the allocation itself.
     pub fn clamp_cursor_size(size: i32) -> i32 {
@@ -292,9 +292,9 @@ impl Appearance {
     ///   windows and visually collide with the neighbor's own ring or window
     ///   content -- a real visual bug, not a preference, so this clamps
     ///   rather than trusting a config value. Takes `gap` rather than reading
-    ///   `flexwm_core::Config` directly to keep this module independent of
+    ///   `scoot_core::Config` directly to keep this module independent of
     ///   that crate's config type -- see the module doc's broader point about
-    ///   this crate, not `flexwm_core`, owning decorations.
+    ///   this crate, not `scoot_core`, owning decorations.
     /// - `cursor_size` into [`Self::MIN_CURSOR_SIZE`]`..=`[`Self::MAX_CURSOR_SIZE`],
     ///   which is about the bitmap allocation it drives, not just how it
     ///   looks -- see those constants.
@@ -349,7 +349,7 @@ pub struct RingRects {
 ///
 /// Pure and unit-tested (see below) without needing a live renderer or
 /// display: everything here is plain `i32` arithmetic on
-/// [`flexwm_core::Rect`], not a Smithay type, so this module doesn't need
+/// [`scoot_core::Rect`], not a Smithay type, so this module doesn't need
 /// Smithay at all to know its geometry is right.
 pub fn ring_rects(rect: Rect, width: i32, bounds: Rect) -> RingRects {
     if width <= 0 {
@@ -411,7 +411,7 @@ impl Decorations {
     /// Builds this frame's focus-ring render elements from the current
     /// arrangement, updating each window's persistent buffers in place.
     /// Invisible windows (scrolled off-screen or on an inactive workspace --
-    /// see `flexwm_core::Placement::visible`) get no ring. A window whose
+    /// see `scoot_core::Placement::visible`) get no ring. A window whose
     /// buffers shrink to nothing (a zero-width ring, or one fully clipped
     /// away at an output edge) still keeps its buffer entries -- just
     /// resized to empty and producing no element -- so its `Id`s stay
@@ -493,7 +493,7 @@ fn push(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use flexwm_core::{OutputId, Placement};
+    use scoot_core::{OutputId, Placement};
     use smithay::backend::renderer::element::Element;
 
     // -- Color::parse -----------------------------------------------------

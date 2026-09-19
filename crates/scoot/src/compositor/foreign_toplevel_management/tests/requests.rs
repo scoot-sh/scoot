@@ -227,7 +227,7 @@ fn activating_the_focused_window_over_the_wire_tells_the_client_nothing() {
 fn activate_on_an_inert_handle_is_ignored() {
     // The race a real taskbar hits: the window closed while the click was in
     // flight. The protocol says an inert handle's requests are ignored, and
-    // the id it names must not resolve onto anything -- flexwm's window ids
+    // the id it names must not resolve onto anything -- scoot's window ids
     // never being reused is what guarantees it never resolves onto the *next*
     // window either.
     let mut fixture = Fixture::bound();
@@ -304,7 +304,7 @@ fn close_on_an_inert_handle_is_ignored() {
 #[test]
 fn the_state_requests_are_accepted_and_do_nothing() {
     // `set_maximized`, `set_minimized`, `set_fullscreen` and their `unset_`
-    // halves have nothing in flexwm's core to attach to, and `set_rectangle`
+    // halves have nothing in scoot's core to attach to, and `set_rectangle`
     // is an animation hint this compositor reads nothing from -- including the
     // negative rectangle wlroots answers with an `invalid_rectangle` protocol
     // error. All of them must be survivable: killing a shell's connection over

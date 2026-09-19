@@ -11,7 +11,7 @@ use std::os::fd::AsRawFd;
 use std::os::unix::fs::{FileTypeExt, PermissionsExt};
 use std::os::unix::net::UnixStream;
 
-use flexwm_ipc::decode;
+use scoot_ipc::decode;
 
 use super::listener;
 use super::*;
@@ -389,17 +389,17 @@ fn throttling_never_outlives_a_frame_however_long_the_gap() {
 // --- the socket itself ---------------------------------------------------
 
 #[test]
-fn staging_names_are_marked_as_flexwms_and_do_not_repeat() {
+fn staging_names_are_marked_as_scoots_and_do_not_repeat() {
     // A name another user could work out in advance is a name they can
-    // occupy before flexwm starts, over and over.
+    // occupy before scoot starts, over and over.
     let names: std::collections::HashSet<_> = (0..64)
         .map(|_| listener::staging_name().expect("a staging name"))
         .collect();
     assert_eq!(names.len(), 64, "a repeat in 64 draws is not randomness");
     for name in &names {
         let name = name.to_str().expect("ascii");
-        assert!(name.starts_with(".flexwm-"), "{name} is unattributable");
-        assert_eq!(name.len(), ".flexwm-".len() + 12);
+        assert!(name.starts_with(".scoot-"), "{name} is unattributable");
+        assert_eq!(name.len(), ".scoot-".len() + 12);
         assert!(
             name.bytes()
                 .all(|byte| byte.is_ascii_alphanumeric() || byte == b'.' || byte == b'-'),
@@ -411,7 +411,7 @@ fn staging_names_are_marked_as_flexwms_and_do_not_repeat() {
 #[test]
 fn a_bound_socket_is_owner_only_and_leaves_no_temporary_behind() {
     let dir = tempfile::tempdir().expect("a temp dir");
-    let path = dir.path().join("flexwm.sock");
+    let path = dir.path().join("scoot.sock");
     let socket = listener::bind(&path).expect("binds");
 
     let metadata = std::fs::metadata(&path).expect("the socket exists");
@@ -428,7 +428,7 @@ fn a_bound_socket_is_owner_only_and_leaves_no_temporary_behind() {
         .expect("readable")
         .map(|entry| entry.expect("an entry").file_name())
         .collect();
-    assert_eq!(left, vec![std::ffi::OsString::from("flexwm.sock")]);
+    assert_eq!(left, vec![std::ffi::OsString::from("scoot.sock")]);
 
     // And it is really listening, with the credentials to prove who
     // connected.
@@ -443,13 +443,13 @@ fn a_bound_socket_is_owner_only_and_leaves_no_temporary_behind() {
 
 #[test]
 fn the_socket_is_owner_only_even_in_a_world_writable_directory() {
-    // The configuration the whole item is about: `$FLEXWM_SOCKET` pointing
+    // The configuration the whole item is about: `$SCOOT_SOCKET` pointing
     // somewhere anyone can write, where `$XDG_RUNTIME_DIR`'s own `0700` is
     // not doing the work any more.
     let dir = tempfile::tempdir().expect("a temp dir");
     std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o777))
         .expect("opens the directory up");
-    let path = dir.path().join("flexwm.sock");
+    let path = dir.path().join("scoot.sock");
     let _socket = listener::bind(&path).expect("binds");
     assert_eq!(
         std::fs::metadata(&path)
@@ -465,7 +465,7 @@ fn the_socket_is_owner_only_even_in_a_world_writable_directory() {
 #[test]
 fn binding_replaces_a_stale_socket_file() {
     let dir = tempfile::tempdir().expect("a temp dir");
-    let path = dir.path().join("flexwm.sock");
+    let path = dir.path().join("scoot.sock");
     std::fs::write(&path, b"left over from a crash").expect("writes");
     let _socket = listener::bind(&path).expect("binds over the stale file");
     assert!(
@@ -483,7 +483,7 @@ fn binding_replaces_a_symlink_rather_than_writing_through_it() {
     // `rename` replaces the link itself, so the socket lands where it was
     // asked to and the link's target is never touched.
     let dir = tempfile::tempdir().expect("a temp dir");
-    let path = dir.path().join("flexwm.sock");
+    let path = dir.path().join("scoot.sock");
     let target = dir.path().join("somewhere-else");
     std::os::unix::fs::symlink(&target, &path).expect("plants a symlink");
 
@@ -514,7 +514,7 @@ fn listing(dir: &std::path::Path) -> Vec<std::ffi::OsString> {
 
 #[test]
 fn a_symlink_where_the_staging_directory_goes_is_refused_and_its_target_untouched() {
-    // The attack both earlier versions of `bind` lost to: the name flexwm is
+    // The attack both earlier versions of `bind` lost to: the name scoot is
     // about to stage at, replaced with a symlink to something somebody else
     // wants deleted, chmodded, or bound over. Nothing may follow it, nothing
     // may be removed to get it out of the way, and nothing may be published.
@@ -539,7 +539,7 @@ fn a_symlink_where_the_staging_directory_goes_is_refused_and_its_target_untouche
             .permissions();
         let staging = dir.path().join("staging");
         std::os::unix::fs::symlink(&victim, &staging).expect("plants a symlink");
-        let path = dir.path().join("flexwm.sock");
+        let path = dir.path().join("scoot.sock");
 
         let error = listener::publish(&staging, &path).expect_err("must refuse the name");
         assert_eq!(
@@ -589,7 +589,7 @@ fn a_plain_file_where_the_staging_directory_goes_is_refused_too() {
     let dir = tempfile::tempdir().expect("a temp dir");
     let staging = dir.path().join("staging");
     std::fs::write(&staging, b"in the way").expect("writes");
-    let error = listener::publish(&staging, &dir.path().join("flexwm.sock"))
+    let error = listener::publish(&staging, &dir.path().join("scoot.sock"))
         .expect_err("must refuse the name");
     assert_eq!(error.kind(), std::io::ErrorKind::NotADirectory);
     assert_eq!(std::fs::read(&staging).expect("readable"), b"in the way");
@@ -603,23 +603,23 @@ fn binding_leaves_everything_else_in_the_directory_alone() {
     // side untouched.
     let dir = tempfile::tempdir().expect("a temp dir");
     let victim = dir.path().join("victim");
-    std::fs::write(&victim, b"not flexwm's").expect("writes");
-    let planted = dir.path().join(".flexwm-aaaaaaaaaaaa");
+    std::fs::write(&victim, b"not scoot's").expect("writes");
+    let planted = dir.path().join(".scoot-aaaaaaaaaaaa");
     std::os::unix::fs::symlink(&victim, &planted).expect("plants a symlink");
-    let path = dir.path().join("flexwm.sock");
+    let path = dir.path().join("scoot.sock");
 
     let _socket = listener::bind(&path).expect("binds");
 
     assert_eq!(
         listing(dir.path()),
         vec![
-            std::ffi::OsString::from(".flexwm-aaaaaaaaaaaa"),
-            std::ffi::OsString::from("flexwm.sock"),
+            std::ffi::OsString::from(".scoot-aaaaaaaaaaaa"),
+            std::ffi::OsString::from("scoot.sock"),
             std::ffi::OsString::from("victim"),
         ],
         "only the socket may be added, and nothing removed"
     );
-    assert_eq!(std::fs::read(&victim).expect("readable"), b"not flexwm's");
+    assert_eq!(std::fs::read(&victim).expect("readable"), b"not scoot's");
     assert!(
         std::fs::symlink_metadata(&planted)
             .expect("exists")
@@ -667,14 +667,14 @@ fn a_bind_that_cannot_be_published_cleans_up_after_itself() {
     // A directory that does not exist fails at the bind, the first step that
     // touches the filesystem, leaving nothing behind.
     let dir = tempfile::tempdir().expect("a temp dir");
-    let path = dir.path().join("no-such-directory").join("flexwm.sock");
+    let path = dir.path().join("no-such-directory").join("scoot.sock");
     assert!(listener::bind(&path).is_err());
     assert_eq!(entries(dir.path()), 0);
 
     // And a path that stages fine but cannot be published: `rename` onto an
     // existing *directory* fails after the socket is already bound, which is
     // the one window where a staged socket could be left behind.
-    let occupied = dir.path().join("flexwm.sock");
+    let occupied = dir.path().join("scoot.sock");
     std::fs::create_dir(&occupied).expect("a directory in the way");
     assert!(listener::bind(&occupied).is_err());
     assert_eq!(

@@ -26,7 +26,7 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use flexwm_core::{Config, Rect, WindowId};
+use scoot_core::{Config, Rect, WindowId};
 use smithay::reexports::calloop::EventLoop;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface as ServerSurface;
 use smithay::reexports::wayland_server::{Client, Display};
@@ -664,7 +664,7 @@ fn run_layer_client(stream: UnixStream, ready: Sender<u32>) -> Result<Connection
     let (w, h) = PANEL;
     let stride = w * 4;
     let len = (stride * h) as usize;
-    let fd = rustix::fs::memfd_create("flexwm-ime-layer", rustix::fs::MemfdFlags::CLOEXEC)
+    let fd = rustix::fs::memfd_create("scoot-ime-layer", rustix::fs::MemfdFlags::CLOEXEC)
         .expect("a memfd");
     let mut file = std::fs::File::from(fd);
     file.write_all(&vec![0xffu8; len]).expect("a pool file");

@@ -40,8 +40,8 @@ use std::sync::LazyLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-use flexwm_core::{Action, WindowId};
-use flexwm_ipc::{
+use scoot_core::{Action, WindowId};
+use scoot_ipc::{
     OutputSnapshot, PROTOCOL_VERSION, Rect as WireRect, Request, Response, WindowSnapshot, encode,
     socket_path,
 };
@@ -129,7 +129,7 @@ pub(super) const MAX_TYPE_CHARS: usize = 16 * 1024;
 /// bound exists to discourage.
 static REFUSAL: LazyLock<String> = LazyLock::new(|| {
     encode(&Response::error(format!(
-        "refused: flexwm serves at most {MAX_CONNECTIONS} ipc connections at once, \
+        "refused: scoot serves at most {MAX_CONNECTIONS} ipc connections at once, \
          and every slot is in use. Close one, or send this request on a connection \
          that is already open -- requests pipeline, so one connection is enough for \
          any number of them"
@@ -151,7 +151,7 @@ static REFUSAL: LazyLock<String> = LazyLock::new(|| {
 /// not merely that a cap is).
 static PRESSURE_REFUSAL: LazyLock<String> = LazyLock::new(|| {
     encode(&Response::error(format!(
-        "refused: flexwm is under file-descriptor pressure (fewer than {RESERVE_FDS} \
+        "refused: scoot is under file-descriptor pressure (fewer than {RESERVE_FDS} \
          fds free); retry in a moment -- this connection cost nothing, and pressure \
          lifts as soon as whoever is holding fds lets go"
     )))
@@ -166,7 +166,7 @@ pub fn init(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let path = socket
         .or_else(socket_path)
-        .ok_or("no socket path: set FLEXWM_SOCKET or XDG_RUNTIME_DIR")?;
+        .ok_or("no socket path: set SCOOT_SOCKET or XDG_RUNTIME_DIR")?;
     let listener = listener::bind(&path)?;
 
     // Owned by the accept loop rather than by `State`: the count is nobody
@@ -349,7 +349,7 @@ impl State {
                 // their own focus requests. Without it `layer_shell.rs`'s
                 // `layer_keyboard_focus` hands the keyboard straight back to
                 // that still-mapped surface, so the refresh `act` ends in
-                // re-derives the panel instead of the window: `flexwm msg
+                // re-derives the panel instead of the window: `scoot msg
                 // windows` reports the new focus while every keystroke still
                 // goes to the panel, with nothing to detect the mismatch
                 // from -- and unlike an `xdg-activation-v1` launcher, nothing
@@ -363,11 +363,11 @@ impl State {
                 // session comes back as the user left it.
                 if matches!(
                     &action,
-                    flexwm_ipc::Action::FocusColumn { .. }
-                        | flexwm_ipc::Action::FocusWindow { .. }
-                        | flexwm_ipc::Action::FocusWindowId { .. }
-                        | flexwm_ipc::Action::FocusWorkspace { .. }
-                        | flexwm_ipc::Action::FocusWorkspaceIndex { .. }
+                    scoot_ipc::Action::FocusColumn { .. }
+                        | scoot_ipc::Action::FocusWindow { .. }
+                        | scoot_ipc::Action::FocusWindowId { .. }
+                        | scoot_ipc::Action::FocusWorkspace { .. }
+                        | scoot_ipc::Action::FocusWorkspaceIndex { .. }
                 ) {
                     self.clicked_layer = None;
                 }
@@ -610,21 +610,21 @@ impl State {
     ///
     /// No allocation: an enum match plus, for the workspace variants, two
     /// `Copy` reads off the core.
-    fn focus_action_is_noop(&self, action: &flexwm_ipc::Action) -> bool {
+    fn focus_action_is_noop(&self, action: &scoot_ipc::Action) -> bool {
         match action {
-            flexwm_ipc::Action::FocusWindowId { id } => self.focus == Some(WindowId(*id)),
-            flexwm_ipc::Action::FocusWorkspaceIndex { index } => self
+            scoot_ipc::Action::FocusWindowId { id } => self.focus == Some(WindowId(*id)),
+            scoot_ipc::Action::FocusWorkspaceIndex { index } => self
                 .world
                 .focused_output()
                 .and_then(|output| self.world.workspaces(output))
                 .is_some_and(|workspaces| workspaces.active == *index),
-            flexwm_ipc::Action::FocusWorkspace { direction } => self
+            scoot_ipc::Action::FocusWorkspace { direction } => self
                 .world
                 .focused_output()
                 .and_then(|output| self.world.workspaces(output))
                 .is_some_and(|workspaces| {
-                    (*direction == flexwm_ipc::Vertical::Up && workspaces.active == 0)
-                        || (*direction == flexwm_ipc::Vertical::Down
+                    (*direction == scoot_ipc::Vertical::Up && workspaces.active == 0)
+                        || (*direction == scoot_ipc::Vertical::Down
                             && workspaces.active + 1 >= workspaces.count)
                 }),
             _ => false,
@@ -666,7 +666,7 @@ impl State {
     }
 }
 
-fn wire(rect: flexwm_core::Rect) -> WireRect {
+fn wire(rect: scoot_core::Rect) -> WireRect {
     WireRect {
         x: rect.x,
         y: rect.y,

@@ -47,7 +47,7 @@
 //!   else until the capture's reply has gone out: any other request arriving
 //!   meanwhile is refused with a retry, the same "refused rather than
 //!   delayed" shape the rate limit already has. Without that a pipelined
-//!   request's reply would overtake the screenshot's. `flexwm msg` sends one
+//!   request's reply would overtake the screenshot's. `scoot msg` sends one
 //!   request per connection and never sees this.
 //! - **Disconnect mid-encode.** The parked entry holds no slot and borrows
 //!   nothing from the connection; if the peer is gone, the completion write
@@ -82,7 +82,7 @@ use std::sync::mpsc::{Receiver, SyncSender, TrySendError, sync_channel};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use flexwm_ipc::{Response, Screenshot, encode};
+use scoot_ipc::{Response, Screenshot, encode};
 use smithay::backend::allocator::Fourcc;
 use smithay::backend::renderer::{Bind, ExportMem};
 use smithay::reexports::calloop::channel::{self, Event as ChannelEvent};
@@ -373,7 +373,7 @@ impl State {
             .done
             .clone();
         thread::Builder::new()
-            .name("flexwm-shot".to_string())
+            .name("scoot-shot".to_string())
             .spawn(move || run_encoder(job_rx, done_tx))
             .map_err(|error| error.to_string())?;
         self.screenshot_encoder = Some(Encoder { jobs: job_tx });

@@ -1,6 +1,6 @@
 //! `zwp_linux_dmabuf_v1`: advertisement *and* import.
 //!
-//! flexwm composites on the CPU with pixman, but a client is free to render
+//! scoot composites on the CPU with pixman, but a client is free to render
 //! on the GPU and hand the result over as a dma-buf -- and Smithay's
 //! [`PixmanRenderer`](smithay::backend::renderer::pixman::PixmanRenderer)
 //! imports one without any GPU on the compositor side: it `mmap`s plane 0 of
@@ -61,7 +61,7 @@
 //! `Argb8888`) with the `LINEAR` layout, which is the only layout a CPU
 //! mapping can make sense of. The render node comes first because the device
 //! in the feedback is what a client *allocates against*, and a client that
-//! only needs to render has no business on a primary node -- flexwm itself
+//! only needs to render has no business on a primary node -- scoot itself
 //! never scans out of these buffers, it reads them.
 //!
 //! ## What an import actually does
@@ -100,7 +100,7 @@
 //!   live count is back to zero on every iteration, which is exactly the
 //!   bypass shape `wl_buffers.rs` exists to catch.
 //!
-//!   So flexwm drains the cache itself, from the one event that actually
+//!   So scoot drains the cache itself, from the one event that actually
 //!   means a mapping may have expired: [`schedule_cache_drain`] is called
 //!   from `dispatch.rs`'s `wl_buffer` destruction hook and queues one loop
 //!   idle, which calls `cleanup_texture_cache`. An idle rather than the hook
@@ -129,7 +129,7 @@
 //! ## Trust model
 //!
 //! No client filter, the same deliberate consistency as
-//! [`screencopy`](super::screencopy)'s capture globals: flexwm has no
+//! [`screencopy`](super::screencopy)'s capture globals: scoot has no
 //! security-context support, so an allow-list would be theatre. What this
 //! global now does hand out is a *mapping of the client's own buffer*, which
 //! is the client's memory, not anyone else's -- an import reads one fd the
@@ -274,8 +274,8 @@ pub(super) fn advertise(dh: &DisplayHandle) -> DmabufState {
 ///
 /// The render node leads because the device named here is the one clients
 /// *allocate against* now that imports really happen: a client that only needs
-/// to render into a buffer flexwm will read on the CPU has no reason to open a
-/// primary node, which needs privileges a render node does not. flexwm itself
+/// to render into a buffer scoot will read on the CPU has no reason to open a
+/// primary node, which needs privileges a render node does not. scoot itself
 /// never scans out of an imported buffer -- `--tty` scans out of its own dumb
 /// buffers -- so the primary node was never the right hint, only the more
 /// visible one. (On this project's own reference machine `/dev/dri/card0` does
@@ -554,13 +554,13 @@ impl DmabufHandler for State {
 /// retains over **both** of that renderer's caches -- and the second retain
 /// drops every entry whose `dmabuf` is `None` (`pixman/mod.rs:807-815`), i.e.
 /// it evicts `self.buffers` wholesale rather than dropping expired entries
-/// from it. That is free today only because flexwm never populates
+/// from it. That is free today only because scoot never populates
 /// `self.buffers`: it is filled solely by `Bind<Dmabuf>`, and every `bind`
 /// call here hands over a `pixman::Image` or a dumb buffer instead
 /// (`headless.rs`, `test_support.rs`), so the extra retain scans an empty
 /// `Vec`.
 ///
-/// The moment flexwm binds a dmabuf render target -- a future GPU tier, or a
+/// The moment scoot binds a dmabuf render target -- a future GPU tier, or a
 /// dmabuf screencopy path -- that stops being free: *every* `wl_buffer`
 /// destruction in the session would then evict the bound-target cache and
 /// force a re-`mmap` on the next frame. Whoever adds that has to narrow this

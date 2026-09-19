@@ -1,11 +1,11 @@
 //! Where the control socket comes from, and who is allowed to speak on it.
 //!
-//! flexwm's IPC is a more powerful channel than most compositors': alongside
+//! scoot's IPC is a more powerful channel than most compositors': alongside
 //! reading state it injects arbitrary keystrokes and pointer input, and hands
 //! back screenshots. Reaching it is still gated the same way sway, i3, niri
 //! and Hyprland gate theirs -- `$XDG_RUNTIME_DIR` is a `0700` per-user
 //! directory, so nobody else can open the path in the first place -- but
-//! `$FLEXWM_SOCKET` can point the socket at a directory anyone can reach, and
+//! `$SCOOT_SOCKET` can point the socket at a directory anyone can reach, and
 //! an unusual umask can leave the socket itself group- or world-writable
 //! (`umask 000` really does publish `srwxrwxrwx`, and another user really can
 //! then inject keystrokes through it). Those are the cases the two checks here
@@ -42,11 +42,11 @@ const STAGING_MODE: u32 = 0o700;
 /// What the socket is called while it is in there.
 const STAGED_NAME: &str = "s";
 
-/// Marks a staging directory as flexwm's, for whoever finds one left behind by
+/// Marks a staging directory as scoot's, for whoever finds one left behind by
 /// a compositor that died mid-startup. Nothing removes those: telling a stale
 /// one from a live one is not possible, and removing another process's is the
 /// mistake this module is built around avoiding.
-const STAGING_PREFIX: &str = ".flexwm-";
+const STAGING_PREFIX: &str = ".scoot-";
 
 /// How many random bytes go in a staging directory's name, 36 choices each.
 const STAGING_RANDOM: usize = 12;
@@ -137,7 +137,7 @@ pub(super) fn publish(staging: &Path, path: &Path) -> io::Result<UnixListener> {
     // `rmdir` neither follows a symlink nor removes a non-empty directory, so
     // this can remove the directory created above and very little else. It is
     // also allowed to fail: if something replaced that name, whatever is there
-    // now is not flexwm's to clean up.
+    // now is not scoot's to clean up.
     let _ = std::fs::remove_dir(staging);
     result
 }
@@ -198,7 +198,7 @@ fn stage(staging: &Path, path: &Path) -> io::Result<UnixListener> {
 /// kernel's `ENOENT` resolving this path, with no path named in the message
 /// itself), and the compositor refuses to start rather than starting with no
 /// control socket.
-/// Every environment flexwm targets mounts `/proc`, webtop containers
+/// Every environment scoot targets mounts `/proc`, webtop containers
 /// included, so that is a statement of the dependency rather than a caveat
 /// about it.
 fn staged_path(directory: &File) -> PathBuf {
@@ -213,7 +213,7 @@ fn staged_path(directory: &File) -> PathBuf {
 /// pool.
 ///
 /// Unpredictable rather than merely unique (a pid is neither): a name another
-/// user can work out in advance is a name they can occupy before flexwm
+/// user can work out in advance is a name they can occupy before scoot
 /// starts, over and over, which turns into a startup failure of their
 /// choosing. Nothing here *depends* on the name being secret -- [`bind`]
 /// treats a taken name as a taken name and moves on -- so the slight modulo
@@ -264,7 +264,7 @@ pub(super) fn own_uid() -> u32 {
 ///   field does not avoid. `geteuid` above has no such hazard, so it still
 ///   goes through rustix's safe wrapper.
 ///
-/// flexwm needs the uid and nothing else, so this asks for the credentials
+/// scoot needs the uid and nothing else, so this asks for the credentials
 /// directly and reads only that.
 pub(super) fn peer_uid(stream: &UnixStream) -> io::Result<u32> {
     let mut credentials = libc::ucred {

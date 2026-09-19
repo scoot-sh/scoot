@@ -17,7 +17,7 @@
 //!
 //! ## What a workspace is here, and what it is not
 //!
-//! `flexwm_core` has real workspaces already ([`World::workspaces`]), and
+//! `scoot_core` has real workspaces already ([`World::workspaces`]), and
 //! they are **positions, not identities**: an output holds a `Vec` of them,
 //! always ending in exactly one empty workspace, and leaving an emptied
 //! workspace drops it, renumbering everything after it. There is no name, no
@@ -31,7 +31,7 @@
 //!   stable across multiple sessions"; these are not stable across the next
 //!   window closing.
 //! - **`name` is the 1-based position** ("1", "2", ...), which is what a bar
-//!   displays. The IPC twin is 0-based: `flexwm msg action
+//!   displays. The IPC twin is 0-based: `scoot msg action
 //!   focus-workspace-index N` drives the same core action `activate` does,
 //!   so a bar label `"2"` means `focus-workspace-index 1`, not `2` --
 //!   nothing on either side adjusts, and nothing warns. See
@@ -89,7 +89,7 @@
 //! compositor must process a series of requests preceding a commit request
 //! atomically"). A client that never sends `commit` never switches anything.
 
-use flexwm_core::{Action, Workspaces};
+use scoot_core::{Action, Workspaces};
 use smithay::output::Output;
 use smithay::reexports::wayland_protocols::ext::workspace::v1::server::ext_workspace_group_handle_v1::{
     self, ExtWorkspaceGroupHandleV1, GroupCapabilities,
@@ -192,7 +192,7 @@ struct Manager {
     /// if any.
     ///
     /// One slot rather than a queue, and it is not a simplification: the only
-    /// staged request flexwm supports is `activate`, and an output has
+    /// staged request scoot supports is `activate`, and an output has
     /// exactly one active workspace -- so replaying a batch of them in order
     /// ends wherever the last one pointed, which is what this holds. A second
     /// `activate` before a `commit` overwrites the first, at the cost of one
@@ -549,7 +549,7 @@ fn coordinates(position: usize) -> Vec<u8> {
 
 /// The `state` bitfield for a workspace.
 ///
-/// `urgent` is never set: nothing in flexwm marks a window as demanding
+/// `urgent` is never set: nothing in scoot marks a window as demanding
 /// attention yet (there is no `xdg_activation` support). `hidden` is never set
 /// either -- every workspace this compositor has, including the trailing empty
 /// one, is one a user can switch to, and the protocol defines `hidden` as
@@ -672,11 +672,11 @@ impl Dispatch2<ExtWorkspaceGroupHandleV1, State> for GroupData {
             // Ignored, as the protocol says a compositor does with a request
             // whose capability it doesn't advertise -- and this one
             // advertises none. See this module's doc for why creating a
-            // workspace isn't a thing flexwm can do.
+            // workspace isn't a thing scoot can do.
             ext_workspace_group_handle_v1::Request::CreateWorkspace { workspace } => {
                 tracing::debug!(
                     name = %workspace,
-                    "ignoring create_workspace: flexwm creates workspaces itself"
+                    "ignoring create_workspace: scoot creates workspaces itself"
                 );
             }
             // The object goes away on its own; the `Weak` held for it simply
@@ -712,7 +712,7 @@ impl Dispatch2<ExtWorkspaceHandleV1, State> for WorkspaceData {
             ext_workspace_handle_v1::Request::Deactivate
             | ext_workspace_handle_v1::Request::Remove
             | ext_workspace_handle_v1::Request::Assign { .. } => {
-                tracing::debug!("ignoring a workspace request flexwm does not advertise");
+                tracing::debug!("ignoring a workspace request scoot does not advertise");
             }
             ext_workspace_handle_v1::Request::Destroy => {}
             _ => {}

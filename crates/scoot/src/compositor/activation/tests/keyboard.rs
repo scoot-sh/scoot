@@ -3,7 +3,7 @@
 //! The bug this pins: `request_activation` ended in
 //! `act(FocusWindowId)` without first clearing `State::clicked_layer`, so a
 //! launcher that stayed mapped kept every keystroke after handing window
-//! focus away -- while the focus ring and `flexwm msg windows` named the new
+//! focus away -- while the focus ring and `scoot msg windows` named the new
 //! window. The weak shape of this test (hand-setting `clicked_layer` with no
 //! real layer surface) passes either way and proves nothing; like
 //! `foreign_toplevel_management`'s `taskbar_holding_the_keyboard`, this runs
@@ -148,7 +148,7 @@ fn taskbar_buffer(
     let stride = width * 4;
     let len = (stride * height) as usize;
     let fd = rustix::fs::memfd_create(
-        "flexwm-activation-keyboard-test",
+        "scoot-activation-keyboard-test",
         rustix::fs::MemfdFlags::CLOEXEC,
     )
     .map_err(|e| e.to_string())?;
@@ -183,7 +183,7 @@ fn run_taskbar(stream: UnixStream, steps: Receiver<()>, acks: Sender<Ack>) -> Re
         &surface,
         None,
         zwlr_layer_shell_v1::Layer::Overlay,
-        "flexwm-activation-test-taskbar".into(),
+        "scoot-activation-test-taskbar".into(),
         &qh,
         (),
     );
@@ -418,7 +418,7 @@ fn an_activation_takes_the_keyboard_back_from_a_clicked_taskbar() {
 
 /// The window end for the lock test: two bare `xdg_toplevel`s, held for the
 /// whole test. Bare, like `foreign_toplevel_management/tests` uses them:
-/// what puts a window in flexwm's model is the toplevel existing, and the
+/// what puts a window in scoot's model is the toplevel existing, and the
 /// activation below is driven by a direct `request_activation` call -- the
 /// serial gate lives at token creation, the ordering under test lives in
 /// this handler's tail -- so no key press, no buffers, and no token round

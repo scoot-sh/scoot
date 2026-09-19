@@ -31,7 +31,7 @@ use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use flexwm_core::Config;
+use scoot_core::Config;
 use smithay::reexports::calloop::EventLoop;
 use smithay::reexports::wayland_server::Display;
 use wayland_client::protocol::{wl_output, wl_registry};
@@ -284,7 +284,7 @@ fn manager_and_output(
 fn ramp_fd(size: u32, entry: u16) -> std::fs::File {
     use rustix::fs::{MemfdFlags, memfd_create};
 
-    let fd = memfd_create("flexwm-gamma-test", MemfdFlags::CLOEXEC).expect("a memfd");
+    let fd = memfd_create("scoot-gamma-test", MemfdFlags::CLOEXEC).expect("a memfd");
     let mut file = std::fs::File::from(fd);
     for _ in 0..3 * size {
         file.write_all(&entry.to_le_bytes()).expect("a filled ramp");
@@ -296,7 +296,7 @@ fn ramp_fd(size: u32, entry: u16) -> std::fs::File {
 fn sized_fd(len: usize) -> std::fs::File {
     use rustix::fs::{MemfdFlags, memfd_create};
 
-    let fd = memfd_create("flexwm-gamma-test", MemfdFlags::CLOEXEC).expect("a memfd");
+    let fd = memfd_create("scoot-gamma-test", MemfdFlags::CLOEXEC).expect("a memfd");
     let mut file = std::fs::File::from(fd);
     file.write_all(&vec![0u8; len]).expect("a filled file");
     file

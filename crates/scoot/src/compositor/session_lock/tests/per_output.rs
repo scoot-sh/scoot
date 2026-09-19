@@ -6,7 +6,7 @@
 //! *resource* (`locked_outputs.contains(&output)` in its `GetLockSurface`
 //! handler -- naming the same bind twice dies there, while naming the same
 //! physical output through a second bind of the global is admitted), so
-//! flexwm enforces it per physical `Output` in `new_surface`: a second
+//! scoot enforces it per physical `Output` in `new_surface`: a second
 //! *live* surface for an output the lock already covers is refused with the
 //! protocol's own `duplicate_output` error, which kills the offending client
 //! the way every other protocol error here does.
@@ -16,7 +16,7 @@
 //! reconstructing its UI must not die for replacing a surface it tore down;
 //! what stays refused is two surfaces alive at once, whichever binds named
 //! the output. (Same-resource destroy-then-rebuild still dies inside
-//! Smithay's own never-shrinking `locked_outputs` list before flexwm is ever
+//! Smithay's own never-shrinking `locked_outputs` list before scoot is ever
 //! asked: a pre-existing Smithay-side stickiness this item does not touch.)
 //!
 //! With exactly one output the rule collapses to "one live lock surface":

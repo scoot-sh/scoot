@@ -27,7 +27,7 @@ adapter can confirm exact target window" — niri's own IPC can identify
 and activate a specific window, but nothing lets a caller inject input
 *into* one without first making it the real focused window.
 
-**flexwm is unusually well-positioned to solve this properly**, since it
+**scoot is unusually well-positioned to solve this properly**, since it
 owns the entire Wayland dispatch stack itself rather than automation
 being bolted onto a desktop environment that wasn't built for it, and
 half the identity/targeting problem is already solved:
@@ -66,6 +66,6 @@ before scoping an implementation.
 
 Concrete shape once designed: likely a new `Request` variant (naming
 TBD — something like a `window` field added to the existing `Key`/
-`Click`/`PointerButton` requests, or dedicated variants) in `flexwm-ipc`,
+`Click`/`PointerButton` requests, or dedicated variants) in `scoot-ipc`,
 implemented in `input.rs` alongside the existing focus-changing
 dispatch it must *not* reuse.

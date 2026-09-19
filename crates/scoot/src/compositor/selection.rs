@@ -14,7 +14,7 @@
 //! and routed through `handlers.rs`. Both data-control states are built with
 //! `Some(&primary_selection_state)` so a clipboard manager can also touch the
 //! primary selection, matching toolkit expectations; all three use an
-//! allow-everyone filter (`|_| true`), because flexwm has no
+//! allow-everyone filter (`|_| true`), because scoot has no
 //! security-context support and an allow-list would be theatre -- the same
 //! rationale as the session-lock global, documented in `README.md`'s trust
 //! note.

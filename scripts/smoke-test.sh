@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Drives flexwm end to end over IPC only: start it, open a terminal inside it,
+# Drives scoot end to end over IPC only: start it, open a terminal inside it,
 # type into that terminal, and capture the screen. Backend-agnostic by design
 # -- IPC input/introspection works the same regardless of how the compositor
 # presents itself, so this is the regression net for every backend, not just
@@ -9,7 +9,7 @@
 # script itself inside a host compositor, e.g.:
 #   WLR_BACKENDS=headless WLR_RENDERER=pixman WLR_LIBINPUT_NO_DEVICES=1 \
 #     cage -- env MODE=--nested scripts/smoke-test.sh
-# so flexwm's own Connection::connect_to_env() (nested.rs) finds cage's
+# so scoot's own Connection::connect_to_env() (nested.rs) finds cage's
 # WAYLAND_DISPLAY when it starts, not this shell's.
 #
 # Every temp path this script uses derives from one overridable prefix, so
@@ -20,7 +20,7 @@
 # scratch file below becomes /tmp/smoke-a* vs /tmp/smoke-b*. Two runs
 # sharing one prefix still collide -- prefixes must differ. An explicit
 # SOCKET/SHOT/LOG/CONFIG/TYPED still wins over the prefix-derived default
-# for that one path, so existing callers that set SOCKET/LOG/MODE/FLEXWM
+# for that one path, so existing callers that set SOCKET/LOG/MODE/SCOOT
 # keep working; with SMOKE_PREFIX unset every default is exactly the
 # historical hardcoded path. A trailing slash on the prefix is stripped, a
 # nonexistent parent dir is created (mkdir -p), and every expansion is
@@ -28,7 +28,7 @@
 set -euo pipefail
 
 MODE=${MODE:---headless}
-FLEXWM=${FLEXWM:-/var/cargo-target/debug/flexwm}
+SCOOT=${SCOOT:-/var/cargo-target/debug/scoot}
 SMOKE_PREFIX=${SMOKE_PREFIX:-}
 while [ -n "$SMOKE_PREFIX" ] && [ "$SMOKE_PREFIX" != "/" ] && [ "${SMOKE_PREFIX%/}" != "$SMOKE_PREFIX" ]; do
     SMOKE_PREFIX=${SMOKE_PREFIX%/}
@@ -51,23 +51,23 @@ if [ -n "$SMOKE_PREFIX" ]; then
     CAPITAL_TEMPLATE="$SMOKE_PREFIX-capital-XXXXXX.toml"
     BROKEN_TEMPLATE="$SMOKE_PREFIX-broken-XXXXXX.toml"
 else
-    SOCKET=${SOCKET:-/run/user/$(id -u)/flexwm-smoke.sock}
-    SHOT=${SHOT:-/tmp/flexwm-smoke.png}
-    LOG=${LOG:-/tmp/flexwm-smoke.log}
-    CONFIG=${CONFIG:-/tmp/flexwm-smoke-appearance.toml}
-    TYPED_DEFAULT=/tmp/flexwm-smoke-typed.txt
-    KILLED=/tmp/flexwm-smoke-killed.png
-    CONFIG_SOCK="/run/user/$(id -u)/flexwm-smoke-config.sock"
-    CONFIG_LOG=/tmp/flexwm-smoke-config.log
-    CAPITAL_SOCK="/run/user/$(id -u)/flexwm-smoke-capital.sock"
-    CAPITAL_LOG=/tmp/flexwm-smoke-capital.log
-    BROKEN_SOCK="/run/user/$(id -u)/flexwm-smoke-broken.sock"
-    BROKEN_LOG=/tmp/flexwm-smoke-broken.log
-    CONFIG_TEMPLATE=/tmp/flexwm-smoke-config-XXXXXX.toml
-    CAPITAL_TEMPLATE=/tmp/flexwm-smoke-capital-XXXXXX.toml
-    BROKEN_TEMPLATE=/tmp/flexwm-smoke-broken-XXXXXX.toml
+    SOCKET=${SOCKET:-/run/user/$(id -u)/scoot-smoke.sock}
+    SHOT=${SHOT:-/tmp/scoot-smoke.png}
+    LOG=${LOG:-/tmp/scoot-smoke.log}
+    CONFIG=${CONFIG:-/tmp/scoot-smoke-appearance.toml}
+    TYPED_DEFAULT=/tmp/scoot-smoke-typed.txt
+    KILLED=/tmp/scoot-smoke-killed.png
+    CONFIG_SOCK="/run/user/$(id -u)/scoot-smoke-config.sock"
+    CONFIG_LOG=/tmp/scoot-smoke-config.log
+    CAPITAL_SOCK="/run/user/$(id -u)/scoot-smoke-capital.sock"
+    CAPITAL_LOG=/tmp/scoot-smoke-capital.log
+    BROKEN_SOCK="/run/user/$(id -u)/scoot-smoke-broken.sock"
+    BROKEN_LOG=/tmp/scoot-smoke-broken.log
+    CONFIG_TEMPLATE=/tmp/scoot-smoke-config-XXXXXX.toml
+    CAPITAL_TEMPLATE=/tmp/scoot-smoke-capital-XXXXXX.toml
+    BROKEN_TEMPLATE=/tmp/scoot-smoke-broken-XXXXXX.toml
 fi
-export FLEXWM_SOCKET="$SOCKET"
+export SCOOT_SOCKET="$SOCKET"
 
 rm -f "$SOCKET" "$SHOT" "$LOG" "$CONFIG"
 
@@ -140,7 +140,7 @@ expect_pixel_color() {
     echo "ok: $label pixel at ($x,$y) matches #$want_hex"
 }
 
-"$FLEXWM" "$MODE" --width 1200 --height 800 --socket "$SOCKET" --config "$CONFIG" >"$LOG" 2>&1 &
+"$SCOOT" "$MODE" --width 1200 --height 800 --socket "$SOCKET" --config "$CONFIG" >"$LOG" 2>&1 &
 compositor=$!
 trap 'kill "$compositor" 2>/dev/null || true' EXIT
 
@@ -155,15 +155,15 @@ if [ ! -S "$SOCKET" ]; then
 fi
 
 echo "--- version ---"
-"$FLEXWM" msg version
+"$SCOOT" msg version
 
 echo "--- opening a terminal ---"
-"$FLEXWM" msg action spawn foot
+"$SCOOT" msg action spawn foot
 
 echo "--- waiting for it to appear as a window ---"
 mapped=0
 for _ in $(seq 1 100); do
-    if "$FLEXWM" msg windows | grep -q '"app_id"'; then
+    if "$SCOOT" msg windows | grep -q '"app_id"'; then
         mapped=1
         break
     fi
@@ -174,7 +174,7 @@ if [ "$mapped" -ne 1 ]; then
     tail -30 "$LOG"
     exit 1
 fi
-"$FLEXWM" msg windows
+"$SCOOT" msg windows
 
 echo "--- checking the spawned terminal got an activation token ---"
 # State::spawn mints an xdg-activation token per child
@@ -188,14 +188,14 @@ fi
 echo "ok: the spawned terminal carries XDG_ACTIVATION_TOKEN"
 
 echo "--- typing ---"
-"$FLEXWM" msg type 'hello from flexwm'
-"$FLEXWM" msg wait-idle --quiet-ms 500 --timeout-ms 10000
+"$SCOOT" msg type 'hello from scoot'
+"$SCOOT" msg wait-idle --quiet-ms 500 --timeout-ms 10000
 
 echo "--- checking the typed text actually reached the client ---"
-"$FLEXWM" msg screenshot --out "$SHOT.check1" >/dev/null
-"$FLEXWM" msg type 'x'
-"$FLEXWM" msg wait-idle --quiet-ms 500 --timeout-ms 10000
-"$FLEXWM" msg screenshot --out "$SHOT.check2" >/dev/null
+"$SCOOT" msg screenshot --out "$SHOT.check1" >/dev/null
+"$SCOOT" msg type 'x'
+"$SCOOT" msg wait-idle --quiet-ms 500 --timeout-ms 10000
+"$SCOOT" msg screenshot --out "$SHOT.check2" >/dev/null
 if cmp -s "$SHOT.check1" "$SHOT.check2"; then
     echo "BUG: the screen did not change after typing -- input is not reaching the client"
     echo "(this is the flush_clients bug from 2026-09-11 if it ever comes back)"
@@ -208,8 +208,8 @@ echo "--- typing text with an embedded newline ---"
 # xkb::utf32_to_keysym has no mapping for control characters, so a literal
 # '\n' used to fail to find a key at all and abort the rest of the string
 # (the 2026-09-12 keysym_for_char bug, if it ever comes back).
-"$FLEXWM" msg type "$(printf 'echo one\necho two')"
-"$FLEXWM" msg wait-idle --quiet-ms 500 --timeout-ms 10000
+"$SCOOT" msg type "$(printf 'echo one\necho two')"
+"$SCOOT" msg wait-idle --quiet-ms 500 --timeout-ms 10000
 
 echo "--- typing shifted characters, round-tripped back out of the terminal ---"
 # Every category the level-0 shift bug got wrong (2026-09-13): capitals and
@@ -226,10 +226,10 @@ TYPED=${TYPED:-"$TYPED_DEFAULT"}
 rm -f "$TYPED"
 # The steps above left `echo two` sitting at the prompt unexecuted; run it so
 # this one starts on an empty command line.
-"$FLEXWM" msg type "$NEWLINE"
-"$FLEXWM" msg wait-idle --quiet-ms 300 --timeout-ms 10000
-"$FLEXWM" msg type "printf '%s' '$SHIFTED' > \"$TYPED\"$NEWLINE"
-"$FLEXWM" msg wait-idle --quiet-ms 500 --timeout-ms 10000
+"$SCOOT" msg type "$NEWLINE"
+"$SCOOT" msg wait-idle --quiet-ms 300 --timeout-ms 10000
+"$SCOOT" msg type "printf '%s' '$SHIFTED' > \"$TYPED\"$NEWLINE"
+"$SCOOT" msg wait-idle --quiet-ms 500 --timeout-ms 10000
 for _ in $(seq 1 50); do
     [ -s "$TYPED" ] && break
     sleep 0.2
@@ -249,14 +249,14 @@ echo "ok: every shifted character arrived exactly as typed"
 rm -f "$TYPED"
 
 focused_window() {
-    "$FLEXWM" msg windows | jq -r '.windows[] | select(.focused) | .id'
+    "$SCOOT" msg windows | jq -r '.windows[] | select(.focused) | .id'
 }
 
 echo "--- opening a second terminal, to exercise keybindings ---"
-"$FLEXWM" msg action spawn foot
+"$SCOOT" msg action spawn foot
 mapped=0
 for _ in $(seq 1 100); do
-    if [ "$("$FLEXWM" msg windows | jq '.windows | length')" -eq 2 ]; then
+    if [ "$("$SCOOT" msg windows | jq '.windows | length')" -eq 2 ]; then
         mapped=1
         break
     fi
@@ -269,11 +269,11 @@ if [ "$mapped" -ne 1 ]; then
 fi
 # A new column opens to the right and takes focus (see world.rs's placement).
 second_id=$(focused_window)
-first_id=$("$FLEXWM" msg windows | jq -r --argjson id "$second_id" '.windows[] | select(.id != $id) | .id')
+first_id=$("$SCOOT" msg windows | jq -r --argjson id "$second_id" '.windows[] | select(.id != $id) | .id')
 
 echo "--- a bare 'h' has no binding: it types into the focused terminal, focus stays put ---"
-"$FLEXWM" msg key h
-"$FLEXWM" msg wait-idle --quiet-ms 300 --timeout-ms 10000
+"$SCOOT" msg key h
+"$SCOOT" msg wait-idle --quiet-ms 300 --timeout-ms 10000
 if [ "$(focused_window)" != "$second_id" ]; then
     echo "BUG: a bare 'h' (no modifier) moved focus -- keybindings must not fire without Super"
     exit 1
@@ -281,11 +281,11 @@ fi
 echo "ok: focus unchanged by a bare 'h'"
 
 echo "--- super+h moves focus to the column on the left (Action::FocusColumn) ---"
-"$FLEXWM" msg key super+h
-"$FLEXWM" msg wait-idle --quiet-ms 300 --timeout-ms 10000
+"$SCOOT" msg key super+h
+"$SCOOT" msg wait-idle --quiet-ms 300 --timeout-ms 10000
 if [ "$(focused_window)" != "$first_id" ]; then
     echo "BUG: super+h did not move focus to the other column; keybindings may be broken"
-    "$FLEXWM" msg windows
+    "$SCOOT" msg windows
     exit 1
 fi
 echo "ok: super+h moved focus from window $second_id to window $first_id"
@@ -296,7 +296,7 @@ echo "ok: super+h moved focus from window $second_id to window $first_id"
 # has a neighbor nearby -- the layout always leaves a full gap above every
 # window on a single row, focused or not, regardless of how many columns
 # there are or which one is scrolled into view.
-windows_json=$("$FLEXWM" msg windows)
+windows_json=$("$SCOOT" msg windows)
 read -r focused_x focused_y focused_w focused_h < <(
     echo "$windows_json" | jq -r --argjson id "$first_id" \
         '.windows[] | select(.id == $id) | "\(.rect.x) \(.rect.y) \(.rect.width) \(.rect.height)"'
@@ -318,11 +318,11 @@ echo "--- parking the pointer clear of everything sampled below ---"
 # sampled pixels, and motion never moves keyboard focus here (input.rs has no
 # focus-follows-mouse), so the ring colors below still describe the focus
 # super+h left behind.
-"$FLEXWM" msg pointer move "$((focused_x + focused_w / 2))" "$((focused_y + focused_h / 2))"
-"$FLEXWM" msg wait-idle --quiet-ms 300 --timeout-ms 10000
+"$SCOOT" msg pointer move "$((focused_x + focused_w / 2))" "$((focused_y + focused_h / 2))"
+"$SCOOT" msg wait-idle --quiet-ms 300 --timeout-ms 10000
 
 echo "--- screenshot ---"
-"$FLEXWM" msg screenshot --out "$SHOT"
+"$SCOOT" msg screenshot --out "$SHOT"
 
 echo "=== decorations: focus ring + background render the configured colors ==="
 ring_ok=1
@@ -356,7 +356,7 @@ echo "--- clients killed mid-screenshot do not wedge the compositor ---"
 # the mid-encode case deterministically (a_client_that_disconnects_mid_encode);
 # this hammers every interleaving end to end instead.
 for _ in $(seq 1 20); do
-    "$FLEXWM" msg screenshot --out "$KILLED" >/dev/null 2>&1 &
+    "$SCOOT" msg screenshot --out "$KILLED" >/dev/null 2>&1 &
     killer=$!
     killed="${killed-} $killer"
     kill -9 "$killer" 2>/dev/null || true
@@ -366,7 +366,7 @@ done
 # shellcheck disable=SC2086
 wait $killed 2>/dev/null || true
 rm -f "$KILLED"
-"$FLEXWM" msg version >/dev/null || {
+"$SCOOT" msg version >/dev/null || {
     echo "BUG: the compositor stopped answering after clients were killed mid-screenshot"
     tail -30 "$LOG"
     exit 1
@@ -377,11 +377,11 @@ echo "--- checking clients see zwp_linux_dmabuf_v1 ---"
 # The dmabuf advertisement (see dmabuf.rs) is bind-time state with no IPC
 # surface, so the only end-to-end proof the global is really advertised is
 # asking the registry itself. The Wayland socket name is auto-assigned and
-# logged at startup ("flexwm is up" carries it as `wayland="..."`).
+# logged at startup ("scoot is up" carries it as `wayland="..."`).
 if command -v wayland-info >/dev/null 2>&1; then
     # `|| true`: with `pipefail` an empty grep would exit the script here,
     # before the BUG message below gets its say. The socket is read off the
-    # "flexwm is up" line only: Smithay's own startup lines also match
+    # "scoot is up" line only: Smithay's own startup lines also match
     # `wayland...".*"` (e.g. `smithay::wayland::output ... "headless"` sorts
     # earlier in the log), so an unanchored `head -1` grabs one of those and
     # the name extraction below comes up empty -- that misread failed the
@@ -389,7 +389,7 @@ if command -v wayland-info >/dev/null 2>&1; then
     # pattern tolerates the ANSI escapes tracing writes between a field name
     # and its value; the second then pulls the bare socket name out of that
     # match.
-    wayland_socket=$(grep 'flexwm is up' "$LOG" | grep -o 'wayland[^"]*"[^"]*"' | head -1 | grep -o 'wayland-[0-9]*' || true)
+    wayland_socket=$(grep 'scoot is up' "$LOG" | grep -o 'wayland[^"]*"[^"]*"' | head -1 | grep -o 'wayland-[0-9]*' || true)
     if [ -z "$wayland_socket" ]; then
         echo "BUG: could not find the Wayland socket name in $LOG"
         tail -30 "$LOG"
@@ -442,7 +442,7 @@ run_config_bind_test() {
 EOF
     rm -f "$socket" "$log"
 
-    "$FLEXWM" --headless --width 1200 --height 800 --socket "$socket" --config "$cfg" \
+    "$SCOOT" --headless --width 1200 --height 800 --socket "$socket" --config "$cfg" \
         >"$log" 2>&1 &
     # Not `local`: the EXIT trap below fires as this subshell itself exits,
     # which is after this function has already returned -- by which point a
@@ -464,7 +464,7 @@ EOF
     # signal that it happened. Same pattern as the top-level $compositor
     # trap above.
     trap 'kill "$pid" 2>/dev/null || true' EXIT
-    export FLEXWM_SOCKET="$socket"
+    export SCOOT_SOCKET="$socket"
 
     for _ in $(seq 1 60); do
         [ -S "$socket" ] && break
@@ -476,11 +476,11 @@ EOF
         return 1
     fi
 
-    "$FLEXWM" msg action spawn foot
-    "$FLEXWM" msg action spawn foot
+    "$SCOOT" msg action spawn foot
+    "$SCOOT" msg action spawn foot
     local mapped=0
     for _ in $(seq 1 100); do
-        if [ "$("$FLEXWM" msg windows | jq '.windows | length')" -eq 2 ]; then
+        if [ "$("$SCOOT" msg windows | jq '.windows | length')" -eq 2 ]; then
             mapped=1
             break
         fi
@@ -495,25 +495,25 @@ EOF
     # The second window opens to the right and takes focus (same placement
     # rule the main test above already relies on).
     local right_id left_id
-    right_id=$("$FLEXWM" msg windows | jq -r '.windows[] | select(.focused) | .id')
-    left_id=$("$FLEXWM" msg windows | jq -r --argjson id "$right_id" '.windows[] | select(.id != $id) | .id')
+    right_id=$("$SCOOT" msg windows | jq -r '.windows[] | select(.focused) | .id')
+    left_id=$("$SCOOT" msg windows | jq -r --argjson id "$right_id" '.windows[] | select(.id != $id) | .id')
 
     # Move left with the default binding first, so the only way super+n can
     # bring focus back to the right column is if it really is bound to
     # focus-column right -- not e.g. a no-op at an already-rightmost column.
-    "$FLEXWM" msg key super+h
-    "$FLEXWM" msg wait-idle --quiet-ms 300 --timeout-ms 10000
+    "$SCOOT" msg key super+h
+    "$SCOOT" msg wait-idle --quiet-ms 300 --timeout-ms 10000
     if [ "$(focused_window)" != "$left_id" ]; then
         echo "config-bind test: super+h did not move focus left; compositor log:"
         tail -30 "$log"
         return 1
     fi
 
-    "$FLEXWM" msg key super+n
-    "$FLEXWM" msg wait-idle --quiet-ms 300 --timeout-ms 10000
+    "$SCOOT" msg key super+n
+    "$SCOOT" msg wait-idle --quiet-ms 300 --timeout-ms 10000
     if [ "$(focused_window)" != "$right_id" ]; then
         echo "BUG: the config file's super+n -> focus-column right bind did not take effect"
-        "$FLEXWM" msg windows
+        "$SCOOT" msg windows
         return 1
     fi
     echo "ok: the config file's super+n bind (focus-column right) moved focus as configured"
@@ -535,13 +535,13 @@ run_capital_bind_test() {
 EOF
     rm -f "$socket" "$log"
 
-    "$FLEXWM" --headless --width 1200 --height 800 --socket "$socket" --config "$cfg" \
+    "$SCOOT" --headless --width 1200 --height 800 --socket "$socket" --config "$cfg" \
         >"$log" 2>&1 &
     # Not `local` -- and EXIT, not RETURN -- see run_config_bind_test's
     # identical trap for why.
     pid=$!
     trap 'kill "$pid" 2>/dev/null || true' EXIT
-    export FLEXWM_SOCKET="$socket"
+    export SCOOT_SOCKET="$socket"
 
     for _ in $(seq 1 60); do
         [ -S "$socket" ] && break
@@ -560,10 +560,10 @@ EOF
     fi
     echo "ok: the capital-letter fold was logged"
 
-    "$FLEXWM" msg action spawn foot
+    "$SCOOT" msg action spawn foot
     local mapped=0
     for _ in $(seq 1 100); do
-        if [ "$("$FLEXWM" msg windows | jq '.windows | length')" -eq 1 ]; then
+        if [ "$("$SCOOT" msg windows | jq '.windows | length')" -eq 1 ]; then
             mapped=1
             break
         fi
@@ -575,11 +575,11 @@ EOF
         return 1
     fi
 
-    "$FLEXWM" msg key a
-    "$FLEXWM" msg wait-idle --quiet-ms 300 --timeout-ms 10000
-    if [ "$("$FLEXWM" msg windows | jq '.windows | length')" -ne 0 ]; then
+    "$SCOOT" msg key a
+    "$SCOOT" msg wait-idle --quiet-ms 300 --timeout-ms 10000
+    if [ "$("$SCOOT" msg windows | jq '.windows | length')" -ne 0 ]; then
         echo "BUG: the config file's \"A\" -> close bind did not fire on an unshifted 'a'"
-        "$FLEXWM" msg windows
+        "$SCOOT" msg windows
         return 1
     fi
     echo "ok: the config file's \"A\" bind (close) fired on an unshifted 'a'"
@@ -595,13 +595,13 @@ run_broken_config_test() {
     printf 'this is not valid toml [[[\n' >"$cfg"
     rm -f "$socket" "$log"
 
-    "$FLEXWM" --headless --width 1200 --height 800 --socket "$socket" --config "$cfg" \
+    "$SCOOT" --headless --width 1200 --height 800 --socket "$socket" --config "$cfg" \
         >"$log" 2>&1 &
     # Not `local` -- and EXIT, not RETURN -- see run_config_bind_test's
     # identical trap for why.
     pid=$!
     trap 'kill "$pid" 2>/dev/null || true' EXIT
-    export FLEXWM_SOCKET="$socket"
+    export SCOOT_SOCKET="$socket"
 
     for _ in $(seq 1 60); do
         [ -S "$socket" ] && break
@@ -622,11 +622,11 @@ run_broken_config_test() {
     fi
     echo "ok: the fallback to defaults was logged"
 
-    "$FLEXWM" msg version
-    "$FLEXWM" msg action spawn foot
+    "$SCOOT" msg version
+    "$SCOOT" msg action spawn foot
     local mapped=0
     for _ in $(seq 1 100); do
-        if [ "$("$FLEXWM" msg windows | jq '.windows | length')" -eq 1 ]; then
+        if [ "$("$SCOOT" msg windows | jq '.windows | length')" -eq 1 ]; then
             mapped=1
             break
         fi

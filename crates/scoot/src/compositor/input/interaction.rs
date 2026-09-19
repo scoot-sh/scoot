@@ -59,7 +59,7 @@
 //!   a release of a key it has no record of. The second is not theoretical:
 //!   under `--nested`, `nested_dispatch` forwards key events but not the
 //!   held-key array in `wl_keyboard.enter`, so a modifier held while entering
-//!   flexwm's window arrives as a lone release; `--tty` produces the same
+//!   scoot's window arrives as a lone release; `--tty` produces the same
 //!   shape when a press happens while the session is paused. `is_transition`
 //!   is not exposed, so `key()` tracks held keycodes itself to tell the
 //!   difference (see [`State::key`]).
@@ -89,7 +89,7 @@
 //!   from that serial -- but `State::press` sends the press and the matching
 //!   release back to back within one call, with no dispatch in between, so
 //!   by the time the client's `commit` is handled the last serial issued is
-//!   the *release*'s. (`flexwm msg key Return` is exactly this, and it is
+//!   the *release*'s. (`scoot msg key Return` is exactly this, and it is
 //!   how the real-launcher flow in
 //!   `docs/backlog/resolved/activation-serial-validation-done.md` was
 //!   driven: the compositor issued 6 and 7, and the launcher's token carried
@@ -117,7 +117,7 @@
 //!   client that actually received it, resolved at delivery time like every
 //!   other entry.
 //! - What an enter *does* buy is any client that merely received one: mapping
-//!   a window earns a keyboard `enter` (flexwm focuses every new window
+//!   a window earns a keyboard `enter` (scoot focuses every new window
 //!   itself), and moving the pointer across one earns a pointer `enter`. For
 //!   up to [`INTERACTION_WINDOW`] afterwards that client can take the keyboard
 //!   through a popup grab with no click or keystroke.
@@ -125,7 +125,7 @@
 //!   is not: the session lock and an `exclusive` layer surface pre-empt and
 //!   refuse it, clicking outside dismisses it, keybindings run before it, and
 //!   a refusal is silent while a *grant* is visible (a menu appears, and
-//!   `flexwm msg windows` reports `popup_grab` on its holder). Activation
+//!   `scoot msg windows` reports `popup_grab` on its holder). Activation
 //!   keeps the stricter bar -- a focus serial there spends nothing -- because
 //!   a stolen activation is invisible and leaves no such trace.
 //!
@@ -178,7 +178,7 @@ pub(crate) const CAPACITY: usize = 16;
 ///
 /// The count bound above cannot do this job: it only evicts when *newer*
 /// qualifying input arrives, and a session can go hours without any. That is
-/// not a corner case here but flexwm's own computer-use path -- an agent
+/// not a corner case here but scoot's own computer-use path -- an agent
 /// drives windows through `Request::Action`, which goes straight to
 /// `State::act` and never through `key`/`pointer_button` -- so without an age
 /// bound a click from this morning would still be spendable this evening, and

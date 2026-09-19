@@ -1,9 +1,9 @@
-//! `flexwm msg`: one request, one reply, for scripts and agents.
+//! `scoot msg`: one request, one reply, for scripts and agents.
 
 use std::error::Error;
 use std::path::Path;
 
-use flexwm_ipc::{Client, Request, Response};
+use scoot_ipc::{Client, Request, Response};
 
 use crate::output;
 
@@ -13,7 +13,7 @@ pub fn run(request: &Request, out: Option<&Path>) -> Result<(), Box<dyn Error>> 
     // A human-readable heads-up on stderr, independent of what goes to
     // stdout below -- every non-error response's JSON goes to stdout the
     // same way regardless of which variant it is (see the catch-all arm),
-    // so e.g. `flexwm msg key ... | jq .` keeps working and reflects what
+    // so e.g. `scoot msg key ... | jq .` keeps working and reflects what
     // actually happened whether or not there's a warning attached to it.
     // Advisory: if stderr itself is closed, the reply below still goes out.
     if let Response::Warning { message } = &response {
@@ -34,7 +34,7 @@ pub fn run(request: &Request, out: Option<&Path>) -> Result<(), Box<dyn Error>> 
                         path.display()
                     ))?;
                 }
-                // Straight to stdout, so `flexwm msg screenshot > shot.png` works.
+                // Straight to stdout, so `scoot msg screenshot > shot.png` works.
                 None => output::write_bytes(&shot.png)?,
             }
             Ok(())

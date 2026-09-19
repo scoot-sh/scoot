@@ -1,8 +1,8 @@
-//! Conversions into `flexwm_core`, for shells that host the protocol.
+//! Conversions into `scoot_core`, for shells that host the protocol.
 
 use crate::action::{Action, Horizontal, Vertical};
 
-impl From<Horizontal> for flexwm_core::Horizontal {
+impl From<Horizontal> for scoot_core::Horizontal {
     fn from(direction: Horizontal) -> Self {
         match direction {
             Horizontal::Left => Self::Left,
@@ -11,7 +11,7 @@ impl From<Horizontal> for flexwm_core::Horizontal {
     }
 }
 
-impl From<Vertical> for flexwm_core::Vertical {
+impl From<Vertical> for scoot_core::Vertical {
     fn from(direction: Vertical) -> Self {
         match direction {
             Vertical::Up => Self::Up,
@@ -20,12 +20,12 @@ impl From<Vertical> for flexwm_core::Vertical {
     }
 }
 
-impl From<Action> for flexwm_core::Action {
+impl From<Action> for scoot_core::Action {
     fn from(action: Action) -> Self {
         match action {
             Action::FocusColumn { direction } => Self::FocusColumn(direction.into()),
             Action::FocusWindow { direction } => Self::FocusWindow(direction.into()),
-            Action::FocusWindowId { id } => Self::FocusWindowId(flexwm_core::WindowId(id)),
+            Action::FocusWindowId { id } => Self::FocusWindowId(scoot_core::WindowId(id)),
             Action::MoveColumn { direction } => Self::MoveColumn(direction.into()),
             Action::MoveWindow { direction } => Self::MoveWindow(direction.into()),
             Action::ConsumeOrExpel { direction } => Self::ConsumeOrExpel(direction.into()),
@@ -49,18 +49,18 @@ mod tests {
     #[test]
     fn actions_map_onto_core_actions() {
         assert_eq!(
-            flexwm_core::Action::from(Action::ConsumeOrExpel {
+            scoot_core::Action::from(Action::ConsumeOrExpel {
                 direction: Horizontal::Right
             }),
-            flexwm_core::Action::ConsumeOrExpel(flexwm_core::Horizontal::Right)
+            scoot_core::Action::ConsumeOrExpel(scoot_core::Horizontal::Right)
         );
         assert_eq!(
-            flexwm_core::Action::from(Action::FocusWindowId { id: 7 }),
-            flexwm_core::Action::FocusWindowId(flexwm_core::WindowId(7))
+            scoot_core::Action::from(Action::FocusWindowId { id: 7 }),
+            scoot_core::Action::FocusWindowId(scoot_core::WindowId(7))
         );
         assert_eq!(
-            flexwm_core::Action::from(Action::FocusWorkspaceIndex { index: 2 }),
-            flexwm_core::Action::FocusWorkspaceIndex(2)
+            scoot_core::Action::from(Action::FocusWorkspaceIndex { index: 2 }),
+            scoot_core::Action::FocusWorkspaceIndex(2)
         );
     }
 }

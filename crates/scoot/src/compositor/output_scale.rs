@@ -39,7 +39,7 @@
 //! one scale for every surface.
 //!
 //! `--nested` is explicitly scale-1-only: the host compositor owns the scale
-//! of the window flexwm is drawn in, and forward-scaled output would only
+//! of the window scoot is drawn in, and forward-scaled output would only
 //! double-count it. `compositor::run` warns and forces 1.0 there.
 
 use smithay::output::{Output, Scale};
@@ -75,7 +75,7 @@ pub(super) const MAX_SCALE: f64 = 4.0;
 
 /// The scale a config value actually gets. Pure and separately tested, the
 /// same shape as [`Appearance::clamped`](super::decorations::Appearance::clamped)
-/// and [`Config::clamp_gap`](flexwm_core::Config::clamp_gap): out-of-range
+/// and [`Config::clamp_gap`](scoot_core::Config::clamp_gap): out-of-range
 /// values are brought into range rather than failing startup (on `--tty` this
 /// compositor *is* the session -- see `config.rs`'s module doc).
 ///
@@ -106,7 +106,7 @@ pub(super) fn smithay_scale(scale: f64) -> Scale {
     }
 }
 
-/// The integer scale flexwm advertises where only an integer fits:
+/// The integer scale scoot advertises where only an integer fits:
 /// `ceil(scale)`, matching [`Scale::integer_scale`] -- which is what Smithay
 /// puts on `wl_output.scale` for the same configured value (verified against
 /// the pinned rev's `output.rs`). `1.5` and `2.0` therefore both resolve to

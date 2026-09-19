@@ -1,7 +1,7 @@
 //! Injected input: what an agent sends in place of a keyboard and mouse.
 
-use flexwm_core::Action;
-use flexwm_ipc::{KeyCombo, Modifier, PointerButton};
+use scoot_core::Action;
+use scoot_ipc::{KeyCombo, Modifier, PointerButton};
 use smithay::backend::input::{Axis, AxisSource, ButtonState, InputTime, KeyState};
 use smithay::input::keyboard::{FilterResult, KeyboardHandle, Keycode, Keysym, xkb};
 use smithay::input::pointer::{
@@ -491,7 +491,7 @@ impl State {
         pointer.frame(self);
         // A click outside an open menu is what dismisses it (Smithay's
         // `PopupPointerGrab` does that inside the call above), and it leaves
-        // the keyboard on the popup's root rather than wherever flexwm's own
+        // the keyboard on the popup's root rather than wherever scoot's own
         // policy would put it. Settling here rather than waiting for the
         // client's follow-up traffic keeps the two in step within the same
         // event. One `Option` check when no menu is open.
@@ -522,7 +522,7 @@ impl State {
     /// modifiers held are the ones `combo` lists. A name this layout only
     /// carries further up (`exclam`, `at`, `A`) is refused rather than
     /// pressed, because the key carrying it types a *different* character
-    /// when pressed bare -- `flexwm msg key exclam` typed `1` for as long as
+    /// when pressed bare -- `scoot msg key exclam` typed `1` for as long as
     /// it resolved names the way Smithay's `keycode_for_keysym` does, which
     /// takes the lowest keycode carrying a keysym at any level. Working out
     /// which modifiers a character needs is [`State::type_text`]'s job; this
@@ -889,7 +889,7 @@ impl State {
     /// an absorbed one, and neither can `pressed_keys()` (it clones a
     /// `HashSet` per call, which this path must not do). Both absorbed cases
     /// are reachable here: a lone release arrives under `--nested` when a
-    /// modifier was held as the pointer entered flexwm's window
+    /// modifier was held as the pointer entered scoot's window
     /// (`nested_dispatch` forwards keys but not `enter`'s held-key array), and
     /// under `--tty` when a press lands while the session is paused.
     ///

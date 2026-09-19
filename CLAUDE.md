@@ -1,15 +1,15 @@
-# flexwm — project instructions
+# scoot — project instructions
 
 ## Vision and fixed decisions
 
-flexwm is a Rust/Smithay Wayland compositor meant to be incredibly
+scoot is a Rust/Smithay Wayland compositor meant to be incredibly
 lightweight, fast and beautiful; niri-like (scrolling columns); with full IPC
 so an agent can do simple computer use in a VM; and able to run without a GPU
 so it works inside linuxserver webtop (nested in pixelflux's Smithay
 compositor via `/defaults/startwm.sh`). Later it should also drive macOS
 window layout OmniWM-style through the Accessibility API.
 
-- **Computer use is a major goal, not *the* goal — flexwm also has to be real
+- **Computer use is a major goal, not *the* goal — scoot also has to be real
   enough to daily-drive.** (User statement 2026-09-12, correcting an
   earlier, too-absolute framing: computer use is "the whole mission for a
   part of things," not the entire mission.) Two priorities coexist when
@@ -20,11 +20,11 @@ window layout OmniWM-style through the Accessibility API.
   This governs *which feature* to pick up next, not how carefully to build it
   — the engineering priority order below still stands per change.
 - **Daily-drivability includes not putting the user's own setup at risk.**
-  Trying flexwm on real hardware (vs. the disposable dev VM) needs an
+  Trying scoot on real hardware (vs. the disposable dev VM) needs an
   explicit, low-risk path — `--nested` inside an existing session first, a
   real `--tty` session reachable by a VT switch back to whatever the user
   normally runs — never something that could strand them out of their own
-  desktop. Treat any request to deploy flexwm onto a user's real, primary
+  desktop. Treat any request to deploy scoot onto a user's real, primary
   machine as consequential and hard to reverse: require explicit confirmation,
   scoped to what was actually asked.
 - **License: MIT.** niri (GPL-3.0) and OmniWM (GPL-2.0-only) may inspire
@@ -34,7 +34,7 @@ window layout OmniWM-style through the Accessibility API.
   (dumb buffers + pixman).** pixman is the default renderer; GL/GPU is an
   optional later tier, not a replacement — GPU-free operation is a hard
   requirement for webtop/no-GPU boxes, not something a GPU path supersedes.
-- **`flexwm-core` stays platform-independent** (events and actions in,
+- **`scoot-core` stays platform-independent** (events and actions in,
   arrangement out; no Wayland, no I/O). A future macOS Accessibility-API
   adapter depends on this. Don't touch it without a measured reason once it's
   fuzz-tested and reviewed clean.
@@ -47,15 +47,15 @@ window layout OmniWM-style through the Accessibility API.
   protocol the way X11 did — whatever composites client surfaces also arranges
   them, so there is no standalone Wayland window-manager process. Matches how
   niri/sway/Hyprland self-describe ("compositor" first, "tiling window
-  manager" as the behavior description). Exception: `flexwm-core`'s crate
+  manager" as the behavior description). Exception: `scoot-core`'s crate
   description really is just "window management state and layout" — it has no
   compositor concerns (no Wayland, no I/O), so that wording is accurate and
   should not change to match this rule.
 - **Where a Wayland protocol standard exists (emerging or established),
   implement that rather than a bespoke alternative, unless there's a concrete
   reason it doesn't fit.** E.g. `ext-workspace-v1` over the older one-off wlr
-  workspace protocols. This is also why `flexwm-ipc`'s protocol is scoped to
-  what genuinely needs to be flexwm-specific (agent-driven input injection,
+  workspace protocols. This is also why `scoot-ipc`'s protocol is scoped to
+  what genuinely needs to be scoot-specific (agent-driven input injection,
   screenshots, window/action queries) rather than reinventing something a
   standard protocol already covers for external tools like bars — see the
   protocol inventory in `docs/backlog/protocols/`.
@@ -96,11 +96,11 @@ the same PR a feature lands, not later** — and more than the Status/Running
 sections: every new/changed config option, default keybinding, CLI flag, or
 IPC request/action a user or integrating agent would need to know. This
 project let the config file and keybinding reference go stale across several
-merged PRs before anyone noticed; `flexwm-implementer` and `flexwm-reviewer`
+merged PRs before anyone noticed; `scoot-implementer` and `scoot-reviewer`
 both call this out explicitly so it doesn't recur.
 
 **Independent review is mandatory, and it's a real gate, not a formality.**
-Use the `flexwm-reviewer` subagent (`.claude/agents/flexwm-reviewer.md`) — or,
+Use the `scoot-reviewer` subagent (`.claude/agents/scoot-reviewer.md`) — or,
 if it doesn't exist in this checkout, an equivalently-instructed pass —
 before any merge. The bar is stellar, principal-level-engineer code. A
 subagent's "tests pass" self-report is a claim to independently re-derive,
@@ -118,7 +118,7 @@ and only shows from reading what a field means across every site touching it.
 ask.** (User, 2026-09-12, after several PRs of check-ins: "Yes. For the last
 time. You get to be the final gate after reviewing the review agent's
 diagnosis." This supersedes any earlier "ask every time" framing.) The
-coordinating session is the final gate: once `flexwm-reviewer` (or an
+coordinating session is the final gate: once `scoot-reviewer` (or an
 equivalently rigorous pass) has reported back and the session has actually
 read and weighed its diagnosis — not just seen "no blocking findings" and
 moved on — merge without asking again. `gh pr merge` is unblocked mechanically
@@ -150,8 +150,8 @@ when the user is likely on mobile, and ask them to verify the result (e.g.
 ## Verification and evidence (avoiding redundant hardware work)
 
 The standard verification set for any compositor change: `cargo test -p
-flexwm`, `cargo nextest run --workspace`, `cargo clippy -p flexwm
---all-targets -- -D warnings`, `cargo fmt --check -p flexwm`, and
+scoot`, `cargo nextest run --workspace`, `cargo clippy -p scoot
+--all-targets -- -D warnings`, `cargo fmt --check -p scoot`, and
 `scripts/smoke-test.sh` (backend-agnostic IPC-driven end-to-end test; set
 `MODE=--nested` to run under a host compositor, and real `--tty` hardware
 needs the binary launched there — see the script's header).
@@ -201,13 +201,13 @@ durable belongs in `CLAUDE.md` or `ROADMAP.md`/`docs/`, not duplicated here.
 
 ## Process notes
 
-- Three agent roles live in `.claude/agents/`: `flexwm-orchestrator.md` (the
+- Three agent roles live in `.claude/agents/`: `scoot-orchestrator.md` (the
   coordinating session's role — delegate, gate on review, merge, repeat),
-  `flexwm-implementer.md` (implements one item per invocation, full cycle,
-  never merges), `flexwm-reviewer.md` (independent review gate, never edits or
+  `scoot-implementer.md` (implements one item per invocation, full cycle,
+  never merges), `scoot-reviewer.md` (independent review gate, never edits or
   merges). Read the relevant one before acting in that role.
 - Delegate implementation to a **fresh, non-fork subagent**
-  (`flexwm-implementer`, or general-purpose if it doesn't fit) to keep the
+  (`scoot-implementer`, or general-purpose if it doesn't fit) to keep the
   coordinating session's context lean. A `subagent_type: fork` inherits and
   re-sends the entire growing transcript every time it's spawned — fine
   occasionally, but it compounds across a long session; reserve fork for cases
@@ -217,7 +217,7 @@ durable belongs in `CLAUDE.md` or `ROADMAP.md`/`docs/`, not duplicated here.
 - An agent that returns near-instantly with zero tool calls and just restates
   the task has not done the work — resume it with an explicit instruction to
   use its tools; don't accept the report.
-- Both dev VMs (linux-builder on `:31022`, the flexwm dev VM on
+- Both dev VMs (linux-builder on `:31022`, the scoot dev VM on
   `ssh -p 2222 dev@localhost`) may already be running — check (`nc -z localhost
   31022` / `nc -z localhost 2222`) before starting either. See `vm/README.md`
   for setup, boot, and troubleshooting, including the `NIX_SSL_CERT_FILE` and
@@ -227,9 +227,9 @@ durable belongs in `CLAUDE.md` or `ROADMAP.md`/`docs/`, not duplicated here.
   ownership of its lifecycle. (Exception: if the user asks directly, be
   explicit that doing so makes the VM a child of that session's process tree.)
 - **Never run branch-mutating git commands (`checkout`, `commit`, etc.) in the
-  shared main checkout (`/Users/steveyackey/code/flexwm`) while a background
+  shared main checkout (`/Users/steveyackey/code/scoot`) while a background
   implementer might still be active there.** Implementers are told to work
-  directly in that checkout, not a worktree (see `flexwm-implementer.md` — the
+  directly in that checkout, not a worktree (see `scoot-implementer.md` — the
   dev VM's 9p mount points at that exact directory, unreachable from a
   worktree elsewhere without a manual copy-over). A background agent's own
   `git checkout -b` can silently switch the branch a concurrent orchestrator
@@ -243,7 +243,7 @@ durable belongs in `CLAUDE.md` or `ROADMAP.md`/`docs/`, not duplicated here.
   /tmp/<name> <branch>` and remove it after pushing. Skip the worktree only
   once no implementer is active.
 - **The same collision can happen between two implementers, not just the
-  orchestrator and one — this also happened once.** Two `flexwm-implementer`
+  orchestrator and one — this also happened once.** Two `scoot-implementer`
   agents were dispatched close together, reasoned safe because their file sets
   didn't overlap (one touched `session_lock.rs`/`headless.rs`/`shell.rs`, the
   other `tty/mod.rs`/`cli.rs`) — but file-level non-overlap doesn't prevent

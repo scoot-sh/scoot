@@ -23,7 +23,7 @@ use std::os::unix::net::UnixStream;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use flexwm_core::Config;
+use scoot_core::Config;
 use smithay::output::{Output, PhysicalProperties, Subpixel};
 use smithay::reexports::calloop::EventLoop;
 use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
@@ -200,7 +200,7 @@ fn new_output(name: &str) -> Output {
         PhysicalProperties {
             size: (0, 0).into(),
             subpixel: Subpixel::Unknown,
-            make: "flexwm".into(),
+            make: "scoot".into(),
             model: name.into(),
             serial_number: "0".into(),
         },

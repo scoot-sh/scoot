@@ -1,6 +1,6 @@
-//! Host-side `wl_shm` buffers: the small double-buffer flexwm presents
+//! Host-side `wl_shm` buffers: the small double-buffer scoot presents
 //! through. Two buffers so the host can still be compositing one while
-//! flexwm writes the next -- writing into one the host hasn't released yet
+//! scoot writes the next -- writing into one the host hasn't released yet
 //! would tear or show garbage.
 
 use std::error::Error;
@@ -135,7 +135,7 @@ struct MappedMem {
 
 impl MappedMem {
     fn new(len: usize) -> Result<Self, Box<dyn Error>> {
-        let fd = rustix::fs::memfd_create("flexwm-nested", rustix::fs::MemfdFlags::CLOEXEC)?;
+        let fd = rustix::fs::memfd_create("scoot-nested", rustix::fs::MemfdFlags::CLOEXEC)?;
         rustix::fs::ftruncate(&fd, len as u64)?;
         // Safety: `fd` was just created and truncated to exactly `len` bytes
         // above, and nothing else holds a mapping of it yet -- this is a

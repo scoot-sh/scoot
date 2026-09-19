@@ -542,7 +542,7 @@ fn solid_buffer(
 ) -> Result<wl_buffer::WlBuffer, String> {
     let stride = SURFACE * 4;
     let len = (stride * SURFACE) as usize;
-    let fd = rustix::fs::memfd_create("flexwm-tablet-test", rustix::fs::MemfdFlags::CLOEXEC)
+    let fd = rustix::fs::memfd_create("scoot-tablet-test", rustix::fs::MemfdFlags::CLOEXEC)
         .map_err(|e| e.to_string())?;
     let mut file = std::fs::File::from(fd);
     file.write_all(&vec![0xffu8; len])

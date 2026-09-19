@@ -8,7 +8,7 @@
 use std::os::unix::net::UnixStream;
 use std::time::{Duration, Instant};
 
-use flexwm_ipc::{Request, Response, decode, encode};
+use scoot_ipc::{Request, Response, decode, encode};
 use smithay::reexports::calloop;
 use smithay::reexports::calloop::generic::Generic;
 use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
@@ -101,12 +101,12 @@ pub(super) const WRITE_STALL_TIMEOUT: Duration = Duration::from_secs(10);
 /// - **Which now costs every other client, not just fds.** 64 waiters parked
 ///   with a huge `timeout_ms` by a client that then exits hold the whole
 ///   connection table for the rest of the session: the bar, the notifier and
-///   every `flexwm msg` are refused, with no living process to blame and
+///   every `scoot msg` are refused, with no living process to blame and
 ///   nothing to do about it short of restarting the compositor. (They also
 ///   keep `pending_idle` non-empty, which pins the frame timer at its full
 ///   rate -- see `headless::ensure_ticking`.)
 ///
-/// A minute is twelve times the client's own default (`flexwm msg wait-idle`
+/// A minute is twelve times the client's own default (`scoot msg wait-idle`
 /// asks for 5s) and far past what the request is for: waiting for a screen to
 /// settle after an injected keystroke or a spawn is hundreds of milliseconds,
 /// and a cold Electron or JVM start -- the longest thing anything here waits
@@ -649,7 +649,7 @@ impl Connection {
         // "refused rather than delayed" shape the screenshot rate limit
         // already has, and for the same reason: this runs on the event-loop
         // thread, where waiting would stall every other client in order to
-        // keep one. `flexwm msg` sends one request per connection and never
+        // keep one. `scoot msg` sends one request per connection and never
         // meets this. Screenshots themselves are exempt: they have their own
         // checks below (the rate limit first, so its message is unchanged).
         let screenshot = matches!(request, Request::Screenshot { .. });

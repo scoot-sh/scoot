@@ -18,7 +18,7 @@ use super::*;
 /// A bound, non-blocking listener in a temp dir, with the dir kept alive.
 fn bound() -> (tempfile::TempDir, UnixListener) {
     let dir = tempfile::tempdir().expect("a temp dir");
-    let path = dir.path().join("flexwm.sock");
+    let path = dir.path().join("scoot.sock");
     let socket = listener::bind(&path).expect("binds");
     (dir, socket)
 }
@@ -111,7 +111,7 @@ fn an_idle_listener_ends_cleanly_without_taking_anything() {
 #[test]
 fn pending_connections_are_served_then_the_loop_ends() {
     let (dir, socket) = bound();
-    let path = dir.path().join("flexwm.sock");
+    let path = dir.path().join("scoot.sock");
     let _first = connect(&path);
     let _second = connect(&path);
     let spare = Spare::new();
@@ -320,7 +320,7 @@ fn exhausted_child(
 #[test]
 fn an_exhausted_listener_sheds_and_clears_the_backlog() {
     let (dir, socket) = bound();
-    let path = dir.path().join("flexwm.sock");
+    let path = dir.path().join("scoot.sock");
     let first = connect(&path);
     let second = connect(&path);
     // Before forking: the spare costs one fd, and the clients theirs.

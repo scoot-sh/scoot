@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# macOS cannot build Linux derivations, and the flexwm VM image is one. This
+# macOS cannot build Linux derivations, and the scoot VM image is one. This
 # manages the standard nixpkgs Linux builder VM (a small headless NixOS VM that
 # the nix daemon delegates aarch64-linux builds to).
 #

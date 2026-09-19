@@ -4,7 +4,7 @@
 use std::collections::VecDeque;
 use std::io::{Cursor, Read};
 
-use flexwm_ipc::{Request, decode, encode};
+use scoot_ipc::{Request, decode, encode};
 
 use super::*;
 

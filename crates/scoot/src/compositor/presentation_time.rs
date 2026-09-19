@@ -3,10 +3,10 @@
 //!
 //! Smithay carries the whole protocol at the pinned rev (`PresentationState`
 //! under `src/wayland/presentation/mod.rs` -- verified in source, not
-//! assumed), so flexwm's side is the PR #88/#89 shape: one hold-alive field
+//! assumed), so scoot's side is the PR #88/#89 shape: one hold-alive field
 //! on [`State`](super::State::new), no hand-rolled handler, no Smithay patch.
 //! The blanket `Dispatch` in `dispatch.rs` forwards everything to Smithay's
-//! own `Dispatch2` impls, so that file is untouched. What flexwm owns is the
+//! own `Dispatch2` impls, so that file is untouched. What scoot owns is the
 //! per-frame half Smithay leaves to the compositor: taking each presented
 //! surface's committed feedback and marking it presented with a timestamp
 //! that means something on the backend that showed it.
@@ -90,14 +90,14 @@
 //!   early-out: Smithay exposes no "any feedback pending" query cheaper
 //!   than the walk itself (`PresentationFeedbackCachedState` is per-surface
 //!   double-buffered state, reachable only through per-surface `with_states`
-//!   -- pinned-rev `src/wayland/presentation/mod.rs`), and a flexwm-side
+//!   -- pinned-rev `src/wayland/presentation/mod.rs`), and a scoot-side
 //!   skip would cost its own bookkeeping to save nothing measurable.
 //!   Nothing at all runs on frames that present nothing.
 //!
 //! ## Trust model
 //!
 //! No client filter, the same deliberate consistency as every other
-//! advertisement here: flexwm has no security-context support, so an
+//! advertisement here: scoot has no security-context support, so an
 //! allow-list would be theatre (see `README.md`'s trust note). Feedback only
 //! ever describes when the requesting client's own committed content was
 //! shown -- it discloses no other client's pixels, input, or timing.
@@ -181,7 +181,7 @@ impl State {
             );
         }
         // The output mode's own refresh, like anvil's `winit` backend at the
-        // pinned rev (`1_000 / refresh_mHz` seconds): the mode flexwm reports
+        // pinned rev (`1_000 / refresh_mHz` seconds): the mode scoot reports
         // is fixed at 60 Hz on every backend, so this is `Fixed`, never
         // `Variable` -- and `Unknown` (a zero refresh on the wire) when the
         // output has no mode at all rather than a number invented here.

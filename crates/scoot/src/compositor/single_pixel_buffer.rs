@@ -8,7 +8,7 @@
 //! `buffer_type`), and `WaylandSurfaceRenderElement::from_state` turns one
 //! into a `SolidColor` element without ever touching the texture import --
 //! which the pixman backend draws with `draw_solid`. So a 1x1 buffer
-//! composited here renders sanely with no flexwm-side import or blit path
+//! composited here renders sanely with no scoot-side import or blit path
 //! of its own.
 //!
 //! ## Edge cases, stated rather than re-derived
@@ -50,7 +50,7 @@
 //! ## Trust model
 //!
 //! No client filter, the same deliberate consistency as every other
-//! advertisement here: flexwm has no security-context support, so an
+//! advertisement here: scoot has no security-context support, so an
 //! allow-list would be theatre (see `README.md`'s trust note). This global
 //! hands out solid colors, not pixels, so it extends that note rather than
 //! widening it.

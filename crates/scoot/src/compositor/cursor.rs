@@ -289,7 +289,7 @@ impl Cursor {
     /// applies) and writes the hotspot only from `set_cursor` -- nothing in
     /// core adjusts it. Smithay's own `anvil` does this same decrement in
     /// its shell commit hook (`anvil/src/shell/mod.rs`, "decrementing
-    /// cursor hotspot"); this is that hook for flexwm, called from
+    /// cursor hotspot"); this is that hook for scoot, called from
     /// `CompositorHandler::commit`, which also already requests the redraw
     /// the moved hotspot needs.
     ///

@@ -22,7 +22,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use flexwm_core::{Arrangement, Config, OutputId};
+use scoot_core::{Arrangement, Config, OutputId};
 use smithay::reexports::calloop::EventLoop;
 use smithay::reexports::wayland_server::Display;
 use wayland_client::protocol::{wl_compositor, wl_registry, wl_surface};
@@ -204,7 +204,7 @@ impl Dispatch<xdg_wm_base::XdgWmBase, ()> for TestClient {
         _: &Connection,
         _: &QueueHandle<Self>,
     ) {
-        // Nothing in flexwm pings today, but a client that ignores one is a
+        // Nothing in scoot pings today, but a client that ignores one is a
         // client that can be killed for it.
         if let xdg_wm_base::Event::Ping { serial } = event {
             wm_base.pong(serial);

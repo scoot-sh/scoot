@@ -46,7 +46,7 @@ use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use flexwm_core::Config;
+use scoot_core::Config;
 use smithay::backend::allocator::Fourcc;
 use smithay::backend::renderer::{Bind, ExportMem};
 use smithay::reexports::calloop::EventLoop;

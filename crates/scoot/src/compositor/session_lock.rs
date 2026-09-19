@@ -27,7 +27,7 @@
 //! **That claim is about this module's own state, and does not extend to
 //! Smithay's.** An earlier version of this doc said there was "no second
 //! boolean that could disagree", full stop; there is one, it just is not
-//! flexwm's. Smithay keeps a `LockStatus` (`Unlocked` / `Locked(lock)` /
+//! scoot's. Smithay keeps a `LockStatus` (`Unlocked` / `Locked(lock)` /
 //! `Defunct`) inside the [`SessionLockManagerState`] held by
 //! [`SessionLock::manager`], and it has *different timing on purpose*: it
 //! becomes `Locked` only when [`SessionLocker::lock`] runs -- i.e. when the
@@ -109,7 +109,7 @@
 //!
 //! The honest consequence, which `README.md` states too: while a lock is
 //! abandoned, any client that can reach this compositor's wayland socket can
-//! take it over and unlock. That is the same-uid trust boundary flexwm's IPC
+//! take it over and unlock. That is the same-uid trust boundary scoot's IPC
 //! socket already has, and it is the price of having a recovery path at all.
 //!
 //! One more way to reach the same state, legally and without dying: a client
@@ -1184,9 +1184,9 @@ impl State {
     ///   `WaylandDndGrabHandler` at a client's own request. It ends only when
     ///   the drag does, and while it lasts it routes pointer events through
     ///   `DnDGrab` rather than through focus at all.
-    /// - **The implicit click grab**, which is not flexwm's code but is
+    /// - **The implicit click grab**, which is not scoot's code but is
     ///   nonetheless installed on *every* button press: Smithay's
-    ///   `DefaultGrab::button` calls `SeatHandler::click_grab` (flexwm takes
+    ///   `DefaultGrab::button` calls `SeatHandler::click_grab` (scoot takes
     ///   the default `ClickGrab`) and sets it. It releases itself once every
     ///   button is up -- so this only ever finds one with a button still
     ///   held, which is exactly the case that must not survive a lock
@@ -1283,7 +1283,7 @@ impl State {
     /// client for it.
     ///
     /// Called from `dispatch.rs`'s blanket request impl *before* the commit
-    /// is delegated -- the only seam flexwm owns ahead of Smithay's
+    /// is delegated -- the only seam scoot owns ahead of Smithay's
     /// pre-commit hooks, which is where the kill happens. The commit itself
     /// is still delegated afterwards, so frame callbacks, buffer release and
     /// damage all flow exactly as they would have.

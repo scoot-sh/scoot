@@ -2,7 +2,7 @@
 //!
 //! # Why this exists, and why it is not a license problem
 //!
-//! `cursor/shapes.rs` draws ten shapes because flexwm may not *ship* a cursor
+//! `cursor/shapes.rs` draws ten shapes because scoot may not *ship* a cursor
 //! theme: niri's assets are GPL and Adwaita's are not MIT-clean, so there is
 //! nothing this repository is allowed to carry. That constraint is about
 //! **shipping an asset**, and it was wrongly read as blocking per-shape
@@ -11,7 +11,7 @@
 //!
 //! **Reading the theme already installed on the user's own machine is a
 //! different thing entirely, and carries no license obligation for this
-//! project**: the file belongs to whoever installed it, flexwm neither
+//! project**: the file belongs to whoever installed it, scoot neither
 //! redistributes nor derives from it, and this is precisely what sway, niri,
 //! Hyprland and Smithay's own `anvil` do (`anvil/src/cursor.rs`). The parsing
 //! is the MIT-licensed `xcursor` crate; nothing is vendored.
@@ -19,13 +19,13 @@
 //! So this module is the primary source of cursor pixels for a named shape,
 //! and `shapes.rs` is the fallback when there is no theme to read — which is
 //! not a hypothetical: a linuxserver webtop or any minimal container is a
-//! first-class flexwm target and frequently has no icon theme installed at
+//! first-class scoot target and frequently has no icon theme installed at
 //! all.
 //!
 //! # Why this matters more since `wp-cursor-shape-v1`
 //!
 //! Before that protocol, a client that wanted a real I-beam loaded its own
-//! theme and uploaded a surface, and flexwm drew the client's pixels
+//! theme and uploaded a surface, and scoot drew the client's pixels
 //! (`CursorImageStatus::Surface`). Advertising cursor-shape makes modern
 //! toolkits (GTK4, and `foot`) *stop* doing that and name a shape instead —
 //! so without this module, turning the protocol on would have **replaced a
@@ -246,7 +246,7 @@ fn lookup(theme: &xcursor::CursorTheme, icon: CursorIcon) -> Option<PathBuf> {
 ///
 /// A file carries several nominal sizes, and each size may carry several
 /// *frames* of an animation. This picks the size closest to the one asked for
-/// and then that size's first frame: flexwm does not drive cursor animation
+/// and then that size's first frame: scoot does not drive cursor animation
 /// (there is no per-frame timer feeding the cursor, and adding one to spin a
 /// busy pointer is not worth a wakeup on an otherwise idle screen), so an
 /// animated cursor shows its first frame rather than nothing.

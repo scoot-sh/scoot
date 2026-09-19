@@ -6,13 +6,13 @@
 //! same ones the rest of the compositor dispatches). The shape follows
 //! Smithay's own `wlr_data_control` manager: a `GlobalData` created once in
 //! [`GammaControlState::new`], a per-bound-manager `UserData`, and
-//! `Dispatch2`/`GlobalDispatch2` impls that flexwm's blanket `Dispatch` (see
+//! `Dispatch2`/`GlobalDispatch2` impls that scoot's blanket `Dispatch` (see
 //! `dispatch.rs`) forwards to with no per-interface code of its own.
 //!
 //! ## Trust model
 //!
 //! The global is visible to every client (`can_view` is unconditional).
-//! flexwm has no security-context support to distinguish a privileged
+//! scoot has no security-context support to distinguish a privileged
 //! night-light daemon from any other client, so an allow-list would be
 //! theatre -- the same rationale as the session-lock global, documented in
 //! `README.md`'s trust note.
@@ -81,7 +81,7 @@ mod tests;
 pub(super) const FALLBACK_GAMMA_SIZE: u32 = 256;
 
 /// Holds the `zwlr_gamma_control_manager_v1` global alive and tracks the one
-/// live control. flexwm has exactly one output, so "at most one live control
+/// live control. scoot has exactly one output, so "at most one live control
 /// per output" is a single [`Option`]: a second `get_gamma_control` fails the
 /// old control and takes its place.
 pub(crate) struct GammaControlState {
@@ -265,7 +265,7 @@ impl Dispatch2<ZwlrGammaControlV1, State> for GammaControlUserData {
 /// Creates the per-output control for `get_gamma_control`.
 ///
 /// Always initializes `id` and always answers on the new object -- `gamma_size`
-/// for flexwm's own output, `failed` for anything else (an output that went
+/// for scoot's own output, `failed` for anything else (an output that went
 /// away, or a request that arrived before `headless::init` created the one
 /// output there is). Initializing-then-failing, rather than posting a protocol
 /// error without initializing, keeps this on the protocol's own rails: the

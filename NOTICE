@@ -1,5 +1,5 @@
-flexwm includes no third-party source files, but parts of the Wayland
-compositor in crates/flexwm/src/compositor follow the structure of
+scoot includes no third-party source files, but parts of the Wayland
+compositor in crates/scoot/src/compositor follow the structure of
 Smithay's example compositors (smallvil and anvil): the protocol state
 setup, the socket and display wiring, and several handler implementations.
 

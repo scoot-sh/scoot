@@ -7,9 +7,9 @@
 //! The attachment is double-buffered like everything else on a surface: it
 //! becomes current on that surface's next commit.
 //!
-//! # What flexwm does with it
+//! # What scoot does with it
 //!
-//! Stores nothing, and draws nothing. flexwm has no titlebars, no taskbar and
+//! Stores nothing, and draws nothing. scoot has no titlebars, no taskbar and
 //! no window-switcher of its own (see `decorations.rs`), so there is no place
 //! in this compositor an icon would appear. What it is for here is the two
 //! consumers *outside* it: a bar or dock showing a window list, and an agent
@@ -50,7 +50,7 @@ use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::wayland::compositor::with_states;
 use smithay::wayland::xdg_toplevel_icon::{ToplevelIconCachedState, XdgToplevelIconHandler};
 
-use flexwm_core::WindowId;
+use scoot_core::WindowId;
 
 use super::State;
 

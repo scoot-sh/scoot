@@ -129,7 +129,7 @@ impl World {
     ///
     /// Both numbers are read from the same borrow, so they cannot disagree
     /// with each other the way two separate accessors could -- a caller
-    /// publishing them (flexwm's `ext-workspace-v1` support does) would
+    /// publishing them (scoot's `ext-workspace-v1` support does) would
     /// otherwise be able to observe an active index that belongs to a
     /// different count than the one it just read.
     ///

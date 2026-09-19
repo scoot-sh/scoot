@@ -15,7 +15,7 @@ recorded so they don't get lost rather than because any is scheduled:
 - `wp_presentation` (presentation-time) — ~~precise frame-timing
   feedback, mainly useful for smooth video/animation clients.~~ — **DONE**
   (`docs/backlog/resolved/presentation-time-done.md`); Smithay carries the
-  whole protocol at the pinned rev, so flexwm advertises its
+  whole protocol at the pinned rev, so scoot advertises its
   `PresentationState` and stamps each presented frame with this backend's
   handoff time (render-complete on headless, host-commit on nested,
   flip-issue on tty -- see the resolved record for why none of the three is
@@ -28,20 +28,20 @@ recorded so they don't get lost rather than because any is scheduled:
   a solid-color 1x1 buffer without allocating a real one; some toolkits
   use it for cheap fills.~~ — **DONE**
   (`docs/backlog/resolved/single-pixel-buffer-done.md`); Smithay carries
-  the whole protocol at the pinned rev, so flexwm advertises its
+  the whole protocol at the pinned rev, so scoot advertises its
   `SinglePixelBufferState` and renders the buffers as solid fills.
 - `relative-pointer-unstable-v1` — ~~raw, unaccelerated pointer deltas;
   pairs with the `pointer_constraints` support already present, and
   games/3D apps expect both together, not just pointer lock/confinement
   alone.~~ — **DONE**
   (`docs/backlog/resolved/relative-pointer-done.md`); both globals are
-  Smithay's at the pinned rev, so flexwm advertises the two states and
+  Smithay's at the pinned rev, so scoot advertises the two states and
   feeds relative motion from its motion core on every focused move.
   (Two corrections to the entry this replaces: the constraints global was
   not in fact already advertised, and relative events are focus-gated per
   the protocol, not lock-gated -- see the resolved record.)
 - `fractional-scale-v1` — ~~crisp non-integer output scaling. Not
-  urgent while flexwm has exactly one output and no real scale
+  urgent while scoot has exactly one output and no real scale
   configuration story yet, but relevant once multi-output/HiDPI does.~~
   **DONE**, implemented with `[output] scale`
   (`docs/backlog/resolved/output-scaling-done.md`). Its integer companion
@@ -53,7 +53,7 @@ recorded so they don't get lost rather than because any is scheduled:
   `docs/backlog/resolved/ghostty-fails-at-1-5-done.md`.)
 - `text-input-v3`/`input-method-v2` — ~~IME support for non-Latin
   script input, and on-screen keyboards. A real gap for non-US-keyboard
-  daily use; unrelated to item 14's `flexwm msg type`/`msg key` work,
+  daily use; unrelated to item 14's `scoot msg type`/`msg key` work,
   which is about agent-driven synthetic input, not live IME composition
   from a real input method.~~ — **DONE**, both halves implemented together
   with the other three protocols `foot` warned about

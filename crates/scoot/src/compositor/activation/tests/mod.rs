@@ -31,8 +31,8 @@ use std::sync::Arc;
 use std::sync::mpsc::Sender;
 use std::time::Instant;
 
-use flexwm_core::{Event, OutputId, Rect, WindowId};
-use flexwm_ipc::PointerButton;
+use scoot_core::{Event, OutputId, Rect, WindowId};
+use scoot_ipc::PointerButton;
 use smithay::backend::input::KeyState;
 use smithay::input::keyboard::Keycode;
 use smithay::reexports::wayland_server::backend::ClientId;
@@ -62,12 +62,12 @@ const OUTPUT: Rect = Rect::new(0, 0, 1600, 1000);
 
 /// The name [`State::new`] gives the one seat this compositor has, which is
 /// how the test client picks it out of the registry.
-const SEAT: &str = "flexwm";
+const SEAT: &str = "scoot";
 
 /// A second seat [`drive`] advertises, so a token naming a seat this
 /// compositor does not own can be built at all. Inert: no keyboard, no
 /// pointer, and nothing in [`State`] refers to it.
-const OTHER_SEAT: &str = "flexwm-test-other";
+const OTHER_SEAT: &str = "scoot-test-other";
 
 /// The side, in pixels, of the buffer each toplevel paints. Small, and far
 /// smaller than the column the core lays the window out in -- so a test that
@@ -280,7 +280,7 @@ fn solid_buffer(
 ) -> Result<wl_buffer::WlBuffer, String> {
     let stride = SURFACE * 4;
     let len = (stride * SURFACE) as usize;
-    let fd = rustix::fs::memfd_create("flexwm-activation-test", rustix::fs::MemfdFlags::CLOEXEC)
+    let fd = rustix::fs::memfd_create("scoot-activation-test", rustix::fs::MemfdFlags::CLOEXEC)
         .map_err(|e| e.to_string())?;
     let mut file = std::fs::File::from(fd);
     file.write_all(&vec![0xffu8; len])
@@ -468,7 +468,7 @@ fn map_two_and_activate_first(
     }
 
     if activate {
-        mint("flexwm-activation-test");
+        mint("scoot-activation-test");
         queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
         // Sent even for a token the compositor refused: the client cannot
         // tell, so this is what a refused activation really looks like on
@@ -897,7 +897,7 @@ fn a_token_carrying_either_half_of_a_key_press_is_accepted() {
     // Both, because which one a client mints from is its own choice, and
     // `State::press` sends the release before any client could answer the
     // press: a gate that only knew one of them would refuse every token
-    // `flexwm msg key` ever leads to.
+    // `scoot msg key` ever leads to.
     let (mut fixture, run) = drive(false, 0, Claim::RealKeyPress);
     let (ours, _other) = seats(&fixture, &run);
     let (press, release, typed_at) = press_a_key(&mut fixture);
@@ -977,7 +977,7 @@ fn a_token_that_names_no_input_event_is_refused() {
 #[test]
 fn a_token_naming_a_seat_this_compositor_does_not_own_is_refused() {
     // A real serial, on a real seat -- just not the seat that issued it. One
-    // seat is all flexwm has today, so this is the rule holding the line for
+    // seat is all scoot has today, so this is the rule holding the line for
     // a future that has more than one rather than one being enforced daily.
     let (mut fixture, run) = drive(false, 0, Claim::RealKeyPress);
     let (_ours, other) = seats(&fixture, &run);

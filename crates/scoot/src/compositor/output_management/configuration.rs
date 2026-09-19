@@ -1,4 +1,4 @@
-//! The write half of `wlr-output-management-unstable-v1`, which flexwm refuses.
+//! The write half of `wlr-output-management-unstable-v1`, which scoot refuses.
 //!
 //! `zwlr_output_manager_v1.create_configuration` is the protocol's only door
 //! into reconfiguration, so this file is the whole of it: a client may build a
@@ -11,7 +11,7 @@
 //! of the interface, so advertising the manager at all advertises them. What
 //! *is* a choice is the answer.
 //!
-//! - **Not a silent success.** flexwm has exactly one output whose mode,
+//! - **Not a silent success.** scoot has exactly one output whose mode,
 //!   position, scale and transform are fixed for the process (see the parent
 //!   module). A configuration that reported `succeeded` and changed nothing
 //!   would give a shell a Display page whose buttons appear to work -- the
@@ -164,7 +164,7 @@ impl Dispatch2<ZwlrOutputConfigurationHeadV1, State> for ConfigurationHeadData {
             | zwlr_output_configuration_head_v1::Request::SetScale { .. }
             | zwlr_output_configuration_head_v1::Request::SetAdaptiveSync { .. } => {
                 tracing::debug!(
-                    "ignoring an output-configuration property: flexwm refuses every \
+                    "ignoring an output-configuration property: scoot refuses every \
                      output configuration"
                 );
             }

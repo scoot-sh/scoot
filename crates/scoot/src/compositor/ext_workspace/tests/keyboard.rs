@@ -4,7 +4,7 @@
 //! The suspected bug this pins: `commit_workspace_requests` ended in
 //! `act(FocusWorkspaceIndex)` without first clearing `State::clicked_layer`,
 //! so a workspace-switching panel that stayed mapped kept every keystroke
-//! after handing window focus away -- while `flexwm msg windows` named the
+//! after handing window focus away -- while `scoot msg windows` named the
 //! new window. The same shape PR #50 fixed in
 //! `foreign_toplevel_management.rs` and PR #53 fixed in `activation.rs` and
 //! `ipc.rs`. Unlike those paths this one was never proven: it is possible
@@ -35,7 +35,7 @@
 //!   green.
 
 use super::*;
-use flexwm_core::WindowId;
+use scoot_core::WindowId;
 use smithay::desktop::{LayerSurface, Window};
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 
@@ -47,10 +47,10 @@ fn click(fixture: &mut Fixture, x: f64, y: f64) {
     fixture.state.pointer_move(x, y);
     fixture
         .state
-        .pointer_button(flexwm_ipc::PointerButton::Left, true);
+        .pointer_button(scoot_ipc::PointerButton::Left, true);
     fixture
         .state
-        .pointer_button(flexwm_ipc::PointerButton::Left, false);
+        .pointer_button(scoot_ipc::PointerButton::Left, false);
     fixture.settle();
 }
 

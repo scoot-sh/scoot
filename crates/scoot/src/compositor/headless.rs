@@ -6,7 +6,7 @@
 use std::error::Error;
 use std::time::{Duration, Instant};
 
-use flexwm_core::{Event as CoreEvent, OutputId, Rect};
+use scoot_core::{Event as CoreEvent, OutputId, Rect};
 use pixman::Image;
 use smithay::backend::allocator::Fourcc;
 use smithay::backend::renderer::damage::OutputDamageTracker;
@@ -58,7 +58,7 @@ render_elements! {
 
 /// The core's id for the one output this compositor creates.
 ///
-/// Every site that reports output geometry to [`flexwm_core`] uses it, so the
+/// Every site that reports output geometry to [`scoot_core`] uses it, so the
 /// "there is exactly one output" assumption lives in one named place rather
 /// than as a bare `OutputId(1)` repeated at each of them. Multi-output
 /// support replaces this with a real per-output id.
@@ -144,7 +144,7 @@ pub fn init_named(
         PhysicalProperties {
             size: (0, 0).into(),
             subpixel: Subpixel::Unknown,
-            make: "flexwm".into(),
+            make: "scoot".into(),
             model: name.to_owned(),
             serial_number: "0".into(),
         },
@@ -844,7 +844,7 @@ impl State {
     /// actually got there.
     ///
     /// Two callers: `--nested`, when the host's first configure disagrees
-    /// with the size flexwm started at (see `nested::init`), and `--tty`,
+    /// with the size scoot started at (see `nested::init`), and `--tty`,
     /// when a DRM hotplug changes the connector's mode (see
     /// `tty/hotplug.rs`). This function doesn't know `Host` or `Tty` exists
     /// -- it only touches the render target and the core's notion of output
@@ -916,7 +916,7 @@ impl State {
             area: Rect::new(0, 0, logical.0, logical.1),
         });
         // The core re-clamps its old usable area into the new one on
-        // `OutputChanged` (see `flexwm_core`'s `Output::set_area`), which is
+        // `OutputChanged` (see `scoot_core`'s `Output::set_area`), which is
         // the right thing to do with a reservation nobody has re-reported
         // yet -- this is that re-report. It only does anything when the zone
         // actually moved (a bar is mapped, so the new mode leaves a

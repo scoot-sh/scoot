@@ -5,10 +5,10 @@
 //! Both globals are Smithay's at the pinned rev (`RelativePointerManagerState`
 //! under `src/wayland/relative_pointer.rs`, `PointerConstraintsState` under
 //! `src/wayland/pointer_constraints.rs` -- verified in source, not assumed),
-//! so flexwm's side is the PR #88 shape: two hold-alive fields on [`State`]
+//! so scoot's side is the PR #88 shape: two hold-alive fields on [`State`]
 //! (see [`State::new`](super::State::new)), this module's
 //! [`PointerConstraintsHandler`] impl, and the constraint-aware motion core in
-//! `input.rs`. No Smithay patch vendored; everything stays in flexwm's
+//! `input.rs`. No Smithay patch vendored; everything stays in scoot's
 //! handler layer.
 //!
 //! ## Gating: focus, not lock state
@@ -115,7 +115,7 @@
 //! ## Trust model
 //!
 //! No client filter, the same deliberate consistency as every other
-//! advertisement here: flexwm has no security-context support, so an
+//! advertisement here: scoot has no security-context support, so an
 //! allow-list would be theatre (see `README.md`'s trust note). A lock only
 //! ever pins the locking client's own focused surface, and relative deltas
 //! only ever reach the focused client.
@@ -381,7 +381,7 @@ impl State {
     /// and stream nothing, and a lock requested while locked must stay
     /// inactive until unlock engages it.
     ///
-    /// Read-only on flexwm state: the one seat lookup plus one
+    /// Read-only on scoot state: the one seat lookup plus one
     /// constraint-map lookup on a transition that has already decided to
     /// re-derive focus and redraw; nothing on any per-event path.
     pub(super) fn deactivate_pointer_constraint(&self) {

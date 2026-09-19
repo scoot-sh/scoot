@@ -1,8 +1,8 @@
 //! `ext-image-copy-capture-v1` + `ext-image-capture-source-v1`: the screen
 //! capture a shell, a screenshot tool or a screen-share needs.
 //!
-//! This is the protocol side of something flexwm already does for itself.
-//! `flexwm msg screenshot` (see `screenshot.rs`) answers an agent over the
+//! This is the protocol side of something scoot already does for itself.
+//! `scoot msg screenshot` (see `screenshot.rs`) answers an agent over the
 //! privileged, owner-only IPC socket and is unchanged by this module; what had
 //! nothing to consume was the *standard* path -- `grim`, a Quickshell
 //! launcher's window thumbnails, a workspace overview's live preview -- which
@@ -32,7 +32,7 @@
 //!
 //! Two source managers exist in the protocol family: one that makes a capture
 //! source out of a `wl_output`, and one that makes one out of an
-//! `ext_foreign_toplevel_handle_v1`. flexwm publishes **only the output one**.
+//! `ext_foreign_toplevel_handle_v1`. scoot publishes **only the output one**.
 //!
 //! A toplevel source means capturing one window's content in isolation, which
 //! for this compositor means rendering that window's own surface tree into a
@@ -107,7 +107,7 @@
 //! frame objects one client holds**, at [`MAX_FRAMES_PER_CLIENT`], refused
 //! pre-delegation with the protocol's own `duplicate_frame` error (see
 //! `dispatch.rs`'s module doc for why a protocol error and not a silent
-//! ignore). A `create_frame` loop with no `capture` -- which flexwm's
+//! ignore). A `create_frame` loop with no `capture` -- which scoot's
 //! [`Capture::pending`] throttle never sees, since it only runs on `capture`
 //! -- can therefore cost at most sixteen small objects per abusive client,
 //! and each refusal kills only the client that overflowed.
@@ -124,7 +124,7 @@
 //! than a check here: [`State::render`] decides *once per frame* whether it is
 //! drawing the lock screen or the desktop (`headless.rs`'s `locked`), so the
 //! framebuffer this module reads back only ever holds one of the two. It is
-//! the same inheritance `flexwm msg screenshot` already has.
+//! the same inheritance `scoot msg screenshot` already has.
 //!
 //! The one thing reuse does not cover is the window *between* a lock being
 //! accepted and the first blanked frame actually reaching the framebuffer: the
@@ -150,7 +150,7 @@
 //! Honouring the flag would mean a second render of the whole output with the
 //! cursor element dropped, i.e. doubling the cost of the thing this module
 //! spends most of its time on, for a flag whose only effect is on the one
-//! backend that has a pointer to draw. `flexwm msg screenshot` has the same
+//! backend that has a pointer to draw. `scoot msg screenshot` has the same
 //! property today for the same reason.
 //!
 //! `create_pointer_cursor_session` is refused outright (Smithay's default
@@ -163,11 +163,11 @@
 //! `wl_shm` only for *capture*: `BufferConstraints::dma` is always `None`, so
 //! a capture session never offers to write into a client's dma-buf.
 //!
-//! That is a statement about this module, not about the compositor. flexwm
+//! That is a statement about this module, not about the compositor. scoot
 //! does import the dma-bufs a client hands it, straight into the pixman
 //! renderer (see [`dmabuf`](super::dmabuf)): a GL client's window composites
 //! here like any other. Capture is the other direction, and it stays shm
-//! because here flexwm is the one *writing* -- filling a client's dma-buf
+//! because here scoot is the one *writing* -- filling a client's dma-buf
 //! means matching its stride, modifier and sync rules on a path where
 //! `wl_shm` already works everywhere and costs a CPU renderer nothing extra.
 //! If some client ever measurably needs a dma-buf capture, that is its own
@@ -471,7 +471,7 @@ impl Screencopy {
     /// globals.
     ///
     /// No client filter, for the same reason the session-lock, data-control
-    /// and input-method globals have none: flexwm has no security-context
+    /// and input-method globals have none: scoot has no security-context
     /// support, so an allow-list would be theatre (see `README.md`'s trust
     /// note). Worth naming here because screen capture is the most obviously
     /// sensitive of those -- a client that can reach this socket can read the
@@ -576,7 +576,7 @@ impl OutputCaptureSourceHandler for State {
     /// the opaque source object mean anything later.
     ///
     /// A [`WeakOutput`], not an [`Output`]: a source outlives nothing here
-    /// today (flexwm has one output for the process's life), but holding a
+    /// today (scoot has one output for the process's life), but holding a
     /// strong `Output` in a client-owned object's user data would make a
     /// client's lifetime decide the compositor's.
     fn output_source_created(&mut self, source: ImageCaptureSource, output: &Output) {

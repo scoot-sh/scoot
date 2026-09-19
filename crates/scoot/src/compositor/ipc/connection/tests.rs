@@ -30,8 +30,8 @@ use std::os::unix::net::UnixStream;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use flexwm_core::Config;
-use flexwm_ipc::{Request, Response, decode, encode};
+use scoot_core::Config;
+use scoot_ipc::{Request, Response, decode, encode};
 use smithay::reexports::calloop::EventLoop;
 use smithay::reexports::wayland_server::Display;
 
@@ -505,7 +505,7 @@ fn queue_a_wayland_message(harness: &Harness) -> smithay::output::Output {
         smithay::output::PhysicalProperties {
             size: (0, 0).into(),
             subpixel: smithay::output::Subpixel::Unknown,
-            make: "flexwm".into(),
+            make: "scoot".into(),
             model: "flush-probe".into(),
             serial_number: "0".into(),
         },
@@ -526,7 +526,7 @@ fn request_line(request: &Request) -> String {
 fn reply_line_len() -> usize {
     encode(&Response::Version {
         version: env!("CARGO_PKG_VERSION").to_string(),
-        protocol: flexwm_ipc::PROTOCOL_VERSION,
+        protocol: scoot_ipc::PROTOCOL_VERSION,
     })
     .expect("a response encodes")
     .len()
@@ -1087,8 +1087,8 @@ fn the_type_cap_counts_characters_not_bytes() {
 fn a_realistic_few_hundred_character_type_is_unaffected() {
     let mut harness = Harness::new();
     let mut client = harness.connect(None);
-    let text = "git log --oneline -20 -- crates/flexwm/src/compositor/ipc.rs | head -40 && \
-                cargo test -p flexwm --lib compositor::ipc 2>&1 | tail -5; echo done";
+    let text = "git log --oneline -20 -- crates/scoot/src/compositor/ipc.rs | head -40 && \
+                cargo test -p scoot --lib compositor::ipc 2>&1 | tail -5; echo done";
     assert!(text.len() < 300, "the test string drifted from realistic");
     client.send(
         request_line(&Request::Type {
@@ -1925,7 +1925,7 @@ fn a_parked_wait_idle_cannot_hold_its_slot_forever() {
     // it has already left the event loop, so the write-stall deadline cannot
     // reach it either. Uncapped, this connection's slot is gone for the rest
     // of the session -- and 64 of them take the whole control channel with
-    // them, for a bar and a notifier and every `flexwm msg` that had nothing
+    // them, for a bar and a notifier and every `scoot msg` that had nothing
     // to do with it.
     let mut harness = Harness::new();
     let mut client = harness.connect_limited(

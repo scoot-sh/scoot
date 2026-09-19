@@ -74,7 +74,7 @@
 //!   assumed).
 //! - `zwp_linux_buffer_params_v1.create` -- the asynchronous sibling, and it
 //!   claims too. This doc used to say it never would, on the premise that
-//!   flexwm answered every import `failed` and so created no object on that
+//!   scoot answered every import `failed` and so created no object on that
 //!   path: "*If a future renderer ever calls `successful()` on a `create`
 //!   notifier, that path starts creating buffers and must claim here too.*"
 //!   That future is here -- `dmabuf.rs` imports dmabufs into the pixman

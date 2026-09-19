@@ -65,7 +65,7 @@ pub struct WindowSnapshot {
     ///
     /// `None` means the client set no *name*: it may have set none at all, or
     /// have supplied raw pixel buffers instead, which this protocol allows
-    /// and flexwm does not expose (see the compositor's `toplevel_icon.rs`).
+    /// and scoot does not expose (see the compositor's `toplevel_icon.rs`).
     ///
     /// Defaulted rather than required, like `OutputSnapshot::scale` above and
     /// `Response::Ok`'s `locked`, and for the same wire reason: adding a

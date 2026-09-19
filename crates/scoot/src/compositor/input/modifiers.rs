@@ -9,11 +9,11 @@
 //! and *which modifiers* have to be held for that key to reach the level it
 //! sits at.
 //!
-//! flexwm used to answer only the first one -- it asked Smithay's
+//! scoot used to answer only the first one -- it asked Smithay's
 //! `raw_syms_for_key_in_layout`, which is hard-coded to level 0, whether the
 //! keysym needed Shift, and that call can only ever answer "no" for a keysym
 //! that needs *any* modifier (level 0 is by definition the unmodified one).
-//! So `flexwm msg type "AbC"` pressed the right three keys with nothing held
+//! So `scoot msg type "AbC"` pressed the right three keys with nothing held
 //! and delivered `abc`: no error, just quietly the wrong text.
 //!
 //! Everything here works off the keymap alone, never off the live keyboard
@@ -29,7 +29,7 @@
 //!   already. It also settles the question a name table cannot: whether a
 //!   key *holds* its modifier or latches/locks it, which is the difference
 //!   between typing one capital letter and turning Caps Lock on for good.
-//! - [`named_key`] answers the *other* question `flexwm msg key` asks --
+//! - [`named_key`] answers the *other* question `scoot msg key` asks --
 //!   which key types this keysym with nothing held -- and says so plainly
 //!   when the answer is "none", rather than offering a key that types
 //!   something else.
@@ -45,7 +45,7 @@
 //! result is a fixed-size, `Copy` value, so typing a string costs no heap
 //! traffic on the IPC path however long the string is.
 
-use flexwm_ipc::Modifier;
+use scoot_ipc::Modifier;
 use smithay::input::keyboard::{Keycode, Keysym, xkb};
 
 #[cfg(test)]
@@ -87,7 +87,7 @@ pub(super) struct KeyPlan {
 /// [`Untypable::NoKey`] is "this layout has no such character at all" (pick
 /// another layout, or another character), while
 /// [`Untypable::NoModifiers`] is "it's there, but only behind something
-/// flexwm won't press." Both are answers *about the keymap* -- a seat with
+/// scoot won't press." Both are answers *about the keymap* -- a seat with
 /// no keyboard at all is not one of them, and is rejected by
 /// [`super::State::type_text`] before anything here is asked.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -103,7 +103,7 @@ pub(super) enum Untypable {
 /// The modifier keys to hold around one keypress. At most one per real
 /// modifier, so the array is sized by construction and can never overflow:
 /// [`ModifierKeys::hold`] pushes one key per set bit of an eight-bit mask,
-/// and [`super::State::press`] one per distinct [`flexwm_ipc::Modifier`], of
+/// and [`super::State::press`] one per distinct [`scoot_ipc::Modifier`], of
 /// which there are four.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct HeldKeys {
@@ -417,7 +417,7 @@ pub(super) fn named_key(
 ///
 /// Same scan Smithay's own `KeyboardHandle::keycode_for_keysym` does (lowest
 /// keycode that carries the keysym at any level), extended to report *which*
-/// level it found it at -- which is the half flexwm was missing, and the
+/// level it found it at -- which is the half scoot was missing, and the
 /// reason this doesn't just call Smithay's version and then go looking for
 /// the level a second time.
 fn key_for(

@@ -8,7 +8,7 @@
 //! [`Workspaces`] snapshots, exercised directly by the tests below.
 //! `ext_workspace.rs` only executes the list it returns.
 
-use flexwm_core::Workspaces;
+use scoot_core::Workspaces;
 
 #[cfg(test)]
 mod tests;

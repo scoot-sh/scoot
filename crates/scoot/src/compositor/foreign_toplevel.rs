@@ -2,7 +2,7 @@
 //!
 //! `ext-workspace-v1` (see `ext_workspace.rs`) tells a bar which *workspaces*
 //! exist; this one tells it which *windows* do. It is the protocol-side twin
-//! of what `flexwm msg windows` already answers over flexwm's own IPC, for the
+//! of what `scoot msg windows` already answers over scoot's own IPC, for the
 //! clients that have no reason to speak a compositor-specific protocol: a
 //! taskbar's window list, an alt-tab switcher, a dock.
 //!
@@ -14,7 +14,7 @@
 //! exists.
 //!
 //! It is not the only one because measurement said so. Stock `quickshell`
-//! 0.3.1 -- the build both Quickshell shells probed against flexwm (DMS,
+//! 0.3.1 -- the build both Quickshell shells probed against scoot (DMS,
 //! Noctalia) run on -- is offered this global and **never binds it**: its
 //! `ToplevelManager` is a `zwlr_foreign_toplevel_manager_v1` client. So
 //! `foreign_toplevel_management.rs` implements the older wlr protocol
@@ -31,21 +31,21 @@
 //! and nothing else. There is no `activate`, no `close`, no `minimize`, no
 //! geometry and no per-output state -- those live in separate extension
 //! protocols that do not exist yet. So there is nothing here to decide about
-//! control: a client that wants to *act* on a window uses flexwm's IPC
-//! (`flexwm msg action focus-window-id N`), which the identifier below is the
+//! control: a client that wants to *act* on a window uses scoot's IPC
+//! (`scoot msg action focus-window-id N`), which the identifier below is the
 //! bridge to.
 //!
 //! ## The identifier, and why it is shaped like that
 //!
 //! `<generation>-<window id>`, e.g. `3f9c1e07-12`: eight hex digits of
-//! per-session randomness, a dash, and the window's flexwm id in decimal.
+//! per-session randomness, a dash, and the window's scoot id in decimal.
 //!
-//! - The **suffix is the id `flexwm msg windows` reports**, so a tool that
+//! - The **suffix is the id `scoot msg windows` reports**, so a tool that
 //!   enumerates windows through this protocol can then act on one through
 //!   IPC. Since the protocol itself has no control requests, that bridge is
 //!   what makes enumeration actionable at all.
 //! - The **prefix is the "opaque generation value" the protocol recommends**.
-//!   flexwm's window ids restart from 1 in every process, so without it a tool
+//!   scoot's window ids restart from 1 in every process, so without it a tool
 //!   that remembered an identifier across a compositor restart would silently
 //!   match a different window; with it, identifiers from two sessions never
 //!   collide.
@@ -55,13 +55,13 @@
 //!
 //! ## What "a toplevel exists" means here
 //!
-//! The protocol describes handles as standing for *mapped* toplevels. flexwm
+//! The protocol describes handles as standing for *mapped* toplevels. scoot
 //! has no map/unmap boundary to hang that on: a window enters the layout, the
 //! IPC window list and the focus order when its `xdg_toplevel` is created (see
 //! `shell.rs`'s [`State::add_window`]), and a client committing a null buffer
 //! afterwards does not take it back out. So a handle here covers exactly the
-//! lifetime flexwm itself treats as a window's -- creation to destruction --
-//! and the list is always identical to `flexwm msg windows`. The visible
+//! lifetime scoot itself treats as a window's -- creation to destruction --
+//! and the list is always identical to `scoot msg windows`. The visible
 //! consequence is a window appearing in a taskbar a few milliseconds before it
 //! has drawn anything, with the empty title and app id it was created with;
 //! the alternative (inventing a map/unmap notion for this protocol alone)
@@ -70,7 +70,7 @@
 //! ## While the session is locked
 //!
 //! Nothing changes: handles stay, titles keep updating, new windows are still
-//! announced. That matches the IPC side (`flexwm msg windows` "still lists
+//! announced. That matches the IPC side (`scoot msg windows` "still lists
 //! your windows while locked, titles included" -- see `README.md`) and the
 //! trust model the whole compositor already states: a process that can reach
 //! this wayland socket runs as the same user and is inside the boundary
@@ -88,7 +88,7 @@
 //! window to the new list unconditionally -- so there is no place to count the
 //! bind against [`crate::compositor::bind_budget`]'s shared budget, and no
 //! place to refuse it either. The other three globals of that shape are all
-//! flexwm-owned already, so this one is too now: the same global, lifecycle
+//! scoot-owned already, so this one is too now: the same global, lifecycle
 //! and event batching, mirroring `foreign_toplevel_management.rs` (which was
 //! hand-rolled from the start for the same reason -- no Smithay support at
 //! all), minus the control half this protocol does not have.
@@ -106,14 +106,14 @@
 //!
 //! ## The per-bind cost, and who pays it
 //!
-//! One list object plus one handle object per window flexwm currently has,
+//! One list object plus one handle object per window scoot currently has,
 //! each stated and closed by its own `done` -- so a bind is O(windows), and a
 //! window opening is O(bound lists). The budget above is what bounds the
 //! product; see `bind_budget.rs` for the number and the refusal form.
 
 use std::collections::BTreeMap;
 
-use flexwm_core::{WindowId, WindowInfo};
+use scoot_core::{WindowId, WindowInfo};
 use smithay::reexports::wayland_protocols::ext::foreign_toplevel_list::v1::server::{
     ext_foreign_toplevel_handle_v1::{self, ExtForeignToplevelHandleV1},
     ext_foreign_toplevel_list_v1::{self, ExtForeignToplevelListV1},
@@ -154,7 +154,7 @@ pub struct ForeignToplevels {
     /// Entries leave on `stop` (answered with `finished`) and on the object's
     /// destruction, which are the only two ways a subscription ends.
     lists: Vec<ExtForeignToplevelListV1>,
-    /// One entry per window flexwm currently has, keyed the same way
+    /// One entry per window scoot currently has, keyed the same way
     /// [`State::windows`] is, and ordered by window id -- which is creation
     /// order, since ids only increment. That ordering is what makes a fresh
     /// bind announce a session's windows oldest-first rather than in a hash
@@ -178,7 +178,7 @@ impl ForeignToplevels {
     /// Creates the `ext_foreign_toplevel_list_v1` global.
     ///
     /// No client filter, for the same reason the session-lock, data-control
-    /// and input-method globals have none: flexwm has no security-context
+    /// and input-method globals have none: scoot has no security-context
     /// support, so an allow-list would be theatre (see `README.md`'s trust
     /// note). The protocol explicitly leaves this to compositor policy --
     /// and per-client *accounting* (see `bind_budget.rs`) is not a filter.

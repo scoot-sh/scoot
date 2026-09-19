@@ -443,7 +443,7 @@ pub(super) enum Freshness {
     ///
     /// Right at startup, and only there. Two reasons, and the first is the
     /// one that makes it correct rather than merely cheaper: the staleness
-    /// [`Reprobe`](Self::Reprobe) exists for begins the moment flexwm takes
+    /// [`Reprobe`](Self::Reprobe) exists for begins the moment scoot takes
     /// DRM master, which is at `session.open()` -- seatd's own `SET_MASTER`
     /// happens there, *before* [`probe`] runs, not after it (see
     /// `tty/mod.rs`'s comment on that, measured on hardware). Up to that
@@ -465,7 +465,7 @@ pub(super) enum Freshness {
     Cached,
     /// Make the kernel re-probe the connector before answering.
     ///
-    /// The hotplug path, and the reason it works at all. Once flexwm holds
+    /// The hotplug path, and the reason it works at all. Once scoot holds
     /// DRM master, the in-kernel client that would otherwise refresh the
     /// cache stops doing so -- its hotplug handler bails out when a
     /// userspace master is present -- so the cached list stays whatever it

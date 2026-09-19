@@ -38,7 +38,7 @@
 //!   security-context support would be theatre (the same rationale as the
 //!   session-lock and data-control globals -- see `README.md`'s trust
 //!   note).
-//! - **There is no built-in auto-locker.** flexwm provides the protocol;
+//! - **There is no built-in auto-locker.** scoot provides the protocol;
 //!   the policy (which timeout locks, what dims first) belongs to the
 //!   daemon the user runs, the way `swayidle` works everywhere else. No
 //!   config key, no timer of our own.

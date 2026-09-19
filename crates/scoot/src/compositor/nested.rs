@@ -1,11 +1,11 @@
-//! Nesting flexwm inside a host Wayland compositor.
+//! Nesting scoot inside a host Wayland compositor.
 //!
 //! `--nested` presents the exact same pixman-rendered framebuffer
 //! `headless.rs` draws into as one ordinary window in a host session (sway in
 //! the dev VM; in principle any wlroots/wayland compositor), and forwards
 //! that window's real input back into this compositor's own seat. Nothing
-//! about rendering changes -- flexwm is still a Wayland *server* to its own
-//! clients exactly as in `--headless`; this module only adds flexwm as a
+//! about rendering changes -- scoot is still a Wayland *server* to its own
+//! clients exactly as in `--headless`; this module only adds scoot as a
 //! Wayland *client* of a second, outer compositor.
 //!
 //! Host-side protocol object handling (the `wayland_client::Dispatch` impls)
@@ -32,7 +32,7 @@ use wayland_protocols::xdg::shell::client::xdg_wm_base::XdgWmBase as HostWmBase;
 use self::buffers::BufferPool;
 use super::State;
 
-/// The connection presenting flexwm's own framebuffer as a window in a host
+/// The connection presenting scoot's own framebuffer as a window in a host
 /// compositor. Everything host-Wayland-specific lives here and in
 /// `nested_dispatch.rs`; nothing outside this module needs to know any of
 /// these types exist (see `Host::present`'s signature -- raw bytes in,
@@ -57,7 +57,7 @@ pub struct Host {
     keyboard: Option<HostKeyboard>,
     pointer: Option<HostPointer>,
     buffers: BufferPool,
-    /// The size flexwm is currently rendering at, i.e. what `buffers` is
+    /// The size scoot is currently rendering at, i.e. what `buffers` is
     /// sized for. Distinct from the size on the wire in an in-flight
     /// configure that hasn't been acted on yet (v1 only ever acts on the
     /// first one -- see `nested_dispatch`).
@@ -68,7 +68,7 @@ pub struct Host {
     /// its paired `xdg_surface::Configure` (the one carrying the serial to
     /// ack) arrives -- xdg-shell delivers the two separately by design.
     /// `None` means "the host proposed 0x0 (its way of saying 'you choose')
-    /// or hasn't sent one yet"; the size flexwm started with is kept in that
+    /// or hasn't sent one yet"; the size scoot started with is kept in that
     /// case.
     pending_size: Option<(i32, i32)>,
     /// Set when `present()` had a frame ready but no host buffer was free to
@@ -98,8 +98,8 @@ pub fn init(
     let surface = compositor.create_surface(&qh, ());
     let xdg_surface = wm_base.get_xdg_surface(&surface, &qh, ());
     let toplevel = xdg_surface.get_toplevel(&qh, ());
-    toplevel.set_title("flexwm".to_string());
-    toplevel.set_app_id("flexwm".to_string());
+    toplevel.set_title("scoot".to_string());
+    toplevel.set_app_id("scoot".to_string());
     // Nothing attached yet -- xdg-shell requires waiting for the first
     // configure before the first buffer, which is why `commit()` here has no
     // preceding `attach()`. This commit is what makes the host actually send
@@ -252,7 +252,7 @@ impl Host {
         self.configured = true;
     }
 
-    /// The host's proposed size, or the size flexwm is already at if the
+    /// The host's proposed size, or the size scoot is already at if the
     /// host never sent one (0x0, "you choose") -- always returns *some*
     /// size, so callers don't need their own fallback.
     pub(super) fn take_pending_size(&mut self) -> (i32, i32) {

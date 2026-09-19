@@ -51,7 +51,7 @@ impl Config {
     /// safe for -- see [`Self::MAX_GAP`].
     ///
     /// Public because the gap is clamped in two places that must agree:
-    /// here, and `flexwm`'s own config loader, which sizes the focus ring
+    /// here, and `scoot`'s own config loader, which sizes the focus ring
     /// against the gap *before* a [`World`](crate::World) exists to validate
     /// it.
     pub fn clamp_gap(gap: i32) -> i32 {

@@ -1,5 +1,5 @@
 {
-  description = "NixOS dev VM for flexwm, bootable on macOS (QEMU + Hypervisor.framework)";
+  description = "NixOS dev VM for scoot, bootable on macOS (QEMU + Hypervisor.framework)";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
@@ -28,17 +28,17 @@
       # run-vm.sh only decides *where* state lives and what gets shared in;
       # everything else is the generated runner's job.
       runVm = hostPkgs.writeShellApplication {
-        name = "flexwm-vm";
+        name = "scoot-vm";
         runtimeInputs = [ hostPkgs.qemu ];
         text = ''
-          FLEXWM_VM_RUNNER=${nixpkgs.lib.getExe runner}
-          export FLEXWM_VM_RUNNER
+          SCOOT_VM_RUNNER=${nixpkgs.lib.getExe runner}
+          export SCOOT_VM_RUNNER
         ''
         + builtins.readFile ./run-vm.sh;
       };
     in
     {
-      nixosConfigurations.flexwm-vm = nixos;
+      nixosConfigurations.scoot-vm = nixos;
 
       packages.${hostSystem} = {
         default = runVm;
@@ -67,7 +67,7 @@
 
       apps.${hostSystem}.default = {
         type = "app";
-        program = "${runVm}/bin/flexwm-vm";
+        program = "${runVm}/bin/scoot-vm";
       };
     };
 }

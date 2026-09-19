@@ -20,7 +20,7 @@ actionable.
 ## High priority
 
 - [**The dmabuf advertisement killed every GL client**](./resolved/dmabuf-advertised-but-never-imported-done.md)
-  — RESOLVED 2026-09-18, regression from `599be4e` found live: flexwm
+  — RESOLVED 2026-09-18, regression from `599be4e` found live: scoot
   advertised `zwp_linux_dmabuf_v1` but answered every import `failed`, which
   for `create_immed` is a fatal `InvalidWlBuffer`. Mesa took the advertised
   dmabuf path over `wl_shm` and died, so noctalia v5 could not start a
@@ -57,14 +57,14 @@ actionable.
   — RESOLVED 2026-09-16 (PR #47): `ext-foreign-toplevel-list-v1`, the `ext-`
   successor the entry told its reader to check for, so a taskbar or switcher
   can list windows. Enumeration only (the protocol has no control requests);
-  the identifier carries the `flexwm msg windows` id, which is the bridge to
+  the identifier carries the `scoot msg windows` id, which is the bridge to
   acting on a window over IPC. Quickshell binds the wlr protocol and ignores
   this one (measured), which is the entry below.
 - [Quickshell's window list needs `wlr-foreign-toplevel-management-v1`](./resolved/wlr-foreign-toplevel-management-done.md)
   — RESOLVED 2026-09-16 (PR #50): the older protocol implemented alongside
   the `ext-` one, from the same window-lifecycle events. Enumeration
   (title/app id/output), `activate`, `close`, and `activated` as the one
-  state bit flexwm can honestly answer; minimize/maximize/fullscreen are
+  state bit scoot can honestly answer; minimize/maximize/fullscreen are
   accepted and ignored, since the core has no concept of any of them.
   Verified live against the real quickshell: window list, click-to-focus and
   close all work.
@@ -94,7 +94,7 @@ actionable.
   `wlr-output-management-unstable-v1` (no `ext-` successor exists at the
   pinned rev, and Smithay has no helper for either, so the handler layer is
   hand-written against the generated wlr bindings the way `gamma_control.rs`
-  is). One head for flexwm's one output, read from the same `Output` that
+  is). One head for scoot's one output, read from the same `Output` that
   configures `wl_output`.
 - [`wlr-output-management` reconfiguration](./resolved/output-management-reconfiguration-done.md)
   — CLOSED 2026-09-18 as a deliberate refusal (accepted tradeoff, kept as a
@@ -113,7 +113,7 @@ actionable.
   `ext-image-capture-source-v1` for **output** capture, so `grim` and a
   workspace-overview preview work. `wlr-screencopy` deliberately not
   implemented alongside it — measured, both clients that matter speak the
-  `ext-` protocol. flexwm's own IPC screenshot is unchanged.
+  `ext-` protocol. scoot's own IPC screenshot is unchanged.
 - [Screen capture, toplevel half](./resolved/screencopy-toplevel-capture-done.md)
   — CLOSED UNREACHABLE 2026-09-17 by phase-1 probe (no build): stock
   quickshell 0.3.1 routes a `Toplevel` capture source exclusively to
@@ -207,7 +207,7 @@ actionable.
   output management), refused with each global's own `finished`; includes
   re-homing the ext list off Smithay state and an idle-deferred refusal
   (backend panics on in-bind destructor events)
-- [Lock surfaces are per-output; flexwm has one output](./resolved/session-lock-per-output-done.md)
+- [Lock surfaces are per-output; scoot has one output](./resolved/session-lock-per-output-done.md)
   — RESOLVED 2026-09-18 (PR #103, pin + document, no behavior change): the first
   blanked frame on the one output confirms the lock whatever the surface
   count (zero-surface half already pinned), every admitted surface shares
@@ -271,7 +271,7 @@ actionable.
 - [The accept loop swallows `EMFILE` and can spin the event loop](./resolved/accept-loop-emfile-resolved.md) — RESOLVED 2026-09-17 (PR #66): pending connections shed on `EMFILE` instead of spinning the accept loop; originally pre-existing, found reviewing the cap
 - [The connection cap turns one client's leak into everyone's refusal](./resolved/connection-cap-denies-the-same-user-done.md) — CLOSED 2026-09-17 as an accepted tradeoff (no workload has hit it; per-pid sub-cap stays unbuilt as speculative); kept as the landing spot for a future "the bar cannot connect"
 - [A large `msg type` blocks the event loop](./resolved/msg-type-blocks-event-loop-resolved.md) — RESOLVED 2026-09-17: `type` text capped at 16,384 characters per request (sized by measurement; worst case ~75ms), refused naming the limit and the split-workaround, counted in characters not bytes
-- [`flexwm msg` panics when its stdout reader goes away](./resolved/msg-client-broken-pipe-done.md) — RESOLVED 2026-09-17 (PR #62): per-write EPIPE handling at every client-binary stdio site, quiet exit 0; compositor unaffected
+- [`scoot msg` panics when its stdout reader goes away](./resolved/msg-client-broken-pipe-done.md) — RESOLVED 2026-09-17 (PR #62): per-write EPIPE handling at every client-binary stdio site, quiet exit 0; compositor unaffected
 - [IPC focus actions run a full `apply` even when nothing moves](./resolved/focus-action-no-op-fast-path-done.md) — RESOLVED 2026-09-17 (PR #67): already-there focus actions skip `act` and run only the keyboard half, mirroring PR #54; relative steps deliberately left on the full path
 
 ### Input
@@ -362,7 +362,7 @@ actionable.
 - [`wl_surface.offset` moves the cursor hotspot](./resolved/cursor-surface-offset-hotspot-done.md)
   — RESOLVED 2026-09-18: PR #106's NEEDS-UPSTREAM triage re-derived and
   overturned (Smithay's own anvil does the decrement compositor-side, so
-  flexwm can too). `Cursor::note_surface_commit` decrements the hotspot by
+  scoot can too). `Cursor::note_surface_commit` decrements the hotspot by
   this commit's `buffer_delta` (saturating — both operands are
   client-controlled `i32`), gated on the active cursor surface; four
   fail-first harness tests.
@@ -403,8 +403,8 @@ actionable.
   so `cargo build` from source stays open on Intel Macs.
 - [`flake.nix` description drift](./resolved/flake-description-drift-done.md) (nit)
   — RESOLVED 2026-09-18: top-level `description` names both (compositor on
-  Linux, `flexwm msg` client on macOS); `meta.description` is per system
-  (Linux reads `crates/flexwm/Cargo.toml`, Darwin names the client). A fully
+  Linux, `scoot msg` client on macOS); `meta.description` is per system
+  (Linux reads `crates/scoot/Cargo.toml`, Darwin names the client). A fully
   single-sourced fix is loader-impossible (top level must be a syntactic
   attrset, `description` a string literal — both proven live), so the top
   level stays one literal by fiat.
@@ -421,4 +421,4 @@ actionable.
   of duplication.
 
 ### Meta
-- [Rename `flexwm` → `flex`, split out `flexctl`](./meta/rename-flex-family.md) — decided, do this **last** in the burn-down (`flexbar` stays separate, undecided)
+- [Rename `scoot` → `flex`, split out `flexctl`](./meta/rename-flex-family.md) — decided, do this **last** in the burn-down (`flexbar` stays separate, undecided)

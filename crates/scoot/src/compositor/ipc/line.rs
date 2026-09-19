@@ -11,7 +11,7 @@
 //! thread back, instead of the read sitting in `unix_stream_read_generic`
 //! with every other client, wayland dispatch and input waiting behind it.
 //!
-//! The ceiling lives here and not in `flexwm-ipc`'s shared codec on purpose:
+//! The ceiling lives here and not in `scoot-ipc`'s shared codec on purpose:
 //! that codec also reads *responses*, and a `Response::Screenshot` is a
 //! whole base64'd PNG -- legitimately megabytes, and legitimately unbounded
 //! from the client's point of view since the compositor chose the size. A

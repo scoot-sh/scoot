@@ -4,7 +4,7 @@
 //! with no `clicked_layer` clear anywhere on the path, so an agent that
 //! clicked an `on_demand` panel (taking the keyboard), then drove focus with
 //! `focus-window-id` and injected keystrokes, got every keystroke delivered
-//! to the panel instead -- with `flexwm msg windows` reporting the window as
+//! to the panel instead -- with `scoot msg windows` reporting the window as
 //! focused the whole time, so there was nothing to detect the mismatch from.
 //! Unlike an `xdg-activation-v1` launcher, nothing here unmaps itself a
 //! moment later to self-correct, which is why this half is the higher
@@ -26,7 +26,7 @@
 use std::os::fd::AsFd;
 use std::sync::mpsc::{Receiver, Sender};
 
-use flexwm_core::WindowId;
+use scoot_core::WindowId;
 use smithay::desktop::Window;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use wayland_client::protocol::{
@@ -192,7 +192,7 @@ wayland_client::delegate_noop!(TestClient: ignore zwlr_layer_shell_v1::ZwlrLayer
 /// Creates one bare `xdg_toplevel` and acks the configure that comes back.
 ///
 /// Bare, like `foreign_toplevel_management/tests` uses them: what puts a
-/// window in flexwm's model is the toplevel existing, and nothing here clicks
+/// window in scoot's model is the toplevel existing, and nothing here clicks
 /// a window or reads a pixel, so no `wl_shm` is needed for them.
 fn map_window(
     compositor: &wl_compositor::WlCompositor,
@@ -232,7 +232,7 @@ fn solid_buffer(
 ) -> Result<wl_buffer::WlBuffer, String> {
     let stride = width * 4;
     let len = (stride * height) as usize;
-    let fd = rustix::fs::memfd_create("flexwm-ipc-actions-test", rustix::fs::MemfdFlags::CLOEXEC)
+    let fd = rustix::fs::memfd_create("scoot-ipc-actions-test", rustix::fs::MemfdFlags::CLOEXEC)
         .map_err(|e| e.to_string())?;
     let mut file = std::fs::File::from(fd);
     file.write_all(&vec![0xffu8; len])
@@ -273,7 +273,7 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
         &surface,
         None,
         zwlr_layer_shell_v1::Layer::Overlay,
-        "flexwm-ipc-test-taskbar".into(),
+        "scoot-ipc-test-taskbar".into(),
         &qh,
         (),
     );
@@ -332,9 +332,9 @@ impl Fixture {
     fn click(&mut self, x: f64, y: f64) {
         self.state.pointer_move(x, y);
         self.state
-            .pointer_button(flexwm_ipc::PointerButton::Left, true);
+            .pointer_button(scoot_ipc::PointerButton::Left, true);
         self.state
-            .pointer_button(flexwm_ipc::PointerButton::Left, false);
+            .pointer_button(scoot_ipc::PointerButton::Left, false);
         self.settle();
     }
 
@@ -429,17 +429,17 @@ fn focusing_over_ipc_takes_the_keyboard_back_from_a_clicked_taskbar() {
         .find(|id| **id != focused)
         .expect("two windows");
     let covered = [
-        flexwm_ipc::Action::FocusWindowId { id: other.0 },
-        flexwm_ipc::Action::FocusColumn {
-            direction: flexwm_ipc::Horizontal::Left,
+        scoot_ipc::Action::FocusWindowId { id: other.0 },
+        scoot_ipc::Action::FocusColumn {
+            direction: scoot_ipc::Horizontal::Left,
         },
-        flexwm_ipc::Action::FocusWindow {
-            direction: flexwm_ipc::Vertical::Down,
+        scoot_ipc::Action::FocusWindow {
+            direction: scoot_ipc::Vertical::Down,
         },
-        flexwm_ipc::Action::FocusWorkspace {
-            direction: flexwm_ipc::Vertical::Down,
+        scoot_ipc::Action::FocusWorkspace {
+            direction: scoot_ipc::Vertical::Down,
         },
-        flexwm_ipc::Action::FocusWorkspaceIndex { index: 0 },
+        scoot_ipc::Action::FocusWorkspaceIndex { index: 0 },
     ];
     for (n, action) in covered.into_iter().enumerate() {
         fixture.click_taskbar();
@@ -483,10 +483,10 @@ fn already_focused_actions_spend_the_click_without_an_apply() {
         "the Up step below is only a no-op from the first workspace"
     );
     let noop = [
-        flexwm_ipc::Action::FocusWindowId { id: focused.0 },
-        flexwm_ipc::Action::FocusWorkspaceIndex { index: active },
-        flexwm_ipc::Action::FocusWorkspace {
-            direction: flexwm_ipc::Vertical::Up,
+        scoot_ipc::Action::FocusWindowId { id: focused.0 },
+        scoot_ipc::Action::FocusWorkspaceIndex { index: active },
+        scoot_ipc::Action::FocusWorkspace {
+            direction: scoot_ipc::Vertical::Up,
         },
     ];
     for (n, action) in noop.into_iter().enumerate() {
@@ -531,7 +531,7 @@ fn real_focus_moves_over_ipc_still_apply() {
     let response =
         fixture
             .state
-            .handle_request(Request::Action(flexwm_ipc::Action::FocusWindowId {
+            .handle_request(Request::Action(scoot_ipc::Action::FocusWindowId {
                 id: other.0,
             }));
     assert!(
@@ -552,8 +552,8 @@ fn real_focus_moves_over_ipc_still_apply() {
     let response =
         fixture
             .state
-            .handle_request(Request::Action(flexwm_ipc::Action::FocusWorkspace {
-                direction: flexwm_ipc::Vertical::Down,
+            .handle_request(Request::Action(scoot_ipc::Action::FocusWorkspace {
+                direction: scoot_ipc::Vertical::Down,
             }));
     assert!(
         matches!(response, Response::Ok { locked: false }),
@@ -579,7 +579,7 @@ fn real_focus_moves_over_ipc_still_apply() {
     let response =
         fixture
             .state
-            .handle_request(Request::Action(flexwm_ipc::Action::FocusWorkspaceIndex {
+            .handle_request(Request::Action(scoot_ipc::Action::FocusWorkspaceIndex {
                 index: 0,
             }));
     assert!(
@@ -624,7 +624,7 @@ fn unknown_window_id_is_not_a_noop() {
     let response =
         fixture
             .state
-            .handle_request(Request::Action(flexwm_ipc::Action::FocusWindowId {
+            .handle_request(Request::Action(scoot_ipc::Action::FocusWindowId {
                 id: 999,
             }));
     assert!(
@@ -665,7 +665,7 @@ fn out_of_range_workspace_index_is_not_a_noop() {
     let response =
         fixture
             .state
-            .handle_request(Request::Action(flexwm_ipc::Action::FocusWorkspaceIndex {
+            .handle_request(Request::Action(scoot_ipc::Action::FocusWorkspaceIndex {
                 index: 99,
             }));
     assert!(
@@ -700,7 +700,7 @@ fn relative_steps_stay_on_the_full_path() {
         let response =
             fixture
                 .state
-                .handle_request(Request::Action(flexwm_ipc::Action::FocusWindowId {
+                .handle_request(Request::Action(scoot_ipc::Action::FocusWindowId {
                     id: leftmost.0,
                 }));
         assert!(matches!(response, Response::Ok { .. }));
@@ -708,11 +708,11 @@ fn relative_steps_stay_on_the_full_path() {
     assert_eq!(fixture.state.focus, Some(leftmost));
 
     for (n, action) in [
-        flexwm_ipc::Action::FocusColumn {
-            direction: flexwm_ipc::Horizontal::Left,
+        scoot_ipc::Action::FocusColumn {
+            direction: scoot_ipc::Horizontal::Left,
         },
-        flexwm_ipc::Action::FocusWindow {
-            direction: flexwm_ipc::Vertical::Up,
+        scoot_ipc::Action::FocusWindow {
+            direction: scoot_ipc::Vertical::Up,
         },
     ]
     .into_iter()
@@ -749,7 +749,7 @@ fn a_layout_action_over_ipc_leaves_a_clicked_taskbars_keyboard_alone() {
     fixture.click_taskbar();
     let response = fixture
         .state
-        .handle_request(Request::Action(flexwm_ipc::Action::CycleColumnWidth));
+        .handle_request(Request::Action(scoot_ipc::Action::CycleColumnWidth));
     assert!(
         matches!(response, Response::Ok { locked: false }),
         "the layout action was not served"

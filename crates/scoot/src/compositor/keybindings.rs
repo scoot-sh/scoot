@@ -1,4 +1,4 @@
-//! The keyboard-shortcut table: vim motions for direction, Super as flexwm's
+//! The keyboard-shortcut table: vim motions for direction, Super as scoot's
 //! own modifier. Matching is pure and unit-testable -- it takes a keysym and
 //! the modifiers currently held, nothing live -- following the same shape as
 //! `first_free` in `nested/buffers.rs` and `keysym_for_char` in `input.rs`.
@@ -13,7 +13,7 @@
 //! identity plus explicit modifiers is both simpler and how real WM
 //! keybindings (e.g. niri, sway) already work.
 
-use flexwm_core::{Action, Horizontal, Vertical};
+use scoot_core::{Action, Horizontal, Vertical};
 use smithay::input::keyboard::{Keysym, ModifiersState};
 
 /// The modifiers a keybinding can require. Lock states (`caps_lock`,
@@ -63,9 +63,9 @@ const CTRL_ALT: Modifiers = mods(false, false, true, true);
 ///
 /// `Action` is the ordinary case: a window-management action, handled
 /// identically by every backend via `State::act`. `ChangeVt` exists
-/// separately, rather than as another `flexwm_core::Action` variant, because
+/// separately, rather than as another `scoot_core::Action` variant, because
 /// switching kernel virtual terminals is a Linux-session concern with no
-/// meaning outside `--tty` -- `flexwm_core` stays platform-independent on
+/// meaning outside `--tty` -- `scoot_core` stays platform-independent on
 /// purpose (this project's stated future goal is a macOS Accessibility-API
 /// adapter that depends on that). See `tty::init` for where `ChangeVt`
 /// bindings get added to the table, and `State::change_vt` for what handling
@@ -80,7 +80,7 @@ pub enum Bound {
 /// a couple dozen entries at most, checked once per keypress -- a linear
 /// scan is simpler and not measurably slower. `config.rs` builds on this
 /// directly (via `insert`/`extend`) to layer a config file's `[binds]` on
-/// top, using `flexwm_ipc::KeyCombo` to parse the string form.
+/// top, using `scoot_ipc::KeyCombo` to parse the string form.
 #[derive(Debug)]
 pub struct Keybindings(Vec<(Modifiers, Keysym, Bound)>);
 

@@ -1,7 +1,7 @@
 //! `wlr-foreign-toplevel-management-unstable-v1`: the window list a shell's
 //! taskbar reads, and clicks on.
 //!
-//! flexwm publishes its windows through two protocols at once, from the same
+//! scoot publishes its windows through two protocols at once, from the same
 //! three window-lifecycle events. `foreign_toplevel.rs` speaks
 //! `ext-foreign-toplevel-list-v1`, the compositor-agnostic successor
 //! `CLAUDE.md` prefers and the pinned Smithay rev implements; this module
@@ -12,7 +12,7 @@
 //!
 //! Because measurement beat the rule, and only for this one protocol. Stock
 //! `quickshell` 0.3.1 -- the build both DMS and Noctalia run on -- is offered
-//! `ext_foreign_toplevel_list_v1` by flexwm and **never binds it**: its
+//! `ext_foreign_toplevel_list_v1` by scoot and **never binds it**: its
 //! `ToplevelManager` is a `zwlr_foreign_toplevel_manager_v1` client, and with
 //! a real window open it reports `count = 0`. The full measurement, and the
 //! decision to implement the wlr protocol alongside rather than instead of the
@@ -37,17 +37,17 @@
 //!
 //! ## Enumeration and two requests, and nothing invented
 //!
-//! This is a *control* protocol as much as an enumeration one, and flexwm can
+//! This is a *control* protocol as much as an enumeration one, and scoot can
 //! honestly answer only part of it. What it does:
 //!
 //! - **Enumerates** every window with its `title`, `app_id` and the output it
-//!   is on -- the same windows, with the same lifetime, that `flexwm msg
+//!   is on -- the same windows, with the same lifetime, that `scoot msg
 //!   windows` and the `ext-` list report.
 //! - **Answers `activate`** by focusing that window, through the same
 //!   `Action::FocusWindowId` an IPC `focus-window-id` and a click already use.
 //! - **Answers `close`** by asking that window's `xdg_toplevel` to close --
 //!   the same thing the `CloseFocused` action's `Effect::Close` does.
-//! - **Reports one state bit, `activated`**, and reports it from flexwm's real
+//! - **Reports one state bit, `activated`**, and reports it from scoot's real
 //!   window focus, reconciled in [`State::refresh_wlr_activation`] from the
 //!   same `self.focus` that drives `xdg_toplevel`'s own `activated` and the
 //!   focus ring. There is one source of truth for "which window is focused"
@@ -55,7 +55,7 @@
 //!
 //! What it deliberately does not do: `set_maximized`, `set_minimized`,
 //! `set_fullscreen` (and their `unset_` halves) and `set_rectangle` are
-//! accepted and ignored. flexwm's core has no concept of maximized, minimized
+//! accepted and ignored. scoot's core has no concept of maximized, minimized
 //! or fullscreen at all -- deciding what they would *mean* in a
 //! scrolling-column layout is layout design, not wire format, and inventing a
 //! meaning here to fill in a protocol enum is exactly the kind of speculative
@@ -65,13 +65,13 @@
 //!
 //! `set_rectangle` is a minimize-animation hint. wlroots validates it and
 //! posts `invalid_rectangle` for a negative size because it *uses* the
-//! rectangle; flexwm reads nothing from it, so killing a taskbar's connection
+//! rectangle; scoot reads nothing from it, so killing a taskbar's connection
 //! over a number nothing will ever look at would be a worse answer than
 //! ignoring it.
 //!
 //! ## `parent` is never sent, and version 3 is still advertised
 //!
-//! Version 3's one addition is the `parent` event. flexwm's layout has no
+//! Version 3's one addition is the `parent` event. scoot's layout has no
 //! parent/child relation -- every `xdg_toplevel` is an independent entry in a
 //! column, dialogs included -- so there is no parent change to report and the
 //! event never fires. That is the same picture a version 1 or 2 client sees,
@@ -81,7 +81,7 @@
 //! ## What "a toplevel exists" means here
 //!
 //! Exactly what it means for the `ext-` list, and for the same reason
-//! (`foreign_toplevel.rs`'s module doc has the long version): flexwm has no
+//! (`foreign_toplevel.rs`'s module doc has the long version): scoot has no
 //! map/unmap boundary, so a handle covers a window's whole life, from
 //! `xdg_toplevel` creation to destruction. The visible consequence is a window
 //! reaching a taskbar a few milliseconds before it has drawn anything, with
@@ -117,7 +117,7 @@
 
 use std::collections::BTreeMap;
 
-use flexwm_core::{Action, WindowId, WindowInfo};
+use scoot_core::{Action, WindowId, WindowInfo};
 use smithay::desktop::Window;
 use smithay::output::Output;
 use smithay::reexports::wayland_protocols_wlr::foreign_toplevel::v1::server::zwlr_foreign_toplevel_handle_v1::{
@@ -164,7 +164,7 @@ pub struct ForeignToplevelManagement {
     /// Entries leave on `stop` (answered with `finished`) and on the object's
     /// destruction, which are the only two ways a subscription ends.
     managers: Vec<ZwlrForeignToplevelManagerV1>,
-    /// One entry per window flexwm currently has, keyed the same way
+    /// One entry per window scoot currently has, keyed the same way
     /// [`State::windows`](super::State) is, and ordered by window id -- which
     /// is creation order, since ids only increment. That ordering is what
     /// makes a fresh bind announce a session's windows oldest-first rather
@@ -183,12 +183,12 @@ impl ForeignToplevelManagement {
     /// Creates the `zwlr_foreign_toplevel_manager_v1` global.
     ///
     /// No client filter, for the same reason the session-lock, gamma-control
-    /// and data-control globals have none: flexwm has no security-context
+    /// and data-control globals have none: scoot has no security-context
     /// support, so an allow-list would be theatre (see `README.md`'s trust
     /// note). Worth saying plainly that this one has a write half, unlike
     /// `output_management.rs`: any client that can reach this socket can focus
     /// and close windows through it -- which is the same boundary
-    /// `flexwm msg action` already sits on.
+    /// `scoot msg action` already sits on.
     ///
     /// The `GlobalId` is dropped: nothing removes this global for the life of
     /// the process, and dropping the id does not remove it either.
@@ -533,7 +533,7 @@ impl State {
 
     /// Answers `zwlr_foreign_toplevel_handle_v1.activate`: focus that window.
     ///
-    /// The `wl_seat` argument is ignored. flexwm has exactly one seat, created
+    /// The `wl_seat` argument is ignored. scoot has exactly one seat, created
     /// in `State::new` and never replaced, so "which seat" has one answer; the
     /// protocol offers the argument for compositors that have more.
     ///
@@ -606,7 +606,7 @@ impl State {
     /// `Effect::Close` sends, aimed at a named window instead of the focused
     /// one. It does not go through [`State::act`](super::State) because there
     /// is no core action for "close this specific window" -- adding one would
-    /// mean changing `flexwm-core`, which is fuzz-tested and
+    /// mean changing `scoot-core`, which is fuzz-tested and
     /// platform-independent by design, to carry a wire protocol's convenience.
     /// So the one thing `act` would have contributed, its session-lock gate, is
     /// applied here explicitly and for exactly the reason `shell.rs` gives for
@@ -750,7 +750,7 @@ impl Dispatch2<ZwlrForeignToplevelHandleV1, State> for HandleData {
             }
             // Accepted and ignored, on purpose -- see the module doc. Listed
             // one by one rather than folded into the catch-all below so that
-            // "flexwm has nothing to attach this to" stays a decision written
+            // "scoot has nothing to attach this to" stays a decision written
             // down here, and a protocol version that adds a *new* request still
             // lands in the catch-all rather than silently joining this list.
             zwlr_foreign_toplevel_handle_v1::Request::SetMaximized

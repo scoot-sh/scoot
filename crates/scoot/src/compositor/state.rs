@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::time::Instant;
 
-use flexwm_core::{Config, Size, WindowId, World};
+use scoot_core::{Config, Size, WindowId, World};
 use smithay::desktop::{LayerSurface, PopupManager, Space, Window, WindowSurfaceType};
 use smithay::input::keyboard::Keycode;
 use smithay::input::{Seat, SeatState};
@@ -286,7 +286,7 @@ pub struct State {
     /// `grim` or a screen-share reads. Read on every capture session, every
     /// frame request and every frame tick that has one parked -- see
     /// `screencopy.rs`, which owns both the protocol objects and the parked
-    /// frames behind them. Output capture only; flexwm's own agent
+    /// frames behind them. Output capture only; scoot's own agent
     /// screenshots go over IPC (`screenshot.rs`) and are unaffected.
     pub screencopy: Screencopy,
     /// `ext_session_lock_manager_v1`: the compositor-enforced screen lock.
@@ -306,7 +306,7 @@ pub struct State {
     /// the global alive -- Smithay routes `set_shape` straight into
     /// `SeatHandler::cursor_image` as a `CursorImageStatus::Named`, which is
     /// the same path `wl_pointer.set_cursor` with no surface already took, so
-    /// there is no handler of flexwm's own between the two. What each name is
+    /// there is no handler of scoot's own between the two. What each name is
     /// drawn as lives in `cursor/shapes.rs`.
     #[allow(dead_code)]
     pub cursor_shape_manager_state: CursorShapeManagerState,
@@ -330,7 +330,7 @@ pub struct State {
     /// `wp_alpha_modifier_v1` (version 1): a client-controlled whole-surface
     /// opacity factor. Held only to keep the global alive -- Smithay's
     /// `from_surface` multiplies the factor into every surface-tree element
-    /// it builds (see `alpha_modifier.rs`), so there is no flexwm-side
+    /// it builds (see `alpha_modifier.rs`), so there is no scoot-side
     /// render work and nothing reads this field again after `new`.
     #[allow(dead_code)]
     pub alpha_modifier_state: AlphaModifierState,
@@ -344,7 +344,7 @@ pub struct State {
     /// buffers with no shm behind them, for cheap toolkit fills. Held only
     /// to keep the global alive -- Smithay owns the buffers (see
     /// `single_pixel_buffer.rs`), and the render path draws them as solid
-    /// fills with no flexwm-side import step.
+    /// fills with no scoot-side import step.
     #[allow(dead_code)]
     pub single_pixel_buffer_state: SinglePixelBufferState,
     /// `zwp_tablet_manager_v2` (version 1): drawing-tablet input. Held
@@ -397,7 +397,7 @@ pub struct State {
     #[allow(dead_code)]
     pub input_method_manager_state: InputMethodManagerState,
     /// `xdg_toplevel_icon_manager_v1`: the icon a client wants shown for its
-    /// window. Held only to keep the global alive -- flexwm draws no icons
+    /// window. Held only to keep the global alive -- scoot draws no icons
     /// itself, and what a bar or an agent reads comes off the surface's own
     /// cached state (see `toplevel_icon.rs`), not from here.
     ///
@@ -665,7 +665,7 @@ impl State {
         let idle_inhibit_manager_state = IdleInhibitManagerState::new::<Self>(&dh);
 
         let mut seat_state = SeatState::new();
-        let mut seat = seat_state.new_wl_seat(&dh, "flexwm");
+        let mut seat = seat_state.new_wl_seat(&dh, "scoot");
         seat.add_keyboard(Default::default(), 200, 25)
             .expect("a keymap for the default layout");
         seat.add_pointer();
@@ -952,7 +952,7 @@ impl State {
         let mut child = Command::new(program);
         child.args(args).env("WAYLAND_DISPLAY", &self.socket_name);
         if let Some(path) = &self.ipc_path {
-            child.env(flexwm_ipc::SOCKET_ENV, path);
+            child.env(scoot_ipc::SOCKET_ENV, path);
         }
         // Removed rather than overwritten: the compositor itself may have been
         // started with one (a launcher client, a nested session), and that
@@ -982,9 +982,9 @@ impl State {
 ///
 /// `BindError`'s own `Display` names the cause; each message here adds what to
 /// do about it, in the shape this project's other startup errors already have
-/// (`ipc::init`'s "no socket path: set FLEXWM_SOCKET or XDG_RUNTIME_DIR",
+/// (`ipc::init`'s "no socket path: set SCOOT_SOCKET or XDG_RUNTIME_DIR",
 /// `config.rs`'s `ConfigFileError`). Printed by `main` as
-/// `flexwm: <this message>`.
+/// `scoot: <this message>`.
 ///
 /// Pure, and a function rather than inline `match` arms, because that is what
 /// makes it testable: the variant that matters is
@@ -1030,7 +1030,7 @@ impl ClientData for ClientState {
     /// this runs while wayland-backend still holds its internal state mutex,
     /// so anything here that touched the `DisplayHandle` (directly or through
     /// `State`) would deadlock the compositor from inside every `post_error`
-    /// call. A protocol error used to leave no trace at all in flexwm's log,
+    /// call. A protocol error used to leave no trace at all in scoot's log,
     /// which is how a compositor-side kill of a layer-shell client stayed
     /// undiagnosed; the `ProtocolError` reason names the code, the object and
     /// the message.

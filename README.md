@@ -1,4 +1,4 @@
-# flexwm
+# scoot
 
 A scrolling-tiling Wayland compositor, in the shape of [niri](https://github.com/YaLTeR/niri):
 lightweight, fast, GPU-optional, and built to be driven by a script or an agent
@@ -17,10 +17,10 @@ Two things distinguish it from a typical compositor:
   The intent is that an agent doing simple computer-use tasks in a VM is a
   first-class client, not an afterthought bolted on later. Because that socket
   can inject any keystroke, it's treated as a privileged channel: it lives in
-  `$XDG_RUNTIME_DIR` (override with `$FLEXWM_SOCKET`), is created `0600`, and
+  `$XDG_RUNTIME_DIR` (override with `$SCOOT_SOCKET`), is created `0600`, and
   serves only connections from the same user as the compositor.
 
-`flexwm-core`, the layout/state engine, is kept platform-independent on
+`scoot-core`, the layout/state engine, is kept platform-independent on
 purpose: it knows nothing about Wayland. The plan is for the same engine to
 eventually back a macOS Accessibility-API adapter, doing OmniWM-style window
 layout on a Mac, not just on Linux.
@@ -73,7 +73,7 @@ installed, from ten shapes the compositor draws itself (see Cursor shapes
 below), `xdg-activation-v1`, so a launcher can hand focus to
 the app it started (see Focus handoff between clients below),
 `xdg-toplevel-icon-v1`, so a bar or an agent can read a window's icon name
-off `flexwm msg windows` (see Window icons below), `text-input-v3` and
+off `scoot msg windows` (see Window icons below), `text-input-v3` and
 `input-method-v2`, so an IME or on-screen keyboard can compose into the
 focused text field, popup and all (see Input methods below), and
 output scaling (`[output] scale` over `wl_output.scale`,
@@ -151,12 +151,12 @@ yet started: a GPU rendering path and the macOS adapter.
 
 ```
 crates/
-  flexwm-core/   Platform-independent window state and scrolling-tile layout.
+  scoot-core/   Platform-independent window state and scrolling-tile layout.
                  No Wayland, no I/O — pure data and functions, fuzz-tested.
-  flexwm-ipc/    The wire protocol (requests/responses) and a client over it.
+  scoot-ipc/    The wire protocol (requests/responses) and a client over it.
                  Builds on any platform.
-  flexwm/        The CLI and, on Linux only, the Smithay-based compositor.
-                 `flexwm msg ...` builds everywhere, so it can drive a
+  scoot/        The CLI and, on Linux only, the Smithay-based compositor.
+                 `scoot msg ...` builds everywhere, so it can drive a
                  compositor running in a VM from a Mac.
 vm/              A NixOS VM + flake for developing the Linux-only compositor
                  from macOS. See vm/README.md.
@@ -169,14 +169,14 @@ Two paths, both from the flake at the repo root. To just get the binary
 (clone, then):
 
 ```sh
-nix build                            # ./result/bin/flexwm
+nix build                            # ./result/bin/scoot
 nix run . -- --headless -- foot      # build and run it in one step
 nix run . -- msg windows             # the client, same binary
 ```
 
 On Linux that builds the compositor. On macOS the compositor is compiled out
-of the crate and the same package gives you `flexwm msg`, the client — useful
-for driving a compositor running in a VM, but `flexwm --headless` there exits
+of the crate and the same package gives you `scoot msg`, the client — useful
+for driving a compositor running in a VM, but `scoot --headless` there exits
 with `the compositor only runs on Linux`. `nix build` deliberately does not
 run the test suite (`flake.nix` says why); `cargo test` below is where that
 runs. On macOS the flake covers Apple Silicon (`aarch64-darwin`) only: the
@@ -187,7 +187,7 @@ To work on the code:
 
 ```sh
 nix develop        # every dependency, on Linux or macOS
-cargo build         # flexwm-core, flexwm-ipc, and the CLI build anywhere;
+cargo build         # scoot-core, scoot-ipc, and the CLI build anywhere;
                      # the compositor itself only compiles on Linux
 cargo test --workspace
 cargo nextest run --workspace   # optional: one process per test, and faster
@@ -204,21 +204,21 @@ a seat — see `vm/README.md` for a Mac-native NixOS VM that provides one.
 ## Running
 
 ```sh
-flexwm --headless --width 1280 --height 800 -- foot   # start, spawn a terminal
-flexwm --nested --width 1280 --height 800 -- foot     # inside your existing compositor
-flexwm --tty -- foot                                  # on a real DRM/KMS seat
-flexwm --tty --gpu /dev/dri/card0 -- foot             # ...naming the DRM device yourself
-flexwm --tty --mode 1920x1080 -- foot                 # ...naming the display mode (see below)
-flexwm msg windows                                     # in another shell
-flexwm msg action focus-column left
-flexwm msg screenshot --out /tmp/shot.png
-flexwm msg type "hello"
-flexwm msg wait-idle --quiet-ms 200
+scoot --headless --width 1280 --height 800 -- foot   # start, spawn a terminal
+scoot --nested --width 1280 --height 800 -- foot     # inside your existing compositor
+scoot --tty -- foot                                  # on a real DRM/KMS seat
+scoot --tty --gpu /dev/dri/card0 -- foot             # ...naming the DRM device yourself
+scoot --tty --mode 1920x1080 -- foot                 # ...naming the display mode (see below)
+scoot msg windows                                     # in another shell
+scoot msg action focus-column left
+scoot msg screenshot --out /tmp/shot.png
+scoot msg type "hello"
+scoot msg wait-idle --quiet-ms 200
 ```
 
 Add `--config PATH` to any of the three to load a TOML config; see
 Configuration below for the full schema and default keybindings. Run
-`flexwm --help` for the full request/action list.
+`scoot --help` for the full request/action list.
 
 `--width`/`--height` (the `--headless`/`--nested` output size) accept
 1–65,535 per axis — whatever DRM itself can report for a mode
@@ -227,7 +227,7 @@ any real display. Anything else is a startup error naming the flag and the
 expected range (`invalid --width: '70000' (expected 1-65535)`), not a
 silently different size.
 
-`flexwm msg type TEXT` types text the way a person would, on whatever
+`scoot msg type TEXT` types text the way a person would, on whatever
 keyboard layout the session is running: for each character it finds the key
 that carries it and holds down whatever modifiers that key's level needs —
 Shift for `A` or `!`, AltGr for a German layout's `@` — so a client receives
@@ -254,7 +254,7 @@ characters now type on every one of the fourteen swept Latin layouts (`us`,
   sits on a level the layout only reaches through a *locking or latching*
   modifier gets its own, different
   message (``[character] needs a modifier this layout only locks or
-  latches``) — flexwm will not press Caps Lock to type a capital, since
+  latches``) — scoot will not press Caps Lock to type a capital, since
   that would leave it on for everything afterwards. The sequences come from
   the session locale (`LC_ALL`, then `LC_CTYPE`, then `LANG`, as the
   compositor process sees them — the same source toolkits read), so a
@@ -265,15 +265,15 @@ characters now type on every one of the fourteen swept Latin layouts (`us`,
   keypress. That only matters for a bind with no modifiers, or one on
   Shift plus a key; if a character does hit a bind, the compositor logs a
   warning naming it rather than swallowing it silently.
-- `flexwm msg key COMBO` is the other one, and it is *not* the same: it
+- `scoot msg key COMBO` is the other one, and it is *not* the same: it
   presses exactly the combination named and holds exactly the modifiers
   named, nothing more. So name the key as it is with nothing held, plus the
   modifiers: `shift+1`, not `exclam`; `shift+a`, not `A`. A name that this
   layout only carries above its unmodified level is refused, because the
   key that carries it types a *different* character when pressed bare —
-  `flexwm msg key exclam` would press the `1` key and deliver `1`. Some
+  `scoot msg key exclam` would press the `1` key and deliver `1`. Some
   characters can't be named as a combination at all (`@` on a German layout
-  needs AltGr, which `key` has no name for); `flexwm msg type` is the one
+  needs AltGr, which `key` has no name for); `scoot msg type` is the one
   that works the modifiers out from the layout, and the one to reach for
   when the goal is text rather than a chord. The modifiers themselves are
   resolved from the active layout the same way — whichever key actually
@@ -284,9 +284,9 @@ characters now type on every one of the fourteen swept Latin layouts (`us`,
 
 ### What the control socket refuses
 
-Nine bounds an agent driving flexwm over IPC can actually hit. The first
+Nine bounds an agent driving scoot over IPC can actually hit. The first
 seven are refusals with a reason — an ordinary `error` response, which
-`flexwm msg` prints and exits non-zero on — rather than a silent drop or a
+`scoot msg` prints and exits non-zero on — rather than a silent drop or a
 delay. The last two can't be: one drops a peer that is by definition not
 reading its socket, and the other shortens a wait rather than refusing it.
 
@@ -314,7 +314,7 @@ reading its socket, and the other shortens a wait rather than refusing it.
   same connection, or a client reading replies in request order sees them
   swap. Any other request arriving on a connection with a capture in flight
   is therefore refused with a retry rather than answered out of order.
-  `flexwm msg` sends one request per connection and never meets this; nor
+  `scoot msg` sends one request per connection and never meets this; nor
   does a capture refuse one on *another* connection. A capture whose earlier
   replies are still going out is refused the same way, for the same framing
   reason -- retry once the queue has drained.
@@ -333,7 +333,7 @@ reading its socket, and the other shortens a wait rather than refusing it.
   queued behind the others. This is what keeps the per-connection bounds
   above meaningful — otherwise reconnecting resets them — so an agent that
   wants many requests should pipeline them on *one* connection rather than
-  open a connection per request. `flexwm msg` opens one per invocation and
+  open a connection per request. `scoot msg` opens one per invocation and
    closes it as soon as it has its answer, so ordinary scripted use never
    approaches this.
 - **A newcomer under file-descriptor pressure is refused, too.** While
@@ -385,14 +385,14 @@ game holds its pointer again and the stream has resumed.
 kernel, on every non-root `--tty` run, Smithay logs `Unable to become drm
 master, assuming unprivileged mode` at startup — expected, not a failure: the
 session manager opens the device and (normally) already holds DRM master on
-flexwm's behalf, and flexwm simply isn't permitted to call `SET_MASTER`
+scoot's behalf, and scoot simply isn't permitted to call `SET_MASTER`
 itself on a file another process opened. `vm/README.md`'s troubleshooting
 section has the kernel-level reason and two commands that check whether
 master really is held, rather than assuming the log line alone settles it.
 
 ### Which DRM device `--tty` drives
 
-Normally: whichever one works. flexwm asks Smithay for the seat's primary
+Normally: whichever one works. scoot asks Smithay for the seat's primary
 GPU, and if that device turns out not to be able to drive a display, it
 tries every other DRM device on the seat in turn before giving up. On an
 ordinary PC the first pick is right and nothing else is ever opened; the
@@ -431,7 +431,7 @@ If the automatic search still picks wrong, name the device — the one that
 owns the connectors, never a render-only node:
 
 ```sh
-flexwm --tty --gpu /dev/dri/card0 -- foot
+scoot --tty --gpu /dev/dri/card0 -- foot
 ```
 
 `--gpu PATH` replaces the search entirely — exactly that device, no
@@ -440,7 +440,7 @@ what failed, not a silent fall back to something else. It only means
 anything under `--tty`; on `--headless` or `--nested` it is ignored with a
 warning. One thing it can cost: hotplug (below) is followed only for
 devices udev lists as GPUs on this seat, and `--gpu` can name one that
-isn't in that list. flexwm says so at startup — `the chosen device is not
+isn't in that list. scoot says so at startup — `the chosen device is not
 in udev's list for this seat, so display changes on it will not be
 noticed` — and the session otherwise runs exactly as it always did, with
 the mode it started on.
@@ -472,7 +472,7 @@ mode is just the host window's size in backing pixels, so it doubles or
 halves with whichever screen the window opened on — name the mode:
 
 ```sh
-flexwm --tty --mode 1920x1080 -- foot
+scoot --tty --mode 1920x1080 -- foot
 ```
 
 `--mode WxH` picks the connector mode of exactly that size, and falls back to
@@ -486,7 +486,7 @@ ignored with a warning outside `--tty`.
 the display underneath it moves, so nothing here is a once-at-startup
 decision any more:
 
-- **Plug a monitor in or pull one out.** Unplugging the connector flexwm is
+- **Plug a monitor in or pull one out.** Unplugging the connector scoot is
   driving makes it pick another connected one and mode-set onto it — moving
   to a different CRTC when the display controller only routes that connector
   there (ordinary PC graphics route any connector to any CRTC; ARM SoCs often
@@ -496,21 +496,21 @@ decision any more:
   in after everything was unplugged mode-sets back onto it.
 - **Resize, rescale or full-screen a VM window.** Apple's Virtualization
   framework reconfigures the guest display when you do, which reaches the
-  guest as a hotplug with a new mode list and a new preferred mode; flexwm
+  guest as a hotplug with a new mode list and a new preferred mode; scoot
   follows it. `--mode WxH` is still honoured on every re-probe, not just the
   first: if the size you named is in the new list it wins, and if it is not
   you get the same warning and the new preferred mode.
 
 A change reaches everything that cares: the render target, `wl_output`
 (`mode` + `done`), `wlr-output-management`, layer-shell surfaces (bars
-re-anchor and re-arrange), the window layout, and `flexwm msg outputs`,
+re-anchor and re-arrange), the window layout, and `scoot msg outputs`,
 which reports the new rectangle on the next query with no extra plumbing.
 
 Two limits worth knowing, both deliberate:
 
 - **Still one output.** Plugging a second monitor into a laptop already
   running on `eDP-1` keeps the session on `eDP-1` rather than jumping to the
-  new screen — flexwm drives one output, so one of the two has to be dark,
+  new screen — scoot drives one output, so one of the two has to be dark,
   and the one you are looking at is the one it keeps. Real multi-output is a
   separate, larger piece of work.
 - **The output keeps the name it started with.** A session that started on
@@ -519,16 +519,16 @@ Two limits worth knowing, both deliberate:
   recreating it would make every client re-enter the output and re-map its
   surfaces, which is a bigger lie about what happened than a stale name.
 
-With nothing connected at all, flexwm holds the last frame, keeps the
+With nothing connected at all, scoot holds the last frame, keeps the
 session running and logs `nothing is connected to this device any more` —
 plug a display back in and it mode-sets onto it. Hotplug events that arrive
-while flexwm is on another VT are picked up on the switch back, since a
+while scoot is on another VT are picked up on the switch back, since a
 session without DRM master cannot mode-set when they happen.
 
 Under `--tty` the output is named after its connector — `HDMI-A-1`, `eDP-1`,
 `Virtual-1`, the same spelling as `/sys/class/drm/card*-*` — so bars and
 shells label the screen as they would under any other compositor;
-`flexwm msg outputs` shows the same name. `--headless` and `--nested` have no
+`scoot msg outputs` shows the same name. `--headless` and `--nested` have no
 connector and keep the name `headless`.
 
 To see what the seat has, and which driver is behind each device:
@@ -550,14 +550,14 @@ machinery.
 
 ## Layer-shell clients (bars, wallpapers, launchers)
 
-flexwm implements `wlr-layer-shell-unstable-v1` (version 5), the protocol
+scoot implements `wlr-layer-shell-unstable-v1` (version 5), the protocol
 every panel, dock, wallpaper setter and notification daemon in the
 wlroots-adjacent ecosystem uses — `waybar`, `swaybg`, `mako`, `wofi`,
 `fuzzel`, `yambar` and friends. Start one the same way you start anything
 else inside the session:
 
 ```sh
-flexwm --tty -- foot              # ...then, in a shell inside the session:
+scoot --tty -- foot              # ...then, in a shell inside the session:
 swaybg -c '#123456' &             # a wallpaper, on the background layer
 waybar &                          # a bar, on the top layer
 fuzzel                            # a launcher, on the overlay layer
@@ -591,7 +591,7 @@ What works:
     back. `exclusive` on the `bottom` or `background` layer is treated the
     same way — the spec allows normal focus semantics there, and nothing
     should be typing into a wallpaper unasked. Note that no *input* other
-    than a click releases an `on_demand` surface: a keybinding or a `flexwm
+    than a click releases an `on_demand` surface: a keybinding or a `scoot
     msg action focus-*` moves window focus but leaves the keyboard where it
     is. The spec leaves this implementation-defined, and click-only is the
     deliberate choice — the alternative silently steals a launcher's keyboard
@@ -690,7 +690,7 @@ What doesn't, yet:
   up, and everything behind it is still drawn and still capturable. Treat one
   as a screen *blanker* you can type a password into, not as something that
   keeps anyone out.
-- **`flexwm msg outputs`** reports each output's *full* rectangle (in logical
+- **`scoot msg outputs`** reports each output's *full* rectangle (in logical
   pixels, along with the output's `scale`) plus its *usable* rectangle — the
   full output minus whatever a bar reserved at its edges, which is where
   windows actually go. An agent asking "how big is the screen" wants `rect`;
@@ -706,12 +706,12 @@ What doesn't, yet:
 
 Two things for agents to know about layer surfaces:
 
-**Window focus and keyboard focus are separate now.** `flexwm msg windows`'
-`focused` flag, the focus ring and `flexwm msg action focus-*` all still mean
+**Window focus and keyboard focus are separate now.** `scoot msg windows`'
+`focused` flag, the focus ring and `scoot msg action focus-*` all still mean
 the *window*, and a layer surface holding the keyboard never appears there —
 what it reports is where focus returns to once that surface goes away. So if
-a launcher is up, `flexwm msg type "..."` and `flexwm msg key` go to the
-launcher (which is usually what you want), while `flexwm msg windows` still
+a launcher is up, `scoot msg type "..."` and `scoot msg key` go to the
+launcher (which is usually what you want), while `scoot msg windows` still
 names the window behind it. There is no IPC request that reports a layer
 surface yet.
 
@@ -719,7 +719,7 @@ A popup menu holding the keyboard is the subtler case of the same split. An
 explicit `xdg_popup.grab` routes every keystroke to the menu until it is
 dismissed, and compositor focus still moves underneath it — focus
 keybindings keep firing with a menu open, by design. So after such a
-keybinding, `flexwm msg windows` can report window B as `"focused": true`
+keybinding, `scoot msg windows` can report window B as `"focused": true`
 while every key still reaches window A's menu, possibly off-screen, with no
 error. Each window therefore also reports `"popup_grab"` while its own
 popup tree holds the keyboard:
@@ -739,7 +739,7 @@ the session is locked there is never a grab to report, because locking
 dismisses any open one and refuses new ones.
 
 The other: a bar redraws on its own schedule, and
-`flexwm msg wait-idle` waits for *nothing on screen* to have redrawn.
+`scoot msg wait-idle` waits for *nothing on screen* to have redrawn.
 Measured on real hardware with a `waybar` clock ticking once a second,
 `--quiet-ms 200` still settles normally (204 ms) while `--quiet-ms 1500`
 never does and times out. Keep `--quiet-ms` below whatever your bar's own
@@ -749,7 +749,7 @@ control socket refuses above.)
 
 ## Workspaces for bars (`ext-workspace-v1`)
 
-flexwm implements `ext-workspace-v1` (version 1), the compositor-agnostic
+scoot implements `ext-workspace-v1` (version 1), the compositor-agnostic
 successor to the one-off wlr workspace protocols, so a panel's workspace
 module, a workspace switcher or an indicator can list workspaces, follow which
 one is active, and switch between them. Together with layer shell above,
@@ -758,7 +758,7 @@ available to every client, no privilege or allow-list.
 
 What a client sees:
 
-- **One workspace group**, carrying flexwm's single output. A client that
+- **One workspace group**, carrying scoot's single output. A client that
   binds `wl_output` after the manager still gets an `output_enter` for it, so
   registry order doesn't matter.
 - **One `ext_workspace_handle_v1` per workspace**, named `"1"`, `"2"`, … in
@@ -780,7 +780,7 @@ the manager** — the protocol batches requests, so an `activate` with no
 
 Worth knowing before you write against it:
 
-- **Workspaces are positions, not identities, and flexwm sends no `id`
+- **Workspaces are positions, not identities, and scoot sends no `id`
   event.** The list grows as you use the trailing empty workspace and shrinks
   when a workspace empties out, which renumbers everything after it: handle 2
   means "the third workspace", not "that workspace". Redraw from what the last
@@ -788,7 +788,7 @@ Worth knowing before you write against it:
   workspace.
 - **`deactivate`, `remove`, `assign` and `create_workspace` are ignored**, and
   no capability is advertised for them, because none of them exists in
-  flexwm's layout model: an output always has exactly one active workspace,
+  scoot's layout model: an output always has exactly one active workspace,
   workspaces are created and dropped by the layout itself rather than by the
   user, and there is only one group.
 - **`activate` is a request, not a guarantee** (as the protocol says): one
@@ -796,12 +796,12 @@ Worth knowing before you write against it:
   `commit` arriving is dropped, and one for the workspace that is already
   active does nothing.
 - **Switching to a workspace *by number* works from both sides now.**
-  `flexwm msg action focus-workspace-index N` (0-based, out of range does
+  `scoot msg action focus-workspace-index N` (0-based, out of range does
   nothing) drives the same core action `ext-workspace-v1`'s `activate`
   already used, so an agent jumps straight to a workspace instead of
   stepping one at a time.
 - **Multiple outputs will change the shape of this** — a group per output is
-  what the protocol is built for — but flexwm has exactly one output today, so
+  what the protocol is built for — but scoot has exactly one output today, so
   there is exactly one group.
 - **One connection may hold at most 8 binds across the workspace manager,
   both window-list globals below and the display manager**, counted per
@@ -815,7 +815,7 @@ Worth knowing before you write against it:
 
 ## Window lists for bars (two protocols)
 
-flexwm publishes its window list through **two** protocols at once, both
+scoot publishes its window list through **two** protocols at once, both
 available to every client with no privilege or allow-list:
 
 - **`ext-foreign-toplevel-list-v1`** (version 1, global
@@ -827,7 +827,7 @@ available to every client with no privilege or allow-list:
   every Quickshell-based shell (DMS, Noctalia) actually binds today. It
   enumerates *and* controls: `activate` and `close` are answered.
 
-Both are the protocol-side twin of `flexwm msg windows`: the same windows,
+Both are the protocol-side twin of `scoot msg windows`: the same windows,
 the same lifetime, live rather than polled — and, because they are driven
 from the same three window-lifecycle events inside the compositor, a client
 bound to both sees one window list described twice rather than two lists
@@ -858,11 +858,11 @@ What a client sees:
 
 **The identifier is `<generation>-<window id>`** — e.g. `a3e689a2-1`: eight
 hex digits of per-session randomness (the "opaque generation value" the
-protocol recommends, so identifiers from two flexwm sessions never collide)
-and, after the last dash, the window id `flexwm msg windows` reports. That
+protocol recommends, so identifiers from two scoot sessions never collide)
+and, after the last dash, the window id `scoot msg windows` reports. That
 suffix is deliberate and is the bridge between the two: this protocol has no
 requests at all, so a client that finds a window here and wants to *act* on
-it sends `flexwm msg action focus-window-id N` with the number after the
+it sends `scoot msg action focus-window-id N` with the number after the
 dash.
 
 Worth knowing before you write against it:
@@ -870,16 +870,16 @@ Worth knowing before you write against it:
 - **There is no control half, by design.** The protocol is deliberately
   minimal — no `activate`, `close`, `minimize`, `fullscreen`, geometry or
   per-output state. Those are meant for extension protocols that don't exist
-  yet. Use the wlr protocol below, or flexwm's IPC (`flexwm msg action
-  focus-window-id N`, `flexwm msg action close` for the focused window).
+  yet. Use the wlr protocol below, or scoot's IPC (`scoot msg action
+  focus-window-id N`, `scoot msg action close` for the focused window).
 - **A handle covers a window's whole life, not the time it is mapped.** The
-  protocol talks about "mapped" toplevels, but flexwm has no map/unmap
+  protocol talks about "mapped" toplevels, but scoot has no map/unmap
   boundary at all — a window is in the layout, the focus order and
-  `flexwm msg windows` from the moment its `xdg_toplevel` exists — so a
+  `scoot msg windows` from the moment its `xdg_toplevel` exists — so a
   handle covers exactly that, and the two lists can never disagree.
 - **An identifier is never reused.** Close a window and open another and it
   gets a new one, even from the same client.
-- **The list stays live while the session is locked**, exactly as `flexwm msg
+- **The list stays live while the session is locked**, exactly as `scoot msg
   windows` does — see Screen locking below for the trust model that sits
   behind that.
 
@@ -900,8 +900,8 @@ What a client sees, per window, on a `zwlr_foreign_toplevel_handle_v1`:
   oldest first, so registry order doesn't matter — and a client that binds
   `wl_output` *after* the manager is sent the `output_enter` it missed as
   soon as it does.
-- **`state`, carrying `activated` and nothing else** — flexwm's real window
-  focus, the same one `flexwm msg windows` reports as `focused`.
+- **`state`, carrying `activated` and nothing else** — scoot's real window
+  focus, the same one `scoot msg windows` reports as `focused`.
 - **Changes arrive in batches closed by `done`**, same as the `ext-` list:
   draw on `done`. A window is announced before its toolkit has sent a title
   or taken focus, so its first batch is usually two empty strings and an
@@ -922,22 +922,22 @@ What a client can ask for:
   a click on the window itself: if your panel is a layer surface that took
   the keyboard when the user clicked it, `activate` hands the keyboard on to
   the window, exactly as clicking the window would. It does that whether or
-  not the window was already the focused one. **`flexwm msg action
+  not the window was already the focused one. **`scoot msg action
   focus-window-id N` does not do this** — it moves window focus the same way
   but does not take the keyboard back off a layer surface that holds it, so
   an agent driving focus over IPC while a clicked panel still has the
   keyboard will have its keystrokes delivered to the panel, not the window,
-  with nothing in `flexwm msg windows` to show the mismatch. See
+  with nothing in `scoot msg windows` to show the mismatch. See
   `docs/backlog/protocols/activation-leaves-the-keyboard-on-a-clicked-layer-surface.md`.
 - **`close`** sends the window's `xdg_toplevel.close`. Whether the window
   actually goes is up to its own client, as the protocol says; `closed`
   follows if and when it does.
 - **`set_maximized`, `unset_maximized`, `set_minimized`, `unset_minimized`,
   `set_fullscreen`, `unset_fullscreen` and `set_rectangle` are accepted and
-  do nothing.** flexwm has no concept of maximized, minimized or fullscreen
+  do nothing.** scoot has no concept of maximized, minimized or fullscreen
   at all, so the matching state bits are never sent either — a taskbar's
   minimise button is inert rather than lying. `set_rectangle` is a
-  minimise-animation hint flexwm reads nothing from; unlike wlroots, an
+  minimise-animation hint scoot reads nothing from; unlike wlroots, an
   invalid rectangle is ignored rather than answered with a protocol error,
   because disconnecting a shell over a number nothing looks at would be
   worse.
@@ -950,10 +950,10 @@ Worth knowing before you write against it:
   event sends nothing at all when you call `activate()` — no request reaches
   the compositor. With a real `PanelWindow` and a real click it works. If you
   are testing this, test it with a window.
-- **`output_leave` is never sent.** flexwm has one output, a window is on it
+- **`output_leave` is never sent.** scoot has one output, a window is on it
   for its whole life, and switching workspaces does not move it — the same
   answer wlroots-based compositors give.
-- **`parent` is never sent** (the version 3 event). flexwm's layout has no
+- **`parent` is never sent** (the version 3 event). scoot's layout has no
   parent/child relation; every `xdg_toplevel` is an independent column
   entry, dialogs included.
 - **The list stays live while the session is locked, but the two requests
@@ -963,13 +963,13 @@ Worth knowing before you write against it:
 
 ## Display information (`wlr-output-management-unstable-v1`)
 
-flexwm implements `zwlr_output_manager_v1` (version 4), which is what
+scoot implements `zwlr_output_manager_v1` (version 4), which is what
 `wlr-randr`, `kanshi` and a shell's Settings → Display page read the screen's
 modes, position, scale and transform from. `wl_output` says what the screen
 *is*; this is the management protocol on top of it. The global is available to
 every client, no privilege or allow-list.
 
-**It is read-only. `apply` and `test` always answer `failed`.** flexwm has
+**It is read-only. `apply` and `test` always answer `failed`.** scoot has
 exactly one output, whose mode, position, scale and transform are fixed for the
 life of the process, so there is nothing a configuration could change. That is
 a refusal, not a stub: a configuration that reported `succeeded` and changed
@@ -992,14 +992,14 @@ What a client sees:
   `name` (the same one `wl_output` reports — a DRM connector name like
   `HDMI-A-1` under `--tty`, `headless` otherwise), `description`, `make`,
   `model`, `enabled`, `position`, `transform`, `scale` and `adaptive_sync`
-  (always `disabled`; flexwm has no VRR support).
+  (always `disabled`; scoot has no VRR support).
 - **A `zwlr_output_mode_v1` per mode the output knows**, with its size,
   refresh rate and whether it is preferred. Binding the global announces
   everything immediately, so registry order doesn't matter.
 - **Changes arrive in batches closed by `done`**, which carries a serial that
   advances on every real change. The only thing that can trigger one today is
   a `--nested` host's *initial* configure at startup, if it proposes a size
-  other than `--width`/`--height` — flexwm applies that one and then ignores
+  other than `--width`/`--height` — scoot applies that one and then ignores
   every later resize of the host window, so nothing changes again after
   startup.
 - **`stop` is answered with `finished`**, after which the head and mode
@@ -1014,10 +1014,10 @@ Worth knowing before you write against it:
 - **The refresh rate is always 60 Hz**, including under `--tty` on a faster
   panel. `wl_output` already reports the same thing; this mirrors it rather
   than adding a second, differently-wrong number.
-- **No `physical_size` and no `serial_number`.** flexwm knows neither (its
+- **No `physical_size` and no `serial_number`.** scoot knows neither (its
   physical size is `0x0` on `wl_output` too, and its serial is a placeholder),
   and the protocol allows omitting both. A client that keys a saved
-  per-monitor profile off a serial would otherwise match every flexwm session
+  per-monitor profile off a serial would otherwise match every scoot session
   on every machine.
 - **The mode list only grows, never shrinks.** A new mode is added rather
   than replacing the old one, so every size the output has had stays
@@ -1033,16 +1033,16 @@ Worth knowing before you write against it:
   away when you switch to another VT, it just stops being drawn, so the head
   stays enabled with the same mode and no `done` is sent. The one thing a
   switch *back* can produce is a mode change, and the switch is not what
-  caused it: a display plugged in or resized while flexwm was on another VT
+  caused it: a display plugged in or resized while scoot was on another VT
   could not be acted on then, so the switch back re-probes and applies
   whatever moved. Switch away and back with the display untouched and
   nothing is sent.
 - **Multiple outputs will change the shape of this** — one head per output is
-  what the protocol is built for — but flexwm has exactly one output today.
+  what the protocol is built for — but scoot has exactly one output today.
 
 ## Screen capture for clients (`ext-image-copy-capture-v1`)
 
-flexwm implements `ext-image-copy-capture-v1` (version 1) together with
+scoot implements `ext-image-copy-capture-v1` (version 1) together with
 `ext-image-capture-source-v1` (version 1), which is what `grim`, a shell's
 workspace-overview live preview, a screen recorder or a conferencing
 screen-share uses to read the screen. Three globals are advertised:
@@ -1053,17 +1053,17 @@ screen-share uses to read the screen. Three globals are advertised:
 | `ext_output_image_capture_source_manager_v1` | Turning a `wl_output` into a capture source |
 | `zwp_linux_dmabuf_v1` | Real dmabuf import (GPU-rendering clients), plus format feedback (see below) |
 
-All three are available to every client, no privilege or allow-list (flexwm has no
+All three are available to every client, no privilege or allow-list (scoot has no
 security-context support to distinguish a privileged client from any other, so
 an allow-list would be theatre — see the trust note under Screen locking
 below). Screen capture is the most obviously sensitive protocol that applies
-to, so it is worth saying plainly: **any process that can reach flexwm's
+to, so it is worth saying plainly: **any process that can reach scoot's
 Wayland socket can read your screen.**
 
-This is separate from, and does not change, `flexwm msg screenshot` — that
+This is separate from, and does not change, `scoot msg screenshot` — that
 still goes over the privileged, owner-only IPC socket, is rate-limited per
 connection, and is what an agent uses. This is the standard-protocol path, for
-tools that will never speak flexwm's own IPC.
+tools that will never speak scoot's own IPC.
 
 `grim` works with no flags:
 
@@ -1091,7 +1091,7 @@ What to know before pointing a client at it:
   `Toplevel` source, so the shells must change.
 - **`wl_shm` buffers only, `Xrgb8888` or `Argb8888`.** A capture session never
   offers to write into a dma-buf (`BufferConstraints::dma` is always `None`) —
-  capture is the direction where flexwm does the writing, and `wl_shm` already
+  capture is the direction where scoot does the writing, and `wl_shm` already
   works everywhere at no extra cost to a CPU renderer. (The other direction,
   a *client's* dma-buf, is imported — see the next bullet.)
   `Xrgb8888` is offered first: if `[appearance]
@@ -1104,7 +1104,7 @@ What to know before pointing a client at it:
 - **`zwp_linux_dmabuf_v1` is advertised (version 6), and dmabufs really are
   imported — a GPU-rendering client works here, with no GPU on the
   compositor side.** The client renders with the GPU and hands over a
-  dma-buf; flexwm `mmap`s it and composites it with pixman, on the CPU, next
+  dma-buf; scoot `mmap`s it and composites it with pixman, on the CPU, next
   to `wl_shm` clients in the same session. No `LIBGL_ALWAYS_SOFTWARE=1`
   needed, and nothing about the GPU-free requirement changes: the compositor
   still never touches a GPU.
@@ -1158,14 +1158,14 @@ What to know before pointing a client at it:
   session). A client that never stockpiles unclaimed frames never sees it.
 - **While the session is locked, a capture sees the lock screen** — never the
   windows behind it, and never a half-drawn transition. This is the same
-  guarantee `flexwm msg screenshot` gives, and it comes from the same place:
+  guarantee `scoot msg screenshot` gives, and it comes from the same place:
   both read back the framebuffer the compositor just drew, and a locked frame
   never has a window in it (see Screen locking below).
 - **The `paint_cursors` option is accepted and has no effect**, which is a
   known deviation. Under `--headless` and `--nested` nothing draws a cursor at
   all, so a capture never contains one. Under `--tty` the cursor is part of
   the one framebuffer a capture is read out of, so a capture always contains
-  it, flag or no flag. `flexwm msg screenshot` behaves the same way.
+  it, flag or no flag. `scoot msg screenshot` behaves the same way.
 - **Cursor capture sessions are refused.** `create_pointer_cursor_session`
   itself gets no event — the cursor-session object has no `stopped` of its
   own — but the `ext_image_copy_capture_session_v1` a client gets back from
@@ -1183,10 +1183,10 @@ build both DMS and Noctalia run on — carries the `ext-` manager and both
 
 ## Screen locking (`ext-session-lock-v1`)
 
-flexwm implements `ext-session-lock-v1` (version 1), so a real locker
+scoot implements `ext-session-lock-v1` (version 1), so a real locker
 (`swaylock` 1.7+, `gtklock`, `hyprlock`, `waylock`) can lock the session with
 the compositor enforcing it, rather than a layer surface asking politely. The
-global is `ext_session_lock_manager_v1`, available to every client (flexwm has
+global is `ext_session_lock_manager_v1`, available to every client (scoot has
 no security-context support to distinguish a privileged client from any
 other, so an allow-list would be theatre — see the trust note below).
 
@@ -1197,7 +1197,7 @@ real `--tty` hardware by screenshot and by what clients were actually sent:
   an opaque backdrop" — windows, layer surfaces (bars, wallpapers, launchers,
   on every layer including `overlay`) and the focus ring are not gathered into
   the frame at all. The screen is the lock surface, an opaque backdrop where
-  it doesn't cover, and the pointer cursor. A `flexwm msg screenshot` reads
+  it doesn't cover, and the pointer cursor. A `scoot msg screenshot` reads
   that same framebuffer, so a capture taken while locked shows the lock screen
   and nothing behind it.
 - **Only the lock surface receives input.** Keyboard focus moves to it (or to
@@ -1220,7 +1220,7 @@ real `--tty` hardware by screenshot and by what clients were actually sent:
   destroyed while the client that made it stays connected and keeps the
   `wl_surface` underneath alive, so "is this surface alive" is not the same
   question as "does this surface still belong to the lock that owns the
-  session". flexwm asks the second one everywhere: a surface from a lock that
+  session". scoot asks the second one everywhere: a surface from a lock that
   was given up, or replaced, stops being drawn and stops receiving keyboard
   and pointer input immediately, without waiting for anything to replace it.
 - **A destroyed lock surface falls back to the backdrop straight away.** The
@@ -1236,7 +1236,7 @@ real `--tty` hardware by screenshot and by what clients were actually sent:
   hatch, not a way in — the VT it switches to has its own login, and this
   session stays locked behind it (verified: switch away, switch back, the lock
   screen is pixel-identical).
-- **`flexwm msg action ...` is refused**, with an error saying why, for the
+- **`scoot msg action ...` is refused**, with an error saying why, for the
   same reason. So is an `ext-workspace-v1` client's `activate`.
 - **Ordinary clients stop drawing.** They get no frame callbacks while
   locked, which is what the protocol asks for and also what keeps them from
@@ -1247,7 +1247,7 @@ real `--tty` hardware by screenshot and by what clients were actually sent:
 
 **If the lock client dies, the session stays locked.** That is the protocol's
 rule and the point of it: a dead locker is not evidence that you want your
-screen unlocked. flexwm's recovery story, so a crashed locker isn't a dead
+screen unlocked. scoot's recovery story, so a crashed locker isn't a dead
 session:
 
 - the screen turns **solid red**, so you can tell "my locker crashed" from "my
@@ -1261,7 +1261,7 @@ session:
   exactly like a fresh lock does, because until then your actual desktop is
   still what's on the display. Taking the lock over at all rather than
   refusing is what sway does too (`lock.c`'s `handle_session_lock` replaces an
-  abandoned lock and refuses a live one, exactly as flexwm does); the
+  abandoned lock and refuses a live one, exactly as scoot does); the
   *conditional* confirmation is niri's (`Niri::lock` confirms immediately only
   from an already-locked state, never from a lock still waiting for its first
   frame). sway confirms unconditionally, fresh lock or takeover alike, so that
@@ -1278,14 +1278,14 @@ its connection and its `wl_surface`s are still perfectly alive.
 **What is *not* guaranteed — read this before trusting it:**
 
 - **A same-uid process is inside the boundary, and always was.** Anything that
-  can reach flexwm's wayland socket can take over a lock whose client has died
+  can reach scoot's wayland socket can take over a lock whose client has died
   and then unlock the session; anything that can reach its IPC socket can
   screenshot the lock screen and inject keystrokes into it (that is how an
   agent drives a lock screen, and it is refused for `action` requests only).
   Both sockets are owner-only. This lock keeps *someone at the keyboard* out,
   not a process already running as you — which could read your files anyway.
-- **`flexwm msg windows` still lists your windows while locked**, titles
-  included, and `flexwm msg outputs` still answers. Nothing is drawn from
+- **`scoot msg windows` still lists your windows while locked**, titles
+  included, and `scoot msg outputs` still answers. Nothing is drawn from
   them, but the IPC surface is not blanked.
 - **So do both foreign-toplevel protocols** (see Window lists for bars
   above): handles stay, titles keep updating, and a window opened behind the
@@ -1298,7 +1298,7 @@ its connection and its `wl_surface`s are still perfectly alive.
   the one thing that does change: `activate` will not move focus and `close`
   will not reach a window, because a window you cannot see must not be
   focused or closed from behind the lock screen. That is the same gate every
-  `flexwm msg action` request already sits behind.
+  `scoot msg action` request already sits behind.
 - **The `locked` event is sent once a blanked frame is confirmed on screen,
   not merely rendered.** Under `--headless`/`--nested` the render is the
   confirmation — there is no scanout at all, and the framebuffer a screenshot
@@ -1315,14 +1315,14 @@ its connection and its `wl_surface`s are still perfectly alive.
 - **Up to one frame of the unlocked screen can still be on the display**
   between the lock request and the first blanked frame. That is inherent (the
   protocol's `locked` ordering exists precisely because of it), not something
-  flexwm defers. Input is already captured during that frame — the keyboard
+  scoot defers. Input is already captured during that frame — the keyboard
   and pointer leave the window the instant the request arrives — so nothing
   typed in that window reaches the unlocked session.
-- **flexwm blanks immediately rather than waiting for the lock client to
+- **scoot blanks immediately rather than waiting for the lock client to
   draw.** Some compositors wait up to a second for lock surfaces so the
-  transition doesn't flash black; flexwm doesn't, deliberately — waiting means
+  transition doesn't flash black; scoot doesn't, deliberately — waiting means
   rendering the unlocked session for that whole second.
-- **One output.** A lock surface is configured per `wl_output` and flexwm has
+- **One output.** A lock surface is configured per `wl_output` and scoot has
   exactly one, so the one live surface a lock may hold is configured to that
   output's size, and the first blanked frame on it is what sends `locked`;
   a second `get_lock_surface` for the same output is refused with the
@@ -1332,13 +1332,13 @@ its connection and its `wl_surface`s are still perfectly alive.
 
 ## Idle detection (`ext-idle-notify-v1`, `idle-inhibit-unstable-v1`)
 
-flexwm implements `ext_idle_notifier_v1` (version 2), so a `swayidle`-style
+scoot implements `ext_idle_notifier_v1` (version 2), so a `swayidle`-style
 daemon can learn the seat has been quiet N milliseconds and dim the screen,
 lock it (see Screen locking above) or suspend the machine — verified live
 with real swayidle: the timeout command fires after a quiet window, input
 runs the resume command, and the next quiet window fires again. Every input
 source resets the timers: real devices under `--tty`, host-forwarded input
-under `--nested`, and IPC-injected input (`flexwm msg type`/`key`/`pointer`
+under `--nested`, and IPC-injected input (`scoot msg type`/`key`/`pointer`
 count as a user at the machine, which is also what keeps an agent's own
 activity from looking like idleness). What does *not* reset them is the
 compositor re-running its own hit test on a lock transition — that is not
@@ -1352,7 +1352,7 @@ input-specific watch (`get_input_idle_notification`, for daemons with their
 own inhibit policy) ignores inhibitors by design.
 
 Two things to know: there is no built-in auto-locker — the timeouts and
-commands are the daemon's config, not flexwm's, the swayidle way — and an
+commands are the daemon's config, not scoot's, the swayidle way — and an
 inhibitor counts while its surface is *alive*, whether or not it is visible.
 A client inhibiting from a surface it never maps holds off `idled`; that
 client is local either way (same trust model as the session-lock global
@@ -1360,7 +1360,7 @@ above).
 
 ## Clipboard managers and primary selection
 
-flexwm exposes all three selection globals, on every backend, available to
+scoot exposes all three selection globals, on every backend, available to
 every client (no security-context support here, so an allow-list would be
 theatre — same trust model as the session-lock global: a same-uid process is
 inside the boundary, see Screen locking above):
@@ -1379,10 +1379,10 @@ inside the boundary, see Screen locking above):
 
 ## Night light (`zwlr_gamma_control_manager_v1`)
 
-flexwm implements `zwlr_gamma_control_manager_v1` (version 1), so
+scoot implements `zwlr_gamma_control_manager_v1` (version 1), so
 `gammastep` and `wlsunset` work, on every backend, available to every client
 (same trust note as above — there is no privileged seat to reserve this
-for). One control per output, and flexwm has exactly one output: a second
+for). One control per output, and scoot has exactly one output: a second
 `get_gamma_control` transfers control, the old control gets `failed` and
 stops affecting anything, and destroying the live control (or disconnecting
 with one held) restores the default linear ramp.
@@ -1398,7 +1398,7 @@ What actually happens to the ramp depends on the backend:
   Anything the DRM device refuses retires the
   control with `failed` and the session keeps running.
 - **Under `--headless`/`--nested`** there is no hardware LUT, so the ramp is
-  accepted but changes nothing on screen — and a `flexwm msg
+  accepted but changes nothing on screen — and a `scoot msg
   screenshot` reads the framebuffer, which is pre-LUT, so captures show the
   unmodified frame either way. `gamma_size` is 256 there.
 
@@ -1415,29 +1415,29 @@ by existing clients as-is.
 
 ## Cursor shapes (`wp-cursor-shape-v1`)
 
-flexwm implements `wp_cursor_shape_manager_v1` (version 2), so a client can
+scoot implements `wp_cursor_shape_manager_v1` (version 2), so a client can
 *name* the cursor it wants — `text`, `ew-resize`, `not-allowed` — instead of
 loading an xcursor theme and uploading a surface of its own. Modern GTK4/Qt6
 toolkits and `foot` prefer this when it exists; without it `foot` logs
 "compositor does not implement server-side cursors".
 
 A named shape is answered from **the cursor theme already installed on the
-machine**: flexwm resolves `[appearance] cursor_theme`, else `$XCURSOR_THEME`,
+machine**: scoot resolves `[appearance] cursor_theme`, else `$XCURSOR_THEME`,
 else `default`, and draws that theme's own artwork — the same pixels the
 client would have loaded for itself. That is what makes the protocol a win
 rather than a downgrade: without it, advertising cursor-shape would take a
 correctly themed I-beam away from a client that had been uploading one and
 replace it with line art.
 
-flexwm still ships no theme (niri's assets are GPL and Adwaita's aren't
+scoot still ships no theme (niri's assets are GPL and Adwaita's aren't
 MIT-clean — see License below), and it does not need to: reading the user's
 own installed theme carries no such obligation, and is what sway, niri and
 Hyprland do. Parsing is the MIT-licensed `xcursor` crate; nothing is
 vendored.
 
 **When no theme is installed** — a linuxserver webtop or any minimal
-container, which is a first-class flexwm target — named shapes fall back to
-ten shapes flexwm **draws procedurally itself**, in `cursor/shapes.rs`. The
+container, which is a first-class scoot target — named shapes fall back to
+ten shapes scoot **draws procedurally itself**, in `cursor/shapes.rs`. The
 mapping collapses the names a user cannot tell apart at 16 pixels:
 
 | Drawn as | Named shapes it answers |
@@ -1460,7 +1460,7 @@ event, not a frame — and cached from then on, including a negative cache so a
 theme missing `zoom-in` is not re-searched on every hover.
 
 A client that uploads its own cursor *surface* still gets its own pixels
-drawn, exactly as before. flexwm also exports `XCURSOR_THEME`/`XCURSOR_SIZE`
+drawn, exactly as before. scoot also exports `XCURSOR_THEME`/`XCURSOR_SIZE`
 to everything it spawns, so a client that loads a theme itself (GTK3, and
 anything predating this protocol) picks the same one the compositor draws —
 which is the "consistent cursor across clients" half the protocol cannot
@@ -1471,25 +1471,25 @@ Cursors are only drawn under `--tty`; `--headless` has no display and
 
 ## Focus handoff between clients (`xdg-activation-v1`)
 
-flexwm implements `xdg_activation_v1` (version 1), so a launcher can hand
+scoot implements `xdg_activation_v1` (version 1), so a launcher can hand
 focus to the app it started and a notification daemon can focus the app its
-popup came from. Without it the only way to move focus is flexwm's own
+popup came from. Without it the only way to move focus is scoot's own
 keybindings and IPC — a client has no standard way to ask.
 
 Honoring every such request unconditionally would be a focus-stealing
-primitive, so flexwm checks the token three ways (see
+primitive, so scoot checks the token three ways (see
 `compositor/activation.rs`):
 
 - **The token must name a real, recent input event that went to the client
   asking.** `set_serial(serial, seat)` is how a client says which click or
   keypress caused it to ask, and a token that names none of them — no serial
-  at all, a seat flexwm doesn't own, or a stale or made-up number — is
-  refused when it is created. What counts is a serial flexwm issued for a key
+  at all, a seat scoot doesn't own, or a stale or made-up number — is
+  refused when it is created. What counts is a serial scoot issued for a key
   or button event (press *or* release; pointer motion never counts, and
   neither does a *focus* event, which every newly mapped window gets for
   free) within the last few input events **and the last 10 seconds**, **and
   that was delivered to that same client**. Both bounds are needed: an idle
-  session — an agent driving flexwm over IPC makes one, since injected
+  session — an agent driving scoot over IPC makes one, since injected
   actions are not input events — never rotates the event history, so without
   the clock a click from this morning would still be spendable tonight. The
   recipient half matters too: Wayland serials come from one
@@ -1515,7 +1515,7 @@ break the one case this protocol exists for. A client the user really did
 interact with can still activate itself off that interaction — the user just
 clicked it, which is the protocol working as intended.
 
-An app flexwm itself started — a keybinding or `msg action spawn` — gets its
+An app scoot itself started — a keybinding or `msg action spawn` — gets its
 token a different way: `State::spawn` mints one from the compositor and hands
 it to the child in `$XDG_ACTIVATION_TOKEN`, so the child can activate its own
 window when it maps one. That covers the slow cold start, where focus has
@@ -1531,7 +1531,7 @@ is where a launched app's focus came from before this protocol existed. For
 anything on `GApplication`) re-invoked from a launcher, or the notification
 daemon case above — nothing maps, so nothing else focuses it and the
 activation simply does not happen. That is worth knowing because of the one
-case flexwm refuses that the protocol would allow: a launcher that mints its
+case scoot refuses that the protocol would allow: a launcher that mints its
 token from a *focus* serial rather than a key or button one (fuzzel does this
 when an entry is picked with the mouse) gets no activation, and for an
 already-running target that is the whole outcome.
@@ -1540,18 +1540,18 @@ A redeemed token is removed whether or not it was honored, so one user action
 cannot be replayed into focus later. Activation goes through the same action
 path a keybinding does, which means it is refused while the session is locked
 and it scrolls the activated column into view rather than only marking it
-focused. A refused activation does nothing visible: flexwm has no per-window
+focused. A refused activation does nothing visible: scoot has no per-window
 urgency state to raise instead.
 
 ## Window icons (`xdg-toplevel-icon-v1`)
 
-flexwm implements `xdg_toplevel_icon_manager_v1` (version 1), so a client can
-say which icon belongs to its window. flexwm draws no icons itself — it has
+scoot implements `xdg_toplevel_icon_manager_v1` (version 1), so a client can
+say which icon belongs to its window. scoot draws no icons itself — it has
 no titlebars, taskbar or window switcher — so this exists for the two
 consumers outside it: a bar or dock showing a window list, and an agent
 driving the session.
 
-`flexwm msg windows` therefore grew one field:
+`scoot msg windows` therefore grew one field:
 
 ```json
 { "id": 1, "app_id": "foot", "title": "zsh", "icon": "foot", ... }
@@ -1562,7 +1562,7 @@ read off the surface's own current state when asked, so it is never stale and
 never reports an icon the client attached but has not committed. The field is
 optional on the wire (an older server simply omits it), so it does not bump
 `PROTOCOL_VERSION`. Two deliberate limits: no *preferred icon sizes* are
-advertised, since nothing in flexwm draws an icon and so it has no size to
+advertised, since nothing in scoot draws an icon and so it has no size to
 prefer; and a client that supplies raw pixel buffers instead of a name reads
 as having no icon, since handing those over IPC would mean re-encoding shm
 buffers to PNG per query and no consumer has asked for it.
@@ -1579,7 +1579,7 @@ has an icon event, and IPC carries the name only.
 
 ## Input methods (`text-input-v3`, `input-method-v2`)
 
-flexwm implements `zwp_text_input_manager_v3` (version 1) and
+scoot implements `zwp_text_input_manager_v3` (version 1) and
 `zwp_input_method_manager_v2` (version 1) — the two halves of IME support,
 neither of which is useful alone. An application binds the first to say
 "there is a text field here"; an input method (fcitx5, ibus, an on-screen
@@ -1589,7 +1589,7 @@ and never sets the path up at all.
 
 Which text field is focused follows keyboard focus automatically, so it works
 for a layer-shell surface with a search field (a launcher) as well as for an
-ordinary window. What flexwm owns is the input method's **popup** — the
+ordinary window. What scoot owns is the input method's **popup** — the
 candidate window beside the text cursor — which is tracked against whichever
 surface has the field and drawn with that surface's own popups, so it follows
 the window, gets frame callbacks, and disappears when the field is disabled.
@@ -1602,7 +1602,7 @@ Same trust note as the other privileged globals: there is no client filter on
 `zwp_input_method_manager_v2`, because an allow-list would be theatre without
 security-context support. An input method is more privileged than a clipboard
 manager — it can grab the keyboard and inject text into the focused client —
-so this is a deliberate consistency with flexwm's existing trust model rather
+so this is a deliberate consistency with scoot's existing trust model rather
 than an oversight. That grab outranks an `xdg_popup.grab` in both orders:
 a menu asked for while the IME holds the seat is refused, and a menu already
 up is dismissed when the IME takes the keyboard (see the popup precedence
@@ -1631,7 +1631,7 @@ It is advertised three ways, matching what clients actually support:
   `preferred_scale` (`1.5`, not `2`), and can render a larger buffer and let
   the compositor scale it down. The `wp_viewporter` global is advertised
   alongside it, because that is the protocol a client uses to submit such a
-  buffer (it sets the surface's logical destination size and flexwm scales the
+  buffer (it sets the surface's logical destination size and scoot scales the
   buffer into it) — without it, a fractional client has no way to render.
 - **`wl_surface.preferred_buffer_scale`** (needs client `wl_compositor` v6) —
   the integer preference that accompanies the fractional value, sent with the
@@ -1645,30 +1645,30 @@ It is advertised three ways, matching what clients actually support:
 
 Notes, because they are real limits rather than polish:
 
-- **Startup only, and one output.** The scale is read once when flexwm starts
+- **Startup only, and one output.** The scale is read once when scoot starts
   and never changes; there is no config reload and no per-output setting
-  (flexwm has exactly one output). Changing it means restarting flexwm.
+  (scoot has exactly one output). Changing it means restarting scoot.
 - **Clamped to `0.5..=4.0`**, warn-and-continue like every other config field
   (see Configuration below): a `scale` outside that range is brought into it
   and logged, and `nan`/`inf` fall back to `1.0`. A non-finite or zero scale
   would make the logical output size nonsense, so this is a correctness bound,
   not taste.
 - **`--nested` is scale-1 only.** The host compositor owns the scale of the
-  window flexwm is drawn inside, so a non-1.0 `scale` there would double-count
-  it; flexwm logs a warning and uses `1.0`. `--headless` and `--tty` honour
+  window scoot is drawn inside, so a non-1.0 `scale` there would double-count
+  it; scoot logs a warning and uses `1.0`. `--headless` and `--tty` honour
   the setting.
 - **Screenshots are physical pixels; layout coordinates are logical.**
-  `flexwm msg screenshot` captures the framebuffer at full physical
-  resolution, while `flexwm msg windows`/`outputs` report logical rectangles.
+  `scoot msg screenshot` captures the framebuffer at full physical
+  resolution, while `scoot msg windows`/`outputs` report logical rectangles.
   An agent converts with `physical = logical * scale`, rounded down where a
    rectangle's edge lands mid-pixel (the logical size is `ceil(physical /
    scale)`, so a full-output `logical * scale` can overshoot by under one
-   pixel). `flexwm msg outputs` reports each output's `scale` for exactly that
+   pixel). `scoot msg outputs` reports each output's `scale` for exactly that
    (older servers omit it, which decodes as `1.0`).
 
 ## Single-pixel buffers (`wp_single_pixel_buffer_manager_v1`)
 
-flexwm implements `wp_single_pixel_buffer_manager_v1` (version 1), so a
+scoot implements `wp_single_pixel_buffer_manager_v1` (version 1), so a
 client can mint a solid-color 1x1 buffer straight from four `u32` channels
 instead of allocating a shm pool for a single pixel — the cheap fill some
 toolkits reach for. The buffer is what the channels say (the full `uint`
@@ -1696,7 +1696,7 @@ What to know before pointing a client at it:
 
 ## Relative pointer (`zwp_relative_pointer_manager_v1`, `zwp_pointer_constraints_v1`)
 
-flexwm implements `zwp_relative_pointer_manager_v1` (version 1) together
+scoot implements `zwp_relative_pointer_manager_v1` (version 1) together
 with `zwp_pointer_constraints_v1` (version 1), the pair games and 3D apps
 expect: the client locks or confines the pointer to its surface and reads
 raw relative motion deltas off its relative-pointer object.
@@ -1706,7 +1706,7 @@ What to know before pointing a client at it:
 - **Relative events are gated on pointer focus, not on the lock.** A client
   whose surface has pointer focus receives `relative_motion` whether or not
   it locked; a client without focus receives nothing. That is the protocol's
-  own rule ("will only emit events when it has focus"), not a flexwm policy.
+  own rule ("will only emit events when it has focus"), not a scoot policy.
 - **Unaccelerated means pre-libinput-acceleration on `--tty`.** A `--tty`
   mouse reports both an accelerated and a raw device delta, and the relative
   event carries each as its own (`dx`/`dy` vs `dx_unaccel`/`dy_unaccel`).
@@ -1734,9 +1734,9 @@ What to know before pointing a client at it:
 
 ## Drawing tablets (`zwp_tablet_manager_v2`)
 
-flexwm implements `zwp_tablet_manager_v2` (version 1 -- the most Smithay
+scoot implements `zwp_tablet_manager_v2` (version 1 -- the most Smithay
 carries at the pinned revision; the protocol's own version 2 only adds a
-tablet bustype event and pad dials, neither of which flexwm mints, see
+tablet bustype event and pad dials, neither of which scoot mints, see
 below), so a drawing tablet works on `--tty` hardware: libinput tool
 events reach tablet-aware clients (Krita, Xournal++), and every other
 client gets a pen that moves the cursor and clicks.
@@ -1768,7 +1768,7 @@ What to know before pointing a client at it:
 
 ## Presentation-time feedback (`wp_presentation`)
 
-flexwm implements `wp_presentation` (version 2): a client requests feedback
+scoot implements `wp_presentation` (version 2): a client requests feedback
 on its surface and learns, per content update, either exactly when that
 update reached the screen (`presented`, with a `CLOCK_MONOTONIC` timestamp,
 the output's refresh, a frame sequence and flags) or that the update was
@@ -1786,7 +1786,7 @@ What to know before pointing a client at it:
   because the flip is vblank-synchronized; the other backends report no
   flags, because there is no retrace to synchronize to and no zero-copy
   path behind a pixman copy.
-- **`refresh` is the mode flexwm advertises, not the panel's.** It is always
+- **`refresh` is the mode scoot advertises, not the panel's.** It is always
   60 Hz -- including under `--tty` on a faster panel, the same known
   inaccuracy as `wl_output`'s own mode (see Display information). A client
   pacing frames should trust the timestamps, not `refresh` plus arithmetic.
@@ -1805,7 +1805,7 @@ What to know before pointing a client at it:
 
 ## Rendering hints (`wp_alpha_modifier_v1`, `wp_content_type_manager_v1`)
 
-flexwm implements `wp_alpha_modifier_v1` (version 1) and
+scoot implements `wp_alpha_modifier_v1` (version 1) and
 `wp_content_type_manager_v1` (version 1), the two client-to-compositor
 rendering hints. They are a pair only on this page: one of them works, and
 the other is stored and honestly ignored.
@@ -1828,9 +1828,9 @@ the other is stored and honestly ignored.
 
 ## Configuration
 
-`--config PATH` loads a TOML file explicitly. Without it, flexwm looks for
-`$XDG_CONFIG_HOME/flexwm/config.toml`, falling back to
-`~/.config/flexwm/config.toml` if `$XDG_CONFIG_HOME` is unset or empty, and runs on
+`--config PATH` loads a TOML file explicitly. Without it, scoot looks for
+`$XDG_CONFIG_HOME/scoot/config.toml`, falling back to
+`~/.config/scoot/config.toml` if `$XDG_CONFIG_HOME` is unset or empty, and runs on
 built-in defaults if neither exists. Five optional tables: `[layout]`,
 `[appearance]`, `[output]`, `[tty]`, `[binds]`. Every field in every table is itself
 optional and defaults independently, so a config that only sets `gap` leaves
@@ -1863,7 +1863,7 @@ below):
   pick — the one place failing loud wins over never blocking startup
   (see `[tty]` below for why falling back there would be fail-open).
 
-This is deliberate: on `--tty`, the real deployment target, flexwm *is* the
+This is deliberate: on `--tty`, the real deployment target, scoot *is* the
 session — there's no other window manager to fall back to and often no easy
 remote access. A compositor that refuses to boot over a config typo is a
 hard lockout with no recovery, so it always starts with something usable and
@@ -1879,7 +1879,7 @@ says what's wrong in the log instead.
 
 ### `[appearance]`
 
-flexwm draws no titlebars by design — a focused window gets a colored ring
+scoot draws no titlebars by design — a focused window gets a colored ring
 drawn *around* it (in the layout's own gap), and there's a solid background
 behind everything, instead of a per-window title bar with text or buttons.
 That's why there's no titlebar-color/font option below: this table controls
@@ -1893,17 +1893,17 @@ the ring, the background, and the built-in pointer cursor — nothing else.
 | `background_color` | `"#rrggbb"` / `"#rrggbbaa"` | `#141419` (near-black) | Cleared behind all window content — there's no separate background render element, this is the frame clear color. |
 | `cursor_size` | integer (pixels) | `16` | Both dimensions of the built-in pointer cursor (see below). Clamped into `4..=256`: under `4` the shape is left with at most one interior pixel (none at all below 3), and a pointer that small is indistinguishable from a dead pixel; over `256` it covers a quarter of a 1080p display's height and the bitmap it allocates stops being small. A value outside `i32` altogether (or a float) isn't a valid value for this field at all, so it's a whole-file parse error (see Failure semantics above), not a clamp. |
 | `cursor_color` | `"#rrggbb"` / `"#rrggbbaa"` | `#ffffff` (white) | Fill color of the built-in pointer cursor. Its 1px outline is always black, at this color's own alpha, and isn't separately configurable — the outline exists to keep the shape's edges visible against similarly-colored content. That doesn't help against a *dark* `cursor_color`: with black (or any near-black) fill, the outline blends into it and the pointer can be hard to spot against dark window content. An alpha of `00` makes the built-in cursor invisible; that's your call, not a clamped value. |
-| `cursor_theme` | string | unset | Which installed xcursor theme named cursor shapes are drawn from (see Cursor shapes above). Unset means follow `$XCURSOR_THEME`, then `default` — i.e. whatever the rest of the desktop uses; an empty string means the same as unset. This only *names* a theme, it never makes flexwm ship one, and a name that matches nothing installed is not an error: named shapes then come from flexwm's own drawn set, exactly as on a machine with no themes at all. |
+| `cursor_theme` | string | unset | Which installed xcursor theme named cursor shapes are drawn from (see Cursor shapes above). Unset means follow `$XCURSOR_THEME`, then `default` — i.e. whatever the rest of the desktop uses; an empty string means the same as unset. This only *names* a theme, it never makes scoot ship one, and a name that matches nothing installed is not an error: named shapes then come from scoot's own drawn set, exactly as on a machine with no themes at all. |
 | `prefer_no_csd` | boolean | `true` | Whether to answer a client's `zxdg_toplevel_decoration_v1` request with `ServerSide`, so a well-behaved client stops drawing its own titlebar (which would otherwise double up with the ring). |
 
-`cursor_size` and `cursor_color` apply to flexwm's own drawn shapes — the
+`cursor_size` and `cursor_color` apply to scoot's own drawn shapes — the
 fallback used when the machine has no cursor theme installed, drawn only
 under `--tty` (`--headless` has no display and `--nested` already shows the
 host's cursor). `cursor_size` also picks which size is taken out of a real
 theme's file, and `cursor_color` has no effect there: a theme's artwork
 brings its own colors. None of the three affects a client that supplies its
 own cursor *image* (a spinner, say): those pixels come from the client over
-the wire, and flexwm draws them at the size and hotspot the client chose.
+the wire, and scoot draws them at the size and hotspot the client chose.
 All three are read once at startup, like every other setting here — there's
 no config reload.
 
@@ -1940,7 +1940,7 @@ press of that key with none of Super/Shift/Ctrl/Alt held; `Shift+Return`,
 for instance, still reaches the focused client normally). Whitespace around
 `+` is ignored. Modifier names are
 case-insensitive: `ctrl`/`control`, `shift`, `alt`, and `super`/`logo`/
-`meta`/`cmd` (all four spellings mean the same modifier — flexwm's own
+`meta`/`cmd` (all four spellings mean the same modifier — scoot's own
 tables and this doc call it "Super"). The key is an xkb keysym name (`h`,
 `Return`, `F5`, ...), resolved by trying the name exactly as written first
 and then case-insensitively — so `"return"` and `"RETURN"` both find
@@ -1954,12 +1954,12 @@ Shift plus that key**: `"A"` means plain `a`, exactly like `"a"` — write
 `"shift+a"` for the Shift chord. Folding a bare capital logs a warning naming
 the bind (config loading warns rather than silently reinterpreting what was
 written); with Shift named there is nothing ambiguous, so `"shift+A"` folds
-quietly. Note `flexwm msg key A` is a different story on purpose: it keeps
+quietly. Note `scoot msg key A` is a different story on purpose: it keeps
 refusing, because pressing `A` with nothing held would type a different
 character — name `shift+a` there, or use `msg type`.
 
-Action strings use exactly the grammar `flexwm --help`'s ACTIONS section
-documents — one parser handles both `flexwm msg action ...` and a config
+Action strings use exactly the grammar `scoot --help`'s ACTIONS section
+documents — one parser handles both `scoot msg action ...` and a config
 file's `[binds]` values:
 
 ```
@@ -2016,7 +2016,7 @@ is no "unbind" action.
 | `Super+Shift+e` | Quit |
 
 That's all 18 default bindings — vim motions (`h`/`j`/`k`/`l`) for direction,
-Super as flexwm's own modifier throughout. Quit is deliberately
+Super as scoot's own modifier throughout. Quit is deliberately
 `Super+Shift+e`, not `Super+Shift+q`: that combo is one slipped Shift away
 from `Super+q` (close focused window), and a slip of the finger shouldn't be
 able to end the whole session.

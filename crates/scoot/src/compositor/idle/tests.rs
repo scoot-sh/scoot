@@ -19,7 +19,7 @@ use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use flexwm_core::Config;
+use scoot_core::Config;
 use smithay::reexports::calloop::EventLoop;
 use smithay::reexports::wayland_server::Display;
 use wayland_client::protocol::{wl_compositor, wl_registry, wl_seat, wl_surface};

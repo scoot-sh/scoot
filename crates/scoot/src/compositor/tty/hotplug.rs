@@ -37,7 +37,7 @@
 //! connector `tty::init` chose) and Smithay's `Output` has no way to rename
 //! one. So a session that started on `HDMI-A-1` and fell back to `eDP-1`
 //! when the HDMI cable came out keeps reporting `HDMI-A-1` to clients and to
-//! `flexwm msg outputs`. The alternative -- destroying and recreating the
+//! `scoot msg outputs`. The alternative -- destroying and recreating the
 //! `wl_output` -- would make every client re-enter the output, re-map its
 //! layer surfaces and re-read its scale, which is a far bigger lie about
 //! what happened than a stale name.
@@ -79,9 +79,9 @@ pub(super) fn udev_event(event: UdevEvent, _: &mut UdevDevices, state: &mut Stat
                 // failed" warnings with no cause attached.
                 tracing::error!(
                     "drm: the device this session is driving was removed; the \
-                     screen will stay as it is -- flexwm drives one DRM device, \
+                     screen will stay as it is -- scoot drives one DRM device, \
                      chosen at startup, and cannot move the session to another \
-                     one. Restart flexwm once the device is back."
+                     one. Restart scoot once the device is back."
                 );
                 Reconfigured::Nothing
             }
@@ -290,7 +290,7 @@ impl Tty {
                     tracing::warn!(
                         "drm: nothing is connected to this device any more; \
                          holding the last frame. The session keeps running -- \
-                         plug a display back in and flexwm mode-sets onto it."
+                         plug a display back in and scoot mode-sets onto it."
                     );
                 }
                 Reconfigured::Nothing
@@ -464,7 +464,7 @@ impl Tty {
     /// *candidate* CRTC's state (disables its current connectors, resets the
     /// CRTC). In the common single-display case that CRTC is idle and the
     /// clear is a no-op commit; at worst it drops whatever the firmware or
-    /// console was showing on a display flexwm never drove. What it can never
+    /// console was showing on a display scoot never drove. What it can never
     /// touch is the live path: the clear addresses the candidate's own CRTC
     /// and its current connectors, which are disjoint from the old CRTC and
     /// the old connector by construction (a connector reports exactly one

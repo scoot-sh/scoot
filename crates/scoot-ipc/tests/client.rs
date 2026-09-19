@@ -4,7 +4,7 @@ use std::io::BufReader;
 use std::os::unix::net::UnixStream;
 use std::thread;
 
-use flexwm_ipc::{Client, PROTOCOL_VERSION, Request, Response, read_message, write_message};
+use scoot_ipc::{Client, PROTOCOL_VERSION, Request, Response, read_message, write_message};
 
 #[test]
 fn client_sends_a_request_and_reads_the_reply() {

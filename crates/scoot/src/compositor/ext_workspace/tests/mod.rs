@@ -36,7 +36,7 @@ use std::os::fd::AsFd;
 use std::os::unix::net::UnixStream;
 use std::sync::mpsc::{Receiver, Sender};
 
-use flexwm_core::{Action, Horizontal, Vertical};
+use scoot_core::{Action, Horizontal, Vertical};
 use wayland_client::protocol::{
     wl_buffer, wl_compositor, wl_output, wl_registry, wl_shm, wl_shm_pool, wl_surface,
 };
@@ -105,7 +105,7 @@ enum Seen {
     WorkspaceEnter(u32, u32),
     WorkspaceLeave(u32, u32),
     Removed(u32),
-    /// `ext_workspace_handle_v1.id`, which flexwm never sends -- recorded so
+    /// `ext_workspace_handle_v1.id`, which scoot never sends -- recorded so
     /// that a test asserting on its absence would actually see one.
     Id(u32, String),
     Done(u32),
@@ -430,7 +430,7 @@ enum Step {
     /// `activate` on the `index`-th workspace handle -- staged, not
     /// committed.
     Activate(usize),
-    /// The requests flexwm never advertises a capability for, which it must
+    /// The requests scoot never advertises a capability for, which it must
     /// therefore ignore without disconnecting anyone.
     Deactivate(usize),
     RemoveWorkspace(usize),
@@ -529,7 +529,7 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                     &surface,
                     None,
                     zwlr_layer_shell_v1::Layer::Overlay,
-                    "flexwm-ext-workspace-test-taskbar".into(),
+                    "scoot-ext-workspace-test-taskbar".into(),
                     &qh,
                     (),
                 );
@@ -628,7 +628,7 @@ fn solid_buffer(
 ) -> wl_buffer::WlBuffer {
     let stride = width * 4;
     let len = (stride * height) as usize;
-    let fd = rustix::fs::memfd_create("flexwm-ext-workspace-test", rustix::fs::MemfdFlags::CLOEXEC)
+    let fd = rustix::fs::memfd_create("scoot-ext-workspace-test", rustix::fs::MemfdFlags::CLOEXEC)
         .expect("a memfd");
     let mut file = std::fs::File::from(fd);
     file.write_all(&vec![0xffu8; len]).expect("a filled pool");
@@ -776,7 +776,7 @@ fn an_output_bound_by_one_client_never_enters_another_clients_group() {
 
 #[test]
 fn no_workspace_is_given_a_stable_id() {
-    // Deliberate, not an omission: flexwm's workspaces are positions that the
+    // Deliberate, not an omission: scoot's workspaces are positions that the
     // next window closing can renumber, and this protocol's `id` is for
     // workspaces stable enough for a client to store preferences against.
     let mut fixture = Fixture::bound();
@@ -1071,7 +1071,7 @@ fn an_activate_on_a_removed_handle_is_ignored() {
 }
 
 #[test]
-fn requests_flexwm_advertises_no_capability_for_are_ignored() {
+fn requests_scoot_advertises_no_capability_for_are_ignored() {
     let mut fixture = Fixture::bound();
     fixture.run(Step::MapWindow);
     fixture.take_log();

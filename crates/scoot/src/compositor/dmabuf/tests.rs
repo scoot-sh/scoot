@@ -434,7 +434,7 @@ fn the_main_device_ladder_prefers_the_render_node() {
         "/dev/dri/renderD128",
         "with both nodes present the render node must answer"
     );
-    let missing = std::path::PathBuf::from("/nonexistent-flexwm-test/renderD128");
+    let missing = std::path::PathBuf::from("/nonexistent-scoot-test/renderD128");
     assert_eq!(
         main_device_from(&missing, &card0).1,
         "/dev/dri/card0",
@@ -444,8 +444,8 @@ fn the_main_device_ladder_prefers_the_render_node() {
 
 #[test]
 fn the_no_drm_node_ladder_ends_at_zero() {
-    let missing = std::path::PathBuf::from("/nonexistent-flexwm-test/renderD128");
-    let also_missing = std::path::PathBuf::from("/nonexistent-flexwm-test/card0");
+    let missing = std::path::PathBuf::from("/nonexistent-scoot-test/renderD128");
+    let also_missing = std::path::PathBuf::from("/nonexistent-scoot-test/card0");
     assert_eq!(
         main_device_from(&missing, &also_missing),
         (0, "no DRM node"),
@@ -617,7 +617,7 @@ fn a_rendered_frame_also_drains_the_mapping_cache() {
     let _mappings = exclusive_mappings();
     // The other half, kept because it is a different mechanism rather than a
     // weaker version of the one above: `Renderer::render` calls
-    // `PixmanRenderer::cleanup` on entry (`pixman/mod.rs:866`), which flexwm
+    // `PixmanRenderer::cleanup` on entry (`pixman/mod.rs:866`), which scoot
     // reaches through `OutputDamageTracker::render_output`. That path is real
     // and worth pinning -- it is just not sufficient on its own, which is what
     // the two tests above establish.
@@ -648,7 +648,7 @@ fn an_imported_dmabuf_survives_being_recommitted_frame_after_frame() {
     // What a GL client actually does: render into one dmabuf, commit, repeat.
     // Nothing upstream re-synchronises the cached mapping on a re-commit
     // (`PixmanRenderer::existing_dmabuf` hands back the first import`s image
-    // untouched), so flexwm issues the DMA_BUF_IOCTL_SYNC bracket itself from
+    // untouched), so scoot issues the DMA_BUF_IOCTL_SYNC bracket itself from
     // the commit handler -- see `dmabuf::sync_committed_dmabufs`. This drives
     // that path for real: a surface tree walked on every commit, with the
     // sync ioctl landing on a live dma-buf.
@@ -863,7 +863,7 @@ fn a_garbage_format_kills_only_the_client_that_sent_it() {
 /// `#[ignore]`d like `cursor/shapes/tests.rs`'s shape dump and run by hand:
 ///
 /// ```text
-/// cargo test -p flexwm --bin flexwm commit_sync_cost -- --ignored --nocapture
+/// cargo test -p scoot --bin scoot commit_sync_cost -- --ignored --nocapture
 /// ```
 ///
 /// Three numbers, because three different clients pay three different prices
@@ -1176,7 +1176,7 @@ fn import(
 /// `/dev/udmabuf`.
 fn plane_fd(backing: Backing, size: u32) -> Option<OwnedFd> {
     let memfd = rustix::fs::memfd_create(
-        "flexwm-dmabuf-test",
+        "scoot-dmabuf-test",
         rustix::fs::MemfdFlags::CLOEXEC | rustix::fs::MemfdFlags::ALLOW_SEALING,
     )
     .expect("a memfd");

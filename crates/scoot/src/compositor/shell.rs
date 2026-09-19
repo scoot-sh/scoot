@@ -1,6 +1,6 @@
 //! Keeping Wayland and the core in step: events in, arrangement out.
 
-use flexwm_core::{Action, Effect, Event, Rect, Size, SizeHints, WindowId, WindowInfo};
+use scoot_core::{Action, Effect, Event, Rect, Size, SizeHints, WindowId, WindowInfo};
 use smithay::desktop::Window;
 use smithay::utils::SERIAL_COUNTER;
 use smithay::wayland::compositor::with_states;
@@ -20,7 +20,7 @@ impl State {
         self.windows.insert(id, Window::new_wayland_window(surface));
         let info = self.info_of(id);
         // Before the core hears about it, though nothing depends on the order:
-        // these are the other two lists of windows flexwm publishes (see
+        // these are the other two lists of windows scoot publishes (see
         // `foreign_toplevel.rs` for `ext-foreign-toplevel-list-v1` and
         // `foreign_toplevel_management.rs` for the wlr protocol every
         // Quickshell-based shell actually binds), and both cover the same
@@ -341,12 +341,12 @@ impl State {
 /// deliberately disabling this clamp and watching the tests below fail
 /// (debug builds panic; release wraps):
 ///
-/// - `flexwm_core`'s own `World::place_workspace`, `x + width` in the
+/// - `scoot_core`'s own `World::place_workspace`, `x + width` in the
 ///   on-screen test -- reached first, during `arrange`, before any rendering;
 /// - `decorations::ring_rects`'s `rect.w + 2 * width`, whose wrapped result
 ///   `clip` happens to discard in release.
 ///
-/// This is the same bound `flexwm_core`'s `learn_from_frame` already applies
+/// This is the same bound `scoot_core`'s `learn_from_frame` already applies
 /// to a *learned* minimum, with one deliberate difference: that one caps to
 /// the usable area of the output the window is on, and this takes the largest
 /// of every output instead. Nothing in `World`'s public surface says which

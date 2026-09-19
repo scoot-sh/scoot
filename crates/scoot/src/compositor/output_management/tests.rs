@@ -108,12 +108,12 @@ fn announced(head: u32, first_mode: u32, modes: &[i32], current: usize, version:
         Seen::Name(head, OUTPUT_NAME.to_string()),
         // `make - model - name`, which is how Smithay builds an output's
         // description (verified against the pinned rev's `Output::new`).
-        Seen::Description(head, format!("flexwm - {OUTPUT_NAME} - {OUTPUT_NAME}")),
+        Seen::Description(head, format!("scoot - {OUTPUT_NAME} - {OUTPUT_NAME}")),
     ];
-    // No `physical_size`: flexwm's is (0, 0). No `serial_number`: flexwm's is a
+    // No `physical_size`: scoot's is (0, 0). No `serial_number`: scoot's is a
     // placeholder. See the module doc for both.
     if version >= 2 {
-        seen.push(Seen::Make(head, "flexwm".to_string()));
+        seen.push(Seen::Make(head, "scoot".to_string()));
         seen.push(Seen::Model(head, OUTPUT_NAME.to_string()));
     }
     for (index, size) in modes.iter().enumerate() {
@@ -655,7 +655,7 @@ fn head_state_agrees_with_wl_output() {
         "the current mode"
     );
     // Neither event is sent, and that agrees with `wl_output` reporting (0, 0):
-    // flexwm knows no physical size. Asserted so a future backend that learns
+    // scoot knows no physical size. Asserted so a future backend that learns
     // one has to update both sides, not just this protocol.
     assert_eq!(
         output.physical_size,

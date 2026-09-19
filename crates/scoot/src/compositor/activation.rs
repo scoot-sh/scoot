@@ -6,7 +6,7 @@
 //! started (conventionally in `$XDG_ACTIVATION_TOKEN`). That party later
 //! sends the token back with `activate(token, surface)`, and the compositor
 //! decides whether to move focus there. Without it a client has no standard
-//! way to ask at all: focus can only move through flexwm's own keybindings
+//! way to ask at all: focus can only move through scoot's own keybindings
 //! and IPC.
 //!
 //! # The policy, and why it is a policy
@@ -14,7 +14,7 @@
 //! The protocol explicitly leaves the decision to the compositor ("the
 //! compositor may ignore the request"), because honoring every request
 //! unconditionally is a focus-stealing primitive: any client, at any time,
-//! could take the keyboard from whatever the user is typing into. flexwm
+//! could take the keyboard from whatever the user is typing into. scoot
 //! applies three rules, all to the token rather than to the surface. Two of
 //! them bound resources and are **not** a defense against focus-stealing
 //! itself (the third, below, is the one that answers that):
@@ -72,7 +72,7 @@
 //! Only key and button events count, which is stricter than the loosest
 //! reading of the protocol -- upstream documents the serial as one that "can
 //! come from an input or focus event". A *focus* event is not consent:
-//! flexwm focuses every newly mapped window itself (`shell.rs`'s
+//! scoot focuses every newly mapped window itself (`shell.rs`'s
 //! `add_window` passes `focus: true`), so any client can collect a
 //! `wl_keyboard.enter` serial just by mapping, and spending it later is the
 //! steal this gate exists to refuse.
@@ -115,14 +115,14 @@
 //! removal and the lock gate all run at redemption (see that method).
 //!
 //! What the compositor does *not* do with a refused request is also
-//! deliberate: nothing. There is no urgency hint to raise instead -- flexwm
+//! deliberate: nothing. There is no urgency hint to raise instead -- scoot
 //! has no per-window urgency state and no decoration to show it on (see
 //! `decorations.rs`) -- so a refusal is logged at debug and dropped rather
 //! than half-honored.
 
 use std::time::Duration;
 
-use flexwm_core::Action;
+use scoot_core::Action;
 use smithay::input::Seat;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::wayland::xdg_activation::{
@@ -185,7 +185,7 @@ impl XdgActivationHandler for State {
             );
             return false;
         };
-        // Resolved rather than assumed: flexwm has exactly one seat, so in
+        // Resolved rather than assumed: scoot has exactly one seat, so in
         // practice any `wl_seat` a client can name is this one -- but a
         // resource that resolves to some other seat, or to no live seat at
         // all, has no bearing on what this compositor's keyboard and pointer
@@ -316,7 +316,7 @@ impl State {
     /// toolkit reads the literal name, so this is the one spelling.
     pub(super) const ACTIVATION_TOKEN_ENV: &str = "XDG_ACTIVATION_TOKEN";
 
-    /// Mints the activation token a process flexwm spawned itself carries in
+    /// Mints the activation token a process scoot spawned itself carries in
     /// [`Self::ACTIVATION_TOKEN_ENV`].
     ///
     /// Upstream never routes this through [`XdgActivationHandler::token_created`]

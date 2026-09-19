@@ -3,11 +3,11 @@
 //! Smithay carries the whole protocol at the pinned rev
 //! (`TabletManagerState` under `src/wayland/tablet_manager.rs`, the
 //! `TabletSeat` under `src/input/tablet/` -- verified in source, not
-//! assumed), so flexwm's side is the same shape as the other Smithay-carried
+//! assumed), so scoot's side is the same shape as the other Smithay-carried
 //! globals: one hold-alive field on [`State`] (see
 //! [`State::new`](super::State::new)), the [`TabletSeatHandler`] impl in
 //! `handlers.rs`, and the event plumbing below. No Smithay patch vendored;
-//! everything stays in flexwm's handler layer.
+//! everything stays in scoot's handler layer.
 //!
 //! ## What a pen does
 //!
@@ -94,7 +94,7 @@ use smithay::reexports::wayland_server::DisplayHandle;
 use smithay::utils::{Logical, Point, SERIAL_COUNTER};
 
 use super::State;
-use flexwm_ipc::PointerButton;
+use scoot_ipc::PointerButton;
 
 #[cfg(test)]
 mod tests;

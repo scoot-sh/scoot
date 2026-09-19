@@ -1,9 +1,9 @@
 #![cfg(unix)]
-//! `flexwm msg` must exit quietly when its stdout reader goes away.
+//! `scoot msg` must exit quietly when its stdout reader goes away.
 //!
 //! Each test serves one canned IPC reply from a fake Unix-socket server
-//! (no compositor needed), runs the real `flexwm` binary against it via
-//! `FLEXWM_SOCKET`, and either reads stdout fully (normal path) or closes
+//! (no compositor needed), runs the real `scoot` binary against it via
+//! `SCOOT_SOCKET`, and either reads stdout fully (normal path) or closes
 //! the read end before the child can write (truncated path). The truncated
 //! reply is ~1 MiB, far past the 64 KiB pipe buffer, so a small reply that
 //! "fits and never errors" cannot weaken the test: the child necessarily
@@ -20,13 +20,13 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
-fn flexwm() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_flexwm"))
+fn scoot() -> PathBuf {
+    PathBuf::from(env!("CARGO_BIN_EXE_scoot"))
 }
 
 fn socket_path(name: &str) -> PathBuf {
     std::env::temp_dir().join(format!(
-        "flexwm-epipe-test-{}-{}-{}.sock",
+        "scoot-epipe-test-{}-{}-{}.sock",
         std::process::id(),
         name,
         std::time::SystemTime::now()
@@ -93,8 +93,8 @@ fn closed_stdout_on_a_large_reply_exits_quietly() {
     let _ = std::fs::remove_file(&path);
     let server = serve_once(path.clone(), big_windows_reply());
 
-    let mut child = Command::new(flexwm())
-        .env("FLEXWM_SOCKET", &path)
+    let mut child = Command::new(scoot())
+        .env("SCOOT_SOCKET", &path)
         .args(["msg", "windows"])
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -114,7 +114,7 @@ fn closed_stdout_on_a_large_reply_exits_quietly() {
 
 #[test]
 fn closed_stdout_on_help_exits_quietly() {
-    let mut child = Command::new(flexwm())
+    let mut child = Command::new(scoot())
         .arg("--help")
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -134,8 +134,8 @@ fn a_full_read_is_unchanged() {
     let _ = std::fs::remove_file(&path);
     let server = serve_once(path.clone(), small_windows_reply());
 
-    let output = Command::new(flexwm())
-        .env("FLEXWM_SOCKET", &path)
+    let output = Command::new(scoot())
+        .env("SCOOT_SOCKET", &path)
         .args(["msg", "windows"])
         .stderr(Stdio::null())
         .output()

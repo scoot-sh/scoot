@@ -83,7 +83,7 @@ fn null_commit_after_lock_role_destroy_survives() {
 
 /// The full real-world order: the unlock itself goes through first (which
 /// clears the compositor's surface list), and *then* the trailing role
-/// destroy plus null commit arrives on a surface flexwm has forgotten. The
+/// destroy plus null commit arrives on a surface scoot has forgotten. The
 /// ack record has to outlive the surface list for exactly this reason.
 #[test]
 fn unlock_then_role_destroy_then_null_commit_survives() {

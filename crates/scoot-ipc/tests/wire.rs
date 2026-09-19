@@ -1,7 +1,7 @@
 //! The JSON shapes clients depend on. A change that breaks one of these needs a
 //! `PROTOCOL_VERSION` bump.
 
-use flexwm_ipc::{
+use scoot_ipc::{
     Action, Horizontal, OutputSnapshot, PointerButton, Rect, Request, Response, Screenshot,
     WindowSnapshot, decode, encode,
 };

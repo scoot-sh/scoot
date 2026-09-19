@@ -21,7 +21,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use flexwm_core::Config;
+use scoot_core::Config;
 use smithay::reexports::calloop::EventLoop;
 use smithay::reexports::wayland_server::Display;
 use wayland_client::backend::WaylandError;
@@ -108,7 +108,7 @@ fn resize_pool_to(stream: UnixStream, size: i32) -> Result<(), DispatchError> {
     queue.roundtrip(&mut client)?;
 
     let shm = client.shm.clone().expect("the wl_shm global");
-    let fd = rustix::fs::memfd_create("flexwm-shm-test", rustix::fs::MemfdFlags::CLOEXEC)
+    let fd = rustix::fs::memfd_create("scoot-shm-test", rustix::fs::MemfdFlags::CLOEXEC)
         .expect("a memfd");
     rustix::fs::ftruncate(&fd, 1).expect("a one-byte pool file");
     let pool = shm.create_pool(fd.as_fd(), 1, &qh, ());
@@ -131,7 +131,7 @@ fn create_pool_of(stream: UnixStream, size: i32) -> Result<(), DispatchError> {
     queue.roundtrip(&mut client)?;
 
     let shm = client.shm.clone().expect("the wl_shm global");
-    let fd = rustix::fs::memfd_create("flexwm-shm-test", rustix::fs::MemfdFlags::CLOEXEC)
+    let fd = rustix::fs::memfd_create("scoot-shm-test", rustix::fs::MemfdFlags::CLOEXEC)
         .expect("a memfd");
     rustix::fs::ftruncate(&fd, 1).expect("a one-byte pool file");
     let _pool = shm.create_pool(fd.as_fd(), size, &qh, ());
@@ -172,7 +172,7 @@ fn healthy_client(stream: UnixStream) -> Result<usize, DispatchError> {
     queue.roundtrip(&mut client)?;
 
     let shm = client.shm.clone().expect("the wl_shm global");
-    let fd = rustix::fs::memfd_create("flexwm-shm-test", rustix::fs::MemfdFlags::CLOEXEC)
+    let fd = rustix::fs::memfd_create("scoot-shm-test", rustix::fs::MemfdFlags::CLOEXEC)
         .expect("a memfd");
     rustix::fs::ftruncate(&fd, 4096).expect("a one-page pool file");
     let pool = shm.create_pool(fd.as_fd(), 4096, &qh, ());
@@ -398,7 +398,7 @@ fn a_pipelined_request_after_a_refused_pool_does_not_reach_the_dead_object() {
         queue.roundtrip(&mut client)?;
 
         let shm = client.shm.clone().expect("the wl_shm global");
-        let fd = rustix::fs::memfd_create("flexwm-shm-test", rustix::fs::MemfdFlags::CLOEXEC)
+        let fd = rustix::fs::memfd_create("scoot-shm-test", rustix::fs::MemfdFlags::CLOEXEC)
             .expect("a memfd");
         rustix::fs::ftruncate(&fd, 1).expect("a one-byte pool file");
         // Both requests queued before a single flush, so they arrive in one
@@ -460,7 +460,7 @@ impl PoolClient {
     fn create_many(&mut self, sizes: &[i32]) -> Result<(), DispatchError> {
         let qh = self.queue.handle();
         for size in sizes {
-            let fd = rustix::fs::memfd_create("flexwm-shm-test", rustix::fs::MemfdFlags::CLOEXEC)
+            let fd = rustix::fs::memfd_create("scoot-shm-test", rustix::fs::MemfdFlags::CLOEXEC)
                 .expect("a memfd");
             rustix::fs::ftruncate(&fd, 1).expect("a one-byte pool file");
             self.pools
@@ -635,7 +635,7 @@ fn resizing_a_pool_leaves_the_count_alone() {
         queue.roundtrip(&mut client)?;
 
         let shm = client.shm.clone().expect("the wl_shm global");
-        let fd = rustix::fs::memfd_create("flexwm-shm-test", rustix::fs::MemfdFlags::CLOEXEC)
+        let fd = rustix::fs::memfd_create("scoot-shm-test", rustix::fs::MemfdFlags::CLOEXEC)
             .expect("a memfd");
         rustix::fs::ftruncate(&fd, 4096).expect("a one-page pool file");
         let pool = shm.create_pool(fd.as_fd(), 4096, &qh, ());
@@ -759,7 +759,7 @@ impl BufferClient {
     fn create_pool(&mut self) -> Result<wl_shm_pool::WlShmPool, DispatchError> {
         let qh = self.queue.handle();
         let shm = self.dispatch.shm.clone().expect("the wl_shm global");
-        let fd = rustix::fs::memfd_create("flexwm-buffer-test", rustix::fs::MemfdFlags::CLOEXEC)
+        let fd = rustix::fs::memfd_create("scoot-buffer-test", rustix::fs::MemfdFlags::CLOEXEC)
             .expect("a memfd");
         rustix::fs::ftruncate(&fd, 4096).expect("a one-page pool file");
         let pool = shm.create_pool(fd.as_fd(), 4096, &qh, ());
@@ -1099,7 +1099,7 @@ fn a_dmabuf_immed_past_a_full_budget_is_refused_before_validation() {
         let size = 32i32;
         let stride = size * 4;
         let fd =
-            rustix::fs::memfd_create("flexwm-dmabuf-budget-test", rustix::fs::MemfdFlags::CLOEXEC)
+            rustix::fs::memfd_create("scoot-dmabuf-budget-test", rustix::fs::MemfdFlags::CLOEXEC)
                 .expect("a memfd");
         rustix::fs::ftruncate(&fd, (stride * size) as u64).expect("a sized memfd");
         params.add(fd.as_fd(), 0, 0, stride as u32, 0, 0);
@@ -1149,7 +1149,7 @@ fn a_dmabuf_create_past_a_full_budget_is_refused_by_the_shared_budget() {
         let size = 32i32;
         let stride = size * 4;
         let fd =
-            rustix::fs::memfd_create("flexwm-dmabuf-create-test", rustix::fs::MemfdFlags::CLOEXEC)
+            rustix::fs::memfd_create("scoot-dmabuf-create-test", rustix::fs::MemfdFlags::CLOEXEC)
                 .expect("a memfd");
         rustix::fs::ftruncate(&fd, (stride * size) as u64).expect("a sized memfd");
         params.add(fd.as_fd(), 0, 0, stride as u32, 0, 0);
@@ -1196,7 +1196,7 @@ fn a_failed_dmabuf_import_kills_only_that_client_and_drains_its_budget() {
         let size = 32i32;
         let stride = size * 4;
         let fd =
-            rustix::fs::memfd_create("flexwm-dmabuf-buffer-test", rustix::fs::MemfdFlags::CLOEXEC)
+            rustix::fs::memfd_create("scoot-dmabuf-buffer-test", rustix::fs::MemfdFlags::CLOEXEC)
                 .expect("a memfd");
         rustix::fs::ftruncate(&fd, (stride * size) as u64).expect("a sized memfd");
         params.add(fd.as_fd(), 0, 0, stride as u32, 0, 0);

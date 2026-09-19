@@ -9,8 +9,8 @@
 //! wire, not about a field in `State`.
 
 use super::*;
-use flexwm_core::{Action, WindowId};
-use flexwm_ipc::{Request, Response};
+use scoot_core::{Action, WindowId};
+use scoot_ipc::{Request, Response};
 
 /// An `xdg_popup` gets its initial configure, maps, draws and tears down
 /// without taking the compositor with it.
@@ -1014,9 +1014,9 @@ fn keybindings_still_fire_while_a_popup_grabs_the_keyboard() {
     let focused = fixture.state.focus;
     fixture
         .state
-        .press(&flexwm_ipc::KeyCombo {
+        .press(&scoot_ipc::KeyCombo {
             key: "h".into(),
-            modifiers: vec![flexwm_ipc::Modifier::Super],
+            modifiers: vec![scoot_ipc::Modifier::Super],
         })
         .expect("a pressable combo");
     fixture.settle();
@@ -1180,7 +1180,7 @@ fn a_layer_parented_popup_configures_maps_and_draws() {
 // IPC visibility: which window's popup holds the keyboard
 // -------------------------------------------------------------------------
 
-/// `flexwm msg windows` reports the popup-grab holder alongside `focused`.
+/// `scoot msg windows` reports the popup-grab holder alongside `focused`.
 ///
 /// The divergence
 /// `docs/backlog/protocols/popup-grab-survives-window-focus-change.md` files:

@@ -4,7 +4,7 @@
 //! from `state.rs` -- this file is purely "what happens when the host sends
 //! us an event", nothing else.
 
-use flexwm_ipc::PointerButton;
+use scoot_ipc::PointerButton;
 use smithay::backend::input::KeyState;
 use smithay::input::keyboard::Keycode;
 use wayland_client::globals::GlobalListContents;
@@ -87,7 +87,7 @@ impl Dispatch<HostWmBase, ()> for State {
         _: &Connection,
         _: &QueueHandle<Self>,
     ) {
-        // The host pings periodically to check flexwm is still alive; not
+        // The host pings periodically to check scoot is still alive; not
         // answering gets this window (and, per some compositors, the whole
         // connection) killed as unresponsive.
         if let xdg_wm_base::Event::Ping { serial } = event {
@@ -156,7 +156,7 @@ impl Dispatch<HostToplevel, ()> for State {
         match event {
             xdg_toplevel::Event::Configure { width, height, .. } => {
                 // 0x0 means "you choose"; keep whatever's already pending
-                // (the size flexwm was started with) rather than resizing to
+                // (the size scoot was started with) rather than resizing to
                 // nothing.
                 if width > 0
                     && height > 0
@@ -166,7 +166,7 @@ impl Dispatch<HostToplevel, ()> for State {
                 }
             }
             xdg_toplevel::Event::Close => {
-                tracing::info!("host closed flexwm's window; exiting");
+                tracing::info!("host closed scoot's window; exiting");
                 state.loop_signal.stop();
             }
             _ => {}
@@ -217,7 +217,7 @@ impl Dispatch<HostKeyboard, ()> for State {
         // Modifiers and the host's keymap are both out of v1 scope: modifier
         // state isn't tracked separately from whatever the raw key events
         // themselves carry (fine for plain typing; a host-side modifier
-        // held before flexwm's window gained focus wouldn't be reflected),
+        // held before scoot's window gained focus wouldn't be reflected),
         // and the keyboard this compositor sets up (state.rs) always uses
         // the default US layout rather than adopting the host's (this
         // `Keymap` event, ignored below, is how the host would offer one).
@@ -227,7 +227,7 @@ impl Dispatch<HostKeyboard, ()> for State {
         // create a `zwp_virtual_keyboard_v1` and upload their own ad hoc xkb
         // keymap, so the host relays a real `Keymap` event carrying keycodes
         // that mean whatever that tool made up, not evdev positions. Since
-        // that event is ignored here, flexwm interprets the raw keycodes
+        // that event is ignored here, scoot interprets the raw keycodes
         // that follow against its own default US layout instead -- garbage
         // in, garbage out, by design, not a bug in the forwarding below. A
         // real physical keyboard never uploads a keymap, so this doesn't

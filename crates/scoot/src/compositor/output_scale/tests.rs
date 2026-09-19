@@ -18,7 +18,7 @@ use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use flexwm_core::Config;
+use scoot_core::Config;
 use smithay::backend::allocator::Fourcc;
 use smithay::backend::renderer::{Bind, ExportMem};
 use smithay::output::{Mode, Output, PhysicalProperties, Scale, Subpixel};
@@ -43,7 +43,7 @@ fn output_at(physical: (i32, i32), scale: Scale) -> Output {
         PhysicalProperties {
             size: (0, 0).into(),
             subpixel: Subpixel::Unknown,
-            make: "flexwm".into(),
+            make: "scoot".into(),
             model: "test".into(),
             serial_number: "0".into(),
         },
@@ -180,7 +180,7 @@ fn logical_size_is_zero_without_a_mode() {
         PhysicalProperties {
             size: (0, 0).into(),
             subpixel: Subpixel::Unknown,
-            make: "flexwm".into(),
+            make: "scoot".into(),
             model: "test".into(),
             serial_number: "0".into(),
         },
@@ -495,7 +495,7 @@ fn solid_buffer(
 ) -> wl_buffer::WlBuffer {
     let stride = width * 4;
     let len = (stride * height) as usize;
-    let fd = rustix::fs::memfd_create("flexwm-scale-test", rustix::fs::MemfdFlags::CLOEXEC)
+    let fd = rustix::fs::memfd_create("scoot-scale-test", rustix::fs::MemfdFlags::CLOEXEC)
         .expect("a memfd");
     let mut file = std::fs::File::from(fd);
     let pixels: Vec<u8> = color.iter().copied().cycle().take(len).collect();
@@ -730,7 +730,7 @@ impl Fixture {
     }
 
     /// Where the core says the first window goes, in logical pixels.
-    fn window_rect(&self) -> flexwm_core::Rect {
+    fn window_rect(&self) -> scoot_core::Rect {
         self.state
             .world
             .arrange()

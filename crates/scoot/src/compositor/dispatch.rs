@@ -1,4 +1,4 @@
-//! flexwm's own Wayland request dispatch for [`State`].
+//! scoot's own Wayland request dispatch for [`State`].
 //!
 //! This is a hand-written copy of what `smithay::delegate_dispatch2!(State)`
 //! expands to -- the blanket `Dispatch`/`GlobalDispatch` impls that forward
@@ -196,7 +196,7 @@
 //!
 //! Unlike the three guards above, this one needs *state*: whether an icon has
 //! been assigned lives in `XdgToplevelIconUserData::constructed`, which is
-//! private with no public accessor, so flexwm cannot ask. It tracks the
+//! private with no public accessor, so scoot cannot ask. It tracks the
 //! assignment itself instead -- `set_icon` is the request that freezes an
 //! icon, and it passes through this very function -- in
 //! [`State::frozen_icons`](super::State), owned by `toplevel_icon.rs`. Delete
@@ -211,7 +211,7 @@
 //! pruning, and no `duplicate_frame` -- even though the protocol allows at
 //! most one frame object per session at a time ("If a client sends a
 //! create_frame request before a previous frame object has been destroyed,
-//! the duplicate_frame protocol error is raised"). And flexwm's own
+//! the duplicate_frame protocol error is raised"). And scoot's own
 //! `Capture::pending` throttle never sees this shape at all: `frame()`, where
 //! that throttle lives, is only reached from the client's `capture` request,
 //! never from `create_frame` itself. So one client, one session, and a
@@ -282,7 +282,7 @@
 //!   draining units claimed by retaining ones). Single-pixel buffers are
 //!   counted too, even though they hold nothing: uniformity is what keeps
 //!   the scalar pairing exact. The dmabuf async `create` claims like the
-//!   rest since flexwm started importing dmabufs for real: a successful
+//!   rest since scoot started importing dmabufs for real: a successful
 //!   import mints a `wl_buffer` on that path too (see `dmabuf.rs`).
 //! - **Claimed unconditionally, exact for live clients by mechanism.**
 //!   Smithay initialises the buffer or kills the client, never neither, so
@@ -318,14 +318,14 @@
 //! for a lock surface *going away* -- so when a client destroys only its
 //! `ext_session_lock_surface_v1`, keeping its `wl_surface`, its lock and its
 //! connection (legal, and what a well-behaved locker does when an output is
-//! removed), Smithay quietly unmaps the surface and no flexwm code runs at
+//! removed), Smithay quietly unmaps the surface and no scoot code runs at
 //! all. The surface stops producing render elements, but nothing asks for the
 //! frame that would show it gone, so its last pixels stay on the display
 //! until something unrelated marks the screen dirty -- against the protocol's
 //! own "the compositor must fall back to rendering a solid color". The
 //! `destroyed` arm of the blanket impl is the only place that destruction is
 //! visible, for the same reason the guards live here: it is the one seam
-//! flexwm owns (see below). `session_lock.rs` holds what to do about it.
+//! scoot owns (see below). `session_lock.rs` holds what to do about it.
 //!
 //! ## Why it's shaped this way
 //!
@@ -333,7 +333,7 @@
 //!   This rev has no `delegate_shm!`; `delegate_dispatch2!` generates one
 //!   *blanket* impl covering every interface at once, and Rust has no
 //!   specialization, so any per-interface impl overlaps it (E0119). The
-//!   blanket impl is therefore the only seam flexwm owns.
+//!   blanket impl is therefore the only seam scoot owns.
 //! - **Not a reimplementation of the valid-size path.** `ShmPoolUserData`'s
 //!   only field is private and `shm::pool::Pool` isn't exported, so there is
 //!   no public way to perform the resize; every in-range request still goes to
@@ -342,7 +342,7 @@
 //! Delete the *first* guard (and the `size <= 0` half of this file's reason to
 //! exist) once the pinned rev carries the missing `return`, and the *third*
 //! once its `set_size` handler range-checks its own `uint`s. The pool size
-//! cap is flexwm's own policy, not a workaround, so it stays -- and so does
+//! cap is scoot's own policy, not a workaround, so it stays -- and so does
 //! the lock-surface hook, until `SessionLockHandler` grows a callback of its
 //! own for it. Either one keeps this file alive on its own, whatever happens
 //! to the guards, unless Smithay also grows a `delegate_shm!` to override
@@ -380,7 +380,7 @@
 //!
 //! It has to run here rather than in `CompositorHandler::commit` because the
 //! kill happens in Smithay's pre-commit hooks, which run before that: this
-//! blanket `request` is the only seam flexwm owns ahead of them. It delegates
+//! blanket `request` is the only seam scoot owns ahead of them. It delegates
 //! afterwards unconditionally -- the commit still applies -- so unlike a guard
 //! it has no refusal path and posts no protocol error, which is also why the
 //! module doc's `Client::kill` mutex precondition is unaffected by it:
@@ -417,7 +417,7 @@ use super::State;
 #[cfg(test)]
 pub(super) mod tests;
 
-/// The largest `wl_shm` pool flexwm will map, in bytes (512 MiB).
+/// The largest `wl_shm` pool scoot will map, in bytes (512 MiB).
 ///
 /// Why this number, not a round one for its own sake:
 ///
@@ -479,7 +479,7 @@ where
 
     fn destroyed(state: &mut Self, client: ClientId, resource: &I, data: &UserData) {
         // *Before* the delegate, unlike every hook below: this only touches
-        // flexwm's own per-client frame count, which Smithay's teardown
+        // scoot's own per-client frame count, which Smithay's teardown
         // neither reads nor writes, and `data.destroyed` moves `client`.
         forget_destroyed_capture_frame::<I>(state, &client, resource);
         forget_destroyed_shm_pool::<I>(state, &client, resource);
@@ -489,7 +489,7 @@ where
         // `ExtLockSurfaceUserData::destroyed` is what unmaps the surface, and
         // this is the redraw that shows the result. Same ordering reason for
         // the layer neutralize below: Smithay's layer destruction handler
-        // resets the surface's layer state after flexwm's `layer_destroyed`
+        // resets the surface's layer state after scoot's `layer_destroyed`
         // has run, so only something here can prepare its next commit.
         redraw_after_lock_surface_destroyed::<I>(state);
         neutralize_destroyed_layer_surface::<I>(state);
@@ -775,7 +775,7 @@ where
 /// Every other request of every other interface -- including `wl_shm_pool`
 /// `resize`/`destroy` and params `add`/`destroy` -- falls through.
 ///
-/// `create` claims because flexwm now really imports dmabufs
+/// `create` claims because scoot now really imports dmabufs
 /// (`dmabuf.rs`): `ImportNotifier::successful` on a `Falliable` notifier
 /// mints a real, fd-retaining `wl_buffer`, so leaving that path uncounted
 /// would let a GL client hold unbounded buffers outside
@@ -1146,7 +1146,7 @@ where
 /// See the module doc's "Why the fifth guard exists" for the full argument;
 /// the short form: the pinned Smithay rev pushes every `create_frame` onto an
 /// unbounded per-session list and never raises `duplicate_frame`, and
-/// flexwm's own `Capture::pending` throttle only runs on `capture`, so a
+/// scoot's own `Capture::pending` throttle only runs on `capture`, so a
 /// `create_frame` loop with no `capture` ever sent is an unbounded-objects
 /// shape nothing else bounds. The refusal is the protocol's own
 /// `duplicate_frame` error on the offending session, which disconnects only
@@ -1213,7 +1213,7 @@ where
 /// nowhere else in this file: this runs only on the path that has just
 /// disconnected a client, never on a served request.
 fn too_large(size: i32) -> String {
-    format!("wl_shm pool size {size} exceeds flexwm's maximum of {MAX_SHM_POOL_BYTES} bytes")
+    format!("wl_shm pool size {size} exceeds scoot's maximum of {MAX_SHM_POOL_BYTES} bytes")
 }
 
 /// Whether a creation holding `live` counted units against a `grace` must

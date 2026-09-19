@@ -1,4 +1,4 @@
-//! A blocking client: enough for scripts, agents and `flexwm msg`.
+//! A blocking client: enough for scripts, agents and `scoot msg`.
 
 use std::io::{self, BufReader};
 use std::os::unix::net::UnixStream;
@@ -24,13 +24,13 @@ impl Client {
         UnixStream::connect(path).and_then(Self::from_stream)
     }
 
-    /// Connects to the socket named by `FLEXWM_SOCKET`, or the default one in
+    /// Connects to the socket named by `SCOOT_SOCKET`, or the default one in
     /// `XDG_RUNTIME_DIR`.
     pub fn connect_default() -> io::Result<Self> {
         let path = socket_path().ok_or_else(|| {
             io::Error::new(
                 io::ErrorKind::NotFound,
-                "neither FLEXWM_SOCKET nor XDG_RUNTIME_DIR is set",
+                "neither SCOOT_SOCKET nor XDG_RUNTIME_DIR is set",
             )
         })?;
         Self::connect(path)

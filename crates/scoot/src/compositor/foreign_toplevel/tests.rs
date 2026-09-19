@@ -14,7 +14,7 @@
 //! not exist.
 //!
 //! Windows here are bare `xdg_toplevel`s with no buffer, for the same reason
-//! `ext_workspace/tests.rs` uses them: what puts a window in flexwm's lists is
+//! `ext_workspace/tests.rs` uses them: what puts a window in scoot's lists is
 //! the toplevel *existing* (see this protocol's own module doc on what "a
 //! toplevel" means here), so nothing needs `wl_shm`.
 //!
@@ -519,12 +519,12 @@ fn a_window_created_with_a_title_reports_it_in_its_own_batch() {
     // rather than on each event.
     let mut fixture = Fixture::bound();
     fixture.run(Step::MapDescribedWindow {
-        app_id: "org.flexwm.Probe".to_string(),
+        app_id: "org.scoot.Probe".to_string(),
         title: "a window".to_string(),
     });
     let mut expected = announced(0, &fixture.identifier_of(1), "", "");
     expected.extend([
-        Seen::AppId(0, "org.flexwm.Probe".to_string()),
+        Seen::AppId(0, "org.scoot.Probe".to_string()),
         Seen::Done(0),
         Seen::Title(0, "a window".to_string()),
         Seen::Done(0),
@@ -554,11 +554,11 @@ fn an_app_id_change_is_one_app_id_event_and_one_done() {
     fixture.run(Step::MapWindow);
     fixture.take_log();
 
-    fixture.run(Step::SetAppId(0, "org.flexwm.Probe".to_string()));
+    fixture.run(Step::SetAppId(0, "org.scoot.Probe".to_string()));
     assert_eq!(
         fixture.take_log(),
         vec![
-            Seen::AppId(0, "org.flexwm.Probe".to_string()),
+            Seen::AppId(0, "org.scoot.Probe".to_string()),
             Seen::Done(0),
         ],
     );
@@ -652,7 +652,7 @@ fn a_late_bind_after_closing_the_first_of_several_sees_the_right_survivors() {
 #[test]
 fn a_reopened_window_gets_a_new_identifier() {
     // The protocol forbids reusing an identifier once a toplevel is gone.
-    // flexwm's window ids only ever increase, which is what makes that hold.
+    // scoot's window ids only ever increase, which is what makes that hold.
     let mut fixture = Fixture::bound();
     fixture.run(Step::MapWindow);
     fixture.run(Step::CloseWindow(0));
@@ -664,18 +664,18 @@ fn a_reopened_window_gets_a_new_identifier() {
     assert_ne!(fixture.identifier_of(1), fixture.identifier_of(2));
 }
 
-// -- the bridge to flexwm's own window list ------------------------------
+// -- the bridge to scoot's own window list ------------------------------
 
 #[test]
 fn the_identifier_names_the_ipc_window_id() {
     // The one thing that makes enumeration actionable: this protocol has no
     // requests at all, so a client that wants to *focus* a window it found
-    // here has to get from the identifier to `flexwm msg action
+    // here has to get from the identifier to `scoot msg action
     // focus-window-id N`. Asserted against the same snapshot builder the
     // `windows` request answers with, in both directions.
     let mut fixture = Fixture::bound();
     fixture.run(Step::MapDescribedWindow {
-        app_id: "org.flexwm.Probe".to_string(),
+        app_id: "org.scoot.Probe".to_string(),
         title: "target".to_string(),
     });
     let log = fixture.take_log();
@@ -999,7 +999,7 @@ fn a_handle_from_before_stop_still_reports_changes() {
 
 #[test]
 fn the_window_list_stays_live_while_the_session_is_locked() {
-    // Deliberate, and the same answer `flexwm msg windows` gives (see this
+    // Deliberate, and the same answer `scoot msg windows` gives (see this
     // module's doc and `README.md`'s lock section): a process that can reach
     // this socket is inside the trust boundary already, and sending `closed`
     // for windows that did not close would be a lie a taskbar could not

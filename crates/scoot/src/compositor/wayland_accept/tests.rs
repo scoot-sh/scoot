@@ -20,7 +20,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-use flexwm_core::Config;
+use scoot_core::Config;
 use smithay::reexports::calloop::{EventLoop, PostAction};
 use smithay::reexports::wayland_server::{Display, ListeningSocket};
 
@@ -63,7 +63,7 @@ fn bound() -> (ListeningSocket, PathBuf) {
     let runtime = std::env::var("XDG_RUNTIME_DIR")
         .expect("tests need a writable $XDG_RUNTIME_DIR, like every harness suite");
     let name = format!(
-        "flexwm-wayland-accept-test-{}-{}",
+        "scoot-wayland-accept-test-{}-{}",
         std::process::id(),
         NEXT_LISTENER.fetch_add(1, Ordering::Relaxed)
     );

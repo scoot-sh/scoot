@@ -172,7 +172,7 @@ fn ipc_actions_are_refused_while_locked() {
 
     let response = fixture
         .state
-        .handle_request(Request::Action(flexwm_ipc::Action::CloseFocused));
+        .handle_request(Request::Action(scoot_ipc::Action::CloseFocused));
     assert!(
         matches!(response, Response::Error { .. }),
         "an IPC action must be refused while locked, got {response:?}"
@@ -187,7 +187,7 @@ fn ipc_actions_are_refused_while_locked() {
     fixture.run(Step::Unlock { lock: 0 });
     let response = fixture
         .state
-        .handle_request(Request::Action(flexwm_ipc::Action::CloseFocused));
+        .handle_request(Request::Action(scoot_ipc::Action::CloseFocused));
     assert!(
         matches!(response, Response::Ok { locked: false }),
         "the same action should work once unlocked, got {response:?}"
@@ -206,7 +206,7 @@ fn the_action_path_itself_is_closed_while_locked() {
     fixture.run(Step::MapWindow);
     fixture.run(Step::Lock);
 
-    fixture.state.act(flexwm_core::Action::CloseFocused);
+    fixture.state.act(scoot_core::Action::CloseFocused);
     fixture.settle();
     assert_eq!(
         fixture.report().closes,
@@ -216,7 +216,7 @@ fn the_action_path_itself_is_closed_while_locked() {
     );
 
     fixture.run(Step::Unlock { lock: 0 });
-    fixture.state.act(flexwm_core::Action::CloseFocused);
+    fixture.state.act(scoot_core::Action::CloseFocused);
     fixture.settle();
     assert_eq!(fixture.report().closes, 1);
 }

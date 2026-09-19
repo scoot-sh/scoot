@@ -28,8 +28,8 @@ use std::sync::mpsc::{Receiver, channel};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use flexwm_core::Config;
-use flexwm_ipc::PointerButton;
+use scoot_core::Config;
+use scoot_ipc::PointerButton;
 use smithay::reexports::calloop::EventLoop;
 use smithay::reexports::wayland_server::Display;
 use smithay::utils::{Logical, Point};
@@ -358,7 +358,7 @@ fn solid_buffer(shm: &wl_shm::WlShm, qh: &QueueHandle<Client>, size: i32) -> wl_
 
     let stride = size * 4;
     let len = (stride * size) as usize;
-    let fd = memfd_create("flexwm-dnd-test", MemfdFlags::CLOEXEC).expect("a memfd");
+    let fd = memfd_create("scoot-dnd-test", MemfdFlags::CLOEXEC).expect("a memfd");
     let mut file = std::fs::File::from(fd);
     use std::io::Write;
     file.write_all(&vec![0u8; len]).expect("a filled pool file");

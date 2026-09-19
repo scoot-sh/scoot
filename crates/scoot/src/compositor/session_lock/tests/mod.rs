@@ -31,7 +31,7 @@ use std::os::unix::net::UnixStream;
 use std::sync::mpsc::{Receiver, Sender};
 use std::time::{Duration, Instant};
 
-use flexwm_ipc::{KeyCombo, Modifier, PointerButton, Request, Response};
+use scoot_ipc::{KeyCombo, Modifier, PointerButton, Request, Response};
 use wayland_client::protocol::{
     wl_buffer, wl_callback, wl_compositor, wl_keyboard, wl_output, wl_pointer, wl_registry,
     wl_seat, wl_shm, wl_shm_pool, wl_surface,
@@ -154,7 +154,7 @@ enum Step {
     /// The same, but naming the one physical output through the client's
     /// *second* `wl_output` bind. Smithay refuses the same resource twice
     /// (`DuplicateOutput`, "Output is already locked") while admitting a
-    /// second bind of the same global; flexwm refuses that shape too, per
+    /// second bind of the same global; scoot refuses that shape too, per
     /// physical output (see `per_output`). So this step is how a refusal is
     /// provoked -- and, after a full destroy of the first surface, how a
     /// rebuild is admitted.
@@ -277,7 +277,7 @@ struct TestClient {
     /// A second bind of the same `wl_output` global, bound up front so a
     /// step can name the one physical output through a different resource.
     /// Smithay's one-surface-per-output guard keys on resource identity and
-    /// admits this shape; flexwm refuses it per physical output while a live
+    /// admits this shape; scoot refuses it per physical output while a live
     /// surface covers it (see `per_output`) -- so this bind is how a refusal
     /// is provoked, and, after a full destroy, how a rebuild is admitted.
     output2: Option<wl_output::WlOutput>,
@@ -642,7 +642,7 @@ fn solid_buffer(
 ) -> wl_buffer::WlBuffer {
     let stride = width * 4;
     let len = (stride * height) as usize;
-    let fd = rustix::fs::memfd_create("flexwm-lock-test", rustix::fs::MemfdFlags::CLOEXEC)
+    let fd = rustix::fs::memfd_create("scoot-lock-test", rustix::fs::MemfdFlags::CLOEXEC)
         .expect("a memfd");
     let mut file = std::fs::File::from(fd);
     let pixels: Vec<u8> = color.iter().copied().cycle().take(len).collect();
@@ -896,7 +896,7 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                     &surface,
                     None,
                     zwlr_layer_shell_v1::Layer::Overlay,
-                    "flexwm-lock-test".into(),
+                    "scoot-lock-test".into(),
                     &qh,
                     SurfaceIndex(index),
                 );

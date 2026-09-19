@@ -1,4 +1,4 @@
-//! DRM dumb-buffer double-buffering: the two GPU-visible buffers flexwm's
+//! DRM dumb-buffer double-buffering: the two GPU-visible buffers scoot's
 //! rendered frame gets copied into for real scanout.
 //!
 //! Structured like `nested/buffers.rs`'s pool -- two slots, write into
@@ -16,7 +16,7 @@
 //! memcpy from the pixman-rendered framebuffer into whichever dumb buffer is
 //! free -- row by row, because a dumb buffer's pitch (its driver-chosen
 //! stride) is not guaranteed to equal `width * 4`, unlike the wl_shm buffers
-//! flexwm creates itself in `nested/buffers.rs` and can assume are tightly
+//! scoot creates itself in `nested/buffers.rs` and can assume are tightly
 //! packed. Getting this wrong is exactly the kind of bug that only shows up
 //! on real hardware, never in this VM's happens-to-be-aligned case.
 //!

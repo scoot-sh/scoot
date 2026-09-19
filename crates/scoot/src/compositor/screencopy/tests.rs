@@ -1910,7 +1910,7 @@ impl Pool {
     /// A pool of `len` bytes, pre-filled with `fill` repeated, so anything the
     /// compositor writes is distinguishable from what was already there.
     fn new(shm: &wl_shm::WlShm, qh: &QueueHandle<TestClient>, len: usize, fill: [u8; 4]) -> Self {
-        let fd = rustix::fs::memfd_create("flexwm-capture-test", rustix::fs::MemfdFlags::CLOEXEC)
+        let fd = rustix::fs::memfd_create("scoot-capture-test", rustix::fs::MemfdFlags::CLOEXEC)
             .expect("a memfd");
         let mut file = std::fs::File::from(fd);
         let bytes: Vec<u8> = fill.iter().copied().cycle().take(len).collect();

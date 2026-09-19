@@ -9,7 +9,7 @@
 //! panic; every stderr write goes through [`warn`], which never fails at
 //! all. A vanished *socket* peer stays an ordinary error, which is why
 //! EPIPE is mapped only here, at the stdio edge, and never inside
-//! `flexwm_ipc::Client`.
+//! `scoot_ipc::Client`.
 //!
 //! Deliberately *not* a restored SIGPIPE disposition: this binary also
 //! hosts the compositor, which must never die to a signal because one IPC

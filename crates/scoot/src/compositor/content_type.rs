@@ -44,7 +44,7 @@
 //! ## Trust model
 //!
 //! No client filter, the same deliberate consistency as every other
-//! advertisement here: flexwm has no security-context support, so an
+//! advertisement here: scoot has no security-context support, so an
 //! allow-list would be theatre (see `README.md`'s trust note). A global
 //! that only labels a client's own surface widens nothing.
 

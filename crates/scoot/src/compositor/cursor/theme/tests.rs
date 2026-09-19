@@ -4,10 +4,10 @@
 //! installed on the machine running the suite. A test that loaded "whatever
 //! Adwaita is here" would assert different pixels on a developer's laptop, in
 //! CI and in a bare container -- and would silently pass by doing nothing at
-//! all on the last of those, which is exactly the environment flexwm targets.
+//! all on the last of those, which is exactly the environment scoot targets.
 //!
 //! So the file-reading half is left to the integration evidence (a real
-//! toolkit under a real flexwm, recorded in
+//! toolkit under a real scoot, recorded in
 //! `docs/backlog/resolved/foot-protocol-warnings-done.md`), and what is
 //! tested here is the half that can be silently wrong: [`decode`]'s choice of
 //! size, its hotspot, and whether the pixel bytes survive in the order the
@@ -99,7 +99,7 @@ fn the_nearest_nominal_size_wins() {
 #[test]
 fn nearest_prefers_the_first_frame_of_an_animation() {
     // An animated cursor stores several frames under the *same* nominal size.
-    // flexwm does not drive cursor animation (see `nearest`'s doc), so the
+    // scoot does not drive cursor animation (see `nearest`'s doc), so the
     // first frame is what gets drawn -- not the last, which is what a naive
     // "find the matching size" would land on.
     let file = xcursor_file(&[image(24, 1, 0x11), image(24, 7, 0x77)]);
@@ -139,7 +139,7 @@ fn a_theme_that_does_not_exist_loads_nothing_and_falls_back() {
     // this crate runs in: no theme, so every named shape comes from
     // `shapes.rs`. `image` must answer `None` rather than, say, panicking on
     // an empty theme.
-    let mut theme = Theme::load(Some("flexwm-test-no-such-theme"), 16);
+    let mut theme = Theme::load(Some("scoot-test-no-such-theme"), 16);
     assert!(!theme.is_loaded());
     assert!(theme.image(CursorIcon::Default).is_none());
     assert!(theme.image(CursorIcon::Text).is_none());
@@ -160,10 +160,10 @@ fn the_configured_size_is_reported_for_export() {
     // `compositor::run` puts this in `XCURSOR_SIZE` for children, so a client
     // loading its own theme matches the compositor's.
     assert_eq!(
-        Theme::load(Some("flexwm-test-no-such-theme"), 32).size(),
+        Theme::load(Some("scoot-test-no-such-theme"), 32).size(),
         32
     );
     // Never zero, whatever it is handed: a zero nominal size would make
     // `nearest` prefer the smallest image in every file.
-    assert_eq!(Theme::load(Some("flexwm-test-no-such-theme"), 0).size(), 1);
+    assert_eq!(Theme::load(Some("scoot-test-no-such-theme"), 0).size(), 1);
 }

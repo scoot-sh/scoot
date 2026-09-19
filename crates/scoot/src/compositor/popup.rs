@@ -9,7 +9,7 @@
 //! both live here rather than anywhere else.
 //!
 //! Smithay supplies the machinery ([`PopupGrab`], [`PopupKeyboardGrab`],
-//! [`PopupPointerGrab`]). What flexwm has to decide is how that machinery
+//! [`PopupPointerGrab`]). What scoot has to decide is how that machinery
 //! sits inside a focus model that already had three answers in it.
 //!
 //! ## Precedence, highest first
@@ -94,7 +94,7 @@
 //! surface the popup chain hangs off. That is right for a window and wrong
 //! for a bar that asked for `keyboard_interactivity: none`, which would end
 //! up holding the keyboard it never wanted. [`State::settle_popup_grab`] is
-//! what makes flexwm's own derivation final: it notices the grab has ended
+//! what makes scoot's own derivation final: it notices the grab has ended
 //! and re-runs [`State::refresh_keyboard_focus`], so the answer comes from
 //! the same policy every other focus change uses.
 //!
@@ -108,7 +108,7 @@
 
 use std::time::Duration;
 
-use flexwm_core::WindowId;
+use scoot_core::WindowId;
 use smithay::desktop::{
     PopupGrab, PopupKeyboardGrab, PopupKind, PopupManager, PopupPointerGrab, PopupUngrabStrategy,
     find_popup_root_surface,
@@ -205,7 +205,7 @@ impl State {
         // The serial is only meaningful against the seat that issued it, and
         // a client-named seat is resolved rather than assumed -- the same
         // check `activation.rs` applies to a token's `set_serial`. In
-        // practice flexwm has exactly one seat, so this never fires; it is
+        // practice scoot has exactly one seat, so this never fires; it is
         // here so a second seat one day does not silently inherit this
         // seat's history.
         if seat != self.seat {
@@ -319,7 +319,7 @@ impl State {
             keyboard.set_focus(self, grab.current_grab(), serial);
             keyboard.set_grab(self, PopupKeyboardGrab::new(&grab), serial);
         }
-        // Held so flexwm can ask whether the grab is over (`settle_popup_grab`)
+        // Held so scoot can ask whether the grab is over (`settle_popup_grab`)
         // and end it on its own terms (`dismiss_popup_grab`); neither is
         // answerable through the seat, which hands back only a `&dyn` grab.
         self.popup_grab = Some(grab);
@@ -374,7 +374,7 @@ impl State {
     }
 
     /// Which window's popup tree currently holds the keyboard through an
-    /// explicit `xdg_popup.grab`, if any -- the answer `flexwm msg windows`
+    /// explicit `xdg_popup.grab`, if any -- the answer `scoot msg windows`
     /// reports per window as `popup_grab` (see `ipc.rs`).
     ///
     /// Read off the held grab's own root surface, so there is no second copy
@@ -496,7 +496,7 @@ impl State {
 
     /// Notices that the active grab has ended -- the client destroyed its
     /// popup, its parent went away, or a click outside dismissed it -- and
-    /// gives flexwm's own focus policy the last word.
+    /// gives scoot's own focus policy the last word.
     ///
     /// Without this the keyboard stays where Smithay's grab put it back: on
     /// the popup's *root*, which is right for a window and wrong for a bar

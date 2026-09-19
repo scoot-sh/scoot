@@ -44,7 +44,7 @@ fn a_session_with_no_layer_surfaces_is_unchanged() {
 /// while `rect` stays whole.
 #[test]
 fn outputs_reports_the_bar_reserved_usable_area() {
-    use flexwm_ipc::{Request, Response};
+    use scoot_ipc::{Request, Response};
 
     let mut fixture = Fixture::new();
     fixture.run(Step::MapWindow);
@@ -55,7 +55,7 @@ fn outputs_reports_the_bar_reserved_usable_area() {
     assert_eq!(outputs.len(), 1, "one output in these tests");
     assert_eq!(
         outputs[0].rect,
-        flexwm_ipc::Rect {
+        scoot_ipc::Rect {
             x: 0,
             y: 0,
             width: CANVAS,
@@ -79,7 +79,7 @@ fn outputs_reports_the_bar_reserved_usable_area() {
     };
     assert_eq!(
         outputs[0].rect,
-        flexwm_ipc::Rect {
+        scoot_ipc::Rect {
             x: 0,
             y: 0,
             width: CANVAS,
@@ -89,7 +89,7 @@ fn outputs_reports_the_bar_reserved_usable_area() {
     );
     assert_eq!(
         outputs[0].usable,
-        flexwm_ipc::Rect {
+        scoot_ipc::Rect {
             x: 0,
             y: 30,
             width: CANVAS,
@@ -280,7 +280,7 @@ fn a_layer_surface_that_never_commits_reserves_nothing() {
 /// layout has made room for a bar that is not drawing yet.
 ///
 /// That is Smithay's `LayerMap` behavior (it arranges every surface mapped
-/// into it, buffer or not) and flexwm takes it as-is rather than
+/// into it, buffer or not) and scoot takes it as-is rather than
 /// reimplementing `arrange` to filter on mapped-ness. It self-heals in both
 /// directions that matter: a client that unmaps has its cached state reset
 /// by Smithay's own pre-commit hook, and one that dies has its surface

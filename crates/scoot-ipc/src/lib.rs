@@ -1,8 +1,8 @@
-//! The flexwm control protocol: newline-delimited JSON over a Unix socket.
+//! The scoot control protocol: newline-delimited JSON over a Unix socket.
 //!
 //! A connection is a simple loop -- write one [`Request`] per line, read one
 //! [`Response`] per line. Nothing here is Wayland- or macOS-specific, so any
-//! flexwm shell can host it and any script or agent can speak it.
+//! scoot shell can host it and any script or agent can speak it.
 
 #![forbid(unsafe_code)]
 
@@ -30,7 +30,7 @@ pub use socket::{SOCKET_ENV, socket_path};
 ///
 /// `Response` is internally tagged (`#[serde(tag = "type", ...)]`), and this
 /// scheme's own `unknown_request_types_are_rejected` test (see
-/// `flexwm-ipc/tests/wire.rs`) proves an unrecognized tag is a hard decode
+/// `scoot-ipc/tests/wire.rs`) proves an unrecognized tag is a hard decode
 /// error, not something an older client can silently ignore -- so adding
 /// `Response::Warning` (2026-09, the IPC-VT-switch-warning item) is exactly
 /// the kind of change this constant's doc warns about: a client built

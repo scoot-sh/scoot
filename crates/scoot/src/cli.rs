@@ -1,20 +1,20 @@
-//! Argument parsing. Deliberately small: flexwm's surface is one compositor to
+//! Argument parsing. Deliberately small: scoot's surface is one compositor to
 //! start and a handful of requests to send.
 
 use std::fmt;
 use std::path::PathBuf;
 
-use flexwm_ipc::{Action, Horizontal, PointerButton, Request, Vertical};
+use scoot_ipc::{Action, Horizontal, PointerButton, Request, Vertical};
 
 pub const USAGE: &str = "\
-flexwm -- a scrolling-tiling Wayland compositor
+scoot -- a scrolling-tiling Wayland compositor
 
 USAGE:
-    flexwm --headless [--width 1-65535] [--height 1-65535] [--socket PATH] [--config PATH] [-- COMMAND...]
-    flexwm --nested [--width 1-65535] [--height 1-65535] [--socket PATH] [--config PATH] [-- COMMAND...]
-    flexwm --tty [--gpu PATH] [--mode WxH] [--socket PATH] [--config PATH] [-- COMMAND...]
-    flexwm msg REQUEST
-    flexwm --help
+    scoot --headless [--width 1-65535] [--height 1-65535] [--socket PATH] [--config PATH] [-- COMMAND...]
+    scoot --nested [--width 1-65535] [--height 1-65535] [--socket PATH] [--config PATH] [-- COMMAND...]
+    scoot --tty [--gpu PATH] [--mode WxH] [--socket PATH] [--config PATH] [-- COMMAND...]
+    scoot msg REQUEST
+    scoot --help
 
 REQUESTS:
     version | outputs | windows
@@ -49,7 +49,7 @@ ACTIONS:
 ///   hardware sits far below that (8K is 7680 wide; the widest 16K
 ///   prototype is 15360), so the bound has room to spare with margin.
 /// - **It keeps every output-derived sum in the layout far from overflow.**
-///   The largest one, `available + gap` in `flexwm_core`'s `column_width`,
+///   The largest one, `available + gap` in `scoot_core`'s `column_width`,
 ///   tops out at `ceil(65535 / MIN_SCALE) + Config::MAX_GAP` -- 131070 +
 ///   10,000 at the `[output] scale` floor of 0.5 -- over four orders of
 ///   magnitude inside `i32`.
@@ -298,7 +298,7 @@ fn message(mut args: impl Iterator<Item = String>) -> Result<Command, Error> {
 }
 
 /// Parses one action and its arguments (`"focus-column" "left"`, ...) the
-/// same way for both `flexwm msg action ...` and a config file's `[binds]`
+/// same way for both `scoot msg action ...` and a config file's `[binds]`
 /// values (see `compositor::config::parse_bind`) -- one grammar, one
 /// parser, rather than a second copy for the config-file case.
 pub(crate) fn action(args: &mut impl Iterator<Item = String>) -> Result<Action, Error> {
@@ -585,17 +585,17 @@ mod tests {
         let Ok(Command::Compositor(options)) = parse_args(&[
             "--headless",
             "--config",
-            "/etc/flexwm/config.toml",
+            "/etc/scoot/config.toml",
             "--socket",
-            "/tmp/flexwm.sock",
+            "/tmp/scoot.sock",
         ]) else {
             panic!("expected compositor");
         };
         assert_eq!(
             options.config,
-            Some(PathBuf::from("/etc/flexwm/config.toml"))
+            Some(PathBuf::from("/etc/scoot/config.toml"))
         );
-        assert_eq!(options.socket, Some(PathBuf::from("/tmp/flexwm.sock")));
+        assert_eq!(options.socket, Some(PathBuf::from("/tmp/scoot.sock")));
     }
 
     #[test]

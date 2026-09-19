@@ -24,7 +24,7 @@ use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use flexwm_core::Config;
+use scoot_core::Config;
 use smithay::reexports::calloop::EventLoop;
 use smithay::reexports::wayland_server::Display;
 use wayland_client::protocol::{
@@ -55,7 +55,7 @@ use crate::compositor::state::ClientState;
 /// What the tests pass around as clipboard content. Distinctive on purpose:
 /// reading back exactly this is what proves the bytes went through the
 /// compositor rather than anywhere else.
-const PAYLOAD: &[u8] = b"flexwm-clipboard-42";
+const PAYLOAD: &[u8] = b"scoot-clipboard-42";
 const MIME: &str = "text/plain";
 
 /// How long a client script may take before the compositor counts as not
@@ -580,7 +580,7 @@ wayland_client::delegate_noop!(Client: ignore xdg_toplevel::XdgToplevel);
 fn receive_memfd() -> std::fs::File {
     use rustix::fs::{MemfdFlags, memfd_create};
 
-    let fd = memfd_create("flexwm-selection-test", MemfdFlags::CLOEXEC).expect("a memfd");
+    let fd = memfd_create("scoot-selection-test", MemfdFlags::CLOEXEC).expect("a memfd");
     std::fs::File::from(fd)
 }
 
@@ -599,7 +599,7 @@ fn solid_buffer(shm: &wl_shm::WlShm, qh: &QueueHandle<Client>, size: i32) -> wl_
 
     let stride = size * 4;
     let len = (stride * size) as usize;
-    let fd = memfd_create("flexwm-selection-test", MemfdFlags::CLOEXEC).expect("a memfd");
+    let fd = memfd_create("scoot-selection-test", MemfdFlags::CLOEXEC).expect("a memfd");
     let mut file = std::fs::File::from(fd);
     file.write_all(&vec![0u8; len]).expect("a filled pool file");
     let pool = shm.create_pool(file.as_fd(), len as i32, qh, ());

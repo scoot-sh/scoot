@@ -26,7 +26,7 @@
 //!   compositor.
 //!
 //! Windows here are bare `xdg_toplevel`s with no buffer, for the same reason
-//! `foreign_toplevel/tests.rs` uses them: what puts a window in flexwm's lists
+//! `foreign_toplevel/tests.rs` uses them: what puts a window in scoot's lists
 //! is the toplevel *existing* (see this protocol's own module doc on what "a
 //! toplevel" means here), so nothing needs `wl_shm`.
 //!
@@ -100,7 +100,7 @@ enum Seen {
     Title(u32, String),
     AppId(u32, String),
     /// `output_enter`, keyed by handle. Which `wl_output` is not recorded:
-    /// flexwm has exactly one, so the only interesting facts are that the
+    /// scoot has exactly one, so the only interesting facts are that the
     /// event arrived and on which handle.
     OutputEnter(u32),
     OutputLeave(u32),
@@ -548,7 +548,7 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                     &surface,
                     None,
                     zwlr_layer_shell_v1::Layer::Overlay,
-                    "flexwm-ftl-test-taskbar".into(),
+                    "scoot-ftl-test-taskbar".into(),
                     &qh,
                     (),
                 );
@@ -636,7 +636,7 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 handle.set_fullscreen(None);
                 handle.unset_fullscreen();
                 // A rectangle with a negative size, which wlroots answers with
-                // an `invalid_rectangle` protocol error. flexwm reads nothing
+                // an `invalid_rectangle` protocol error. scoot reads nothing
                 // from the rectangle, so it must survive this rather than kill
                 // the client over a hint it ignores.
                 let surface = windows.first().ok_or("no window to hang a rectangle on")?;
@@ -696,7 +696,7 @@ fn solid_buffer(
 ) -> wl_buffer::WlBuffer {
     let stride = width * 4;
     let len = (stride * height) as usize;
-    let fd = rustix::fs::memfd_create("flexwm-ftl-test", rustix::fs::MemfdFlags::CLOEXEC)
+    let fd = rustix::fs::memfd_create("scoot-ftl-test", rustix::fs::MemfdFlags::CLOEXEC)
         .expect("a memfd");
     let mut file = std::fs::File::from(fd);
     file.write_all(&vec![0xffu8; len]).expect("a filled pool");
@@ -783,9 +783,9 @@ impl Fixture {
     fn click(&mut self, x: f64, y: f64) {
         self.state.pointer_move(x, y);
         self.state
-            .pointer_button(flexwm_ipc::PointerButton::Left, true);
+            .pointer_button(scoot_ipc::PointerButton::Left, true);
         self.state
-            .pointer_button(flexwm_ipc::PointerButton::Left, false);
+            .pointer_button(scoot_ipc::PointerButton::Left, false);
         self.settle();
     }
 
@@ -895,7 +895,7 @@ fn a_window_created_with_a_title_reports_it_in_its_own_batch() {
     // rather than on each event.
     let mut fixture = Fixture::bound();
     fixture.run(Step::MapDescribedWindow {
-        app_id: "org.flexwm.Probe".to_string(),
+        app_id: "org.scoot.Probe".to_string(),
         title: "a window".to_string(),
     });
     // The activation batch lands between the two: the window is announced and
@@ -904,7 +904,7 @@ fn a_window_created_with_a_title_reports_it_in_its_own_batch() {
     let mut expected = announced(0, "", "", &[]);
     expected.extend(activation(0, &activated()));
     expected.extend([
-        Seen::AppId(0, "org.flexwm.Probe".to_string()),
+        Seen::AppId(0, "org.scoot.Probe".to_string()),
         Seen::Done(0),
         Seen::Title(0, "a window".to_string()),
         Seen::Done(0),
@@ -1099,7 +1099,7 @@ fn a_reopened_window_gets_a_handle_of_its_own() {
 
 #[test]
 fn focus_moving_deactivates_one_window_and_activates_the_other() {
-    // The `activated` bit is flexwm's real window focus, re-derived from
+    // The `activated` bit is scoot's real window focus, re-derived from
     // `State::focus` on every change. Both windows are told, in one batch
     // each, and nothing else moves.
     let mut fixture = Fixture::bound();
@@ -1409,7 +1409,7 @@ fn windows_opened_and_destroyed_at_full_rate_leave_nothing_behind() {
 
 #[test]
 fn both_window_lists_describe_the_same_windows_to_one_client() {
-    // flexwm publishes its windows twice, through this protocol and through
+    // scoot publishes its windows twice, through this protocol and through
     // `ext-foreign-toplevel-list-v1`, from the same three lifecycle events. A
     // client bound to both -- which a shell hedging its bets really would be --
     // must see one window list described twice, never two that disagree about
@@ -1419,7 +1419,7 @@ fn both_window_lists_describe_the_same_windows_to_one_client() {
     fixture.take_log();
 
     fixture.run(Step::MapDescribedWindow {
-        app_id: "org.flexwm.Probe".to_string(),
+        app_id: "org.scoot.Probe".to_string(),
         title: "shared".to_string(),
     });
     fixture.run(Step::MapWindow);
@@ -1446,8 +1446,8 @@ fn both_window_lists_describe_the_same_windows_to_one_client() {
             Seen::ExtTitle(0, "shared".to_string()),
         ),
         (
-            Seen::AppId(0, "org.flexwm.Probe".to_string()),
-            Seen::ExtAppId(0, "org.flexwm.Probe".to_string()),
+            Seen::AppId(0, "org.scoot.Probe".to_string()),
+            Seen::ExtAppId(0, "org.scoot.Probe".to_string()),
         ),
     ] {
         assert!(
@@ -1468,7 +1468,7 @@ fn both_window_lists_describe_the_same_windows_to_one_client() {
         "the two protocols disagreed about a window closing: {log:?}"
     );
 
-    // And both agree with the third list flexwm publishes, its own IPC one.
+    // And both agree with the third list scoot publishes, its own IPC one.
     let snapshots = fixture.state.window_snapshots();
     assert_eq!(snapshots.len(), 1);
     assert_eq!(fixture.tracked(), 1);
@@ -1478,7 +1478,7 @@ fn both_window_lists_describe_the_same_windows_to_one_client() {
 
 #[test]
 fn the_window_list_stays_live_while_the_session_is_locked() {
-    // Deliberate, and the same answer `flexwm msg windows` and the `ext-` list
+    // Deliberate, and the same answer `scoot msg windows` and the `ext-` list
     // give (see this module's doc and `README.md`'s lock section): a process
     // that can reach this socket is inside the trust boundary already, and
     // sending `closed` for windows that did not close would be a lie a taskbar
