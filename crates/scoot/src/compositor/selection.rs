@@ -16,8 +16,8 @@
 //! primary selection, matching toolkit expectations; all three use an
 //! allow-everyone filter (`|_| true`), because scoot has no
 //! security-context support and an allow-list would be theatre -- the same
-//! rationale as the session-lock global, documented in `README.md`'s trust
-//! note.
+//! rationale as the session-lock global, documented in `docs/protocols.md`'s
+//! trust note.
 //!
 //! Nothing here is per-frame: selection traffic is per client action, so
 //! there is nothing to benchmark (see `tests.rs` for the round-trips this

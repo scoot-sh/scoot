@@ -51,9 +51,9 @@
 //!
 //! No client filter, the same deliberate consistency as every other
 //! advertisement here: scoot has no security-context support, so an
-//! allow-list would be theatre (see `README.md`'s trust note). This global
-//! hands out solid colors, not pixels, so it extends that note rather than
-//! widening it.
+//! allow-list would be theatre (see `docs/protocols.md`'s trust note). This
+//! global hands out solid colors, not pixels, so it extends that note rather
+//! than widening it.
 
 #[cfg(test)]
 mod tests;

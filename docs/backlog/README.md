@@ -416,12 +416,60 @@ falsify. Read `flexwm` there as `scoot`.
   — RESOLVED 2026-09-16, together with the `--tty` entry above that had
   independently (and wrongly) filed the same failure as a compositor bug.
 - [Enhanced hardware/DRM testing ideas](./testing/hardware-testing-ideas.md) (research)
+- [No CI: every verification run is manual and self-reported](./testing/ci-test-run.md)
+  — LANDED 2026-09-19 (PR #140): `.github/workflows/ci.yml` runs fmt,
+  clippy, `cargo nextest run --workspace`, `cargo test --workspace`, the
+  `--headless` smoke test, and an `ldd` pair asserting the default build
+  links no `libgbm`/`libEGL` while the `--features gpu-scanout` build does
+  — all through `nix develop`; plus a macOS `cargo check` of the `scoot
+  msg` client. 4m30s warm, 8m05s cold. What CI cannot cover (`--tty`, a
+  DRM/VT seat, GPU hardware, `--nested`, performance) is named in the
+  workflow's own header.
 - [Extract a shared test harness; split the largest test files; adopt `cargo-nextest`](./resolved/large-test-file-organization-done.md)
   — RESOLVED 2026-09-16: `compositor/test_support.rs` now carries the
   real-client harness the five largest suites each reimplemented; the two
   biggest are split by concern; `cargo-nextest` is on the dev VM and in the
   documented verification set. Same tests, same assertions, 707 fewer lines
   of duplication.
+
+### Requested 2026-09-19
+
+Filed together and **sequenced behind the `scootctl` split and milestone 6**
+at the user's direction. The `blocked:` field on each records that ordering;
+none of them is technically blocked, so the sequencing is a choice and can
+be revisited.
+
+- [Multi-output: more than one monitor at a time](./core/multi-output.md)
+  — **HIGH**, and almost certainly milestone-sized rather than
+  backlog-sized. `README.md`'s "Not yet" list leads with it. The scope is
+  already enumerated by `headless.rs`'s `OUTPUT_ID` doc (layer-shell wants
+  four *different* per-output behaviours, not one) and by
+  `session-lock-per-output-done.md`, which was resolved as single-output
+  *pins* rather than as multi-output — including that `locked` must wait for
+  every output's blanked frame, which is the security-relevant one.
+- [Workspace shortcuts: no numbered bind, and no move-to-index action at all](./input/workspace-index-keybindings.md)
+  — two gaps that look like one. `focus-workspace-index N` exists and simply
+  is not bound by default (so `Super+1`..`9` is a keybinding change), but
+  `move-window-to-workspace` takes **only** `up|down` — there is no index
+  form anywhere, so a window can only be moved one workspace at a time. That
+  half is a missing action, and it is an agent-facing gap too.
+- [No config reload](./config/config-reload.md) — on `--tty` a settings
+  change costs the whole session. Not every field can be re-applied
+  (`[output] scale`, `[tty] gpu`, `[renderer] backend` realistically cannot),
+  so the honest shape is a partial reload with an explicit list, and a failed
+  reload must keep the running config rather than fall back to defaults.
+- [Consuming scoot from another flake, and the missing home-manager module](./packaging/flake-consumer-and-home-manager.md)
+  — the flake exposes `packages`/`apps`/`devShells` but **no** `overlays`,
+  `nixosModules` or `homeManagerModules`. Documenting what already works is
+  small; `programs.scoot.enable` is real work with real decisions.
+- [No way to emit a default config file](./config/default-config-command.md)
+  — `--config PATH` reads one, nothing writes one. Wants generating from
+  `Config::default()` rather than a hand-maintained string, or it drifts.
+- [Rounded window corners](./rendering/rounded-window-corners.md) — the cost
+  is not the corners, it is that a rounded window is no longer opaque, so
+  what is behind it can no longer be skipped. Measure with *overlapping*
+  windows; a single-window benchmark will show nothing. Milestone 6 changes
+  the calculus, which is why it is sequenced after it.
 
 ### Meta
 - [Split the CLI out into `scootctl`](./meta/rename-flex-family.md) — the `flexwm` → `scoot` rename half landed 2026-09-18 (PR #128); the crate split remains, and wants its own design pass (a status bar stays separate, undecided)

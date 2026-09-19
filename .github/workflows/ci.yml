@@ -1,0 +1,357 @@
+# scoot CI -- the floor under this project's manual verification, not a
+# replacement for it. `CLAUDE.md`'s independent-review gate is unchanged by
+# this file: a green check is evidence the tests passed, not evidence the
+# change is right.
+#
+# --------------------------------------------------------------------------
+# WHAT THIS CANNOT COVER
+# --------------------------------------------------------------------------
+# A GitHub runner has no seat, no VT, no /dev/dri and no GPU, so none of the
+# following is exercised here. Every one of them stays a manual run on the
+# dev VM (`vm/README.md`) or on real Apple Silicon (`Asahi.md`):
+#
+#   * `--tty` -- the entire DRM/KMS backend: mode setting, VT switching,
+#     session pause/resume through libseat, connector hotplug, GPU selection.
+#     Nothing below starts the compositor on a real seat.
+#   * Any GPU *hardware* path -- GPU scanout, and importing a dmabuf a real
+#     GPU produced. Two halves of that are worth stating exactly, because
+#     "no GPU coverage" would be as misleading as claiming it:
+#       - `render/tests.rs`'s GLES tests do run here, but against Mesa's
+#         software rasteriser (see "Resolve a software EGL" below), never a
+#         driver. No run here starts a live compositor with `--renderer
+#         gles`; that is `RENDERER=gles scripts/smoke-test.sh` on the dev VM.
+#       - The dmabuf suite's hardware tests skip *themselves* where there is
+#         no usable `/dev/udmabuf` (they print "skipped -- no usable
+#         /dev/udmabuf" and still count as passed), so a green nextest
+#         summary here is not evidence those paths ran. See
+#         `crates/scoot/src/compositor/dmabuf/tests.rs`'s module doc.
+#   * `--nested` -- needs a host compositor (cage/sway) around the run. Only
+#     `--headless` is exercised here.
+#   * Performance. A shared runner's timings are noise; the before/after
+#     benchmarks `CLAUDE.md` asks for stay on the dev VM.
+#
+# --------------------------------------------------------------------------
+# WHY EVERY STEP RUNS THROUGH THE FLAKE
+# --------------------------------------------------------------------------
+# `nix develop` is the only dependency set this repo maintains: `flake.nix`
+# pulls the compositor's C libraries from `vm/compositor-deps.nix`, the same
+# list the dev VM's system profile uses. A hand-listed apt install of
+# libseat/libinput/libxkbcommon/pixman/udev here would be a second list, and
+# it would drift from the first with nothing to catch it.
+
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# Superseded runs are cancelled: pushing twice to a branch in a minute
+# should not leave two full Smithay builds competing for a runner. Keyed by
+# workflow as well as ref, so a second workflow added later cannot cancel
+# this one's runs.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    name: Linux (compositor)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      CARGO_TERM_COLOR: always
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: DeterminateSystems/nix-installer-action@v23
+
+      # No Nix *store* cache here, measured rather than assumed:
+      # `magic-nix-cache-action@v15` was tried first and now requires a
+      # FlakeHub account -- it failed to authenticate on every run
+      # (35453015885, 35453689394), cached nothing, and still cost 11s up
+      # front plus up to 1m51s in its own post step on macOS. Realising the
+      # dev shell from cache.nixos.org instead costs ~35s of the first
+      # `nix develop` below. The cargo cache is where the real time is: a
+      # cold `target/` is ~2m of Smithay in each of clippy, build and test.
+      # The compositor -- and every test that starts one -- binds a real
+      # Wayland socket, and the IPC socket lives here too
+      # (`crates/scoot-ipc/src/socket.rs` resolves `$SCOOT_SOCKET`, else
+      # `$XDG_RUNTIME_DIR`). A GitHub runner has no `/run/user/<uid>`, so
+      # without this the suites fail at startup rather than on anything they
+      # mean to test. Exported for every later step, not just this one.
+      - name: Create XDG_RUNTIME_DIR
+        run: |
+          mkdir -p -m 700 "$RUNNER_TEMP/xdg"
+          echo "XDG_RUNTIME_DIR=$RUNNER_TEMP/xdg" >>"$GITHUB_ENV"
+
+      # Split restore/save rather than `actions/cache`: the combined action
+      # saves only when the job succeeds, so a red run on main would rebuild
+      # Smithay from scratch -- exactly when a fast turnaround matters most.
+      # The save step below therefore runs on failure too, but only on main
+      # and never on cancellation; see its own comment for why.
+      - name: Restore the cargo cache
+        id: cargo-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          # `flake.lock` is in the key because it pins the toolchain: a
+          # nixpkgs bump changes rustc, which invalidates every artifact in
+          # `target/`. `run_id`/`run_attempt` make each run's key unique so
+          # every run saves a fresh entry; `restore-keys` falls back to the
+          # most recent entry sharing the prefix.
+          key: linux-cargo-${{ hashFiles('Cargo.lock', 'flake.lock') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            linux-cargo-${{ hashFiles('Cargo.lock', 'flake.lock') }}-
+            linux-cargo-
+
+      # `CLAUDE.md`'s documented step is `cargo fmt --check -p scoot`; this is
+      # a superset. `scoot-core` and `scoot-ipc` cost nothing extra to check
+      # and nothing else checks them.
+      - name: cargo fmt
+        shell: nix develop --command bash -euo pipefail {0}
+        run: cargo fmt --all --check
+
+      # Also a superset of the documented `-p scoot --all-targets`, for the
+      # same reason: their dependencies are built here anyway.
+      - name: cargo clippy
+        shell: nix develop --command bash -euo pipefail {0}
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      # ------------------------------------------------------------------
+      # The GPU-free build is a HARD REQUIREMENT, not a preference: scoot has
+      # to run in a GPU-less container (webtop) and on boxes with no GL stack
+      # installed at all, which is why pixman is the default renderer and why
+      # Smithay's `backend_gbm` is deliberately not in the default feature set
+      # (see `crates/scoot/Cargo.toml`). Nothing but a human remembering to
+      # look has enforced that so far. `ldd` reports the whole DT_NEEDED
+      # closure, so this also catches a GPU library arriving *transitively*
+      # through something else.
+      # ------------------------------------------------------------------
+      - name: Build the default compositor, and assert it links no GPU stack
+        shell: nix develop --command bash -euo pipefail {0}
+        run: |
+          cargo build -p scoot
+          # Kept aside before the gpu-scanout step below overwrites
+          # `target/debug/scoot`: the smoke test must run the default build.
+          cp target/debug/scoot "$RUNNER_TEMP/scoot-default"
+
+          echo "--- ldd target/debug/scoot ---"
+          ldd target/debug/scoot
+
+          # Matches the soname field, not the whole line, so an unrelated
+          # store path that happens to contain the string cannot trip it.
+          leaked=$(ldd target/debug/scoot | awk '{ print $1 }' | grep -Ei '^lib(gbm|drm|EGL|GLESv2)' || true)
+          if [ -n "$leaked" ]; then
+            echo "::error title=The default build links a GPU library::$(echo "$leaked" | tr '\n' ' ')-- the default build must run on a box with no GPU stack installed (see CLAUDE.md's fixed decisions). A GPU dependency belongs behind the gpu-scanout feature."
+            echo "the default build links these, and must not:"
+            ldd target/debug/scoot | grep -Ei 'libgbm|libEGL'
+            exit 1
+          fi
+          echo "ok: the default build links no libgbm and no libEGL"
+
+      # `render/tests.rs` states, as a deliberate decision, that its GLES
+      # tests fail rather than skip where EGL is missing, on the reasoning
+      # that "any machine [able to run this suite] has Mesa's software EGL
+      # device even with no GPU at all -- that is exactly what this
+      # project's dev VM is". A GitHub runner is the first machine that
+      # runs the suite and is *not* that: the first CI run on this branch
+      # died at `a_capture_covers_the_whole_target_at_the_backends_own_size`
+      # with `Failed to load LibEGL: libEGL.so.1: cannot open shared object
+      # file` (run 35453015885), taking 333 unrun tests with it.
+      #
+      # The dev VM resolves that dlopen through `/run/current-system/sw/lib`
+      # in the binary's RUNPATH -- a NixOS path a runner does not have. So
+      # CI is given the software EGL the suite documents needing, rather
+      # than any test being changed: libglvnd is already in the dev shell's
+      # `$LIBRARY_PATH` (`vm/compositor-deps.nix`), and Mesa supplies the
+      # vendor driver libglvnd dispatches to. `--inputs-from .` pins Mesa to
+      # this repo's own `flake.lock`, like every other dependency here.
+      #
+      # Exported under CI-only names, then mapped onto the real variables by
+      # the two test steps alone: the smoke test below deliberately keeps
+      # running in an environment with *no* loadable EGL, which is the
+      # GPU-less box scoot has to work on.
+      - name: Resolve a software EGL for the GLES tests
+        shell: nix develop --command bash -euo pipefail {0}
+        run: |
+          mesa=$(nix build --inputs-from . nixpkgs#mesa --no-link --print-out-paths | head -1)
+          test -e "$mesa/share/glvnd/egl_vendor.d/50_mesa.json"
+          {
+            echo "CI_EGL_LIBRARY_PATH=$LIBRARY_PATH:$mesa/lib"
+            echo "CI_EGL_VENDOR_DIRS=$mesa/share/glvnd/egl_vendor.d"
+          } >>"$GITHUB_ENV"
+
+      - name: cargo nextest
+        shell: nix develop --command bash -euo pipefail {0}
+        run: |
+          export LD_LIBRARY_PATH="$CI_EGL_LIBRARY_PATH"
+          export __EGL_VENDOR_LIBRARY_DIRS="$CI_EGL_VENDOR_DIRS"
+          # --no-fail-fast, unlike the local loop: CI's job is to report every
+          # failure in one run. Without it a single early failure hides the
+          # rest -- run 35453015885 stopped with 333 tests unrun.
+          cargo nextest run --workspace --no-fail-fast
+
+      # NOT a duplicate of the nextest run above -- do not delete it as one.
+      # nextest runs every test in its own process, so it structurally cannot
+      # see a test that breaks when it *shares* a process with its neighbours
+      # (this workspace has suites that share `smithay::utils::SERIAL_COUNTER`
+      # and say so in as many words). `cargo test` runs them concurrently in
+      # one process, so it catches exactly that, and cannot catch what nextest
+      # catches. Since 2026-09-19 `cargo test` is no longer a required local
+      # step (`CLAUDE.md`, "Verification and evidence"), which makes this the
+      # only place that coverage is still taken.
+      - name: cargo test (one process -- the coverage nextest cannot give)
+        shell: nix develop --command bash -euo pipefail {0}
+        run: |
+          export LD_LIBRARY_PATH="$CI_EGL_LIBRARY_PATH"
+          export __EGL_VENDOR_LIBRARY_DIRS="$CI_EGL_VENDOR_DIRS"
+          cargo test --workspace
+
+      # End to end over IPC: starts the compositor, spawns a terminal in it,
+      # types into that terminal, reads the characters back out of the shell,
+      # drives keybindings, and samples real pixels out of a screenshot.
+      # `--headless` is the one backend a runner can host (the script is
+      # otherwise backend-agnostic -- see its header).
+      #
+      # The tools here are the smoke test's own harness (`foot` to be the
+      # client, `jq` to read IPC replies, ImageMagick to sample pixels,
+      # `wayland-info` for the dmabuf-advertisement check) -- not compositor
+      # dependencies, which come from the dev shell as everywhere else.
+      # `--inputs-from .` resolves `nixpkgs` through this repo's own
+      # `flake.lock`, so they are pinned to the same revision as the dev
+      # shell rather than to a second, floating one.
+      - name: scripts/smoke-test.sh (--headless)
+        timeout-minutes: 15
+        env:
+          SCOOT: ${{ runner.temp }}/scoot-default
+          # Keeps every socket, log and screenshot under RUNNER_TEMP: the
+          # script's unprefixed defaults live in `/run/user/<uid>`, which a
+          # runner does not have.
+          SMOKE_PREFIX: ${{ runner.temp }}/smoke
+        shell: nix shell --inputs-from . nixpkgs#foot nixpkgs#jq nixpkgs#imagemagick nixpkgs#wayland-utils --command bash -euo pipefail {0}
+        run: |
+          # Negative control for the GPU-free requirement, and the reason it
+          # is here rather than in the test steps: those are deliberately
+          # given a software EGL (see "Resolve a software EGL"), so they
+          # cannot prove anything about a box without one. This step is the
+          # only place scoot runs the way a webtop/no-GPU box runs it, which
+          # makes it the real guard -- so assert the premise rather than
+          # assuming it. A job-level LD_LIBRARY_PATH or a dev-shell change
+          # could otherwise hand this step an EGL and silently erase the
+          # guarantee with nothing failing.
+          if ldconfig -p 2>/dev/null | grep -qi 'libEGL\.so'; then
+            echo "::error title=The smoke step can load libEGL::this step is the only GPU-free run in CI, and something has put an EGL on its library path. Either scope that change to the test steps, or this workflow no longer proves scoot runs without a GPU stack."
+            exit 1
+          fi
+          echo "ok: no loadable libEGL here -- this run is the GPU-free path"
+          scripts/smoke-test.sh
+
+      # The other half of the GPU-free requirement: the opt-in tier still has
+      # to build (nothing else builds it, so it can rot silently), and the
+      # negative assertion above is only meaningful if a build that *should*
+      # link libgbm actually does. Without this positive control, an `ldd`
+      # aimed at the wrong binary, or a feature that quietly stopped pulling
+      # `smithay/backend_gbm`, would leave the no-GPU check passing while
+      # testing nothing.
+      #
+      # Last, deliberately: `--features` changes the unification, so this
+      # rebuilds Smithay and `scoot` and leaves a GPU-linked binary at
+      # `target/debug/scoot`. The smoke test above must run the default one.
+      - name: Build --features gpu-scanout, and assert that one does link libgbm
+        shell: nix develop --command bash -euo pipefail {0}
+        run: |
+          cargo build -p scoot --features gpu-scanout
+          echo "--- ldd target/debug/scoot (--features gpu-scanout) ---"
+          ldd target/debug/scoot
+          if ! ldd target/debug/scoot | awk '{ print $1 }' | grep -qEi '^libgbm'; then
+            echo "::error title=The gpu-scanout build does not link libgbm::either the feature no longer pulls smithay/backend_gbm, or this checked the wrong binary -- which would make the default build's no-GPU assertion vacuous."
+            exit 1
+          fi
+          echo "ok: --features gpu-scanout links libgbm, so the libgbm half of the default build's assertion is a real one"
+          echo "note: libEGL/libGLESv2 are dlopen'd by renderer_gl and never appear in ldd for either build, so"
+          echo "      those clauses are belt-and-braces against a future static link, not live checks. What"
+          echo "      actually guards the GPU-free path is the smoke test below, which runs with no loadable EGL."
+
+      - name: Save the cargo cache
+        # Not `always()`, which also fires on cancellation -- and
+        # cancel-in-progress makes that routine, risking a partially written
+        # target/ saved under the primary key. And not on every PR run: six
+        # runs of one PR already put this repo at 10.07 GB against GitHub's
+        # 10 GB LRU budget, all of it scoped to refs/pull/N/merge where no
+        # other branch can read it. Saving only on main keeps one shared,
+        # restorable entry; PR runs restore from it and save nothing.
+        if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          # The restore step's own key, not a second copy of the expression:
+          # `hashFiles` re-evaluated here would hash the tree as the build
+          # left it, so any file the build touched would save under a key
+          # the next run's restore cannot predict.
+          key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
+
+  macos:
+    # The compositor is `cfg`'d out on macOS and what builds is `scoot msg`,
+    # the client that drives a compositor running elsewhere. Nobody builds
+    # that half on a Mac between releases, and it has broken before without
+    # anyone noticing -- this job is the cheap insurance against that.
+    # `macos-latest` is arm64, which is the only Darwin system `flake.nix`
+    # provides (it drops x86_64-darwin; see the comment there).
+    name: macOS (scoot msg client)
+    runs-on: macos-latest
+    timeout-minutes: 30
+    env:
+      CARGO_TERM_COLOR: always
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: DeterminateSystems/nix-installer-action@v23
+
+      # No Nix store cache -- see the Linux job's note on why.
+      - name: Restore the cargo cache
+        id: cargo-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: macos-cargo-${{ hashFiles('Cargo.lock', 'flake.lock') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            macos-cargo-${{ hashFiles('Cargo.lock', 'flake.lock') }}-
+            macos-cargo-
+
+      # `--all-targets` so the tests and the CLI's own test targets are
+      # type-checked too, not just the library and binary.
+      - name: cargo check
+        shell: nix develop --command bash -euo pipefail {0}
+        run: cargo check --workspace --all-targets
+
+      - name: Save the cargo cache
+        # Same condition as the Linux job's save -- see the comment there for
+        # why it is not `always()` and not every PR run.
+        if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          # The restore step's own key -- see the Linux job's note.
+          key: ${{ steps.cargo-cache.outputs.cache-primary-key }}

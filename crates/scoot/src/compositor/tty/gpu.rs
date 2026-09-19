@@ -400,7 +400,7 @@ fn probe(
     // and a user who mistyped a path is worse off being told their GPU
     // only computes.
     // The shared, provable part is that this device cannot mode-set; what
-    // the split-GPU case looks like is in `README.md`, where it can be
+    // the split-GPU case looks like is in `docs/tty.md`, where it can be
     // explained rather than asserted.
     let resources = device.resource_handles().map_err(|error| {
         format!("has no usable KMS pipeline -- loading its DRM resources failed ({error})")
