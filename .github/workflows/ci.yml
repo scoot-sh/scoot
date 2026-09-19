@@ -13,12 +13,18 @@
 #   * `--tty` -- the entire DRM/KMS backend: mode setting, VT switching,
 #     session pause/resume through libseat, connector hotplug, GPU selection.
 #     Nothing below starts the compositor on a real seat.
-#   * Any GPU path -- `--renderer gles`, GPU scanout, and importing a dmabuf
-#     that a real GPU produced. The dmabuf suite's hardware tests skip
-#     *themselves* where there is no usable `/dev/udmabuf` (they print
-#     "skipped -- no usable /dev/udmabuf" and still count as passed), so a
-#     green nextest summary here is not evidence those paths ran. See
-#     `crates/scoot/src/compositor/dmabuf/tests.rs`'s module doc.
+#   * Any GPU *hardware* path -- GPU scanout, and importing a dmabuf a real
+#     GPU produced. Two halves of that are worth stating exactly, because
+#     "no GPU coverage" would be as misleading as claiming it:
+#       - `render/tests.rs`'s GLES tests do run here, but against Mesa's
+#         software rasteriser (see "Resolve a software EGL" below), never a
+#         driver. No run here starts a live compositor with `--renderer
+#         gles`; that is `RENDERER=gles scripts/smoke-test.sh` on the dev VM.
+#       - The dmabuf suite's hardware tests skip *themselves* where there is
+#         no usable `/dev/udmabuf` (they print "skipped -- no usable
+#         /dev/udmabuf" and still count as passed), so a green nextest
+#         summary here is not evidence those paths ran. See
+#         `crates/scoot/src/compositor/dmabuf/tests.rs`'s module doc.
 #   * `--nested` -- needs a host compositor (cage/sway) around the run. Only
 #     `--headless` is exercised here.
 #   * Performance. A shared runner's timings are noise; the before/after
@@ -60,12 +66,14 @@ jobs:
 
       - uses: DeterminateSystems/nix-installer-action@v23
 
-      # Caches the *Nix store* (the dev shell's closure) in the Actions cache.
-      # Orthogonal to the cargo cache below: this one saves re-downloading
-      # rustc/cargo/clippy/nextest and the C libraries, that one saves
-      # recompiling Smithay.
-      - uses: DeterminateSystems/magic-nix-cache-action@v15
-
+      # No Nix *store* cache here, measured rather than assumed:
+      # `magic-nix-cache-action@v15` was tried first and now requires a
+      # FlakeHub account -- it failed to authenticate on every run
+      # (35453015885, 35453689394), cached nothing, and still cost 11s up
+      # front plus up to 1m51s in its own post step on macOS. Realising the
+      # dev shell from cache.nixos.org instead costs ~35s of the first
+      # `nix develop` below. The cargo cache is where the real time is: a
+      # cold `target/` is ~2m of Smithay in each of clippy, build and test.
       # The compositor -- and every test that starts one -- binds a real
       # Wayland socket, and the IPC socket lives here too
       # (`crates/scoot-ipc/src/socket.rs` resolves `$SCOOT_SOCKET`, else
@@ -82,6 +90,7 @@ jobs:
       # Smithay from scratch -- exactly when a fast turnaround matters most.
       # The save step below is `if: always()`.
       - name: Restore the cargo cache
+        id: cargo-cache
         uses: actions/cache/restore@v6
         with:
           path: |
@@ -224,25 +233,19 @@ jobs:
         run: scripts/smoke-test.sh
 
       # The other half of the GPU-free requirement: the opt-in tier still has
-      # to build, and the negative assertion above is only meaningful if a
-      # build that *should* link libgbm actually does.
+      # to build (nothing else builds it, so it can rot silently), and the
+      # negative assertion above is only meaningful if a build that *should*
+      # link libgbm actually does. Without this positive control, an `ldd`
+      # aimed at the wrong binary, or a feature that quietly stopped pulling
+      # `smithay/backend_gbm`, would leave the no-GPU check passing while
+      # testing nothing.
       #
-      # The `gpu-scanout` feature is not in this tree yet -- it arrives with
-      # PR #135 (`impl/drm-compositor-scanout`). Until that merges this step
-      # annotates the run and stops; once it is on `main`, delete the
-      # detection below and build unconditionally. The detection asks
-      # `cargo metadata`, and any failure of the query itself aborts the step
-      # rather than being read as "the feature is absent".
+      # Last, deliberately: `--features` changes the unification, so this
+      # rebuilds Smithay and `scoot` and leaves a GPU-linked binary at
+      # `target/debug/scoot`. The smoke test above must run the default one.
       - name: Build --features gpu-scanout, and assert that one does link libgbm
         shell: nix develop --command bash -euo pipefail {0}
         run: |
-          features=$(cargo metadata --no-deps --format-version 1 \
-            | jq -r '.packages[] | select(.name == "scoot") | .features | keys[]')
-          if ! printf '%s\n' "$features" | grep -qx 'gpu-scanout'; then
-            echo "::warning title=gpu-scanout is not in this tree::the scoot crate declares no gpu-scanout feature, so the opt-in GPU build and the positive libgbm control were skipped. Expected until PR #135 merges; if that has merged, this step is now silently covering nothing."
-            exit 0
-          fi
-
           cargo build -p scoot --features gpu-scanout
           echo "--- ldd target/debug/scoot (--features gpu-scanout) ---"
           ldd target/debug/scoot
@@ -263,7 +266,11 @@ jobs:
             ~/.cargo/registry/cache
             ~/.cargo/git/db
             target
-          key: linux-cargo-${{ hashFiles('Cargo.lock', 'flake.lock') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          # The restore step's own key, not a second copy of the expression:
+          # `hashFiles` re-evaluated here would hash the tree as the build
+          # left it, so any file the build touched would save under a key
+          # the next run's restore cannot predict.
+          key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
 
   macos:
     # The compositor is `cfg`'d out on macOS and what builds is `scoot msg`,
@@ -283,9 +290,9 @@ jobs:
 
       - uses: DeterminateSystems/nix-installer-action@v23
 
-      - uses: DeterminateSystems/magic-nix-cache-action@v15
-
+      # No Nix store cache -- see the Linux job's note on why.
       - name: Restore the cargo cache
+        id: cargo-cache
         uses: actions/cache/restore@v6
         with:
           path: |
@@ -313,4 +320,5 @@ jobs:
             ~/.cargo/registry/cache
             ~/.cargo/git/db
             target
-          key: macos-cargo-${{ hashFiles('Cargo.lock', 'flake.lock') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          # The restore step's own key -- see the Linux job's note.
+          key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
