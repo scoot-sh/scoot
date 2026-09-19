@@ -762,22 +762,27 @@ numbers would mean optimising for a configuration nobody should run.
 
 Dev VM (4 cores, 3.8 GiB, llvmpipe / GLES 3.2 / Mesa 26.2.2, virtio-gpu
 `card0` + `renderD128`), `CARGO_TARGET_DIR=/var/cargo-target`,
-`CARGO_INCREMENTAL=0`. Everything below was captured at **`2b725fc`** (the
-merge of `main` into the branch) unless a block says otherwise; the only
-commit after it is this section, which is docs-only.
+`CARGO_INCREMENTAL=0`. Everything below was captured at **`e0d6f43`** unless a
+block says otherwise; the only commit after it is this section, which is
+docs-only.
+
+**An earlier version of this section was keyed to `2b725fc` and is gone
+rather than kept**, because review's blocking finding changed `tranche`
+itself -- so every number it carried was stale by the project's own cache
+rule, and the whole set below was re-run rather than patched.
 
 ### The verification set
 
 ```
 cargo nextest run --workspace
-    Summary [ 37.157s] 1107 tests run: 1107 passed, 3 skipped
+    Summary [ 33.973s] 1108 tests run: 1108 passed, 3 skipped
 cargo nextest run --workspace --features gpu-scanout
-    Summary [ 35.668s] 1107 tests run: 1107 passed, 3 skipped
+    Summary [ 33.999s] 1108 tests run: 1108 passed, 3 skipped
 SCOOT_TEST_RENDERER=gles cargo nextest run --workspace --no-fail-fast
-    Summary [ 54.535s] 1107 tests run: 1100 passed, 7 failed, 3 skipped
+    Summary [ 49.689s] 1108 tests run: 1101 passed, 7 failed, 3 skipped
 cargo test -p scoot
-    running 1005 tests ... 1002 passed; 0 failed; 3 ignored
-    running 3 tests   ...    3 passed; 0 failed; 0 ignored
+    1003 passed; 0 failed; 3 ignored
+       3 passed; 0 failed; 0 ignored
 cargo clippy -p scoot --all-targets -- -D warnings                      clean
 cargo clippy -p scoot --all-targets --features gpu-scanout -- -D warnings  clean
 cargo fmt --check -p scoot                                              clean
@@ -785,19 +790,46 @@ cargo fmt --check -p scoot                                              clean
 
 **Every delta accounted for.** The baseline at `8af76fd` is 1102 passed / 3
 skipped in both flavours and 1095 passed / 7 failed / 3 skipped under `gles`.
-The whole difference is **+5 tests**, all new:
-`pixmans_own_importable_set_still_contains_both_candidates`,
-`a_renderer_that_imports_nothing_is_advertised_as_nothing`,
-`a_renderer_missing_one_candidate_advertises_only_the_other`,
-`a_non_linear_candidate_is_never_offered`,
-`the_renderers_own_device_beats_the_path_ladder`. Three existing tests were
-renamed rather than added or removed
+The whole difference is **+6 tests**, all new:
+
+```
+pixmans_own_importable_set_still_contains_both_candidates
+a_renderer_that_imports_nothing_is_advertised_as_nothing
+a_renderer_missing_one_candidate_advertises_only_the_other
+a_renderer_listing_only_the_invalid_modifier_still_advertises_linear
+a_renderer_with_only_other_explicit_modifiers_advertises_nothing
+the_renderers_own_device_beats_the_path_ladder
+```
+
+Four existing tests were renamed rather than added or removed
 (`default_feedback_names_a_device_and_both_advertised_formats` ->
 `..._and_the_renderers_own_formats`,
 `every_advertised_format_is_one_pixman_can_import` ->
 `..._is_one_the_renderer_imports`,
 `a_session_with_no_renderer_answers_failed` ->
-`..._advertises_no_dmabuf_global`).
+`..._advertises_no_dmabuf_global`, and
+`a_non_linear_candidate_is_never_offered` ->
+`a_renderer_with_only_other_explicit_modifiers_advertises_nothing`, whose
+premise the widened evidence rule changed).
+
+**The `Modifier::Invalid` regression is pinned fail-first, not asserted.**
+With `imports_linear` reverted to the narrow rule (`[Modifier::Linear]`
+alone) and nothing else changed, at `68d22a2`:
+
+```
+FAIL compositor::dmabuf::tests::a_renderer_listing_only_the_invalid_modifier_still_advertises_linear
+  assertion `left == right` failed
+    left: []
+   right: [DrmFormat { code: DrmFourcc(XR24), modifier: Linear },
+           DrmFormat { code: DrmFourcc(AR24), modifier: Linear }]
+Summary: 2 tests run: 1 passed, 1 failed
+```
+
+`left: []` is exactly the production failure: an empty tranche, therefore no
+global, on a renderer that imports fine. The other test of the pair
+(`..._with_only_other_explicit_modifiers_advertises_nothing`) passes under
+*both* rules, which is what says the fix widened the evidence rather than
+removing it.
 
 **The seven `gles` failures are the same seven, by name** -- unchanged, which
 is the expected result and not a gap (see "What is *not* in it" above):
@@ -819,11 +851,11 @@ collides. All five: `rc=0`, **17 ok**.
 
 | run | command | log prefix |
 | --- | ------- | ---------- |
-| headless, pixman | `SMOKE_PREFIX=/tmp/s4g-hlpx scripts/smoke-test.sh` | `/tmp/s4g-hlpx.*` |
-| headless, gles | `RENDERER=gles SMOKE_PREFIX=/tmp/s4g-hlgles ...` | `/tmp/s4g-hlgles.*` |
-| nested, pixman | `WLR_BACKENDS=headless WLR_RENDERER=pixman WLR_LIBINPUT_NO_DEVICES=1 cage -- env MODE=--nested SMOKE_PREFIX=/tmp/s4g-nest ...` | `/tmp/s4g-nest.*` |
-| `--tty`, gles (`--features gpu-scanout`) | `MODE=--tty RENDERER=gles SMOKE_PREFIX=/tmp/s4g-ttyg ...` | `/tmp/s4g-ttyg.*` |
-| `--tty`, pixman | `MODE=--tty SMOKE_PREFIX=/tmp/s4g-ttyd ...` | `/tmp/s4g-ttyd.*` |
+| headless, pixman | `SMOKE_PREFIX=/tmp/s4h-hlpx scripts/smoke-test.sh` | `/tmp/s4h-hlpx.*` |
+| headless, gles | `RENDERER=gles SMOKE_PREFIX=/tmp/s4h-hlgles ...` | `/tmp/s4h-hlgles.*` |
+| nested, pixman | `WLR_BACKENDS=headless WLR_RENDERER=pixman WLR_LIBINPUT_NO_DEVICES=1 cage -- env MODE=--nested SMOKE_PREFIX=/tmp/s4h-nest ...` | `/tmp/s4h-nest.*` |
+| `--tty`, gles (`--features gpu-scanout`) | `MODE=--tty RENDERER=gles SMOKE_PREFIX=/tmp/s4h-ttyg ...` | `/tmp/s4h-ttyg.*` |
+| `--tty`, pixman | `MODE=--tty SMOKE_PREFIX=/tmp/s4h-ttyd ...` | `/tmp/s4h-ttyd.*` |
 
 The two `--tty` runs really were different tiers:
 
@@ -858,7 +890,20 @@ So on this machine the derived answer and the old path guess agree, which is
 what makes it safe to say the ladder is a fallback rather than a difference
 in behaviour here.
 
-### The finding that changed the diff
+**No run logged `can import none of the dma-buf formats this compositor
+serves`**, which is the other thing these five sessions establish: this VM's
+display lists both candidates at an explicit `LINEAR` among its 76 import
+formats, so the widened evidence rule (`imports_linear`) changes nothing
+here and the table is the same two formats under either rule. That is why
+the widening is pinned by unit test and fail-first rather than by a live
+reproduction -- see the verification set above.
+
+### The two findings that changed the diff
+
+**One: the `Modifier::Invalid` false negative** -- found by review, fixed
+before merge, and the fail-first proof is in the verification set above.
+
+**Two: the scanout tier's EGL display cannot name its device.**
 
 Captured at `35497f4` (before the fix), `--tty --renderer gles`,
 `--features gpu-scanout`, `RUST_LOG=scoot=debug`:
