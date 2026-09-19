@@ -497,6 +497,14 @@ be revisited.
 - [No way to emit a default config file](./config/default-config-command.md)
   — `--config PATH` reads one, nothing writes one. Wants generating from
   `Config::default()` rather than a hand-maintained string, or it drifts.
+- [CPU vs GPU rendering has never been measured on a real GPU](./rendering/gpu-vs-cpu-measured.md)
+  — **HIGH**, blocked on the user's Asahi machine. Every GPU number the
+  project has is llvmpipe's. What *is* known: offscreen GLES cost 17–32x
+  pixman and scanout costs ~1.5x on the same rasteriser, so the read-back
+  was the dominant cost — but "therefore it wins on real hardware" is an
+  extrapolation, not a measurement. Runbook is `Asahi.md`'s Test 4. Note
+  FPS is the wrong headline for a damage-driven compositor; idle CPU, frame
+  cost under damage, RSS and power are the numbers that decide it.
 - [Rounded window corners](./rendering/rounded-window-corners.md) — the cost
   is not the corners, it is that a rounded window is no longer opaque, so
   what is behind it can no longer be skipped. Measure with *overlapping*

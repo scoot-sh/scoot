@@ -367,6 +367,74 @@ deliberate.
 
 ---
 
+## Test 4 — CPU vs GPU rendering, on a GPU that is actually a GPU
+
+**This is the only machine that can answer it.** Every GPU number the
+project has is llvmpipe's — a software rasteriser — so nothing measured so
+far says anything about real GPU performance. What the VM *did* establish is
+the shape: GLES rendering offscreen and reading each frame back cost
+**17–32x** pixman, and GPU scanout on the same rasteriser costs **~1.5x**.
+Removing the read-back closed nearly the whole gap, which means the
+read-back was the dominant cost rather than the rasterising. On real
+hardware, where rasterising stops being a CPU's problem, scanout should win
+— but that sentence is an extrapolation, and this test is what turns it into
+a number.
+
+Needs a `--features gpu-scanout` build (see `docs/tty.md`), and the `--tty`
+seat.
+
+**Expect correctness questions before performance ones.** Scanout has never
+run on a real GPU, drives the **primary plane only**, and this machine is
+the split render/display case — AGX (`card1`) has the render node, `apple,dcp`
+(`card2`) owns the connectors — which the design allows for but nothing has
+exercised. If it does not come up, that result is worth more than any
+timing.
+
+### The metrics that matter, in order
+
+**FPS is the wrong headline number for a compositor.** scoot renders on
+damage, not on a clock, so "frames per second" mostly measures how much the
+clients asked for. The numbers that decide whether GPU rendering is worth
+using on a laptop are:
+
+1. **Idle CPU.** A compositor that is fast but busy is worse on battery than
+   one slightly slower that sleeps. Sample jiffies over a fixed window with
+   nothing moving:
+   ```sh
+   pid=$(pgrep -x scoot); read -r a b < <(awk '{print $14, $15}' /proc/$pid/stat)
+   sleep 10
+   read -r c d < <(awk '{print $14, $15}' /proc/$pid/stat)
+   echo "jiffies over 10s: $(( (c-a) + (d-b) ))"
+   ```
+2. **Frame cost under damage.** One window scrolling, then several. This is
+   where scanout should show its advantage, because it is the read-back it
+   deletes.
+3. **Memory.** `grep VmRSS /proc/$pid/status` — a GBM swapchain is not free,
+   and three buffers at panel resolution is real memory.
+4. **Power**, if you care about the laptop: GPU scanout may cut CPU wakeups
+   and raise GPU draw. Net effect is genuinely unknown and is the most
+   interesting result here.
+
+### Method
+
+Alternate the two tiers rather than running each once. The project has
+already been burned by this: a single A/B pair once read as a **70%
+regression** that was pure noise, and it took eight alternating rounds to
+show the medians were 2.4µs apart against a 19µs spread. Same scene, same
+clients, same duration, at least four rounds each, and report medians with
+the spread — not a best-of.
+
+```sh
+# tier A: CPU, the default
+scoot --tty -- foot
+# tier B: GPU scanout
+scoot --tty --renderer gles -- foot        # gpu-scanout build
+```
+
+Confirm which tier you are actually on before trusting a number — the log
+line is `scanout="gpu"` versus the dumb tier's absence of it, and
+`--renderer gles` without the feature silently keeps pixman with a warning.
+
 ## What to send back
 
 - `ghostty --version`
