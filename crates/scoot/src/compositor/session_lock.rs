@@ -107,10 +107,11 @@
 //! uses instead. niri's `Niri::lock` draws the same line (it fast-confirms
 //! only from an already-`Locked` state, never from `Locking(_)`).
 //!
-//! The honest consequence, which `README.md` states too: while a lock is
-//! abandoned, any client that can reach this compositor's wayland socket can
-//! take it over and unlock. That is the same-uid trust boundary scoot's IPC
-//! socket already has, and it is the price of having a recovery path at all.
+//! The honest consequence, which `docs/protocols.md` states too: while a lock
+//! is abandoned, any client that can reach this compositor's wayland socket
+//! can take it over and unlock. That is the same-uid trust boundary scoot's
+//! IPC socket already has, and it is the price of having a recovery path at
+//! all.
 //!
 //! One more way to reach the same state, legally and without dying: a client
 //! may `destroy` its lock object *before* `locked` arrives (only
@@ -464,7 +465,7 @@ impl SessionLock {
             // to distinguish a locker from any other client (peer creds
             // are spoofable and same-uid anyway; security-context marks
             // sandboxes, not lockers), so restricting the global by
-            // client would only be theatre. See `README.md` and
+            // client would only be theatre. See `docs/protocols.md` and
             // `docs/backlog/resolved/session-lock-global-restriction-done.md`.
             manager: SessionLockManagerState::new::<State, _>(display, |_| true),
             owner: None,

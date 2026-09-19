@@ -187,9 +187,9 @@ fn an_unlisted_character_has_no_sequence() {
 /// Latin layouts `modifiers/tests.rs` sweeps resolves through the fallback
 /// instead: the refused characters there are exactly the dead keys
 /// (`dead_circumflex`/`dead_grave` for `^`/`` ` ``, `dead_tilde` for `~`),
-/// and dead-plus-space is in every session table. Pinned here so the README
-/// can claim all of printable ASCII on all fourteen, with the table above
-/// standing in for the session's.
+/// and dead-plus-space is in every session table. Pinned here so
+/// `docs/ipc.md` can claim all of printable ASCII on all fourteen, with the
+/// table above standing in for the session's.
 ///
 /// The table pairing is load-bearing: each refused character needs its
 /// dead-plus-space pair *in the table*. A session locale whose table lacked

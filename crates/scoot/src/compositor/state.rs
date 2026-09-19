@@ -370,9 +370,10 @@ pub struct State {
     /// (`cliphist`, `clipman`). Held only to keep the global alive -- the
     /// handler (`DataControlHandler`, see `handlers.rs`) routes through it.
     /// No client filter: like the session-lock global, an allow-list would be
-    /// theatre without security-context support (see `README.md`'s trust
-    /// note). Constructed after `primary_selection_state` because it borrows
-    /// it, so data-control clients can also touch the primary selection.
+    /// theatre without security-context support (see `docs/protocols.md`'s
+    /// trust note). Constructed after `primary_selection_state` because it
+    /// borrows it, so data-control clients can also touch the primary
+    /// selection.
     #[allow(dead_code)]
     pub wlr_data_control_state: WlrDataControlState,
     /// `ext_data_control_manager_v1` (version 1): the successor to the wlr
@@ -399,11 +400,11 @@ pub struct State {
     ///
     /// No client filter, for the same reason the session-lock and
     /// data-control globals have none: an allow-list would be theatre
-    /// without security-context support (see `README.md`'s trust note).
-    /// Worth naming here because an input method is more privileged than
-    /// those two -- it can grab the keyboard and inject text into the focused
-    /// client -- so this is a deliberate consistency with the existing trust
-    /// model, not an oversight about what the protocol can do.
+    /// without security-context support (see `docs/protocols.md`'s trust
+    /// note). Worth naming here because an input method is more privileged
+    /// than those two -- it can grab the keyboard and inject text into the
+    /// focused client -- so this is a deliberate consistency with the existing
+    /// trust model, not an oversight about what the protocol can do.
     #[allow(dead_code)]
     pub input_method_manager_state: InputMethodManagerState,
     /// `xdg_toplevel_icon_manager_v1`: the icon a client wants shown for its
