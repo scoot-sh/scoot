@@ -1,9 +1,8 @@
 ---
 title: "Multi-output foundation: make `State.output` a collection, and give `--headless` an `--outputs N`"
-status: "open"
+status: "resolved"
 area: "core"
 priority: "high"
-blocked: "start once milestone 6 stage 4 lands — both change `State::new`, and a collection refactor merged against a constructor reordering is the bad case"
 ---
 
 # Multi-output foundation: make `State.output` a collection, and give `--headless` an `--outputs N`
@@ -75,3 +74,53 @@ because `dmabuf::advertise` runs inside it before any renderer exists, this
 because the output field is constructed there — and merging a collection
 refactor against a constructor reordering is the case this project has
 already been bitten by twice with concurrent implementers.
+
+## Resolved 2026-09-19
+
+`State.output: Option<Output>` is now `State.outputs: Outputs`
+(`crates/scoot/src/compositor/outputs.rs`), an id-keyed collection;
+`OUTPUT_ID` is gone, replaced by `Outputs::primary` as the one named place
+the single-output assumption lives; and `--headless --outputs N` (1-8) builds
+N outputs left to right, each with its own `wl_output` global, its own
+logical position and its own scrolling strip in the core.
+
+**The two decisions the entry asked for, answered:**
+
+1. **The core already modelled the collection — the compositor did not.**
+   The entry expected the core's single `OutputId` to be "the largest single
+   edit in the item"; it turned out to be no edit at all. `World` already
+   holds `outputs: Vec<Output>`, upserts them by `OutputId`, gives each its
+   own workspaces and usable area, tracks `focused_output`, and stamps every
+   `Placement` with the output it belongs to (`world/mod.rs`, `events.rs`,
+   `arrange.rs`). What was singular lived entirely on the compositor side.
+   So the new collection is the *binding* from a core id to a
+   `wl_output`-backed Smithay `Output`, which is Wayland and belongs there —
+   a macOS Accessibility adapter would keep its own id-to-`NSScreen` map
+   against the same core.
+2. **One scrolling strip per output, niri-style** — and the core's tree had
+   already committed to it: workspaces hang off an output, and `view_x`
+   hangs off a workspace. Written down in `outputs.rs`'s module doc as three
+   consequences: a window is on exactly one output, moving a column across
+   outputs is a tree move rather than a scroll, and one output's reserved
+   edges shrink that output's usable area only.
+
+**One step past mechanical, deliberately.** `commit_layer_surface` and
+`layer_destroyed` now find the surface's *own* output rather than the
+primary one. With a real second output the old lookup was two client-facing
+faults, not an incompleteness: a commit on a surface the primary's map does
+not hold reads as "not a layer surface", so no initial configure is ever sent
+and the client waits forever; and the destruction never unmaps it, leaving a
+dead surface arranged on a map `render()`'s `cleanup()` does not walk.
+
+**Refused rather than answered wrong.** One output is composited, so
+`screenshot --output N` for any other output is now an error instead of the
+primary output's pixels under another output's name. `screencopy` and
+`gamma_control` already compared against the single output and keep doing so
+against the primary one.
+
+Everything else stays single-output *in behaviour* and goes through
+`Outputs::primary`, which is what [multi-output](../core/multi-output.md)
+picks up: layer-shell zones per output, `layer_hit`, `layer_keyboard_focus`,
+`render()`'s per-output pass, session lock (including `locked` waiting for
+every output's blanked frame), `ext-workspace` groups, output-management
+heads and the pointer clamp.
