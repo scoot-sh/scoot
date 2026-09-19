@@ -168,8 +168,7 @@ are at the top of [docs/protocols.md](docs/protocols.md).
 ```sh
 nix develop                     # every dependency, on Linux or macOS
 cargo test --workspace          # the compositor only compiles on Linux
-cargo nextest run --workspace   # one process per test; runs no doctests, so
-                                # it is an addition, not a replacement
+cargo nextest run --workspace   # one process per test -- the required runner
 ```
 
 `crates/scoot-core` is the platform-independent layout engine (no Wayland, no

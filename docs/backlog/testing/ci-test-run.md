@@ -1,5 +1,5 @@
 ---
-title: "No CI: every verification run is manual and self-reported — LANDED 2026-09-19 (PR #140), except the `--features gpu-scanout` build, which is written and gated until PR #135 puts that feature on `main`"
+title: "No CI: every verification run is manual and self-reported — LANDED 2026-09-19 (PR #140)"
 status: "resolved"
 area: "testing"
 priority: "high"

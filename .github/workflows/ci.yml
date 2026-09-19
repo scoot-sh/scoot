@@ -148,7 +148,7 @@ jobs:
 
           # Matches the soname field, not the whole line, so an unrelated
           # store path that happens to contain the string cannot trip it.
-          leaked=$(ldd target/debug/scoot | awk '{ print $1 }' | grep -Ei '^lib(gbm|EGL)' || true)
+          leaked=$(ldd target/debug/scoot | awk '{ print $1 }' | grep -Ei '^lib(gbm|drm|EGL|GLESv2)' || true)
           if [ -n "$leaked" ]; then
             echo "::error title=The default build links a GPU library::$(echo "$leaked" | tr '\n' ' ')-- the default build must run on a box with no GPU stack installed (see CLAUDE.md's fixed decisions). A GPU dependency belongs behind the gpu-scanout feature."
             echo "the default build links these, and must not:"
@@ -194,7 +194,10 @@ jobs:
         run: |
           export LD_LIBRARY_PATH="$CI_EGL_LIBRARY_PATH"
           export __EGL_VENDOR_LIBRARY_DIRS="$CI_EGL_VENDOR_DIRS"
-          cargo nextest run --workspace
+          # --no-fail-fast, unlike the local loop: CI's job is to report every
+          # failure in one run. Without it a single early failure hides the
+          # rest -- run 35453015885 stopped with 333 tests unrun.
+          cargo nextest run --workspace --no-fail-fast
 
       # NOT a duplicate of the nextest run above -- do not delete it as one.
       # nextest runs every test in its own process, so it structurally cannot
@@ -234,7 +237,22 @@ jobs:
           # runner does not have.
           SMOKE_PREFIX: ${{ runner.temp }}/smoke
         shell: nix shell --inputs-from . nixpkgs#foot nixpkgs#jq nixpkgs#imagemagick nixpkgs#wayland-utils --command bash -euo pipefail {0}
-        run: scripts/smoke-test.sh
+        run: |
+          # Negative control for the GPU-free requirement, and the reason it
+          # is here rather than in the test steps: those are deliberately
+          # given a software EGL (see "Resolve a software EGL"), so they
+          # cannot prove anything about a box without one. This step is the
+          # only place scoot runs the way a webtop/no-GPU box runs it, which
+          # makes it the real guard -- so assert the premise rather than
+          # assuming it. A job-level LD_LIBRARY_PATH or a dev-shell change
+          # could otherwise hand this step an EGL and silently erase the
+          # guarantee with nothing failing.
+          if ldconfig -p 2>/dev/null | grep -qi 'libEGL\.so'; then
+            echo "::error title=The smoke step can load libEGL::this step is the only GPU-free run in CI, and something has put an EGL on its library path. Either scope that change to the test steps, or this workflow no longer proves scoot runs without a GPU stack."
+            exit 1
+          fi
+          echo "ok: no loadable libEGL here -- this run is the GPU-free path"
+          scripts/smoke-test.sh
 
       # The other half of the GPU-free requirement: the opt-in tier still has
       # to build (nothing else builds it, so it can rot silently), and the
@@ -257,12 +275,20 @@ jobs:
             echo "::error title=The gpu-scanout build does not link libgbm::either the feature no longer pulls smithay/backend_gbm, or this checked the wrong binary -- which would make the default build's no-GPU assertion vacuous."
             exit 1
           fi
-          echo "ok: --features gpu-scanout links libgbm, so the default build's assertion is a real one"
+          echo "ok: --features gpu-scanout links libgbm, so the libgbm half of the default build's assertion is a real one"
+          echo "note: libEGL/libGLESv2 are dlopen'd by renderer_gl and never appear in ldd for either build, so"
+          echo "      those clauses are belt-and-braces against a future static link, not live checks. What"
+          echo "      actually guards the GPU-free path is the smoke test below, which runs with no loadable EGL."
 
       - name: Save the cargo cache
-        # `always()`: a failed run's artifacts are still worth keeping -- see
-        # the restore step.
-        if: always()
+        # Not `always()`, which also fires on cancellation -- and
+        # cancel-in-progress makes that routine, risking a partially written
+        # target/ saved under the primary key. And not on every PR run: six
+        # runs of one PR already put this repo at 10.07 GB against GitHub's
+        # 10 GB LRU budget, all of it scoped to refs/pull/N/merge where no
+        # other branch can read it. Saving only on main keeps one shared,
+        # restorable entry; PR runs restore from it and save nothing.
+        if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
         uses: actions/cache/save@v6
         with:
           path: |
