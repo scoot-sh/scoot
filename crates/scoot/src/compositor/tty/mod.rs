@@ -586,7 +586,7 @@ impl Tty {
         self.active
     }
 
-    /// The buffer age `headless::render` should pass `render_output` for
+    /// The buffer age `render::draw_frame_with` should pass `render_output` for
     /// this frame -- see `buffers.rs`'s module doc on why it isn't always
     /// the same value, and `BufferPool::next_age`'s doc for what it means.
     /// A pure peek: pair every call with [`advance_generation`](Self::advance_generation)
@@ -661,7 +661,7 @@ impl Tty {
     ///
     /// The size check is a *mismatch* check, not a fixed-size one: the mode
     /// can change while the session runs (`hotplug.rs`), and the frame
-    /// `headless::render` produced may have been laid out against the
+    /// `render::draw_frame_with` produced may have been laid out against the
     /// previous one. Dropping that frame is right -- the next render, which
     /// `State::resize_output` has already asked for, is built at the new
     /// size.

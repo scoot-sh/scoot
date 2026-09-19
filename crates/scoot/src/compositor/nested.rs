@@ -10,7 +10,7 @@
 //!
 //! Host-side protocol object handling (the `wayland_client::Dispatch` impls)
 //! lives in `nested_dispatch.rs`; this file is the data (`Host`), setup
-//! (`init`), and the one thing `headless::render` calls (`Host::present`).
+//! (`init`), and the one thing `render::draw_frame_with` calls (`Host::present`).
 
 mod buffers;
 
