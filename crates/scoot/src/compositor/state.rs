@@ -1055,7 +1055,15 @@ impl ClientData for ClientState {
     fn disconnected(&self, id: ClientId, reason: DisconnectReason) {
         match &reason {
             DisconnectReason::ConnectionClosed => {
-                tracing::info!(?id, "wayland client disconnected");
+                // `debug!`, not `info!`: a client closing its own connection
+                // is the uninteresting half of this, and it is the only half
+                // that repeats. Under Selkies (every webtop deployment) the
+                // clipboard monitor shells out to `wl-paste --list-types`
+                // every 500 ms, and each poll is a whole fresh connection --
+                // so an *idle* session logged two lines a second forever,
+                // burying everything else. See
+                // `docs/backlog/resolved/clean-disconnect-log-flood-done.md`.
+                tracing::debug!(?id, "wayland client disconnected");
             }
             DisconnectReason::ProtocolError(error) => {
                 tracing::warn!(?id, ?error, "wayland client killed by a protocol error");

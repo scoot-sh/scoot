@@ -436,27 +436,21 @@ falsify. Read `flexwm` there as `scoot`.
 ### Field reports from the webtop deployment (2026-09-19)
 
 Both filed as GitHub issues from running scoot nested inside webtop — the
-deployment target `README.md` names. Neither is blocked; both are ahead of
-the sequenced items below because they are the named target failing in
-normal use.
+deployment target `README.md` names. **Both RESOLVED 2026-09-19**, shipped
+together as one PR since they are one field report.
 
-- [`--nested` ignores every configure after the first](./core/nested-follow-host-resize.md)
-  (issue #144) — **HIGH**. Resize the browser window and the desktop never
-  fills it again; pixelflux letterboxes the difference. It is a documented
-  v1 scope boundary (`nested_dispatch.rs:119`) and the plumbing is nearly
-  all there — later sizes are already captured by `set_pending_size`,
-  `ack_configure` already happens first, and `apply_size` already does the
-  work atomically. The entry answers the design question the issue asks:
-  `apply_size`'s failure should stop the loop on the *first* configure and
-  must not on a later one, because ending a live desktop over a failed
-  realloc is the data-loss case `CLAUDE.md` weighs, and `apply_size`
-  already leaves the old size consistent on `Err`.
-- [A clean disconnect logs at INFO, flooding an idle session](./ipc/clean-disconnect-log-flood.md)
-  (issue #145) — Selkies' clipboard monitor polls `wl-paste` every 500 ms,
-  each poll a fresh connection, so an idle session emits two lines a second
-  forever and buries everything else. Demote only the `ConnectionClosed`
-  arm to `debug!`; all the diagnostic value the logging was added for lives
-  in the `ProtocolError` arm, which stays at `warn!`.
+- [`--nested` ignores every configure after the first](./resolved/nested-follow-host-resize-done.md)
+  (issue #144) — RESOLVED. A `--nested` session now follows the host
+  window's size for its whole life, not just the first configure. The
+  design question the issue asked is answered in the code rather than
+  inferred: two entry points, `Host::apply_first_configure` (a failure is
+  fatal — nothing is on screen yet) and `Host::apply_resize` (a failure
+  logs and keeps the session at the size it was), over one private core.
+- [A clean disconnect logs at INFO, flooding an idle session](./resolved/clean-disconnect-log-flood-done.md)
+  (issue #145) — RESOLVED. Only the `ConnectionClosed` arm moved to
+  `debug!`; all the diagnostic value the logging was added for is in the
+  `ProtocolError` arm, which stays at `warn!`. Ten connect/bind/disconnect
+  cycles now add zero lines to an `info`-level log.
 
 ### Requested 2026-09-19
 

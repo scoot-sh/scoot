@@ -30,20 +30,40 @@ struct Slot {
 }
 
 impl BufferPool {
+    /// Builds a pool of [`COUNT`] `width` x `height` `Argb8888` buffers.
+    ///
+    /// `Err` rather than a truncated pool for a size whose byte count cannot
+    /// be named: `wl_shm.create_pool` takes an `i32`, and a plain `as i32`
+    /// on a bigger count would hand the host a wrong (possibly negative)
+    /// size and be killed by it for a protocol error -- a compositor death
+    /// from a size the host itself proposed. Reachable from inside
+    /// `nested.rs`'s own `1..=65535`-per-axis guard (65535x8192 needs more
+    /// than `i32::MAX` bytes for two slots), so this checks rather than
+    /// assumes. The caller decides what a failure means: fatal on the first
+    /// configure, "stay at the old size" on a resize (see
+    /// `Host::apply_resize`).
     pub fn new(
         shm: &HostShm,
         qh: &QueueHandle<State>,
         width: i32,
         height: i32,
     ) -> Result<Self, Box<dyn Error>> {
-        let stride = width as usize * 4;
-        let frame_len = stride * height as usize;
-        let total_len = frame_len * COUNT;
+        let Layout {
+            stride,
+            frame_len,
+            total_len,
+            wire_len,
+        } = layout(width, height).ok_or_else(|| {
+            format!("a {width}x{height} host buffer pool is larger than wl_shm can describe")
+        })?;
 
         let mem = MappedMem::new(total_len)?;
-        let pool = shm.create_pool(mem.fd.as_fd(), total_len as i32, qh, ());
+        let pool = shm.create_pool(mem.fd.as_fd(), wire_len, qh, ());
         let slots = std::array::from_fn(|i| {
             let offset = i * frame_len;
+            // Both `as i32`s are in range by the checks above: `offset` and
+            // `stride` are each at most `total_len`, which `wire_len` just
+            // proved fits.
             let buffer = pool.create_buffer(
                 offset as i32,
                 width,
@@ -116,6 +136,48 @@ impl BufferPool {
 
 fn free_slot(slots: &[Slot; COUNT]) -> Option<usize> {
     first_free(slots.iter().map(|slot| slot.free))
+}
+
+/// The byte layout of a pool of [`COUNT`] `width` x `height` `Argb8888`
+/// frames.
+struct Layout {
+    /// Bytes per row of one frame.
+    stride: usize,
+    /// Bytes in one frame, which is also the stride between slots.
+    frame_len: usize,
+    /// Bytes in the whole pool, for the mapping.
+    total_len: usize,
+    /// The same count as `wl_shm.create_pool` takes it. Carried separately
+    /// rather than cast at the call site so the conversion happens once,
+    /// where it is checked.
+    wire_len: i32,
+}
+
+/// Computes [`Layout`], or `None` for a size whose byte count cannot be
+/// described.
+///
+/// Every step is checked and the total has to fit the `i32`
+/// `wl_shm.create_pool` takes. A plain `as i32` on a bigger count would hand
+/// the host a wrong (possibly negative) pool size and get this compositor
+/// killed for a protocol error -- death by a size the host itself proposed.
+/// It is reachable from inside `nested.rs`'s own `1..=65535`-per-axis guard:
+/// 65535x8192 is two slots of 2.1 GB. A negative axis is refused the same
+/// way, since `width as usize` on one is how a pool comes to ask for sixteen
+/// exabytes.
+///
+/// A free function so the arithmetic is testable without a live host
+/// connection, same rationale as [`first_free`].
+fn layout(width: i32, height: i32) -> Option<Layout> {
+    let stride = usize::try_from(width).ok()?.checked_mul(4)?;
+    let frame_len = stride.checked_mul(usize::try_from(height).ok()?)?;
+    let total_len = frame_len.checked_mul(COUNT)?;
+    let wire_len = i32::try_from(total_len).ok()?;
+    Some(Layout {
+        stride,
+        frame_len,
+        total_len,
+        wire_len,
+    })
 }
 
 /// The index of the first `true`. Pulled out of `free_slot` so it's testable
@@ -192,5 +254,52 @@ mod tests {
         assert_eq!(first_free([false, true].into_iter()), Some(1));
         assert_eq!(first_free([true, true].into_iter()), Some(0));
         assert_eq!(first_free(std::iter::empty()), None);
+    }
+
+    #[test]
+    fn an_ordinary_size_lays_out_two_slots_back_to_back() {
+        let layout = layout(1280, 800).expect("1280x800 fits");
+        assert_eq!(layout.stride, 1280 * 4);
+        assert_eq!(layout.frame_len, 1280 * 4 * 800);
+        assert_eq!(layout.wire_len, 1280 * 4 * 800 * 2);
+    }
+
+    #[test]
+    fn the_largest_describable_pool_is_accepted() {
+        // Two slots totalling eight bytes short of `i32::MAX`, to pin that
+        // the bound is "fits an `i32`" and not "fits with room to spare".
+        let frame = usize::try_from(i32::MAX).expect("i32::MAX fits a usize") / 2;
+        let width = 1;
+        let height = i32::try_from(frame / 4).expect("a plausible height");
+        let layout = layout(width, height).expect("half of i32::MAX per frame fits");
+        assert_eq!(layout.wire_len, height * 8);
+    }
+
+    #[test]
+    fn a_pool_bigger_than_wl_shm_can_describe_is_refused() {
+        // Both inside `nested.rs`'s `1..=65535` per-axis guard, and together
+        // past what an `i32` byte count can name: 65535 * 4 * 8192 * 2 is
+        // about 4.3 GB. Truncating this to an `i32` is what the check exists
+        // to prevent.
+        assert!(layout(65535, 8192).is_none());
+        assert!(layout(65535, 65535).is_none());
+    }
+
+    #[test]
+    fn a_negative_axis_is_refused_rather_than_sign_extended() {
+        // `-1 as usize` is `usize::MAX`; the `try_from` is what stops a
+        // 16-exabyte `ftruncate` request.
+        assert!(layout(-1, 800).is_none());
+        assert!(layout(1280, -1).is_none());
+        assert!(layout(i32::MIN, i32::MIN).is_none());
+    }
+
+    #[test]
+    fn a_zero_axis_lays_out_an_empty_pool_rather_than_overflowing() {
+        // `nested.rs` refuses a zero axis before this is reached, and
+        // `--width`/`--height` cannot be zero either; this pins that the
+        // arithmetic itself is still total if that ever changes.
+        let layout = layout(0, 800).expect("zero width is arithmetically fine");
+        assert_eq!(layout.wire_len, 0);
     }
 }

@@ -214,6 +214,18 @@ running with no GPU at all is a hard requirement here, not a fallback tier.
 - **Scanout is primary-plane only, and unproven on real hardware.** No
   overlay or cursor planes, and every number measured for it so far came
   from a software rasteriser — no run has ever put it on a real GPU.
+- **A resize is expensive under `gles`, and `--nested` now resizes.** Every
+  resize rebuilds the render target, and under `gles` that means a whole new
+  EGL context and shader set: measured on the dev VM (llvmpipe, 800x800, 8
+  windows) at **16.6 ms** per resize against **37 µs** for pixman (both
+  measured with `CARGO_PROFILE_RELEASE_LTO=thin`, not the repo's fat-LTO
+  release profile, which OOM-kills on the 3.8 GB dev VM) — a full
+  60 Hz frame apiece. It is once per *distinct* size, not once per event, so
+  settling at a new size costs one; dragging a `--nested --renderer gles`
+  window to resize pays it per distinct size that drag passes through and
+  will stutter until you let go. pixman is unaffected, and it is the
+  default. If this ever matters, the fix is resizing the GLES target in
+  place instead of rebuilding it.
 - **Hardware first.** The EGL device is chosen by preferring a real device
   over a software one and taking the first that yields a working renderer, so
   a box with a GPU uses the GPU. Note that "software" here means only that

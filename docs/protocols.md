@@ -397,13 +397,15 @@ Worth knowing before you write against it:
   saved per-monitor profile off a serial would otherwise match every scoot
   session on every machine.
 - **The mode list only grows, never shrinks.** A new mode is added rather
-  than replacing the old one, matching what `wl_output` does. Under
-  `--nested` that happens at most once (only the host's *initial* configure,
-  if it proposes a size other than `--width`/`--height`). Under `--tty` it
-  happens once per mode the display actually changes to, so a VM window moved
-  between a 2x and a 1x screen a few times leaves a mode for each distinct
-  size. Bounded by the number of distinct sizes the connector has offered,
-  not by how many hotplug events arrive.
+  than replacing the old one, matching what `wl_output` does. Under `--tty`
+  that happens once per mode the display actually changes to, so a VM window
+  moved between a 2x and a 1x screen a few times leaves a mode for each
+  distinct size. Under `--nested` it happens once per size the host
+  configures scoot's window to, which for a window dragged to resize is once
+  per distinct size that drag passed through. Both are bounded by *distinct
+  sizes*, not by how many events arrived: a configure or a hotplug that lands
+  on a size already in the list adds nothing, and a `--nested` configure at
+  the size scoot is already at does not even rebuild the output.
 - **A `--tty` VT switch changes nothing by itself.** The output does not go
   away when you switch to another VT, it just stops being drawn, so the head
   stays enabled with the same mode and no `done` is sent. The one thing a

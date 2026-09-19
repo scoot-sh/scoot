@@ -9,6 +9,36 @@ scoot has not cut a numbered release yet; entries are dated.
 
 ## Unreleased
 
+### 2026-09-19 — `--nested` follows the host window's size, and an idle session stops talking
+
+Two things from running scoot nested inside
+[webtop](https://docs.linuxserver.io/images/docker-webtop/), the deployment
+the README names (issues #144 and #145).
+
+- **A `--nested` session now resizes with its host window.** Resize the
+  browser window (or drag the window scoot is running in, under any host)
+  and the desktop inside fills it, at any size, for the whole life of the
+  session — not just the size it came up at. Before this, only the host's
+  *first* configure was acted on, and everything after was acked and
+  ignored: the desktop kept its starting size and the host letterboxed the
+  difference.
+  Windows inside the session re-lay-out with it, and `scoot msg outputs`
+  and `scoot msg screenshot` both report the new size.
+  If scoot cannot follow the host to some new size (a bigger buffer pool it
+  could not allocate), it says so in the log, stays at the size it was, and
+  **keeps running**. You get letterboxing, not a dead session with your
+  windows in it. A failure on the very first configure is still fatal, with
+  the error it already printed — nothing is on screen at that point, so
+  there is no session to save.
+- **An idle session no longer logs two lines a second.** A client
+  disconnecting cleanly is now `DEBUG`, not `INFO`. Under Selkies (every
+  webtop deployment) the clipboard monitor runs `wl-paste` every 500 ms and
+  each run is a whole fresh Wayland connection, so an idle session buried
+  its own log in `wayland client disconnected`. A client killed by a
+  *protocol error* still logs at `WARN`, unchanged — that is the line worth
+  keeping, and it is the one that does not repeat. Run with
+  `RUST_LOG=scoot=debug` to get the disconnect lines back.
+
 ### 2026-09-19 — `--headless --outputs N`, and a screenshot that refuses the wrong screen
 
 `scoot --headless --outputs N` (1–8, default 1) creates N virtual outputs
