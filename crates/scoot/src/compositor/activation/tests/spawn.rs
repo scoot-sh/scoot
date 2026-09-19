@@ -22,7 +22,9 @@
 //! `$XDG_RUNTIME_DIR`: [`State::new`] binds a real listening socket. They
 //! also spawn a real `sh`, which the dev VM and any Unix test host have.
 
+use std::ffi::CString;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+use std::os::unix::ffi::OsStrExt;
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -472,6 +474,41 @@ fn a_spawned_childs_token_is_refused_while_locked() {
     );
 }
 
+/// The `sh` the fd probe below runs in the child.
+///
+/// Two sections, one file, written under a temporary name and `mv`d into
+/// place so [`read_probe`] -- which returns on the first non-empty read --
+/// can never see a half-written listing:
+///
+/// - `fd <number> <target>` per open fd, from `readlink`, so every fd is
+///   identified by what it points at rather than by its number.
+/// - the whole of `fdinfo`, `grep -H ''`-prefixed with the file each line
+///   came from, which is where the eventfd marker's identity lives (see the
+///   test's own comment on `eventfd-count`).
+///
+/// `/proc/$$/fd`, never `/proc/self/fd`: `self` resolves against whatever
+/// process opens the path, so `readlink` and `grep` would each report their
+/// *own* table. `$$` stays the shell's pid inside a command substitution,
+/// which is the process that did the inheriting.
+const FD_PROBE: &str = r#"
+for f in /proc/$$/fd/*; do
+    printf 'fd %s %s\n' "${f##*/}" "$(readlink "$f")"
+done > "${1}.tmp"
+grep -H '' /proc/$$/fdinfo/* >>"${1}.tmp" 2>/dev/null
+mv "${1}.tmp" "$1"
+"#;
+
+/// The count in an `eventfd-count: <hex>` line, from the compositor's own
+/// `/proc/self/fdinfo/<n>` or from the child's `grep -H ''` dump (which
+/// prefixes every line with the file it came from, so the key is mid-line
+/// there). The kernel prints it as `%16llx` -- space-padded lowercase hex --
+/// which is parsed rather than string-matched, so padding or width changing
+/// cannot silently turn the child-side check into a no-op.
+fn eventfd_count(line: &str) -> Option<u64> {
+    let (_, count) = line.split_once("eventfd-count:")?;
+    u64::from_str_radix(count.trim(), 16).ok()
+}
+
 /// A `State::spawn` child inherits no close-on-exec compositor fd.
 ///
 /// `--tty` used to pass `OFlags::CLOEXEC` when opening the DRM fd through
@@ -483,41 +520,96 @@ fn a_spawned_childs_token_is_refused_while_locked() {
 /// receive path (measured live 2026-09-13: the DRM and input fds all report
 /// it), and `execve` closes such fds in the child. This test pins the
 /// `spawn` side of that chain with the real `State::spawn` and a real child:
-/// marker fds with close-on-exec set must be absent from the child's
-/// `/proc/self/fd`. The markers cover every fd shape the compositor holds
-/// across a spawn, not just plain files: the seatd-fd-shaped `/dev/null`
-/// open, a connected socket pair (the listener/accepted-stream shape -- every
-/// one is a std socket), a `try_clone` of one end (the parked-screenshot and
-/// `PendingIdle` clone shape), and an `eventfd` (the calloop channel-ping
-/// shape behind the screenshot completion channel and the session notifier).
-/// A second marker deliberately *without* close-on-exec is the positive
-/// control: it must be PRESENT, which proves the probe observes real
-/// inheritance -- and proves the bit is load-bearing, because `State::spawn`
-/// provably inherits any fd lacking it.
-/// (First written asserting both `/dev/null` markers absent, it failed
-/// exactly on the plain marker -- the child's table held it -- which is both
-/// the fail-first record and the reason the control asserts presence,
-/// permanently. The socket/clone/eventfd markers were each proven sensitive
-/// the same way, by clearing the bit on one marker and watching exactly that
-/// marker appear in the child.) If Rust std ever starts closing every fd at
-/// spawn, the control goes red: revisit then, the guarantee will have moved.
+/// marker fds with close-on-exec set must be absent from the child's fd
+/// table. The markers cover every fd shape the compositor holds across a
+/// spawn, not just plain files: the seatd-fd-shaped file open, a connected
+/// socket pair (the listener/accepted-stream shape -- every one is a std
+/// socket), a `try_clone` of one end (the parked-screenshot and `PendingIdle`
+/// clone shape), and an `eventfd` (the calloop channel-ping shape behind the
+/// screenshot completion channel and the session notifier). A second marker
+/// deliberately *without* close-on-exec is the positive control: it must be
+/// PRESENT, which proves the probe observes real inheritance -- and proves
+/// the bit is load-bearing, because `State::spawn` provably inherits any fd
+/// lacking it.
+/// (First written asserting both markers absent, it failed exactly on the
+/// plain marker -- the child's table held it -- which is both the fail-first
+/// record and the reason the control asserts presence, permanently. The
+/// socket/clone/eventfd markers were each proven sensitive the same way, by
+/// clearing the bit on one marker and watching exactly that marker appear in
+/// the child.) If Rust std ever starts closing every fd at spawn, the control
+/// goes red: revisit then, the guarantee will have moved.
+///
+/// **Every check here is by fd *identity*, never by fd number**, and that is
+/// load-bearing rather than fastidious. The number-based version of this test
+/// went red on an unrelated docs-only PR (CI run 35460052576, `cargo test
+/// --workspace`): a number says nothing about *which* open file description
+/// it names, in either direction. The child's own fds (the shell's redirect,
+/// the listing process's directory fd) take the lowest free numbers, and
+/// after `execve` those are exactly the numbers the close-on-exec fds just
+/// vacated -- so a marker at fd 3 reappears as the child's own fd 3 and reads
+/// as a leak. The other direction is the same coin: under `cargo test` every
+/// test shares one process, so a neighbour's fd (`gamma_control/tests.rs`
+/// opens a deliberately plain `libc::pipe`, and any test that closes one
+/// frees its number) can be the thing sitting on a marker's number. nextest,
+/// running each test in its own process, structurally cannot see either --
+/// which is why this has to be right rather than merely green there.
+/// So: each file marker gets a path nothing else in this process opens, and
+/// is matched by that path; the sockets are matched by the `socket:[inode]`
+/// their target carries, taken from `fstat` on this side; the eventfd, whose
+/// target is the shape-only `anon_inode:[eventfd]`, is matched by a
+/// distinctive starting count read back out of `fdinfo`. An open fd's path
+/// and inode are exclusively its own for as long as it stays open, which the
+/// liveness check at the end of the test is what guarantees.
 #[test]
 fn a_spawned_child_inherits_no_close_on_exec_fd() {
     let mut fixture: Harness<(), ()> = Harness::bare(Appearance::default());
 
-    /// Opens `/dev/null`, with close-on-exec exactly as asked: the
-    /// `cloexec` marker is the seatd-obtained-fd shape, the plain one the
-    /// worst case. `libc::open`, not `std::fs::File`, because std sets
+    /// A marker file, held open across the spawn and removed when the test
+    /// ends (on the panicking path too, which is what `Drop` buys over a
+    /// tidy-up line at the bottom).
+    struct FileMarker {
+        /// Canonical, and what the child's `readlink` reports for the fd.
+        path: PathBuf,
+        fd: OwnedFd,
+    }
+
+    impl Drop for FileMarker {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
+
+    /// Opens a fresh file nothing else in this process opens, with
+    /// close-on-exec exactly as asked: the `cloexec` marker is the
+    /// seatd-obtained-fd shape, the plain one the worst case.
+    ///
+    /// A unique path, not `/dev/null` (what these markers used to be),
+    /// because the path *is* the identity here and half a process points at
+    /// `/dev/null`. `libc::open`, not `std::fs::File`, because std sets
     /// close-on-exec unconditionally and the plain marker needs it absent.
-    fn open_marker(cloexec: bool) -> OwnedFd {
+    fn open_marker(cloexec: bool) -> FileMarker {
+        static NEXT_MARKER: AtomicU64 = AtomicU64::new(0);
+        let path = std::env::temp_dir().join(format!(
+            "scoot-spawn-fd-marker-{}-{}",
+            std::process::id(),
+            NEXT_MARKER.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::write(&path, b"").expect("a writable temp dir for the marker file");
+        // Canonicalized because `/proc/<pid>/fd/<n>` readlinks to the real
+        // path: a symlinked `$TMPDIR` would otherwise make every comparison
+        // below miss, and the absence checks would pass vacuously.
+        let path = std::fs::canonicalize(&path).expect("the marker file just written");
+        let c_path = CString::new(path.as_os_str().as_bytes()).expect("a temp path with no NUL");
         let flags = if cloexec {
             libc::O_RDONLY | libc::O_CLOEXEC
         } else {
             libc::O_RDONLY
         };
-        let fd = unsafe { libc::open(c"/dev/null".as_ptr(), flags) };
-        assert!(fd >= 0, "could not open the marker fd");
-        unsafe { OwnedFd::from_raw_fd(fd) }
+        let fd = unsafe { libc::open(c_path.as_ptr(), flags) };
+        assert!(fd >= 0, "could not open the marker file {}", path.display());
+        // SAFETY: `open` just returned this fd; it is open and owned.
+        let fd = unsafe { OwnedFd::from_raw_fd(fd) };
+        FileMarker { path, fd }
     }
     let cloexec_marker = open_marker(true);
     let plain_marker = open_marker(false);
@@ -529,7 +621,15 @@ fn a_spawned_child_inherits_no_close_on_exec_fd() {
     // the fd flag, and this names the exact flag at creation.
     let (sock_a, sock_b) = UnixStream::pair().expect("a socket pair");
     let sock_clone = sock_a.try_clone().expect("a cloned socket");
-    let event = unsafe { libc::eventfd(0, libc::EFD_CLOEXEC | libc::EFD_NONBLOCK) };
+    // The eventfd's starting count is its identity: `readlink` reports every
+    // eventfd as `anon_inode:[eventfd]`, naming no instance, but `fdinfo`
+    // reports the count, and no other eventfd in this process carries a
+    // value like this one (calloop's pings start at 0 and are read back to 0
+    // after every wake). The pid is in it so two scoot test processes
+    // sharing a machine stay distinguishable in any captured output; only
+    // this process's own table can ever reach the child.
+    let event_count = 0xEF00_0000 | (std::process::id() & 0x00FF_FFFF);
+    let event = unsafe { libc::eventfd(event_count, libc::EFD_CLOEXEC | libc::EFD_NONBLOCK) };
     assert!(event >= 0, "could not create the eventfd marker");
     // SAFETY: `eventfd` just returned this fd; it is open and owned.
     let event = unsafe { OwnedFd::from_raw_fd(event) };
@@ -538,12 +638,12 @@ fn a_spawned_child_inherits_no_close_on_exec_fd() {
     // premise instead of silently pinning a weaker claim.
     let flag_of = |fd: i32| unsafe { libc::fcntl(fd, libc::F_GETFD) };
     assert_ne!(
-        flag_of(cloexec_marker.as_raw_fd()) & libc::FD_CLOEXEC,
+        flag_of(cloexec_marker.fd.as_raw_fd()) & libc::FD_CLOEXEC,
         0,
         "the close-on-exec marker is missing close-on-exec"
     );
     assert_eq!(
-        flag_of(plain_marker.as_raw_fd()) & libc::FD_CLOEXEC,
+        flag_of(plain_marker.fd.as_raw_fd()) & libc::FD_CLOEXEC,
         0,
         "the worst-case marker unexpectedly carries close-on-exec"
     );
@@ -559,6 +659,37 @@ fn a_spawned_child_inherits_no_close_on_exec_fd() {
             "the {what} marker is missing close-on-exec"
         );
     }
+    // The same premise guard for the eventfd's identity: if its count were
+    // not visible, or not the value asked for, the child-side check could
+    // not see it either and would pass against a real leak.
+    let event_fdinfo = std::fs::read_to_string(format!("/proc/self/fdinfo/{}", event.as_raw_fd()))
+        .expect("this platform has /proc/self/fdinfo");
+    assert_eq!(
+        event_fdinfo.lines().find_map(eventfd_count),
+        Some(u64::from(event_count)),
+        "the eventfd marker does not report the count that identifies it, so \
+         the child-side check below would prove nothing: {event_fdinfo:?}"
+    );
+    // A socket's target is `socket:[<inode>]`, and the inode is `fstat`'s --
+    // unique among live sockets, and unreusable while the fd stays open.
+    // `sock_clone` shares `sock_a`'s description and so its inode: one
+    // identity covers both, and a leak of either surfaces as that inode (the
+    // bit is per-fd-slot, so both are still checked for it above).
+    let socket_target = |what: &str, socket: &UnixStream| {
+        let stat = rustix::fs::fstat(socket).unwrap_or_else(|e| panic!("fstat on the {what}: {e}"));
+        format!("socket:[{}]", stat.st_ino)
+    };
+    let pair_target = socket_target("socket pair end", &sock_a);
+    let other_target = socket_target("other socket pair end", &sock_b);
+    assert_eq!(
+        pair_target,
+        socket_target("cloned socket", &sock_clone),
+        "a try_clone of a socket reports a different inode than its original"
+    );
+    assert_ne!(
+        pair_target, other_target,
+        "the two ends of a socket pair report one inode, so one absence check covers both"
+    );
 
     static NEXT_ID: AtomicU64 = AtomicU64::new(0);
     let path = std::env::temp_dir().join(format!(
@@ -570,49 +701,73 @@ fn a_spawned_child_inherits_no_close_on_exec_fd() {
     let command = vec![
         "sh".to_string(),
         "-c".to_string(),
-        "ls /proc/self/fd > \"$1\"".to_string(),
+        FD_PROBE.to_string(),
         "sh".to_string(),
         path.to_string_lossy().into_owned(),
     ];
     fixture.state.spawn(&command);
-    let child_fds: Vec<i32> = read_probe(&path)
+    let listing = read_probe(&path);
+    // Every `fd <number> <target>` line, as (number, target). A target can be
+    // empty: the shell's own glob directory fd is in the expansion and gone
+    // again by the time `readlink` runs on it.
+    let child_fds: Vec<(&str, &str)> = listing
         .lines()
-        .filter_map(|line| line.trim().parse().ok())
+        .filter_map(|line| line.strip_prefix("fd ").and_then(|l| l.split_once(' ')))
         .collect();
     assert!(
-        child_fds.contains(&1),
+        child_fds.iter().any(|(number, _)| *number == "1"),
         "the child's own stdout (fd 1) is missing from its listing -- \
-         the probe observes nothing, so 'absent' below would pass vacuously: {child_fds:?}"
+         the probe observes nothing, so 'absent' below would pass vacuously: {listing}"
     );
-    assert!(
-        !child_fds.contains(&cloexec_marker.as_raw_fd()),
-        "a State::spawn child inherited a close-on-exec compositor fd: {child_fds:?}"
-    );
-    for (what, fd) in [
-        ("socket pair end", sock_a.as_raw_fd()),
-        ("socket pair end", sock_b.as_raw_fd()),
-        ("cloned socket", sock_clone.as_raw_fd()),
-        ("eventfd", event.as_raw_fd()),
+    for (what, target) in [
+        ("compositor fd", cloexec_marker.path.to_string_lossy()),
+        (
+            "socket pair end (or its clone)",
+            pair_target.as_str().into(),
+        ),
+        ("socket pair end", other_target.as_str().into()),
     ] {
         assert!(
-            !child_fds.contains(&fd),
-            "a State::spawn child inherited a close-on-exec {what} (fd {fd}): {child_fds:?}"
+            !child_fds.iter().any(|(_, seen)| *seen == target),
+            "a State::spawn child inherited a close-on-exec {what} ({target}): {listing}"
         );
     }
+    // The eventfd's half of the listing: `grep -H ''` prefixes every line
+    // with the fdinfo file it came from, so a count line reads
+    // `/proc/<pid>/fdinfo/<n>:eventfd-count:        <hex>`.
+    let fdinfo_lines: Vec<&str> = listing
+        .lines()
+        .filter(|line| line.starts_with("/proc/"))
+        .collect();
     assert!(
-        child_fds.contains(&plain_marker.as_raw_fd()),
-        "the positive control is missing from the child's table -- either the \
-         probe stopped observing inheritance, or Rust std started closing \
-         every fd at spawn and the guarantee moved: {child_fds:?}"
+        fdinfo_lines.iter().any(|line| line.contains("/fdinfo/1:")),
+        "the child reported no fdinfo for its own stdout -- the eventfd check \
+         below would pass vacuously: {listing}"
+    );
+    assert!(
+        !fdinfo_lines
+            .iter()
+            .any(|line| eventfd_count(line) == Some(u64::from(event_count))),
+        "a State::spawn child inherited a close-on-exec eventfd \
+         (count {event_count:#x}): {listing}"
+    );
+    assert!(
+        child_fds
+            .iter()
+            .any(|(_, seen)| *seen == plain_marker.path.to_string_lossy()),
+        "the positive control ({}) is missing from the child's table -- either \
+         the probe stopped observing inheritance, or Rust std started closing \
+         every fd at spawn and the guarantee moved: {listing}",
+        plain_marker.path.display()
     );
     // Every marker must still be open here: had one closed before the child
-    // exec'd, its number could have been reused and "absent"/"present" would
-    // prove nothing. This is also the markers' last use, which is what keeps
-    // them alive across the spawn -- without it they could drop (closing the
-    // fds) before the child even starts.
+    // exec'd, its path or inode could have been reused and "absent"/"present"
+    // would prove nothing. This is also the markers' last use, which is what
+    // keeps them alive across the spawn -- without it they could drop
+    // (closing the fds) before the child even starts.
     for marker in [
-        cloexec_marker.as_raw_fd(),
-        plain_marker.as_raw_fd(),
+        cloexec_marker.fd.as_raw_fd(),
+        plain_marker.fd.as_raw_fd(),
         sock_a.as_raw_fd(),
         sock_b.as_raw_fd(),
         sock_clone.as_raw_fd(),
