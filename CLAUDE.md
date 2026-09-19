@@ -106,7 +106,7 @@ build → test → bug bash → optimize → benchmark → independent review �
 → PR → merge (the review gate below replaces a per-PR approval ask). Not
 "make it work, polish later" — a feature is done only once it has passed the
 full cycle. Split modules before they sprawl (tests in their own file), and
-run `cargo test`, `clippy -D warnings` and `fmt --check` after each step.
+run `nextest`, `clippy -D warnings` and `fmt --check` after each step.
 Beyond "does it work": actively look for bugs, not just the happy path;
 measure performance with real before/after numbers. **Update `README.md` in
 the same PR a feature lands, not later** — and more than the Status/Running
@@ -166,17 +166,24 @@ when the user is likely on mobile, and ask them to verify the result (e.g.
 
 ## Verification and evidence (avoiding redundant hardware work)
 
-The standard verification set for any compositor change: `cargo test -p
-scoot`, `cargo nextest run --workspace`, `cargo clippy -p scoot
---all-targets -- -D warnings`, `cargo fmt --check -p scoot`, and
-`scripts/smoke-test.sh` (backend-agnostic IPC-driven end-to-end test; set
-`MODE=--nested` to run under a host compositor, and real `--tty` hardware
-needs the binary launched there — see the script's header).
+The standard verification set for any compositor change: `cargo nextest run
+--workspace`, `cargo clippy -p scoot --all-targets -- -D warnings`, `cargo
+fmt --check -p scoot`, and `scripts/smoke-test.sh` (backend-agnostic
+IPC-driven end-to-end test; set `MODE=--nested` to run under a host
+compositor, and real `--tty` hardware needs the binary launched there — see
+the script's header).
 
-`cargo nextest run` is an **addition to** `cargo test`, not a replacement:
-it runs each test in its own process, which is how a test that only passed
-because it shared `smithay::utils::SERIAL_COUNTER` (process-global, and
-several suites say so in as many words) with its neighbours gets caught.
+**nextest is the runner to lean on** (user, 2026-09-19). It is the stricter
+of the two and it guards the more important property — see below. `cargo
+test -p scoot` is no longer a required per-change step; it stays the
+fallback for a machine without nextest, and it is what CI should run once
+CI exists (`docs/backlog/testing/ci-test-run.md`), so the coverage nextest
+structurally cannot provide is not simply dropped.
+
+Why nextest is the one to keep: it runs each test in its own process, which
+is how a test that only passed because it shared
+`smithay::utils::SERIAL_COUNTER` (process-global, and several suites say so
+in as many words) with its neighbours gets caught.
 
 **The doctest reason this used to give was wrong, and is corrected here
 (2026-09-19).** It said `cargo test` was kept because only it runs
@@ -193,12 +200,18 @@ it. `cargo test` runs them concurrently in one process, so it catches a test
 that *breaks* when sharing, and cannot see the coupling nextest catches.
 There is no flag on either tool that bridges this.
 
-Worth knowing when weighing whether both stay required: coupling can mask a
+That asymmetry is why nextest is the one to lean on: coupling can mask a
 *product* bug (a test passing that should not), while interference is
-usually a *test-quality* bug — so nextest guards the more important
-property. The standing alternative, if the cost is ever judged too high, is
-to remove the root cause: tests that compare serials relatively instead of
-asserting absolute values would not care which runner ran them.
+usually a *test-quality* bug.
+
+**What leaning on nextest gives up, and how you would notice.** With every
+test in its own process, a test that breaks when it shares one is invisible
+locally. The tell is `cargo test` failing while `nextest` passes — which is
+what CI should run `cargo test` for, and why a contributor reporting
+exactly that shape is reporting a real bug rather than a flake. The standing deeper fix
+is to remove the root cause: tests that compare serials relatively instead
+of asserting absolute values would not care which runner ran them, and then
+one runner would genuinely suffice.
 
 nextest is installed on the dev VM (`vm/configuration.nix`); a machine
 without it still has the `cargo test` baseline, which needs no extra tool.
