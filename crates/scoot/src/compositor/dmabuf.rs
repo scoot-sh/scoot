@@ -99,9 +99,9 @@
 //! which describe the same formats.
 //!
 //! The default feedback names a **render node** as `main_device`
-//! ([`main_device`]: the active renderer's own EGL device where it has one,
-//! else `/dev/dri/renderD128`, else `card0`, else `0`, each logged once at
-//! startup) and the derived tranche -- [`DMABUF_CANDIDATES`] (`Xrgb8888` then
+//! ([`main_device`]: the active renderer's own device where it can name one,
+//! else `/dev/dri/renderD128`, else `card0`, else `0`, whichever rung
+//! answered logged once at startup) and the derived tranche -- [`DMABUF_CANDIDATES`] (`Xrgb8888` then
 //! `Argb8888`) minus anything the renderer cannot import -- with the `LINEAR`
 //! layout, which is the only layout a CPU mapping can make sense of and the
 //! only one every tier here agrees on. A render node rather than a primary
@@ -395,15 +395,17 @@ fn tranche(can_import: impl Fn(Format) -> bool) -> impl Iterator<Item = Format> 
 /// The `main_device` for default feedback: the device a client should allocate
 /// against.
 ///
-/// `renderer` is the DRM render node the active renderer's own EGL display is
-/// on ([`Backend::render_node`](super::render::Backend)), and it leads because
-/// it is the only rung that can be *checked* rather than guessed: an import is
-/// performed by one specific renderer on one specific device, and on a machine
-/// with two GPUs a client that allocates against the other node hands over a
-/// dma-buf that renderer cannot import -- which `create_immed` turns into a
-/// disconnect. pixman has no device (it `mmap`s whatever it is handed,
-/// whichever node allocated it), and a software EGL device has no DRM node, so
-/// both fall through to the path ladder below.
+/// `renderer` is the DRM render node of the device the active renderer is on
+/// ([`Backend::render_node`](super::render::Backend) -- its EGL device, or on
+/// the scanout tier the GBM device its EGL display was made on, which is the
+/// same device), and it leads because it is the only rung that can be
+/// *checked* rather than guessed: an import is performed by one specific
+/// renderer on one specific device, and on a machine with two GPUs a client
+/// that allocates against the other node hands over a dma-buf that renderer
+/// cannot import -- which `create_immed` turns into a disconnect. pixman has
+/// no device at all (it `mmap`s whatever it is handed, whichever node
+/// allocated it), and neither a software EGL device nor a display-only DRM
+/// device has a render node, so those fall through to the path ladder below.
 ///
 /// The ladder: `/dev/dri/renderD128` first, `card0` where there is no render
 /// node, `0` where there is no DRM node at all -- plausibly *the* production
@@ -418,7 +420,7 @@ fn tranche(can_import: impl Fn(Format) -> bool) -> impl Iterator<Item = Format> 
 /// Whichever rung answers is logged once, here, at startup.
 fn main_device(renderer: Option<libc::dev_t>) -> libc::dev_t {
     let (device, source) = match renderer {
-        Some(device) => (device, "the renderer's own EGL device"),
+        Some(device) => (device, "the renderer's own device"),
         None => main_device_from(Path::new(RENDER_NODE), Path::new(CARD0)),
     };
     tracing::info!(device, source, "dmabuf feedback main device");

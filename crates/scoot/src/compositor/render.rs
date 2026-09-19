@@ -333,7 +333,9 @@ impl Backend {
             // buffer.
             #[cfg(feature = "gpu-scanout")]
             Pipeline::Scanout(gpu) => {
-                let scanout::ScanoutBackend { renderer, captures } = &mut **gpu;
+                let scanout::ScanoutBackend {
+                    renderer, captures, ..
+                } = &mut **gpu;
                 let Some(frame) = captures.frame_mut() else {
                     return Err(CaptureError::new(
                         CaptureStage::Bind,
@@ -421,15 +423,22 @@ impl Backend {
     ///
     /// `None` for pixman, which has no device at all: it `mmap`s whatever
     /// dma-buf it is handed, whichever node allocated it. Both GLES tiers
-    /// answer with their own EGL display's node, which is the device a client
-    /// has to allocate on for the import to have a chance of succeeding -- see
-    /// `dmabuf.rs`'s `main_device`.
+    /// answer with their own device's render node, which is what a client
+    /// has to allocate on for the import to have a chance of succeeding --
+    /// see `dmabuf.rs`'s `main_device`.
+    ///
+    /// The scanout tier has a second rung because its EGL display often
+    /// cannot answer at all: it is made through `PLATFORM_GBM_KHR`, whose
+    /// `EGLDevice` need not carry `EGL_EXT_device_drm`, so the GBM device it
+    /// was made on is asked instead (see [`scanout::ScanoutBackend::node`]).
+    /// The two name the same device by construction, so this is a fallback,
+    /// not a preference.
     pub(super) fn render_node(&self) -> Option<libc::dev_t> {
         match &self.pipeline {
             Pipeline::Pixman(_) => None,
             Pipeline::Gles(gpu) => gles::render_node(&gpu.renderer),
             #[cfg(feature = "gpu-scanout")]
-            Pipeline::Scanout(gpu) => gles::render_node(&gpu.renderer),
+            Pipeline::Scanout(gpu) => gles::render_node(&gpu.renderer).or(gpu.node),
         }
     }
 
@@ -670,7 +679,9 @@ fn draw_frame_scanout(
     } else {
         state.appearance.background_color.into()
     };
-    let scanout::ScanoutBackend { renderer, captures } = gpu;
+    let scanout::ScanoutBackend {
+        renderer, captures, ..
+    } = gpu;
     let (elements, cursor_surface) = state.gather_elements(renderer, output, &frame, ring_elements);
     outcome.cursor_surface = cursor_surface;
 

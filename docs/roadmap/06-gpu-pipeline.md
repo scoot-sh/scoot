@@ -577,12 +577,25 @@ first `wl_registry`.
   path a failed feedback build already took. That is the hazard the stage
   exists for: an EGL display with no dma-buf import capability, where the old
   pair would have been advertised and every GL client killed for believing it.
-- **`main_device` is the renderer's own DRM render node** where it has one
-  (`EGLDevice::device_for_display` -> `try_get_render_node` -> `dev_id`),
+- **`main_device` is the renderer's own DRM render node** where it has one,
   falling back to the `/dev/dri/renderD128` -> `card0` -> `0` path ladder for
-  pixman and for a software EGL device with no node. On a two-GPU machine the
-  path guess can name the *other* card, and a client that allocates there
-  hands over a buffer this renderer cannot import.
+  pixman (no device at all) and for a software EGL device (no node at all).
+  On a two-GPU machine the path guess can name the *other* card, and a client
+  that allocates there hands over a buffer this renderer cannot import.
+
+  Two rungs answer "the renderer's own device", because one of them is not
+  enough and that was measured rather than assumed. The offscreen tier's
+  display can name its device
+  (`EGLDevice::device_for_display` -> `try_get_render_node` -> `dev_id`). The
+  **scanout tier's cannot**: its display is made through `PLATFORM_GBM_KHR`,
+  and on the dev VM's virtio-gpu that `EGLDevice` carries neither
+  `EGL_EXT_device_drm_render_node` nor `EGL_EXT_device_drm` -- the same Mesa
+  that answers both for the offscreen tier's enumerated device. So
+  `ScanoutBackend` takes the node from the GBM device its EGL display was
+  made on instead (`DrmNode::from_file` ->
+  `node_with_type(NodeType::Render)`), which is the same device by
+  construction. Without that second rung the scanout tier silently kept the
+  old path guess, which is the thing this bullet exists to stop.
 - **Stage 3B's import guard is removed, deliberately.**
   `ScanoutBackend::new`'s `first_unimportable` computed `advertised ∩
   has_dmabuf_format` -- the identical predicate `tranche` now computes -- and

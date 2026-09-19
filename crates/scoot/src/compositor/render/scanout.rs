@@ -70,6 +70,23 @@ const SLOT_POOL: usize = 4;
 pub(crate) struct ScanoutBackend {
     pub(super) renderer: GlesRenderer,
     pub(super) captures: Captures,
+    /// This tier's DRM **render** node, for `zwp_linux_dmabuf_v1`'s
+    /// `main_device` -- the device a client should allocate the buffers this
+    /// renderer imports against (see `dmabuf.rs`).
+    ///
+    /// Taken from the GBM device rather than from the EGL display, because on
+    /// this tier the EGL display frequently cannot answer: it is created
+    /// through `PLATFORM_GBM_KHR`, and its `EGLDevice` need not carry
+    /// `EGL_EXT_device_drm` at all. Measured, not assumed -- on the dev VM's
+    /// virtio-gpu it carries neither that nor
+    /// `EGL_EXT_device_drm_render_node`, while the *same* Mesa answers both
+    /// for the offscreen tier's enumerated device.
+    ///
+    /// `None` where the GBM device is not a DRM node this can reason about,
+    /// or has no render node of its own -- the split render/display case
+    /// (Apple Silicon: `apple,dcp` owns the CRTCs and has no render node) is
+    /// the realistic one. `dmabuf.rs`'s path ladder answers then.
+    pub(super) node: Option<libc::dev_t>,
 }
 
 /// The dma-bufs a capture reads, and the pool they are exported into once per
@@ -119,6 +136,7 @@ impl ScanoutBackend {
                 exported: Vec::with_capacity(SLOT_POOL),
                 frame: None,
             },
+            node: render_node(gbm),
         })
     }
 
@@ -163,6 +181,27 @@ impl ScanoutBackend {
             .copied()
             .collect()
     }
+}
+
+/// The DRM render node belonging to the same device as `gbm`, if it has one.
+///
+/// The *render* node specifically, converted from whichever node the GBM
+/// device was opened on (a primary one, under `--tty`): the device
+/// `zwp_linux_dmabuf_v1` names is what a client allocates against, and a
+/// client that only renders has no business on a primary node. The
+/// conversion is a minor-number lookup plus a `stat` of the matching path
+/// (`DrmNode::node_with_type`), so it answers `None` rather than guessing
+/// when the device has no render node at all.
+///
+/// Every failure is `None` and none of them is an error worth a log line
+/// here: the caller's ladder has a further rung, and `dmabuf.rs` logs which
+/// rung actually answered. Startup-only, once per session.
+fn render_node(gbm: &GbmDevice<DrmDeviceFd>) -> Option<libc::dev_t> {
+    use smithay::backend::drm::{DrmNode, NodeType};
+
+    let node = DrmNode::from_file(gbm).ok()?;
+    let render = node.node_with_type(NodeType::Render)?.ok()?;
+    Some(render.dev_id())
 }
 
 impl Captures {
