@@ -213,6 +213,23 @@ compositor's real-Wayland-client test suites from sharing process-global
 state. It is an addition, not a replacement — it does not run doctests, so
 `cargo test` stays the baseline and needs no extra tool.
 
+There is one optional Cargo feature, **`gpu-scanout`**, off by default:
+
+```sh
+cargo build -p scoot --features gpu-scanout
+```
+
+It is where the `--tty` GPU scanout tier is being built (Smithay's
+`DrmCompositor` over a GBM swapchain). It is off by default because it is the
+one thing in the tree that adds a **link-time** dependency on `libgbm`: the
+resulting binary carries `libgbm.so.1` in its `DT_NEEDED` list and will not
+start on a machine without it, while the default build has no such entry and
+runs anywhere. Running with no GPU stack at all is a hard requirement here, so
+`cargo build` keeps producing the binary that does. (`--renderer gles` is
+*not* in the same position and needs no feature: libEGL/libGLESv2 are
+`dlopen`ed, so a GPU-less machine only fails when that renderer is asked for,
+at startup, with a message.)
+
 To actually run the compositor you need a real (or virtual) Linux machine with
 a seat — see `vm/README.md` for a Mac-native NixOS VM that provides one.
 

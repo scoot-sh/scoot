@@ -220,13 +220,106 @@ does not add the scanout path that would be the win even if there were.
 - **Every frame's `Bind<GlesRenderbuffer>` creates and destroys an FBO**, which
   is smithay's design at the pinned rev, not something this seam chose.
 
+## Stage 3, part A: the feature gate and the presenter split
+
+Stage 3 is split in two, because the `DrmCompositor` path and the structural
+room it needs are not reviewable as one diff. Part A is zero behaviour change
+and lands first.
+
+### The spike that decided stage 3 is verifiable here at all
+
+The open question going in (recorded in the stage-2 notes above and in
+`HANDOFF.md`) was that **no atomic commit or page flip through a
+GBM-allocated framebuffer had ever been attempted on this VM.** The dumb tier
+already proves atomic commit, page flip and vblank work here; what was
+unknown was whether the primary plane takes a *GBM* framebuffer, and whether
+`queue_frame` → `VBlank` → `frame_submitted` round-trips.
+
+A throwaway `crates/scoot/examples/spike_drm_compositor.rs` (deleted after;
+it went through `LibSeatSession` exactly as `tty::init` does, so DRM master
+was held the same way) answered it, dev VM, working tree at the feature-gate
+commit, `2026-09-19T14:02Z`:
+
+```
+connector connector::Handle(38) mode (1600, 1000)
+surface: crtc=crtc::Handle(37) plane=plane::Handle(33) legacy=false
+renderer dmabuf render formats: 80
+primary planes kept: 1
+DrmCompositor built: format=DrmFourcc(AR24) modifiers=[Invalid]
+round 0: commit_pending_before=true is_empty=false
+round 0: queued
+round 0: vblank(s) [crtc::Handle(37)] after ~50ms
+round 0: frame_submitted -> Some(0)
+round 1: commit_pending_before=false is_empty=false
+round 1: queued
+round 1: vblank(s) [crtc::Handle(37)] after ~50ms
+round 1: frame_submitted -> Some(1)
+round 2: commit_pending_before=false is_empty=false
+round 2: queued
+round 2: vblank(s) [crtc::Handle(37)] after ~50ms
+round 2: frame_submitted -> Some(2)
+SPIKE OK: 3 GBM scanout cycles, each confirmed by its own vblank
+```
+
+What that establishes, and what it does not:
+
+- **Establishes.** `DrmCompositor::new` succeeds on virtio-gpu with the
+  primary plane alone (`cursor`/`overlay` emptied), atomic, at `AR24`. Round
+  0 is a modeset (`commit_pending_before=true`), rounds 1–2 are page flips,
+  and each one's vblank round-trips its own user data through
+  `frame_submitted` — which is exactly the mechanism the session-lock blank
+  confirmation has to ride on. `~50ms` is the spike's dispatch granularity,
+  not a latency measurement.
+- **Does not establish.** `modifiers=[Invalid]` — this device advertises no
+  explicit modifiers, so the swapchain is on the implicit/linear path.
+  Modifier negotiation on real hardware is untested here. And `is_software()`
+  stays false-but-llvmpipe on this VM (see the stage-2 correction above), so
+  **real GPU scanout remains an Asahi-only claim**: what the VM proves is the
+  KMS plumbing, not the performance case.
+
+### What part A lands
+
+- **`scoot`'s `gpu-scanout` Cargo feature (default off) → `smithay/backend_gbm`.**
+  `backend_gbm` is a real link-time dependency on libgbm, unlike `renderer_gl`
+  which `dlopen`s libEGL/libGLESv2. GPU-free operation is a fixed decision, so
+  the default build must not carry it. Proven rather than asserted, dev VM:
+
+  ```
+  $ ldd /tmp/scoot-default | grep -i gbm     # cargo build -p scoot
+  (no output)
+  $ ldd /tmp/scoot-gpu | grep -i gbm         # + --features gpu-scanout
+  libgbm.so.1 => /nix/store/xv6s7zkvnnqjmjfqw09h3099lswrnpyf-mesa-libgbm-26.1.3/lib/libgbm.so.1
+  ```
+
+  Off by default does not mean unexercised: the verification set is run twice,
+  once per flavour.
+- **`tty/dumb.rs`** — the dumb-buffer presenter, moved out of `Tty` whole:
+  the `DrmSurface`, the `BufferPool`, the `FlipTracker`, `needs_modeset`,
+  `showing`/`pending_free`, `present_skipped`, `retry_armed` and
+  `PresentRetries`, plus `present`, `flip_settled`, `next_buffer_age`,
+  `advance_generation`, `take_retry_render` and `invalidate_scanout` (which
+  came from `hotplug.rs`). Bodies and field docs are unchanged — `git diff
+  --color-moved` shows it as a move.
+
+  What stays on `Tty` is what is true of the *session* regardless of how it
+  presents: libseat, the `DrmDevice`, the connector and mode being driven,
+  `active` (DRM master held) and `session_paused`. `Tty::present` keeps
+  exactly its two session-level guards (`!active`, and the frame matching the
+  current mode) and delegates the rest.
+
+  This is the room part B needs. Once the presenter is a field rather than
+  nine fields spread through `Tty`, a second tier is a second variant, and
+  the dumb tier's machinery becomes unreachable from it *by type* rather than
+  by everyone remembering not to call it.
+
 ## Staging
 
 | Stage | What | Status |
 | ----- | ---- | ------ |
 | 1 | The renderer seam, pixman the only implementation, zero behaviour change | PR #129, merged `06201e6` |
-| 2 | A `GlesRenderer` implementation behind `--renderer`, offscreen + `ExportMem` read-back, so every backend can use it and the existing pixel suites run under both | PR #130 |
-| 3 | `DrmCompositor` scanout for `--tty`: skip the read-back and the dumb-buffer memcpy entirely where a GPU really is present | not started |
+| 2 | A `GlesRenderer` implementation behind `--renderer`, offscreen + `ExportMem` read-back, so every backend can use it and the existing pixel suites run under both | PR #130, merged `acbdbe0` |
+| 3A | The `gpu-scanout` Cargo feature (with the no-libgbm `ldd` proof) and the dumb presenter lifted out of `Tty`; zero behaviour change | this PR |
+| 3B | `DrmCompositor` scanout for `--tty`: skip the read-back and the dumb-buffer memcpy entirely where a GPU really is present | not started |
 | 4 | Renderer-derived dmabuf formats: advertise what the *active* renderer can import rather than the hard-coded pixman LINEAR pair | not started |
 
 Stage 2 is the first stage with a user-facing surface (`--renderer`), so it

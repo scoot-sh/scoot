@@ -50,7 +50,6 @@ use smithay::backend::udev::{UdevDevices, UdevEvent};
 use smithay::reexports::drm::control::{Device as ControlDevice, Mode, connector, crtc};
 
 use super::buffers::BufferPool;
-use super::present_retry::PresentRetries;
 use super::{State, Tty, gpu};
 
 /// Handles one udev event for the DRM subsystem.
@@ -327,7 +326,7 @@ impl Tty {
                             connector = %name,
                             "drm: a display is connected again; forcing a modeset"
                         );
-                        self.invalidate_scanout();
+                        self.presenter.invalidate_scanout();
                         Reconfigured::Render
                     }
                     Plan::Unchanged | Plan::NoConnector => {
@@ -389,14 +388,14 @@ impl Tty {
             None
         };
         // Only the mode half of this pair is read from the surface --
-        // `self.surface.pending_mode()` -- because it is the surface's
+        // `presenter.surface().pending_mode()` -- because it is the surface's
         // *pending* mode that a half-applied change has to be undone back
         // to. The connector half is `self.connector`, not
-        // `self.surface.pending_connectors()`: this field is the one this
+        // `pending_connectors()`: this field is the one this
         // module treats as authoritative for "which connector are we on",
         // and it is what the failure path below restores toward.
-        let previous = (self.connector, self.surface.pending_mode());
-        if !set_pending(&self.surface, (connector, mode), previous) {
+        let previous = (self.connector, self.presenter.surface().pending_mode());
+        if !set_pending(self.presenter.surface(), (connector, mode), previous) {
             // The current CRTC cannot drive the new connector with the new
             // mode -- on hardware whose encoders are wired to specific CRTCs
             // (see `switch_crtc`) that is a routability refusal, not a mode
@@ -411,24 +410,20 @@ impl Tty {
             "drm: display reconfigured; mode-setting onto it"
         );
         self.connector = connector;
-        if let Some(buffers) = buffers {
-            // The old pool -- and the framebuffers in it, one of which the
-            // CRTC may still be scanning out -- is dropped here. The kernel
-            // handles a framebuffer removed while active by blanking the
-            // plane, which is what a mode change does anyway; the full
-            // modeset `invalidate_scanout` arms below is what brings it
-            // back, on a buffer that is the right size for the new mode.
-            self.buffers = buffers;
-        }
-        // Unconditionally, not inside the branch above: these two are
+        // The old pool -- and the framebuffers in it, one of which the CRTC
+        // may still be scanning out -- is dropped inside `adopt_buffers`; see
+        // its doc for what the kernel does with a framebuffer removed while
+        // active. `None` (the size did not change) keeps the current pool.
+        self.presenter.adopt_buffers(buffers);
+        // Unconditionally, not inside `adopt_buffers`: these two are
         // `present`'s size guard and must equal the size the pool was built
         // at, whichever branch got here. Writing them only where a new pool
-        // was built would make that a fact about this `if`, which is exactly
+        // was built would make that a fact about that `if`, which is exactly
         // the kind of coupling that survives one refactor and not two. When
         // the size did not change they are already these values.
         self.width = width;
         self.height = height;
-        self.invalidate_scanout();
+        self.presenter.invalidate_scanout();
         if size_changed {
             Reconfigured::Resized(width, height)
         } else {
@@ -512,7 +507,7 @@ impl Tty {
         size_changed: bool,
     ) -> Reconfigured {
         let (width, height) = mode_size(mode);
-        let current = self.surface.crtc();
+        let current = self.presenter.crtc();
         // Copied, not borrowed: `create_surface` below needs `&mut self.drm`.
         // One small `Vec` on a path that runs when a cable moves, matching
         // `tty::create_surface`'s own shape.
@@ -554,26 +549,24 @@ impl Tty {
             // CRTC's state, whose connector is gone anyway; the full commit
             // `invalidate_scanout` arms below is what brings the new CRTC up
             // on the new state.
-            self.surface = candidate;
+            self.presenter.adopt_surface(candidate);
             self.connector = connector;
-            if let Some(buffers) = buffers {
-                // The old pool -- and the framebuffers in it, one of which the
-                // old CRTC may still be scanning out -- is dropped here, the
-                // same blank-a-plane step `retarget` documents for the mode
-                // change; the modeset below brings it back at the new size.
-                self.buffers = buffers;
-            }
+            // The old pool -- and the framebuffers in it, one of which the
+            // old CRTC may still be scanning out -- is dropped here, the
+            // same blank-a-plane step `retarget` documents for the mode
+            // change; the modeset below brings it back at the new size.
+            self.presenter.adopt_buffers(buffers);
             // Unconditionally, for the same reason as in `retarget`: these two
             // are `present`'s size guard and must equal the size the pool was
             // built at, whichever branch got here.
             self.width = width;
             self.height = height;
-            self.invalidate_scanout();
+            self.presenter.invalidate_scanout();
             // A new CRTC is new device state: the old connector's refusal
             // streak (if any) says nothing about the new one, so the first
             // transient refusal on it must arm a retry rather than answer
             // Quiet off a streak it never earned.
-            self.retries = PresentRetries::new();
+            self.presenter.reset_retries();
             return Reconfigured::SwitchedCrtc {
                 width,
                 height,
@@ -586,46 +579,6 @@ impl Tty {
             "drm: no other crtc on this device can drive the new connector; staying on the current one"
         );
         Reconfigured::Nothing
-    }
-
-    /// The scanout bookkeeping shared by `reactivate` and [`Self::retarget`]:
-    /// after either, nothing this pool records can be trusted to describe
-    /// what the CRTC is showing, and only a full modeset -- not a page flip
-    /// onto state that may have been reconfigured behind us -- is safe to
-    /// issue next.
-    ///
-    /// `flips` is discarded even though a flip really may still be in
-    /// flight. Both directions have a cost and they are not symmetric:
-    /// leaving it armed when the flip's `VBlank` never arrives (its
-    /// framebuffer having been destroyed, or its CRTC re-modeset underneath
-    /// it) freezes the screen permanently with no error anywhere, while
-    /// discarding it costs at worst one rejected flip, which `present` logs
-    /// and retries from the frame timer (`retry_armed` — see its error arm;
-    /// no `VBlank` is owed since nothing is in flight). Discarding
-    /// also retires the number a session-lock wait may have recorded for
-    /// that flip, so a late vblank for it cannot confirm a lock whose
-    /// blanked frame never scanned out -- the wait stays, owned by the
-    /// fallback deadline, until the next render records a fresh flip.
-    ///
-    /// `mark_all_free` likewise frees the slot the CRTC may still be
-    /// scanning out, so the next `write_region` can write into live scanout
-    /// -- a torn frame, in principle. Accepted, and bounded to nothing a
-    /// user can see: `needs_modeset` is set in the same breath, so the next
-    /// `present` issues a full `commit` rather than a page flip, and every
-    /// caller of this is already on a path that blanks the screen (a VT
-    /// switch back, or a modeset onto a connector that just changed). The
-    /// alternative -- keeping the showing slot busy -- reintroduces exactly
-    /// the "both slots stuck, nothing ever flips again" state `present`'s
-    /// own warning exists for, on a path where nothing can vouch for what
-    /// the CRTC is holding. This is pre-existing behaviour from
-    /// `reactivate`, restated here rather than newly chosen.
-    pub(super) fn invalidate_scanout(&mut self) {
-        self.flips.discard();
-        self.needs_modeset = true;
-        self.buffers.mark_all_free();
-        self.buffers.invalidate_ages();
-        self.showing = None;
-        self.pending_free = None;
     }
 }
 

@@ -11,9 +11,11 @@
 //! object) to justify forcing a shared abstraction between the two -- see
 //! this project's "no premature abstraction" standard.
 //!
-//! No GBM in this rev of Smithay for dumb buffers (see the crate's
-//! `Cargo.toml` comment on `backend_gbm`), so presenting a frame is a plain
-//! memcpy from the pixman-rendered framebuffer into whichever dumb buffer is
+//! No GBM on this tier at all -- that is the point of it, and why it is the
+//! one that needs no GPU stack (see `dumb.rs`'s module doc and the crate's
+//! `Cargo.toml` comment on the `gpu-scanout` feature). So presenting a frame
+//! here is a plain
+//! memcpy from the rendered framebuffer into whichever dumb buffer is
 //! free -- row by row, because a dumb buffer's pitch (its driver-chosen
 //! stride) is not guaranteed to equal `width * 4`, unlike the wl_shm buffers
 //! scoot creates itself in `nested/buffers.rs` and can assume are tightly
