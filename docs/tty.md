@@ -201,8 +201,9 @@ running with no GPU at all is a hard requirement here, not a fallback tier.
   offscreen buffer and then read back to main memory exactly as pixman's is,
   so `gles` adds a GPU round trip without removing any CPU copy; on a machine
   whose "GPU" is a software rasteriser (llvmpipe, which is what a VM or a
-  GPU-less container has) it is several times *slower* than pixman. The
-  scanout path that would make it faster on real hardware is not written yet.
+  GPU-less container has) it is several times *slower* than pixman. Under
+  `--tty` the scanout path below removes that round trip; everywhere else
+  the read-back stands.
 - **Under `--tty`, `gles` now scans out from the GPU** — in a build with
   `--features gpu-scanout` (see below). That is the path where it stops
   being a round trip: the frame is scanned out directly instead of being
@@ -238,10 +239,16 @@ There is one optional Cargo feature, **`gpu-scanout`**, off by default:
 cargo build -p scoot --features gpu-scanout
 ```
 
-It is where the `--tty` GPU scanout tier is being built (Smithay's
-`DrmCompositor` over a GBM swapchain). **Today it gates no code** — enabling
-it gives you an identical compositor plus the dependency below, so there is
-nothing to gain by turning it on until that tier lands.
+It is what the `--tty` GPU scanout tier is built behind (Smithay's
+`DrmCompositor` over a GBM swapchain). With it, `--tty --renderer gles`
+scans out from the GPU instead of reading each frame back; without it,
+`--tty` warns and keeps pixman however `gles` was asked for.
+
+Two limits worth knowing before you turn it on: scanout drives the
+**primary plane only** — no overlay or cursor planes — and it has **never
+run on a real GPU**. Every measurement behind it came from a software
+rasteriser, so the case for it on real hardware is reasoned, not
+measured.
 
 It is off by default because it is the one thing in the tree that adds a
 **link-time** dependency on `libgbm`: the resulting binary carries

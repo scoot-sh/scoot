@@ -416,10 +416,18 @@ was checked free before each session (`pgrep` for another `--tty` client,
 - **The frame is right, and the capture reads the right buffer.** Comparing
   IPC screenshots (ImageMagick `compare -metric AE`, 1600x1000):
 
-  | pair | differing pixels |
+  | pair | ImageMagick `AE` |
   | ---- | ---------------- |
   | `--tty` dumb vs `--tty` gpu | 1568.49 |
   | `--headless` pixman vs `--headless` gles | 1568.63 |
+
+  `AE` is ImageMagick's absolute-error metric, **not** a count of differing
+  pixels -- review re-ran it and found `differing_fraction=0.999915`, i.e.
+  nearly every pixel differs, each by one least-significant bit in one of
+  four channels. 1600000/255/4 = 1568.6 analytically, which is what the
+  second row is. That makes the conclusion *stronger* than the original
+  wording claimed: the two numbers matching says the whole difference is the
+  renderer's rounding, and scanout introduces none of its own.
   | `--tty` gpu vs `--headless` gles | 73.96 |
 
   The first two are the *same* number: the only difference between the tiers

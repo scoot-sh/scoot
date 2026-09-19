@@ -35,9 +35,15 @@
 //! swapchain slot. The pool is keyed by the address of the `GbmBuffer` inside
 //! the slot, which is stable for as long as the swapchain is, and is dropped
 //! wholesale whenever the swapchain is rebuilt (see
-//! [`Captures::forget_slots`] and its one caller). That caller is the
-//! only thing that can free a slot, so a stale entry cannot outlive the
-//! buffer it names.
+//! [`Captures::forget_slots`] and its one caller).
+//!
+//! That pointer is only a safe key while *every* path that frees a slot
+//! flags it. Rebuild and resize are the obvious ones; the non-obvious one is
+//! a failed `render_frame`, which resets the swapchain internally on its way
+//! out (`drm/compositor/mod.rs`'s `Err` arm at the pinned rev). Miss one and
+//! the allocator will reuse the freed address for the next slot, a cached
+//! export aliases it, and a stale frame is served as a current one. Keep
+//! `slots_dropped` set on all of them.
 
 use std::error::Error;
 
@@ -158,9 +164,12 @@ impl ScanoutBackend {
 /// `docs/backlog/resolved/dmabuf-advertised-but-never-imported-done.md`,
 /// where exactly that took down a whole shell). Under `--tty` the renderer
 /// has always been pixman, which imports a linear dma-buf by mmapping it and
-/// essentially never refuses; this tier is the first thing that routes those
-/// imports through GLES, which *can*. So the check is the price of adding the
-/// tier, not a feature of it.
+/// essentially never refuses, whereas GLES *can*. This tier is not the first
+/// path to route client imports through GLES -- `render.rs`'s
+/// `Pipeline::Gles` arm already does, and `docs/tty.md` documents that gap --
+/// but it is the first under `--tty`, where refusing means killing a client
+/// on the user's own session rather than in a nested window. So the check is
+/// the price of adding the tier, not a feature of it.
 ///
 /// What it deliberately does **not** do is change what is advertised --
 /// deriving the tranche from the active renderer is stage 4, and is a

@@ -142,7 +142,9 @@ pub(crate) struct ScanoutPresenter {
     /// results, and the bound in `present_retry.rs` counts both.
     retry_armed: bool,
     /// Whether the swapchain's slots have been freed since the render path
-    /// last looked. Set by every path that rebuilds or resizes the swapchain,
+    /// last looked. Set by every path that frees slots -- the ones that
+    /// rebuild or resize the swapchain, and also a failed `render_frame`,
+    /// which resets the swapchain internally before returning its error --
     /// taken by `render::draw_frame_scanout`, which uses it to drop the
     /// dma-bufs it exported from those slots (see
     /// `render::scanout::ScanoutBackend::forget_slots`). One writer set, one
@@ -296,6 +298,26 @@ impl ScanoutPresenter {
             {
                 Ok(result) => result,
                 Err(error) => {
+                    // Smithay frees the swapchain on its way out of this
+                    // error: `render_frame`'s own `Err` arm calls
+                    // `self.swapchain.reset_buffers()` before returning
+                    // (`drm/compositor/mod.rs:2343` at the pinned rev), and
+                    // that sets every slot to `Default::default()`
+                    // (`allocator/swapchain.rs:234`), dropping the
+                    // `Arc<InternalSlot>`s the export pool is keyed on.
+                    //
+                    // So this path frees slots exactly like a rebuild does,
+                    // and has to say so. Without this the next `acquire()`
+                    // allocates identically-sized slots that the allocator
+                    // will happily place at the addresses just freed, a
+                    // cached export aliases one by pointer, and `note_frame`
+                    // serves a *stale* dma-buf -- so every IPC screenshot
+                    // and `ext-image-copy-capture-v1` frame shows an old
+                    // screen until something else rebuilds the swapchain.
+                    // For an agent driving this compositor that is acting on
+                    // a screen that is not there, which is worse than the
+                    // failed frame that caused it.
+                    self.slots_dropped = true;
                     tracing::warn!(%error, "could not render the frame for scanout");
                     return ScanoutFrame {
                         drew: false,
