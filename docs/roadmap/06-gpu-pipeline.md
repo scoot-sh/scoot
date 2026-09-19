@@ -3,7 +3,7 @@ item: "6"
 title: "Real GPU rendering pipeline"
 status: "in-progress"
 area: "backend"
-pr: 134
+pr: 135
 commit: null
 ---
 
@@ -510,8 +510,8 @@ no speculative multi-GPU abstraction added here.
 | ----- | ---- | ------ |
 | 1 | The renderer seam, pixman the only implementation, zero behaviour change | PR #129, merged `06201e6` |
 | 2 | A `GlesRenderer` implementation behind `--renderer`, offscreen + `ExportMem` read-back, so every backend can use it and the existing pixel suites run under both | PR #130, merged `acbdbe0` |
-| 3A | The `gpu-scanout` Cargo feature (with the no-libgbm `ldd` proof) and the dumb presenter lifted out of `Tty`; zero behaviour change | this PR |
-| 3B | `DrmCompositor` scanout for `--tty`: skip the read-back and the dumb-buffer memcpy entirely where a GPU really is present | this PR |
+| 3A | The `gpu-scanout` Cargo feature (with the no-libgbm `ldd` proof) and the dumb presenter lifted out of `Tty`; zero behaviour change | PR #133 |
+| 3B | `DrmCompositor` scanout for `--tty`: skip the read-back and the dumb-buffer memcpy entirely where a GPU really is present | PR #135, stacked on #133 |
 | 4 | Renderer-derived dmabuf formats: advertise what the *active* renderer can import rather than the hard-coded pixman LINEAR pair | not started |
 
 Stage 2 is the first stage with a user-facing surface (`--renderer`), so it
