@@ -217,7 +217,9 @@ running with no GPU at all is a hard requirement here, not a fallback tier.
 - **A resize is expensive under `gles`, and `--nested` now resizes.** Every
   resize rebuilds the render target, and under `gles` that means a whole new
   EGL context and shader set: measured on the dev VM (llvmpipe, 800x800, 8
-  windows) at **16.6 ms** per resize against **37 µs** for pixman — a full
+  windows) at **16.6 ms** per resize against **37 µs** for pixman (both
+  measured with `CARGO_PROFILE_RELEASE_LTO=thin`, not the repo's fat-LTO
+  release profile, which OOM-kills on the 3.8 GB dev VM) — a full
   60 Hz frame apiece. It is once per *distinct* size, not once per event, so
   settling at a new size costs one; dragging a `--nested --renderer gles`
   window to resize pays it per distinct size that drag passes through and

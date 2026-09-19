@@ -38,6 +38,7 @@ the README names (issues #144 and #145).
   *protocol error* still logs at `WARN`, unchanged — that is the line worth
   keeping, and it is the one that does not repeat. Run with
   `RUST_LOG=scoot=debug` to get the disconnect lines back.
+
 ### 2026-09-19 — `--headless --outputs N`, and a screenshot that refuses the wrong screen
 
 `scoot --headless --outputs N` (1–8, default 1) creates N virtual outputs
