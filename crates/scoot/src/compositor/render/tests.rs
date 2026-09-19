@@ -1,14 +1,27 @@
-//! Tests for the renderer seam itself: the read-back's orientation contract,
-//! the damage-tracker contract the `--tty` retry rests on, and the
-//! damage-bbox arithmetic the presenters copy through.
+//! Tests for the renderer seam itself: the read-back's orientation contract
+//! (under *both* renderers, and their agreement), which renderer a session
+//! resolves to, the damage-tracker contract the `--tty` retry rests on, and
+//! the damage-bbox arithmetic the presenters copy through.
 //!
 //! What is *not* here, on purpose: whether a frame draws the right thing.
 //! That is asserted on real pixels by the suites that drive a real client
 //! through a real `State` -- `session_lock`, `layer_shell`, `alpha_modifier`,
 //! `single_pixel_buffer`, `cursor`, `output_scale` -- all of which read the
-//! framebuffer back through [`Backend::capture`]. They are the regression net
-//! for this module; duplicating them here would only pin the seam against
-//! itself.
+//! framebuffer back through [`Backend::capture`], and all of which run under
+//! either renderer (`SCOOT_TEST_RENDERER=gles`, see `test_support`). They are
+//! the regression net for this module; duplicating them here would only pin
+//! the seam against itself.
+//!
+//! # The GLES tests here require a working EGL, and fail rather than skip
+//!
+//! Deliberate. Every suite in this crate already needs a real Linux session
+//! (a writable `$XDG_RUNTIME_DIR`, a bindable wayland socket), and any such
+//! machine has Mesa's software EGL device even with no GPU at all -- that is
+//! exactly what this project's dev VM is. A silently-skipped GLES test is
+//! worse than a failing one: `cargo test` captures output, so the skip would
+//! be invisible and "the suite passed" would mean nothing about the renderer
+//! this stage exists to add. Nothing about the default pixman path depends on
+//! EGL being there.
 
 use smithay::backend::allocator::Fourcc;
 use smithay::backend::renderer::element::Kind;
@@ -65,6 +78,53 @@ fn pixel(bytes: &[u8], width: i32, x: i32, y: i32) -> [u8; 4] {
         .expect("four bytes per pixel")
 }
 
+/// Draws the orientation scene -- green across the logical top half, red
+/// across the bottom -- with whichever renderer `backend` is carrying, and
+/// hands back the read-back bytes.
+///
+/// Generic below the match for the same reason [`draw_frame`] is: the arms
+/// choose a renderer and nothing under them knows which one, so the two
+/// renderers are measured by *identical* code rather than by two
+/// hand-written scenes that could differ.
+fn marker_pixels(renderer: RendererKind) -> Vec<u8> {
+    let output = test_output(MARKER_CANVAS, MARKER_CANVAS);
+    let mut backend =
+        Backend::new(&output, MARKER_CANVAS, MARKER_CANVAS, renderer).expect("a backend");
+    let Backend {
+        pipeline, damage, ..
+    } = &mut backend;
+    match pipeline {
+        Pipeline::Pixman(cpu) => draw_markers(&mut cpu.renderer, &mut cpu.image, damage),
+        Pipeline::Gles(gpu) => draw_markers(&mut gpu.renderer, &mut gpu.buffer, damage),
+    }
+    backend
+        .capture(<[u8]>::to_vec)
+        .expect("the framebuffer reads back")
+}
+
+fn draw_markers<R, T>(renderer: &mut R, target: &mut T, damage: &mut OutputDamageTracker)
+where
+    R: Renderer + Bind<T>,
+{
+    let half = MARKER_CANVAS / 2;
+    let top = SolidColorBuffer::new((MARKER_CANVAS, half), [0.0, 1.0, 0.0, 1.0]);
+    let bottom = SolidColorBuffer::new((MARKER_CANVAS, half), [1.0, 0.0, 0.0, 1.0]);
+    let elements = [
+        SolidColorRenderElement::from_buffer(&top, (0, 0), 1.0, 1.0, Kind::Unspecified),
+        SolidColorRenderElement::from_buffer(&bottom, (0, half), 1.0, 1.0, Kind::Unspecified),
+    ];
+    let mut framebuffer = renderer.bind(target).expect("a framebuffer");
+    damage
+        .render_output(
+            renderer,
+            &mut framebuffer,
+            0,
+            &elements,
+            [0.0, 0.0, 0.0, 1.0],
+        )
+        .expect("a rendered frame");
+}
+
 /// The orientation contract [`read_back`]'s doc states, pinned on real
 /// pixels rather than on a comment: a marker drawn at the *logical* top-left
 /// comes back at the *start* of the buffer.
@@ -75,67 +135,119 @@ fn pixel(bytes: &[u8], width: i32, x: i32, y: i32) -> [u8; 4] {
 /// already compensated for by `flip180` in the projection), so a future
 /// reader who "fixes" the read-back by reversing rows when `flipped()` is
 /// set would invert the screen for everyone. Reverse the row order anywhere
-/// between `render_output` and the returned slice and this test fails.
+/// between `render_output` and the returned slice and this test fails --
+/// under *either* renderer, which is the point of running it under both: the
+/// one that answers `true` is the one such a "fix" would be written for.
 #[test]
 fn the_read_back_hands_out_the_logical_top_row_first() {
-    let output = test_output(MARKER_CANVAS, MARKER_CANVAS);
-    let mut backend = Backend::new(&output, MARKER_CANVAS, MARKER_CANVAS).expect("a backend");
-    let half = MARKER_CANVAS / 2;
-    let top = SolidColorBuffer::new((MARKER_CANVAS, half), [0.0, 1.0, 0.0, 1.0]);
-    let bottom = SolidColorBuffer::new((MARKER_CANVAS, half), [1.0, 0.0, 0.0, 1.0]);
-    let elements = [
-        SolidColorRenderElement::from_buffer(&top, (0, 0), 1.0, 1.0, Kind::Unspecified),
-        SolidColorRenderElement::from_buffer(&bottom, (0, half), 1.0, 1.0, Kind::Unspecified),
-    ];
+    for renderer in [RendererKind::Pixman, RendererKind::Gles] {
+        let bytes = marker_pixels(renderer);
+        assert_eq!(
+            pixel(&bytes, MARKER_CANVAS, 0, 0),
+            GREEN_BGRA,
+            "{renderer}: the first pixel of the buffer must be the one drawn at the \
+             logical top-left"
+        );
+        assert_eq!(
+            pixel(&bytes, MARKER_CANVAS, 0, MARKER_CANVAS - 1),
+            RED_BGRA,
+            "{renderer}: the last row of the buffer must be the one drawn at the \
+             logical bottom"
+        );
+    }
+}
 
-    let Backend {
-        pipeline: Pipeline::Pixman(cpu),
-        damage,
-        ..
-    } = &mut backend;
-    let mut framebuffer = cpu.renderer.bind(&mut cpu.image).expect("a framebuffer");
-    damage
-        .render_output(
-            &mut cpu.renderer,
-            &mut framebuffer,
-            0,
-            &elements,
-            [0.0, 0.0, 0.0, 1.0],
-        )
-        .expect("a rendered frame");
-    drop(framebuffer);
-
-    let bytes = backend
-        .capture(<[u8]>::to_vec)
-        .expect("the framebuffer reads back");
+/// The stronger form of the same claim, and the one stage 2 rests on: the
+/// two renderers do not merely each put their own top row first, they
+/// produce the *same bytes* for the same scene -- which is what lets every
+/// pixel-readback suite in the crate run unchanged under either (see this
+/// module's doc).
+///
+/// Byte equality rather than a tolerance because this scene is opaque solid
+/// colour with no blending, no scaling and no filtering: there is nothing
+/// for two correct renderers to round differently. A tolerance here would
+/// hide exactly the layout and channel-order bugs this exists to catch.
+#[test]
+fn both_renderers_lay_the_same_frame_out_the_same_way() {
+    let cpu = marker_pixels(RendererKind::Pixman);
+    let gpu = marker_pixels(RendererKind::Gles);
+    assert_eq!(cpu.len(), gpu.len(), "both frames are the same size");
+    let differing = cpu
+        .chunks_exact(4)
+        .zip(gpu.chunks_exact(4))
+        .filter(|(left, right)| left != right)
+        .count();
     assert_eq!(
-        pixel(&bytes, MARKER_CANVAS, 0, 0),
-        GREEN_BGRA,
-        "the first pixel of the buffer must be the one drawn at the logical top-left"
-    );
-    assert_eq!(
-        pixel(&bytes, MARKER_CANVAS, 0, MARKER_CANVAS - 1),
-        RED_BGRA,
-        "the last row of the buffer must be the one drawn at the logical bottom"
+        differing,
+        0,
+        "pixman and gles disagree on {differing} of {} pixels of an opaque two-colour frame",
+        cpu.len() / 4
     );
 }
 
 /// [`Backend::capture`] reads back the whole target, at the size the target
 /// was built at -- which is what `screencopy.rs` advertises to clients as
-/// their buffer size, and what `screenshot.rs` encodes against.
+/// their buffer size, and what `screenshot.rs` encodes against. True of
+/// either renderer: a capture client's buffer size cannot depend on which
+/// one the session was started with.
 #[test]
 fn a_capture_covers_the_whole_target_at_the_backends_own_size() {
-    let output = test_output(40, 24);
-    let mut backend = Backend::new(&output, 40, 24).expect("a backend");
-    assert_eq!(backend.size(), (40, 24));
-    let bytes = backend
-        .capture(<[u8]>::to_vec)
-        .expect("the framebuffer reads back");
+    for renderer in [RendererKind::Pixman, RendererKind::Gles] {
+        let output = test_output(40, 24);
+        let mut backend = Backend::new(&output, 40, 24, renderer).expect("a backend");
+        assert_eq!(backend.size(), (40, 24), "{renderer}");
+        assert_eq!(backend.renderer(), renderer, "{renderer}");
+        let bytes = backend
+            .capture(<[u8]>::to_vec)
+            .expect("the framebuffer reads back");
+        assert_eq!(
+            bytes.len(),
+            40 * 24 * 4,
+            "{renderer}: a capture is four bytes per pixel of the whole target"
+        );
+    }
+}
+
+/// Which renderer a session ends up with, across the four ways of asking.
+/// The flag beats the file -- including `--renderer pixman` against a file
+/// asking for `gles`, which is the case a plain `RendererKind` (rather than
+/// an `Option`) at either site would quietly get wrong.
+#[test]
+fn the_flag_beats_the_config_file_and_neither_means_pixman() {
+    use RendererKind::{Gles, Pixman};
+    assert_eq!(resolve(None, None, false), Pixman, "nothing named");
+    assert_eq!(resolve(None, Some(Gles), false), Gles, "the file alone");
+    assert_eq!(resolve(Some(Gles), None, false), Gles, "the flag alone");
     assert_eq!(
-        bytes.len(),
-        40 * 24 * 4,
-        "a capture is four bytes per pixel of the whole target"
+        resolve(Some(Pixman), Some(Gles), false),
+        Pixman,
+        "an explicit --renderer pixman must beat a file asking for gles"
     );
+    assert_eq!(
+        resolve(Some(Gles), Some(Pixman), false),
+        Gles,
+        "an explicit --renderer gles must beat a file asking for pixman"
+    );
+}
+
+/// `--tty` overrides both: there is no GPU scanout path yet, and reading a
+/// GPU frame back only to memcpy it into a dumb buffer would be slower than
+/// compositing on the CPU in the first place. A warning and pixman, never a
+/// refusal to start -- on `--tty`, scoot *is* the session.
+#[test]
+fn tty_keeps_pixman_however_gles_was_asked_for() {
+    use RendererKind::{Gles, Pixman};
+    for (flag, file) in [
+        (Some(Gles), None),
+        (None, Some(Gles)),
+        (Some(Gles), Some(Gles)),
+        (Some(Gles), Some(Pixman)),
+    ] {
+        assert_eq!(resolve(flag, file, true), Pixman, "{flag:?} / {file:?}");
+    }
+    // ...and asking for nothing under --tty is still the same default, not a
+    // second code path.
+    assert_eq!(resolve(None, None, true), Pixman);
 }
 
 #[test]

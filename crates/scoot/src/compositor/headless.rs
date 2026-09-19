@@ -119,7 +119,10 @@ pub fn init_named(
     );
     state.space.map_output(&output, (0, 0));
 
-    state.backend = Some(Backend::new(&output, width, height)?);
+    // The renderer the session resolved at startup (`render::resolve`), not
+    // a per-call choice: `State::resize_output` rebuilds the backend later
+    // and has to build the same one.
+    state.backend = Some(Backend::new(&output, width, height, state.renderer)?);
     // What the core is told is the *logical* output rectangle, which is the
     // same rectangle Smithay's `Space` lays windows out in -- see
     // `output_scale.rs`'s `logical_size`. Handing the core the physical
@@ -494,7 +497,7 @@ impl State {
             return false;
         };
         set_mode(&output, width, height, None, self.output_scale);
-        match Backend::new(&output, width, height) {
+        match Backend::new(&output, width, height, self.renderer) {
             Ok(backend) => self.backend = Some(backend),
             Err(error) => {
                 tracing::warn!(%error, "could not resize the render target");

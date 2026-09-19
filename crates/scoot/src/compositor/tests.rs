@@ -102,6 +102,7 @@ impl Probe {
             Keybindings::default(),
             Appearance::default(),
             1.0,
+            crate::compositor::test_support::test_renderer(),
         )
         .expect("a compositor state with a wayland socket");
 

@@ -41,8 +41,8 @@
 //! either way.
 
 use std::os::unix::net::UnixStream;
-use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
+use std::sync::{Arc, OnceLock};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
@@ -51,6 +51,7 @@ use smithay::reexports::calloop::EventLoop;
 use smithay::reexports::wayland_server::{Client, Display};
 use wayland_client::EventQueue;
 
+use crate::cli::RendererKind;
 use crate::compositor::State;
 use crate::compositor::decorations::Appearance;
 use crate::compositor::headless;
@@ -71,6 +72,49 @@ const PATIENCE: Duration = Duration::from_secs(10);
 /// compositor being dispatched on another thread, so a round-trip count can
 /// give up before the frame it is waiting for could possibly have happened.
 const CLIENT_PATIENCE: Duration = Duration::from_secs(5);
+
+/// The renderer every test in the crate builds its `State` with, from
+/// `SCOOT_TEST_RENDERER` (`pixman` -- the default -- or `gles`).
+///
+/// This is how the pixel-readback suites become the regression net for a
+/// *second* renderer instead of just the first: the same tests, the same
+/// assertions, run a second time with `SCOOT_TEST_RENDERER=gles`, and any
+/// pixel the two renderers disagree about fails a real test rather than
+/// going unnoticed. One env var rather than a parameterised `Harness::new`
+/// per suite because the suites assert on pixels, not on renderers -- a
+/// GLES-run variant of each would be the same assertions copied twice.
+///
+/// Public to the crate because a dozen suites still build their `State` by
+/// hand rather than through [`Harness`] (they predate it), and a run that
+/// covered only the harness-based ones would be a partial claim.
+///
+/// Both failure modes are loud on purpose. An unrecognised value panics
+/// rather than falling back, and a `gles` run on a machine where GLES cannot
+/// be built panics inside `headless::init` with the renderer's own error --
+/// because a run that quietly used pixman would report a clean pass for a
+/// renderer it never touched.
+///
+/// # Known: seven `dmabuf` tests fail under `gles` on software EGL
+///
+/// Every pixel-readback suite passes byte-identically under both renderers.
+/// The exception is `dmabuf::tests`' seven *import* tests, and it is a
+/// property of the machine, not of this change: those tests synthesise a
+/// dma-buf from a memfd through `/dev/udmabuf`, which pixman imports by
+/// mmapping it, while GLES must hand it to the driver -- and Mesa's
+/// `kms_swrast` answers `eglCreateImageKHR: createImageFromDmaBufs failed`
+/// (`EGL_BAD_ALLOC`) for a udmabuf-backed import. scoot still advertises
+/// pixman's hard-coded format pair whichever renderer is active, which is
+/// what stage 4 of `docs/roadmap/06-gpu-pipeline.md` exists to fix; see that
+/// file for the captured error and the reasoning.
+pub(crate) fn test_renderer() -> RendererKind {
+    static RENDERER: OnceLock<RendererKind> = OnceLock::new();
+    *RENDERER.get_or_init(|| match std::env::var("SCOOT_TEST_RENDERER") {
+        Ok(name) => RendererKind::parse(&name).unwrap_or_else(|| {
+            panic!("SCOOT_TEST_RENDERER must be `pixman` or `gles`, not `{name}`")
+        }),
+        Err(_) => RendererKind::default(),
+    })
+}
 
 /// A live compositor on its own event loop, plus the client threads scripted
 /// against it.
@@ -119,6 +163,7 @@ impl<S, A> Harness<S, A> {
     }
 
     fn build(appearance: Appearance, canvas: Option<i32>) -> Self {
+        let renderer = test_renderer();
         let mut event_loop: EventLoop<'static, State> =
             EventLoop::try_new().expect("an event loop");
         let display: Display<State> = Display::new().expect("a wayland display");
@@ -129,10 +174,24 @@ impl<S, A> Harness<S, A> {
             Keybindings::default(),
             appearance,
             1.0,
+            renderer,
         )
         .expect("a compositor state with a wayland socket");
         if let Some(canvas) = canvas {
             headless::init(&mut state, canvas, canvas).expect("a headless backend");
+            // What was asked for is not evidence of what was built (see
+            // `Backend::renderer`): this is what makes a `gles` run of the
+            // suite a claim about GLES rather than about whatever the
+            // compositor fell back to.
+            assert_eq!(
+                state
+                    .backend
+                    .as_ref()
+                    .expect("a headless backend")
+                    .renderer(),
+                renderer,
+                "the harness did not get the renderer it asked for"
+            );
         }
         Self {
             event_loop,

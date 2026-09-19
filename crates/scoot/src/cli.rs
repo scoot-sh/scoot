@@ -10,8 +10,8 @@ pub const USAGE: &str = "\
 scoot -- a scrolling-tiling Wayland compositor
 
 USAGE:
-    scoot --headless [--width 1-65535] [--height 1-65535] [--socket PATH] [--config PATH] [-- COMMAND...]
-    scoot --nested [--width 1-65535] [--height 1-65535] [--socket PATH] [--config PATH] [-- COMMAND...]
+    scoot --headless [--width 1-65535] [--height 1-65535] [--renderer pixman|gles] [--socket PATH] [--config PATH] [-- COMMAND...]
+    scoot --nested [--width 1-65535] [--height 1-65535] [--renderer pixman|gles] [--socket PATH] [--config PATH] [-- COMMAND...]
     scoot --tty [--gpu PATH] [--mode WxH] [--socket PATH] [--config PATH] [-- COMMAND...]
     scoot msg REQUEST
     scoot --help
@@ -57,6 +57,55 @@ ACTIONS:
 /// [`CompositorOptions::width`]/[`CompositorOptions::height`] below carry
 /// the range into the type docs; `dimension` enforces it at parse.
 pub const MAX_OUTPUT_DIMENSION: i32 = 65535;
+
+/// Which renderer composites each frame.
+///
+/// Lives here rather than beside the renderers themselves because
+/// [`CompositorOptions`] has to exist on every platform -- `scoot msg` builds
+/// anywhere, while `compositor::render` is Linux-only -- and because the
+/// config file parses the same two names (`[renderer] backend`). One name
+/// list, one parser, the way [`action`] is shared with `[binds]`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum RendererKind {
+    /// CPU compositing with pixman: the default, and the only renderer that
+    /// needs no graphics device at all.
+    #[default]
+    Pixman,
+    /// GLES on an EGL device. Opt-in, and `--headless`/`--nested` only
+    /// today -- `--tty` scanout through a GPU is a separate piece of work,
+    /// so `--tty` warns and keeps pixman (see `compositor::render::resolve`).
+    Gles,
+}
+
+impl RendererKind {
+    /// The spelling a user writes, in both the flag and the config file --
+    /// and what every log line and warning names it by, so the two cannot
+    /// drift.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Pixman => "pixman",
+            Self::Gles => "gles",
+        }
+    }
+
+    /// Exactly the two names [`RendererKind::as_str`] produces, and nothing
+    /// else -- no aliases, no case folding. `None` is "not one of ours",
+    /// which the flag refuses outright and the config file warns about and
+    /// ignores (see `compositor::config`).
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "pixman" => Some(Self::Pixman),
+            "gles" => Some(Self::Gles),
+            _ => None,
+        }
+    }
+}
+
+impl fmt::Display for RendererKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
 
 #[derive(Debug, PartialEq)]
 pub enum Command {
@@ -111,6 +160,14 @@ pub struct CompositorOptions {
     /// device on a backend with no DRM device at all means the user
     /// believes they are on `--tty` and is not.
     pub gpu: Option<PathBuf>,
+    /// Which renderer composites each frame, when the command line says.
+    /// `None` (the normal case) means the config file's `[renderer] backend`
+    /// decides, and pixman when that is unset too -- so this is
+    /// `Option<RendererKind>` rather than a plain `RendererKind` precisely so
+    /// that an explicit `--renderer pixman` can *override* a config file
+    /// asking for `gles`, the way `--gpu` overrides `[tty] gpu`. Resolved
+    /// once, in `compositor::render::resolve`.
+    pub renderer: Option<RendererKind>,
     /// `--tty`'s display mode, as `WxH`, when the connector's own preferred
     /// mode is the wrong size. `None` (the normal case) takes the preferred
     /// mode, else the first one listed. `Some` picks the connector mode of
@@ -137,6 +194,7 @@ impl Default for CompositorOptions {
             nested: false,
             tty: false,
             gpu: None,
+            renderer: None,
             mode: None,
         }
     }
@@ -214,6 +272,7 @@ fn compositor(
                 let path = args.next().ok_or(Error::Missing("a path after --gpu"))?;
                 options.gpu = Some(PathBuf::from(path));
             }
+            "--renderer" => options.renderer = Some(renderer("--renderer", args.next())?),
             "--mode" => options.mode = Some(mode("--mode", args.next())?),
             "--" => {
                 options.command = args.by_ref().collect();
@@ -223,6 +282,16 @@ fn compositor(
         }
     }
     Ok(options)
+}
+
+/// One of the two renderer names, refused rather than defaulted: a typo'd
+/// `--renderer glse` silently compositing on the CPU is exactly the kind of
+/// "it ran, but not the way you asked" this project treats as a bug. The
+/// config file's copy of the same key is the graceful half (warn, keep the
+/// default) -- see `compositor::config` for why the two differ.
+fn renderer(what: &'static str, value: Option<String>) -> Result<RendererKind, Error> {
+    let value = value.ok_or(Error::Missing("pixman or gles after --renderer"))?;
+    RendererKind::parse(&value).ok_or(Error::Invalid { what, value })
 }
 
 /// A display mode as `WxH` (`1920x1080`): two positive pixel counts around a
@@ -650,6 +719,59 @@ mod tests {
             parse_args(&["--tty", "--gpu"]),
             Err(Error::Missing("a path after --gpu"))
         );
+    }
+
+    #[test]
+    fn renderer_is_unset_by_default_and_takes_either_name() {
+        // Unset, not `Pixman`: the config file only gets a say when the
+        // command line has not spoken, so "absent" and "explicitly pixman"
+        // cannot be the same value (see `CompositorOptions::renderer`).
+        for mode in ["--headless", "--nested", "--tty"] {
+            let Ok(Command::Compositor(options)) = parse_args(&[mode]) else {
+                panic!("expected compositor");
+            };
+            assert_eq!(options.renderer, None, "{mode}");
+        }
+
+        for (name, expected) in [
+            ("pixman", RendererKind::Pixman),
+            ("gles", RendererKind::Gles),
+        ] {
+            let Ok(Command::Compositor(options)) = parse_args(&["--headless", "--renderer", name])
+            else {
+                panic!("expected compositor for {name}");
+            };
+            assert_eq!(options.renderer, Some(expected));
+        }
+    }
+
+    #[test]
+    fn an_unknown_renderer_name_is_refused_not_defaulted() {
+        // Including the near-misses a typo actually produces, and the empty
+        // string: none of them may quietly composite with the other renderer.
+        for bad in ["glse", "GLES", "opengl", "gl", "vulkan", "", "pixman "] {
+            assert_eq!(
+                parse_args(&["--headless", "--renderer", bad]),
+                Err(Error::Invalid {
+                    what: "--renderer",
+                    value: bad.to_owned(),
+                }),
+                "{bad}"
+            );
+        }
+        assert_eq!(
+            parse_args(&["--headless", "--renderer"]),
+            Err(Error::Missing("pixman or gles after --renderer"))
+        );
+    }
+
+    #[test]
+    fn the_two_renderer_names_round_trip_through_their_own_spelling() {
+        for kind in [RendererKind::Pixman, RendererKind::Gles] {
+            assert_eq!(RendererKind::parse(kind.as_str()), Some(kind));
+            assert_eq!(kind.to_string(), kind.as_str());
+        }
+        assert_eq!(RendererKind::default(), RendererKind::Pixman);
     }
 
     #[test]

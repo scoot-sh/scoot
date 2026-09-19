@@ -1,9 +1,10 @@
 //! The CPU renderer: pixman compositing into a main-memory image.
 //!
-//! The only implementation behind [`Backend`](super::Backend) today, and the
-//! default forever -- GPU-free operation is a hard requirement (webtop,
-//! no-GPU boxes), not a tier a GPU path supersedes. See `super`'s module doc
-//! for what the seam around it is for.
+//! The default behind [`Backend`](super::Backend), and the default forever --
+//! GPU-free operation is a hard requirement (webtop, no-GPU boxes), not a
+//! tier a GPU path supersedes. [`gles`](super::gles) is the opt-in
+//! alternative; see `super`'s module doc for what the seam between them is
+//! for.
 //!
 //! What lives here is only what is *specific to pixman*: the renderer and the
 //! image it draws into. Damage tracking and the framebuffer's size are

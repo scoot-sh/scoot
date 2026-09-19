@@ -25,14 +25,17 @@
 //! never named a concrete renderer -- so the seam adds one generic function
 //! and one generic enum, not a generic compositor.
 //!
-//! # What a second implementation has to bring, and what it inherits
+//! # What an implementation brings, and what it inherits
 //!
 //! Damage tracking and the framebuffer's size are renderer-agnostic and live
-//! on [`Backend`] itself, so a second implementation brings only a renderer
-//! and a target (see [`pixman::PixmanBackend`]) and inherits the rest. The
-//! three things it has to satisfy are the bounds on [`draw_frame_with`]:
-//! import client buffers ([`ImportAll`] + [`ImportMem`]), bind its own target
-//! ([`Bind`]), and read that target back to main memory ([`ExportMem`]).
+//! on [`Backend`] itself, so an implementation brings only a renderer and a
+//! target -- [`pixman::PixmanBackend`] (the default) and
+//! [`gles::GlesBackend`] (opt-in, `--renderer gles`) are each exactly that
+//! pair -- and inherits the rest. The three things one has to satisfy are the
+//! bounds on [`draw_frame_with`]: import client buffers ([`ImportAll`] +
+//! [`ImportMem`]), bind its own target ([`Bind`]), and read that target back
+//! to main memory ([`ExportMem`]). Those bounds were written for pixman alone
+//! and took the GLES renderer unchanged.
 //!
 //! # The read-back's orientation, and the trap in it
 //!
@@ -54,13 +57,52 @@ use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{Buffer, Physical, Rectangle};
 
+use crate::cli::RendererKind;
+
 use super::State;
 use super::tty::Tty;
 use elements::FrameContext;
+use gles::GlesBackend;
 use pixman::PixmanBackend;
 
 mod elements;
+mod gles;
 mod pixman;
+
+/// Which renderer this session composites with: the flag, else the config
+/// file, else the default.
+///
+/// `flag` is `--renderer`, `file` is `[renderer] backend`, and an explicit
+/// flag beats the file the way `--gpu` beats `[tty] gpu` -- including
+/// `--renderer pixman`, which is why both are `Option` rather than a resolved
+/// value (see [`CompositorOptions::renderer`](crate::cli::CompositorOptions)).
+///
+/// `tty` is the one case that overrides both. The GLES pipeline here
+/// composites into an offscreen renderbuffer and reads the frame back to
+/// main memory, which is what `--headless` (nothing) and `--nested` (a host
+/// surface) do with a frame anyway -- but under `--tty` it would mean
+/// rendering on the GPU only to copy every frame back to the CPU and memcpy
+/// it into a dumb buffer, which is strictly worse than compositing there in
+/// the first place. Scanning a GPU buffer out directly needs `DrmCompositor`
+/// and is its own piece of work. So `--tty` warns and keeps pixman rather
+/// than silently accepting a slower session -- a warning, not a startup
+/// error, because on `--tty` scoot *is* the session and a refusal to start is
+/// a lockout (see `config.rs`'s module doc).
+pub(super) fn resolve(
+    flag: Option<RendererKind>,
+    file: Option<RendererKind>,
+    tty: bool,
+) -> RendererKind {
+    let chosen = flag.or(file).unwrap_or_default();
+    if tty && chosen == RendererKind::Gles {
+        tracing::warn!(
+            "the gles renderer is not available under --tty yet (it has no scanout path); \
+             using pixman"
+        );
+        return RendererKind::Pixman;
+    }
+    chosen
+}
 
 /// What draws this session's frames, and what it draws into.
 ///
@@ -84,13 +126,32 @@ pub struct Backend {
 
 /// The renderers [`Backend`] can be carrying.
 ///
-/// One variant today. A GPU renderer is a second variant plus a second arm
-/// in [`draw_frame`] and [`Backend::capture`] -- not a change to any element
-/// source, which is what the seam is for.
+/// Each variant owns a renderer and the target that renderer draws into, and
+/// nothing else: everything renderer-agnostic lives on [`Backend`], so a
+/// third variant would be a third arm at the four dispatch sites here
+/// ([`Backend::new`], [`Backend::capture`], [`Backend::import_dmabuf`],
+/// [`Backend::cleanup_texture_cache`], [`draw_frame`]) and no change at all
+/// to any element source, which is what the seam is for.
+///
+/// # Why the GLES variant is boxed and the pixman one is not
+///
+/// `GlesRenderer` is ~6.4KB by value -- it carries GL's whole function-pointer
+/// table inline -- against `PixmanBackend`'s 72 bytes. An unboxed variant
+/// would make *every* session's `Pipeline` 6.4KB, including a pixman one that
+/// never touches GL, and `State::render` `take`s the whole `Backend` out of
+/// `State` and puts it back on **every frame** (see `headless.rs`'s
+/// `render()`, which does that so it can hold `&mut State` and `&mut` the
+/// renderer at once). That is a 6.4KB memcpy twice a frame, on the default
+/// path, bought with nothing. Boxed, it is one startup allocation for the
+/// sessions that ask for GLES and a pointer for everyone else.
 enum Pipeline {
     /// CPU compositing with pixman: the default, and the only mode that works
     /// with no GPU at all.
     Pixman(PixmanBackend),
+    /// GLES compositing into an offscreen renderbuffer, read back to main
+    /// memory exactly as pixman's image is. Opt-in, `--headless`/`--nested`
+    /// only -- see [`gles`] and [`resolve`].
+    Gles(Box<GlesBackend>),
 }
 
 impl Backend {
@@ -98,13 +159,41 @@ impl Backend {
     /// target to draw into, and the damage tracker that pairs with them.
     ///
     /// Shared by `headless::init_named` and `State::resize_output` so the two
-    /// can't drift apart.
-    pub(super) fn new(output: &Output, width: i32, height: i32) -> Result<Self, Box<dyn Error>> {
+    /// can't drift apart -- which is also why `renderer` is a parameter here
+    /// and a field on `State`: a resize rebuilds the pipeline, and it has to
+    /// rebuild the one the session was started with.
+    pub(super) fn new(
+        output: &Output,
+        width: i32,
+        height: i32,
+        renderer: RendererKind,
+    ) -> Result<Self, Box<dyn Error>> {
+        let pipeline = match renderer {
+            RendererKind::Pixman => Pipeline::Pixman(PixmanBackend::new(width, height)?),
+            RendererKind::Gles => Pipeline::Gles(Box::new(GlesBackend::new(width, height)?)),
+        };
         Ok(Self {
-            pipeline: Pipeline::Pixman(PixmanBackend::new(width, height)?),
+            pipeline,
             damage: OutputDamageTracker::from_output(output),
             size: (width, height),
         })
+    }
+
+    /// Which renderer is *actually* drawing this session's frames.
+    ///
+    /// Test-only, and deliberately not the same question as
+    /// `State::renderer`: that field is what was asked for, this is what was
+    /// built. A test that runs the pixel suites under `--renderer gles` has
+    /// to be able to tell the difference, or a silent fallback to pixman
+    /// would make it pass while proving nothing (see `test_support`).
+    /// Nothing on the frame path branches on either -- that is
+    /// [`draw_frame`]'s single match.
+    #[cfg(test)]
+    pub(super) fn renderer(&self) -> RendererKind {
+        match &self.pipeline {
+            Pipeline::Pixman(_) => RendererKind::Pixman,
+            Pipeline::Gles(_) => RendererKind::Gles,
+        }
     }
 
     /// The render target's size in physical pixels.
@@ -133,11 +222,10 @@ impl Backend {
         let region: Rectangle<i32, Buffer> = Rectangle::from_size(self.size.into());
         match &mut self.pipeline {
             Pipeline::Pixman(cpu) => {
-                let PixmanBackend { renderer, image } = cpu;
-                let framebuffer = renderer
-                    .bind(image)
-                    .map_err(|error| CaptureError::new(CaptureStage::Bind, error))?;
-                read_back(renderer, &framebuffer, region, use_pixels)
+                capture_with(&mut cpu.renderer, &mut cpu.image, region, use_pixels)
+            }
+            Pipeline::Gles(gpu) => {
+                capture_with(&mut gpu.renderer, &mut gpu.buffer, region, use_pixels)
             }
         }
     }
@@ -157,6 +245,9 @@ impl Backend {
             Pipeline::Pixman(cpu) => ImportDma::import_dmabuf(&mut cpu.renderer, dmabuf, None)
                 .map(|_texture| ())
                 .map_err(|error| error.to_string()),
+            Pipeline::Gles(gpu) => ImportDma::import_dmabuf(&mut gpu.renderer, dmabuf, None)
+                .map(|_texture| ())
+                .map_err(|error| error.to_string()),
         }
     }
 
@@ -168,8 +259,29 @@ impl Backend {
         match &mut self.pipeline {
             Pipeline::Pixman(cpu) => Renderer::cleanup_texture_cache(&mut cpu.renderer)
                 .map_err(|error| error.to_string()),
+            Pipeline::Gles(gpu) => Renderer::cleanup_texture_cache(&mut gpu.renderer)
+                .map_err(|error| error.to_string()),
         }
     }
+}
+
+/// [`Backend::capture`]'s body, over any renderer that can bind its own
+/// target and read it back -- the same "one generic function, one arm per
+/// renderer" shape [`draw_frame`] uses, for the same reason: the arms pick a
+/// renderer, nothing below them knows which one.
+fn capture_with<R, T, U>(
+    renderer: &mut R,
+    target: &mut T,
+    region: Rectangle<i32, Buffer>,
+    use_pixels: impl FnOnce(&[u8]) -> U,
+) -> Result<U, CaptureError>
+where
+    R: Bind<T> + ExportMem,
+{
+    let framebuffer = renderer
+        .bind(target)
+        .map_err(|error| CaptureError::new(CaptureStage::Bind, error))?;
+    read_back(renderer, &framebuffer, region, use_pixels)
 }
 
 /// Which step of a read-back failed. Each caller has its own log line per
@@ -313,6 +425,10 @@ pub(super) fn draw_frame(
         Pipeline::Pixman(cpu) => {
             let PixmanBackend { renderer, image } = cpu;
             draw_frame_with(state, renderer, image, damage, *size, output, locked)
+        }
+        Pipeline::Gles(gpu) => {
+            let GlesBackend { renderer, buffer } = &mut **gpu;
+            draw_frame_with(state, renderer, buffer, damage, *size, output, locked)
         }
     }
 }

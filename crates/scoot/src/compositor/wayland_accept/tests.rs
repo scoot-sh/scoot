@@ -334,6 +334,7 @@ fn admit_state() -> (EventLoop<'static, State>, State) {
         Keybindings::default(),
         Appearance::default(),
         1.0,
+        crate::compositor::test_support::test_renderer(),
     )
     .expect("a compositor state");
     (event_loop, state)

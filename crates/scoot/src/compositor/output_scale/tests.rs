@@ -204,6 +204,7 @@ fn relative_pointer_motion_is_clamped_to_the_logical_extent() {
         crate::compositor::keybindings::Keybindings::default(),
         crate::compositor::decorations::Appearance::default(),
         2.0,
+        crate::compositor::test_support::test_renderer(),
     )
     .expect("a compositor state with a wayland socket");
     crate::compositor::headless::init(&mut state, CANVAS, CANVAS).expect("a headless backend");
@@ -232,6 +233,7 @@ fn startup_placement_centres_on_the_logical_extent() {
         crate::compositor::keybindings::Keybindings::default(),
         crate::compositor::decorations::Appearance::default(),
         2.0,
+        crate::compositor::test_support::test_renderer(),
     )
     .expect("a compositor state with a wayland socket");
     crate::compositor::headless::init(&mut state, CANVAS, CANVAS).expect("a headless backend");
@@ -636,6 +638,7 @@ impl Fixture {
             crate::compositor::keybindings::Keybindings::default(),
             crate::compositor::decorations::Appearance::default(),
             scale,
+            crate::compositor::test_support::test_renderer(),
         )
         .expect("a compositor state with a wayland socket");
         crate::compositor::headless::init(&mut state, CANVAS, CANVAS).expect("a headless backend");

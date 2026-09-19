@@ -47,6 +47,8 @@ use smithay::wayland::viewporter::ViewporterState;
 use smithay::wayland::xdg_activation::XdgActivationState;
 use smithay::wayland::xdg_toplevel_icon::XdgToplevelIconManager;
 
+use crate::cli::RendererKind;
+
 use super::bind_budget::BindBudget;
 use super::cursor::Cursor;
 use super::decorations::{Appearance, Decorations};
@@ -222,6 +224,14 @@ pub struct State {
     /// never disagree with `output_scale`: that field is fixed for the
     /// process's life and nothing writes either one after `new`.
     pub integer_scale: i32,
+    /// Which renderer [`Self::backend`] composites with, resolved once from
+    /// `--renderer`/`[renderer] backend` (see `render::resolve`) and fixed
+    /// for the process's lifetime. Kept here rather than read back off the
+    /// live `Backend` because `resize_output` *replaces* that backend and has
+    /// to rebuild the pipeline the session was started with -- including on
+    /// the path where there is no backend to ask, because building the
+    /// previous one failed.
+    pub renderer: RendererKind,
     pub backend: Option<Backend>,
     /// Set only under `--nested`: the connection presenting `backend`'s
     /// framebuffer as a window in a host compositor, and forwarding that
@@ -617,6 +627,7 @@ impl State {
         keybindings: Keybindings,
         appearance: Appearance,
         scale: f64,
+        renderer: RendererKind,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let dh = display.handle();
         let compositor_state = CompositorState::new_v6::<Self>(&dh);
@@ -706,6 +717,7 @@ impl State {
             output: None,
             output_scale: scale,
             integer_scale: super::output_scale::integer_scale(scale),
+            renderer,
             backend: None,
             host: None,
             tty: None,

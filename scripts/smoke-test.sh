@@ -5,8 +5,10 @@
 # presents itself, so this is the regression net for every backend, not just
 # --headless.
 #
-# MODE selects the backend (default --headless). For --nested, run this
-# script itself inside a host compositor, e.g.:
+# MODE selects the backend (default --headless); RENDERER selects which
+# renderer draws the frames it checks (default pixman, or `gles` under
+# --headless/--nested), e.g. RENDERER=gles scripts/smoke-test.sh. For
+# --nested, run this script itself inside a host compositor, e.g.:
 #   WLR_BACKENDS=headless WLR_RENDERER=pixman WLR_LIBINPUT_NO_DEVICES=1 \
 #     cage -- env MODE=--nested scripts/smoke-test.sh
 # so scoot's own Connection::connect_to_env() (nested.rs) finds cage's
@@ -29,6 +31,17 @@ set -euo pipefail
 
 MODE=${MODE:---headless}
 SCOOT=${SCOOT:-/var/cargo-target/debug/scoot}
+# RENDERER picks which renderer composites the frames this run checks
+# (`pixman` -- the default when unset -- or `gles`, which needs --headless or
+# --nested; see README). Unset means the flag is not passed at all, so the
+# default run is byte-for-byte the command this script has always used. Only
+# the main compositor below takes it: the config-fallback launches further
+# down check config parsing, not pixels.
+RENDERER=${RENDERER:-}
+RENDERER_ARGS=()
+if [ -n "$RENDERER" ]; then
+    RENDERER_ARGS=(--renderer "$RENDERER")
+fi
 SMOKE_PREFIX=${SMOKE_PREFIX:-}
 while [ -n "$SMOKE_PREFIX" ] && [ "$SMOKE_PREFIX" != "/" ] && [ "${SMOKE_PREFIX%/}" != "$SMOKE_PREFIX" ]; do
     SMOKE_PREFIX=${SMOKE_PREFIX%/}
@@ -140,7 +153,8 @@ expect_pixel_color() {
     echo "ok: $label pixel at ($x,$y) matches #$want_hex"
 }
 
-"$SCOOT" "$MODE" --width 1200 --height 800 --socket "$SOCKET" --config "$CONFIG" >"$LOG" 2>&1 &
+"$SCOOT" "$MODE" --width 1200 --height 800 "${RENDERER_ARGS[@]}" --socket "$SOCKET" \
+    --config "$CONFIG" >"$LOG" 2>&1 &
 compositor=$!
 trap 'kill "$compositor" 2>/dev/null || true' EXIT
 
