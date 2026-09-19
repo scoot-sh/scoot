@@ -48,6 +48,7 @@ use wayland_protocols::wp::linux_dmabuf::zv1::client::{
 };
 
 use super::{DMABUF_CANDIDATES, main_device, main_device_from, tranche};
+use crate::cli::RendererKind;
 use crate::compositor::decorations::Appearance;
 use crate::compositor::screencopy::FORMATS;
 use crate::compositor::test_support::{Harness, wait_for};
@@ -200,6 +201,18 @@ impl Fixture {
     fn buffers_in_flight(&self) -> usize {
         self.state.wl_buffers.buffers_in_flight()
     }
+
+    /// Which renderer this fixture's backend really *built*, which is not the
+    /// same question as which one was asked for (see `Backend::renderer`).
+    /// The advertisement is derived from the built one, so a test that pins a
+    /// renderer-specific answer has to branch on the built one too.
+    fn renderer(&self) -> RendererKind {
+        self.state
+            .backend
+            .as_ref()
+            .expect("a headless backend behind the fixture")
+            .renderer()
+    }
 }
 
 impl Ack {
@@ -333,6 +346,22 @@ fn default_feedback_names_a_device_and_the_renderers_own_formats() {
          can import, in candidate order, LINEAR (modifier 0)"
     );
     assert_eq!(seen.tranches, 1, "one tranche carries the whole table");
+    // Under the default renderer the derivation has a known answer, so pin the
+    // literal bytes too rather than only the derived ones -- this is the
+    // assertion the pixman-only version of this test used to make, and it is
+    // what would catch the table's *encoding* going wrong (a swapped pair, a
+    // modifier that is not LINEAR) rather than only its contents.
+    if fixture.renderer() == RendererKind::Pixman {
+        assert_eq!(
+            seen.table,
+            vec![
+                (u32::from_ne_bytes(*b"XR24"), 0),
+                (u32::from_ne_bytes(*b"AR24"), 0),
+            ],
+            "pixman imports both candidates, so its session advertises exactly \
+             them, opaque first, LINEAR (modifier 0)"
+        );
+    }
 }
 
 #[test]

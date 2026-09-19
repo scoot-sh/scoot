@@ -353,7 +353,9 @@ What lands:
   the screen stays stale until unrelated damage arrives. The counter is pure
   bounded-retry arithmetic with no dumb-buffer coupling; duplicating it would
   have been worse engineering than reusing it.
-- **A dma-buf import guard, which is not stage 4.** `zwp_linux_dmabuf_v1`'s
+- **A dma-buf import guard, which is not stage 4** *(and which stage 4 then
+  removed — see that section below; it is described here as it landed)*.
+  `zwp_linux_dmabuf_v1`'s
   tranche is a promise with teeth -- a client that allocates from it and has
   the import refused is *killed*, because `create_immed`'s only failure reply
   is a fatal protocol error. Under `--tty` the renderer has always been
@@ -636,8 +638,9 @@ first `wl_registry`.
   derives), a code path that does not exist, a `DrmNode` the GPU-less
   containers scoot targets do not have, and, under pixman, the bound-target
   cache eviction `dmabuf.rs`'s `schedule_cache_drain` warns about, which would
-  have to be fixed in the same change. Filed as its own item rather than
-  bundled.
+  have to be fixed in the same change. Filed as
+  [`docs/backlog/protocols/screencopy-dmabuf-capture.md`](../backlog/protocols/screencopy-dmabuf-capture.md)
+  rather than bundled.
 - **The seven `dmabuf::tests` failures under `SCOOT_TEST_RENDERER=gles`**, which
   this stage was twice expected to fix and does not. They are the test
   allocator's `/dev/udmabuf` **provenance**, not format (see the stage-2

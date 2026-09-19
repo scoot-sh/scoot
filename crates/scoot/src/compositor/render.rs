@@ -401,9 +401,14 @@ impl Backend {
     /// mapping -- so nothing but scoot synchronises it, and `dmabuf.rs`'s
     /// `sync_committed_dmabufs` has to issue the `DMA_BUF_IOCTL_SYNC` bracket
     /// itself on every commit. Both GLES tiers hand the buffer to the driver
-    /// as an `EGLImage` instead, which waits on the buffer's own implicit
-    /// fences when it samples it; issuing the ioctl pair there would be a
-    /// per-commit syscall pair that buys nothing.
+    /// as an `EGLImage` instead and never map it here, so the buffer's
+    /// implicit fences are the driver's to honour when it samples -- the
+    /// arrangement every GL compositor relies on, none of which issues a
+    /// per-commit `DMA_BUF_IOCTL_SYNC`. Running it there would not be free
+    /// either: the `START` half *blocks the event loop* until the client's GPU
+    /// job finishes, while holding that surface's user-data locks (see
+    /// `sync_committed_dmabufs`), which is a cost with no CPU mapping left to
+    /// justify it.
     ///
     /// Deliberately *not* folded into
     /// [`State::imports_dmabufs`](super::State), which answers a different

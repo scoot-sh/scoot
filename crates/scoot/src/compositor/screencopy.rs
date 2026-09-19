@@ -181,9 +181,10 @@
 //! about, which would have to be fixed in the same change.
 //! `DmabufConstraints` also requires a `DrmNode`, which the GPU-less
 //! containers scoot targets do not have, so the honest answer there would be
-//! `None` regardless. If some client ever measurably needs a dma-buf capture,
-//! that is its own item -- with its own write path and its own before/after
-//! numbers -- rather than a line to flip here.
+//! `None` regardless. Filed as
+//! [its own item](../../../../docs/backlog/protocols/screencopy-dmabuf-capture.md),
+//! with its own write path and its own before/after numbers, rather than left
+//! as a line to flip here.
 //!
 //! `Xrgb8888` is offered first and `Argb8888` second. Both are the same four
 //! bytes in the same order in memory -- the compositor's own framebuffer is

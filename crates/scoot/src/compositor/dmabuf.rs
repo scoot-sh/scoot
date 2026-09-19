@@ -522,9 +522,12 @@ fn node_rdev(path: &Path) -> Option<libc::dev_t> {
 /// **This is pixman's workaround, and only pixman's.** Everything above is
 /// true because the renderer composites out of a CPU mapping *this* process
 /// made and nothing else synchronises. Both GLES tiers hand the buffer to the
-/// driver as an `EGLImage` and sample it there, which waits on the buffer's
-/// own implicit fences on its own, so the ioctl pair would be two syscalls per
-/// commit buying nothing. `handlers.rs` therefore gates this on
+/// driver as an `EGLImage` and never map it here, so the buffer's implicit
+/// fences are the driver's to honour when it samples -- what every GL
+/// compositor relies on, none of which issues a per-commit
+/// `DMA_BUF_IOCTL_SYNC` -- and running it anyway would keep the event-loop
+/// block described below for a mapping that no longer exists.
+/// `handlers.rs` therefore gates this on
 /// [`Backend::maps_dmabufs_on_the_cpu`](super::render::Backend) as well as on
 /// the flag below -- a *renderer* question, deliberately kept out of
 /// [`State::imports_dmabufs`](super::State), whose other reader (the cache

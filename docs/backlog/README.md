@@ -470,6 +470,13 @@ be revisited.
   what is behind it can no longer be skipped. Measure with *overlapping*
   windows; a single-window benchmark will show nothing. Milestone 6 changes
   the calculus, which is why it is sequenced after it.
+- [dma-buf capture buffers for `ext-image-copy-capture-v1`](./protocols/screencopy-dmabuf-capture.md)
+  — filed out of milestone 6 stage 4, which was expected to cover it and
+  should not have: importing a client's dma-buf and *rendering into* one are
+  different capabilities. Wants a write path that does not exist, the
+  renderer's `dmabuf_render_formats` rather than its import set, a `DrmNode`
+  the GPU-less target does not have, and a fix for the bound-target cache
+  eviction `dmabuf.rs` warns about. No measured client need yet.
 
 ### Meta
 - [Split the CLI out into `scootctl`](./meta/rename-flex-family.md) — the `flexwm` → `scoot` rename half landed 2026-09-18 (PR #128); the crate split remains, and wants its own design pass (a status bar stays separate, undecided)

@@ -85,11 +85,12 @@ impl CompositorHandler for State {
         // Two conditions, not one, and they ask different questions: the flag
         // is "do dmabufs happen in this session at all", the backend's is "is
         // an imported dmabuf a CPU mapping only this process synchronises".
-        // Only pixman answers yes to the second -- a GLES tier samples the
-        // buffer through an `EGLImage`, which honours its implicit fences on
-        // its own, so the ioctl pair would be pure per-commit cost there. The
-        // flag comes first because it is the cheaper test and the one that is
-        // false in almost every session.
+        // Only pixman answers yes to the second -- a GLES tier never maps the
+        // buffer here, so its implicit fences are the driver's to honour, and
+        // the ioctl pair would be per-commit cost (including a blocking wait
+        // on the client's GPU job) for a mapping that does not exist. The flag
+        // comes first because it is the cheaper test and the one that is false
+        // in almost every session.
         if self.imports_dmabufs
             && self
                 .backend
