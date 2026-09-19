@@ -40,6 +40,8 @@ mod flip_tracker;
 mod gpu;
 mod hotplug;
 mod present_retry;
+#[cfg(feature = "gpu-scanout")]
+mod scanout;
 
 pub(crate) use self::gpu::{ExplicitGpu, resolve};
 
@@ -74,6 +76,8 @@ use self::dumb::DumbPresenter;
 use super::State;
 use super::keybindings::Keybindings;
 use super::output_scale::logical_size;
+use super::render::ScanoutHandoff;
+use crate::cli::RendererKind;
 
 /// The DRM/KMS presenter: session, device, surface, and the dumb-buffer
 /// pool frames get copied into. See the module doc for how this fits next
@@ -91,10 +95,10 @@ pub struct Tty {
     /// since it only logs a warning on error (see its doc).
     session: LibSeatSession,
     drm: DrmDevice,
-    /// How this backend gets a rendered frame onto the CRTC: the DRM
-    /// surface, its scanout buffers and the flip bookkeeping that pairs with
-    /// them. See `dumb.rs` for what lives there rather than here.
-    presenter: DumbPresenter,
+    /// How this backend gets a rendered frame onto the CRTC. See
+    /// [`Presenter`] for the two tiers and `dumb.rs`/`scanout.rs` for what
+    /// lives there rather than here.
+    presenter: Presenter,
     /// Which udev device this backend is driving, so a `change` event for
     /// one of the seat's *other* DRM devices can be told from one for ours.
     /// `DrmDevice::device_id`'s own value, which is the `st_rdev` of the
@@ -179,6 +183,241 @@ pub struct Tty {
     session_paused: bool,
 }
 
+/// How a rendered frame reaches the CRTC, and the one place the two tiers
+/// are told apart.
+///
+/// The split is deliberately at the *presenter*, not at a flag: the
+/// dumb-buffer tier's pool, per-slot ages and single-in-flight flip tracker
+/// live inside [`DumbPresenter`] and are simply not reachable from the
+/// scanout variant, and the scanout tier's swapchain and
+/// `OutputDamageTracker` are not reachable from the dumb one. That is
+/// stronger than "the GPU path does not call them": it is a type error to.
+///
+/// Both variants are boxed. Neither is small (a `BufferPool` with its two
+/// mappings, a `DrmCompositor` with its swapchain and element tables), and
+/// `Presenter` is built once at startup and never moved again -- so a pointer
+/// each costs one allocation at startup and nothing per frame, while an
+/// unboxed pair would make every `Tty` carry the larger of the two whichever
+/// tier it is on.
+enum Presenter {
+    /// CPU-composited frames memcpy'd into DRM dumb buffers -- the default,
+    /// and the only tier that needs no GPU stack at all. See `dumb.rs`.
+    Dumb(Box<DumbPresenter>),
+    /// GLES-composited frames scanned out of a GBM swapchain by
+    /// `DrmCompositor`, with no read-back at all. `--renderer gles` under
+    /// `--tty`, only in a build carrying the `gpu-scanout` feature. Boxed
+    /// because `DrmCompositor` is a large value and `Tty` is moved into
+    /// `State` at startup. See `scanout.rs`.
+    #[cfg(feature = "gpu-scanout")]
+    Gpu(Box<scanout::ScanoutPresenter>),
+}
+
+impl Presenter {
+    /// The CRTC being driven -- what a `DrmEvent::VBlank` is matched against,
+    /// and whose gamma LUT `zwlr_gamma_control_v1` reports.
+    fn crtc(&self) -> crtc::Handle {
+        match self {
+            Self::Dumb(dumb) => dumb.crtc(),
+            #[cfg(feature = "gpu-scanout")]
+            Self::Gpu(gpu) => gpu.crtc(),
+        }
+    }
+
+    /// The DRM surface being driven, for the hotplug path's connector and
+    /// mode moves (`hotplug.rs`'s `set_pending`), which are identical on both
+    /// tiers -- a surface is a surface.
+    fn surface(&self) -> &smithay::backend::drm::DrmSurface {
+        match self {
+            Self::Dumb(dumb) => dumb.surface(),
+            #[cfg(feature = "gpu-scanout")]
+            Self::Gpu(gpu) => gpu.surface(),
+        }
+    }
+
+    /// Settles whatever flip was outstanding, returning whether a render
+    /// should be re-triggered and the completed flip's number for the
+    /// session-lock wait (see `session_lock.rs`).
+    ///
+    /// The two tiers answer the "which flip" question differently and that is
+    /// the point: the dumb tier tracks its own single in-flight number
+    /// (`flip_tracker.rs`), while `DrmCompositor` hands back the `user_data`
+    /// the kernel paired with the frame that actually reached scan-out.
+    fn settle_flip(&mut self) -> (bool, Option<u64>) {
+        match self {
+            Self::Dumb(dumb) => dumb.flip_settled(),
+            #[cfg(feature = "gpu-scanout")]
+            Self::Gpu(gpu) => gpu.frame_submitted(),
+        }
+    }
+
+    /// Takes whether the last frame was a refused commit owed a timer-driven
+    /// retry (see `present_retry.rs`, shared by both tiers).
+    fn take_retry_render(&mut self) -> bool {
+        match self {
+            Self::Dumb(dumb) => dumb.take_retry_render(),
+            #[cfg(feature = "gpu-scanout")]
+            Self::Gpu(gpu) => gpu.take_retry_render(),
+        }
+    }
+
+    /// The session has been paused (VT-switched away).
+    ///
+    /// The dumb tier drops the in-flight flip's number so a late vblank
+    /// cannot match a lock wait recorded after it. The scanout tier
+    /// deliberately does *not*: `DrmCompositor` pairs a completion with the
+    /// frame it belongs to, so a vblank that really does arrive for a frame
+    /// issued before the pause confirms exactly that frame -- which did reach
+    /// the screen -- and one that never arrives is cleared by the drain in
+    /// [`reactivate`](Self::reactivate) instead.
+    fn pause(&mut self) {
+        match self {
+            Self::Dumb(dumb) => dumb.discard_flip(),
+            #[cfg(feature = "gpu-scanout")]
+            Self::Gpu(_) => {}
+        }
+    }
+
+    /// The session has been reactivated and DRM master may be back: re-read
+    /// the CRTC's state and throw away every assumption about what it is
+    /// showing.
+    fn reactivate(&mut self) {
+        match self {
+            Self::Dumb(dumb) => {
+                if let Err(error) = dumb.reset_state() {
+                    tracing::warn!(%error, "could not reset drm surface state after reactivation");
+                }
+                dumb.invalidate_scanout();
+            }
+            #[cfg(feature = "gpu-scanout")]
+            Self::Gpu(gpu) => gpu.reactivate(),
+        }
+    }
+
+    /// Allocates whatever the *new* mode needs, before anything on the DRM
+    /// side is told to change.
+    ///
+    /// Order is load-bearing on the dumb tier and the reason this is a
+    /// separate step: a failed dumb-buffer allocation then leaves the display
+    /// exactly as it was and working, whereas allocating after the modeset
+    /// would leave the CRTC on a mode whose frames no buffer in the pool is
+    /// the right size to hold -- which `present`'s size guard drops silently,
+    /// forever. `None` when only the connector changed: the existing pool is
+    /// already the right size.
+    ///
+    /// The scanout tier has nothing to pre-allocate. `DrmCompositor` resizes
+    /// its own swapchain in [`adopt_mode`](Self::adopt_mode), which has to
+    /// run *after* the surface has taken the new mode, not before -- so its
+    /// failure ordering is the other way round and is handled there.
+    fn new_buffers(
+        &self,
+        drm: &DrmDevice,
+        size_changed: bool,
+        width: i32,
+        height: i32,
+    ) -> Result<Option<BufferPool>, ()> {
+        match self {
+            Self::Dumb(_) if size_changed => {
+                match BufferPool::new(drm.device_fd(), width, height) {
+                    Ok(buffers) => Ok(Some(buffers)),
+                    Err(error) => {
+                        tracing::warn!(
+                            %error, width, height,
+                            "drm: could not allocate scanout buffers for the new mode; \
+                             staying on the current one"
+                        );
+                        Err(())
+                    }
+                }
+            }
+            Self::Dumb(_) => Ok(None),
+            #[cfg(feature = "gpu-scanout")]
+            Self::Gpu(_) => Ok(None),
+        }
+    }
+
+    /// Installs a pool allocated by [`new_buffers`](Self::new_buffers).
+    /// Always `None`, and so always a no-op, on the scanout tier.
+    fn adopt_buffers(&mut self, buffers: Option<BufferPool>) {
+        match self {
+            Self::Dumb(dumb) => dumb.adopt_buffers(buffers),
+            #[cfg(feature = "gpu-scanout")]
+            Self::Gpu(_) => debug_assert!(buffers.is_none()),
+        }
+    }
+
+    /// Follows the surface onto a new mode, answering whether it took.
+    ///
+    /// Nothing to do on the dumb tier: the mode lives on the surface, which
+    /// `hotplug.rs`'s `set_pending` has already moved, and the pool at the
+    /// new size was installed by [`adopt_buffers`](Self::adopt_buffers). The
+    /// scanout tier additionally has to resize its swapchain, which is what
+    /// `DrmCompositor::use_mode` does.
+    #[cfg_attr(not(feature = "gpu-scanout"), allow(unused_variables))]
+    fn adopt_mode(&mut self, mode: Mode) -> bool {
+        match self {
+            Self::Dumb(_) => true,
+            #[cfg(feature = "gpu-scanout")]
+            Self::Gpu(gpu) => gpu.use_mode(mode),
+        }
+    }
+
+    /// Installs a surface built on a different CRTC, answering whether it
+    /// took (see `hotplug.rs`'s `switch_crtc`).
+    ///
+    /// Infallible on the dumb tier -- a surface is a surface. The scanout
+    /// tier has to rebuild its whole `DrmCompositor`, since that owns the
+    /// surface by value, and that rebuild can fail; it builds the replacement
+    /// before dropping the live one, so a refusal leaves what is on screen
+    /// exactly as it was.
+    fn adopt_surface(&mut self, surface: smithay::backend::drm::DrmSurface) -> bool {
+        match self {
+            Self::Dumb(dumb) => {
+                dumb.adopt_surface(surface);
+                true
+            }
+            #[cfg(feature = "gpu-scanout")]
+            Self::Gpu(gpu) => gpu.adopt_surface(surface),
+        }
+    }
+
+    /// Starts the refused-commit streak over, because the CRTC underneath is
+    /// new device state (see `present_retry.rs`).
+    fn reset_retries(&mut self) {
+        match self {
+            Self::Dumb(dumb) => dumb.reset_retries(),
+            #[cfg(feature = "gpu-scanout")]
+            Self::Gpu(_) => {
+                // `ScanoutPresenter::invalidate_scanout`, which every caller
+                // of this runs in the same breath, already does it -- the
+                // swapchain and the streak are reset together there because
+                // on that tier they are void for the same reason.
+            }
+        }
+    }
+
+    /// Which tier this is, for the one startup log line that says so. A
+    /// string rather than a bool because it is read by a person grepping a
+    /// log, and "gpu"/"dumb" answers the question `scanout=false` only hints
+    /// at.
+    fn tier(&self) -> &'static str {
+        match self {
+            Self::Dumb(_) => "dumb",
+            #[cfg(feature = "gpu-scanout")]
+            Self::Gpu(_) => "gpu",
+        }
+    }
+
+    /// Everything about what the CRTC is showing is void -- a modeset, a
+    /// connector move, or a display that came back after going away.
+    fn invalidate_scanout(&mut self) {
+        match self {
+            Self::Dumb(dumb) => dumb.invalidate_scanout(),
+            #[cfg(feature = "gpu-scanout")]
+            Self::Gpu(gpu) => gpu.invalidate_scanout(),
+        }
+    }
+}
+
 /// Sets up the session, DRM device and surface, and libinput, and extends
 /// the keybinding table with `--tty`-only VT-switch bindings. Returns the
 /// chosen mode's size -- the connector's preferred mode, or the `--mode`
@@ -196,11 +435,24 @@ pub struct Tty {
 /// what "works" means. `mode` is `--mode WxH`, applied to whichever device
 /// is chosen; see `gpu::find_connector_and_mode` for the fallback when the
 /// connector has no mode of that size.
+///
+/// `handoff` is how the GPU scanout tier gets its renderer to
+/// `headless::init_named`: the `DrmCompositor` needs the renderer's importable
+/// dma-buf formats to pick a swapchain format at all, so the renderer has to
+/// be built here, before the `wl_output` (and therefore `Backend`) exists.
+/// Left untouched on the dumb tier, which is every build without the
+/// `gpu-scanout` feature and every `--tty` session that is not
+/// `--renderer gles`. This function also *corrects* [`State::renderer`] when
+/// the scanout tier was asked for and could not be built -- a `--tty` session
+/// must never refuse to start over a renderer (that is a lockout; see
+/// `config.rs`'s module doc), so the refusal becomes a loud warning and a
+/// pixman session.
 pub fn init(
     loop_handle: LoopHandle<'static, State>,
     state: &mut State,
     gpu: Option<ExplicitGpu<'_>>,
     mode: Option<(u16, u16)>,
+    handoff: &mut ScanoutHandoff,
 ) -> Result<(i32, i32, String), Box<dyn Error>> {
     let (mut session, notifier) = LibSeatSession::new()?;
     let seat_name = session.seat();
@@ -211,25 +463,45 @@ pub fn init(
     // a user staring at a black screen needs to know which devices exist
     // and what each of them said, not just that something went wrong.
     let candidates = gpu::candidates(&seat_name, gpu)?;
-    let (path, device) =
-        gpu::first_usable(candidates, |path| open_device(&mut session, path, mode))
-            .map_err(|failures| gpu::unusable_device_error(&seat_name, gpu, &failures))?;
+    let wanted = state.renderer;
+    let (path, device) = gpu::first_usable(candidates, |path| {
+        open_device(&mut session, path, mode, wanted)
+    })
+    .map_err(|failures| gpu::unusable_device_error(&seat_name, gpu, &failures))?;
     let Device {
         drm,
         notifier: drm_notifier,
-        surface,
+        presenter,
+        scanout: device_handoff,
+        renderer,
         connector,
-        buffers,
         width,
         height,
         name,
     } = device;
     let device_id = drm.device_id();
+    // The tier this device actually came up on, which is not always the one
+    // that was asked for: `open_device` falls back to the dumb tier when the
+    // scanout one cannot be built, because refusing to start a `--tty`
+    // session is a lockout. `State::renderer` is what `resize_output`
+    // rebuilds from, so the correction has to land there and not merely in a
+    // log line.
+    state.renderer = renderer;
+    *handoff = device_handoff;
     // info!, not debug!: which device `--tty` ended up on is the first
     // question to ask when a screen stays black, and on hardware where the
     // automatic pick is wrong it is the only thing separating "the fallback
-    // worked" from "it happened to work anyway".
-    tracing::info!(path = %path.display(), connector = %name, width, height, "drm: driving this device");
+    // worked" from "it happened to work anyway". `scanout` is on the same
+    // line because "which tier is this session actually on" is the same kind
+    // of question and has the same one answer.
+    tracing::info!(
+        path = %path.display(),
+        connector = %name,
+        width,
+        height,
+        scanout = presenter.tier(),
+        "drm: driving this device"
+    );
 
     let interface = LibinputSessionInterface::from(session.clone());
     let mut libinput_context = Libinput::new_with_udev(interface);
@@ -241,7 +513,7 @@ pub fn init(
     state.tty = Some(Tty {
         session,
         drm,
-        presenter: DumbPresenter::new(surface, buffers),
+        presenter,
         device_id,
         connector,
         requested_mode: mode,
@@ -357,12 +629,19 @@ fn watch_for_hotplug(loop_handle: &LoopHandle<'static, State>, seat: &str, devic
 struct Device {
     drm: DrmDevice,
     notifier: DrmDeviceNotifier,
-    surface: smithay::backend::drm::DrmSurface,
+    presenter: Presenter,
+    /// The renderer this device actually came up on, which is `Pixman`
+    /// whenever the scanout tier was asked for and could not be built. `init`
+    /// writes it back to [`State::renderer`]; see its doc for why a `--tty`
+    /// session falls back rather than refusing to start.
+    renderer: RendererKind,
+    /// The GLES renderer the scanout tier built, on its way to `Backend`.
+    /// Empty on the dumb tier.
+    scanout: ScanoutHandoff,
     /// The connector the surface was created against -- `Tty::connector`'s
     /// initial value. Carried out of `open_device` rather than re-derived,
     /// because that is where the choice was made.
     connector: connector::Handle,
-    buffers: BufferPool,
     width: i32,
     height: i32,
     /// The connector's name (`gpu::OpenGpu::name`), for the `wl_output`.
@@ -392,6 +671,7 @@ fn open_device(
     session: &mut LibSeatSession,
     path: &Path,
     requested: Option<(u16, u16)>,
+    wanted: RendererKind,
 ) -> Result<Device, gpu::Rejection> {
     // `gpu::open` goes through `Session::open`, never a bare
     // `std::fs::File::open` -- that would compile and even run, right up
@@ -440,6 +720,48 @@ fn open_device(
 
     let (mode_width, mode_height) = mode.size();
     let (width, height) = (i32::from(mode_width), i32::from(mode_height));
+
+    // The GPU scanout tier, if this build has it and this session asked for
+    // it. Tried before the dumb buffers are allocated, so a session that gets
+    // it never pays for two full-screen dumb buffers it will never write to.
+    #[cfg(feature = "gpu-scanout")]
+    let surface = match try_scanout(&drm_fd, surface, (width, height), wanted) {
+        Ok((presenter, scanout)) => {
+            return Ok(Device {
+                drm,
+                notifier,
+                presenter,
+                renderer: RendererKind::Gles,
+                scanout,
+                connector,
+                width,
+                height,
+                name,
+            });
+        }
+        // Not taken up (not asked for), or refused before the surface was
+        // handed over: carry on with the same surface.
+        Err(Some(surface)) => *surface,
+        // `DrmCompositor::new` takes the surface by value and drops it on
+        // failure, so there is nothing left to fall back *on*. Building a
+        // fresh one is safe precisely because the old one is gone: Smithay's
+        // surface `Drop` clears that CRTC's state and releases its primary
+        // plane, so this claims exactly what the failed attempt released.
+        Err(None) => create_surface(&mut drm, connector, mode).ok_or_else(|| {
+            gpu::Rejection::Unusable(
+                "could not be re-opened for dumb-buffer scanout after the gpu \
+                 scanout tier refused it"
+                    .to_owned(),
+            )
+        })?,
+    };
+    // Without the feature there is no second tier to choose, so the caller's
+    // answer is the only one there is. `render::resolve` has already turned
+    // `--renderer gles` under `--tty` into pixman with a warning naming the
+    // missing feature, so nothing is silently lost here.
+    #[cfg(not(feature = "gpu-scanout"))]
+    let _ = wanted;
+
     let buffers = BufferPool::new(&drm_fd, width, height).map_err(|error| {
         gpu::Rejection::Unusable(format!("could not allocate scanout buffers ({error})"))
     })?;
@@ -447,13 +769,89 @@ fn open_device(
     Ok(Device {
         drm,
         notifier,
-        surface,
+        presenter: Presenter::Dumb(Box::new(DumbPresenter::new(surface, buffers))),
+        // Not `wanted`: reaching here means either the dumb tier was what was
+        // asked for, or the scanout tier was asked for and refused. Both are
+        // a pixman session, and `init` writes this back to `State::renderer`
+        // so a later `resize_output` rebuilds the pipeline this session is
+        // actually running rather than the one it hoped for.
+        renderer: RendererKind::Pixman,
+        scanout: ScanoutHandoff::default(),
         connector,
-        buffers,
         width,
         height,
         name,
     })
+}
+
+/// Builds the GPU scanout tier on `surface`, or explains itself and hands the
+/// surface back.
+///
+/// `Err(Some(surface))` means nothing was attempted or nothing was consumed
+/// -- the caller carries on with the same surface. `Err(None)` means
+/// `DrmCompositor::new` took the surface and dropped it with its failure, so
+/// the caller has to build a new one.
+///
+/// Every failure here is a `warn!` and a fall back to the dumb tier, never a
+/// startup error. Under `--tty` scoot *is* the session: refusing to start
+/// over a renderer leaves a user with no desktop and no way back (see
+/// `config.rs`'s module doc), which is a far worse outcome than a session
+/// that runs on the CPU renderer and says so. That is the opposite of
+/// `--headless`/`--nested`, where `--renderer gles` failing is a startup
+/// error precisely because nothing is at stake.
+#[cfg(feature = "gpu-scanout")]
+#[allow(clippy::type_complexity)]
+fn try_scanout(
+    drm_fd: &DrmDeviceFd,
+    surface: smithay::backend::drm::DrmSurface,
+    size: (i32, i32),
+    wanted: RendererKind,
+) -> Result<(Presenter, ScanoutHandoff), Option<Box<smithay::backend::drm::DrmSurface>>> {
+    use smithay::backend::allocator::gbm::GbmDevice;
+
+    if wanted != RendererKind::Gles {
+        return Err(Some(Box::new(surface)));
+    }
+    let gbm = match GbmDevice::new(drm_fd.clone()) {
+        Ok(gbm) => gbm,
+        Err(error) => {
+            tracing::warn!(
+                %error,
+                "drm: this device has no usable gbm node, so --renderer gles cannot \
+                 scan out on it; falling back to the cpu renderer and dumb buffers"
+            );
+            return Err(Some(Box::new(surface)));
+        }
+    };
+    let backend = match super::render::ScanoutBackend::new(&gbm) {
+        Ok(backend) => backend,
+        Err(error) => {
+            tracing::warn!(
+                %error,
+                "drm: could not build a gles renderer on this device's gbm node; \
+                 falling back to the cpu renderer and dumb buffers"
+            );
+            return Err(Some(Box::new(surface)));
+        }
+    };
+    let formats = backend.renderer_formats();
+    match scanout::ScanoutPresenter::new(surface, gbm, formats, size) {
+        Ok(presenter) => {
+            let handoff = ScanoutHandoff {
+                backend: Some(Box::new(backend)),
+            };
+            Ok((Presenter::Gpu(Box::new(presenter)), handoff))
+        }
+        Err(error) => {
+            tracing::warn!(
+                %error,
+                "drm: no scan-out format works for both this crtc's primary plane \
+                 and the gles renderer; falling back to the cpu renderer and dumb \
+                 buffers"
+            );
+            Err(None)
+        }
+    }
 }
 
 /// Tries every CRTC on the device against `conn`/`mode` until one accepts
@@ -552,7 +950,16 @@ impl Tty {
     /// A pure peek: pair every call with [`advance_generation`](Self::advance_generation)
     /// once the render it was used for has actually happened.
     pub fn next_buffer_age(&self) -> usize {
-        self.presenter.next_buffer_age()
+        match &self.presenter {
+            Presenter::Dumb(dumb) => dumb.next_buffer_age(),
+            // Unreachable: this is read only by `render::draw_frame_with`,
+            // which the scanout tier never goes through (`DrmCompositor` owns
+            // its own damage tracker and buffer ages -- see `scanout.rs`).
+            // `0` is the always-full-redraw answer, which is the safe one if
+            // a future path ever does reach here.
+            #[cfg(feature = "gpu-scanout")]
+            Presenter::Gpu(_) => 0,
+        }
     }
 
     /// Must be called exactly once per `render_output` call this backend's
@@ -561,7 +968,14 @@ impl Tty {
     /// into `present` itself (it must run even when `present` isn't called
     /// at all, i.e. when nothing was damaged this frame).
     pub fn advance_generation(&mut self) {
-        self.presenter.advance_generation();
+        match &mut self.presenter {
+            Presenter::Dumb(dumb) => dumb.advance_generation(),
+            // Unreachable for the same reason as `next_buffer_age`: only
+            // `render::draw_frame_with` calls this, and the scanout tier does
+            // not go through it.
+            #[cfg(feature = "gpu-scanout")]
+            Presenter::Gpu(_) => {}
+        }
     }
 
     /// Copies an already-rendered frame's `region` into a free dumb buffer
@@ -637,7 +1051,15 @@ impl Tty {
         if frame_size != (self.width, self.height) {
             return None;
         }
-        self.presenter.present(pixels, region, frame_size)
+        match &mut self.presenter {
+            Presenter::Dumb(dumb) => dumb.present(pixels, region, frame_size),
+            // Unreachable for the same reason as `next_buffer_age`: the
+            // scanout tier composites *into* its scanout buffer, so there are
+            // never pixels to hand it. `None` means "no flip was issued",
+            // which is exactly what happened.
+            #[cfg(feature = "gpu-scanout")]
+            Presenter::Gpu(_) => None,
+        }
     }
 
     /// Takes whether the last `present()` was a refused flip owed a
@@ -646,6 +1068,36 @@ impl Tty {
     /// consumer, since a refused flip has no completion event coming.
     pub fn take_retry_render(&mut self) -> bool {
         self.presenter.take_retry_render()
+    }
+
+    /// The GPU scanout presenter, if this session is on that tier.
+    ///
+    /// `render::draw_frame_scanout`'s only way in, and the reason the
+    /// `DrmCompositor` can live here while the renderer lives in `Backend`:
+    /// the render path is the one place that holds both.
+    #[cfg(feature = "gpu-scanout")]
+    pub(super) fn scanout_mut(&mut self) -> Option<&mut scanout::ScanoutPresenter> {
+        match &mut self.presenter {
+            Presenter::Gpu(gpu) => Some(gpu),
+            Presenter::Dumb(_) => None,
+        }
+    }
+
+    /// Points the scanout tier's `DrmCompositor` at the real `wl_output`, so
+    /// a mode or scale change is followed without a second place having to
+    /// mirror it.
+    ///
+    /// Called once by `headless::init_named`, right after the output is
+    /// created -- the first moment it is possible and the last one at which
+    /// it is still free (nothing has been drawn). A no-op on the dumb tier,
+    /// which reads the mode size off `Tty` instead.
+    pub fn track_output(&mut self, output: &smithay::output::Output) {
+        match &mut self.presenter {
+            Presenter::Dumb(_) => {}
+            #[cfg(feature = "gpu-scanout")]
+            Presenter::Gpu(gpu) => gpu.track_output(output),
+        }
+        let _ = output;
     }
 
     /// Settles the in-flight flip for a `VBlank` on this surface's own crtc
@@ -663,7 +1115,7 @@ impl Tty {
         if crtc != self.presenter.crtc() {
             return (false, None);
         }
-        self.presenter.flip_settled()
+        self.presenter.settle_flip()
     }
 
     /// Re-evaluates the CRTC's state and forces a full modeset on the next
@@ -696,31 +1148,24 @@ impl Tty {
         if self.libinput.resume().is_err() {
             tracing::warn!("could not resume libinput after reactivation");
         }
-        // `activate(true)` already resets state on the device (and every
-        // surface on it) if it had been inactive -- see `DrmDevice::
-        // activate`'s doc -- so this is cheap belt-and-braces when
-        // `drm_active`, but still worth attempting even when it isn't:
-        // without DRM master this is a harmless no-op/read rather than
-        // something that needs gating, and if the device does come back on
-        // some later reactivation there's no reason for stale surface state
-        // to have gone unreset in the meantime.
-        if let Err(error) = self.presenter.reset_state() {
-            tracing::warn!(%error, "could not reset drm surface state after reactivation");
-        }
+        // Unconditional, not gated on `drm_active`. `activate(true)` already
+        // resets state on the device (and every surface on it) if it had been
+        // inactive -- see `DrmDevice::activate`'s doc -- so this is cheap
+        // belt-and-braces when `drm_active`, but still worth attempting when
+        // it isn't: without DRM master these are harmless no-ops/reads rather
+        // than something that needs gating, and if the device does come back
+        // on some later reactivation there is no reason for stale surface
+        // state to have gone unreset in the meantime.
+        //
+        // What it throws away is everything this process believed about what
+        // the CRTC is showing -- which is nothing it can vouch for after
+        // another VT may have reconfigured it -- so the next frame is a full
+        // redraw through a full modeset. Each tier has its own version of
+        // that (dumb buffer slots and their ages; a swapchain and a pending
+        // frame), which is why this is one call and not a list here; see
+        // `Presenter::reactivate`.
+        self.presenter.reactivate();
         self.active = drm_active;
-        // The surface's own notion of what's scanned out is gone along with
-        // its state (or, if `drm.activate` failed, was never something we
-        // can trust to begin with) -- either way both buffer slots are safe
-        // to reuse. Unconditional: freeing slots is always safe, never
-        // harmful, regardless of what else above failed. Ages are
-        // invalidated for the same reason (see `BufferPool::invalidate_ages`'s
-        // doc): a slot's pre-pause content is real, but nothing here can
-        // vouch for what's actually on screen right now, so the next
-        // present must be a full redraw rather than trusting a stale age.
-        // Shared with the hotplug path, which invalidates exactly the same
-        // six things for exactly the same reason -- see
-        // `DumbPresenter::invalidate_scanout`.
-        self.presenter.invalidate_scanout();
         drm_active
     }
 }
@@ -786,7 +1231,7 @@ fn session_event(event: SessionEvent, _: &mut (), state: &mut State) {
                 // to match a lock wait recorded after it (see
                 // `flip_tracker.rs`). The wait itself stays, owned by the
                 // fallback deadline until the switch back re-renders.
-                tty.presenter.discard_flip();
+                tty.presenter.pause();
                 hotplug::Reconfigured::Nothing
             }
             SessionEvent::ActivateSession => {
@@ -856,7 +1301,7 @@ fn drm_event(event: DrmEvent, _: &mut Option<DrmEventMetadata>, state: &mut Stat
                 // an untrackable completion must not confirm a session lock
                 // (see `flip_settled` and `session_lock.rs`) -- the fallback
                 // deadline owns that wait.
-                let (needs_render, _) = tty.presenter.flip_settled();
+                let (needs_render, _) = tty.presenter.settle_flip();
                 (needs_render, None)
             }
         }

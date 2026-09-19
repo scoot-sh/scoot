@@ -11,7 +11,7 @@
 ```
 scoot --headless [--width 1-65535] [--height 1-65535] [--renderer pixman|gles] [--socket PATH] [--config PATH] [-- COMMAND...]
 scoot --nested   [--width 1-65535] [--height 1-65535] [--renderer pixman|gles] [--socket PATH] [--config PATH] [-- COMMAND...]
-scoot --tty      [--gpu PATH] [--mode WxH] [--socket PATH] [--config PATH] [-- COMMAND...]
+scoot --tty      [--gpu PATH] [--mode WxH] [--renderer pixman|gles] [--socket PATH] [--config PATH] [-- COMMAND...]
 scoot msg REQUEST
 scoot --help
 ```
@@ -269,7 +269,8 @@ scale = 1.0
 
 # [renderer]
 # Unset means "pixman", the CPU renderer -- the right answer on a GPU-less
-# box and the default everywhere. "gles" is opt-in, --headless/--nested only,
+# box and the default everywhere. "gles" is opt-in; under --tty it scans out
+# from the GPU in a --features gpu-scanout build,
 # and buys correctness parity rather than speed today. --renderer wins over
 # this when both name one. See docs/tty.md before switching.
 # backend = "gles"

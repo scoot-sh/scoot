@@ -18,7 +18,8 @@ Two things distinguish it from a typical compositor:
   [pixman](http://pixman.org/) on the CPU, so it works headless and works in
   a GPU-less container (the target is running inside
   [webtop](https://github.com/linuxserver/docker-webtop)). A GLES renderer is
-  available opt-in (`--renderer gles`, `--headless`/`--nested` only) but
+  available opt-in (`--renderer gles`, and under `--tty` it scans out from
+  the GPU with a `gpu-scanout` build) but
   pixman stays the default — see
   [docs/tty.md](docs/tty.md#which-renderer-draws-the-frames) for what that
   does and does not buy today.
@@ -46,9 +47,11 @@ Linux, and daily-driven on `--tty`** (2026-09-18).
 
 - **One output.** Plug in a second monitor and it stays dark.
 - **No XWayland.** X11-only applications do not run.
-- **No GPU scanout.** The GLES renderer above reads every frame back to main
-  memory exactly as pixman does, so it buys correctness parity, not speed.
-  Scanning a GPU buffer out under `--tty` is the milestone in flight.
+- **GPU scanout is new and narrow.** `--tty --renderer gles` scans out from
+  the GPU, but only in a `gpu-scanout` build, only on the primary plane (no
+  overlay or cursor planes), and it has never run on a real GPU — every
+  measurement so far is a software rasteriser's. `--headless`/`--nested`
+  still read every frame back to main memory as pixman does.
 - **No config reload.** Settings are read once at startup.
 - **No macOS adapter.** `scoot-core` is kept platform-independent so one can
   exist, but nothing drives the Accessibility API yet. On macOS you get the
@@ -75,6 +78,7 @@ build`.
 scoot --headless --width 1280 --height 800 -- foot   # start, spawn a terminal
 scoot --nested --width 1280 --height 800 -- foot     # inside your compositor
 scoot --tty -- foot                                  # on a real DRM/KMS seat
+scoot --tty --renderer gles -- foot                  # ...scanning out from the GPU
 
 scoot msg windows                                    # in another shell
 scoot msg action focus-column left

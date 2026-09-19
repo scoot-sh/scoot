@@ -360,32 +360,21 @@ impl Tty {
     /// this falls back to rebuilding the surface on a different CRTC (see
     /// `switch_crtc`) rather than staying on the connector that went away.
     ///
-    /// Order is load-bearing. The buffers are allocated *first*, before
-    /// anything on the DRM side is told to change: a failed allocation then
-    /// leaves the display exactly as it was and working, whereas the other
-    /// order would leave the CRTC on a mode whose frames no buffer in the
-    /// pool is the right size to hold -- which `present`'s size guard drops
-    /// silently, forever.
+    /// Order is load-bearing. Whatever the new mode needs is allocated
+    /// *first*, before anything on the DRM side is told to change: a failed
+    /// allocation then leaves the display exactly as it was and working,
+    /// whereas the other order would leave the CRTC on a mode whose frames no
+    /// buffer is the right size to hold -- which `present`'s size guard drops
+    /// silently, forever. See `Presenter::new_buffers` for what each tier
+    /// allocates (the scanout tier: nothing, by design).
     fn retarget(&mut self, connector: connector::Handle, mode: Mode, name: &str) -> Reconfigured {
         let (width, height) = mode_size(mode);
         let size_changed = (width, height) != (self.width, self.height);
-        // `None` when only the connector changed: the existing pool is
-        // already the right size, and reallocating it would throw away two
-        // perfectly good dumb buffers to get two identical ones.
-        let buffers = if size_changed {
-            match BufferPool::new(self.drm.device_fd(), width, height) {
-                Ok(buffers) => Some(buffers),
-                Err(error) => {
-                    tracing::warn!(
-                        %error, width, height,
-                        "drm: could not allocate scanout buffers for the new mode; \
-                         staying on the current one"
-                    );
-                    return Reconfigured::Nothing;
-                }
-            }
-        } else {
-            None
+        let Ok(buffers) = self
+            .presenter
+            .new_buffers(&self.drm, size_changed, width, height)
+        else {
+            return Reconfigured::Nothing;
         };
         // Only the mode half of this pair is read from the surface --
         // `presenter.surface().pending_mode()` -- because it is the surface's
@@ -409,18 +398,46 @@ impl Tty {
             height,
             "drm: display reconfigured; mode-setting onto it"
         );
+        // Before `self.width`/`height` and before the `wl_output`'s own mode
+        // moves (`Reconfigured::finish` -> `State::resize_output` ->
+        // `set_mode`, all of which run after this function returns). On the
+        // scanout tier that leaves a window in which the swapchain is the new
+        // size while the compositor's `OutputModeSource::Auto(output)` still
+        // reports the old one -- harmless only because nothing renders in
+        // between: this runs inside the udev handler's borrow of `state.tty`,
+        // and `finish` runs immediately after it, with no event-loop dispatch
+        // (and so no frame) between the two.
+        if !self.presenter.adopt_mode(mode) {
+            // Scanout tier only, and all but unreachable: `set_pending` has
+            // just put this exact mode on this exact surface, so the repeat
+            // inside `DrmCompositor::use_mode` is asking a question that was
+            // answered `Ok` a line ago. error!, not warn!, because if it ever
+            // does happen the surface is on the new mode while the swapchain
+            // is still sized for the old one, and every frame from then on
+            // would be the wrong size. Returning `Nothing` leaves
+            // `self.width`/`height` untouched, so the next uevent plans
+            // `NewMode` again and retries rather than believing the move
+            // landed.
+            tracing::error!(
+                connector = %name, width, height,
+                "drm: the surface took the new mode but the scanout compositor \
+                 would not; staying on the current one"
+            );
+            return Reconfigured::Nothing;
+        }
         self.connector = connector;
         // The old pool -- and the framebuffers in it, one of which the CRTC
         // may still be scanning out -- is dropped inside `adopt_buffers`; see
         // its doc for what the kernel does with a framebuffer removed while
-        // active. `None` (the size did not change) keeps the current pool.
+        // active. `None` (the size did not change, or the scanout tier, which
+        // has no pool) keeps whatever is there.
         self.presenter.adopt_buffers(buffers);
         // Unconditionally, not inside `adopt_buffers`: these two are
-        // `present`'s size guard and must equal the size the pool was built
-        // at, whichever branch got here. Writing them only where a new pool
-        // was built would make that a fact about that `if`, which is exactly
-        // the kind of coupling that survives one refactor and not two. When
-        // the size did not change they are already these values.
+        // `present`'s size guard and must equal the size the buffers were
+        // built at, whichever branch got here. Writing them only where a new
+        // pool was built would make that a fact about that `if`, which is
+        // exactly the kind of coupling that survives one refactor and not
+        // two. When the size did not change they are already these values.
         self.width = width;
         self.height = height;
         self.presenter.invalidate_scanout();
@@ -549,7 +566,16 @@ impl Tty {
             // CRTC's state, whose connector is gone anyway; the full commit
             // `invalidate_scanout` arms below is what brings the new CRTC up
             // on the new state.
-            self.presenter.adopt_surface(candidate);
+            //
+            // On the scanout tier this rebuilds the whole `DrmCompositor`
+            // (it owns its surface by value) and can refuse. It builds the
+            // replacement before dropping the live one, so a refusal leaves
+            // this CRTC, this connector and what is on screen exactly as they
+            // were -- the same property the loop relies on for a candidate
+            // that fails earlier -- and the next candidate is tried.
+            if !self.presenter.adopt_surface(candidate) {
+                continue;
+            }
             self.connector = connector;
             // The old pool -- and the framebuffers in it, one of which the
             // old CRTC may still be scanning out -- is dropped here, the

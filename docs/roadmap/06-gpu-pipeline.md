@@ -3,7 +3,7 @@ item: "6"
 title: "Real GPU rendering pipeline"
 status: "in-progress"
 area: "backend"
-pr: 130
+pr: 135
 commit: null
 ---
 
@@ -312,14 +312,214 @@ What that establishes, and what it does not:
   the dumb tier's machinery becomes unreachable from it *by type* rather than
   by everyone remembering not to call it.
 
+## Stage 3, part B: `DrmCompositor` scanout
+
+What lands:
+
+- **`tty/scanout.rs`** -- `ScanoutPresenter`, a `DrmCompositor<GbmAllocator,
+  GbmFramebufferExporter, u64, DrmDeviceFd>` plus the bounded retry counter and
+  the flip numbering the session-lock wait rides on. **`u64` is the frame's
+  `user_data`**: `queue_frame(seq)` -> vblank -> `frame_submitted() ==
+  Some(seq)`, so the lock's blank confirmation is matched by the kernel's own
+  pairing rather than by "at most one flip is out", which is not true here.
+- **`render/scanout.rs`** -- `ScanoutBackend`: the `GlesRenderer`, plus the
+  dma-buf a capture reads. The renderer lives in `Backend` because every
+  non-frame consumer of a renderer (`capture`, `import_dmabuf`,
+  `cleanup_texture_cache`) reaches it only through `Backend`; the
+  `DrmCompositor` lives in `Tty` because everything *it* needs is `Tty`'s.
+  `render::draw_frame` is the one place holding both.
+- **`Presenter::{Dumb, Gpu}`** on `Tty`, and `Pipeline::Scanout` on `Backend`.
+  With part A's split in place the dumb tier's `BufferPool`, per-slot ages and
+  `FlipTracker` are not merely uncalled on this tier -- they are unreachable
+  by type.
+- **`--tty --renderer gles`** now selects it, where before `resolve` forced
+  pixman. Three fallbacks, all warnings rather than startup errors, because on
+  `--tty` a refusal to start is a lockout: no `gpu-scanout` feature in this
+  build, no usable GBM node, or no scan-out format that works for both the
+  primary plane and the renderer.
+
+### Deliberate scope decisions, each of which could have gone the other way
+
+- **`planes: Some(primary only)`, `gbm: None`.** No cursor plane, no overlay
+  planes.
+- **`FrameFlags::empty()`, not `DEFAULT`.** `DEFAULT` is `ALLOW_SCANOUT`,
+  which lets a client's own buffer be scanned out directly on the primary
+  plane. That is a real optimisation and it is not this stage's -- with it the
+  frame is *not* in the swapchain buffer, so the capture path would silently
+  start returning something that is not what is on screen.
+- **`PresentRetries` is reused, not replaced**, against the letter of the
+  staging note below. A refused `queue_frame` is the same hazard as a refused
+  `page_flip`: nothing is in flight, so no completion event will retry it and
+  the screen stays stale until unrelated damage arrives. The counter is pure
+  bounded-retry arithmetic with no dumb-buffer coupling; duplicating it would
+  have been worse engineering than reusing it.
+- **A dma-buf import guard, which is not stage 4.** `zwp_linux_dmabuf_v1`'s
+  tranche is a promise with teeth -- a client that allocates from it and has
+  the import refused is *killed*, because `create_immed`'s only failure reply
+  is a fatal protocol error. Under `--tty` the renderer has always been
+  pixman, which imports a linear dma-buf by mmapping it and essentially never
+  refuses; this tier is the first thing that routes those imports through
+  GLES, which can. So `ScanoutBackend::new` refuses to come up at all on a
+  device whose renderer cannot import what `dmabuf.rs` advertises, and the
+  session falls back to pixman. That is not stage 4 (deriving the *tranche*
+  from the active renderer); it is the price of adding the tier, per
+  `CLAUDE.md`'s rule that a user-facing harm is never deferred to a later
+  stage.
+
+### The VT-switch landmine, and why `reset_state` alone is not enough
+
+Smithay's own `DrmOutputManager::activate` is `device.activate()` plus
+`compositor.reset_state()`. `reset_state` sets `reset_pending` (so the next
+frame is a full commit rather than a page flip onto state another VT may have
+reconfigured) but it deliberately does **not** touch `pending_frame` -- and
+`queue_frame` only *submits* when `pending_frame` is `None`, queueing behind
+it otherwise. A flip still in flight when the session paused, whose vblank the
+kernel then never delivers, would therefore leave every subsequent frame
+queued and never submitted: a permanently black screen after a switch back,
+with no error anywhere. `ScanoutPresenter::reactivate` drains one
+`frame_submitted()` after the reset for exactly that, discarding its number
+(that frame's content never reached the screen, so it must not confirm a
+lock).
+
+`drm_event`'s body is byte-identical to before; only the presenter's own
+settle differs per tier. That is what preserves
+`docs/backlog/resolved/screencopy-parked-across-lock-confirm-done.md` by
+construction rather than by re-tracing it: `note_flip_completed` ->
+`confirm_lock` -> `ensure_ticking` still runs on the same event, in the same
+order, so a screencopy frame parked across a lock confirmation is still
+re-armed.
+
+### Capture without a read-back target
+
+The other two tiers own a persistent framebuffer a capture can be read out of.
+Here each frame lands in whichever swapchain slot was free, so the render path
+records the dma-buf that carried the most recent *drawn* frame and
+`Backend::capture` binds and reads that. Exporting a `Dmabuf` costs an fd per
+plane plus allocation, so the exports are pooled per swapchain slot (four
+entries; the pool is warm after four frames) and dropped wholesale whenever
+the swapchain is rebuilt -- signalled by the presenter through one
+`take_slots_dropped` flag, so the only thing that can free a slot is also the
+only thing that invalidates the pool.
+
+### Evidence (dev VM, `--tty` seat held 14:40-14:47Z and again 15:11-15:13Z, 2026-09-19)
+
+Everything below was captured twice: first at the tree that became `5ffd3c6`,
+then re-run in full at `19f9282` after a comment-and-docs-only commit, so the
+key matches the branch head rather than something one commit behind. The seat
+was checked free before each session (`pgrep` for another `--tty` client,
+`journalctl -u seatd`).
+
+- **The tier really comes up on real KMS**: `drm: driving this device
+  path=/dev/dri/card0 connector=Virtual-1 width=1600 height=1000
+  scanout="gpu"`, EGL on `PLATFORM_GBM_KHR` over `/dev/dri/card0`, GLES 3.2
+  Mesa 26.2.2.
+- **The frame is right, and the capture reads the right buffer.** Comparing
+  IPC screenshots (ImageMagick `compare -metric AE`, 1600x1000):
+
+  | pair | ImageMagick `AE` |
+  | ---- | ---------------- |
+  | `--tty` dumb vs `--tty` gpu | 1568.49 |
+  | `--headless` pixman vs `--headless` gles | 1568.63 |
+
+  `AE` is ImageMagick's absolute-error metric, **not** a count of differing
+  pixels -- review re-ran it and found `differing_fraction=0.999915`, i.e.
+  nearly every pixel differs, each by one least-significant bit in one of
+  four channels. 1600000/255/4 = 1568.6 analytically, which is what the
+  second row is. That makes the conclusion *stronger* than the original
+  wording claimed: the two numbers matching says the whole difference is the
+  renderer's rounding, and scanout introduces none of its own.
+  | `--tty` gpu vs `--headless` gles | 73.96 |
+
+  The first two are the *same* number: the only difference between the tiers
+  is the renderer, and it is the pixman-vs-GLES rounding difference stage 2
+  already carries (background `srgba(20,20,25)` vs `srgba(20,20,26)`), not
+  anything scanout introduced. The third is essentially only the cursor, which
+  `--headless` does not draw.
+- **A real client end to end**: `MODE=--tty RENDERER=gles
+  scripts/smoke-test.sh` -> 17 ok, rc=0.
+- **Two VT switch cycles and a hotplug**, on the gpu tier: `session paused` ->
+  `session activated` -> full modeset each time, and screenshots taken before
+  the first switch, after each switch back and after the hotplug are
+  **pixel-identical** (`compare -metric AE` = 0 for all three pairs).
+- **Session lock, live, on both tiers** (throwaway
+  `examples/tty_lock_probe.rs`, deleted after; a minimal `ext-session-lock-v1`
+  client that locks, maps a full-size lock surface, waits for `locked`, and
+  unlocks, three times). Every one of the six locks logged `session lock
+  confirmed: the blanked frame reached scanout` from inside the `drm_atomic`
+  span -- the vblank path -- and the one-second fallback (`confirming a
+  session lock without its vblank`) never fired.
+- **The default build is unchanged and GPU-free**: `ldd` shows no libgbm,
+  `--tty --renderer gles` warns `this build has no gpu scanout tier (it was
+  built without the 'gpu-scanout' Cargo feature) ...` and comes up
+  `scanout="dumb" renderer=pixman`.
+
+### Benchmark
+
+**Does adding the tier cost the default pixman path anything?** No, and not
+measurably in either direction. `crates/scoot/src/compositor/headless/bench.rs`,
+release, six rounds run **alternately** against part A's commit (`2ef80d9`,
+`git archive`d to `/tmp/scoot-pr1` and built into the same
+`CARGO_TARGET_DIR`), because a single pair on this VM says whatever the noise
+wants it to say:
+
+| round | base empty | branch empty | base 8win | branch 8win |
+| ----- | ---------- | ------------ | --------- | ----------- |
+| 1 | 75.87 | 75.08 | 141.82 | 124.43 |
+| 2 | 66.16 | 68.11 | 124.81 | 143.61 |
+| 3 | 73.08 | 60.73 | 113.82 | 137.33 |
+| 4 | 69.52 | 72.30 | 128.06 | 133.05 |
+| 5 | 66.86 | 70.97 | 133.43 | 131.32 |
+| 6 | 59.63 | 71.83 | 140.36 | 108.59 |
+| **median** | **68.2** | **71.4** | **130.7** | **132.2** |
+
+(µs per frame, best of five 500-frame runs each.) The medians differ by 3.2µs
+and 1.5µs while each build's own spread across identical rounds is 16µs and
+28µs, and the branch holds both the fastest 8-window run (108.6) and the
+fastest-but-one empty run. **This VM cannot resolve a difference below roughly
+its own ±25% noise, and there is none larger than that here.** Which matches
+the code: the pixman arm's work is untouched, `draw_frame`'s per-frame match
+gained one jump-table entry, and `Backend::new` gained a startup-only
+argument.
+
+**And what does the scanout tier itself cost, here?** More than the dumb tier,
+because there is no GPU on this VM -- but far less than the offscreen GLES
+pipeline does. Compositor CPU (`utime+stime` from `/proc/<pid>/stat`) over 300
+IPC pointer moves on a `--tty` session, two runs each:
+
+| tier | jiffies | wall |
+| ---- | ------- | ---- |
+| `scanout="dumb"` (pixman) | 27, 24 | 3369ms, 3339ms |
+| `scanout="gpu"` (gles) | 36, 37 | 3425ms, 3414ms |
+
+~1.5x, against the **17-32x** stage 2 measured for offscreen GLES on the same
+rasteriser. That gap is the read-back and the dumb-buffer memcpy this tier
+removes, and it is the only part of the performance story this VM can show.
+The part it cannot: what any of this costs on a real GPU, where the
+rasterising itself stops being llvmpipe's problem. Do not read these numbers
+as a reason to run the tier on a GPU-less box -- pixman is still the right
+answer there, and is still the default.
+
+### What this does *not* establish
+
+`is_software()` is false-but-llvmpipe on this VM (see the stage-2 correction
+above), so **every number here is a software rasteriser's**. What the VM
+proves is the KMS plumbing -- modeset, page flip, vblank pairing, VT recovery,
+hotplug, lock confirmation -- not the performance case. Real GPU scanout
+remains an Asahi-only claim, and the split render/display shape that machine
+has (AGX owns the render node, `apple,dcp` owns the CRTCs) is designed for
+but untested: `DrmCompositor::new` takes the allocator and the framebuffer
+exporter separately, so the allocator's `GbmDevice` would wrap the render
+node's fd and the exporter's the display node's, with no `MultiRenderer` and
+no speculative multi-GPU abstraction added here.
+
 ## Staging
 
 | Stage | What | Status |
 | ----- | ---- | ------ |
 | 1 | The renderer seam, pixman the only implementation, zero behaviour change | PR #129, merged `06201e6` |
 | 2 | A `GlesRenderer` implementation behind `--renderer`, offscreen + `ExportMem` read-back, so every backend can use it and the existing pixel suites run under both | PR #130, merged `acbdbe0` |
-| 3A | The `gpu-scanout` Cargo feature (with the no-libgbm `ldd` proof) and the dumb presenter lifted out of `Tty`; zero behaviour change | this PR |
-| 3B | `DrmCompositor` scanout for `--tty`: skip the read-back and the dumb-buffer memcpy entirely where a GPU really is present | not started |
+| 3A | The `gpu-scanout` Cargo feature (with the no-libgbm `ldd` proof) and the dumb presenter lifted out of `Tty`; zero behaviour change | PR #133 |
+| 3B | `DrmCompositor` scanout for `--tty`: skip the read-back and the dumb-buffer memcpy entirely where a GPU really is present | PR #135, stacked on #133 |
 | 4 | Renderer-derived dmabuf formats: advertise what the *active* renderer can import rather than the hard-coded pixman LINEAR pair | not started |
 
 Stage 2 is the first stage with a user-facing surface (`--renderer`), so it

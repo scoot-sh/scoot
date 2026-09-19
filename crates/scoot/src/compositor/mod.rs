@@ -130,8 +130,18 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
     // both the `--tty` init below and the not-`--tty` warnings read the
     // same answer.
     let gpu = tty::resolve(options.gpu.as_deref(), loaded.gpu.as_deref())?;
+    // Carries the GPU scanout renderer from `tty::init` (which must build it,
+    // because the `DrmCompositor` needs its formats) to `init_named` (which
+    // owns every renderer). Empty on every other path; see `ScanoutHandoff`.
+    let mut scanout = render::ScanoutHandoff::default();
     let (width, height, output_name) = if options.tty {
-        tty::init(state.loop_handle.clone(), &mut state, gpu, options.mode)?
+        tty::init(
+            state.loop_handle.clone(),
+            &mut state,
+            gpu,
+            options.mode,
+            &mut scanout,
+        )?
     } else {
         // Not silently dropped the way `--width`/`--height` are under
         // `--tty`: those have a sensible reading on the backend that
@@ -153,7 +163,7 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
             headless::OUTPUT_NAME.to_owned(),
         )
     };
-    headless::init_named(&mut state, &output_name, width, height)?;
+    headless::init_named(&mut state, &output_name, width, height, scanout)?;
 
     // Order matters, and it's load-bearing, not incidental: `--nested`
     // connects to the *host* compositor via the caller's own WAYLAND_DISPLAY

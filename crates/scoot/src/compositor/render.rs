@@ -68,6 +68,29 @@ use pixman::PixmanBackend;
 mod elements;
 mod gles;
 mod pixman;
+#[cfg(feature = "gpu-scanout")]
+mod scanout;
+
+#[cfg(feature = "gpu-scanout")]
+pub(crate) use scanout::ScanoutBackend;
+
+/// The GPU scanout renderer travelling from `tty::init` to [`Backend::new`].
+///
+/// It has to travel, rather than being built where every other renderer is,
+/// because of one ordering fact: `DrmCompositor::new` needs the renderer's
+/// importable dma-buf formats to pick a swapchain format, and `tty::init`
+/// runs before the `wl_output` (and therefore `Backend`) exists. So the
+/// renderer is built with the `DrmCompositor` and handed forward.
+///
+/// A struct with one optional field rather than a bare `Option`, so the whole
+/// signature chain compiles identically with and without the `gpu-scanout`
+/// feature: without it there is no field, `default()` is the only value, and
+/// the tier does not exist.
+#[derive(Default)]
+pub(crate) struct ScanoutHandoff {
+    #[cfg(feature = "gpu-scanout")]
+    pub(crate) backend: Option<Box<ScanoutBackend>>,
+}
 
 /// Which renderer this session composites with: the flag, else the config
 /// file, else the default.
@@ -77,31 +100,58 @@ mod pixman;
 /// `--renderer pixman`, which is why both are `Option` rather than a resolved
 /// value (see [`CompositorOptions::renderer`](crate::cli::CompositorOptions)).
 ///
-/// `tty` is the one case that overrides both. The GLES pipeline here
-/// composites into an offscreen renderbuffer and reads the frame back to
-/// main memory, which is what `--headless` (nothing) and `--nested` (a host
-/// surface) do with a frame anyway -- but under `--tty` it would mean
-/// rendering on the GPU only to copy every frame back to the CPU and memcpy
-/// it into a dumb buffer, which is strictly worse than compositing there in
-/// the first place. Scanning a GPU buffer out directly needs `DrmCompositor`
-/// and is its own piece of work. So `--tty` warns and keeps pixman rather
-/// than silently accepting a slower session -- a warning, not a startup
-/// error, because on `--tty` scoot *is* the session and a refusal to start is
-/// a lockout (see `config.rs`'s module doc).
+/// `tty` is the one case that can override both, and only in a build without
+/// the `gpu-scanout` feature. With the feature, `--renderer gles` under
+/// `--tty` selects the GPU scanout tier (`tty/scanout.rs`): the frame is
+/// composited straight into the buffer the CRTC scans out, with no read-back
+/// and no memcpy. Without it, the only GLES pipeline that exists is the
+/// offscreen one, which under `--tty` would mean rendering on the GPU only to
+/// copy every frame back to the CPU and memcpy it into a dumb buffer --
+/// strictly worse than compositing there in the first place. So that build
+/// warns and keeps pixman rather than silently accepting a slower session.
+///
+/// A warning, not a startup error, and that asymmetry with
+/// `--headless`/`--nested` is deliberate: on `--tty` scoot *is* the session,
+/// so a refusal to start is a lockout (see `config.rs`'s module doc). The
+/// second place the same rule applies is `tty::init`, which falls back the
+/// same way when the feature is present but the device cannot drive the tier.
 pub(super) fn resolve(
     flag: Option<RendererKind>,
     file: Option<RendererKind>,
     tty: bool,
 ) -> RendererKind {
-    let chosen = flag.or(file).unwrap_or_default();
-    if tty && chosen == RendererKind::Gles {
-        tracing::warn!(
-            "the gles renderer is not available under --tty yet (it has no scanout path); \
-             using pixman"
-        );
-        return RendererKind::Pixman;
+    let (chosen, warning) = resolve_with(flag, file, tty, cfg!(feature = "gpu-scanout"));
+    if let Some(warning) = warning {
+        tracing::warn!("{warning}");
     }
     chosen
+}
+
+/// [`resolve`]'s decision, with the build-time fact spelled out as an
+/// argument so both answers are unit-testable from either build.
+///
+/// Returns the warning text rather than logging it, so a test can pin *which*
+/// refusal happened: "this build has no scanout tier" and "this device cannot
+/// drive it" are different problems with different fixes, and a user reading
+/// one must not be handed the other's wording.
+fn resolve_with(
+    flag: Option<RendererKind>,
+    file: Option<RendererKind>,
+    tty: bool,
+    scanout_available: bool,
+) -> (RendererKind, Option<&'static str>) {
+    let chosen = flag.or(file).unwrap_or_default();
+    if tty && chosen == RendererKind::Gles && !scanout_available {
+        return (
+            RendererKind::Pixman,
+            Some(
+                "this build has no gpu scanout tier (it was built without the \
+                 `gpu-scanout` Cargo feature), and the offscreen gles pipeline \
+                 would be slower than the cpu renderer under --tty; using pixman",
+            ),
+        );
+    }
+    (chosen, None)
 }
 
 /// What draws this session's frames, and what it draws into.
@@ -152,6 +202,12 @@ enum Pipeline {
     /// memory exactly as pixman's image is. Opt-in, `--headless`/`--nested`
     /// only -- see [`gles`] and [`resolve`].
     Gles(Box<GlesBackend>),
+    /// GLES compositing straight into the buffer the CRTC scans out, with no
+    /// read-back at all. `--tty --renderer gles`, in a build carrying the
+    /// `gpu-scanout` feature -- see [`scanout`] and `tty/scanout.rs`. Boxed
+    /// for the same reason the offscreen variant is.
+    #[cfg(feature = "gpu-scanout")]
+    Scanout(Box<ScanoutBackend>),
 }
 
 impl Backend {
@@ -162,12 +218,28 @@ impl Backend {
     /// can't drift apart -- which is also why `renderer` is a parameter here
     /// and a field on `State`: a resize rebuilds the pipeline, and it has to
     /// rebuild the one the session was started with.
+    /// `scanout` is the renderer `tty::init` already built for the GPU
+    /// scanout tier (see [`ScanoutHandoff`]); when it carries one, it *is*
+    /// the pipeline and `renderer` is not consulted. Empty on every other
+    /// path, including `State::resize_output`, which never reaches here on
+    /// that tier (see its own early return).
     pub(super) fn new(
         output: &Output,
         width: i32,
         height: i32,
         renderer: RendererKind,
+        scanout: ScanoutHandoff,
     ) -> Result<Self, Box<dyn Error>> {
+        #[cfg(feature = "gpu-scanout")]
+        if let Some(backend) = scanout.backend {
+            return Ok(Self {
+                pipeline: Pipeline::Scanout(backend),
+                damage: OutputDamageTracker::from_output(output),
+                size: (width, height),
+            });
+        }
+        #[cfg(not(feature = "gpu-scanout"))]
+        let _ = scanout;
         let pipeline = match renderer {
             RendererKind::Pixman => Pipeline::Pixman(PixmanBackend::new(width, height)?),
             RendererKind::Gles => Pipeline::Gles(Box::new(GlesBackend::new(width, height)?)),
@@ -177,6 +249,30 @@ impl Backend {
             damage: OutputDamageTracker::from_output(output),
             size: (width, height),
         })
+    }
+
+    /// Whether this session composites straight into its scanout buffer.
+    ///
+    /// The one thing outside this module that has to know: `resize_output`
+    /// must *not* rebuild a scanout pipeline, because `DrmCompositor` follows
+    /// the output's mode on its own and rebuilding would throw away the EGL
+    /// context, the swapchain and the frame in flight to get an identical
+    /// one. See that function.
+    pub(super) fn is_scanout(&self) -> bool {
+        #[cfg(feature = "gpu-scanout")]
+        {
+            matches!(self.pipeline, Pipeline::Scanout(_))
+        }
+        #[cfg(not(feature = "gpu-scanout"))]
+        {
+            false
+        }
+    }
+
+    /// Moves the recorded render-target size without touching the pipeline --
+    /// what a scanout resize is, in full. See [`is_scanout`](Self::is_scanout).
+    pub(super) fn note_resized(&mut self, width: i32, height: i32) {
+        self.size = (width, height);
     }
 
     /// Which renderer is *actually* drawing this session's frames.
@@ -193,6 +289,8 @@ impl Backend {
         match &self.pipeline {
             Pipeline::Pixman(_) => RendererKind::Pixman,
             Pipeline::Gles(_) => RendererKind::Gles,
+            #[cfg(feature = "gpu-scanout")]
+            Pipeline::Scanout(_) => RendererKind::Gles,
         }
     }
 
@@ -227,6 +325,23 @@ impl Backend {
             Pipeline::Gles(gpu) => {
                 capture_with(&mut gpu.renderer, &mut gpu.buffer, region, use_pixels)
             }
+            // There is no persistent framebuffer to read here: each frame
+            // lands in whichever swapchain slot was free, so what a capture
+            // binds is the dma-buf that carried the most recent one (see
+            // `scanout.rs`). Before the first frame there is nothing to read
+            // and saying so is better than handing back an uninitialised
+            // buffer.
+            #[cfg(feature = "gpu-scanout")]
+            Pipeline::Scanout(gpu) => {
+                let scanout::ScanoutBackend { renderer, captures } = &mut **gpu;
+                let Some(frame) = captures.frame_mut() else {
+                    return Err(CaptureError::new(
+                        CaptureStage::Bind,
+                        "nothing has been scanned out yet",
+                    ));
+                };
+                capture_with(renderer, frame, region, use_pixels)
+            }
         }
     }
 
@@ -248,6 +363,10 @@ impl Backend {
             Pipeline::Gles(gpu) => ImportDma::import_dmabuf(&mut gpu.renderer, dmabuf, None)
                 .map(|_texture| ())
                 .map_err(|error| error.to_string()),
+            #[cfg(feature = "gpu-scanout")]
+            Pipeline::Scanout(gpu) => ImportDma::import_dmabuf(&mut gpu.renderer, dmabuf, None)
+                .map(|_texture| ())
+                .map_err(|error| error.to_string()),
         }
     }
 
@@ -260,6 +379,9 @@ impl Backend {
             Pipeline::Pixman(cpu) => Renderer::cleanup_texture_cache(&mut cpu.renderer)
                 .map_err(|error| error.to_string()),
             Pipeline::Gles(gpu) => Renderer::cleanup_texture_cache(&mut gpu.renderer)
+                .map_err(|error| error.to_string()),
+            #[cfg(feature = "gpu-scanout")]
+            Pipeline::Scanout(gpu) => Renderer::cleanup_texture_cache(&mut gpu.renderer)
                 .map_err(|error| error.to_string()),
         }
     }
@@ -430,7 +552,98 @@ pub(super) fn draw_frame(
             let GlesBackend { renderer, buffer } = &mut **gpu;
             draw_frame_with(state, renderer, buffer, damage, *size, output, locked)
         }
+        // A separate body, not a third `draw_frame_with` arm: this tier has
+        // no read-back, no presenter hand-off and no use for `damage` at all
+        // (`DrmCompositor` owns its own `OutputDamageTracker`), so sharing
+        // one function would mean branching inside it on which half of it
+        // applies.
+        #[cfg(feature = "gpu-scanout")]
+        Pipeline::Scanout(gpu) => draw_frame_scanout(state, gpu, *size, output, locked),
     }
+}
+
+/// [`draw_frame`]'s body for the GPU scanout tier.
+///
+/// The shape the other tiers have -- bind a framebuffer, render into it, read
+/// it back, hand the bytes to a presenter -- collapses to one call here:
+/// `DrmCompositor::render_frame` binds the swapchain slot itself and
+/// `queue_frame` puts it on the CRTC. What is left to do around it is exactly
+/// what the other body does *outside* its own render call: build the frame
+/// context, gather the elements, pick the clear colour, and report what
+/// happened.
+///
+/// `damage` is deliberately not a parameter. `Backend`'s own
+/// `OutputDamageTracker` is superseded on this tier, not merely unused: the
+/// compositor tracks damage against its own swapchain's buffer ages, which is
+/// the only tracking that can be right when the buffer a frame lands in is
+/// chosen by the swapchain.
+#[cfg(feature = "gpu-scanout")]
+fn draw_frame_scanout(
+    state: &mut State,
+    gpu: &mut ScanoutBackend,
+    size: (i32, i32),
+    output: &Output,
+    locked: bool,
+) -> FrameOutcome {
+    let mut outcome = FrameOutcome::default();
+    let frame = FrameContext {
+        size,
+        scale: output.current_scale().fractional_scale(),
+        geometry: state.space.output_geometry(output),
+        locked,
+    };
+    // Same rule as `draw_frame_with`: no window and no ring is laid out while
+    // locked, because no frame can show it.
+    let ring_elements = if locked {
+        Vec::new()
+    } else {
+        let arrangement = state.world.arrange();
+        state
+            .decorations
+            .elements(&arrangement, &state.appearance, frame.bounds(), frame.scale)
+    };
+    let clear_color: Color32F = if locked {
+        state.lock_clear_color()
+    } else {
+        state.appearance.background_color.into()
+    };
+    let scanout::ScanoutBackend { renderer, captures } = gpu;
+    let (elements, cursor_surface) = state.gather_elements(renderer, output, &frame, ring_elements);
+    outcome.cursor_surface = cursor_surface;
+
+    let (drawn, retry) = {
+        // Unreachable in practice -- this pipeline only exists on a `--tty`
+        // session -- but written as a fallthrough rather than an `expect`,
+        // because a panic on the frame path would take every client's
+        // unsaved state with it. The default `FrameOutcome` says "nothing
+        // happened", which confirms no lock and stamps no feedback.
+        let Some(presenter) = state.tty.as_mut().and_then(Tty::scanout_mut) else {
+            tracing::warn!("the scanout pipeline has no drm compositor to present to");
+            return outcome;
+        };
+        // Before the render, not after: the swapchain may have been rebuilt
+        // since the last frame (a mode change, a reactivation), which frees
+        // every slot the capture pool exported a dma-buf from.
+        if presenter.take_slots_dropped() {
+            captures.forget_slots();
+        }
+        let drawn = presenter.render_and_queue(renderer, &elements, clear_color, |buffer| {
+            captures.note_frame(buffer);
+        });
+        (drawn, presenter.take_retry_render())
+    };
+
+    outcome.drew_a_frame = drawn.drew;
+    outcome.blank_seq = drawn.flip;
+    outcome.retry_render = retry;
+    // Exactly what `draw_frame_with` counts: whether the pixels moved. A
+    // render that produced no damage left the previous frame on screen, and
+    // counting it would make every capture session copy the same pixels
+    // again (see `State::frame_serial`).
+    if drawn.damaged {
+        state.frame_serial = state.frame_serial.wrapping_add(1);
+    }
+    outcome
 }
 
 /// [`draw_frame`]'s body, over any renderer that can import client buffers,
