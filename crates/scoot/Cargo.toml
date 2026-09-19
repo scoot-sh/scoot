@@ -6,6 +6,27 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
+# `gpu-scanout` compiles the `--tty` GPU scanout tier (`DrmCompositor` over a
+# GBM swapchain -- see `compositor/tty/`), and is **off by default on
+# purpose**.
+#
+# Unlike `renderer_gl`, which reaches libEGL/libGLESv2 through `dlopen` and so
+# costs a GPU-free machine nothing, Smithay's `backend_gbm` is a real
+# *link-time* dependency on libgbm: with it enabled the produced binary
+# carries `libgbm.so.1` in its `DT_NEEDED` list and will not start at all
+# where that library is absent. GPU-free operation on webtop/no-GPU boxes is a
+# fixed project decision (see `CLAUDE.md`), so the default build must not link
+# it -- `cargo build` keeps producing a binary that runs anywhere, and a
+# distribution targeting real hardware opts in with
+# `--features gpu-scanout`.
+#
+# Off by default does not mean unexercised: the standard verification set is
+# run twice, once per feature flavour, and `ldd` on both binaries is the proof
+# that the default one really is free of libgbm.
+[features]
+default = []
+gpu-scanout = ["smithay/backend_gbm"]
+
 [dependencies]
 scoot-core.workspace = true
 scoot-ipc = { workspace = true, features = ["core"] }
@@ -104,8 +125,12 @@ rev = "0ff00983b6007257a7a161a4fe8b14a778e2ac8f"
 default-features = false
 # backend_drm/backend_libinput/backend_udev/backend_session_libseat are for
 # --tty: real DRM/KMS scanout, libinput device handling, and VT/session
-# management via seatd. Deliberately not backend_gbm -- see tty/buffers.rs's
-# module doc for why this backend uses dumb buffers, not GBM, in this rev.
+# management via seatd. backend_gbm is deliberately *not* here -- it is
+# reached only through this crate's own `gpu-scanout` feature (see the
+# `[features]` table above), because it is a link-time libgbm dependency and
+# the default build must keep running on a machine with no GPU stack at all.
+# Without that feature the `--tty` backend presents through DRM dumb buffers;
+# see `tty/dumb.rs`'s module doc.
 #
 # renderer_gl is the optional `--renderer gles` pipeline
 # (compositor/render/gles.rs). It is *not* behind a Cargo feature of our own
@@ -114,8 +139,6 @@ default-features = false
 # dependency and a build of this crate still runs on a machine with no GL
 # stack installed at all (`--renderer gles` is what fails there, at startup,
 # with a message -- not the build, and not the default pixman path).
-# backend_gbm, which stage 3's DRM scanout needs, *is* a real link-time
-# dependency on libgbm and will need that gate; this one does not.
 features = [
     "desktop",
     "wayland_frontend",

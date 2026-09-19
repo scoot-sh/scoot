@@ -7,9 +7,17 @@
 //! `render::draw_frame_with`'s call to `Tty::present`, right alongside its
 //! call to `nested::Host::present`), just a different transport --
 //! dumb-buffer scanout via DRM instead of `wl_shm` buffers attached to a
-//! host surface. Session (libseat) + DRM device/surface + calloop wiring
-//! live here; the two dumb buffers themselves live in `buffers.rs`, same
-//! split as `nested.rs`/`nested/buffers.rs`.
+//! host surface. Session (libseat) + DRM device + calloop wiring live here;
+//! the surface, the two dumb buffers and the flip bookkeeping live in
+//! `dumb.rs` (and `buffers.rs`/`flip_tracker.rs`/`present_retry.rs` under
+//! it), the same split as `nested.rs`/`nested/buffers.rs`.
+//!
+//! **What belongs here and what belongs in `dumb.rs`**: this module owns what
+//! is true of the *session* no matter how it presents -- libseat, the DRM
+//! device, which connector and mode is driven, whether DRM master is held,
+//! whether the session is paused. `dumb.rs` owns what is true only of
+//! dumb-buffer scanout: the surface it flips, the buffer slots it copies
+//! into, the in-flight flip's number and the refused-commit retry counter.
 //!
 //! `--tty` is the root compositor on the machine: unlike `--nested`, there
 //! is no host compositor's `WAYLAND_DISPLAY` to race against, so `init`
@@ -27,6 +35,7 @@
 //! that module's doc for what a hotplug does and deliberately does not do.
 
 mod buffers;
+mod dumb;
 mod flip_tracker;
 mod gpu;
 mod hotplug;
@@ -39,7 +48,7 @@ use std::path::Path;
 
 use scoot_ipc::PointerButton;
 use smithay::backend::drm::{
-    DrmDevice, DrmDeviceFd, DrmDeviceNotifier, DrmEvent, DrmEventMetadata, PlaneConfig, PlaneState,
+    DrmDevice, DrmDeviceFd, DrmDeviceNotifier, DrmEvent, DrmEventMetadata,
 };
 use smithay::backend::input::{
     AbsolutePositionEvent, Axis, ButtonState, Event, InputEvent, KeyboardKeyEvent,
@@ -54,15 +63,14 @@ use smithay::backend::udev::UdevBackend;
 use smithay::reexports::calloop::LoopHandle;
 use smithay::reexports::drm::control::{Mode, connector, crtc};
 use smithay::reexports::input::Libinput;
-use smithay::utils::{Buffer as BufferSpace, DeviceFd, Physical, Rectangle, Size, Transform};
+use smithay::utils::{DeviceFd, Physical, Rectangle};
 
 use smithay::input::tablet::TabletDescriptor;
 use smithay::input::tablet::tool::AxisFrame;
 use smithay::reexports::input::DeviceCapability as LibinputCapability;
 
 use self::buffers::BufferPool;
-use self::flip_tracker::FlipTracker;
-use self::present_retry::PresentRetries;
+use self::dumb::DumbPresenter;
 use super::State;
 use super::keybindings::Keybindings;
 use super::output_scale::logical_size;
@@ -83,7 +91,10 @@ pub struct Tty {
     /// since it only logs a warning on error (see its doc).
     session: LibSeatSession,
     drm: DrmDevice,
-    surface: smithay::backend::drm::DrmSurface,
+    /// How this backend gets a rendered frame onto the CRTC: the DRM
+    /// surface, its scanout buffers and the flip bookkeeping that pairs with
+    /// them. See `dumb.rs` for what lives there rather than here.
+    presenter: DumbPresenter,
     /// Which udev device this backend is driving, so a `change` event for
     /// one of the seat's *other* DRM devices can be told from one for ours.
     /// `DrmDevice::device_id`'s own value, which is the `st_rdev` of the
@@ -95,9 +106,9 @@ pub struct Tty {
     /// (`gpu::find_connector_and_mode`) and a hotplug can move it
     /// (`hotplug.rs`), which is the only other write site.
     ///
-    /// The `DrmSurface` has its own `pending_connectors()`, and the two
-    /// agree by construction -- every write here happens right after the
-    /// matching `set_connectors` succeeded. This field exists because the
+    /// The presenter's `DrmSurface` has its own `pending_connectors()`, and
+    /// the two agree by construction -- every write here happens right after
+    /// the matching `set_connectors` succeeded. This field exists because the
     /// surface's answer is a set (Smithay supports several connectors per
     /// CRTC; this backend deliberately drives exactly one), and re-deriving
     /// "the connector" from a set would mean inventing a rule for a case
@@ -121,7 +132,6 @@ pub struct Tty {
     /// modeset -- it does, because the CRTC spent the gap driving a
     /// connector that had physically gone away.
     nothing_connected: bool,
-    buffers: BufferPool,
     /// Kept only to `suspend()`/`resume()` in step with session pause/
     /// activate -- `LibinputInputBackend` owns its own clone of the same
     /// underlying context (see this module's `init`) to actually dispatch
@@ -167,48 +177,6 @@ pub struct Tty {
     /// so reaching this initializer at all already proves the session is
     /// active.
     session_paused: bool,
-    /// Set right after a successful `commit`/`page_flip`, cleared on the
-    /// matching `VBlank`. `present()` skips (setting `present_skipped`
-    /// instead of blocking) rather than flip again while this is set --
-    /// flipping while a previous flip is still pending fails with EBUSY.
-    ///
-    /// This is the presenter's half of the session-lock vblank wait (see
-    /// `session_lock.rs`): the number identifies *which* flip is out, so a
-    /// completion can be matched against the flip that actually carries the
-    /// blanked frame rather than against merely "a flip finished". One field
-    /// for both facts -- `is_busy()` is "a flip is in flight" -- so the two
-    /// can never disagree.
-    flips: FlipTracker,
-    /// `true` for the very first frame and again right after a session
-    /// reactivation, when the CRTC's state is unknown and only a full
-    /// modeset (`commit`), not a `page_flip`, is safe to issue.
-    needs_modeset: bool,
-    /// Which buffer slot is currently scanned out (or mid-flip to), so the
-    /// next flip knows which slot becomes free once *this* flip's `VBlank`
-    /// confirms the previous one is off screen.
-    showing: Option<usize>,
-    /// The slot that will become free on the next `VBlank`, i.e. whatever
-    /// `showing` held immediately before the in-flight flip was issued.
-    pending_free: Option<usize>,
-    /// Mirrors `nested::Host`'s `present_skipped`: set when `present()` had
-    /// a frame ready but couldn't flip (a flip already in flight, or no
-    /// buffer slot free). Checked on the next `VBlank` so a skipped frame
-    /// doesn't leave the screen stale until some unrelated redraw happens
-    /// to trigger another one.
-    present_skipped: bool,
-    /// Whether the last `present()` was a refused commit/page-flip owed a
-    /// timer-driven retry. Two fields rather than one shared with
-    /// `present_skipped` deliberately: a skip owned by a completion event
-    /// (a `VBlank` is owed) and a refusal owned by the frame timer (nothing
-    /// is in flight, so no event will ever arrive) are different facts with
-    /// different consumers, and sharing a flag between them would be the
-    /// fact-in-two-places split this project treats as its own bug class.
-    /// Set only by the commit-failure arm, taken only by the render tail
-    /// (see `take_retry_render`).
-    retry_armed: bool,
-    /// How many consecutive flips the kernel has refused -- bounds the
-    /// timer-driven retries above (see `present_retry.rs`).
-    retries: PresentRetries,
 }
 
 /// Sets up the session, DRM device and surface, and libinput, and extends
@@ -273,24 +241,16 @@ pub fn init(
     state.tty = Some(Tty {
         session,
         drm,
-        surface,
+        presenter: DumbPresenter::new(surface, buffers),
         device_id,
         connector,
         requested_mode: mode,
         nothing_connected: false,
-        buffers,
         libinput: libinput_context,
         width,
         height,
         active: true,
         session_paused: false,
-        flips: FlipTracker::new(),
-        needs_modeset: true,
-        showing: None,
-        pending_free: None,
-        present_skipped: false,
-        retry_armed: false,
-        retries: PresentRetries::new(),
     });
 
     // The gamma protocol's `gamma_size` is per-CRTC hardware state, and the
@@ -530,7 +490,7 @@ impl Tty {
         use smithay::reexports::drm::control::Device as ControlDevice;
 
         const MAX_SANE_GAMMA_SIZE: u32 = 4096;
-        match self.drm.get_crtc(self.surface.crtc()) {
+        match self.drm.get_crtc(self.presenter.crtc()) {
             Ok(info) => {
                 let size = info.gamma_length();
                 if (2..=MAX_SANE_GAMMA_SIZE).contains(&size) {
@@ -573,7 +533,7 @@ impl Tty {
     ) -> std::io::Result<()> {
         use smithay::reexports::drm::control::Device as ControlDevice;
 
-        self.drm.set_gamma(self.surface.crtc(), red, green, blue)
+        self.drm.set_gamma(self.presenter.crtc(), red, green, blue)
     }
 
     /// Whether this process currently holds DRM master -- the same question
@@ -592,7 +552,7 @@ impl Tty {
     /// A pure peek: pair every call with [`advance_generation`](Self::advance_generation)
     /// once the render it was used for has actually happened.
     pub fn next_buffer_age(&self) -> usize {
-        self.buffers.next_age()
+        self.presenter.next_buffer_age()
     }
 
     /// Must be called exactly once per `render_output` call this backend's
@@ -601,7 +561,7 @@ impl Tty {
     /// into `present` itself (it must run even when `present` isn't called
     /// at all, i.e. when nothing was damaged this frame).
     pub fn advance_generation(&mut self) {
-        self.buffers.advance_generation();
+        self.presenter.advance_generation();
     }
 
     /// Copies an already-rendered frame's `region` into a free dumb buffer
@@ -677,114 +637,7 @@ impl Tty {
         if frame_size != (self.width, self.height) {
             return None;
         }
-        if self.flips.is_busy() {
-            self.present_skipped = true;
-            return None;
-        }
-        let Some((index, fb)) = self.buffers.write_region(pixels, region) else {
-            // Unlike the in-flight skip above -- an ordinary, frequent,
-            // harmless throttle; exactly one slot is always free whenever a
-            // flip isn't in flight -- reaching here means neither slot was
-            // free even though no flip is pending, which should never
-            // happen in normal operation. It means either a buffer-freeing
-            // bug leaked a slot (this is the failure mode a prior review
-            // flagged as running silently forever once both slots are
-            // stuck busy) or `write_region` failed to map a dumb buffer
-            // (see its own log line in buffers.rs). warn!, not debug!: this is a
-            // bug signal, not routine throttling, so it's fine for it to
-            // repeat on every subsequent present() for as long as it lasts.
-            tracing::warn!(
-                "drm: present skipped, no free buffer slot (both slots busy \
-                 with no flip pending)"
-            );
-            self.present_skipped = true;
-            return None;
-        };
-        self.present_skipped = false;
-
-        let src_size: Size<i32, BufferSpace> = frame_size.into();
-        let dst_size: Size<i32, Physical> = frame_size.into();
-        let plane_state = PlaneState {
-            handle: self.surface.plane(),
-            config: Some(PlaneConfig {
-                src: Rectangle::from_size(src_size).to_f64(),
-                dst: Rectangle::from_size(dst_size),
-                transform: Transform::Normal,
-                alpha: 1.0,
-                damage_clips: None,
-                fb,
-                fence: None,
-            }),
-        };
-
-        let result = if self.needs_modeset {
-            // info!, not debug!: a modeset is rare (first frame, or right
-            // after a session reactivation) and is exactly the event
-            // pitfall #2's verification depends on being able to grep for
-            // at the default log level -- see the commit introducing this
-            // backend.
-            tracing::info!("drm: modeset (full commit)");
-            self.surface.commit([plane_state], true)
-        } else {
-            // debug!, not info!: an ordinary page flip happens on every
-            // redraw (a keystroke, a cursor blink) -- once cursor
-            // rendering exists this could be well over 100 times a second,
-            // and logging that at info! would drown out everything else at
-            // the default level for no benefit once the modeset/page-flip
-            // distinction above has already been proven to work.
-            tracing::debug!("drm: page flip");
-            self.surface.page_flip([plane_state], true)
-        };
-        match result {
-            Ok(()) => {
-                self.needs_modeset = false;
-                let seq = self.flips.issued();
-                // Whatever was showing before this flip becomes free once
-                // this flip's VBlank confirms it's off screen.
-                self.pending_free = self.showing.replace(index);
-                self.retries.succeeded();
-                Some(seq)
-            }
-            Err(error) => {
-                tracing::warn!(%error, "drm commit/page flip failed");
-                // Undo the write above -- this slot was never actually
-                // sent to the CRTC, so it must not stay marked busy -- and
-                // unvouch its age: the pixels reached the slot but never
-                // scanout, and the retry must fully redraw rather than
-                // trust the fresh `last_written` the copy stored (see
-                // `BufferPool::note_write_failed`).
-                self.buffers.note_write_failed(index);
-                // This frame was rendered and never shown, so the screen is
-                // stale by exactly the amount that was damaged -- but unlike
-                // the two skips above, no completion event can retry it:
-                // nothing is in flight, so no `VBlank` will ever arrive to
-                // consume `present_skipped`. Arm a timer-driven retry
-                // directly instead (bounded: a device that keeps refusing
-                // must not pin the loop at full redraws).
-                //
-                // Newly reachable rather than newly wrong: `hotplug.rs`'s
-                // `invalidate_scanout` discards the in-flight flip while one
-                // really may still be out (see its doc for why that
-                // is the safer of the two mistakes), which can put one
-                // EBUSY-rejected flip between the hotplug and the first
-                // frame at the new mode. Self-limiting: the retry either
-                // issues (resetting the streak) or exhausts its bound and
-                // goes quiet until genuine damage arrives.
-                match self.retries.failed() {
-                    present_retry::Retry::Arm => {
-                        self.retry_armed = true;
-                    }
-                    present_retry::Retry::GiveUp => {
-                        tracing::warn!(
-                            "drm: commit/page flip keeps failing; leaving scanout \
-                             as-is until new damage arrives"
-                        );
-                    }
-                    present_retry::Retry::Quiet => {}
-                }
-                None
-            }
-        }
+        self.presenter.present(pixels, region, frame_size)
     }
 
     /// Takes whether the last `present()` was a refused flip owed a
@@ -792,7 +645,7 @@ impl Tty {
     /// the render tail, which re-arms the frame timer for it -- the only
     /// consumer, since a refused flip has no completion event coming.
     pub fn take_retry_render(&mut self) -> bool {
-        std::mem::take(&mut self.retry_armed)
+        self.presenter.take_retry_render()
     }
 
     /// Settles the in-flight flip for a `VBlank` on this surface's own crtc
@@ -807,34 +660,10 @@ impl Tty {
     /// `session_lock.rs`): only the completion of the flip carrying the
     /// blanked frame confirms the lock.
     fn on_vblank(&mut self, crtc: crtc::Handle) -> (bool, Option<u64>) {
-        if crtc != self.surface.crtc() {
+        if crtc != self.presenter.crtc() {
             return (false, None);
         }
-        self.flip_settled()
-    }
-
-    /// The shared tail of `on_vblank` and `drm_event`'s `DrmEvent::Error`
-    /// arm: whatever flip was in flight is done -- one way (confirmed by a
-    /// `VBlank`) or another (its completion is now untrackable, reported as
-    /// an `Error` instead) -- so the buffer slot it was about to free
-    /// (`pending_free`) is safe, and necessary, to free either way; nothing
-    /// else in this module will ever free that slot on our behalf. Pulled
-    /// out into one method specifically so the two call sites can't drift
-    /// the way they did before (`on_vblank` freed `pending_free`, the
-    /// `Error` arm didn't, and the CRTC-mismatch check in `on_vblank` has no
-    /// equivalent need here -- a `DrmEvent::Error` isn't scoped to a crtc).
-    /// Returns whether a render should be re-triggered because a previous
-    /// `present()` had been skipped, plus the finished flip's number for the
-    /// session-lock wait. The `Error` arm's caller deliberately drops the
-    /// number: an error means the completion is untrackable, so it must not
-    /// confirm a lock -- the fallback deadline owns that wait instead (see
-    /// `session_lock.rs`).
-    fn flip_settled(&mut self) -> (bool, Option<u64>) {
-        let completed = self.flips.settled();
-        if let Some(index) = self.pending_free.take() {
-            self.buffers.mark_free(index);
-        }
-        (std::mem::take(&mut self.present_skipped), completed)
+        self.presenter.flip_settled()
     }
 
     /// Re-evaluates the CRTC's state and forces a full modeset on the next
@@ -875,7 +704,7 @@ impl Tty {
         // something that needs gating, and if the device does come back on
         // some later reactivation there's no reason for stale surface state
         // to have gone unreset in the meantime.
-        if let Err(error) = self.surface.reset_state() {
+        if let Err(error) = self.presenter.reset_state() {
             tracing::warn!(%error, "could not reset drm surface state after reactivation");
         }
         self.active = drm_active;
@@ -890,8 +719,8 @@ impl Tty {
         // present must be a full redraw rather than trusting a stale age.
         // Shared with the hotplug path, which invalidates exactly the same
         // six things for exactly the same reason -- see
-        // `hotplug.rs`'s `invalidate_scanout`.
-        self.invalidate_scanout();
+        // `DumbPresenter::invalidate_scanout`.
+        self.presenter.invalidate_scanout();
         drm_active
     }
 }
@@ -906,7 +735,7 @@ impl Tty {
 /// `Arc<DrmDeviceInternal>`, which `DrmDevice::new` clones into both the
 /// device and the `DrmDeviceNotifier`, and `create_surface` clones once
 /// more into the surface. At steady state the count is three (`Tty.drm`,
-/// `Tty.surface`, and the notifier registered with the event loop in
+/// `Tty.presenter`'s surface, and the notifier registered with the event loop in
 /// `init`), so the restore runs when the *last* clone drops -- the
 /// notifier's, during event-loop teardown -- which is *after* the libseat
 /// notifier living in that same loop has dropped and closed the seatd
@@ -957,7 +786,7 @@ fn session_event(event: SessionEvent, _: &mut (), state: &mut State) {
                 // to match a lock wait recorded after it (see
                 // `flip_tracker.rs`). The wait itself stays, owned by the
                 // fallback deadline until the switch back re-renders.
-                tty.flips.discard();
+                tty.presenter.discard_flip();
                 hotplug::Reconfigured::Nothing
             }
             SessionEvent::ActivateSession => {
@@ -1027,7 +856,7 @@ fn drm_event(event: DrmEvent, _: &mut Option<DrmEventMetadata>, state: &mut Stat
                 // an untrackable completion must not confirm a session lock
                 // (see `flip_settled` and `session_lock.rs`) -- the fallback
                 // deadline owns that wait.
-                let (needs_render, _) = tty.flip_settled();
+                let (needs_render, _) = tty.presenter.flip_settled();
                 (needs_render, None)
             }
         }
