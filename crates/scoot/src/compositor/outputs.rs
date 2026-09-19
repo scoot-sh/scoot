@@ -45,6 +45,9 @@
 use scoot_core::OutputId;
 use smithay::output::Output;
 
+#[cfg(test)]
+mod tests;
+
 /// The id of the first output created. Outputs are numbered from one so that
 /// a single-output session reports the same `OutputId(1)` over IPC and to the
 /// core that it always has.
@@ -127,9 +130,12 @@ impl Outputs {
     /// - `input.rs`'s pointer clamp needs the union of the outputs, or the
     ///   one the pointer is on.
     ///
-    /// The one site that already resolves an output *per surface* rather than
-    /// through here is `layer_shell.rs`'s `new_layer_surface`, which honours
-    /// the client's requested `wl_output`.
+    /// The two sites that already resolve an output *per surface* rather than
+    /// through here are `layer_shell.rs`'s `new_layer_surface` (which honours
+    /// the client's requested `wl_output`) and [`State::output_of_layer`],
+    /// which finds the map a layer surface is actually in.
+    ///
+    /// [`State::output_of_layer`]: super::State::output_of_layer
     pub(crate) fn primary(&self) -> Option<&Output> {
         self.entries.first().map(|entry| &entry.output)
     }
