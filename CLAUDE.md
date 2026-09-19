@@ -176,9 +176,10 @@ the script's header).
 **nextest is the runner to lean on** (user, 2026-09-19). It is the stricter
 of the two and it guards the more important property — see below. `cargo
 test -p scoot` is no longer a required per-change step; it stays the
-fallback for a machine without nextest, and it is what CI should run once
-CI exists (`docs/backlog/testing/ci-test-run.md`), so the coverage nextest
-structurally cannot provide is not simply dropped.
+fallback for a machine without nextest, and it is what CI runs
+(`.github/workflows/ci.yml`, which says in as many words that it is not a
+duplicate of the nextest step) so the coverage nextest structurally cannot
+provide is not simply dropped.
 
 Why nextest is the one to keep: it runs each test in its own process, which
 is how a test that only passed because it shared

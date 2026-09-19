@@ -19,6 +19,26 @@ that this work has to revisit. Filed here because that is where it was
 asked for; promoting it to a numbered milestone in `ROADMAP.md` when it is
 picked up would be reasonable.
 
+## The one line that defines the problem
+
+`State` holds `pub output: Option<Output>` (`state.rs:206`) — *singular*.
+Not a collection that happens to have one entry: one slot. And `OUTPUT_ID`
+is a `const`, not a lookup. So there is no "headless multi-monitor mode" to
+turn on for testing, on any backend, because there is nowhere to put a
+second output.
+
+**That makes the first step obvious, and it is not hardware.** Turn
+`State.output` into a collection, and a headless `--outputs 2` becomes
+nearly free — at which point almost everything below is testable on the dev
+VM with no second monitor anywhere: layer-shell zones per output, the
+session-lock rule that `locked` must wait for *every* output's blanked
+frame, `ext-workspace` groups per output, focus rules across outputs. The
+`--tty` multi-CRTC half stays hardware-bound, but it stops being the
+blocker for the rest.
+
+Do that first. Every other piece of this item is cheaper and safer to build
+against two virtual outputs than against one real monitor and a guess.
+
 ## The scope is already written down
 
 `crates/scoot/src/compositor/headless.rs`'s doc on `OUTPUT_ID` enumerates
