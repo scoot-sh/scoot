@@ -143,6 +143,7 @@ refusing: `[tty] gpu` naming a device that will not open, and
 | Lock the screen | `ext-session-lock-v1`, compositor-enforced | [protocols.md](docs/protocols.md#screen-locking-ext-session-lock-v1) |
 | Auto-lock or dim on idle | `ext-idle-notify-v1` + `idle-inhibit-v1` (`swayidle`) | [protocols.md](docs/protocols.md#idle-detection) |
 | Screenshot or screen-share | `ext-image-copy-capture-v1` (`grim`), plus `scoot msg screenshot` | [protocols.md](docs/protocols.md#screen-capture-ext-image-copy-capture-v1) |
+| Run a GPU-rendering client with no GPU on the compositor | `zwp_linux_dmabuf_v1`, formats taken from whichever renderer is active | [protocols.md](docs/protocols.md#screen-capture-ext-image-copy-capture-v1) |
 | Clipboard manager, middle-click paste | `wlr-`/`ext-data-control`, `primary-selection-v1` | [protocols.md](docs/protocols.md#clipboard-and-primary-selection) |
 | Night light | `wlr-gamma-control-v1` (`wlsunset`, `gammastep`) | [protocols.md](docs/protocols.md#night-light-wlr-gamma-control-v1) |
 | A HiDPI display | `[output] scale`, integer and fractional | [protocols.md](docs/protocols.md#output-scaling) |

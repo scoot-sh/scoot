@@ -126,13 +126,22 @@ pub fn init_named(
     // `State::resize_output` rebuilds the backend later and has to build the
     // same one. `scanout` is the already-built GPU scanout renderer on the
     // one path that has one (see `ScanoutHandoff`).
-    state.backend = Some(Backend::new(
-        &output,
-        width,
-        height,
-        state.renderer,
-        scanout,
-    )?);
+    let backend = Backend::new(&output, width, height, state.renderer, scanout)?;
+    // The one place the dmabuf advertisement can be made, and the reason it is
+    // here rather than in `State::new` with every other global: the tranche is
+    // derived from what *this* renderer can import (see `dmabuf.rs`), and this
+    // is the first instant a renderer exists. Nothing can observe the
+    // difference -- the wayland listening socket is a calloop source, so no
+    // connection is accepted, no registry served and no global announced until
+    // `event_loop.run`, which is several steps after this on every path
+    // (`compositor::run`) and after the client is even spawned in every test
+    // harness.
+    super::dmabuf::advertise(
+        &state.display_handle,
+        &mut state.screencopy.dmabuf,
+        &backend,
+    );
+    state.backend = Some(backend);
     // The GPU scanout tier's `DrmCompositor` was built before this output
     // existed (`tty::init` runs first, because `--tty` is where the size
     // comes from), so it is still tracking a static copy of the mode. Point

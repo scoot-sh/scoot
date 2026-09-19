@@ -166,6 +166,41 @@ fn build(device: EGLDevice, width: i32, height: i32) -> Result<GlesBackend, Box<
     Ok(GlesBackend { renderer, buffer })
 }
 
+/// The DRM **render node** `renderer`'s EGL display is on, or `None` when EGL
+/// cannot name one.
+///
+/// What `zwp_linux_dmabuf_v1`'s `main_device` wants (see `dmabuf.rs`): the
+/// device a client should allocate the buffers this renderer will import
+/// against. Asked of the renderer's own display rather than guessed from a
+/// path, because the guess is wrong exactly where it matters -- a machine with
+/// two GPUs has more than one render node, and a client that allocates on the
+/// other one hands over a dma-buf this renderer cannot import, which
+/// `create_immed` turns into a disconnect.
+///
+/// `None` has three honest causes and no error among them: Mesa's pure
+/// software device has no DRM node at all, a display may not carry
+/// `EGL_EXT_device_query`, and a device may carry neither
+/// `EGL_EXT_device_drm_render_node` nor `EGL_EXT_device_drm`.
+/// [`try_get_render_node`](EGLDevice::try_get_render_node) already folds the
+/// second DRM extension into the first and converts a primary node to its
+/// render node, so this is one call rather than the ladder `describe` below
+/// still needs for a log line. The caller falls back to the path ladder.
+pub(super) fn render_node(renderer: &GlesRenderer) -> Option<libc::dev_t> {
+    let display = renderer.egl_context().display();
+    let device = EGLDevice::device_for_display(display)
+        .inspect_err(|error| {
+            tracing::debug!(%error, "this EGL display cannot name its device");
+        })
+        .ok()?;
+    let node = device
+        .try_get_render_node()
+        .inspect_err(|error| {
+            tracing::debug!(%error, "this EGL device cannot name a DRM render node");
+        })
+        .ok()??;
+    Some(node.dev_id())
+}
+
 /// A device's DRM node path for the log, or a stand-in when it has none --
 /// which is exactly what Mesa's pure software device is: no node, no card.
 ///

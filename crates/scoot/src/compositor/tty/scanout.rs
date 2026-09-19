@@ -107,10 +107,13 @@ pub(crate) struct ScanoutPresenter {
     /// `DrmCompositor::new` intersects them with the plane's. Kept for the
     /// same reason as `gbm`.
     ///
-    /// This is *not* stage 4's renderer-derived client format advertisement
-    /// and must not be read as pulling it forward: it is a constructor
-    /// argument `DrmCompositor::new` requires in order to pick a swapchain
-    /// format at all, and it never reaches `zwp_linux_dmabuf_v1`.
+    /// Not the same set as the one `zwp_linux_dmabuf_v1` advertises to
+    /// clients, and it never reaches it: these are the formats the renderer
+    /// can *render into* for scanout (`dmabuf_render_formats`), which
+    /// `DrmCompositor::new` requires in order to pick a swapchain format at
+    /// all. What a client is offered is what the renderer can *import*
+    /// (`dmabuf_texture_formats`, narrowed further still), derived in
+    /// `dmabuf.rs`.
     renderer_formats: Vec<DrmFormat>,
     /// Where the compositor reads the mode, scale and transform from. Kept
     /// so a CRTC switch can rebuild the compositor against the same source

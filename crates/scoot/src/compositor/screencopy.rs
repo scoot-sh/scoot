@@ -164,14 +164,26 @@
 //! a capture session never offers to write into a client's dma-buf.
 //!
 //! That is a statement about this module, not about the compositor. scoot
-//! does import the dma-bufs a client hands it, straight into the pixman
-//! renderer (see [`dmabuf`](super::dmabuf)): a GL client's window composites
-//! here like any other. Capture is the other direction, and it stays shm
-//! because here scoot is the one *writing* -- filling a client's dma-buf
-//! means matching its stride, modifier and sync rules on a path where
+//! does import the dma-bufs a client hands it, into whichever renderer the
+//! session is running (see [`dmabuf`](super::dmabuf)): a GL client's window
+//! composites here like any other. Capture is the other direction, and it
+//! stays shm because here scoot is the one *writing* -- filling a client's
+//! dma-buf means matching its stride, modifier and sync rules on a path where
 //! `wl_shm` already works everywhere and costs a CPU renderer nothing extra.
-//! If some client ever measurably needs a dma-buf capture, that is its own
-//! item rather than an oversight here.
+//!
+//! **Still `None` after the advertisement became renderer-derived**, and
+//! deliberately, because the two are less related than they look. Knowing
+//! what the renderer can *import* says nothing about this: a capture would
+//! `Bind` the client's buffer as a **render target** and blit into it, which
+//! is a different capability (`dmabuf_render_formats`), a code path that does
+//! not exist here at all, and -- under pixman -- the one that trips the
+//! bound-target cache eviction `dmabuf.rs`'s `schedule_cache_drain` warns
+//! about, which would have to be fixed in the same change.
+//! `DmabufConstraints` also requires a `DrmNode`, which the GPU-less
+//! containers scoot targets do not have, so the honest answer there would be
+//! `None` regardless. If some client ever measurably needs a dma-buf capture,
+//! that is its own item -- with its own write path and its own before/after
+//! numbers -- rather than a line to flip here.
 //!
 //! `Xrgb8888` is offered first and `Argb8888` second. Both are the same four
 //! bytes in the same order in memory -- the compositor's own framebuffer is
@@ -208,7 +220,6 @@ use smithay::wayland::image_copy_capture::{
 use smithay::wayland::shm::with_buffer_contents_mut;
 
 use super::State;
-use super::dmabuf;
 use super::render::{Backend, CaptureStage};
 
 #[cfg(test)]
@@ -393,8 +404,12 @@ pub struct Screencopy {
     /// The advertisement itself lives in [`dmabuf`](super::dmabuf): this
     /// field is only where the state the ticket names keeps the delegate so
     /// [`DmabufHandler::dmabuf_state`](smithay::wayland::dmabuf::DmabufHandler::dmabuf_state)
-    /// has one field to return. Built once in [`Screencopy::new`], never
-    /// touched per frame, per bind or per hotplug event.
+    /// has one field to return. Created empty here and given its global by
+    /// `dmabuf::advertise` from `headless::init_named`, once the renderer
+    /// whose importable formats the advertisement is derived from exists --
+    /// never touched per frame, per bind or per hotplug event afterwards. A
+    /// state with no global is a complete, working value: that is also what a
+    /// session whose renderer can import nothing keeps.
     pub(super) dmabuf: DmabufState,
     /// One entry per live capture session, in creation order.
     ///
@@ -464,9 +479,9 @@ impl Capture {
 }
 
 impl Screencopy {
-    /// Creates the `ext_image_copy_capture_manager_v1`,
-    /// `ext_output_image_capture_source_manager_v1` and `zwp_linux_dmabuf_v1`
-    /// globals.
+    /// Creates the `ext_image_copy_capture_manager_v1` and
+    /// `ext_output_image_capture_source_manager_v1` globals, and the empty
+    /// dmabuf state `dmabuf::advertise` later hangs `zwp_linux_dmabuf_v1` on.
     ///
     /// No client filter, for the same reason the session-lock, data-control
     /// and input-method globals have none: scoot has no security-context
@@ -477,12 +492,13 @@ impl Screencopy {
     /// model the whole compositor already states, not an oversight about what
     /// the protocol can do. The dmabuf global extends that note rather than
     /// widening it: it hands out no pixels by itself, only format feedback,
-    /// and answers every import `failed` (see [`dmabuf`](super::dmabuf)).
+    /// and an import is a mapping of the client's *own* buffer (see
+    /// [`dmabuf`](super::dmabuf)).
     pub(super) fn new(dh: &DisplayHandle) -> Self {
         Self {
             output_sources: OutputCaptureSourceState::new::<State>(dh),
             capture: ImageCopyCaptureState::new::<State>(dh),
-            dmabuf: dmabuf::advertise(dh),
+            dmabuf: DmabufState::new(),
             sessions: Vec::new(),
             frames_per_client: HashMap::new(),
             clock: Clock::new(),
@@ -788,8 +804,9 @@ fn constraints(backend: &Backend) -> BufferConstraints {
     BufferConstraints {
         size: (width, height).into(),
         shm: FORMATS.to_vec(),
-        // No GPU, no dma-buf, no DRM render node to name. See this module's
-        // doc.
+        // Capture writes into the client's buffer, which is a `Bind` and a
+        // blit this module has no path for -- a different renderer capability
+        // from the import side, and its own item. See this module's doc.
         dma: None,
     }
 }

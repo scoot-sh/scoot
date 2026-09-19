@@ -512,6 +512,130 @@ exporter separately, so the allocator's `GbmDevice` would wrap the render
 node's fd and the exporter's the display node's, with no `MultiRenderer` and
 no speculative multi-GPU abstraction added here.
 
+## Stage 4: the dmabuf advertisement follows the renderer
+
+`DMABUF_FORMATS` was a hard-coded `Xrgb8888`/`Argb8888`/`LINEAR` pair, pinned
+by a test to what `PixmanRenderer` can import -- and advertised whichever
+renderer was active. This stage makes the tranche a *property of the renderer
+the session actually built*.
+
+### The ordering problem, and why the global moved
+
+`dmabuf::advertise` ran from `Screencopy::new`, inside `State::new`, **before
+any `Backend` exists**: there is no renderer there to ask. Three shapes were
+available and two lose.
+
+- **Reorder so the backend exists first inside `State::new`** -- not possible
+  without inverting a real dependency, rather than merely inconvenient.
+  `Backend::new` needs the `Output`, which needs the framebuffer size, which
+  under `--tty` comes out of `tty::init(&mut state, ..)` -- a function that
+  needs the `State` (its loop handle, its `renderer`, its `tty` field) to
+  exist and that *corrects* `State::renderer` on its way. Moving the backend
+  into `State::new` means moving libseat, DRM and udev setup in front of
+  `State`, which is a re-architecture, not a reorder.
+- **A throwaway renderer at `State::new`, purely to query formats** -- wasteful
+  (a second EGL display and GL context) and, worse, *wrong*: it would not
+  reliably be the same renderer. `GlesBackend::new` enumerates EGL devices and
+  prefers a non-software one; `ScanoutBackend::new` builds on the GBM node
+  `tty::init` picked. A probe that landed on a different display would
+  describe an EGL context nothing imports through, which is exactly the
+  "format table that described a *different* EGL context would be a promise
+  nothing keeps" argument `render/scanout.rs` already makes about its own
+  formats.
+- **Create the global later, once the backend is up** -- what landed.
+  `headless::init_named` calls `dmabuf::advertise` immediately after
+  `Backend::new`, and `Screencopy::new` keeps a bare `DmabufState` with no
+  global.
+
+The risk that shape carries is the one `dmabuf.rs:13-19` records -- this
+global gates quickshell's `ScreencopyView` readiness, so a client binding
+early must not miss it -- and **it does not apply, because no client can bind
+in the window that moved**. The wayland listening socket is a calloop source
+(`State::listen`), so no connection is accepted, no registry served and no
+global announced until `event_loop.run`. `compositor::run` reaches that
+several steps after `init_named` and after the session's own `--` command is
+spawned; every test harness is `State::new` -> `headless::init` -> spawn a
+client. A global created anywhere in that window was there from the client's
+first `wl_registry`.
+
+### What lands
+
+- **`dmabuf::tranche(can_import)`** -- `DMABUF_CANDIDATES` (still
+  `Xrgb8888`, `Argb8888`, `LINEAR`, still pinned to `screencopy`'s shm list)
+  filtered by `Backend::imports_dmabuf_format`, which is
+  `ImportDma::has_dmabuf_format` on whichever renderer the pipeline holds. A
+  predicate rather than a renderer, so the decision is unit-testable --
+  including the case no machine here can produce on demand, a renderer that
+  imports nothing.
+- **Narrowing, not replacing.** The renderer's own set is *not* advertised
+  wholesale: GLES on a real driver imports dozens of fourccs, many multi-plane
+  or YUV, which no other pixel path here speaks. The direction is asymmetric
+  (advertising fewer than can be imported costs a client nothing; advertising
+  one that cannot is a `create_immed` kill), so candidates narrow and never
+  widen.
+- **An empty tranche means no global at all**, not an empty table -- the same
+  path a failed feedback build already took. That is the hazard the stage
+  exists for: an EGL display with no dma-buf import capability, where the old
+  pair would have been advertised and every GL client killed for believing it.
+- **`main_device` is the renderer's own DRM render node** where it has one
+  (`EGLDevice::device_for_display` -> `try_get_render_node` -> `dev_id`),
+  falling back to the `/dev/dri/renderD128` -> `card0` -> `0` path ladder for
+  pixman and for a software EGL device with no node. On a two-GPU machine the
+  path guess can name the *other* card, and a client that allocates there
+  hands over a buffer this renderer cannot import.
+- **Stage 3B's import guard is removed, deliberately.**
+  `ScanoutBackend::new`'s `first_unimportable` computed `advertised ∩
+  has_dmabuf_format` -- the identical predicate `tranche` now computes -- and
+  refused to bring the tier up rather than narrowing the table. Two mechanisms
+  over one predicate disagree by construction; the narrower one is the one
+  that cannot kill a client, so it is the one that stayed. The consequence,
+  stated rather than discovered: on a device whose GLES renderer can import
+  neither candidate, the session now comes up on the scanout tier with no
+  dmabuf global (GL clients fall back to `wl_shm`) where before it fell back
+  to pixman and dumb buffers. No machine this project can reach produces that
+  configuration.
+- **`sync_committed_dmabufs` is now pixman-only.** It is a CPU-cache
+  workaround for a renderer that composites out of an `mmap` nothing else
+  synchronises; a GLES tier samples the buffer through an `EGLImage`, which
+  honours its implicit fences. `handlers.rs` gates it on
+  `Backend::maps_dmabufs_on_the_cpu` as well as `State::imports_dmabufs` --
+  two conditions asking different questions, deliberately not folded into one
+  flag, because `imports_dmabufs`' other reader (the cache drain) is right for
+  every renderer.
+- **The pinning test became per-renderer**, not deleted: a promise with teeth
+  needs *a* test.
+  `every_advertised_format_is_one_the_renderer_imports` reads the feedback
+  table off the wire and asserts every entry against the session's own
+  backend, which is strictly stronger than the pixman-only version (under
+  `SCOOT_TEST_RENDERER=gles` it asserts against `GlesRenderer`'s EGL display,
+  which the old test could not see). `pixmans_own_importable_set_still_contains_both_candidates`
+  keeps the other half -- a Smithay bump that dropped a format from pixman's
+  `SUPPORTED_FORMATS` would otherwise silently shrink the default session's
+  table with no test failing.
+
+### What is *not* in it
+
+- **`screencopy::constraints().dma` stays `None`.** It is listed with this
+  stage in `HANDOFF.md`, and it is a separate feature rather than a line to
+  flip: capture is the direction where scoot *writes*, so it means binding the
+  client's buffer as a render target and blitting into it -- a different
+  renderer capability (`dmabuf_render_formats`, not the import set this stage
+  derives), a code path that does not exist, a `DrmNode` the GPU-less
+  containers scoot targets do not have, and, under pixman, the bound-target
+  cache eviction `dmabuf.rs`'s `schedule_cache_drain` warns about, which would
+  have to be fixed in the same change. Filed as its own item rather than
+  bundled.
+- **The seven `dmabuf::tests` failures under `SCOOT_TEST_RENDERER=gles`**, which
+  this stage was twice expected to fix and does not. They are the test
+  allocator's `/dev/udmabuf` **provenance**, not format (see the stage-2
+  section above); the derived table on that VM names the same two formats the
+  hard-coded one did, and the same seven fail identically. A change in that
+  count would have been a finding, not a win.
+
+### Evidence
+
+See "Stage 4 evidence" at the end of this file.
+
 ## Staging
 
 | Stage | What | Status |
@@ -520,7 +644,7 @@ no speculative multi-GPU abstraction added here.
 | 2 | A `GlesRenderer` implementation behind `--renderer`, offscreen + `ExportMem` read-back, so every backend can use it and the existing pixel suites run under both | PR #130, merged `acbdbe0` |
 | 3A | The `gpu-scanout` Cargo feature (with the no-libgbm `ldd` proof) and the dumb presenter lifted out of `Tty`; zero behaviour change | PR #133 |
 | 3B | `DrmCompositor` scanout for `--tty`: skip the read-back and the dumb-buffer memcpy entirely where a GPU really is present | PR #135, stacked on #133 |
-| 4 | Renderer-derived dmabuf formats: advertise what the *active* renderer can import rather than the hard-coded pixman LINEAR pair | not started |
+| 4 | Renderer-derived dmabuf formats: advertise what the *active* renderer can import rather than the hard-coded pixman LINEAR pair | PR #141 |
 
 Stage 2 is the first stage with a user-facing surface (`--renderer`), so it
 is the first that owes `README.md` a change.

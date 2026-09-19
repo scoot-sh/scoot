@@ -1,7 +1,7 @@
 //! `zwp_linux_dmabuf_v1`: advertisement *and* import.
 //!
-//! scoot composites on the CPU with pixman, but a client is free to render
-//! on the GPU and hand the result over as a dma-buf -- and Smithay's
+//! scoot composites on the CPU with pixman by default, but a client is free
+//! to render on the GPU and hand the result over as a dma-buf -- and Smithay's
 //! [`PixmanRenderer`](smithay::backend::renderer::pixman::PixmanRenderer)
 //! imports one without any GPU on the compositor side: it `mmap`s plane 0 of
 //! a single-plane `LINEAR` dmabuf and wraps the mapping in a `pixman::Image`
@@ -37,38 +37,53 @@
 //!
 //! The consequence that survives the fix: **the tranche is a promise with
 //! teeth.** A format or modifier in the feedback table that the renderer then
-//! refuses is the same client kill with extra steps, so [`DMABUF_FORMATS`] is
-//! pinned to what `PixmanRenderer` can really import -- by test
-//! (`dmabuf/tests.rs::every_advertised_format_is_one_pixman_can_import`),
+//! refuses is the same client kill with extra steps.
+//!
+//! ## The table is the active renderer's, not a list
+//!
+//! Which renderer will do the importing is a per-session fact --
+//! `PixmanRenderer` by default, `GlesRenderer` under `--renderer gles`, and a
+//! third `GlesRenderer` on its own EGL display under `--tty --renderer gles`
+//! (see [`render`](super::render)) -- and their importable sets are not the
+//! same. pixman's is a fixed list of fourccs at `LINEAR`; a GLES one is
+//! whatever its EGL display reports, which is a property of the driver and
+//! the device.
+//!
+//! So the tranche is **derived**: [`DMABUF_CANDIDATES`] is what this
+//! compositor is willing to serve, and [`tranche`] keeps only those the
+//! session's own renderer answers
+//! [`has_dmabuf_format`](smithay::backend::renderer::ImportDma::has_dmabuf_format)
+//! for. A candidate it cannot import is never offered, so the promise cannot
+//! be broken by a renderer this compositor does not have. Pinned over the
+//! wire, against the session's own backend
+//! (`dmabuf/tests.rs::every_advertised_format_is_one_the_renderer_imports`),
 //! not by comment.
 //!
-//! **That pinning is to *pixman*, and the table is advertised whichever
-//! renderer is active.** Under `--renderer gles` (see `render::gles`) the
-//! importer is `GlesRenderer`, whose importable set is the EGL display's
-//! rather than this list. Whether that is a broken promise depends on the
-//! display, and on the dev VM it is *not*: probing the device scoot's own
-//! selection picks there found both advertised formats (`AR24`, `XR24`)
-//! present with `LINEAR` among the display's 76 import formats -- a
-//! superset of what is advertised, so an advertised format is importable.
+//! **The hazard that closes**, which is the reason the stage exists: an EGL
+//! display with *no* dmabuf-import capability has an empty importable set,
+//! and the old hard-coded pixman pair would have been advertised against it
+//! anyway -- every GL client on that machine allocating a buffer and being
+//! killed through `create_immed` for believing the feedback. That case now
+//! ends in no global at all ([`advertise`] returns without creating one),
+//! which steers the same client onto `wl_shm`: a slower session, not a dead
+//! one. The case is real and this project has no machine that produces it, so
+//! it is closed by construction and by unit test
+//! (`a_renderer_that_imports_nothing_is_advertised_as_nothing`) rather than
+//! by a live reproduction.
 //!
-//! What does fail there is narrower and worth stating precisely, because an
-//! earlier revision of this comment got it wrong: `dmabuf/tests.rs` builds
-//! its buffers through `/dev/udmabuf`, and Mesa's `kms_swrast` refuses a
-//! udmabuf-backed import (`eglCreateImageKHR: createImageFromDmaBufs
-//! failed`, `EGL_BAD_ALLOC`) for *either* format, with or without modifier
-//! attributes. That is buffer **provenance**, not format, so it is a
-//! property of the test's allocator rather than of the advertisement -- and
-//! a renderer-derived table would name the same two formats and fail the
-//! same way. No real client reaches it on that machine in any case:
-//! `gbm_bo_create` on its render node is refused outright, so nothing there
-//! can produce a GBM dmabuf at all.
-//!
-//! Stage 4 of `docs/roadmap/06-gpu-pipeline.md` should still make the
-//! advertisement renderer-derived, for the case this one is not: an EGL
-//! display with no dmabuf-import capability yields an *empty* importable
-//! set, and advertising pixman's pair against it would kill every dmabuf
-//! client. That hazard is real and unverified; the seven failing tests are
-//! not evidence of it.
+//! **What this deliberately does not fix**, because it never was this: the
+//! seven `dmabuf/tests.rs` import tests that fail under
+//! `SCOOT_TEST_RENDERER=gles` fail identically after it, and that is the
+//! expected result rather than a gap. They build their buffers through
+//! `/dev/udmabuf`, and Mesa's `kms_swrast` refuses a udmabuf-backed import
+//! (`eglCreateImageKHR: createImageFromDmaBufs failed`, `EGL_BAD_ALLOC`) for
+//! *either* format, with or without modifier attributes. That is buffer
+//! **provenance**, not format: probing the device scoot's own selection picks
+//! on the dev VM found both candidates present with `LINEAR` among that
+//! display's 76 import formats, so the derived table there names exactly the
+//! two the hard-coded one did. No real client reaches that path on that
+//! machine either -- `gbm_bo_create` on its render node is refused outright,
+//! so nothing there can produce a GBM dmabuf at all.
 //!
 //! ## What is advertised, exactly
 //!
@@ -81,16 +96,44 @@
 //! at v4 against this same v6 global, and both were served the same feedback.
 //! A client binding v3 or lower never sees feedback at all -- Smithay answers
 //! it with `format`/`modifier` events derived from the main tranche instead,
-//! which describe the same two formats.
+//! which describe the same formats.
 //!
-//! The default feedback names this machine's **render node** as `main_device`
-//! ([`main_device`]: `/dev/dri/renderD128`, else `card0`, else `0`, each
-//! logged once at startup) and [`DMABUF_FORMATS`] (`Xrgb8888` then
-//! `Argb8888`) with the `LINEAR` layout, which is the only layout a CPU
-//! mapping can make sense of. The render node comes first because the device
-//! in the feedback is what a client *allocates against*, and a client that
-//! only needs to render has no business on a primary node -- scoot itself
-//! never scans out of these buffers, it reads them.
+//! The default feedback names a **render node** as `main_device`
+//! ([`main_device`]: the active renderer's own EGL device where it has one,
+//! else `/dev/dri/renderD128`, else `card0`, else `0`, each logged once at
+//! startup) and the derived tranche -- [`DMABUF_CANDIDATES`] (`Xrgb8888` then
+//! `Argb8888`) minus anything the renderer cannot import -- with the `LINEAR`
+//! layout, which is the only layout a CPU mapping can make sense of and the
+//! only one every tier here agrees on. A render node rather than a primary
+//! one because the device in the feedback is what a client *allocates
+//! against*, and a client that only needs to render has no business on a
+//! primary node -- scoot itself never scans out of these buffers, it reads
+//! them.
+//!
+//! ## When it is advertised, and why that is not `State::new`
+//!
+//! [`advertise`] runs from `headless::init_named`, immediately after the
+//! render target is built -- not from
+//! [`Screencopy::new`](super::screencopy::Screencopy) with every other global,
+//! which is where it used to run. It has to: the tranche is derived from a
+//! renderer, and `State::new` has none. The backend cannot simply be built
+//! earlier either, because its size comes from `tty::init`, which already
+//! needs a `&mut State` to exist.
+//!
+//! **No client can observe the difference**, which is the load-bearing part
+//! given that this global gates quickshell's capture readiness (above) and a
+//! shell that binds early must not miss it. The wayland listening socket is a
+//! calloop source, so no connection is accepted, no registry served and no
+//! global announced until `event_loop.run` -- which `compositor::run` reaches
+//! several steps after `init_named`, and after the session's own `--` command
+//! is even spawned. Every test harness has the same shape: `State::new`,
+//! `headless::init`, *then* a client. A global created anywhere in that window
+//! is a global that was there from the client's first `wl_registry`.
+//!
+//! The one visible consequence is the honest one: a `State` with no renderer
+//! at all (the bare test harness; any future front-end that has none)
+//! advertises no dmabuf global, rather than advertising one that could only
+//! ever answer `failed`.
 //!
 //! ## What an import actually does
 //!
@@ -172,23 +215,28 @@
 //!   that far -- Smithay posts `InvalidFormat`/`InvalidDimensions`/`OutOfBounds`
 //!   on the params object, which disconnects that client and no one else.
 //!   Both are covered in `dmabuf/tests.rs`.
-//! - **Multi-plane and non-`LINEAR` imports stay refused**, because pixman
-//!   refuses them (`UnsupportedNumberOfPlanes`, `UnsupportedModifier`). The
-//!   tranche never offers either, and Smithay validates the *format* against
-//!   the table but not the modifier or the plane count, so only a client that
-//!   ignores the feedback it was sent can reach that refusal. On the async
-//!   `create` path it gets the protocol's `failed` event and lives; on
-//!   `create_immed` it dies, which is what the protocol prescribes for a
-//!   buffer the client already believes it holds.
+//! - **Multi-plane and non-`LINEAR` imports stay refused.** The tranche never
+//!   offers either -- [`DMABUF_CANDIDATES`] is `LINEAR`-only and the renderer
+//!   can only narrow it -- and Smithay validates the *format* against the
+//!   table but not the modifier or the plane count, so only a client that
+//!   ignores the feedback it was sent can reach that refusal. Under pixman
+//!   the refusal is `UnsupportedNumberOfPlanes`/`UnsupportedModifier`; under
+//!   GLES it is whatever EGL says. On the async `create` path the client gets
+//!   the protocol's `failed` event and lives; on `create_immed` it dies, which
+//!   is what the protocol prescribes for a buffer the client already believes
+//!   it holds.
 //! - **An fd that is not really a dma-buf is refused, not trusted.**
 //!   `PixmanRenderer::import_dmabuf` syncs plane 0 before it builds the
 //!   image, and `DMA_BUF_IOCTL_SYNC` on (say) a plain memfd fails with
 //!   `ENOTTY` -- so the import errors out rather than silently mapping
-//!   something that is not a dma-buf at all.
-//! - **A renderer-less `State` refuses every import.** The bare test harness
-//!   has `backend: None`; so would any future front-end with no renderer.
-//!   `failed()` is the honest answer there, and it is the *only* case left in
-//!   which a well-formed import is refused.
+//!   something that is not a dma-buf at all. A GLES tier refuses the same fd
+//!   at `eglCreateImageKHR`.
+//! - **A renderer-less `State` cannot be asked in the first place.** It
+//!   advertises no global (above), so nothing reaches
+//!   [`DmabufHandler::dmabuf_imported`]'s no-backend branch through the
+//!   protocol. That branch stays regardless: it is the difference between a
+//!   refusal and a panic on an `unwrap`, for any future shape in which a
+//!   session has a renderer at startup and loses one.
 //! - **What bounds the mappings a client can make this compositor hold.**
 //!   `MAX_BUFFERS_PER_CLIENT` (512, `wl_buffers.rs`), now that the async
 //!   `create` path claims too -- and each mapping's *size* is bounded by the
@@ -203,13 +251,21 @@
 //!   without calling back into this module. There is no per-bind work to
 //!   storm.
 //! - **Hotplug and mode changes need no re-send.** The feedback names the DRM
-//!   *device*, not a connector or a mode, and [`DMABUF_FORMATS`] is a property
-//!   of the renderer, which no hotplug changes -- so `set_default_feedback` is
-//!   never called. If a future renderer grows real per-connector tranche
-//!   preferences, that is when this paragraph stops being true.
-//! - **No-DRM-node logging is once per boot, not per frame.** The
-//!   `main_device = 0` fallback is logged where it is chosen, in
-//!   [`advertise`], which runs once in [`Screencopy::new`](super::screencopy::Screencopy).
+//!   *device*, not a connector or a mode, and the tranche is a property of the
+//!   renderer, which no hotplug changes -- so `set_default_feedback` (which
+//!   would re-send to every bound feedback object at the pinned rev) is never
+//!   called. The assumption that rests on, now that the table is derived: a
+//!   session's renderer is fixed for its life. `State::resize_output` rebuilds
+//!   the backend, but always as the renderer the session started with, and
+//!   `GlesBackend::new`'s device enumeration is deterministic within a boot --
+//!   so a rebuild lands on the same EGL display and the same importable set.
+//!   A future renderer with real per-connector tranche preferences, or a
+//!   resize that could migrate to another device, is when this paragraph stops
+//!   being true and `set_default_feedback` becomes the fix.
+//! - **No-DRM-node logging is once per boot, not per frame.** Which rung of
+//!   [`main_device`] answered -- including the `0` fallback -- is logged where
+//!   it is chosen, in [`advertise`], which runs once from
+//!   `headless::init_named`.
 //!   Per-attempt import refusals are `debug!` for the same reason in the
 //!   other direction: every dmabuf-capable client tries at least once at
 //!   startup, so anything louder would spam the log per client launch. The
@@ -218,8 +274,10 @@
 //!   blank" report needs, and it cannot repeat.
 //! - **A feedback build failure skips the global rather than half-advertising.**
 //!   `DmabufFeedbackBuilder::build` fails only if the format-table memfd
-//!   cannot be created; [`advertise`] then logs and returns a state with no
-//!   global, and the compositor runs exactly as before this module existed.
+//!   cannot be created; [`advertise`] then logs and leaves the state with no
+//!   global, and the compositor runs exactly as before this module existed --
+//!   the same outcome, and the same code path, as a renderer that can import
+//!   none of the candidates.
 //!   There is deliberately no `DmabufGlobal` handle stored anywhere: the
 //!   display owns the advertisement and the state owns the feedback, so a
 //!   bare `DmabufState` is everything a static advertisement needs to keep.
@@ -227,7 +285,7 @@
 //!   handler is unreachable here -- nothing ever destroys it.
 
 use std::os::unix::fs::MetadataExt;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use smithay::backend::allocator::dmabuf::{Dmabuf, DmabufSyncFlags};
 use smithay::backend::allocator::{Buffer, Format, Fourcc, Modifier};
@@ -242,18 +300,21 @@ use smithay::wayland::dmabuf::{
 };
 
 use super::State;
+use super::render::Backend;
 use super::wl_buffers::WlBuffers;
 
-/// The dmabuf formats this compositor advertises, in the order a client sees
-/// them in the feedback table.
+/// The dma-buf formats this compositor is willing to advertise, in the order a
+/// client sees them in the feedback table -- *before* the active renderer has
+/// narrowed them (see [`tranche`], which is what actually reaches a client).
 ///
-/// Every entry is a format `PixmanRenderer::import_dmabuf` can really map --
-/// which is what `dmabuf/tests.rs::every_advertised_format_is_one_pixman_can_import`
-/// pins, against the renderer's own `dmabuf_formats()` rather than against a
-/// comment. That direction matters and the other does not: pixman's list is
-/// much longer (ten-plus fourccs), and advertising *fewer* formats than can be
-/// imported costs a client nothing, while advertising one that cannot is a
-/// `create_immed` kill.
+/// Every entry the renderer keeps is a format it can really import, which is
+/// what `dmabuf/tests.rs::every_advertised_format_is_one_the_renderer_imports`
+/// pins over the wire against the session's own backend rather than against a
+/// comment. That direction matters and the other does not: a renderer's
+/// importable set is much longer than this (pixman's is ten-plus fourccs,
+/// GLES's dozens), and advertising *fewer* formats than can be imported costs
+/// a client nothing, while advertising one that cannot is a `create_immed`
+/// kill.
 ///
 /// Deliberately the same two [`screencopy`](super::screencopy) serves captures
 /// in, in the same order (`Xrgb8888` first, for the same translucent-background
@@ -262,18 +323,32 @@ use super::wl_buffers::WlBuffers;
 /// the compositor's own framebuffer is that layout too. Kept as `Fourcc` rather
 /// than derived from `screencopy`'s `wl_shm` list so there is no format mapping
 /// to get wrong; `dmabuf/tests.rs` pins those two lists to each other as well.
-const DMABUF_FORMATS: [Fourcc; 2] = [Fourcc::Xrgb8888, Fourcc::Argb8888];
+const DMABUF_CANDIDATES: [Fourcc; 2] = [Fourcc::Xrgb8888, Fourcc::Argb8888];
 
-/// Creates the `zwp_linux_dmabuf_v1` global, or returns a bare state when the
-/// feedback cannot be built (see the module doc: no global beats a
-/// half-advertised one).
+/// `/dev/dri/renderD128`, the first rung of [`main_device`]'s path ladder.
+const RENDER_NODE: &str = "/dev/dri/renderD128";
+/// `/dev/dri/card0`, the second rung of [`main_device`]'s path ladder.
+const CARD0: &str = "/dev/dri/card0";
+
+/// Creates the `zwp_linux_dmabuf_v1` global for whatever `backend`'s renderer
+/// can really import, or creates nothing at all when it can import none of
+/// [`DMABUF_CANDIDATES`] (see the module doc: no global beats one that
+/// promises an import this session cannot perform).
 ///
-/// Runs once, from [`Screencopy::new`](super::screencopy::Screencopy) -- never
-/// per bind, per frame or per hotplug event.
-pub(super) fn advertise(dh: &DisplayHandle) -> DmabufState {
-    let mut state = DmabufState::new();
-    let device = main_device();
-    let formats = advertised_formats();
+/// Runs once, from `headless::init_named`, immediately after the render target
+/// is built and before the event loop starts -- never per bind, per frame or
+/// per hotplug event. See the module doc for why that is still early enough
+/// for a client that gates on this global.
+pub(super) fn advertise(dh: &DisplayHandle, state: &mut DmabufState, backend: &Backend) {
+    let mut formats = tranche(|format| backend.imports_dmabuf_format(format)).peekable();
+    if formats.peek().is_none() {
+        tracing::warn!(
+            "this session's renderer can import none of the dma-buf formats this \
+             compositor serves; running without zwp_linux_dmabuf_v1"
+        );
+        return;
+    }
+    let device = main_device(backend.render_node());
     match DmabufFeedbackBuilder::new(device, formats).build() {
         Ok(feedback) => {
             state.create_global_with_default_feedback::<State>(dh, &feedback);
@@ -285,45 +360,67 @@ pub(super) fn advertise(dh: &DisplayHandle) -> DmabufState {
             );
         }
     }
-    state
 }
 
-/// Exactly what [`advertise`] puts in the feedback tranche, for anything that
-/// has to check a renderer against the promise this compositor makes.
+/// The feedback tranche: [`DMABUF_CANDIDATES`] in their advertised order,
+/// minus any the active renderer cannot import.
 ///
-/// One function rather than two copies of the list: the tranche is a promise
-/// with teeth (see this module's doc -- a format in it that the renderer then
-/// refuses is a `create_immed` kill), so anything verifying that promise has
-/// to be reading the promise itself.
-pub(super) fn advertised_formats() -> impl Iterator<Item = Format> {
-    DMABUF_FORMATS.iter().map(|code| Format {
-        code: *code,
-        modifier: Modifier::Linear,
-    })
+/// A predicate rather than a renderer, for two reasons. It is what makes the
+/// *decision* testable without the renderer that would have to be there to
+/// make it -- including the case that matters most and that no machine here
+/// can produce on demand, a renderer that imports nothing. And it states the
+/// rule in one place: the filter is the whole of what "renderer-derived"
+/// means here.
+///
+/// Filtering a fixed candidate list rather than advertising the renderer's own
+/// set wholesale, which is the other thing "derive it from the renderer" could
+/// have meant and is not what this does. The direction is asymmetric:
+/// advertising *fewer* formats than can be imported costs a client nothing
+/// (it falls back to `wl_shm`), while advertising one that cannot be imported
+/// is a `create_immed` kill. GLES on a real driver imports dozens of fourccs,
+/// many of them multi-plane or YUV, none of which this compositor's capture
+/// path, framebuffer layout or `screencopy` shm list agrees with -- so the
+/// candidates stay the two that every other pixel path here already speaks
+/// (see [`DMABUF_CANDIDATES`]) and the renderer only ever narrows them.
+fn tranche(can_import: impl Fn(Format) -> bool) -> impl Iterator<Item = Format> {
+    DMABUF_CANDIDATES
+        .into_iter()
+        .map(|code| Format {
+            code,
+            modifier: Modifier::Linear,
+        })
+        .filter(move |format| can_import(*format))
 }
 
-/// The `main_device` for default feedback: this machine's render node.
+/// The `main_device` for default feedback: the device a client should allocate
+/// against.
 ///
-/// `/dev/dri/renderD128` first, `card0` where there is no render node, `0`
-/// where there is no DRM node at all -- plausibly *the* production shape on
-/// GPU-less containers -- each logged once, here, at startup. `0` is the
-/// `dev_t`/kernel convention for "no device", so the fallback ladder degrades
-/// to that rather than to a guess.
+/// `renderer` is the DRM render node the active renderer's own EGL display is
+/// on ([`Backend::render_node`](super::render::Backend)), and it leads because
+/// it is the only rung that can be *checked* rather than guessed: an import is
+/// performed by one specific renderer on one specific device, and on a machine
+/// with two GPUs a client that allocates against the other node hands over a
+/// dma-buf that renderer cannot import -- which `create_immed` turns into a
+/// disconnect. pixman has no device (it `mmap`s whatever it is handed,
+/// whichever node allocated it), and a software EGL device has no DRM node, so
+/// both fall through to the path ladder below.
 ///
-/// The render node leads because the device named here is the one clients
-/// *allocate against* now that imports really happen: a client that only needs
-/// to render into a buffer scoot will read on the CPU has no reason to open a
-/// primary node, which needs privileges a render node does not. scoot itself
-/// never scans out of an imported buffer -- `--tty` scans out of its own dumb
-/// buffers -- so the primary node was never the right hint, only the more
-/// visible one. (On this project's own reference machine `/dev/dri/card0` does
-/// not even exist: the Asahi M2 enumerates `card1`/`card2` plus `renderD128`.)
-fn main_device() -> libc::dev_t {
-    /// Bound to `PathBuf` (rather than `&str`) so the ladder below reads as
-    /// data, not as three near-identical `metadata` calls.
-    const RENDER: &str = "/dev/dri/renderD128";
-    const CARD0: &str = "/dev/dri/card0";
-    let (device, source) = main_device_from(&PathBuf::from(RENDER), &PathBuf::from(CARD0));
+/// The ladder: `/dev/dri/renderD128` first, `card0` where there is no render
+/// node, `0` where there is no DRM node at all -- plausibly *the* production
+/// shape on GPU-less containers. `0` is the `dev_t`/kernel convention for "no
+/// device", so it degrades to that rather than to a guess. The render node
+/// leads there for the same reason it does above: a client that only needs to
+/// render into a buffer scoot will read on the CPU has no reason to open a
+/// primary node, which needs privileges a render node does not. (On this
+/// project's own reference machine `/dev/dri/card0` does not even exist: the
+/// Asahi M2 enumerates `card1`/`card2` plus `renderD128`.)
+///
+/// Whichever rung answers is logged once, here, at startup.
+fn main_device(renderer: Option<libc::dev_t>) -> libc::dev_t {
+    let (device, source) = match renderer {
+        Some(device) => (device, "the renderer's own EGL device"),
+        None => main_device_from(Path::new(RENDER_NODE), Path::new(CARD0)),
+    };
     tracing::info!(device, source, "dmabuf feedback main device");
     device
 }
@@ -419,6 +516,17 @@ fn node_rdev(path: &Path) -> Option<libc::dev_t> {
 /// surface's buffer is not applied until its parent commits, so syncing it
 /// here would sync the *previous* buffer and miss the new one. The parent's
 /// commit reaches it.
+///
+/// **This is pixman's workaround, and only pixman's.** Everything above is
+/// true because the renderer composites out of a CPU mapping *this* process
+/// made and nothing else synchronises. Both GLES tiers hand the buffer to the
+/// driver as an `EGLImage` and sample it there, which waits on the buffer's
+/// own implicit fences on its own, so the ioctl pair would be two syscalls per
+/// commit buying nothing. `handlers.rs` therefore gates this on
+/// [`Backend::maps_dmabufs_on_the_cpu`](super::render::Backend) as well as on
+/// the flag below -- a *renderer* question, deliberately kept out of
+/// [`State::imports_dmabufs`](super::State), whose other reader (the cache
+/// drain) is right for every renderer.
 ///
 /// Only called when [`State::imports_dmabufs`](super::State) says some import
 /// has actually succeeded in this session, so an shm-only session never pays
@@ -594,17 +702,28 @@ impl DmabufHandler for State {
 /// retains over **both** of that renderer's caches -- and the second retain
 /// drops every entry whose `dmabuf` is `None` (`pixman/mod.rs:807-815`), i.e.
 /// it evicts `self.buffers` wholesale rather than dropping expired entries
-/// from it. That is free today only because scoot never populates
-/// `self.buffers`: it is filled solely by `Bind<Dmabuf>`, and the only `bind`
-/// call scoot makes hands over a `pixman::Image` (`render.rs`'s
+/// from it. That is free today only because scoot never populates *pixman's*
+/// `self.buffers`: it is filled solely by `Bind<Dmabuf>`, and the only bind
+/// the pixman pipeline makes hands over a `pixman::Image` (`render.rs`'s
 /// `draw_frame`/`Backend::capture`), so the extra retain scans an empty
 /// `Vec`.
 ///
-/// The moment scoot binds a dmabuf render target -- a future GPU tier, or a
-/// dmabuf screencopy path -- that stops being free: *every* `wl_buffer`
-/// destruction in the session would then evict the bound-target cache and
-/// force a re-`mmap` on the next frame. Whoever adds that has to narrow this
-/// drain (or upstream's retain) at the same time.
+/// **A dmabuf render target does exist now, on one tier, and it does not
+/// share this hazard** -- stated because the previous version of this note
+/// predicted the arrival and not which renderer it would arrive on. The GPU
+/// scanout tier's `Backend::capture` binds the swapchain slot's `Dmabuf`
+/// (`render/scanout.rs`), but through `GlesRenderer`, whose `cleanup` retains
+/// `self.buffers` on `!dmabuf.is_gone()` alone (`gles/mod.rs:820-824`) rather
+/// than evicting entries that have no dmabuf. So a `wl_buffer` destruction
+/// there drops nothing live: the capture pool holds its own clone of every
+/// exported slot, which is exactly what keeps `is_gone()` false.
+///
+/// The hazard is still real for the two combinations that have not happened:
+/// a *pixman* dmabuf render target, or a dmabuf screencopy path that binds a
+/// client's buffer under pixman. Either would make *every* `wl_buffer`
+/// destruction in the session evict the bound-target cache and force a
+/// re-`mmap` on the next frame. Whoever adds one has to narrow this drain (or
+/// upstream's retain) at the same time.
 pub(super) fn schedule_cache_drain(state: &mut State) {
     if !state.imports_dmabufs || state.dmabuf_drain_queued {
         return;
