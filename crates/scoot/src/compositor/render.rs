@@ -128,7 +128,7 @@ pub struct Backend {
 ///
 /// Each variant owns a renderer and the target that renderer draws into, and
 /// nothing else: everything renderer-agnostic lives on [`Backend`], so a
-/// third variant would be a third arm at the four dispatch sites here
+/// third variant would be a third arm at the five dispatch sites here
 /// ([`Backend::new`], [`Backend::capture`], [`Backend::import_dmabuf`],
 /// [`Backend::cleanup_texture_cache`], [`draw_frame`]) and no change at all
 /// to any element source, which is what the seam is for.

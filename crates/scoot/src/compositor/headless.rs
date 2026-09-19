@@ -88,7 +88,8 @@ pub fn init(state: &mut State, width: i32, height: i32) -> Result<(), Box<dyn Er
     init_named(state, OUTPUT_NAME, width, height)
 }
 
-/// Creates the one output and the CPU render target behind it. `name` is
+/// Creates the one output and the render target behind it -- pixman's image
+/// or, under `--renderer gles`, a GLES renderbuffer (see `render`). `name` is
 /// what clients see as `wl_output.name` (and `model`): a connector name
 /// such as `HDMI-A-1` or `Virtual-1` under `--tty`, so a bar or shell
 /// labels the screen the way it would under any other compositor, or
@@ -482,8 +483,16 @@ impl State {
     /// exactly what `present()`'s size guard silently drops every frame for:
     /// `--nested` stops the loop, `--tty` logs an error saying the screen
     /// stays as it is until the next hotplug or a restart. Nothing is
-    /// reverted here -- a failure to build a pixman image at one size is not
-    /// evidence that rebuilding it at the previous size would work.
+    /// reverted here -- a failure to build the render target at one size is
+    /// not evidence that rebuilding it at the previous size would work.
+    ///
+    /// It rebuilds whichever renderer the session started with
+    /// (`State::renderer`), never a different one: a resize that silently
+    /// changed renderers would be a session quietly different from the one
+    /// that was asked for. Under `--renderer gles` that means a whole new
+    /// EGL context and shader set per resize, which is wasteful and correct;
+    /// only `--nested`'s host configure and `--tty`'s hotplug get here at
+    /// all.
     pub fn resize_output(&mut self, width: i32, height: i32) -> bool {
         let Some(output) = self.output.clone() else {
             // Logged, not a silent `false`: both callers' comments say

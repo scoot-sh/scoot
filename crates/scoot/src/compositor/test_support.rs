@@ -157,7 +157,8 @@ impl<S, A> Harness<S, A> {
 
     /// A compositor with a real headless backend rendering into a
     /// `canvas`-square framebuffer, which [`Harness::render`] draws and reads
-    /// back with the real `PixmanRenderer`.
+    /// back with a real renderer -- `PixmanRenderer`, or `GlesRenderer`
+    /// under `SCOOT_TEST_RENDERER=gles` (see [`test_renderer`]).
     pub(crate) fn headless(appearance: Appearance, canvas: i32) -> Self {
         Self::build(appearance, Some(canvas))
     }

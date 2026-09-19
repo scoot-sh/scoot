@@ -42,6 +42,17 @@
 //! (`dmabuf/tests.rs::every_advertised_format_is_one_pixman_can_import`),
 //! not by comment.
 //!
+//! **That pinning is to *pixman*, and the table is advertised whichever
+//! renderer is active.** Under `--renderer gles` (see `render::gles`) the
+//! promise therefore has less than full teeth: this list is still what
+//! clients are offered, while the importer is `GlesRenderer`, whose own
+//! importable set is the EGL display's -- and on the dev VM's software
+//! driver a `udmabuf`-backed import of an advertised format is refused with
+//! `EGL_BAD_ALLOC`, which `create_immed` turns into a client kill. Making
+//! the advertisement renderer-derived is stage 4 of
+//! `docs/roadmap/06-gpu-pipeline.md`; nothing here is renderer-aware yet,
+//! and the GLES pipeline deliberately did not grow into it.
+//!
 //! ## What is advertised, exactly
 //!
 //! Smithay's `DmabufState` + `DmabufHandler` at the pinned rev, one global via

@@ -5,7 +5,8 @@
 //! The pure tests need no live compositor: `clamp_scale`, `smithay_scale` and
 //! `logical_size` are all functions of their arguments (an `Output` is a plain
 //! value, constructible without a backend). The client tests drive a real
-//! [`State`] through a real socket pair and the real pixman renderer, the same
+//! [`State`] through a real socket pair and a real renderer (pixman, or GLES
+//! under `SCOOT_TEST_RENDERER=gles`), the same
 //! choice `layer_shell/tests.rs` made and for the same reason: "what did the
 //! client actually receive" and "where did the surface actually land on
 //! screen" are both invisible to a test that calls the handler directly.

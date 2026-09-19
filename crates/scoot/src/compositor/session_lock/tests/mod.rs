@@ -3,7 +3,8 @@
 //! These drive a *real* `wayland-client` connection -- binding
 //! `ext_session_lock_manager_v1`, `xdg_wm_base`, `wl_seat` and `wl_output`
 //! exactly as `swaylock` does -- through a real [`State`] with a real
-//! `headless` backend, then render with the real [`PixmanRenderer`] and read
+//! `headless` backend, then render with a real renderer ([`PixmanRenderer`],
+//! or `GlesRenderer` under `SCOOT_TEST_RENDERER=gles`) and read
 //! the framebuffer back. That is deliberate, and the same choice
 //! `layer_shell/tests/` and `cursor/tests.rs` made for the same reason, but
 //! it matters more here than anywhere else in this compositor: the claim
