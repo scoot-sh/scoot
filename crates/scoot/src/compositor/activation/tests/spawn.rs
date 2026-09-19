@@ -476,7 +476,7 @@ fn a_spawned_childs_token_is_refused_while_locked() {
 
 /// The `sh` the fd probe below runs in the child.
 ///
-/// Three sections, one file, written under a temporary name and `mv`d into
+/// Two sections, one file, written under a temporary name and `mv`d into
 /// place so [`read_probe`] -- which returns on the first non-empty read --
 /// can never see a half-written listing:
 ///

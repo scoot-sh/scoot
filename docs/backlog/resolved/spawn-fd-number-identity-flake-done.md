@@ -83,8 +83,8 @@ Two supporting changes the above needs:
   half-written listing and the positive control would flake — a new flake in
   place of the old one.
 
-`sh`, `ls`, `readlink`, `grep` and `mv`: the probe needed a shell and
-coreutils before this change and still does.
+The probe needed a shell and coreutils before this change and still does;
+which coreutils changed (`ls` before, `readlink`/`grep`/`mv` now).
 
 ### The eventfd, and the check that was deliberately *not* used
 
