@@ -433,6 +433,23 @@ falsify. Read `flexwm` there as `scoot`.
   documented verification set. Same tests, same assertions, 707 fewer lines
   of duplication.
 
+### Found reviewing the webtop fixes (2026-09-19)
+
+- [Every host configure is acted on immediately](./core/coalesce-host-configures.md)
+  — **HIGH**. Confirmed live: 4 modes after 3 resizes, one of which never
+  rendered. A browser drag 800→1900px is ~1100 modes and ~1100 protocol
+  objects per output-management client, with an O(N²) refresh, on the named
+  deployment target in its most ordinary interaction. Coalescing configures
+  to the next render tick fixes four separately-filed things at once —
+  this, the 16.6 ms GLES resize stutter, the unbounded 8192×32767 product,
+  and the benchmark's exclusion of the pool rebuild — which is the tell that
+  it is the right shape rather than `delete_mode` on the nested path.
+- [`smoke-test.sh` defaults to a shared target dir](./testing/smoke-test-binary-default.md)
+  — it handed **three different agents someone else's binary** in one
+  session. Silent by construction: the path exists, the binary runs, nothing
+  says which tree it came from. Two were near-misses that would have
+  produced a confident wrong verdict.
+
 ### Field reports from the webtop deployment (2026-09-19)
 
 Both filed as GitHub issues from running scoot nested inside webtop — the
