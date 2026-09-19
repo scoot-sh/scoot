@@ -114,8 +114,8 @@ the `scoot msg` half nobody builds between releases.
 
 ### Evidence
 
-Run <https://github.com/scoot-sh/scoot/actions/runs/35454377003> (commit
-`44f7d3e`, both jobs green):
+Run <https://github.com/scoot-sh/scoot/actions/runs/35454769422> (commit
+`f4bb769`, the last commit that touches `ci.yml`; both jobs green):
 
 - `cargo nextest run --workspace` — `1100 tests run: 1100 passed, 3 skipped`
 - `cargo test --workspace` — `995 passed; 0 failed; 3 ignored` for the
@@ -127,10 +127,13 @@ Run <https://github.com/scoot-sh/scoot/actions/runs/35454377003> (commit
   and `zwp_linux_dmabuf_v1 is advertised`
 
 Wall clock, Linux job: **8m05s cold** (empty cargo cache, run 35453015885)
-against **4m30s warm** (run 35454377003) — clippy 2m09s → 11s, build 2m09s
-→ 12s, nextest 2m29s → 53s. macOS: 3m46s cold, 1m33s warm. The cargo cache
-restores in ~1m (1.4 GB) and is saved with `if: always()`, so a red run's
-artifacts survive for the next attempt.
+against **4m42s warm** (run 35454769422) — clippy 2m09s → 14s, build+`ldd`
+2m09s → 8s, nextest 2m29s → 53s, `cargo test` 32s, smoke test 9s, the
+gpu-scanout build + `ldd` 7s. macOS: 3m46s cold, 1m32s warm. Restoring the
+1.4 GB cargo cache is now the single largest step at ~1m10s, and it is
+saved with `if: always()`, so a red run's artifacts survive for the next
+attempt — which is the difference between a 4-minute and a 9-minute fix
+cycle.
 
 ### Two findings from the first runs
 
