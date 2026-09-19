@@ -144,9 +144,44 @@ jobs:
           fi
           echo "ok: the default build links no libgbm and no libEGL"
 
+      # `render/tests.rs` states, as a deliberate decision, that its GLES
+      # tests fail rather than skip where EGL is missing, on the reasoning
+      # that "any machine [able to run this suite] has Mesa's software EGL
+      # device even with no GPU at all -- that is exactly what this
+      # project's dev VM is". A GitHub runner is the first machine that
+      # runs the suite and is *not* that: the first CI run on this branch
+      # died at `a_capture_covers_the_whole_target_at_the_backends_own_size`
+      # with `Failed to load LibEGL: libEGL.so.1: cannot open shared object
+      # file` (run 35453015885), taking 333 unrun tests with it.
+      #
+      # The dev VM resolves that dlopen through `/run/current-system/sw/lib`
+      # in the binary's RUNPATH -- a NixOS path a runner does not have. So
+      # CI is given the software EGL the suite documents needing, rather
+      # than any test being changed: libglvnd is already in the dev shell's
+      # `$LIBRARY_PATH` (`vm/compositor-deps.nix`), and Mesa supplies the
+      # vendor driver libglvnd dispatches to. `--inputs-from .` pins Mesa to
+      # this repo's own `flake.lock`, like every other dependency here.
+      #
+      # Exported under CI-only names, then mapped onto the real variables by
+      # the two test steps alone: the smoke test below deliberately keeps
+      # running in an environment with *no* loadable EGL, which is the
+      # GPU-less box scoot has to work on.
+      - name: Resolve a software EGL for the GLES tests
+        shell: nix develop --command bash -euo pipefail {0}
+        run: |
+          mesa=$(nix build --inputs-from . nixpkgs#mesa --no-link --print-out-paths | head -1)
+          test -e "$mesa/share/glvnd/egl_vendor.d/50_mesa.json"
+          {
+            echo "CI_EGL_LIBRARY_PATH=$LIBRARY_PATH:$mesa/lib"
+            echo "CI_EGL_VENDOR_DIRS=$mesa/share/glvnd/egl_vendor.d"
+          } >>"$GITHUB_ENV"
+
       - name: cargo nextest
         shell: nix develop --command bash -euo pipefail {0}
-        run: cargo nextest run --workspace
+        run: |
+          export LD_LIBRARY_PATH="$CI_EGL_LIBRARY_PATH"
+          export __EGL_VENDOR_LIBRARY_DIRS="$CI_EGL_VENDOR_DIRS"
+          cargo nextest run --workspace
 
       # NOT a duplicate of the nextest run above -- do not delete it as one.
       # nextest runs every test in its own process, so it structurally cannot
@@ -159,7 +194,10 @@ jobs:
       # only place that coverage is still taken.
       - name: cargo test (one process -- the coverage nextest cannot give)
         shell: nix develop --command bash -euo pipefail {0}
-        run: cargo test --workspace
+        run: |
+          export LD_LIBRARY_PATH="$CI_EGL_LIBRARY_PATH"
+          export __EGL_VENDOR_LIBRARY_DIRS="$CI_EGL_VENDOR_DIRS"
+          cargo test --workspace
 
       # End to end over IPC: starts the compositor, spawns a terminal in it,
       # types into that terminal, reads the characters back out of the shell,

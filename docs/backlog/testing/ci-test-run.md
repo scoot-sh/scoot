@@ -1,12 +1,17 @@
 ---
-title: "No CI: every verification run is manual and self-reported"
-status: "open"
+title: "No CI: every verification run is manual and self-reported — LANDED 2026-09-19 (PR #140), except the `--features gpu-scanout` build, which is written and gated until PR #135 puts that feature on `main`"
+status: "resolved"
 area: "testing"
 priority: "high"
 blocked: null
 ---
 
-# No CI: every verification run is manual and self-reported
+# No CI: every verification run is manual and self-reported — LANDED 2026-09-19 (PR #140)
+
+**What landed is at the bottom of this file** ("What landed", below). The
+entry is kept at this path rather than moved to `resolved/`, against the
+usual convention, because `CLAUDE.md` links `docs/backlog/testing/ci-test-run.md`
+by name and an implementer may not edit `CLAUDE.md`.
 
 Requested 2026-09-19. There is **no `.github/workflows` at all** — verified
 during the 2026-09-17 audit of PRs #73–#89 and still true. Every number in
