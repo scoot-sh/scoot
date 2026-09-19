@@ -88,7 +88,6 @@ use smithay::wayland::shell::wlr_layer::{
 };
 
 use super::State;
-use super::headless::OUTPUT_ID;
 
 #[cfg(test)]
 mod tests;
@@ -159,7 +158,7 @@ impl WlrLayerShellHandler for State {
     ///
     /// `output` is the client's request for which screen to appear on. It is
     /// allowed to be `None`, which the protocol defines as "the compositor
-    /// chooses"; scoot has exactly one output, so both cases land on it.
+    /// chooses"; scoot chooses the primary output (see `Outputs::primary`).
     fn new_layer_surface(
         &mut self,
         surface: WlrLayerSurface,
@@ -168,7 +167,7 @@ impl WlrLayerShellHandler for State {
         namespace: String,
     ) {
         let requested = output.as_ref().and_then(Output::from_resource);
-        let Some(output) = requested.or_else(|| self.output.clone()) else {
+        let Some(output) = requested.or_else(|| self.outputs.primary().cloned()) else {
             // No output at all. Unreachable in this compositor (`headless::init`
             // creates one before the event loop starts and nothing removes
             // it), but it is a client-facing path, so it closes the surface
@@ -213,7 +212,7 @@ impl WlrLayerShellHandler for State {
         self.layers_awaiting_neutralize
             .push(surface.wl_surface().clone());
         self.mapped_layers.remove(surface.wl_surface());
-        let Some(output) = self.output.clone() else {
+        let Some(output) = self.outputs.primary().cloned() else {
             return;
         };
         {
@@ -254,7 +253,7 @@ impl State {
     /// what makes it carry a size that respects what the client just asked
     /// for -- and only then tell the core what is left over.
     pub(super) fn commit_layer_surface(&mut self, surface: &WlSurface) -> bool {
-        let Some(output) = self.output.clone() else {
+        let Some(output) = self.outputs.primary().cloned() else {
             return false;
         };
         let (found, touches_keyboard, mapped) = {
@@ -372,8 +371,17 @@ impl State {
     /// the comparison against what the core already has means a bar that
     /// repeats the same exclusive zone on every frame costs one rectangle
     /// comparison, not a re-layout.
+    ///
+    /// Still the primary output's zone only (see `Outputs::primary`): a zone
+    /// per output is the multi-output item, and until then a bar on a
+    /// secondary output reserves nothing anywhere -- it does not reserve the
+    /// wrong output's edge.
     pub(super) fn refresh_layer_zone(&mut self) {
-        let Some(output) = self.output.clone() else {
+        let Some((id, output)) = self
+            .outputs
+            .primary_entry()
+            .map(|(id, output)| (id, output.clone()))
+        else {
             return;
         };
         // The zone is output-local; the core's rectangles are global. One
@@ -395,13 +403,11 @@ impl State {
         // Nothing to do when it hasn't moved -- and this is the common case,
         // since every commit a bar makes comes through here while its
         // exclusive zone stays exactly the same.
-        if self.world.usable_area(OUTPUT_ID) == Some(area) {
+        if self.world.usable_area(id) == Some(area) {
             return;
         }
-        self.world.handle_event(CoreEvent::OutputUsableAreaChanged {
-            id: OUTPUT_ID,
-            area,
-        });
+        self.world
+            .handle_event(CoreEvent::OutputUsableAreaChanged { id, area });
         self.apply();
     }
 
@@ -442,8 +448,13 @@ impl State {
     /// tree walk that already takes a lock per node, which is why this is one
     /// function rather than two loops: pointer motion runs this at libinput's
     /// rate, and a second walk would have cost far more than the clone.
+    ///
+    /// The primary output's map only (see `Outputs::primary`): hit-testing
+    /// the output the pointer is *on* is the multi-output item. A position
+    /// over another output falls outside this map's extent, so it misses
+    /// rather than hitting the wrong surface.
     fn layer_hit(&self, layers: &[Layer], position: Point<f64, Logical>) -> Option<LayerHit> {
-        let output = self.output.as_ref()?;
+        let output = self.outputs.primary()?;
         let origin = self
             .space
             .output_geometry(output)
@@ -491,8 +502,12 @@ impl State {
     /// protocol's own "mine until I unmap" and pre-empts a menu, while a
     /// click-focused `on_demand` surface does not -- a bar's own menu is
     /// exactly the case that would otherwise fight itself. See `popup.rs`.
+    ///
+    /// The primary output's map only (see `Outputs::primary`): walking every
+    /// output's map, and deciding which one's `exclusive` surface wins, is
+    /// the multi-output item.
     pub(super) fn layer_keyboard_focus(&self) -> Option<LayerKeyboardFocus> {
-        let output = self.output.as_ref()?;
+        let output = self.outputs.primary()?;
         let map = layer_map_for_output(output);
         for &layer in &ABOVE_WINDOWS {
             let exclusive = map

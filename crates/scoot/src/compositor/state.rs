@@ -11,7 +11,6 @@ use scoot_core::{Config, Size, WindowId, World};
 use smithay::desktop::{LayerSurface, PopupManager, Space, Window, WindowSurfaceType};
 use smithay::input::keyboard::Keycode;
 use smithay::input::{Seat, SeatState};
-use smithay::output::Output;
 use smithay::reexports::calloop::generic::Generic;
 use smithay::reexports::calloop::{EventLoop, Interest, LoopHandle, LoopSignal, Mode, PostAction};
 use smithay::reexports::wayland_server::backend::{
@@ -63,6 +62,7 @@ use super::keybindings::Keybindings;
 use super::layer_shell;
 use super::nested::Host;
 use super::output_management::OutputManagement;
+use super::outputs::Outputs;
 use super::popup::ActivePopupGrab;
 use super::render::Backend;
 use super::screencopy::Screencopy;
@@ -203,7 +203,12 @@ pub struct State {
     /// nothing, so an ended-by-others session cannot lend its serial to a
     /// reopen. See `popup.rs`.
     pub last_popup_grab: Option<(ClientId, Instant)>,
-    pub output: Option<Output>,
+    /// Every output this compositor drives, and the core id each is known by
+    /// -- see `outputs.rs` for why the collection lives here rather than in
+    /// [`scoot_core`], and for what a site reaching for
+    /// [`Outputs::primary`](super::outputs::Outputs::primary) is still
+    /// assuming.
+    pub outputs: Outputs,
     /// The output scale resolved from `[output] scale` (see
     /// `output_scale.rs`), fixed for the process's lifetime. Read by
     /// `headless`'s `set_mode` (which applies it to the `Output`), by the
@@ -715,7 +720,7 @@ impl State {
             popups: PopupManager::default(),
             popup_grab: None,
             last_popup_grab: None,
-            output: None,
+            outputs: Outputs::default(),
             output_scale: scale,
             integer_scale: super::output_scale::integer_scale(scale),
             renderer,

@@ -719,7 +719,7 @@ fn a_layer_surfaces_parent_geometry_is_surface_local_not_its_place_on_the_output
         .object_from_protocol_id(&fixture.state.display_handle, surface_id)
         .expect("the layer client's surface");
 
-    let output = fixture.state.output.clone().expect("an output");
+    let output = fixture.state.outputs.primary().cloned().expect("an output");
     let (positioned, local) = {
         let map = smithay::desktop::layer_map_for_output(&output);
         let layer = map

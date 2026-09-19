@@ -22,7 +22,7 @@
 //! With exactly one output the rule collapses to "one live lock surface":
 //! the first blanked frame confirms whatever the surface state (see
 //! `blanking`), a resize reaches the one surface, and the multi-output
-//! revisit lives in `headless.rs`'s `OUTPUT_ID` doc.
+//! revisit lives in `outputs.rs`'s `Outputs::primary` doc.
 
 use super::*;
 

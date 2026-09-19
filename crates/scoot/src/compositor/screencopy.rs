@@ -614,12 +614,14 @@ impl ImageCopyCaptureHandler for State {
     /// one".
     fn capture_constraints(&mut self, source: &ImageCaptureSource) -> Option<BufferConstraints> {
         let weak = source.user_data().get::<WeakOutput>()?;
-        // Compared against the compositor's own output rather than merely
-        // upgraded: `upgrade` answers "some output still exists", which is not
-        // the question -- the capture below reads *this* compositor's one
-        // framebuffer, so a source naming anything else must not be told a
-        // size it would then be handed the wrong pixels for.
-        if self.output.as_ref() != Some(&weak.upgrade()?) {
+        // Compared against the *primary* output rather than merely upgraded,
+        // and deliberately not against "any output this compositor has":
+        // `upgrade` answers "some output still exists", which is not the
+        // question -- the capture below reads this compositor's one
+        // framebuffer, which is the primary output's (see `Outputs::primary`),
+        // so a source naming any other output must not be told a size it
+        // would then be handed the wrong pixels for.
+        if self.outputs.primary() != Some(&weak.upgrade()?) {
             return None;
         }
         Some(constraints(self.backend.as_ref()?))

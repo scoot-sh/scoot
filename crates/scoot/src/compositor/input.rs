@@ -380,7 +380,7 @@ impl State {
     /// the user left it (`resize_output` never touches it, and neither does
     /// `session_event`'s reactivation arm).
     pub(super) fn place_pointer_at_output_centre(&mut self) {
-        let (width, height) = self.output.as_ref().map(logical_size).unwrap_or((0, 0));
+        let (width, height) = self.outputs.primary().map(logical_size).unwrap_or((0, 0));
         self.pointer_move_quietly(f64::from(width) / 2.0, f64::from(height) / 2.0);
     }
 
@@ -433,7 +433,13 @@ impl State {
         // real desktop and, under `--tty`, onto a coordinate no output
         // contains. `logical_size` is the same rectangle the core and the
         // `Space` use, so the clamp can never disagree with what is on screen.
-        let (width, height) = self.output.as_ref().map(logical_size).unwrap_or((0, 0));
+        // The primary output's extent (see `Outputs::primary`): clamping to
+        // the union of every output, or to the one the pointer is on, is the
+        // multi-output item. Unreachable with more than one output today --
+        // this is `--tty`'s relative motion, and `--tty` has one output;
+        // `--outputs` is `--headless`, whose only pointer source is the
+        // absolute IPC one, which does not clamp at all.
+        let (width, height) = self.outputs.primary().map(logical_size).unwrap_or((0, 0));
         let current = pointer.current_location();
         let x = clamp_to_extent(current.x + dx, width);
         let y = clamp_to_extent(current.y + dy, height);

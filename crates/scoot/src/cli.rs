@@ -10,7 +10,7 @@ pub const USAGE: &str = "\
 scoot -- a scrolling-tiling Wayland compositor
 
 USAGE:
-    scoot --headless [--width 1-65535] [--height 1-65535] [--renderer pixman|gles] [--socket PATH] [--config PATH] [-- COMMAND...]
+    scoot --headless [--width 1-65535] [--height 1-65535] [--outputs 1-8] [--renderer pixman|gles] [--socket PATH] [--config PATH] [-- COMMAND...]
     scoot --nested [--width 1-65535] [--height 1-65535] [--renderer pixman|gles] [--socket PATH] [--config PATH] [-- COMMAND...]
     scoot --tty [--gpu PATH] [--mode WxH] [--socket PATH] [--config PATH] [-- COMMAND...]
     scoot msg REQUEST
@@ -57,6 +57,21 @@ ACTIONS:
 /// [`CompositorOptions::width`]/[`CompositorOptions::height`] below carry
 /// the range into the type docs; `dimension` enforces it at parse.
 pub const MAX_OUTPUT_DIMENSION: i32 = 65535;
+
+/// The most outputs `--headless --outputs N` will create.
+///
+/// Small on purpose. The flag exists so multi-output behaviour is testable
+/// with no second monitor in the building, and nothing tests more screens than
+/// a desk holds -- an unbounded count would only buy a way to ask for a
+/// million `wl_output` globals.
+///
+/// It also keeps the one sum the flag introduces far from overflow. Outputs are
+/// laid out left to right, so the right edge of the last one is at most
+/// `MAX_OUTPUTS * ceil(MAX_OUTPUT_DIMENSION / MIN_SCALE)` -- 8 * 131070, about
+/// 1.05 million, four orders of magnitude inside `i32` and inside the same
+/// margin [`MAX_OUTPUT_DIMENSION`] claims for the layout's own sums.
+/// `headless::add_output` saturates in any case.
+pub const MAX_OUTPUTS: i32 = 8;
 
 /// Which renderer composites each frame.
 ///
@@ -125,6 +140,19 @@ pub struct CompositorOptions {
     /// `parse` refuses anything else.
     pub width: i32,
     pub height: i32,
+    /// How many outputs `--headless` creates, each `width` by `height` and
+    /// placed left to right with no gap. `1..=MAX_OUTPUTS`; `parse` refuses
+    /// anything else.
+    ///
+    /// `--headless` only, and `compositor::run` warns and ignores it on the
+    /// other two backends -- `--nested` presents one window in its host and
+    /// `--tty` drives one CRTC, so neither has anywhere to put a second
+    /// output. Exactly one output -- the first -- gets a render target; the
+    /// rest exist as `wl_output` globals with their own geometry and their own
+    /// scrolling strip in the core, which is what makes per-output protocol
+    /// behaviour testable without a second monitor. Nothing is shown on a
+    /// headless output in any case.
+    pub outputs: i32,
     /// Where to listen for IPC; the default path when `None`.
     pub socket: Option<PathBuf>,
     /// Explicit config file path; the XDG default when `None`. See
@@ -188,6 +216,7 @@ impl Default for CompositorOptions {
         Self {
             width: 1600,
             height: 1000,
+            outputs: 1,
             socket: None,
             config: None,
             command: Vec::new(),
@@ -260,6 +289,7 @@ fn compositor(
         match arg.as_str() {
             "--width" => options.width = dimension("--width", args.next())?,
             "--height" => options.height = dimension("--height", args.next())?,
+            "--outputs" => options.outputs = count("--outputs", args.next())?,
             "--socket" => {
                 let path = args.next().ok_or(Error::Missing("a path after --socket"))?;
                 options.socket = Some(PathBuf::from(path));
@@ -515,6 +545,28 @@ fn dimension(what: &'static str, value: Option<String>) -> Result<i32, Error> {
     }
 }
 
+/// An `--outputs` value: at least one output, at most [`MAX_OUTPUTS`].
+/// Refused rather than clamped, for the same reason [`dimension`] refuses --
+/// silently running with a different number of screens than was asked for is
+/// the surprise, not the error.
+fn count(what: &'static str, value: Option<String>) -> Result<i32, Error> {
+    let raw = value.ok_or(Error::Missing(what))?;
+    let parsed: i32 = raw.parse().map_err(|_| Error::Invalid {
+        what,
+        value: raw.clone(),
+    })?;
+    if (1..=MAX_OUTPUTS).contains(&parsed) {
+        Ok(parsed)
+    } else {
+        Err(Error::OutOfRange {
+            what,
+            value: raw,
+            min: 1,
+            max: MAX_OUTPUTS,
+        })
+    }
+}
+
 fn number<T: std::str::FromStr>(what: &'static str, value: Option<String>) -> Result<T, Error> {
     let value = value.ok_or(Error::Missing(what))?;
     value.parse().map_err(|_| Error::Invalid {
@@ -603,6 +655,60 @@ mod tests {
             };
             assert_eq!((options.width, options.height), (expected, expected));
         }
+    }
+
+    #[test]
+    fn outputs_defaults_to_one_and_takes_the_whole_legal_range() {
+        for mode in ["--headless", "--nested", "--tty"] {
+            let Ok(Command::Compositor(options)) = parse_args(&[mode]) else {
+                panic!("expected compositor");
+            };
+            assert_eq!(options.outputs, 1, "{mode}");
+        }
+
+        for good in ["1", "2", "3", "8"] {
+            let expected: i32 = good.parse().unwrap();
+            let Ok(Command::Compositor(options)) = parse_args(&["--headless", "--outputs", good])
+            else {
+                panic!("expected compositor for {good}");
+            };
+            assert_eq!(options.outputs, expected);
+        }
+    }
+
+    #[test]
+    fn outputs_refuses_zero_negatives_and_more_screens_than_a_desk_holds() {
+        // Refused rather than clamped, and the refusal echoes the range --
+        // the same shape `--width`/`--height` have, so a typo is a message
+        // rather than a session with a surprising number of screens.
+        for bad in ["0", "-1", "9", "100", "2000000000", "two", ""] {
+            let err = parse_args(&["--headless", "--outputs", bad])
+                .expect_err("an out-of-range output count should not parse");
+            match bad.parse::<i32>() {
+                Ok(_) => assert_eq!(
+                    err,
+                    Error::OutOfRange {
+                        what: "--outputs",
+                        value: bad.to_owned(),
+                        min: 1,
+                        max: MAX_OUTPUTS,
+                    },
+                    "{bad}"
+                ),
+                Err(_) => assert_eq!(
+                    err,
+                    Error::Invalid {
+                        what: "--outputs",
+                        value: bad.to_owned(),
+                    },
+                    "{bad}"
+                ),
+            }
+        }
+        assert_eq!(
+            parse_args(&["--headless", "--outputs"]),
+            Err(Error::Missing("--outputs"))
+        );
     }
 
     #[test]

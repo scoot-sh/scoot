@@ -1332,7 +1332,7 @@ impl Fixture {
     /// node and leaves the other on screen. Counting the tree is the only
     /// direct way to pin it.
     fn popups_on_first_layer(&self) -> usize {
-        let output = self.state.output.as_ref().expect("the one output");
+        let output = self.state.outputs.primary().expect("the one output");
         let map = smithay::desktop::layer_map_for_output(output);
         let layer = map.layers().next().expect("a mapped layer surface");
         smithay::desktop::PopupManager::popups_for_surface(layer.wl_surface()).count()

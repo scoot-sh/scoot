@@ -1075,10 +1075,13 @@ impl SessionLockHandler for State {
             tracing::warn!("ignoring a lock surface from a lock this compositor did not accept");
             return;
         }
-        // The output the client named, falling back to this compositor's own
-        // -- there is exactly one, so the two are the same object today (see
-        // `headless.rs`'s `OUTPUT_ID` for what multi-output has to revisit).
-        let Some(output) = Output::from_resource(&output).or_else(|| self.output.clone()) else {
+        // The output the client named, falling back to the primary one for a
+        // resource that no longer resolves (see `Outputs::primary` for what
+        // multi-output has to revisit here -- most of all that `locked` must
+        // wait for every output's blanked frame, not the first).
+        let Some(output) =
+            Output::from_resource(&output).or_else(|| self.outputs.primary().cloned())
+        else {
             tracing::warn!("no output for a lock surface");
             return;
         };
@@ -1609,8 +1612,8 @@ impl State {
         position: Point<f64, Logical>,
     ) -> Option<(WlSurface, Point<f64, Logical>)> {
         let origin = self
-            .output
-            .as_ref()
+            .outputs
+            .primary()
             .and_then(|output| self.space.output_geometry(output))
             .map(|geometry| geometry.loc)
             .unwrap_or_default();

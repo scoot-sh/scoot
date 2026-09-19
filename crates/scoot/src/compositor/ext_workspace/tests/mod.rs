@@ -57,7 +57,6 @@ use wayland_protocols::xdg::shell::client::{xdg_surface, xdg_toplevel, xdg_wm_ba
 use wayland_protocols_wlr::layer_shell::v1::client::{zwlr_layer_shell_v1, zwlr_layer_surface_v1};
 
 use crate::compositor::decorations::Appearance;
-use crate::compositor::headless;
 use crate::compositor::test_support::{Harness, wait_for};
 
 mod keyboard;
@@ -698,10 +697,11 @@ impl Fixture {
 
     /// What the core says right now, as `(count, active)`.
     fn workspaces(&self) -> (usize, usize) {
+        let primary = self.state.outputs.primary_id().expect("the output exists");
         let workspaces = self
             .state
             .world
-            .workspaces(headless::OUTPUT_ID)
+            .workspaces(primary)
             .expect("the output exists");
         (workspaces.count, workspaces.active)
     }

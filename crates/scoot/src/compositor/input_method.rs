@@ -159,7 +159,7 @@ impl InputMethodHandler for State {
         if let Some(window) = self.id_of(parent).and_then(|id| self.window(id)) {
             return window.geometry();
         }
-        let Some(output) = self.output.as_ref() else {
+        let Some(output) = self.outputs.primary() else {
             return Rectangle::default();
         };
         let map = layer_map_for_output(output);

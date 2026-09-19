@@ -202,9 +202,9 @@ impl State {
                 Some(region) => self
                     .space
                     .render_elements_for_region(renderer, &region, scale, 1.0),
-                // Unreachable while `self.output` is the output
-                // `headless::init` mapped into the space; an output that isn't
-                // in the space has no region to render.
+                // Unreachable while `output` is the primary output
+                // `headless::init_named` mapped into the space; an output that
+                // isn't in the space has no region to render.
                 None => Vec::new(),
             };
             let layers = layer_map_for_output(output);

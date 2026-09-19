@@ -751,7 +751,7 @@ fn an_explicit_seq_reaches_the_wire_verbatim() {
     let Ack::Done = fixture.wait_for_ack(0) else {
         panic!("a feedback request answered with something else");
     };
-    let output = fixture.state.output.clone().expect("an output");
+    let output = fixture.state.outputs.primary().cloned().expect("an output");
     fixture.state.present_feedback(&output, false, None, 42);
     let Ack::Feedback { events } = fixture.run_on(0, Step::ReportFeedback) else {
         panic!("a feedback report answered with something else");

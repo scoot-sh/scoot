@@ -60,17 +60,18 @@
 //!   the layout itself (a new one appears as soon as the trailing empty one
 //!   is used, an emptied one is dropped when it is left). A user cannot
 //!   create or delete one, so a client cannot either.
-//! - **`assign`**: there is one workspace group, because there is one output.
+//! - **`assign`**: there is one workspace group, because one output is
+//!   published.
 //!
-//! ## One group, because there is one output
+//! ## One group, because one output is published
 //!
-//! The single group carries the one [`Output`] this compositor creates (see
-//! `headless.rs`'s `OUTPUT_ID`). Multi-output support has to make this a
-//! group per output -- the protocol is built for it (a group is "a set of
-//! outputs", and a bar reads its workspaces per group) -- and that is the
-//! same list of sites `OUTPUT_ID`'s own doc enumerates, plus
-//! [`Action::FocusWorkspaceIndex`], which today means "of the focused
-//! output".
+//! The single group carries the primary [`Output`] (see
+//! [`Outputs::primary`](super::outputs::Outputs::primary)). Multi-output
+//! support has to make this a group per output -- the protocol is built for
+//! it (a group is "a set of outputs", and a bar reads its workspaces per
+//! group) -- and that is the same list of sites `Outputs::primary`'s own doc
+//! enumerates, plus [`Action::FocusWorkspaceIndex`], which today means "of
+//! the focused output".
 //!
 //! ## Batching
 //!
@@ -108,7 +109,6 @@ use smithay::reexports::wayland_server::{
 use smithay::wayland::{Dispatch2, GlobalDispatch2};
 
 use super::State;
-use super::headless::OUTPUT_ID;
 use diff::Change;
 
 mod diff;
@@ -308,7 +308,11 @@ impl State {
     /// most calls, since `apply` also runs for moves within a workspace -- is
     /// one `Option` compare of two `usize`s.
     pub(super) fn refresh_workspaces(&mut self) {
-        let Some(current) = self.world.workspaces(OUTPUT_ID) else {
+        let Some(current) = self
+            .outputs
+            .primary_id()
+            .and_then(|id| self.world.workspaces(id))
+        else {
             // No output, so nothing to describe. Unreachable after
             // `headless::init` (which adds the output before the event loop
             // runs) and deliberately *not* published as "zero workspaces":
@@ -345,7 +349,11 @@ impl State {
             .iter_mut()
             .find(|entry| entry.manager == *manager)
             .and_then(|entry| entry.pending_activate.take());
-        let (Some(index), Some(current)) = (pending, self.world.workspaces(OUTPUT_ID)) else {
+        let published = self
+            .outputs
+            .primary_id()
+            .and_then(|id| self.world.workspaces(id));
+        let (Some(index), Some(current)) = (pending, published) else {
             return;
         };
         if index >= current.count {
@@ -405,7 +413,10 @@ impl State {
     /// the manager before the output (registry order is the server's choice,
     /// not the client's) would see a group with no outputs in it forever.
     pub(super) fn workspace_group_output_bound(&mut self, output: &Output, wl_output: &WlOutput) {
-        if self.output.as_ref() != Some(output) {
+        // The primary output, not any of them: the group carries exactly that
+        // one output (see the `output_enter` in `announce_workspaces` below),
+        // so a bind of any other must not tell the group it entered.
+        if self.outputs.primary() != Some(output) {
             return;
         }
         let bound = wl_output.id();
@@ -481,7 +492,7 @@ impl State {
         // protocol requires `capabilities` after creation, and an empty set
         // is how a client learns not to offer a "new workspace" button.
         group.capabilities(GroupCapabilities::empty());
-        if let Some(output) = &self.output {
+        if let Some(output) = self.outputs.primary() {
             for wl_output in output.client_outputs(client) {
                 group.output_enter(&wl_output);
             }
