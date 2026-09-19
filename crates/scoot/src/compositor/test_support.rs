@@ -102,10 +102,14 @@ const CLIENT_PATIENCE: Duration = Duration::from_secs(5);
 /// dma-buf from a memfd through `/dev/udmabuf`, which pixman imports by
 /// mmapping it, while GLES must hand it to the driver -- and Mesa's
 /// `kms_swrast` answers `eglCreateImageKHR: createImageFromDmaBufs failed`
-/// (`EGL_BAD_ALLOC`) for a udmabuf-backed import. scoot still advertises
-/// pixman's hard-coded format pair whichever renderer is active, which is
-/// what stage 4 of `docs/roadmap/06-gpu-pipeline.md` exists to fix; see that
-/// file for the captured error and the reasoning.
+/// (`EGL_BAD_ALLOC`) for a udmabuf-backed import.
+///
+/// It is the buffer's **provenance** that is refused, not its format: both
+/// advertised formats are present with `LINEAR` among that display's 76
+/// import formats. So stage 4's renderer-derived advertisement would *not*
+/// fix these seven -- it would name the same two formats. Do not read them
+/// as blocked on stage 4; they are blocked on `kms_swrast` accepting a
+/// udmabuf, or on the tests allocating through GBM instead.
 pub(crate) fn test_renderer() -> RendererKind {
     static RENDERER: OnceLock<RendererKind> = OnceLock::new();
     *RENDERER.get_or_init(|| match std::env::var("SCOOT_TEST_RENDERER") {

@@ -163,7 +163,7 @@ What landed:
   ordering does prefer a real device node; the software fallback is what a
   box with no node at all would land on.
 
-### The seven dmabuf failures, and why they are stage 4's
+### The seven dmabuf failures, and why they are *not* stage 4's
 
 Captured with a temporary `tracing_subscriber` in the failing test (reverted;
 the compositor never installs one under `cargo test`):
@@ -182,12 +182,25 @@ synthesise their dma-buf from a memfd through `/dev/udmabuf`; pixman imports
 that by mmapping it, while GLES must hand it to the driver, and `kms_swrast`
 refuses a udmabuf-backed import with `EGL_BAD_ALLOC`.
 
-The user-visible half is real and is **stage 4's**: `DMABUF_FORMATS` is a
-hard-coded pixman-shaped pair advertised whichever renderer is active, so
-under `--renderer gles` a client can be offered a format this renderer cannot
-import for its buffer -- and `create_immed` then disconnects it. Fixing the
-advertisement to be renderer-derived is exactly stage 4's scope, so stage 2
-documents it (`README.md`, `test_support.rs`) rather than growing into it.
+**This was first written up as stage 4's, and that was wrong.** Review
+probed the EGL device scoot's own selection picks on that VM and found both
+advertised formats (`AR24`, `XR24`) present with `LINEAR` among the
+display's **76** import formats — a superset of what is advertised. So the
+advertisement is not a broken promise here, and a renderer-derived table
+would name the same two formats and fail these seven tests identically.
+What `kms_swrast` refuses is the buffer's **provenance**: the tests
+synthesise a dma-buf through `/dev/udmabuf`, which pixman mmaps and the GL
+path cannot accept. No real client reaches it on that machine either —
+`gbm_bo_create` on its render node is refused, so nothing there can produce
+a GBM dmabuf at all.
+
+Stage 4 is still worth doing, for a hazard these tests do **not**
+demonstrate: an EGL display with no dmabuf-import capability yields an empty
+importable set, and advertising pixman's pair against it would disconnect
+every dmabuf client. That case is real and unverified. The distinction
+matters because "deferred to stage 4" would otherwise read as "already
+diagnosed, fix scheduled" when the actual state is "different problem,
+unmeasured".
 
 ### Benchmarks
 
@@ -258,10 +271,14 @@ per-frame dispatch is the same single match.
 **And what does `gles` itself cost?** On llvmpipe, a great deal -- as
 expected:
 
-| Scene | pixman | gles (llvmpipe) |
-| ----- | ------ | --------------- |
-| empty desktop | 62.2µs | **1.978ms** (32x) |
-| 8 windows | 138.3µs | **2.384ms** (17x) |
+| Scene | pixman (median) | gles (llvmpipe) |
+| ----- | --------------- | --------------- |
+| empty desktop | 64.4µs | **1.978ms** (31x) |
+| 8 windows | 131.0µs | **2.384ms** (18x) |
+
+(Medians across all eight rounds, matching the table above. An earlier
+version of this row quoted round 1 — 62.2µs and 138.3µs — which flattered
+one scene and penalised the other for no reason beyond round order.)
 
 This is **not a regression and not a reason to tune anything**. There is no
 GPU on this VM: `gles` here means Mesa's `kms_swrast` rasterising in software

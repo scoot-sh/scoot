@@ -267,10 +267,14 @@ and is not today:
   memcpy it into a dumb scanout buffer would be strictly worse than
   compositing on the CPU in the first place.
 - **Hardware first.** The EGL device is chosen by preferring a real device
-  over a software one and taking the first that yields a working renderer, so
-  a box with a GPU uses the GPU and a box without falls back to Mesa's
-  software device. The chosen device is logged at startup
-  (`the GLES renderer is up device=/dev/dri/renderD128 software=false`).
+  over a software one and taking the first that yields a working renderer,
+  so a box with a GPU uses the GPU. Note that "software" here means only
+  that the device advertises `EGL_MESA_device_software`: a real device *node*
+  backed by a software driver answers no, so it is preferred and then served
+  in software anyway. That is what happens on the dev VM, and it is why
+  numbers measured there are llvmpipe's. The chosen device is logged at
+  startup (`the GLES renderer is up device=/dev/dri/renderD128
+  software=false`) — trust that line over the flag name.
 - **A wrong `--renderer gles` is a startup error, not a silent downgrade.** If
   no EGL device can drive it, scoot says so and names each failure rather than
   quietly compositing with the other renderer.
