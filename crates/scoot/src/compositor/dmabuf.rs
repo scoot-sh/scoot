@@ -121,7 +121,8 @@
 //! The default feedback names a **render node** as `main_device`
 //! ([`main_device`]: the active renderer's own device where it can name one,
 //! else `/dev/dri/renderD128`, else `card0`, else `0`, whichever rung
-//! answered logged once at startup) and the derived tranche -- [`DMABUF_CANDIDATES`] (`Xrgb8888` then
+//! answered logged once at startup) and the derived tranche --
+//! [`DMABUF_CANDIDATES`] (`Xrgb8888` then
 //! `Argb8888`) minus anything the renderer cannot import -- with the `LINEAR`
 //! layout, which is the only layout a CPU mapping can make sense of and the
 //! only one every tier here agrees on. A render node rather than a primary
