@@ -87,9 +87,12 @@ impl Outputs {
     ///
     /// The count is bounded at startup (`--outputs`, see `cli.rs`) and
     /// nothing adds one later, so the counter cannot realistically be driven
-    /// anywhere near wrapping; it saturates rather than wraps all the same,
-    /// because a repeated id would silently merge two outputs in the core
-    /// while a stuck one merely refuses to distinguish them.
+    /// anywhere near wrapping. It saturates rather than wraps all the same --
+    /// but be clear about what that buys, because an earlier version of this
+    /// comment had it backwards: *both* behaviours repeat an id at the
+    /// boundary. Saturation repeats the last one, wrapping repeats from the
+    /// start. It is preferred only because a stuck maximum is the more
+    /// obvious symptom to debug, not because it avoids the collision.
     pub(crate) fn add(&mut self, output: Output) -> OutputId {
         let id = self.next;
         self.next = OutputId(self.next.0.saturating_add(1));

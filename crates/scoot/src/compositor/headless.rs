@@ -89,6 +89,20 @@ pub fn init_named(
         &mut state.screencopy.dmabuf,
         &backend,
     );
+    // One backend, one output, and `state.backend` is *replaced* while
+    // `state.outputs` is *appended to* -- so calling this twice would leave
+    // `primary()` naming output 1 while the backend belongs to output 2.
+    // Every capture and gamma path compares against `primary()`, so they
+    // would then refuse the one output that actually has pixels, and
+    // `render()` would draw output 1's geometry into output 2's target.
+    // Unreachable today (one call, at startup) and cheap to keep that way;
+    // `Outputs::add` got a structural guard for the same reason.
+    debug_assert!(
+        state.outputs.is_empty(),
+        "the headless backend was initialised twice: the second output would \
+         be appended while the backend is replaced, leaving primary() and the \
+         backend naming different outputs"
+    );
     state.backend = Some(backend);
     // The GPU scanout tier's `DrmCompositor` was built before this output
     // existed (`tty::init` runs first, because `--tty` is where the size

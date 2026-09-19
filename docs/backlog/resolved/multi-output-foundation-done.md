@@ -112,6 +112,16 @@ not hold reads as "not a layer surface", so no initial configure is ever sent
 and the client waits forever; and the destruction never unmaps it, leaving a
 dead surface arranged on a map `render()`'s `cleanup()` does not walk.
 
+**That second fault is fixed at the destroy path, not everywhere.** The
+explicit teardown now unmaps on the surface's own output, but `render()`'s
+`cleanup()` (`headless.rs`) still walks the primary map only — so a layer
+surface torn down *implicitly*, by its client disconnecting rather than by a
+`destroy`, still leaks on a secondary output. That safety net exists for
+exactly the ordering the explicit path cannot cover, and it is the one place
+this item deliberately leaves single-output. It belongs with the rest of the
+per-output render walk in [multi-output](../core/multi-output.md); named here
+so it is not mistaken for finished.
+
 **Refused rather than answered wrong.** One output is composited, so
 `screenshot --output N` for any other output is now an error instead of the
 primary output's pixels under another output's name. `screencopy` and
