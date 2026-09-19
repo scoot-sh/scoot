@@ -416,7 +416,7 @@ falsify. Read `flexwm` there as `scoot`.
   — RESOLVED 2026-09-16, together with the `--tty` entry above that had
   independently (and wrongly) filed the same failure as a compositor bug.
 - [Enhanced hardware/DRM testing ideas](./testing/hardware-testing-ideas.md) (research)
-- [No CI: every verification run is manual and self-reported](./testing/ci-test-run.md)
+- [No CI: every verification run is manual and self-reported](./resolved/ci-test-run-done.md)
   — LANDED 2026-09-19 (PR #140): `.github/workflows/ci.yml` runs fmt,
   clippy, `cargo nextest run --workspace`, `cargo test --workspace`, the
   `--headless` smoke test, and an `ldd` pair asserting the default build
@@ -439,6 +439,13 @@ at the user's direction. The `blocked:` field on each records that ordering;
 none of them is technically blocked, so the sequencing is a choice and can
 be revisited.
 
+- [Multi-output **foundation**: `State.output` becomes a collection, and `--headless --outputs N`](./core/multi-output-foundation.md)
+  — **HIGH**, split out 2026-09-19 and scheduled ahead of the item below.
+  `State` holds `pub output: Option<Output>` — singular, one slot — so there
+  is no headless multi-monitor mode to test with, on any backend. Making it
+  a collection is what turns most of the item below from hardware work into
+  VM-testable work. Start once milestone 6 stage 4 lands; both change
+  `State::new`.
 - [Multi-output: more than one monitor at a time](./core/multi-output.md)
   — **HIGH**, and almost certainly milestone-sized rather than
   backlog-sized. `README.md`'s "Not yet" list leads with it. The scope is

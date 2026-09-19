@@ -35,7 +35,7 @@ in
     writableStore = true;
     writableStoreUseTmpfs = false;
 
-    diskSize = 16 * 1024; # writable root; cargo target dirs live here
+    diskSize = 32 * 1024; # writable root; cargo target dirs live here
     memorySize = 4096;
     cores = 4;
     graphics = true;
