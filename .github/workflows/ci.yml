@@ -49,8 +49,12 @@ on:
 permissions:
   contents: read
 
+# Superseded runs are cancelled: pushing twice to a branch in a minute
+# should not leave two full Smithay builds competing for a runner. Keyed by
+# workflow as well as ref, so a second workflow added later cannot cancel
+# this one's runs.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
