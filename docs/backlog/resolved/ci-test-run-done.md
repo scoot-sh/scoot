@@ -8,13 +8,10 @@ blocked: null
 
 # No CI: every verification run is manual and self-reported — LANDED 2026-09-19 (PR #140)
 
-**What landed is at the bottom of this file** ("What landed", below). The
-entry is kept at this path rather than moved to `resolved/`, against the
-usual convention, because `CLAUDE.md` links `docs/backlog/testing/ci-test-run.md`
-by name and an implementer may not edit `CLAUDE.md`.
+**What landed is at the bottom of this file** ("What landed", below).
 
-Requested 2026-09-19. There is **no `.github/workflows` at all** — verified
-during the 2026-09-17 audit of PRs #73–#89 and still true. Every number in
+Requested 2026-09-19. When this was filed there was **no `.github/workflows`
+at all** — verified during the 2026-09-17 audit of PRs #73–#89. Every number in
 every PR body is a self-reported run on the dev VM, and the only thing
 catching a wrong one is that the reviewer and the coordinating session
 re-derive it by hand.

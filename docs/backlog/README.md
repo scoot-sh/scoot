@@ -416,7 +416,7 @@ falsify. Read `flexwm` there as `scoot`.
   — RESOLVED 2026-09-16, together with the `--tty` entry above that had
   independently (and wrongly) filed the same failure as a compositor bug.
 - [Enhanced hardware/DRM testing ideas](./testing/hardware-testing-ideas.md) (research)
-- [No CI: every verification run is manual and self-reported](./testing/ci-test-run.md)
+- [No CI: every verification run is manual and self-reported](./resolved/ci-test-run-done.md)
   — LANDED 2026-09-19 (PR #140): `.github/workflows/ci.yml` runs fmt,
   clippy, `cargo nextest run --workspace`, `cargo test --workspace`, the
   `--headless` smoke test, and an `ldd` pair asserting the default build
