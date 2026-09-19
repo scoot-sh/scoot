@@ -401,7 +401,13 @@ the swapchain is rebuilt -- signalled by the presenter through one
 `take_slots_dropped` flag, so the only thing that can free a slot is also the
 only thing that invalidates the pool.
 
-### Evidence (dev VM, `--tty` seat held 14:40-14:47Z 2026-09-19)
+### Evidence (dev VM, `--tty` seat held 14:40-14:47Z and again 15:11-15:13Z, 2026-09-19)
+
+Everything below was captured twice: first at the tree that became `5ffd3c6`,
+then re-run in full at `19f9282` after a comment-and-docs-only commit, so the
+key matches the branch head rather than something one commit behind. The seat
+was checked free before each session (`pgrep` for another `--tty` client,
+`journalctl -u seatd`).
 
 - **The tier really comes up on real KMS**: `drm: driving this device
   path=/dev/dri/card0 connector=Virtual-1 width=1600 height=1000
