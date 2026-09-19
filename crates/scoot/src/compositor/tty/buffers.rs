@@ -120,7 +120,7 @@ impl SlotAges {
     ///
     /// Without this the retry reads as age 1 -- one render out of date, only
     /// this frame's own damage requested -- and a frame with no *new* damage
-    /// comes back `None` from the damage tracker (see `headless.rs`'s
+    /// comes back `None` from the damage tracker (see `render/tests.rs`'s
     /// contract test), so nothing is ever re-presented and scanout stays
     /// stale until unrelated damage arrives.
     fn write_failed(&mut self, index: usize) {
@@ -293,8 +293,9 @@ fn make_slot(
     height: i32,
 ) -> Result<Slot, Box<dyn Error>> {
     // Xrgb8888: the same little-endian BGRx byte layout as the pixman
-    // Argb8888 image `headless.rs` renders into and reads back (see its
-    // module doc and screenshot.rs's comment on the same fact) -- KMS
+    // Argb8888 image `render/pixman.rs` composites into and `render.rs`
+    // reads back (see their module docs and screenshot.rs's comment on the
+    // same fact) -- KMS
     // doesn't care whether the unused top byte means "ignored" or "alpha",
     // only that the channel order underneath matches, and it does.
     let buffer = allocator.create_buffer(
@@ -446,7 +447,7 @@ mod tests {
         // must fully redraw (age 0). Merely freeing the slot -- what the
         // commit-failure arm did before this fix -- leaves age 1, and an
         // unchanged frame at age 1 reports no damage at all (see
-        // `headless.rs`'s contract test), so nothing is ever re-presented.
+        // `render/tests.rs`'s contract test), so nothing is ever re-presented.
         // Neuter check: make `write_failed` a no-op and the final assertion
         // reads 1, not 0.
         let mut ages = SlotAges {

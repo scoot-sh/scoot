@@ -47,16 +47,13 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use scoot_core::Config;
-use smithay::backend::allocator::Fourcc;
-use smithay::backend::renderer::{Bind, ExportMem};
 use smithay::reexports::calloop::EventLoop;
 use smithay::reexports::wayland_server::{Client, Display};
-use smithay::utils::Rectangle;
 use wayland_client::EventQueue;
 
 use crate::compositor::State;
 use crate::compositor::decorations::Appearance;
-use crate::compositor::headless::{self, Backend};
+use crate::compositor::headless;
 use crate::compositor::keybindings::Keybindings;
 use crate::compositor::state::ClientState;
 
@@ -394,18 +391,14 @@ impl<S, A> Harness<S, A> {
     pub(crate) fn pixels(&mut self) -> Vec<u8> {
         let canvas = self.canvas.expect("a headless harness has a framebuffer");
         let backend = self.state.backend.as_mut().expect("a backend");
-        let Backend {
-            renderer, image, ..
-        } = backend;
-        let framebuffer = renderer.bind(image).expect("a framebuffer");
-        let region = Rectangle::from_size((canvas, canvas).into());
-        let mapping = renderer
-            .copy_framebuffer(&framebuffer, region, Fourcc::Argb8888)
-            .expect("a framebuffer readback");
-        renderer
-            .map_texture(&mapping)
-            .expect("mapped pixels")
-            .to_vec()
+        assert_eq!(
+            backend.size(),
+            (canvas, canvas),
+            "the harness reads the whole framebuffer back, so its size must be the canvas"
+        );
+        backend
+            .capture(<[u8]>::to_vec)
+            .expect("a framebuffer readback")
     }
 }
 

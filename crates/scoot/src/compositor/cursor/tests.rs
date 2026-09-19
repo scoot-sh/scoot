@@ -583,7 +583,7 @@ impl Fixture {
 
     /// Renders this frame's cursor elements into a [`CANVAS`]-square
     /// framebuffer and hands back the raw BGRA pixels, exactly the layout
-    /// `headless.rs` renders into.
+    /// `render/pixman.rs` composites into.
     fn frame(&self) -> Canvas {
         let mut renderer = PixmanRenderer::new().expect("a pixman renderer");
         let mut image = renderer

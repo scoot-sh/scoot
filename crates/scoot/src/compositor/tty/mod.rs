@@ -3,9 +3,9 @@
 //! all.
 //!
 //! Structurally this is the same idea as `nested.rs`: another *presenter*
-//! for the same pixman-rendered framebuffer `headless.rs` already draws
-//! into (see `headless::render`'s call to `Tty::present`, right alongside
-//! its call to `nested::Host::present`), just a different transport --
+//! for the same framebuffer `render.rs` already draws into (see
+//! `render::draw_frame_with`'s call to `Tty::present`, right alongside its
+//! call to `nested::Host::present`), just a different transport --
 //! dumb-buffer scanout via DRM instead of `wl_shm` buffers attached to a
 //! host surface. Session (libseat) + DRM device/surface + calloop wiring
 //! live here; the two dumb buffers themselves live in `buffers.rs`, same

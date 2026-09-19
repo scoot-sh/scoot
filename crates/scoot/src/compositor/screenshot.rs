@@ -83,14 +83,11 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use scoot_ipc::{Response, Screenshot, encode};
-use smithay::backend::allocator::Fourcc;
-use smithay::backend::renderer::{Bind, ExportMem};
 use smithay::reexports::calloop::channel::{self, Event as ChannelEvent};
-use smithay::utils::Rectangle;
 
 use super::State;
-use super::headless::Backend;
 use super::ipc::Outbound;
+use super::render::Backend;
 
 /// How many captures may be accepted-but-undelivered at once, across every
 /// connection.
@@ -622,29 +619,25 @@ impl State {
 }
 
 fn read_back(backend: &mut Backend) -> Result<RawCapture, String> {
-    let (width, height) = backend.size;
+    let (width, height) = backend.size();
     if width <= 0 || height <= 0 {
         return Err(format!("no pixels to capture at {width}x{height}"));
     }
-    let region = Rectangle::from_size((width, height).into());
-    let Backend {
-        renderer, image, ..
-    } = backend;
-
-    let framebuffer = renderer.bind(image).map_err(|e| e.to_string())?;
-    let mapping = renderer
-        .copy_framebuffer(&framebuffer, region, Fourcc::Argb8888)
-        .map_err(|e| e.to_string())?;
-    let pixels = renderer.map_texture(&mapping).map_err(|e| e.to_string())?;
-
-    // Owned before returning: `map_texture`'s contract is a read-only view
-    // into the renderer's own mapping, not a buffer that can be sent to
+    // Owned inside the callback: `Backend::capture` hands out a read-only
+    // view into the renderer's own mapping, not a buffer that can be sent to
     // another thread. This copy is the one part of the read-back that cannot
     // move off the event-loop thread with the encode.
+    //
+    // `CaptureError`'s `Display` is the renderer's own message, which is what
+    // the IPC client is told -- the surrounding text at each call site already
+    // says a capture is what failed.
+    let bgra = backend
+        .capture(<[u8]>::to_vec)
+        .map_err(|error| error.to_string())?;
     Ok(RawCapture {
         width,
         height,
-        bgra: pixels.to_vec(),
+        bgra,
     })
 }
 

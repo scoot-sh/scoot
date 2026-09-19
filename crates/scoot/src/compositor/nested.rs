@@ -135,10 +135,11 @@ pub fn init(
 impl Host {
     /// Copies an already-rendered frame into a free host buffer and presents
     /// it. Takes raw pixels plus dimensions rather than any renderer-specific
-    /// type -- headless.rs's CPU/pixman path is the only renderer that exists
-    /// today, but this module has no reason to know that; a future GPU
-    /// renderer reading its own output back into a byte slice could present
-    /// through this exact same call.
+    /// type -- pixman is the only renderer behind `render.rs`'s seam today,
+    /// but this module has no reason to know that; a future GPU renderer
+    /// reading its own output back into a byte slice presents through this
+    /// exact same call, unchanged (see `render.rs`'s `read_back`, which is
+    /// what hands the slice over).
     ///
     /// Returns whether the frame reached the host. Anything else -- the
     /// surface not configured yet, a size mismatch against a resize still in

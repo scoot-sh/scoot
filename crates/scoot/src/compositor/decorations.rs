@@ -25,7 +25,7 @@
 //! elements on top; that *is* a background, for free, already guaranteed to
 //! be the bottom-most thing on screen by construction (nothing draws before
 //! the clear). Passing `Appearance::background_color` as that clear color
-//! (see `headless.rs::render`) is simpler than a full-output element, needs
+//! (see `render.rs::draw_frame_with`) is simpler than a full-output element, needs
 //! no persistent buffer, and structurally cannot end up on the wrong side of
 //! the window content the way a stray ordering bug in an element list could
 //! -- see pitfall #3 in this feature's task notes. Only the ring is built as
@@ -42,7 +42,7 @@
 //! nothing changed.
 //!
 //! It happens not to matter *today*, in this specific codebase: every call
-//! to `headless.rs::render()` passes `age: 0` to `render_output`, which
+//! to `render.rs::draw_frame_with` passes `age: 0` to `render_output`, which
 //! (see `damage_output_internal` in Smithay's `backend::renderer::damage`)
 //! unconditionally damages the *entire* output on every call, regardless of
 //! any element's identity or commit counter -- the fine-grained per-element
@@ -120,7 +120,7 @@ impl Color {
     /// - **Byte order.** `Argb8888` names the channels from the *most*
     ///   significant bit of a 32-bit little-endian word down, so the lowest
     ///   address holds B -- the same layout `cursor.rs::generate_bitmap`
-    ///   writes, `headless.rs` renders into and `tty/buffers.rs` scans out
+    ///   writes, `render/pixman.rs` renders into and `tty/buffers.rs` scans out
     ///   (see their module docs on the same fact), which is why nothing
     ///   downstream converts.
     /// - **Premultiplied.** The pinned Smithay rev hands an `Argb8888` memory
@@ -392,7 +392,7 @@ struct WindowRing {
 }
 
 /// Per-window decoration bookkeeping, owned by [`State`](super::State) for
-/// as long as the compositor runs. `headless.rs` calls [`Decorations::elements`]
+/// as long as the compositor runs. `render.rs` calls [`Decorations::elements`]
 /// once per render to get this frame's ring, and otherwise doesn't know this
 /// type exists -- see the module doc's opening paragraph on keeping
 /// decoration logic out of the render loop itself.
