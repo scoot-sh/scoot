@@ -45,8 +45,8 @@
 //!
 //! No client filter, the same deliberate consistency as every other
 //! advertisement here: scoot has no security-context support, so an
-//! allow-list would be theatre (see `README.md`'s trust note). A global
-//! that only dims a client's own surface widens nothing.
+//! allow-list would be theatre (see `docs/protocols.md`'s trust note). A
+//! global that only dims a client's own surface widens nothing.
 
 #[cfg(test)]
 mod tests;

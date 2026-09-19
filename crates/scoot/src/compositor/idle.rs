@@ -36,7 +36,7 @@
 //!   never maps can hold off `idled` indefinitely; that client is local
 //!   and unprivileged either way, and an allow-list without
 //!   security-context support would be theatre (the same rationale as the
-//!   session-lock and data-control globals -- see `README.md`'s trust
+//!   session-lock and data-control globals -- see `docs/protocols.md`'s trust
 //!   note).
 //! - **There is no built-in auto-locker.** scoot provides the protocol;
 //!   the policy (which timeout locks, what dims first) belongs to the

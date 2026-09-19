@@ -41,7 +41,7 @@
       # cfg'd out of the crate and what builds is `scoot msg`, the client
       # that drives a compositor running elsewhere (a VM) over its socket.
       # `scoot --headless` there exits with a message saying exactly that,
-      # so the same package is honest on both -- see README's Building.
+      # so the same package is honest on both -- see README's Install section.
       packages = forEach (pkgs: {
         default = pkgs.rustPlatform.buildRustPackage {
           pname = "scoot";
@@ -123,7 +123,7 @@
             # Linux builds the whole compositor, so the crate's own
             # description is the honest one; on Darwin the compositor is
             # cfg'd out and the package is just `scoot msg` (see the
-            # comment on `packages` above and README's Building), so the
+            # comment on `packages` above and README's Install section), so the
             # metadata says that instead of advertising a compositor macOS
             # never runs.
             description =

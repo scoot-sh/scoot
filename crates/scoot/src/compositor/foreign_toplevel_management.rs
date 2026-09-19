@@ -102,8 +102,8 @@
 //!
 //! The list stays live -- handles stay, titles keep updating, new windows are
 //! still announced -- for the same reason the `ext-` list does (see
-//! `README.md`'s lock section: a process that can reach this socket is a
-//! same-uid process inside the trust boundary already, and `closed` for a
+//! `docs/protocols.md`'s lock section: a process that can reach this socket is
+//! a same-uid process inside the trust boundary already, and `closed` for a
 //! window that did not close is a lie a taskbar cannot recover from).
 //!
 //! The two *requests* are refused while locked, which is the difference this
@@ -184,10 +184,10 @@ impl ForeignToplevelManagement {
     ///
     /// No client filter, for the same reason the session-lock, gamma-control
     /// and data-control globals have none: scoot has no security-context
-    /// support, so an allow-list would be theatre (see `README.md`'s trust
-    /// note). Worth saying plainly that this one has a write half, unlike
-    /// `output_management.rs`: any client that can reach this socket can focus
-    /// and close windows through it -- which is the same boundary
+    /// support, so an allow-list would be theatre (see `docs/protocols.md`'s
+    /// trust note). Worth saying plainly that this one has a write half,
+    /// unlike `output_management.rs`: any client that can reach this socket
+    /// can focus and close windows through it -- which is the same boundary
     /// `scoot msg action` already sits on.
     ///
     /// The `GlobalId` is dropped: nothing removes this global for the life of

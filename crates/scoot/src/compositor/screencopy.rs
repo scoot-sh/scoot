@@ -470,12 +470,12 @@ impl Screencopy {
     ///
     /// No client filter, for the same reason the session-lock, data-control
     /// and input-method globals have none: scoot has no security-context
-    /// support, so an allow-list would be theatre (see `README.md`'s trust
-    /// note). Worth naming here because screen capture is the most obviously
-    /// sensitive of those -- a client that can reach this socket can read the
-    /// screen -- so this is a deliberate consistency with the trust model the
-    /// whole compositor already states, not an oversight about what the
-    /// protocol can do. The dmabuf global extends that note rather than
+    /// support, so an allow-list would be theatre (see `docs/protocols.md`'s
+    /// trust note). Worth naming here because screen capture is the most
+    /// obviously sensitive of those -- a client that can reach this socket can
+    /// read the screen -- so this is a deliberate consistency with the trust
+    /// model the whole compositor already states, not an oversight about what
+    /// the protocol can do. The dmabuf global extends that note rather than
     /// widening it: it hands out no pixels by itself, only format feedback,
     /// and answers every import `failed` (see [`dmabuf`](super::dmabuf)).
     pub(super) fn new(dh: &DisplayHandle) -> Self {
