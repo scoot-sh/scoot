@@ -1,6 +1,6 @@
 # scoot test VM
 
-A NixOS VM (aarch64) for developing **scoot**, a Wayland window manager, from
+A NixOS VM (aarch64) for developing **scoot**, a Wayland compositor, from
 a Mac. The point is to get a *real* DRM/KMS device, real libinput devices and a
 real seat — the things a compositor needs and macOS cannot provide — while you
 keep editing code on the Mac.
@@ -68,6 +68,20 @@ qemu monitor).
   (override with `SCOOT_SRC=/path/to/repo`)
 - the VM's disk lives in `~/.local/state/scoot-vm/`
 
+Coming from a VM built before the `flexwm` → `scoot` rename: the share moved
+from `/mnt/flexwm` to `/mnt/scoot` and the state directory from
+`~/.local/state/flexwm-vm/`, so a VM already on disk needs its state moved
+across or it boots from a fresh (empty) disk, losing the guest's cargo target
+cache:
+
+```sh
+mv ~/.local/state/flexwm-vm ~/.local/state/scoot-vm
+mv ~/.local/state/scoot-vm/flexwm-vm.qcow2 ~/.local/state/scoot-vm/scoot-vm.qcow2
+```
+
+A VM that is already *running* keeps the share it booted with (`/mnt/flexwm`)
+until it is rebuilt and rebooted; `/mnt/scoot` is what the next boot mounts.
+
 ## Is the stack alive?
 
 In the QEMU window:
@@ -88,7 +102,7 @@ Edit on the Mac, build and run in the VM:
 
 ```sh
 ssh -p 2222 dev@localhost
-cd /mnt/scoot && cargo build          # CARGO_TARGET_DIR is /var/cargo-target,
+cd /mnt/scoot && cargo build           # CARGO_TARGET_DIR is /var/cargo-target,
                                        # i.e. on the guest disk, not over 9p
 ```
 
@@ -275,7 +289,7 @@ were being reproduced, and the EPERM read as a `--gpu` bug until the holder was
 noticed. Check before you start, and again if an errno surprises you:
 
 ```sh
-pgrep -a scoot; pgrep -a sway            # nothing should be holding it
+pgrep -a scoot; pgrep -a sway             # nothing should be holding it
 sudo journalctl -u seatd -n 5 --no-pager  # "Removed client N" = seat free now
 ```
 

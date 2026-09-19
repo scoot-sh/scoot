@@ -101,7 +101,7 @@ risky part comes last:
 ## Build
 
 ```sh
-git clone https://github.com/yackey-labs/scoot && cd scoot
+git clone https://github.com/scoot-sh/scoot && cd scoot
 nix build                      # -> ./result/bin/scoot
 mkdir -p /tmp/fx
 ```

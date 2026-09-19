@@ -131,7 +131,7 @@
                 "Remote-control client (`scoot msg`) for the scoot scrolling-tiling Wayland compositor"
               else
                 crateDescription;
-            homepage = "https://github.com/yackey-labs/scoot";
+            homepage = "https://github.com/scoot-sh/scoot";
             license = pkgs.lib.licenses.mit;
             mainProgram = "scoot";
             platforms = pkgs.lib.platforms.linux ++ pkgs.lib.platforms.darwin;

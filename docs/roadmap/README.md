@@ -13,6 +13,11 @@ The prose inside each file is the original `ROADMAP.md` entry, moved
 verbatim — review findings, raw evidence, exact commands and all. `ROADMAP.md`
 at the repo root is the index; this directory is the detail.
 
+All of it predates the rename to `scoot` (2026-09-18) and keeps the old name,
+`flexwm`, verbatim for the same reason it is verbatim in every other respect:
+the nix store paths, typed input strings, screenshot paths and commands here
+are a record of what was actually run. Read `flexwm` as `scoot`.
+
 | Item | Title | Status | PR |
 | ---- | ----- | ------ | -- |
 | [1](./01-nested-backend.md) | Nested backend | done | — |

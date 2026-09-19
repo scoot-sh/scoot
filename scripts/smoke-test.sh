@@ -22,7 +22,7 @@
 # SOCKET/SHOT/LOG/CONFIG/TYPED still wins over the prefix-derived default
 # for that one path, so existing callers that set SOCKET/LOG/MODE/SCOOT
 # keep working; with SMOKE_PREFIX unset every default is exactly the
-# historical hardcoded path. A trailing slash on the prefix is stripped, a
+# hardcoded path below. A trailing slash on the prefix is stripped, a
 # nonexistent parent dir is created (mkdir -p), and every expansion is
 # quoted so a prefix containing spaces works.
 set -euo pipefail

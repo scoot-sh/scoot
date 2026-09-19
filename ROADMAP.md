@@ -928,9 +928,17 @@ medium priority — the effective top of what's actually open.
    through the session-locale table, per-char atomic, prefix-typed;
    inactive groups, lock/latch, `Multi_key` and plain-`us` `é` stay loud
    refusals).
-4. [Rename `scoot` → `flex`, split out
-   `flexctl`](docs/backlog/meta/rename-flex-family.md) — decided, explicitly
-   scheduled **last** in the burn-down, per the entry's own frontmatter.
+4. [Split the CLI out into
+   `scootctl`](docs/backlog/meta/rename-flex-family.md) — the rename half of
+   that entry LANDED 2026-09-18: `flexwm` → **`scoot`** across crates, binary,
+   socket (`scoot.sock`/`$SCOOT_SOCKET`), config paths (`~/.config/scoot/`,
+   `/etc/scoot/config.toml`), flake and docs, with no fallback to the old
+   names; `flex` was dropped for a crates.io and GNU-flex collision, and the
+   repo moved to `scoot-sh/scoot`. `docs/backlog/resolved/` and the numbered
+   `docs/roadmap/` files keep the old name on purpose — they record evidence
+   (nix store paths, typed strings, screenshot paths) a rename would falsify.
+   What remains open here is the `scootctl` crate split, which wants its own
+   design pass.
 
 ## Shell enablement (DMS / Noctalia probes, 2026-09-14)
 

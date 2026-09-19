@@ -2,7 +2,8 @@
 
 A scrolling-tiling Wayland compositor, in the shape of [niri](https://github.com/YaLTeR/niri):
 lightweight, fast, GPU-optional, and built to be driven by a script or an agent
-as easily as by a keyboard.
+as easily as by a keyboard. [scoot.sh](https://scoot.sh) ·
+[github.com/scoot-sh/scoot](https://github.com/scoot-sh/scoot)
 
 Two things distinguish it from a typical compositor:
 
@@ -24,6 +25,13 @@ Two things distinguish it from a typical compositor:
 purpose: it knows nothing about Wayland. The plan is for the same engine to
 eventually back a macOS Accessibility-API adapter, doing OmniWM-style window
 layout on a Mac, not just on Linux.
+
+**Renamed from `flexwm` on 2026-09-18**, a clean break with no fallback to the
+old names: the binary is `scoot`, the crates are `scoot`/`scoot-core`/
+`scoot-ipc`, the socket is `scoot.sock` (overridden by `$SCOOT_SOCKET`, not
+`$FLEXWM_SOCKET`), and the config file is read from `~/.config/scoot/` (or
+`$XDG_CONFIG_HOME/scoot/`) only — a file left at `~/.config/flexwm/config.toml`
+is not loaded, so move it or pass `--config PATH`.
 
 ## Status
 
@@ -557,7 +565,7 @@ wlroots-adjacent ecosystem uses — `waybar`, `swaybg`, `mako`, `wofi`,
 else inside the session:
 
 ```sh
-scoot --tty -- foot              # ...then, in a shell inside the session:
+scoot --tty -- foot               # ...then, in a shell inside the session:
 swaybg -c '#123456' &             # a wallpaper, on the background layer
 waybar &                          # a bar, on the top layer
 fuzzel                            # a launcher, on the overlay layer

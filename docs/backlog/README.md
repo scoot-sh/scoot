@@ -15,7 +15,10 @@ the detail. Prose is the original backlog entry, moved verbatim.
 
 **Resolved entries** (struck through in the old monolith, kept for the
 diagnosis history) live in [`resolved/`](./resolved/). They are archived, not
-actionable.
+actionable — and they still say `flexwm`, the name this project carried until
+2026-09-18. That is deliberate: they record evidence (nix store paths, typed
+input strings, screenshot paths, exact commands run) that renaming would
+falsify. Read `flexwm` there as `scoot`.
 
 ## High priority
 
@@ -421,4 +424,4 @@ actionable.
   of duplication.
 
 ### Meta
-- [Rename `scoot` → `flex`, split out `flexctl`](./meta/rename-flex-family.md) — decided, do this **last** in the burn-down (`flexbar` stays separate, undecided)
+- [Split the CLI out into `scootctl`](./meta/rename-flex-family.md) — the `flexwm` → `scoot` rename half landed 2026-09-18; the crate split remains, and wants its own design pass (a status bar stays separate, undecided)

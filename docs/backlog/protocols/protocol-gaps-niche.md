@@ -53,7 +53,7 @@ blocked: null
     real in-tree consumer, content-type is stored and honestly ignored).
     See `../resolved/protocol-gaps-niche-done.md`.
 
-**From `scoot-reviewer's pass on PR #13 (item 8, client cursor surface
+**From `flexwm-reviewer's pass on PR #13 (item 8, client cursor surface
 rendering), all low priority, none blocking:**
 
 - **`Cursor::element`'s fallback path allocates a one-element `Vec` every
