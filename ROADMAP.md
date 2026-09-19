@@ -866,6 +866,30 @@ each item's own file records why it landed when it did.
   revisit condition rather than a diagnosis.
   Still open and still needing that machine: issue #48's connector fallback,
   which needs an external display (this one has only `eDP-1`).
+- **[The spawn close-on-exec pin asserted fd numbers, not fd
+  identity](docs/backlog/resolved/spawn-fd-number-identity-flake-done.md)**
+  — RESOLVED 2026-09-19 (test-only, no production change): CI run
+  35460052576 went red on a docs-only PR at
+  `a_spawned_child_inherits_no_close_on_exec_fd`, in the `cargo test` step
+  and not the nextest one — the asymmetry that step exists for. A raw fd
+  number names no particular open file description, so the assertion was
+  wrong both ways: `execve` frees the close-on-exec markers' numbers and the
+  child's own fds take the lowest free ones (a marker at fd 3 comes back as
+  the child's fd 3), while from the other side a neighbour test's plain fd
+  in the shared process sits on a marker's number. Markers are now
+  identified — file markers by a unique canonical path, the sockets and the
+  `try_clone` by `socket:[inode]` from `fstat`, the eventfd by a distinctive
+  `eventfd-count` (the "no eventfd at all" superset check was rejected: one
+  foreign non-close-on-exec eventfd would re-open the same flake). The child
+  also reads `/proc/$$/fd`, not `/proc/self/fd` — which was reporting `ls`'s
+  own table — and renames its listing into place, because `read_probe`
+  returns on the first non-empty read. Fail-first made deterministic by
+  parking an unrelated fd on the marker's number (pre-fix red every time,
+  post-fix green), and each marker re-proven sensitive by neutering. Found
+  alongside and filed separately (low, load-only, and reproduced at pristine
+  `main`): the icon live-buffer-budget flood is
+  [refused by process-wide fd pressure](docs/backlog/testing/icon-buffer-budget-fd-pressure-flake.md)
+  when a neighbour test holds fds at the wrong moment.
 
 ## What's next
 
