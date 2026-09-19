@@ -616,10 +616,7 @@ fn the_icon_reaches_the_ipc_window_list() {
         name: "org.scoot.Probe".to_string(),
     });
     fixture.run(Step::Commit);
-    assert_eq!(
-        fixture.icon_over_ipc(),
-        Some("org.scoot.Probe".to_string())
-    );
+    assert_eq!(fixture.icon_over_ipc(), Some("org.scoot.Probe".to_string()));
 }
 
 /// Reproduces the upstream trap this protocol brings with it: a client that

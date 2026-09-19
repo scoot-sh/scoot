@@ -159,10 +159,7 @@ fn an_empty_configured_name_is_treated_as_unset() {
 fn the_configured_size_is_reported_for_export() {
     // `compositor::run` puts this in `XCURSOR_SIZE` for children, so a client
     // loading its own theme matches the compositor's.
-    assert_eq!(
-        Theme::load(Some("scoot-test-no-such-theme"), 32).size(),
-        32
-    );
+    assert_eq!(Theme::load(Some("scoot-test-no-such-theme"), 32).size(), 32);
     // Never zero, whatever it is handed: a zero nominal size would make
     // `nearest` prefer the smallest image in every file.
     assert_eq!(Theme::load(Some("scoot-test-no-such-theme"), 0).size(), 1);

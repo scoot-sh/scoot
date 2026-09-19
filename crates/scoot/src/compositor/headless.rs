@@ -6,8 +6,8 @@
 use std::error::Error;
 use std::time::{Duration, Instant};
 
-use scoot_core::{Event as CoreEvent, OutputId, Rect};
 use pixman::Image;
+use scoot_core::{Event as CoreEvent, OutputId, Rect};
 use smithay::backend::allocator::Fourcc;
 use smithay::backend::renderer::damage::OutputDamageTracker;
 use smithay::backend::renderer::element::solid::SolidColorRenderElement;

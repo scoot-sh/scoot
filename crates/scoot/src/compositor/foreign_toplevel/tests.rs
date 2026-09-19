@@ -557,10 +557,7 @@ fn an_app_id_change_is_one_app_id_event_and_one_done() {
     fixture.run(Step::SetAppId(0, "org.scoot.Probe".to_string()));
     assert_eq!(
         fixture.take_log(),
-        vec![
-            Seen::AppId(0, "org.scoot.Probe".to_string()),
-            Seen::Done(0),
-        ],
+        vec![Seen::AppId(0, "org.scoot.Probe".to_string()), Seen::Done(0),],
     );
 }
 
