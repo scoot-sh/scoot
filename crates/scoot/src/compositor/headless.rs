@@ -30,6 +30,11 @@ use super::output_scale::smithay_scale;
 use super::session_lock::LOCK_VBLANK_TIMEOUT;
 use super::tty::Tty;
 
+/// The per-frame cost of [`State::render`], for the record CLAUDE.md asks
+/// for. Printed, not asserted -- see the module's own doc.
+#[cfg(test)]
+mod bench;
+
 // What kinds of thing `render()` can draw. Which one covers which is decided
 // by the *order* they go into the list (see `render()`'s comment on Smithay's
 // back-to-front convention), not by this enum. The background isn't a variant
