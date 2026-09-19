@@ -180,10 +180,10 @@ fallback for a machine without nextest, and it is what CI should run once
 CI exists (`docs/backlog/testing/ci-test-run.md`), so the coverage nextest
 structurally cannot provide is not simply dropped.
 
-`cargo nextest run` is an **addition to** `cargo test`, not a replacement:
-it runs each test in its own process, which is how a test that only passed
-because it shared `smithay::utils::SERIAL_COUNTER` (process-global, and
-several suites say so in as many words) with its neighbours gets caught.
+Why nextest is the one to keep: it runs each test in its own process, which
+is how a test that only passed because it shared
+`smithay::utils::SERIAL_COUNTER` (process-global, and several suites say so
+in as many words) with its neighbours gets caught.
 
 **The doctest reason this used to give was wrong, and is corrected here
 (2026-09-19).** It said `cargo test` was kept because only it runs
