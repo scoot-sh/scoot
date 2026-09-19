@@ -176,10 +176,32 @@ needs the binary launched there — see the script's header).
 `cargo nextest run` is an **addition to** `cargo test`, not a replacement:
 it runs each test in its own process, which is how a test that only passed
 because it shared `smithay::utils::SERIAL_COUNTER` (process-global, and
-several suites say so in as many words) with its neighbours gets caught —
-but it does not run doctests, which only `cargo test` does. It is installed
-on the dev VM (`vm/configuration.nix`); a machine without it still has the
-`cargo test` baseline, which needs no extra tool.
+several suites say so in as many words) with its neighbours gets caught.
+
+**The doctest reason this used to give was wrong, and is corrected here
+(2026-09-19).** It said `cargo test` was kept because only it runs
+doctests. This workspace has **zero** doctests — `cargo test --doc` reports
+`0 passed` for `scoot-core` and `scoot-ipc`, and for `scoot` it cannot run
+any at all (`error: no library targets found`, it being a binary crate). So
+that justification was vacuous.
+
+The real reason to run both is that they catch **opposite** failure modes,
+and neither tool can cover the other's: nextest isolates each test in its
+own process, so it catches a test that only passed by *sharing* process
+state — and structurally cannot see cross-test interference, having removed
+it. `cargo test` runs them concurrently in one process, so it catches a test
+that *breaks* when sharing, and cannot see the coupling nextest catches.
+There is no flag on either tool that bridges this.
+
+Worth knowing when weighing whether both stay required: coupling can mask a
+*product* bug (a test passing that should not), while interference is
+usually a *test-quality* bug — so nextest guards the more important
+property. The standing alternative, if the cost is ever judged too high, is
+to remove the root cause: tests that compare serials relatively instead of
+asserting absolute values would not care which runner ran them.
+
+nextest is installed on the dev VM (`vm/configuration.nix`); a machine
+without it still has the `cargo test` baseline, which needs no extra tool.
 
 The first four are cheap to re-run in full every time, no exceptions —
 `cargo`'s incremental cache means re-running them after a successful build
