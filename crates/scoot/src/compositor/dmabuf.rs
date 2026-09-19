@@ -42,6 +42,34 @@
 //! (`dmabuf/tests.rs::every_advertised_format_is_one_pixman_can_import`),
 //! not by comment.
 //!
+//! **That pinning is to *pixman*, and the table is advertised whichever
+//! renderer is active.** Under `--renderer gles` (see `render::gles`) the
+//! importer is `GlesRenderer`, whose importable set is the EGL display's
+//! rather than this list. Whether that is a broken promise depends on the
+//! display, and on the dev VM it is *not*: probing the device scoot's own
+//! selection picks there found both advertised formats (`AR24`, `XR24`)
+//! present with `LINEAR` among the display's 76 import formats -- a
+//! superset of what is advertised, so an advertised format is importable.
+//!
+//! What does fail there is narrower and worth stating precisely, because an
+//! earlier revision of this comment got it wrong: `dmabuf/tests.rs` builds
+//! its buffers through `/dev/udmabuf`, and Mesa's `kms_swrast` refuses a
+//! udmabuf-backed import (`eglCreateImageKHR: createImageFromDmaBufs
+//! failed`, `EGL_BAD_ALLOC`) for *either* format, with or without modifier
+//! attributes. That is buffer **provenance**, not format, so it is a
+//! property of the test's allocator rather than of the advertisement -- and
+//! a renderer-derived table would name the same two formats and fail the
+//! same way. No real client reaches it on that machine in any case:
+//! `gbm_bo_create` on its render node is refused outright, so nothing there
+//! can produce a GBM dmabuf at all.
+//!
+//! Stage 4 of `docs/roadmap/06-gpu-pipeline.md` should still make the
+//! advertisement renderer-derived, for the case this one is not: an EGL
+//! display with no dmabuf-import capability yields an *empty* importable
+//! set, and advertising pixman's pair against it would kill every dmabuf
+//! client. That hazard is real and unverified; the seven failing tests are
+//! not evidence of it.
+//!
 //! ## What is advertised, exactly
 //!
 //! Smithay's `DmabufState` + `DmabufHandler` at the pinned rev, one global via
@@ -458,8 +486,9 @@ impl DmabufHandler for State {
         &mut self.screencopy.dmabuf
     }
 
-    /// Imports the dmabuf into this session's pixman renderer, answering the
-    /// client with what the renderer said.
+    /// Imports the dmabuf into this session's active renderer, answering the
+    /// client with what that renderer said. Which renderer that is depends on
+    /// `--renderer`; do not assume pixman here.
     ///
     /// A success mints the client's `wl_buffer` and leaves an `mmap` of plane
     /// 0 in the renderer's cache, which the ordinary surface render path then
@@ -502,7 +531,7 @@ impl DmabufHandler for State {
                     tracing::info!(
                         format = ?dmabuf.format().code,
                         modifier = ?dmabuf.format().modifier,
-                        "imported a client dmabuf into the pixman renderer"
+                        "imported a client dmabuf into the active renderer"
                     );
                     self.imports_dmabufs = true;
                 }

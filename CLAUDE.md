@@ -83,6 +83,23 @@ snappy and reliable, always.** A concrete bar every change is held to:
   rate), not just the happy path.
 - Benchmark before/after whenever a change touches a hot path, asked for or
   not.
+- **Never defer a user-facing harm to a later stage.** (User, 2026-09-19,
+  on PR #130.) If a change can disconnect a client, lose their work, or
+  wedge their session, "documented and scheduled for stage N" is not a fix
+  — staging is for scope, never for harm. Land it behind a flag that cannot
+  reach the harm, or fix it, or do not merge.
+  **The corollary is the half that takes discipline: establish whether the
+  harm is real before you either defer it *or* block on it.** The same PR
+  is the worked example. A failing test named
+  `an_import_through_create_immed_is_not_a_client_kill` looked like proof of
+  a reachable client kill, and the coordinating session said so. Review then
+  probed the actual EGL device and found the advertised formats were a
+  *subset* of what the renderer could import, that the refusal was the test
+  allocator's `udmabuf` provenance rather than any format, and that nothing
+  on that machine could produce a GBM dmabuf to reach the path at all — so
+  the fix everyone had scheduled would not have fixed those tests. An
+  alarming test name is a reason to go and measure, not a verdict. Blocking
+  on a phantom costs real work; deferring a real one costs a user.
 
 **Per-feature cycle**, repeated until stable before starting the next thing:
 build → test → bug bash → optimize → benchmark → independent review → commit

@@ -106,10 +106,21 @@ default-features = false
 # --tty: real DRM/KMS scanout, libinput device handling, and VT/session
 # management via seatd. Deliberately not backend_gbm -- see tty/buffers.rs's
 # module doc for why this backend uses dumb buffers, not GBM, in this rev.
+#
+# renderer_gl is the optional `--renderer gles` pipeline
+# (compositor/render/gles.rs). It is *not* behind a Cargo feature of our own
+# and does not need to be: it pulls backend_egl, which loads libEGL and
+# libGLESv2 through `libloading` at runtime, so enabling it adds no link-time
+# dependency and a build of this crate still runs on a machine with no GL
+# stack installed at all (`--renderer gles` is what fails there, at startup,
+# with a message -- not the build, and not the default pixman path).
+# backend_gbm, which stage 3's DRM scanout needs, *is* a real link-time
+# dependency on libgbm and will need that gate; this one does not.
 features = [
     "desktop",
     "wayland_frontend",
     "renderer_pixman",
+    "renderer_gl",
     "backend_drm",
     "backend_libinput",
     "backend_udev",

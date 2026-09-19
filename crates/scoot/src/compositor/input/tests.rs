@@ -114,6 +114,7 @@ fn a_fresh_session_starts_with_the_pointer_at_the_output_centre() {
         Keybindings::default(),
         Appearance::default(),
         1.0,
+        crate::compositor::test_support::test_renderer(),
     )
     .expect("a compositor state with a wayland socket");
     headless::init(&mut state, CANVAS, CANVAS).expect("a headless backend");
@@ -170,6 +171,7 @@ fn a_later_resize_leaves_the_pointer_where_the_user_left_it() {
         Keybindings::default(),
         Appearance::default(),
         1.0,
+        crate::compositor::test_support::test_renderer(),
     )
     .expect("a compositor state with a wayland socket");
     headless::init(&mut state, CANVAS, CANVAS).expect("a headless backend");
@@ -534,6 +536,7 @@ impl Fixture {
             Keybindings::default(),
             Appearance::default(),
             1.0,
+            crate::compositor::test_support::test_renderer(),
         )
         .expect("a compositor state with a wayland socket");
         headless::init(&mut state, CANVAS, CANVAS).expect("a headless backend");

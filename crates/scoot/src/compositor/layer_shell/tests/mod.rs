@@ -3,7 +3,8 @@
 //! These drive a *real* `wayland-client` connection -- binding
 //! `zwlr_layer_shell_v1` and `xdg_wm_base` exactly as `waybar` or `swaybg`
 //! does -- through a real [`State`] with a real `headless` backend, then
-//! render with the real [`PixmanRenderer`] and read the framebuffer back.
+//! render with a real renderer ([`PixmanRenderer`], or `GlesRenderer` under
+//! `SCOOT_TEST_RENDERER=gles`) and read the framebuffer back.
 //! That is deliberate, and the same choice `cursor/tests.rs` made for the
 //! same reason: what is under test is *where things end up on screen* and
 //! *what the layout does about it*, and both are invisible to a test that

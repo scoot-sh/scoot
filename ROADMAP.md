@@ -25,14 +25,17 @@ docs/backlog`, `rg -l 'area: "protocols"' docs/roadmap`.
 | 4b | [Window decorations](docs/roadmap/04b-decorations.md) | done |
 | 5 | [Cursor rendering for `--tty`](docs/roadmap/05-cursor-rendering.md) | done |
 | 5b | [VT-switch-back `EPERM`](docs/roadmap/05b-vt-switch-eperm.md) | done |
-| 6 | [Real GPU rendering pipeline](docs/roadmap/06-gpu-pipeline.md) | **in progress (stage 1 of 4)** |
+| 6 | [Real GPU rendering pipeline](docs/roadmap/06-gpu-pipeline.md) | **in progress (stage 2 of 4)** |
 | 7–18 | [Backlog-driven hardening and protocol work](docs/roadmap/) | done |
 
 Item 6 (a **GLES** renderer as an optional alternative to pixman, selected
 per-backend, with GPU-free operation kept as a hard requirement) is the only
-remaining item on the original ordered list, and the first of its four stages
-is in flight (PR #129: the renderer seam, pixman still the only
-implementation, provably zero behaviour change). Two claims that entry used to
+remaining item on the original ordered list. Stage 1 of its four has landed
+(PR #129: the renderer seam, pixman still the only implementation, provably
+zero behaviour change) and stage 2 is in flight (PR #130: the GLES pipeline
+behind `--renderer pixman|gles` and `[renderer] backend`, off by default,
+`--headless`/`--nested` only — every pixel-readback suite passes
+byte-identically under both renderers). Two claims that entry used to
 make were checked and corrected in the same PR: the "render-target/presentation
 split" it called the seam a GPU renderer slots into **did not exist** (one
 monolithic `State::render()` hard-wired to pixman three ways), and the pinned
@@ -1039,12 +1042,13 @@ Small follow-ups already filed alongside:
 (resolved, PR #77).
 
 Item 6 (the GPU pipeline) remains the one *ordered* milestone still open, now
-with its first of four stages in flight (PR #129, the renderer seam). It has
-never been ahead of the daily-drivability and correctness work the backlog
-keeps producing, and that trade can be revisited at any time — stage 1 was
-picked up now because it is a pure refactor with no behaviour change, so it
-costs the backlog nothing and removes the one thing that made every later
-stage unreviewable.
+two of four stages in: the renderer seam (PR #129, merged) and the GLES
+pipeline behind `--renderer` (PR #130, in flight). It has never been ahead of
+the daily-drivability and correctness work the backlog keeps producing, and
+that trade can be revisited at any time — stage 1 was picked up when it was
+because it is a pure refactor with no behaviour change, so it cost the backlog
+nothing and removed the one thing that made every later stage unreviewable,
+and stage 2 is opt-in and off by default for the same reason.
 
 ## History
 

@@ -76,6 +76,7 @@ impl Harness {
             Keybindings::default(),
             Appearance::default(),
             1.0,
+            crate::compositor::test_support::test_renderer(),
         )
         .expect("a compositor state with a wayland socket");
         headless::init(&mut state, 200, 200).expect("a headless backend");

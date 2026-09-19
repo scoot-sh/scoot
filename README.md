@@ -10,6 +10,9 @@ Two things distinguish it from a typical compositor:
 - **It runs with no GPU.** Rendering goes through [pixman](http://pixman.org/)
   on the CPU, so it works headless and works in a GPU-less container (the
   target is running inside [webtop](https://github.com/linuxserver/docker-webtop)).
+  A GLES renderer is available opt-in (`--renderer gles`, `--headless`/
+  `--nested` only) but pixman stays the default — see Which renderer draws
+  the frames below for what that does and does not buy today.
 - **It's IPC-first.** Every action a keybind would trigger — focus, move,
   resize, spawn, close — and every input a user could give — key presses,
   pointer movement, clicks — is also a request on a Unix socket, alongside
@@ -50,7 +53,8 @@ re-modesets instead of leaving the screen wrong; and it renders
 a pointer cursor, a client's own image when it supplies one, a built-in shape
 otherwise, whose size and color the config file can override). Also done:
 vim-style keybindings, a TOML config file (`--config`, `[layout]`/
-`[appearance]`/`[binds]`, see Configuration below), window decorations (a
+`[appearance]`/`[output]`/`[renderer]`/`[tty]`/`[binds]`, see Configuration
+below), window decorations (a
 niri-style focus ring, background color, server-side
 `zxdg_decoration_manager_v1`),
 `wlr-layer-shell-unstable-v1`, so bars, docks, wallpapers, launchers and
@@ -217,6 +221,7 @@ a seat — see `vm/README.md` for a Mac-native NixOS VM that provides one.
 ```sh
 scoot --headless --width 1280 --height 800 -- foot   # start, spawn a terminal
 scoot --nested --width 1280 --height 800 -- foot     # inside your existing compositor
+scoot --headless --renderer gles -- foot             # ...drawing with GLES instead of the CPU
 scoot --tty -- foot                                  # on a real DRM/KMS seat
 scoot --tty --gpu /dev/dri/card0 -- foot             # ...naming the DRM device yourself
 scoot --tty --mode 1920x1080 -- foot                 # ...naming the display mode (see below)
@@ -237,6 +242,47 @@ Configuration below for the full schema and default keybindings. Run
 any real display. Anything else is a startup error naming the flag and the
 expected range (`invalid --width: '70000' (expected 1-65535)`), not a
 silently different size.
+
+### Which renderer draws the frames
+
+`--renderer pixman|gles` (config: `[renderer] backend`, see below) picks what
+composites each frame. **The default is `pixman`, the CPU renderer, and that
+is not changing** — running with no GPU at all is a hard requirement here, not
+a fallback tier. `gles` is opt-in, and worth being precise about what it is
+and is not today:
+
+- **What it buys you.** Correctness parity with pixman on a second renderer,
+  and the groundwork for scanning a GPU buffer out directly under `--tty`.
+  Every pixel-readback test in the suite — session lock, layer shell, alpha
+  modifier, single-pixel buffers, the cursor, output scaling — passes
+  byte-identically under either renderer.
+- **What it does not buy you yet.** No speed. The frame is composited into an
+  offscreen buffer and then read back to main memory exactly as pixman's is,
+  so `gles` adds a GPU round trip without removing any CPU copy; on a machine
+  whose "GPU" is a software rasteriser (llvmpipe, which is what a VM or a
+  GPU-less container has) it is several times *slower* than pixman. The
+  scanout path that would make it faster on real hardware is not written yet.
+- **`--headless` and `--nested` only.** `--tty` warns and keeps pixman
+  whichever way `gles` was asked for, because reading a GPU frame back only to
+  memcpy it into a dumb scanout buffer would be strictly worse than
+  compositing on the CPU in the first place.
+- **Hardware first.** The EGL device is chosen by preferring a real device
+  over a software one and taking the first that yields a working renderer,
+  so a box with a GPU uses the GPU. Note that "software" here means only
+  that the device advertises `EGL_MESA_device_software`: a real device *node*
+  backed by a software driver answers no, so it is preferred and then served
+  in software anyway. That is what happens on the dev VM, and it is why
+  numbers measured there are llvmpipe's. The chosen device is logged at
+  startup (`the GLES renderer is up device=/dev/dri/renderD128
+  software=false`) — trust that line over the flag name.
+- **A wrong `--renderer gles` is a startup error, not a silent downgrade.** If
+  no EGL device can drive it, scoot says so and names each failure rather than
+  quietly compositing with the other renderer.
+- **Known gap: dma-buf clients.** The buffer formats scoot advertises to
+  clients are still the CPU renderer's, whichever renderer is active, so a
+  client handing over a GPU buffer the active GLES renderer cannot import has
+  it refused (and, through `create_immed`, is disconnected for it). If you use
+  dma-buf clients, stay on `pixman` for now.
 
 `scoot msg type TEXT` types text the way a person would, on whatever
 keyboard layout the session is running: for each character it finds the key
@@ -1936,6 +1982,12 @@ all.)
 |---|---|---|---|
 | `scale` | float | `1.0` | Output scale advertised to clients and rendered at. `1.0` renders identically to no setting at all; anything else advertises `ceil(scale)` on `wl_output` and `wl_surface.preferred_buffer_scale`, and the exact value through `wp_fractional_scale_v1`/`wp_viewporter` (see Output scaling above). Clamped into `0.5..=4.0` with a warning, and a non-finite value falls back to `1.0`; startup-only. `--nested` ignores a non-1.0 value with a warning. |
 
+### `[renderer]`
+
+| Field | Type | Default | Meaning |
+|---|---|---|---|
+| `backend` | string (`"pixman"` or `"gles"`) | `"pixman"` | Which renderer composites each frame — the config-file form of `--renderer` (see Which renderer draws the frames above). This is a different axis from `--headless`/`--nested`/`--tty`, which choose how the compositor *presents* what it drew; this chooses what draws it. `"pixman"` is the CPU renderer and needs no graphics device at all. `"gles"` draws with GLES on an EGL device and is `--headless`/`--nested` only — `--tty` warns and keeps pixman. `--renderer` wins when both name one, including `--renderer pixman` against a file asking for `gles`. A name that is neither is a warning and the default, like any other malformed value; but a name this build *knows* and then cannot build (`"gles"` with no working EGL) is a startup error, because silently drawing with the other renderer would be a session quietly different from the one you asked for. Startup-only, like every other setting here. |
+
 ### `[tty]`
 
 | Field | Type | Default | Meaning |
@@ -2065,6 +2117,14 @@ prefer_no_csd = true
 # 1.0 is correct for a non-HiDPI display; raise it (e.g. 2.0) on a HiDPI
 # panel, or text and widgets render far too small. See the reference above.
 scale = 1.0
+
+# [renderer]
+# Unset means "pixman", the CPU renderer -- the right answer on a GPU-less
+# box and the default everywhere. "gles" is opt-in, --headless/--nested only,
+# and buys correctness parity rather than speed today (there is no scanout
+# path yet, and on a software rasteriser it is slower). --renderer wins over
+# this when both name one. See the reference above before switching.
+# backend = "gles"
 
 # [tty]
 # Uncomment only on hardware where the automatic DRM device search picks

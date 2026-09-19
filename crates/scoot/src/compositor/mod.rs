@@ -92,6 +92,14 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
         loaded.scale
     };
 
+    // Resolved before `State::new` for the same reason the config is: the
+    // renderer is fixed for the process's life, and `State` carries it so a
+    // later resize rebuilds the pipeline this session started with. `--tty`
+    // is handled inside `resolve` (it warns and keeps pixman -- there is no
+    // GPU scanout path yet), which is why it takes the flag rather than
+    // reading it back out afterwards.
+    let renderer = render::resolve(options.renderer, loaded.renderer, options.tty);
+
     let mut event_loop: EventLoop<'static, State> = EventLoop::try_new()?;
     let display: Display<State> = Display::new()?;
     let mut state = State::new(
@@ -101,6 +109,7 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
         loaded.keybindings,
         loaded.appearance,
         scale,
+        renderer,
     )?;
 
     // `--tty` picks its own size from the connector's preferred mode (or
@@ -200,7 +209,12 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
         state.spawn(&command);
     }
 
-    tracing::info!(wayland = ?state.socket_name, ipc = ?state.ipc_path, "scoot is up");
+    tracing::info!(
+        wayland = ?state.socket_name,
+        ipc = ?state.ipc_path,
+        renderer = %state.renderer,
+        "scoot is up"
+    );
     event_loop.run(None, &mut state, post_dispatch)?;
     Ok(())
 }

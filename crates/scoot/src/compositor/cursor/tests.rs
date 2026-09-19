@@ -5,7 +5,9 @@
 //! needs a real `wl_surface` with a real committed buffer, so those tests
 //! drive an actual `wayland-client` connection through an actual [`State`]
 //! -- the same approach `dispatch/tests.rs` established -- and then render
-//! the result with a real [`PixmanRenderer`] and read the pixels back. That
+//! the result with a real renderer and read the pixels back (the harness
+//! ones follow `SCOOT_TEST_RENDERER`; the few that build their own renderer
+//! below are pixman by construction). That
 //! is what distinguishes "drew the client's image" from "drew the fallback
 //! triangle"; asserting on the element enum's variant alone would pass even
 //! if the element were positioned or imported wrongly.

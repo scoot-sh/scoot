@@ -290,6 +290,7 @@ fn drive(min: (i32, i32)) -> Observed {
         Keybindings::default(),
         Appearance::default(),
         1.0,
+        crate::compositor::test_support::test_renderer(),
     )
     .expect("a compositor state with a wayland socket");
     // The core needs an output for there to be a usable area to clamp

@@ -5,7 +5,8 @@
 //! The pure tests need no live compositor: `clamp_scale`, `smithay_scale` and
 //! `logical_size` are all functions of their arguments (an `Output` is a plain
 //! value, constructible without a backend). The client tests drive a real
-//! [`State`] through a real socket pair and the real pixman renderer, the same
+//! [`State`] through a real socket pair and a real renderer (pixman, or GLES
+//! under `SCOOT_TEST_RENDERER=gles`), the same
 //! choice `layer_shell/tests.rs` made and for the same reason: "what did the
 //! client actually receive" and "where did the surface actually land on
 //! screen" are both invisible to a test that calls the handler directly.
@@ -204,6 +205,7 @@ fn relative_pointer_motion_is_clamped_to_the_logical_extent() {
         crate::compositor::keybindings::Keybindings::default(),
         crate::compositor::decorations::Appearance::default(),
         2.0,
+        crate::compositor::test_support::test_renderer(),
     )
     .expect("a compositor state with a wayland socket");
     crate::compositor::headless::init(&mut state, CANVAS, CANVAS).expect("a headless backend");
@@ -232,6 +234,7 @@ fn startup_placement_centres_on_the_logical_extent() {
         crate::compositor::keybindings::Keybindings::default(),
         crate::compositor::decorations::Appearance::default(),
         2.0,
+        crate::compositor::test_support::test_renderer(),
     )
     .expect("a compositor state with a wayland socket");
     crate::compositor::headless::init(&mut state, CANVAS, CANVAS).expect("a headless backend");
@@ -636,6 +639,7 @@ impl Fixture {
             crate::compositor::keybindings::Keybindings::default(),
             crate::compositor::decorations::Appearance::default(),
             scale,
+            crate::compositor::test_support::test_renderer(),
         )
         .expect("a compositor state with a wayland socket");
         crate::compositor::headless::init(&mut state, CANVAS, CANVAS).expect("a headless backend");

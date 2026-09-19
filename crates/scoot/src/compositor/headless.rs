@@ -88,7 +88,8 @@ pub fn init(state: &mut State, width: i32, height: i32) -> Result<(), Box<dyn Er
     init_named(state, OUTPUT_NAME, width, height)
 }
 
-/// Creates the one output and the CPU render target behind it. `name` is
+/// Creates the one output and the render target behind it -- pixman's image
+/// or, under `--renderer gles`, a GLES renderbuffer (see `render`). `name` is
 /// what clients see as `wl_output.name` (and `model`): a connector name
 /// such as `HDMI-A-1` or `Virtual-1` under `--tty`, so a bar or shell
 /// labels the screen the way it would under any other compositor, or
@@ -119,7 +120,10 @@ pub fn init_named(
     );
     state.space.map_output(&output, (0, 0));
 
-    state.backend = Some(Backend::new(&output, width, height)?);
+    // The renderer the session resolved at startup (`render::resolve`), not
+    // a per-call choice: `State::resize_output` rebuilds the backend later
+    // and has to build the same one.
+    state.backend = Some(Backend::new(&output, width, height, state.renderer)?);
     // What the core is told is the *logical* output rectangle, which is the
     // same rectangle Smithay's `Space` lays windows out in -- see
     // `output_scale.rs`'s `logical_size`. Handing the core the physical
@@ -479,8 +483,16 @@ impl State {
     /// exactly what `present()`'s size guard silently drops every frame for:
     /// `--nested` stops the loop, `--tty` logs an error saying the screen
     /// stays as it is until the next hotplug or a restart. Nothing is
-    /// reverted here -- a failure to build a pixman image at one size is not
-    /// evidence that rebuilding it at the previous size would work.
+    /// reverted here -- a failure to build the render target at one size is
+    /// not evidence that rebuilding it at the previous size would work.
+    ///
+    /// It rebuilds whichever renderer the session started with
+    /// (`State::renderer`), never a different one: a resize that silently
+    /// changed renderers would be a session quietly different from the one
+    /// that was asked for. Under `--renderer gles` that means a whole new
+    /// EGL context and shader set per resize, which is wasteful and correct;
+    /// only `--nested`'s host configure and `--tty`'s hotplug get here at
+    /// all.
     pub fn resize_output(&mut self, width: i32, height: i32) -> bool {
         let Some(output) = self.output.clone() else {
             // Logged, not a silent `false`: both callers' comments say
@@ -494,7 +506,7 @@ impl State {
             return false;
         };
         set_mode(&output, width, height, None, self.output_scale);
-        match Backend::new(&output, width, height) {
+        match Backend::new(&output, width, height, self.renderer) {
             Ok(backend) => self.backend = Some(backend),
             Err(error) => {
                 tracing::warn!(%error, "could not resize the render target");

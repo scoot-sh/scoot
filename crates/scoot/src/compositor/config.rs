@@ -29,6 +29,18 @@
 //! explicitly ruled out), so the fail-closed refusal wins over the
 //! never-block-startup rule for this one key. See [`LoadedConfig::gpu`]
 //! and `tty::gpu::resolve`.
+//!
+//! `[renderer] backend` is a near-miss worth spelling out, because it splits
+//! the two halves across the rule. An *unknown* name (`backend = "vulkan"`)
+//! is an ordinary malformed value: warn, use the default, start. But a name
+//! this build knows and then cannot build -- `"gles"` on a box with no
+//! working EGL -- fails startup, from the config file exactly as from
+//! `--renderer gles`, because silently compositing with the other renderer
+//! would make every "verified under GLES" claim false while looking fine.
+//! That is not the lockout the rule above exists to prevent: `--tty` never
+//! reaches it (it warns and keeps pixman, see `render::resolve`), so the only
+//! sessions that can fail this way are `--headless` and `--nested`, both of
+//! which are started from a shell that is still there to read the error.
 
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -41,6 +53,8 @@ use std::path::{Path, PathBuf};
 use scoot_core::Config;
 use serde::Deserialize;
 use smithay::input::keyboard::Keysym;
+
+use crate::cli::RendererKind;
 
 use super::decorations::{Appearance, Color};
 use super::input::keysym_named;
@@ -209,6 +223,43 @@ struct TtyConfig {
     gpu: Option<PathBuf>,
 }
 
+/// `[renderer]`. One field today: `backend`, which renderer composites each
+/// frame -- `"pixman"` (the default, and the only one that needs no graphics
+/// device) or `"gles"`. Named `backend` for the renderer *behind* the
+/// compositor, which is a different axis from `--headless`/`--nested`/`--tty`
+/// (how the compositor presents what it drew); README says so in as many
+/// words.
+///
+/// A `String` rather than a `RendererKind` so that an unrecognised name
+/// degrades the way every other malformed value in this file does -- a
+/// warning naming the key, and the default for that field only (see
+/// [`RendererConfig::into_kind`]) -- instead of `serde` rejecting the whole
+/// file over one typo. `--renderer` refuses the same typo outright, because
+/// a flag is a thing the user just typed and can retype.
+#[derive(Debug, Default, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+struct RendererConfig {
+    backend: Option<String>,
+}
+
+impl RendererConfig {
+    /// `None` when the file says nothing (or says something unusable), which
+    /// is what lets `--renderer` and the built-in default share one
+    /// resolution rule -- see `render::resolve`.
+    fn into_kind(self) -> Option<RendererKind> {
+        let name = self.backend?;
+        let kind = RendererKind::parse(&name);
+        if kind.is_none() {
+            tracing::warn!(
+                value = %name,
+                "unknown [renderer] backend in config file; expected `pixman` or `gles`, \
+                 using the default"
+            );
+        }
+        kind
+    }
+}
+
 /// The whole file. `binds`' values are parsed lazily, one at a time (see
 /// [`apply_binds`]), so one bad bind can't take the rest down with it.
 #[derive(Debug, Default, Deserialize, PartialEq)]
@@ -220,6 +271,8 @@ struct FileConfig {
     appearance: Option<AppearanceConfig>,
     #[serde(default)]
     output: Option<OutputConfig>,
+    #[serde(default)]
+    renderer: Option<RendererConfig>,
     #[serde(default)]
     tty: Option<TtyConfig>,
     #[serde(default)]
@@ -245,6 +298,13 @@ pub struct LoadedConfig {
     /// `compositor::run` ignores it with a warning, for the same reason as
     /// `--gpu` itself.
     pub gpu: Option<PathBuf>,
+    /// The `[renderer] backend` the file asks for, when it names a renderer
+    /// this build knows. `None` -- no `[renderer]` table, no `backend` key,
+    /// or a name that is neither `pixman` nor `gles` (warned about at load) --
+    /// leaves the choice to `--renderer`, and to the pixman default when that
+    /// is unset too. `--renderer` wins over this when both name one; see
+    /// `render::resolve`, which is also where `--tty` overrides both.
+    pub renderer: Option<RendererKind>,
 }
 
 impl LoadedConfig {
@@ -255,6 +315,7 @@ impl LoadedConfig {
             appearance: Appearance::default(),
             scale: 1.0,
             gpu: None,
+            renderer: None,
         }
     }
 
@@ -266,6 +327,7 @@ impl LoadedConfig {
             .into_appearance(Config::clamp_gap(config.gap));
         let scale = file.output.unwrap_or_default().into_scale();
         let gpu = file.tty.and_then(|tty| tty.gpu);
+        let renderer = file.renderer.unwrap_or_default().into_kind();
         let mut keybindings = Keybindings::default();
         apply_binds(&mut keybindings, file.binds);
         Self {
@@ -274,6 +336,7 @@ impl LoadedConfig {
             appearance,
             scale,
             gpu,
+            renderer,
         }
     }
 }
@@ -1491,6 +1554,80 @@ mod tests {
         .expect("valid toml");
         let loaded = LoadedConfig::from_file(file);
         assert_eq!(loaded.appearance.cursor_theme, None);
+    }
+
+    // -- [renderer] -------------------------------------------------------
+
+    #[test]
+    fn a_renderer_backend_key_round_trips_for_both_names() {
+        for (name, expected) in [
+            ("pixman", RendererKind::Pixman),
+            ("gles", RendererKind::Gles),
+        ] {
+            let toml = format!("[renderer]\nbackend = \"{name}\"\n");
+            let file: FileConfig = toml::from_str(&toml).expect("valid toml");
+            assert_eq!(
+                file.renderer,
+                Some(RendererConfig {
+                    backend: Some(name.to_owned()),
+                })
+            );
+            assert_eq!(LoadedConfig::from_file(file).renderer, Some(expected));
+        }
+    }
+
+    #[test]
+    fn a_missing_renderer_table_or_backend_key_leaves_the_choice_open() {
+        // `None`, not `Some(Pixman)`: the file saying nothing is what lets
+        // `--renderer` decide, and the default only applies when neither
+        // does (see `render::resolve`).
+        let file: FileConfig = toml::from_str("").unwrap();
+        assert_eq!(file.renderer, None);
+        assert_eq!(LoadedConfig::from_file(file).renderer, None);
+
+        let file: FileConfig = toml::from_str("[renderer]\n").expect("valid toml");
+        assert_eq!(file.renderer, Some(RendererConfig { backend: None }));
+        assert_eq!(LoadedConfig::from_file(file).renderer, None);
+    }
+
+    /// An unknown renderer name is an ordinary malformed value: warn, use
+    /// the default, start. Unlike `--renderer`, which refuses it -- see this
+    /// module's doc for why the two halves of the same key differ, and note
+    /// that the whole *file* survives, unlike a type mismatch.
+    #[test]
+    fn an_unknown_renderer_backend_falls_back_without_taking_the_file_down() {
+        for bad in ["vulkan", "GLES", "gles2", "", "opengl"] {
+            let toml = format!("[layout]\ngap = 20\n\n[renderer]\nbackend = \"{bad}\"\n");
+            let file: FileConfig = toml::from_str(&toml).expect("valid toml");
+            let loaded = LoadedConfig::from_file(file);
+            assert_eq!(loaded.renderer, None, "{bad}");
+            assert_eq!(
+                loaded.config.gap, 20,
+                "{bad}: the rest of the file survives"
+            );
+        }
+    }
+
+    #[test]
+    fn deny_unknown_fields_rejects_a_renderer_typo() {
+        assert!(toml::from_str::<FileConfig>("[renderer]\nbackends = \"gles\"\n").is_err());
+        assert!(toml::from_str::<FileConfig>("[render]\nbackend = \"gles\"\n").is_err());
+    }
+
+    #[test]
+    fn a_renderer_backend_of_the_wrong_type_is_a_whole_file_fallback() {
+        // Same rule as any other type mismatch (see the module doc): the
+        // file is discarded, not the key. A *name* this build doesn't know
+        // is the graceful case above; a value that isn't even a string is
+        // not.
+        let (_dir, path) = write_temp("[layout]\ngap = 20\n\n[renderer]\nbackend = true\n");
+        let loaded = load_from(&path, true).expect("a parse failure must never fail startup");
+        assert_eq!(loaded.renderer, None);
+        assert_eq!(
+            loaded.config.gap,
+            Config::default().gap,
+            "the whole file is discarded, including a valid [layout]"
+        );
     }
 
     // -- [tty] ------------------------------------------------------------
