@@ -32,7 +32,7 @@
 //! every time" here would turn every mouse-motion event into a multi-MB/s
 //! memcpy. [`write_region`](BufferPool::write_region) instead copies only
 //! the caller-supplied damage rectangle, and [`next_age`](BufferPool::next_age)
-//! tells the caller (`headless::render`, via `Tty::next_buffer_age`) how
+//! tells the caller (`render::draw_frame_with`, via `Tty::next_buffer_age`) how
 //! many `render_output` calls out of date whichever slot is about to be
 //! written actually is -- not always 1, because the two slots alternate:
 //! if slot A was last written 2 renders ago (slot B took the render in
@@ -120,7 +120,7 @@ impl SlotAges {
     ///
     /// Without this the retry reads as age 1 -- one render out of date, only
     /// this frame's own damage requested -- and a frame with no *new* damage
-    /// comes back `None` from the damage tracker (see `headless.rs`'s
+    /// comes back `None` from the damage tracker (see `render/tests.rs`'s
     /// contract test), so nothing is ever re-presented and scanout stays
     /// stale until unrelated damage arrives.
     fn write_failed(&mut self, index: usize) {
@@ -293,8 +293,9 @@ fn make_slot(
     height: i32,
 ) -> Result<Slot, Box<dyn Error>> {
     // Xrgb8888: the same little-endian BGRx byte layout as the pixman
-    // Argb8888 image `headless.rs` renders into and reads back (see its
-    // module doc and screenshot.rs's comment on the same fact) -- KMS
+    // Argb8888 image `render/pixman.rs` composites into and `render.rs`
+    // reads back (see their module docs and screenshot.rs's comment on the
+    // same fact) -- KMS
     // doesn't care whether the unused top byte means "ignored" or "alpha",
     // only that the channel order underneath matches, and it does.
     let buffer = allocator.create_buffer(
@@ -326,7 +327,7 @@ fn first_free(free: impl Iterator<Item = bool>) -> Option<usize> {
 /// `last_written` is captured by `write_region` *after*
 /// [`advance_generation`](BufferPool::advance_generation) has already run
 /// for the render that performed that write (see this module's doc and
-/// `headless::render`'s call order: `advance_generation` runs before
+/// `render::draw_frame_with`'s call order: `advance_generation` runs before
 /// `present`/`write_region`) -- so it equals the total count of completed
 /// `render_output` calls through and including that write. The render this
 /// age is being computed for hasn't happened yet (this is a peek, taken
@@ -393,7 +394,7 @@ mod tests {
     fn age_of_a_slot_written_by_the_immediately_preceding_render_is_one() {
         // Regression for the two-slot alternation this module's doc
         // describes: slot0 is written during render 1 (generation becomes 1
-        // *before* the write, per `headless::render`'s call order, so
+        // *before* the write, per `render::draw_frame_with`'s call order, so
         // `last_written = 1`). Peeking again immediately -- as if render 1
         // were about to be repeated with no other render in between -- must
         // report age 1 (this render's own fresh damage is enough), not 0
@@ -446,7 +447,7 @@ mod tests {
         // must fully redraw (age 0). Merely freeing the slot -- what the
         // commit-failure arm did before this fix -- leaves age 1, and an
         // unchanged frame at age 1 reports no damage at all (see
-        // `headless.rs`'s contract test), so nothing is ever re-presented.
+        // `render/tests.rs`'s contract test), so nothing is ever re-presented.
         // Neuter check: make `write_failed` a no-op and the final assertion
         // reads 1, not 0.
         let mut ages = SlotAges {

@@ -33,6 +33,7 @@ mod output_scale;
 mod popup;
 mod presentation_time;
 mod relative_pointer;
+pub(crate) mod render;
 mod screencopy;
 mod screenshot;
 mod selection;

@@ -128,7 +128,7 @@ impl InputMethodHandler for State {
     ///   makes the two cancel and leaves the surface-local offset.
     /// - `space/wayland/layer.rs` computes `popup_offset -
     ///   popup.geometry().loc` and adds *nothing* back -- because
-    ///   `headless.rs::layer_elements` has already placed the surface at
+    ///   `render/elements.rs`'s `layer_elements` has already placed the surface at
     ///   `LayerMap::layer_geometry(..).loc`.
     ///
     /// So for a layer surface this returns [`LayerSurface::geometry`] (the

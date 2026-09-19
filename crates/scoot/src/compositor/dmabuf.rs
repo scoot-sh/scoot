@@ -204,7 +204,6 @@ use std::path::{Path, PathBuf};
 use smithay::backend::allocator::dmabuf::{Dmabuf, DmabufSyncFlags};
 use smithay::backend::allocator::{Buffer, Format, Fourcc, Modifier};
 use smithay::backend::renderer::utils::RendererSurfaceStateUserData;
-use smithay::backend::renderer::{ImportDma, Renderer};
 use smithay::reexports::wayland_server::DisplayHandle;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::wayland::compositor::{
@@ -486,13 +485,14 @@ impl DmabufHandler for State {
             refuse_import(&mut self.wl_buffers, notifier);
             return;
         };
-        // The texture is dropped right here on purpose: the mapping it names
-        // lives in the renderer's `dmabuf_cache` (keyed by the dmabuf itself),
-        // and the render path re-imports from that cache on every commit. What
-        // this call is *for* is establishing that the mapping can be made at
-        // all, before the client is told its buffer exists.
-        match ImportDma::import_dmabuf(&mut backend.renderer, &dmabuf, None) {
-            Ok(_texture) => {
+        // The texture the import produced is dropped inside
+        // `Backend::import_dmabuf` on purpose: the mapping it names lives in
+        // the renderer's own cache (keyed by the dmabuf itself), and the
+        // render path re-imports from that cache on every commit. What this
+        // call is *for* is establishing that the mapping can be made at all,
+        // before the client is told its buffer exists.
+        match backend.import_dmabuf(&dmabuf) {
+            Ok(()) => {
                 if !self.imports_dmabufs {
                     // Once per session, on the transition only: the line a
                     // "why is this client blank / why did it die" report needs
@@ -550,14 +550,14 @@ impl DmabufHandler for State {
 ///
 /// ## Maintenance hazard: `cleanup_texture_cache` is not dmabuf-only
 ///
-/// `Renderer::cleanup_texture_cache` reaches `PixmanRenderer::cleanup`, which
+/// `Backend::cleanup_texture_cache` reaches `PixmanRenderer::cleanup`, which
 /// retains over **both** of that renderer's caches -- and the second retain
 /// drops every entry whose `dmabuf` is `None` (`pixman/mod.rs:807-815`), i.e.
 /// it evicts `self.buffers` wholesale rather than dropping expired entries
 /// from it. That is free today only because scoot never populates
-/// `self.buffers`: it is filled solely by `Bind<Dmabuf>`, and every `bind`
-/// call here hands over a `pixman::Image` or a dumb buffer instead
-/// (`headless.rs`, `test_support.rs`), so the extra retain scans an empty
+/// `self.buffers`: it is filled solely by `Bind<Dmabuf>`, and the only `bind`
+/// call scoot makes hands over a `pixman::Image` (`render.rs`'s
+/// `draw_frame`/`Backend::capture`), so the extra retain scans an empty
 /// `Vec`.
 ///
 /// The moment scoot binds a dmabuf render target -- a future GPU tier, or a
@@ -576,7 +576,7 @@ pub(super) fn schedule_cache_drain(state: &mut State) {
 /// Drops every dmabuf mapping whose buffer has gone, and clears the flag that
 /// lets the next destruction queue another drain.
 ///
-/// `Renderer::cleanup_texture_cache` is `PixmanRenderer::cleanup` with a
+/// `Backend::cleanup_texture_cache` is `PixmanRenderer::cleanup` with a
 /// `Result` around it (`pixman/mod.rs:891-894`); the pixman implementation
 /// cannot fail, so the error arm is for a renderer this compositor does not
 /// have yet. It logs rather than propagating: there is nothing a caller on
@@ -587,7 +587,7 @@ fn drain_cache(state: &mut State) {
     let Some(backend) = state.backend.as_mut() else {
         return;
     };
-    if let Err(error) = Renderer::cleanup_texture_cache(&mut backend.renderer) {
+    if let Err(error) = backend.cleanup_texture_cache() {
         tracing::debug!(%error, "dropping expired dmabuf mappings failed");
     }
 }

@@ -6,55 +6,23 @@
 use std::error::Error;
 use std::time::{Duration, Instant};
 
-use pixman::Image;
 use scoot_core::{Event as CoreEvent, OutputId, Rect};
-use smithay::backend::allocator::Fourcc;
-use smithay::backend::renderer::damage::OutputDamageTracker;
-use smithay::backend::renderer::element::solid::SolidColorRenderElement;
-use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
-use smithay::backend::renderer::element::{AsRenderElements, render_elements};
-use smithay::backend::renderer::pixman::PixmanRenderer;
-use smithay::backend::renderer::{Bind, ExportMem, Offscreen};
+use smithay::desktop::layer_map_for_output;
 use smithay::desktop::utils::send_frames_surface_tree;
-use smithay::desktop::{LayerMap, layer_map_for_output};
 use smithay::output::{Mode, Output, PhysicalProperties, Subpixel};
 use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
-use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-use smithay::utils::{Buffer, Physical, Rectangle, Scale, Transform};
-use smithay::wayland::shell::wlr_layer::Layer;
+use smithay::utils::Transform;
 
 use super::State;
-use super::cursor::CursorElement;
-use super::layer_shell;
 use super::output_scale::smithay_scale;
+use super::render::{self, Backend};
 use super::session_lock::LOCK_VBLANK_TIMEOUT;
 use super::tty::Tty;
 
-// What kinds of thing `render()` can draw. Which one covers which is decided
-// by the *order* they go into the list (see `render()`'s comment on Smithay's
-// back-to-front convention), not by this enum. The background isn't a variant
-// here at all -- it's the `render_output` call's `clear_color`, always the
-// bottom-most thing on screen by construction; see `decorations.rs`'s module
-// doc for why that's simpler and safer than a full-output element.
-//
-// Windows and layer-shell surfaces (bars, wallpapers) share the one `Surface`
-// variant because they produce the same element type: a variant each would
-// need two `From<WaylandSurfaceRenderElement<PixmanRenderer>>` impls on this
-// enum, which cannot coexist. Nothing is lost by that -- what puts a bar in
-// front of a window and a wallpaper behind one is where `render()` inserts
-// it, and a variant could not have expressed that anyway.
-//
-// Fixed to `PixmanRenderer` (this backend's only renderer) rather than
-// generic over `R`, which is why this lives here and not in
-// `decorations.rs`/`cursor.rs` -- those modules stay renderer-agnostic,
-// returning plain `SolidColorRenderElement`s and generic `CursorElement<R>`s
-// this enum only wraps.
-render_elements! {
-    Elements<=PixmanRenderer>;
-    Cursor = CursorElement<PixmanRenderer>,
-    Surface = WaylandSurfaceRenderElement<PixmanRenderer>,
-    Decoration = SolidColorRenderElement,
-}
+/// The per-frame cost of [`State::render`], for the record CLAUDE.md asks
+/// for. Printed, not asserted -- see the module's own doc.
+#[cfg(test)]
+mod bench;
 
 /// The core's id for the one output this compositor creates.
 ///
@@ -106,14 +74,6 @@ pub(super) const OUTPUT_ID: OutputId = OutputId(1);
 /// legitimately differ.
 pub(super) const FRAME_INTERVAL: Duration = Duration::from_millis(16);
 
-/// The CPU renderer and the image it draws into.
-pub struct Backend {
-    pub renderer: PixmanRenderer,
-    pub image: Image<'static, 'static>,
-    pub damage: OutputDamageTracker,
-    pub size: (i32, i32),
-}
-
 /// The output's name -- and model -- when no backend has a better one:
 /// `--headless` and `--nested`, and every test. `--tty` passes its
 /// connector's name to [`init_named`] instead.
@@ -159,7 +119,7 @@ pub fn init_named(
     );
     state.space.map_output(&output, (0, 0));
 
-    state.backend = Some(create_backend(&output, width, height)?);
+    state.backend = Some(Backend::new(&output, width, height)?);
     // What the core is told is the *logical* output rectangle, which is the
     // same rectangle Smithay's `Space` lays windows out in -- see
     // `output_scale.rs`'s `logical_size`. Handing the core the physical
@@ -239,21 +199,6 @@ fn set_mode(
     );
 }
 
-/// Builds the CPU render target at a given size: a pixman renderer, an
-/// offscreen image to draw into, and the damage tracker that pairs with it.
-/// Shared by `init` and `State::resize_output` so the two can't drift apart.
-fn create_backend(output: &Output, width: i32, height: i32) -> Result<Backend, Box<dyn Error>> {
-    let mut renderer = PixmanRenderer::new()?;
-    let image = renderer.create_buffer(Fourcc::Argb8888, (width, height).into())?;
-    let damage = OutputDamageTracker::from_output(output);
-    Ok(Backend {
-        renderer,
-        image,
-        damage,
-        size: (width, height),
-    })
-}
-
 impl State {
     /// Draws a frame, if anything changed since the last one.
     pub fn render(&mut self) {
@@ -317,347 +262,18 @@ impl State {
         let Some(mut backend) = self.backend.take() else {
             return;
         };
-        // The client-supplied cursor surface this frame drew from, if any --
-        // set only on the frames that actually went looking for one (`--tty`
-        // with a pointer). See the `send_frames_surface_tree` call at the
-        // end of this function.
-        let mut cursor_surface: Option<WlSurface> = None;
-        // Whether this frame actually reached the renderer. Only a frame that
-        // did may confirm a pending session lock: the protocol forbids
-        // sending `locked` before a blanked frame exists (see
-        // `session_lock.rs`).
-        let mut drew_a_frame = false;
-        // The flip this frame went out on under `--tty`, if `present`
-        // issued one. Only meaningful for a locked frame with a pending
-        // lock (see the `confirm_lock`/`await_vblank` split at the end of
-        // this function); every other frame leaves it for the tail to
-        // ignore.
-        let mut blank_seq: Option<u64> = None;
-        // Whether this frame's `present` was refused after the pixels were
-        // already written (a commit/page-flip the kernel rejected -- the
-        // only present skip no completion event can retry, since nothing is
-        // in flight). The tail re-arms the frame timer for it below, after
-        // `needs_render` is cleared so the request isn't clobbered.
-        let mut retry_render = false;
-        // Whether this frame reached the host under `--nested`, if `present`
-        // committed it. Like `blank_seq` above, this is what tells the tail
-        // the frame actually went out rather than merely rendered: only a
-        // presented frame may stamp presentation feedback (see
-        // `presentation_time.rs`).
-        let mut host_committed = false;
-        // Read once, here, so every branch below -- elements, clear colour,
-        // frame callbacks -- is answering the same question about the same
-        // frame.
+        // Read once, here, so the element gathering, the clear colour and
+        // the frame callbacks below are all answering the same question
+        // about the same frame.
         let locked = self.session_lock.is_locked();
-        {
-            let Backend {
-                renderer,
-                image,
-                damage,
-                size,
-            } = &mut backend;
-            // The core's arrangement, and this frame's ring segments built
-            // from it -- computed once here rather than inside the match
-            // below so a failure to bind the framebuffer still logs without
-            // having done this for nothing. See `decorations.rs`'s module
-            // doc for why the background isn't part of this list.
-            //
-            // Not computed at all while locked: no window and no ring is
-            // drawn then, so laying the windows out would be work for a frame
-            // that cannot show it. `apply()` still runs the layout on every
-            // change underneath, so nothing is lost by the time it unlocks.
-            let (width, height) = *size;
-            // What every element's own coordinates are built at, read from the
-            // output rather than hardcoded so windows, layer surfaces, the
-            // ring and the cursor can never disagree about it. 1.0 unless
-            // `[output] scale` says otherwise (see `output_scale.rs`).
-            let scale = output.current_scale().fractional_scale();
-            // The output rectangle in *logical* coordinates -- the space the
-            // core arranges in and the space every element is built in. The
-            // decorations' clip bounds and the lock backdrop's physical origin
-            // both come from here, which is the whole coordinate-space split
-            // in one place: `bounds` is logical, `(width, height)` below is the
-            // physical render target.
-            let geometry = self.space.output_geometry(&output);
-            let bounds = geometry
-                .map(|geometry| {
-                    Rect::new(
-                        geometry.loc.x,
-                        geometry.loc.y,
-                        geometry.size.w,
-                        geometry.size.h,
-                    )
-                })
-                .unwrap_or_else(|| Rect::new(0, 0, width, height));
-            let ring_elements = if locked {
-                Vec::new()
-            } else {
-                let arrangement = self.world.arrange();
-                self.decorations
-                    .elements(&arrangement, &self.appearance, bounds, scale)
-            };
-            match renderer.bind(image) {
-                Ok(mut framebuffer) => {
-                    // Only `--tty` ever draws a cursor -- see `cursor.rs`'s
-                    // module doc; headless has no display and `--nested`
-                    // already shows the host's own. The list is empty when
-                    // there's nothing to draw (hidden, or a client cursor
-                    // surface with no content yet) and can hold more than
-                    // one element when a client's cursor surface has
-                    // subsurfaces of its own.
-                    let cursor_elements = if self.tty.is_some() {
-                        match self.seat.get_pointer() {
-                            Some(pointer) => {
-                                cursor_surface = self.cursor.surface().cloned();
-                                self.cursor
-                                    .element(renderer, pointer.current_location(), scale)
-                            }
-                            None => Vec::new(),
-                        }
-                    } else {
-                        Vec::new()
-                    };
-                    // Smithay's damage tracker draws a `&[E]` back-to-front by
-                    // walking it in reverse (confirmed in
-                    // `OutputDamageTracker::render_output_internal`, which
-                    // iterates `render_elements.iter().rev()`), so the *first*
-                    // entry here ends up drawn *last*, i.e. on top. Read this
-                    // list as "front to back":
-                    //
-                    // 1. the cursor -- meaningless hidden behind anything;
-                    // 2. the overlay and top layer-shell layers, which the
-                    //    protocol defines as being above ordinary windows (a
-                    //    bar, a launcher, a notification);
-                    // 3. windows, which must still win over the ring:
-                    //    `shell.rs::apply()` positions a window from the
-                    //    layout's rect but sizes it from whatever the client
-                    //    actually committed, and a client that's slow to
-                    //    shrink (or a `--nested` resize still in flight) can
-                    //    briefly have a surface larger than its placement
-                    //    rect, reaching into the gap the ring is drawn in.
-                    //    Ring-on-top would paint over that live content every
-                    //    such frame; windows-on-top instead means the
-                    //    stale/oversized content can only ever cover the
-                    //    ring, never the reverse -- the same direction niri
-                    //    itself picks, and the only one of the two that can't
-                    //    corrupt what a client is showing;
-                    // 4. the focus ring, drawn in the layout's own gap;
-                    // 5. the bottom and background layers (a wallpaper),
-                    //    which the protocol defines as being below windows.
-                    //
-                    // The ring sits *between* windows and the background
-                    // layer rather than below both, which is the one thing
-                    // `space::space_render_elements` -- which gathers layer
-                    // surfaces itself, in one fixed order -- cannot express:
-                    // it would put a full-screen wallpaper on top of the
-                    // ring, i.e. hide the ring completely for anyone running
-                    // `swaybg`. So windows come from
-                    // `Space::render_elements_for_region` (windows only, by
-                    // construction -- see its own doc) and the layers are
-                    // gathered here, around the ring.
-                    //
-                    // ...unless the session is locked, in which case this
-                    // whole list is replaced -- not reordered -- by the lock
-                    // screen's own (see `session_lock.rs`). Everything above
-                    // is skipped outright rather than pushed behind an opaque
-                    // backdrop, because "drawn behind something opaque" is a
-                    // weaker guarantee than "never gathered": it would rest on
-                    // element ordering, on no client surface ever being larger
-                    // than the rect it was placed at, and on the damage
-                    // tracker never surprising us. The cursor is the one thing
-                    // still drawn in front, and it is this compositor's own
-                    // shape (`SessionLockHandler::lock` resets it at lock
-                    // time) -- a lock screen with a password field needs a
-                    // pointer.
-                    let elements = if locked {
-                        let origin = geometry
-                            .map(|geometry| geometry.loc.to_physical_precise_round(scale))
-                            .unwrap_or_default();
-                        let (lock_surfaces, backdrop) =
-                            self.lock_elements(renderer, origin, scale, (width, height));
-                        let mut elements =
-                            Vec::with_capacity(cursor_elements.len() + lock_surfaces.len() + 1);
-                        elements.extend(cursor_elements.into_iter().map(Elements::Cursor));
-                        elements.extend(lock_surfaces.into_iter().map(Elements::Surface));
-                        elements.push(Elements::Decoration(backdrop));
-                        elements
-                    } else {
-                        let window_elements = match geometry {
-                            Some(region) => self
-                                .space
-                                .render_elements_for_region(renderer, &region, scale, 1.0),
-                            // Unreachable while `self.output` is the output
-                            // `headless::init` mapped into the space; an output
-                            // that isn't in the space has no region to render.
-                            None => Vec::new(),
-                        };
-                        let layers = layer_map_for_output(&output);
-                        let mut elements = Vec::with_capacity(
-                            cursor_elements.len()
-                                + window_elements.len()
-                                + ring_elements.len()
-                                + layers.len(),
-                        );
-                        elements.extend(cursor_elements.into_iter().map(Elements::Cursor));
-                        layer_elements(
-                            &layers,
-                            &layer_shell::ABOVE_WINDOWS,
-                            renderer,
-                            scale,
-                            &mut elements,
-                        );
-                        elements.extend(window_elements.into_iter().map(Elements::Surface));
-                        elements.extend(ring_elements.into_iter().map(Elements::Decoration));
-                        layer_elements(
-                            &layers,
-                            &layer_shell::BELOW_WINDOWS,
-                            renderer,
-                            scale,
-                            &mut elements,
-                        );
-                        // Nothing below this point needs the layer map, and the
-                        // frame-callback pass at the end of `render()` takes the
-                        // same per-output lock again -- holding this one across
-                        // the render would deadlock the compositor against
-                        // itself.
-                        drop(layers);
-                        elements
-                    };
-
-                    // `0` (always-full-redraw) for every presenter except
-                    // `--tty`: see `buffers.rs`'s module doc on why that one
-                    // specifically needs a real buffer age -- cursor motion
-                    // can trigger a render on every mouse-motion event, and a
-                    // naive full-frame copy at that rate is exactly the
-                    // multi-MB/s memcpy the roadmap calls out. Neither
-                    // `--headless` nor `--nested` draws a cursor, so neither
-                    // has a new reason to render more often than before.
-                    let age = self.tty.as_ref().map_or(0, Tty::next_buffer_age);
-                    // The backdrop element already covers the output opaquely
-                    // while locked; this is the second line of defence behind
-                    // it, so that even a frame whose elements somehow produced
-                    // nothing clears to the lock colour rather than to the
-                    // configured desktop background -- which a user may have
-                    // given an alpha, and which is the colour the unlocked
-                    // session is showing.
-                    let clear_color = if locked {
-                        self.lock_clear_color()
-                    } else {
-                        self.appearance.background_color.into()
-                    };
-                    let result = damage.render_output(
-                        renderer,
-                        &mut framebuffer,
-                        age,
-                        &elements,
-                        clear_color,
-                    );
-                    match result {
-                        Ok(render_result) => {
-                            drew_a_frame = true;
-                            // What `screencopy.rs` asks "have the pixels moved
-                            // since this session's last capture?" with. Gated
-                            // on the damage tracker having something to report
-                            // rather than on reaching this arm at all: under
-                            // `--tty` (the one backend passing a real buffer
-                            // age) a redundant `request_render` legitimately
-                            // draws nothing and leaves the previous frame on
-                            // screen, and counting that as a change would make
-                            // every capture session copy the same pixels
-                            // again. See `State::frame_serial`'s doc for what
-                            // this does and does not claim.
-                            if render_result.damage.is_some() {
-                                self.frame_serial = self.frame_serial.wrapping_add(1);
-                            }
-                            // Must run unconditionally, even when there
-                            // turns out to be nothing to present below --
-                            // see `BufferPool::advance_generation`'s doc for
-                            // why this can't be skipped just because this
-                            // frame is.
-                            if let Some(tty) = &mut self.tty {
-                                tty.advance_generation();
-                            }
-                            // Both presenters read back the same frame the
-                            // same way; only what happens with the pixels
-                            // afterward differs, so the read-back itself
-                            // happens once for whichever (or both) are set --
-                            // and not at all with neither (plain
-                            // `--headless`, e.g. under IPC-only control):
-                            // that copy would be pure waste on every render
-                            // with nothing to hand it to.
-                            if (self.host.is_some() || self.tty.is_some())
-                                && let Some(damaged) = render_result.damage
-                            {
-                                // Bounding box of every damaged rect, not
-                                // the rects themselves: `copy_framebuffer`
-                                // (and the dumb-buffer write behind it) only
-                                // ever copies one contiguous region. For
-                                // `--headless`/`--nested` (`age` always `0`
-                                // above) this is always the full frame
-                                // regardless, so nothing changes for them;
-                                // for `--tty` a small, cheap bbox is the
-                                // common case (see `buffers.rs`'s module
-                                // doc), and only a large pointer jump or a
-                                // real content change grows it.
-                                let region = union_bbox(damaged);
-                                let buffer_region: Rectangle<i32, Buffer> = Rectangle::new(
-                                    (region.loc.x, region.loc.y).into(),
-                                    (region.size.w, region.size.h).into(),
-                                );
-                                // Argb8888 here is the same little-endian
-                                // BGRA layout wl_shm's own Argb8888 format
-                                // uses (see screenshot.rs's comment on the
-                                // same fact for the PNG path) -- unlike
-                                // there, this is a straight memcpy into the
-                                // presenter's own buffer, no channel
-                                // reordering.
-                                match renderer.copy_framebuffer(
-                                    &framebuffer,
-                                    buffer_region,
-                                    Fourcc::Argb8888,
-                                ) {
-                                    Ok(mapping) => match renderer.map_texture(&mapping) {
-                                        Ok(pixels) => {
-                                            if let Some(host) = &mut self.host {
-                                                host_committed = host.present(
-                                                    pixels,
-                                                    region.size.w,
-                                                    region.size.h,
-                                                );
-                                            }
-                                            if let Some(tty) = &mut self.tty {
-                                                blank_seq =
-                                                    tty.present(pixels, region, (width, height));
-                                                retry_render = tty.take_retry_render();
-                                            }
-                                        }
-                                        Err(error) => tracing::warn!(
-                                            %error,
-                                            "could not read back the frame for the presenter"
-                                        ),
-                                    },
-                                    Err(error) => tracing::warn!(
-                                        %error,
-                                        "could not copy the framebuffer for the presenter"
-                                    ),
-                                }
-                            }
-                            // else: no presenter is watching this frame,
-                            // or (only possible when `age > 0`, i.e. only
-                            // under `--tty`) nothing actually changed -- e.g.
-                            // a redundant `request_render` with no real
-                            // difference -- so there's nothing to read back
-                            // or present either way.
-                        }
-                        Err(error) => tracing::warn!(%error, "could not render"),
-                    }
-                }
-                Err(error) => tracing::warn!(%error, "could not bind the framebuffer"),
-            }
-        }
+        // The frame itself, drawn with whichever renderer this session is
+        // carrying. See `render.rs` for why the choice of renderer is an
+        // enum dispatched once per frame rather than a type parameter
+        // threaded through `State`.
+        let frame = render::draw_frame(self, &mut backend, &output, locked);
         self.backend = Some(backend);
         self.needs_render = false;
-        // A refused `--tty` flip (see `retry_render` above): nothing is in
+        // A refused `--tty` flip (see `FrameOutcome::retry_render`): nothing is in
         // flight, so no `VBlank` will ever arrive to retry it the way
         // `present_skipped` retries an in-flight skip -- re-arm the frame
         // timer directly so the re-presented frame goes out on the next
@@ -665,7 +281,7 @@ impl State {
         // clear above, so this request survives it; bounded at the source
         // (`present_retry.rs`), so a device that keeps refusing goes quiet
         // instead of pinning the loop.
-        if retry_render {
+        if frame.retry_render {
             self.request_render();
         }
 
@@ -684,10 +300,10 @@ impl State {
         // vblank after `locked` has gone out. Headless and nested have no
         // scanout, so the drawn frame *is* the shown one and confirms at
         // once, exactly as before.
-        if drew_a_frame {
+        if frame.drew_a_frame {
             if self.session_lock.awaiting_blank() && self.tty.is_some() {
                 let now = Instant::now();
-                if self.session_lock.await_vblank(blank_seq, now) {
+                if self.session_lock.await_vblank(frame.blank_seq, now) {
                     // This frame needs a timer watching the fallback
                     // deadline: a newly armed wait has none yet, and a
                     // freshly issued flip restarted the bound out from
@@ -740,12 +356,17 @@ impl State {
         // output is self-refreshing with no queryable count.
         if let Some(seq) = super::presentation_time::presented_frame(
             self.host.is_some(),
-            host_committed,
+            frame.host_committed,
             self.tty.is_some(),
-            blank_seq,
-            drew_a_frame,
+            frame.blank_seq,
+            frame.drew_a_frame,
         ) {
-            self.present_feedback(&output, self.tty.is_some(), cursor_surface.as_ref(), seq);
+            self.present_feedback(
+                &output,
+                self.tty.is_some(),
+                frame.cursor_surface.as_ref(),
+                seq,
+            );
         }
 
         let time = self.start_time.elapsed();
@@ -773,7 +394,7 @@ impl State {
         // holds pointer focus or a pointer grab (Smithay's
         // `allow_setting_cursor`), and locking resets the image, drops grabs
         // and moves pointer focus onto the lock surface.
-        if let Some(surface) = &cursor_surface {
+        if let Some(surface) = &frame.cursor_surface {
             send_frames_surface_tree(surface, &output, time, Some(Duration::ZERO), |_, _| {
                 Some(output.clone())
             });
@@ -864,7 +485,7 @@ impl State {
         let Some(output) = self.output.clone() else {
             // Logged, not a silent `false`: both callers' comments say
             // "`resize_output` has already logged what failed", and without
-            // this that was only true of the `create_backend` path below.
+            // this that was only true of the `Backend::new` path below.
             // Unreachable today -- `headless::init_named` runs before either
             // backend can ask for a resize -- but a `false` nobody can
             // explain is exactly the shape of failure this project treats as
@@ -873,7 +494,7 @@ impl State {
             return false;
         };
         set_mode(&output, width, height, None, self.output_scale);
-        match create_backend(&output, width, height) {
+        match Backend::new(&output, width, height) {
             Ok(backend) => self.backend = Some(backend),
             Err(error) => {
                 tracing::warn!(%error, "could not resize the render target");
@@ -1007,51 +628,6 @@ fn blank_timeout(_now: std::time::Instant, _metadata: &mut (), state: &mut State
     TimeoutAction::Drop
 }
 
-/// Appends the render elements of every mapped layer surface on `layers`,
-/// front-most first, to `elements`.
-///
-/// Within one layer the most recently mapped surface wins, which is what
-/// `layers_on(..).rev()` gives (the map keeps insertion order) and what
-/// Smithay's own `space_render_elements` does with the same list. The
-/// protocol itself leaves ordering *within* a layer undefined, so this is a
-/// choice, not a rule -- but it is the same choice every wlroots-derived
-/// compositor makes, and the one a client expects when it maps a second
-/// surface on the same layer.
-///
-/// Allocates only when there is something to draw: `render_elements` returns
-/// a `Vec` per surface (Smithay's own signature), so a session with no bars
-/// or wallpaper -- the default -- adds no allocation to the frame at all.
-fn layer_elements(
-    layers: &LayerMap,
-    which: &[Layer],
-    renderer: &mut PixmanRenderer,
-    scale: f64,
-    elements: &mut Vec<Elements>,
-) {
-    for &layer in which {
-        for surface in layers.layers_on(layer).rev() {
-            // `layer_geometry` is `None` only for a surface this map never
-            // mapped, which `layers_on` cannot produce.
-            let Some(geometry) = layers.layer_geometry(surface) else {
-                continue;
-            };
-            elements.extend(
-                AsRenderElements::<PixmanRenderer>::render_elements::<
-                    WaylandSurfaceRenderElement<PixmanRenderer>,
-                >(
-                    surface,
-                    renderer,
-                    geometry.loc.to_physical_precise_round(scale),
-                    Scale::from(scale),
-                    1.0,
-                )
-                .into_iter()
-                .map(Elements::Surface),
-            );
-        }
-    }
-}
-
 /// Whether `render()` must skip this frame because no presenter can show
 /// it: `Some(false)` is a `--tty` session holding no DRM master (paused or a
 /// failed reactivation -- see `Tty::active`), `Some(true)` is one holding it,
@@ -1067,66 +643,9 @@ fn tty_blocks_render(tty_active: Option<bool>) -> bool {
     tty_active.is_some_and(|active| !active)
 }
 
-/// The smallest rectangle containing every rect in `rects`. Pulled out of
-/// `render()` so it's testable without a live renderer, same rationale as
-/// `input.rs`'s `clamp_to_extent`. `rects` must be non-empty --
-/// `OutputDamageTracker::render_output` only ever returns `Some` damage
-/// when it has at least one rectangle to report; an empty list would have
-/// been `None` instead (confirmed against the pinned Smithay source).
-fn union_bbox(rects: &[Rectangle<i32, Physical>]) -> Rectangle<i32, Physical> {
-    let mut iter = rects.iter().copied();
-    let first = iter
-        .next()
-        .expect("render_output never returns an empty damage list");
-    iter.fold(first, |acc, rect| {
-        let x0 = acc.loc.x.min(rect.loc.x);
-        let y0 = acc.loc.y.min(rect.loc.y);
-        let x1 = (acc.loc.x + acc.size.w).max(rect.loc.x + rect.size.w);
-        let y1 = (acc.loc.y + acc.size.h).max(rect.loc.y + rect.size.h);
-        Rectangle::new((x0, y0).into(), (x1 - x0, y1 - y0).into())
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn rect(x: i32, y: i32, w: i32, h: i32) -> Rectangle<i32, Physical> {
-        Rectangle::new((x, y).into(), (w, h).into())
-    }
-
-    #[test]
-    fn a_single_rect_is_its_own_bounding_box() {
-        assert_eq!(union_bbox(&[rect(10, 20, 30, 40)]), rect(10, 20, 30, 40));
-    }
-
-    #[test]
-    fn disjoint_rects_bound_the_gap_between_them() {
-        // An old cursor position and a new one some distance away: the
-        // bbox must cover both plus whatever's between them, since a
-        // single `copy_framebuffer`/dumb-buffer write can only ever copy
-        // one contiguous region.
-        let old_position = rect(0, 0, 16, 16);
-        let new_position = rect(100, 50, 16, 16);
-        assert_eq!(
-            union_bbox(&[old_position, new_position]),
-            rect(0, 0, 116, 66)
-        );
-    }
-
-    #[test]
-    fn an_overlapping_rect_does_not_grow_the_box_past_the_union() {
-        let a = rect(0, 0, 20, 20);
-        let b = rect(10, 10, 20, 20);
-        assert_eq!(union_bbox(&[a, b]), rect(0, 0, 30, 30));
-    }
-
-    #[test]
-    fn a_rect_fully_containing_another_wins_alone() {
-        let outer = rect(0, 0, 100, 100);
-        let inner = rect(40, 40, 10, 10);
-        assert_eq!(union_bbox(&[inner, outer]), outer);
-    }
 
     #[test]
     fn no_tty_never_blocks_a_render() {
@@ -1148,73 +667,5 @@ mod tests {
         // show. This is the fail-first pin for the gate -- negate the
         // predicate body and this fails.
         assert!(tty_blocks_render(Some(false)));
-    }
-
-    /// The damage-tracker contract `Tty`'s failed-flip retry relies on,
-    /// verified against the pinned Smithay source rather than assumed:
-    /// `damage_output_internal` extends an unchanged frame's (empty) new
-    /// damage with `old_damage.take(age - 1)`, so age 1 asks for nothing
-    /// and reports `None`, while age 0 takes the full-redraw branch and
-    /// reports the whole output. A retry that reads as age 1 therefore
-    /// presents nothing on a quiet screen (the loss this fix closes); a
-    /// retry at age 0 always re-presents.
-    #[test]
-    fn an_unchanged_frame_reports_no_damage_at_age_one_but_full_damage_at_age_zero() {
-        use smithay::backend::renderer::element::Kind;
-        use smithay::backend::renderer::element::solid::{
-            SolidColorBuffer, SolidColorRenderElement,
-        };
-
-        let mut renderer = PixmanRenderer::new().expect("a cpu renderer");
-        let mut image = renderer
-            .create_buffer(Fourcc::Argb8888, (64, 64).into())
-            .expect("an image");
-        let mut tracker = OutputDamageTracker::new((64, 64), 1.0, Transform::Normal);
-        let buffer = SolidColorBuffer::new((64, 64), [1.0, 0.0, 1.0, 1.0]);
-        let element =
-            SolidColorRenderElement::from_buffer(&buffer, (0, 0), 1.0, 1.0, Kind::Unspecified);
-        let mut framebuffer = renderer.bind(&mut image).expect("a framebuffer");
-        let first = tracker
-            .render_output(
-                &mut renderer,
-                &mut framebuffer,
-                0,
-                &[element],
-                [0.0, 0.0, 0.0, 1.0],
-            )
-            .expect("a first render");
-        assert!(first.damage.is_some());
-        drop(first);
-        // Unchanged, at the age a failed flip's retry would read without
-        // the age clear: nothing new, and no history requested either.
-        let mut framebuffer = renderer.bind(&mut image).expect("a framebuffer");
-        let element =
-            SolidColorRenderElement::from_buffer(&buffer, (0, 0), 1.0, 1.0, Kind::Unspecified);
-        let second = tracker
-            .render_output(
-                &mut renderer,
-                &mut framebuffer,
-                1,
-                &[element],
-                [0.0, 0.0, 0.0, 1.0],
-            )
-            .expect("a second render");
-        assert!(second.damage.is_none());
-        drop(second);
-        // The same unchanged frame at age 0 -- what the cleared slot reads
-        // as -- redraws the whole output.
-        let mut framebuffer = renderer.bind(&mut image).expect("a framebuffer");
-        let element =
-            SolidColorRenderElement::from_buffer(&buffer, (0, 0), 1.0, 1.0, Kind::Unspecified);
-        let third = tracker
-            .render_output(
-                &mut renderer,
-                &mut framebuffer,
-                0,
-                &[element],
-                [0.0, 0.0, 0.0, 1.0],
-            )
-            .expect("a third render");
-        assert!(third.damage.is_some());
     }
 }

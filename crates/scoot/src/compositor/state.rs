@@ -54,7 +54,6 @@ use super::ext_workspace::ExtWorkspaceState;
 use super::foreign_toplevel::ForeignToplevels;
 use super::foreign_toplevel_management::ForeignToplevelManagement;
 use super::gamma_control::GammaControlState;
-use super::headless::Backend;
 use super::idle;
 use super::input;
 use super::ipc::PendingIdle;
@@ -63,6 +62,7 @@ use super::layer_shell;
 use super::nested::Host;
 use super::output_management::OutputManagement;
 use super::popup::ActivePopupGrab;
+use super::render::Backend;
 use super::screencopy::Screencopy;
 use super::screenshot::{Encoder, PendingShot, ShotSink};
 use super::session_lock::SessionLock;
@@ -446,7 +446,7 @@ pub struct State {
     /// `wp_presentation` (version 2): frame-timing feedback for smooth
     /// video/animation clients. Held only to keep the global alive --
     /// Smithay owns the feedback objects (see `presentation_time.rs`), and
-    /// the frame handoff in `headless.rs::render` takes and marks them
+    /// the frame handoff in `State::render` takes and marks them
     /// presented with this backend's timestamp semantics.
     #[allow(dead_code)]
     pub presentation_state: PresentationState,

@@ -49,7 +49,7 @@
 //! ordering tweak on top of it -- drawing the lock surface last is not
 //! exclusivity if anything else is still in the list:
 //!
-//! - **Rendering** (`headless.rs::render`): the element list is built from
+//! - **Rendering** (`render/elements.rs`'s `gather_elements`): the element list is built from
 //!   this module alone -- an opaque full-output backdrop, the mapped lock
 //!   surfaces, and the popups parented to those surfaces (see "Popups over
 //!   the lock screen") -- so a window, a bar, a wallpaper or a focus ring is

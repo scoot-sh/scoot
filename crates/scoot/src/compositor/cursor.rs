@@ -2,8 +2,8 @@
 //!
 //! `--headless` has no display to draw one on, and `--nested` already shows
 //! the host compositor's own cursor on top -- so this backend-neutral module
-//! knows nothing about which backend is active; `headless.rs::render` is the
-//! one that gates its use to `self.tty.is_some()`.
+//! knows nothing about which backend is active; `render/elements.rs`'s
+//! `gather_elements` is the one that gates its use to `self.tty.is_some()`.
 //!
 //! # Two sources of cursor pixels
 //!
@@ -98,8 +98,8 @@ render_elements! {
 /// else.
 ///
 /// Both colors are single `Argb8888` pixels in little-endian memory order
-/// (`[B, G, R, A]`, premultiplied) -- the same layout `headless.rs` renders
-/// into and `tty/buffers.rs` scans out (see their module docs on the same
+/// (`[B, G, R, A]`, premultiplied) -- the same layout `render/pixman.rs`
+/// renders into and `tty/buffers.rs` scans out (see their module docs on the same
 /// fact), so this needs no conversion anywhere downstream.
 /// [`Color::to_argb8888`] is what produces one from a config color; this
 /// function stays pure and takes whatever it is given, so it is testable

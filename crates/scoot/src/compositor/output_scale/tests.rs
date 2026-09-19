@@ -19,12 +19,10 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use scoot_core::Config;
-use smithay::backend::allocator::Fourcc;
-use smithay::backend::renderer::{Bind, ExportMem};
 use smithay::output::{Mode, Output, PhysicalProperties, Scale, Subpixel};
 use smithay::reexports::calloop::EventLoop;
 use smithay::reexports::wayland_server::Display;
-use smithay::utils::{Rectangle, Transform};
+use smithay::utils::Transform;
 use wayland_client::protocol::{
     wl_buffer, wl_compositor, wl_output, wl_registry, wl_shm, wl_shm_pool, wl_surface,
 };
@@ -715,18 +713,9 @@ impl Fixture {
         self.state.request_render();
         self.state.render();
         let backend = self.state.backend.as_mut().expect("a backend");
-        let crate::compositor::headless::Backend {
-            renderer, image, ..
-        } = backend;
-        let framebuffer = renderer.bind(image).expect("a framebuffer");
-        let region = Rectangle::from_size((CANVAS, CANVAS).into());
-        let mapping = renderer
-            .copy_framebuffer(&framebuffer, region, Fourcc::Argb8888)
-            .expect("a framebuffer readback");
-        renderer
-            .map_texture(&mapping)
-            .expect("mapped pixels")
-            .to_vec()
+        backend
+            .capture(<[u8]>::to_vec)
+            .expect("a framebuffer readback")
     }
 
     /// Where the core says the first window goes, in logical pixels.

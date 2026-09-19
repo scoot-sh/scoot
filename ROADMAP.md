@@ -25,15 +25,22 @@ docs/backlog`, `rg -l 'area: "protocols"' docs/roadmap`.
 | 4b | [Window decorations](docs/roadmap/04b-decorations.md) | done |
 | 5 | [Cursor rendering for `--tty`](docs/roadmap/05-cursor-rendering.md) | done |
 | 5b | [VT-switch-back `EPERM`](docs/roadmap/05b-vt-switch-eperm.md) | done |
-| 6 | [Real GPU rendering pipeline](docs/roadmap/06-gpu-pipeline.md) | **planned** |
+| 6 | [Real GPU rendering pipeline](docs/roadmap/06-gpu-pipeline.md) | **in progress (stage 1 of 4)** |
 | 7–18 | [Backlog-driven hardening and protocol work](docs/roadmap/) | done |
 
-Item 6 (a GLES/Vulkan renderer as an optional alternative to pixman, selected
+Item 6 (a **GLES** renderer as an optional alternative to pixman, selected
 per-backend, with GPU-free operation kept as a hard requirement) is the only
-remaining item on the original ordered list. Everything since item 7 has been
-pulled forward from [`docs/backlog/`](docs/backlog/) rather than the order
-above, at the user's direction or because a live crash-DoS or daily-driver
-gap jumped the queue — each item's own file records why it landed when it did.
+remaining item on the original ordered list, and the first of its four stages
+is in flight (PR #129: the renderer seam, pixman still the only
+implementation, provably zero behaviour change). Two claims that entry used to
+make were checked and corrected in the same PR: the "render-target/presentation
+split" it called the seam a GPU renderer slots into **did not exist** (one
+monolithic `State::render()` hard-wired to pixman three ways), and the pinned
+Smithay rev has **no Vulkan renderer at all** — `src/backend/vulkan/` is an
+allocator. Everything since item 7 has been pulled forward from
+[`docs/backlog/`](docs/backlog/) rather than the order above, at the user's
+direction or because a live crash-DoS or daily-driver gap jumped the queue —
+each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
@@ -1031,9 +1038,13 @@ Small follow-ups already filed alongside:
 [`layer-destroy`](docs/backlog/resolved/layer-destroy-review-followup-done.md)
 (resolved, PR #77).
 
-Item 6 (the GPU pipeline) remains the one *ordered* milestone still open; it
-has never been ahead of the daily-drivability and correctness work the backlog
-keeps producing, and that trade can be revisited at any time.
+Item 6 (the GPU pipeline) remains the one *ordered* milestone still open, now
+with its first of four stages in flight (PR #129, the renderer seam). It has
+never been ahead of the daily-drivability and correctness work the backlog
+keeps producing, and that trade can be revisited at any time — stage 1 was
+picked up now because it is a pure refactor with no behaviour change, so it
+costs the backlog nothing and removes the one thing that made every later
+stage unreviewable.
 
 ## History
 

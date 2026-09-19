@@ -190,8 +190,6 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use smithay::backend::allocator::Fourcc;
-use smithay::backend::renderer::{Bind, ExportMem};
 use smithay::output::{Output, WeakOutput};
 use smithay::reexports::wayland_server::backend::ClientId;
 use smithay::reexports::wayland_server::protocol::wl_buffer::WlBuffer;
@@ -211,7 +209,7 @@ use smithay::wayland::shm::with_buffer_contents_mut;
 
 use super::State;
 use super::dmabuf;
-use super::headless::Backend;
+use super::render::{Backend, CaptureStage};
 
 #[cfg(test)]
 mod tests;
@@ -786,7 +784,7 @@ impl State {
 /// from the same pair), and taking it from the backend means they cannot drift
 /// apart here even if that ever stops being true.
 fn constraints(backend: &Backend) -> BufferConstraints {
-    let (width, height) = backend.size;
+    let (width, height) = backend.size();
     BufferConstraints {
         size: (width, height).into(),
         shm: FORMATS.to_vec(),
@@ -809,49 +807,62 @@ fn deliver(
     presented: Duration,
     force_xrgb_alpha: bool,
 ) {
-    let (width, height) = backend.size;
-    let region: Rectangle<i32, BufferCoords> = Rectangle::from_size((width, height).into());
-    let Backend {
-        renderer, image, ..
-    } = backend;
+    let (width, height) = backend.size();
 
-    // The same bind/copy/map sequence `screenshot.rs` reads a PNG out of, and
-    // deliberately the same one: it is what makes the session-lock guarantee
-    // above inherited rather than re-derived. Each step is a real failure mode
-    // (a renderer that cannot bind its own target, an allocation that failed),
-    // and each one has to end in *some* answer per parked frame or its client
-    // blocks forever.
+    // The same read-back `screenshot.rs` reads a PNG out of, and deliberately
+    // the same one: it is what makes the session-lock guarantee above
+    // inherited rather than re-derived. Each of its steps is a real failure
+    // mode (a renderer that cannot bind its own target, an allocation that
+    // failed), and each one has to end in *some* answer per parked frame or
+    // its client blocks forever -- which is why the error arm below answers
+    // every due frame rather than returning quietly.
     //
-    // Written out rather than chained through `and_then` because both
-    // intermediates are borrowed from, not consumed: the framebuffer borrows
-    // `image`, and the pixel slice borrows the *mapping* (see `map_texture`'s
-    // signature at the pinned rev -- its lifetime comes from the mapping, not
-    // from `&mut self`), so both have to outlive the copy below. Nothing here
-    // copies the frame a second time.
-    let framebuffer = match renderer.bind(image) {
-        Ok(framebuffer) => framebuffer,
-        Err(error) => {
-            tracing::warn!(%error, "could not bind the framebuffer for a screen capture");
-            fail_due(sessions, serial, CaptureFailureReason::Unknown);
-            return;
+    // The write happens inside the callback rather than over a returned
+    // buffer: the pixels are a borrowed view into the renderer's own mapping,
+    // and copying them out first would cost a full extra copy of the screen
+    // before any client had been written to.
+    let outcome = backend.capture(|pixels| {
+        write_due_captures(
+            pixels,
+            sessions,
+            serial,
+            presented,
+            force_xrgb_alpha,
+            (width, height),
+        )
+    });
+    if let Err(failure) = outcome {
+        match failure.stage {
+            CaptureStage::Bind => tracing::warn!(
+                error = %failure,
+                "could not bind the framebuffer for a screen capture"
+            ),
+            CaptureStage::Copy => tracing::warn!(
+                error = %failure,
+                "could not copy the framebuffer for a screen capture"
+            ),
+            CaptureStage::Map => tracing::warn!(
+                error = %failure,
+                "could not map the framebuffer for a screen capture"
+            ),
         }
-    };
-    let mapping = match renderer.copy_framebuffer(&framebuffer, region, Fourcc::Argb8888) {
-        Ok(mapping) => mapping,
-        Err(error) => {
-            tracing::warn!(%error, "could not copy the framebuffer for a screen capture");
-            fail_due(sessions, serial, CaptureFailureReason::Unknown);
-            return;
-        }
-    };
-    let pixels = match renderer.map_texture(&mapping) {
-        Ok(pixels) => pixels,
-        Err(error) => {
-            tracing::warn!(%error, "could not map the framebuffer for a screen capture");
-            fail_due(sessions, serial, CaptureFailureReason::Unknown);
-            return;
-        }
-    };
+        fail_due(sessions, serial, CaptureFailureReason::Unknown);
+    }
+}
+
+/// Writes one read-back frame into every due capture session.
+///
+/// Split out of [`deliver`] only so the read-back's callback stays readable;
+/// the `(width, height)` pair is the backend's own size, which is also what
+/// every client's buffer was sized against.
+fn write_due_captures(
+    pixels: &[u8],
+    sessions: &mut [Capture],
+    serial: u64,
+    presented: Duration,
+    force_xrgb_alpha: bool,
+    (width, height): (i32, i32),
+) {
     // pixman lays a 32-bit image out at `stride * height` bytes with the
     // stride rounded up to a multiple of four -- i.e. exactly `width * 4` for
     // these formats -- but the row length is derived rather than assumed, so a
