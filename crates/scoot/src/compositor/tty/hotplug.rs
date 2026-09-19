@@ -398,6 +398,15 @@ impl Tty {
             height,
             "drm: display reconfigured; mode-setting onto it"
         );
+        // Before `self.width`/`height` and before the `wl_output`'s own mode
+        // moves (`Reconfigured::finish` -> `State::resize_output` ->
+        // `set_mode`, all of which run after this function returns). On the
+        // scanout tier that leaves a window in which the swapchain is the new
+        // size while the compositor's `OutputModeSource::Auto(output)` still
+        // reports the old one -- harmless only because nothing renders in
+        // between: this runs inside the udev handler's borrow of `state.tty`,
+        // and `finish` runs immediately after it, with no event-loop dispatch
+        // (and so no frame) between the two.
         if !self.presenter.adopt_mode(mode) {
             // Scanout tier only, and all but unreachable: `set_pending` has
             // just put this exact mode on this exact surface, so the repeat

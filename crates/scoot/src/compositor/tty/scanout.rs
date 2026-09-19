@@ -128,10 +128,18 @@ pub(crate) struct ScanoutPresenter {
     /// timer-driven retries (see `present_retry.rs`).
     retries: PresentRetries,
     /// Whether the last frame was a refused commit owed a timer-driven retry.
-    /// Set only by the refusal arms below, taken only by the render tail (see
-    /// [`take_retry_render`](Self::take_retry_render)) -- the same one-writer,
-    /// one-taker shape the dumb tier uses, and for the same reason: nothing is
-    /// in flight after a refusal, so no completion event can retry it.
+    /// Set only by [`arm_retry`](Self::arm_retry), and *taken* -- never read
+    /// -- so it fires exactly once however many places look.
+    ///
+    /// Two takers here, unlike the dumb tier's one, and the difference is
+    /// real rather than sloppy: a refusal from
+    /// [`render_and_queue`](Self::render_and_queue) is owed to the render
+    /// tail (`take_retry_render`), while a refusal from
+    /// [`frame_submitted`](Self::frame_submitted) happens inside a completion
+    /// event, where the render tail will not run again unless something asks
+    /// for it -- so that one takes the flag itself and reports it as
+    /// "re-render" to `drm_event`. Either way exactly one `request_render`
+    /// results, and the bound in `present_retry.rs` counts both.
     retry_armed: bool,
     /// Whether the swapchain's slots have been freed since the render path
     /// last looked. Set by every path that rebuilds or resizes the swapchain,

@@ -439,6 +439,52 @@ only thing that invalidates the pool.
   built without the 'gpu-scanout' Cargo feature) ...` and comes up
   `scanout="dumb" renderer=pixman`.
 
+### Benchmark
+
+**Does adding the tier cost the default pixman path anything?** No, and not
+measurably in either direction. `crates/scoot/src/compositor/headless/bench.rs`,
+release, six rounds run **alternately** against part A's commit (`2ef80d9`,
+`git archive`d to `/tmp/scoot-pr1` and built into the same
+`CARGO_TARGET_DIR`), because a single pair on this VM says whatever the noise
+wants it to say:
+
+| round | base empty | branch empty | base 8win | branch 8win |
+| ----- | ---------- | ------------ | --------- | ----------- |
+| 1 | 75.87 | 75.08 | 141.82 | 124.43 |
+| 2 | 66.16 | 68.11 | 124.81 | 143.61 |
+| 3 | 73.08 | 60.73 | 113.82 | 137.33 |
+| 4 | 69.52 | 72.30 | 128.06 | 133.05 |
+| 5 | 66.86 | 70.97 | 133.43 | 131.32 |
+| 6 | 59.63 | 71.83 | 140.36 | 108.59 |
+| **median** | **68.2** | **71.4** | **130.7** | **132.2** |
+
+(µs per frame, best of five 500-frame runs each.) The medians differ by 3.2µs
+and 1.5µs while each build's own spread across identical rounds is 16µs and
+28µs, and the branch holds both the fastest 8-window run (108.6) and the
+fastest-but-one empty run. **This VM cannot resolve a difference below roughly
+its own ±25% noise, and there is none larger than that here.** Which matches
+the code: the pixman arm's work is untouched, `draw_frame`'s per-frame match
+gained one jump-table entry, and `Backend::new` gained a startup-only
+argument.
+
+**And what does the scanout tier itself cost, here?** More than the dumb tier,
+because there is no GPU on this VM -- but far less than the offscreen GLES
+pipeline does. Compositor CPU (`utime+stime` from `/proc/<pid>/stat`) over 300
+IPC pointer moves on a `--tty` session, two runs each:
+
+| tier | jiffies | wall |
+| ---- | ------- | ---- |
+| `scanout="dumb"` (pixman) | 27, 24 | 3369ms, 3339ms |
+| `scanout="gpu"` (gles) | 36, 37 | 3425ms, 3414ms |
+
+~1.5x, against the **17-32x** stage 2 measured for offscreen GLES on the same
+rasteriser. That gap is the read-back and the dumb-buffer memcpy this tier
+removes, and it is the only part of the performance story this VM can show.
+The part it cannot: what any of this costs on a real GPU, where the
+rasterising itself stops being llvmpipe's problem. Do not read these numbers
+as a reason to run the tier on a GPU-less box -- pixman is still the right
+answer there, and is still the default.
+
 ### What this does *not* establish
 
 `is_software()` is false-but-llvmpipe on this VM (see the stage-2 correction
