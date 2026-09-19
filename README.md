@@ -220,7 +220,10 @@ cargo build -p scoot --features gpu-scanout
 ```
 
 It is where the `--tty` GPU scanout tier is being built (Smithay's
-`DrmCompositor` over a GBM swapchain). It is off by default because it is the
+`DrmCompositor` over a GBM swapchain). **Today it gates no code**: enabling
+it gives you an identical compositor plus the `libgbm` dependency below, so
+there is nothing to gain by turning it on until that tier lands. It is off
+by default because it is the
 one thing in the tree that adds a **link-time** dependency on `libgbm`: the
 resulting binary carries `libgbm.so.1` in its `DT_NEEDED` list and will not
 start on a machine without it, while the default build has no such entry and
