@@ -817,7 +817,11 @@ With `imports_linear` reverted to the narrow rule (`[Modifier::Linear]`
 alone) and nothing else changed, at `68d22a2`:
 
 ```
-FAIL compositor::dmabuf::tests::a_renderer_listing_only_the_invalid_modifier_still_advertises_linear
+cargo nextest run --workspace --no-fail-fast \
+  -E 'test(invalid_modifier) or test(only_other_explicit)'
+
+PASS a_renderer_with_only_other_explicit_modifiers_advertises_nothing
+FAIL a_renderer_listing_only_the_invalid_modifier_still_advertises_linear
   assertion `left == right` failed
     left: []
    right: [DrmFormat { code: DrmFourcc(XR24), modifier: Linear },
@@ -825,11 +829,12 @@ FAIL compositor::dmabuf::tests::a_renderer_listing_only_the_invalid_modifier_sti
 Summary: 2 tests run: 1 passed, 1 failed
 ```
 
-`left: []` is exactly the production failure: an empty tranche, therefore no
-global, on a renderer that imports fine. The other test of the pair
-(`..._with_only_other_explicit_modifiers_advertises_nothing`) passes under
-*both* rules, which is what says the fix widened the evidence rather than
-removing it.
+Two things, and the `--no-fail-fast` is there so both are observed rather
+than one inferred. `left: []` is exactly the production failure -- an empty
+tranche, therefore no global, on a renderer that imports fine. And the
+*other* test of the pair passes under the narrow rule too, which is what
+says the fix widened the evidence rather than removing it: exactly one test
+changes answer between the rules, and it is the one naming the regression.
 
 **The seven `gles` failures are the same seven, by name** -- unchanged, which
 is the expected result and not a gap (see "What is *not* in it" above):

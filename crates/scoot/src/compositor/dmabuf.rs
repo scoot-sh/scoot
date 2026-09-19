@@ -248,8 +248,12 @@
 //!   on the params object, which disconnects that client and no one else.
 //!   Both are covered in `dmabuf/tests.rs`.
 //! - **Multi-plane and non-`LINEAR` imports stay refused.** The tranche never
-//!   offers either -- [`DMABUF_CANDIDATES`] is `LINEAR`-only and the renderer
-//!   can only narrow it -- and Smithay validates the *format* against the
+//!   offers either: [`DMABUF_CANDIDATES`] is `LINEAR`-only and the renderer
+//!   can only narrow *which fourccs* survive, never widen what modifier is
+//!   named -- an entry whose evidence was `Modifier::Invalid` is still
+//!   advertised as `LINEAR` (see [`imports_linear`], and note that the
+//!   widening is on the evidence side alone). Smithay validates the *format*
+//!   against the
 //!   table but not the modifier or the plane count, so only a client that
 //!   ignores the feedback it was sent can reach that refusal. Under pixman
 //!   the refusal is `UnsupportedNumberOfPlanes`/`UnsupportedModifier`; under
