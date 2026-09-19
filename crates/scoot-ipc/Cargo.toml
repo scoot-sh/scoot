@@ -1,0 +1,17 @@
+[package]
+name = "scoot-ipc"
+description = "Wire protocol and client for controlling scoot"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[features]
+# Conversions into scoot-core types, for shells that host the protocol.
+core = ["dep:scoot-core"]
+
+[dependencies]
+base64.workspace = true
+scoot-core = { workspace = true, optional = true }
+serde.workspace = true
+serde_json.workspace = true

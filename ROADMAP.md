@@ -1,4 +1,4 @@
-# flexwm roadmap
+# scoot roadmap
 
 The ordered list of milestones, worked through with the cycle in
 `CLAUDE.md`. This file is the **index**: the live ordered work and a status
@@ -80,7 +80,7 @@ gap jumped the queue — each item's own file records why it landed when it did.
   alt-tab switcher reads, alongside the workspace list `ext-workspace-v1`
   already gave them. Enumeration only (the protocol has no control
   requests); the identifier is `<generation>-<window id>`, so a client can
-  go from a toplevel it found here to `flexwm msg action focus-window-id
+  go from a toplevel it found here to `scoot msg action focus-window-id
   N`. Measured caveat, filed as its own item and
   [since resolved](docs/backlog/resolved/wlr-foreign-toplevel-management-done.md):
   quickshell — and so DMS and Noctalia — binds the *wlr* protocol and
@@ -97,7 +97,7 @@ gap jumped the queue — each item's own file records why it landed when it did.
   them. **Read-only by design**: `apply`/`test` always answer `failed`, and
   reconfiguration is
   [closed as a deliberate refusal](docs/backlog/resolved/output-management-reconfiguration-done.md)
-  — flexwm has one output with a fixed mode, position and scale, so a
+  — scoot has one output with a fixed mode, position and scale, so a
   `succeeded` that changed nothing would be a settings page that lies.
 - **[`wlr-foreign-toplevel-management-unstable-v1`](docs/backlog/resolved/wlr-foreign-toplevel-management-done.md)**
   (PR #50, 2026-09-16) — the other half of PR #47 above, and the window
@@ -105,7 +105,7 @@ gap jumped the queue — each item's own file records why it landed when it did.
   rather than instead of it, from the same three window-lifecycle events, so
   the two are one list described twice. Enumeration (title, app id,
   `output_enter`), `activate` and `close`, and `activated` as the only state
-  bit flexwm can honestly answer — minimize/maximize/fullscreen are accepted
+  bit scoot can honestly answer — minimize/maximize/fullscreen are accepted
   and ignored, because the core has no concept of any of them and deciding
   what they mean in a scrolling-column layout is layout design, not wire
   format. No Smithay support at the pinned rev, so hand-rolled against the
@@ -134,7 +134,7 @@ gap jumped the queue — each item's own file records why it landed when it did.
   `ext-` protocol and *not* `wlr-screencopy` alongside it, the opposite call
   to PR #50 and for the same reason — measured: `grim` 1.5.0 speaks only the
   `ext-` one, and quickshell 0.3.1 speaks it too. Unlike the three protocol
-  items before it, Smithay implements this one, so flexwm writes handlers.
+  items before it, Smithay implements this one, so scoot writes handlers.
   **Output capture only**: a per-window source needs a second render target
   per session and was [its own
   item](docs/backlog/resolved/screencopy-toplevel-capture-done.md) — probed
@@ -144,10 +144,10 @@ gap jumped the queue — each item's own file records why it landed when it did.
   bounds it to one per session per frame and lets a repeat capture of an
   unchanged screen wait — both of which the protocol explicitly allows. The
   lock guarantee is inherited from `render()` rather than re-checked, plus
-  one guard for the locked-but-not-yet-blanked window `flexwm msg screenshot`
+  one guard for the locked-but-not-yet-blanked window `scoot msg screenshot`
   still has. Two upstream gaps found and worked around: Smithay never sweeps
   its own session list (an unbounded, client-driven leak) and never raises
-  `duplicate_frame`. `flexwm msg screenshot` is unchanged.
+  `duplicate_frame`. `scoot msg screenshot` is unchanged.
 - **[Activation / IPC focus leaves the keyboard on a clicked layer surface](docs/backlog/resolved/activation-clicked-layer-keyboard-done.md)**
   (PR #53, 2026-09-16) — the identical bug PR #50 fixed in its own `activate`,
   pre-existing in `xdg-activation-v1`'s `request_activation` and worse in
@@ -220,7 +220,7 @@ gap jumped the queue — each item's own file records why it landed when it did.
   in its own last sentence — no genuinely dmabuf-allocating client on the
   GPU-less dev VM, so that half wire-test proven rather than live — is
   precisely where the regression hid until real GPU hardware ran it.
-- **[`flexwm msg` EPIPE panic](docs/backlog/resolved/msg-client-broken-pipe-done.md)**
+- **[`scoot msg` EPIPE panic](docs/backlog/resolved/msg-client-broken-pipe-done.md)**
   (PR #62, 2026-09-17) — `msg ... | head` died with exit 101
   (`println!` panics on EPIPE; Rust ignores SIGPIPE). New `output.rs` maps
   a closed stdout to a quiet exit 0 at all six client-binary stdio sites
@@ -341,7 +341,7 @@ gap jumped the queue — each item's own file records why it landed when it did.
   a destructor `finished` sent inside `bind` panics wayland-backend's bind
   epilogue (so refusals defer to loop idle), and Smithay's
   `ForeignToplevelListState` exposes no bind seam — the ext list is now
-  flexwm-owned, mirroring its wlr twin, with byte-identical wire behavior
+  scoot-owned, mirroring its wlr twin, with byte-identical wire behavior
   pinned by the existing suite. Fail-first harness tests per global plus
   isolation, drain, floor and same-batch stop/destroy shapes; bind-storm
   before/after (64 binds × 50 windows: 64 registered before, 8 after) and
@@ -411,7 +411,7 @@ gap jumped the queue — each item's own file records why it landed when it did.
   already existed whole-name; this scopes it to single ASCII letters only
   (whole-name silently redirected `"OE"`/Œ to `"oe"`/œ — measured), warns
   naming the bind (`"A"` means plain `a`, not `shift+a`), and leaves
-  `keysym_named` untouched so `flexwm msg key A` keeps refusing. Fail-first
+  `keysym_named` untouched so `scoot msg key A` keeps refusing. Fail-first
    unit tests per direction plus a permanent smoke-test section (live
    `--headless`: warn logged, injected `a` closes the window).
 - **[`--width`/`--height`
@@ -609,7 +609,7 @@ gap jumped the queue — each item's own file records why it landed when it did.
   allow-list (it marks sandboxes, not lockers) — so the ticket's own
   `blocked:` line was wrong. Ordinary-client lock + second-client
   takeover stay pinned by the existing harness suite.
-- **[Lock surfaces are per-output; flexwm has one
+- **[Lock surfaces are per-output; scoot has one
   output](docs/backlog/resolved/session-lock-per-output-done.md)** —
   RESOLVED 2026-09-18 (PR #103, pin + document, no behavior change): first blanked
   frame on the one output confirms whatever the surface count, every
@@ -622,7 +622,7 @@ gap jumped the queue — each item's own file records why it landed when it did.
   once](docs/backlog/resolved/session-lock-duplicate-output-done.md)** —
   RESOLVED 2026-09-18 (refuse, no Smithay patch): the admission question PR
   #103 punted here. The protocol mandates `duplicate_output` per *output*,
-  Smithay enforces it per *resource*, so flexwm refuses a second live
+  Smithay enforces it per *resource*, so scoot refuses a second live
   surface for an already-covered output with code 3 on the lock, keyed on
   the physical `Output`; destroying the surface frees it for a rebuild.
    Neither probed shell ever holds two at once. Supersedes PR #103's
@@ -648,7 +648,7 @@ gap jumped the queue — each item's own file records why it landed when it did.
    ([tablet-v2](docs/backlog/resolved/tablet-v2-done.md)); screencopy,
    output-management and the VT-pause cursor item already resolved;
    security-context and the cursor `Vec` closed deliberate; cursor-hotspot
-   offset closed needs-upstream (since overturned and fixed flexwm-side —
+   offset closed needs-upstream (since overturned and fixed scoot-side —
    see below).
 - **[A `present()` skipped for an in-flight flip consumes that frame's
   damage](docs/backlog/resolved/present-skip-eats-frame-damage-done.md)**
@@ -667,7 +667,7 @@ gap jumped the queue — each item's own file records why it landed when it did.
   — RESOLVED 2026-09-18: PR #106's NEEDS-UPSTREAM triage re-derived and
   overturned — Smithay core never adjusts the hotspot, but Smithay's own
   anvil does the decrement compositor-side in its shell commit hook, so
-  flexwm can too. `Cursor::note_surface_commit` (one call site at the end
+  scoot can too. `Cursor::note_surface_commit` (one call site at the end
   of `CompositorHandler::commit`) decrements by this commit's
   `buffer_delta`, saturating rather than wrapping (both operands are
   client-controlled `i32`) and gated on the active cursor surface. Four
@@ -755,9 +755,9 @@ gap jumped the queue — each item's own file records why it landed when it did.
   paused-retry `IgnoredPaused` guard is unregressed.
 - **[`flake.nix` description drift](docs/backlog/resolved/flake-description-drift-done.md)**
   — RESOLVED 2026-09-18 (flake metadata only, no code): top-level
-  `description` names both (compositor on Linux, `flexwm msg` client on
+  `description` names both (compositor on Linux, `scoot msg` client on
   macOS); `meta.description` is per system (Linux reads
-  `crates/flexwm/Cargo.toml`, Darwin names the client), so `nix search` no
+  `crates/scoot/Cargo.toml`, Darwin names the client), so `nix search` no
   longer advertises a compositor macOS never runs. A fully single-sourced
   fix is loader-impossible (top level must be a syntactic attrset,
   `description` a string literal — both proven live), so the top level stays
@@ -781,10 +781,10 @@ gap jumped the queue — each item's own file records why it landed when it did.
   is green on the three remaining systems.
 - **[The dmabuf advertisement killed every GL client](docs/backlog/resolved/dmabuf-advertised-but-never-imported-done.md)**
   — RESOLVED 2026-09-18 (branch `fix/dmabuf-real-import`), regression from
-  `599be4e` found live on Asahi: flexwm advertised `zwp_linux_dmabuf_v1`
+  `599be4e` found live on Asahi: scoot advertised `zwp_linux_dmabuf_v1`
   and answered every import `failed`, which for `create_immed` is a fatal
   `InvalidWlBuffer` — so Mesa took the advertised dmabuf path over `wl_shm`
-  and died, and noctalia v5 could not start a session at all. flexwm now
+  and died, and noctalia v5 could not start a session at all. scoot now
   really imports: `PixmanRenderer` `mmap`s a single-plane LINEAR dmabuf on
   the CPU, so a GPU-rendering client works with no GPU on the compositor
   side and no `LIBGL_ALWAYS_SOFTWARE=1`. Four cross-site consequences came
@@ -792,7 +792,7 @@ gap jumped the queue — each item's own file records why it landed when it did.
   (and hands the unit back on a refusal, the one refusal a client survives),
   the feedback table is pinned by test to what the renderer can actually
   import, `main_device` names the render node rather than a primary node,
-  and flexwm issues the per-commit `DMA_BUF_IOCTL_SYNC` bracket the pinned
+  and scoot issues the per-commit `DMA_BUF_IOCTL_SYNC` bracket the pinned
   rev does not (it syncs once at import and never again).
 - **[Drawing-tablet input](docs/backlog/resolved/tablet-v2-done.md)** —
   RESOLVED 2026-09-18: `zwp_tablet_manager_v2` (version 1, Smithay's
@@ -928,9 +928,18 @@ medium priority — the effective top of what's actually open.
    through the session-locale table, per-char atomic, prefix-typed;
    inactive groups, lock/latch, `Multi_key` and plain-`us` `é` stay loud
    refusals).
-4. [Rename `flexwm` → `flex`, split out
-   `flexctl`](docs/backlog/meta/rename-flex-family.md) — decided, explicitly
-   scheduled **last** in the burn-down, per the entry's own frontmatter.
+4. [Split the CLI out into
+   `scootctl`](docs/backlog/meta/rename-flex-family.md) — the rename half of
+   that entry LANDED 2026-09-18 (PR #128): `flexwm` → **`scoot`** across
+   crates, binary,
+   socket (`scoot.sock`/`$SCOOT_SOCKET`), config path (`~/.config/scoot/`),
+   flake and docs, with no fallback to the old
+   names; `flex` was dropped for a crates.io and GNU-flex collision, and the
+   repo moved to `scoot-sh/scoot`. `docs/backlog/resolved/` and the numbered
+   `docs/roadmap/` files keep the old name on purpose — they record evidence
+   (nix store paths, typed strings, screenshot paths) a rename would falsify.
+   What remains open here is the `scootctl` crate split, which wants its own
+   design pass.
 
 ## Shell enablement (DMS / Noctalia probes, 2026-09-14)
 
@@ -974,13 +983,13 @@ probes' recommended order:
    — RESOLVED 2026-09-16, in two halves. The successor the entry told its
    reader to check for exists (`ext-foreign-toplevel-list-v1`, PR #47) and is
    implemented, so a standards-following taskbar or switcher can list windows
-   and map each one back to its `flexwm msg windows` id — but it did *not*
+   and map each one back to its `scoot msg windows` id — but it did *not*
    unlock these two shells: quickshell 0.3.1 is offered the global and never
    binds it (measured, wire-level), because its `ToplevelManager` is a wlr
    client. [`wlr-foreign-toplevel-management`](docs/backlog/resolved/wlr-foreign-toplevel-management-done.md)
    (PR #50) closes that half — list, click-to-focus and close, all verified
    live against the real quickshell. Minimise/maximise remain no-ops, since
-   flexwm's core has no concept of either.
+   scoot's core has no concept of either.
 4. [`output-management`](docs/backlog/resolved/output-management-read-only-done.md)
    — HALF-RESOLVED 2026-09-16 (PR #49): the query half a shell's display page
    binds is implemented (`wlr-output-management-unstable-v1` v4 — no `ext-`

@@ -1,0 +1,9 @@
+[package]
+name = "scoot-core"
+description = "Platform-independent window management state and layout for scoot"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]

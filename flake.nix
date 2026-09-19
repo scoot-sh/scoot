@@ -1,10 +1,10 @@
 {
   # On Linux this flake builds the whole compositor; on macOS the compositor
-  # is cfg'd out and the same package is just `flexwm msg`, the
+  # is cfg'd out and the same package is just `scoot msg`, the
   # remote-control client — so the top level names both, and the package's
   # `meta.description` below says per system which one it is. (This has to
   # stay a string literal: the flake loader rejects anything else here.)
-  description = "flexwm: a scrolling-tiling Wayland compositor that runs without a GPU (on macOS, the remote-control client only)";
+  description = "scoot: a scrolling-tiling Wayland compositor that runs without a GPU (on macOS, the remote-control client only)";
 
   # Pinned to the same nixpkgs revision as vm/, so the dev shell and the VM
   # agree on every library and nothing is downloaded twice.
@@ -33,18 +33,18 @@
       # two can't drift; the flake-level `description` above has to stay a
       # hand-written literal (see its comment).
       crateDescription =
-        (builtins.fromTOML (builtins.readFile ./crates/flexwm/Cargo.toml)).package.description;
+        (builtins.fromTOML (builtins.readFile ./crates/scoot/Cargo.toml)).package.description;
     in
     {
       # `nix build` / `nix run`, for getting the binary without a dev shell.
       # On Linux this is the whole compositor; on Darwin the compositor is
-      # cfg'd out of the crate and what builds is `flexwm msg`, the client
+      # cfg'd out of the crate and what builds is `scoot msg`, the client
       # that drives a compositor running elsewhere (a VM) over its socket.
-      # `flexwm --headless` there exits with a message saying exactly that,
+      # `scoot --headless` there exits with a message saying exactly that,
       # so the same package is honest on both -- see README's Building.
       packages = forEach (pkgs: {
         default = pkgs.rustPlatform.buildRustPackage {
-          pname = "flexwm";
+          pname = "scoot";
           # Read from where the version already lives, so the two can't drift.
           version = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).workspace.package.version;
           # Scoped to exactly what the build reads, so doc-only edits
@@ -53,7 +53,7 @@
           # target/ (~1GB in-store) and .git along -- no longer bust the
           # derivation's cache and force a full rebuild. Everything else
           # this flake reads at eval time (./Cargo.toml for `version`,
-          # ./crates/flexwm/Cargo.toml for the description,
+          # ./crates/scoot/Cargo.toml for the description,
           # ./Cargo.lock for `cargoLock.lockFile`,
           # ./vm/compositor-deps.nix for buildInputs) resolves against
           # the flake tree, not `src`, so it stays out of the filter.
@@ -73,7 +73,7 @@
           cargoLock = {
             lockFile = ./Cargo.lock;
             # Smithay is a git dependency pinned by rev (see
-            # crates/flexwm/Cargo.toml), and a git source carries no
+            # crates/scoot/Cargo.toml), and a git source carries no
             # crates.io checksum to vendor against, so its tree hash has to
             # be recorded here. Bumping that rev changes the hash and fails
             # the build loudly, printing the one it got -- it cannot drift
@@ -122,25 +122,25 @@
           meta = {
             # Linux builds the whole compositor, so the crate's own
             # description is the honest one; on Darwin the compositor is
-            # cfg'd out and the package is just `flexwm msg` (see the
+            # cfg'd out and the package is just `scoot msg` (see the
             # comment on `packages` above and README's Building), so the
             # metadata says that instead of advertising a compositor macOS
             # never runs.
             description =
               if pkgs.stdenv.hostPlatform.isDarwin then
-                "Remote-control client (`flexwm msg`) for the flexwm scrolling-tiling Wayland compositor"
+                "Remote-control client (`scoot msg`) for the scoot scrolling-tiling Wayland compositor"
               else
                 crateDescription;
-            homepage = "https://github.com/yackey-labs/flexwm";
+            homepage = "https://github.com/scoot-sh/scoot";
             license = pkgs.lib.licenses.mit;
-            mainProgram = "flexwm";
+            mainProgram = "scoot";
             platforms = pkgs.lib.platforms.linux ++ pkgs.lib.platforms.darwin;
           };
         };
       });
 
       # So `nix run . -- --headless -- foot` and `nix run . -- msg windows`
-      # work. `flexwm` is the package's mainProgram, so `nix run` would find
+      # work. `scoot` is the package's mainProgram, so `nix run` would find
       # it either way; naming it here keeps that explicit rather than
       # implied.
       apps = forEach (pkgs: {
@@ -168,7 +168,7 @@
           # should stay a subset of that closure -- nothing new to fetch.
           ++ pkgs.lib.optional pkgs.stdenv.hostPlatform.isDarwin pkgs.rust-analyzer;
           # The compositor's C dependencies exist only on Linux; the core, the
-          # IPC crate and `flexwm msg` build anywhere.
+          # IPC crate and `scoot msg` build anywhere.
           buildInputs = pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux (
             import ./vm/compositor-deps.nix pkgs
           );

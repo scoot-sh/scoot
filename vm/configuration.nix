@@ -1,4 +1,4 @@
-# Guest configuration for the flexwm development VM.
+# Guest configuration for the scoot development VM.
 #
 # One job: hand a Rust/Wayland compositor a real DRM/KMS device, real libinput
 # devices and a seat to sit on -- inside a VM that boots on macOS under QEMU/HVF.
@@ -49,15 +49,15 @@ in
       }
     ];
 
-    # $FLEXWM_SRC is expanded by the launcher at runtime, not at build time.
-    sharedDirectories.flexwm = {
-      source = "\"$FLEXWM_SRC\"";
-      target = "/mnt/flexwm";
+    # $SCOOT_SRC is expanded by the launcher at runtime, not at build time.
+    sharedDirectories.scoot = {
+      source = "\"$SCOOT_SRC\"";
+      target = "/mnt/scoot";
     };
 
     qemu.options = [
       # aarch64 `virt` has no default display adapter, and this is also the DRM
-      # device flexwm will drive. Deliberately no virgl: Cocoa has no host GL
+      # device scoot will drive. Deliberately no virgl: Cocoa has no host GL
       # passthrough, so Mesa lands on llvmpipe. KMS and input are still real.
       "-device virtio-gpu-pci,xres=1600,yres=1000"
       # Boot log and a root shell in the terminal you launched from, alongside
@@ -72,13 +72,13 @@ in
   # seatd hands a non-root compositor DRM master and input devices. libseat
   # picks this over its logind backend here, and that is load-bearing, not
   # incidental: logind gives an ssh login no seat at all (`Seat=`, `VTNr=0`),
-  # so `LIBSEAT_BACKEND=logind flexwm --tty` over ssh fails outright, while
+  # so `LIBSEAT_BACKEND=logind scoot --tty` over ssh fails outright, while
   # seatd's VT-bound seat0 binds any client to the foreground VT regardless of
   # how its process was started. That is what makes the ssh `--tty` workflow
   # in vm/README.md work.
   services.seatd.enable = true;
 
-  # Nothing owns the display by default -- flexwm is meant to. sway and cage are
+  # Nothing owns the display by default -- scoot is meant to. sway and cage are
   # installed below purely as an "is the stack alive?" reference.
   services.xserver.enable = false;
 
@@ -86,7 +86,7 @@ in
   users.mutableUsers = false;
   users.users.dev = {
     isNormalUser = true;
-    description = "flexwm developer";
+    description = "scoot developer";
     password = "dev";
     extraGroups = [
       "wheel"
@@ -107,13 +107,13 @@ in
   services.getty.autologinUser = "dev";
 
   users.motd = ''
-    flexwm dev VM -- the Mac checkout is at /mnt/flexwm (9p, edit on the host)
+    scoot dev VM -- the Mac checkout is at /mnt/scoot (9p, edit on the host)
 
       kmscube                 DRM/KMS + GLES smoke test (Ctrl-C quits)
       drm_info                what virtio-gpu exposes
       sudo libinput list-devices
       sway                    reference compositor; WLR_RENDERER=pixman is quicker here
-      cd /mnt/flexwm && cargo build      (CARGO_TARGET_DIR is already off 9p)
+      cd /mnt/scoot && cargo build      (CARGO_TARGET_DIR is already off 9p)
 
     ssh dev@localhost -p 2222 from the Mac.
   '';
@@ -125,7 +125,7 @@ in
     settings.PasswordAuthentication = true; # throwaway local VM
   };
 
-  networking.hostName = "flexwm-vm";
+  networking.hostName = "scoot-vm";
   networking.firewall.enable = false;
   time.timeZone = "UTC";
 
@@ -140,7 +140,7 @@ in
     ];
   };
 
-  # /mnt/flexwm is a 9p mount of the Mac checkout with no uid mapping, so it
+  # /mnt/scoot is a 9p mount of the Mac checkout with no uid mapping, so it
   # shows up owned by the Mac's uid. Without this, both `git` and `nix flake`
   # (via its bundled libgit2) refuse to touch it: "not owned by current user".
   # A single-user disposable VM has no one to protect it from, hence the "*".
@@ -178,7 +178,7 @@ in
       sway
       cage
       foot
-      # Reads specific pixels out of a `flexwm msg screenshot` PNG --
+      # Reads specific pixels out of a `scoot msg screenshot` PNG --
       # scripts/smoke-test.sh's decoration checks need this to confirm the
       # focus ring/background actually rendered the configured colors, not
       # just that the compositor didn't crash.

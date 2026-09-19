@@ -1,9 +1,14 @@
-# Running flexwm on Apple Silicon (Asahi Linux)
+# Running scoot on Apple Silicon (Asahi Linux)
 
 Three things in the backlog were blocked on an Asahi machine and cannot be
 answered anywhere else. This is the runbook for answering them. Written
 against `main` at `1b706b8`; the flags and bindings below are quoted from
-`README.md` at that commit. **Two of the three were answered on 2026-09-18**
+`README.md` at that commit. The project was renamed `flexwm` → `scoot` on
+2026-09-18 and every command here is the one to run *today*. Wherever a past
+result is quoted against the commit it was captured at — the "Results so
+far" section below, pinned to `f688ac9`, and the verification set at the end
+— the old name stands, because that is what was typed and logged then.
+Renaming those would falsify the record. **Two of the three were answered on 2026-09-18**
 — see the results table and section immediately below; the runbook itself is
 kept intact for re-runs on other Apple Silicon models.
 
@@ -20,7 +25,7 @@ split is exactly as this document predicted: `card1` → `asahi` (render, no
 KMS), `card2` → `apple-drm` (display, owns `eDP-1`), `renderD128` → render
 node.
 
-- **Test 2 — answered, no VT needed after all.** flexwm was *already the
+- **Test 2 — answered, no VT needed after all.** scoot was *already the
   live desktop session* (greetd → `flexwm --tty -- noctalia`), running with
   no `--gpu` flag and no `[tty] gpu` key, with `/dev/dri/card2` as its only
   open DRM fd. The automatic search works on Apple Silicon; `--gpu` is a
@@ -65,7 +70,7 @@ Two of the three are Apple-Silicon-specific by construction, not by accident:
   heuristic assumes the 3D GPU and the display controller are one DRM device.
   Under Asahi they are not: `asahi`/AGX owns the render node, `apple,dcp`
   owns the CRTCs and connectors, and there is no PCI GPU or VGA BIOS for the
-  rule to match. flexwm has a fallback that tries every DRM device on the
+  rule to match. scoot has a fallback that tries every DRM device on the
   seat, and `--gpu PATH` to skip the search entirely. Both were built and
   unit-tested long before either had run on Apple Silicon; **the fallback
   has now run there and is correct** (2026-09-18), and `--gpu` remains
@@ -87,22 +92,22 @@ risky part comes last:
   hypothesis was refuted. Refuting it did promote `--headless`-vs-`--tty` to
   the largest remaining variable, so that was then tested too, as a real
   session; see Test 1's result note. Nothing is left outstanding here.)*
-- **Test 2 may need no VT either** — if flexwm is already your desktop
+- **Test 2 may need no VT either** — if scoot is already your desktop
   session, the read-only shortcut in that section answers it from inside the
   session you are in. Check before booking a VT.
-- **Tests 2 and 3 take a VT**, absent that shortcut. Under `--tty`, flexwm binds `Ctrl+Alt+F1`
+- **Tests 2 and 3 take a VT**, absent that shortcut. Under `--tty`, scoot binds `Ctrl+Alt+F1`
   through `Ctrl+Alt+F12` to VT switching. These are added *after* the config
   file loads and always win over a colliding config bind (logging a warning
   naming what they displaced), precisely so this recovery path cannot be lost
   to a typo. `Ctrl+Alt+F<your desktop's VT>` gets you back.
-- `Super+Shift+e` quits flexwm. (Deliberately not `Super+Shift+q` — one
+- `Super+Shift+e` quits scoot. (Deliberately not `Super+Shift+q` — one
   slipped Shift from `Super+q`, close window.)
 
 ## Build
 
 ```sh
-git clone https://github.com/yackey-labs/flexwm && cd flexwm
-nix build                      # -> ./result/bin/flexwm
+git clone https://github.com/scoot-sh/scoot && cd scoot
+nix build                      # -> ./result/bin/scoot
 mkdir -p /tmp/fx
 ```
 
@@ -119,14 +124,14 @@ only dependency set this repo maintains.
 not load at `1.5`; `foot` works at both. The integer
 `wl_surface.preferred_buffer_scale` companion event was missing and has since
 been fixed (PR #31) — but GTK4 ignores that event whenever a
-`wp_fractional_scale_v1` object exists, which flexwm always advertises, so
+`wp_fractional_scale_v1` object exists, which scoot always advertises, so
 **the fix probably does not explain the symptom and the root cause is
 unknown.** A dev-VM reproduction attempt failed to reproduce at all: Ghostty
 1.3.1 mapped and rendered real content at both scales.
 
 So the job here is not to confirm a fix. It is to get the one piece of
 evidence that tells us whether this is a Ghostty-version thing or a GPU/GL
-thing — a client-side EGL/GL error would mean flexwm's scaling is not the
+thing — a client-side EGL/GL error would mean scoot's scaling is not the
 defect.
 
 ```sh
@@ -139,15 +144,15 @@ ghostty --version                   # record this
 Run at 1.5:
 
 ```sh
-FLEXWM_SOCKET=/tmp/fx/t15.sock WAYLAND_DEBUG=1 \
-  ./result/bin/flexwm --headless --width 1280 --height 800 \
+SCOOT_SOCKET=/tmp/fx/t15.sock WAYLAND_DEBUG=1 \
+  ./result/bin/scoot --headless --width 1280 --height 800 \
   --config /tmp/fx/s15.toml \
   -- ghostty --gtk-single-instance=false -e sh -c "sleep 60" \
   > /tmp/fx/ghostty-1.5.log 2>&1 &
 
 sleep 12
-FLEXWM_SOCKET=/tmp/fx/t15.sock ./result/bin/flexwm msg windows
-FLEXWM_SOCKET=/tmp/fx/t15.sock ./result/bin/flexwm msg screenshot --out /tmp/fx/g15.png
+SCOOT_SOCKET=/tmp/fx/t15.sock ./result/bin/scoot msg windows
+SCOOT_SOCKET=/tmp/fx/t15.sock ./result/bin/scoot msg screenshot --out /tmp/fx/g15.png
 ```
 
 Then the same with `--config /tmp/fx/s20.toml` and a *different* socket
@@ -157,10 +162,10 @@ Then the same with `--config /tmp/fx/s20.toml` and a *different* socket
 investigation; the third was found running this document on 2026-09-18. All
 are recorded so they are not repeated:**
 
-- **Set `FLEXWM_SOCKET` per instance if flexwm might already be running.**
-  `socket_path()` defaults to `$XDG_RUNTIME_DIR/flexwm.sock`, so on a machine
-  where flexwm *is the desktop session* — which is how this one is set up —
-  a bare `flexwm msg windows` talks to **the live session, not the test
+- **Set `SCOOT_SOCKET` per instance if scoot might already be running.**
+  `socket_path()` defaults to `$XDG_RUNTIME_DIR/scoot.sock`, so on a machine
+  where scoot *is the desktop session* — which is how this one is set up —
+  a bare `scoot msg windows` talks to **the live session, not the test
   instance**. That reads the real desktop's window list as if it were
   Ghostty's and screenshots the real screen, which can look like either a
   pass or a failure depending on what happens to be open. This is the same
@@ -178,13 +183,13 @@ are recorded so they are not repeated:**
 screenshot with drawn content rather than a blank backdrop, means it loaded.
 If 1.5 fails here, the log is the payload: the lines after the first
 `wl_surface.commit`, and any EGL/GL error. A Ghostty-side EGL/GL error means
-the defect is not flexwm's scaling and the fix (if any) is Ghostty-side or a
+the defect is not scoot's scaling and the fix (if any) is Ghostty-side or a
 workaround (`scale = 2.0`, or Ghostty's own `window-scale`/font-size
-setting). A Wayland protocol error means the opposite, and is a flexwm bug.
+setting). A Wayland protocol error means the opposite, and is a scoot bug.
 
 **Don't reach for `--nested` as a middle ground.** It looks like a way to
 test fractional scale against a real compositing backend without taking the
-VT, and it is not — flexwm refuses output scaling there by design, because
+VT, and it is not — scoot refuses output scaling there by design, because
 the host compositor owns the window's scale:
 
 ```
@@ -218,26 +223,26 @@ reproducible. See the backlog entry for the full table.
 Apple Silicon, and if not, does `--gpu` fix it?
 
 > **Answered 2026-09-18: yes, the search works; `--gpu` is not needed.**
-> And it needed no VT, because flexwm was already the live session. **Check
-> that first** — if flexwm is already running as your desktop, the cheapest
+> And it needed no VT, because scoot was already the live session. **Check
+> that first** — if scoot is already running as your desktop, the cheapest
 > and most authoritative version of this test is read-only, on the session
 > you are already in:
 >
 > ```sh
-> pgrep -ax flexwm                       # was --gpu passed?
-> # Pick the --tty one by name: a test instance or a stray `flexwm msg`
-> # makes `$(pgrep -x flexwm)` expand to several pids and the path garbage.
-> for p in $(pgrep -f 'flexwm .*--tty'); do
+> pgrep -ax scoot                       # was --gpu passed?
+> # Pick the --tty one by name: a test instance or a stray `scoot msg`
+> # makes `$(pgrep -x scoot)` expand to several pids and the path garbage.
+> for p in $(pgrep -f 'scoot .*--tty'); do
 >   echo "pid $p:"; ls -l /proc/$p/fd | grep dri
 > done
-> flexwm msg outputs                     # which connector?
+> scoot msg outputs                     # which connector?
 > ```
 >
 > On this machine that gave `--tty` with no `--gpu`, one DRM fd
 > (`/dev/dri/card2`, the `apple-drm` display controller), and `eDP-1` —
 > i.e. the fallback rejected the `asahi` render node unattended, in a real
 > daily-driven session. That is better evidence than a test run, and it
-> costs nothing. The steps below are for the case where flexwm is *not*
+> costs nothing. The steps below are for the case where scoot is *not*
 > already up, or where you want the log lines themselves.
 >
 > Note the log lines are the one thing this shortcut cannot give you: a
@@ -268,15 +273,15 @@ search first — whether the fallback works here is the actual open question,
 and `--gpu` would mask the answer:
 
 ```sh
-cd ~/flexwm
-RUST_LOG=info ./result/bin/flexwm --tty -- foot 2>&1 | tee /tmp/fx/tty-auto.log
+cd ~/scoot
+RUST_LOG=info ./result/bin/scoot --tty -- foot 2>&1 | tee /tmp/fx/tty-auto.log
 ```
 
 If that fails, name the display controller explicitly (adjust the path from
 the listing above):
 
 ```sh
-RUST_LOG=info ./result/bin/flexwm --tty --gpu /dev/dri/card1 -- foot 2>&1 \
+RUST_LOG=info ./result/bin/scoot --tty --gpu /dev/dri/card1 -- foot 2>&1 \
   | tee /tmp/fx/tty-gpu.log
 ```
 
@@ -302,7 +307,7 @@ failed, never a silent fall back to something else. Naming a device skips the
 *search*, not the checks: it still has to open through the session and pass
 the same KMS probe every automatic candidate does.
 
-**Once you know the right device, stop retyping it.** `~/.config/flexwm/config.toml`:
+**Once you know the right device, stop retyping it.** `~/.config/scoot/config.toml`:
 
 ```toml
 [tty]
@@ -335,10 +340,10 @@ otherwise). Test 2 cleared both conditions on 2026-09-18.
 > describes has no defined outcome to observe. It needs an external display
 > on USB-C (DP alt mode). Check for a second `card2-*` entry after plugging
 > one in — if none appears, that is an Asahi DCP limitation to establish
-> before blaming flexwm.
+> before blaming scoot.
 >
 > Second constraint: it needs the `--tty` seat, which only one process can
-> hold. If flexwm is already your desktop session, that session *is* the
+> hold. If scoot is already your desktop session, that session *is* the
 > one to test — don't start a second `--tty` instance, it will be refused.
 
 Issue #48 is the last open issue in the repo. PR #51 implemented DRM hotplug
@@ -348,11 +353,11 @@ change a connector's mode list at runtime (EDID override, off/detect cycles
 and `vkms` were all tried and documented as dead ends). A laptop with an
 external display is the only thing that can produce one of them.
 
-With flexwm running under `--tty` and an external display plugged in, unplug
-the one flexwm is currently driving. Expected: it falls back to the other
+With scoot running under `--tty` and an external display plugged in, unplug
+the one scoot is currently driving. Expected: it falls back to the other
 connector and keeps running, rather than black-screening until restart.
 Capture the log the same way (`tee`), and note which connector it started on
-(`flexwm msg outputs` names it — `eDP-1`, `HDMI-A-1` and so on).
+(`scoot msg outputs` names it — `eDP-1`, `HDMI-A-1` and so on).
 
 This exercises `Plan::NewConnector`, which is the only path that runs
 `set_pending` against real DRM. Plugging a *second* display in without
@@ -382,10 +387,12 @@ first trap). Assume the next one exists too, and keep the raw output.
 ## Verification set on this hardware (2026-09-18)
 
 First time the suite had ever run on aarch64/Asahi. All green against `main`
-at `f688ac9`: `cargo test -p flexwm` 964 passed; `cargo nextest run
---workspace` 1069 passed, 2 skipped; `cargo clippy -p flexwm --all-targets
--- -D warnings` clean; `cargo fmt --check -p flexwm` clean;
-`scripts/smoke-test.sh` 16/16 `ok`.
+at `f688ac9` — where the package was still called `flexwm`, so these are the
+commands as they were actually run, not as they would be typed today
+(`-p flexwm` is `-p scoot` on current `main`): `cargo test -p flexwm` 964
+passed; `cargo nextest run --workspace` 1069 passed, 2 skipped;
+`cargo clippy -p flexwm --all-targets -- -D warnings` clean;
+`cargo fmt --check -p flexwm` clean; `scripts/smoke-test.sh` 16/16 `ok`.
 
 One snag worth knowing: `smoke-test.sh` needs `jq`, which the flake's dev
 shell does not provide. Without it the window-count check compares an empty

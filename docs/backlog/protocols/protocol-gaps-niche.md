@@ -20,17 +20,17 @@ blocked: null
   - **`wlr-screencopy-unstable-v1`/a newer `ext-image-copy-capture-v1`** —
     ~~lets third-party tools (`grim`, `wf-recorder`, screen-sharing in video
     conferencing apps) capture the screen directly, rather than going
-    through flexwm's own bespoke `flexwm msg screenshot` IPC action. Worth
+    through scoot's own bespoke `scoot msg screenshot` IPC action. Worth
     revisiting against `CLAUDE.md`'s "prefer the standard protocol over a
-    bespoke one" rule at some point — flexwm's own screenshot action
-    exists because computer-use automation needs it under flexwm's own
+    bespoke one" rule at some point — scoot's own screenshot action
+    exists because computer-use automation needs it under scoot's own
     control/auth model, but that doesn't mean third-party tools shouldn't
     also have the standard path available to them.~~ — **ALREADY RESOLVED**
     (PR #52, `../resolved/screencopy-capture-done.md`); the wlr half stays
     deliberately unbuilt.
   - **`wlr-output-management-unstable-v1`** (or a newer successor) — lets
     tools like `wlr-randr`/`kanshi` query and reconfigure output mode,
-    position and scale. Moot while flexwm has exactly one `Output` and no
+    position and scale. Moot while scoot has exactly one `Output` and no
     real multi-monitor support; relevant once that lands. *Half-resolved
     2026-09-16 (PR #49): the query half shipped — it turned out to have real
     clients (shell display pages) well ahead of multi-output support, and
@@ -82,16 +82,16 @@ rendering), all low priority, none blocking:**
    decrement on `wl_surface.offset` requests to a cursor surface. At the
    pinned Smithay rev, `CursorImageAttributes.hotspot` is only ever written
    by `wl_pointer.set_cursor` (and the tablet-tool equivalent) — nothing
-   adjusts it on offset/commit — and flexwm reads it verbatim. A client
+   adjusts it on offset/commit — and scoot reads it verbatim. A client
    using `wl_surface.offset` on its cursor gets a misplaced image. Not a
    regression (nothing rendered for `Surface` before item 8), and real
    toolkits don't appear to do this in practice. **Re-verified at the
    pinned rev 2026-09-18 and closed NEEDS-UPSTREAM** (the fix belongs in
    Smithay's set_cursor/commit path). **OVERTURNED 2026-09-18 — fixed
-   flexwm-side** ([record](../resolved/cursor-surface-offset-hotspot-done.md)):
+   scoot-side** ([record](../resolved/cursor-surface-offset-hotspot-done.md)):
    the NEEDS-UPSTREAM half-truth was that *core* never adjusts it;
    Smithay's own anvil does the decrement compositor-side in its shell
-   commit hook, which is exactly where flexwm's `Cursor::note_surface_commit`
+   commit hook, which is exactly where scoot's `Cursor::note_surface_commit`
    now does it (saturating).
 
 (Note: this file always ended mid-sentence at "none blocking:" -- the
