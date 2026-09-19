@@ -245,9 +245,9 @@ impl Host {
     /// because a *bigger* buffer pool could not be allocated, is the
     /// data-loss case `CLAUDE.md` weighs a crash against, for a failure the
     /// user neither caused nor can avoid. It is safe to differ because
-    /// `replace_render_target` leaves the losing case *consistent*, not
-    /// half-applied: `state.host` is restored, the new pool is destroyed, and
-    /// the render target and the host buffers are both still at the old size,
+    /// `replace_render_target` leaves the losing case *consistent* rather
+    /// than half-applied -- see its doc for the ordering that buys that: the
+    /// render target and the host buffers are both still at the old size,
     /// which is a working session. The host letterboxes the difference, which
     /// is an annoyance; a dead compositor is lost work.
     ///

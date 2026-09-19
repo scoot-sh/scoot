@@ -138,7 +138,7 @@ fn resize_cost() {
     // Two sizes, neither of them CANVAS, so the first timed call is no
     // cheaper or dearer than the rest.
     let sizes = [(CANVAS, CANVAS + 8), (CANVAS + 16, CANVAS)];
-    let mut resize_rounds = |fixture: &mut Fixture, rounds: u32| {
+    let resize_rounds = |fixture: &mut Fixture, rounds: u32| {
         let started = Instant::now();
         for round in 0..rounds {
             let (width, height) = sizes[round as usize % sizes.len()];
