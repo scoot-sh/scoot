@@ -1,5 +1,5 @@
 [package]
-name = "flexwm"
+name = "scoot"
 description = "A scrolling-tiling Wayland compositor that runs without a GPU"
 version.workspace = true
 edition.workspace = true
@@ -7,8 +7,8 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
-flexwm-core.workspace = true
-flexwm-ipc = { workspace = true, features = ["core"] }
+scoot-core.workspace = true
+scoot-ipc = { workspace = true, features = ["core"] }
 serde_json.workspace = true
 
 # libinput-sys (unlike libseat-sys/udev-sys/xkbcommon-sys, which all use
@@ -32,7 +32,7 @@ serde_json.workspace = true
 [build-dependencies]
 pkg-config = "0.3"
 
-# The compositor is Linux-only; `flexwm msg` builds everywhere, so the CLI can
+# The compositor is Linux-only; `scoot msg` builds everywhere, so the CLI can
 # drive a VM from a Mac.
 [target.'cfg(target_os = "linux")'.dependencies]
 pixman = "0.2"
@@ -41,12 +41,12 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # For the config file (compositor/config.rs), which is Linux-only along with
 # everything else that depends on `Keybindings`'s smithay `Keysym`s -- see
-# that module's doc. `serde` is already in the tree via flexwm-ipc, at the
+# that module's doc. `serde` is already in the tree via scoot-ipc, at the
 # same version pinned in workspace.dependencies, so this doesn't add a
 # second incompatible copy.
 serde.workspace = true
 toml = "1"
-# For --nested: flexwm is itself a Wayland *client* of a host compositor,
+# For --nested: scoot is itself a Wayland *client* of a host compositor,
 # alongside being a server to its own. Same wayland-client/wayland-protocols
 # versions Smithay itself already pins internally (for its own optional,
 # unused-by-us winit/x11 backends), so this can't create a resolver conflict.

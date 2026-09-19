@@ -10,8 +10,8 @@ rust-version = "1.87"
 license = "MIT"
 
 [workspace.dependencies]
-flexwm-core = { path = "crates/flexwm-core" }
-flexwm-ipc = { path = "crates/flexwm-ipc" }
+scoot-core = { path = "crates/scoot-core" }
+scoot-ipc = { path = "crates/scoot-ipc" }
 base64 = "0.22"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

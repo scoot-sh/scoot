@@ -299,12 +299,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "flexwm"
+name = "scoot"
 version = "0.1.0"
 dependencies = [
  "calloop-wayland-source",
- "flexwm-core",
- "flexwm-ipc",
+ "scoot-core",
+ "scoot-ipc",
  "libc",
  "pixman",
  "pkg-config",
@@ -325,15 +325,15 @@ dependencies = [
 ]
 
 [[package]]
-name = "flexwm-core"
+name = "scoot-core"
 version = "0.1.0"
 
 [[package]]
-name = "flexwm-ipc"
+name = "scoot-ipc"
 version = "0.1.0"
 dependencies = [
  "base64",
- "flexwm-core",
+ "scoot-core",
  "serde",
  "serde_json",
 ]
