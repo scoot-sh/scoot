@@ -3,7 +3,10 @@
 Three things in the backlog were blocked on an Asahi machine and cannot be
 answered anywhere else. This is the runbook for answering them. Written
 against `main` at `1b706b8`; the flags and bindings below are quoted from
-`README.md` at that commit. **Two of the three were answered on 2026-09-18**
+`README.md` at that commit. The project was renamed `flexwm` → `scoot` on
+2026-09-18 and every command here is the one to run *today*; the one place a
+past result is quoted with the commit it was captured at (the verification
+set at the end) keeps the old name, because that is what was typed then. **Two of the three were answered on 2026-09-18**
 — see the results table and section immediately below; the runbook itself is
 kept intact for re-runs on other Apple Silicon models.
 
@@ -382,10 +385,12 @@ first trap). Assume the next one exists too, and keep the raw output.
 ## Verification set on this hardware (2026-09-18)
 
 First time the suite had ever run on aarch64/Asahi. All green against `main`
-at `f688ac9`: `cargo test -p scoot` 964 passed; `cargo nextest run
---workspace` 1069 passed, 2 skipped; `cargo clippy -p scoot --all-targets
--- -D warnings` clean; `cargo fmt --check -p scoot` clean;
-`scripts/smoke-test.sh` 16/16 `ok`.
+at `f688ac9` — where the package was still called `flexwm`, so these are the
+commands as they were actually run, not as they would be typed today
+(`-p flexwm` is `-p scoot` on current `main`): `cargo test -p flexwm` 964
+passed; `cargo nextest run --workspace` 1069 passed, 2 skipped;
+`cargo clippy -p flexwm --all-targets -- -D warnings` clean;
+`cargo fmt --check -p flexwm` clean; `scripts/smoke-test.sh` 16/16 `ok`.
 
 One snag worth knowing: `smoke-test.sh` needs `jq`, which the flake's dev
 shell does not provide. Without it the window-count check compares an empty

@@ -31,7 +31,10 @@ old names: the binary is `scoot`, the crates are `scoot`/`scoot-core`/
 `scoot-ipc`, the socket is `scoot.sock` (overridden by `$SCOOT_SOCKET`, not
 `$FLEXWM_SOCKET`), and the config file is read from `~/.config/scoot/` (or
 `$XDG_CONFIG_HOME/scoot/`) only — a file left at `~/.config/flexwm/config.toml`
-is not loaded, so move it or pass `--config PATH`.
+is not loaded, so move it or pass `--config PATH`. The names clients see
+followed too: the `wl_seat` name, `wl_output`'s `make` (and the `xdg_output`
+description built from it) and the `--nested` window's own title/app-id are
+all `scoot` now, so anything matching on those strings needs updating.
 
 ## Status
 

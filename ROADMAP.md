@@ -930,7 +930,8 @@ medium priority — the effective top of what's actually open.
    refusals).
 4. [Split the CLI out into
    `scootctl`](docs/backlog/meta/rename-flex-family.md) — the rename half of
-   that entry LANDED 2026-09-18: `flexwm` → **`scoot`** across crates, binary,
+   that entry LANDED 2026-09-18 (PR #128): `flexwm` → **`scoot`** across
+   crates, binary,
    socket (`scoot.sock`/`$SCOOT_SOCKET`), config paths (`~/.config/scoot/`,
    `/etc/scoot/config.toml`), flake and docs, with no fallback to the old
    names; `flex` was dropped for a crates.io and GNU-flex collision, and the

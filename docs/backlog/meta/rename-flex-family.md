@@ -19,9 +19,9 @@ flex the lexer generator on every `$PATH` that has it — the collision check
 this entry asked for, answered. The user chose **`scoot`**, which passed the
 same availability check, and owns `scoot.sh`.
 
-Done in one mechanical PR, behavior-preserving except for the three
-user-visible paths, which changed with **no compatibility fallback** to the
-old names (`CLAUDE.md` rules out compat shims, and the break is meant to be
+Done in one mechanical PR (#128), behavior-preserving except for the
+user-visible names below, which changed with **no compatibility fallback** to
+the old ones (`CLAUDE.md` rules out compat shims, and the break is meant to be
 clean):
 
 - crates `flexwm`/`flexwm-core`/`flexwm-ipc` → `scoot`/`scoot-core`/`scoot-ipc`
@@ -35,6 +35,13 @@ clean):
 - the dev VM's share moved `/mnt/flexwm` → `/mnt/scoot`, `$FLEXWM_SRC` →
   `$SCOOT_SRC`, state dir `~/.local/state/flexwm-vm/` → `scoot-vm/` (needs a
   VM rebuild plus the `mv` in `vm/README.md` to keep an existing disk)
+- the names clients and operators see at runtime followed too: the `wl_seat`
+  name, `wl_output`'s `make` (and the `xdg_output` description built from
+  it), the `--nested` window's own title/app-id, the IPC refusal messages
+  that name the compositor, the staging socket prefix in `$XDG_RUNTIME_DIR`
+  (`.flexwm-` → `.scoot-`), the screenshot worker's thread name and the
+  `memfd` names. A client that matched on any of those strings sees the new
+  one, with no alias.
 
 Two deliberate exceptions to "rename everything", both recorded here so a
 later grep for `flexwm` does not read as unfinished work:

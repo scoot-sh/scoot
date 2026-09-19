@@ -424,4 +424,4 @@ falsify. Read `flexwm` there as `scoot`.
   of duplication.
 
 ### Meta
-- [Split the CLI out into `scootctl`](./meta/rename-flex-family.md) — the `flexwm` → `scoot` rename half landed 2026-09-18; the crate split remains, and wants its own design pass (a status bar stays separate, undecided)
+- [Split the CLI out into `scootctl`](./meta/rename-flex-family.md) — the `flexwm` → `scoot` rename half landed 2026-09-18 (PR #128); the crate split remains, and wants its own design pass (a status bar stays separate, undecided)
