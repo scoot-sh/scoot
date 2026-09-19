@@ -4,9 +4,11 @@ Three things in the backlog were blocked on an Asahi machine and cannot be
 answered anywhere else. This is the runbook for answering them. Written
 against `main` at `1b706b8`; the flags and bindings below are quoted from
 `README.md` at that commit. The project was renamed `flexwm` → `scoot` on
-2026-09-18 and every command here is the one to run *today*; the one place a
-past result is quoted with the commit it was captured at (the verification
-set at the end) keeps the old name, because that is what was typed then. **Two of the three were answered on 2026-09-18**
+2026-09-18 and every command here is the one to run *today*. Wherever a past
+result is quoted against the commit it was captured at — the "Results so
+far" section below, pinned to `f688ac9`, and the verification set at the end
+— the old name stands, because that is what was typed and logged then.
+Renaming those would falsify the record. **Two of the three were answered on 2026-09-18**
 — see the results table and section immediately below; the runbook itself is
 kept intact for re-runs on other Apple Silicon models.
 
@@ -24,11 +26,11 @@ KMS), `card2` → `apple-drm` (display, owns `eDP-1`), `renderD128` → render
 node.
 
 - **Test 2 — answered, no VT needed after all.** scoot was *already the
-  live desktop session* (greetd → `scoot --tty -- noctalia`), running with
+  live desktop session* (greetd → `flexwm --tty -- noctalia`), running with
   no `--gpu` flag and no `[tty] gpu` key, with `/dev/dri/card2` as its only
   open DRM fd. The automatic search works on Apple Silicon; `--gpu` is a
   convenience here, not a requirement. Read-only `/proc/<pid>/fd` and
-  `scoot msg outputs` gave this without restarting anything — and the
+  `flexwm msg outputs` gave this without restarting anything — and the
   canonical log lines this section asks for were captured on the next reboot,
   once the session started logging to a file:
 
@@ -191,7 +193,7 @@ VT, and it is not — scoot refuses output scaling there by design, because
 the host compositor owns the window's scale:
 
 ```
-WARN scoot::compositor: output scaling is not supported under --nested
+WARN flexwm::compositor: output scaling is not supported under --nested
      (the host compositor owns the window's scale); using 1.0 configured=1.5
 ```
 

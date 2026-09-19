@@ -28,8 +28,10 @@ clean):
   (`git mv`, so history follows), binary `flexwm` → `scoot`
 - IPC socket `flexwm.sock` → `scoot.sock`, `$FLEXWM_SOCKET` → `$SCOOT_SOCKET`
 - config `$XDG_CONFIG_HOME/flexwm/config.toml` → `.../scoot/config.toml`,
-  `~/.config/flexwm/` → `~/.config/scoot/`, `/etc/flexwm/config.toml` →
-  `/etc/scoot/config.toml`
+  `~/.config/flexwm/` → `~/.config/scoot/`. There is no `/etc` config path
+  and never was — the loader reads the XDG location only (`config.rs`), and
+  the `/etc/...` string that looks like one is an arbitrary `--config`
+  argument inside a `cli.rs` unit test.
 - GitHub repo `yackey-labs/flexwm` → `scoot-sh/scoot` (transferred by the user
   before the PR; the local remote and every in-tree URL follow it)
 - the dev VM's share moved `/mnt/flexwm` → `/mnt/scoot`, `$FLEXWM_SRC` →

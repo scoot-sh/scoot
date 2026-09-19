@@ -96,11 +96,11 @@ the same PR a feature lands, not later** — and more than the Status/Running
 sections: every new/changed config option, default keybinding, CLI flag, or
 IPC request/action a user or integrating agent would need to know. This
 project let the config file and keybinding reference go stale across several
-merged PRs before anyone noticed; `flexwm-implementer` and `flexwm-reviewer`
+merged PRs before anyone noticed; `scoot-implementer` and `scoot-reviewer`
 both call this out explicitly so it doesn't recur.
 
 **Independent review is mandatory, and it's a real gate, not a formality.**
-Use the `flexwm-reviewer` subagent (`.claude/agents/flexwm-reviewer.md`) — or,
+Use the `scoot-reviewer` subagent (`.claude/agents/scoot-reviewer.md`) — or,
 if it doesn't exist in this checkout, an equivalently-instructed pass —
 before any merge. The bar is stellar, principal-level-engineer code. A
 subagent's "tests pass" self-report is a claim to independently re-derive,
@@ -118,7 +118,7 @@ and only shows from reading what a field means across every site touching it.
 ask.** (User, 2026-09-12, after several PRs of check-ins: "Yes. For the last
 time. You get to be the final gate after reviewing the review agent's
 diagnosis." This supersedes any earlier "ask every time" framing.) The
-coordinating session is the final gate: once `flexwm-reviewer` (or an
+coordinating session is the final gate: once `scoot-reviewer` (or an
 equivalently rigorous pass) has reported back and the session has actually
 read and weighed its diagnosis — not just seen "no blocking findings" and
 moved on — merge without asking again. `gh pr merge` is unblocked mechanically
@@ -201,19 +201,18 @@ durable belongs in `CLAUDE.md` or `ROADMAP.md`/`docs/`, not duplicated here.
 
 ## Process notes
 
-- Three agent roles live in `.claude/agents/`: `flexwm-orchestrator.md` (the
+- Three agent roles live in `.claude/agents/`: `scoot-orchestrator.md` (the
   coordinating session's role — delegate, gate on review, merge, repeat),
-  `flexwm-implementer.md` (implements one item per invocation, full cycle,
-  never merges), `flexwm-reviewer.md` (independent review gate, never edits or
-  merges). Read the relevant one before acting in that role. They still carry
-  the pre-rename `flexwm-` prefix on purpose: `.claude/` is a protected path
-  no agent may write, so those three files (and the `/mnt/flexwm`,
-  `cargo test -p flexwm` references *inside* them) are renamed by the user in
-  a separate, user-run pass. Same for the local checkout directory named
-  above — it is still `code/flexwm`; the dev VM's running 9p share points at
+  `scoot-implementer.md` (implements one item per invocation, full cycle,
+  never merges), `scoot-reviewer.md` (independent review gate, never edits or
+  merges). Read the relevant one before acting in that role. These were
+  renamed by the user in a separate, user-run pass, because `.claude/` is a
+  protected path no agent may write — chat approval cannot lift that check,
+  which is the point of it. **The local checkout directory is still
+  `code/flexwm`** and must stay so: the dev VM's running 9p share points at
   that exact path.
 - Delegate implementation to a **fresh, non-fork subagent**
-  (`flexwm-implementer`, or general-purpose if it doesn't fit) to keep the
+  (`scoot-implementer`, or general-purpose if it doesn't fit) to keep the
   coordinating session's context lean. A `subagent_type: fork` inherits and
   re-sends the entire growing transcript every time it's spawned — fine
   occasionally, but it compounds across a long session; reserve fork for cases
@@ -235,7 +234,7 @@ durable belongs in `CLAUDE.md` or `ROADMAP.md`/`docs/`, not duplicated here.
 - **Never run branch-mutating git commands (`checkout`, `commit`, etc.) in the
   shared main checkout (`/Users/steveyackey/code/flexwm`) while a background
   implementer might still be active there.** Implementers are told to work
-  directly in that checkout, not a worktree (see `flexwm-implementer.md` — the
+  directly in that checkout, not a worktree (see `scoot-implementer.md` — the
   dev VM's 9p mount points at that exact directory, unreachable from a
   worktree elsewhere without a manual copy-over). A background agent's own
   `git checkout -b` can silently switch the branch a concurrent orchestrator
@@ -249,7 +248,7 @@ durable belongs in `CLAUDE.md` or `ROADMAP.md`/`docs/`, not duplicated here.
   /tmp/<name> <branch>` and remove it after pushing. Skip the worktree only
   once no implementer is active.
 - **The same collision can happen between two implementers, not just the
-  orchestrator and one — this also happened once.** Two `flexwm-implementer`
+  orchestrator and one — this also happened once.** Two `scoot-implementer`
   agents were dispatched close together, reasoned safe because their file sets
   didn't overlap (one touched `session_lock.rs`/`headless.rs`/`shell.rs`, the
   other `tty/mod.rs`/`cli.rs`) — but file-level non-overlap doesn't prevent
