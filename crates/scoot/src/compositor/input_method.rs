@@ -159,10 +159,13 @@ impl InputMethodHandler for State {
         if let Some(window) = self.id_of(parent).and_then(|id| self.window(id)) {
             return window.geometry();
         }
-        let Some(output) = self.outputs.primary() else {
+        // The surface's own output, not the primary one: an IME popup over a
+        // bar on a second screen would otherwise be positioned against a map
+        // that does not hold it, i.e. at the origin.
+        let Some(output) = self.output_of_layer(parent) else {
             return Rectangle::default();
         };
-        let map = layer_map_for_output(output);
+        let map = layer_map_for_output(&output);
         map.layer_for_surface(parent, WindowSurfaceType::TOPLEVEL)
             .map(|layer| layer.geometry())
             .unwrap_or_default()

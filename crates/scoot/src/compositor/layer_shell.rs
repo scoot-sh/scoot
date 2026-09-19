@@ -212,7 +212,13 @@ impl WlrLayerShellHandler for State {
         self.layers_awaiting_neutralize
             .push(surface.wl_surface().clone());
         self.mapped_layers.remove(surface.wl_surface());
-        let Some(output) = self.outputs.primary().cloned() else {
+        // The output whose map actually holds it, not the primary one: a
+        // client may name any output in `get_layer_surface`, and unmapping
+        // from the wrong map would leave the dead surface arranged forever --
+        // holding an `Arc` to it, and leaving `clicked_layer` pointing at a
+        // surface nobody can reach. `render()`'s `cleanup()` is no safety net
+        // for that: it only walks the primary output's map.
+        let Some(output) = self.output_of_layer_role(&surface) else {
             return;
         };
         {
@@ -253,7 +259,12 @@ impl State {
     /// what makes it carry a size that respects what the client just asked
     /// for -- and only then tell the core what is left over.
     pub(super) fn commit_layer_surface(&mut self, surface: &WlSurface) -> bool {
-        let Some(output) = self.outputs.primary().cloned() else {
+        // Which output's map this surface is in, not the primary one: a
+        // client may name any output in `get_layer_surface`, and a commit on
+        // a surface the primary's map does not hold would otherwise be read
+        // as "not a layer surface at all" -- so its initial configure would
+        // never be sent and the client would wait for one forever.
+        let Some(output) = self.output_of_layer(surface) else {
             return false;
         };
         let (found, touches_keyboard, mapped) = {
@@ -362,6 +373,42 @@ impl State {
         for surface in std::mem::take(&mut self.layers_awaiting_neutralize) {
             neutralize_pending_anchor(&surface);
         }
+    }
+
+    /// The output whose [`LayerMap`](smithay::desktop::LayerMap) holds the
+    /// layer surface rooted at `surface`, if any.
+    ///
+    /// The lookup that replaces "the one output there is" wherever a layer
+    /// surface's *own* output is what is wanted -- a commit on it, its
+    /// destruction, or the geometry an IME popup is placed against. Costs one
+    /// map lock per output until it hits, and a session has a handful of
+    /// outputs; with one output it is the same single lookup as before.
+    pub(super) fn output_of_layer(&self, surface: &WlSurface) -> Option<Output> {
+        self.outputs
+            .iter()
+            .find(|output| {
+                layer_map_for_output(output)
+                    .layer_for_surface(surface, WindowSurfaceType::TOPLEVEL)
+                    .is_some()
+            })
+            .cloned()
+    }
+
+    /// [`State::output_of_layer`] by role object rather than by `wl_surface`.
+    ///
+    /// `layer_destroyed` needs this one: it runs from the role object's own
+    /// destructor, where the `wl_surface` may already be dead -- and
+    /// `LayerMap::layer_for_surface` answers `None` for a dead surface, which
+    /// would leave the unmap this lookup exists to perform undone.
+    fn output_of_layer_role(&self, role: &WlrLayerSurface) -> Option<Output> {
+        self.outputs
+            .iter()
+            .find(|output| {
+                layer_map_for_output(output)
+                    .layers()
+                    .any(|layer| layer.layer_surface() == role)
+            })
+            .cloned()
     }
 
     /// Recomputes what layer surfaces have left for windows and tells the
