@@ -69,12 +69,16 @@ dbus-update-activation-environment --systemd WAYLAND_DISPLAY XDG_CURRENT_DESKTOP
 dbus-update-activation-environment WAYLAND_DISPLAY XDG_CURRENT_DESKTOP
 ```
 
-`resources/scoot-portals.conf` names which backend serves what once the
+Only those two travel to the bus: the `$XDG_SESSION_*` values scoot fills
+for its children stay out (nothing on the bus reads them). `resources/scoot-portals.conf` names which backend serves what once the
 lookup can find us: everything falls through to `gtk`, while
 `ScreenCast`/`Screenshot` go to `wlr` — which binds against scoot through
 `ext-image-copy-capture-v1` (needs xdg-desktop-portal-wlr 0.8.0+; older
 releases need the `wlr-screencopy` global scoot deliberately omits) and
-through `grim` for screenshots (so `grim` must be installed). Install the
+through `grim` for screenshots (so `grim` must be installed). `ScreenCast`
+covers whole outputs; per-window sharing is refused — scoot does not
+advertise the toplevel capture-source manager (see
+`backlog/resolved/screencopy-toplevel-capture-done.md`). Install the
 file as `scoot-portals.conf` in the first of these your setup provides —
 `~/.config/xdg-desktop-portal/`, `/etc/xdg-desktop-portal/`,
 `/usr/share/xdg-desktop-portal/` — and xdg-desktop-portal 1.17+ does the

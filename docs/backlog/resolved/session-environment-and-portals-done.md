@@ -50,8 +50,8 @@ Two upstream facts since then change the verdict:
 
 - **xdg-desktop-portal-wlr v0.8.0** (21 Oct, commit `0ab4f6f`, verified on
   the project's own releases page) ships "`ext_image_copy_capture_v1:
-  Initial implementation`" (Kenny Levinsen), with ext-path follow-ups in
-  0.8.1/0.8.2 ("check for capture source manager in
+  Initial   implementation`" (Kenny Levinsen), with an ext-path follow-up in
+  0.8.2 ("check for capture source manager in
   `ext_register_session_cb`"). So `wlr` binds against an ext-only
   compositor through the ext protocol -- provided the backend is >= 0.8.0.
   (Avoid 0.8.3: its own release notes warn it can stall screen recording;

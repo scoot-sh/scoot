@@ -69,3 +69,8 @@ Decisions this needs, which is why it is a ticket and not a patch:
 `docs/backlog/config/default-config-command.md` — if a module renders the
 config, the emitted-defaults work and the module's schema want to agree
 about what the defaults are rather than drifting apart.
+
+`docs/backlog/resolved/session-environment-and-portals-done.md` — installing
+`resources/scoot-portals.conf` to an xdg-desktop-portal lookup path is
+packaging work with the same shape as placing the config file, so it belongs
+to this module when it exists; until then the copy-over is manual.
