@@ -419,7 +419,8 @@ falsify. Read `flexwm` there as `scoot`.
 - [Enhanced hardware/DRM testing ideas](./testing/hardware-testing-ideas.md) (research)
 - [Dispatch flood tests die on fd-pressure kills under a pressured process table](./resolved/dispatch-flood-fd-pressure-flake-done.md)
   — RESOLVED 2026-09-20 (test-only): both dispatch halves run under the icon test's treatment (raised `RLIMIT_NOFILE` ceiling with verified headroom — 896 free for the 512-retaining fill, 384 for the fd-less single-pixel flood — plus budget-cause pinning by message); the single-pixel flood now takes the shared `FD_FLOOD_LOCK`. The `immed`   twin reproduces identically and is left for a follow-up per the ticket's scope.
-- [Two more dispatch floods in the same fd-pressure class (`immed`, second-client)](./testing/dispatch-flood-remainder-flake.md) — reproduced red under `prlimit 650` during PR #168, scoped out there: `immed` wants the same two-line treatment, second-client wants headroom only. Headroom checks must go on the test thread (in-closure panics strand the fixture's 10s deadline).
+- [Two more dispatch floods in the same fd-pressure class (`immed`, second-client)](./resolved/dispatch-flood-remainder-flake-done.md)
+  — RESOLVED 2026-09-20 (test-only): the `immed` twin takes the same two-line treatment (headroom + budget-cause pin by message), second-client takes headroom only (it asserts the fill succeeds); both locks and checks on the test thread.
 - [`msg_broken_pipe`'s unbounded `accept()` wedges the suite on a transient connect failure](./testing/msg-broken-pipe-accept-hang.md) — observed as a >840s stick (solo 0.00s) during PR #168: no accept timeout, no `Command` timeout, no nextest slow-timeout anywhere. A hang, not a failure — fixture timeout preferred, nextest knob as backstop.
 - [No CI: every verification run is manual and self-reported](./resolved/ci-test-run-done.md)
   — LANDED 2026-09-19 (PR #140): `.github/workflows/ci.yml` runs fmt,
