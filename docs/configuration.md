@@ -41,10 +41,45 @@ one-line startup error), `$SCOOT_SOCKET`, `$XDG_CONFIG_HOME`,
 `$XCURSOR_THEME`, and the session locale (`$LC_ALL`, `$LC_CTYPE`, `$LANG`)
 for [`scootctl type`](ipc.md#type-vs-key). Environment scoot exports to what
 it spawns: `$WAYLAND_DISPLAY`, `$SCOOT_SOCKET`, `$XCURSOR_THEME`,
-`$XCURSOR_SIZE` and — unless the token table is full — a fresh
+`$XCURSOR_SIZE`, `$XDG_CURRENT_DESKTOP=scoot` (always — a child talks to
+this compositor, so it must name this compositor even under `--nested`
+inside another one), `$XDG_SESSION_TYPE=wayland` and
+`$XDG_SESSION_DESKTOP=scoot` (only where unset or empty — on a logind seat
+both are logind's to set, and scoot keeps its owner's values), and —
+unless the token table is full — a fresh
 `$XDG_ACTIVATION_TOKEN`. A token the compositor was itself started with is
 removed rather than passed on: it is a receipt for someone else's user
 action.
+
+### Portals and the D-Bus activation environment
+
+`$XDG_CURRENT_DESKTOP=scoot` above is what lets
+[xdg-desktop-portal](https://github.com/flatpak/xdg-desktop-portal) pick a
+backend for this session — without it a browser has no screen sharing on
+Wayland and degraded file choosers. But setting it on scoot's children is
+only half: the portal itself is D-Bus activated, so it inherits the **D-Bus
+activation environment**, not the environment of whatever client asked.
+That half belongs to the session script (config is state, the script is
+behavior — scoot itself never touches the bus):
+
+```sh
+# systemd session (the niri/xdpw shape):
+dbus-update-activation-environment --systemd WAYLAND_DISPLAY XDG_CURRENT_DESKTOP
+# s6 / seat without a user manager (the webtop target):
+dbus-update-activation-environment WAYLAND_DISPLAY XDG_CURRENT_DESKTOP
+```
+
+`resources/scoot-portals.conf` names which backend serves what once the
+lookup can find us: everything falls through to `gtk`, while
+`ScreenCast`/`Screenshot` go to `wlr` — which binds against scoot through
+`ext-image-copy-capture-v1` (needs xdg-desktop-portal-wlr 0.8.0+; older
+releases need the `wlr-screencopy` global scoot deliberately omits) and
+through `grim` for screenshots (so `grim` must be installed). Install the
+file as `scoot-portals.conf` in the first of these your setup provides —
+`~/.config/xdg-desktop-portal/`, `/etc/xdg-desktop-portal/`,
+`/usr/share/xdg-desktop-portal/` — and xdg-desktop-portal 1.17+ does the
+rest. (Packaging that install step into the flake is still open; until
+then this copy-over is manual.)
 
 ### More than one output
 

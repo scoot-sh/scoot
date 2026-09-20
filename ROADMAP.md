@@ -76,6 +76,19 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[`XDG_CURRENT_DESKTOP` is set nowhere, so a portal has no backend to
+  pick](docs/backlog/resolved/session-environment-and-portals-done.md)**
+  (2026-09-20) — `XDG_CURRENT_DESKTOP=scoot` exported unconditionally (a child
+  talks to this compositor, so it names this compositor even under `--nested`),
+  `XDG_SESSION_TYPE`/`XDG_SESSION_DESKTOP` filled only where no logind set
+  them, through one pure `resolve` applied both in-process and per spawned
+  child. Activation propagation decided as the session script's job
+  (documented, both systemd and s6 shapes); `resources/scoot-portals.conf`
+  shipped with capture via `wlr` — the ticket's "no backend speaks ext"
+  premise proved stale in upstream source (xdg-desktop-portal-wlr ≥ 0.8.0
+  implements `ext-image-copy-capture`; its Screenshot portal shells out to
+  ext-only `grim`). Flake install wiring filed as remainder; live portal
+  proof impossible on the dev VM (no portal stack), stated not claimed.
 - **[`scoot --help` hides `--renderer` under `--tty`](docs/backlog/resolved/cli-help-tty-missing-renderer-done.md)**
   (2026-09-20) — one-line `--help` fix plus a usage-vs-parser pinning test; no behavior change, no README change (it was already right).
 - **[README audit +

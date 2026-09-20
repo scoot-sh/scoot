@@ -338,6 +338,23 @@ if ! tr '\0' '\n' <"/proc/$foot_pid/environ" | grep -q '^XDG_ACTIVATION_TOKEN=.\
 fi
 echo "ok: the spawned terminal carries XDG_ACTIVATION_TOKEN"
 
+echo "--- checking the spawned terminal got the session environment ---"
+# State::spawn settles the session-identity environment per child
+# (XDG_CURRENT_DESKTOP unconditionally, XDG_SESSION_TYPE/_DESKTOP where no
+# logind set them). Same foot, same /proc technique, so this proves the
+# variables rode along to a real child, not just onto a Command.
+if ! tr '\0' '\n' <"/proc/$foot_pid/environ" | grep -q '^XDG_CURRENT_DESKTOP=scoot$'; then
+    echo "BUG: the foot State::spawn started carries no XDG_CURRENT_DESKTOP=scoot"
+    exit 1
+fi
+for var in XDG_SESSION_TYPE XDG_SESSION_DESKTOP; do
+    if ! tr '\0' '\n' <"/proc/$foot_pid/environ" | grep -q "^$var=.\+$"; then
+        echo "BUG: the foot State::spawn started carries no $var"
+        exit 1
+    fi
+done
+echo "ok: the spawned terminal carries the session environment"
+
 echo "--- typing ---"
 "$SCOOT" msg type 'hello from scoot'
 "$SCOOT" msg wait-idle --quiet-ms 500 --timeout-ms 10000

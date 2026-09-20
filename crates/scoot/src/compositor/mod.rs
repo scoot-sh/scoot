@@ -39,6 +39,7 @@ pub(crate) mod render;
 mod screencopy;
 mod screenshot;
 mod selection;
+mod session_env;
 mod session_lock;
 mod shell;
 mod shm_pools;
@@ -223,6 +224,28 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
         if let Some(path) = &state.ipc_path {
             std::env::set_var(scoot_ipc::SOCKET_ENV, path);
         }
+        // Who this session is, for the programs inside it: the portal
+        // backend lookup (`XDG_CURRENT_DESKTOP` against `scoot-portals.conf`)
+        // and the session-type/desktop readers (Qt, xdg-autostart) that no
+        // protocol carries. Settled once here -- see `session_env` for the
+        // ownership rules (unconditional vs fill-the-vacuum) -- and again
+        // per child in `State::spawn`, which applies the same `resolve`
+        // explicitly rather than relying on this inheritance.
+        //
+        // Read before `resolve` (not inline in its arguments): `var` returns
+        // owned strings, and `resolve` borrows the kept values, so the
+        // owners have to live somewhere past the call.
+        let current_desktop = std::env::var(session_env::CURRENT_DESKTOP).ok();
+        let session_type = std::env::var(session_env::SESSION_TYPE).ok();
+        let session_desktop = std::env::var(session_env::SESSION_DESKTOP).ok();
+        let session_env = session_env::resolve(
+            current_desktop.as_deref(),
+            session_type.as_deref(),
+            session_desktop.as_deref(),
+        );
+        std::env::set_var(session_env::CURRENT_DESKTOP, session_env.current_desktop);
+        std::env::set_var(session_env::SESSION_TYPE, session_env.session_type);
+        std::env::set_var(session_env::SESSION_DESKTOP, session_env.session_desktop);
         // The cursor theme this compositor resolved, so a client that loads a
         // theme *itself* picks the same one. `wp-cursor-shape-v1` covers the
         // clients that ask the compositor to draw for them (see

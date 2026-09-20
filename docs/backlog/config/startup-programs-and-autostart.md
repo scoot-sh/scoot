@@ -144,6 +144,6 @@ What *was* in scope, and was a real bug found asking this question:
 compositor's job whether or not anything ever supervises.
 
 Also related:
-[`session-environment-and-portals.md`](../core/session-environment-and-portals.md)
+[`session-environment-and-portals.md`](../resolved/session-environment-and-portals-done.md)
 — a session script is also where the D-Bus activation environment would get
 updated, so the two entries share a mechanism.
