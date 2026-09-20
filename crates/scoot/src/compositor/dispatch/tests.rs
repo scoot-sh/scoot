@@ -991,7 +991,23 @@ fn retaining_a_buffer_past_its_pool_trips_the_buffer_cap() {
         }
         buffers.roundtrip()
     });
-    assert_shm_protocol_error(&report.resize, "wl_shm_pool", wl_shm::Error::InvalidStride);
+    // Message pin, not the code-only `assert_shm_protocol_error`, on purpose:
+    // the fd-pressure twin of this refusal posts the identical
+    // `InvalidStride` on the identical pool object (see `reject_excess_buffer`),
+    // so code+interface cannot tell "the 512-cap said no" from "the pressured
+    // table said no" -- proven by running this test under
+    // `prlimit --nofile=650:650`, where the kill lands at ~grace-129 with the
+    // pressure cause and the code-only assertion still passes green. Only the
+    // budget message proves the kill came from the bound under test (the
+    // pressure text carries no `maximum of … live buffers`). The helper itself
+    // is unchanged: its "stays valid whichever side answered" stance stands
+    // for its other users, where no twin shares code+object.
+    assert_raw_protocol_error_with_message(
+        &report.resize,
+        "wl_shm_pool",
+        wl_shm::Error::InvalidStride as u32,
+        &format!("maximum of {MAX_BUFFERS_PER_CLIENT} live buffers"),
+    );
     assert_survivor_still_served(&report);
     assert_eq!(
         report.buffers, 0,
@@ -1030,7 +1046,18 @@ fn destroying_a_pool_with_live_buffers_keeps_every_buffer_counted() {
         buffers.bypass_once();
         buffers.roundtrip()
     });
-    assert_shm_protocol_error(&report.resize, "wl_shm_pool", wl_shm::Error::InvalidStride);
+    // Message pin, not the code-only `assert_shm_protocol_error`, for the same
+    // reason as the bypass-loop test above: pressure and budget refusals share
+    // code+object on this path too, so only the budget message proves the
+    // 513rd refusal came from the cap rather than a pressured table. The
+    // helper's code-only stance stands for its other users; it is these two
+    // sites that need the discrimination, not the helper that needs changing.
+    assert_raw_protocol_error_with_message(
+        &report.resize,
+        "wl_shm_pool",
+        wl_shm::Error::InvalidStride as u32,
+        &format!("maximum of {MAX_BUFFERS_PER_CLIENT} live buffers"),
+    );
     assert_survivor_still_served(&report);
     assert_eq!(report.buffers, 0, "the killed client's buffers must drain");
 }
