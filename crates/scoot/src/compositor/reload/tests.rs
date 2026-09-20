@@ -116,13 +116,19 @@ fn reload_applies_gap_appearance_and_binds_and_lists_them() {
 
         [appearance]
         background_color = "#ff0000"
+        corner_radius = 12
 
         [binds]
         "super+n" = "focus-column right"
         "##,
     );
     let response = fixture.reload();
-    for name in [field::GAP, field::BACKGROUND, field::BINDS] {
+    for name in [
+        field::GAP,
+        field::BACKGROUND,
+        field::CORNER_RADIUS,
+        field::BINDS,
+    ] {
         assert!(
             applied(&response).contains(&name.to_owned()),
             "{name} was not reported applied: {response:?}"
@@ -137,6 +143,7 @@ fn reload_applies_gap_appearance_and_binds_and_lists_them() {
         fixture.state.appearance.background_color,
         Color::parse("#ff0000").expect("a parsable color")
     );
+    assert_eq!(fixture.state.appearance.corner_radius, 12);
     assert_eq!(
         fixture.state.keybindings.match_key(
             crate::compositor::input::keysym_named("n").expect("a named key"),

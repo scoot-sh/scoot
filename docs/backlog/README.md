@@ -534,7 +534,7 @@ be revisited.
   extrapolation, not a measurement. Runbook is `Asahi.md`'s Test 4. Note
   FPS is the wrong headline for a damage-driven compositor; idle CPU, frame
   cost under damage, RSS and power are the numbers that decide it.
-- [Rounded window corners](./rendering/rounded-window-corners.md) — the cost
+- [Rounded window corners](./resolved/rounded-window-corners-done.md) — the cost
   is not the corners, it is that a rounded window is no longer opaque, so
   what is behind it can no longer be skipped. Measure with *overlapping*
   windows; a single-window benchmark will show nothing. Milestone 6 changes

@@ -474,6 +474,11 @@ What to know before pointing a client at it:
   what keeps a live-preview client from costing a full-screen copy every
   frame on a desktop that is not moving. A capture parked this way is served
   the moment anything redraws.
+- **Captures show rounded corners.** `screenshot` and `screencopy` read the
+  composited frame, so a non-zero `[appearance] corner_radius` appears in
+  captures: window corners show whatever is behind the window. An agent
+  diffing screenshots against expected pixels must account for the session's
+  configured radius.
 - **At most one *outstanding capture* per session** — a second `capture`
   request before the first has been answered is failed rather than queued.
   And at most sixteen live frame *objects* per client, across all of its
