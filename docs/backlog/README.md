@@ -527,5 +527,40 @@ be revisited.
   the GPU-less target does not have, and a fix for the bound-target cache
   eviction `dmabuf.rs` warns about. No measured client need yet.
 
+### Found asking how a session starts its own programs (2026-09-19)
+
+One question — *"how do we handle startup exec of other processes like
+Waybar, fuzzel, browsers?"* — turned up one confirmed bug and two gaps. They
+share a mechanism (what a session owes the programs inside it) but are
+separately actionable.
+
+- [Every spawned child becomes a zombie](./core/spawned-children-never-reaped.md)
+  — **HIGH**, and confirmed live rather than code-traced: four `spawn`
+  actions left four `<defunct>` children under scoot's pid, which is one per
+  spawn for the life of the session. `State::spawn` drops the `Child` at
+  `state.rs:985` and no `SIGCHLD` handling exists anywhere in the workspace.
+  The per-zombie cost is small and the entry says so; the case rests on it
+  being unbounded in a session-lifetime process, visible in any process
+  monitor, and cheapest to hit under exactly the agent-driven spawning the
+  IPC invites. Note the trap the entry spells out: `signal(SIGCHLD, SIG_IGN)`
+  survives `execve` and breaks every child that waits on its own children.
+- [`XDG_CURRENT_DESKTOP` is set nowhere, so a portal has no backend to pick](./core/session-environment-and-portals.md)
+  — the string does not occur in this repo at all, while `mod.rs` already
+  exports four other variables for exactly this kind of reason. Portals are
+  how a Wayland browser does screen sharing and file dialogs, and a browser
+  is what the webtop target exists to run. Split into a two-line half (export
+  it) and a real half (D-Bus activation environment, `scoot-portals.conf`)
+  — and the entry is explicit that no portal has actually been watched to
+  fail yet, with the check that would settle it.
+- [Nothing documents how to start a bar or a launcher, and `--` takes one command](./config/startup-programs-and-autostart.md)
+  — `docs/protocols.md` shows `waybar &` without ever saying where that shell
+  runs. Carries the design argument for what "idiomatic scoot config" means:
+  config is *state*, the session script is *behavior*, and the reason that
+  line holds is that `config.rs:565` parses a `[binds]` value with the same
+  `cli::action` the IPC uses — one vocabulary, three doors. An optional
+  `[autostart]` would be a list of those same action strings. Supervision is
+  argued out of scope (and the webtop target has no systemd, which is the
+  wrinkle).
+
 ### Meta
 - [Split the CLI out into `scootctl`](./meta/rename-flex-family.md) — the `flexwm` → `scoot` rename half landed 2026-09-18 (PR #128); the crate split remains, and wants its own design pass (a status bar stays separate, undecided)
