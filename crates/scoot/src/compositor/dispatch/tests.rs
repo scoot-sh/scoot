@@ -844,6 +844,130 @@ fn assert_raw_protocol_error(result: &Result<(), DispatchError>, interface: &str
     }
 }
 
+/// `assert_raw_protocol_error` plus a cause pin on the server's message.
+///
+/// Budget and pressure refusals post the same code on the same object on
+/// every factory here (7 on the dmabuf params, 0 on the single-pixel
+/// manager), so code+interface cannot tell "the shared budget said no"
+/// from "the pressured table said no" -- only the message proves the
+/// kill came from the bound under test rather than the ceiling. The same
+/// pin shape the icon half uses for its 513rd refusal, where its twins
+/// likewise share code+object.
+fn assert_raw_protocol_error_with_message(
+    result: &Result<(), DispatchError>,
+    interface: &str,
+    code: u32,
+    message_contains: &str,
+) {
+    match result {
+        Err(DispatchError::Backend(WaylandError::Protocol(error))) => {
+            assert_eq!(error.code, code, "wrong protocol error code: {error:?}");
+            assert_eq!(
+                error.object_interface, interface,
+                "the error was posted on the wrong object: {error:?}"
+            );
+            assert!(
+                error.message.contains(message_contains),
+                "the refusal came from the wrong cause (budget and fd-pressure share code+object): {error:?}"
+            );
+        }
+        Err(other) => panic!("expected a protocol error, got {other:?}"),
+        Ok(()) => panic!("the buffer creation was accepted"),
+    }
+}
+
+/// Headroom for the fd-flood tests below: the `dispatch` half of the
+/// treatment `toplevel_icon/tests.rs::ensure_flood_headroom` owns the
+/// other half of (see
+/// `docs/backlog/resolved/icon-buffer-budget-fd-pressure-flake-done.md`
+/// for the mechanism, and
+/// `docs/backlog/resolved/dispatch-flood-fd-pressure-flake-done.md` for
+/// this half).
+///
+/// The 512-retaining fills sit near the process-wide fd-pressure
+/// boundary by design, so under `cargo test` -- one process, one fd
+/// table shared with every neighbour thread -- a few neighbour-held fds
+/// are enough to land the refusal mid-fill instead of after it. Raising
+/// the ceiling moves the boundary out of reach instead of sampling
+/// around it. Same safe direction as the icon half: `free = soft - used`
+/// only grows, so parallel neighbours see fewer pressure verdicts, never
+/// more -- and the suite's own pressure pins drive hand-built tables or
+/// a forked child's own copy of the limit, never the live process table.
+///
+/// `retained` is what the caller's fill keeps server-side: 512 for the
+/// shm-bypass fills (one fd+mapping per retained buffer), 0 for the
+/// single-pixel flood, which holds no fd at all and trips only on a
+/// neighbour-pressured table -- hence its smaller need, and hence why it
+/// still takes the lock: without it, a concurrent flood's ~512 fds
+/// overlapping its microsecond grace-crossing is its whole exposure.
+///
+/// Must run under [`hold_flood_lock`], taken on the test thread *before*
+/// `drive` (which every caller does): the lock is what keeps another
+/// flood's ~512 fds from appearing between this check and the fill, and
+/// taking it on the test thread is what keeps a failed check a fast
+/// panic here rather than a stranded client thread and the 10s dispatch
+/// deadline. What can still move is non-flood neighbours,
+/// covered by `NEIGHBOUR_SLACK` -- and if they ever outgrow even that,
+/// the failure is a loud panic here, never a fill reddened with the
+/// wrong cause. Every failure is fast and names the numbers -- never a
+/// skip, which would stop guarding the bound these floods exist to pin.
+fn ensure_dispatch_flood_headroom(retained: u64) {
+    use crate::compositor::fd_pressure::{RESERVE_FDS, table};
+
+    /// Ceiling the floods run under: the same 4096 the icon half raises
+    /// to, so one number covers the whole suite and a flood here never
+    /// re-pressures a flood there.
+    const TARGET_SOFT: u64 = 4096;
+    /// Fds non-flood neighbours may transiently hold between the check
+    /// and the fill. Generous on purpose: an ordinary fixture holds a
+    /// socket pair, an event loop and a handful of memfds -- tens, not
+    /// hundreds.
+    const NEIGHBOUR_SLACK: u64 = 256;
+
+    // SAFETY: `getrlimit` writes exactly one `struct rlimit` through a
+    // live pointer to one, and returns nonzero on failure without
+    // touching it (the same shape `fd_pressure` already uses).
+    let mut limits: libc::rlimit = unsafe { std::mem::zeroed() };
+    assert!(
+        unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &mut limits) } == 0,
+        "cannot read RLIMIT_NOFILE, so the flood's headroom is unknowable; refusing to run it blind"
+    );
+    let soft = limits.rlim_cur as u64;
+    let hard = limits.rlim_max as u64;
+    // Only ever raise, never lower -- and never past the hard limit.
+    // (`hard` may be `RLIM_INFINITY`, which `min` folds away.)
+    let goal = TARGET_SOFT.min(hard);
+    if soft < goal {
+        let raised = libc::rlimit {
+            rlim_cur: goal as libc::rlim_t,
+            rlim_max: limits.rlim_max,
+        };
+        // SAFETY: a plain value copy through a live pointer; on failure
+        // the limit is unchanged.
+        assert!(
+            unsafe { libc::setrlimit(libc::RLIMIT_NOFILE, &raised) } == 0,
+            "cannot raise RLIMIT_NOFILE to {goal} (soft {soft}, hard {hard}); the flood does not fit this table deterministically"
+        );
+    }
+    let need_free = retained + RESERVE_FDS + NEIGHBOUR_SLACK;
+    if let Some(observed) = table() {
+        assert!(
+            observed.free() >= need_free,
+            "no deterministic headroom for the dispatch flood: table is {}/{} used/soft, \
+             need {need_free} free ({retained} retained + {RESERVE_FDS} reserve + {NEIGHBOUR_SLACK} neighbour slack); \
+             raise this process's RLIMIT_NOFILE hard limit",
+            observed.used,
+            observed.soft,
+        );
+    }
+    // `table()` is `None` where there is no observable guard:
+    // `/proc/self/fd` unreadable (macOS), an infinite table, or a table
+    // below `MIN_TABLE_FDS` -- and every enforcement site fails open on
+    // `None`, so pressure cannot fire. (A table physically too small for
+    // the flood fails the flood itself with its own error, not with a
+    // pressure refusal.)
+}
+
 /// The bypass loop the ticket is about: `create_pool` / `create_buffer` /
 /// `destroy_pool` returns the live-pool count to zero every iteration while
 /// the retained fd+mapping count grows. Past the buffer cap the excess
@@ -1065,8 +1189,23 @@ fn a_few_single_pixel_buffers_are_accepted() {
 /// Single-pixel buffers count toward the same budget: 513 of them trip the
 /// cap even though each holds no fd. Refused with a bare 0 on the manager
 /// -- the interface defines no error enum -- killing only the flooder.
+///
+/// The fd-pressure twin of that refusal posts the identical 0 on the
+/// identical manager object, so code+interface cannot discriminate them:
+/// the assertion pins the budget cause by message (required here, not
+/// optional), the same pin the icon half uses where its twins likewise
+/// share code+object. The flood holds no fd itself, so its only pressure
+/// exposure is a concurrent fd-holder overlapping its microsecond
+/// grace-128 crossing -- which is why it takes the shared
+/// `FD_FLOOD_LOCK` like every other flood (it did not, before this
+/// treatment) and runs under [`ensure_dispatch_flood_headroom`].
 #[test]
 fn flooding_single_pixel_buffers_trips_the_same_cap() {
+    // Lock and headroom on the test thread, before `drive`: a failed
+    // check must panic here, fast -- inside the client thread it would
+    // strand the dispatch loop on its 10s deadline instead.
+    let _flood = hold_flood_lock();
+    ensure_dispatch_flood_headroom(0);
     let report = drive(|stream| {
         let mut buffers = BufferClient::connect(stream)?;
         let manager = buffers
@@ -1082,7 +1221,12 @@ fn flooding_single_pixel_buffers_trips_the_same_cap() {
         }
         buffers.roundtrip()
     });
-    assert_raw_protocol_error(&report.resize, "wp_single_pixel_buffer_manager_v1", 0);
+    assert_raw_protocol_error_with_message(
+        &report.resize,
+        "wp_single_pixel_buffer_manager_v1",
+        0,
+        &format!("maximum of {MAX_BUFFERS_PER_CLIENT} live buffers"),
+    );
     assert_survivor_still_served(&report);
     assert_eq!(
         report.buffers, 0,
@@ -1146,10 +1290,20 @@ fn a_dmabuf_immed_past_a_full_budget_is_refused_before_validation() {
 /// compositor refused every import. See `wl_buffers.rs`: uncounted, the
 /// async path would be the one `wl_buffer` factory outside
 /// `MAX_BUFFERS_PER_CLIENT` entirely.
+///
+/// The 512-buffer fill runs under [`ensure_dispatch_flood_headroom`]: it
+/// sits near the fd-pressure boundary by design, and without a raised
+/// ceiling the refusal lands mid-fill with the pressure cause instead of
+/// after it with the budget one. The assertion pins the budget cause by
+/// message for the same reason -- both causes post 7 on this object.
 #[test]
 fn a_dmabuf_create_past_a_full_budget_is_refused_by_the_shared_budget() {
+    // Lock and headroom on the test thread, before `drive`: a failed
+    // check must panic here, fast -- inside the client thread it would
+    // strand the dispatch loop on its 10s deadline instead.
+    let _flood = hold_flood_lock();
+    ensure_dispatch_flood_headroom(u64::from(MAX_BUFFERS_PER_CLIENT));
     let report = drive(|stream| {
-        let _flood = hold_flood_lock();
         let mut buffers = BufferClient::connect(stream)?;
         for i in 0..MAX_BUFFERS_PER_CLIENT {
             buffers.bypass_once();
@@ -1176,7 +1330,12 @@ fn a_dmabuf_create_past_a_full_budget_is_refused_by_the_shared_budget() {
         );
         buffers.roundtrip()
     });
-    assert_raw_protocol_error(&report.resize, "zwp_linux_buffer_params_v1", 7);
+    assert_raw_protocol_error_with_message(
+        &report.resize,
+        "zwp_linux_buffer_params_v1",
+        7,
+        &format!("maximum of {MAX_BUFFERS_PER_CLIENT} live buffers"),
+    );
     assert_survivor_still_served(&report);
     assert_eq!(
         report.buffers, 0,
