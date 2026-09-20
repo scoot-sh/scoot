@@ -547,6 +547,17 @@ pub struct State {
     pub interaction_serials: input::interaction::Recent,
 
     pub keybindings: Keybindings,
+    /// Pids of children [`State::spawn`] started and the reaper has not
+    /// collected yet -- the *only* pids the `SIGCHLD` drain ever `waitpid`s
+    /// (see `child_reaper.rs` for why `-1` would steal the unit-test binary's
+    /// own forked children under `cargo test`).
+    ///
+    /// Written only here in `spawn` (on success -- a child that never started
+    /// has nothing to reap) and drained only by `reap_children` on the loop
+    /// thread, so entries cannot be lost or double-reaped: a pid stays until
+    /// its zombie is collected, a zombie holds its pid against reuse, and an
+    /// `ECHILD` (reaped elsewhere) forgets the entry rather than leaking it.
+    pub spawned_children: HashSet<u32>,
     /// Keycodes currently held that a keybinding intercepted on press, so
     /// their matching release is intercepted too instead of forwarded to
     /// whatever the focused client becomes in between. See `input::key`.
@@ -773,6 +784,7 @@ impl State {
             seat,
             interaction_serials: input::interaction::Recent::default(),
             keybindings,
+            spawned_children: HashSet::new(),
             suppressed_keys: HashSet::new(),
             held_keys: HashSet::new(),
             // true without going through request_render(), so nothing has
@@ -982,7 +994,15 @@ impl State {
             child.env(State::ACTIVATION_TOKEN_ENV, token.as_str());
         }
         match child.spawn() {
-            Ok(_) => tracing::info!(?command, "spawned"),
+            Ok(child) => {
+                // Tracked for the SIGCHLD drain, which reaps exactly these
+                // pids and nothing else (see `child_reaper.rs`). Inserted
+                // synchronously here, before the child can possibly exit and
+                // before any drain can run -- both this and the drain live on
+                // the loop thread -- so no reap is lost and none is doubled.
+                self.spawned_children.insert(child.id());
+                tracing::info!(?command, "spawned");
+            }
             Err(error) => {
                 // The child never started, so nothing will ever redeem this:
                 // pull it back out rather than occupying a slot until the

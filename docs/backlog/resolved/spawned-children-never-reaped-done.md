@@ -1,12 +1,14 @@
 ---
-title: "Every spawned child becomes a zombie: nothing in scoot ever reaps one"
-status: "open"
-area: "core"
-priority: "high"
+title: "Every spawned child becomes a zombie: nothing in scoot ever reaps one — RESOLVED."
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
 ---
 
-# Every spawned child becomes a zombie: nothing in scoot ever reaps one
+# Every spawned child becomes a zombie: nothing in scoot ever reaps one — RESOLVED.
+
+## The entry as filed
 
 Found 2026-09-19 while answering "how do we start waybar/fuzzel/a browser at
 session start". **Confirmed live, not code-traced** — this entry is not
@@ -277,3 +279,83 @@ Mind the constraint above when writing it: whatever the test installs must
 not be a process-wide `waitpid(-1)` drain, or it will reap the children
 `ipc/accept/tests.rs` and `wayland_accept/tests.rs` fork for themselves —
 green under `nextest`, red under `cargo test`.
+
+## Resolution (2026-09-20) — sigaction + wake eventfd, tracked-pid drain
+
+Built as the ticket filed it, with one documented deviation of letter but
+not of shape: the wake is *not* calloop's own `ping`, though it is the same
+mechanism (an eventfd drained by a level-triggered source, coalescing
+bursts). `Ping`'s sender is opaque -- there is no raw fd for a signal
+handler to write to -- and its `ping()` logs on error, which a handler may
+not do. So `compositor/child_reaper.rs` owns the eventfd directly: `install`
+keeps the write side as a process-lifetime fd named by an atomic (a `dup`
+of the loop's read end, so a dropped loop's fd number can never be reused
+under a still-stored value), the read side moves into a `Generic` source,
+and the handler does one 8-byte `write` plus `errno` save/restore and
+nothing else. The decision record the ticket asked for lives in that
+module's doc comment (`SIG_IGN` survives exec, the mask survives exec with
+libstd resetting SIGPIPE only, `-1` would steal the test binary's own
+forked children).
+
+`State::spawn` inserts each started child's pid into a new
+`spawned_children: HashSet<u32>` synchronously (failure arm inserts
+nothing); `reap_children` sweeps the whole set per wakeup with
+`waitpid(pid, WNOHANG)` -- `ECHILD` forgets the entry rather than leaking
+it, `EINTR` retries inline, any other errno keeps the entry and warns so a
+later wakeup retries. `install` runs once from `run`, before the startup
+command, and ends with a synchronous drain closing the install race (a
+signal discarded before the handler existed leaves no pending counter).
+Re-installing re-points the process-global handler at the newest loop
+(last wins) -- what the in-harness test relies on, and why production must
+not do it twice.
+
+Tests (`child_reaper/tests.rs`): a no-reaper control proving the probe sees
+`Z`; an 8-`true` burst through the real `spawn` collected with nothing
+tracked and nothing in `/proc` (fail-first verified by neutering the
+install: all eight sit `Z` until the timeout); and a child-disposition test
+asserting the `SIGCHLD` bit clear in the child's `SigIgn`, `SigBlk` *and*
+`SigCgt` (the ticket asked the first two; the third pins the exec-resets-
+handler row for free). The `SigIgn` leg's sensitivity was proven live by
+setting `SIG_IGN` before a spawn: the child reported
+`SigIgn: 0000000000010000` and the test fired -- which also re-derives the
+ticket's execve table on this machine.
+
+## Evidence
+
+All captured on the dev VM (`ssh -p 2222 dev@localhost`, source at
+`/mnt/scoot`, `CARGO_TARGET_DIR=/var/cargo-target`), tree uncommitted atop
+`4f8707c` unless noted; final commit SHA recorded in the merge.
+
+- `cargo nextest run --workspace`: 1150 passed, 4 skipped (0 failed).
+- `cargo test -p scoot`: 1045 passed, 0 failed (unit binary) + 3
+  integration -- the runner the `waitpid(-1)` hazard would break, green,
+  so the tracked-pid drain steals nothing from the fork/waitpid suites.
+- New tests under both runners: `cargo nextest run -p scoot child_reaper`
+  3 passed; `cargo test -p scoot child_reaper` 3 passed.
+- `cargo clippy -p scoot --all-targets -- -D warnings`: clean.
+  `cargo fmt --check -p scoot`: clean (Mac-side).
+- `scripts/smoke-test.sh` (`SMOKE_PREFIX=/tmp/smoke-reaper`, default
+  `--headless`): 17 `ok` lines, zero failure lines, exit 0 -- three
+  consecutive runs, since the diff touches `spawn`, which smoke exercises.
+- Live zombie probe replicating the ticket: headless scoot
+  (`/var/cargo-target/debug/scoot`, this branch), 6x
+  `scoot msg action spawn true`, 3s settle -- `ps --ppid` shows no child
+  rows at all, zero `Z`. Ten further spawns, same result. Live
+  `/proc/<pid>/status`: `SigBlk: 0000000000000000`,
+  `SigCgt: 0000000000010440` (the `0x10000` bit is the caught `SIGCHLD`;
+  `0x440` is libstd's pre-existing `SIGSEGV`/`SIGBUS` overflow handlers,
+  untouched by this diff), `Threads: 1`.
+- Fail-first record: burst test with the `install` line neutered times out
+  naming all eight pids `Some('Z')`; disposition test with `SIG_IGN`
+  forced pre-spawn fails on `SigIgn` `65536 != 0`. Both restored after.
+
+## Deliberately left out (per the ticket's scope)
+
+- Supervision/restart/backoff: reaping only, as the ticket's boundary
+  section requires (see `startup-programs-and-autostart.md`).
+- Startup/autostart config and portals env: separate open items, untouched.
+- No benchmark: `SIGCHLD` arrives at process-exit rate, not per-frame; the
+  drain's empty-set fast path is one branch, and nothing on a hot path
+  (input dispatch, render loop, IPC dispatch) was touched.
+- No README change: internal reliability fix, no new config, keybinding,
+  CLI flag, or IPC surface a user or agent would need to know.

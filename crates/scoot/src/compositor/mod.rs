@@ -7,6 +7,7 @@
 mod activation;
 mod alpha_modifier;
 mod bind_budget;
+mod child_reaper;
 mod config;
 mod content_type;
 mod cursor;
@@ -235,6 +236,14 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
         std::env::set_var("XCURSOR_THEME", state.cursor.theme().name());
         std::env::set_var("XCURSOR_SIZE", state.cursor.theme().size().to_string());
     }
+
+    // The SIGCHLD reaper, before the first spawn below: an exit between the
+    // install and the first drain leaves no pending wakeup (its signal was
+    // discarded or went elsewhere), and `install`'s synchronous drain is
+    // what closes that race -- so the startup command must not run first.
+    // Every later spawn (keybinding and IPC `spawn`) flows through the same
+    // `State::spawn`, which is what tracks the pids this reaps.
+    child_reaper::install(&event_loop.handle(), &mut state)?;
 
     if !options.command.is_empty() {
         let command = options.command.clone();
