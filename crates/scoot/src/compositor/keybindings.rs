@@ -214,6 +214,21 @@ impl Default for Keybindings {
 }
 
 impl Keybindings {
+    /// Every binding in table order: the modifiers, the unshifted keysym,
+    /// and what the combo is bound to.
+    ///
+    /// What `--print-default-config` iterates to spell the default `[binds]`
+    /// table back out (see `config::default_config_toml`): table order is
+    /// the hardcoded `Default` order, so the emitted file is byte-stable
+    /// from run to run -- unlike the `HashMap` the file loader reads, which
+    /// is why the loader refuses to arbitrate collisions rather than pick a
+    /// file-order winner it cannot truthfully name.
+    pub fn iter(&self) -> impl Iterator<Item = (Modifiers, Keysym, &Bound)> + '_ {
+        self.0
+            .iter()
+            .map(|(mods, keysym, bound)| (*mods, *keysym, bound))
+    }
+
     /// What `keysym` held with exactly `mods` is bound to, if anything.
     pub fn match_key(&self, keysym: Keysym, mods: Modifiers) -> Option<Bound> {
         self.0

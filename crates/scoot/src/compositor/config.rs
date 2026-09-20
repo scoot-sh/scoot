@@ -54,7 +54,7 @@ use std::path::{Path, PathBuf};
 
 use scoot_core::{Action, Config};
 use serde::Deserialize;
-use smithay::input::keyboard::Keysym;
+use smithay::input::keyboard::{Keysym, xkb};
 
 use crate::cli::RendererKind;
 
@@ -511,6 +511,241 @@ pub fn enforce_vt_binds(table: &mut Keybindings) {
             "a config-file keybinding on this combo was overridden by --tty's \
              VT-switch binding, which must always work as the recovery path"
         );
+    }
+}
+
+// -- `--print-default-config` -----------------------------------------------
+
+/// Emits a starting config file generated from the compositor's own live
+/// defaults: [`Config::default`], [`Appearance::default`],
+/// [`Keybindings::default`], scale 1.0, no `[tty] gpu`, no `[renderer]`
+/// backend, and no `[autostart]` entries.
+///
+/// Every key is present and commented out with its default as the value, so
+/// the emitted file as-is *is* the defaults -- uncomment a line to set it
+/// explicitly. That shape is also what makes the anti-drift test possible:
+/// the output parses back (through [`FileConfig`], the same type startup
+/// reads) to the defaults it was generated from, so a changed default
+/// changes the emitted file automatically instead of going stale like a
+/// hand-maintained string would.
+///
+/// Three appearance colors are the nearest `"#rrggbb"` to built-ins none of
+/// whose floats is exactly representable in 8 bits (see
+/// `docs/configuration.md`); leave one commented for the real default.
+/// The conversion is [`hex`]'s, which follows the same `.round()` the
+/// compositor's own pixel conversion uses, and the test below pins the
+/// fixed point: parsing the emitted hex and re-emitting it is byte-stable.
+///
+/// Determinism is structural, not sorted-at-the-end: `[binds]` iterates the
+/// default table in its hardcoded order (see [`Keybindings::iter`]), and
+/// every other section is a scalar in a fixed position -- so two emissions
+/// are byte-identical, with no timestamp and no `HashMap` order in play.
+/// (The file *loader* reads `[binds]` into a `HashMap`, which is why it
+/// refuses to arbitrate collisions; the emitter never touches that map.)
+pub fn default_config_toml() -> String {
+    let config = Config::default();
+    let appearance = Appearance::default();
+    let keybindings = Keybindings::default();
+
+    let mut out = String::new();
+    out.push_str(
+        "# A starting scoot config, generated from the compositor's own built-in\n\
+         # defaults (`scoot --print-default-config`). Every key is present and\n\
+         # commented out with its default as the value, so this file as-is is\n\
+         # exactly the defaults: uncomment a line to set it explicitly, and save\n\
+         # it as ~/.config/scoot/config.toml (or pass it with --config PATH).\n\
+         #\n\
+         # The ring/background colors are the nearest \"#rrggbb\" to built-ins\n\
+         # none of whose floats is exactly representable in 8 bits -- leave one\n\
+         # commented for the real default (see docs/configuration.md, which these\n\
+         # comments summarize, not replace).\n\
+         #\n\
+         # Gap, appearance and binds re-apply live with `scootctl reload`;\n\
+         # everything else is startup-only and a reload refuses it with a message.\n",
+    );
+
+    out.push_str("\n[layout]\n");
+    out.push_str(
+        "# Gap between columns, between windows stacked in a column, and at output edges.\n",
+    );
+    out.push_str(&format!("# gap = {}\n", config.gap));
+    out.push_str("# Column widths as fractions of the output width, in cycle order.\n");
+    let widths: Vec<String> = config
+        .column_widths
+        .iter()
+        .map(|w| format!("{w:?}"))
+        .collect();
+    out.push_str(&format!("# column_widths = [{}]\n", widths.join(", ")));
+    out.push_str("# Index into column_widths for newly created columns.\n");
+    out.push_str(&format!(
+        "# default_column_width = {}\n",
+        config.default_column_width
+    ));
+
+    out.push_str("\n[appearance]\n");
+    out.push_str("# Ring thickness; clamped to at most half of gap.\n");
+    out.push_str(&format!(
+        "# focus_ring_width = {}\n",
+        appearance.focus_ring_width
+    ));
+    out.push_str(&format!(
+        "# focus_ring_active_color = \"{}\"\n",
+        hex(appearance.focus_ring_active_color)
+    ));
+    out.push_str(&format!(
+        "# focus_ring_inactive_color = \"{}\"\n",
+        hex(appearance.focus_ring_inactive_color)
+    ));
+    out.push_str(&format!(
+        "# background_color = \"{}\"\n",
+        hex(appearance.background_color)
+    ));
+    out.push_str(&format!("# cursor_size = {}\n", appearance.cursor_size));
+    out.push_str(&format!(
+        "# cursor_color = \"{}\"\n",
+        hex(appearance.cursor_color)
+    ));
+    out.push_str(
+        "# Unset follows $XCURSOR_THEME, then \"default\"; name one here only to override that.\n",
+    );
+    out.push_str("# cursor_theme = \"Adwaita\"\n");
+    out.push_str(&format!("# prefer_no_csd = {}\n", appearance.prefer_no_csd));
+
+    out.push_str("\n[output]\n");
+    out.push_str("# Output scale advertised to clients and rendered at.\n");
+    out.push_str("# scale = 1.0\n");
+
+    out.push_str("\n[renderer]\n");
+    out.push_str(
+        "# Which renderer composites each frame. --renderer wins over this when both name one.\n",
+    );
+    out.push_str(&format!(
+        "# backend = \"{}\"\n",
+        RendererKind::default().as_str()
+    ));
+
+    out.push_str("\n[tty]\n");
+    out.push_str(
+        "# Unset means the automatic search picks; --gpu PATH wins over this when both name one.\n\
+         # Name the display controller (prefer a stable /dev/dri/by-path/... alias):\n",
+    );
+    out.push_str("# gpu = \"/dev/dri/card0\"\n");
+
+    out.push_str("\n[autostart]\n");
+    out.push_str("# Action strings to run once each, in file order, at session startup.\n");
+    out.push_str("# commands = []\n");
+
+    out.push_str("\n[binds]\n");
+    for (mods, keysym, bound) in keybindings.iter() {
+        match bound {
+            Bound::Action(action) => {
+                out.push_str(&format!(
+                    "# \"{}\" = \"{}\"\n",
+                    combo_string(mods, keysym),
+                    action_string(action)
+                ));
+            }
+            // No config spelling exists for these: they are layered onto the
+            // table by the session itself (`enforce_vt_binds`), not read out
+            // of it. The defaults hold none today, so this arm is future
+            // proofing, not dead code -- and a comment keeps the emission
+            // total rather than silently dropping a binding.
+            Bound::ChangeVt(vt) => {
+                out.push_str(&format!(
+                    "# (plus a session-managed VT-switch binding for VT {vt}, \
+                     which has no config spelling)\n"
+                ));
+            }
+        }
+    }
+    out.push_str(
+        "# Under --tty, Ctrl+Alt+F1..F12 VT-switch bindings are layered on last and\n\
+         # always win over a colliding bind here; they have no config spelling.\n",
+    );
+    out
+}
+
+/// This color as `"#rrggbb"` (opaque) or `"#rrggbbaa"`, the nearest 8-bit
+/// value per channel.
+///
+/// The `.round()` matches the compositor's own channel conversion
+/// (`Color`'s pixel value), rather than truncating toward a different
+/// neighbor: the emitted hex is what the running default renders closest
+/// to, and parsing it back is a fixed point (see the round-trip test).
+fn hex(color: Color) -> String {
+    let channel = |v: f32| (v * 255.0).round().clamp(0.0, 255.0) as u8;
+    let (r, g, b, a) = (
+        channel(color.r),
+        channel(color.g),
+        channel(color.b),
+        channel(color.a),
+    );
+    if a == u8::MAX {
+        format!("#{r:02x}{g:02x}{b:02x}")
+    } else {
+        format!("#{r:02x}{g:02x}{b:02x}{a:02x}")
+    }
+}
+
+/// One `[binds]` combo back in the string form the file loader parses
+/// (`parse_combo`): modifiers in a fixed order, then the keysym's own name.
+///
+/// The name comes from xkb itself (`keysym_get_name`), not a table kept
+/// beside the defaults -- the same lookup `keysym_named` resolves through,
+/// so whatever it spells is spellable back. The round-trip test pins that
+/// for every default bind.
+fn combo_string(mods: Modifiers, keysym: Keysym) -> String {
+    let mut combo = String::new();
+    if mods.super_ {
+        combo.push_str("super+");
+    }
+    if mods.shift {
+        combo.push_str("shift+");
+    }
+    if mods.ctrl {
+        combo.push_str("ctrl+");
+    }
+    if mods.alt {
+        combo.push_str("alt+");
+    }
+    combo.push_str(&xkb::keysym_get_name(keysym));
+    combo
+}
+
+/// One action back in the string form the file loader parses
+/// (`scootctl::action`): the same grammar `scootctl action ...` and a
+/// `[binds]` value use, so whatever this spells loads back to the same
+/// [`Action`]. Total over every variant -- including ones the defaults hold
+/// none of -- so a future default needs no second change here.
+fn action_string(action: &Action) -> String {
+    use scoot_core::{Horizontal, Vertical};
+    let direction = |h: &Horizontal| match h {
+        Horizontal::Left => "left",
+        Horizontal::Right => "right",
+    };
+    let vertical = |v: &Vertical| match v {
+        Vertical::Up => "up",
+        Vertical::Down => "down",
+    };
+    match action {
+        Action::FocusColumn(d) => format!("focus-column {}", direction(d)),
+        Action::MoveColumn(d) => format!("move-column {}", direction(d)),
+        Action::ConsumeOrExpel(d) => format!("consume-or-expel {}", direction(d)),
+        Action::FocusWindow(d) => format!("focus-window {}", vertical(d)),
+        Action::MoveWindow(d) => format!("move-window {}", vertical(d)),
+        Action::FocusWindowId(id) => format!("focus-window-id {}", id.0),
+        Action::FocusWorkspace(d) => format!("focus-workspace {}", vertical(d)),
+        Action::FocusWorkspaceIndex(index) => format!("focus-workspace-index {index}"),
+        Action::MoveWindowToWorkspace(d) => {
+            format!("move-window-to-workspace {}", vertical(d))
+        }
+        Action::MoveWindowToWorkspaceIndex(index) => {
+            format!("move-window-to-workspace-index {index}")
+        }
+        Action::CycleColumnWidth => "cycle-column-width".to_owned(),
+        Action::CloseFocused => "close".to_owned(),
+        Action::Spawn(command) => format!("spawn {}", command.join(" ")),
+        Action::Quit => "quit".to_owned(),
     }
 }
 
@@ -2108,5 +2343,177 @@ mod tests {
             Some(PathBuf::from("")),
             "an empty gpu must survive loading so resolve can refuse it loudly"
         );
+    }
+
+    // -- `--print-default-config` -----------------------------------------
+
+    /// The loop-closing pin from the ticket: the emitted file is generated
+    /// from the live defaults, so parsing it back through the same
+    /// [`FileConfig`] startup reads must yield those same defaults. A
+    /// changed default changes the emission automatically; if the two ever
+    /// disagree -- a hand-edited emission, a new field someone forgot to
+    /// emit -- this fails.
+    ///
+    /// The user-facing harm this guards is an emitted file that does not
+    /// parse back, or parses to different behavior: a starting config that
+    /// silently is not the defaults. Load-bearing, and proven so by
+    /// mutation (a wrong `gap` in the emission fails the first assertion).
+    #[test]
+    fn the_emitted_default_config_parses_back_to_the_live_defaults() {
+        let emitted = default_config_toml();
+        let file: FileConfig =
+            toml::from_str(&emitted).expect("the emitted file must parse as a config");
+        let loaded = LoadedConfig::from_file(file);
+        assert_eq!(
+            loaded.config,
+            Config::default(),
+            "the [layout] emission drifted from Config::default()"
+        );
+        assert!(
+            loaded.keybindings.same_bindings_as(&Keybindings::default()),
+            "the [binds] emission drifted from Keybindings::default()"
+        );
+        assert_eq!(loaded.scale, 1.0, "the [output] emission drifted");
+        assert_eq!(loaded.gpu, None, "the [tty] emission drifted");
+        assert_eq!(loaded.renderer, None, "the [renderer] emission drifted");
+        assert!(
+            loaded.autostart.is_empty(),
+            "the [autostart] emission drifted"
+        );
+        let defaults = Appearance::default();
+        // Exact, not approximate: every appearance key is commented out, so
+        // the file carries no color value at all and each field falls back
+        // to its built-in -- including the three colors none of whose floats
+        // is exactly representable in 8 bits. The nearest-hex approximation
+        // only enters when a user uncomments a color line, which is disclosed
+        // in the emission's own header comment.
+        assert_eq!(
+            loaded.appearance, defaults,
+            "the [appearance] emission drifted from Appearance::default()"
+        );
+        // What must hold for those uncommented colors is the fixed point:
+        // parsing an emitted hex and re-emitting it is byte-stable, so an
+        // uncommented line never drifts a second time.
+        for (name, built_in) in [
+            ("focus_ring_active_color", defaults.focus_ring_active_color),
+            (
+                "focus_ring_inactive_color",
+                defaults.focus_ring_inactive_color,
+            ),
+            ("background_color", defaults.background_color),
+            ("cursor_color", defaults.cursor_color),
+        ] {
+            let parsed = Color::parse(&hex(built_in))
+                .unwrap_or_else(|| panic!("the emission of {name} is not a parseable color"));
+            assert_eq!(
+                hex(parsed),
+                hex(built_in),
+                "{name} is not a fixed point: re-emitting the parsed color moves it"
+            );
+        }
+    }
+
+    /// The second cheap pin: every `[section]` the loader knows must appear
+    /// in the output, so a newly added table cannot silently go un-emitted
+    /// while the round-trip test above still passes on everything else.
+    #[test]
+    fn the_emitted_default_config_names_every_section_the_loader_knows() {
+        let emitted = default_config_toml();
+        for section in [
+            "[layout]",
+            "[appearance]",
+            "[output]",
+            "[renderer]",
+            "[tty]",
+            "[autostart]",
+            "[binds]",
+        ] {
+            assert!(
+                emitted.lines().any(|line| line.trim() == section),
+                "the emission never names {section}"
+            );
+        }
+    }
+
+    /// Byte-identical across runs: no timestamps, and no `HashMap` iteration
+    /// order anywhere in the emission path (`[binds]` iterates the default
+    /// table's hardcoded `Vec` order -- see `Keybindings::iter`). Humans
+    /// diff this output; run-to-run noise would be `apply_binds`' collision
+    /// rule applied to the project's own file.
+    #[test]
+    fn the_emitted_default_config_is_byte_identical_across_runs() {
+        assert_eq!(default_config_toml(), default_config_toml());
+    }
+
+    /// The ticket's format model: every key present *and* commented, with
+    /// its default as the value -- so the file as-is is exactly the
+    /// defaults -- and every default bind spelled back in a form the loader
+    /// accepts, resolving to the same combo and the same action.
+    #[test]
+    fn every_emitted_key_is_commented_and_every_default_bind_loads_back() {
+        let emitted = default_config_toml();
+        for line in emitted.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with('[') {
+                continue;
+            }
+            assert!(
+                trimmed.starts_with('#'),
+                "a live (uncommented) key line, which would stop being the defaults: {line}"
+            );
+        }
+
+        let mut binds = 0;
+        for (mods, keysym, bound) in Keybindings::default().iter() {
+            let Bound::Action(action) = bound else {
+                panic!("the defaults hold no session-managed binds to emit as comments");
+            };
+            let combo = combo_string(mods, keysym);
+            let spelling = action_string(action);
+            assert!(
+                emitted
+                    .lines()
+                    .any(|line| line.trim() == format!("# \"{combo}\" = \"{spelling}\"")),
+                "default bind {combo} = {spelling} is missing from the emission"
+            );
+            let (parsed_mods, parsed_keysym) =
+                parse_combo(&combo).expect("an emitted combo must parse");
+            assert_eq!(
+                (parsed_mods, parsed_keysym),
+                (mods, keysym),
+                "emitted combo {combo} does not resolve back"
+            );
+            let mut tokens = spelling.split_whitespace().map(str::to_owned);
+            let parsed = scootctl::action(&mut tokens).expect("an emitted action must parse");
+            assert!(
+                tokens.next().is_none(),
+                "emitted action `{spelling}` leaves trailing text"
+            );
+            assert_eq!(
+                Action::from(parsed),
+                *action,
+                "emitted action `{spelling}` does not resolve back"
+            );
+            binds += 1;
+        }
+        // "All 36 of them" (see docs/configuration.md): a dropped default
+        // bind must fail loudly here, not just shrink the file.
+        assert_eq!(binds, 36, "a default bind was added or lost");
+    }
+
+    /// The 8-bit spelling's other half: a translucent color emits
+    /// `"#rrggbbaa"` and parses back to itself, so the alpha arm of `hex`
+    /// is pinned even though no default exercises it.
+    #[test]
+    fn a_translucent_color_emits_eight_digits_and_parses_back() {
+        let color = Color::new(1.0, 0.5, 0.0, 0.5);
+        let spelled = hex(color);
+        assert_eq!(
+            spelled.len(),
+            9,
+            "expected `#` plus eight digits: {spelled}"
+        );
+        let parsed = Color::parse(&spelled).expect("the emitted alpha form must parse");
+        assert_eq!(hex(parsed), spelled, "the alpha form is not a fixed point");
     }
 }
