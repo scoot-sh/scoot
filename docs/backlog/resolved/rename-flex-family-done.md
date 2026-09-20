@@ -1,15 +1,31 @@
 ---
-title: "Split the CLI out of the compositor binary into `scootctl` — the other half of this entry, the `flexwm` → `scoot` rename, has landed."
-status: "open"
+title: "Split the CLI out of the compositor binary into `scootctl` — both halves landed; closed 2026-09-20."
+status: "resolved"
 area: "meta"
 priority: "low"
 blocked: null
 ---
 
-# Split the CLI out of the compositor binary into `scootctl` — the other half of this entry, the `flexwm` → `scoot` rename, has landed.
+# Split the CLI out of the compositor binary into `scootctl` — CLOSED, both halves landed
 
-*(Filename kept as `rename-flex-family.md` so existing links keep resolving;
-`flex` is not the name that was chosen — see below.)*
+Closed 2026-09-20 by coordinator verification (no code change): the rename
+half landed 2026-09-18 (PR #128, `flexwm` → `scoot`, no compat fallback) and
+the `scootctl` half landed 2026-09-20 (PR #157, new lib+bin crate, `scoot
+msg` kept as a permanent alias, Darwin default is `scootctl` — see
+[`scootctl-split-done.md`](./scootctl-split-done.md)). The `.claude/agents/`
+role files were renamed by the user in a separate pass (zero residual
+`flexwm` under `.claude/`). A status bar stays out of scope, as the entry
+always said.
+
+Remaining `flexwm` spellings in the tree are all deliberate, verified
+2026-09-20: the recorded-evidence archives (`docs/backlog/resolved/`,
+`docs/roadmap/`, `Asahi.md` run records — renaming those would falsify what
+was run), `vm/README.md`'s pre-rename migration instructions (functional),
+and the on-disk checkout path `/Users/steveyackey/code/flexwm` (the dev VM's
+9p share points at that exact directory; it did not move).
+
+*(Original filename kept in spirit — `rename-flex-family.md` — so existing
+links keep resolving; `flex` is not the name that was chosen — see below.)*
 
 ## What landed, 2026-09-18: the rename, as `scoot`, not `flex`
 

@@ -76,6 +76,13 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[The rename entry is closed](docs/backlog/resolved/rename-flex-family-done.md)**
+  (2026-09-20, no code — coordinator verification): both halves landed
+  earlier (PR #128 the `flexwm` → `scoot` rename, PR #157 the `scootctl`
+  split), the `.claude/agents/` role files were renamed by the user, and
+  every remaining `flexwm` spelling in the tree is deliberate (evidence
+  archives, VM migration text, the on-disk checkout path the 9p share
+  points at).
 - **[No config reload](docs/backlog/resolved/config-reload-done.md)**
   (2026-09-20) — the biggest remaining daily-driver gap, and the README
   "Not yet" line that named it: `scootctl reload` (new session-level
