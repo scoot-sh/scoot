@@ -76,6 +76,16 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[Icon live-buffer-budget flood flake under `cargo
+  test`](docs/backlog/resolved/icon-buffer-budget-fd-pressure-flake-done.md)**
+  (2026-09-20, test-only) — the 512-fd flood sat near the process-wide
+  fd-pressure boundary by design, so neighbours' fds tipped the refusal
+  into the flood (10s `PATIENCE` timeout, never nextest). Now the flood
+  raises soft `RLIMIT_NOFILE` to 4096 with verified headroom (fast loud
+  panic naming the numbers where the table cannot fit it, never a
+  silent skip), the 513th refusal is pinned to the budget by its message
+  (same code/object as the pressure refusal), and the 512-count is pinned
+  again by a deterministic test opening no fd at all.
 - **[No documented flake-consumer path, no home-manager/NixOS
   module](docs/backlog/resolved/flake-consumer-and-home-manager-done.md)**
   (2026-09-20) — both halves: README Install carries the consumer
@@ -1099,8 +1109,11 @@ each item's own file records why it landed when it did.
   post-fix green), and each marker re-proven sensitive by neutering. Found
   alongside and filed separately (low, load-only, and reproduced at pristine
   `main`): the icon live-buffer-budget flood is
-  [refused by process-wide fd pressure](docs/backlog/testing/icon-buffer-budget-fd-pressure-flake.md)
-  when a neighbour test holds fds at the wrong moment.
+  [refused by process-wide fd pressure](docs/backlog/resolved/icon-buffer-budget-fd-pressure-flake-done.md)
+  when a neighbour test holds fds at the wrong moment — RESOLVED
+  2026-09-20 (test-only: raised ceiling with verified headroom, budget
+  refusal pinned by message, 512-count pinned by a deterministic
+  fd-free test).
 
 ## What's next
 
