@@ -562,15 +562,15 @@ exactly what `State::spawn` started), and two gaps. They share a mechanism
   `grim`, so the ticket's "no backend speaks ext" premise is superseded with
   sources cited). Flake install wiring filed as the packaging remainder;
   live portal proof impossible on the dev VM (no portal stack installed).
-- [Nothing documents how to start a bar or a launcher, and `--` takes one command](./config/startup-programs-and-autostart.md)
-  — `docs/protocols.md` shows `waybar &` without ever saying where that shell
-  runs. Carries the design argument for what "idiomatic scoot config" means:
-  config is *state*, the session script is *behavior*, and the reason that
-  line holds is that `config.rs:565` parses a `[binds]` value with the same
-  `cli::action` the IPC uses — one vocabulary, three doors. An optional
-  `[autostart]` would be a list of those same action strings. Supervision is
-  argued out of scope (and the webtop target has no systemd, which is the
-  wrinkle).
+- [Nothing documents how to start a bar or a launcher, and `--` takes one command](./resolved/startup-programs-and-autostart-done.md)
+  — RESOLVED 2026-09-20: "Starting a session" documented (`session.sh` +
+  webtop `/defaults/startwm.sh` variant, in `docs/configuration.md` with a
+  README pointer), `[autostart] commands` built as a flat list of action
+  strings through the shared `scootctl::action` parser (fail-open per
+  entry, entries first in file order then the `--` command, no supervision),
+  home-manager left as a pointer for the flake ticket. The entry's design
+  argument stands: config is *state*, the session script is *behavior*, and
+  the reason that line holds is that one vocabulary parses in three doors.
 
 ### Meta
 - [Split the CLI out into `scootctl`](./meta/rename-flex-family.md) — the `flexwm` → `scoot` rename half landed 2026-09-18 (PR #128); the crate split landed 2026-09-20 ([record](./resolved/scootctl-split-done.md)): new `scootctl` lib+bin crate, `scoot msg` kept as a permanent alias, Darwin default is `scootctl`. A status bar stays separate.

@@ -9,7 +9,7 @@ blocked: null
 # `XDG_CURRENT_DESKTOP` is set nowhere, so a desktop portal has no backend to pick — DONE
 
 Filed 2026-09-19 out of the same question as
-[`startup-programs-and-autostart.md`](../config/startup-programs-and-autostart.md):
+[`startup-programs-and-autostart.md`](startup-programs-and-autostart-done.md):
 what does a scoot session owe the programs running inside it. A repo-wide
 grep was the finding: the strings `XDG_CURRENT_DESKTOP`,
 `XDG_SESSION_DESKTOP` and `portal` occurred nowhere in `crates/ vm/
@@ -143,6 +143,9 @@ along in a live `foot`'s `/proc/$pid/environ`.
    `startup-programs-and-autostart.md`: that entry already names the D-Bus
    activation environment as the session script's mechanism, and it stays
    open (supervision/autostart config is explicitly out of scope here).
+   (Update 2026-09-20: the autostart half has since resolved — see
+   `startup-programs-and-autostart-done.md`; supervision remains out of
+   scope.)
 
 Also decided, from the bug-bash: **nothing is unset on session end.** The
 process environment dies with the process, and scoot never writes the

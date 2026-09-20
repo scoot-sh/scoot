@@ -1,4 +1,4 @@
-//! Loading `[layout]`/`[binds]` from a TOML config file into the types the
+//! Loading `[layout]`/`[binds]`/`[autostart]` from a TOML config file into the types the
 //! rest of the compositor already uses: [`scoot_core::Config`] and
 //! [`Keybindings`].
 //!
@@ -52,7 +52,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use scoot_core::Config;
+use scoot_core::{Action, Config};
 use serde::Deserialize;
 use smithay::input::keyboard::Keysym;
 
@@ -262,8 +262,54 @@ impl RendererConfig {
     }
 }
 
-/// The whole file. `binds`' values are parsed lazily, one at a time (see
-/// [`apply_binds`]), so one bad bind can't take the rest down with it.
+/// `[autostart]`. One field: `commands`, a flat list of action strings in
+/// exactly the grammar `scootctl action ...` (and a config file's `[binds]`
+/// values) use -- see `scootctl::action`, reused here rather than duplicated.
+/// No ordering, no conditionals, no supervision: entries run once each, in
+/// file order, before the `--` command (see `compositor::run`), and anything
+/// fancier belongs in the session script. Parsed lazily one at a time (see
+/// [`AutostartConfig::into_actions`]), so one bad entry can't take the rest
+/// down with it -- the same isolation philosophy [`apply_binds`] has for
+/// `[binds]`.
+#[derive(Debug, Default, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+struct AutostartConfig {
+    #[serde(default)]
+    commands: Vec<String>,
+}
+
+impl AutostartConfig {
+    /// Parses every entry through the shared action grammar, keeping the ones
+    /// that check out, in file order.
+    ///
+    /// A malformed entry (an unknown action, a missing argument, trailing
+    /// text after the action) is skipped with a `tracing::warn!` naming just
+    /// that entry; every other entry still runs. Fail-open, the same rule
+    /// `[binds]` follows: on `--tty` scoot *is* the session, so a typo must
+    /// never cost the session -- that refusal-to-start shape is the
+    /// user-facing harm this degrades away from, and it is pinned by test
+    /// (see `an_invalid_autostart_entry_is_skipped_and_the_session_still_starts`).
+    fn into_actions(self) -> Vec<Action> {
+        let mut actions = Vec::new();
+        for command in &self.commands {
+            match parse_autostart(command) {
+                Ok(action) => actions.push(action),
+                Err(reason) => {
+                    tracing::warn!(
+                        command = %command, %reason,
+                        "skipping an invalid [autostart] entry"
+                    );
+                }
+            }
+        }
+        actions
+    }
+}
+
+/// The whole file. `binds`' values and `autostart`'s entries are parsed
+/// lazily, one at a time (see [`apply_binds`] and
+/// [`AutostartConfig::into_actions`]), so one bad bind or entry can't take
+/// the rest down with it.
 #[derive(Debug, Default, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 struct FileConfig {
@@ -277,6 +323,8 @@ struct FileConfig {
     renderer: Option<RendererConfig>,
     #[serde(default)]
     tty: Option<TtyConfig>,
+    #[serde(default)]
+    autostart: Option<AutostartConfig>,
     #[serde(default)]
     binds: HashMap<String, String>,
 }
@@ -307,6 +355,14 @@ pub struct LoadedConfig {
     /// is unset too. `--renderer` wins over this when both name one; see
     /// `render::resolve`, which is also where `--tty` overrides both.
     pub renderer: Option<RendererKind>,
+    /// The `[autostart] commands` that parsed, in file order. Entries that
+    /// did not parse were already warned about and dropped at load (see
+    /// [`AutostartConfig::into_actions`]); an empty `Vec` -- no table, no
+    /// `commands` key, or nothing usable in it -- means nothing runs before
+    /// the `--` command. `compositor::run` drains these through `State::act`
+    /// before spawning `--`, so the full action grammar applies (a non-`spawn`
+    /// action at startup is the user's choice, documented as such).
+    pub autostart: Vec<Action>,
 }
 
 impl LoadedConfig {
@@ -318,6 +374,7 @@ impl LoadedConfig {
             scale: 1.0,
             gpu: None,
             renderer: None,
+            autostart: Vec::new(),
         }
     }
 
@@ -330,6 +387,7 @@ impl LoadedConfig {
         let scale = file.output.unwrap_or_default().into_scale();
         let gpu = file.tty.and_then(|tty| tty.gpu);
         let renderer = file.renderer.unwrap_or_default().into_kind();
+        let autostart = file.autostart.unwrap_or_default().into_actions();
         let mut keybindings = Keybindings::default();
         apply_binds(&mut keybindings, file.binds);
         Self {
@@ -339,6 +397,7 @@ impl LoadedConfig {
             scale,
             gpu,
             renderer,
+            autostart,
         }
     }
 }
@@ -570,6 +629,21 @@ fn parse_bind(key: &str, value: &str) -> Result<(Modifiers, Keysym, Bound), Stri
         return Err(format!("trailing text after the action in `{value}`"));
     }
     Ok((mods, keysym, Bound::Action(action.into())))
+}
+
+/// Parses one `[autostart]` entry: `value` is an action string in exactly the
+/// grammar `scootctl action ...` (and a `[binds]` value) uses -- see
+/// `scootctl::action`, reused here rather than duplicated. No spawn-only
+/// restriction: a non-`spawn` action at startup (say, `focus-workspace-index
+/// 2`) is the user's choice, documented as such where `[autostart]` is
+/// documented.
+fn parse_autostart(value: &str) -> Result<Action, String> {
+    let mut tokens = value.split_whitespace().map(str::to_owned);
+    let action = scootctl::action(&mut tokens).map_err(|error| error.to_string())?;
+    if tokens.next().is_some() {
+        return Err(format!("trailing text after the action in `{value}`"));
+    }
+    Ok(action.into())
 }
 
 /// Parses a combo string (`"super+shift+t"`) into this table's `Modifiers`
@@ -1052,6 +1126,150 @@ mod tests {
             ),
             None,
             "no default exists for Super+n, and the collision must not apply either alias"
+        );
+    }
+
+    // -- [autostart] --------------------------------------------------------
+
+    #[test]
+    fn a_full_autostart_table_round_trips_in_file_order() {
+        let toml = r#"
+            [autostart]
+            commands = [
+                "spawn waybar",
+                "spawn foot -e htop",
+                "focus-workspace-index 2",
+            ]
+        "#;
+        let file: FileConfig = toml::from_str(toml).expect("valid toml");
+        let loaded = LoadedConfig::from_file(file);
+        assert_eq!(
+            loaded.autostart,
+            vec![
+                Action::Spawn(vec!["waybar".into()]),
+                Action::Spawn(vec!["foot".into(), "-e".into(), "htop".into()]),
+                Action::FocusWorkspaceIndex(2),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_missing_autostart_table_means_nothing_runs() {
+        let file: FileConfig = toml::from_str("").unwrap();
+        let loaded = LoadedConfig::from_file(file);
+        assert!(loaded.autostart.is_empty());
+    }
+
+    #[test]
+    fn an_empty_autostart_list_means_nothing_runs() {
+        let (_dir, path) = write_temp("[autostart]\ncommands = []\n");
+        let loaded = load_from(&path, true).expect("valid config");
+        assert!(loaded.autostart.is_empty());
+    }
+
+    #[test]
+    fn an_invalid_autostart_entry_is_skipped_and_the_session_still_starts() {
+        // The load-bearing fail-open pin: a typo in one entry must cost that
+        // entry, never the session. On `--tty` scoot *is* the session, so a
+        // refusal here would be a hard lockout over a typo -- `load_from`
+        // still returns `Ok`, the valid entries still parse, and the rest of
+        // the file (binds included) still applies.
+        let (_dir, path) = write_temp(
+            r#"
+            [autostart]
+            commands = [
+                "not-a-real-action",
+                "spawn waybar",
+                "focus-column sideways",
+                "",
+                "close extra-garbage",
+            ]
+
+            [binds]
+            "super+n" = "focus-column right"
+        "#,
+        );
+        let loaded = load_from(&path, true).expect("a bad autostart entry must never fail startup");
+        assert_eq!(
+            loaded.autostart,
+            vec![Action::Spawn(vec!["waybar".into()])],
+            "only the one valid entry survives"
+        );
+        assert_eq!(
+            loaded.keybindings.match_key(
+                keysym_named("n").unwrap(),
+                Modifiers {
+                    super_: true,
+                    ..Modifiers::default()
+                }
+            ),
+            Some(Bound::Action(Action::FocusColumn(Horizontal::Right))),
+            "a bad autostart entry must not cost the rest of the file"
+        );
+    }
+
+    #[test]
+    fn autostart_trailing_text_after_the_action_is_rejected() {
+        assert_eq!(
+            parse_autostart("focus-column left extra-garbage"),
+            Err("trailing text after the action in `focus-column left extra-garbage`".into())
+        );
+        // `spawn` consumes the rest of the line as its command, so this is
+        // one spawn of three words, not an action plus trailing text.
+        assert_eq!(
+            parse_autostart("spawn foot -e htop"),
+            Ok(Action::Spawn(vec![
+                "foot".into(),
+                "-e".into(),
+                "htop".into()
+            ]))
+        );
+    }
+
+    #[test]
+    fn autostart_accepts_a_non_spawn_action() {
+        // No spawn-only restriction: the full action grammar applies, and a
+        // non-spawn action at startup is the user's choice.
+        assert_eq!(
+            parse_autostart("focus-workspace-index 2"),
+            Ok(Action::FocusWorkspaceIndex(2))
+        );
+        assert_eq!(parse_autostart("quit"), Ok(Action::Quit));
+    }
+
+    #[test]
+    fn an_autostart_wrong_type_falls_back_to_full_defaults() {
+        // `commands` given the wrong type is a whole-file parse error, the
+        // same as any other mistyped field -- fail-open at the file level
+        // (defaults, never a refusal), while a bad *entry* only costs that
+        // entry (see the fail-open pin above).
+        let (_dir, path) = write_temp("[autostart]\ncommands = \"spawn waybar\"\n");
+        let loaded = load_from(&path, true).expect("a mistyped field must never fail startup");
+        assert_eq!(loaded.config, Config::default());
+        assert!(loaded.autostart.is_empty());
+    }
+
+    #[test]
+    fn deny_unknown_fields_rejects_an_autostart_typo() {
+        let toml = "[autostart]\ncommand = [\"spawn waybar\"]\n";
+        assert!(toml::from_str::<FileConfig>(toml).is_err());
+    }
+
+    #[test]
+    fn a_hundred_entry_autostart_list_parses() {
+        // The 100-entry edge: a cold-path parse cost only, paid once at
+        // startup -- no bound needed, but the shape must hold together.
+        let mut toml = String::from("[autostart]\ncommands = [\n");
+        for i in 0..100 {
+            toml.push_str(&format!("    \"spawn program-{i}\",\n"));
+        }
+        toml.push_str("]\n");
+        let file: FileConfig = toml::from_str(&toml).expect("valid toml");
+        let loaded = LoadedConfig::from_file(file);
+        assert_eq!(loaded.autostart.len(), 100);
+        assert_eq!(
+            loaded.autostart[99],
+            Action::Spawn(vec!["program-99".into()])
         );
     }
 

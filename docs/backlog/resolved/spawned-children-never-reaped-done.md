@@ -255,7 +255,7 @@ be written down — a future reader will otherwise re-ask why the obvious
 This is reaping, not supervision. Restarting a bar that died, backing off a
 crash loop and deciding whether an exit was the user's intent are a service
 manager's job, not a compositor's — no peer compositor supervises. See
-[`startup-programs-and-autostart.md`](../config/startup-programs-and-autostart.md)
+[`startup-programs-and-autostart.md`](startup-programs-and-autostart-done.md)
 for where that boundary is drawn and why. The two are related only in that a
 `SIGCHLD` source is the hook anything else would need, and that reaping is
 worth doing whether or not supervision ever lands.
@@ -353,7 +353,9 @@ All captured on the dev VM (`ssh -p 2222 dev@localhost`, source at
 
 - Supervision/restart/backoff: reaping only, as the ticket's boundary
   section requires (see `startup-programs-and-autostart.md`).
-- Startup/autostart config and portals env: separate open items, untouched.
+- Startup/autostart config and portals env: separate items, untouched here
+  (both since resolved — see `startup-programs-and-autostart-done.md` and
+  `session-environment-and-portals-done.md`).
 - No benchmark: `SIGCHLD` arrives at process-exit rate, not per-frame; the
   drain's empty-set fast path is one branch, and nothing on a hot path
   (input dispatch, render loop, IPC dispatch) was touched.

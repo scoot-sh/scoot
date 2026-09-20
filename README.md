@@ -142,7 +142,14 @@ background_color = "#101014"
 [binds]
 "super+t" = "spawn foot"
 "ctrl+alt+space" = "spawn wofi --show drun"
+
+[autostart]
+commands = ["spawn waybar"]
 ```
+
+How a session starts its programs — a session script (`scoot -- ...`) vs
+`[autostart]` — is in
+[docs/configuration.md](docs/configuration.md#starting-a-session).
 
 Every table, field, default and failure mode is in
 [docs/configuration.md](docs/configuration.md). Almost nothing in it can stop

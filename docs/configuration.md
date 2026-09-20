@@ -2,7 +2,7 @@
 
 - [Command-line flags](#command-line-flags)
 - [The config file](#the-config-file)
-- [`[layout]`](#layout) · [`[appearance]`](#appearance) · [`[output]`](#output) · [`[renderer]`](#renderer) · [`[tty]`](#tty) · [`[binds]`](#binds)
+- [`[layout]`](#layout) · [`[appearance]`](#appearance) · [`[output]`](#output) · [`[renderer]`](#renderer) · [`[tty]`](#tty) · [`[autostart]`](#autostart) · [`[binds]`](#binds)
 - [Default keybindings](#default-keybindings)
 - [Example `config.toml`](#example-configtoml)
 
@@ -33,7 +33,7 @@ duplicated here.
 | `--mode WxH` | Which connector mode `--tty` picks. Ignored with a warning outside `--tty`. |
 | `--socket PATH` | Where the IPC control socket lives, overriding `$SCOOT_SOCKET` and the default `$XDG_RUNTIME_DIR/scoot.sock`. See [ipc.md](ipc.md#the-socket). |
 | `--config PATH` | Load this TOML file instead of searching the default paths. |
-| `-- COMMAND...` | Spawn this command once the session is up. |
+| `-- COMMAND...` | Spawn this command once the session is up, after `[autostart]` entries (see [Starting a session](#starting-a-session)). |
 | `--help` | Usage, every request and every action. |
 
 Environment scoot reads: `$XDG_RUNTIME_DIR` (required — a missing one is a
@@ -117,13 +117,69 @@ What it is **not**, yet — the work tracked in
   `ext-workspace` publishes one group, and a session lock covers the first
   output.
 
+## Starting a session
+
+scoot starts the programs inside the session two ways, which compose rather
+than compete. A bar, a wallpaper, a notification daemon, a launcher — each
+starts "the same way you start anything else inside the session" (see
+[protocols.md](protocols.md#layer-shell-bars-wallpapers-launchers)); this
+section says where that shell runs.
+
+**The session script** is the `-- COMMAND...` flag: everything after `--` is
+one program and its arguments, run once the session is up with
+`WAYLAND_DISPLAY`, `SCOOT_SOCKET` and the session environment already set.
+It is the 20% route — the one with ordering, conditionals, and `wait`:
+
+```sh
+#!/bin/sh
+# ~/bin/session.sh
+swaybg -c '#123456' &     # a wallpaper, on the background layer
+waybar &                  # a bar, on the top layer
+mako &                    # a notification daemon
+exec foot                 # the terminal the session starts with
+```
+
+```sh
+scoot --tty -- ~/bin/session.sh
+```
+
+scoot does not wait on the script and does not exit when it exits — fire
+and forget — and it restarts nothing that dies. Supervision is explicitly
+out of scope: restarting a crashed bar is a service manager's job (on the
+webtop target, the container's — that target has no systemd). Exited
+children are reaped, so nothing lingers as a zombie.
+
+**On webtop**, scoot runs `--nested` inside the host compositor, launched
+from `/defaults/startwm.sh`:
+
+```sh
+#!/bin/sh
+# /defaults/startwm.sh (linuxserver webtop): the container's desktop init
+# execs this with the session environment already set. Start scoot nested
+# in the host compositor, with the same session script:
+exec scoot --nested -- /path/to/session.sh
+```
+
+**`[autostart]`** is the 80% route — the programs with no ordering or
+conditionals, as action strings in the config file (see
+[`[autostart]`](#autostart)). Entries run first, in file order, then the
+`--` command: the config declares the session baseline, the script carries
+the behavior. Spawning the same bar in both places yields two bars — pick
+one route per program.
+
+(Under home-manager, `programs.scoot.settings` renders this TOML and a
+session script carries the behavior half — see
+[`flake-consumer-and-home-manager.md`](backlog/packaging/flake-consumer-and-home-manager.md),
+which owns that mapping.)
+
 ## The config file
 
 `--config PATH` loads a TOML file explicitly. Without it, scoot looks for
 `$XDG_CONFIG_HOME/scoot/config.toml`, falling back to
 `~/.config/scoot/config.toml` if `$XDG_CONFIG_HOME` is unset or empty, and
-runs on built-in defaults if neither exists. Six optional tables:
-`[layout]`, `[appearance]`, `[output]`, `[renderer]`, `[tty]`, `[binds]`.
+runs on built-in defaults if neither exists. Seven optional tables:
+`[layout]`, `[appearance]`, `[output]`, `[renderer]`, `[tty]`,
+`[autostart]`, `[binds]`.
 Every field in every table is itself optional and defaults independently, so
 a config that only sets `gap` leaves everything else — including the rest of
 `[layout]` — at its built-in default.
@@ -289,6 +345,46 @@ fail silently rather than as a startup error:
 A user bind on a combo that already has a default simply replaces it; there
 is no "unbind" action.
 
+## `[autostart]`
+
+| Field | Type | Default | Meaning |
+|---|---|---|---|
+| `commands` | array of strings | `[]` | Action strings to run once each, in file order, at session startup — before the `--` command (see [Starting a session](#starting-a-session)). |
+
+Each entry is an action string in the grammar in [ipc.md](ipc.md#actions) —
+one parser handles `scootctl action ...` (and its `scoot msg` alias), a
+config file's `[binds]` values, and these entries:
+
+```toml
+[autostart]
+commands = [
+    "spawn waybar",
+    "spawn mako",
+]
+```
+
+Deliberately the *action* grammar, not a bare argv list: every string here
+is something `scoot msg action` would accept and a `[binds]` value could
+contain, which is what keeps the config agent-legible. There is no
+spawn-only restriction — a non-`spawn` action at startup (say,
+`"focus-workspace-index 2"`) is the user's choice, documented as such; it
+runs through the same `act` path a keybind or IPC request would take.
+
+Three behaviors worth knowing:
+
+- **Fail-open per entry.** A malformed entry (an unknown action, a missing
+  argument, trailing text after the action) is skipped with a warning naming
+  just that entry; every other entry still runs, the rest of the file still
+  applies, and the session always starts. On `--tty` scoot *is* the session,
+  so a typo must never cost it — the same rule `[binds]` follows (see
+  [Failure semantics](#failure-semantics)).
+- **Ordering.** Entries run first, in file order, then the `--` command.
+  Spawning the same bar in both places yields two bars — the same class as
+  two `spawn` binds, the user's composition to fix.
+- **No supervision.** An entry that exits instantly is reaped, not restarted;
+  telling a deliberate quit from a crash loop is a service manager's job,
+  not the compositor's.
+
 ## Default keybindings
 
 | Combo | Action |
@@ -373,4 +469,10 @@ scale = 1.0
 "super+t" = "spawn foot"
 "super+shift+t" = "spawn foot -e htop"
 "ctrl+alt+space" = "spawn wofi --show drun"
+
+[autostart]
+commands = [
+    "spawn waybar",
+    "spawn mako",
+]
 ```
