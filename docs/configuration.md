@@ -84,8 +84,9 @@ advertise the toplevel capture-source manager (see
 file as `scoot-portals.conf` in the first of these your setup provides —
 `~/.config/xdg-desktop-portal/`, `/etc/xdg-desktop-portal/`,
 `/usr/share/xdg-desktop-portal/` — and xdg-desktop-portal 1.17+ does the
-rest. (Packaging that install step into the flake is still open; until
-then this copy-over is manual.)
+rest. (Under home-manager this copy-over is the module's job:
+`programs.scoot.portals.enable`, on by default — see
+[`docs/nix.md`](nix.md). Without the module, it stays manual.)
 
 ### More than one output
 
@@ -171,8 +172,7 @@ one route per program.
 
 (Under home-manager, `programs.scoot.settings` renders this TOML and a
 session script carries the behavior half — see
-[`flake-consumer-and-home-manager.md`](backlog/packaging/flake-consumer-and-home-manager.md),
-which owns that mapping.)
+[`docs/nix.md`](nix.md), which owns that mapping.)
 
 ## The config file
 

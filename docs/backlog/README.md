@@ -497,10 +497,14 @@ be revisited.
   applied-vs-refused reply; scale/gpu/renderer/autostart/cursor stay
   startup-only and refuse with a message. Failed reloads keep the running
   config; `--tty` VT recovery binds are un-strippable.
-- [Consuming scoot from another flake, and the missing home-manager module](./packaging/flake-consumer-and-home-manager.md)
-  — the flake exposes `packages`/`apps`/`devShells` but **no** `overlays`,
-  `nixosModules` or `homeManagerModules`. Documenting what already works is
-  small; `programs.scoot.enable` is real work with real decisions.
+- [Consuming scoot from another flake, and the missing home-manager module](./resolved/flake-consumer-and-home-manager-done.md)
+  — RESOLVED 2026-09-20: README Install carries the consumer snippet and
+  `docs/nix.md` owns the fuller section; thin `programs.scoot` modules on
+  both sides (free-form `settings` via `pkgs.formats.toml`, opt-in
+  additive login-screen entry defaulted off, portals.conf installed by
+  default). Hermetic eval + content checks under `nix flake check`;
+  module-rendered configs proven live through a real `--headless`
+  session (empty, binds-with-quoting, wrong-type fail-safe).
 - [No way to emit a default config file](./resolved/default-config-command-done.md)
   — RESOLVED 2026-09-20: `scoot --print-default-config` emits a commented
   starting file to stdout, generated from the live defaults, parsing back to

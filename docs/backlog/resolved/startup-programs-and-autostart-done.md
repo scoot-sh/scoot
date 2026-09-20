@@ -60,7 +60,8 @@ commands = ["spawn waybar", ...]
 **Shape 3 — home-manager stays a pointer.** One sentence in "Starting a
 session" mapping `programs.scoot.settings` / a session script onto the
 state/behavior split, owned by
-[`flake-consumer-and-home-manager.md`](../packaging/flake-consumer-and-home-manager.md).
+[`docs/nix.md`](../../nix.md) (resolved from
+[`flake-consumer-and-home-manager-done.md`](./flake-consumer-and-home-manager-done.md)).
 
 ## The load-bearing property: fail-open per entry
 
