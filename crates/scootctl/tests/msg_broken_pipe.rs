@@ -20,10 +20,10 @@
 //! test's equivalence section and scoot's alias unit test.
 
 use std::io::{BufRead, BufReader, Write};
-use std::os::unix::net::UnixListener;
+use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 fn scootctl() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_scootctl"))
@@ -41,13 +41,73 @@ fn socket_path(name: &str) -> PathBuf {
     ))
 }
 
+/// How long the fake server waits for the `scootctl` child to connect
+/// before failing loudly. A connect that never arrives used to wedge the
+/// whole suite: `listener.accept()` blocks forever and `server.join()`
+/// never returns (observed as a >840s stick under parallel nextest).
+///
+/// Sized at 3x the 10s read/write timeouts below: spawn + exec + connect
+/// is strictly more work than one socket read, and it lands in tens of
+/// milliseconds even under load (measured 2026-09-20 on the dev VM:
+/// 0.019–0.113s for the connect-inclusive fixture tests inside a full
+/// 1212-test parallel run, 0.020–0.090s solo) — so 30s is >250x margin
+/// against a flaky-fast timeout, while still failing ~28x faster than the
+/// observed wedge. See `docs/backlog/resolved/msg-broken-pipe-accept-hang-done.md`.
+const ACCEPT_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Poll interval for the non-blocking accept loop. Adds at most this much
+/// latency to the normal connect path — noise next to a process spawn.
+const ACCEPT_POLL: Duration = Duration::from_millis(10);
+
+/// Accepts one connection, giving up loudly after `deadline` instead of
+/// blocking forever. `UnixListener::accept()` has no timeout knob, so the
+/// listener goes non-blocking and the loop polls it; the accepted socket
+/// itself is blocking again on return (Linux `accept()` clears
+/// `SOCK_NONBLOCK` for the new fd, and this is re-asserted explicitly so
+/// no later reader inherits a surprising mode).
+fn accept_with_deadline(
+    listener: &UnixListener,
+    deadline: Duration,
+) -> std::io::Result<UnixStream> {
+    listener.set_nonblocking(true)?;
+    let start = Instant::now();
+    loop {
+        match listener.accept() {
+            Ok((stream, _)) => {
+                stream.set_nonblocking(false)?;
+                return Ok(stream);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                if start.elapsed() >= deadline {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::TimedOut,
+                        format!(
+                            "fake IPC server: no client connected within {:?} \
+                             — the scootctl child failed to spawn or connect",
+                            deadline
+                        ),
+                    ));
+                }
+                std::thread::sleep(ACCEPT_POLL);
+            }
+            Err(e) => return Err(e),
+        }
+    }
+}
+
 /// Serves `reply_line` (one `\n`-terminated JSON line) to the first client
 /// that connects, then goes away. Reads the request first so a client that
 /// writes before reading never blocks on a full socket buffer.
+///
+/// The accept carries a deadline: a child that never connects (failed
+/// spawn, failed exec, connect hiccup under load) used to wedge the suite
+/// forever via `server.join()`, so it is a loud panic naming the cause
+/// instead. The panic message is preserved across the thread boundary by
+/// `join_server` below.
 fn serve_once(path: PathBuf, reply_line: Vec<u8>) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
         let listener = UnixListener::bind(&path).unwrap();
-        let (stream, _) = listener.accept().unwrap();
+        let stream = accept_with_deadline(&listener, ACCEPT_TIMEOUT).unwrap();
         stream
             .set_read_timeout(Some(Duration::from_secs(10)))
             .unwrap();
@@ -92,6 +152,16 @@ fn small_windows_reply() -> Vec<u8> {
     .to_vec()
 }
 
+/// Joins a `serve_once` thread, preserving the fixture's own panic message.
+/// `JoinHandle::unwrap()` would discard it behind `Any { .. }`, turning a
+/// named cause ("no client connected within ...") into an anonymous join
+/// failure — the loudness this fixture exists for.
+fn join_server(server: std::thread::JoinHandle<()>) {
+    if let Err(payload) = server.join() {
+        std::panic::resume_unwind(payload);
+    }
+}
+
 #[test]
 fn closed_stdout_on_a_large_reply_exits_quietly() {
     let path = socket_path("large");
@@ -110,7 +180,7 @@ fn closed_stdout_on_a_large_reply_exits_quietly() {
     drop(child.stdout.take());
     let status = child.wait().unwrap();
     let _ = std::fs::remove_file(&path);
-    server.join().unwrap();
+    join_server(server);
     assert!(
         status.success(),
         "closed stdout should exit 0, got {status}"
@@ -146,9 +216,41 @@ fn a_full_read_is_unchanged() {
         .output()
         .unwrap();
     let _ = std::fs::remove_file(&path);
-    server.join().unwrap();
+    join_server(server);
     assert!(output.status.success(), "got {}", output.status);
     let text = String::from_utf8(output.stdout).unwrap();
     let parsed: serde_json::Value = serde_json::from_str(&text).unwrap();
     assert_eq!(parsed["windows"][0]["title"], "one");
+}
+
+/// The accept deadline fires instead of hanging: with no client ever
+/// connecting, `accept_with_deadline` must return `TimedOut` at the
+/// deadline, naming the cause. Deterministic under load — nothing can
+/// complete the accept, so the lower bound cannot flake; the upper bound
+/// is deliberately generous (15x the 2s deadline) so only a true wedge
+/// fails it.
+#[test]
+fn accept_timeout_fires_without_a_client() {
+    let path = socket_path("accept-timeout");
+    let _ = std::fs::remove_file(&path);
+    let listener = UnixListener::bind(&path).unwrap();
+    let deadline = Duration::from_secs(2);
+    let start = Instant::now();
+    let err = accept_with_deadline(&listener, deadline).unwrap_err();
+    let elapsed = start.elapsed();
+    assert_eq!(err.kind(), std::io::ErrorKind::TimedOut);
+    assert!(
+        err.to_string().contains("no client connected"),
+        "timeout must name the cause, got: {err}"
+    );
+    assert!(
+        elapsed >= deadline,
+        "returned before the deadline: {elapsed:?}"
+    );
+    assert!(
+        elapsed < deadline * 15,
+        "deadline did not fire promptly: {elapsed:?}"
+    );
+    drop(listener);
+    let _ = std::fs::remove_file(&path);
 }
