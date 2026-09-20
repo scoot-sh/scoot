@@ -67,6 +67,7 @@ use super::popup::ActivePopupGrab;
 use super::render::Backend;
 use super::screencopy::Screencopy;
 use super::screenshot::{Encoder, PendingShot, ShotSink};
+use super::session_env;
 use super::session_lock::SessionLock;
 use super::shm_pools::ShmPools;
 use super::tty::Tty;
@@ -969,8 +970,11 @@ impl State {
 
     /// Runs a command inside this session.
     ///
-    /// The child inherits `WAYLAND_DISPLAY` and the IPC socket path, and --
-    /// unless the token table is full -- a fresh activation token in
+    /// The child inherits `WAYLAND_DISPLAY` and the IPC socket path, the
+    /// session-identity environment (`XDG_CURRENT_DESKTOP`,
+    /// `XDG_SESSION_TYPE`, `XDG_SESSION_DESKTOP` -- see `session_env` for
+    /// which are unconditional and which fill a vacuum), and -- unless the
+    /// token table is full -- a fresh activation token in
     /// `XDG_ACTIVATION_TOKEN`, so it can activate its own window when it maps
     /// one (see [`State::mint_spawn_token`] for which bounds apply and what a
     /// full table means). Takes `&mut` for the token table; both callers
@@ -984,6 +988,22 @@ impl State {
         if let Some(path) = &self.ipc_path {
             child.env(scoot_ipc::SOCKET_ENV, path);
         }
+        // The same `resolve` `run` applied to the process environment (see
+        // `session_env`): re-resolving here is idempotent there, and keeps a
+        // child correct even where the process environment was never settled.
+        // Set explicitly rather than inherited so the contract reads at this
+        // site, the way `WAYLAND_DISPLAY` does above.
+        let current_desktop = std::env::var(session_env::CURRENT_DESKTOP).ok();
+        let session_type = std::env::var(session_env::SESSION_TYPE).ok();
+        let session_desktop = std::env::var(session_env::SESSION_DESKTOP).ok();
+        let session_env = session_env::resolve(
+            current_desktop.as_deref(),
+            session_type.as_deref(),
+            session_desktop.as_deref(),
+        );
+        child.env(session_env::CURRENT_DESKTOP, session_env.current_desktop);
+        child.env(session_env::SESSION_TYPE, session_env.session_type);
+        child.env(session_env::SESSION_DESKTOP, session_env.session_desktop);
         // Removed rather than overwritten: the compositor itself may have been
         // started with one (a launcher client, a nested session), and that
         // token is a receipt for someone else's user action -- handing it to

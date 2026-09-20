@@ -550,18 +550,18 @@ resolved 2026-09-20: a `SIGCHLD` handler plus a tracked-pid drain reaps
 exactly what `State::spawn` started), and two gaps. They share a mechanism
 (what a session owes the programs inside it) but are separately actionable.
 
-- [`XDG_CURRENT_DESKTOP` is set nowhere, so a portal has no backend to pick](./core/session-environment-and-portals.md)
-  — the string does not occur in this project's code at all, while `mod.rs`
-  already exports four other variables for exactly this kind of reason. Portals are
-  how a Wayland browser does screen sharing and file dialogs, and a browser
-  is what the webtop target exists to run. Split into a two-line half (export
-  it) and a real half (D-Bus activation environment, `scoot-portals.conf`)
-  — and the entry is explicit that no portal has actually been watched to
-  fail yet, with the check that would settle it. Which backend serves
-  ScreenCast is left open rather than guessed: `xdg-desktop-portal-wlr`
-  wants `zwlr_screencopy_manager_v1`, which `docs/protocols.md` records as a
-  deliberate *non*-implementation, so pointing a config at it would ship a
-  backend that fails every request.
+- [`XDG_CURRENT_DESKTOP` is set nowhere, so a portal has no backend to pick](./resolved/session-environment-and-portals-done.md)
+  — RESOLVED 2026-09-20: `XDG_CURRENT_DESKTOP=scoot` exported unconditionally
+  plus `XDG_SESSION_TYPE`/`XDG_SESSION_DESKTOP` filled where no logind set
+  them (one pure `resolve`, applied in-process and per spawned child, pinned
+  by unit + live-child tests and a smoke-test section); activation
+  propagation decided as the session script's job (documented with both
+  shapes); `resources/scoot-portals.conf` shipped (`default=gtk`,
+  capture via `wlr` — xdg-desktop-portal-wlr ≥ 0.8.0 speaks
+  `ext-image-copy-capture`, and its Screenshot portal shells out to ext-only
+  `grim`, so the ticket's "no backend speaks ext" premise is superseded with
+  sources cited). Flake install wiring filed as the packaging remainder;
+  live portal proof impossible on the dev VM (no portal stack installed).
 - [Nothing documents how to start a bar or a launcher, and `--` takes one command](./config/startup-programs-and-autostart.md)
   — `docs/protocols.md` shows `waybar &` without ever saying where that shell
   runs. Carries the design argument for what "idiomatic scoot config" means:
