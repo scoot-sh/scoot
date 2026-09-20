@@ -14,7 +14,7 @@ desktop-env type things?"*
 
 The answer today is "a shell script", and it works — but the project has
 never written that down, and the one place that comes close doesn't say it.
-`docs/protocols.md:72-79` shows exactly the right commands:
+`docs/protocols.md:72-80` shows exactly the right commands:
 
 ```sh
 swaybg -c '#123456' &     # a wallpaper, on the background layer
@@ -25,9 +25,9 @@ fuzzel                    # a launcher, on the overlay layer
 …under the sentence *"Start one the same way you start anything else inside
 the session"* — which never says **where** that shell runs, or how it gets
 started, or that `--` is how you get one. Someone coming from sway
-(`exec`), niri (`spawn-at-startup`) or Hyprland (`exec-once`) will look in
-the config file first, find nothing, and reasonably conclude scoot can't do
-this.
+(`exec`), niri (`spawn-at-startup`) or Hyprland (`exec-once` in the hyprlang
+era; `hl.exec_cmd` since it moved to Lua) will look in the config file
+first, find nothing, and reasonably conclude scoot can't do this.
 
 ## What actually exists
 
@@ -38,7 +38,7 @@ this.
 - **Fire and forget.** `mod.rs:239-242` calls `state.spawn(&command)` and
   moves on. scoot does not wait on it and does not exit when it exits.
 - **Placement is already right.** That spawn happens *after* `ipc::init` and
-  after the `set_var` block at `mod.rs:213-238`, so the child inherits
+  after the `set_var` block at `mod.rs:218-237`, so the child inherits
   `WAYLAND_DISPLAY`, `SCOOT_SOCKET` and the cursor variables for free. Any
   list added at the same site inherits the same thing — that placement is
   the whole design, and it is already correct.
@@ -122,8 +122,13 @@ which is some evidence the split is the right one.
 
 Restarting a bar that died, backing off a crash loop, telling a deliberate
 quit from a crash — that is a service manager's job. No peer compositor
-supervises; sway, niri and Hyprland all point at `systemctl --user`, and
-waybar ships a unit. Reimplementing systemd badly inside a compositor is a
+supervises: sway's `exec`, niri's `spawn-at-startup`, Hyprland's and river's
+`init` are all fire-and-forget. The systemd route is the usual answer —
+niri ships a session script that imports the environment into the user
+manager, Hyprland ships `example/hyprland.service`, and waybar ships
+`resources/waybar.service.in`. (sway does *not* ship a unit in-tree; that is
+the third-party `sway-systemd`, which is worth knowing before citing sway as
+the precedent.) Reimplementing systemd badly inside a compositor is a
 well-known trap, and it would sit directly in the render loop's process.
 
 The wrinkle worth recording: **the webtop target has no systemd.** Its init

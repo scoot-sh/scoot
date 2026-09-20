@@ -538,20 +538,29 @@ separately actionable.
   — **HIGH**, and confirmed live rather than code-traced: four `spawn`
   actions left four `<defunct>` children under scoot's pid, which is one per
   spawn for the life of the session. `State::spawn` drops the `Child` at
-  `state.rs:985` and no `SIGCHLD` handling exists anywhere in the workspace.
-  The per-zombie cost is small and the entry says so; the case rests on it
-  being unbounded in a session-lifetime process, visible in any process
-  monitor, and cheapest to hit under exactly the agent-driven spawning the
-  IPC invites. Note the trap the entry spells out: `signal(SIGCHLD, SIG_IGN)`
-  survives `execve` and breaks every child that waits on its own children.
+  `state.rs:985` and nothing installs a `SIGCHLD` handler. On a desktop the
+  per-zombie cost is small and the entry says so — but the named deployment
+  target is a **container**, where cgroup `pids.max` counts zombies as live
+  tasks and s6 as pid 1 reaps only orphans, so a long agent-driven session
+  ends at `fork: Resource temporarily unavailable` with no way to spawn a
+  recovery shell. The entry also carries two traps found by review:
+  `signal(SIGCHLD, SIG_IGN)` survives `execve`, and `execve` *preserves* the
+  signal mask (what clears it for scoot's children is libstd, not exec) —
+  which matters because signalfd needs SIGCHLD blocked process-wide. And a
+  plain `waitpid(-1)` drain would steal the children two unit tests fork for
+  themselves: green under `nextest`, red under `cargo test`.
 - [`XDG_CURRENT_DESKTOP` is set nowhere, so a portal has no backend to pick](./core/session-environment-and-portals.md)
-  — the string does not occur in this repo at all, while `mod.rs` already
-  exports four other variables for exactly this kind of reason. Portals are
+  — the string does not occur in this project's code at all, while `mod.rs`
+  already exports four other variables for exactly this kind of reason. Portals are
   how a Wayland browser does screen sharing and file dialogs, and a browser
   is what the webtop target exists to run. Split into a two-line half (export
   it) and a real half (D-Bus activation environment, `scoot-portals.conf`)
   — and the entry is explicit that no portal has actually been watched to
-  fail yet, with the check that would settle it.
+  fail yet, with the check that would settle it. Which backend serves
+  ScreenCast is left open rather than guessed: `xdg-desktop-portal-wlr`
+  wants `zwlr_screencopy_manager_v1`, which `docs/protocols.md` records as a
+  deliberate *non*-implementation, so pointing a config at it would ship a
+  backend that fails every request.
 - [Nothing documents how to start a bar or a launcher, and `--` takes one command](./config/startup-programs-and-autostart.md)
   — `docs/protocols.md` shows `waybar &` without ever saying where that shell
   runs. Carries the design argument for what "idiomatic scoot config" means:
