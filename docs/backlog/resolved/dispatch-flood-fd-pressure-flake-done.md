@@ -142,11 +142,13 @@ substring, verified against both refusal constructors in
   reproduces byte-identically under `prlimit 650` (same fill, same
   wrong-cause kill, code 1 vs expected 7) and is **not** hardened here:
   the ticket scopes this item to the two tests and names any other test
-  explicitly out. Same two-line treatment applies whenever it is filed.
+  explicitly out. Same two-line treatment applies whenever it is filed —
+  [since applied](dispatch-flood-remainder-flake-done.md).
 - **`a_second_client_buffers_while_the_first_sits_at_the_cap`** likewise
   dies under `prlimit 650` (fill refused mid-way) and is likewise out of
   scope — its assertion shape differs (it asserts the fill *succeeds*,
-  so it wants the headroom half only, no message pin).
+  so it wants the headroom half only, no message pin) —
+  [since applied](dispatch-flood-remainder-flake-done.md).
 - **The single-pixel half never reproduced** (green solo, green paired,
   green in the pressured suite run) — hardened per the ticket's shape
   anyway (lock + headroom + required message pin, which converts any

@@ -76,6 +76,15 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[Two more dispatch floods in the same fd-pressure class (`immed`,
+  second-client)](docs/backlog/resolved/dispatch-flood-remainder-flake-done.md)**
+  (2026-09-20, test-only) — the PR #168 follow-up: the `immed` twin takes
+  the same two-line treatment (test-thread lock + 896-free headroom,
+  budget-cause pin by message), the second-client fill takes headroom only
+  (it asserts success, so no kill to discriminate). Both reproduced red
+  under `prlimit 650` first (wrong-cause code 1; mid-fill refusal into the
+  10s deadline), both fail fast-loud at 0.00s after; 6/6 full-binary greens
+  plus 4/4 at 16 threads plus 2/2 nextest (1211 passed).
 - **[Dispatch flood tests die on fd-pressure kills under a pressured
   process table](docs/backlog/resolved/dispatch-flood-fd-pressure-flake-done.md)**
   (2026-09-20, test-only) — the dmabuf fill-phase kill landed on the
@@ -88,7 +97,9 @@ each item's own file records why it landed when it did.
   message (required where twins share code+object), and the single-pixel
   flood finally taking the shared `FD_FLOOD_LOCK`. The `immed` twin
   reproduces identically and is left for a follow-up per the ticket's
-  scope.
+  scope — [since resolved](docs/backlog/resolved/dispatch-flood-remainder-flake-done.md)
+  (that entry also covers the second-client fill, the other red in the
+  same pressured-suite run).
 - **[Icon live-buffer-budget flood flake under `cargo
    test`](docs/backlog/resolved/icon-buffer-budget-fd-pressure-flake-done.md)**
   (2026-09-20, test-only) — the 512-fd flood sat near the process-wide
