@@ -76,6 +76,15 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[Pin the budget cause by message in the two bypass-loop cap
+  tests](docs/backlog/resolved/bypass-loop-cap-cause-pin-done.md)**
+  (2026-09-20, test-only) — the PR #169 review finding: the two
+  bypass-loop cap tests asserted code+interface only while pressure and
+  budget refusals share both, so under `prlimit 650` they passed green
+  while guarding the pressure cause (reproduced). Both sites now pin the
+  budget by message per the coordinator's per-call-site decision (the
+  helper's code-only stance stands for its other users); pins proven to
+  bite in both directions, 1211-passed nextest green.
 - **[Two more dispatch floods in the same fd-pressure class (`immed`,
   second-client)](docs/backlog/resolved/dispatch-flood-remainder-flake-done.md)**
   (2026-09-20, test-only) — the PR #168 follow-up: the `immed` twin takes
