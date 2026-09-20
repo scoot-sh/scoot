@@ -26,7 +26,7 @@ duplicated here.
 | `--headless` | No display at all. Renders into a framebuffer that `scootctl screenshot` reads. |
 | `--nested` | Runs as a window inside an existing compositor. The session follows that window's size: resize it and the desktop inside resizes with it, for the life of the session. If the host cannot be followed to a new size (it could not be allocated), scoot logs it, stays at the size it was, and keeps running — the host letterboxes the difference. |
 | `--tty` | A real DRM/KMS + libseat + libinput session — see [tty.md](tty.md). |
-| `--width N`, `--height N` | The `--headless`/`--nested` output size, 1–65535 per axis — whatever DRM itself can report for a mode (`drm_mode_modeinfo` stores each axis in a `u16`), with room to spare past any real display. Anything else is a startup error naming the flag and the expected range (`invalid --width: '70000' (expected 1-65535)`), not a silently different size. Under `--nested` it is only the size scoot *asks* for: the host's first configure decides what the window comes up at, and every later one moves it. Under `--headless` it is the size for the whole session. |
+| `--width N`, `--height N` | The `--headless`/`--nested` output size, 1–65535 per axis (default 1600x1000) — whatever DRM itself can report for a mode (`drm_mode_modeinfo` stores each axis in a `u16`), with room to spare past any real display. Anything else is a startup error naming the flag and the expected range (``invalid --width: `70000` (expected 1-65535)``), not a silently different size. Under `--nested` it is only the size scoot *asks* for: the host's first configure decides what the window comes up at, and every later one moves it. Under `--headless` it is the size for the whole session. |
 | `--outputs N` | How many outputs `--headless` creates, 1–8 (default 1). Each is `--width` by `--height` and sits immediately right of the last, so two 1280-wide outputs at scale 1 cover x 0–1279 and 1280–2559. Out of range is a startup error naming the range, like `--width`. `--headless` only: `--nested` presents one window in its host and `--tty` drives one CRTC, so both warn and ignore it. See [More than one output](#more-than-one-output) for what a second output does and does not do yet. |
 | `--renderer pixman\|gles` | Which renderer composites each frame. Config-file form: `[renderer] backend`. See [tty.md](tty.md#which-renderer-draws-the-frames). |
 | `--gpu PATH` | Which DRM device `--tty` drives. Config-file form: `[tty] gpu`. Ignored with a warning outside `--tty`. See [tty.md](tty.md#which-drm-device---tty-drives). |
@@ -95,8 +95,9 @@ a config that only sets `gap` leaves everything else — including the rest of
 
 An explicit `--config PATH` that doesn't exist or can't be read is a hard
 startup error — you pointed at it on purpose. Every other problem falls back
-to defaults and logs instead of blocking startup, with one exception (`[tty]
-gpu`):
+to defaults and logs instead of blocking startup, with two exceptions (both
+cases where guessing would be worse than refusing — see below and
+[`[renderer]`](#renderer)):
 
 - No file at the *default* path: silent, not even a log line (a fresh
   install, not a mistake).
@@ -114,6 +115,9 @@ gpu`):
   in the file still applies.
 - A set-but-unusable `[tty] gpu` (a wrong path, or an empty one): a hard
   startup error naming the key, not a silent fallback to the automatic pick.
+  This is one of the two deliberate startup exceptions; the other is
+  `[renderer] backend = "gles"` with no working EGL (see
+  [`[renderer]`](#renderer)).
 
 The reason for the general rule: on `--tty`, the real deployment target,
 scoot *is* the session — there's no other window manager to fall back to and
@@ -177,7 +181,7 @@ pure white *is* exactly representable.)
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
-| `backend` | string (`"pixman"` or `"gles"`) | `"pixman"` | Which renderer composites each frame — the config-file form of `--renderer` (see [tty.md](tty.md#which-renderer-draws-the-frames)). `"pixman"` is the CPU renderer and needs no graphics device at all. `"gles"` draws with GLES on an EGL device and is `--headless`/`--nested` only — `--tty` warns and keeps pixman. `--renderer` wins when both name one, including `--renderer pixman` against a file asking for `gles`. A name that is neither is a warning and the default, like any other malformed value; but a name this build *knows* and then cannot build (`"gles"` with no working EGL) is a startup error, because silently drawing with the other renderer would be a session quietly different from the one you asked for. Startup-only. |
+| `backend` | string (`"pixman"` or `"gles"`) | `"pixman"` | Which renderer composites each frame — the config-file form of `--renderer` (see [tty.md](tty.md#which-renderer-draws-the-frames)). `"pixman"` is the CPU renderer and needs no graphics device at all. `"gles"` draws with GLES on an EGL device; under `--tty` it needs a `--features gpu-scanout` build, where it scans out from the GPU, and warns and keeps pixman without one. `--renderer` wins when both name one, including `--renderer pixman` against a file asking for `gles`. A name that is neither is a warning and the default, like any other malformed value; but a name this build *knows* and then cannot build (`"gles"` with no working EGL) is a startup error — the second deliberate one — because silently drawing with the other renderer would be a session quietly different from the one you asked for. Startup-only. |
 
 ## `[tty]`
 

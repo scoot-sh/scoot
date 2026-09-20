@@ -21,7 +21,7 @@ read your files anyway.
 | `wlr-output-management-v1` | 4 | [Display information](#display-information-wlr-output-management-v1) — read-only. |
 | `ext-image-copy-capture-v1` | 1 | [Screen capture](#screen-capture-ext-image-copy-capture-v1), output only. |
 | `ext-image-capture-source-v1` | 1 | Output sources only; no toplevel source manager. |
-| `zwp_linux_dmabuf_v1` | 6 | [Real dmabuf import](#screen-capture-ext-image-copy-capture-v1), `LINEAR` single-plane, formats derived from the active renderer. |
+| `zwp_linux_dmabuf_v1` | 6 | [Real dmabuf import](#gpu-rendering-clients-zwp_linux_dmabuf_v1), `LINEAR` single-plane, formats derived from the active renderer. |
 | `ext-session-lock-v1` | 1 | [Screen locking](#screen-locking-ext-session-lock-v1). |
 | `ext-idle-notify-v1` | 2 | [Idle detection](#idle-detection). |
 | `idle-inhibit-v1` | 1 | [Idle inhibitors](#idle-detection). |
@@ -462,58 +462,6 @@ What to know before pointing a client at it:
   get a screenshot rather than a translucent image. With the default opaque
   background that pass is skipped — same bytes either way. An `Argb8888`
   capture hands you the framebuffer's own alpha.
-- **`zwp_linux_dmabuf_v1` is advertised (version 6), and dmabufs really are
-  imported — a GPU-rendering client works here, with no GPU on the compositor
-  side.** The client renders with the GPU and hands over a dma-buf; scoot
-  `mmap`s it and composites it with pixman, on the CPU, next to `wl_shm`
-  clients in the same session. No `LIBGL_ALWAYS_SOFTWARE=1` needed.
-
-  What is advertised: `Xrgb8888` then `Argb8888`, `LINEAR` only, single-plane
-  only — **minus anything the renderer this session is actually running
-  cannot import.** A format in the table that could not then be imported
-  would kill the client that believed it
-  (`zwp_linux_buffer_params_v1.create_immed` has no soft refusal), so the
-  table is derived from that renderer's own importable set rather than fixed,
-  and pinned over the wire by test. A client that ignores the feedback and
-  offers a multi-plane or non-`LINEAR` buffer is refused: `failed` on the
-  asynchronous `create`, which it survives, and a protocol error on
-  `create_immed`, which the protocol prescribes.
-
-  "Can import" is read generously on purpose: a driver that lists a format
-  only with `Modifier::Invalid` — which is what a display without
-  `EGL_EXT_image_dma_buf_import_modifiers`, or one that refuses a modifier
-  query for its own format, reports — does import a linear dma-buf, so the
-  format is still offered, still at `LINEAR`.
-
-  Two edges of that derivation are worth knowing before you debug one of
-  them. If the active renderer can import *neither* format — an EGL display
-  with no dma-buf import capability at all — **no dmabuf global is
-  advertised**. That steers GL clients onto `wl_shm` rather than killing
-  them, but it is not free: they then render in software, and a shell that
-  waits for dmabuf feedback before capturing (below) waits forever. scoot
-  logs `can import none of the dma-buf formats this compositor serves` when
-  it happens, and `--renderer pixman` is the working session on such a
-  machine. A compositor with no renderer at all advertises nothing here for
-  the same reason.
-
-  `main_device` names a **render node**: the active renderer's own, where it
-  can name one, else `/dev/dri/renderD128`, else `card0`, else `0`. The
-  renderer's own device leads because that is the device an import can
-  actually succeed against — on a two-GPU machine a client that allocated
-  against the other node would hand over a buffer this renderer cannot
-  import. Which rung answered is logged once at startup
-  (`dmabuf feedback main device device=… source=…`).
-
-  The global also gates screen capture for some shells: quickshell's buffer
-  manager instantiates no capture context at all — not even the `wl_shm` one
-  — until it has seen real dmabuf feedback, so without this advertisement
-  every quickshell `ScreencopyView` stays blank despite the capture protocol
-  working.
-
-  **This follows `--renderer`**, and no longer asks you to avoid one: the
-  table is the active renderer's, so `gles` advertises what GLES can import
-  and pixman advertises what pixman can. See
-  [tty.md](tty.md#which-renderer-draws-the-frames).
 - **The buffer size is the framebuffer's, and it is re-advertised on a
   resize.** If `--tty` follows a hotplug to a new mode, every live session
   gets a fresh `buffer_size` + `done`. A capture whose buffer is now *too
@@ -545,6 +493,61 @@ What to know before pointing a client at it:
   itself gets no event — the cursor-session object has no `stopped` of its
   own — but the `ext_image_copy_capture_session_v1` a client gets back from
   its `get_capture_session` is answered `stopped` immediately.
+
+### GPU-rendering clients (`zwp_linux_dmabuf_v1`)
+
+`zwp_linux_dmabuf_v1` is advertised (version 6), and dmabufs really are
+imported — a GPU-rendering client works here, with no GPU on the compositor
+side. The client renders with the GPU and hands over a dma-buf; scoot
+`mmap`s it and composites it with pixman, on the CPU, next to `wl_shm`
+clients in the same session. No `LIBGL_ALWAYS_SOFTWARE=1` needed.
+
+What is advertised: `Xrgb8888` then `Argb8888`, `LINEAR` only, single-plane
+only — **minus anything the renderer this session is actually running
+cannot import.** A format in the table that could not then be imported
+would kill the client that believed it
+(`zwp_linux_buffer_params_v1.create_immed` has no soft refusal), so the
+table is derived from that renderer's own importable set rather than fixed,
+and pinned over the wire by test. A client that ignores the feedback and
+offers a multi-plane or non-`LINEAR` buffer is refused: `failed` on the
+asynchronous `create`, which it survives, and a protocol error on
+`create_immed`, which the protocol prescribes.
+
+"Can import" is read generously on purpose: a driver that lists a format
+only with `Modifier::Invalid` — which is what a display without
+`EGL_EXT_image_dma_buf_import_modifiers`, or one that refuses a modifier
+query for its own format, reports — does import a linear dma-buf, so the
+format is still offered, still at `LINEAR`.
+
+Two edges of that derivation are worth knowing before you debug one of
+them. If the active renderer can import *neither* format — an EGL display
+with no dma-buf import capability at all — **no dmabuf global is
+advertised**. That steers GL clients onto `wl_shm` rather than killing
+them, but it is not free: they then render in software, and a shell that
+  waits for dmabuf feedback before capturing (below) waits forever. scoot
+logs `can import none of the dma-buf formats this compositor serves` when
+it happens, and `--renderer pixman` is the working session on such a
+machine. A compositor with no renderer at all advertises nothing here for
+the same reason.
+
+`main_device` names a **render node**: the active renderer's own, where it
+can name one, else `/dev/dri/renderD128`, else `card0`, else `0`. The
+renderer's own device leads because that is the device an import can
+actually succeed against — on a two-GPU machine a client that allocated
+against the other node would hand over a buffer this renderer cannot
+import. Which rung answered is logged once at startup
+(`dmabuf feedback main device device=… source=…`).
+
+The global also gates screen capture for some shells: quickshell's buffer
+manager instantiates no capture context at all — not even the `wl_shm` one
+— until it has seen real dmabuf feedback, so without this advertisement
+every quickshell `ScreencopyView` stays blank despite the capture protocol
+working.
+
+**This follows `--renderer`**, and no longer asks you to avoid one: the
+table is the active renderer's, so `gles` advertises what GLES can import
+and pixman advertises what pixman can. See
+[tty.md](tty.md#which-renderer-draws-the-frames).
 
 ## Screen locking (`ext-session-lock-v1`)
 

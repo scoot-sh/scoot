@@ -525,6 +525,16 @@ be revisited.
   renderer's `dmabuf_render_formats` rather than its import set, a `DrmNode`
   the GPU-less target does not have, and a fix for the bound-target cache
   eviction `dmabuf.rs` warns about. No measured client need yet.
+- [README rewrite: helpful, concise, aimed at the user](./resolved/readme-rewrite-done.md)
+  — RESOLVED 2026-09-20: the third item of this queue, worked as an audit +
+  tightening pass rather than a rewrite (PR #132 had already given
+  `README.md` its front-door shape). Every checklist item verified by
+  running, not reading: keys table vs defaults, config example vs
+  `Config::default()`, both `--help` outputs live, all 31 protocol
+  versions against a live `wayland-info` dump, all 15 README anchors
+  mechanically. Five doc corrections, one precision restructure (dmabuf's
+  own subsection anchor), and one code bug filed-not-fixed (`scoot --help`
+  hides `--renderer` under `--tty`).
 
 ### Found asking how a session starts its own programs (2026-09-19)
 

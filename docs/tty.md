@@ -250,7 +250,7 @@ running with no GPU at all is a hard requirement here, not a fallback tier.
   that feedback is the renderer's own DRM render node rather than a guessed
   path, which is what makes a client's allocation land on the device the
   import will happen on. See
-  [protocols.md](protocols.md#screen-capture-ext-image-copy-capture-v1).
+  [protocols.md](protocols.md#gpu-rendering-clients-zwp_linux_dmabuf_v1).
 
 ### The `gpu-scanout` build feature
 
