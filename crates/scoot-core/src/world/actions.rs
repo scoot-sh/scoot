@@ -36,6 +36,9 @@ impl World {
             Action::MoveWindowToWorkspace(dir) => {
                 self.reshape(|o| o.move_focused_window_to_workspace(dir));
             }
+            Action::MoveWindowToWorkspaceIndex(index) => {
+                self.reshape(|o| o.move_focused_window_to_workspace_index(index));
+            }
             Action::FocusWindowId(id) => {
                 if let Some(loc) = self.locate(id) {
                     self.focus_location(loc);

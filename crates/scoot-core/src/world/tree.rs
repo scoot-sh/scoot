@@ -296,6 +296,33 @@ impl Output {
         self.normalize();
     }
 
+    /// Carries the focused window to the workspace at `index`, and follows
+    /// it there.
+    ///
+    /// Ignoring rather than creating or clamping, like
+    /// [`focus_workspace_index`](Self::focus_workspace_index): an index past
+    /// the end is a caller working from a stale list, and silently carrying
+    /// the window to the *last* workspace instead would be a move the user
+    /// never asked for. The window stays where it is. Moving to the
+    /// already-active workspace, or with no window focused, likewise does
+    /// nothing -- the same early returns the relative
+    /// [`move_focused_window_to_workspace`](Self::move_focused_window_to_workspace)
+    /// makes at the tree's edge and on an empty workspace.
+    pub(super) fn move_focused_window_to_workspace_index(&mut self, index: usize) {
+        if index >= self.workspaces.len() || index == self.active {
+            return;
+        }
+        let source = &mut self.workspaces[self.active];
+        let Some(column) = source.focused_column() else {
+            return;
+        };
+        let (column_index, window_index, preset) = (source.focused, column.focused, column.preset);
+        let id = source.take(column_index, window_index);
+        self.workspaces[index].insert_column(id, preset, true);
+        self.active = index;
+        self.normalize();
+    }
+
     /// Carries the focused window to the neighbouring workspace, and follows it.
     pub(super) fn move_focused_window_to_workspace(&mut self, dir: Vertical) {
         let target = step(self.active, self.workspaces.len(), dir == Vertical::Down);

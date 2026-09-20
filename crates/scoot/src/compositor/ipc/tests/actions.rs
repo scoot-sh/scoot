@@ -769,3 +769,106 @@ fn a_layout_action_over_ipc_leaves_a_clicked_taskbars_keyboard_alone() {
         "a layout action spent the taskbar's click"
     );
 }
+
+#[test]
+fn move_window_to_workspace_index_carries_the_focused_window_there() {
+    // The new action through the whole `State` path: conversion, `act`,
+    // `apply`. `drive` maps two windows onto workspace 0 (focus is the
+    // second), so naming index 1 must carry exactly the focused window to
+    // the trailing empty workspace and follow it there -- active moves
+    // *with* focus still naming the same window, which no focus action
+    // could produce (an empty workspace has nothing to focus).
+    let mut fixture = Fixture::drive();
+    let focused = fixture.state.focus.expect("a focused window");
+    let output = fixture
+        .state
+        .world
+        .focused_output()
+        .expect("a focused output");
+
+    fixture.state.needs_render = false;
+    let response = fixture.state.handle_request(Request::Action(
+        scoot_ipc::Action::MoveWindowToWorkspaceIndex { index: 1 },
+    ));
+    assert!(
+        matches!(response, Response::Ok { locked: false }),
+        "the move-to-index action was not served"
+    );
+    assert_eq!(
+        fixture.state.focus,
+        Some(focused),
+        "the move did not follow the window it carried"
+    );
+    assert_eq!(
+        fixture.state.world.workspaces(output).map(|ws| ws.active),
+        Some(1),
+        "the move did not land on workspace index 1"
+    );
+    fixture.assert_keyboard_follows_focus("a real move-to-index");
+    assert!(
+        fixture.state.needs_render,
+        "a real move-to-index laid nothing out"
+    );
+
+    // Out of range over the same path: no workspace 99 exists, so the
+    // window stays where the move above put it -- still focused, still on
+    // workspace 1. The data-loss shape this rules out is a move that
+    // drops the window somewhere no workspace list names.
+    let before = fixture
+        .state
+        .world
+        .workspaces(output)
+        .expect("a workspace list");
+    fixture.state.needs_render = false;
+    let response = fixture.state.handle_request(Request::Action(
+        scoot_ipc::Action::MoveWindowToWorkspaceIndex { index: 99 },
+    ));
+    assert!(
+        matches!(response, Response::Ok { locked: false }),
+        "the out-of-range move-to-index was not served"
+    );
+    assert_eq!(
+        fixture.state.world.workspaces(output),
+        Some(before),
+        "an out-of-range move-to-index moved anything at all"
+    );
+    assert_eq!(
+        fixture.state.focus,
+        Some(focused),
+        "an out-of-range move-to-index lost the focused window"
+    );
+}
+
+#[test]
+fn a_move_to_index_over_ipc_leaves_a_clicked_taskbars_keyboard_alone() {
+    // The same boundary the layout-action test above pins, for the new
+    // action: carrying a window changes arrangement, not where focus is
+    // reported to be, so it must not spend a deliberate keyboard placement
+    // -- it stays out of the focus-family click-spend match in
+    // `handle_request`, and this test fails if it ever lands in it.
+    let mut fixture = Fixture::drive();
+    let focus_before = fixture.state.focus;
+
+    fixture.click_taskbar();
+    let response = fixture.state.handle_request(Request::Action(
+        scoot_ipc::Action::MoveWindowToWorkspaceIndex { index: 1 },
+    ));
+    assert!(
+        matches!(response, Response::Ok { locked: false }),
+        "the move-to-index action was not served"
+    );
+
+    assert_eq!(
+        fixture.state.focus, focus_before,
+        "a move-to-index moved window focus"
+    );
+    assert_eq!(
+        fixture.keyboard_surface(),
+        Some(fixture.clicked_surface()),
+        "a move-to-index ripped the keyboard out of the clicked taskbar"
+    );
+    assert!(
+        fixture.state.clicked_layer.is_some(),
+        "a move-to-index spent the taskbar's click"
+    );
+}

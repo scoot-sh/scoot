@@ -319,7 +319,7 @@ handles `scootctl action ...` (and its `scoot msg` alias) and a config file's
 focus-column|move-column|consume-or-expel   left|right
 focus-window|move-window                    up|down
 focus-workspace|move-window-to-workspace    up|down
-focus-window-id ID | focus-workspace-index N | cycle-column-width | close | spawn COMMAND... | quit
+focus-window-id ID | focus-workspace-index N | move-window-to-workspace-index N | cycle-column-width | close | spawn COMMAND... | quit
 ```
 
 e.g. `"focus-column left"`, `"close"`, or `"spawn foot -e htop"` (split on
@@ -406,16 +406,24 @@ Three behaviors worth knowing:
 | `Super+Ctrl+k` | Focus workspace up |
 | `Super+Ctrl+Shift+j` | Move window to workspace down |
 | `Super+Ctrl+Shift+k` | Move window to workspace up |
+| `Super+1`..`Super+9` | Focus workspace 1–9 directly (index 0–8) |
+| `Super+Shift+1`..`Super+Shift+9` | Move window to workspace 1–9 directly (index 0–8) |
 | `Super+r` | Cycle column width |
 | `Super+q` | Close focused window |
 | `Super+Return` | Spawn `foot` |
 | `Super+Shift+e` | Quit |
 
-All 18 of them — vim motions (`h`/`j`/`k`/`l`) for direction, Super as
+All 36 of them — vim motions (`h`/`j`/`k`/`l`) for direction, Super as
 scoot's own modifier throughout. Quit is deliberately `Super+Shift+e`, not
 `Super+Shift+q`: that combo is one slipped Shift away from `Super+q` (close
 focused window), and a slip of the finger shouldn't be able to end the whole
 session.
+
+Targeting a workspace that doesn't exist yet — `Super+9` with only three
+workspaces open, or either index action with a stale number — does nothing:
+it neither creates a workspace nor falls back to the last one. (The
+workspace set is dynamic: empty workspaces are dropped, so an index only
+means anything against the list it was read from.)
 
 `--tty` additionally binds `Ctrl+Alt+F1` through `Ctrl+Alt+F12` to VT
 switching — not present under `--headless`/`--nested`, since VT switching is

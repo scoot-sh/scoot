@@ -108,6 +108,17 @@ pub enum Action {
     /// [`World::workspaces`](crate::World::workspaces) read it came from.
     FocusWorkspaceIndex(usize),
     MoveWindowToWorkspace(Vertical),
+    /// Carry the focused window to one specific workspace of the focused
+    /// output, by its position in [`World::workspaces`](crate::World::workspaces)'
+    /// list, and follow it there. The index half of [`Action::FocusWorkspaceIndex`]'s
+    /// mirror: stepping (`MoveWindowToWorkspace`) cannot express this, for
+    /// the same renumbering reason focusing by index exists at all.
+    ///
+    /// The same out-of-range rule as [`Action::FocusWorkspaceIndex`]: an
+    /// index this output doesn't have does nothing, and the window stays
+    /// where it is. Moving to the already-active workspace, or with no
+    /// window focused, likewise does nothing.
+    MoveWindowToWorkspaceIndex(usize),
     CloseFocused,
     Spawn(Vec<String>),
     Quit,

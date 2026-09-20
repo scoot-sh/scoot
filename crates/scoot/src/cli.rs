@@ -36,7 +36,7 @@ ACTIONS:
     focus-column|move-column|consume-or-expel   left|right
     focus-window|move-window                    up|down
     focus-workspace|move-window-to-workspace    up|down
-    focus-window-id ID | focus-workspace-index N | cycle-column-width | close | spawn COMMAND... | quit
+    focus-window-id ID | focus-workspace-index N | move-window-to-workspace-index N | cycle-column-width | close | spawn COMMAND... | quit
 ";
 
 /// The largest `--width`/`--height` a `--headless`/`--nested` output may ask
@@ -747,6 +747,7 @@ mod tests {
             &["action", "focus-column", "left"],
             &["action", "move-window-to-workspace", "down"],
             &["action", "focus-workspace-index", "2"],
+            &["action", "move-window-to-workspace-index", "3"],
             &["action", "spawn", "foot", "-e", "htop"],
             &["action", "quit"],
             &["screenshot"],
@@ -764,6 +765,7 @@ mod tests {
             &["action"],
             &["action", "focus-column", "sideways"],
             &["action", "focus-workspace-index", "down"],
+            &["action", "move-window-to-workspace-index", "down"],
             &["action", "spawn"],
             &["pointer", "move", "x", "1"],
             &["pointer", "button", "left", "hold"],

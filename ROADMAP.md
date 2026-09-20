@@ -76,6 +76,20 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[Workspace shortcuts: numbered binds plus
+  move-to-index](docs/backlog/resolved/workspace-index-keybindings-done.md)**
+  (2026-09-20) — both halves of the two-gaps-that-look-like-one ticket:
+  `Super+1`..`Super+9` bound to the existing `focus-workspace-index`
+  (binds only, no behavior change), and a new
+  `move-window-to-workspace-index N` action through the full stack (core →
+  `scoot-ipc` variant/conversion → shared `scootctl::action` grammar →
+  `Super+Shift+1`..`9` defaults) so a window — or an agent placing one —
+  jumps to an absolute workspace instead of stepping. Out-of-range is a
+  no-op on both (neither creates nor clamps; the window stays put),
+  mirroring what `FocusWorkspaceIndex` already did. Additive wire format,
+  no `PROTOCOL_VERSION` bump. Live proof on the dev VM: IPC move,
+  injected-key binds, out-of-range no-ops, empty-session moves.
+
 - **[Nothing says how to start a bar, a launcher or a browser at session
   start](docs/backlog/resolved/startup-programs-and-autostart-done.md)**
   (2026-09-20) — "Starting a session" documented (`session.sh` plus the

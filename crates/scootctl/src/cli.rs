@@ -41,7 +41,7 @@ pub const ACTIONS_HELP: &str = "\
     focus-column|move-column|consume-or-expel   left|right
     focus-window|move-window                    up|down
     focus-workspace|move-window-to-workspace    up|down
-    focus-window-id ID | focus-workspace-index N | cycle-column-width | close | spawn COMMAND... | quit
+    focus-window-id ID | focus-workspace-index N | move-window-to-workspace-index N | cycle-column-width | close | spawn COMMAND... | quit
 ";
 
 pub const USAGE: &str = "\
@@ -68,7 +68,7 @@ ACTIONS:
     focus-column|move-column|consume-or-expel   left|right
     focus-window|move-window                    up|down
     focus-workspace|move-window-to-workspace    up|down
-    focus-window-id ID | focus-workspace-index N | cycle-column-width | close | spawn COMMAND... | quit
+    focus-window-id ID | focus-workspace-index N | move-window-to-workspace-index N | cycle-column-width | close | spawn COMMAND... | quit
 ";
 
 #[derive(Debug, PartialEq)]
@@ -235,6 +235,9 @@ pub fn action(args: &mut impl Iterator<Item = String>) -> Result<Action, Error> 
             id: number("a window id", args.next())?,
         },
         "focus-workspace-index" => Action::FocusWorkspaceIndex {
+            index: number("a workspace index", args.next())?,
+        },
+        "move-window-to-workspace-index" => Action::MoveWindowToWorkspaceIndex {
             index: number("a workspace index", args.next())?,
         },
         "cycle-column-width" => Action::CycleColumnWidth,
@@ -408,6 +411,22 @@ mod tests {
         // ...which is a number, not a direction: sharing the
         // `focus-workspace` name would make `up`/`down` and `2` ambiguous.
         assert!(parse_msg_args(&["action", "focus-workspace-index", "down"]).is_err());
+    }
+
+    #[test]
+    fn move_window_to_workspace_index_takes_a_number() {
+        assert_eq!(
+            parse_msg_args(&["action", "move-window-to-workspace-index", "3"]),
+            Ok(Msg {
+                request: Request::Action(Action::MoveWindowToWorkspaceIndex { index: 3 }),
+                out: None,
+            })
+        );
+        // A number, not a direction -- mirroring `focus-workspace-index`:
+        // sharing the `move-window-to-workspace` name would make `up`/`down`
+        // and `3` ambiguous.
+        assert!(parse_msg_args(&["action", "move-window-to-workspace-index", "down"]).is_err());
+        assert!(parse_msg_args(&["action", "move-window-to-workspace-index"]).is_err());
     }
 
     #[test]

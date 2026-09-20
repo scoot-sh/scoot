@@ -76,6 +76,22 @@ pub enum Bound {
     ChangeVt(u32),
 }
 
+/// The digit keys, in order: `DIGITS[i]` is the keycap for workspace index
+/// `i` (keycap 1-based, core index 0-based, so `Super+3` is index 2). One
+/// shared order for the default table below and its tests, so the two
+/// cannot disagree about which key means which workspace.
+const DIGITS: [Keysym; 9] = [
+    Keysym::_1,
+    Keysym::_2,
+    Keysym::_3,
+    Keysym::_4,
+    Keysym::_5,
+    Keysym::_6,
+    Keysym::_7,
+    Keysym::_8,
+    Keysym::_9,
+];
+
 /// The default vim-motions-plus-Super table, `Vec` rather than a `HashMap`:
 /// a couple dozen entries at most, checked once per keypress -- a linear
 /// scan is simpler and not measurably slower. `config.rs` builds on this
@@ -86,7 +102,7 @@ pub struct Keybindings(Vec<(Modifiers, Keysym, Bound)>);
 
 impl Default for Keybindings {
     fn default() -> Self {
-        Self(vec![
+        let mut bindings = vec![
             (
                 SUPER,
                 Keysym::h,
@@ -170,7 +186,30 @@ impl Default for Keybindings {
             // from Super+q (close-focused), and a slip shouldn't be able to
             // end the whole session.
             (SUPER_SHIFT, Keysym::e, Bound::Action(Action::Quit)),
-        ])
+        ];
+        // Numbered workspaces, 1-based on the keycap and 0-based in the
+        // core: `Super+3` focuses index 2, `Super+Shift+3` carries the
+        // focused window to index 2 and follows it there. Bare Super for
+        // focus and Shift for move match the relative pair's convention
+        // (`Super+Ctrl+j` focuses, `Super+Ctrl+Shift+j` moves). Targeting a
+        // workspace that doesn't exist yet does nothing -- it neither
+        // creates one nor clamps to the last one, the same rule
+        // `focus-workspace-index N` already keeps over IPC. Matching is by
+        // unshifted keysym (see the module doc), so `Super+Shift+1` names
+        // the `1` key with Shift held, not `!`.
+        for (index, keysym) in DIGITS.into_iter().enumerate() {
+            bindings.push((
+                SUPER,
+                keysym,
+                Bound::Action(Action::FocusWorkspaceIndex(index)),
+            ));
+            bindings.push((
+                SUPER_SHIFT,
+                keysym,
+                Bound::Action(Action::MoveWindowToWorkspaceIndex(index)),
+            ));
+        }
+        Self(bindings)
     }
 }
 
@@ -347,6 +386,28 @@ mod tests {
         let table = Keybindings::default();
         assert_eq!(table.match_key(Keysym::x, SUPER), None);
         assert_eq!(table.match_key(Keysym::h, Modifiers::default()), None);
+    }
+
+    #[test]
+    fn numbered_workspaces_are_bound_by_default() {
+        // Gap-1 pin: the keycap is 1-based, the core index 0-based, so
+        // `Super+3` focuses index 2 and `Super+Shift+3` carries the focused
+        // window to index 2.
+        let table = Keybindings::default();
+        for (i, keysym) in DIGITS.into_iter().enumerate() {
+            assert_eq!(
+                table.match_key(keysym, SUPER),
+                Some(Bound::Action(Action::FocusWorkspaceIndex(i))),
+                "Super+{}",
+                i + 1
+            );
+            assert_eq!(
+                table.match_key(keysym, SUPER_SHIFT),
+                Some(Bound::Action(Action::MoveWindowToWorkspaceIndex(i))),
+                "Super+Shift+{}",
+                i + 1
+            );
+        }
     }
 
     #[test]
