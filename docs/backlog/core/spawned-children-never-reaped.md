@@ -75,7 +75,10 @@ seconds later — so this is not one run's artifact.
 The per-zombie cost is small — one pid and one `task_struct`, no memory the
 child held, no fds. On an ordinary desktop this is **not** a plausible route
 to pid exhaustion: the dev VM's `/proc/sys/kernel/pid_max` is `4194304`, and
-a user would have to spawn for weeks.
+a user would have to spawn for weeks. Not quite unconditional even there —
+the kernel uncharges both the pids cgroup and the per-user `RLIMIT_NPROC` in
+`release_task()`, i.e. at *reap* time, so a zombie holds its `RLIMIT_NPROC`
+slot too, and that ceiling is far lower than `pid_max`.
 
 **On the named deployment target it is a different story, and that is worth
 stating rather than waving off.** A linuxserver webtop is a container, where
@@ -116,36 +119,57 @@ very hard to trace back here.
 
 ### What `execve` actually does to signal state
 
-Worth getting exactly right, because the recommended mechanism leans on it.
-Measured on the dev VM (two small `rustc` probes, not reasoned from memory):
+Worth getting exactly right, because it decides which mechanism wins.
+Measured on the dev VM with `rustc` probes that exec `grep` directly — **no
+shell anywhere in the path**, which matters: a probe that exec'd `sh` read
+the mask as empty and was wrong, because bash unblocks SIGCHLD at startup.
 
-| disposition/state in the parent | after `execve` |
+| state in the parent | in the child after `execve` |
 | --- | --- |
 | **ignored** (`SIG_IGN`) | **survives** — child shows `SigIgn: …10000` |
 | **handled** (a function) | reset to `SIG_DFL` — child's `SigCgt` loses the bit |
 | **blocked** (in the signal mask) | **preserved** — child shows `SigBlk: …10000` |
 
-The blocked row is the one that is easy to get backwards: `execve`
-**preserves the signal mask**. scoot's children come out with an empty mask
-today only because `std::process::Command` does its own `sigprocmask` in the
-child before `exec` — a libstd behavior, not an exec guarantee. (Proven by
-blocking SIGCHLD from a `pre_exec` closure, i.e. *after* libstd's reset, and
-exec'ing `grep` directly: `SigBlk: 0000000000010000`. An earlier probe
-exec'ing `sh` read `0` and was misleading — bash unblocks SIGCHLD at
-startup.)
+The blocked row is the one that is easy to get backwards, and it is not
+rescued by libstd. One probe shows both halves at once — parent blocks
+SIGCHLD, then a plain `Command::spawn` (no `pre_exec`, no raw fork):
 
-This matters because **signalfd requires blocking SIGCHLD process-wide.**
-Anyone who believes the mask is cleared by `exec` will not check whether
-that block leaks into children — and it would, the moment any spawn path
-stops going through `Command` (a `pre_exec` closure, a raw fork/exec). A
-child with SIGCHLD blocked misses its own children's exits: same class of
-silent breakage as the `SIG_IGN` trap, different mechanism.
+```text
+parent SigBlk: 0000000000010000   child SigBlk: 0000000000010000   <- mask inherited
+parent SigIgn: 0000000000001000   child SigIgn: 0000000000000000   <- SIGPIPE reset
+```
 
-Related constraint on the same design: `sigprocmask` is **per-thread**, so a
-signalfd only sees SIGCHLD if every thread that could receive it has it
-blocked. A live `--headless` scoot reports `Threads: 1`, so this is fine
-today — but it is an assumption the design rests on, not a given, and it
-should be written next to the code.
+Read it as: `std::process::Command` resets **SIGPIPE only** — bit `0x1000`,
+signal 13, which Rust ignores at its own startup and hands back to children
+as `SIG_DFL` — and **inherits the mask untouched**. (Behavioral evidence,
+measured here; review reports that libstd's `sys/process/unix/unix.rs` says
+the same in a comment, which nobody on this ticket has read directly. The
+measurement is the load-bearing part and does not depend on it.)
+
+So **nothing clears the mask. There is no safety net.**
+
+This decides the mechanism, because **signalfd requires blocking SIGCHLD
+process-wide**:
+
+- Choose **signalfd** and every child spawned through the ordinary `Command`
+  path — the user's terminal, the shell in it, waybar with script modules,
+  anything from a `spawn` bind or `scoot msg action spawn` — starts with
+  SIGCHLD blocked and misses its own children's exits. Not a latent hazard
+  waiting on some future raw fork: the ordinary path *is* the leak. Taking
+  this route therefore **obliges** a `pre_exec` closure that
+  `sigprocmask(SIG_SETMASK, <empty>)`s in every child. Not optional.
+- Choose a **`sigaction` handler** that writes to a `calloop::ping` and the
+  problem does not exist: row 2 says a caught handler is reset to `SIG_DFL`
+  by `exec`, so it cannot leak into any child, and nothing needs blocking.
+
+That asymmetry is the single most useful thing on this page, and it is the
+reverse of the intuition that a signalfd is "the clean modern way".
+
+Related constraint if signalfd is chosen anyway: `sigprocmask` is
+**per-thread**, so a signalfd only sees SIGCHLD if every thread that could
+receive it has it blocked. A live `--headless` scoot reports `Threads: 1`,
+so this is fine today — but it is an assumption the design rests on, not a
+given, and it should be written next to the code.
 
 ### The shape of the drain
 
@@ -173,13 +197,21 @@ assertion.
 Worse, that failure is **runner-dependent**: `nextest` gives each test its
 own process, so it cannot see it; `cargo test` shares one, so it can. Per
 `CLAUDE.md`'s own note on the asymmetry, that lands as a CI-only failure
-reproducing on nobody's machine. Two ways out, and one should be chosen
-deliberately rather than discovered:
+reproducing on nobody's machine. Three ways out, not equal:
 
 - **Track spawned pids** and `waitpid(pid, WNOHANG)` each, so scoot only
-  ever reaps children it started. Costs a small set to maintain.
+  ever reaps children it started. Costs a small set to maintain, and
+  **dominates the next option** — it removes the hazard *and* leaves the
+  in-harness test able to install the reaper and assert on it.
 - **Register the reaper only on the real `run` path**, never in a unit test
-  that shares a process with the fork/waitpid tests.
+  sharing a process with the fork/waitpid tests. Safe, but self-defeating on
+  its own: the in-harness test below presumes the test installs the reaper,
+  so this option deletes the test it is protecting.
+- **…unless it is paired with an integration test** in `crates/scoot/tests/`
+  (its own binary, exactly like `msg_broken_pipe.rs`) that launches a real
+  headless scoot and reads `ps --ppid`. That exercises the real `run` path
+  and shares no process with the unit tests, so it composes with the option
+  above instead of contradicting it.
 
 (`Command::new` itself appears at `state.rs:970` and three times in
 `tests/msg_broken_pipe.rs` — a separate test binary, so not part of this
@@ -187,15 +219,22 @@ hazard. The unit-test `fork` sites are.)
 
 ### Mechanism options, with the dependency cost of each
 
-- **`libc` directly.** `libc = "0.2"` is **already a direct Linux dependency**
-  of `crates/scoot` (`Cargo.toml:99`, added for `SO_PEERCRED`), and the tree
-  already calls `libc::waitpid` in two tests. This is the zero-new-dependency
-  route, and probably the one to beat.
+Ordered by the mask finding above, not just by dependency cost.
+
+- **`libc::sigaction` + a `calloop::ping`** — the one to beat. `libc = "0.2"`
+  is **already a direct Linux dependency** of `crates/scoot`
+  (`Cargo.toml:99`, added for `SO_PEERCRED`) and calloop is already in the
+  tree, so this adds nothing. It blocks no signal, so it cannot leak into a
+  child, and `exec` resets the handler for free. The handler itself must be
+  async-signal-safe — writing one byte to a ping fd is, which is the whole
+  reason for the ping.
 - **`signalfd` as a `calloop::generic::Generic` source.** Fits the loop the
   way every other fd source already does and keeps reaping on the thread
-  where `State` lives — but `rustix 1.1.4` lists `signalfd` under
-  `not_implemented!` (`src/not_implemented.rs:300`, the only occurrence of
-  the string in the crate), so this is `libc`'s `signalfd` or nothing.
+  where `State` lives — but it **requires** the process-wide block, and
+  therefore the `pre_exec` mask reset in every child described above. Also
+  `rustix 1.1.4` lists `signalfd` under `not_implemented!`
+  (`src/not_implemented.rs:300`, the only occurrence of the string in the
+  crate), so it would be `libc`'s `signalfd` regardless.
 - **calloop's own `signals` feature.** Verified against the pinned
   `calloop 0.14.4`: `signals = ["nix"]`, and `Cargo.lock` shows calloop's
   dependency set today as `bitflags, polling, rustix, slab, tracing` — so
@@ -227,6 +266,10 @@ to prove by neutering the handler. Worth a second test that the *child's*
 two regressions the `SIG_IGN` shortcut and the signalfd block would
 introduce respectively, neither of which anything else would catch. Both
 read straight out of the child's `/proc/self/status` (`SigIgn`, `SigBlk`).
+
+The `SigBlk` half is not hypothetical: since libstd inherits the mask, a
+signalfd implementation that forgets its `pre_exec` reset fails this test
+and nothing else in the suite would notice.
 
 Mind the constraint above when writing it: whatever the test installs must
 not be a process-wide `waitpid(-1)` drain, or it will reap the children

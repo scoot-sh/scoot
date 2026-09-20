@@ -122,8 +122,8 @@ which is some evidence the split is the right one.
 
 Restarting a bar that died, backing off a crash loop, telling a deliberate
 quit from a crash — that is a service manager's job. No peer compositor
-supervises: sway's `exec`, niri's `spawn-at-startup`, Hyprland's and river's
-`init` are all fire-and-forget. The systemd route is the usual answer —
+supervises: sway's `exec`, niri's `spawn-at-startup`, Hyprland's `exec-once`
+and river's `init` are all fire-and-forget. The systemd route is the usual answer —
 niri ships a session script that imports the environment into the user
 manager, Hyprland ships `example/hyprland.service`, and waybar ships
 `resources/waybar.service.in`. (sway does *not* ship a unit in-tree; that is

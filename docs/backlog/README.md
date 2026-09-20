@@ -545,10 +545,13 @@ separately actionable.
   ends at `fork: Resource temporarily unavailable` with no way to spawn a
   recovery shell. The entry also carries two traps found by review:
   `signal(SIGCHLD, SIG_IGN)` survives `execve`, and `execve` *preserves* the
-  signal mask (what clears it for scoot's children is libstd, not exec) —
-  which matters because signalfd needs SIGCHLD blocked process-wide. And a
-  plain `waitpid(-1)` drain would steal the children two unit tests fork for
-  themselves: green under `nextest`, red under `cargo test`.
+  signal mask — with **nothing** clearing it afterwards, since libstd resets
+  SIGPIPE only and deliberately inherits the mask. That decides the design:
+  signalfd needs SIGCHLD blocked process-wide and so leaks the block into
+  every spawned child unless each one resets it, while a `sigaction` handler
+  is reset by `exec` for free. And a plain `waitpid(-1)` drain would steal
+  the children two unit tests fork for themselves: green under `nextest`,
+  red under `cargo test`.
 - [`XDG_CURRENT_DESKTOP` is set nowhere, so a portal has no backend to pick](./core/session-environment-and-portals.md)
   — the string does not occur in this project's code at all, while `mod.rs`
   already exports four other variables for exactly this kind of reason. Portals are

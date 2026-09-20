@@ -96,7 +96,7 @@ So the work splits cleanly:
 
    **Which backend handles ScreenCast/Screenshot is genuinely open, and
    `wlr` is not the answer today.** `xdg-desktop-portal-wlr` requires
-   `zwlr_screencopy_manager_v1`, and `docs/protocols.md:53-57` lists
+   `zwlr_screencopy_manager_v1`, and `docs/protocols.md:52-57` lists
    `wlr-screencopy-v1` under *"Not implemented"* as a **deliberate**
    decision — scoot implements `ext-image-copy-capture-v1` +
    `ext-image-capture-source-v1` instead, because the clients that motivated
@@ -122,9 +122,14 @@ exactly where a wrong value would mislead, and overwriting logind's is the
 one case with a real owner.
 
 Note also that niri does **not** set `XDG_SESSION_DESKTOP`, which step 1
-above proposes. It is the conventional companion (systemd's `user@.service`
-documentation and most session-manager desktop files set it), but proposing
-it means saying why we differ from the closest peer.
+above proposes — and there is a good reason, which strengthens rather than
+weakens the case for thinking about it. `XDG_SESSION_DESKTOP` is
+**logind-owned**: `pam_systemd(8)` documents it as a PAM environment
+variable read at session registration (preferred over the module's own
+`desktop=` argument). On a logind seat it is already someone else's to set,
+which is exactly the `XDG_SESSION_TYPE` situation above. Where it is *not*
+already set — `--nested`, a container with no logind — the same argument for
+setting it applies. Say which of those cases step 1 is for.
 
 ## What is verified and what is not
 
