@@ -26,8 +26,10 @@ live defaults, in the commented-example format modeled on
   `Appearance::default()`, `Keybindings::default()`, scale 1.0, no gpu, no
   renderer backend, no autostart entries. Live section headers, every key
   present and commented with its default as the value -- so the file as-is
-  parses back to *all* defaults exactly, not just `Config` (stronger than
-  the ticket's loop-closing test asked).
+  parses back to the defaults (every key commented means every `Option` is
+  `None`, so this pin covers commented-ness, not comment text; the
+  commented scalar *values* are pinned separately by
+  `every_emitted_commented_scalar_names_its_live_default`).
 - **Five tests**: the round-trip pin, the every-section pin, the
   byte-identical pin, the commented-keys + every-default-bind-loads-back
   pin, and the translucent-alpha spelling pin; plus two CLI tests (parses to

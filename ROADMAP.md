@@ -80,7 +80,8 @@ each item's own file records why it landed when it did.
   file](docs/backlog/resolved/default-config-command-done.md)**
   (2026-09-20) — `scoot --print-default-config` writes a commented starting
   file to stdout (never a path, so it cannot clobber), generated from the
-  live defaults, parsing back to all of them exactly; EPIPE-quiet like
+  live defaults, parsing back to them (commented keys) with commented scalar
+  values pinned to the live defaults by their own test; EPIPE-quiet like
   `--help`, byte-identical across runs, every default bind spelled back in
   loader-accepted form.
 - **[The rename entry is closed](docs/backlog/resolved/rename-flex-family-done.md)**

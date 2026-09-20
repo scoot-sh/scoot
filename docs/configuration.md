@@ -308,7 +308,7 @@ cursor.
 | `focus_ring_width` | integer (pixels) | `3` | Ring thickness. Clamped at load time to at most half of `gap`, so it can never visually reach a neighboring window. Re-applied live by `scootctl reload` (re-clamped against the reloaded gap). |
 | `focus_ring_active_color` | `"#rrggbb"` / `"#rrggbbaa"` | `#6ba6fa` (accent blue) | Ring color around the focused window. Re-applied live. |
 | `focus_ring_inactive_color` | `"#rrggbb"` / `"#rrggbbaa"` | `#595961` (muted gray) | Ring color around every other window. Re-applied live. |
-| `background_color` | `"#rrggbb"` / `"#rrggbbaa"` | `#141419` (near-black) | Cleared behind all window content — there's no separate background render element, this is the frame clear color. Re-applied live. |
+| `background_color` | `"#rrggbb"` / `"#rrggbbaa"` | `#141419` (near-black, pixel-sampled under pixman) | Cleared behind all window content — there's no separate background render element, this is the frame clear color. Re-applied live. |
 | `cursor_size` | integer (pixels) | `16` | Both dimensions of the built-in pointer cursor. Clamped into `4..=256`: under `4` the shape is left with at most one interior pixel (none at all below 3), and a pointer that small is indistinguishable from a dead pixel; over `256` it covers a quarter of a 1080p display's height and the bitmap it allocates stops being small. A value outside `i32` altogether (or a float) is a whole-file parse error, not a clamp. Startup-only — a reload refuses changes. |
 | `cursor_color` | `"#rrggbb"` / `"#rrggbbaa"` | `#ffffff` (white) | Fill color of the built-in pointer cursor. Its 1px outline is always black, at this color's own alpha, and isn't separately configurable — the outline exists to keep the shape's edges visible against similarly-colored content. That doesn't help against a *dark* `cursor_color`: with a near-black fill, the outline blends into it and the pointer can be hard to spot against dark window content. An alpha of `00` makes the built-in cursor invisible; that's your call, not a clamped value. Startup-only — a reload refuses changes. |
 | `cursor_theme` | string | unset | Which installed xcursor theme named cursor shapes are drawn from (see [protocols.md](protocols.md#cursor-shapes-wp-cursor-shape-v1)). Unset means follow `$XCURSOR_THEME`, then `default` — i.e. whatever the rest of the desktop uses; an empty string means the same as unset. This only *names* a theme, it never makes scoot ship one, and a name that matches nothing installed is not an error: named shapes then come from scoot's own drawn set. Startup-only — a reload refuses changes. |
@@ -322,8 +322,10 @@ brings its own colors. None of the three affects a client that supplies its
 own cursor *image*.
 
 The first three hex values above are the actual rendered colors
-(pixel-sampled from a real screenshot, and pasting any of them back into the
-matching config field reproduces the default exactly). Internally those three
+(pixel-sampled from a real screenshot under pixman, the default renderer;
+pasting one back reproduces the default within 1 LSB — the pixman and GLES
+paths disagree by that much on backgrounds, so no hex string is pixel-exact
+everywhere). Internally those three
 built-in defaults are stored as raw RGBA floats (`0.42, 0.65, 0.98`, `0.35,
 0.35, 0.38`, and `0.08, 0.08, 0.1`, each `1.0` alpha), and none of those
 floats is exactly representable as an 8-bit `"#rrggbb"` string. Leave a color

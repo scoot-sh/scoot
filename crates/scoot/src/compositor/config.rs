@@ -531,10 +531,12 @@ pub fn enforce_vt_binds(table: &mut Keybindings) {
 ///
 /// Three appearance colors are the nearest `"#rrggbb"` to built-ins none of
 /// whose floats is exactly representable in 8 bits (see
-/// `docs/configuration.md`); leave one commented for the real default.
-/// The conversion is [`hex`]'s, which follows the same `.round()` the
-/// compositor's own pixel conversion uses, and the test below pins the
-/// fixed point: parsing the emitted hex and re-emitting it is byte-stable.
+/// `docs/configuration.md`) -- and "nearest" is renderer-dependent by 1 LSB
+/// (pixman truncates where the emitter rounds; GLES agrees with the
+/// emitter), so no emitted hex is pixel-exact everywhere. Leave one
+/// commented for the real default. The conversion is [`hex`]'s, and the
+/// test below pins the fixed point: parsing the emitted hex and re-emitting
+/// it is byte-stable.
 ///
 /// Determinism is structural, not sorted-at-the-end: `[binds]` iterates the
 /// default table in its hardcoded order (see [`Keybindings::iter`]), and
@@ -560,8 +562,9 @@ pub fn default_config_toml() -> String {
          # commented for the real default (see docs/configuration.md, which these\n\
          # comments summarize, not replace).\n\
          #\n\
-         # Gap, appearance and binds re-apply live with `scootctl reload`;\n\
-         # everything else is startup-only and a reload refuses it with a message.\n",
+         # Gap, the ring/background appearance fields, and binds re-apply live\n\
+         # with `scootctl reload`; cursor settings, column widths, and everything\n\
+         # else are startup-only and a reload refuses them with a message.\n",
     );
 
     out.push_str("\n[layout]\n");
@@ -668,10 +671,15 @@ pub fn default_config_toml() -> String {
 /// This color as `"#rrggbb"` (opaque) or `"#rrggbbaa"`, the nearest 8-bit
 /// value per channel.
 ///
-/// The `.round()` matches the compositor's own channel conversion
-/// (`Color`'s pixel value), rather than truncating toward a different
-/// neighbor: the emitted hex is what the running default renders closest
-/// to, and parsing it back is a fixed point (see the round-trip test).
+/// Nearest, not exact: none of the built-in floats is exactly representable
+/// in 8 bits, and the two renderers disagree by 1 LSB on backgrounds anyway
+/// (pixman's float-to-16-bit conversion truncates where `.round()` rounds,
+/// so a pixman session renders the running default 1 LSB below this hex;
+/// GLES agrees with it). No hex string is pixel-exact on both renderers --
+/// leave the line commented for the real default. What `.round()` does buy
+/// is the fixed point: parsing the emitted hex and re-emitting it is
+/// byte-stable (see the round-trip test), so an uncommented line never
+/// drifts a second time.
 fn hex(color: Color) -> String {
     let channel = |v: f32| (v * 255.0).round().clamp(0.0, 255.0) as u8;
     let (r, g, b, a) = (
@@ -2499,6 +2507,55 @@ mod tests {
         // "All 36 of them" (see docs/configuration.md): a dropped default
         // bind must fail loudly here, not just shrink the file.
         assert_eq!(binds, 36, "a default bind was added or lost");
+    }
+
+    /// Commented scalar values are pinned to their live defaults, not just
+    /// to being commented: the round-trip test above passes on an
+    /// all-commented file regardless of comment text (every `Option` is
+    /// `None`), so without this a future edit could hardcode a stale
+    /// `# gap = 8` while `Config::default().gap` moves and stay green.
+    /// Every expectation below is derived from the live defaults -- never
+    /// from the emitter -- so a hardcoded emission fails here.
+    #[test]
+    fn every_emitted_commented_scalar_names_its_live_default() {
+        let emitted = default_config_toml();
+        let config = Config::default();
+        let appearance = Appearance::default();
+        let widths: Vec<String> = config
+            .column_widths
+            .iter()
+            .map(|w| format!("{w:?}"))
+            .collect();
+        for expected in [
+            format!("# gap = {}", config.gap),
+            format!("# column_widths = [{}]", widths.join(", ")),
+            format!("# default_column_width = {}", config.default_column_width),
+            format!("# focus_ring_width = {}", appearance.focus_ring_width),
+            format!(
+                "# focus_ring_active_color = \"{}\"",
+                hex(appearance.focus_ring_active_color)
+            ),
+            format!(
+                "# focus_ring_inactive_color = \"{}\"",
+                hex(appearance.focus_ring_inactive_color)
+            ),
+            format!(
+                "# background_color = \"{}\"",
+                hex(appearance.background_color)
+            ),
+            format!("# cursor_size = {}", appearance.cursor_size),
+            format!("# cursor_color = \"{}\"", hex(appearance.cursor_color)),
+            format!("# prefer_no_csd = {}", appearance.prefer_no_csd),
+            format!(
+                "# backend = \"{}\"",
+                crate::cli::RendererKind::default().as_str()
+            ),
+        ] {
+            assert!(
+                emitted.lines().any(|line| line.trim() == expected),
+                "the emission no longer carries its live default: {expected}"
+            );
+        }
     }
 
     /// The 8-bit spelling's other half: a translucent color emits
