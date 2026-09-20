@@ -10,12 +10,19 @@
 //! renderer in the type at all -- so what this module adds is the one enum
 //! that holds all three, and the gathering order between them.
 
-use scoot_core::Rect;
+use std::collections::HashMap;
+
+use scoot_core::{Arrangement, Rect, WindowId};
+use smithay::backend::renderer::element::memory::MemoryRenderBufferRenderElement;
 use smithay::backend::renderer::element::solid::SolidColorRenderElement;
-use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
-use smithay::backend::renderer::element::{AsRenderElements, render_elements};
+use smithay::backend::renderer::element::surface::{
+    WaylandSurfaceRenderElement, render_elements_from_surface_tree,
+};
+use smithay::backend::renderer::element::{AsRenderElements, Kind, render_elements};
 use smithay::backend::renderer::{ImportAll, ImportMem, Renderer, Texture};
-use smithay::desktop::{LayerMap, layer_map_for_output};
+use smithay::desktop::{
+    LayerMap, PopupManager, Space, Window, WindowSurface, layer_map_for_output,
+};
 use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{Logical, Rectangle, Scale};
@@ -23,7 +30,9 @@ use smithay::wayland::shell::wlr_layer::Layer;
 
 use crate::compositor::State;
 use crate::compositor::cursor::CursorElement;
+use crate::compositor::decorations::{Appearance, Decorations, RingElement};
 use crate::compositor::layer_shell;
+use crate::compositor::rounded::{Rounded, clip_rect, physical_radius};
 
 // What a frame can draw. Which kind covers which is decided by the *order*
 // they go into the list (see `gather` below on Smithay's back-to-front
@@ -47,6 +56,8 @@ render_elements! {
     Cursor = CursorElement<R>,
     Surface = WaylandSurfaceRenderElement<R>,
     Decoration = SolidColorRenderElement,
+    PaintedRing = MemoryRenderBufferRenderElement<R>,
+    RoundedSurface = Rounded<WaylandSurfaceRenderElement<R>>,
 }
 
 /// What every element source needs to know about the frame being drawn, read
@@ -97,9 +108,11 @@ impl State {
     /// Everything this frame draws, front-most first, plus the client cursor
     /// surface it drew from if there was one.
     ///
-    /// `ring_elements` is built by the caller rather than here, because it
-    /// needs no renderer and is deliberately computed *before* the
-    /// framebuffer is bound -- see `super::draw_frame_with`.
+    /// `ring_elements` is built by the caller rather than here, because the
+    /// painted ring needs the renderer and is deliberately computed *before*
+    /// the framebuffer is bound -- see `super::draw_frame_with`. It arrives
+    /// already mapped into frame elements for the same reason the window
+    /// split below maps its own: one `Vec<Elements<R>>` in, extended, done.
     ///
     /// The returned surface is set only on the frames that actually went
     /// looking for one (`--tty` with a pointer); it is what the frame
@@ -109,7 +122,8 @@ impl State {
         renderer: &mut R,
         output: &Output,
         frame: &FrameContext,
-        ring_elements: Vec<SolidColorRenderElement>,
+        ring_elements: Vec<Elements<R>>,
+        arrangement: Option<&Arrangement>,
     ) -> (Vec<Elements<R>>, Option<WlSurface>)
     where
         R: Renderer + ImportAll + ImportMem,
@@ -198,14 +212,27 @@ impl State {
             elements.push(Elements::Decoration(backdrop));
             elements
         } else {
-            let window_elements = match geometry {
-                Some(region) => self
+            let rounded = self.appearance.corner_radius > 0;
+            let window_elements: Vec<Elements<R>> = match (geometry, arrangement) {
+                (Some(region), Some(arranged)) if rounded => rounded_window_elements(
+                    &self.space,
+                    &self.windows,
+                    arranged,
+                    renderer,
+                    region,
+                    scale,
+                    self.appearance.corner_radius,
+                ),
+                (Some(region), _) => self
                     .space
-                    .render_elements_for_region(renderer, &region, scale, 1.0),
+                    .render_elements_for_region(renderer, &region, scale, 1.0)
+                    .into_iter()
+                    .map(Elements::Surface)
+                    .collect(),
                 // Unreachable while `output` is the primary output
                 // `headless::init_named` mapped into the space; an output that
                 // isn't in the space has no region to render.
-                None => Vec::new(),
+                (None, _) => Vec::new(),
             };
             let layers = layer_map_for_output(output);
             let mut elements = Vec::with_capacity(
@@ -219,8 +246,8 @@ impl State {
                 scale,
                 &mut elements,
             );
-            elements.extend(window_elements.into_iter().map(Elements::Surface));
-            elements.extend(ring_elements.into_iter().map(Elements::Decoration));
+            elements.extend(window_elements);
+            elements.extend(ring_elements);
             layer_elements(
                 &layers,
                 &layer_shell::BELOW_WINDOWS,
@@ -237,6 +264,145 @@ impl State {
         };
         (elements, cursor_surface)
     }
+}
+
+/// One ring element into the frame list. The square path's bars keep their
+/// `Decoration` variant; the painted ring has its own.
+pub(super) fn map_ring<R: Renderer>(element: RingElement<R>) -> Elements<R> {
+    match element {
+        RingElement::Rect(bar) => Elements::Decoration(bar),
+        RingElement::Painted(ring) => Elements::PaintedRing(*ring),
+    }
+}
+
+/// This frame's ring, already mapped into frame elements: the painted
+/// rounded ring when the session rounds, the four solid bars otherwise,
+/// nothing while locked (`arrangement` is `None` then).
+///
+/// Shared by both frame bodies (`draw_frame_with` and the scanout tier), so
+/// the radius branch cannot drift between them. Built before the framebuffer
+/// is bound, like the arrangement it comes from.
+pub(super) fn ring_elements<R>(
+    decorations: &mut Decorations,
+    appearance: &Appearance,
+    arrangement: Option<&Arrangement>,
+    frame: &FrameContext,
+    renderer: &mut R,
+) -> Vec<Elements<R>>
+where
+    R: Renderer + ImportAll + ImportMem,
+    R::TextureId: Texture + Send + Clone + 'static,
+{
+    match arrangement {
+        Some(arranged) if appearance.corner_radius > 0 => decorations
+            .elements_rounded(arranged, appearance, frame.bounds(), frame.scale, renderer)
+            .into_iter()
+            .map(map_ring)
+            .collect(),
+        Some(arranged) => decorations
+            .elements(arranged, appearance, frame.bounds(), frame.scale)
+            .into_iter()
+            .map(Elements::Decoration)
+            .collect(),
+        None => Vec::new(),
+    }
+}
+
+/// The rounded path's window list: like `Space::render_elements_for_region`,
+/// but per window, so each window's toplevel tree can be clipped to its own
+/// rounded rect while its popups stay square.
+///
+/// Order, filtering and positioning replicate `render_elements_for_region`
+/// exactly (storage order reversed, bbox-overlap filter, render location
+/// minus region, `1.0` alpha): the only deliberate differences are the split
+/// of each window's elements into popup vs toplevel halves -- mirroring
+/// `Window`'s own `AsRenderElements` impl at the pinned rev
+/// (`desktop/space/wayland/window.rs`), popups first -- and the [`Rounded`]
+/// wrap on the toplevel half. A window whose effective radius is zero pushes
+/// its elements plain, so tiny windows cost nothing.
+///
+/// The clip comes from the arrangement placement (the layout rect the ring is
+/// painted from too), not from the drawn surface: both edges then coincide by
+/// construction. A surface temporarily larger than its placement (a shrink
+/// still in flight) is cut to the placement rather than bleeding into the
+/// gap -- a behavior change, but only with rounding opted in.
+#[allow(clippy::too_many_arguments)]
+fn rounded_window_elements<R>(
+    space: &Space<Window>,
+    windows: &HashMap<WindowId, Window>,
+    arrangement: &Arrangement,
+    renderer: &mut R,
+    region: Rectangle<i32, Logical>,
+    scale: f64,
+    configured_radius: i32,
+) -> Vec<Elements<R>>
+where
+    R: Renderer + ImportAll + ImportMem,
+    R::TextureId: Texture + Send + Clone + 'static,
+{
+    let mut out = Vec::new();
+    // Back to front in storage, so reversed here: the same order
+    // `render_elements_for_region` gathers in.
+    for placement in arrangement.placements.iter().rev() {
+        let Some(window) = windows.get(&placement.id) else {
+            continue;
+        };
+        // The bbox filter, on the same bbox (popups included) --
+        // `Space::element_bbox` reads the same `InnerElement::bbox`.
+        let Some(bbox) = space.element_bbox(window) else {
+            continue;
+        };
+        if !region.overlaps(bbox) {
+            continue;
+        }
+        // The render location, minus the region: `render_location` is the
+        // mapped location minus the surface geometry's own offset.
+        let Some(mapped) = space.element_location(window) else {
+            continue;
+        };
+        let geometry = window.geometry();
+        let location = (mapped - geometry.loc - region.loc).to_physical_precise_round(scale);
+        // No X11 arm: this crate builds without xwayland, so `Wayland` is
+        // the only variant -- and if that ever changes this match fails to
+        // compile rather than silently dropping windows.
+        let WindowSurface::Wayland(toplevel) = window.underlying_surface();
+        let surface = toplevel.wl_surface();
+        for (popup, popup_offset) in PopupManager::popups_for_surface(surface) {
+            let offset = (geometry.loc + popup_offset - popup.geometry().loc)
+                .to_physical_precise_round(scale);
+            out.extend(
+                render_elements_from_surface_tree(
+                    renderer,
+                    popup.wl_surface(),
+                    location + offset,
+                    scale,
+                    1.0,
+                    Kind::Unspecified,
+                )
+                .into_iter()
+                .map(Elements::Surface),
+            );
+        }
+        let main: Vec<WaylandSurfaceRenderElement<R>> = render_elements_from_surface_tree(
+            renderer,
+            surface,
+            location,
+            scale,
+            1.0,
+            Kind::Unspecified,
+        );
+        let clip = clip_rect(placement.rect, scale);
+        let radius = physical_radius(configured_radius, clip, scale);
+        if radius > 0 {
+            out.extend(
+                main.into_iter()
+                    .map(|element| Elements::RoundedSurface(Rounded::new(element, clip, radius))),
+            );
+        } else {
+            out.extend(main.into_iter().map(Elements::Surface));
+        }
+    }
+    out
 }
 
 /// Appends the render elements of every mapped layer surface on `layers`,

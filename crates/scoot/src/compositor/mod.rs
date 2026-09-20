@@ -37,6 +37,7 @@ mod presentation_time;
 mod relative_pointer;
 mod reload;
 pub(crate) mod render;
+mod rounded;
 mod screencopy;
 mod screenshot;
 mod selection;

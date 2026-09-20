@@ -10,11 +10,12 @@
 //! server-drawn ring floating next to a client-drawn one.
 //!
 //! Explicitly out of scope, matching niri's own take on the same tradeoff:
-//! real titlebar text or buttons, per-window/per-app-id overrides, rounded
-//! corners, drop shadows, and any animation on focus change. A client told
-//! `ServerSide` that expects the compositor to draw a close button or a drag
-//! area gets neither -- just the ring. That's an accepted rough edge, not a
-//! bug to fix here.
+//! real titlebar text or buttons, per-window/per-app-id overrides, drop
+//! shadows, and any animation on focus change. A client told `ServerSide`
+//! that expects the compositor to draw a close button or a drag area gets
+//! neither -- just the ring. That's an accepted rough edge, not a bug to fix
+//! here. (Rounded corners used to be on this list; `[appearance]
+//! corner_radius` implements them -- see `rounded.rs`.)
 //!
 //! # Where the background lives (it isn't a render element)
 //!
@@ -65,10 +66,19 @@
 use std::collections::{HashMap, HashSet};
 
 use scoot_core::{Arrangement, Rect, WindowId};
+use smithay::backend::allocator::Fourcc;
 use smithay::backend::renderer::Color32F;
 use smithay::backend::renderer::element::Kind;
+use smithay::backend::renderer::element::memory::{
+    MemoryRenderBuffer, MemoryRenderBufferRenderElement,
+};
 use smithay::backend::renderer::element::solid::{SolidColorBuffer, SolidColorRenderElement};
-use smithay::utils::{Logical, Point};
+use smithay::backend::renderer::{ImportAll, ImportMem, Renderer, Texture};
+use smithay::utils::{Logical, Physical, Point, Rectangle, Size, Transform};
+
+use super::rounded::{
+    RingPaint, clip_rect, element_canvas, paint_ring, physical_radius, ring_layout,
+};
 
 /// A straight (non-premultiplied) RGBA color in `0.0..=1.0`, the form a
 /// `"#rrggbb"`/`"#rrggbbaa"` config string parses into. Kept distinct from
@@ -187,6 +197,17 @@ pub struct Appearance {
     pub focus_ring_active_color: Color,
     pub focus_ring_inactive_color: Color,
     pub background_color: Color,
+    /// Window corner radius in logical pixels (`[appearance] corner_radius`,
+    /// default 0 = square). Rounds the window content (see `rounded.rs`) and
+    /// the focus ring below together: a square ring around a rounded window
+    /// is worse than none, so the ring follows the radius rather than
+    /// staying rectangular.
+    ///
+    /// Always within `0..=` once [`Appearance::clamped`] has run (negatives
+    /// become 0); the upper bound lives per window at render time
+    /// ([`rounded::effective_radius`]: half the window's smaller dimension),
+    /// because windows differ in size and no one config value fits all.
+    pub corner_radius: i32,
     /// Both dimensions of the square fallback cursor bitmap, in pixels --
     /// always within [`Appearance::MIN_CURSOR_SIZE`]`..=`[`Appearance::MAX_CURSOR_SIZE`]
     /// once [`Appearance::clamped`] has run. Only the *fallback* shape
@@ -226,6 +247,10 @@ impl Default for Appearance {
             // values.
             focus_ring_inactive_color: Color::new(0.35, 0.35, 0.38, 1.0),
             background_color: Color::new(0.08, 0.08, 0.1, 1.0),
+            // Square until configured: any non-zero radius opts the session
+            // into the rounded window + ring path (see `rounded.rs`), so the
+            // default session is byte-identical to before it existed.
+            corner_radius: 0,
             // The shape `cursor.rs` has drawn since it existed: a 16x16
             // triangle with a white fill. Unchanged defaults, so an existing
             // config file (or none) looks exactly as it did before this was
@@ -312,6 +337,13 @@ impl Appearance {
             );
             self.focus_ring_width = max;
         }
+        if self.corner_radius < 0 {
+            tracing::warn!(
+                configured = self.corner_radius,
+                "corner_radius is negative; clamping to zero"
+            );
+            self.corner_radius = 0;
+        }
         let cursor_size = Self::clamp_cursor_size(self.cursor_size);
         if cursor_size != self.cursor_size {
             tracing::warn!(
@@ -391,14 +423,83 @@ struct WindowRing {
     right: SolidColorBuffer,
 }
 
+/// One window's ring element: either a solid bar (the square path, and the
+/// fallback when a painted ring cannot be built) or one painted rounded
+/// strip (top or bottom -- the rounded path paints two strips plus the two
+/// solid side bars, so a frame holds the same four elements per window
+/// either way).
+///
+/// The caller (`render/elements.rs`) maps each into the frame's element list;
+/// nothing about the frame path changes, only which variant each window
+/// contributes.
+pub enum RingElement<R: Renderer> {
+    /// One bar of the square ring (four per window), or a side bar / the
+    /// whole fallback on the rounded path.
+    Rect(SolidColorRenderElement),
+    /// One painted rounded strip (top or bottom). Boxed: the element carries
+    /// the imported texture and dwarfs the bar variant, and without the box
+    /// every window's slot in the per-frame ring `Vec` pays the big
+    /// variant's size.
+    Painted(Box<MemoryRenderBufferRenderElement<R>>),
+}
+
+/// What decides whether a window's painted ring is still current. Every input
+/// to the paint, so a stale buffer is impossible by construction: any change
+/// repaints before the element is built.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PaintedKey {
+    /// Logical window size (the paint's inputs, before scaling).
+    w: i32,
+    h: i32,
+    /// Logical ring thickness.
+    thickness: i32,
+    /// Configured radius, logical pixels.
+    radius: i32,
+    /// Ring color bytes (premultiplied `Argb8888`, little-endian).
+    color: [u8; 4],
+    /// Output scale bits (`f64` has no `Eq`; the bits do).
+    scale_bits: u64,
+}
+
+/// One window's painted ring: the two strip buffers the elements borrow,
+/// where to draw them, the paint scratch reused across repaints, and the key
+/// the buffers were painted for -- or `top: None` when the last build failed
+/// and this window is on the square fallback until its key changes (a failed
+/// build retried every frame would warn every frame).
+///
+/// Two strips rather than one full-window image: the middle of a full-canvas
+/// ring is transparent, and compositing it costs a full-window blend every
+/// frame for pixels that change nothing -- most of what an early benchmark
+/// measured as the rounding cost. The strips cover only rows that hold ring
+/// pixels (top band plus upper arcs, bottom band plus lower arcs); the
+/// straight side runs stay solid rects through the existing `rings` buffers.
+struct PaintedRing {
+    top: Option<MemoryRenderBuffer>,
+    bottom: Option<MemoryRenderBuffer>,
+    /// Where the strips draw, and at what logical size: computed at build
+    /// alongside the buffers (they only change with the key).
+    top_at: Option<StripGeometry>,
+    bottom_at: Option<StripGeometry>,
+    pixels: Vec<u8>,
+    key: Option<PaintedKey>,
+}
+
+/// Where one painted strip draws: its origin in exact physical pixels and
+/// its size in logical pixels (what the element is built at).
+struct StripGeometry {
+    loc: Point<f64, Physical>,
+    logical: Size<i32, Logical>,
+}
+
 /// Per-window decoration bookkeeping, owned by [`State`](super::State) for
 /// as long as the compositor runs. `render.rs` calls [`Decorations::elements`]
 /// once per render to get this frame's ring, and otherwise doesn't know this
 /// type exists -- see the module doc's opening paragraph on keeping
 /// decoration logic out of the render loop itself.
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct Decorations {
     rings: HashMap<WindowId, WindowRing>,
+    painted: HashMap<WindowId, PaintedRing>,
     /// Scratch space for `elements`'s "which windows are still around"
     /// check, cleared and refilled in place every call instead of a fresh
     /// `HashSet` collected from scratch each time -- this runs on every
@@ -420,6 +521,12 @@ impl Decorations {
     /// Every window still present in `arrangement` keeps its buffers;
     /// windows no longer present (closed) have theirs dropped, so this
     /// map can't grow without bound over a long-running session.
+    ///
+    /// This is the square ring, unchanged: the rounded session reaches
+    /// [`Decorations::elements_rounded`] instead, so this path stays
+    /// byte-identical with no branch on the radius. Painted buffers from an
+    /// earlier rounded stretch are dropped here, so toggling the radius back
+    /// to square frees them instead of leaking them for the session.
     pub fn elements(
         &mut self,
         arrangement: &Arrangement,
@@ -427,22 +534,14 @@ impl Decorations {
         bounds: Rect,
         scale: f64,
     ) -> Vec<SolidColorRenderElement> {
-        self.live.clear();
-        self.live
-            .extend(arrangement.placements.iter().map(|p| p.id));
-        let live = &self.live;
-        self.rings.retain(|id, _| live.contains(id));
-
+        self.retain(arrangement);
+        self.painted.clear();
         let mut elements = Vec::new();
         for placement in &arrangement.placements {
             if !placement.visible {
                 continue;
             }
-            let color = if arrangement.focused == Some(placement.id) {
-                appearance.focus_ring_active_color
-            } else {
-                appearance.focus_ring_inactive_color
-            };
+            let color = ring_color(arrangement, placement.id, appearance);
             let rects = ring_rects(placement.rect, appearance.focus_ring_width, bounds);
             let ring = self.rings.entry(placement.id).or_default();
             push(&mut elements, &mut ring.top, rects.top, color, scale);
@@ -452,6 +551,342 @@ impl Decorations {
         }
         elements
     }
+
+    /// The rounded session's ring: one painted rounded ring per window (see
+    /// `rounded.rs`), falling back to the square bars for a window whose
+    /// painted buffer cannot be built. `renderer` is only touched to import a
+    /// freshly repainted buffer -- steady-state frames reuse the cached one
+    /// and never touch it.
+    ///
+    /// Painted buffers are dropped when the session goes back to square
+    /// (`corner_radius == 0` reaches [`Decorations::elements`] instead and
+    /// never calls this), so toggling the radius does not leak them.
+    pub fn elements_rounded<R>(
+        &mut self,
+        arrangement: &Arrangement,
+        appearance: &Appearance,
+        bounds: Rect,
+        scale: f64,
+        renderer: &mut R,
+    ) -> Vec<RingElement<R>>
+    where
+        R: Renderer + ImportAll + ImportMem,
+        R::TextureId: Texture + Send + Clone + 'static,
+    {
+        self.retain(arrangement);
+        let mut elements = Vec::new();
+        for placement in &arrangement.placements {
+            if !placement.visible {
+                continue;
+            }
+            let color = ring_color(arrangement, placement.id, appearance);
+            self.push_painted(
+                &mut elements,
+                placement.id,
+                placement.rect,
+                appearance,
+                color,
+                bounds,
+                scale,
+                renderer,
+            );
+        }
+        elements
+    }
+
+    /// Drops every buffer -- rect and painted -- for windows no longer in the
+    /// arrangement. Shared by both ring paths.
+    fn retain(&mut self, arrangement: &Arrangement) {
+        self.live.clear();
+        self.live
+            .extend(arrangement.placements.iter().map(|p| p.id));
+        let live = &self.live;
+        self.rings.retain(|id, _| live.contains(id));
+        self.painted.retain(|id, _| live.contains(id));
+    }
+
+    /// One window's painted rounded ring -- two strips plus the two solid
+    /// side bars -- or the square fallback when the painted buffers cannot
+    /// be built. Repaints only when the key changed (resize, radius, width,
+    /// color or scale); steady-state frames reuse the cached buffers with no
+    /// allocation and no renderer touch.
+    #[allow(clippy::too_many_arguments)]
+    fn push_painted<R>(
+        &mut self,
+        elements: &mut Vec<RingElement<R>>,
+        id: WindowId,
+        rect: Rect,
+        appearance: &Appearance,
+        color: Color,
+        bounds: Rect,
+        scale: f64,
+        renderer: &mut R,
+    ) where
+        R: Renderer + ImportAll + ImportMem,
+        R::TextureId: Texture + Send + Clone + 'static,
+    {
+        let thickness = appearance.focus_ring_width;
+        if thickness <= 0 {
+            return;
+        }
+        let key = PaintedKey {
+            w: rect.w,
+            h: rect.h,
+            thickness,
+            radius: appearance.corner_radius,
+            color: color.to_argb8888(),
+            scale_bits: scale.to_bits(),
+        };
+        let entry = self.painted.entry(id).or_insert_with(|| PaintedRing {
+            top: None,
+            bottom: None,
+            top_at: None,
+            bottom_at: None,
+            pixels: Vec::new(),
+            key: None,
+        });
+        if entry.key != Some(key) {
+            entry.key = Some(key);
+            build_strips(rect, appearance, color, scale, entry);
+        }
+        let (Some(top), Some(bottom), Some(top_at), Some(bottom_at)) =
+            (&entry.top, &entry.bottom, &entry.top_at, &entry.bottom_at)
+        else {
+            // The last build failed (already warned there): square fallback
+            // through the persistent rect buffers, silently until the key
+            // changes and a rebuild is attempted.
+            self.push_fallback(elements, id, rect, thickness, color, bounds, scale);
+            return;
+        };
+        let top = MemoryRenderBufferRenderElement::from_buffer(
+            renderer,
+            top_at.loc,
+            top,
+            None,
+            None,
+            Some(top_at.logical),
+            Kind::Unspecified,
+        );
+        let bottom = MemoryRenderBufferRenderElement::from_buffer(
+            renderer,
+            bottom_at.loc,
+            bottom,
+            None,
+            None,
+            Some(bottom_at.logical),
+            Kind::Unspecified,
+        );
+        match (top, bottom) {
+            (Ok(top), Ok(bottom)) => {
+                elements.push(RingElement::Painted(Box::new(top)));
+                elements.push(RingElement::Painted(Box::new(bottom)));
+                let rects = ring_rects(rect, thickness, bounds);
+                let ring = self.rings.entry(id).or_default();
+                push_painted_rect(elements, &mut ring.left, rects.left, color, scale);
+                push_painted_rect(elements, &mut ring.right, rects.right, color, scale);
+            }
+            (Err(error), _) | (_, Err(error)) => {
+                // Import-time failure (the paint succeeded): poison the entry
+                // so this window falls back silently until its key changes --
+                // a renderer refusing one import will refuse the retry next
+                // frame too, and warning every frame is log spam.
+                tracing::warn!(
+                    %error,
+                    "could not import the painted focus ring; falling back to a square ring"
+                );
+                entry.top = None;
+                entry.bottom = None;
+                entry.top_at = None;
+                entry.bottom_at = None;
+                self.push_fallback(elements, id, rect, thickness, color, bounds, scale);
+            }
+        }
+    }
+
+    /// The square fallback for one window on the rounded path: the same four
+    /// bars [`Decorations::elements`] builds, through the same persistent
+    /// buffers, so a window that cannot paint still gets a ring.
+    #[allow(clippy::too_many_arguments)]
+    fn push_fallback<R>(
+        &mut self,
+        elements: &mut Vec<RingElement<R>>,
+        id: WindowId,
+        rect: Rect,
+        thickness: i32,
+        color: Color,
+        bounds: Rect,
+        scale: f64,
+    ) where
+        R: Renderer,
+    {
+        let rects = ring_rects(rect, thickness, bounds);
+        let ring = self.rings.entry(id).or_default();
+        push_painted_rect(elements, &mut ring.top, rects.top, color, scale);
+        push_painted_rect(elements, &mut ring.bottom, rects.bottom, color, scale);
+        push_painted_rect(elements, &mut ring.left, rects.left, color, scale);
+        push_painted_rect(elements, &mut ring.right, rects.right, color, scale);
+    }
+}
+
+/// Active color for the focused window, inactive for the rest: the one rule
+/// both ring paths share.
+fn ring_color(arrangement: &Arrangement, id: WindowId, appearance: &Appearance) -> Color {
+    if arrangement.focused == Some(id) {
+        appearance.focus_ring_active_color
+    } else {
+        appearance.focus_ring_inactive_color
+    }
+}
+
+/// Repaints `entry`'s two strips for `rect`: computes the full-canvas ring
+/// geometry once (the band both strips share), then paints the top rows and
+/// the bottom rows into the shared scratch, importing each into its buffer.
+/// On any failure warns once and leaves the entry empty (the caller falls
+/// back to the square ring until the key changes).
+///
+/// A zero-area canvas (degenerate window) paints nothing rather than
+/// allocating a zero-byte buffer: the ring of an invisible window is
+/// invisible either way, and `MemoryRenderBuffer::from_slice` on an empty
+/// slice would only assert downstream.
+fn build_strips(
+    rect: Rect,
+    appearance: &Appearance,
+    color: Color,
+    scale: f64,
+    entry: &mut PaintedRing,
+) {
+    entry.top = None;
+    entry.bottom = None;
+    entry.top_at = None;
+    entry.bottom_at = None;
+    let thickness = appearance.focus_ring_width;
+    let (loc, logical, canvas) = ring_layout(rect, thickness, scale);
+    if canvas.w <= 0 || canvas.h <= 0 {
+        tracing::warn!("cannot paint a focus ring with no pixels; falling back to a square ring");
+        return;
+    }
+    let clip = clip_rect(rect, scale);
+    let radius_inner = physical_radius(appearance.corner_radius, clip, scale);
+    let thickness_phys = (f64::from(thickness) * scale).round() as i32;
+    let radius_outer = radius_inner + thickness_phys.max(0);
+    // The window's rect and the ring's outer rect in full-canvas
+    // coordinates: both strips paint sub-rects of this one band, so the
+    // strips and the solid side bars agree on every boundary by
+    // construction. At scale 1.0 the inner rect is exactly `(thickness,
+    // thickness, w, h)`; at fractional scales both roundings come from the
+    // same conversions, so the band still hugs the clip.
+    let origin: Point<i32, Physical> = loc.to_i32_round();
+    let inner = Rectangle::new(
+        (clip.loc.x - origin.x, clip.loc.y - origin.y).into(),
+        clip.size,
+    );
+    let outer = Rectangle::new((0, 0).into(), (canvas.w, canvas.h).into());
+    let argb = color.to_argb8888();
+    // Strip height in physical pixels: the band rows plus the arc rows. The
+    // logical height rounds UP, so the element's canvas always covers the
+    // target: a strip one row short would leave a 1px gap in the ring at a
+    // fractional scale, while a strip one row long only repaints side-band
+    // pixels the solid bars already cover (same opaque color -- idempotent).
+    let strip_target = thickness_phys + radius_outer;
+    let strip_logical_h = ((strip_target as f64 / scale).ceil() as i32).max(1);
+    let strip_logical = Size::<i32, Logical>::from((logical.w, strip_logical_h));
+    // Top strip: full-canvas rows `0..canvas_h`, painted in place.
+    let top_canvas = element_canvas(loc, strip_logical, scale);
+    if top_canvas.w <= 0 || top_canvas.h <= 0 {
+        tracing::warn!("cannot paint a focus ring with no pixels; falling back to a square ring");
+        return;
+    }
+    paint_strip(
+        &mut entry.pixels,
+        top_canvas,
+        RingPaint {
+            canvas: top_canvas,
+            outer,
+            radius_outer,
+            inner,
+            radius_inner,
+        },
+        argb,
+    );
+    entry.top = Some(MemoryRenderBuffer::from_slice(
+        &entry.pixels,
+        Fourcc::Argb8888,
+        (top_canvas.w, top_canvas.h),
+        1,
+        Transform::Normal,
+        None,
+    ));
+    entry.top_at = Some(StripGeometry {
+        loc,
+        logical: strip_logical,
+    });
+    // Bottom strip: full-canvas rows `canvas.h - bottom_h..canvas.h`. Its
+    // canvas height comes from the same logical height at its own origin, so
+    // it can differ from the top's by a pixel at fractional scales -- each
+    // strip paints exactly its own canvas, so both stay correct. Seeded from
+    // the top height (exact at integer scales); a degenerate window whose
+    // full height is shorter than two strips just overlaps them, painting
+    // the same opaque color twice -- idempotent.
+    //
+    // Recomputed rather than mirrored: the element rounding is
+    // origin-sensitive, and the bottom origin differs.
+    let bottom_loc =
+        Point::<f64, Physical>::from((loc.x, loc.y + f64::from(canvas.h - top_canvas.h)));
+    let bottom_canvas = element_canvas(bottom_loc, strip_logical, scale);
+    if bottom_canvas.w <= 0 || bottom_canvas.h <= 0 {
+        tracing::warn!("cannot paint a focus ring with no pixels; falling back to a square ring");
+        entry.top = None;
+        entry.top_at = None;
+        return;
+    }
+    // The bottom strip's origin in full-canvas rows, so the shared `outer` /
+    // `inner` rects land on the right rows when painted into the small
+    // canvas: shift both rects up by the strip's first full-canvas row.
+    let first_row = canvas.h - bottom_canvas.h;
+    let shift = |rect: Rectangle<i32, Physical>| {
+        Rectangle::new((rect.loc.x, rect.loc.y - first_row).into(), rect.size)
+    };
+    paint_strip(
+        &mut entry.pixels,
+        bottom_canvas,
+        RingPaint {
+            canvas: bottom_canvas,
+            outer: shift(outer),
+            radius_outer,
+            inner: shift(inner),
+            radius_inner,
+        },
+        argb,
+    );
+    entry.bottom = Some(MemoryRenderBuffer::from_slice(
+        &entry.pixels,
+        Fourcc::Argb8888,
+        (bottom_canvas.w, bottom_canvas.h),
+        1,
+        Transform::Normal,
+        None,
+    ));
+    entry.bottom_at = Some(StripGeometry {
+        loc: bottom_loc,
+        logical: strip_logical,
+    });
+}
+
+/// Sizes `pixels` for a strip canvas, zeroes it, and paints the shared ring
+/// band into it: the same `outer`/`inner` rects (in full-canvas coordinates)
+/// either strip passes, since `paint_ring` only fills rows its rects reach.
+fn paint_strip(
+    pixels: &mut Vec<u8>,
+    canvas: Size<i32, Physical>,
+    paint: RingPaint,
+    color: [u8; 4],
+) {
+    let len = canvas.w as usize * canvas.h as usize * 4;
+    if pixels.len() != len {
+        pixels.resize(len, 0);
+    }
+    pixels.fill(0);
+    paint_ring(pixels, &paint, color);
 }
 
 /// Updates one persistent segment buffer to `rect` (or to empty, if this
@@ -488,6 +923,30 @@ fn push(
         1.0,
         Kind::Unspecified,
     ));
+}
+
+/// [`push`] for the rounded path's square fallback: same segment update,
+/// wrapped as [`RingElement::Rect`] instead of a bare solid element.
+fn push_painted_rect<R: Renderer>(
+    elements: &mut Vec<RingElement<R>>,
+    buffer: &mut SolidColorBuffer,
+    rect: Option<Rect>,
+    color: Color,
+    scale: f64,
+) {
+    let Some(rect) = rect else {
+        buffer.resize((0, 0));
+        return;
+    };
+    buffer.update((rect.w, rect.h), color);
+    let location = Point::<i32, Logical>::from((rect.x, rect.y)).to_physical_precise_round(scale);
+    elements.push(RingElement::Rect(SolidColorRenderElement::from_buffer(
+        buffer,
+        location,
+        scale,
+        1.0,
+        Kind::Unspecified,
+    )));
 }
 
 #[cfg(test)]
@@ -714,6 +1173,37 @@ mod tests {
         }
         .clamped(-6);
         assert_eq!(appearance.focus_ring_width, 0);
+    }
+
+    #[test]
+    fn a_negative_corner_radius_is_clamped_to_zero() {
+        let appearance = Appearance {
+            corner_radius: -8,
+            ..Appearance::default()
+        }
+        .clamped(10);
+        assert_eq!(appearance.corner_radius, 0);
+    }
+
+    #[test]
+    fn a_zero_or_positive_corner_radius_survives_clamped() {
+        for configured in [0, 1, 12, i32::MAX] {
+            let appearance = Appearance {
+                corner_radius: configured,
+                ..Appearance::default()
+            }
+            .clamped(10);
+            assert_eq!(
+                appearance.corner_radius, configured,
+                "corner_radius {configured} must not be clamped: the upper bound \
+                 is per window at render time, not per config at load time"
+            );
+        }
+    }
+
+    #[test]
+    fn the_default_corner_radius_is_square() {
+        assert_eq!(Appearance::default().corner_radius, 0);
     }
 
     // -- ring_rects -----------------------------------------------------------

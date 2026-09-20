@@ -149,6 +149,7 @@ struct AppearanceConfig {
     focus_ring_active_color: Option<String>,
     focus_ring_inactive_color: Option<String>,
     background_color: Option<String>,
+    corner_radius: Option<i32>,
     cursor_size: Option<i32>,
     cursor_color: Option<String>,
     cursor_theme: Option<String>,
@@ -197,6 +198,7 @@ impl AppearanceConfig {
                 "background_color",
                 defaults.background_color,
             ),
+            corner_radius: self.corner_radius.unwrap_or(defaults.corner_radius),
             cursor_size: self.cursor_size.unwrap_or(defaults.cursor_size),
             cursor_color: color(self.cursor_color, "cursor_color", defaults.cursor_color),
             // An empty string is treated as unset rather than as a theme
@@ -603,6 +605,9 @@ pub fn default_config_toml() -> String {
         "# background_color = \"{}\"\n",
         hex(appearance.background_color)
     ));
+    out.push_str("# Window corner radius in logical pixels; 0 is square. The effective\n");
+    out.push_str("# radius is clamped per window to half its smaller dimension.\n");
+    out.push_str(&format!("# corner_radius = {}\n", appearance.corner_radius));
     out.push_str(&format!("# cursor_size = {}\n", appearance.cursor_size));
     out.push_str(&format!(
         "# cursor_color = \"{}\"\n",
@@ -1742,6 +1747,7 @@ mod tests {
             focus_ring_active_color = "#ff0000"
             focus_ring_inactive_color = "#00ff0080"
             background_color = "#101010"
+            corner_radius = 12
             cursor_size = 32
             cursor_color = "#ff8000"
             cursor_theme = "Adwaita"
@@ -1750,6 +1756,7 @@ mod tests {
         let file: FileConfig = toml::from_str(toml).expect("valid toml");
         let loaded = LoadedConfig::from_file(file);
         assert_eq!(loaded.appearance.focus_ring_width, 5);
+        assert_eq!(loaded.appearance.corner_radius, 12);
         assert_eq!(loaded.appearance.cursor_size, 32);
         assert_eq!(
             loaded.appearance.cursor_theme.as_deref(),
@@ -1780,6 +1787,14 @@ mod tests {
         let file: FileConfig = toml::from_str("").unwrap();
         let loaded = LoadedConfig::from_file(file);
         assert_eq!(loaded.appearance, Appearance::default());
+    }
+
+    #[test]
+    fn a_negative_corner_radius_is_clamped_to_zero_at_load() {
+        let toml = "[appearance]\ncorner_radius = -12\n";
+        let file: FileConfig = toml::from_str(toml).expect("valid toml");
+        let loaded = LoadedConfig::from_file(file);
+        assert_eq!(loaded.appearance.corner_radius, 0);
     }
 
     #[test]
@@ -2439,6 +2454,35 @@ mod tests {
             assert!(
                 emitted.lines().any(|line| line.trim() == section),
                 "the emission never names {section}"
+            );
+        }
+    }
+
+    /// The third pin, at key granularity for `[appearance]`: the round-trip
+    /// test above compares the parsed emission against the live defaults,
+    /// which a *missing* key also satisfies (a missing key falls back to its
+    /// default) -- so an omitted key would pass it silently. Every appearance
+    /// key must be named in the emission, commented out with its default.
+    #[test]
+    fn the_emitted_default_config_names_every_appearance_key() {
+        let emitted = default_config_toml();
+        for key in [
+            "focus_ring_width",
+            "focus_ring_active_color",
+            "focus_ring_inactive_color",
+            "background_color",
+            "corner_radius",
+            "cursor_size",
+            "cursor_color",
+            "cursor_theme",
+            "prefer_no_csd",
+        ] {
+            assert!(
+                emitted.lines().any(|line| {
+                    let trimmed = line.trim();
+                    trimmed.starts_with('#') && trimmed[1..].trim_start().starts_with(key)
+                }),
+                "the emission never names [appearance] {key}"
             );
         }
     }

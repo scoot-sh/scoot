@@ -17,12 +17,12 @@
 //!   structural, not taste. (The gap-only `Config` handed to `set_config`
 //!   keeps the running widths, which is what makes that panic unreachable
 //!   rather than merely avoided.)
-//! - `[appearance]` ring width and colors, background, `prefer_no_csd`:
-//!   applied -- every reader takes them live from `State::appearance` (the
-//!   render path, `XdgDecorationHandler`). The cursor fields (`cursor_size`,
-//!   `cursor_color`, `cursor_theme`) are refused: `Cursor::new` consumes
-//!   them once at startup into a bitmap and a loaded theme, so writing them
-//!   here would change nothing.
+//! - `[appearance]` ring width and colors, background, `corner_radius`,
+//!   `prefer_no_csd`: applied -- every reader takes them live from
+//!   `State::appearance` (the render path, `XdgDecorationHandler`). The
+//!   cursor fields (`cursor_size`, `cursor_color`, `cursor_theme`) are
+//!   refused: `Cursor::new` consumes them once at startup into a bitmap and
+//!   a loaded theme, so writing them here would change nothing.
 //! - `[binds]`: rebuilt from defaults plus the file (see
 //!   [`keybindings_for`](super::config::keybindings_for)), with the `--tty`
 //!   `Ctrl+Alt+F1..F12` recovery bindings layered on last when this session
@@ -73,6 +73,7 @@ mod field {
     pub const RING_ACTIVE: &str = "appearance.focus_ring_active_color";
     pub const RING_INACTIVE: &str = "appearance.focus_ring_inactive_color";
     pub const BACKGROUND: &str = "appearance.background_color";
+    pub const CORNER_RADIUS: &str = "appearance.corner_radius";
     pub const CURSOR_SIZE: &str = "appearance.cursor_size";
     pub const CURSOR_COLOR: &str = "appearance.cursor_color";
     pub const CURSOR_THEME: &str = "appearance.cursor_theme";
@@ -164,6 +165,11 @@ impl State {
             report.applied.push(field::BACKGROUND.to_owned());
             appearance_changed = true;
         }
+        if appearance.corner_radius != live.corner_radius {
+            self.appearance.corner_radius = appearance.corner_radius;
+            report.applied.push(field::CORNER_RADIUS.to_owned());
+            appearance_changed = true;
+        }
         if appearance.prefer_no_csd != live.prefer_no_csd {
             self.appearance.prefer_no_csd = appearance.prefer_no_csd;
             report.applied.push(field::PREFER_NO_CSD.to_owned());
@@ -236,6 +242,7 @@ impl State {
                 || name == field::RING_ACTIVE
                 || name == field::RING_INACTIVE
                 || name == field::BACKGROUND
+                || name == field::CORNER_RADIUS
         }) {
             self.apply();
         }

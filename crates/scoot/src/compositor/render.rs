@@ -61,7 +61,7 @@ use crate::cli::RendererKind;
 
 use super::State;
 use super::tty::Tty;
-use elements::FrameContext;
+use elements::{Elements, FrameContext, ring_elements};
 use gles::GlesBackend;
 use pixman::PixmanBackend;
 
@@ -669,25 +669,35 @@ fn draw_frame_scanout(
         geometry: state.space.output_geometry(output),
         locked,
     };
+    let scanout::ScanoutBackend {
+        renderer, captures, ..
+    } = gpu;
     // Same rule as `draw_frame_with`: no window and no ring is laid out while
     // locked, because no frame can show it.
-    let ring_elements = if locked {
-        Vec::new()
+    let arrangement = if locked {
+        None
     } else {
-        let arrangement = state.world.arrange();
-        state
-            .decorations
-            .elements(&arrangement, &state.appearance, frame.bounds(), frame.scale)
+        Some(state.world.arrange())
     };
+    let ring_elements: Vec<Elements<_>> = ring_elements(
+        &mut state.decorations,
+        &state.appearance,
+        arrangement.as_ref(),
+        &frame,
+        renderer,
+    );
     let clear_color: Color32F = if locked {
         state.lock_clear_color()
     } else {
         state.appearance.background_color.into()
     };
-    let scanout::ScanoutBackend {
-        renderer, captures, ..
-    } = gpu;
-    let (elements, cursor_surface) = state.gather_elements(renderer, output, &frame, ring_elements);
+    let (elements, cursor_surface) = state.gather_elements(
+        renderer,
+        output,
+        &frame,
+        ring_elements,
+        arrangement.as_ref(),
+    );
     outcome.cursor_surface = cursor_surface;
 
     let (drawn, retry) = {
@@ -762,18 +772,27 @@ where
     // so laying the windows out would be work for a frame that cannot show
     // it. `apply()` still runs the layout on every change underneath, so
     // nothing is lost by the time it unlocks.
-    let ring_elements = if locked {
-        Vec::new()
+    let arrangement = if locked {
+        None
     } else {
-        let arrangement = state.world.arrange();
-        state
-            .decorations
-            .elements(&arrangement, &state.appearance, frame.bounds(), frame.scale)
+        Some(state.world.arrange())
     };
+    let ring_elements: Vec<Elements<_>> = ring_elements(
+        &mut state.decorations,
+        &state.appearance,
+        arrangement.as_ref(),
+        &frame,
+        renderer,
+    );
     match renderer.bind(target) {
         Ok(mut framebuffer) => {
-            let (elements, cursor_surface) =
-                state.gather_elements(renderer, output, &frame, ring_elements);
+            let (elements, cursor_surface) = state.gather_elements(
+                renderer,
+                output,
+                &frame,
+                ring_elements,
+                arrangement.as_ref(),
+            );
             outcome.cursor_surface = cursor_surface;
 
             // `0` (always-full-redraw) for every presenter except `--tty`:

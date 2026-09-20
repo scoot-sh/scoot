@@ -1,0 +1,1173 @@
+//! Pixel tests for rounded window corners (`[appearance] corner_radius`).
+//!
+//! Every test here drives a real `wayland-client` connection through a real
+//! [`State`](crate::compositor::State) with a real headless backend, maps
+//! real `wl_shm` windows, renders, and asserts on framebuffer bytes -- never
+//! on which enum variant a path chose. Colors are exact-byte values (pure
+//! red/green client buffers), except the ring and background, which are
+//! sampled from the frame itself: pixman truncates where GLES rounds, so the
+//! two renderers disagree by 1 LSB on colors derived from floats (see
+//! `docs/configuration.md`), and hard-coding those bytes would fail one of
+//! the two `SCOOT_TEST_RENDERER` runs.
+//!
+//! Window placement is read from the live arrangement, never hard-coded, so
+//! these survive layout default changes that preserve the tiling contract.
+//!
+//! Like every other live-`State` suite, these need a writable
+//! `$XDG_RUNTIME_DIR`.
+
+use std::collections::HashMap;
+use std::io::Write;
+use std::os::fd::AsFd;
+use std::os::unix::net::UnixStream;
+use std::sync::mpsc::{Receiver, Sender};
+
+use scoot_core::Rect;
+use wayland_client::protocol::{
+    wl_buffer, wl_compositor, wl_registry, wl_shm, wl_shm_pool, wl_surface,
+};
+use wayland_client::{Connection, Dispatch, Proxy, QueueHandle};
+use wayland_protocols::xdg::shell::client::{
+    xdg_popup, xdg_positioner, xdg_surface, xdg_toplevel, xdg_wm_base,
+};
+use wayland_protocols_wlr::layer_shell::v1::client::{zwlr_layer_shell_v1, zwlr_layer_surface_v1};
+
+use crate::compositor::decorations::{Appearance, ring_rects};
+use crate::compositor::rounded::{clip_rect, cut_width, physical_radius};
+use crate::compositor::test_support::{Harness, assert_pixel, find_color, wait_for};
+
+/// The framebuffer these tests render into.
+const CANVAS: i32 = 400;
+
+/// Pure red, opaque -- what every test window draws.
+const WINDOW_BGRA: [u8; 4] = [0x00, 0x00, 0xFF, 0xFF];
+/// Pure green, opaque -- the popup color.
+const POPUP_BGRA: [u8; 4] = [0x00, 0xFF, 0x00, 0xFF];
+/// Purple, opaque -- the wallpaper color. Distinct from the window, the
+/// popup, the ring and the background on purpose.
+const WALLPAPER_BGRA: [u8; 4] = [0x80, 0x00, 0x80, 0xFF];
+
+type Fixture = Harness<Step, Ack>;
+
+/// What a test tells its client to do.
+#[derive(Debug)]
+enum Step {
+    /// Map a toplevel drawing a solid `color` buffer sized to whatever the
+    /// compositor configures (like a real toolkit).
+    Window { color: [u8; 4] },
+    /// Map a no-grab popup parented to the first window, sized `w` x `h`,
+    /// anchored to grow down-right from the parent's origin -- over the
+    /// parent's top-left rounded corner.
+    Popup { color: [u8; 4], w: i32, h: i32 },
+    /// Map a fullscreen background-layer wallpaper drawing a solid `color`.
+    Wallpaper { color: [u8; 4] },
+}
+
+#[derive(Debug)]
+enum Ack {
+    Done,
+}
+
+/// Which `xdg_surface` a configure belongs to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SurfaceKind {
+    Window,
+    Popup,
+}
+
+#[derive(Default)]
+struct TestClient {
+    compositor: Option<wl_compositor::WlCompositor>,
+    shm: Option<wl_shm::WlShm>,
+    wm_base: Option<xdg_wm_base::XdgWmBase>,
+    layer_shell: Option<zwlr_layer_shell_v1::ZwlrLayerShellV1>,
+    window_serial: Option<u32>,
+    popup_serial: Option<u32>,
+    window_size: Option<(i32, i32)>,
+    layer_size: Option<(u32, u32)>,
+}
+
+impl Dispatch<wl_registry::WlRegistry, ()> for TestClient {
+    fn event(
+        client: &mut Self,
+        registry: &wl_registry::WlRegistry,
+        event: wl_registry::Event,
+        _: &(),
+        _: &Connection,
+        qh: &QueueHandle<Self>,
+    ) {
+        let wl_registry::Event::Global {
+            name,
+            interface,
+            version,
+        } = event
+        else {
+            return;
+        };
+        if interface == wl_compositor::WlCompositor::interface().name {
+            // Version 4: `surface.attach`/`commit` are v1, but
+            // `damage_buffer` needs v4.
+            client.compositor = Some(registry.bind(name, version.min(4), qh, ()));
+        } else if interface == wl_shm::WlShm::interface().name {
+            client.shm = Some(registry.bind(name, version.min(1), qh, ()));
+        } else if interface == xdg_wm_base::XdgWmBase::interface().name {
+            client.wm_base = Some(registry.bind(name, version.min(1), qh, ()));
+        } else if interface == zwlr_layer_shell_v1::ZwlrLayerShellV1::interface().name {
+            client.layer_shell = Some(registry.bind(name, version.min(1), qh, ()));
+        }
+    }
+}
+
+impl Dispatch<xdg_wm_base::XdgWmBase, ()> for TestClient {
+    fn event(
+        _: &mut Self,
+        wm_base: &xdg_wm_base::XdgWmBase,
+        event: xdg_wm_base::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let xdg_wm_base::Event::Ping { serial } = event {
+            wm_base.pong(serial);
+        }
+    }
+}
+
+impl Dispatch<xdg_surface::XdgSurface, SurfaceKind> for TestClient {
+    fn event(
+        client: &mut Self,
+        _: &xdg_surface::XdgSurface,
+        event: xdg_surface::Event,
+        kind: &SurfaceKind,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let xdg_surface::Event::Configure { serial } = event {
+            match kind {
+                SurfaceKind::Window => client.window_serial = Some(serial),
+                SurfaceKind::Popup => client.popup_serial = Some(serial),
+            }
+        }
+    }
+}
+
+impl Dispatch<xdg_toplevel::XdgToplevel, ()> for TestClient {
+    fn event(
+        client: &mut Self,
+        _: &xdg_toplevel::XdgToplevel,
+        event: xdg_toplevel::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let xdg_toplevel::Event::Configure { width, height, .. } = event {
+            if width > 0 && height > 0 {
+                client.window_size = Some((width, height));
+            }
+        }
+    }
+}
+
+impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, ()> for TestClient {
+    fn event(
+        client: &mut Self,
+        layer: &zwlr_layer_surface_v1::ZwlrLayerSurfaceV1,
+        event: zwlr_layer_surface_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let zwlr_layer_surface_v1::Event::Configure {
+            serial,
+            width,
+            height,
+        } = event
+        {
+            layer.ack_configure(serial);
+            if width > 0 && height > 0 {
+                client.layer_size = Some((width, height));
+            }
+        }
+    }
+}
+
+wayland_client::delegate_noop!(TestClient: ignore wl_compositor::WlCompositor);
+wayland_client::delegate_noop!(TestClient: ignore wl_shm::WlShm);
+wayland_client::delegate_noop!(TestClient: ignore wl_shm_pool::WlShmPool);
+wayland_client::delegate_noop!(TestClient: ignore wl_buffer::WlBuffer);
+wayland_client::delegate_noop!(TestClient: ignore wl_surface::WlSurface);
+wayland_client::delegate_noop!(TestClient: ignore xdg_popup::XdgPopup);
+wayland_client::delegate_noop!(TestClient: ignore xdg_positioner::XdgPositioner);
+wayland_client::delegate_noop!(TestClient: ignore zwlr_layer_shell_v1::ZwlrLayerShellV1);
+
+/// A `w` x `h` solid-`color` `wl_buffer` over a real memfd.
+fn solid_buffer(
+    shm: &wl_shm::WlShm,
+    qh: &QueueHandle<TestClient>,
+    w: i32,
+    h: i32,
+    color: [u8; 4],
+) -> wl_buffer::WlBuffer {
+    let stride = w * 4;
+    let len = (stride * h) as usize;
+    let fd = rustix::fs::memfd_create("scoot-rounded-test", rustix::fs::MemfdFlags::CLOEXEC)
+        .expect("a memfd");
+    let mut file = std::fs::File::from(fd);
+    let bytes: Vec<u8> = color.iter().copied().cycle().take(len).collect();
+    file.write_all(&bytes).expect("a filled pool file");
+    let pool = shm.create_pool(file.as_fd(), len as i32, qh, ());
+    let buffer = pool.create_buffer(0, w, h, stride, wl_shm::Format::Argb8888, qh, ());
+    pool.destroy();
+    buffer
+}
+
+fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> Result<(), String> {
+    let conn = Connection::from_socket(stream).map_err(|e| e.to_string())?;
+    let mut queue = conn.new_event_queue();
+    let qh = queue.handle();
+    let mut client = TestClient::default();
+    conn.display().get_registry(&qh, ());
+    queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+
+    let compositor = client.compositor.clone().ok_or("no wl_compositor")?;
+    let shm = client.shm.clone().ok_or("no wl_shm")?;
+    let wm_base = client.wm_base.clone().ok_or("no xdg_wm_base")?;
+    let layer_shell = client.layer_shell.clone();
+    // Held so every mapped surface stays alive for the run.
+    let mut surfaces: Vec<wl_surface::WlSurface> = Vec::new();
+    let mut roles: Vec<xdg_surface::XdgSurface> = Vec::new();
+    let mut parent: Option<xdg_surface::XdgSurface> = None;
+
+    while let Ok(step) = steps.recv() {
+        match step {
+            Step::Window { color } => {
+                let surface = compositor.create_surface(&qh, ());
+                let xdg = wm_base.get_xdg_surface(&surface, &qh, SurfaceKind::Window);
+                let toplevel = xdg.get_toplevel(&qh, ());
+                toplevel.set_title("rounded".into());
+                surface.commit();
+                // A real toolkit sizes its buffer to the configure: wait for
+                // one carrying a size, so the drawn window matches the
+                // placement the assertions are derived from.
+                let (w, h) = wait_for(&mut queue, &mut client, "a sized configure", |client| {
+                    client.window_size
+                })?;
+                let serial = wait_for(&mut queue, &mut client, "an xdg serial", |client| {
+                    client.window_serial
+                })?;
+                xdg.ack_configure(serial);
+                let buffer = solid_buffer(&shm, &qh, w, h, color);
+                surface.attach(Some(&buffer), 0, 0);
+                surface.damage_buffer(0, 0, w, h);
+                surface.commit();
+                queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                parent = Some(xdg.clone());
+                roles.push(xdg);
+                surfaces.push(surface);
+                acks.send(Ack::Done).map_err(|e| e.to_string())?;
+            }
+            Step::Popup { color, w, h } => {
+                let parent = parent.clone().ok_or("no parent window")?;
+                let surface = compositor.create_surface(&qh, ());
+                let xdg = wm_base.get_xdg_surface(&surface, &qh, SurfaceKind::Popup);
+                let positioner = wm_base.create_positioner(&qh, ());
+                positioner.set_size(w, h);
+                positioner.set_anchor_rect(0, 0, 10, 10);
+                positioner.set_anchor(xdg_positioner::Anchor::TopLeft);
+                positioner.set_gravity(xdg_positioner::Gravity::BottomRight);
+                let popup = xdg.get_popup(Some(&parent), &positioner, &qh, ());
+                drop(positioner);
+                drop(popup);
+                surface.commit();
+                let serial = wait_for(&mut queue, &mut client, "a popup configure", |client| {
+                    client.popup_serial
+                })?;
+                xdg.ack_configure(serial);
+                let buffer = solid_buffer(&shm, &qh, w, h, color);
+                surface.attach(Some(&buffer), 0, 0);
+                surface.damage_buffer(0, 0, w, h);
+                surface.commit();
+                queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                roles.push(xdg);
+                surfaces.push(surface);
+                acks.send(Ack::Done).map_err(|e| e.to_string())?;
+            }
+            Step::Wallpaper { color } => {
+                let layer_shell = layer_shell.clone().ok_or("no zwlr_layer_shell_v1")?;
+                let surface = compositor.create_surface(&qh, ());
+                let layer = layer_shell.get_layer_surface(
+                    &surface,
+                    None,
+                    zwlr_layer_shell_v1::Layer::Background,
+                    "rounded-wallpaper".into(),
+                    &qh,
+                    (),
+                );
+                layer.set_anchor(
+                    zwlr_layer_surface_v1::Anchor::Top
+                        | zwlr_layer_surface_v1::Anchor::Bottom
+                        | zwlr_layer_surface_v1::Anchor::Left
+                        | zwlr_layer_surface_v1::Anchor::Right,
+                );
+                layer.set_size(CANVAS as u32, CANVAS as u32);
+                layer.set_exclusive_zone(0);
+                surface.commit();
+                let (w, h) = wait_for(&mut queue, &mut client, "a layer configure", |client| {
+                    client.layer_size
+                })?;
+                let buffer = solid_buffer(&shm, &qh, w as i32, h as i32, color);
+                surface.attach(Some(&buffer), 0, 0);
+                surface.damage_buffer(0, 0, w as i32, h as i32);
+                surface.commit();
+                queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                surfaces.push(surface);
+                acks.send(Ack::Done).map_err(|e| e.to_string())?;
+            }
+        }
+    }
+    Ok(())
+}
+
+impl Fixture {
+    fn with_radius(radius: i32) -> Self {
+        let mut fixture = Harness::headless(
+            Appearance {
+                corner_radius: radius,
+                ..Appearance::default()
+            },
+            CANVAS,
+        );
+        fixture.spawn(run_client);
+        fixture
+    }
+
+    /// The live arrangement's first (and here only) placement.
+    fn placement(&mut self) -> Rect {
+        self.settle();
+        let arrangement = self.state.world.arrange();
+        assert_eq!(
+            arrangement.placements.len(),
+            1,
+            "these tests map exactly one window"
+        );
+        arrangement.placements[0].rect
+    }
+}
+
+/// Full-frame color census: how many pixels of each byte value the frame
+/// holds.
+fn census(pixels: &[u8]) -> HashMap<[u8; 4], usize> {
+    let mut counts = HashMap::new();
+    for pixel in pixels.chunks_exact(4) {
+        *counts
+            .entry(pixel.try_into().expect("4 bytes"))
+            .or_insert(0) += 1;
+    }
+    counts
+}
+
+// ---------------------------------------------------------------------------
+// radius 0: the byte-identical baseline
+// ---------------------------------------------------------------------------
+
+/// `corner_radius = 0` renders exactly what the square path always has: one
+/// window's-worth of red, four ring bars' worth of ring color, background
+/// everywhere else -- pinned as exact counts, so any future change to the
+/// default path moves a number here. Rendering twice is byte-identical, so
+/// the census pins a stable frame rather than a lucky one.
+#[test]
+fn radius_zero_renders_the_square_baseline_exactly() {
+    let mut fixture = Fixture::with_radius(0);
+    fixture.run(Step::Window { color: WINDOW_BGRA });
+    let placement = fixture.placement();
+
+    let first = fixture.render();
+    let second = fixture.render();
+    assert_eq!(first, second, "two renders of a settled frame must agree");
+
+    let bounds = Rect::new(0, 0, CANVAS, CANVAS);
+    let bars = ring_rects(placement, Appearance::default().focus_ring_width, bounds);
+    let bar_area: i32 = [bars.top, bars.bottom, bars.left, bars.right]
+        .into_iter()
+        .flatten()
+        .map(|rect| rect.w * rect.h)
+        .sum();
+    // The top bar's middle pixel is ring color for sure (it never touches a
+    // window corner or an output edge on this scene).
+    let ring_sample = [
+        placement.x + placement.w / 2,
+        placement.y - Appearance::default().focus_ring_width / 2 - 1,
+    ];
+    let counts = census(&first);
+    let ring_color: [u8; 4] = first[(ring_sample[1] * CANVAS + ring_sample[0]) as usize * 4..][..4]
+        .try_into()
+        .expect("in bounds");
+    assert_eq!(
+        counts.get(&WINDOW_BGRA).copied().unwrap_or(0),
+        (placement.w * placement.h) as usize,
+        "every window pixel must be red"
+    );
+    assert_eq!(
+        counts.get(&ring_color).copied().unwrap_or(0),
+        bar_area as usize,
+        "every ring-bar pixel must be ring color"
+    );
+    assert_eq!(
+        counts.values().sum::<usize>(),
+        (CANVAS * CANVAS) as usize,
+        "the census must cover the whole frame"
+    );
+    assert_eq!(
+        counts.len(),
+        3,
+        "exactly three colors on a square frame: window, ring, background"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// rounding: corners reveal what is below, the ring follows
+// ---------------------------------------------------------------------------
+
+/// The headline: with `corner_radius = 12`, the window's corner pixels are
+/// background, the first pixel inside the staircase is window, and the ring
+/// hugs the rounded shape -- no square remnants on the diagonal, ring on the
+/// band. Checked on all four corners; the top-left is worked in detail.
+#[test]
+fn rounded_corners_reveal_the_background_and_the_ring_follows() {
+    const RADIUS: i32 = 12;
+    let mut fixture = Fixture::with_radius(RADIUS);
+    fixture.run(Step::Window { color: WINDOW_BGRA });
+    let placement = fixture.placement();
+    let pixels = fixture.render();
+
+    let bg: [u8; 4] = pixels[0..4].try_into().expect("canvas corner");
+    let (x, y, w, h) = (placement.x, placement.y, placement.w, placement.h);
+    // The frame corner is background on this scene (the layout insets every
+    // window by the gap); everything below measures against it.
+    assert_ne!(
+        bg, WINDOW_BGRA,
+        "the test needs a non-window background sample"
+    );
+
+    // Red census: the full rect minus the four staircases -- the draw clip
+    // tied to `cut_width` end to end.
+    let cut: i32 = (0..RADIUS).map(|row| cut_width(RADIUS, row)).sum();
+    let counts = census(&pixels);
+    assert_eq!(
+        counts.get(&WINDOW_BGRA).copied().unwrap_or(0),
+        (w * h - 4 * cut) as usize,
+        "the window must draw its rect minus exactly the four staircases"
+    );
+
+    // The ring color, sampled from the top straight run (it never touches a
+    // corner or an output edge on this scene).
+    let thickness = Appearance::default().focus_ring_width;
+    let ring_sample = [x + w / 2, y - thickness / 2 - 1];
+    let ring: [u8; 4] = pixels[(ring_sample[1] * CANVAS + ring_sample[0]) as usize * 4..][..4]
+        .try_into()
+        .expect("in bounds");
+    assert_ne!(
+        ring, WINDOW_BGRA,
+        "the sampled ring pixel must not be window"
+    );
+    assert_ne!(ring, bg, "the sampled ring pixel must not be background");
+
+    // Top-left in detail. Row 0: the window cuts `cut0` pixels; the ring
+    // band hugs the staircase, so the cut zone is background outside the
+    // outer arc and ring inside it -- and the first kept pixel is window.
+    let cut0 = cut_width(RADIUS, 0);
+    let cut1 = cut_width(RADIUS, 1);
+    assert_pixel(&pixels, CANVAS, x, y, bg, "the extreme corner is cut");
+    assert_pixel(
+        &pixels,
+        CANVAS,
+        x + 1,
+        y,
+        bg,
+        "row 0, outside the outer arc",
+    );
+    assert_pixel(
+        &pixels,
+        CANVAS,
+        x + cut0 - 1,
+        y,
+        ring,
+        "row 0, the ring hugs the window staircase",
+    );
+    assert_pixel(
+        &pixels,
+        CANVAS,
+        x + cut0,
+        y,
+        WINDOW_BGRA,
+        "row 0, first kept pixel",
+    );
+    assert_pixel(
+        &pixels,
+        CANVAS,
+        x,
+        y + 1,
+        bg,
+        "row 1, outside the outer arc",
+    );
+    assert_pixel(
+        &pixels,
+        CANVAS,
+        x + cut1 - 1,
+        y + 1,
+        ring,
+        "row 1, the ring hugs the window staircase",
+    );
+    assert_pixel(
+        &pixels,
+        CANVAS,
+        x + cut1,
+        y + 1,
+        WINDOW_BGRA,
+        "row 1, first kept pixel",
+    );
+    // The other three corners: extreme pixel cut, first inner pixel kept.
+    assert_pixel(&pixels, CANVAS, x + w - 1, y, bg, "top-right corner");
+    assert_pixel(
+        &pixels,
+        CANVAS,
+        x + w - 1 - cut0,
+        y,
+        WINDOW_BGRA,
+        "top-right kept",
+    );
+    assert_pixel(&pixels, CANVAS, x, y + h - 1, bg, "bottom-left corner");
+    assert_pixel(
+        &pixels,
+        CANVAS,
+        x + cut0,
+        y + h - 1,
+        WINDOW_BGRA,
+        "bottom-left kept",
+    );
+    assert_pixel(
+        &pixels,
+        CANVAS,
+        x + w - 1,
+        y + h - 1,
+        bg,
+        "bottom-right corner",
+    );
+    assert_pixel(
+        &pixels,
+        CANVAS,
+        x + w - 1 - cut0,
+        y + h - 1,
+        WINDOW_BGRA,
+        "bottom-right kept",
+    );
+    // Center still window.
+    assert_pixel(
+        &pixels,
+        CANVAS,
+        x + w / 2,
+        y + h / 2,
+        WINDOW_BGRA,
+        "the window middle",
+    );
+
+    // The ring's straight runs paint, the diagonal just outside the outer
+    // corner is background (a square ring would paint there), and the band
+    // itself sits exactly between the window staircase and the outer arc.
+    assert_pixel(
+        &pixels,
+        CANVAS,
+        ring_sample[0],
+        ring_sample[1],
+        ring,
+        "top straight run",
+    );
+    assert_pixel(
+        &pixels,
+        CANVAS,
+        x - 1,
+        y - 1,
+        bg,
+        "no square corner remnant",
+    );
+    // Diagonal through the top-left corner's center (the two circles share
+    // it: the window's radius 12 around (x + 12, y + 12), the ring's outer
+    // radius 15 around the same point). k steps out along the diagonal:
+    // k=8 lands inside the window, k=9 on the band, k=13 past the ring.
+    let (cx, cy) = (x + RADIUS, y + RADIUS);
+    assert_pixel(&pixels, CANVAS, cx - 9, cy - 9, ring, "on the band");
+    assert_pixel(
+        &pixels,
+        CANVAS,
+        cx - 8,
+        cy - 8,
+        WINDOW_BGRA,
+        "inside the window",
+    );
+    assert_pixel(&pixels, CANVAS, cx - 13, cy - 13, bg, "outside the ring");
+}
+
+/// `corner_radius = 1` cuts nothing: the corner pixel's center is still
+/// inside the unit circle, so the frame is the square baseline. Pins the
+/// pixel-center rule end to end rather than just in `cut_width`.
+#[test]
+fn radius_one_leaves_the_corner_square() {
+    let mut fixture = Fixture::with_radius(1);
+    fixture.run(Step::Window { color: WINDOW_BGRA });
+    let placement = fixture.placement();
+    let pixels = fixture.render();
+    assert_pixel(
+        &pixels,
+        CANVAS,
+        placement.x,
+        placement.y,
+        WINDOW_BGRA,
+        "a radius of 1 must not cut the corner pixel",
+    );
+}
+
+/// A radius past half the window's smaller dimension clamps to a stadium:
+/// no panic, no wrap, fully round ends. The extreme corners are background
+/// and the middle of each edge is window.
+#[test]
+fn a_huge_radius_clamps_to_a_stadium() {
+    let mut fixture = Fixture::with_radius(10_000);
+    fixture.run(Step::Window { color: WINDOW_BGRA });
+    let placement = fixture.placement();
+    let pixels = fixture.render();
+    let bg: [u8; 4] = pixels[0..4].try_into().expect("canvas corner");
+    let (x, y, w, h) = (placement.x, placement.y, placement.w, placement.h);
+    let effective = (w.min(h) / 2).max(0);
+    assert!(effective > 0, "the test needs a non-degenerate window");
+    for (px, py, what) in [
+        (x, y, "top-left corner of a stadium"),
+        (x + w - 1, y, "top-right corner of a stadium"),
+        (x, y + h - 1, "bottom-left corner of a stadium"),
+        (x + w - 1, y + h - 1, "bottom-right corner of a stadium"),
+    ] {
+        assert_pixel(&pixels, CANVAS, px, py, bg, what);
+    }
+    assert_pixel(
+        &pixels,
+        CANVAS,
+        x + w / 2,
+        y,
+        WINDOW_BGRA,
+        "top edge middle survives the clamp",
+    );
+    assert_pixel(
+        &pixels,
+        CANVAS,
+        x + w / 2,
+        y + h / 2,
+        WINDOW_BGRA,
+        "the middle survives the clamp",
+    );
+    // And the physical radius the frame used really is the clamped one.
+    assert_eq!(
+        physical_radius(10_000, clip_rect(placement, 1.0), 1.0),
+        effective,
+        "physical_radius must clamp before anything draws"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// popups stay square
+// ---------------------------------------------------------------------------
+
+/// A no-grab popup over the parent's rounded corner keeps its own square
+/// corners: every corner of the popup's bbox is popup color, while the
+/// parent's uncovered rounded corner is background. Locates the popup by
+/// color rather than hard-coding the positioner's arithmetic.
+#[test]
+fn popups_stay_square_over_rounded_corners() {
+    const RADIUS: i32 = 12;
+    const POPUP_W: i32 = 80;
+    const POPUP_H: i32 = 60;
+    let mut fixture = Fixture::with_radius(RADIUS);
+    fixture.run(Step::Window { color: WINDOW_BGRA });
+    fixture.run(Step::Popup {
+        color: POPUP_BGRA,
+        w: POPUP_W,
+        h: POPUP_H,
+    });
+    let placement = fixture.placement();
+    let pixels = fixture.render();
+
+    // The popup's bbox, from its own pixels.
+    let mut min_x = CANVAS;
+    let mut max_x = 0;
+    let mut min_y = CANVAS;
+    let mut max_y = 0;
+    for y in 0..CANVAS {
+        for x in 0..CANVAS {
+            let base = (y * CANVAS + x) as usize * 4;
+            if pixels[base..base + 4] == POPUP_BGRA {
+                min_x = min_x.min(x);
+                max_x = max_x.max(x);
+                min_y = min_y.min(y);
+                max_y = max_y.max(y);
+            }
+        }
+    }
+    assert!(
+        find_color(&pixels, CANVAS, POPUP_BGRA).is_some(),
+        "the popup must have drawn"
+    );
+    assert_eq!(max_x - min_x + 1, POPUP_W, "the popup draws its full width");
+    assert_eq!(
+        max_y - min_y + 1,
+        POPUP_H,
+        "the popup draws its full height"
+    );
+    // It really does cover the parent's top-left corner (else the squareness
+    // assertions below would be vacuous).
+    assert!(
+        min_x <= placement.x && min_y <= placement.y,
+        "the popup must reach the parent's top-left corner, at ({min_x}, {min_y})"
+    );
+    // Square: all four popup corners are popup color -- a clipped popup
+    // would show background at its own corners.
+    for (px, py, what) in [
+        (min_x, min_y, "popup top-left stays square"),
+        (max_x, min_y, "popup top-right stays square"),
+        (min_x, max_y, "popup bottom-left stays square"),
+        (max_x, max_y, "popup bottom-right stays square"),
+    ] {
+        assert_pixel(&pixels, CANVAS, px, py, POPUP_BGRA, what);
+    }
+    // And the parent's own far corner still rounds.
+    let bg: [u8; 4] = pixels[0..4].try_into().expect("canvas corner");
+    assert_pixel(
+        &pixels,
+        CANVAS,
+        placement.x + placement.w - 1,
+        placement.y,
+        bg,
+        "the parent's uncovered corner still rounds under a popup",
+    );
+}
+
+/// A background-layer wallpaper behind a rounded window shows through the
+/// cut corners: the one reachable below-window case (placements never
+/// overlap, so no other window can appear in a cut -- only the background
+/// layer or the clear color). The ring still draws over the wallpaper.
+#[test]
+fn a_wallpaper_shows_through_rounded_corners() {
+    const RADIUS: i32 = 12;
+    let mut fixture = Fixture::with_radius(RADIUS);
+    fixture.run(Step::Window { color: WINDOW_BGRA });
+    fixture.run(Step::Wallpaper {
+        color: WALLPAPER_BGRA,
+    });
+    let placement = fixture.placement();
+    let pixels = fixture.render();
+
+    let (x, y, w, h) = (placement.x, placement.y, placement.w, placement.h);
+    // The wallpaper covers the clear color everywhere it shows...
+    assert_pixel(
+        &pixels,
+        CANVAS,
+        0,
+        0,
+        WALLPAPER_BGRA,
+        "the frame corner is wallpaper",
+    );
+    // ...including the window's cut corners.
+    for (px, py, what) in [
+        (x, y, "wallpaper through the top-left cut"),
+        (x + w - 1, y, "wallpaper through the top-right cut"),
+        (x, y + h - 1, "wallpaper through the bottom-left cut"),
+        (
+            x + w - 1,
+            y + h - 1,
+            "wallpaper through the bottom-right cut",
+        ),
+    ] {
+        assert_pixel(&pixels, CANVAS, px, py, WALLPAPER_BGRA, what);
+    }
+    // ...but the ring still draws on top of it.
+    let thickness = Appearance::default().focus_ring_width;
+    let ring: [u8; 4] = pixels[((y - thickness / 2 - 1) * CANVAS + x + w / 2) as usize * 4..][..4]
+        .try_into()
+        .expect("in bounds");
+    assert_ne!(
+        ring, WALLPAPER_BGRA,
+        "the ring must draw over the wallpaper"
+    );
+    assert_ne!(
+        ring, WINDOW_BGRA,
+        "the sampled pixel must be ring, not window"
+    );
+    assert_pixel(
+        &pixels,
+        CANVAS,
+        x + w / 2,
+        y - thickness / 2 - 1,
+        ring,
+        "the top straight run over wallpaper",
+    );
+    // And the window middle is untouched by any of it.
+    assert_pixel(
+        &pixels,
+        CANVAS,
+        x + w / 2,
+        y + h / 2,
+        WINDOW_BGRA,
+        "the window middle",
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Pure geometry: radius, staircase, clip and paint arithmetic
+// ---------------------------------------------------------------------------
+
+use super::*;
+use smithay::utils::Rectangle;
+use smithay::utils::{Logical, Physical, Point, Size};
+
+// -- effective_radius ---------------------------------------------------
+
+#[test]
+fn a_zero_config_stays_zero() {
+    assert_eq!(effective_radius(0, 800, 600), 0);
+}
+
+#[test]
+fn a_negative_config_becomes_zero() {
+    assert_eq!(effective_radius(-12, 800, 600), 0);
+}
+
+#[test]
+fn a_small_radius_passes_through() {
+    assert_eq!(effective_radius(12, 800, 600), 12);
+}
+
+#[test]
+fn a_radius_past_half_the_height_clamps_to_it() {
+    assert_eq!(effective_radius(400, 800, 600), 300);
+}
+
+#[test]
+fn a_radius_past_half_the_width_clamps_to_it() {
+    assert_eq!(effective_radius(500, 800, 1200), 400);
+}
+
+#[test]
+fn an_absurd_radius_clamps_rather_than_overflowing() {
+    assert_eq!(effective_radius(i32::MAX, 800, 600), 300);
+}
+
+#[test]
+fn a_zero_size_window_rounds_nothing() {
+    assert_eq!(effective_radius(12, 0, 600), 0);
+    assert_eq!(effective_radius(12, 800, 0), 0);
+    assert_eq!(effective_radius(12, 0, 0), 0);
+}
+
+// -- cut_width ----------------------------------------------------------
+
+/// The independent oracle: pixel `(px, py)` of the top-left `radius`
+/// square draws iff its center is inside the quarter circle around
+/// `(radius, radius)`.
+fn covers(px: i32, py: i32, radius: i32) -> bool {
+    let r = f64::from(radius);
+    let dx = f64::from(px) + 0.5 - r;
+    let dy = f64::from(py) + 0.5 - r;
+    dx * dx + dy * dy <= r * r
+}
+
+/// `cut_width` is exactly the per-pixel rule, on every radius that fits
+/// in the test's time plus spot larges. There are no on-circle ties to
+/// disagree on (see `cut_width`'s doc), so any mismatch here is a formula
+/// bug, not float noise.
+#[test]
+fn cut_width_matches_the_pixel_rule_on_every_small_radius() {
+    for radius in 0..=64 {
+        for row in 0..radius {
+            let cut = cut_width(radius, row);
+            let expected = (0..radius)
+                .take_while(|px| !covers(*px, row, radius))
+                .count() as i32;
+            assert_eq!(
+                cut, expected,
+                "radius {radius} row {row}: formula says {cut}, pixels say {expected}"
+            );
+            assert!(
+                (0..=radius).contains(&cut),
+                "radius {radius} row {row}: cut {cut} outside 0..=radius"
+            );
+        }
+    }
+}
+
+#[test]
+fn cut_width_matches_the_pixel_rule_on_large_radii() {
+    for radius in [100, 256, 1000, 4096, 16383] {
+        for row in [0, 1, radius / 2, radius - 1] {
+            let cut = cut_width(radius, row);
+            let expected = (0..radius)
+                .take_while(|px| !covers(*px, row, radius))
+                .count() as i32;
+            assert_eq!(
+                cut, expected,
+                "radius {radius} row {row}: formula says {cut}, pixels say {expected}"
+            );
+        }
+    }
+}
+
+#[test]
+fn radius_one_cuts_nothing() {
+    assert_eq!(cut_width(1, 0), 0);
+}
+
+#[test]
+fn radius_two_cuts_one_pixel_off_the_first_row_only() {
+    assert_eq!(cut_width(2, 0), 1);
+    assert_eq!(cut_width(2, 1), 0);
+}
+
+// -- row_cut ------------------------------------------------------------
+
+#[test]
+fn middle_rows_cut_nothing() {
+    assert_eq!(row_cut(12, 12, 100), 0);
+    assert_eq!(row_cut(12, 50, 100), 0);
+    assert_eq!(row_cut(12, 87, 100), 0);
+}
+
+#[test]
+fn top_and_bottom_rows_mirror() {
+    for radius in [2, 8, 12, 30] {
+        let h = 4 * radius + 10;
+        for row in 0..radius {
+            assert_eq!(
+                row_cut(radius, row, h),
+                cut_width(radius, row),
+                "top row {row} at radius {radius}"
+            );
+            assert_eq!(
+                row_cut(radius, h - 1 - row, h),
+                cut_width(radius, row),
+                "bottom row {row} at radius {radius}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_zero_radius_cuts_no_row() {
+    assert_eq!(row_cut(0, 0, 100), 0);
+}
+
+// -- clip_rect ----------------------------------------------------------
+
+#[test]
+fn clip_rect_is_the_identity_at_scale_one() {
+    let placement = Rect::new(100, 80, 800, 600);
+    assert_eq!(
+        clip_rect(placement, 1.0),
+        Rectangle::new((100, 80).into(), (800, 600).into())
+    );
+}
+
+#[test]
+fn clip_rect_doubles_cleanly_at_scale_two() {
+    let placement = Rect::new(100, 80, 800, 600);
+    assert_eq!(
+        clip_rect(placement, 2.0),
+        Rectangle::new((200, 160).into(), (1600, 1200).into())
+    );
+}
+
+// -- physical_radius ----------------------------------------------------
+
+#[test]
+fn physical_radius_is_the_identity_at_scale_one() {
+    let clip = Rectangle::new((0, 0).into(), (800, 600).into());
+    assert_eq!(physical_radius(12, clip, 1.0), 12);
+}
+
+#[test]
+fn physical_radius_scales_and_clamps_to_the_clip() {
+    let clip = Rectangle::new((0, 0).into(), (800, 600).into());
+    assert_eq!(physical_radius(12, clip, 2.0), 24);
+    // 400 logical px at scale 2 is 800 physical -- past half the 600px
+    // height, so the clip wins.
+    assert_eq!(physical_radius(400, clip, 2.0), 300);
+}
+
+#[test]
+fn physical_radius_saturates_rather_than_overflowing() {
+    let clip = Rectangle::new((0, 0).into(), (800, 600).into());
+    assert_eq!(physical_radius(i32::MAX, clip, 4.0), 300);
+}
+
+// -- Rounded::new clamping ----------------------------------------------
+
+struct Stub;
+
+#[test]
+fn the_constructor_clamps_an_oversize_radius_to_the_clip() {
+    let clip = Rectangle::new((0, 0).into(), (800, 600).into());
+    let wrapped = Rounded::new(Stub, clip, 10_000);
+    assert_eq!(wrapped.radius(), 300);
+}
+
+#[test]
+fn the_constructor_keeps_a_fitting_radius() {
+    let clip = Rectangle::new((0, 0).into(), (800, 600).into());
+    let wrapped = Rounded::new(Stub, clip, 12);
+    assert_eq!(wrapped.radius(), 12);
+}
+
+// -- ring_layout ----------------------------------------------------------
+
+#[test]
+fn ring_layout_is_exact_at_scale_one() {
+    let (loc, logical, canvas) = ring_layout(Rect::new(100, 80, 200, 150), 4, 1.0);
+    assert_eq!(loc, Point::<f64, Physical>::from((96.0, 76.0)));
+    assert_eq!(logical, Size::<i32, Logical>::from((208, 158)));
+    assert_eq!(canvas, Size::<i32, Physical>::from((208, 158)));
+}
+
+#[test]
+fn ring_layout_doubles_cleanly_at_scale_two() {
+    let (loc, logical, canvas) = ring_layout(Rect::new(100, 80, 200, 150), 4, 2.0);
+    assert_eq!(loc, Point::<f64, Physical>::from((192.0, 152.0)));
+    assert_eq!(logical, Size::<i32, Logical>::from((208, 158)));
+    assert_eq!(canvas, Size::<i32, Physical>::from((416, 316)));
+}
+
+#[test]
+fn ring_layout_at_a_fractional_scale_stays_sane() {
+    // Best-effort territory (see the module doc): what matters is no
+    // panic, positive canvas, and the canvas covering the scaled size.
+    let (loc, logical, canvas) = ring_layout(Rect::new(100, 80, 200, 150), 4, 1.5);
+    assert_eq!(logical, Size::<i32, Logical>::from((208, 158)));
+    assert!(
+        canvas.w > 0 && canvas.h > 0,
+        "a degenerate canvas paints nothing"
+    );
+    assert_eq!((loc.x, loc.y), (144.0, 114.0));
+    assert!(
+        canvas.w >= (208.0f64 * 1.5) as i32 - 1 && canvas.w <= (208.0f64 * 1.5) as i32 + 1,
+        "canvas {canvas:?} disagrees with the scaled size by more than rounding"
+    );
+}
+
+// -- paint_ring -------------------------------------------------------------
+
+const RING: [u8; 4] = [0x61, 0x59, 0x59, 0xff];
+const CLEAR: [u8; 4] = [0, 0, 0, 0];
+
+fn painted(
+    canvas: (i32, i32),
+    inner: Rectangle<i32, Physical>,
+    radius_inner: i32,
+    radius_outer: i32,
+) -> Vec<u8> {
+    let mut pixels = vec![0; canvas.0 as usize * canvas.1 as usize * 4];
+    let outer = Rectangle::new((0, 0).into(), (canvas.0, canvas.1).into());
+    paint_ring(
+        &mut pixels,
+        &RingPaint {
+            canvas: (canvas.0, canvas.1).into(),
+            outer,
+            radius_outer,
+            inner,
+            radius_inner,
+        },
+        RING,
+    );
+    pixels
+}
+
+fn at(pixels: &[u8], canvas_w: i32, x: i32, y: i32) -> [u8; 4] {
+    let base = (y * canvas_w + x) as usize * 4;
+    pixels[base..base + 4].try_into().expect("in bounds")
+}
+
+/// A square ring paints exactly the four bars: top/bottom span the full
+/// width, left/right only the window height -- the same decomposition
+/// `ring_rects` uses, so a zero inner radius agrees with the rect path.
+#[test]
+fn a_square_ring_paints_the_four_bars() {
+    // Window 200x150 at offset (4, 4) in a 208x158 canvas, thickness 4.
+    let inner = Rectangle::new((4, 4).into(), (200, 150).into());
+    let pixels = painted((208, 158), inner, 0, 4);
+    // Top bar, bottom bar, left bar, right bar.
+    assert_eq!(at(&pixels, 208, 100, 0), RING);
+    assert_eq!(at(&pixels, 208, 100, 157), RING);
+    assert_eq!(at(&pixels, 208, 0, 80), RING);
+    assert_eq!(at(&pixels, 208, 207, 80), RING);
+    // Just inside the window: transparent. Just outside the ring: canvas
+    // edge, but the bars cover the full width here.
+    assert_eq!(at(&pixels, 208, 100, 80), CLEAR);
+    assert_eq!(at(&pixels, 208, 100, 3), RING);
+    assert_eq!(at(&pixels, 208, 3, 80), RING);
+    // The window's own corners are transparent (square: the corner pixel
+    // of the inner rect is window, not ring).
+    assert_eq!(at(&pixels, 208, 4, 4), CLEAR);
+}
+
+/// A rounded ring cuts the outer corners and bites the inner ones: the
+/// extreme corner pixel stays transparent, the straight runs paint.
+#[test]
+fn a_rounded_ring_cuts_both_corner_sets() {
+    let inner = Rectangle::new((12, 12).into(), (200, 150).into());
+    // thickness 12, inner radius 8, outer radius 20.
+    let pixels = painted((224, 174), inner, 8, 20);
+    // Straight runs still paint.
+    assert_eq!(at(&pixels, 224, 112, 0), RING, "top straight run");
+    assert_eq!(at(&pixels, 224, 0, 87), RING, "left straight run");
+    // Extreme outer corner pixel: outside the outer circle.
+    assert_eq!(at(&pixels, 224, 0, 0), CLEAR, "outer corner");
+    // The cut is a staircase, not a square notch: row 0 cuts
+    // `cut_width(20, 0)` pixels, so the first painted pixel is exactly
+    // there rather than at the square's edge.
+    let cut = cut_width(20, 0);
+    assert_eq!(at(&pixels, 224, cut - 1, 0), CLEAR);
+    assert_eq!(at(&pixels, 224, cut, 0), RING);
+    // The window's own corner square is cut away, and that cut zone is
+    // ring, not background: (12, 12) is window-relative (0, 0), outside
+    // the window's staircase but inside the outer span.
+    assert_eq!(at(&pixels, 224, 12, 12), RING, "cut zone paints");
+    // ...but the ring hugs the staircase: the last pixel before the
+    // window's cut paints, the first window pixel does not.
+    let inner_cut = cut_width(8, 0);
+    assert_eq!(at(&pixels, 224, 12 + inner_cut - 1, 12), RING);
+    assert_eq!(at(&pixels, 224, 12 + inner_cut, 12), CLEAR);
+}
+
+/// The ring's inner edge is the window clip's outer edge: every painted
+/// pixel adjacent to the inner rect sits exactly outside the window's own
+/// staircase, so no gap and no overlap. This walks the whole inner
+/// boundary rather than spot-checking corners.
+#[test]
+fn the_ring_inner_edge_matches_the_window_staircase() {
+    let inner = Rectangle::new((12, 12).into(), (200, 150).into());
+    let pixels = painted((224, 174), inner, 8, 20);
+    // For each canvas row crossing the window, the leftmost painted pixel
+    // must be exactly the window's cut on that row.
+    for y in 12..162 {
+        let yi = y - 12;
+        let cut = row_cut(8, yi, 150);
+        let first_ring = 12 + cut - 1;
+        // Everything left of the window's cut on this row is ring (until
+        // the outer cut, which is further out here).
+        assert_eq!(
+            at(&pixels, 224, first_ring, y),
+            RING,
+            "row {y}: pixel just outside the window staircase must be ring"
+        );
+        if cut < 200 {
+            assert_eq!(
+                at(&pixels, 224, 12 + cut, y),
+                CLEAR,
+                "row {y}: pixel just inside the window staircase must not be ring"
+            );
+        }
+    }
+}

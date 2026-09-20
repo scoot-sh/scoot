@@ -76,6 +76,20 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[Rounded window
+  corners](docs/backlog/resolved/rounded-window-corners-done.md)**
+  (2026-09-20) — `[appearance] corner_radius` (logical px, default `0` =
+  square, live-reloadable): each window's toplevel tree is wrapped in a
+  `Rounded` element cutting the corner staircases out of every draw while
+  shrinking the opaque region to match (the two are one atomic change —
+  either alone is a slowdown or a stale-corner bug), the focus ring follows
+  as two painted strips plus the solid side bars, popups stay square by
+  decision. Pixman cost measured small (+9% medians on a three-window
+  session, ~0% on the overlap scene, nothing at the default); no renderer
+  gating — the staircase works byte-identically on GLES with no shader, and
+  the llvmpipe GLES numbers are disclosed as llvmpipe artifacts, not a GPU
+  verdict.
+
 - **[Test socket paths overflow macOS `SUN_LEN` under a long
   `$TMPDIR`](docs/backlog/resolved/fixture-socket-sun-len-done.md)**
   (2026-09-20, test-only) — the PR #180 review finding: the

@@ -47,9 +47,18 @@
 //! Like the other suites that drive a real `State`, this needs a writable
 //! `$XDG_RUNTIME_DIR`.
 
+use std::io::Write;
+use std::os::fd::AsFd;
+use std::os::unix::net::UnixStream;
+use std::sync::mpsc::{Receiver, Sender};
 use std::time::{Duration, Instant};
 
 use scoot_core::{Event as CoreEvent, WindowId, WindowInfo};
+use wayland_client::protocol::{
+    wl_buffer, wl_compositor, wl_registry, wl_shm, wl_shm_pool, wl_surface,
+};
+use wayland_client::{Connection, Dispatch, Proxy, QueueHandle};
+use wayland_protocols::xdg::shell::client::{xdg_surface, xdg_toplevel, xdg_wm_base};
 
 use crate::compositor::decorations::Appearance;
 use crate::compositor::test_support::{Harness, test_renderer};
@@ -107,7 +116,7 @@ fn scene(windows: u64) -> Fixture {
 /// on a clean screen -- which is the behaviour under measurement's own
 /// fast path, not something being worked around: what is being timed is the
 /// cost of a frame that really draws.
-fn render_frames(fixture: &mut Fixture, rounds: u32) -> Duration {
+fn render_frames<S, A>(fixture: &mut Harness<S, A>, rounds: u32) -> Duration {
     let started = Instant::now();
     for _ in 0..rounds {
         fixture.state.request_render();
@@ -194,8 +203,286 @@ fn render_frame_cost() {
         }
         println!(
             "render [{renderer}], {label}: BEST {:?} per frame ({ROUNDS} frames, \
-             {CANVAS}x{CANVAS})",
+         {CANVAS}x{CANVAS})",
             best / ROUNDS
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Rounded corners: what `corner_radius` costs per frame
+// ---------------------------------------------------------------------------
+
+/// Frames per timed run in [`rounded_corners_cost`]. Fewer than [`ROUNDS`]:
+/// every frame here composites real client textures at full damage, so one
+/// frame costs milliseconds, not microseconds.
+const ROUNDED_ROUNDS: u32 = 200;
+
+/// Timed runs per tier. Tiers alternate within a run (square, rounded,
+/// square, rounded, ...) so a thermal or noisy-neighbor drift lands on both
+/// tiers alike instead of flattering whichever ran first.
+const ROUNDED_RUNS: u32 = 12;
+
+/// Frames after a radius switch before timing starts: the switch repaints
+/// every ring buffer once, and that one-off must not land in the average.
+const ROUNDED_WARMUP: u32 = 30;
+
+/// The radius under test: a value people actually configure.
+const ROUNDED_RADIUS: i32 = 12;
+
+/// What the bench client can be told to do.
+#[derive(Debug)]
+enum RoundedStep {
+    /// Map a toplevel (no buffer yet) and report its index.
+    Map,
+    /// Attach a `w` x `h` solid-`color` buffer to the `index`th surface and
+    /// commit, so the drawn window is exactly that size at its placement.
+    Attach {
+        index: usize,
+        w: i32,
+        h: i32,
+        color: [u8; 4],
+    },
+}
+
+#[derive(Debug)]
+enum RoundedAck {
+    Done,
+}
+
+#[derive(Default)]
+struct RoundedClient {
+    compositor: Option<wl_compositor::WlCompositor>,
+    shm: Option<wl_shm::WlShm>,
+    wm_base: Option<xdg_wm_base::XdgWmBase>,
+    serial: Option<u32>,
+}
+
+impl Dispatch<wl_registry::WlRegistry, ()> for RoundedClient {
+    fn event(
+        client: &mut Self,
+        registry: &wl_registry::WlRegistry,
+        event: wl_registry::Event,
+        _: &(),
+        _: &Connection,
+        qh: &QueueHandle<Self>,
+    ) {
+        let wl_registry::Event::Global {
+            name,
+            interface,
+            version,
+        } = event
+        else {
+            return;
+        };
+        if interface == wl_compositor::WlCompositor::interface().name {
+            client.compositor = Some(registry.bind(name, version.min(4), qh, ()));
+        } else if interface == wl_shm::WlShm::interface().name {
+            client.shm = Some(registry.bind(name, version.min(1), qh, ()));
+        } else if interface == xdg_wm_base::XdgWmBase::interface().name {
+            client.wm_base = Some(registry.bind(name, version.min(1), qh, ()));
+        }
+    }
+}
+
+impl Dispatch<xdg_wm_base::XdgWmBase, ()> for RoundedClient {
+    fn event(
+        _: &mut Self,
+        wm_base: &xdg_wm_base::XdgWmBase,
+        event: xdg_wm_base::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let xdg_wm_base::Event::Ping { serial } = event {
+            wm_base.pong(serial);
+        }
+    }
+}
+
+impl Dispatch<xdg_surface::XdgSurface, ()> for RoundedClient {
+    fn event(
+        client: &mut Self,
+        surface: &xdg_surface::XdgSurface,
+        event: xdg_surface::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let xdg_surface::Event::Configure { serial } = event {
+            surface.ack_configure(serial);
+            client.serial = Some(serial);
+        }
+    }
+}
+
+wayland_client::delegate_noop!(RoundedClient: ignore wl_compositor::WlCompositor);
+wayland_client::delegate_noop!(RoundedClient: ignore wl_shm::WlShm);
+wayland_client::delegate_noop!(RoundedClient: ignore wl_shm_pool::WlShmPool);
+wayland_client::delegate_noop!(RoundedClient: ignore wl_buffer::WlBuffer);
+wayland_client::delegate_noop!(RoundedClient: ignore wl_surface::WlSurface);
+wayland_client::delegate_noop!(RoundedClient: ignore xdg_toplevel::XdgToplevel);
+
+fn run_rounded_client(
+    stream: UnixStream,
+    steps: Receiver<RoundedStep>,
+    acks: Sender<RoundedAck>,
+) -> Result<(), String> {
+    let conn = Connection::from_socket(stream).map_err(|e| e.to_string())?;
+    let mut queue = conn.new_event_queue();
+    let qh = queue.handle();
+    let mut client = RoundedClient::default();
+    conn.display().get_registry(&qh, ());
+    queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+
+    let compositor = client.compositor.clone().ok_or("no wl_compositor")?;
+    let shm = client.shm.clone().ok_or("no wl_shm")?;
+    let wm_base = client.wm_base.clone().ok_or("no xdg_wm_base")?;
+    let mut surfaces: Vec<wl_surface::WlSurface> = Vec::new();
+
+    while let Ok(step) = steps.recv() {
+        match step {
+            RoundedStep::Map => {
+                let surface = compositor.create_surface(&qh, ());
+                let xdg = wm_base.get_xdg_surface(&surface, &qh, ());
+                let toplevel = xdg.get_toplevel(&qh, ());
+                toplevel.set_title("rounded-bench".into());
+                surface.commit();
+                queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                surfaces.push(surface);
+                acks.send(RoundedAck::Done).map_err(|e| e.to_string())?;
+            }
+            RoundedStep::Attach { index, w, h, color } => {
+                let stride = w * 4;
+                let len = (stride * h) as usize;
+                let fd = rustix::fs::memfd_create(
+                    "scoot-rounded-bench",
+                    rustix::fs::MemfdFlags::CLOEXEC,
+                )
+                .expect("a memfd");
+                let mut file = std::fs::File::from(fd);
+                let bytes: Vec<u8> = color.iter().copied().cycle().take(len).collect();
+                file.write_all(&bytes).expect("a filled pool file");
+                let pool = shm.create_pool(file.as_fd(), len as i32, &qh, ());
+                let buffer = pool.create_buffer(0, w, h, stride, wl_shm::Format::Argb8888, &qh, ());
+                pool.destroy();
+                let surface = &surfaces[index];
+                surface.attach(Some(&buffer), 0, 0);
+                surface.damage_buffer(0, 0, w, h);
+                surface.commit();
+                queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                acks.send(RoundedAck::Done).map_err(|e| e.to_string())?;
+            }
+        }
+    }
+    Ok(())
+}
+
+type RoundedFixture = Harness<RoundedStep, RoundedAck>;
+
+/// Maps `windows` clients and sizes each buffer to its live placement (or a
+/// multiple of it for the overhang scene), so the drawn content and the
+/// rounding clip agree exactly as they do in a production session.
+fn rounded_scene(windows: usize, overhang: i32) -> RoundedFixture {
+    let mut fixture = RoundedFixture::headless(Appearance::default(), CANVAS);
+    fixture.spawn(run_rounded_client);
+    for _ in 0..windows {
+        fixture.run(RoundedStep::Map);
+    }
+    let arrangement = fixture.state.world.arrange();
+    assert_eq!(
+        arrangement.placements.len(),
+        windows,
+        "every mapped client must have a placement"
+    );
+    // Distinct opaque colors per window, so occlusion (or its absence) is
+    // what the pixels say, not an assumption.
+    let colors: [[u8; 4]; 3] = [
+        [0x00, 0x00, 0xFF, 0xFF],
+        [0x00, 0xFF, 0x00, 0xFF],
+        [0xFF, 0x00, 0x00, 0xFF],
+    ];
+    for (index, placement) in arrangement.placements.iter().enumerate() {
+        fixture.run(RoundedStep::Attach {
+            index,
+            w: placement.rect.w * overhang,
+            h: placement.rect.h * overhang,
+            color: colors[index % colors.len()],
+        });
+    }
+    fixture
+}
+
+/// Times `rounds` frames at `radius`, after a warmup that absorbs the ring
+/// repaints the switch caused.
+fn time_rounded_tier(fixture: &mut RoundedFixture, radius: i32, rounds: u32) -> Duration {
+    fixture.state.appearance.corner_radius = radius;
+    render_frames(fixture, ROUNDED_WARMUP);
+    render_frames(fixture, rounds)
+}
+
+/// What one frame costs with square vs rounded windows, on scenes with real
+/// client content:
+///
+/// - **single**: one window. Nothing is behind it, so this isolates the
+///   clip-filter overhead (damage rects minus the corner staircases, plus
+///   the extra composite ops) from any opacity effect.
+/// - **tiled3**: three windows tiling the output. The realistic session:
+///   adjacent windows, gaps, one painted ring each.
+/// - **overhang3**: the same three windows with double-size buffers, the
+///   shape a shrink still in flight has (content bleeding past its
+///   placement into the neighbor). Square, the bleed draws; rounded, the
+///   clip cuts it to the placement -- so this scene also shows whether the
+///   clip's removal of overlap outweighs its own cost.
+///
+/// Tiers alternate per run and the table reports min/median/max per tier:
+/// this is a VM sharing a host's cores (see `render_frame_cost`), so a
+/// single number per tier says nothing about whether a delta is real.
+#[test]
+#[ignore = "prints per-frame render timings for a human; asserts nothing"]
+fn rounded_corners_cost() {
+    let renderer = test_renderer();
+    for (label, windows, overhang) in [("single", 1, 1), ("tiled3", 3, 1), ("overhang3", 3, 2)] {
+        let mut fixture = rounded_scene(windows, overhang);
+        let mut square: Vec<Duration> = Vec::with_capacity(ROUNDED_RUNS as usize);
+        let mut rounded: Vec<Duration> = Vec::with_capacity(ROUNDED_RUNS as usize);
+        // Paired deltas: each run's rounded batch minus its own square
+        // batch, so a drift between runs cannot flatter either tier. The
+        // median of these is the number to compare against the medians'
+        // delta below; when they disagree, the paired one is honest.
+        let mut paired: Vec<f64> = Vec::with_capacity(ROUNDED_RUNS as usize);
+        for _ in 0..ROUNDED_RUNS {
+            let square_total = time_rounded_tier(&mut fixture, 0, ROUNDED_ROUNDS);
+            let rounded_total = time_rounded_tier(&mut fixture, ROUNDED_RADIUS, ROUNDED_ROUNDS);
+            paired.push(rounded_total.as_nanos() as f64 / square_total.as_nanos() as f64 - 1.0);
+            square.push(square_total);
+            rounded.push(rounded_total);
+        }
+        let summarize = |samples: &mut Vec<Duration>| {
+            samples.sort();
+            let median = samples[samples.len() / 2] / ROUNDED_ROUNDS;
+            (
+                samples[0] / ROUNDED_ROUNDS,
+                median,
+                samples[samples.len() - 1] / ROUNDED_ROUNDS,
+            )
+        };
+        let (square_min, square_med, square_max) = summarize(&mut square);
+        let (round_min, round_med, round_max) = summarize(&mut rounded);
+        let delta = round_med.as_nanos() as f64 / square_med.as_nanos() as f64 - 1.0;
+        paired.sort_by(|a, b| a.total_cmp(b));
+        let paired_med = paired[paired.len() / 2];
+        let paired_min = paired[0];
+        let paired_max = paired[paired.len() - 1];
+        println!(
+            "rounded [{renderer}], {label}: square min/median/max {square_min:?}/{square_med:?}/{square_max:?} \
+             vs radius {ROUNDED_RADIUS} {round_min:?}/{round_med:?}/{round_max:?} \
+             per frame ({ROUNDED_ROUNDS} frames x {ROUNDED_RUNS} alternating runs, {CANVAS}x{CANVAS}); \
+             median delta {:+.1}%, paired min/median/max {:+.1}%/{:+.1}%/{:+.1}%",
+            delta * 100.0,
+            paired_min * 100.0,
+            paired_med * 100.0,
+            paired_max * 100.0
         );
     }
 }
