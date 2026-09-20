@@ -76,8 +76,21 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[Dispatch flood tests die on fd-pressure kills under a pressured
+  process table](docs/backlog/resolved/dispatch-flood-fd-pressure-flake-done.md)**
+  (2026-09-20, test-only) — the dmabuf fill-phase kill landed on the
+  wrong cause under `prlimit 650` (reproduced: code 1 on `wl_shm_pool`
+  with the pressure message where code 7 on the dmabuf params is
+  expected). Both dispatch halves now run under the icon test's
+  treatment: raised `RLIMIT_NOFILE` ceiling with verified headroom (896
+  free for the 512-retaining fill, 384 for the fd-less single-pixel
+  flood — fast loud panic, never a skip), budget-cause pinning by
+  message (required where twins share code+object), and the single-pixel
+  flood finally taking the shared `FD_FLOOD_LOCK`. The `immed` twin
+  reproduces identically and is left for a follow-up per the ticket's
+  scope.
 - **[Icon live-buffer-budget flood flake under `cargo
-  test`](docs/backlog/resolved/icon-buffer-budget-fd-pressure-flake-done.md)**
+   test`](docs/backlog/resolved/icon-buffer-budget-fd-pressure-flake-done.md)**
   (2026-09-20, test-only) — the 512-fd flood sat near the process-wide
   fd-pressure boundary by design, so neighbours' fds tipped the refusal
   into the flood (10s `PATIENCE` timeout, never nextest). Now the flood
