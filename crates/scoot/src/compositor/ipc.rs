@@ -317,6 +317,11 @@ impl State {
                 version: env!("CARGO_PKG_VERSION").to_string(),
                 protocol: PROTOCOL_VERSION,
             },
+            // Session-level like `windows`, not an `action`: actions are
+            // window/focus operations (and refused while locked), while this
+            // re-reads the session's own config file. Applies under lock by
+            // design -- see `reload.rs`.
+            Request::Reload => self.reload(),
             Request::Outputs => Response::Outputs {
                 outputs: self.output_snapshots(),
             },

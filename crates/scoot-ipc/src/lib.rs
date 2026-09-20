@@ -36,4 +36,12 @@ pub use socket::{SOCKET_ENV, socket_path};
 /// the kind of change this constant's doc warns about: a client built
 /// against protocol 1 fails to decode a reply it's never seen the moment
 /// the server sends one, rather than degrading gracefully.
-pub const PROTOCOL_VERSION: u32 = 2;
+///
+/// The same bar moved this 2 → 3 for `Response::Reloaded` (2026-09, config
+/// reload): only a client new enough to send `Request::Reload` ever receives
+/// one, but the variant is still a new tag on the wire, and an older client
+/// handed one would fail its decode. What did *not* move it is the request
+/// half -- an unknown `Request` tag is a decode error the server answers
+/// with an ordinary `Error` and keeps serving (see `unknown_request_types_are_rejected`),
+/// so an older server meets a new `reload` client with an error, not a kill.
+pub const PROTOCOL_VERSION: u32 = 3;

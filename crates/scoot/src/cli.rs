@@ -22,6 +22,8 @@ USAGE:
 REQUESTS:
     version | outputs | windows
     action ACTION [ARGUMENT...]
+    reload                          re-read the config file and re-apply
+                                    what can be re-applied live
     screenshot [--output ID] [--out FILE]
     pointer move X Y | pointer click X Y [left|right|middle]
     pointer button left|right|middle press|release | pointer scroll DX DY
@@ -744,6 +746,7 @@ mod tests {
             &["version"],
             &["outputs"],
             &["windows"],
+            &["reload"],
             &["action", "focus-column", "left"],
             &["action", "move-window-to-workspace", "down"],
             &["action", "focus-workspace-index", "2"],

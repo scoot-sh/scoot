@@ -153,6 +153,27 @@ pub enum Response {
     Warning {
         message: String,
     },
+    /// What a `Reload` request answers on success: which config fields were
+    /// re-applied live, and which differed from the running session but
+    /// cannot be (`output.scale`, `tty.gpu`, `renderer.backend`,
+    /// `autostart.commands`, the cursor fields, `layout.column_widths` --
+    /// each refused explicitly, never silently ignored).
+    ///
+    /// Both lists name only fields that *differed*: a field the file and the
+    /// running session agree on appears in neither. Two empty lists together
+    /// therefore mean "the reload changed nothing it was asked to" -- that
+    /// is the honest answer, not a missing one. A reload that could not load
+    /// or validate the file at all answers `Error` instead (the running
+    /// config untouched), which is why there is no third list here.
+    ///
+    /// A new variant, so this is the half that moved `PROTOCOL_VERSION` (see
+    /// that constant's doc): an older client that somehow received one would
+    /// fail to decode it. In practice only a client new enough to send
+    /// `Reload` ever receives one.
+    Reloaded {
+        applied: Vec<String>,
+        refused: Vec<String>,
+    },
     Error {
         message: String,
     },

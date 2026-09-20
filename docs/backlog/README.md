@@ -492,11 +492,11 @@ be revisited.
   carries-and-follows (new `MoveWindowToWorkspaceIndex` core/IPC/config
   action mirroring `FocusWorkspaceIndex`'s ignore-out-of-range rule); agent
   window placement is absolute, not stepped.
-- [No config reload](./config/config-reload.md) — on `--tty` a settings
-  change costs the whole session. Not every field can be re-applied
-  (`[output] scale`, `[tty] gpu`, `[renderer] backend` realistically cannot),
-  so the honest shape is a partial reload with an explicit list, and a failed
-  reload must keep the running config rather than fall back to defaults.
+- [No config reload](./resolved/config-reload-done.md) — RESOLVED 2026-09-20:
+  `scootctl reload` re-applies gap, appearance and keybindings live with an
+  applied-vs-refused reply; scale/gpu/renderer/autostart/cursor stay
+  startup-only and refuse with a message. Failed reloads keep the running
+  config; `--tty` VT recovery binds are un-strippable.
 - [Consuming scoot from another flake, and the missing home-manager module](./packaging/flake-consumer-and-home-manager.md)
   — the flake exposes `packages`/`apps`/`devShells` but **no** `overlays`,
   `nixosModules` or `homeManagerModules`. Documenting what already works is

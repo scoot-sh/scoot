@@ -76,6 +76,25 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[No config reload](docs/backlog/resolved/config-reload-done.md)**
+  (2026-09-20) — the biggest remaining daily-driver gap, and the README
+  "Not yet" line that named it: `scootctl reload` (new session-level
+  `reload` request, `scoot msg` alias included) re-reads the same file
+  startup used and re-applies gap, appearance and keybindings live
+  (arrangement recomputed, render requested), refusing scale, gpu,
+  renderer backend, autostart, cursor fields and column widths explicitly
+  in the reply's `refused` list — never silently ignored. A failed reload
+  (unreadable, malformed, unknown field) keeps the running config and
+  reports loudly; two empty lists mean "changed nothing". The `--tty`
+  `Ctrl+Alt+F1..F12` recovery path is un-strippable by reload (shared
+  `enforce_vt_binds` with startup), a held key neither wedges nor drops
+  across the table swap, and reload applies under session lock
+  (deliberate: nothing applied can disclose locked content). New
+  `Response::Reloaded` moved `PROTOCOL_VERSION` 2 → 3; the request half
+  degrades to error + continue on older servers. Live proof on the dev
+  VM: gap + colour + bind change, screenshot pixel diff, injected-key
+  bind fire, malformed-file untouched.
+
 - **[Workspace shortcuts: numbered binds plus
   move-to-index](docs/backlog/resolved/workspace-index-keybindings-done.md)**
   (2026-09-20) — both halves of the two-gaps-that-look-like-one ticket:

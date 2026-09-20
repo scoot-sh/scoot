@@ -75,4 +75,12 @@ pub enum Request {
         quiet_ms: u64,
         timeout_ms: u64,
     },
+    /// Re-read the config file the session started from and re-apply what
+    /// can be re-applied live (layout gap, appearance, keybindings).
+    ///
+    /// Additive like `MoveWindowToWorkspaceIndex`: a client that never sends
+    /// this tag decodes exactly as before, so no `PROTOCOL_VERSION` bump for
+    /// the request half. (The reply half is a new `Response` variant, which
+    /// is why the version still moved -- see `Response::Reloaded`.)
+    Reload,
 }

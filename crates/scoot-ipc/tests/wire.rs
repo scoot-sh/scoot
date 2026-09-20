@@ -14,6 +14,11 @@ fn json_of<T: serde::Serialize>(value: &T) -> Value {
 #[test]
 fn unit_requests_are_just_a_type() {
     assert_eq!(json_of(&Request::Windows), json!({ "type": "windows" }));
+    assert_eq!(json_of(&Request::Reload), json!({ "type": "reload" }));
+    assert_eq!(
+        decode::<Request>(&encode(&Request::Reload).unwrap()).unwrap(),
+        Request::Reload
+    );
 }
 
 #[test]
@@ -116,11 +121,32 @@ fn warnings_carry_a_message_and_round_trip() {
 }
 
 #[test]
+fn a_reload_report_round_trips_with_both_lists() {
+    let response = Response::Reloaded {
+        applied: vec!["layout.gap".into(), "binds".into()],
+        refused: vec!["output.scale".into()],
+    };
+    assert_eq!(
+        json_of(&response),
+        json!({
+            "type": "reloaded",
+            "applied": ["layout.gap", "binds"],
+            "refused": ["output.scale"],
+        })
+    );
+    assert_eq!(
+        decode::<Response>(&encode(&response).unwrap()).unwrap(),
+        response
+    );
+}
+
+#[test]
 fn every_request_round_trips_on_one_line() {
     let requests = [
         Request::Version,
         Request::Outputs,
         Request::Windows,
+        Request::Reload,
         Request::Action(Action::Spawn {
             command: vec!["foot".into()],
         }),

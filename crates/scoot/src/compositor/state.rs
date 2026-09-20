@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::time::Instant;
 
-use scoot_core::{Config, Size, WindowId, World};
+use scoot_core::{Action, Config, Size, WindowId, World};
 use smithay::desktop::{LayerSurface, PopupManager, Space, Window, WindowSurfaceType};
 use smithay::input::keyboard::Keycode;
 use smithay::input::{Seat, SeatState};
@@ -84,6 +84,21 @@ pub struct State {
     pub loop_signal: LoopSignal,
     pub socket_name: OsString,
     pub ipc_path: Option<PathBuf>,
+    /// The config file this session started from: the explicit `--config`
+    /// path when one was given, else the resolved XDG default path (whether
+    /// or not a file existed there at startup). What `Request::Reload`
+    /// re-reads -- see `reload.rs`. `None` only when no path could be
+    /// resolved at all (neither `XDG_CONFIG_HOME` nor `HOME` set), in which
+    /// case a reload answers an error rather than guessing.
+    pub config_path: Option<PathBuf>,
+    /// The startup-only config values a reload diffs against: `[tty] gpu`
+    /// as the file named it (`None` when unset) and `[autostart] commands`
+    /// as they ran. Neither has live state to compare a reloaded file with
+    /// (the device is already driven, the entries already ran), so the
+    /// startup values are what decides "changed, and refused" versus
+    /// "agreed, silent". Set once in `run`, never written after.
+    pub startup_gpu: Option<PathBuf>,
+    pub startup_autostart: Vec<Action>,
 
     /// The layout. Everything else here exists to serve it.
     pub world: World,
@@ -718,6 +733,9 @@ impl State {
             loop_signal: event_loop.get_signal(),
             socket_name,
             ipc_path: None,
+            config_path: None,
+            startup_gpu: None,
+            startup_autostart: Vec::new(),
             world: World::new(config),
             windows: HashMap::new(),
             requested: HashMap::new(),
