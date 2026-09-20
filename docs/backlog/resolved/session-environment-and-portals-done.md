@@ -197,6 +197,11 @@ touched; no numbers taken.
 
 ## Evidence
 
+Implementation commit: `ce69ffe` on branch
+`backlog/session-environment-portals` (all evidence below captured against
+that tree; the `nextest`/`clippy`/`fmt`/`smoke` runs below ran after the
+final source edit, so the key is unmodified).
+
 - `cargo nextest run --workspace`: 1162 passed, 4 skipped, 0 failed (dev VM).
 - `cargo clippy -p scoot --all-targets -- -D warnings`: clean (dev VM).
 - `cargo fmt --check -p scoot`: clean (dev VM).
