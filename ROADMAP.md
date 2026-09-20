@@ -76,6 +76,17 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[`smoke-test.sh` no longer defaults to someone else's
+  binary](docs/backlog/resolved/smoke-test-binary-default-done.md)**
+  (2026-09-20) — the shared-target-dir default handed three agents a binary
+  from another branch in one session, silently. `SCOOT`/`SCOOTCTL` now
+  default to the invoking tree (`$CARGO_TARGET_DIR`, else the script's own
+  repo) with `SCOOTCTL` always paired next to `SCOOT` (same build, never a
+  split-brain pair); any unresolvable binary fails loudly before anything
+  launches, and the header prints path + source + mtime. Proven live: a
+  default run, a bare-name-on-PATH run from a foreign cwd under a
+  spaced `SMOKE_PREFIX`, and a concurrent pair with disjoint binaries and
+  disjoint headers. No README change (no smoke env contract there).
 - **[Split the CLI out into
   `scootctl`](docs/backlog/resolved/scootctl-split-done.md)**
   (2026-09-20) — the second half of the `rename-flex-family` ticket. The

@@ -310,6 +310,12 @@ the binary is newer than the edit before trusting any run:
 ls -l --time-style=full-iso /var/cargo-target/debug/scoot
 ```
 
+`scripts/smoke-test.sh` now does part of this for you: an unresolvable
+`SCOOT`/`SCOOTCTL` default fails loudly before anything launches, and every
+run's first lines print each binary's path, source and mtime — read them
+and confirm the binary is your build, especially after a concurrent build
+may have replaced it.
+
 Same applies to `cargo test` output when two builds race — rerun it once the
 other build has finished rather than debugging the result.
 

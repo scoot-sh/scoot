@@ -442,11 +442,12 @@ falsify. Read `flexwm` there as `scoot`.
   resize's never-rendered size is `delete_mode`d off the failure path. The
   unbounded product and the in-place GLES resize stay open as stated in the
   record.
-- [`smoke-test.sh` defaults to a shared target dir](./testing/smoke-test-binary-default.md)
-  — it handed **three different agents someone else's binary** in one
-  session. Silent by construction: the path exists, the binary runs, nothing
-  says which tree it came from. Two were near-misses that would have
-  produced a confident wrong verdict.
+- [`smoke-test.sh` defaults to a shared target dir](./resolved/smoke-test-binary-default-done.md)
+  — RESOLVED 2026-09-20: SCOOT/SCOOTCTL default to the invoking tree
+  (`$CARGO_TARGET_DIR`, else the script's own repo) with SCOOTCTL always
+  paired next to SCOOT (same build); any unresolvable binary fails loudly
+  before launch, and the header prints path + source + mtime. Silent
+  wrong-binary runs are now either loud failures or auditable in the log.
 
 ### Field reports from the webtop deployment (2026-09-19)
 
