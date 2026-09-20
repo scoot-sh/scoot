@@ -871,6 +871,113 @@ fn resizing_back_to_a_known_mode_reuses_its_object() {
     );
 }
 
+// -- a resize that fails --------------------------------------------------
+
+/// A size no renderer can build a target for. pixman refuses it without
+/// allocating anything (`_pixman_multiply_overflows_int(width, 32)` in its
+/// own `create_bits`), and GLES refuses it past `GL_MAX_RENDERBUFFER_SIZE` --
+/// so this drives `resize_output`'s failure path under either renderer the
+/// suite runs with (the same shape as `headless.rs`'s own `UNBUILDABLE`).
+const UNBUILDABLE: (i32, i32) = (i32::MAX, 1);
+
+#[test]
+fn a_failed_resize_sends_nothing_to_output_management() {
+    // The failure path returns before `refresh_output_heads`, so there is no
+    // batch to send -- and in particular no `done` serial bump for a change
+    // that never happened.
+    let mut fixture = Fixture::bound(4);
+    assert!(
+        !fixture.state.resize_output(UNBUILDABLE.0, UNBUILDABLE.1),
+        "a render target was somehow built at {UNBUILDABLE:?}"
+    );
+    fixture.settle();
+    assert_eq!(fixture.take_log(), vec![]);
+}
+
+#[test]
+fn a_failed_resize_leaves_no_mode_for_the_next_refresh() {
+    // Fail-first: `set_mode` pushes the failed size into `Output::modes`
+    // before the render target is rebuilt, so without the `delete_mode` on
+    // the failure path the *next* successful refresh announces the size that
+    // never rendered as a brand-new mode object alongside the real one.
+    let mut fixture = Fixture::bound(4);
+    assert!(!fixture.state.resize_output(UNBUILDABLE.0, UNBUILDABLE.1));
+    fixture.settle();
+    assert_eq!(
+        fixture.take_log(),
+        vec![],
+        "a failed resize should send nothing"
+    );
+
+    fixture.state.resize_output(RESIZED, RESIZED);
+    fixture.settle();
+    assert_eq!(
+        fixture.take_log(),
+        vec![
+            Seen::Mode(0, 1),
+            Seen::ModeSize(1, RESIZED, RESIZED),
+            Seen::ModeRefresh(1, REFRESH),
+            Seen::ModePreferred(1),
+            Seen::CurrentMode(0, 1),
+            Seen::Done(2),
+        ],
+        "only the size that actually rendered should be announced"
+    );
+}
+
+#[test]
+fn a_failed_resize_puts_the_advertised_mode_back() {
+    // `resize_output` restores the old mode after a failed build, so a client
+    // bound across the failure ends with the old size current and preferred
+    // again rather than believing a size nothing renders at.
+    //
+    // What this deliberately does *not* assert is that the failed size
+    // vanishes from this client's list: `wl_output` has no un-prefer and no
+    // mode withdrawal, and Smithay sends synchronously, so the failed size's
+    // `Current|Preferred` announcement is already on the wire before the
+    // build fails. That transient is inherent to advertising before building
+    // and only opens on a resize that fails. What the fix does guarantee is
+    // the recovery below, and (pinned next) that a later bind never learns
+    // the failed size at all.
+    let mut fixture = Fixture::new();
+    fixture.run(Step::BindOutput);
+    fixture.take_output();
+
+    assert!(!fixture.state.resize_output(UNBUILDABLE.0, UNBUILDABLE.1));
+    fixture.settle();
+    let output = fixture.take_output();
+    assert!(
+        output
+            .modes
+            .iter()
+            .any(|mode| (mode.width, mode.height) == (CANVAS, CANVAS)
+                && mode.current
+                && mode.preferred),
+        "the old mode should be current and preferred again: {output:?}"
+    );
+}
+
+#[test]
+fn a_client_bound_after_a_failed_resize_never_sees_its_size() {
+    // Fail-first: the failed size used to stay in `Output::modes` for the
+    // life of the session, and a bind sends every known mode -- so whoever
+    // bound next (a restarted bar, `wlr-randr`) learned a mode nothing
+    // renders at, with the next refresh minting it a `zwlr_output_mode_v1`.
+    let mut fixture = Fixture::new();
+    assert!(!fixture.state.resize_output(UNBUILDABLE.0, UNBUILDABLE.1));
+    fixture.settle();
+
+    fixture.run(Step::BindOutput);
+    let output = fixture.take_output();
+    assert!(
+        !output
+            .modes
+            .iter()
+            .any(|mode| (mode.width, mode.height) == UNBUILDABLE),
+        "a later bind should never learn the size that never rendered: {output:?}"
+    );
+}
+
 #[test]
 fn two_managers_are_kept_in_step() {
     let mut fixture = Fixture::new();

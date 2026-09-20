@@ -295,6 +295,17 @@ fn set_mode(
 impl State {
     /// Draws a frame, if anything changed since the last one.
     pub fn render(&mut self) {
+        // A host resize queued since the last tick is applied here, at most
+        // one per frame, before anything else: this is the drain half of
+        // `--nested`'s configure coalescing (see
+        // [`Host::drain_pending_resize`](super::nested::Host::drain_pending_resize)).
+        // Ahead of the clean-screen early return below, so a queued resize
+        // is acted on even when nothing else dirtied the screen. A resize
+        // applied here draws in this same frame (`apply_resize` ends in
+        // `request_render`, and the frame below is composited after this).
+        // A no-op on every backend without a host (`None` there), which is
+        // every test harness: nothing outside `--nested` can queue one.
+        super::nested::Host::drain_pending_resize(self);
         if !self.needs_render {
             return;
         }
@@ -589,14 +600,13 @@ impl State {
     /// EGL context and shader set per resize, which is wasteful and correct.
     /// What bounds it is the callers: `--tty`'s hotplug handler does not
     /// reach here unless the connector's mode actually changed, and
-    /// `--nested` classifies a configure at the size it is already at as
-    /// `Nothing` before it can (see `nested.rs`'s `configure_action`) -- so
-    /// this runs once per *distinct* size, not once per event. A host window
-    /// dragged to resize still pays it per distinct size that drag passes
-    /// through, which is the one case where "wasteful" is felt rather than
-    /// theoretical; `--renderer gles` under `--nested` is opt-in, and
-    /// resizing a live GLES target in place instead of rebuilding is the fix
-    /// if that ever matters.
+    /// `--nested` queues a configure's size and drains at most one per frame
+    /// tick (see `Host::drain_pending_resize`) -- so this runs once per
+    /// *drained* size, not once per event. A host window dragged to resize
+    /// still pays it per frame the drag spans while the size keeps moving,
+    /// which is the honest per-frame-budget cost; `--renderer gles` under
+    /// `--nested` is opt-in, and resizing a live GLES target in place
+    /// instead of rebuilding is the fix if that ever matters.
     pub fn resize_output(&mut self, width: i32, height: i32) -> bool {
         // Both halves in one read, so the `OutputChanged` below names the id
         // of the output that was actually resized without a second lookup
@@ -671,6 +681,39 @@ impl State {
                             None,
                             self.output_scale,
                         );
+                        // ...and the size that never rendered is taken back
+                        // out of `Output::modes`, so a client binding later
+                        // never hears about it and the next
+                        // `refresh_output_heads` does not mint a
+                        // `zwlr_output_mode_v1` for it. `set_mode` above
+                        // pushed it twice over (once via `set_preferred`,
+                        // once via `change_current_state`), and nothing
+                        // prunes that list on its own -- without this every
+                        // failed resize would leave a mode behind for the
+                        // life of the session, announced to whoever binds
+                        // next. Guarded on differing: a same-size call names
+                        // the mode that is still current and preferred, and
+                        // `delete_mode` clears both when they match.
+                        //
+                        // What this cannot take back is what an already-bound
+                        // `wl_output` client was told synchronously, before
+                        // the build failed: it saw the failed size become
+                        // current *and* preferred, then the old size become
+                        // current and preferred again, and `wl_output` has
+                        // no un-prefer and no mode withdrawal to unsay the
+                        // first half with. That transient is inherent to
+                        // advertising before building (see `set_mode`'s
+                        // caller order, which `wl_output`'s synchronous send
+                        // forces), and it only opens on a resize that fails
+                        // -- a pool that would not allocate -- not on the
+                        // steady path.
+                        let failed = Mode {
+                            size: (width, height).into(),
+                            refresh: 60_000,
+                        };
+                        if failed != previous {
+                            output.delete_mode(failed);
+                        }
                     }
                     return false;
                 }
@@ -925,6 +968,41 @@ mod tests {
             state.backend.as_ref().expect("a backend").size(),
             (CANVAS, CANVAS),
             "a failed resize replaced the render target with one at another size"
+        );
+    }
+
+    /// The third half: the size that never rendered is taken back out of
+    /// `Output::modes`, so a client binding later never learns it and the
+    /// next refresh mints no `zwlr_output_mode_v1` for it. Fail-first: drop
+    /// the `delete_mode` on the failure path and this reports two modes.
+    #[test]
+    fn a_failed_resize_leaves_no_mode_behind() {
+        const CANVAS: i32 = 200;
+        let mut event_loop: EventLoop<'static, State> =
+            EventLoop::try_new().expect("an event loop");
+        let display: Display<State> = Display::new().expect("a wayland display");
+        let mut state = State::new(
+            &mut event_loop,
+            display,
+            Config::default(),
+            Keybindings::default(),
+            Appearance::default(),
+            1.0,
+            super::super::test_support::test_renderer(),
+        )
+        .expect("a compositor state with a wayland socket");
+        init(&mut state, CANVAS, CANVAS).expect("a headless backend");
+
+        assert!(!state.resize_output(UNBUILDABLE.0, UNBUILDABLE.1));
+
+        let modes = state.outputs.primary().expect("an output").modes();
+        assert_eq!(
+            modes
+                .iter()
+                .map(|mode| (mode.size.w, mode.size.h))
+                .collect::<Vec<_>>(),
+            vec![(CANVAS, CANVAS)],
+            "a failed resize left a mode behind that nothing renders at"
         );
     }
 

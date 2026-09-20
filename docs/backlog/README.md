@@ -435,15 +435,13 @@ falsify. Read `flexwm` there as `scoot`.
 
 ### Found reviewing the webtop fixes (2026-09-19)
 
-- [Every host configure is acted on immediately](./core/coalesce-host-configures.md)
-  — **HIGH**. Confirmed live: 4 modes after 3 resizes, one of which never
-  rendered. A browser drag 800→1900px is ~1100 modes and ~1100 protocol
-  objects per output-management client, with an O(N²) refresh, on the named
-  deployment target in its most ordinary interaction. Coalescing configures
-  to the next render tick fixes four separately-filed things at once —
-  this, the 16.6 ms GLES resize stutter, the unbounded 8192×32767 product,
-  and the benchmark's exclusion of the pool rebuild — which is the tell that
-  it is the right shape rather than `delete_mode` on the nested path.
+- [Every host configure is acted on immediately](./resolved/coalesce-host-configures-done.md)
+  — RESOLVED 2026-09-20: a later configure only overwrites an
+  allocation-free queue slot and the next render drains at most one size per
+  frame tick (live flood: 81 modes pre-fix, 25 post-fix release); a failed
+  resize's never-rendered size is `delete_mode`d off the failure path. The
+  unbounded product and the in-place GLES resize stay open as stated in the
+  record.
 - [`smoke-test.sh` defaults to a shared target dir](./testing/smoke-test-binary-default.md)
   — it handed **three different agents someone else's binary** in one
   session. Silent by construction: the path exists, the binary runs, nothing

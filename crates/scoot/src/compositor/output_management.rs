@@ -55,25 +55,31 @@
 //!   calls `change_current_state` with the real DRM refresh. `wl_output`
 //!   already reports the same 60 Hz, so this mirrors the existing inaccuracy
 //!   rather than adding a second one.
-//! - **[`Output::modes`] only ever grows, never shrinks.**
-//!   `change_current_state` pushes any mode it has not seen and nothing
-//!   calls `delete_mode`. The only production caller that can hand it a
-//!   second mode is [`State::resize_output`], which two backends reach:
-//!   `--nested`'s dispatch loop (`nested_dispatch.rs`) calls it once per
-//!   size the host configures scoot's window to (its first configure and
-//!   every resize after -- a window dragged to resize passes through one
-//!   mode per distinct size that drag touched), and `--tty`'s hotplug
-//!   handler (`tty/hotplug.rs`) calls it once per mode change the display
-//!   underneath actually makes -- a vfkit window moved between a 2x and a
-//!   1x screen a few times leaves a mode for each distinct size it settled
-//!   at. Both are bounded by the number of *distinct sizes* offered, not by
-//!   event traffic: a re-probe that lands on a size already in the list
-//!   adds nothing, `plan` in `tty/hotplug.rs` does not even reach
+//! - **[`Output::modes`] only ever grows on the success path, never shrinks.**
+//!   `change_current_state` pushes any mode it has not seen and nothing on
+//!   that path calls `delete_mode`. The only production caller that can hand
+//!   it a second mode is [`State::resize_output`], which two backends reach:
+//!   `--nested`'s render tick drains at most one queued host size per frame
+//!   (see `nested.rs`'s [`Host::drain_pending_resize`](super::nested::Host::drain_pending_resize)
+//!   -- a window dragged to resize passes through one mode per frame the
+//!   drag spans while the size keeps moving, not one per pixel step), and
+//!   `--tty`'s hotplug handler (`tty/hotplug.rs`) calls it once per mode
+//!   change the display underneath actually makes -- a vfkit window moved
+//!   between a 2x and a 1x screen a few times leaves a mode for each distinct
+//!   size it settled at. Both are bounded by the number of *applied* sizes,
+//!   not by event traffic: a re-probe that lands on a size already in the
+//!   list adds nothing, `plan` in `tty/hotplug.rs` does not even reach
 //!   `set_mode` unless the size changed, and a `--nested` configure at the
-//!   size scoot is already at is classified `Nothing` before it can reach
-//!   here (see `nested.rs`'s `configure_action`), which is what keeps a
+//!   size scoot is already at is classified `Nothing` before it can be
+//!   queued (see `nested.rs`'s `configure_action`), which is what keeps a
 //!   host's activation and maximize configures -- re-sent at an unchanged
 //!   size on every focus change -- out of this list entirely.
+//!   A resize that *fails* is the exception that proves the rule: its size
+//!   was already pushed before the build failed, and `resize_output` takes
+//!   it back out with `delete_mode` on the way out, so a size nothing ever
+//!   rendered at is never announced to a later bind (an already-bound
+//!   `wl_output` client keeps the transient -- that protocol has no
+//!   un-prefer and no mode withdrawal -- but nothing new learns it).
 //!   `wl_output` advertises every known mode for the same
 //!   reason this protocol does, and the `preferred` flag tracks it the same
 //!   way on both: `headless.rs`'s `set_mode` marks the new mode preferred
