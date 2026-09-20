@@ -498,7 +498,9 @@ be revisited.
   per-output behaviours, not one) and by `session-lock-per-output-done.md`,
   which was resolved as single-output *pins* rather than as multi-output —
   including that `locked` must wait for every output's blanked frame, which
-  is the security-relevant one.
+  is the security-relevant one. Promoted 2026-09-20 to **Milestone 19**
+  ([plan](../roadmap/19-multi-output.md), in progress, phases A–D
+  VM-testable, E hardware-gated) — this entry stays the detailed spec.
 - [Workspace shortcuts: no numbered bind, and no move-to-index action at all](./resolved/workspace-index-keybindings-done.md)
   — RESOLVED 2026-09-20: `Super+1`..`9` focuses and `Super+Shift+1`..`9`
   carries-and-follows (new `MoveWindowToWorkspaceIndex` core/IPC/config

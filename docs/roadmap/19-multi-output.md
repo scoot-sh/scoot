@@ -1,0 +1,82 @@
+# Milestone 19: multi-output (more than one monitor at a time)
+
+Promoted from `docs/backlog/core/multi-output.md` (still the detailed spec —
+read it first; this file is the staging plan, not a rewrite). The biggest
+user-facing gap scoot has; `README.md`'s "Not yet" list leads with it.
+
+## What already landed
+
+The foundation (PR #150, `State.outputs` id-keyed collection,
+`--headless --outputs N` creating N virtual outputs side by side, each
+with its own `wl_output`, logical position, and scrolling strip in the
+core). Almost everything below is therefore testable on the dev VM with
+no second monitor. `crates/scoot/src/compositor/outputs.rs`'s doc on
+`Outputs::primary` enumerates the single-output-assumption sites — every
+`primary()` caller is one — and is more precise than a fresh survey.
+
+## Decisions (coordinator's, recorded before Phase A)
+
+- **Scrolling strip: one per output** (already the foundation's shape, and
+  niri's answer). Not revisited.
+- **Focus across outputs reuses the within-output rule.** No new
+  focus-follows-pointer doctrine: the pointer position picks the output,
+  then the existing focus derivation applies unchanged. If the code proves
+  the existing rule assumes singleness somewhere, that site is a bug in
+  this milestone's scope, not a reason to invent a second rule.
+- **`scoot-core` models strips per output id; the compositor owns outputs.**
+  No core redesign: the foundation's split stands unless a phase proves a
+  workspace-set-per-output concept must move into the core (flag it, don't
+  silently redesign).
+- **Renderers: both must work.** Pixman-first implementation is fine, but
+  every phase proves its pixels under `SCOOT_TEST_RENDERER=gles` too (the
+  coalesce precedent: byte-identical suites under both). No GLES-only or
+  pixman-only per-output behavior without a measured reason.
+- **Single-output stays byte-identical.** Every phase keeps the one-output
+  session pixel- and wire-identical (existing suite + screenshot hashes);
+  multi-output is additive.
+
+## Phases (in order — each is one implementer invocation + review + merge)
+
+- **A. Render + capture per output.** One render target per output
+  (`State::render` draws the primary's framebuffer and nothing else today
+  because `State.backend` is one `Backend`). Un-refuse `screenshot
+  --output N`; serve `screencopy` of non-primary outputs
+  (`capture_constraints`); per-output gamma (`get_gamma_control`);
+  per-output frame callbacks. Exit: two virtual outputs each show their
+  own strip live; screenshot/screencopy per output pinned; single-output
+  byte-identical.
+- **B. Layer shell per output.** `refresh_layer_zone` per output;
+  `layer_hit` under the pointer; `layer_keyboard_focus` + render's
+  frame-callback/cleanup walks over all maps;
+  `foreign_toplevel_management` `output_enter` per output a window is on.
+  (Admission + unmap already resolve per surface — foundation did those.)
+- **C. Session lock per output.** Drop the single-output fallback in
+  `new_surface`; size each surface to its own output; **`locked` waits for
+  *every* output's blanked frame** (security-relevant — the bug the
+  vblank-confirmation work exists to prevent, across screens); focus rule
+  one surface per output; locked render path per output. Heaviest review
+  of the five.
+- **D. Workspaces + output management + pointer.** `ext-workspace-v1`
+  group per output; `wlr-output-management` head per output (read half —
+  the `apply`/`test` refusal stays as documented); `input.rs` pointer
+  clamp over the union (or the output under the pointer — decide from the
+  focus decision above, record it).
+- **E. `--tty` multi-CRTC (hardware-gated).** One connector is chosen at
+  startup and hotplug *switches* rather than *adds*; driving two at once
+  is a different shape. Needs real two-connector hardware (Asahi) — like
+  `gpu-vs-cpu-measured.md`, this phase waits on the user's machine and
+  does not block A–D.
+
+## Verification per phase (in addition to the standard set)
+
+`--headless --outputs 2` throughout (side-by-side virtual outputs, no
+second monitor): per-output screenshots compared, protocol dumps
+(`wayland-info`, `wlr-randr`) per output, fail-first tests for every
+refusal being lifted. `--nested`/`--tty` single-output regressions via
+smoke. Phase E additionally needs the Asahi runbook treatment.
+
+## Explicitly not in this milestone
+
+`wlr-output-management` `apply`/`test` becoming real (refusal stands as
+documented — multi-output makes it *possible*, not *required*); named
+workspaces; per-output scale/mode configuration surface.

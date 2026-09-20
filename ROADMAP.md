@@ -27,6 +27,7 @@ docs/backlog`, `rg -l 'area: "protocols"' docs/roadmap`.
 | 5b | [VT-switch-back `EPERM`](docs/roadmap/05b-vt-switch-eperm.md) | done |
 | 6 | [Real GPU rendering pipeline](docs/roadmap/06-gpu-pipeline.md) | **done on paper — unverified on a real GPU** |
 | 7–18 | [Backlog-driven hardening and protocol work](docs/roadmap/) | done |
+| 19 | [Multi-output](docs/roadmap/19-multi-output.md) | **in progress (phases A–D VM-testable, E hardware-gated)** |
 
 Item 6 (a **GLES** renderer as an optional alternative to pixman, selected
 per-backend, with GPU-free operation kept as a hard requirement) was the last
