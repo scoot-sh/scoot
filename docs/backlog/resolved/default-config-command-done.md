@@ -9,7 +9,7 @@ blocked: null
 # No way to emit a default config file — DONE
 
 Requested 2026-09-19. Resolved 2026-09-20 as decided, with the ticket's
-shape intact: `scoot --print-default-config > ~/.config/scoot/config.toml`
+shape intact (PR #165): `scoot --print-default-config > ~/.config/scoot/config.toml`
 emits to stdout (never a path, so it cannot clobber), generated from the
 live defaults, in the commented-example format modeled on
 `docs/configuration.md`, with the parse-back test closing the loop.
