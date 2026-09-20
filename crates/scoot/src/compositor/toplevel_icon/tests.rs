@@ -765,6 +765,148 @@ fn icon_buffers_drain_when_their_client_disconnects() {
     }
 }
 
+/// Raises the process's soft `RLIMIT_NOFILE` so the live flood below runs
+/// with a deterministically unreachable pressure boundary, then verifies
+/// the headroom is really there.
+///
+/// The flood retains one server fd per buffer -- ~512 against a 1024-fd
+/// table whose pressure boundary sits at 896 used -- so it lives near the
+/// boundary by design, and a few fds held by a neighbour test in the
+/// shared `cargo test` process tip the refusal into the flood (the
+/// client is killed mid-fill, its ack never comes, the fixture waits out
+/// its 10s `PATIENCE`). Raising the ceiling moves the boundary out of
+/// reach instead of sampling around it.
+///
+/// Why raising is safe for every neighbour sharing this process:
+/// `free = soft - used` only grows, so a parallel test can only see
+/// *fewer* pressure verdicts, never more -- the direction that cannot
+/// manufacture a refusal. It also cannot blind the suite's own pressure
+/// pins: those drive hand-built tables (`fd_pressure/tests.rs`,
+/// `pressure_refusal_for`) or pin a forked child's *own* copy of the
+/// limit (`wayland_accept/tests.rs`, `ipc/accept/tests.rs`), never the
+/// live process table.
+///
+/// Why the lock comes first: the caller holds `hold_flood_lock` across
+/// this, so no other flood's ~512 fds can appear between the check and
+/// the fill. What can still move is non-flood neighbours, covered by
+/// `NEIGHBOUR_SLACK` -- and if they ever outgrow even that, the failure
+/// is the old loud timeout, never a false green: a pressure kill fails
+/// this test, it cannot pass it.
+///
+/// Every failure here is a fast, loud panic naming the numbers -- never
+/// the 10s `PATIENCE` timeout, and never a silent skip: a skip that
+/// passes would stop guarding the DoS bound the flood exists to pin.
+/// (The counting invariant itself stays pinned regardless, by
+/// `the_live_buffer_budget_counts_to_512_with_no_flood_at_all` below,
+/// which opens no fd at all.)
+fn ensure_flood_headroom() {
+    use crate::compositor::fd_pressure::{RESERVE_FDS, table};
+    use crate::compositor::wl_buffers::MAX_BUFFERS_PER_CLIENT;
+
+    /// Ceiling the flood runs under: the ~512 retained server fds plus
+    /// the reserve plus neighbour slack land near 1000, so 4096 leaves
+    /// the boundary unreachable by construction.
+    const TARGET_SOFT: u64 = 4096;
+    /// Fds non-flood neighbours may transiently hold between the check
+    /// and the fill. Generous on purpose: an ordinary fixture holds a
+    /// socket pair, an event loop and a handful of memfds -- tens, not
+    /// hundreds.
+    const NEIGHBOUR_SLACK: u64 = 256;
+
+    // SAFETY: `getrlimit` writes exactly one `struct rlimit` through a
+    // live pointer to one, and returns nonzero on failure without
+    // touching it (the same shape `fd_pressure` already uses).
+    let mut limits: libc::rlimit = unsafe { std::mem::zeroed() };
+    assert!(
+        unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &mut limits) } == 0,
+        "cannot read RLIMIT_NOFILE, so the flood's headroom is unknowable; refusing to run it blind"
+    );
+    let soft = limits.rlim_cur as u64;
+    let hard = limits.rlim_max as u64;
+    // Only ever raise, never lower -- and never past the hard limit.
+    // (`hard` may be `RLIM_INFINITY`, which `min` folds away.)
+    let goal = TARGET_SOFT.min(hard);
+    if soft < goal {
+        let raised = libc::rlimit {
+            rlim_cur: goal as libc::rlim_t,
+            rlim_max: limits.rlim_max,
+        };
+        // SAFETY: a plain value copy through a live pointer; on failure
+        // the limit is unchanged.
+        assert!(
+            unsafe { libc::setrlimit(libc::RLIMIT_NOFILE, &raised) } == 0,
+            "cannot raise RLIMIT_NOFILE to {goal} (soft {soft}, hard {hard}); the flood does not fit this table deterministically"
+        );
+    }
+    let need_free = u64::from(MAX_BUFFERS_PER_CLIENT) + RESERVE_FDS + NEIGHBOUR_SLACK;
+    if let Some(observed) = table() {
+        assert!(
+            observed.free() >= need_free,
+            "no deterministic headroom for the icon-buffer flood: table is {}/{} used/soft, \
+             need {need_free} free ({} flood + {} reserve + {} neighbour slack); \
+             raise this process's RLIMIT_NOFILE hard limit",
+            observed.used,
+            observed.soft,
+            u64::from(MAX_BUFFERS_PER_CLIENT),
+            RESERVE_FDS,
+            NEIGHBOUR_SLACK,
+        );
+    }
+    // `table()` is `None` where there is no observable guard:
+    // `/proc/self/fd` unreadable (macOS), an infinite table, or a table
+    // below `MIN_TABLE_FDS` -- and every enforcement site fails open on
+    // `None`, so pressure cannot fire. (A table physically too small for
+    // the flood fails the flood itself with its own error, not with a
+    // pressure refusal.)
+}
+
+/// The budget invariant with no flood and no fds at all: 512 claims
+/// admitted, the 513th refused, the count draining back to zero --
+/// driven straight against `WlBuffers` through a server-side client
+/// that never binds anything, so process-wide fd pressure cannot reach
+/// it. This is the pin that holds even on a machine whose table cannot
+/// fit the live flood above: the structural split `CLAUDE.md` names
+/// for this class (tests that do not depend on process-shared state).
+/// The flood keeps the integration shape -- real icon-factory wire
+/// buffers sharing the one budget -- while this test owns the count.
+#[test]
+fn the_live_buffer_budget_counts_to_512_with_no_flood_at_all() {
+    use crate::compositor::wl_buffers::MAX_BUFFERS_PER_CLIENT;
+
+    let mut fixture = Fixture::new();
+    let (server, _peer) = UnixStream::pair().expect("a socket pair");
+    let client = fixture
+        .state
+        .display_handle
+        .insert_client(server, Arc::new(ClientState::default()))
+        .expect("an inserted client");
+    for i in 0..MAX_BUFFERS_PER_CLIENT {
+        assert!(
+            !fixture.state.wl_buffers.claim_buffer_creation(&client),
+            "claim {} of {MAX_BUFFERS_PER_CLIENT} was refused below the cap",
+            i + 1,
+        );
+    }
+    assert_eq!(
+        fixture.buffers_in_flight(),
+        MAX_BUFFERS_PER_CLIENT as usize,
+        "512 claims did not fill the live-buffer budget"
+    );
+    assert!(
+        fixture.state.wl_buffers.claim_buffer_creation(&client),
+        "the 513rd claim past a full budget must be refused"
+    );
+    let id = client.id();
+    for _ in 0..MAX_BUFFERS_PER_CLIENT {
+        fixture.state.wl_buffers.forget_buffer(&id);
+    }
+    assert_eq!(
+        fixture.buffers_in_flight(),
+        0,
+        "released claims never drained the budget count"
+    );
+}
+
 /// The ticket's literal question, answered as a pin rather than a
 /// paragraph: 512 pixels-only icon buffers fill the same per-client
 /// budget every other `wl_buffer` shares, and the 513rd creation is
@@ -779,12 +921,25 @@ fn icon_buffers_drain_when_their_client_disconnects() {
 /// reason this takes the shared fd-flood lock -- beside a dispatch
 /// flood on another thread the pair would exhaust the test process's
 /// table.
+///
+/// The flood runs under [`ensure_flood_headroom`]: its ~512 retained
+/// server fds sit close to the fd-pressure boundary by design (see
+/// `fd_pressure`), so without a raised ceiling a few fds held by a
+/// neighbour test in the shared `cargo test` process are enough to
+/// land the refusal inside the flood instead of after it -- the flake
+/// `docs/backlog/resolved/icon-buffer-budget-fd-pressure-flake-done.md`
+/// records. The 513rd refusal is asserted on the *message*, not just
+/// the kill: budget and pressure refusals post the same
+/// `wl_shm::Error::InvalidStride` on the same `wl_shm_pool` object, so
+/// the code cannot tell them apart and only the message proves the
+/// kill came from the budget rather than the ceiling.
 #[test]
 fn icon_buffers_fill_the_same_live_buffer_budget() {
     use crate::compositor::dispatch::tests::hold_flood_lock;
     use crate::compositor::wl_buffers::MAX_BUFFERS_PER_CLIENT;
 
     let _flood = hold_flood_lock();
+    ensure_flood_headroom();
     let mut fixture = Fixture::new();
     for _ in 0..MAX_BUFFERS_PER_CLIENT / 64 {
         fixture.run(Step::AttachManyIconBuffers { count: 64 });
@@ -801,9 +956,11 @@ fn icon_buffers_fill_the_same_live_buffer_budget() {
         fixture.pump();
     }
     let outcome = fixture.join_client();
+    let error =
+        outcome.expect_err("the 513rd icon buffer should have been refused with a protocol error");
     assert!(
-        outcome.is_err(),
-        "the 513rd icon buffer should have been refused with a protocol error"
+        error.contains(&format!("maximum of {MAX_BUFFERS_PER_CLIENT} live buffers")),
+        "the 513rd icon buffer was refused, but not by the live-buffer budget: {error}"
     );
     assert_eq!(
         fixture.buffers_in_flight(),
