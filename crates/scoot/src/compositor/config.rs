@@ -856,6 +856,31 @@ mod tests {
     }
 
     #[test]
+    fn an_index_action_parses_through_a_digit_combo_bind() {
+        // The config-grammar half of the workspace-index item: a digit combo
+        // plus the new action string, through the shared `scootctl::action`
+        // parser rather than a parallel one. Rebinding `super+3` (a combo
+        // that now has a default) replaces that default.
+        let (_dir, path) = write_temp(
+            r#"
+            [binds]
+            "super+3" = "move-window-to-workspace-index 2"
+        "#,
+        );
+        let loaded = load_from(&path, true).expect("valid config");
+        assert_eq!(
+            loaded.keybindings.match_key(
+                keysym_named("3").unwrap(),
+                Modifiers {
+                    super_: true,
+                    ..Modifiers::default()
+                }
+            ),
+            Some(Bound::Action(Action::MoveWindowToWorkspaceIndex(2)))
+        );
+    }
+
+    #[test]
     fn a_malformed_bind_is_skipped_and_the_rest_of_the_file_still_loads() {
         let (_dir, path) = write_temp(
             r#"

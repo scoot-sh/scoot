@@ -56,6 +56,16 @@ pub enum Action {
     MoveWindowToWorkspace {
         direction: Vertical,
     },
+    /// Carry the focused window to one specific workspace of the focused
+    /// output, by its position in the workspace list (0-based; out of range
+    /// leaves the window where it is, like `FocusWorkspaceIndex` leaves
+    /// focus where it is) -- the wire half of
+    /// `scoot_core::Action::MoveWindowToWorkspaceIndex`. Additive: a client
+    /// that never sends this tag decodes exactly as before, so no
+    /// `PROTOCOL_VERSION` bump.
+    MoveWindowToWorkspaceIndex {
+        index: usize,
+    },
     CloseFocused,
     Spawn {
         command: Vec<String>,

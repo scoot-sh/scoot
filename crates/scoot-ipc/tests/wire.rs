@@ -28,6 +28,35 @@ fn actions_flatten_into_the_request() {
 }
 
 #[test]
+fn the_indexed_workspace_actions_travel_as_snake_case_with_an_index() {
+    // Both directions: the exact JSON shape a client sends, and the decode
+    // of that shape back into the same request. Pinning both keeps an
+    // additive variant honest about what it actually puts on the wire.
+    for (action, tag, index) in [
+        (
+            Action::FocusWorkspaceIndex { index: 2 },
+            "focus_workspace_index",
+            2,
+        ),
+        (
+            Action::MoveWindowToWorkspaceIndex { index: 3 },
+            "move_window_to_workspace_index",
+            3,
+        ),
+    ] {
+        let request = Request::Action(action);
+        assert_eq!(
+            json_of(&request),
+            json!({ "type": "action", "action": tag, "index": index })
+        );
+        assert_eq!(
+            decode::<Request>(&encode(&request).unwrap()).unwrap(),
+            request
+        );
+    }
+}
+
+#[test]
 fn key_combos_travel_as_strings() {
     let request = Request::Key {
         keys: "ctrl+shift+t".parse().unwrap(),

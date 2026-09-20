@@ -487,12 +487,11 @@ be revisited.
   which was resolved as single-output *pins* rather than as multi-output —
   including that `locked` must wait for every output's blanked frame, which
   is the security-relevant one.
-- [Workspace shortcuts: no numbered bind, and no move-to-index action at all](./input/workspace-index-keybindings.md)
-  — two gaps that look like one. `focus-workspace-index N` exists and simply
-  is not bound by default (so `Super+1`..`9` is a keybinding change), but
-  `move-window-to-workspace` takes **only** `up|down` — there is no index
-  form anywhere, so a window can only be moved one workspace at a time. That
-  half is a missing action, and it is an agent-facing gap too.
+- [Workspace shortcuts: no numbered bind, and no move-to-index action at all](./resolved/workspace-index-keybindings-done.md)
+  — RESOLVED 2026-09-20: `Super+1`..`9` focuses and `Super+Shift+1`..`9`
+  carries-and-follows (new `MoveWindowToWorkspaceIndex` core/IPC/config
+  action mirroring `FocusWorkspaceIndex`'s ignore-out-of-range rule); agent
+  window placement is absolute, not stepped.
 - [No config reload](./config/config-reload.md) — on `--tty` a settings
   change costs the whole session. Not every field can be re-applied
   (`[output] scale`, `[tty] gpu`, `[renderer] backend` realistically cannot),

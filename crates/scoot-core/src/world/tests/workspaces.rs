@@ -191,3 +191,81 @@ fn observed_focus_switches_to_that_windows_workspace() {
     assert_eq!(focused(&world), Some(1));
     assert!(placement(&world, 1).visible);
 }
+
+// -- `Action::MoveWindowToWorkspaceIndex`, the write side ------------------
+
+#[test]
+fn moving_the_focused_window_by_index_carries_it_and_follows() {
+    let mut world = world();
+    open(&mut world, 1);
+    world.handle_action(Action::FocusWorkspace(Vertical::Down));
+    open(&mut world, 2);
+    // Two occupied workspaces plus the trailing empty one.
+    assert_eq!(workspace_count(&world), 3);
+
+    world.handle_action(Action::FocusWorkspaceIndex(0));
+    assert_eq!(focused(&world), Some(1));
+    world.handle_action(Action::MoveWindowToWorkspaceIndex(1));
+    // The emptied source workspace is dropped, so the destination that was
+    // at index 1 is now at index 0 -- and it is the active one: the move
+    // followed the window there.
+    assert_eq!(
+        world.workspaces(OutputId(1)),
+        Some(Workspaces {
+            count: 2,
+            active: 0
+        })
+    );
+    assert_eq!(focused(&world), Some(1));
+    assert!(placement(&world, 1).visible);
+    assert!(placement(&world, 2).visible);
+}
+
+#[test]
+fn moving_to_the_already_active_index_changes_nothing() {
+    let mut world = world();
+    open(&mut world, 1);
+    let before = world.workspaces(OutputId(1));
+    world.handle_action(Action::MoveWindowToWorkspaceIndex(0));
+    assert_eq!(world.workspaces(OutputId(1)), before);
+    assert_eq!(focused(&world), Some(1));
+}
+
+#[test]
+fn an_out_of_range_move_index_leaves_the_window_where_it_is() {
+    let mut world = world();
+    open(&mut world, 1);
+    let before = world.workspaces(OutputId(1));
+    // One past the end, and the two extremes a client could send over a
+    // protocol that takes an unbounded number -- mirroring the focus-index
+    // case, including the promise the window is never lost: it stays where
+    // it was, still focused.
+    for index in [2, usize::MAX / 2, usize::MAX] {
+        world.handle_action(Action::MoveWindowToWorkspaceIndex(index));
+        assert_eq!(world.workspaces(OutputId(1)), before, "index {index}");
+        assert_eq!(focused(&world), Some(1), "index {index}");
+    }
+}
+
+#[test]
+fn moving_by_index_with_no_focused_window_does_nothing() {
+    // A fresh world: one empty workspace, no window focused. The move must
+    // not reach a column that isn't there -- to the active index (the
+    // already-there early return) or past the end (the out-of-range one).
+    let mut world = world();
+    world.handle_action(Action::MoveWindowToWorkspaceIndex(0));
+    assert_eq!(workspace_count(&world), 1);
+    world.handle_action(Action::MoveWindowToWorkspaceIndex(3));
+    assert_eq!(workspace_count(&world), 1);
+}
+
+#[test]
+fn moving_by_index_with_no_outputs_does_nothing() {
+    // Nothing to move within: the action must not reach a tree that isn't
+    // there. `reshape` already guards this, but it is the shape a protocol
+    // client can provoke (bind, then the output goes away).
+    let mut world = World::new(config());
+    world.handle_action(Action::MoveWindowToWorkspaceIndex(0));
+    world.handle_action(Action::MoveWindowToWorkspaceIndex(usize::MAX));
+    assert_eq!(world.workspaces(OutputId(1)), None);
+}
