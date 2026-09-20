@@ -32,7 +32,7 @@ are all "present but wrong", not "present but noisy".
 ## Audit findings, per checklist item
 
 - **Keys table vs actual defaults: already correct, no change.**
-  All 18 rows match `Keybindings::default()` in
+  All 18 bindings (12 rows) match `Keybindings::default()` in
   `crates/scoot/src/compositor/keybindings.rs:87-175` entry for entry
   (modifiers, keysyms, actions, `foot` as the `Super+Return` spawn), and
   the VT row matches `vt_switch_bindings()` (`keybindings.rs:233-253`,
@@ -64,7 +64,7 @@ are all "present but wrong", not "present but noisy".
   usage line omits `[--renderer pixman|gles]` though the parser accepts it
   on all backends and the docs advertise `--tty --renderer gles`.
 - **What-works anchors vs `docs/protocols.md`: all resolve; the dmabuf
-  suspicion was wrong, fixed by precision anyway.** All 15 internal links
+  suspicion was wrong, fixed by precision anyway.** All 16 internal links
   in `README.md` resolve (checked mechanically with the GitHub slug
   algorithm), and all 31 protocol name/version pairs match a live
   `wayland-info` dump from `--headless` at `cc1c79e` — the table had zero

@@ -505,6 +505,9 @@ be revisited.
 - [No way to emit a default config file](./config/default-config-command.md)
   — `--config PATH` reads one, nothing writes one. Wants generating from
   `Config::default()` rather than a hand-maintained string, or it drifts.
+- [`scoot --help` hides `--renderer` under `--tty`](./config/cli-help-tty-missing-renderer.md)
+  — the parser accepts it on all backends and the docs show it there, but the
+  `--tty` usage line omits it. One-line fix plus a usage-vs-parser pinning test.
 - [CPU vs GPU rendering has never been measured on a real GPU](./rendering/gpu-vs-cpu-measured.md)
   — **HIGH**, blocked on the user's Asahi machine. Every GPU number the
   project has is llvmpipe's. What *is* known: offscreen GLES cost 17–32x
