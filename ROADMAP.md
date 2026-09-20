@@ -76,6 +76,8 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[`msg_broken_pipe`'s unbounded `accept()` wedged the suite on a transient connect failure](docs/backlog/resolved/msg-broken-pipe-accept-hang-done.md)**
+  (2026-09-20, test-only + one config stanza) — 30s accept deadline in the fixture (loud `TimedOut` naming the cause, preserved across the join) plus a `.config/nextest.toml` backstop (`period = 60s, terminate-after = 2`, sized ~15x above the 7.72s measured max); both proven to bite, full greens under both runners.
 - **[Pin the budget cause by message in the two bypass-loop cap
   tests](docs/backlog/resolved/bypass-loop-cap-cause-pin-done.md)**
   (2026-09-20, test-only) — the PR #169 review finding: the two

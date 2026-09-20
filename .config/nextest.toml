@@ -1,0 +1,20 @@
+# Nextest profile: fail loudly on a hung test instead of wedging the run.
+#
+# Background: `scootctl::msg_broken_pipe a_full_read_is_unchanged` once stuck
+# >840s in a parallel run (0.00s solo) — an unbounded `accept()` in the test
+# fixture, fixed with a 30s accept deadline in the fixture itself
+# (`crates/scootctl/tests/msg_broken_pipe.rs`). That fixture timeout names
+# the cause; this knob is the backstop for the *next* infinite hang anywhere
+# else: a test still running after two 60s slow periods is terminated and
+# fails, instead of wedging the suite until someone kills it.
+#
+# Sizing (measured 2026-09-20, full `cargo nextest run --workspace` on the
+# dev VM, 1212 passed): slowest legitimate test 7.72s (a scoot-core fuzz
+# invariant), next-slowest 1.23s, and the largest designed in-suite wait is
+# the 10s PATIENCE. So 60s is ~8x the measured max and 6x the largest
+# designed wait before a test is even *marked* slow, and termination at 120s
+# is ~15x / 12x — margin for slower CI hardware and fuzz variance, while a
+# true wedge fails ~7x faster than the observed >840s stick. Deliberately no
+# `retries` here: a terminated hang must stay red, never retried green.
+[profile.default]
+slow-timeout = { period = "60s", terminate-after = 2 }
