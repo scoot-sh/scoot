@@ -527,5 +527,52 @@ be revisited.
   the GPU-less target does not have, and a fix for the bound-target cache
   eviction `dmabuf.rs` warns about. No measured client need yet.
 
+### Found asking how a session starts its own programs (2026-09-19)
+
+One question — *"how do we handle startup exec of other processes like
+Waybar, fuzzel, browsers?"* — turned up one confirmed bug and two gaps. They
+share a mechanism (what a session owes the programs inside it) but are
+separately actionable.
+
+- [Every spawned child becomes a zombie](./core/spawned-children-never-reaped.md)
+  — **HIGH**, and confirmed live rather than code-traced: four `spawn`
+  actions left four `<defunct>` children under scoot's pid, which is one per
+  spawn for the life of the session. `State::spawn` drops the `Child` at
+  `state.rs:985` and nothing installs a `SIGCHLD` handler. On a desktop the
+  per-zombie cost is small and the entry says so — but the named deployment
+  target is a **container**, where cgroup `pids.max` counts zombies as live
+  tasks and s6 as pid 1 reaps only orphans, so a long agent-driven session
+  ends at `fork: Resource temporarily unavailable` with no way to spawn a
+  recovery shell. The entry also carries two traps found by review:
+  `signal(SIGCHLD, SIG_IGN)` survives `execve`, and `execve` *preserves* the
+  signal mask — with **nothing** clearing it afterwards, since libstd resets
+  SIGPIPE only and deliberately inherits the mask. That decides the design:
+  signalfd needs SIGCHLD blocked process-wide and so leaks the block into
+  every spawned child unless each one resets it, while a `sigaction` handler
+  is reset by `exec` for free. And a plain `waitpid(-1)` drain would steal
+  the children two unit tests fork for themselves: green under `nextest`,
+  red under `cargo test`.
+- [`XDG_CURRENT_DESKTOP` is set nowhere, so a portal has no backend to pick](./core/session-environment-and-portals.md)
+  — the string does not occur in this project's code at all, while `mod.rs`
+  already exports four other variables for exactly this kind of reason. Portals are
+  how a Wayland browser does screen sharing and file dialogs, and a browser
+  is what the webtop target exists to run. Split into a two-line half (export
+  it) and a real half (D-Bus activation environment, `scoot-portals.conf`)
+  — and the entry is explicit that no portal has actually been watched to
+  fail yet, with the check that would settle it. Which backend serves
+  ScreenCast is left open rather than guessed: `xdg-desktop-portal-wlr`
+  wants `zwlr_screencopy_manager_v1`, which `docs/protocols.md` records as a
+  deliberate *non*-implementation, so pointing a config at it would ship a
+  backend that fails every request.
+- [Nothing documents how to start a bar or a launcher, and `--` takes one command](./config/startup-programs-and-autostart.md)
+  — `docs/protocols.md` shows `waybar &` without ever saying where that shell
+  runs. Carries the design argument for what "idiomatic scoot config" means:
+  config is *state*, the session script is *behavior*, and the reason that
+  line holds is that `config.rs:565` parses a `[binds]` value with the same
+  `cli::action` the IPC uses — one vocabulary, three doors. An optional
+  `[autostart]` would be a list of those same action strings. Supervision is
+  argued out of scope (and the webtop target has no systemd, which is the
+  wrinkle).
+
 ### Meta
 - [Split the CLI out into `scootctl`](./meta/rename-flex-family.md) — the `flexwm` → `scoot` rename half landed 2026-09-18 (PR #128); the crate split remains, and wants its own design pass (a status bar stays separate, undecided)
