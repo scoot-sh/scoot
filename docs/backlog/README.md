@@ -427,7 +427,8 @@ falsify. Read `flexwm` there as `scoot`.
   — RESOLVED 2026-09-20 (test-only + one config stanza): 30s accept deadline in the fixture (loud `TimedOut` naming the cause, `resume_unwind` across the join) plus `.config/nextest.toml` backstop (`period = 60s, terminate-after = 2`, ~15x above the 7.72s measured max); `Command` timeout deliberately left to the backstop.
 - [Bind-before-spawn in the `msg_broken_pipe` fixture](./resolved/broken-pipe-bind-race-done.md)
   — RESOLVED 2026-09-20 (test-only): `serve_once` takes an already-bound listener, so program-order `bind` → spawn closes the bind-vs-connect race (before-control 21/22 with one 30.01s race-red, after 22/22 green); 30s deadline and 2s regression test unchanged.
-- [Test socket paths overflow macOS `SUN_LEN` under a long `$TMPDIR`](./testing/fixture-socket-sun-len.md) — pre-existing, CI-invisible (macOS CI only runs `cargo check`): the `msg_broken_pipe` fixture's ~63-char socket filename plus a 50-char `TMPDIR` exceeds macOS's 104-byte limit. Shorten/hash the filename; locally verified only.
+- [Test socket paths overflow macOS `SUN_LEN` under a long `$TMPDIR`](./resolved/fixture-socket-sun-len-done.md)
+  — RESOLVED 2026-09-20 (test-only): `socket_path` now builds `scoot-ep-{pid}-{nanos-lo32-hex}-{tag}.sock` (32–34-char filenames, 81–83 total against the dev Mac's 49-byte `$TMPDIR`); pre-fix `SUN_LEN` failure reproduced on the Mac, 4/4 green after, full Linux gate green. macOS CI is check-only, so coverage is local-only by construction.
 - [No CI: every verification run is manual and self-reported](./resolved/ci-test-run-done.md)
   — LANDED 2026-09-19 (PR #140): `.github/workflows/ci.yml` runs fmt,
   clippy, `cargo nextest run --workspace`, `cargo test --workspace`, the
