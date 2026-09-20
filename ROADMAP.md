@@ -76,6 +76,19 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[Nothing says how to start a bar, a launcher or a browser at session
+  start](docs/backlog/resolved/startup-programs-and-autostart-done.md)**
+  (2026-09-20) — "Starting a session" documented (`session.sh` plus the
+  webtop `/defaults/startwm.sh` variant; config declares the baseline, the
+  script carries the behavior), and `[autostart] commands` built as a flat
+  list of action strings through the shared `scootctl::action` parser:
+  fail-open per entry (a typo costs the entry, never the `--tty` session),
+  entries first in file order, then the `--` command, no supervision (the
+  ticket's exclusion stands; reaping already landed). Home-manager stays a
+  pointer for the flake ticket. Live proof on the dev VM: marker processes
+  observed under the session, malformed entry logged with the session up,
+  ordering confirmed in the spawn log.
+
 - **[`XDG_CURRENT_DESKTOP` is set nowhere, so a portal has no backend to
   pick](docs/backlog/resolved/session-environment-and-portals-done.md)**
   (2026-09-20) — `XDG_CURRENT_DESKTOP=scoot` exported unconditionally (a child

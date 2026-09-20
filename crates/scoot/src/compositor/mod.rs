@@ -270,6 +270,18 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
     // `State::spawn`, which is what tracks the pids this reaps.
     child_reaper::install(&event_loop.handle(), &mut state)?;
 
+    // `[autostart]` first (the declared session baseline), then `--` (the
+    // session script): both run through actions the session already knows
+    // (`act` for the config entries, `spawn` for the one command), in the
+    // same environment `--` has always had. The session starts unlocked, so
+    // `act`'s lock gate passes here by construction; a non-`spawn` entry is
+    // the user's choice (documented as such), and a config autostart plus a
+    // script spawning the same bar yields two bars -- the same class as two
+    // `spawn` binds, the user's composition to fix.
+    for action in loaded.autostart {
+        state.act(action);
+    }
+
     if !options.command.is_empty() {
         let command = options.command.clone();
         state.spawn(&command);
