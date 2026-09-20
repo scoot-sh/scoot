@@ -34,7 +34,7 @@ use wayland_protocols_wlr::layer_shell::v1::client::{zwlr_layer_shell_v1, zwlr_l
 
 use crate::compositor::decorations::{Appearance, ring_rects};
 use crate::compositor::rounded::{clip_rect, cut_width, physical_radius};
-use crate::compositor::test_support::{Harness, assert_pixel, find_color, wait_for};
+use crate::compositor::test_support::{Harness, assert_pixel, find_color, pixel, wait_for};
 
 /// The framebuffer these tests render into.
 const CANVAS: i32 = 400;
@@ -71,7 +71,7 @@ enum Ack {
 /// Which `xdg_surface` a configure belongs to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SurfaceKind {
-    Window,
+    Window(usize),
     Popup,
 }
 
@@ -81,9 +81,14 @@ struct TestClient {
     shm: Option<wl_shm::WlShm>,
     wm_base: Option<xdg_wm_base::XdgWmBase>,
     layer_shell: Option<zwlr_layer_shell_v1::ZwlrLayerShellV1>,
-    window_serial: Option<u32>,
     popup_serial: Option<u32>,
-    window_size: Option<(i32, i32)>,
+    /// Per-window configure state by creation order: mapping a second
+    /// window re-layouts (and reconfigures) the first, so a single shared
+    /// slot would let one window's configure overwrite the other's before
+    /// it is acked -- acking that serial on the wrong object is a protocol
+    /// error.
+    window_serials: Vec<Option<u32>>,
+    window_sizes: Vec<Option<(i32, i32)>>,
     layer_size: Option<(u32, u32)>,
 }
 
@@ -144,25 +149,33 @@ impl Dispatch<xdg_surface::XdgSurface, SurfaceKind> for TestClient {
     ) {
         if let xdg_surface::Event::Configure { serial } = event {
             match kind {
-                SurfaceKind::Window => client.window_serial = Some(serial),
+                SurfaceKind::Window(index) => {
+                    if let Some(slot) = client.window_serials.get_mut(*index) {
+                        *slot = Some(serial);
+                    }
+                }
                 SurfaceKind::Popup => client.popup_serial = Some(serial),
             }
         }
     }
 }
 
-impl Dispatch<xdg_toplevel::XdgToplevel, ()> for TestClient {
+impl Dispatch<xdg_toplevel::XdgToplevel, SurfaceKind> for TestClient {
     fn event(
         client: &mut Self,
         _: &xdg_toplevel::XdgToplevel,
         event: xdg_toplevel::Event,
-        _: &(),
+        kind: &SurfaceKind,
         _: &Connection,
         _: &QueueHandle<Self>,
     ) {
         if let xdg_toplevel::Event::Configure { width, height, .. } = event {
             if width > 0 && height > 0 {
-                client.window_size = Some((width, height));
+                if let SurfaceKind::Window(index) = kind {
+                    if let Some(slot) = client.window_sizes.get_mut(*index) {
+                        *slot = Some((width, height));
+                    }
+                }
             }
         }
     }
@@ -241,19 +254,22 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
     while let Ok(step) = steps.recv() {
         match step {
             Step::Window { color } => {
+                let index = client.window_serials.len();
+                client.window_serials.push(None);
+                client.window_sizes.push(None);
                 let surface = compositor.create_surface(&qh, ());
-                let xdg = wm_base.get_xdg_surface(&surface, &qh, SurfaceKind::Window);
-                let toplevel = xdg.get_toplevel(&qh, ());
+                let xdg = wm_base.get_xdg_surface(&surface, &qh, SurfaceKind::Window(index));
+                let toplevel = xdg.get_toplevel(&qh, SurfaceKind::Window(index));
                 toplevel.set_title("rounded".into());
                 surface.commit();
                 // A real toolkit sizes its buffer to the configure: wait for
                 // one carrying a size, so the drawn window matches the
                 // placement the assertions are derived from.
                 let (w, h) = wait_for(&mut queue, &mut client, "a sized configure", |client| {
-                    client.window_size
+                    client.window_sizes[index]
                 })?;
                 let serial = wait_for(&mut queue, &mut client, "an xdg serial", |client| {
-                    client.window_serial
+                    client.window_serials[index]
                 })?;
                 xdg.ack_configure(serial);
                 let buffer = solid_buffer(&shm, &qh, w, h, color);
@@ -343,14 +359,21 @@ impl Fixture {
 
     /// The live arrangement's first (and here only) placement.
     fn placement(&mut self) -> Rect {
+        let placements = self.placements();
+        assert_eq!(placements.len(), 1, "these tests map exactly one window");
+        placements[0]
+    }
+
+    /// Every live placement in arrangement order.
+    fn placements(&mut self) -> Vec<Rect> {
         self.settle();
-        let arrangement = self.state.world.arrange();
-        assert_eq!(
-            arrangement.placements.len(),
-            1,
-            "these tests map exactly one window"
-        );
-        arrangement.placements[0].rect
+        self.state
+            .world
+            .arrange()
+            .placements
+            .iter()
+            .map(|placement| placement.rect)
+            .collect()
     }
 }
 
@@ -749,9 +772,13 @@ fn popups_stay_square_over_rounded_corners() {
 }
 
 /// A background-layer wallpaper behind a rounded window shows through the
-/// cut corners: the one reachable below-window case (placements never
-/// overlap, so no other window can appear in a cut -- only the background
-/// layer or the clear color). The ring still draws over the wallpaper.
+/// cut corners: the reachable below-window case in a settled layout (only
+/// the background layer or the clear color -- tiling keeps settled windows
+/// apart, but a surface can transiently overhang its placement mid-move, as
+/// the bench's own overhang scene shows, so this relies on no
+/// placements-never-overlap claim: the shrunk opaque region composites
+/// whatever is genuinely below, repainted through damage, which self-heals
+/// rather than going stale). The ring still draws over the wallpaper.
 #[test]
 fn a_wallpaper_shows_through_rounded_corners() {
     const RADIUS: i32 = 12;
@@ -818,13 +845,188 @@ fn a_wallpaper_shows_through_rounded_corners() {
     );
 }
 
+/// Corners track what is below across frames: render the window alone (its
+/// cut corners show the clear color), map a wallpaper behind it, re-render.
+/// The corners must now be wallpaper, and the window middle still window.
+///
+/// Under `--headless`'s always-full redraw this passes even with a stale
+/// opaque claim -- pixels come out right when every frame repaints
+/// everything -- so this pins the end-to-end behavior while the unit test
+/// below pins the opaque half. On a damage-tracked backend this exact
+/// sequence is the stale-corner artifact (the tracker trusting a full-rect
+/// opaque claim never repaints what is below the cuts), so both stay.
+#[test]
+fn corners_track_what_is_below_across_frames() {
+    const RADIUS: i32 = 12;
+    let mut fixture = Fixture::with_radius(RADIUS);
+    fixture.run(Step::Window { color: WINDOW_BGRA });
+    let placement = fixture.placement();
+    let (x, y, w, h) = (placement.x, placement.y, placement.w, placement.h);
+
+    let first = fixture.render();
+    let bg: [u8; 4] = first[0..4].try_into().expect("canvas corner");
+    assert_pixel(
+        &first,
+        CANVAS,
+        x,
+        y,
+        bg,
+        "the cut corner over the clear color, first frame",
+    );
+
+    fixture.run(Step::Wallpaper {
+        color: WALLPAPER_BGRA,
+    });
+    let second = fixture.render();
+    for (px, py, what) in [
+        (x, y, "wallpaper through the top-left cut, second frame"),
+        (
+            x + w - 1,
+            y,
+            "wallpaper through the top-right cut, second frame",
+        ),
+        (
+            x,
+            y + h - 1,
+            "wallpaper through the bottom-left cut, second frame",
+        ),
+        (
+            x + w - 1,
+            y + h - 1,
+            "wallpaper through the bottom-right cut, second frame",
+        ),
+    ] {
+        assert_pixel(&second, CANVAS, px, py, WALLPAPER_BGRA, what);
+    }
+    assert_pixel(
+        &second,
+        CANVAS,
+        x + w / 2,
+        y + h / 2,
+        WINDOW_BGRA,
+        "the window middle, second frame",
+    );
+}
+
+/// Moving a painted window moves its ring: the strips are cached by
+/// size/shape/color, and a reorder keeps all three fixed while the origins
+/// move -- so the second render below must reuse the cached buffers at new
+/// origins. Pre-fix it reuses the stored origins too, and the top/bottom
+/// strips draw stale while the solid side bars (rebuilt from the live rect
+/// every frame) move correctly.
+#[test]
+fn moving_a_painted_window_moves_its_ring() {
+    const RADIUS: i32 = 12;
+    let mut fixture = Fixture::with_radius(RADIUS);
+    fixture.run(Step::Window { color: WINDOW_BGRA });
+    fixture.run(Step::Window { color: WINDOW_BGRA });
+    let thickness = Appearance::default().focus_ring_width;
+
+    let before = fixture.state.world.arrange();
+    assert_eq!(before.placements.len(), 2, "two windows, two columns");
+    assert_eq!(
+        (before.placements[0].rect.w, before.placements[0].rect.h),
+        (before.placements[1].rect.w, before.placements[1].rect.h),
+        "the swap must keep both windows' sizes fixed, so the ring cache hits"
+    );
+    let before_rects: Vec<(scoot_core::WindowId, Rect)> = before
+        .placements
+        .iter()
+        .map(|placement| (placement.id, placement.rect))
+        .collect();
+    fixture.render(); // paints (and caches) both rings
+
+    // Move the focused window toward the other column. Focus follows the
+    // moved column, so its color -- and both windows' sizes -- stay fixed.
+    let focused = before.focused.expect("a focused window");
+    let focused_rect = before
+        .placements
+        .iter()
+        .find(|placement| placement.id == focused)
+        .expect("the focused placement")
+        .rect;
+    let other_rect = before
+        .placements
+        .iter()
+        .find(|placement| placement.id != focused)
+        .expect("the other placement")
+        .rect;
+    let direction = if focused_rect.x < other_rect.x {
+        scoot_ipc::Horizontal::Right
+    } else {
+        scoot_ipc::Horizontal::Left
+    };
+    let response =
+        fixture
+            .state
+            .handle_request(scoot_ipc::Request::Action(scoot_ipc::Action::MoveColumn {
+                direction,
+            }));
+    assert!(
+        matches!(response, scoot_ipc::Response::Ok { .. }),
+        "move-column was not served"
+    );
+    fixture.settle();
+
+    let after = fixture.state.world.arrange();
+    assert_eq!(
+        after.focused,
+        Some(focused),
+        "focus follows the moved column"
+    );
+
+    let pixels = fixture.render();
+    // Every window that moved with its size fixed: its ring color, sampled
+    // from its own left side bar (solid bars rebuild from the live rect
+    // every frame, so this sample is correct with or without the bug), must
+    // match its top straight run (a cached strip). Pre-fix the strips still
+    // draw at the old origins, so the run pixel is whatever was already
+    // there -- the other window's stale strip, or background -- and this
+    // fails.
+    let mut moved_any = false;
+    for placement in &after.placements {
+        let (rect, old) = (
+            placement.rect,
+            before_rects
+                .iter()
+                .find(|(id, _)| *id == placement.id)
+                .expect("the same window from before the move")
+                .1,
+        );
+        assert_eq!(
+            (rect.w, rect.h),
+            (old.w, old.h),
+            "sizes stay fixed: the ring cache must hit"
+        );
+        if rect.x == old.x && rect.y == old.y {
+            continue;
+        }
+        moved_any = true;
+        let ring = pixel(
+            &pixels,
+            CANVAS,
+            rect.x - thickness / 2 - 1,
+            rect.y + rect.h / 2,
+        );
+        assert_pixel(
+            &pixels,
+            CANVAS,
+            rect.x + rect.w / 2,
+            rect.y - thickness / 2 - 1,
+            ring,
+            "the top run follows its window after a move",
+        );
+    }
+    assert!(moved_any, "the move must actually relocate a window");
+}
+
 // ---------------------------------------------------------------------------
 // Pure geometry: radius, staircase, clip and paint arithmetic
 // ---------------------------------------------------------------------------
 
 use super::*;
 use smithay::utils::Rectangle;
-use smithay::utils::{Logical, Physical, Point, Size};
+use smithay::utils::{Logical, Physical, Point, Scale, Size};
 
 // -- effective_radius ---------------------------------------------------
 
@@ -1170,4 +1372,86 @@ fn the_ring_inner_edge_matches_the_window_staircase() {
             );
         }
     }
+}
+
+// -- Rounded::opaque_regions --------------------------------------------------
+
+/// A window element claiming its whole rect opaque -- what a client surface
+/// reports before [`Rounded`] cuts it.
+struct OpaqueStub {
+    id: Id,
+    geom: Rectangle<i32, Physical>,
+}
+
+impl Element for OpaqueStub {
+    fn id(&self) -> &Id {
+        &self.id
+    }
+
+    fn current_commit(&self) -> CommitCounter {
+        CommitCounter::default()
+    }
+
+    fn src(&self) -> Rectangle<f64, BufferSpace> {
+        Rectangle::from_size((f64::from(self.geom.size.w), f64::from(self.geom.size.h)).into())
+    }
+
+    fn geometry(&self, _scale: Scale<f64>) -> Rectangle<i32, Physical> {
+        self.geom
+    }
+
+    fn opaque_regions(&self, _scale: Scale<f64>) -> OpaqueRegions<i32, Physical> {
+        OpaqueRegions::from_slice(&[Rectangle::new((0, 0).into(), self.geom.size)])
+    }
+}
+
+/// The atomicity half the pixel tests cannot see: [`Rounded`] shrinks the
+/// opaque region in the same construction that clips the draw, so the two
+/// cannot drift apart. A draw-clip-only version (opaque untouched) renders
+/// identical pixels under `--headless`'s always-full redraw -- every pixel
+/// test above passes either way -- while on a damage-tracked backend the
+/// tracker trusts the full-rect claim and never repaints what is below the
+/// cut corners: persistent stale pixels. This test fails against that
+/// neuter (the region stays the full rect); the two-frame pixel test above
+/// pins the end-to-end behavior both share.
+#[test]
+fn the_opaque_region_shrinks_with_the_draw_clip() {
+    const RADIUS: i32 = 12;
+    const W: i32 = 200;
+    const H: i32 = 150;
+    let clip = Rectangle::<i32, Physical>::new((40, 30).into(), (W, H).into());
+    let wrapped = Rounded::new(
+        OpaqueStub {
+            id: Id::new(),
+            geom: clip,
+        },
+        clip,
+        RADIUS,
+    );
+    let opaque: Vec<Rectangle<i32, Physical>> =
+        wrapped.opaque_regions(1.0.into()).into_iter().collect();
+    // Whole corner squares subtracted (the conservative superset of the
+    // staircase -- see `corner_squares`), nothing else.
+    let area: i32 = opaque.iter().map(|rect| rect.size.w * rect.size.h).sum();
+    assert_eq!(
+        area,
+        W * H - 4 * RADIUS * RADIUS,
+        "the opaque region must lose exactly the four corner squares"
+    );
+    let covers = |x: i32, y: i32| {
+        opaque.iter().any(|rect| {
+            x >= rect.loc.x
+                && x < rect.loc.x + rect.size.w
+                && y >= rect.loc.y
+                && y < rect.loc.y + rect.size.h
+        })
+    };
+    // Element-relative: the stub sits exactly on the clip, so the offset is
+    // zero and these are output coordinates minus (40, 30).
+    assert!(!covers(0, 0), "the cut corner must not be opaque");
+    assert!(!covers(W - 1, 0), "the cut corner must not be opaque");
+    assert!(!covers(0, H - 1), "the cut corner must not be opaque");
+    assert!(!covers(W - 1, H - 1), "the cut corner must not be opaque");
+    assert!(covers(W / 2, 0), "the top edge middle stays opaque");
+    assert!(covers(W / 2, H / 2), "the window middle stays opaque");
 }

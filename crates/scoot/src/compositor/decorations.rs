@@ -443,9 +443,16 @@ pub enum RingElement<R: Renderer> {
     Painted(Box<MemoryRenderBufferRenderElement<R>>),
 }
 
-/// What decides whether a window's painted ring is still current. Every input
-/// to the paint, so a stale buffer is impossible by construction: any change
-/// repaints before the element is built.
+/// What decides whether a window's painted ring is still current. Every
+/// input to the paint, so a stale buffer is impossible by construction: any
+/// change repaints before the element is built.
+///
+/// Position is deliberately *not* an input: the paint is
+/// position-independent (the same window paints the same strips wherever it
+/// sits), so a move must not repaint -- only the strips' draw origins go
+/// stale, and [`Decorations::push_painted`] refreshes those in place on
+/// every cache hit (see `refresh_strip_origins`). Keying on position instead
+/// would repaint every window on every scroll frame for identical pixels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct PaintedKey {
     /// Logical window size (the paint's inputs, before scaling).
@@ -484,11 +491,15 @@ struct PaintedRing {
     key: Option<PaintedKey>,
 }
 
-/// Where one painted strip draws: its origin in exact physical pixels and
-/// its size in logical pixels (what the element is built at).
+/// Where one painted strip draws: its origin in exact physical pixels, its
+/// size in logical pixels (what the element is built at), and its canvas in
+/// physical pixels (what the cached buffer holds -- the refresh path
+/// compares this to decide whether the buffers still fit).
+#[derive(Debug, Clone, Copy)]
 struct StripGeometry {
     loc: Point<f64, Physical>,
     logical: Size<i32, Logical>,
+    canvas: Size<i32, Physical>,
 }
 
 /// Per-window decoration bookkeeping, owned by [`State`](super::State) for
@@ -609,7 +620,10 @@ impl Decorations {
     /// side bars -- or the square fallback when the painted buffers cannot
     /// be built. Repaints only when the key changed (resize, radius, width,
     /// color or scale); steady-state frames reuse the cached buffers with no
-    /// allocation and no renderer touch.
+    /// allocation and no renderer touch. A hit still re-derives the strips'
+    /// origins from the live rect -- moves and scrolls change no key input
+    /// -- repainting only when fractional-scale rounding changed a strip
+    /// canvas out from under the cached buffers.
     #[allow(clippy::too_many_arguments)]
     fn push_painted<R>(
         &mut self,
@@ -647,6 +661,16 @@ impl Decorations {
         });
         if entry.key != Some(key) {
             entry.key = Some(key);
+            build_strips(rect, appearance, color, scale, entry);
+        } else if entry.top_at.is_some() && !refresh_strip_origins(rect, appearance, scale, entry) {
+            // A fractional-scale rounding boundary moved under a cached ring
+            // and a strip canvas no longer matches its buffer: repaint this
+            // frame. At integer scales the canvases are exact, so this never
+            // fires and a move costs two origin stores, not a repaint. The
+            // `top_at` guard keeps the poison contract below: a window whose
+            // last build failed stays on the silent square fallback until
+            // its key changes, rather than retrying (and warning) every
+            // frame.
             build_strips(rect, appearance, color, scale, entry);
         }
         let (Some(top), Some(bottom), Some(top_at), Some(bottom_at)) =
@@ -738,50 +762,52 @@ fn ring_color(arrangement: &Arrangement, id: WindowId, appearance: &Appearance) 
     }
 }
 
-/// Repaints `entry`'s two strips for `rect`: computes the full-canvas ring
-/// geometry once (the band both strips share), then paints the top rows and
-/// the bottom rows into the shared scratch, importing each into its buffer.
-/// On any failure warns once and leaves the entry empty (the caller falls
-/// back to the square ring until the key changes).
+/// Everything about one window's painted ring that follows from geometry
+/// alone (no color): the two strip placements plus the full-canvas paint
+/// inputs [`build_strips`] fills them from.
 ///
-/// A zero-area canvas (degenerate window) paints nothing rather than
-/// allocating a zero-byte buffer: the ring of an invisible window is
-/// invisible either way, and `MemoryRenderBuffer::from_slice` on an empty
-/// slice would only assert downstream.
-fn build_strips(
-    rect: Rect,
-    appearance: &Appearance,
-    color: Color,
-    scale: f64,
-    entry: &mut PaintedRing,
-) {
-    entry.top = None;
-    entry.bottom = None;
-    entry.top_at = None;
-    entry.bottom_at = None;
+/// Pure -- the same inputs give the same plan -- which is what makes the
+/// per-frame refresh sound: recomputing the plan for the live rect and
+/// finding the same strip canvases means the cached buffers still fit, and
+/// only their origins went stale.
+struct StripPlan {
+    top: StripGeometry,
+    bottom: StripGeometry,
+    /// The full-canvas size (what the shared paint rects live in).
+    canvas: Size<i32, Physical>,
+    /// The window's rect and the ring's outer rect in full-canvas
+    /// coordinates: both strips paint sub-rects of this one band, so the
+    /// strips and the solid side bars agree on every boundary by
+    /// construction. At scale 1.0 the inner rect is exactly `(thickness,
+    /// thickness, w, h)`; at fractional scales both roundings come from the
+    /// same conversions, so the band still hugs the clip.
+    inner: Rectangle<i32, Physical>,
+    outer: Rectangle<i32, Physical>,
+    radius_inner: i32,
+    radius_outer: i32,
+}
+
+/// Computes the strip plan for `rect`, or `None` when a canvas is degenerate
+/// (a zero-area window paints nothing rather than allocating a zero-byte
+/// buffer: the ring of an invisible window is invisible either way, and
+/// `MemoryRenderBuffer::from_slice` on an empty slice would only assert
+/// downstream).
+fn plan_strips(rect: Rect, appearance: &Appearance, scale: f64) -> Option<StripPlan> {
     let thickness = appearance.focus_ring_width;
     let (loc, logical, canvas) = ring_layout(rect, thickness, scale);
     if canvas.w <= 0 || canvas.h <= 0 {
-        tracing::warn!("cannot paint a focus ring with no pixels; falling back to a square ring");
-        return;
+        return None;
     }
     let clip = clip_rect(rect, scale);
     let radius_inner = physical_radius(appearance.corner_radius, clip, scale);
     let thickness_phys = (f64::from(thickness) * scale).round() as i32;
     let radius_outer = radius_inner + thickness_phys.max(0);
-    // The window's rect and the ring's outer rect in full-canvas
-    // coordinates: both strips paint sub-rects of this one band, so the
-    // strips and the solid side bars agree on every boundary by
-    // construction. At scale 1.0 the inner rect is exactly `(thickness,
-    // thickness, w, h)`; at fractional scales both roundings come from the
-    // same conversions, so the band still hugs the clip.
     let origin: Point<i32, Physical> = loc.to_i32_round();
     let inner = Rectangle::new(
         (clip.loc.x - origin.x, clip.loc.y - origin.y).into(),
         clip.size,
     );
     let outer = Rectangle::new((0, 0).into(), (canvas.w, canvas.h).into());
-    let argb = color.to_argb8888();
     // Strip height in physical pixels: the band rows plus the arc rows. The
     // logical height rounds UP, so the element's canvas always covers the
     // target: a strip one row short would leave a 1px gap in the ring at a
@@ -793,33 +819,8 @@ fn build_strips(
     // Top strip: full-canvas rows `0..canvas_h`, painted in place.
     let top_canvas = element_canvas(loc, strip_logical, scale);
     if top_canvas.w <= 0 || top_canvas.h <= 0 {
-        tracing::warn!("cannot paint a focus ring with no pixels; falling back to a square ring");
-        return;
+        return None;
     }
-    paint_strip(
-        &mut entry.pixels,
-        top_canvas,
-        RingPaint {
-            canvas: top_canvas,
-            outer,
-            radius_outer,
-            inner,
-            radius_inner,
-        },
-        argb,
-    );
-    entry.top = Some(MemoryRenderBuffer::from_slice(
-        &entry.pixels,
-        Fourcc::Argb8888,
-        (top_canvas.w, top_canvas.h),
-        1,
-        Transform::Normal,
-        None,
-    ));
-    entry.top_at = Some(StripGeometry {
-        loc,
-        logical: strip_logical,
-    });
     // Bottom strip: full-canvas rows `canvas.h - bottom_h..canvas.h`. Its
     // canvas height comes from the same logical height at its own origin, so
     // it can differ from the top's by a pixel at fractional scales -- each
@@ -834,42 +835,133 @@ fn build_strips(
         Point::<f64, Physical>::from((loc.x, loc.y + f64::from(canvas.h - top_canvas.h)));
     let bottom_canvas = element_canvas(bottom_loc, strip_logical, scale);
     if bottom_canvas.w <= 0 || bottom_canvas.h <= 0 {
-        tracing::warn!("cannot paint a focus ring with no pixels; falling back to a square ring");
-        entry.top = None;
-        entry.top_at = None;
-        return;
+        return None;
     }
+    Some(StripPlan {
+        top: StripGeometry {
+            loc,
+            logical: strip_logical,
+            canvas: top_canvas,
+        },
+        bottom: StripGeometry {
+            loc: bottom_loc,
+            logical: strip_logical,
+            canvas: bottom_canvas,
+        },
+        canvas,
+        inner,
+        outer,
+        radius_inner,
+        radius_outer,
+    })
+}
+
+/// Refreshes one window's cached strip origins for its current `rect`
+/// without repainting: the paint depends only on the key (size, shape,
+/// color, scale), but the placement moves with the layout -- scrolling,
+/// `fix_view`, `move-column` -- so a cache hit must still re-derive where
+/// the strips draw.
+///
+/// Returns `false` when the cached buffers no longer fit -- a degenerate
+/// plan, a first build that never happened, or a fractional-scale rounding
+/// boundary that moved a strip canvas across a pixel boundary -- so the
+/// caller repaints instead. No allocation and no renderer touch on `true`:
+/// two origin stores.
+fn refresh_strip_origins(
+    rect: Rect,
+    appearance: &Appearance,
+    scale: f64,
+    entry: &mut PaintedRing,
+) -> bool {
+    let Some(plan) = plan_strips(rect, appearance, scale) else {
+        return false;
+    };
+    let (Some(top_at), Some(bottom_at)) = (&mut entry.top_at, &mut entry.bottom_at) else {
+        return false;
+    };
+    if top_at.canvas != plan.top.canvas || bottom_at.canvas != plan.bottom.canvas {
+        return false;
+    }
+    // The key is unchanged, so size, thickness and scale are too -- the
+    // logical sizes cannot have moved, only the origins.
+    debug_assert_eq!(top_at.logical, plan.top.logical);
+    debug_assert_eq!(bottom_at.logical, plan.bottom.logical);
+    top_at.loc = plan.top.loc;
+    bottom_at.loc = plan.bottom.loc;
+    true
+}
+
+/// Repaints `entry`'s two strips for `rect`: computes the full-canvas ring
+/// geometry once (the band both strips share -- see [`plan_strips`]), then
+/// paints the top rows and the bottom rows into the shared scratch,
+/// importing each into its buffer. On any failure warns once and leaves the
+/// entry empty (the caller falls back to the square ring until the key
+/// changes).
+fn build_strips(
+    rect: Rect,
+    appearance: &Appearance,
+    color: Color,
+    scale: f64,
+    entry: &mut PaintedRing,
+) {
+    entry.top = None;
+    entry.bottom = None;
+    entry.top_at = None;
+    entry.bottom_at = None;
+    let Some(plan) = plan_strips(rect, appearance, scale) else {
+        tracing::warn!("cannot paint a focus ring with no pixels; falling back to a square ring");
+        return;
+    };
+    let argb = color.to_argb8888();
+    paint_strip(
+        &mut entry.pixels,
+        plan.top.canvas,
+        RingPaint {
+            canvas: plan.top.canvas,
+            outer: plan.outer,
+            radius_outer: plan.radius_outer,
+            inner: plan.inner,
+            radius_inner: plan.radius_inner,
+        },
+        argb,
+    );
+    entry.top = Some(MemoryRenderBuffer::from_slice(
+        &entry.pixels,
+        Fourcc::Argb8888,
+        (plan.top.canvas.w, plan.top.canvas.h),
+        1,
+        Transform::Normal,
+        None,
+    ));
     // The bottom strip's origin in full-canvas rows, so the shared `outer` /
     // `inner` rects land on the right rows when painted into the small
     // canvas: shift both rects up by the strip's first full-canvas row.
-    let first_row = canvas.h - bottom_canvas.h;
+    let first_row = plan.canvas.h - plan.bottom.canvas.h;
     let shift = |rect: Rectangle<i32, Physical>| {
         Rectangle::new((rect.loc.x, rect.loc.y - first_row).into(), rect.size)
     };
     paint_strip(
         &mut entry.pixels,
-        bottom_canvas,
+        plan.bottom.canvas,
         RingPaint {
-            canvas: bottom_canvas,
-            outer: shift(outer),
-            radius_outer,
-            inner: shift(inner),
-            radius_inner,
+            canvas: plan.bottom.canvas,
+            outer: shift(plan.outer),
+            radius_outer: plan.radius_outer,
+            inner: shift(plan.inner),
+            radius_inner: plan.radius_inner,
         },
         argb,
     );
     entry.bottom = Some(MemoryRenderBuffer::from_slice(
         &entry.pixels,
         Fourcc::Argb8888,
-        (bottom_canvas.w, bottom_canvas.h),
+        (plan.bottom.canvas.w, plan.bottom.canvas.h),
         1,
         Transform::Normal,
         None,
     ));
-    entry.bottom_at = Some(StripGeometry {
-        loc: bottom_loc,
-        logical: strip_logical,
-    });
+    entry.top_at = Some(plan.top);
+    entry.bottom_at = Some(plan.bottom);
 }
 
 /// Sizes `pixels` for a strip canvas, zeroes it, and paints the shared ring
