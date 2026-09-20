@@ -48,7 +48,7 @@
 //!
 //! This is reaping, not supervision: a dead child is collected and forgotten.
 //! Restarting a bar that died or backing off a crash loop is a service
-//! manager's job (see `docs/backlog/config/startup-programs-and-autostart.md`
+//! manager's job (see `docs/backlog/resolved/startup-programs-and-autostart-done.md`
 //! for where that boundary is drawn).
 
 #[cfg(test)]

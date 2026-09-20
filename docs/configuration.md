@@ -205,9 +205,9 @@ cases where guessing would be worse than refusing — see below and
   the *entire* file is discarded for full built-in defaults — a single bad
   field in `[layout]` also throws away an otherwise-valid `[binds]` table
   elsewhere in the same file.
-- One bad `[appearance]` color string, or one bad `[binds]` entry: logged as
-  a warning, and only that field/bind falls back — every other field and bind
-  in the file still applies.
+- One bad `[appearance]` color string, one bad `[binds]` entry, or one bad
+  `[autostart]` entry: logged as a warning, and only that field/bind/entry
+  falls back — every other field and bind in the file still applies.
 - A set-but-unusable `[tty] gpu` (a wrong path, or an empty one): a hard
   startup error naming the key, not a silent fallback to the automatic pick.
   This is one of the two deliberate startup exceptions; the other is
@@ -369,6 +369,9 @@ contain, which is what keeps the config agent-legible. There is no
 spawn-only restriction — a non-`spawn` action at startup (say,
 `"focus-workspace-index 2"`) is the user's choice, documented as such; it
 runs through the same `act` path a keybind or IPC request would take.
+(`"quit"` is in this class too: it ends the session cleanly before the `--`
+command runs, so an autostart list containing it is a session that starts
+and immediately exits.)
 
 Three behaviors worth knowing:
 
