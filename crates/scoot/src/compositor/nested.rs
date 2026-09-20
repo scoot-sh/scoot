@@ -10,8 +10,12 @@
 //!
 //! The window follows the host's size for as long as it lives: the first
 //! configure builds the render target and the host buffers, and every later
-//! one that proposes a different size rebuilds both together. The two
-//! entry points for that ([`Host::apply_first_configure`] and
+//! one that proposes a different size rebuilds both together -- but at most
+//! one rebuild per frame tick, not one per configure. A host resize is not
+//! one event (dragging a window sends a configure per pixel step), so a
+//! later configure only *queues* its size and the next render drains the
+//! queue (see [`Host::drain_pending_resize`]). The two entry points for
+//! acting on a size ([`Host::apply_first_configure`] and
 //! [`Host::apply_resize`]) differ only in what a failure means, and that is
 //! the whole reason they are two functions rather than one with a flag.
 //!
@@ -87,6 +91,14 @@ pub struct Host {
     /// 'you choose', or a size out of range) or hasn't sent one yet"; the
     /// size scoot is already at is kept in that case.
     pending_size: Option<(i32, i32)>,
+    /// A later configure's size that has been queued but not yet acted on.
+    /// Written by `nested_dispatch.rs` once per `Resize` classification and
+    /// drained once per frame tick by [`Host::drain_pending_resize`] -- which
+    /// is what keeps a drag's configure-per-pixel-step from rebuilding the
+    /// pool and the render target per step. Overwritten, never extended
+    /// (only the latest size matters), so a configure costs two `i32` stores
+    /// and no allocation, whatever rate the host sends them at.
+    pending_resize: PendingResize,
     /// Set when `present()` had a frame ready but no host buffer was free to
     /// write it into (both still held by the host). Checked when the host
     /// releases a buffer (`nested_dispatch::Dispatch<HostBuffer>`) so a
@@ -138,6 +150,7 @@ pub fn init(
         size: (width, height),
         configured: false,
         pending_size: None,
+        pending_resize: PendingResize::default(),
         present_skipped: false,
     });
 
@@ -239,6 +252,10 @@ impl Host {
     /// browser window resized under webtop, a tiling host relaying out, an
     /// interactive drag), so the desktop resizes with it.
     ///
+    /// Reached once per frame tick from [`Host::drain_pending_resize`], never
+    /// directly from dispatch -- see that function's doc for why the two are
+    /// split that way.
+    ///
     /// A failure here is *not* fatal, deliberately and asymmetrically with
     /// [`Host::apply_first_configure`] -- the one decision this split exists
     /// to make explicit rather than leave `replace_render_target` to infer
@@ -263,6 +280,49 @@ impl Host {
                 height,
                 "could not follow the host's resize; staying at the previous size"
             );
+        }
+    }
+
+    /// Records a later configure's size for the next render tick, overwriting
+    /// whatever an earlier configure in the same frame queued -- only the
+    /// latest size is ever acted on. Two `i32` stores and no allocation, so
+    /// this is safe to call at whatever rate the host sends configures (a
+    /// drag is one per pixel step). The caller must [`State::request_render`]
+    /// afterwards, or nothing will drain the queue.
+    pub(super) fn queue_resize(&mut self, width: i32, height: i32) {
+        self.pending_resize.queue((width, height));
+    }
+
+    /// Applies the size configures queued since the last frame, if any --
+    /// at most one rebuild per call, however many configures arrived.
+    ///
+    /// Called at the top of [`State::render`](super::State::render), before
+    /// the clean-screen early return, so a queued resize is acted on even
+    /// when nothing else dirtied the screen (queueing always marks it dirty
+    /// anyway; this ordering is belt and braces for a flag cleared in
+    /// between). Draining here rather than in dispatch is the whole
+    /// coalescing: a drag's hundred configures become one rebuild per frame
+    /// tick, each at the latest size, instead of a pool rebuild, a render
+    /// target rebuild, a mode mint and a linear mode-list extension per
+    /// pixel step. A configure that only undoes a still-queued one (the drag
+    /// came back to the size scoot is already at within one frame) drains to
+    /// nothing at all.
+    ///
+    /// A resize applied here still draws in the *same* frame: draining runs
+    /// before the frame is composited, and `apply_resize` ends in
+    /// `request_render`, so the tick that picks the size up also shows it.
+    /// The cost is a delay of at most one frame between the host's configure
+    /// and the pixels, against unbounded rebuilds without it.
+    pub(super) fn drain_pending_resize(state: &mut State) {
+        let pending = match &mut state.host {
+            Some(host) => {
+                let current = host.size();
+                host.pending_resize.take_if_changed(current)
+            }
+            None => None,
+        };
+        if let Some((width, height)) = pending {
+            Self::apply_resize(state, width, height);
         }
     }
 
@@ -400,6 +460,39 @@ impl Host {
     /// free host buffer -- see `present_skipped`'s field doc.
     pub(super) fn take_present_skipped(&mut self) -> bool {
         std::mem::take(&mut self.present_skipped)
+    }
+}
+
+/// One queued host resize: the latest size a `Resize` configure proposed
+/// since the last frame tick, or nothing queued.
+///
+/// A struct rather than a bare `Option` so the two halves of the coalescing
+/// contract -- "queueing overwrites" and "draining drops a size scoot is
+/// already at" -- are methods with unit tests, not conventions callers have
+/// to remember. Neither allocates: this is two `i32`s on the per-configure
+/// path, which runs at pixel-step rate during a drag.
+#[derive(Debug, Default)]
+pub(super) struct PendingResize(Option<(i32, i32)>);
+
+impl PendingResize {
+    /// Queues `size`, replacing whatever was queued before. Only the latest
+    /// proposal matters: every intermediate size would have been superseded
+    /// by the next frame anyway.
+    fn queue(&mut self, size: (i32, i32)) {
+        self.0 = Some(size);
+    }
+
+    /// Takes the queued size if it differs from what is already showing.
+    /// `None` covers both "nothing queued" and "the drag came back to the
+    /// size scoot is already at within one frame" -- either way there is
+    /// nothing to rebuild. Always consumes: a proposal that has been
+    /// compared against the current size has been acted on, whether or not
+    /// it turned out to differ.
+    fn take_if_changed(&mut self, current: (i32, i32)) -> Option<(i32, i32)> {
+        match self.0.take() {
+            Some(pending) if pending != current => Some(pending),
+            _ => None,
+        }
     }
 }
 

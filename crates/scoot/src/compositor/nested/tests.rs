@@ -9,7 +9,7 @@
 //! functions over plain values: which of the two entry points a configure
 //! goes to, and which proposed sizes are acted on at all.
 
-use super::{ConfigureAction, configure_action, usable_size};
+use super::{ConfigureAction, PendingResize, configure_action, usable_size};
 use crate::cli::MAX_OUTPUT_DIMENSION;
 
 const STARTED_AT: (i32, i32) = (1280, 800);
@@ -106,4 +106,44 @@ fn an_axis_past_the_output_bound_is_not_usable() {
     assert_eq!(usable_size(MAX_OUTPUT_DIMENSION + 1, 800), None);
     assert_eq!(usable_size(1280, MAX_OUTPUT_DIMENSION + 1), None);
     assert_eq!(usable_size(i32::MAX, i32::MAX), None);
+}
+
+// -- the coalescing queue -------------------------------------------------
+
+#[test]
+fn an_empty_queue_drains_to_nothing() {
+    let mut queued = PendingResize::default();
+    assert_eq!(queued.take_if_changed(STARTED_AT), None);
+}
+
+#[test]
+fn a_queued_resize_drains_once_at_its_size() {
+    // The drain half of the coalescing: one queued configure becomes one
+    // applied resize, and the queue is consumed whether or not it differed.
+    let mut queued = PendingResize::default();
+    queued.queue((1920, 1080));
+    assert_eq!(queued.take_if_changed(STARTED_AT), Some((1920, 1080)));
+    assert_eq!(queued.take_if_changed((1920, 1080)), None);
+}
+
+#[test]
+fn queueing_overwrites_so_only_the_latest_size_is_ever_applied() {
+    // The queue half: a drag's configure-per-pixel-step collapses to the
+    // latest size, so a frame tick rebuilds once, not once per step.
+    let mut queued = PendingResize::default();
+    for width in [1281, 1400, 1600, 1900] {
+        queued.queue((width, 800));
+    }
+    assert_eq!(queued.take_if_changed(STARTED_AT), Some((1900, 800)));
+    assert_eq!(queued.take_if_changed((1900, 800)), None);
+}
+
+#[test]
+fn a_queue_that_comes_back_to_the_current_size_drains_to_nothing() {
+    // A drag that returns to where it started within one frame must not
+    // rebuild anything: the size on screen is already the queued one.
+    let mut queued = PendingResize::default();
+    queued.queue((1900, 800));
+    queued.queue(STARTED_AT);
+    assert_eq!(queued.take_if_changed(STARTED_AT), None);
 }

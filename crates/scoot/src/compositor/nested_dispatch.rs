@@ -125,10 +125,19 @@ impl Dispatch<HostXdgSurface, ()> for State {
         // Which failure policy applies is the entry point, not a flag read in
         // here: a first configure that cannot be built is fatal, a resize
         // that cannot be built keeps the session at its old size. See each
-        // function's doc for why they differ.
+        // function's doc for why they differ. A resize is queued for the
+        // next render tick rather than applied here: a drag sends a
+        // configure per pixel step, and rebuilding the pool and the render
+        // target per step is what `Host::drain_pending_resize` exists to
+        // avoid. The render request is what gets it drained.
         match action {
             ConfigureAction::FirstConfigure => Host::apply_first_configure(state, width, height),
-            ConfigureAction::Resize => Host::apply_resize(state, width, height),
+            ConfigureAction::Resize => {
+                if let Some(host) = &mut state.host {
+                    host.queue_resize(width, height);
+                }
+                state.request_render();
+            }
             ConfigureAction::Nothing => {}
         }
     }

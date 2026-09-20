@@ -76,6 +76,20 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[Host configures coalesced to one resize per frame](docs/backlog/resolved/coalesce-host-configures-done.md)**
+  (2026-09-20) — a drag's configure-per-pixel-step no longer rebuilds the
+  pool and the render target per step: a later configure only overwrites a
+  two-`i32`, allocation-free queue slot, and the next render drains at most
+  one size per frame tick (first configure stays immediate, same-size stays
+  ignored). Live flood (79 distinct sizes, no settle): 81 modes pre-fix, 25
+  post-fix release. Settled resizes cost one frame-tick wait more (18ms →
+  31ms end-to-end release); gles rebuilds confirmed at 15.5ms apiece, which
+  is what makes one-per-tick load-bearing there. The ticket's watch-for
+  proved real — a failed resize's never-rendered size stayed in
+  `Output::modes` and the next refresh announced it — and is fixed by
+  `delete_mode` on the failure path (fail-first wire proofs); the
+  already-bound `wl_output` transient is inherent (no un-prefer) and stated,
+  not fixed. No README change (internal perf fix, no user-facing surface).
 - **[The two webtop field reports](docs/backlog/resolved/nested-follow-host-resize-done.md)**
   (issues #144/#145, 2026-09-19) — shipped together, being one field report
   from the deployment `README.md` names. **`--nested` now follows the host
