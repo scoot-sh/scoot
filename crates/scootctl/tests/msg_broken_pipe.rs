@@ -29,15 +29,35 @@ fn scootctl() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_scootctl"))
 }
 
-fn socket_path(name: &str) -> PathBuf {
+/// Builds a fresh Unix-socket path under `$TMPDIR` for one fixture test.
+/// `tag` is a per-test abbreviation (`large`, `full`, `acc` for the
+/// accept-timeout test) so a stray socket left behind by a crash still
+/// names its owner.
+///
+/// The filename is deliberately short (~32 chars): macOS `SUN_LEN` is only
+/// 104 bytes, and a Mac `$TMPDIR` alone can run ~50 (49 on this dev Mac),
+/// so the old `scoot-epipe-test-{pid}-{name}-{nanos}.sock` shape (a
+/// ~62-char filename, 111 total) failed at `bind` with `InvalidInput:
+/// "path must be shorter than SUN_LEN"` while Linux (108-byte limit,
+/// short `$TMPDIR`) stayed green.
+///
+/// Uniqueness across parallel tests comes from the pid (across processes —
+/// nextest isolates each test in its own) plus the tag (across tests
+/// sharing one `cargo test` process) plus the low 32 bits of `as_nanos`
+/// as 8 hex digits (across sequential re-runs leaking a stale path, on
+/// top of the `remove_file` at each call site). A residual collision
+/// still fails loudly here at `bind`, never inside the server thread.
+/// `std` only — no new deps for a test fixture.
+fn socket_path(tag: &str) -> PathBuf {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos() as u32;
     std::env::temp_dir().join(format!(
-        "scoot-epipe-test-{}-{}-{}.sock",
+        "scoot-ep-{}-{:08x}-{}.sock",
         std::process::id(),
-        name,
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
+        nanos,
+        tag
     ))
 }
 
@@ -246,7 +266,7 @@ fn a_full_read_is_unchanged() {
 /// fails it.
 #[test]
 fn accept_timeout_fires_without_a_client() {
-    let path = socket_path("accept-timeout");
+    let path = socket_path("acc");
     let _ = std::fs::remove_file(&path);
     let listener = UnixListener::bind(&path).unwrap();
     let deadline = Duration::from_secs(2);

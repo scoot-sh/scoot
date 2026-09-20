@@ -76,6 +76,14 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[Test socket paths overflow macOS `SUN_LEN` under a long
+  `$TMPDIR`](docs/backlog/resolved/fixture-socket-sun-len-done.md)**
+  (2026-09-20, test-only) — the PR #180 review finding: the
+  `msg_broken_pipe` fixture's ~62-char socket filename plus the dev
+  Mac's 49-byte `$TMPDIR` exceeded macOS's 104-byte limit (reproduced
+  `InvalidInput` pre-fix). Now `scoot-ep-{pid}-{nanos-lo32}-{tag}.sock`
+  (32–34 chars, 81–83 total); 4/4 Mac green, full Linux gate green.
+  macOS CI is check-only, so coverage is local-only by construction.
 - **[Bind-before-spawn in the `msg_broken_pipe`
   fixture](docs/backlog/resolved/broken-pipe-bind-race-done.md)**
   (2026-09-20, test-only) — the PR #179 residual: `serve_once` takes an
