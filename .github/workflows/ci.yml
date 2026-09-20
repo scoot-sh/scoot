@@ -139,10 +139,11 @@ jobs:
       - name: Build the default compositor, and assert it links no GPU stack
         shell: nix develop --command bash -euo pipefail {0}
         run: |
-          cargo build -p scoot
+          cargo build -p scoot -p scootctl
           # Kept aside before the gpu-scanout step below overwrites
           # `target/debug/scoot`: the smoke test must run the default build.
           cp target/debug/scoot "$RUNNER_TEMP/scoot-default"
+          cp target/debug/scootctl "$RUNNER_TEMP/scootctl-default"
 
           echo "--- ldd target/debug/scoot ---"
           ldd target/debug/scoot
@@ -157,6 +158,18 @@ jobs:
             exit 1
           fi
           echo "ok: the default build links no libgbm and no libEGL"
+
+          # The client half of the same requirement: `scootctl` is pure Rust
+          # (the macOS package), so the same refusal applies -- a GPU library
+          # here would mean a client-side dependency leaked into it.
+          echo "--- ldd target/debug/scootctl ---"
+          ldd target/debug/scootctl
+          leaked=$(ldd target/debug/scootctl | awk '{ print $1 }' | grep -Ei '^lib(gbm|drm|EGL|GLESv2)' || true)
+          if [ -n "$leaked" ]; then
+            echo "::error title=The client build links a GPU library::$(echo "$leaked" | tr '\n' ' ')-- scootctl must stay dependency-free enough to build anywhere (see the scootctl split record). A GPU dependency does not belong in the client."
+            exit 1
+          fi
+          echo "ok: the client build links no GPU stack either"
 
       # `render/tests.rs` states, as a deliberate decision, that its GLES
       # tests fail rather than skip where EGL is missing, on the reasoning
@@ -233,6 +246,7 @@ jobs:
         timeout-minutes: 15
         env:
           SCOOT: ${{ runner.temp }}/scoot-default
+          SCOOTCTL: ${{ runner.temp }}/scootctl-default
           # Keeps every socket, log and screenshot under RUNNER_TEMP: the
           # script's unprefixed defaults live in `/run/user/<uid>`, which a
           # runner does not have.
@@ -304,13 +318,13 @@ jobs:
           key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
 
   macos:
-    # The compositor is `cfg`'d out on macOS and what builds is `scoot msg`,
-    # the client that drives a compositor running elsewhere. Nobody builds
+    # The compositor is Linux-only and the macOS package is `scootctl`, the
+    # client that drives a compositor running elsewhere. Nobody builds
     # that half on a Mac between releases, and it has broken before without
     # anyone noticing -- this job is the cheap insurance against that.
     # `macos-latest` is arm64, which is the only Darwin system `flake.nix`
     # provides (it drops x86_64-darwin; see the comment there).
-    name: macOS (scoot msg client)
+    name: macOS (scootctl client)
     runs-on: macos-latest
     timeout-minutes: 30
     env:

@@ -1,8 +1,8 @@
 #![cfg(unix)]
-//! `scoot msg` must exit quietly when its stdout reader goes away.
+//! `scootctl` must exit quietly when its stdout reader goes away.
 //!
 //! Each test serves one canned IPC reply from a fake Unix-socket server
-//! (no compositor needed), runs the real `scoot` binary against it via
+//! (no compositor needed), runs the real `scootctl` binary against it via
 //! `SCOOT_SOCKET`, and either reads stdout fully (normal path) or closes
 //! the read end before the child can write (truncated path). The truncated
 //! reply is ~1 MiB, far past the 64 KiB pipe buffer, so a small reply that
@@ -13,6 +13,11 @@
 //! Pre-fix this fails with exit 101 (`failed printing to stdout: Broken
 //! pipe`); post-fix the truncated path exits 0, matching the standard Unix
 //! tool contract (`head -1` pipelines stay green under `pipefail`).
+//!
+//! The `scoot msg` alias shares this exact code path (it parses and runs
+//! through this crate), so one binary's suite covers both entry points;
+//! byte-equivalence between the two is pinned separately, by the smoke
+//! test's equivalence section and scoot's alias unit test.
 
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixListener;
@@ -20,8 +25,8 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
-fn scoot() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_scoot"))
+fn scootctl() -> PathBuf {
+    PathBuf::from(env!("CARGO_BIN_EXE_scootctl"))
 }
 
 fn socket_path(name: &str) -> PathBuf {
@@ -93,9 +98,9 @@ fn closed_stdout_on_a_large_reply_exits_quietly() {
     let _ = std::fs::remove_file(&path);
     let server = serve_once(path.clone(), big_windows_reply());
 
-    let mut child = Command::new(scoot())
+    let mut child = Command::new(scootctl())
         .env("SCOOT_SOCKET", &path)
-        .args(["msg", "windows"])
+        .args(["windows"])
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
@@ -114,7 +119,7 @@ fn closed_stdout_on_a_large_reply_exits_quietly() {
 
 #[test]
 fn closed_stdout_on_help_exits_quietly() {
-    let mut child = Command::new(scoot())
+    let mut child = Command::new(scootctl())
         .arg("--help")
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -134,9 +139,9 @@ fn a_full_read_is_unchanged() {
     let _ = std::fs::remove_file(&path);
     let server = serve_once(path.clone(), small_windows_reply());
 
-    let output = Command::new(scoot())
+    let output = Command::new(scootctl())
         .env("SCOOT_SOCKET", &path)
-        .args(["msg", "windows"])
+        .args(["windows"])
         .stderr(Stdio::null())
         .output()
         .unwrap();

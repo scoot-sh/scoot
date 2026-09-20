@@ -556,13 +556,14 @@ fn apply_binds(keybindings: &mut Keybindings, binds: HashMap<String, String>) {
 }
 
 /// Parses one `[binds]` entry: `key` is the TOML key (`"super+h"`), `value`
-/// is an action string in exactly the grammar `scoot msg action ...` uses
-/// (`"focus-column left"`, `"close"`, `"spawn" "foot"`, ...) -- see
-/// `cli::action`, reused here rather than duplicated.
+/// is an action string in exactly the grammar `scootctl action ...` (and its
+/// `scoot msg action ...` alias) uses (`"focus-column left"`, `"close"`,
+/// `"spawn" "foot"`, ...) -- see `scootctl::action`, reused here rather than
+/// duplicated.
 fn parse_bind(key: &str, value: &str) -> Result<(Modifiers, Keysym, Bound), String> {
     let (mods, keysym) = parse_combo(key)?;
     let mut tokens = value.split_whitespace().map(str::to_owned);
-    let action = crate::cli::action(&mut tokens).map_err(|error| error.to_string())?;
+    let action = scootctl::action(&mut tokens).map_err(|error| error.to_string())?;
     if tokens.next().is_some() {
         return Err(format!("trailing text after the action in `{value}`"));
     }

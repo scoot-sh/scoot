@@ -1,10 +1,10 @@
 {
-  # On Linux this flake builds the whole compositor; on macOS the compositor
-  # is cfg'd out and the same package is just `scoot msg`, the
-  # remote-control client — so the top level names both, and the package's
-  # `meta.description` below says per system which one it is. (This has to
-  # stay a string literal: the flake loader rejects anything else here.)
-  description = "scoot: a scrolling-tiling Wayland compositor that runs without a GPU (on macOS, the remote-control client only)";
+  # On Linux this flake builds the whole compositor; on macOS the default is
+  # `scootctl`, the remote-control client -- so the top level names both, and
+  # each package's `meta.description` below comes from its own crate. (The
+  # flake-level `description` here has to stay a string literal: the flake
+  # loader rejects anything else.)
+  description = "scoot: a scrolling-tiling Wayland compositor that runs without a GPU (on macOS, the scootctl remote-control client only)";
 
   # Pinned to the same nixpkgs revision as vm/, so the dev shell and the VM
   # agree on every library and nothing is downloaded twice.
@@ -29,22 +29,27 @@
       ];
       forEach = f: nixpkgs.lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
       # The Linux `meta.description` below reads the compositor crate's own
-      # metadata (same `readFile`/`fromTOML` shape as `version`), so those
-      # two can't drift; the flake-level `description` above has to stay a
-      # hand-written literal (see its comment).
+      # metadata (same `readFile`/`fromTOML` shape as `version`), and the
+      # client's reads its crate's the same way, so no description can drift
+      # from the crate it names; the flake-level `description` above has to
+      # stay a hand-written literal (see its comment).
       crateDescription =
         (builtins.fromTOML (builtins.readFile ./crates/scoot/Cargo.toml)).package.description;
+      scootctlDescription =
+        (builtins.fromTOML (builtins.readFile ./crates/scootctl/Cargo.toml)).package.description;
     in
     {
-      # `nix build` / `nix run`, for getting the binary without a dev shell.
-      # On Linux this is the whole compositor; on Darwin the compositor is
-      # cfg'd out of the crate and what builds is `scoot msg`, the client
-      # that drives a compositor running elsewhere (a VM) over its socket.
-      # `scoot --headless` there exits with a message saying exactly that,
-      # so the same package is honest on both -- see README's Install section.
-      packages = forEach (pkgs: {
-        default = pkgs.rustPlatform.buildRustPackage {
-          pname = "scoot";
+      # `nix build` / `nix run`, for getting the binaries without a dev shell.
+      # `scoot` is the whole compositor (plus the `scoot msg` client alias);
+      # `scootctl` is the standalone remote-control client that drives a
+      # compositor running elsewhere (a VM) over its socket. On Linux the
+      # default is the compositor; on Darwin the compositor is cfg'd out of
+      # the crate, so the default is the client -- and `scoot --headless`
+      # there exits with a message saying exactly that, so the same package
+      # is honest on both (see README's Install section).
+      packages = forEach (
+        pkgs:
+        let
           # Read from where the version already lives, so the two can't drift.
           version = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).workspace.package.version;
           # Scoped to exactly what the build reads, so doc-only edits
@@ -53,8 +58,8 @@
           # target/ (~1GB in-store) and .git along -- no longer bust the
           # derivation's cache and force a full rebuild. Everything else
           # this flake reads at eval time (./Cargo.toml for `version`,
-          # ./crates/scoot/Cargo.toml for the description,
-          # ./Cargo.lock for `cargoLock.lockFile`,
+          # ./crates/scoot/Cargo.toml and ./crates/scootctl/Cargo.toml for
+          # the descriptions, ./Cargo.lock for `cargoLock.lockFile`,
           # ./vm/compositor-deps.nix for buildInputs) resolves against
           # the flake tree, not `src`, so it stays out of the filter.
           # Verified to cover the build: no build.rs outside crates/, no
@@ -83,70 +88,121 @@
             };
           };
 
-          nativeBuildInputs = [ pkgs.pkg-config ];
-          # The same list the dev shell uses, Linux-only for the same reason:
-          # nothing outside the compositor links against them. The dev shell's
-          # LIBRARY_PATH hook below needs no counterpart here -- in a
-          # derivation the stdenv cc wrapper puts every buildInput on the link
-          # path through NIX_LDFLAGS, which is what those -sys crates' bare
-          # -lfoo resolves against. Checked by building, not by assuming.
-          buildInputs = pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux (
-            import ./vm/compositor-deps.nix pkgs
-          );
+          scoot = pkgs.rustPlatform.buildRustPackage {
+            pname = "scoot";
+            inherit version src cargoLock;
 
-          # The workspace's release profile sets `strip = true`, but nixpkgs'
-          # cargoBuildHook exports CARGO_PROFILE_RELEASE_STRIP=false to hand
-          # stripping to stdenv -- which by default takes debug info only and
-          # leaves the symbol table, so the binary would ship 1,224,312 bytes
-          # of `.symtab`/`.strtab` the profile asks it not to (4,843,776
-          # against 3,619,464, measured here). This puts the profile back.
-          # `cargo-auditable`'s non-allocated `.dep-v0` section survives
-          # `strip -s`, checked on the built binary, so the dependency
-          # manifest `nix build` embeds is not lost with it.
-          stripAllList = [ "bin" ];
+            nativeBuildInputs = [ pkgs.pkg-config ];
+            # The same list the dev shell uses, Linux-only for the same reason:
+            # nothing outside the compositor links against them. The dev shell's
+            # LIBRARY_PATH hook below needs no counterpart here -- in a
+            # derivation the stdenv cc wrapper puts every buildInput on the link
+            # path through NIX_LDFLAGS, which is what those -sys crates' bare
+            # -lfoo resolves against. Checked by building, not by assuming.
+            buildInputs = pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux (
+              import ./vm/compositor-deps.nix pkgs
+            );
 
-          # No test run here, deliberately, for two measured reasons. This
-          # workspace's release profile sets `panic = "abort"`, which cargo
-          # ignores for test targets (a test harness has to unwind), so
-          # `cargo test --release` rebuilds the whole dependency tree a
-          # second time: on Darwin, where that tree is smallest, 10 crates
-          # recompile after a complete `cargo build --release` against 3 (the
-          # workspace's own) with `panic = "abort"` removed -- and on Linux
-          # the tree it would rebuild includes Smithay. On top of that the
-          # compositor's tests bind a real wayland socket and so need a
-          # writable `$XDG_RUNTIME_DIR`, which the build sandbox has no
-          # reason to provide. `nix build` is the path to a binary; `cargo
-          # test` in `nix develop` is where the suite runs.
-          doCheck = false;
+            # The workspace's release profile sets `strip = true`, but nixpkgs'
+            # cargoBuildHook exports CARGO_PROFILE_RELEASE_STRIP=false to hand
+            # stripping to stdenv -- which by default takes debug info only and
+            # leaves the symbol table, so the binary would ship 1,224,312 bytes
+            # of `.symtab`/`.strtab` the profile asks it not to (4,843,776
+            # against 3,619,464, measured here). This puts the profile back.
+            # `cargo-auditable`'s non-allocated `.dep-v0` section survives
+            # `strip -s`, checked on the built binary, so the dependency
+            # manifest `nix build` embeds is not lost with it.
+            stripAllList = [ "bin" ];
 
-          meta = {
-            # Linux builds the whole compositor, so the crate's own
-            # description is the honest one; on Darwin the compositor is
-            # cfg'd out and the package is just `scoot msg` (see the
-            # comment on `packages` above and README's Install section), so the
-            # metadata says that instead of advertising a compositor macOS
-            # never runs.
-            description =
-              if pkgs.stdenv.hostPlatform.isDarwin then
-                "Remote-control client (`scoot msg`) for the scoot scrolling-tiling Wayland compositor"
-              else
-                crateDescription;
-            homepage = "https://github.com/scoot-sh/scoot";
-            license = pkgs.lib.licenses.mit;
-            mainProgram = "scoot";
-            platforms = pkgs.lib.platforms.linux ++ pkgs.lib.platforms.darwin;
+            # No test run here, deliberately, for two reasons. This
+            # workspace's release profile sets `panic = "abort"`, which cargo
+            # ignores for test targets (a test harness has to unwind), so
+            # `cargo test --release` rebuilds the whole dependency tree a
+            # second time -- and on Linux the tree it would rebuild includes
+            # Smithay. On top of that the compositor's tests bind a real
+            # wayland socket and so need a writable `$XDG_RUNTIME_DIR`, which
+            # the build sandbox has no reason to provide. `nix build` is the
+            # path to a binary; `cargo test` in `nix develop` is where the
+            # suite runs.
+            doCheck = false;
+
+            meta = {
+              # Linux builds the whole compositor, so the crate's own
+              # description is the honest one; on Darwin the compositor is
+              # cfg'd out and the package is just `scoot msg` (see the
+              # comment on `packages` above and README's Install section), so the
+              # metadata says that instead of advertising a compositor macOS
+              # never runs.
+              description =
+                if pkgs.stdenv.hostPlatform.isDarwin then
+                  "Remote-control client (`scoot msg`) for the scoot scrolling-tiling Wayland compositor"
+                else
+                  crateDescription;
+              homepage = "https://github.com/scoot-sh/scoot";
+              license = pkgs.lib.licenses.mit;
+              mainProgram = "scoot";
+              platforms = pkgs.lib.platforms.linux ++ pkgs.lib.platforms.darwin;
+            };
           };
-        };
-      });
+
+          scootctl = pkgs.rustPlatform.buildRustPackage {
+            pname = "scootctl";
+            inherit version src cargoLock;
+
+            # Just this crate, not the whole workspace: `$out/bin` carries
+            # only `scootctl`, and on Darwin nothing compositor-shaped (and
+            # no Smithay tree) is compiled at all.
+            cargoBuildFlags = [
+              "-p"
+              "scootctl"
+            ];
+
+            # Nothing to probe or link: the client is pure Rust
+            # (`scoot-ipc` plus `serde_json` plus std), so neither of the
+            # lists the compositor package above needs applies here -- which
+            # is also why this package builds anywhere with zero cfg gating.
+
+            # Same profile-put-back as the compositor package above (see its
+            # comment): the release profile asks for a full strip and the
+            # cargo hook hands stripping to stdenv.
+            stripAllList = [ "bin" ];
+
+            # No test run here, for the same reasons as above (the
+            # `panic = "abort"` double-build plus no `$XDG_RUNTIME_DIR` in
+            # the sandbox). `nix build` is the path to a binary; `cargo
+            # test` in `nix develop` is where the suite runs.
+            doCheck = false;
+
+            meta = {
+              # The crate's own description, no per-system conditional: this
+              # package is the client on every system.
+              description = scootctlDescription;
+              homepage = "https://github.com/scoot-sh/scoot";
+              license = pkgs.lib.licenses.mit;
+              mainProgram = "scootctl";
+              platforms = pkgs.lib.platforms.linux ++ pkgs.lib.platforms.darwin;
+            };
+          };
+        in
+        {
+          # Linux gets the compositor, Darwin gets the client.
+          default = if pkgs.stdenv.hostPlatform.isDarwin then scootctl else scoot;
+          inherit scoot scootctl;
+        }
+      );
 
       # So `nix run . -- --headless -- foot` and `nix run . -- msg windows`
-      # work. `scoot` is the package's mainProgram, so `nix run` would find
-      # it either way; naming it here keeps that explicit rather than
-      # implied.
+      # work, and `nix run .#scootctl -- windows` runs the standalone client
+      # anywhere. Each `mainProgram` would resolve without the explicit
+      # naming; keeping it explicit rather than implied.
       apps = forEach (pkgs: {
         default = {
           type = "app";
           program = pkgs.lib.getExe self.packages.${pkgs.stdenv.hostPlatform.system}.default;
+        };
+        scootctl = {
+          type = "app";
+          program = pkgs.lib.getExe self.packages.${pkgs.stdenv.hostPlatform.system}.scootctl;
         };
       });
 
@@ -168,7 +224,7 @@
           # should stay a subset of that closure -- nothing new to fetch.
           ++ pkgs.lib.optional pkgs.stdenv.hostPlatform.isDarwin pkgs.rust-analyzer;
           # The compositor's C dependencies exist only on Linux; the core, the
-          # IPC crate and `scoot msg` build anywhere.
+          # IPC crate and the `scootctl` client build anywhere.
           buildInputs = pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux (
             import ./vm/compositor-deps.nix pkgs
           );

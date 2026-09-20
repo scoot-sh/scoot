@@ -57,8 +57,8 @@ Linux, and daily-driven on `--tty`** (2026-09-18).
   still read every frame back to main memory as pixman does.
 - **No config reload.** Settings are read once at startup.
 - **No macOS adapter.** `scoot-core` is kept platform-independent so one can
-  exist, but nothing drives the Accessibility API yet. On macOS you get the
-  `scoot msg` client only.
+  exist, but nothing drives the Accessibility API yet. On macOS you get
+  `scootctl`, the remote-control client, only.
 
 ## Install
 
@@ -66,14 +66,15 @@ Clone, then, from the flake at the repo root:
 
 ```sh
 nix build                            # ./result/bin/scoot
+nix build .#scootctl                 # ./result/bin/scootctl, the client alone
 nix run . -- --headless -- foot      # build and run it in one step
-nix run . -- msg windows             # the client, same binary
+nix run .#scootctl -- windows        # the client, from anywhere
 ```
 
-On Linux that builds the compositor. On macOS it is compiled out and you get
-`scoot msg` alone — enough to drive a compositor running in a VM. The flake
+On Linux that builds the compositor. On macOS the default is `scootctl`
+alone — enough to drive a compositor running in a VM. The flake
 covers Apple Silicon only; an Intel Mac builds the same client with `cargo
-build`.
+build -p scootctl`.
 
 ## Running
 
@@ -84,20 +85,23 @@ scoot --nested --width 1280 --height 800 -- foot     # inside your compositor
 scoot --tty -- foot                                  # on a real DRM/KMS seat
 scoot --tty --renderer gles -- foot                  # ...scanning out from the GPU
 
-scoot msg windows                                    # in another shell
-scoot msg action focus-column left
-scoot msg screenshot --out /tmp/shot.png
-scoot msg type "hello"
+scootctl windows                                    # in another shell
+scootctl action focus-column left
+scootctl screenshot --out /tmp/shot.png
+scootctl type "hello"
 ```
+
+`scootctl` is the client every example on this page uses; `scoot msg ...`
+is the same client kept as a permanent alias on the compositor binary.
 
 `--tty` needs a seat (`seatd` or logind) with a DRM device on it; everything
 about device choice, hotplug and modes is in [docs/tty.md](docs/tty.md). Run
-`scoot --help` for every flag, request and action.
+`scoot --help` for every flag, `scootctl --help` for every request and action.
 
 `--headless --outputs N` (1–8) creates N virtual outputs side by side, so
 per-output behaviour is testable with no second monitor: each gets its own
 `wl_output`, its own place in the coordinate space and its own scrolling
-strip. One of them is composited — the first — so `scoot msg screenshot
+strip. One of them is composited — the first — so `scootctl screenshot
 --output 2` is refused rather than answered with the first output's pixels.
 `--nested` and `--tty` warn and ignore the flag, having one host window and
 one CRTC respectively. See
@@ -156,7 +160,7 @@ refusing: `[tty] gpu` naming a device that will not open, and
 | List, focus and close windows from a taskbar | `ext-foreign-toplevel-list-v1` **and** the wlr one | [protocols.md](docs/protocols.md#window-lists-two-protocols) |
 | Lock the screen | `ext-session-lock-v1`, compositor-enforced | [protocols.md](docs/protocols.md#screen-locking-ext-session-lock-v1) |
 | Auto-lock or dim on idle | `ext-idle-notify-v1` + `idle-inhibit-v1` (`swayidle`) | [protocols.md](docs/protocols.md#idle-detection) |
-| Screenshot or screen-share | `ext-image-copy-capture-v1` (`grim`), plus `scoot msg screenshot` | [protocols.md](docs/protocols.md#screen-capture-ext-image-copy-capture-v1) |
+| Screenshot or screen-share | `ext-image-copy-capture-v1` (`grim`), plus `scootctl screenshot` | [protocols.md](docs/protocols.md#screen-capture-ext-image-copy-capture-v1) |
 | Run a GPU-rendering client with no GPU on the compositor | `zwp_linux_dmabuf_v1`, formats taken from whichever renderer is active | [protocols.md](docs/protocols.md#screen-capture-ext-image-copy-capture-v1) |
 | Clipboard manager, middle-click paste | `wlr-`/`ext-data-control`, `primary-selection-v1` | [protocols.md](docs/protocols.md#clipboard-and-primary-selection) |
 | Night light | `wlr-gamma-control-v1` (`wlsunset`, `gammastep`) | [protocols.md](docs/protocols.md#night-light-wlr-gamma-control-v1) |
@@ -192,7 +196,8 @@ cargo nextest run --workspace   # one process per test -- the required runner
 ```
 
 `crates/scoot-core` is the platform-independent layout engine (no Wayland, no
-I/O), `crates/scoot-ipc` the wire protocol and a client over it, `crates/scoot`
+I/O), `crates/scoot-ipc` the wire protocol and a client over it,
+`crates/scootctl` the `scootctl` remote-control client, `crates/scoot`
 the CLI and the Smithay-based compositor. `vm/README.md` sets up a Mac-native
 NixOS VM to run the Linux-only half in; `CLAUDE.md` has the engineering
 standards.
@@ -201,7 +206,7 @@ Every pull request runs `.github/workflows/ci.yml`, which does the above
 plus `cargo fmt`, `cargo clippy -D warnings`, `scripts/smoke-test.sh` under
 `--headless`, an `ldd` check that the default build links no `libgbm` or
 `libEGL` (running with no GPU is a hard requirement, not a preference), and
-a macOS `cargo check` of the `scoot msg` client. It runs everything through
+a macOS `cargo check` of the `scootctl` client. It runs everything through
 `nix develop`, so the flake stays the only dependency list. **A green check
 is not full coverage**: a GitHub runner has no seat, no VT, no `/dev/dri`
 and no GPU, so `--tty`, `--nested`, every GPU path and all performance work

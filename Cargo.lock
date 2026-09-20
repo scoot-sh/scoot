@@ -768,6 +768,7 @@ dependencies = [
  "rustix 1.1.4",
  "scoot-core",
  "scoot-ipc",
+ "scootctl",
  "serde",
  "serde_json",
  "smithay",
@@ -793,6 +794,14 @@ dependencies = [
  "base64",
  "scoot-core",
  "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "scootctl"
+version = "0.1.0"
+dependencies = [
+ "scoot-ipc",
  "serde_json",
 ]
 

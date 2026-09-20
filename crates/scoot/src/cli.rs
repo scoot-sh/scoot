@@ -1,10 +1,13 @@
 //! Argument parsing. Deliberately small: scoot's surface is one compositor to
-//! start and a handful of requests to send.
+//! start, plus the `msg` alias for the client (parsed and run through
+//! `scootctl`, which owns that surface -- see that crate's docs).
 
 use std::fmt;
 use std::path::PathBuf;
 
-use scoot_ipc::{Action, Horizontal, PointerButton, Request, Vertical};
+use scoot_ipc::Request;
+
+use scootctl::Error;
 
 pub const USAGE: &str = "\
 scoot -- a scrolling-tiling Wayland compositor
@@ -76,10 +79,11 @@ pub const MAX_OUTPUTS: i32 = 8;
 /// Which renderer composites each frame.
 ///
 /// Lives here rather than beside the renderers themselves because
-/// [`CompositorOptions`] has to exist on every platform -- `scoot msg` builds
-/// anywhere, while `compositor::render` is Linux-only -- and because the
-/// config file parses the same two names (`[renderer] backend`). One name
-/// list, one parser, the way [`action`] is shared with `[binds]`.
+/// [`CompositorOptions`] has to exist on every platform -- the client
+/// (`scoot msg`, and `scootctl`) builds anywhere, while `compositor::render`
+/// is Linux-only -- and because the config file parses the same two names
+/// (`[renderer] backend`). One name list, one parser, the way `scootctl`'s
+/// [`scootctl::action`] is shared with `[binds]`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum RendererKind {
     /// CPU compositing with pixman: the default, and the only renderer that
@@ -231,40 +235,6 @@ impl Default for CompositorOptions {
     }
 }
 
-#[derive(Debug, PartialEq)]
-pub enum Error {
-    Unknown(String),
-    Missing(&'static str),
-    Invalid {
-        what: &'static str,
-        value: String,
-    },
-    OutOfRange {
-        what: &'static str,
-        value: String,
-        min: i32,
-        max: i32,
-    },
-}
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Unknown(what) => write!(f, "unknown argument `{what}` (try --help)"),
-            Self::Missing(what) => write!(f, "missing {what} (try --help)"),
-            Self::Invalid { what, value } => write!(f, "invalid {what}: `{value}`"),
-            Self::OutOfRange {
-                what,
-                value,
-                min,
-                max,
-            } => write!(f, "invalid {what}: `{value}` (expected {min}-{max})"),
-        }
-    }
-}
-
-impl std::error::Error for Error {}
-
 pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Command, Error> {
     let mut args = args.into_iter();
     match args.next().as_deref() {
@@ -272,7 +242,10 @@ pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Command, Error> 
         Some("--headless") => compositor(args, false, false).map(Command::Compositor),
         Some("--nested") => compositor(args, true, false).map(Command::Compositor),
         Some("--tty") => compositor(args, false, true).map(Command::Compositor),
-        Some("msg") => message(args),
+        Some("msg") => scootctl::parse_msg(args).map(|msg| Command::Msg {
+            request: msg.request,
+            out: msg.out,
+        }),
         Some(other) => Err(Error::Unknown(other.to_owned())),
     }
 }
@@ -342,187 +315,6 @@ fn mode(what: &'static str, value: Option<String>) -> Result<(u16, u16), Error> 
     }
 }
 
-fn message(mut args: impl Iterator<Item = String>) -> Result<Command, Error> {
-    let verb = args.next().ok_or(Error::Missing("a request"))?;
-    let mut out = None;
-    let request = match verb.as_str() {
-        "version" => Request::Version,
-        "outputs" => Request::Outputs,
-        "windows" => Request::Windows,
-        "action" => Request::Action(action(&mut args)?),
-        "screenshot" => {
-            let mut output = None;
-            while let Some(flag) = args.next() {
-                match flag.as_str() {
-                    "--output" => output = Some(number::<u64>("--output", args.next())?),
-                    "--out" => {
-                        out = Some(PathBuf::from(
-                            args.next().ok_or(Error::Missing("a path after --out"))?,
-                        ))
-                    }
-                    other => return Err(Error::Unknown(other.to_owned())),
-                }
-            }
-            Request::Screenshot { output }
-        }
-        "pointer" => pointer(&mut args)?,
-        "key" => {
-            let combo = args.next().ok_or(Error::Missing("a key combination"))?;
-            Request::Key {
-                keys: combo.parse().map_err(|_| Error::Invalid {
-                    what: "key combination",
-                    value: combo.clone(),
-                })?,
-            }
-        }
-        "type" => Request::Type {
-            text: args.collect::<Vec<_>>().join(" "),
-        },
-        "wait-idle" => {
-            let mut quiet_ms = 200;
-            let mut timeout_ms = 5000;
-            while let Some(flag) = args.next() {
-                match flag.as_str() {
-                    "--quiet-ms" => quiet_ms = number("--quiet-ms", args.next())?,
-                    "--timeout-ms" => timeout_ms = number("--timeout-ms", args.next())?,
-                    other => return Err(Error::Unknown(other.to_owned())),
-                }
-            }
-            Request::WaitIdle {
-                quiet_ms,
-                timeout_ms,
-            }
-        }
-        other => return Err(Error::Unknown(other.to_owned())),
-    };
-    Ok(Command::Msg { request, out })
-}
-
-/// Parses one action and its arguments (`"focus-column" "left"`, ...) the
-/// same way for both `scoot msg action ...` and a config file's `[binds]`
-/// values (see `compositor::config::parse_bind`) -- one grammar, one
-/// parser, rather than a second copy for the config-file case.
-pub(crate) fn action(args: &mut impl Iterator<Item = String>) -> Result<Action, Error> {
-    let name = args.next().ok_or(Error::Missing("an action"))?;
-    let action = match name.as_str() {
-        "focus-column" => Action::FocusColumn {
-            direction: horizontal(args)?,
-        },
-        "move-column" => Action::MoveColumn {
-            direction: horizontal(args)?,
-        },
-        "consume-or-expel" => Action::ConsumeOrExpel {
-            direction: horizontal(args)?,
-        },
-        "focus-window" => Action::FocusWindow {
-            direction: vertical(args)?,
-        },
-        "move-window" => Action::MoveWindow {
-            direction: vertical(args)?,
-        },
-        "focus-workspace" => Action::FocusWorkspace {
-            direction: vertical(args)?,
-        },
-        "move-window-to-workspace" => Action::MoveWindowToWorkspace {
-            direction: vertical(args)?,
-        },
-        "focus-window-id" => Action::FocusWindowId {
-            id: number("a window id", args.next())?,
-        },
-        "focus-workspace-index" => Action::FocusWorkspaceIndex {
-            index: number("a workspace index", args.next())?,
-        },
-        "cycle-column-width" => Action::CycleColumnWidth,
-        "close" => Action::CloseFocused,
-        "spawn" => {
-            let command: Vec<String> = args.collect();
-            if command.is_empty() {
-                return Err(Error::Missing("a command to spawn"));
-            }
-            Action::Spawn { command }
-        }
-        "quit" => Action::Quit,
-        other => return Err(Error::Unknown(other.to_owned())),
-    };
-    Ok(action)
-}
-
-fn pointer(args: &mut impl Iterator<Item = String>) -> Result<Request, Error> {
-    let kind = args.next().ok_or(Error::Missing("a pointer request"))?;
-    let request = match kind.as_str() {
-        "move" => Request::PointerMove {
-            x: number("x", args.next())?,
-            y: number("y", args.next())?,
-        },
-        "click" => Request::Click {
-            x: number("x", args.next())?,
-            y: number("y", args.next())?,
-            button: args
-                .next()
-                .map(|b| button(&b))
-                .transpose()?
-                .unwrap_or_default(),
-        },
-        "button" => {
-            let which = args.next().ok_or(Error::Missing("a button"))?;
-            let state = args.next().ok_or(Error::Missing("press or release"))?;
-            Request::PointerButton {
-                button: button(&which)?,
-                pressed: match state.as_str() {
-                    "press" => true,
-                    "release" => false,
-                    _ => {
-                        return Err(Error::Invalid {
-                            what: "button state",
-                            value: state,
-                        });
-                    }
-                },
-            }
-        }
-        "scroll" => Request::Scroll {
-            dx: number("dx", args.next())?,
-            dy: number("dy", args.next())?,
-        },
-        other => return Err(Error::Unknown(other.to_owned())),
-    };
-    Ok(request)
-}
-
-fn button(name: &str) -> Result<PointerButton, Error> {
-    match name {
-        "left" => Ok(PointerButton::Left),
-        "right" => Ok(PointerButton::Right),
-        "middle" => Ok(PointerButton::Middle),
-        other => Err(Error::Invalid {
-            what: "button",
-            value: other.to_owned(),
-        }),
-    }
-}
-
-fn horizontal(args: &mut impl Iterator<Item = String>) -> Result<Horizontal, Error> {
-    match args.next().ok_or(Error::Missing("left or right"))?.as_str() {
-        "left" => Ok(Horizontal::Left),
-        "right" => Ok(Horizontal::Right),
-        other => Err(Error::Invalid {
-            what: "direction",
-            value: other.to_owned(),
-        }),
-    }
-}
-
-fn vertical(args: &mut impl Iterator<Item = String>) -> Result<Vertical, Error> {
-    match args.next().ok_or(Error::Missing("up or down"))?.as_str() {
-        "up" => Ok(Vertical::Up),
-        "down" => Ok(Vertical::Down),
-        other => Err(Error::Invalid {
-            what: "direction",
-            value: other.to_owned(),
-        }),
-    }
-}
-
 /// A `--width`/`--height` value: a positive pixel count no DRM mode could
 /// exceed (see [`MAX_OUTPUT_DIMENSION`]). Refused rather than clamped --
 /// every other invalid flag in this file is an `Error::Invalid`, and a
@@ -567,14 +359,6 @@ fn count(what: &'static str, value: Option<String>) -> Result<i32, Error> {
             max: MAX_OUTPUTS,
         })
     }
-}
-
-fn number<T: std::str::FromStr>(what: &'static str, value: Option<String>) -> Result<T, Error> {
-    let value = value.ok_or(Error::Missing(what))?;
-    value.parse().map_err(|_| Error::Invalid {
-        what,
-        value: value.clone(),
-    })
 }
 
 #[cfg(test)]
@@ -883,111 +667,84 @@ mod tests {
     }
 
     #[test]
-    fn actions_take_their_direction() {
-        assert_eq!(
-            parse_args(&["msg", "action", "focus-column", "left"]),
-            Ok(Command::Msg {
-                request: Request::Action(Action::FocusColumn {
-                    direction: Horizontal::Left
-                }),
-                out: None,
-            })
-        );
-    }
-
-    #[test]
-    fn focus_workspace_index_takes_a_number() {
-        assert_eq!(
-            parse_args(&["msg", "action", "focus-workspace-index", "2"]),
-            Ok(Command::Msg {
-                request: Request::Action(Action::FocusWorkspaceIndex { index: 2 }),
-                out: None,
-            })
-        );
-        // ...which is a number, not a direction: sharing the
-        // `focus-workspace` name would make `up`/`down` and `2` ambiguous.
-        assert!(parse_args(&["msg", "action", "focus-workspace-index", "down"]).is_err());
-    }
-
-    #[test]
-    fn spawn_takes_the_rest_of_the_line() {
-        let Ok(Command::Msg { request, .. }) =
-            parse_args(&["msg", "action", "spawn", "foot", "-e", "htop"])
-        else {
-            panic!("expected a message");
-        };
-        assert_eq!(
-            request,
-            Request::Action(Action::Spawn {
-                command: vec!["foot".into(), "-e".into(), "htop".into()]
-            })
-        );
-    }
-
-    #[test]
-    fn typing_keeps_the_words_together() {
-        let Ok(Command::Msg { request, .. }) = parse_args(&["msg", "type", "hello", "there"])
-        else {
-            panic!("expected a message");
-        };
-        assert_eq!(
-            request,
-            Request::Type {
-                text: "hello there".into()
-            }
-        );
-    }
-
-    #[test]
-    fn screenshot_flags_split_between_request_and_output_file() {
-        assert_eq!(
-            parse_args(&[
-                "msg",
-                "screenshot",
-                "--output",
-                "2",
-                "--out",
-                "/tmp/shot.png"
-            ]),
-            Ok(Command::Msg {
-                request: Request::Screenshot { output: Some(2) },
-                out: Some(PathBuf::from("/tmp/shot.png")),
-            })
-        );
-    }
-
-    #[test]
-    fn pointer_requests_parse() {
-        assert_eq!(
-            parse_args(&["msg", "pointer", "click", "10", "20"]),
-            Ok(Command::Msg {
-                request: Request::Click {
-                    x: 10.0,
-                    y: 20.0,
-                    button: PointerButton::Left
-                },
-                out: None,
-            })
-        );
-    }
-
-    #[test]
     fn bad_input_explains_itself() {
         assert_eq!(parse_args(&["fly"]), Err(Error::Unknown("fly".into())));
-        assert_eq!(parse_args(&["msg"]), Err(Error::Missing("a request")));
         assert_eq!(
-            parse_args(&["msg", "action", "focus-column", "sideways"]),
-            Err(Error::Invalid {
-                what: "direction",
-                value: "sideways".into()
-            })
+            parse_args(&["--headless", "--width"]),
+            Err(Error::Missing("--width"))
         );
         assert_eq!(
-            parse_args(&["msg", "pointer", "move", "x", "1"]),
-            Err(Error::Invalid {
-                what: "x",
-                value: "x".into()
-            })
+            parse_args(&["--headless", "--bogus"]),
+            Err(Error::Unknown("--bogus".into()))
         );
+    }
+
+    #[test]
+    fn help_prints_the_shared_client_grammar() {
+        // The alias pin from this side: `scoot --help` embeds the same two
+        // blocks `scootctl --help` prints (pinned from that side in
+        // scootctl's `cli` tests), so the alias's documented grammar cannot
+        // drift from the client's.
+        assert!(
+            USAGE.contains(scootctl::cli::REQUESTS_HELP),
+            "scoot --help lost the shared REQUESTS block"
+        );
+        assert!(
+            USAGE.contains(scootctl::cli::ACTIONS_HELP),
+            "scoot --help lost the shared ACTIONS block"
+        );
+    }
+
+    #[test]
+    fn the_msg_alias_parses_identically_to_scootctl() {
+        // The structural pin behind "the alias cannot drift": every one of
+        // these arg vectors must parse to the same request (or the same
+        // error) through `scoot msg ...` as through `scootctl ...` directly.
+        // Success cases pin the request *and* the `--out` split; error cases
+        // pin byte-identical failures.
+        let cases: &[&[&str]] = &[
+            &["version"],
+            &["outputs"],
+            &["windows"],
+            &["action", "focus-column", "left"],
+            &["action", "move-window-to-workspace", "down"],
+            &["action", "focus-workspace-index", "2"],
+            &["action", "spawn", "foot", "-e", "htop"],
+            &["action", "quit"],
+            &["screenshot"],
+            &["screenshot", "--output", "2", "--out", "/tmp/shot.png"],
+            &["pointer", "move", "10", "20"],
+            &["pointer", "click", "10", "20", "right"],
+            &["pointer", "button", "left", "press"],
+            &["pointer", "scroll", "1", "-2"],
+            &["key", "super+h"],
+            &["type", "hello", "there"],
+            &["wait-idle"],
+            &["wait-idle", "--quiet-ms", "100", "--timeout-ms", "500"],
+            &[],
+            &["frobnicate"],
+            &["action"],
+            &["action", "focus-column", "sideways"],
+            &["action", "focus-workspace-index", "down"],
+            &["action", "spawn"],
+            &["pointer", "move", "x", "1"],
+            &["pointer", "button", "left", "hold"],
+            &["screenshot", "--bogus"],
+            &["key"],
+        ];
+        for case in cases {
+            let mut aliased: Vec<&str> = vec!["msg"];
+            aliased.extend(case.iter());
+            let through_alias = parse_args(&aliased);
+            let direct = scootctl::parse_msg(case.iter().map(|a| (*a).to_owned()));
+            match (through_alias, direct) {
+                (Ok(Command::Msg { request, out }), Ok(msg)) => {
+                    assert_eq!(request, msg.request, "{case:?}");
+                    assert_eq!(out, msg.out, "{case:?}");
+                }
+                (Err(left), Err(right)) => assert_eq!(left, right, "{case:?}"),
+                (left, right) => panic!("alias/direct diverged on {case:?}: {left:?} vs {right:?}"),
+            }
+        }
     }
 }

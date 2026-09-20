@@ -76,6 +76,16 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[Split the CLI out into
+  `scootctl`](docs/backlog/resolved/scootctl-split-done.md)**
+  (2026-09-20) — the second half of the `rename-flex-family` ticket. The
+  IPC client is now its own `scootctl` lib+bin crate; `scoot msg ...` stays
+  as a permanent alias that parses and runs through it, so the two entry
+  points cannot drift (pinned by a 29-case parse-equivalence unit test and
+  a smoke-test section comparing live replies byte for byte, screenshot
+  PNGs included). Agents reach for `scootctl`; the macOS flake default is
+  now the client with zero cfg gating. No wire change, no
+  `PROTOCOL_VERSION` bump.
 - **[Every spawned child becomes a
   zombie](docs/backlog/resolved/spawned-children-never-reaped-done.md)**
   (2026-09-20) — `State::spawn` dropped the `Child` and nothing installed a
