@@ -75,10 +75,12 @@ seconds later — so this is not one run's artifact.
 The per-zombie cost is small — one pid and one `task_struct`, no memory the
 child held, no fds. On an ordinary desktop this is **not** a plausible route
 to pid exhaustion: the dev VM's `/proc/sys/kernel/pid_max` is `4194304`, and
-a user would have to spawn for weeks. Not quite unconditional even there —
-the kernel uncharges both the pids cgroup and the per-user `RLIMIT_NPROC` in
-`release_task()`, i.e. at *reap* time, so a zombie holds its `RLIMIT_NPROC`
-slot too, and that ceiling is far lower than `pid_max`.
+a user would have to spawn for weeks. Not quite unconditional even there:
+review reports (from kernel source, not re-derived here) that both the pids
+cgroup and the per-user `RLIMIT_NPROC` are uncharged in `release_task()` —
+i.e. at *reap* time, not at exit — so a zombie holds its `RLIMIT_NPROC` slot
+too, and that ceiling is far lower than `pid_max`. Worth confirming before
+leaning on it.
 
 **On the named deployment target it is a different story, and that is worth
 stating rather than waving off.** A linuxserver webtop is a container, where
