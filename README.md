@@ -146,7 +146,7 @@ background_color = "#101014"
 
 Every table, field, default and failure mode is in
 [docs/configuration.md](docs/configuration.md). Almost nothing in it can stop
-scoot starting — a bad value logs a warning and falls back to the default.
+scoot starting — a bad value is logged and falls back to the default.
 The two exceptions are deliberate, because guessing would be worse than
 refusing: `[tty] gpu` naming a device that will not open, and
 `[renderer] backend = "gles"` on a box with no working EGL.
@@ -161,7 +161,7 @@ refusing: `[tty] gpu` naming a device that will not open, and
 | Lock the screen | `ext-session-lock-v1`, compositor-enforced | [protocols.md](docs/protocols.md#screen-locking-ext-session-lock-v1) |
 | Auto-lock or dim on idle | `ext-idle-notify-v1` + `idle-inhibit-v1` (`swayidle`) | [protocols.md](docs/protocols.md#idle-detection) |
 | Screenshot or screen-share | `ext-image-copy-capture-v1` (`grim`), plus `scootctl screenshot` | [protocols.md](docs/protocols.md#screen-capture-ext-image-copy-capture-v1) |
-| Run a GPU-rendering client with no GPU on the compositor | `zwp_linux_dmabuf_v1`, formats taken from whichever renderer is active | [protocols.md](docs/protocols.md#screen-capture-ext-image-copy-capture-v1) |
+| Run a GPU-rendering client with no GPU on the compositor | `zwp_linux_dmabuf_v1`, formats taken from whichever renderer is active | [protocols.md](docs/protocols.md#gpu-rendering-clients-zwp_linux_dmabuf_v1) |
 | Clipboard manager, middle-click paste | `wlr-`/`ext-data-control`, `primary-selection-v1` | [protocols.md](docs/protocols.md#clipboard-and-primary-selection) |
 | Night light | `wlr-gamma-control-v1` (`wlsunset`, `gammastep`) | [protocols.md](docs/protocols.md#night-light-wlr-gamma-control-v1) |
 | A HiDPI display | `[output] scale`, integer and fractional | [protocols.md](docs/protocols.md#output-scaling) |
@@ -204,10 +204,14 @@ standards.
 
 Every pull request runs `.github/workflows/ci.yml`, which does the above
 plus `cargo fmt`, `cargo clippy -D warnings`, `scripts/smoke-test.sh` under
-`--headless`, an `ldd` check that the default build links no `libgbm` or
-`libEGL` (running with no GPU is a hard requirement, not a preference), and
-a macOS `cargo check` of the `scootctl` client. It runs everything through
-`nix develop`, so the flake stays the only dependency list. **A green check
+`--headless`, an `ldd` check that the default build links no GPU stack
+(`libgbm` is the live assertion; `libEGL`/`libGLESv2` are belt-and-braces,
+since both are `dlopen`ed and never appear in `ldd` either way), and a macOS
+`cargo check --workspace --all-targets` (on a Mac that is the `scootctl`
+client plus the compositor crate with its Linux halves cfg'd out). It runs the
+build and test steps through `nix develop` (the smoke test's own tools come
+via `nix shell` pinned to the same lockfile), so the flake stays the only
+dependency list. **A green check
 is not full coverage**: a GitHub runner has no seat, no VT, no `/dev/dri`
 and no GPU, so `--tty`, `--nested`, every GPU path and all performance work
 stay manual on the dev VM — the workflow's header says so in full.

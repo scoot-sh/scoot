@@ -76,6 +76,20 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[README audit +
+  tightening](docs/backlog/resolved/readme-rewrite-done.md)**
+  (2026-09-20) — the last item of the 2026-09-19 directed queue, worked as an
+  audit rather than a rewrite: PR #132's front-door shape was verified
+  against its own relocate-don't-drop constraint item by item (keys vs
+  defaults, config example vs `Config::default()`, both `--help` outputs
+  run live, all 31 protocol versions against a live `wayland-info` dump,
+  all 15 README anchors resolved mechanically). Five doc corrections (the
+  CI paragraph's ldd/macOS/nix-shell scope, the "one exception" that has
+  been two since the renderer startup-error landed, the
+  `--headless`/`--nested`-only claim wrong in `gpu-scanout` builds), dmabuf
+  given its own subsection anchor, and one code bug filed-not-fixed
+  (`scoot --help` hides `--renderer` under `--tty`). Docs-only, no wire,
+  no `PROTOCOL_VERSION` change.
 - **[`smoke-test.sh` no longer defaults to someone else's
   binary](docs/backlog/resolved/smoke-test-binary-default-done.md)**
   (2026-09-20) — the shared-target-dir default handed three agents a binary
