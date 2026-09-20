@@ -425,7 +425,8 @@ falsify. Read `flexwm` there as `scoot`.
   — RESOLVED 2026-09-20 (test-only): per-call-site message pins (`maximum of 512 live buffers`) with the helper's code-only stance left standing for its other users; proven vacuous-then-biting (`prlimit 650` green-while-guarding-pressure pre-fix, loud red post-fix).
 - [`msg_broken_pipe`'s unbounded `accept()` wedges the suite on a transient connect failure](./resolved/msg-broken-pipe-accept-hang-done.md)
   — RESOLVED 2026-09-20 (test-only + one config stanza): 30s accept deadline in the fixture (loud `TimedOut` naming the cause, `resume_unwind` across the join) plus `.config/nextest.toml` backstop (`period = 60s, terminate-after = 2`, ~15x above the 7.72s measured max); `Command` timeout deliberately left to the backstop.
-- [Bind-before-spawn in the `msg_broken_pipe` fixture](./testing/broken-pipe-bind-race.md) — residual race the deadline exposed (server thread `bind()` vs child `connect()`, no happens-before edge): ~18% of rapid isolation reruns go red at 30s, 0 in full runs. Fix is ~5 lines: bind on the calling thread first.
+- [Bind-before-spawn in the `msg_broken_pipe` fixture](./resolved/broken-pipe-bind-race-done.md)
+  — RESOLVED 2026-09-20 (test-only): `serve_once` takes an already-bound listener, so program-order `bind` → spawn closes the bind-vs-connect race (before-control 21/22 with one 30.01s race-red, after 22/22 green); 30s deadline and 2s regression test unchanged.
 - [No CI: every verification run is manual and self-reported](./resolved/ci-test-run-done.md)
   — LANDED 2026-09-19 (PR #140): `.github/workflows/ci.yml` runs fmt,
   clippy, `cargo nextest run --workspace`, `cargo test --workspace`, the

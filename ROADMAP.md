@@ -76,6 +76,13 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[Bind-before-spawn in the `msg_broken_pipe`
+  fixture](docs/backlog/resolved/broken-pipe-bind-race-done.md)**
+  (2026-09-20, test-only) — the PR #179 residual: `serve_once` takes an
+  already-bound listener, so program-order `bind` → spawn closes the
+  bind-vs-connect race (before-control 21/22 with one exact-mechanism
+  30.01s red, after 22/22 green); 30s deadline, nextest backstop and 2s
+  regression test all unchanged.
 - **[`msg_broken_pipe`'s unbounded `accept()` wedged the suite on a transient connect failure](docs/backlog/resolved/msg-broken-pipe-accept-hang-done.md)**
   (2026-09-20, test-only + one config stanza) — 30s accept deadline in the fixture (loud `TimedOut` naming the cause, preserved across the join) plus a `.config/nextest.toml` backstop (`period = 60s, terminate-after = 2`, sized ~15x above the 7.72s measured max); both proven to bite, full greens under both runners.
 - **[Pin the budget cause by message in the two bypass-loop cap
