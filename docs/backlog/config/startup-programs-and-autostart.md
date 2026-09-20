@@ -137,9 +137,10 @@ that target supervision belongs to the container, where linuxserver images
 already put it. If a scoot-native supervisor is ever wanted it should be a
 separate tool, the same way a status bar is.
 
-What *is* in scope, and is a real bug found asking this question:
-[`spawned-children-never-reaped.md`](../core/spawned-children-never-reaped.md)
-— every child scoot spawns becomes a zombie, confirmed live. Reaping is the
+What *was* in scope, and was a real bug found asking this question:
+[`spawned-children-never-reaped.md`](../resolved/spawned-children-never-reaped-done.md)
+— every child scoot spawned became a zombie, confirmed live; resolved
+2026-09-20 by a `SIGCHLD` handler plus a tracked-pid drain. Reaping is the
 compositor's job whether or not anything ever supervises.
 
 Also related:

@@ -76,6 +76,24 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[Every spawned child becomes a
+  zombie](docs/backlog/resolved/spawned-children-never-reaped-done.md)**
+  (2026-09-20) — `State::spawn` dropped the `Child` and nothing installed a
+  `SIGCHLD` handler, so every `--` startup command, `spawn` bind and
+  `scoot msg action spawn` stayed `<defunct>` for the session's life
+  (confirmed live: four spawns, four zombies). Now a `sigaction` handler
+  writes one counter increment to a wake eventfd and the loop drains exactly
+  the pids `spawn` tracks — never `waitpid(-1)`, which would steal the
+  unit-test binary's own forked children under `cargo test`. The ticket's
+  measured execve table decided the mechanism and is written down next to
+  the code: `SIG_IGN` survives exec (breaks children's own `wait()`),
+  the signal mask survives exec with libstd resetting SIGPIPE only (rules
+  out signalfd without a `pre_exec` reset in every child), a caught handler
+  is reset for free. Pinned by an in-harness burst test (fail-first:
+  eight `Z`s with the install neutered) and a child-disposition test
+  (`SIG_DFL` + empty mask, sensitivity proven by forcing `SIG_IGN`).
+  Live probe: 16 spawns, zero zombies, `SigBlk` empty. No README change
+  (internal reliability fix, no user-facing surface).
 - **[Host configures coalesced to one resize per frame](docs/backlog/resolved/coalesce-host-configures-done.md)**
   (2026-09-20) — a drag's configure-per-pixel-step no longer rebuilds the
   pool and the render target per step: a later configure only overwrites a

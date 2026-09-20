@@ -528,28 +528,12 @@ be revisited.
 ### Found asking how a session starts its own programs (2026-09-19)
 
 One question — *"how do we handle startup exec of other processes like
-Waybar, fuzzel, browsers?"* — turned up one confirmed bug and two gaps. They
-share a mechanism (what a session owes the programs inside it) but are
-separately actionable.
+Waybar, fuzzel, browsers?"* — turned up one confirmed bug, since fixed
+([every spawned child became a zombie](./resolved/spawned-children-never-reaped-done.md),
+resolved 2026-09-20: a `SIGCHLD` handler plus a tracked-pid drain reaps
+exactly what `State::spawn` started), and two gaps. They share a mechanism
+(what a session owes the programs inside it) but are separately actionable.
 
-- [Every spawned child becomes a zombie](./core/spawned-children-never-reaped.md)
-  — **HIGH**, and confirmed live rather than code-traced: four `spawn`
-  actions left four `<defunct>` children under scoot's pid, which is one per
-  spawn for the life of the session. `State::spawn` drops the `Child` at
-  `state.rs:985` and nothing installs a `SIGCHLD` handler. On a desktop the
-  per-zombie cost is small and the entry says so — but the named deployment
-  target is a **container**, where cgroup `pids.max` counts zombies as live
-  tasks and s6 as pid 1 reaps only orphans, so a long agent-driven session
-  ends at `fork: Resource temporarily unavailable` with no way to spawn a
-  recovery shell. The entry also carries two traps found by review:
-  `signal(SIGCHLD, SIG_IGN)` survives `execve`, and `execve` *preserves* the
-  signal mask — with **nothing** clearing it afterwards, since libstd resets
-  SIGPIPE only and deliberately inherits the mask. That decides the design:
-  signalfd needs SIGCHLD blocked process-wide and so leaks the block into
-  every spawned child unless each one resets it, while a `sigaction` handler
-  is reset by `exec` for free. And a plain `waitpid(-1)` drain would steal
-  the children two unit tests fork for themselves: green under `nextest`,
-  red under `cargo test`.
 - [`XDG_CURRENT_DESKTOP` is set nowhere, so a portal has no backend to pick](./core/session-environment-and-portals.md)
   — the string does not occur in this project's code at all, while `mod.rs`
   already exports four other variables for exactly this kind of reason. Portals are
