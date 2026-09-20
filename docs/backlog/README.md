@@ -417,6 +417,7 @@ falsify. Read `flexwm` there as `scoot`.
   — RESOLVED 2026-09-16, together with the `--tty` entry above that had
   independently (and wrongly) filed the same failure as a compositor bug.
 - [Enhanced hardware/DRM testing ideas](./testing/hardware-testing-ideas.md) (research)
+- [Dispatch flood tests die on fd-pressure kills under a pressured process table](./testing/dispatch-flood-fd-pressure-flake.md) — same shared-table flake class as the icon-budget one (fixed in PR #167): the dmabuf fill-phase kill lands on the wrong cause under `prlimit 650` (reproduced), the single-pixel half is assertion-invisible by construction. Fix is the icon-test treatment: headroom check + cause-pinning by message.
 - [No CI: every verification run is manual and self-reported](./resolved/ci-test-run-done.md)
   — LANDED 2026-09-19 (PR #140): `.github/workflows/ci.yml` runs fmt,
   clippy, `cargo nextest run --workspace`, `cargo test --workspace`, the
