@@ -79,6 +79,21 @@ alone — enough to drive a compositor running in a VM. The flake
 covers Apple Silicon only; an Intel Mac builds the same client with `cargo
 build -p scootctl`.
 
+To consume scoot from your own flake (the way a NixOS user actually
+installs a compositor) rather than from a clone:
+
+```nix
+inputs.scoot.url = "github:scoot-sh/scoot";
+# then, in a module:
+environment.systemPackages = [ inputs.scoot.packages.${pkgs.system}.scoot ];
+```
+
+For the full story — that snippet plus the home-manager module
+(`programs.scoot.settings` rendering `~/.config/scoot/config.toml`,
+session script hook, portal backend install) and the NixOS module
+(package plus an opt-in, strictly-additive login-screen session entry)
+— see [docs/nix.md](docs/nix.md).
+
 ## Running
 
 ```sh
@@ -197,6 +212,9 @@ are at the top of [docs/protocols.md](docs/protocols.md).
   shell: every protocol, and what to know before writing against it.
 - [docs/configuration.md](docs/configuration.md) — every flag, table, field
   and keybinding.
+- [docs/nix.md](docs/nix.md) — consuming the flake from your own
+  configuration: the home-manager and NixOS modules, platform notes, and
+  the live-defaults reference.
 - [docs/tty.md](docs/tty.md) — real hardware: DRM device selection, Asahi
   Linux, hotplug, modes, renderers.
 - [CHANGELOG.md](CHANGELOG.md) · [ROADMAP.md](ROADMAP.md)

@@ -76,6 +76,21 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[No documented flake-consumer path, no home-manager/NixOS
+  module](docs/backlog/resolved/flake-consumer-and-home-manager-done.md)**
+  (2026-09-20) — both halves: README Install carries the consumer
+  snippet plus a pointer, new `docs/nix.md` owns the fuller section
+  (modules, platform notes, failure modes, live-defaults reference
+  pasted from a real emission), and thin `programs.scoot` modules ship
+  on both sides — free-form `settings` via `pkgs.formats.toml` (typed
+  schema deliberately refused: it would go stale and lie), an opt-in
+  login-screen entry that only ever adds alongside existing sessions
+  (default off, per the never-strand rule), and `scoot-portals.conf`
+  installed by default (closing the portals-ticket remainder).
+  Hermetic eval + rendered-content checks under `nix flake check`;
+  module-rendered configs proven live through a real `--headless`
+  session (empty, quoting-needing binds, wrong-type fail-safe). No
+  compositor/client code touched.
 - **[No way to emit a default config
   file](docs/backlog/resolved/default-config-command-done.md)**
   (2026-09-20) — `scoot --print-default-config` writes a commented starting

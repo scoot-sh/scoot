@@ -242,6 +242,52 @@
         };
       });
 
+      # `programs.scoot`: a home-manager module (per-user config file,
+      # session script hook, portals.conf install) and a NixOS module
+      # (system package + opt-in login-screen session entry). Split the
+      # way they are because the config file is per-user while session
+      # wiring is system-level -- most compositors ship both, thin.
+      # Each wrapper below is one `mkDefault` for `package` over the
+      # pure module in `nix/modules/`: without an overlay there is no
+      # `pkgs.scoot` to default to, so the flake's own build (the same
+      # per-system default as `packages`) is injected here instead, and
+      # an explicit setting still wins. See docs/nix.md.
+      homeManagerModules =
+        let
+          hmWrapper =
+            { pkgs, ... }:
+            {
+              imports = [ ./nix/modules/home.nix ];
+              programs.scoot.package = nixpkgs.lib.mkDefault self.packages.${pkgs.system}.default;
+            };
+        in
+        {
+          default = hmWrapper;
+          scoot = hmWrapper;
+        };
+
+      nixosModules =
+        let
+          osWrapper =
+            { pkgs, ... }:
+            {
+              imports = [ ./nix/modules/nixos.nix ];
+              programs.scoot.package = nixpkgs.lib.mkDefault self.packages.${pkgs.system}.scoot;
+            };
+        in
+        {
+          default = osWrapper;
+          scoot = osWrapper;
+        };
+
+      # Hermetic module checks (see nix/tests.nix): standalone
+      # evalModules + rendered-file content assertions. Eval-time Nix,
+      # so no benchmark applies -- nothing here runs per-event or
+      # per-frame; it runs once per `nix flake check`.
+      checks = forEach (pkgs: {
+        scoot-modules = pkgs.callPackage ./nix/tests.nix { };
+      });
+
       formatter = forEach (pkgs: pkgs.nixfmt-rfc-style);
     };
 }

@@ -87,11 +87,14 @@ recommend for the non-capture portals.
 (xdg-desktop-portal 1.17+, xdg-desktop-portal-wlr 0.8.0+, installed `grim`)
 and the install paths (`~/.config`, `/etc`, `/usr/share` under
 `xdg-desktop-portal/scoot-portals.conf`) in comments. Wiring the install
-step into the flake is *not* done -- the flake's `src` fileset is scoped to
+step into the flake is *not* done here -- the flake's `src` fileset is scoped to
 `Cargo.toml`/`Cargo.lock`/`crates/` by an explicit verified-coverage claim,
 and an install step no portal stack on any test machine can exercise would
-be unverifiable wiring. Until the packaging half lands (natural home: the
-flake-consumer ticket), the copy-over is manual and documented in
+be unverifiable wiring. That packaging half has since landed in the
+home-manager module (`programs.scoot.portals.enable`, on by default — see
+`docs/nix.md` and
+`docs/backlog/resolved/flake-consumer-and-home-manager-done.md`); without
+the module, the copy-over stays manual as documented in
 `docs/configuration.md`.
 
 **Docs** (`docs/configuration.md`): the env-exports paragraph now names all

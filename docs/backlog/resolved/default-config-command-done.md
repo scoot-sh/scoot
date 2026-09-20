@@ -98,5 +98,5 @@ Cheap set, all on the dev VM (`ssh -p 2222 dev@localhost`, tree at
 
 - `--write` (ticket's own "could follow"; stdout is the safer default).
 - Home-manager schema agreement: the flake ticket
-  (`docs/backlog/packaging/flake-consumer-and-home-manager.md`) owns that
+  (`docs/backlog/resolved/flake-consumer-and-home-manager-done.md`) owns that
   question -- this emission is the format a module schema must agree with.
