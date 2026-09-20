@@ -99,14 +99,23 @@ fn accept_with_deadline(
 /// that connects, then goes away. Reads the request first so a client that
 /// writes before reading never blocks on a full socket buffer.
 ///
+/// Takes an already-bound listener rather than a path: binding on the
+/// calling thread *before* the server thread and the `scootctl` child are
+/// spawned is the happens-before edge that a thread-internal `bind()` (the
+/// pre-fix shape) lacked. Without it, the child could `connect()` before
+/// the server thread bound, take ENOENT, and exit 1 in milliseconds while
+/// the server thread polled `WouldBlock` for the full 30s — a red
+/// `TimedOut` naming the wrong cause (~18% of rapid isolation reruns,
+/// observed 4/22 by the PR #179 reviewer). Program-order `bind` → spawn
+/// closes the race completely, with no retry timing to size.
+///
 /// The accept carries a deadline: a child that never connects (failed
 /// spawn, failed exec, connect hiccup under load) used to wedge the suite
 /// forever via `server.join()`, so it is a loud panic naming the cause
 /// instead. The panic message is preserved across the thread boundary by
 /// `join_server` below.
-fn serve_once(path: PathBuf, reply_line: Vec<u8>) -> std::thread::JoinHandle<()> {
+fn serve_once(listener: UnixListener, reply_line: Vec<u8>) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
-        let listener = UnixListener::bind(&path).unwrap();
         let stream = accept_with_deadline(&listener, ACCEPT_TIMEOUT).unwrap();
         stream
             .set_read_timeout(Some(Duration::from_secs(10)))
@@ -166,7 +175,11 @@ fn join_server(server: std::thread::JoinHandle<()>) {
 fn closed_stdout_on_a_large_reply_exits_quietly() {
     let path = socket_path("large");
     let _ = std::fs::remove_file(&path);
-    let server = serve_once(path.clone(), big_windows_reply());
+    // Bind here, before the server thread or the child exists, so the
+    // child's `connect()` cannot race the `bind()` (see `serve_once`).
+    // A collision fails here, loudly, instead of inside the thread.
+    let listener = UnixListener::bind(&path).unwrap();
+    let server = serve_once(listener, big_windows_reply());
 
     let mut child = Command::new(scootctl())
         .env("SCOOT_SOCKET", &path)
@@ -207,7 +220,9 @@ fn closed_stdout_on_help_exits_quietly() {
 fn a_full_read_is_unchanged() {
     let path = socket_path("full");
     let _ = std::fs::remove_file(&path);
-    let server = serve_once(path.clone(), small_windows_reply());
+    // Bind before spawn — same race as above (see `serve_once`).
+    let listener = UnixListener::bind(&path).unwrap();
+    let server = serve_once(listener, small_windows_reply());
 
     let output = Command::new(scootctl())
         .env("SCOOT_SOCKET", &path)
