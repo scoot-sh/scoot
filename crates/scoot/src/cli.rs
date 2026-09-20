@@ -16,6 +16,7 @@ USAGE:
     scoot --headless [--width 1-65535] [--height 1-65535] [--outputs 1-8] [--renderer pixman|gles] [--socket PATH] [--config PATH] [-- COMMAND...]
     scoot --nested [--width 1-65535] [--height 1-65535] [--renderer pixman|gles] [--socket PATH] [--config PATH] [-- COMMAND...]
     scoot --tty [--gpu PATH] [--mode WxH] [--renderer pixman|gles] [--socket PATH] [--config PATH] [-- COMMAND...]
+    scoot --print-default-config
     scoot msg REQUEST
     scoot --help
 
@@ -135,6 +136,15 @@ impl fmt::Display for RendererKind {
 #[derive(Debug, PartialEq)]
 pub enum Command {
     Help,
+    /// `scoot --print-default-config`: emit a starting config file,
+    /// generated from the compositor's own live defaults, to stdout (see
+    /// `compositor::config::default_config_toml`). Stdout, never a path:
+    /// it cannot clobber an existing config and it composes
+    /// (`scoot --print-default-config > ~/.config/scoot/config.toml`).
+    /// A first-arg flag like `--help`, not a backend and not `msg`: it needs
+    /// no running compositor -- producing a file before a session is
+    /// configured is the whole point.
+    PrintDefaultConfig,
     Compositor(CompositorOptions),
     Msg {
         request: Request,
@@ -245,6 +255,7 @@ pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Command, Error> 
     let mut args = args.into_iter();
     match args.next().as_deref() {
         None | Some("--help" | "-h" | "help") => Ok(Command::Help),
+        Some("--print-default-config") => Ok(Command::PrintDefaultConfig),
         Some("--headless") => compositor(args, false, false).map(Command::Compositor),
         Some("--nested") => compositor(args, true, false).map(Command::Compositor),
         Some("--tty") => compositor(args, false, true).map(Command::Compositor),
@@ -378,6 +389,28 @@ mod tests {
     #[test]
     fn no_arguments_prints_help() {
         assert_eq!(parse_args(&[]), Ok(Command::Help));
+    }
+
+    #[test]
+    fn print_default_config_parses_to_its_own_command() {
+        // A first-arg flag like `--help`, not a backend and not `msg`: it
+        // needs no running compositor, and it takes no further arguments.
+        assert_eq!(
+            parse_args(&["--print-default-config"]),
+            Ok(Command::PrintDefaultConfig)
+        );
+    }
+
+    #[test]
+    fn usage_names_print_default_config_on_its_own_line() {
+        // The `--help` surface for the new flag: its own usage line, so a
+        // user reading `--help` can discover it without knowing the ticket.
+        assert!(
+            USAGE
+                .lines()
+                .any(|line| line.trim() == "scoot --print-default-config"),
+            "--help hides the default-config flag"
+        );
     }
 
     #[test]

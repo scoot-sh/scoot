@@ -133,7 +133,9 @@ second output does and does not do yet.
 ## Configuring
 
 Drop a TOML file at `~/.config/scoot/config.toml`, or pass `--config PATH`.
-Everything in it is optional:
+Everything in it is optional. No file yet? `scoot --print-default-config >
+~/.config/scoot/config.toml` writes a commented starting one from the live
+defaults:
 
 ```toml
 [layout]

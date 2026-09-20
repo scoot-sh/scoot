@@ -76,6 +76,13 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[No way to emit a default config
+  file](docs/backlog/resolved/default-config-command-done.md)**
+  (2026-09-20) — `scoot --print-default-config` writes a commented starting
+  file to stdout (never a path, so it cannot clobber), generated from the
+  live defaults, parsing back to all of them exactly; EPIPE-quiet like
+  `--help`, byte-identical across runs, every default bind spelled back in
+  loader-accepted form.
 - **[The rename entry is closed](docs/backlog/resolved/rename-flex-family-done.md)**
   (2026-09-20, no code — coordinator verification): both halves landed
   earlier (PR #128 the `flexwm` → `scoot` rename, PR #157 the `scootctl`

@@ -37,8 +37,31 @@ fn run() -> Result<(), Box<dyn Error>> {
             Ok(())
         }
         cli::Command::Msg { request, out } => scootctl::run(&request, out.as_deref()),
+        cli::Command::PrintDefaultConfig => print_default_config(),
         cli::Command::Compositor(options) => start_compositor(options),
     }
+}
+
+#[cfg(target_os = "linux")]
+fn print_default_config() -> Result<(), Box<dyn Error>> {
+    // `USAGE` already ends in a newline, so `write_str`, not `print_line` --
+    // and the same EPIPE contract as `--help`: a closed pipe
+    // (`scoot --print-default-config | head -c0`) is a quiet success, not a
+    // panic, because the truncated consumer got what it wanted.
+    scootctl::output::write_str(compositor::config::default_config_toml().as_str())?;
+    Ok(())
+}
+
+#[cfg(not(target_os = "linux"))]
+fn print_default_config() -> Result<(), Box<dyn Error>> {
+    // The emission is generated from the compositor's own defaults, which
+    // live in the Linux-gated config module -- so there is no `scoot` binary
+    // here that could emit them. Copy the example out of
+    // `docs/configuration.md` instead.
+    Err(
+        "`--print-default-config` needs the compositor's defaults, which only exist on Linux"
+            .into(),
+    )
 }
 
 #[cfg(target_os = "linux")]

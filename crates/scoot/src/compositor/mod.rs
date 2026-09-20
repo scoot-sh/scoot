@@ -8,7 +8,7 @@ mod activation;
 mod alpha_modifier;
 mod bind_budget;
 mod child_reaper;
-mod config;
+pub(crate) mod config;
 mod content_type;
 mod cursor;
 mod decorations;

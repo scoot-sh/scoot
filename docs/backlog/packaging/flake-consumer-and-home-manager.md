@@ -66,7 +66,7 @@ Decisions this needs, which is why it is a ticket and not a patch:
 
 ## Related
 
-`docs/backlog/config/default-config-command.md` — if a module renders the
+`docs/backlog/resolved/default-config-command-done.md` — if a module renders the
 config, the emitted-defaults work and the module's schema want to agree
 about what the defaults are rather than drifting apart.
 

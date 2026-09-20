@@ -14,6 +14,7 @@ scoot --headless [--width 1-65535] [--height 1-65535] [--outputs 1-8] [--rendere
 scoot --nested   [--width 1-65535] [--height 1-65535] [--renderer pixman|gles] [--socket PATH] [--config PATH] [-- COMMAND...]
 scoot --tty      [--gpu PATH] [--mode WxH] [--renderer pixman|gles] [--socket PATH] [--config PATH] [-- COMMAND...]
 scoot msg REQUEST          # the scootctl client, kept as an alias (see below)
+scoot --print-default-config   # emit a starting config file to stdout
 scoot --help
 ```
 
@@ -184,6 +185,14 @@ runs on built-in defaults if neither exists. Seven optional tables:
 Every field in every table is itself optional and defaults independently, so
 a config that only sets `gap` leaves everything else — including the rest of
 `[layout]` — at its built-in default.
+
+No config file yet? `scoot --print-default-config >
+~/.config/scoot/config.toml` writes a starting one to stdout (never to a
+path, so it cannot clobber anything), generated from the same defaults this
+page documents — every key present and commented out with its default as the
+value, so the file as-is is exactly the defaults. (On a machine with no
+`scoot` binary — macOS, where only the `scootctl` client builds — copy the
+[example below](#example-configtoml) instead.)
 
 **Most settings are read once at startup; some can be reloaded live.**
 `scootctl reload` (see [Reloading the config](#reloading-the-config))
