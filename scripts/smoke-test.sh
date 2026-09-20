@@ -27,15 +27,88 @@
 # hardcoded path below. A trailing slash on the prefix is stripped, a
 # nonexistent parent dir is created (mkdir -p), and every expansion is
 # quoted so a prefix containing spaces works.
+#
+# SCOOT and SCOOTCTL pick which binaries this run tests: explicit values
+# always win; otherwise SCOOT defaults to the invoking tree
+# ($CARGO_TARGET_DIR/debug/scoot when set, else
+# <this repo>/target/debug/scoot resolved from this script's own location,
+# so the script runs from any cwd) and SCOOTCTL to the scootctl next to
+# it -- the same build, never a split-brain pair. Either default missing
+# (or a bare name not on PATH) fails loudly before anything launches, and
+# the run's first lines print each binary's path, source and mtime -- read
+# them and confirm the binary is your build, especially where
+# CARGO_TARGET_DIR is shared between checkouts.
 set -euo pipefail
 
 MODE=${MODE:---headless}
-SCOOT=${SCOOT:-/var/cargo-target/debug/scoot}
-# SCOOTCTL is the standalone client under test next to the compositor: the
-# `scoot msg` alias parses and runs through the same crate, so every request
-# below is answered by both binaries in the equivalence section and must come
-# back byte-identical.
-SCOOTCTL=${SCOOTCTL:-"$(dirname "$SCOOT")/scootctl"}
+# Which binaries this run tests. An explicit SCOOT/SCOOTCTL always wins, so
+# existing callers and CI (which set both) see no change.
+#
+# The SCOOT default is the invoking tree, never a machine-specific absolute
+# path: $CARGO_TARGET_DIR/debug/scoot when that is set (the builder's real
+# output dir -- export a private one and the default follows your build),
+# else <this-script's-repo>/target/debug/scoot, resolved from this script's
+# own location rather than the cwd, so the script runs from anywhere. A
+# globally shared CARGO_TARGET_DIR (the dev VM points every checkout at
+# /var/cargo-target) still resolves to the shared binary -- the header below
+# then shows exactly which file that is, so read it and confirm it is your
+# build before trusting a green run.
+#
+# SCOOTCTL defaults to the scootctl next to SCOOT -- the same build. A
+# compositor from one tree driven by a client from another is the same
+# wrong-verdict class this default exists to prevent, so the pairing is
+# kept, not split: there is no SCOOTCTL default independent of SCOOT. A bare
+# SCOOT (found on PATH rather than naming a file) is pinned to its full
+# path first, so the pairing, the checks and the header all see one file --
+# dirname of a bare name would be ".", i.e. the cwd, which is the wrong tree
+# by construction.
+#
+# Either binary missing, not a regular file, or not executable fails loudly
+# here, before anything launches, instead of testing someone else's binary
+# -- or nothing at all -- and calling it green.
+if [ -n "${SCOOT:-}" ]; then
+    SCOOT_SRC="environment"
+elif [ -n "${CARGO_TARGET_DIR:-}" ]; then
+    SCOOT="$CARGO_TARGET_DIR/debug/scoot"
+    SCOOT_SRC="default from CARGO_TARGET_DIR"
+else
+    SCOOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../target/debug/scoot"
+    SCOOT_SRC="default from the invoking tree"
+fi
+case "$SCOOT" in
+    */*) ;;
+    *)
+        SCOOT_ON_PATH=$(command -v "$SCOOT" || true)
+        if [ -z "$SCOOT_ON_PATH" ]; then
+            echo "error: SCOOT='$SCOOT' names no file and is not on PATH -- set SCOOT to the compositor binary to test"
+            exit 1
+        fi
+        case "$SCOOT_ON_PATH" in
+            */*) SCOOT="$SCOOT_ON_PATH" ;;
+            *) SCOOT="$PWD/$SCOOT_ON_PATH" ;;
+        esac
+        SCOOT_SRC="$SCOOT_SRC (on PATH at $SCOOT)"
+        ;;
+esac
+if [ ! -f "$SCOOT" ] || [ ! -x "$SCOOT" ]; then
+    echo "error: no compositor binary at SCOOT=$SCOOT ($SCOOT_SRC) -- set SCOOT explicitly or build first (cargo build -p scoot)"
+    exit 1
+fi
+if [ -n "${SCOOTCTL:-}" ]; then
+    SCOOTCTL_SRC="environment"
+else
+    SCOOTCTL="$(dirname "$SCOOT")/scootctl"
+    SCOOTCTL_SRC="default next to SCOOT (same build)"
+fi
+if [ ! -f "$SCOOTCTL" ] || [ ! -x "$SCOOTCTL" ]; then
+    echo "error: no client binary at SCOOTCTL=$SCOOTCTL ($SCOOTCTL_SRC) -- the split must ship both binaries; set SCOOTCTL explicitly or build first (cargo build -p scootctl)"
+    exit 1
+fi
+echo "--- binaries ---"
+echo "SCOOT=$SCOOT ($SCOOT_SRC)"
+ls -l "$SCOOT"
+echo "SCOOTCTL=$SCOOTCTL ($SCOOTCTL_SRC)"
+ls -l "$SCOOTCTL"
 # RENDERER picks which renderer composites the frames this run checks
 # (`pixman` -- the default when unset -- or `gles`, which needs --headless or
 # --nested; see README). Unset means the flag is not passed at all, so the
@@ -200,11 +273,9 @@ echo "--- scoot msg vs scootctl: same request, identical answer ---"
 # crate), so a request answered from either binary must be byte-identical on
 # stdout -- and a bad one must fail identically (same exit code, same message
 # past the `scoot: ` / `scootctl: ` prefix). `windows` is compared here, with
-# two terminals mapped, rather than above, so the reply is non-empty.
-if [ ! -x "$SCOOTCTL" ]; then
-    echo "BUG: no client binary at SCOOTCTL=$SCOOTCTL -- the split must ship both binaries"
-    exit 1
-fi
+# two terminals mapped, rather than above, so the reply is non-empty. (Both
+# binaries were checked present and executable up front in the resolution
+# block, so a failure here is a real divergence, not a missing file.)
 # One request answered by both clients: same stdout bytes AND same exit code.
 # `cmp <(...)` alone would pass vacuously if both sides failed identically, so
 # the codes are captured alongside the bytes (the `|| code=$?` guard, not a
