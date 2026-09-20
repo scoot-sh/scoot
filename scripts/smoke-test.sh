@@ -205,19 +205,34 @@ if [ ! -x "$SCOOTCTL" ]; then
     echo "BUG: no client binary at SCOOTCTL=$SCOOTCTL -- the split must ship both binaries"
     exit 1
 fi
-cmp <("$SCOOT" msg version) <("$SCOOTCTL" version) \
-    || { echo "BUG: version differs between scoot msg and scootctl"; exit 1; }
-cmp <("$SCOOT" msg windows) <("$SCOOTCTL" windows) \
-    || { echo "BUG: windows differs between scoot msg and scootctl"; exit 1; }
-cmp <("$SCOOT" msg outputs) <("$SCOOTCTL" outputs) \
-    || { echo "BUG: outputs differs between scoot msg and scootctl"; exit 1; }
+# One request answered by both clients: same stdout bytes AND same exit code.
+# `cmp <(...)` alone would pass vacuously if both sides failed identically, so
+# the codes are captured alongside the bytes (the `|| code=$?` guard, not a
+# bare capture: a failing client trips `set -e`, as above).
+same_answer() {
+    desc=$1; shift
+    prefix=${SMOKE_PREFIX:-/tmp/scoot-smoke}
+    alias_out="$prefix-equiv-alias.out"
+    ctl_out="$prefix-equiv-ctl.out"
+    alias_code=0
+    "$SCOOT" msg "$@" >"$alias_out" || alias_code=$?
+    ctl_code=0
+    "$SCOOTCTL" "$@" >"$ctl_out" || ctl_code=$?
+    cmp "$alias_out" "$ctl_out" \
+        || { echo "BUG: $desc differs between scoot msg and scootctl"; exit 1; }
+    if [ "$alias_code" != "$ctl_code" ]; then
+        echo "BUG: $desc exits $alias_code via scoot msg but $ctl_code via scootctl"
+        exit 1
+    fi
+}
+same_answer "version" version
+same_answer "windows" windows
+same_answer "outputs" outputs
 # Screenshots of the same settled screen must be the same PNG, byte for byte.
 "$SCOOT" msg wait-idle --quiet-ms 500 --timeout-ms 10000
-cmp <("$SCOOT" msg screenshot) <("$SCOOTCTL" screenshot) \
-    || { echo "BUG: screenshot bytes differ between scoot msg and scootctl"; exit 1; }
+same_answer "screenshot bytes" screenshot
 # `action` replies and malformed-arg errors, same treatment.
-cmp <("$SCOOT" msg action focus-column left) <("$SCOOTCTL" action focus-column left) \
-    || { echo "BUG: an action reply differs between scoot msg and scootctl"; exit 1; }
+same_answer "an action reply" action focus-column left
 for bad in "frobnicate" "pointer move x 1" "action focus-column sideways"; do
     # `|| code=$?` (not a bare capture): a failing client inside `$(...)`
     # trips `set -e` on the assignment itself, so the exit code is taken in

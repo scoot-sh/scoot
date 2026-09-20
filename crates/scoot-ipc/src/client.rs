@@ -1,4 +1,4 @@
-//! A blocking client: enough for scripts, agents and `scoot msg`.
+//! A blocking client: enough for scripts, agents, `scootctl`, and its `scoot msg` alias.
 
 use std::io::{self, BufReader};
 use std::os::unix::net::UnixStream;
