@@ -76,6 +76,8 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[`scoot --help` hides `--renderer` under `--tty`](docs/backlog/resolved/cli-help-tty-missing-renderer-done.md)**
+  (2026-09-20) — one-line `--help` fix plus a usage-vs-parser pinning test; no behavior change, no README change (it was already right).
 - **[README audit +
   tightening](docs/backlog/resolved/readme-rewrite-done.md)**
   (2026-09-20) — the last item of the 2026-09-19 directed queue, worked as an

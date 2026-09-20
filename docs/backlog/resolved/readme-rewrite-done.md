@@ -60,7 +60,7 @@ are all "present but wrong", not "present but noisy".
   correctly; macOS story (Darwin default is `scootctl`, flake Darwin is
   Apple-Silicon-only) verified against `flake.nix:17-21,189-205` and
   `nix flake show`. **Filed, not fixed:
-  `docs/backlog/config/cli-help-tty-missing-renderer.md`** — the `--tty`
+  `docs/backlog/resolved/cli-help-tty-missing-renderer-done.md`** — the `--tty`
   usage line omits `[--renderer pixman|gles]` though the parser accepts it
   on all backends and the docs advertise `--tty --renderer gles`.
 - **What-works anchors vs `docs/protocols.md`: all resolve; the dmabuf
@@ -101,7 +101,7 @@ are all "present but wrong", not "present but noisy".
 ## Out of scope, as filed
 
 - The `--help`/`--tty`/`--renderer` mismatch above (filed as
-  `docs/backlog/config/cli-help-tty-missing-renderer.md`, not fixed —
+  `docs/backlog/resolved/cli-help-tty-missing-renderer-done.md`, not fixed —
   docs-only PR).
 - No code, no wire, no `PROTOCOL_VERSION` change. `cargo fmt` / `clippy`
   untouched — no code changed, so there was nothing for them to check.

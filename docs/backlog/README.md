@@ -505,9 +505,11 @@ be revisited.
 - [No way to emit a default config file](./config/default-config-command.md)
   — `--config PATH` reads one, nothing writes one. Wants generating from
   `Config::default()` rather than a hand-maintained string, or it drifts.
-- [`scoot --help` hides `--renderer` under `--tty`](./config/cli-help-tty-missing-renderer.md)
-  — the parser accepts it on all backends and the docs show it there, but the
-  `--tty` usage line omits it. One-line fix plus a usage-vs-parser pinning test.
+- [`scoot --help` hides `--renderer` under `--tty`](./resolved/cli-help-tty-missing-renderer-done.md)
+  — RESOLVED 2026-09-20: one-line `--help` fix (`--tty` usage line names
+  `[--renderer pixman|gles]`, no behavior change) plus a usage-vs-parser
+  pinning test; the stale unconditional `--tty`-warns-and-keeps-pixman
+  claim corrected everywhere it appeared.
 - [CPU vs GPU rendering has never been measured on a real GPU](./rendering/gpu-vs-cpu-measured.md)
   — **HIGH**, blocked on the user's Asahi machine. Every GPU number the
   project has is llvmpipe's. What *is* known: offscreen GLES cost 17–32x

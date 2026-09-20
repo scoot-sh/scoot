@@ -97,8 +97,10 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
     // Resolved before `State::new` for the same reason the config is: the
     // renderer is fixed for the process's life, and `State` carries it so a
     // later resize rebuilds the pipeline this session started with. `--tty`
-    // is handled inside `resolve` (it warns and keeps pixman -- there is no
-    // GPU scanout path yet), which is why it takes the flag rather than
+    // is handled inside `resolve` (without the `gpu-scanout` feature it
+    // warns and keeps pixman; with it, `--tty --renderer gles` selects the
+    // scanout tier, falling back in `tty::init` when the device cannot
+    // drive it), which is why it takes the flag rather than
     // reading it back out afterwards.
     let renderer = render::resolve(options.renderer, loaded.renderer, options.tty);
 
