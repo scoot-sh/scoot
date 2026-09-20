@@ -4,6 +4,10 @@ Everything a keybinding can do, and everything a user can type or click, is
 also a request on a Unix socket. This page is the reference for scripts and
 for agents doing computer-use tasks.
 
+The client is `scootctl`; `scoot msg ...` is the same client kept as a
+permanent alias on the compositor binary. Every `scootctl` example below
+works with `scoot msg` in its place, byte for byte.
+
 - [The socket](#the-socket)
 - [Requests](#requests)
 - [Actions](#actions)
@@ -20,19 +24,19 @@ in `$XDG_RUNTIME_DIR/scoot.sock`, is created `0600`, and serves only
 connections from the same user as the compositor. A missing
 `$XDG_RUNTIME_DIR` is a one-line startup error.
 
-Override the path with `$SCOOT_SOCKET` (read by both the compositor and
-`scoot msg`) or with `--socket PATH` on the compositor. Running two
+Override the path with `$SCOOT_SOCKET` (read by the compositor and
+`scootctl`) or with `--socket PATH` on the compositor. Running two
 compositors at once means giving each its own socket.
 
-`scoot msg` opens one connection per invocation and closes it as soon as it
+`scootctl` opens one connection per invocation and closes it as soon as it
 has its answer. A client that wants many requests should pipeline them on
 *one* connection rather than open a connection per request — the
 per-connection bounds below are what keep the socket fair, and reconnecting
 resets them.
 
-`scoot msg` prints an `error` reply and exits non-zero. The client half of
-the protocol builds on every platform, so a Mac can drive a compositor
-running in a VM.
+`scootctl` prints an `error` reply and exits non-zero. The client builds on
+every platform -- `scootctl` is the macOS package -- so a Mac can drive a
+compositor running in a VM.
 
 ## Requests
 
@@ -52,17 +56,18 @@ running in a VM.
 | `wait-idle [--quiet-ms N] [--timeout-ms N]` | Block until nothing on screen has redrawn for `--quiet-ms` (default 200), giving up after `--timeout-ms` (default 5000). |
 
 ```sh
-scoot msg windows
-scoot msg action focus-column left
-scoot msg screenshot --out /tmp/shot.png
-scoot msg type "hello"
-scoot msg wait-idle --quiet-ms 200
+scootctl windows
+scootctl action focus-column left
+scootctl screenshot --out /tmp/shot.png
+scootctl type "hello"
+scootctl wait-idle --quiet-ms 200
 ```
 
 ## Actions
 
-The same grammar `scoot --help` prints, and the same one a config file's
-`[binds]` values use — one parser handles both.
+The same grammar `scootctl --help` prints -- and `scoot --help` embeds --
+and the same one a config file's `[binds]` values use: one parser handles
+all three.
 
 ```
 focus-column|move-column|consume-or-expel   left|right
@@ -78,7 +83,7 @@ is locked.
 
 ## `type` vs `key`
 
-**`scoot msg type TEXT` types text the way a person would**, on whatever
+**`scootctl type TEXT` types text the way a person would**, on whatever
 keyboard layout the session is running: for each character it finds the key
 that carries it and holds down whatever modifiers that key's level needs —
 Shift for `A` or `!`, AltGr for a German layout's `@` — so a client receives
@@ -114,12 +119,12 @@ characters type on every one of the fourteen swept Latin layouts (`us`,
   plus a key; if a character does hit a bind, the compositor logs a warning
   naming it rather than swallowing it silently.
 
-**`scoot msg key COMBO` is not the same.** It presses exactly the
+**`scootctl key COMBO` is not the same.** It presses exactly the
 combination named and holds exactly the modifiers named, nothing more. Name
 the key as it is with nothing held, plus the modifiers: `shift+1`, not
 `exclam`; `shift+a`, not `A`. A name this layout only carries above its
 unmodified level is refused, because the key that carries it types a
-*different* character when pressed bare — `scoot msg key exclam` would press
+*different* character when pressed bare — `scootctl key exclam` would press
 the `1` key and deliver `1`. Some characters can't be named as a combination
 at all (`@` on a German layout needs AltGr, which `key` has no name for);
 `type` is the one that works the modifiers out from the layout, and the one
@@ -168,8 +173,8 @@ to `rect`), and an omitted `scale` decodes as `1.0`.
 
 ## Rules an agent needs
 
-**Window focus and keyboard focus are separate.** `scoot msg windows`'
-`focused` flag, the focus ring and `scoot msg action focus-*` all mean the
+**Window focus and keyboard focus are separate.** `scootctl windows`'
+`focused` flag, the focus ring and `scootctl action focus-*` all mean the
 *window*. A layer surface holding the keyboard (a launcher like `fuzzel` or
 `wofi`, a bar's search field) never appears there — what `windows` reports is
 where focus returns to once that surface goes away. So if a launcher is up,
@@ -257,7 +262,7 @@ socket, and the other shortens a wait rather than refusing it.
   own reply still has to go out before any later reply on that same
   connection, or a client reading replies in request order sees them swap.
   Any other request arriving on a connection with a capture in flight is
-  refused with a retry rather than answered out of order. `scoot msg` sends
+  refused with a retry rather than answered out of order. `scootctl` sends
   one request per connection and never meets this; nor does a capture refuse
   one on *another* connection. A capture whose earlier replies are still
   going out is refused the same way — retry once the queue has drained.

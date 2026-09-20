@@ -1,0 +1,11 @@
+[package]
+name = "scootctl"
+description = "Remote-control client for the scoot scrolling-tiling Wayland compositor"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+scoot-ipc.workspace = true
+serde_json.workspace = true

@@ -31,6 +31,11 @@ set -euo pipefail
 
 MODE=${MODE:---headless}
 SCOOT=${SCOOT:-/var/cargo-target/debug/scoot}
+# SCOOTCTL is the standalone client under test next to the compositor: the
+# `scoot msg` alias parses and runs through the same crate, so every request
+# below is answered by both binaries in the equivalence section and must come
+# back byte-identical.
+SCOOTCTL=${SCOOTCTL:-"$(dirname "$SCOOT")/scootctl"}
 # RENDERER picks which renderer composites the frames this run checks
 # (`pixman` -- the default when unset -- or `gles`, which needs --headless or
 # --nested; see README). Unset means the flag is not passed at all, so the
@@ -189,6 +194,52 @@ if [ "$mapped" -ne 1 ]; then
     exit 1
 fi
 "$SCOOT" msg windows
+
+echo "--- scoot msg vs scootctl: same request, identical answer ---"
+# The alias is the same client (it parses and runs through the scootctl
+# crate), so a request answered from either binary must be byte-identical on
+# stdout -- and a bad one must fail identically (same exit code, same message
+# past the `scoot: ` / `scootctl: ` prefix). `windows` is compared here, with
+# two terminals mapped, rather than above, so the reply is non-empty.
+if [ ! -x "$SCOOTCTL" ]; then
+    echo "BUG: no client binary at SCOOTCTL=$SCOOTCTL -- the split must ship both binaries"
+    exit 1
+fi
+cmp <("$SCOOT" msg version) <("$SCOOTCTL" version) \
+    || { echo "BUG: version differs between scoot msg and scootctl"; exit 1; }
+cmp <("$SCOOT" msg windows) <("$SCOOTCTL" windows) \
+    || { echo "BUG: windows differs between scoot msg and scootctl"; exit 1; }
+cmp <("$SCOOT" msg outputs) <("$SCOOTCTL" outputs) \
+    || { echo "BUG: outputs differs between scoot msg and scootctl"; exit 1; }
+# Screenshots of the same settled screen must be the same PNG, byte for byte.
+"$SCOOT" msg wait-idle --quiet-ms 500 --timeout-ms 10000
+cmp <("$SCOOT" msg screenshot) <("$SCOOTCTL" screenshot) \
+    || { echo "BUG: screenshot bytes differ between scoot msg and scootctl"; exit 1; }
+# `action` replies and malformed-arg errors, same treatment.
+cmp <("$SCOOT" msg action focus-column left) <("$SCOOTCTL" action focus-column left) \
+    || { echo "BUG: an action reply differs between scoot msg and scootctl"; exit 1; }
+for bad in "frobnicate" "pointer move x 1" "action focus-column sideways"; do
+    # `|| code=$?` (not a bare capture): a failing client inside `$(...)`
+    # trips `set -e` on the assignment itself, so the exit code is taken in
+    # the guard. `$bad` splits on purpose -- each entry is a word list.
+    alias_code=0
+    # shellcheck disable=SC2086
+    alias_err=$("$SCOOT" msg $bad 2>&1) || alias_code=$?
+    ctl_code=0
+    # shellcheck disable=SC2086
+    ctl_err=$("$SCOOTCTL" $bad 2>&1) || ctl_code=$?
+    if [ "$alias_code" = "0" ] || [ "$ctl_code" = "0" ]; then
+        echo "BUG: '$bad' unexpectedly succeeded from one client ($alias_code vs $ctl_code)"
+        exit 1
+    fi
+    if [ "$alias_code" != "$ctl_code" ] || [ "${alias_err#scoot: }" != "${ctl_err#scootctl: }" ]; then
+        echo "BUG: '$bad' fails differently between scoot msg and scootctl"
+        echo "  scoot msg: exit $alias_code: $alias_err"
+        echo "  scootctl:  exit $ctl_code: $ctl_err"
+        exit 1
+    fi
+done
+echo "ok: scoot msg and scootctl answer identically"
 
 echo "--- checking the spawned terminal got an activation token ---"
 # State::spawn mints an xdg-activation token per child

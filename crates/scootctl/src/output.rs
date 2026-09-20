@@ -1,5 +1,5 @@
-//! Stdout/stderr writes for the client half of this binary (`msg`,
-//! `--help`) that survive a closed pipe.
+//! Stdout/stderr writes for the client (`scootctl`, and the `scoot msg`
+//! alias through it) that survive a closed pipe.
 //!
 //! Rust ignores SIGPIPE process-wide, so a `println!` to a closed stdout
 //! panics (`failed printing to stdout: Broken pipe`, exit 101) instead of
@@ -11,12 +11,12 @@
 //! EPIPE is mapped only here, at the stdio edge, and never inside
 //! `scoot_ipc::Client`.
 //!
-//! Deliberately *not* a restored SIGPIPE disposition: this binary also
-//! hosts the compositor, which must never die to a signal because one IPC
-//! peer stopped reading, and the disposition is process-wide -- placing it
-//! on a client-only path would leave a future refactor one move away from
-//! handing the compositor a crash-on-disconnect. Per-write handling keeps
-//! the two halves' failure modes separate with safe code and no new
+//! Deliberately *not* a restored SIGPIPE disposition: the `scoot` binary
+//! also hosts the compositor, which must never die to a signal because one
+//! IPC peer stopped reading, and the disposition is process-wide -- placing
+//! it on a client-only path would leave a future refactor one move away
+//! from handing the compositor a crash-on-disconnect. Per-write handling
+//! keeps the two halves' failure modes separate with safe code and no new
 //! dependencies (the alternative needs `unsafe` to set a process-wide
 //! disposition for what is really a per-write concern).
 //!

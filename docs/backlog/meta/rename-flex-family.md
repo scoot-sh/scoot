@@ -59,7 +59,15 @@ later grep for `flexwm` does not read as unfinished work:
   open question this entry carried: the role files do rename, just not from
   inside an agent session.
 
-## What remains: `scootctl`
+## What remains: `scootctl` — LANDED
+
+> **Resolved — see
+> [`docs/backlog/resolved/scootctl-split-done.md`](../resolved/scootctl-split-done.md).**
+> New `scootctl` lib+bin crate; `scoot msg` kept as a permanent alias
+> parsing/running through it; Darwin default is now `scootctl`; no wire
+> change. The design answers below all held as written. Follow-ups live in
+> the resolved record (`--print-default-config`, a possible future `scoot
+> msg` removal), not here.
 
 Unchanged in substance from the original entry (below), with `flexctl` read as
 `scootctl`: today `scoot msg …` (and `type`/`key`/etc.) is one `Command`

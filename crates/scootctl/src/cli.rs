@@ -1,0 +1,485 @@
+//! Argument parsing for the client: one request per invocation.
+//!
+//! This module owns the whole client surface -- the request grammar, the
+//! `Error` display strings (several are byte-pinned by tests, e.g. the
+//! `OutOfRange` echo, so they must not drift), and the help text. Both
+//! front-ends (`scootctl` directly, `scoot msg` as its alias) parse through
+//! here.
+//!
+//! The help text is single-sourced by construction: [`REQUESTS_HELP`] and
+//! [`ACTIONS_HELP`] are the one copy of the request/action grammar, and both
+//! this crate's [`USAGE`] and the compositor binary's `scoot --help` print
+//! those same blocks (a containment test here and one in `scoot`'s `cli`
+//! tests pin that -- `concat!` takes literals only, so the full help strings
+//! can't be composed from the fragments at compile time).
+
+use std::fmt;
+use std::path::PathBuf;
+
+use scoot_ipc::{Action, Horizontal, PointerButton, Request, Vertical};
+
+/// The request grammar both clients print in their `--help`. The single
+/// owner: `scoot --help` embeds this same block rather than a second copy.
+pub const REQUESTS_HELP: &str = "\
+    version | outputs | windows
+    action ACTION [ARGUMENT...]
+    screenshot [--output ID] [--out FILE]
+    pointer move X Y | pointer click X Y [left|right|middle]
+    pointer button left|right|middle press|release | pointer scroll DX DY
+    key COMBO                       e.g. Return, ctrl+shift+t -- name the key
+                                    as it is unmodified plus the modifiers to
+                                    hold (shift+1, not exclam)
+    type TEXT                       types text, working out each character's
+                                    own modifiers from the active layout
+    wait-idle [--quiet-ms N] [--timeout-ms N]
+";
+
+/// The action grammar both clients print in their `--help`. Same single-owner
+/// arrangement as [`REQUESTS_HELP`]; also the grammar a config file's
+/// `[binds]` values use (see [`action`]).
+pub const ACTIONS_HELP: &str = "\
+    focus-column|move-column|consume-or-expel   left|right
+    focus-window|move-window                    up|down
+    focus-workspace|move-window-to-workspace    up|down
+    focus-window-id ID | focus-workspace-index N | cycle-column-width | close | spawn COMMAND... | quit
+";
+
+pub const USAGE: &str = "\
+scootctl -- remote-control client for the scoot Wayland compositor
+
+USAGE:
+    scootctl REQUEST
+    scootctl --help
+
+REQUESTS:
+    version | outputs | windows
+    action ACTION [ARGUMENT...]
+    screenshot [--output ID] [--out FILE]
+    pointer move X Y | pointer click X Y [left|right|middle]
+    pointer button left|right|middle press|release | pointer scroll DX DY
+    key COMBO                       e.g. Return, ctrl+shift+t -- name the key
+                                    as it is unmodified plus the modifiers to
+                                    hold (shift+1, not exclam)
+    type TEXT                       types text, working out each character's
+                                    own modifiers from the active layout
+    wait-idle [--quiet-ms N] [--timeout-ms N]
+
+ACTIONS:
+    focus-column|move-column|consume-or-expel   left|right
+    focus-window|move-window                    up|down
+    focus-workspace|move-window-to-workspace    up|down
+    focus-window-id ID | focus-workspace-index N | cycle-column-width | close | spawn COMMAND... | quit
+";
+
+#[derive(Debug, PartialEq)]
+pub enum Command {
+    Help,
+    Msg {
+        request: Request,
+        out: Option<PathBuf>,
+    },
+}
+
+/// One parsed client invocation: the request to send, plus where a
+/// screenshot's PNG goes (`None` means stdout).
+#[derive(Debug, PartialEq)]
+pub struct Msg {
+    pub request: Request,
+    pub out: Option<PathBuf>,
+}
+
+#[derive(Debug, PartialEq)]
+pub enum Error {
+    Unknown(String),
+    Missing(&'static str),
+    Invalid {
+        what: &'static str,
+        value: String,
+    },
+    OutOfRange {
+        what: &'static str,
+        value: String,
+        min: i32,
+        max: i32,
+    },
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Unknown(what) => write!(f, "unknown argument `{what}` (try --help)"),
+            Self::Missing(what) => write!(f, "missing {what} (try --help)"),
+            Self::Invalid { what, value } => write!(f, "invalid {what}: `{value}`"),
+            Self::OutOfRange {
+                what,
+                value,
+                min,
+                max,
+            } => write!(f, "invalid {what}: `{value}` (expected {min}-{max})"),
+        }
+    }
+}
+
+impl std::error::Error for Error {}
+
+/// Parses a full client argv (without the program name): `--help` (or
+/// nothing) is help, anything else is a request verb.
+///
+/// Collects into one `Vec` first so the verb stays at the head for
+/// [`parse_msg`]'s contract -- a cold path (one process per invocation), so
+/// the single small allocation is not load-bearing.
+pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Command, Error> {
+    let args: Vec<String> = args.into_iter().collect();
+    match args.first().map(String::as_str) {
+        None | Some("--help" | "-h" | "help") => Ok(Command::Help),
+        Some(_) => {
+            let Msg { request, out } = message(args.into_iter())?;
+            Ok(Command::Msg { request, out })
+        }
+    }
+}
+
+/// Parses the arguments after the request verb (`scootctl windows ...`, or
+/// `scoot msg windows ...` with `msg` already stripped): the verb plus its
+/// flags into a [`Msg`].
+pub fn parse_msg<I: IntoIterator<Item = String>>(args: I) -> Result<Msg, Error> {
+    message(args.into_iter())
+}
+
+fn message(mut args: impl Iterator<Item = String>) -> Result<Msg, Error> {
+    let verb = args.next().ok_or(Error::Missing("a request"))?;
+    let mut out = None;
+    let request = match verb.as_str() {
+        "version" => Request::Version,
+        "outputs" => Request::Outputs,
+        "windows" => Request::Windows,
+        "action" => Request::Action(action(&mut args)?),
+        "screenshot" => {
+            let mut output = None;
+            while let Some(flag) = args.next() {
+                match flag.as_str() {
+                    "--output" => output = Some(number::<u64>("--output", args.next())?),
+                    "--out" => {
+                        out = Some(PathBuf::from(
+                            args.next().ok_or(Error::Missing("a path after --out"))?,
+                        ))
+                    }
+                    other => return Err(Error::Unknown(other.to_owned())),
+                }
+            }
+            Request::Screenshot { output }
+        }
+        "pointer" => pointer(&mut args)?,
+        "key" => {
+            let combo = args.next().ok_or(Error::Missing("a key combination"))?;
+            Request::Key {
+                keys: combo.parse().map_err(|_| Error::Invalid {
+                    what: "key combination",
+                    value: combo.clone(),
+                })?,
+            }
+        }
+        "type" => Request::Type {
+            text: args.collect::<Vec<_>>().join(" "),
+        },
+        "wait-idle" => {
+            let mut quiet_ms = 200;
+            let mut timeout_ms = 5000;
+            while let Some(flag) = args.next() {
+                match flag.as_str() {
+                    "--quiet-ms" => quiet_ms = number("--quiet-ms", args.next())?,
+                    "--timeout-ms" => timeout_ms = number("--timeout-ms", args.next())?,
+                    other => return Err(Error::Unknown(other.to_owned())),
+                }
+            }
+            Request::WaitIdle {
+                quiet_ms,
+                timeout_ms,
+            }
+        }
+        other => return Err(Error::Unknown(other.to_owned())),
+    };
+    Ok(Msg { request, out })
+}
+
+/// Parses one action and its arguments (`"focus-column" "left"`, ...) the
+/// same way for both `scootctl action ...` (and its `scoot msg action ...`
+/// alias) and a config file's `[binds]` values (see
+/// `scoot::compositor::config::parse_bind`) -- one grammar, one parser,
+/// rather than a second copy for the config-file case.
+pub fn action(args: &mut impl Iterator<Item = String>) -> Result<Action, Error> {
+    let name = args.next().ok_or(Error::Missing("an action"))?;
+    let action = match name.as_str() {
+        "focus-column" => Action::FocusColumn {
+            direction: horizontal(args)?,
+        },
+        "move-column" => Action::MoveColumn {
+            direction: horizontal(args)?,
+        },
+        "consume-or-expel" => Action::ConsumeOrExpel {
+            direction: horizontal(args)?,
+        },
+        "focus-window" => Action::FocusWindow {
+            direction: vertical(args)?,
+        },
+        "move-window" => Action::MoveWindow {
+            direction: vertical(args)?,
+        },
+        "focus-workspace" => Action::FocusWorkspace {
+            direction: vertical(args)?,
+        },
+        "move-window-to-workspace" => Action::MoveWindowToWorkspace {
+            direction: vertical(args)?,
+        },
+        "focus-window-id" => Action::FocusWindowId {
+            id: number("a window id", args.next())?,
+        },
+        "focus-workspace-index" => Action::FocusWorkspaceIndex {
+            index: number("a workspace index", args.next())?,
+        },
+        "cycle-column-width" => Action::CycleColumnWidth,
+        "close" => Action::CloseFocused,
+        "spawn" => {
+            let command: Vec<String> = args.collect();
+            if command.is_empty() {
+                return Err(Error::Missing("a command to spawn"));
+            }
+            Action::Spawn { command }
+        }
+        "quit" => Action::Quit,
+        other => return Err(Error::Unknown(other.to_owned())),
+    };
+    Ok(action)
+}
+
+fn pointer(args: &mut impl Iterator<Item = String>) -> Result<Request, Error> {
+    let kind = args.next().ok_or(Error::Missing("a pointer request"))?;
+    let request = match kind.as_str() {
+        "move" => Request::PointerMove {
+            x: number("x", args.next())?,
+            y: number("y", args.next())?,
+        },
+        "click" => Request::Click {
+            x: number("x", args.next())?,
+            y: number("y", args.next())?,
+            button: args
+                .next()
+                .map(|b| button(&b))
+                .transpose()?
+                .unwrap_or_default(),
+        },
+        "button" => {
+            let which = args.next().ok_or(Error::Missing("a button"))?;
+            let state = args.next().ok_or(Error::Missing("press or release"))?;
+            Request::PointerButton {
+                button: button(&which)?,
+                pressed: match state.as_str() {
+                    "press" => true,
+                    "release" => false,
+                    _ => {
+                        return Err(Error::Invalid {
+                            what: "button state",
+                            value: state,
+                        });
+                    }
+                },
+            }
+        }
+        "scroll" => Request::Scroll {
+            dx: number("dx", args.next())?,
+            dy: number("dy", args.next())?,
+        },
+        other => return Err(Error::Unknown(other.to_owned())),
+    };
+    Ok(request)
+}
+
+fn button(name: &str) -> Result<PointerButton, Error> {
+    match name {
+        "left" => Ok(PointerButton::Left),
+        "right" => Ok(PointerButton::Right),
+        "middle" => Ok(PointerButton::Middle),
+        other => Err(Error::Invalid {
+            what: "button",
+            value: other.to_owned(),
+        }),
+    }
+}
+
+fn horizontal(args: &mut impl Iterator<Item = String>) -> Result<Horizontal, Error> {
+    match args.next().ok_or(Error::Missing("left or right"))?.as_str() {
+        "left" => Ok(Horizontal::Left),
+        "right" => Ok(Horizontal::Right),
+        other => Err(Error::Invalid {
+            what: "direction",
+            value: other.to_owned(),
+        }),
+    }
+}
+
+fn vertical(args: &mut impl Iterator<Item = String>) -> Result<Vertical, Error> {
+    match args.next().ok_or(Error::Missing("up or down"))?.as_str() {
+        "up" => Ok(Vertical::Up),
+        "down" => Ok(Vertical::Down),
+        other => Err(Error::Invalid {
+            what: "direction",
+            value: other.to_owned(),
+        }),
+    }
+}
+
+fn number<T: std::str::FromStr>(what: &'static str, value: Option<String>) -> Result<T, Error> {
+    let value = value.ok_or(Error::Missing(what))?;
+    value.parse().map_err(|_| Error::Invalid {
+        what,
+        value: value.clone(),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse_msg_args(args: &[&str]) -> Result<Msg, Error> {
+        parse_msg(args.iter().map(|a| (*a).to_owned()))
+    }
+
+    fn parse_args(args: &[&str]) -> Result<Command, Error> {
+        parse(args.iter().map(|a| (*a).to_owned()))
+    }
+
+    #[test]
+    fn no_arguments_and_help_flags_print_help() {
+        assert_eq!(parse_args(&[]), Ok(Command::Help));
+        for flag in ["--help", "-h", "help"] {
+            assert_eq!(parse_args(&[flag]), Ok(Command::Help), "{flag}");
+        }
+    }
+
+    #[test]
+    fn usage_prints_the_shared_grammar_blocks() {
+        // The single-ownership pin: the full help text embeds the same two
+        // blocks `scoot --help` embeds (pinned from that side in scoot's
+        // `cli` tests), so editing one copy without the other fails here.
+        assert!(USAGE.contains(REQUESTS_HELP), "USAGE lost REQUESTS_HELP");
+        assert!(USAGE.contains(ACTIONS_HELP), "USAGE lost ACTIONS_HELP");
+    }
+
+    #[test]
+    fn a_bare_request_parses() {
+        assert_eq!(
+            parse_args(&["windows"]),
+            Ok(Command::Msg {
+                request: Request::Windows,
+                out: None,
+            })
+        );
+        assert_eq!(
+            parse_args(&["version"]),
+            Ok(Command::Msg {
+                request: Request::Version,
+                out: None,
+            })
+        );
+    }
+
+    #[test]
+    fn actions_take_their_direction() {
+        assert_eq!(
+            parse_msg_args(&["action", "focus-column", "left"]),
+            Ok(Msg {
+                request: Request::Action(Action::FocusColumn {
+                    direction: Horizontal::Left
+                }),
+                out: None,
+            })
+        );
+    }
+
+    #[test]
+    fn focus_workspace_index_takes_a_number() {
+        assert_eq!(
+            parse_msg_args(&["action", "focus-workspace-index", "2"]),
+            Ok(Msg {
+                request: Request::Action(Action::FocusWorkspaceIndex { index: 2 }),
+                out: None,
+            })
+        );
+        // ...which is a number, not a direction: sharing the
+        // `focus-workspace` name would make `up`/`down` and `2` ambiguous.
+        assert!(parse_msg_args(&["action", "focus-workspace-index", "down"]).is_err());
+    }
+
+    #[test]
+    fn spawn_takes_the_rest_of_the_line() {
+        let Ok(Msg { request, .. }) = parse_msg_args(&["action", "spawn", "foot", "-e", "htop"])
+        else {
+            panic!("expected a message");
+        };
+        assert_eq!(
+            request,
+            Request::Action(Action::Spawn {
+                command: vec!["foot".into(), "-e".into(), "htop".into()]
+            })
+        );
+    }
+
+    #[test]
+    fn typing_keeps_the_words_together() {
+        let Ok(Msg { request, .. }) = parse_msg_args(&["type", "hello", "there"]) else {
+            panic!("expected a message");
+        };
+        assert_eq!(
+            request,
+            Request::Type {
+                text: "hello there".into()
+            }
+        );
+    }
+
+    #[test]
+    fn screenshot_flags_split_between_request_and_output_file() {
+        assert_eq!(
+            parse_msg_args(&["screenshot", "--output", "2", "--out", "/tmp/shot.png"]),
+            Ok(Msg {
+                request: Request::Screenshot { output: Some(2) },
+                out: Some(PathBuf::from("/tmp/shot.png")),
+            })
+        );
+    }
+
+    #[test]
+    fn pointer_requests_parse() {
+        assert_eq!(
+            parse_msg_args(&["pointer", "click", "10", "20"]),
+            Ok(Msg {
+                request: Request::Click {
+                    x: 10.0,
+                    y: 20.0,
+                    button: PointerButton::Left
+                },
+                out: None,
+            })
+        );
+    }
+
+    #[test]
+    fn bad_input_explains_itself() {
+        assert_eq!(parse_args(&["fly"]), Err(Error::Unknown("fly".into())));
+        assert_eq!(parse_msg_args(&[]), Err(Error::Missing("a request")));
+        assert_eq!(
+            parse_msg_args(&["action", "focus-column", "sideways"]),
+            Err(Error::Invalid {
+                what: "direction",
+                value: "sideways".into()
+            })
+        );
+        assert_eq!(
+            parse_msg_args(&["pointer", "move", "x", "1"]),
+            Err(Error::Invalid {
+                what: "x",
+                value: "x".into()
+            })
+        );
+    }
+}

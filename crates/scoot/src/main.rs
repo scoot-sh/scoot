@@ -1,8 +1,11 @@
-//! scoot: the compositor, and the client that drives it.
+//! scoot: the compositor, with the `msg` client alias.
+//!
+//! Starting the session is this binary's own job; talking to a running one
+//! is `scootctl`'s. `scoot msg ...` stays as a permanent alias for it --
+//! parsed and run through that crate, never reimplemented here, so the two
+//! entry points cannot drift.
 
 mod cli;
-mod msg;
-mod output;
 
 #[cfg(target_os = "linux")]
 mod compositor;
@@ -16,9 +19,9 @@ fn main() -> ExitCode {
         Err(error) => {
             // Infallible by design: if stderr is closed too, there is
             // nowhere to report to, and `eprintln!` would panic (exit 101)
-            // on the EPIPE -- the same class of bug `output` fixes on
-            // stdout. The process still exits FAILURE either way.
-            output::warn(format_args!("scoot: {error}"));
+            // on the EPIPE -- the same class of bug `scootctl::output` fixes
+            // on stdout. The process still exits FAILURE either way.
+            scootctl::output::warn(format_args!("scoot: {error}"));
             ExitCode::FAILURE
         }
     }
@@ -30,10 +33,10 @@ fn run() -> Result<(), Box<dyn Error>> {
             // `cli::USAGE` already ends in a newline, so `write_str`, not
             // `print_line`. A closed pipe is a quiet success here too:
             // `scoot --help | head -1` exits 0.
-            output::write_str(cli::USAGE)?;
+            scootctl::output::write_str(cli::USAGE)?;
             Ok(())
         }
-        cli::Command::Msg { request, out } => msg::run(&request, out.as_deref()),
+        cli::Command::Msg { request, out } => scootctl::run(&request, out.as_deref()),
         cli::Command::Compositor(options) => start_compositor(options),
     }
 }

@@ -30,6 +30,7 @@ gpu-scanout = ["smithay/backend_gbm"]
 [dependencies]
 scoot-core.workspace = true
 scoot-ipc = { workspace = true, features = ["core"] }
+scootctl.workspace = true
 serde_json.workspace = true
 
 # libinput-sys (unlike libseat-sys/udev-sys/xkbcommon-sys, which all use

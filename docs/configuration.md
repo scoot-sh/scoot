@@ -12,13 +12,18 @@
 scoot --headless [--width 1-65535] [--height 1-65535] [--outputs 1-8] [--renderer pixman|gles] [--socket PATH] [--config PATH] [-- COMMAND...]
 scoot --nested   [--width 1-65535] [--height 1-65535] [--renderer pixman|gles] [--socket PATH] [--config PATH] [-- COMMAND...]
 scoot --tty      [--gpu PATH] [--mode WxH] [--renderer pixman|gles] [--socket PATH] [--config PATH] [-- COMMAND...]
-scoot msg REQUEST
+scoot msg REQUEST          # the scootctl client, kept as an alias (see below)
 scoot --help
 ```
 
+`scoot msg REQUEST` is byte-for-byte the `scootctl REQUEST` client kept on
+the compositor binary as a permanent alias -- agents reach for `scootctl`
+(see [ipc.md](ipc.md)); everything under `REQUEST` is documented there, not
+duplicated here.
+
 | Flag | Meaning |
 | --- | --- |
-| `--headless` | No display at all. Renders into a framebuffer that `scoot msg screenshot` reads. |
+| `--headless` | No display at all. Renders into a framebuffer that `scootctl screenshot` reads. |
 | `--nested` | Runs as a window inside an existing compositor. The session follows that window's size: resize it and the desktop inside resizes with it, for the life of the session. If the host cannot be followed to a new size (it could not be allocated), scoot logs it, stays at the size it was, and keeps running — the host letterboxes the difference. |
 | `--tty` | A real DRM/KMS + libseat + libinput session — see [tty.md](tty.md). |
 | `--width N`, `--height N` | The `--headless`/`--nested` output size, 1–65535 per axis — whatever DRM itself can report for a mode (`drm_mode_modeinfo` stores each axis in a `u16`), with room to spare past any real display. Anything else is a startup error naming the flag and the expected range (`invalid --width: '70000' (expected 1-65535)`), not a silently different size. Under `--nested` it is only the size scoot *asks* for: the host's first configure decides what the window comes up at, and every later one moves it. Under `--headless` it is the size for the whole session. |
@@ -34,7 +39,7 @@ scoot --help
 Environment scoot reads: `$XDG_RUNTIME_DIR` (required — a missing one is a
 one-line startup error), `$SCOOT_SOCKET`, `$XDG_CONFIG_HOME`,
 `$XCURSOR_THEME`, and the session locale (`$LC_ALL`, `$LC_CTYPE`, `$LANG`)
-for [`scoot msg type`](ipc.md#type-vs-key). Environment scoot exports to what
+for [`scootctl type`](ipc.md#type-vs-key). Environment scoot exports to what
 it spawns: `$WAYLAND_DISPLAY`, `$SCOOT_SOCKET`, `$XCURSOR_THEME`,
 `$XCURSOR_SIZE` and — unless the token table is full — a fresh
 `$XDG_ACTIVATION_TOKEN`. A token the compositor was itself started with is
@@ -52,7 +57,7 @@ What a second output **is**, today:
 - a real `wl_output` global with its own name (`headless`, `headless-2`, ...),
   its own mode and its own position in the global coordinate space, so a
   client can address it;
-- its own output in `scoot msg outputs`, with its own id, rectangle and name;
+- its own output in `scootctl outputs`, with its own id, rectangle and name;
 - its own workspaces and its own scrolling strip in the layout, so a window is
   on exactly one output and nothing scrolls across a boundary;
 - a layer surface naming it is configured against it and unmapped from it
@@ -64,7 +69,7 @@ What it is **not**, yet — the work tracked in
 
 - **nothing is composited on it.** scoot draws one framebuffer, the first
   output's. Nothing is displayed on a headless output in any case, but the
-  consequence to know is that `scoot msg screenshot --output 2` is *refused*
+  consequence to know is that `scootctl screenshot --output 2` is *refused*
   rather than answered from the first output's pixels — a picture of one
   screen labelled as another would be worse than an error.
 - a bar on a second output reserves no space anywhere (exclusive zones are
@@ -203,12 +208,13 @@ an ordinary modifier, so **a capital letter names the unshifted key, not
 Shift plus that key**: `"A"` means plain `a`, exactly like `"a"` — write
 `"shift+a"` for the Shift chord. Folding a bare capital logs a warning naming
 the bind; with Shift named there is nothing ambiguous, so `"shift+A"` folds
-quietly. Note `scoot msg key A` is a different story on purpose: it keeps
+quietly. Note `scootctl key A` is a different story on purpose: it keeps
 refusing, because pressing `A` with nothing held would type a different
 character.
 
 Action strings use the grammar in [ipc.md](ipc.md#actions) — one parser
-handles both `scoot msg action ...` and a config file's `[binds]` values:
+handles `scootctl action ...` (and its `scoot msg` alias) and a config file's
+`[binds]` values:
 
 ```
 focus-column|move-column|consume-or-expel   left|right
