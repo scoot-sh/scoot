@@ -86,9 +86,21 @@ impl World {
     /// width presets, which is why a reload may only shrink or grow
     /// `column_widths` through the compositor's refusal path -- a preset
     /// past the end of a shorter list would index out of range in `arrange`.
-    /// See `reload`'s `layout.column_widths` refusal.
+    /// See `reload`'s `layout.column_widths` refusal. The `debug_assert`
+    /// below is the backstop: any future caller handing a list shorter than
+    /// a live preset fails loudly in test/debug instead of panicking a
+    /// release session in `arrange`.
     pub fn set_config(&mut self, config: Config) {
-        self.config = config.validated();
+        let config = config.validated();
+        debug_assert!(
+            self.outputs
+                .iter()
+                .flat_map(|output| &output.workspaces)
+                .flat_map(|workspace| &workspace.columns)
+                .all(|column| column.preset < config.column_widths.len()),
+            "live column preset past the end of the incoming width list"
+        );
+        self.config = config;
         self.fix_all_views();
     }
 

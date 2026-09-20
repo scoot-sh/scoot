@@ -274,8 +274,8 @@ Two guarantees the applied set pins:
   VT to switch to there.
 
 A reload applies while the session is locked: nothing in the applied set
-can disclose locked content (appearance only recolors what the lock screen
-already shows; gap and binds are input-side, and binds cannot fire actions
+can disclose locked content (appearance changes touch nothing the locked
+frame draws; gap and binds are input-side, and binds cannot fire actions
 while locked anyway).
 
 ## `[layout]`

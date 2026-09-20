@@ -49,7 +49,6 @@ fn set_config_repairs_an_unusable_width_list_the_way_new_does() {
     );
     assert!(world.config().default_column_width < world.config().column_widths.len());
 }
-
 #[test]
 fn set_config_keeps_existing_columns_placeable() {
     // The compositor refuses a `column_widths` shrink past live presets (see
@@ -68,4 +67,30 @@ fn set_config_keeps_existing_columns_placeable() {
         area: SCREEN,
     });
     let _ = world.arrange();
+}
+
+// The backstop for `set_config`'s `debug_assert!`: a caller handing a list
+// shorter than a live preset is a bug the compositor's refusal path must
+// have caught first, so this fails loudly instead of letting `arrange`
+// index out of range. Gated on `debug_assertions` because release compiles
+// the assert out -- without the gate this test would fail a release run by
+// succeeding.
+#[test]
+#[cfg(debug_assertions)]
+#[should_panic(expected = "live column preset")]
+fn set_config_shouts_when_a_live_preset_outruns_the_incoming_list() {
+    let mut world = World::new(Config {
+        column_widths: vec![0.25, 0.5, 0.75, 1.0],
+        default_column_width: 3,
+        ..config()
+    });
+    world.handle_event(Event::OutputAdded {
+        id: OutputId(1),
+        area: SCREEN,
+    });
+    open(&mut world, 1);
+    world.set_config(Config {
+        column_widths: vec![0.5],
+        ..config()
+    });
 }

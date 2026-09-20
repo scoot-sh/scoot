@@ -46,8 +46,8 @@
 //! # While locked
 //!
 //! A reload applies under session lock, deliberately. Nothing in the applied
-//! set can disclose locked content: appearance changes only recolor the
-//! ring and background the lock screen already shows (the render path draws
+//! set can disclose locked content: appearance changes touch nothing the
+//! locked frame draws (the render path draws
 //! the lock surface and nothing else while locked), gap and binds are
 //! input-side, and binds cannot fire actions while locked anyway
 //! (`input::key` forwards them to the lock client). Refusing under lock
