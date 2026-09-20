@@ -1067,10 +1067,20 @@ fn double_buffered_churn_and_a_burst_stay_far_from_the_cap() {
 /// The anti-shared-table property for buffers: one client sitting exactly
 /// at the cap (512 retained buffers, zero live pools -- the bypass shape at
 /// rest) must not deny a second client its first buffer.
+///
+/// The 512-retaining fill runs under [`ensure_dispatch_flood_headroom`]:
+/// without a raised ceiling the refusal lands mid-fill with the pressure
+/// cause instead of after it (this test asserts the fill *succeeds*, so
+/// there is no kill to discriminate -- the headroom half only, no message
+/// pin).
 #[test]
 fn a_second_client_buffers_while_the_first_sits_at_the_cap() {
+    // Lock and headroom on the test thread, before `drive_both`: a failed
+    // check must panic here, fast -- inside the client thread it would
+    // strand the dispatch loop on its 10s deadline instead.
+    let _flood = hold_flood_lock();
+    ensure_dispatch_flood_headroom(u64::from(MAX_BUFFERS_PER_CLIENT));
     let (first, second, _, _) = drive_both(|greedy_stream, survivor_stream| {
-        let _flood = hold_flood_lock();
         let mut greedy = BufferClient::connect(greedy_stream).expect("the greedy client connects");
         for i in 0..MAX_BUFFERS_PER_CLIENT {
             greedy.bypass_once();
@@ -1240,10 +1250,20 @@ fn flooding_single_pixel_buffers_trips_the_same_cap() {
 /// `InvalidFormat` (4) the garbage format below would otherwise earn. That
 /// code difference is what proves the refusal came from the shared budget
 /// rather than the import path.
+///
+/// The 512-buffer fill runs under [`ensure_dispatch_flood_headroom`]: it
+/// sits near the fd-pressure boundary by design, and without a raised
+/// ceiling the refusal lands mid-fill with the pressure cause instead of
+/// after it with the budget one. The assertion pins the budget cause by
+/// message for the same reason -- both causes post 7 on this object.
 #[test]
 fn a_dmabuf_immed_past_a_full_budget_is_refused_before_validation() {
+    // Lock and headroom on the test thread, before `drive`: a failed
+    // check must panic here, fast -- inside the client thread it would
+    // strand the dispatch loop on its 10s deadline instead.
+    let _flood = hold_flood_lock();
+    ensure_dispatch_flood_headroom(u64::from(MAX_BUFFERS_PER_CLIENT));
     let report = drive(|stream| {
-        let _flood = hold_flood_lock();
         let mut buffers = BufferClient::connect(stream)?;
         for i in 0..MAX_BUFFERS_PER_CLIENT {
             buffers.bypass_once();
@@ -1272,7 +1292,12 @@ fn a_dmabuf_immed_past_a_full_budget_is_refused_before_validation() {
         ));
         buffers.roundtrip()
     });
-    assert_raw_protocol_error(&report.resize, "zwp_linux_buffer_params_v1", 7);
+    assert_raw_protocol_error_with_message(
+        &report.resize,
+        "zwp_linux_buffer_params_v1",
+        7,
+        &format!("maximum of {MAX_BUFFERS_PER_CLIENT} live buffers"),
+    );
     assert_survivor_still_served(&report);
     assert_eq!(
         report.buffers, 0,
