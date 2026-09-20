@@ -484,7 +484,8 @@ struct PaintedRing {
     top: Option<MemoryRenderBuffer>,
     bottom: Option<MemoryRenderBuffer>,
     /// Where the strips draw, and at what logical size: computed at build
-    /// alongside the buffers (they only change with the key).
+    /// alongside the buffers. Canvases only change with the key; origins
+    /// are refreshed per frame from the live rect (see `refresh_strip_origins`).
     top_at: Option<StripGeometry>,
     bottom_at: Option<StripGeometry>,
     pixels: Vec<u8>,

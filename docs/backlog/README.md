@@ -539,6 +539,7 @@ be revisited.
   what is behind it can no longer be skipped. Measure with *overlapping*
   windows; a single-window benchmark will show nothing. Milestone 6 changes
   the calculus, which is why it is sequenced after it.
+- [Fractional-scale ring-hole drift in the painted-ring origin refresh](./rendering/ring-hole-fractional-drift.md) — ≤1px, fractional sessions only, self-healing: the reuse check compares canvases but paint content also depends on absolute position through rounding phases. Compare `plan.inner`/`plan.outer` too.
 - [dma-buf capture buffers for `ext-image-copy-capture-v1`](./protocols/screencopy-dmabuf-capture.md)
   — filed out of milestone 6 stage 4, which was expected to cover it and
   should not have: importing a client's dma-buf and *rendering into* one are

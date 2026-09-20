@@ -245,7 +245,7 @@ live. No signal, no file watching: the IPC request is the trigger.
 
 **Applied:** `[layout] gap` (the arrangement is recomputed and the screen
 redrawn), the `[appearance]` focus-ring width and colors, the background
-color, and `prefer_no_csd`, and the whole `[binds]` table (rebuilt from the
+color, `corner_radius`, and `prefer_no_csd`, and the whole `[binds]` table (rebuilt from the
 defaults plus the file, so a reload both adds and overrides binds).
 
 **Refused, explicitly:** `[layout] column_widths` and
