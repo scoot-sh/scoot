@@ -84,11 +84,9 @@ No compositor or client code touched — Nix, docs, and eval tests only.
   string for `layout.gap`) type-checks and *renders* — the refusal
   happens at session start, fail-safe (whole file discarded for
   defaults, session boots; proven live). What fails loud-and-early is
-  the *non-representable* value (a function): the generator serializes
-  via JSON at derivation-construction time, so evaluation aborts with
-  `cannot convert a function to JSON` before anything builds (verified
-  manually against the pinned nixpkgs; `type.check` is loose and does
-  not catch it, so it is documented, not mechanically pinned). The harm
+  the *non-representable* value (a function): the option type-check
+  rejects it ("not of type 'TOML value'") at evaluation time, before
+  anything builds (verified manually against the pinned nixpkgs). The harm
   the brief feared — a module writing a config the compositor rejects
   at startup, stranding a greetd session — does not materialize either
   way: the loader never refuses to boot over config content (the two
@@ -145,10 +143,10 @@ No compositor or client code touched — Nix, docs, and eval tests only.
     answers IPC, log carries `could not parse config file; using
     defaults ... TOML parse error at line 2, column 7` — fail-safe live.
 - `nixfmt --check` clean on all new/changed `.nix`. (`nix fmt` prints
-  `unexpected end of input / expecting expression` and exits 0 — also
-  on pristine `main` (verified via throwaway worktree), pre-existing,
-  out of scope; `vm/compositor-deps.nix` was already unformatted per
-  current nixfmt before this branch.)
+  `unexpected end of input / expecting expression` — also on pristine
+  `main` (verified via throwaway worktree), pre-existing, out of scope;
+  `vm/compositor-deps.nix` was already unformatted per current nixfmt
+  before this branch.)
 - `cargo` suite untouched: no `.rs` files changed (`git status` shows
   only `flake.nix`, `nix/`, `docs/`, `README.md`).
 

@@ -161,9 +161,9 @@ loudly at eval instead of writing a session entry with no binary.)
 Two cases, behaving differently by design:
 
 - **A value with no TOML representation** (e.g. a Nix function in
-  `settings`) fails at evaluation time — the generator serializes via
-  JSON while constructing the derivation, so the error aborts before
-  anything builds, let alone starts a session. Loud and early.
+  `settings`) fails the option type-check at evaluation time ("not of type
+  'TOML value'"), so the error aborts before anything builds, let alone
+  starts a session. Loud and early.
 - **A value that renders but has the wrong scoot type** (a string for
   `layout.gap`) builds fine and is refused at session start — where the
   loader fails safe: the whole file is discarded for built-in defaults,

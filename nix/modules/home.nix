@@ -10,10 +10,9 @@ let
   tomlFormat = pkgs.formats.toml { };
 
   # Rendered from the user's free-form settings. A value with no TOML
-  # representation at all (e.g. a function) fails at evaluation time --
-  # the generator serializes via JSON while constructing the derivation,
-  # so the error (`cannot convert a function to JSON`) aborts before
-  # anything builds, let alone starts a session. A value that renders
+  # representation at all (e.g. a function) fails the option type-check
+  # at evaluation time ("not of type 'TOML value'"), so the error aborts
+  # before anything builds, let alone starts a session. A value that renders
   # but has the wrong *scoot* type (a string for `layout.gap`) reaches
   # the session and is refused there -- and the loader fails safe (whole
   # file discarded for defaults, session still boots), so a typo costs

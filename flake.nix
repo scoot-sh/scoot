@@ -272,7 +272,7 @@
             { pkgs, ... }:
             {
               imports = [ ./nix/modules/nixos.nix ];
-              programs.scoot.package = nixpkgs.lib.mkDefault self.packages.${pkgs.system}.scoot;
+              programs.scoot.package = nixpkgs.lib.mkDefault self.packages.${pkgs.system}.default;
             };
         in
         {
