@@ -15,7 +15,7 @@ scoot -- a scrolling-tiling Wayland compositor
 USAGE:
     scoot --headless [--width 1-65535] [--height 1-65535] [--outputs 1-8] [--renderer pixman|gles] [--socket PATH] [--config PATH] [-- COMMAND...]
     scoot --nested [--width 1-65535] [--height 1-65535] [--renderer pixman|gles] [--socket PATH] [--config PATH] [-- COMMAND...]
-    scoot --tty [--gpu PATH] [--mode WxH] [--socket PATH] [--config PATH] [-- COMMAND...]
+    scoot --tty [--gpu PATH] [--mode WxH] [--renderer pixman|gles] [--socket PATH] [--config PATH] [-- COMMAND...]
     scoot msg REQUEST
     scoot --help
 
@@ -90,9 +90,13 @@ pub enum RendererKind {
     /// needs no graphics device at all.
     #[default]
     Pixman,
-    /// GLES on an EGL device. Opt-in, and `--headless`/`--nested` only
-    /// today -- `--tty` scanout through a GPU is a separate piece of work,
-    /// so `--tty` warns and keeps pixman (see `compositor::render::resolve`).
+    /// GLES on an EGL device. Opt-in; `--headless`/`--nested` honour it in
+    /// every build (the offscreen pipeline). Under `--tty` it needs the
+    /// `gpu-scanout` Cargo feature, where the frame is composited straight
+    /// into the buffer the CRTC scans out; without the feature `--tty`
+    /// warns and keeps pixman, since the offscreen pipeline would only copy
+    /// every frame back to the CPU (see `compositor::render::resolve`, and
+    /// `tty::init`'s fallback when the device cannot drive the tier).
     Gles,
 }
 
@@ -677,6 +681,40 @@ mod tests {
             parse_args(&["--headless", "--bogus"]),
             Err(Error::Unknown("--bogus".into()))
         );
+    }
+
+    #[test]
+    fn usage_lists_renderer_on_every_backend_that_parses_it() {
+        // Fail-first pin for the `--help` blind spot the README audit found:
+        // the parser (`compositor`, one function for all three backends)
+        // accepts `--renderer` everywhere, so every usage line must name it.
+        // Found 2026-09-20 with the `--tty` line missing it while
+        // `README.md`, `docs/configuration.md` and `docs/tty.md` all showed
+        // `scoot --tty --renderer gles`.
+        fn usage_line(backend: &str) -> &'static str {
+            USAGE
+                .lines()
+                .find(|line| line.trim_start().starts_with(backend))
+                .unwrap_or_else(|| panic!("{backend} has no usage line"))
+        }
+        for backend in ["scoot --headless", "scoot --nested", "scoot --tty"] {
+            assert!(
+                usage_line(backend).contains("[--renderer pixman|gles]"),
+                "{backend}'s usage line hides a flag its parse accepts"
+            );
+            for name in ["pixman", "gles"] {
+                let flag = backend.split_whitespace().nth(1).unwrap();
+                let Ok(Command::Compositor(options)) = parse_args(&[flag, "--renderer", name])
+                else {
+                    panic!("{backend} should parse --renderer {name}");
+                };
+                assert_eq!(
+                    options.renderer,
+                    RendererKind::parse(name),
+                    "{backend} --renderer {name}"
+                );
+            }
+        }
     }
 
     #[test]

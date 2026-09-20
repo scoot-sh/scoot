@@ -38,7 +38,9 @@
 //! `--renderer gles`, because silently compositing with the other renderer
 //! would make every "verified under GLES" claim false while looking fine.
 //! That is not the lockout the rule above exists to prevent: `--tty` never
-//! reaches it (it warns and keeps pixman, see `render::resolve`), so the only
+//! reaches it (without the `gpu-scanout` feature it warns and keeps pixman
+//! in `render::resolve`; with it the fallback happens in `tty::init`
+//! instead), so the only
 //! sessions that can fail this way are `--headless` and `--nested`, both of
 //! which are started from a shell that is still there to read the error.
 
