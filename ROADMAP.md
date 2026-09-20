@@ -1157,7 +1157,7 @@ medium priority — the effective top of what's actually open.
    inactive groups, lock/latch, `Multi_key` and plain-`us` `é` stay loud
    refusals).
 4. [Split the CLI out into
-   `scootctl`](docs/backlog/meta/rename-flex-family.md) — the rename half of
+   `scootctl`](docs/backlog/resolved/rename-flex-family-done.md) — the rename half of
    that entry LANDED 2026-09-18 (PR #128): `flexwm` → **`scoot`** across
    crates, binary,
    socket (`scoot.sock`/`$SCOOT_SOCKET`), config path (`~/.config/scoot/`),

@@ -50,7 +50,7 @@ the loop cheaply.
 - `docs/backlog/resolved/config-reload-done.md` — the other half of the
   config-editing experience. Emitting a starting file matters more once
   editing it does not require a session restart.
-- If `scootctl` lands first (`docs/backlog/meta/rename-flex-family.md`),
+- If `scootctl` lands first (`docs/backlog/resolved/rename-flex-family-done.md`),
   decide deliberately whether this belongs on the compositor binary or the
   client. It needs no running compositor, which argues for `scootctl` — but
   it needs the compositor's own defaults, which argues for `scoot`.

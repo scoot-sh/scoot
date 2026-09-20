@@ -10,8 +10,8 @@ blocked: null
 
 ## What it said
 
-`docs/backlog/meta/rename-flex-family.md` (kept under that filename so
-existing links keep resolving): `scoot msg …` is one `Command` variant of
+`docs/backlog/resolved/rename-flex-family-done.md` (moved there on close;
+kept under a stable filename so existing links keep resolving): `scoot msg …` is one `Command` variant of
 the single `scoot` binary — the same executable that starts the compositor
 also sends it IPC requests. A separate `scootctl` binary cleanly separates
 "the compositor" from "a client of the compositor" (the computer-use goal:
