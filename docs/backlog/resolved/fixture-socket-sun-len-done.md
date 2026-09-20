@@ -33,8 +33,10 @@ The ticket's shorten shape, exactly as filed: `socket_path` now builds
 accept-timeout test). New filename lengths: 34 / 33 / 32 chars; totals
 against this Mac's 49-byte `$TMPDIR`: 83 / 82 / 81, i.e. 21+ bytes of
 headroom under the 104 limit. Worst-case audit: a 7-digit Linux pid
-with the longest tag (`large`) is still a 36-char filename, fitting a
-68-char `$TMPDIR` on macOS. The why (limit math, uniqueness argument,
+with the longest tag (`large`) is a 36-char filename, fitting a 67-char
+`$TMPDIR` on macOS (strictly shorter than `SUN_LEN` is required, so 68
+is one too many — unreachable in practice: 7-digit pids are Linux-only,
+and macOS pids cap at 5 digits). The why (limit math, uniqueness argument,
 tag mapping) is written down next to the code in `socket_path`'s doc
 comment, not just here. `std` only — the "hash" is a plain low-32-bit
 truncation formatted hex, no new deps for a test fixture.
