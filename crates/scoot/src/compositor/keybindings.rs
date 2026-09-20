@@ -97,7 +97,7 @@ const DIGITS: [Keysym; 9] = [
 /// scan is simpler and not measurably slower. `config.rs` builds on this
 /// directly (via `insert`/`extend`) to layer a config file's `[binds]` on
 /// top, using `scoot_ipc::KeyCombo` to parse the string form.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Keybindings(Vec<(Modifiers, Keysym, Bound)>);
 
 impl Default for Keybindings {
@@ -266,6 +266,30 @@ impl Keybindings {
             .collect()
     }
 
+    /// Whether this table binds exactly what `other` binds: same combos,
+    /// same targets.
+    ///
+    /// What a reload compares its rebuilt table with before swapping it in,
+    /// so a reload that changed nothing it was asked to can say so instead
+    /// of claiming `binds` as applied. Order-independent by construction:
+    /// `[binds]` is read out of a `HashMap` (see `config::apply_binds`),
+    /// whose iteration order has no relationship to the file's, so two
+    /// tables built from the same file can hold the same binds in a
+    /// different `Vec` order. A derived `PartialEq` on the `Vec` would call
+    /// those different; this does not. Duplicates cannot hide a difference
+    /// either way: `insert` replaces, so neither table holds the same combo
+    /// twice, and equal length plus every combo of one matching in the other
+    /// is the same mapping.
+    ///
+    /// Cold path (one comparison per reload request), so the per-combo
+    /// `match_key` scan is not load-bearing the way it is per keypress.
+    pub fn same_bindings_as(&self, other: &Self) -> bool {
+        self.0.len() == other.0.len()
+            && self.0.iter().all(|(mods, keysym, bound)| {
+                other.match_key(*keysym, *mods).as_ref() == Some(bound)
+            })
+    }
+
     /// `Ctrl+Alt+F1`..`Ctrl+Alt+F12`, bound to switching to VT 1..12.
     /// `--tty`-only (see `extend`'s doc); a free function rather than a
     /// method so it has no dependency on an existing `Keybindings` value.
@@ -408,6 +432,28 @@ mod tests {
                 i + 1
             );
         }
+    }
+
+    #[test]
+    fn same_bindings_survives_build_order_and_spots_a_real_difference() {
+        // `[binds]` is read out of a `HashMap`, so two tables built from
+        // the same file can hold the same binds in a different `Vec` order
+        // -- a derived `PartialEq` would call those different, and a reload
+        // would claim `binds` as applied for changing nothing.
+        let mut first = Keybindings::default();
+        first.insert(SUPER, Keysym::n, Bound::Action(Action::CloseFocused));
+        first.insert(SUPER_SHIFT, Keysym::m, Bound::Action(Action::CloseFocused));
+        let mut second = Keybindings::default();
+        second.insert(SUPER_SHIFT, Keysym::m, Bound::Action(Action::CloseFocused));
+        second.insert(SUPER, Keysym::n, Bound::Action(Action::CloseFocused));
+        assert!(first.same_bindings_as(&second));
+        assert!(second.same_bindings_as(&first));
+
+        let mut different = Keybindings::default();
+        different.insert(SUPER, Keysym::n, Bound::Action(Action::Quit));
+        assert!(!first.same_bindings_as(&different));
+        assert!(!different.same_bindings_as(&first));
+        assert!(!Keybindings::default().same_bindings_as(&first));
     }
 
     #[test]

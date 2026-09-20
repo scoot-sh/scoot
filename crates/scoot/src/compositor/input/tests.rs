@@ -21,6 +21,7 @@
 //! nothing here connects to (the client is a socket pair) but which is
 //! created either way.
 
+use std::fs;
 use std::os::unix::net::UnixStream;
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
@@ -28,6 +29,7 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use scoot_core::Config;
+use scoot_ipc::{Request, Response};
 use smithay::input::keyboard::XkbConfig;
 use smithay::reexports::calloop::EventLoop;
 use smithay::reexports::wayland_server::Display;
@@ -1432,5 +1434,86 @@ fn pointer_motion_is_never_recorded_as_an_interaction() {
             .state
             .interaction_serials
             .contains(Serial::from(after), &client)
+    );
+}
+
+/// A reload that rebinds a held key neither wedges nor drops it.
+///
+/// Press/release routing never consults the table mid-hold: the press
+/// records its keycode in `suppressed_keys` (or doesn't), and the release
+/// is routed by that set. So a `super+h` pressed under the default table
+/// (intercepted) and released after a reload rebound it to `close` is still
+/// swallowed -- the client never saw the press, so it must not see a lone
+/// release either. The companion test below pins the other direction.
+///
+/// Lives here rather than in `reload/tests.rs` because it needs
+/// `resolve_combo`, which is private to `input`.
+#[test]
+fn a_reload_that_rebinds_a_held_key_keeps_its_release_suppressed() {
+    let mut fixture = Fixture::new();
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let path = dir.path().join("config.toml");
+    fs::write(&path, "[binds]\n\"super+h\" = \"close\"\n").expect("a config file");
+    fixture.state.config_path = Some(path);
+
+    let combo: KeyCombo = "super+h".parse().expect("a parsable combination");
+    let (code, held) = fixture
+        .state
+        .resolve_combo(&combo)
+        .expect("`super+h` is pressable on a US layout");
+    let modifier = *held.as_slice().first().expect("Super is held for it");
+    fixture.state.key(modifier, KeyState::Pressed);
+    let pressed = fixture.state.key(code, KeyState::Pressed);
+    assert!(
+        pressed.intercepted,
+        "`super+h` is not bound, so this test proves nothing"
+    );
+
+    let response = fixture.state.handle_request(Request::Reload);
+    assert!(
+        matches!(response, Response::Reloaded { .. }),
+        "the rebinding reload was not served: {response:?}"
+    );
+
+    let released = fixture.state.key(code, KeyState::Released);
+    assert!(
+        released.intercepted,
+        "the release was forwarded as a lone release the client never pressed"
+    );
+    fixture.state.key(modifier, KeyState::Released);
+}
+
+/// The other direction: a key pressed while bound to nothing is forwarded,
+/// and stays forwarded when a reload binds it mid-hold -- the client saw
+/// the press, so it must see the release.
+#[test]
+fn a_reload_that_binds_a_held_key_forwards_its_release() {
+    let mut fixture = Fixture::new();
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let path = dir.path().join("config.toml");
+    fs::write(&path, "[binds]\n\"x\" = \"close\"\n").expect("a config file");
+    fixture.state.config_path = Some(path);
+
+    let combo: KeyCombo = "x".parse().expect("a parsable combination");
+    let (code, _) = fixture
+        .state
+        .resolve_combo(&combo)
+        .expect("`x` is pressable on a US layout");
+    let pressed = fixture.state.key(code, KeyState::Pressed);
+    assert!(
+        !pressed.intercepted,
+        "bare `x` is bound, so this test proves nothing"
+    );
+
+    let response = fixture.state.handle_request(Request::Reload);
+    assert!(
+        matches!(response, Response::Reloaded { .. }),
+        "the binding reload was not served: {response:?}"
+    );
+
+    let released = fixture.state.key(code, KeyState::Released);
+    assert!(
+        !released.intercepted,
+        "the release was swallowed for a press the client received"
     );
 }

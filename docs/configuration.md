@@ -2,6 +2,7 @@
 
 - [Command-line flags](#command-line-flags)
 - [The config file](#the-config-file)
+- [Reloading the config](#reloading-the-config)
 - [`[layout]`](#layout) · [`[appearance]`](#appearance) · [`[output]`](#output) · [`[renderer]`](#renderer) · [`[tty]`](#tty) · [`[autostart]`](#autostart) · [`[binds]`](#binds)
 - [Default keybindings](#default-keybindings)
 - [Example `config.toml`](#example-configtoml)
@@ -184,7 +185,11 @@ Every field in every table is itself optional and defaults independently, so
 a config that only sets `gap` leaves everything else — including the rest of
 `[layout]` — at its built-in default.
 
-**Every setting is read once at startup. There is no config reload.**
+**Most settings are read once at startup; some can be reloaded live.**
+`scootctl reload` (see [Reloading the config](#reloading-the-config))
+re-reads this same file and re-applies the gap, the appearance and the
+keybindings. Everything else is startup-only and a reload refuses it with a
+message rather than silently ignoring it.
 
 ### Failure semantics
 
@@ -222,13 +227,64 @@ usable and says what's wrong in the log instead. `[tty] gpu` is the exception
 because falling back there would mean silently driving a device the config
 explicitly ruled out.
 
+## Reloading the config
+
+`scootctl reload` (and `scoot msg reload`, the same client) re-reads the
+same file startup used — the explicit `--config PATH` when one was given,
+else the resolved default path — and re-applies what can be re-applied
+live. No signal, no file watching: the IPC request is the trigger.
+
+**Applied:** `[layout] gap` (the arrangement is recomputed and the screen
+redrawn), the `[appearance]` focus-ring width and colors, the background
+color, and `prefer_no_csd`, and the whole `[binds]` table (rebuilt from the
+defaults plus the file, so a reload both adds and overrides binds).
+
+**Refused, explicitly:** `[layout] column_widths` and
+`default_column_width` (live columns hold presets into that list),
+`[appearance] cursor_size`, `cursor_color` and `cursor_theme` (the fallback
+bitmap and the loaded theme are built once at startup), `[output] scale`
+(clients were told it at bind time), `[tty] gpu` (the session already
+drives its device), `[renderer] backend` (the live renderer holds client
+textures), and `[autostart] commands` (entries run once, at session start —
+a reload never re-runs them).
+
+The reply says which was which:
+
+```json
+{ "type": "reloaded", "applied": ["layout.gap", "binds"],
+  "refused": ["output.scale (startup-only: clients were told the scale at bind time)"] }
+```
+
+Both lists name only fields that *differed* — a field the file and the
+session agree on appears in neither, so two empty lists together mean "the
+reload changed nothing it was asked to". A reload that cannot load or
+validate the file at all (unreadable, malformed TOML, an unknown field)
+answers an `error` instead, keeps the running config untouched, and logs —
+never defaults, never a half-applied session, never an exit. `scootctl`
+exits non-zero on that error like any other.
+
+Two guarantees the applied set pins:
+
+- A key held across a `[binds]` rebuild neither wedges nor drops: release
+  routing follows what the press decided, not what the table says now.
+- Under `--tty`, a reload cannot strip the `Ctrl+Alt+F1..F12` VT-switch
+  recovery bindings — they are layered back on last, overriding any
+  colliding file bind with a warning, exactly as at startup. On
+  `--headless`/`--nested` a reload gains no VT bindings either; there is no
+  VT to switch to there.
+
+A reload applies while the session is locked: nothing in the applied set
+can disclose locked content (appearance only recolors what the lock screen
+already shows; gap and binds are input-side, and binds cannot fire actions
+while locked anyway).
+
 ## `[layout]`
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
-| `gap` | integer (pixels) | `12` | Gap between columns, between windows stacked in a column, and at output edges. Clamped into `0..=10000`: negatives become `0`, and anything above `10000` becomes `10000` — already wider than the long edge of an 8K display, and it keeps the layout's own integer arithmetic well away from overflow. A gap that large leaves no usable area, so windows end up 1x1; it's a guard against a typo or a probe, not a usable setting. |
-| `column_widths` | array of floats | `[0.333…, 0.5, 0.666…]` (i.e. `1/3`, `1/2`, `2/3`) | Column widths as fractions of the output width, in the order `cycle-column-width` steps through. Non-finite or non-positive entries are dropped; an empty list falls back to the built-in three. |
-| `default_column_width` | integer (unsigned) | `1` | Index into `column_widths` used for newly created columns (`1` selects `0.5`, i.e. half the output). Too large is clamped to the last valid index; negative isn't a valid value for this field at all, so it's a whole-file parse error, not a clamp. |
+| `gap` | integer (pixels) | `12` | Gap between columns, between windows stacked in a column, and at output edges. Clamped into `0..=10000`: negatives become `0`, and anything above `10000` becomes `10000` — already wider than the long edge of an 8K display, and it keeps the layout's own integer arithmetic well away from overflow. A gap that large leaves no usable area, so windows end up 1x1; it's a guard against a typo or a probe, not a usable setting. Re-applied live by `scootctl reload`. |
+| `column_widths` | array of floats | `[0.333…, 0.5, 0.666…]` (i.e. `1/3`, `1/2`, `2/3`) | Column widths as fractions of the output width, in the order `cycle-column-width` steps through. Non-finite or non-positive entries are dropped; an empty list falls back to the built-in three. Startup-only — a reload refuses changes (see [Reloading the config](#reloading-the-config)). |
+| `default_column_width` | integer (unsigned) | `1` | Index into `column_widths` used for newly created columns (`1` selects `0.5`, i.e. half the output). Too large is clamped to the last valid index; negative isn't a valid value for this field at all, so it's a whole-file parse error, not a clamp. Startup-only — a reload refuses changes. |
 
 ## `[appearance]`
 
@@ -240,14 +296,14 @@ cursor.
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
-| `focus_ring_width` | integer (pixels) | `3` | Ring thickness. Clamped at load time to at most half of `gap`, so it can never visually reach a neighboring window. |
-| `focus_ring_active_color` | `"#rrggbb"` / `"#rrggbbaa"` | `#6ba6fa` (accent blue) | Ring color around the focused window. |
-| `focus_ring_inactive_color` | `"#rrggbb"` / `"#rrggbbaa"` | `#595961` (muted gray) | Ring color around every other window. |
-| `background_color` | `"#rrggbb"` / `"#rrggbbaa"` | `#141419` (near-black) | Cleared behind all window content — there's no separate background render element, this is the frame clear color. |
-| `cursor_size` | integer (pixels) | `16` | Both dimensions of the built-in pointer cursor. Clamped into `4..=256`: under `4` the shape is left with at most one interior pixel (none at all below 3), and a pointer that small is indistinguishable from a dead pixel; over `256` it covers a quarter of a 1080p display's height and the bitmap it allocates stops being small. A value outside `i32` altogether (or a float) is a whole-file parse error, not a clamp. |
-| `cursor_color` | `"#rrggbb"` / `"#rrggbbaa"` | `#ffffff` (white) | Fill color of the built-in pointer cursor. Its 1px outline is always black, at this color's own alpha, and isn't separately configurable — the outline exists to keep the shape's edges visible against similarly-colored content. That doesn't help against a *dark* `cursor_color`: with a near-black fill, the outline blends into it and the pointer can be hard to spot against dark window content. An alpha of `00` makes the built-in cursor invisible; that's your call, not a clamped value. |
-| `cursor_theme` | string | unset | Which installed xcursor theme named cursor shapes are drawn from (see [protocols.md](protocols.md#cursor-shapes-wp-cursor-shape-v1)). Unset means follow `$XCURSOR_THEME`, then `default` — i.e. whatever the rest of the desktop uses; an empty string means the same as unset. This only *names* a theme, it never makes scoot ship one, and a name that matches nothing installed is not an error: named shapes then come from scoot's own drawn set. |
-| `prefer_no_csd` | boolean | `true` | Whether to answer a client's `zxdg_toplevel_decoration_v1` request with `ServerSide`, so a well-behaved client stops drawing its own titlebar (which would otherwise double up with the ring). |
+| `focus_ring_width` | integer (pixels) | `3` | Ring thickness. Clamped at load time to at most half of `gap`, so it can never visually reach a neighboring window. Re-applied live by `scootctl reload` (re-clamped against the reloaded gap). |
+| `focus_ring_active_color` | `"#rrggbb"` / `"#rrggbbaa"` | `#6ba6fa` (accent blue) | Ring color around the focused window. Re-applied live. |
+| `focus_ring_inactive_color` | `"#rrggbb"` / `"#rrggbbaa"` | `#595961` (muted gray) | Ring color around every other window. Re-applied live. |
+| `background_color` | `"#rrggbb"` / `"#rrggbbaa"` | `#141419` (near-black) | Cleared behind all window content — there's no separate background render element, this is the frame clear color. Re-applied live. |
+| `cursor_size` | integer (pixels) | `16` | Both dimensions of the built-in pointer cursor. Clamped into `4..=256`: under `4` the shape is left with at most one interior pixel (none at all below 3), and a pointer that small is indistinguishable from a dead pixel; over `256` it covers a quarter of a 1080p display's height and the bitmap it allocates stops being small. A value outside `i32` altogether (or a float) is a whole-file parse error, not a clamp. Startup-only — a reload refuses changes. |
+| `cursor_color` | `"#rrggbb"` / `"#rrggbbaa"` | `#ffffff` (white) | Fill color of the built-in pointer cursor. Its 1px outline is always black, at this color's own alpha, and isn't separately configurable — the outline exists to keep the shape's edges visible against similarly-colored content. That doesn't help against a *dark* `cursor_color`: with a near-black fill, the outline blends into it and the pointer can be hard to spot against dark window content. An alpha of `00` makes the built-in cursor invisible; that's your call, not a clamped value. Startup-only — a reload refuses changes. |
+| `cursor_theme` | string | unset | Which installed xcursor theme named cursor shapes are drawn from (see [protocols.md](protocols.md#cursor-shapes-wp-cursor-shape-v1)). Unset means follow `$XCURSOR_THEME`, then `default` — i.e. whatever the rest of the desktop uses; an empty string means the same as unset. This only *names* a theme, it never makes scoot ship one, and a name that matches nothing installed is not an error: named shapes then come from scoot's own drawn set. Startup-only — a reload refuses changes. |
+| `prefer_no_csd` | boolean | `true` | Whether to answer a client's `zxdg_toplevel_decoration_v1` request with `ServerSide`, so a well-behaved client stops drawing its own titlebar (which would otherwise double up with the ring). Re-applied live (answers future requests; repaints nothing). |
 
 `cursor_size` and `cursor_color` apply to scoot's own drawn shapes — the
 fallback used when the machine has no cursor theme installed, drawn only
@@ -270,19 +326,19 @@ pure white *is* exactly representable.)
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
-| `scale` | float | `1.0` | Output scale advertised to clients and rendered at. `1.0` renders identically to no setting at all; anything else advertises `ceil(scale)` on `wl_output` and `wl_surface.preferred_buffer_scale`, and the exact value through `wp_fractional_scale_v1`/`wp_viewporter` (see [protocols.md](protocols.md#output-scaling)). Clamped into `0.5..=4.0` with a warning, and a non-finite value falls back to `1.0`; startup-only. `--nested` ignores a non-1.0 value with a warning, since the host owns the scale of the window scoot draws inside. |
+| `scale` | float | `1.0` | Output scale advertised to clients and rendered at. `1.0` renders identically to no setting at all; anything else advertises `ceil(scale)` on `wl_output` and `wl_surface.preferred_buffer_scale`, and the exact value through `wp_fractional_scale_v1`/`wp_viewporter` (see [protocols.md](protocols.md#output-scaling)). Clamped into `0.5..=4.0` with a warning, and a non-finite value falls back to `1.0`; startup-only — a reload refuses changes (see [Reloading the config](#reloading-the-config)). `--nested` ignores a non-1.0 value with a warning, since the host owns the scale of the window scoot draws inside. |
 
 ## `[renderer]`
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
-| `backend` | string (`"pixman"` or `"gles"`) | `"pixman"` | Which renderer composites each frame — the config-file form of `--renderer` (see [tty.md](tty.md#which-renderer-draws-the-frames)). `"pixman"` is the CPU renderer and needs no graphics device at all. `"gles"` draws with GLES on an EGL device; under `--tty` it needs a `--features gpu-scanout` build, where it scans out from the GPU, and warns and keeps pixman without one. `--renderer` wins when both name one, including `--renderer pixman` against a file asking for `gles`. A name that is neither is a warning and the default, like any other malformed value; but a name this build *knows* and then cannot build (`"gles"` with no working EGL) is a startup error — the second deliberate one — because silently drawing with the other renderer would be a session quietly different from the one you asked for. Startup-only. |
+| `backend` | string (`"pixman"` or `"gles"`) | `"pixman"` | Which renderer composites each frame — the config-file form of `--renderer` (see [tty.md](tty.md#which-renderer-draws-the-frames)). `"pixman"` is the CPU renderer and needs no graphics device at all. `"gles"` draws with GLES on an EGL device; under `--tty` it needs a `--features gpu-scanout` build, where it scans out from the GPU, and warns and keeps pixman without one. `--renderer` wins when both name one, including `--renderer pixman` against a file asking for `gles`. A name that is neither is a warning and the default, like any other malformed value; but a name this build *knows* and then cannot build (`"gles"` with no working EGL) is a startup error — the second deliberate one — because silently drawing with the other renderer would be a session quietly different from the one you asked for. Startup-only — a reload refuses changes. |
 
 ## `[tty]`
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
-| `gpu` | string (device path) | unset | Which DRM device `--tty` drives, when the automatic choice is wrong — the config-file form of `--gpu PATH` (see [tty.md](tty.md#which-drm-device---tty-drives)). Unset means the automatic search picks: Smithay's primary GPU first, then every other DRM device on the seat until one works. Set means exactly that device, no fallback: a wrong path is a clean startup error naming the key and what failed, so this key is fail-closed where every other config field degrades gracefully. `--gpu` wins when both name one; an empty value (`gpu = ""`) is a startup error naming the key, on every backend. Only means anything under `--tty`; on `--headless` or `--nested` a set non-empty value is ignored with a warning. Startup-only. |
+| `gpu` | string (device path) | unset | Which DRM device `--tty` drives, when the automatic choice is wrong — the config-file form of `--gpu PATH` (see [tty.md](tty.md#which-drm-device---tty-drives)). Unset means the automatic search picks: Smithay's primary GPU first, then every other DRM device on the seat until one works. Set means exactly that device, no fallback: a wrong path is a clean startup error naming the key and what failed, so this key is fail-closed where every other config field degrades gracefully. `--gpu` wins when both name one; an empty value (`gpu = ""`) is a startup error naming the key, on every backend. Only means anything under `--tty`; on `--headless` or `--nested` a set non-empty value is ignored with a warning. Startup-only — a reload refuses changes. |
 
 ## `[binds]`
 
@@ -343,7 +399,10 @@ fail silently rather than as a startup error:
   before the file loaded is left in place.
 
 A user bind on a combo that already has a default simply replaces it; there
-is no "unbind" action.
+is no "unbind" action. `scootctl reload` rebuilds the whole table from the
+defaults plus the file, so a reload both adds and overrides binds — and a
+bind removed from the file falls back to its default (or to unbound, if it
+never had one).
 
 ## `[autostart]`
 
@@ -387,6 +446,9 @@ Three behaviors worth knowing:
 - **No supervision.** An entry that exits instantly is reaped, not restarted;
   telling a deliberate quit from a crash loop is a service manager's job,
   not the compositor's.
+- **Never re-run.** Entries run once, at session start. `scootctl reload`
+  refuses `autostart.commands` changes with a message rather than running
+  anything a second time (see [Reloading the config](#reloading-the-config)).
 
 ## Default keybindings
 
@@ -429,7 +491,8 @@ means anything against the list it was read from.)
 switching — not present under `--headless`/`--nested`, since VT switching is
 a Linux-session concept with no meaning there. See
 [tty.md](tty.md#vt-switching) for why they always win over a config-file
-bind.
+bind — at startup and on every `scootctl reload`, which layers them back on
+last rather than letting a reloaded file strip the recovery path.
 
 ## Example `config.toml`
 

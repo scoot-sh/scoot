@@ -2,6 +2,7 @@ mod columns;
 mod frames;
 mod invariants;
 mod outputs;
+mod reload;
 mod workspaces;
 
 use crate::{Config, Event, OutputId, Placement, Rect, WindowId, WindowInfo, World};

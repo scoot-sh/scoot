@@ -73,6 +73,25 @@ impl World {
         &self.config
     }
 
+    /// Replaces the layout tunables on a live world: what a config reload
+    /// drives, since nothing else writes `config` after `new`.
+    ///
+    /// Validated exactly like `new`, so a reloaded gap gets the same clamp
+    /// the startup one did. Scroll offsets are then re-normalised, the way
+    /// every `reshape` action ends in `fix_view`: a gap change moves usable
+    /// edges, and a `view_x` that was correct for the old gap can leave the
+    /// focused column off screen under the new one.
+    ///
+    /// What this deliberately does *not* touch: existing columns keep their
+    /// width presets, which is why a reload may only shrink or grow
+    /// `column_widths` through the compositor's refusal path -- a preset
+    /// past the end of a shorter list would index out of range in `arrange`.
+    /// See `reload`'s `layout.column_widths` refusal.
+    pub fn set_config(&mut self, config: Config) {
+        self.config = config.validated();
+        self.fix_all_views();
+    }
+
     pub fn focused_window(&self) -> Option<WindowId> {
         self.outputs
             .get(self.focused_output)?

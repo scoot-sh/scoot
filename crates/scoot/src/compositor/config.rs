@@ -379,6 +379,17 @@ impl LoadedConfig {
     }
 
     fn from_file(file: FileConfig) -> Self {
+        Self::from_file_with_vt(file, false)
+    }
+
+    /// Like [`from_file`](Self::from_file), but for a live reload rather
+    /// than startup: `vt` says whether this session drives `--tty`, in
+    /// which case the replacement table gets the `Ctrl+Alt+F1..F12`
+    /// recovery bindings layered on last -- exactly what `tty::init` does
+    /// to the startup table (see [`enforce_vt_binds`]). Startup itself
+    /// always passes `false` here: the VT bindings are added later, once
+    /// `--tty` is known to be the backend.
+    fn from_file_with_vt(file: FileConfig, vt: bool) -> Self {
         let config = file.layout.unwrap_or_default().into_config();
         let appearance = file
             .appearance
@@ -388,8 +399,7 @@ impl LoadedConfig {
         let gpu = file.tty.and_then(|tty| tty.gpu);
         let renderer = file.renderer.unwrap_or_default().into_kind();
         let autostart = file.autostart.unwrap_or_default().into_actions();
-        let mut keybindings = Keybindings::default();
-        apply_binds(&mut keybindings, file.binds);
+        let keybindings = keybindings_for(&file.binds, vt);
         Self {
             config,
             keybindings,
@@ -399,6 +409,108 @@ impl LoadedConfig {
             renderer,
             autostart,
         }
+    }
+}
+
+/// The config file a session started from: the explicit `--config PATH`
+/// when one was given, else the resolved XDG default path -- whether or
+/// not a file existed there at startup. What `Request::Reload` re-reads
+/// (see `reload.rs`); `None` only when no path resolves at all (neither
+/// `XDG_CONFIG_HOME` nor `HOME` set), in which case a reload answers an
+/// error rather than guessing.
+///
+/// Pure over its two env vars like [`default_path`], for the same testability
+/// reason -- `run` passes the live ones.
+pub fn startup_path(
+    explicit: Option<&Path>,
+    xdg_config_home: Option<OsString>,
+    home: Option<OsString>,
+) -> Option<PathBuf> {
+    explicit
+        .map(Path::to_owned)
+        .or_else(|| default_path(xdg_config_home, home))
+}
+
+/// Re-reads `path` the way startup would, but without any of startup's
+/// graceful degradation: this runs against a live session, where falling
+/// back to defaults over a typo would silently revert what the user has.
+///
+/// - The file must read and the whole TOML must validate (`deny_unknown_fields`
+///   included): anything less keeps the running config untouched and comes
+///   back as an `Err` naming the path and the reason -- never defaults,
+///   never a partial load, never an exit. `LoadedConfig::from_file`'s own
+///   per-field fallbacks (one bad color, one bad bind) still apply *within*
+///   a file that validates, the same isolation startup has.
+/// - `vt` is whether this session drives `--tty` (see
+///   [`LoadedConfig::from_file_with_vt`](LoadedConfig::from_file_with_vt)).
+pub fn reload_from(path: &Path, vt: bool) -> Result<LoadedConfig, ReloadError> {
+    let text = fs::read_to_string(path).map_err(|source| ReloadError {
+        path: path.to_owned(),
+        reason: source.to_string(),
+    })?;
+    toml::from_str::<FileConfig>(&text)
+        .map(|file| LoadedConfig::from_file_with_vt(file, vt))
+        .map_err(|source| ReloadError {
+            path: path.to_owned(),
+            reason: source.to_string(),
+        })
+}
+
+/// A reload that could not load or validate the file. The running config is
+/// untouched; the message is what the `reload` reply (and the log) carries.
+#[derive(Debug)]
+pub struct ReloadError {
+    path: PathBuf,
+    reason: String,
+}
+
+impl fmt::Display for ReloadError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "could not reload config file `{}`: {}; keeping the running config",
+            self.path.display(),
+            self.reason
+        )
+    }
+}
+
+impl std::error::Error for ReloadError {}
+
+/// Builds the keybinding table a config file's `[binds]` describes: the
+/// defaults, the file's binds layered on via [`apply_binds`], and -- when
+/// `vt` -- the `--tty` `Ctrl+Alt+F1..F12` recovery bindings on top of those
+/// (see [`enforce_vt_binds`]). Startup builds with `false` (the VT bindings
+/// land later, in `tty::init`); a reload builds with whether this session
+/// drives `--tty`, so a reload can neither strip the recovery path nor gain
+/// it on a backend that never had it.
+pub fn keybindings_for(binds: &HashMap<String, String>, vt: bool) -> Keybindings {
+    let mut table = Keybindings::default();
+    apply_binds(&mut table, binds);
+    if vt {
+        enforce_vt_binds(&mut table);
+    }
+    table
+}
+
+/// Layers the `--tty`-only `Ctrl+Alt+F1..F12` VT-switch bindings over
+/// `table`, overriding any colliding bind with a warning.
+///
+/// One function rather than two call sites (`tty::init` at startup,
+/// [`keybindings_for`] on reload) so the two cannot disagree about what
+/// "the recovery path always wins" means: a config-file bind landing on the
+/// same combo as a VT switch -- a typo or a well-meaning-but-dangerous
+/// rebind -- would otherwise silently shadow the one recovery path this
+/// project has on real hardware (see this module's doc).
+pub fn enforce_vt_binds(table: &mut Keybindings) {
+    for (mods, keysym, replaced) in table.extend(Keybindings::vt_switch_bindings()) {
+        tracing::warn!(
+            ?mods,
+            keysym = keysym.raw(),
+            ?replaced,
+            "a config-file keybinding on this combo was overridden by --tty's \
+             VT-switch binding, which must always work as the recovery path"
+        );
     }
 }
 
@@ -574,9 +686,9 @@ fn parse_or_defaults(text: &str, path: &Path) -> LoadedConfig {
 ///   every bind in the colliding group is skipped, with one warning naming
 ///   all of them; whatever was bound to that combo before this file was
 ///   loaded (a default, or nothing) is left alone.
-fn apply_binds(keybindings: &mut Keybindings, binds: HashMap<String, String>) {
+fn apply_binds(keybindings: &mut Keybindings, binds: &HashMap<String, String>) {
     let mut parsed: Vec<(String, Modifiers, Keysym, Bound)> = Vec::new();
-    for (raw, value) in &binds {
+    for (raw, value) in binds {
         match parse_bind(raw, value) {
             Ok((mods, keysym, bound)) => parsed.push((raw.clone(), mods, keysym, bound)),
             Err(reason) => {
@@ -752,6 +864,64 @@ mod tests {
         file.write_all(contents.as_bytes())
             .expect("write temp config");
         (dir, path)
+    }
+
+    #[test]
+    fn startup_path_is_the_explicit_path_or_the_xdg_default() {
+        let explicit = PathBuf::from("/etc/scoot/config.toml");
+        assert_eq!(
+            startup_path(Some(&explicit), None, None),
+            Some(explicit.clone()),
+            "an explicit --config wins over every default"
+        );
+        assert_eq!(
+            startup_path(
+                None,
+                Some(OsString::from("/xdg")),
+                Some(OsString::from("/home/dev")),
+            ),
+            Some(PathBuf::from("/xdg/scoot/config.toml")),
+            "XDG_CONFIG_HOME wins over HOME"
+        );
+        assert_eq!(
+            startup_path(
+                None,
+                Some(OsString::from("")),
+                Some(OsString::from("/home/dev"))
+            ),
+            Some(PathBuf::from("/home/dev/.config/scoot/config.toml")),
+            "an empty XDG_CONFIG_HOME falls back to HOME"
+        );
+        assert_eq!(
+            startup_path(None, None, None),
+            None,
+            "nowhere to look means no path, not a guessed one"
+        );
+    }
+
+    #[test]
+    fn reload_from_loads_a_valid_file_and_refuses_a_bad_one() {
+        let (_dir, path) = write_temp("[layout]\ngap = 20\n");
+        let loaded = reload_from(&path, false).expect("a valid file reloads");
+        assert_eq!(loaded.config.gap, 20);
+
+        let (_dir, bad) = write_temp("this is not valid toml [[[");
+        let error = reload_from(&bad, false).expect_err("a malformed file must not reload");
+        assert!(
+            error.to_string().contains("keeping the running config"),
+            "the refusal must say the session is untouched: {error}"
+        );
+
+        let missing = bad.parent().unwrap().join("does-not-exist.toml");
+        reload_from(&missing, false).expect_err("a vanished path must not reload");
+    }
+
+    #[test]
+    fn reload_from_rejects_an_unknown_field_like_startup_parses_it() {
+        // Whole-file validation before anything applies: an unknown field
+        // fails the reload even though every other table is valid.
+        let (_dir, path) = write_temp("[layout]\ngaps = 5\n");
+        reload_from(&path, false).expect_err("an unknown field must not reload");
     }
 
     #[test]

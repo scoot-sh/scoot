@@ -46,6 +46,7 @@ compositor running in a VM.
 | `outputs` | Every output's name, rectangle, usable rectangle and scale. |
 | `windows` | Every window: id, app id, title, icon, focus, popup grab. |
 | `action ACTION [ARGUMENT...]` | Run a layout action — see [Actions](#actions). |
+| `reload` | Re-read the config file the session started from and re-apply what can be re-applied live (gap, appearance, keybindings) — see [configuration.md](configuration.md#reloading-the-config). Answers `reloaded` with applied-vs-refused field lists, or `error` (running config untouched) when the file cannot load or validate. |
 | `screenshot [--output ID] [--out FILE]` | Capture the screen as PNG. Without `--out`, the PNG goes to stdout. `--output` names which output to capture; scoot composites one (the first, id 1), so any other id is refused rather than answered with that one's pixels. Omitting it always means the composited output. |
 | `pointer move X Y` | Move the pointer to logical coordinates. |
 | `pointer click X Y [left\|right\|middle]` | Move, then press and release. |
@@ -58,6 +59,7 @@ compositor running in a VM.
 ```sh
 scootctl windows
 scootctl action focus-column left
+scootctl reload
 scootctl screenshot --out /tmp/shot.png
 scootctl type "hello"
 scootctl wait-idle --quiet-ms 200
@@ -170,6 +172,25 @@ defaulted — an older server omits them rather than bumping
 `popup_grab: true` are always truthful, while `false` means "no, *or* a
 server predating the field"; an all-zero `usable` means the same (fall back
 to `rect`), and an omitted `scale` decodes as `1.0`.
+
+**`reloaded`**, the answer to `reload`, is the exception that proves the
+rule above: it is a new reply variant, not a defaulted field, and it moved
+`PROTOCOL_VERSION` 2 → 3 (an older client handed one would fail its decode
+— in practice only a client new enough to send `reload` ever receives one).
+Read it asymmetrically from the other direction: a `reload` sent to a
+server predating the request answers an ordinary `error`, not a kill — an
+unknown request tag is a decode error the server answers and keeps serving.
+
+```json
+{ "type": "reloaded", "applied": ["layout.gap", "binds"],
+  "refused": ["output.scale (startup-only: clients were told the scale at bind time)"] }
+```
+
+`applied` names the fields re-applied live, `refused` the ones that
+differed but cannot be (each with its reason). Both name only fields that
+*differed*: two empty lists together mean the reload changed nothing it was
+asked to. A reload that could not load or validate the file answers
+`error` with the running config untouched (`scootctl` exits non-zero).
 
 ## Rules an agent needs
 

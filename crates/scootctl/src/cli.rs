@@ -23,6 +23,8 @@ use scoot_ipc::{Action, Horizontal, PointerButton, Request, Vertical};
 pub const REQUESTS_HELP: &str = "\
     version | outputs | windows
     action ACTION [ARGUMENT...]
+    reload                          re-read the config file and re-apply
+                                    what can be re-applied live
     screenshot [--output ID] [--out FILE]
     pointer move X Y | pointer click X Y [left|right|middle]
     pointer button left|right|middle press|release | pointer scroll DX DY
@@ -54,6 +56,8 @@ USAGE:
 REQUESTS:
     version | outputs | windows
     action ACTION [ARGUMENT...]
+    reload                          re-read the config file and re-apply
+                                    what can be re-applied live
     screenshot [--output ID] [--out FILE]
     pointer move X Y | pointer click X Y [left|right|middle]
     pointer button left|right|middle press|release | pointer scroll DX DY
@@ -153,6 +157,7 @@ fn message(mut args: impl Iterator<Item = String>) -> Result<Msg, Error> {
         "version" => Request::Version,
         "outputs" => Request::Outputs,
         "windows" => Request::Windows,
+        "reload" => Request::Reload,
         "action" => Request::Action(action(&mut args)?),
         "screenshot" => {
             let mut output = None;
@@ -374,6 +379,13 @@ mod tests {
             parse_args(&["windows"]),
             Ok(Command::Msg {
                 request: Request::Windows,
+                out: None,
+            })
+        );
+        assert_eq!(
+            parse_args(&["reload"]),
+            Ok(Command::Msg {
+                request: Request::Reload,
                 out: None,
             })
         );

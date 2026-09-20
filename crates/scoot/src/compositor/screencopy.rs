@@ -274,10 +274,10 @@ const BYTES_PER_PIXEL: i32 = 4;
 ///
 /// True exactly while `[appearance] background_color`'s alpha is below 1.0.
 /// Read off [`State::appearance`](super::State) once per frame tick in
-/// [`State::service_captures`], not cached anywhere: there is
-/// no config reload today (nothing writes `appearance` after `State::new`),
-/// so any read is current -- but a startup-cached bool would go stale the
-/// moment a reload exists, and a per-tick read cannot.
+/// [`State::service_captures`], not cached anywhere: a config reload can
+/// rewrite `appearance` under a live session (see `reload.rs`), so a
+/// startup-cached bool would go stale the moment a background turned
+/// translucent -- and a per-tick read cannot.
 ///
 /// Exact `< 1.0`, no epsilon, and that is deliberate rather than lazy.
 /// `Color::parse` produces `byte / 255.0`, so the only opaque value a config

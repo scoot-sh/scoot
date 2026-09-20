@@ -35,6 +35,7 @@ mod outputs;
 mod popup;
 mod presentation_time;
 mod relative_pointer;
+mod reload;
 pub(crate) mod render;
 mod screencopy;
 mod screenshot;
@@ -116,6 +117,19 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
         scale,
         renderer,
     )?;
+
+    // What `Request::Reload` re-reads: the same path startup used (the
+    // explicit `--config` when one was given, else the resolved XDG default
+    // -- even when no file existed there, so a file created later still
+    // reloads). Plus the startup-only values a reload diffs against; both
+    // come off `loaded` before the autostart drain below moves it.
+    state.config_path = config::startup_path(
+        options.config.as_deref(),
+        std::env::var_os("XDG_CONFIG_HOME"),
+        std::env::var_os("HOME"),
+    );
+    state.startup_gpu = loaded.gpu.clone();
+    state.startup_autostart = loaded.autostart.clone();
 
     // `--tty` picks its own size from the connector's preferred mode (or
     // the `--mode` the user named) -- there's no host to negotiate a size

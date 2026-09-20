@@ -74,7 +74,6 @@ use smithay::reexports::input::DeviceCapability as LibinputCapability;
 use self::buffers::BufferPool;
 use self::dumb::DumbPresenter;
 use super::State;
-use super::keybindings::Keybindings;
 use super::output_scale::logical_size;
 use super::render::ScanoutHandoff;
 use crate::cli::RendererKind;
@@ -555,16 +554,10 @@ pub fn init(
     // is the one recovery path when the display is wedged on hardware with
     // no other window manager and no easy remote access (see
     // `config.rs`'s module doc), so it must always win, not silently lose
-    // to a config-file typo or a well-meaning-but-dangerous rebind.
-    for (mods, keysym, replaced) in state.keybindings.extend(Keybindings::vt_switch_bindings()) {
-        tracing::warn!(
-            ?mods,
-            keysym = keysym.raw(),
-            ?replaced,
-            "a config-file keybinding on this combo was overridden by --tty's \
-             VT-switch binding, which must always work as the recovery path"
-        );
-    }
+    // to a config-file typo or a well-meaning-but-dangerous rebind. One
+    // shared function with the reload path (`config::enforce_vt_binds`), so
+    // a reloaded file cannot strip what startup layered on.
+    super::config::enforce_vt_binds(&mut state.keybindings);
 
     Ok((width, height, name))
 }

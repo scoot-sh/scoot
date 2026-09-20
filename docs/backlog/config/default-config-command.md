@@ -47,7 +47,7 @@ the loop cheaply.
 
 ## Related
 
-- `docs/backlog/config/config-reload.md` — the other half of the
+- `docs/backlog/resolved/config-reload-done.md` — the other half of the
   config-editing experience. Emitting a starting file matters more once
   editing it does not require a session restart.
 - If `scootctl` lands first (`docs/backlog/meta/rename-flex-family.md`),
