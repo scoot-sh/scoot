@@ -521,6 +521,20 @@ struct StripGeometry {
     canvas: Size<i32, Physical>,
 }
 
+/// The `src` rect for a painted strip element: the whole buffer, in texels.
+///
+/// `from_buffer`'s `src` is `Logical`-typed but converted to texels through
+/// the buffer's own scale, which [`build_strips`] leaves at 1 -- so the
+/// canvas dimensions name every painted pixel exactly. The default (the
+/// element's logical size) is a different rect at any scale but 1.0; see the
+/// call sites.
+fn strip_src(canvas: Size<i32, Physical>) -> Rectangle<f64, Logical> {
+    Rectangle::from_size(Size::<f64, Logical>::from((
+        f64::from(canvas.w),
+        f64::from(canvas.h),
+    )))
+}
+
 /// Per-window decoration bookkeeping, owned by [`State`](super::State) for
 /// as long as the compositor runs. `render.rs` calls [`Decorations::elements`]
 /// once per render to get this frame's ring, and otherwise doesn't know this
@@ -709,7 +723,15 @@ impl Decorations {
             top_at.loc,
             top,
             None,
-            None,
+            // The buffer holds physical pixels (the strip canvas) while the
+            // element is built at the logical size: the default src (the
+            // logical size) would sample only the top-left logical-sized
+            // sub-rect of the buffer and stretch it over the whole canvas.
+            // Invisible at scale 1.0, where the two coincide -- which is why
+            // the scale-1.0 suite never caught it -- and a visibly misplaced
+            // corner arc everywhere else (gh #205). Name the full buffer
+            // explicitly; its scale is 1, so these numbers are texels.
+            Some(strip_src(top_at.canvas)),
             Some(top_at.logical),
             Kind::Unspecified,
         );
@@ -718,7 +740,9 @@ impl Decorations {
             bottom_at.loc,
             bottom,
             None,
-            None,
+            // Same full-buffer src as above: the two strips share nothing
+            // but the mistake.
+            Some(strip_src(bottom_at.canvas)),
             Some(bottom_at.logical),
             Kind::Unspecified,
         );

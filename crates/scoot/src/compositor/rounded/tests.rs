@@ -27,6 +27,10 @@ use wayland_client::protocol::{
     wl_buffer, wl_compositor, wl_registry, wl_shm, wl_shm_pool, wl_surface,
 };
 use wayland_client::{Connection, Dispatch, Proxy, QueueHandle};
+use wayland_protocols::wp::fractional_scale::v1::client::{
+    wp_fractional_scale_manager_v1, wp_fractional_scale_v1,
+};
+use wayland_protocols::wp::viewporter::client::{wp_viewport, wp_viewporter};
 use wayland_protocols::xdg::shell::client::{
     xdg_popup, xdg_positioner, xdg_surface, xdg_toplevel, xdg_wm_base,
 };
@@ -81,6 +85,12 @@ struct TestClient {
     shm: Option<wl_shm::WlShm>,
     wm_base: Option<xdg_wm_base::XdgWmBase>,
     layer_shell: Option<zwlr_layer_shell_v1::ZwlrLayerShellV1>,
+    fractional_manager: Option<wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1>,
+    viewporter: Option<wp_viewporter::WpViewporter>,
+    /// `wp_fractional_scale_v1.preferred_scale`, converted from the
+    /// protocol's 1/120ths to a plain factor. Fixed for the session, so one
+    /// slot is enough no matter how many windows map.
+    preferred_scale: Option<f64>,
     popup_serial: Option<u32>,
     /// Per-window configure state by creation order: mapping a second
     /// window re-layouts (and reconfigures) the first, so a single shared
@@ -119,6 +129,12 @@ impl Dispatch<wl_registry::WlRegistry, ()> for TestClient {
             client.wm_base = Some(registry.bind(name, version.min(1), qh, ()));
         } else if interface == zwlr_layer_shell_v1::ZwlrLayerShellV1::interface().name {
             client.layer_shell = Some(registry.bind(name, version.min(1), qh, ()));
+        } else if interface
+            == wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1::interface().name
+        {
+            client.fractional_manager = Some(registry.bind(name, version.min(1), qh, ()));
+        } else if interface == wp_viewporter::WpViewporter::interface().name {
+            client.viewporter = Some(registry.bind(name, version.min(1), qh, ()));
         }
     }
 }
@@ -204,7 +220,26 @@ impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, ()> for TestClient {
     }
 }
 
+impl Dispatch<wp_fractional_scale_v1::WpFractionalScaleV1, ()> for TestClient {
+    fn event(
+        client: &mut Self,
+        _: &wp_fractional_scale_v1::WpFractionalScaleV1,
+        event: wp_fractional_scale_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let wp_fractional_scale_v1::Event::PreferredScale { scale } = event {
+            // The protocol carries the scale as 1/120ths.
+            client.preferred_scale = Some(f64::from(scale) / 120.0);
+        }
+    }
+}
+
 wayland_client::delegate_noop!(TestClient: ignore wl_compositor::WlCompositor);
+wayland_client::delegate_noop!(TestClient: ignore wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1);
+wayland_client::delegate_noop!(TestClient: ignore wp_viewporter::WpViewporter);
+wayland_client::delegate_noop!(TestClient: ignore wp_viewport::WpViewport);
 wayland_client::delegate_noop!(TestClient: ignore wl_shm::WlShm);
 wayland_client::delegate_noop!(TestClient: ignore wl_shm_pool::WlShmPool);
 wayland_client::delegate_noop!(TestClient: ignore wl_buffer::WlBuffer);
@@ -246,9 +281,19 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
     let shm = client.shm.clone().ok_or("no wl_shm")?;
     let wm_base = client.wm_base.clone().ok_or("no xdg_wm_base")?;
     let layer_shell = client.layer_shell.clone();
+    let fractional_manager = client
+        .fractional_manager
+        .clone()
+        .ok_or("no wp_fractional_scale_manager_v1")?;
+    let viewporter = client.viewporter.clone().ok_or("no wp_viewporter")?;
     // Held so every mapped surface stays alive for the run.
     let mut surfaces: Vec<wl_surface::WlSurface> = Vec::new();
     let mut roles: Vec<xdg_surface::XdgSurface> = Vec::new();
+    // The fractional-scale objects and viewports: dropping either could
+    // release surface state the compositor still reads, so they live as
+    // long as their surface does.
+    let mut fractional_scales: Vec<wp_fractional_scale_v1::WpFractionalScaleV1> = Vec::new();
+    let mut viewports: Vec<wp_viewport::WpViewport> = Vec::new();
     let mut parent: Option<xdg_surface::XdgSurface> = None;
 
     while let Ok(step) = steps.recv() {
@@ -258,6 +303,14 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 client.window_serials.push(None);
                 client.window_sizes.push(None);
                 let surface = compositor.create_surface(&qh, ());
+                // A modern toolkit speaks fractional scale whenever the
+                // globals exist: learn the session's scale first, then size
+                // the buffer from it (the `foot`/GTK shape), with the
+                // viewport destination at the configured logical size.
+                let fractional = fractional_manager.get_fractional_scale(&surface, &qh, ());
+                let preferred = wait_for(&mut queue, &mut client, "a preferred scale", |client| {
+                    client.preferred_scale
+                })?;
                 let xdg = wm_base.get_xdg_surface(&surface, &qh, SurfaceKind::Window(index));
                 let toplevel = xdg.get_toplevel(&qh, SurfaceKind::Window(index));
                 toplevel.set_title("rounded".into());
@@ -272,14 +325,22 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                     client.window_serials[index]
                 })?;
                 xdg.ack_configure(serial);
-                let buffer = solid_buffer(&shm, &qh, w, h, color);
+                let viewport = viewporter.get_viewport(&surface, &qh, ());
+                viewport.set_destination(w, h);
+                let (bw, bh) = (
+                    (f64::from(w) * preferred).round() as i32,
+                    (f64::from(h) * preferred).round() as i32,
+                );
+                let buffer = solid_buffer(&shm, &qh, bw, bh, color);
                 surface.attach(Some(&buffer), 0, 0);
-                surface.damage_buffer(0, 0, w, h);
+                surface.damage_buffer(0, 0, bw, bh);
                 surface.commit();
                 queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
                 parent = Some(xdg.clone());
                 roles.push(xdg);
                 surfaces.push(surface);
+                fractional_scales.push(fractional);
+                viewports.push(viewport);
                 acks.send(Ack::Done).map_err(|e| e.to_string())?;
             }
             Step::Popup { color, w, h } => {
@@ -352,6 +413,23 @@ impl Fixture {
                 ..Appearance::default()
             },
             CANVAS,
+        );
+        fixture.spawn(run_client);
+        fixture
+    }
+
+    /// The same at an output scale other than 1.0, with an explicit ring
+    /// thickness: the ticket's `corner_radius = 10, focus_ring_width = 4`
+    /// shape for the fractional-scale separation test below.
+    fn with_radius_at_scale(radius: i32, thickness: i32, scale: f64) -> Self {
+        let mut fixture = Harness::headless_scaled(
+            Appearance {
+                corner_radius: radius,
+                focus_ring_width: thickness,
+                ..Appearance::default()
+            },
+            CANVAS,
+            scale,
         );
         fixture.spawn(run_client);
         fixture
@@ -692,6 +770,246 @@ fn a_huge_radius_clamps_to_a_stadium() {
         effective,
         "physical_radius must clamp before anything draws"
     );
+}
+
+// ---------------------------------------------------------------------------
+// gh #205: ring vs content alignment across output scales (separation test)
+// ---------------------------------------------------------------------------
+
+/// The separation test for gh #205 ("ring and window content corners do not
+/// line up at fractional output scale"): the same fractional-aware client
+/// (preferred scale + viewport destination, the `foot`/GTK shape) at scale
+/// 1.0, 2.0 and 1.5 with the ticket's `corner_radius = 10,
+/// focus_ring_width = 4`. The ticket's hypothesis says the integer scales
+/// line up and only 1.5 is wrong (the rounding-route split); if an integer
+/// leg fails too, the hypothesis is falsified and the failure -- not a
+/// rounding fix -- is what needs explaining.
+///
+/// What "lines up" means, pinned per scale: the window draws its clip rect
+/// minus exactly the four staircases (red census), every corner row's first
+/// and last red pixel sits exactly on the staircase the ring's inner edge is
+/// painted from, and the pixel just outside each is ring color.
+#[test]
+fn ring_and_content_align_at_scale_one() {
+    check_ring_content_alignment(1.0, 10, 4);
+}
+
+#[test]
+fn ring_and_content_align_at_scale_two() {
+    check_ring_content_alignment(2.0, 10, 4);
+}
+
+#[test]
+fn ring_and_content_align_at_scale_one_point_five() {
+    check_ring_content_alignment(1.5, 10, 4);
+}
+
+/// The drift ticket's brute-force shape applied to this fix: the same
+/// alignment at the other common fractional scales, not just the ticket's
+/// 1.5. One test with a fresh fixture per scale rather than three tests,
+/// since these are one assertion at different render targets.
+#[test]
+fn ring_and_content_align_across_fractional_scales() {
+    for scale in [1.25, 1.75, 4.0 / 3.0] {
+        check_ring_content_alignment(scale, 10, 4);
+    }
+}
+
+/// `corner_radius = 1` at scale 1.5 is a physical radius of 2, which cuts
+/// exactly the corner pixel per the pixel-center rule -- the scale-1.0 "cuts
+/// nothing" pin does not transfer, and this pins what replaces it: the same
+/// clip-minus-staircase census and row transitions at a tiny radius.
+#[test]
+fn radius_one_at_fractional_scale_cuts_one_pixel() {
+    check_ring_content_alignment(1.5, 1, 4);
+}
+
+/// A radius past half the window's smaller dimension clamps to a stadium at
+/// fractional scale too: no panic, no wrap, extreme corners background and
+/// edge middles window.
+#[test]
+fn huge_radius_clamps_to_a_stadium_at_fractional_scale() {
+    const SCALE: f64 = 1.5;
+    let mut fixture = Fixture::with_radius_at_scale(10_000, 4, SCALE);
+    fixture.run(Step::Window { color: WINDOW_BGRA });
+    let placement = fixture.placement();
+    let pixels = fixture.render();
+    let clip = clip_rect(placement, SCALE);
+    let (x, y, w, h) = (clip.loc.x, clip.loc.y, clip.size.w, clip.size.h);
+    let effective = physical_radius(10_000, clip, SCALE);
+    assert_eq!(
+        effective,
+        clip.size.w.min(clip.size.h) / 2,
+        "the frame must use the clamped radius"
+    );
+    assert!(
+        cut_width(effective, 0) > 0,
+        "the test needs a radius that actually cuts the extreme corner"
+    );
+    let bg: [u8; 4] = pixels[0..4].try_into().expect("canvas corner");
+    for (px, py, what) in [
+        (x, y, "top-left corner of a stadium"),
+        (x + w - 1, y, "top-right corner of a stadium"),
+        (x, y + h - 1, "bottom-left corner of a stadium"),
+        (x + w - 1, y + h - 1, "bottom-right corner of a stadium"),
+    ] {
+        assert_pixel(&pixels, CANVAS, px, py, bg, what);
+    }
+    assert_pixel(
+        &pixels,
+        CANVAS,
+        x + w / 2,
+        y,
+        WINDOW_BGRA,
+        "top edge middle survives the clamp",
+    );
+    assert_pixel(
+        &pixels,
+        CANVAS,
+        x + w / 2,
+        y + h / 2,
+        WINDOW_BGRA,
+        "the middle survives the clamp",
+    );
+}
+
+fn check_ring_content_alignment(scale: f64, configured: i32, thickness: i32) {
+    let mut fixture = Fixture::with_radius_at_scale(configured, thickness, scale);
+    fixture.run(Step::Window { color: WINDOW_BGRA });
+    let placement = fixture.placement();
+    let pixels = fixture.render();
+
+    let clip = clip_rect(placement, scale);
+    let radius = physical_radius(configured, clip, scale);
+    assert!(
+        radius > 1,
+        "scale {scale}: the test needs a radius that cuts"
+    );
+    let thickness_phys = (f64::from(thickness) * scale).round() as i32;
+    assert!(
+        thickness_phys > 0,
+        "scale {scale}: the test needs a visible ring band"
+    );
+    let (x, y, w, h) = (clip.loc.x, clip.loc.y, clip.size.w, clip.size.h);
+
+    let bg: [u8; 4] = pixels[0..4].try_into().expect("canvas corner");
+    assert_ne!(
+        bg, WINDOW_BGRA,
+        "scale {scale}: the test needs a non-window background sample"
+    );
+
+    // Red census: the clip rect minus the four staircases. Position-free,
+    // so a shifted or resized content rect fails here no matter which
+    // corner it hides in.
+    let cut: i32 = (0..radius).map(|row| cut_width(radius, row)).sum();
+    let counts = census(&pixels);
+    assert_eq!(
+        counts.get(&WINDOW_BGRA).copied().unwrap_or(0),
+        (w * h - 4 * cut) as usize,
+        "scale {scale}: the window must draw its clip rect minus exactly the four staircases"
+    );
+
+    // The ring color, sampled from the top straight run (it never touches a
+    // corner on this scene).
+    let ring_sample = [x + w / 2, y - thickness_phys / 2 - 1];
+    let ring: [u8; 4] = pixels[(ring_sample[1] * CANVAS + ring_sample[0]) as usize * 4..][..4]
+        .try_into()
+        .expect("in bounds");
+    assert_ne!(
+        ring, WINDOW_BGRA,
+        "scale {scale}: the sampled ring pixel must not be window"
+    );
+    assert_ne!(
+        ring, bg,
+        "scale {scale}: the sampled ring pixel must not be background"
+    );
+    assert_pixel(
+        &pixels,
+        CANVAS,
+        ring_sample[0],
+        ring_sample[1],
+        ring,
+        &format!("scale {scale}: top straight run"),
+    );
+
+    // Every corner row: the first and last red pixels sit exactly on the
+    // staircase, ring just outside. Top and bottom halves mirror.
+    for row in 0..radius {
+        let cut = cut_width(radius, row);
+        for (py, what) in [(y + row, "top"), (y + h - 1 - row, "bottom")] {
+            if cut > 0 {
+                assert_pixel(
+                    &pixels,
+                    CANVAS,
+                    x + cut - 1,
+                    py,
+                    ring,
+                    &format!("scale {scale}: {what} row {row}, ring hugs the staircase"),
+                );
+                assert_pixel(
+                    &pixels,
+                    CANVAS,
+                    x + w - cut,
+                    py,
+                    ring,
+                    &format!("scale {scale}: {what} row {row}, ring hugs the staircase (right)"),
+                );
+            }
+            assert_pixel(
+                &pixels,
+                CANVAS,
+                x + cut,
+                py,
+                WINDOW_BGRA,
+                &format!("scale {scale}: {what} row {row}, first kept pixel"),
+            );
+            assert_pixel(
+                &pixels,
+                CANVAS,
+                x + w - 1 - cut,
+                py,
+                WINDOW_BGRA,
+                &format!("scale {scale}: {what} row {row}, last kept pixel"),
+            );
+        }
+    }
+    // Center still window; the diagonal just outside the outer corner is
+    // background (a square ring would paint there).
+    assert_pixel(
+        &pixels,
+        CANVAS,
+        x + w / 2,
+        y + h / 2,
+        WINDOW_BGRA,
+        &format!("scale {scale}: the window middle"),
+    );
+    // The diagonal just outside the outer corner: background once the
+    // diagonal clears the outer arc (a square ring would paint there), ring
+    // while it is still inside it (a tiny radius with a thick ring). The
+    // gate is arithmetic on the two circles sharing the corner's center:
+    // `(radius + 1) * sqrt(2) > radius + thickness_phys`, which
+    // `radius > thickness_phys * 2` implies for every thickness this helper
+    // runs with (all `<= 8`; the slack runs out past that, and a new caller
+    // past it must re-derive rather than widen the gate).
+    if radius > thickness_phys * 2 {
+        assert_pixel(
+            &pixels,
+            CANVAS,
+            x - 1,
+            y - 1,
+            bg,
+            &format!("scale {scale}: no square corner remnant"),
+        );
+    } else {
+        assert_pixel(
+            &pixels,
+            CANVAS,
+            x - 1,
+            y - 1,
+            ring,
+            &format!("scale {scale}: the outer arc still covers the diagonal"),
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
