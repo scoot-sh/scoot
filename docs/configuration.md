@@ -264,10 +264,19 @@ explicitly ruled out.
 
 ## Reloading the config
 
-`scootctl reload` (and `scoot msg reload`, the same client) re-reads the
-same file startup used — the explicit `--config PATH` when one was given,
-else the resolved default path — and re-applies what can be re-applied
-live. No signal, no file watching: the IPC request is the trigger.
+Two triggers re-read the same file startup used — the explicit `--config
+PATH` when one was given, else the resolved default path — and re-apply
+what can be re-applied live:
+
+- `scootctl reload` (and `scoot msg reload`, the same client), which answers
+  with the applied-vs-refused report below;
+- `kill -HUP <compositor pid>` (`systemctl reload`-shaped tooling works
+  without a socket client), which drives the same path with no reply
+  channel: the applied/refused summary goes to the compositor log instead.
+
+No file watching: a live-edited config would fire mid-keystroke, while both
+triggers above say exactly when. A HUP to the `scootctl` client itself means
+nothing — only the compositor installs the handler.
 
 **Applied:** `[layout] gap` (the arrangement is recomputed and the screen
 redrawn), the `[appearance]` focus-ring width and colors, the background
