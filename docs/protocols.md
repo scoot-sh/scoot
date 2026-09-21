@@ -685,9 +685,12 @@ alive.
   none), and pointer input is hit-tested per output the same way, so exactly
   one surface holds each at a time. `locked` is sent only once *every*
   output has shown its blanked frame: an output with no surface counts on
-  its backdrop frame, but one whose surface is admitted and not yet drawn
-  holds the confirmation open, because its screen is still showing a
-  placeholder rather than the locker's blank. A surface admitted after the
+  its backdrop frame, but (with more than one output) one whose surface is
+  admitted and not yet drawn holds the confirmation open, because its screen
+  is still showing a placeholder rather than the locker's blank. If that
+  surface never draws, `locked` never fires — that wedge is the secure
+  default (confirming would show an unblanked screen as locked); kill the
+  locker and the abandoned path takes every screen red. A surface admitted after the
   lock already confirmed is sized and shown with no second confirmation. A
   second `get_lock_surface` for an already-covered output is refused with
   the protocol's `duplicate_output` error even when it names the output
