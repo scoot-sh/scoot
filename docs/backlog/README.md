@@ -538,6 +538,11 @@ be revisited.
   applied-vs-refused reply; scale/gpu/renderer/autostart/cursor stay
   startup-only and refuse with a message. Failed reloads keep the running
   config; `--tty` VT recovery binds are un-strippable.
+- [SIGHUP trigger for config reload](./resolved/reload-sighup-trigger-done.md)
+  — RESOLVED 2026-09-21: `kill -HUP` drives the same shared reload path with
+  no reply channel (the applied/refused summary goes to the log); default
+  terminate disposition fully replaced, composes with the SIGCHLD reaper,
+  children keep default HUP. inotify stays out; `scootctl` gets no handler.
 - [Consuming scoot from another flake, and the missing home-manager module](./resolved/flake-consumer-and-home-manager-done.md)
   — RESOLVED 2026-09-20: README Install carries the consumer snippet and
   `docs/nix.md` owns the fuller section; thin `programs.scoot` modules on

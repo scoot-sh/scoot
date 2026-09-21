@@ -58,7 +58,8 @@ Linux, and daily-driven on `--tty`** (2026-09-18).
   overlay or cursor planes), and it has never run on a real GPU — every
   measurement so far is a software rasteriser's. `--headless`/`--nested`
   still read every frame back to main memory as pixman does.
-- **Config reload is partial.** `scootctl reload` re-applies the gap, the
+- **Config reload is partial.** `scootctl reload` (or `kill -HUP` on the
+  compositor) re-applies the gap, the
   appearance and the keybindings live; output scale, DRM device, renderer,
   autostart and cursor bitmap stay startup-only and a reload refuses them
   with a message rather than silently ignoring them.

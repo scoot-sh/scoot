@@ -77,6 +77,12 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[SIGHUP trigger for config
+  reload](docs/backlog/resolved/reload-sighup-trigger-done.md)**
+  (2026-09-21) — `kill -HUP` drives the shared reload path (no reply
+  channel; summary to the log), composes with the SIGCHLD reaper, children
+  keep default HUP. Coordinator-directed, no gh issue.
+
 - **[README + docs consistency
   re-audit](docs/backlog/resolved/readme-rereview-done.md)**
   (2026-09-21) — docs-only: every user-facing surface since PR #159

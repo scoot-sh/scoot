@@ -45,6 +45,7 @@ mod session_env;
 mod session_lock;
 mod shell;
 mod shm_pools;
+mod sighup;
 mod single_pixel_buffer;
 mod state;
 mod tablet;
@@ -284,6 +285,12 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
     // Every later spawn (keybinding and IPC `spawn`) flows through the same
     // `State::spawn`, which is what tracks the pids this reaps.
     child_reaper::install(&event_loop.handle(), &mut state)?;
+
+    // The SIGHUP reload trigger, next to the reaper: a HUP arriving before
+    // this install keeps its default disposition and kills the session, so
+    // this must not run after the first spawn either. Only the compositor
+    // installs it -- `scootctl` keeps the default meaning of HUP.
+    sighup::install(&event_loop.handle())?;
 
     // `[autostart]` first (the declared session baseline), then `--` (the
     // session script): both run through actions the session already knows
