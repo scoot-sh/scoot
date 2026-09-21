@@ -281,6 +281,18 @@ no second monitor. `crates/scoot/src/compositor/outputs.rs`'s doc on
   is a different shape. Needs real two-connector hardware (Asahi) — like
   `gpu-vs-cpu-measured.md`, this phase waits on the user's machine and
   does not block A–D.
+- **F. Cross-output window moves + focus (staged 2026-09-21, the last
+  "partially implemented" gap).** All of A–D deliberately left windows
+  opening on output 1 with no way across: no move primitive, no
+  focus-output primitive (keyboard users are stuck on output 1 — focus
+  only follows the pointer), and no `output_leave` pairing. Shape (decided,
+  see below): `MoveFocusedWindowToOutput` + `FocusOutput` core actions,
+  IPC variants, config grammar, NO default binds (document; binds get
+  their own decision like the workspace-index ones did), `output_leave`
+  pairing wherever `output_enter` already fires, focus follows the moved
+  window (mirroring move-to-workspace-index's carry-and-follow), keyboard
+  on the source output falls back per existing rules. Out: per-output
+  scale/mode surface, runtime output add/remove, default binds.
 
 ## Verification per phase (in addition to the standard set)
 
