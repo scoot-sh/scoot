@@ -91,6 +91,12 @@ impl State {
     /// field list, the failure semantics, and the while-locked decision.
     pub fn reload(&mut self) -> Response {
         let Some(path) = self.config_path.clone() else {
+            // Logged as well as answered: over IPC the client sees the
+            // error, but a SIGHUP trigger has no reply channel, so without
+            // this nothing would observe the refusal anywhere.
+            tracing::error!(
+                "config reload refused: no resolvable config path; keeping the running config"
+            );
             return Response::error(
                 "refused: this session started with no resolvable config path \
                  (neither XDG_CONFIG_HOME nor HOME is set), so there is no \
