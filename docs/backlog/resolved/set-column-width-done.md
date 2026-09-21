@@ -1,12 +1,25 @@
 ---
-title: "An action that sets a column's width directly, not just cycle-column-width"
-status: "open"
-area: "core"
-priority: "medium"
+title: "An action that sets a column's width directly, not just cycle-column-width — RESOLVED"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
 ---
 
-# An action that sets a column's width directly, not just cycle-column-width
+# An action that sets a column's width directly, not just cycle-column-width — RESOLVED
+
+RESOLVED 2026-09-21 (gh #204, PR #206, merge `c75f405`): `set-column-width N`
+through the full stack, following the workspace-index precedent exactly
+(`resolved/workspace-index-keybindings-done.md`). 0-based index into
+`[layout] column_widths`; out-of-range = ignore/no-op; range-checked before
+`forget_learned_widths` so an ignored index changes nothing observable.
+No default bind (user-sized list, phase-F precedent), no `PROTOCOL_VERSION`
+bump (client→server additive, still 3), toggle/memory explicitly still out.
+Review: NO BLOCKING FINDINGS (every arrival path traced to the single
+`handle_action` choke point, live spot-check re-run); CI red once on
+`cargo fmt --all` (implementer's gate used `-p scoot`, which misses other
+crates' tests) — fixed whitespace-only (`fbd96ee`), full CI green before
+merge. Original entry below, kept verbatim.
 
 Filed as gh issue #204 (2026-09-21). `cycle-column-width` is the only way
 to change a column's width, so "make this window as wide as the output" is

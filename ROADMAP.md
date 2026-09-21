@@ -77,6 +77,16 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[Set a column's width
+  directly](docs/backlog/resolved/set-column-width-done.md)**
+  (2026-09-21, gh #204, PR #206) — `set-column-width N` (0-based into
+  `[layout] column_widths`, out-of-range ignored without disturbing learned
+  widths) through the workspace-index path (core → IPC → shared grammar →
+  config emit → `configuration.md`/`ipc.md`); no default bind, no
+  `PROTOCOL_VERSION` bump, toggle/memory still out. Review clean; CI red
+  once on `cargo fmt --all` (fixed whitespace-only), full green before
+  merge.
+
 - **[`--print-default-config --write`
   convenience](docs/backlog/resolved/default-config-write-done.md)**
   (2026-09-21) — the stdout emitter's follow-up: `--write` places the same
