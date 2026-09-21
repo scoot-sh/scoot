@@ -77,6 +77,11 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[Flake polish: `homeModules` alias, Darwin default, nixfmt (gh
+  #175)](docs/backlog/resolved/flake-polish-done.md)**
+  (2026-09-21) — `homeModules` alias over legacy
+  `homeManagerModules`, Darwin HM default `null` (files-only), formatted
+  `compositor-deps.nix`, un-aliased formatter. Flake-only, zero `.rs`.
 - **[home-manager `sessionScript` follows `configFile` (gh
   #174)](docs/backlog/resolved/hm-session-script-path-done.md)**
   (2026-09-21) — the script path is derived from the config's directory

@@ -408,7 +408,8 @@ falsify. Read `flexwm` there as `scoot`.
   — RESOLVED 2026-09-21 (gh #174): script path derived from `configFile`'s directory (`scoot/session.sh` by default, byte-identical), `hmRelocated` pins the pairing.
 - [CI never exercises the Nix packaging](./packaging/ci-nix-packaging.md) — gh #173: no `nix flake check` / `nix build` in CI; take at least the cheap `flake check` half.
 - [NixOS session entry can't launch a shell](./packaging/nixos-session-command.md) — gh #171: fixed `Exec=scoot --tty` ignores the HM-written `session.sh`; needs a session-command option (default bare, additive entry).
-- [Flake polish: `homeModules` alias, Darwin default, nixfmt](./packaging/flake-polish.md) — gh #175: four one-line items (legacy output name warning, Darwin installs wrongly-named binary, `compositor-deps.nix` unformatted, `nixfmt-rfc-style` alias).
+- [Flake polish: `homeModules` alias, Darwin default, nixfmt](./resolved/flake-polish-done.md)
+  — RESOLVED 2026-09-21 (gh #175): `homeModules` alias over legacy `homeManagerModules` (both evaluate identically), Darwin HM default `null` (files-only; explicit `package` still wins), `compositor-deps.nix` formatted, formatter un-aliased to `pkgs.nixfmt`. Flake-only, zero `.rs`.
 - [Nix `src = self` invalidates the build on doc-only edits](./resolved/nix-src-fileset-done.md)
   — RESOLVED 2026-09-18: `src` is a `lib.fileset` union of `Cargo.toml`,
   `Cargo.lock`, `crates/` (every other `./` read in the flake re-verified

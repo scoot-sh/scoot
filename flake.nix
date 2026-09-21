@@ -266,20 +266,35 @@
       # pure module in `nix/modules/`: without an overlay there is no
       # `pkgs.scoot` to default to, so the flake's own build (the same
       # per-system default as `packages`) is injected here instead, and
-      # an explicit setting still wins. See docs/nix.md.
+      # an explicit setting still wins -- except on Darwin on the HM
+      # side (see below). See docs/nix.md.
       homeManagerModules =
         let
           hmWrapper =
             { pkgs, ... }:
             {
               imports = [ ./nix/modules/home.nix ];
-              programs.scoot.package = nixpkgs.lib.mkDefault self.packages.${pkgs.system}.default;
+              # On Darwin the per-system default would be `scootctl`, a
+              # binary not named `scoot` -- while the option reads "The
+              # scoot package to install" and docs/nix.md frames the
+              # macOS use as config management (the config edited here
+              # deploys to a Linux box). So the Darwin default is null:
+              # files-only, which the module explicitly supports. Darwin
+              # users who want the client set `package` explicitly.
+              programs.scoot.package = nixpkgs.lib.mkDefault (
+                if pkgs.stdenv.hostPlatform.isDarwin then null else self.packages.${pkgs.system}.default
+              );
             };
         in
         {
           default = hmWrapper;
           scoot = hmWrapper;
         };
+
+      # Current home-manager spelling (`homeModules.*`); the legacy
+      # `homeManagerModules.*` above keeps working for existing
+      # consumers -- both names resolve to the same set.
+      homeModules = self.homeManagerModules;
 
       nixosModules =
         let
@@ -303,6 +318,6 @@
         scoot-modules = pkgs.callPackage ./nix/tests.nix { };
       });
 
-      formatter = forEach (pkgs: pkgs.nixfmt-rfc-style);
+      formatter = forEach (pkgs: pkgs.nixfmt);
     };
 }

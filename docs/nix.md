@@ -56,13 +56,19 @@ while the NixOS module's session entry only means anything on NixOS.
 ```nix
 # In your home-manager flake inputs: scoot.url = "github:scoot-sh/scoot";
 # In your home configuration:
-imports = [ inputs.scoot.homeManagerModules.scoot ];
+imports = [ inputs.scoot.homeModules.scoot ];
+# (Legacy spelling `inputs.scoot.homeManagerModules.scoot` still resolves
+# to the same module.)
 
 programs.scoot = {
   enable = true;
-  # `package` defaults to the flake's own build for your system (the
-  # same per-system default as `packages`); set it only to override:
+  # `package` defaults to the flake's own build for your system on Linux
+  # (the same per-system default as `packages`); on macOS it defaults to
+  # null (files only — the module manages the config, installs no
+  # binary). Set it only to override:
   # package = inputs.scoot.packages.${pkgs.system}.scoot;
+  # # macOS, to also install the remote-control client:
+  # package = inputs.scoot.packages.${pkgs.system}.scootctl;
   settings = {
     layout.gap = 8;
     binds = {
@@ -77,7 +83,7 @@ programs.scoot = {
 | Option | Default | Meaning |
 |---|---|---|
 | `enable` | `false` | Manage scoot files (and install `package`). |
-| `package` | flake's own build | The binary installed to your profile. `null` installs no binary (files only). |
+| `package` | flake's own build (Linux), `null` (macOS) | The binary installed to your profile. `null` installs no binary (files only). |
 | `settings` | `{ }` | Free-form config, rendered verbatim to TOML (see below). Empty renders a valid minimal file: the compositor runs it as pure defaults. |
 | `configFile` | `"scoot/config.toml"` | Where the rendered TOML lands, relative to `$XDG_CONFIG_HOME`. Keep the default unless you pass the same path via `--config` wherever you launch scoot. |
 | `sessionScript` | `null` | Startup script text, written executable beside the rendered config at `<dirOf configFile>/session.sh` (`scoot/session.sh` with the default `configFile`). Launch it with `scoot -- ~/.config/scoot/session.sh` for the default (or `~/.config/<that path>` after a `configFile` override), or exec it from your greetd/startwm entry. `null` writes no file. |
