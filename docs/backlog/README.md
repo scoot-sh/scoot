@@ -407,7 +407,8 @@ falsify. Read `flexwm` there as `scoot`.
 - [home-manager `sessionScript` vs `configFile` override](./resolved/hm-session-script-path-done.md)
   — RESOLVED 2026-09-21 (gh #174): script path derived from `configFile`'s directory (`scoot/session.sh` by default, byte-identical), `hmRelocated` pins the pairing.
 - [CI never exercises the Nix packaging](./packaging/ci-nix-packaging.md) — gh #173: no `nix flake check` / `nix build` in CI; take at least the cheap `flake check` half.
-- [NixOS session entry can't launch a shell](./packaging/nixos-session-command.md) — gh #171: fixed `Exec=scoot --tty` ignores the HM-written `session.sh`; needs a session-command option (default bare, additive entry).
+- [NixOS session entry can't launch a shell](./resolved/nixos-session-command-done.md)
+  — RESOLVED 2026-09-21 (gh #171): `session.command` (nullOr str, default null = bare `--tty`, byte-identical) takes the full `Exec=` line — append shape and wrapper-script path both expressible, HM `sessionScript` pairing documented both sides.
 - [Flake polish: `homeModules` alias, Darwin default, nixfmt](./resolved/flake-polish-done.md)
   — RESOLVED 2026-09-21 (gh #175): `homeModules` alias over legacy `homeManagerModules` (both evaluate identically), Darwin HM default `null` (files-only; explicit `package` still wins), `compositor-deps.nix` formatted, formatter un-aliased to `pkgs.nixfmt`. Flake-only, zero `.rs`.
 - [Nix `src = self` invalidates the build on doc-only edits](./resolved/nix-src-fileset-done.md)
