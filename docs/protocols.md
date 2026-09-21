@@ -262,6 +262,13 @@ Worth knowing before you write against it:
 - **With one output the wire is exactly what it always was** — one group,
   one `done` per batch. A second output adds a second group block before
   that `done`, nothing else.
+- **A group never changes outputs, so `output_leave` never fires on one.**
+  Each group is announced with its own output and keeps it: moving a window
+  across outputs changes workspace membership, not group assignment (the
+  protocol's `output_leave` is for an output *removed* from a group, which
+  only runtime output add/remove could produce — out of scope, outputs are
+  fixed for the session). The `ext-foreign-toplevel-list-v1` next door has
+  no output events at all, so a move changes nothing on it either.
 - **One client may hold at most 8 binds** across this manager, both
   window-list globals and the display manager combined; a ninth is answered
   `done` then `finished` rather than announced. A bar binds this global once.
@@ -372,10 +379,15 @@ Worth knowing before you write against it:
   `ShellRoot` with no window and no input event sends nothing at all when you
   call `activate()` — no request reaches the compositor. With a real
   `PanelWindow` and a real click it works. Test it with a window.
-- **`output_leave` is never sent.** Nothing moves a window across outputs
-  yet — a window stays on the output it opened on for its whole life, and
-  switching workspaces does not move it — the same answer wlroots-based
-  compositors give.
+- **`output_leave` is sent when a move carries the window across
+  outputs** — one `output_leave` for the old screen plus one `output_enter`
+  for the new one, closed by `done`, on exactly the window that moved (which
+  is the only thing that can change a window's screen: new windows open on
+  the first output, and switching workspaces does not move one). Closing a
+  window sends `closed` with no `leave` first — the handle's death is the
+  `closed` event, and nothing may be sent on it after. A client holding no
+  `wl_output` for either screen hears nothing about the move, not even a
+  bare `done`.
 - **`parent` is never sent** (the version 3 event). scoot's layout has no
   parent/child relation; every `xdg_toplevel` is an independent column entry,
   dialogs included.

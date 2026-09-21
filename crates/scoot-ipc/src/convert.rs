@@ -36,6 +36,10 @@ impl From<Action> for scoot_core::Action {
                 Self::MoveWindowToWorkspace(direction.into())
             }
             Action::MoveWindowToWorkspaceIndex { index } => Self::MoveWindowToWorkspaceIndex(index),
+            Action::MoveFocusedWindowToOutput { output } => {
+                Self::MoveFocusedWindowToOutput(scoot_core::OutputId(output))
+            }
+            Action::FocusOutput { output } => Self::FocusOutput(scoot_core::OutputId(output)),
             Action::CloseFocused => Self::CloseFocused,
             Action::Spawn { command } => Self::Spawn(command),
             Action::Quit => Self::Quit,
@@ -66,6 +70,14 @@ mod tests {
         assert_eq!(
             scoot_core::Action::from(Action::MoveWindowToWorkspaceIndex { index: 3 }),
             scoot_core::Action::MoveWindowToWorkspaceIndex(3)
+        );
+        assert_eq!(
+            scoot_core::Action::from(Action::MoveFocusedWindowToOutput { output: 2 }),
+            scoot_core::Action::MoveFocusedWindowToOutput(scoot_core::OutputId(2))
+        );
+        assert_eq!(
+            scoot_core::Action::from(Action::FocusOutput { output: 2 }),
+            scoot_core::Action::FocusOutput(scoot_core::OutputId(2))
         );
     }
 }

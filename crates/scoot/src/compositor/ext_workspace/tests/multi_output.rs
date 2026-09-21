@@ -222,3 +222,37 @@ fn stop_ends_updates_for_both_groups() {
         "the manager should be gone"
     );
 }
+
+// -- cross-output moves (milestone 19, phase F) ----------------------------
+
+/// Moving a window across outputs reassigns no group to any output: each
+/// group keeps the screen it was announced with, so no `output_leave` (and
+/// no second `output_enter`) fires on any group -- only the workspace
+/// membership events the move implies. The protocol's `output_leave` is for
+/// an output *removed from a group*, which runtime output add/remove would
+/// be, and that is out of scope: with fixed outputs it is unreachable.
+#[test]
+fn moving_a_window_across_outputs_reassigns_no_group() {
+    let mut fixture = two_output_fixture();
+    fixture.run(Step::BindOutputAt(0));
+    fixture.run(Step::BindOutputAt(1));
+    fixture.run(Step::BindManager);
+    fixture.run(Step::MapWindow);
+    fixture.take_log();
+
+    fixture
+        .state
+        .act(Action::MoveFocusedWindowToOutput(OutputId(2)));
+    fixture.settle();
+    let log = fixture.take_log();
+    assert!(
+        !log.iter()
+            .any(|seen| matches!(seen, Seen::OutputLeave(_) | Seen::OutputEnter(_))),
+        "a cross-output move reassigned a group's output: {log:?}"
+    );
+    // ...while the workspaces themselves did move: output 1 is back to its
+    // single empty workspace, and output 2 holds the window on its active
+    // workspace with the trailing empty one behind it.
+    assert_eq!(workspaces_of(&fixture, 1), (1, 0));
+    assert_eq!(workspaces_of(&fixture, 2), (2, 0));
+}

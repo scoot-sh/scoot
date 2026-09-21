@@ -62,6 +62,43 @@ fn the_indexed_workspace_actions_travel_as_snake_case_with_an_index() {
 }
 
 #[test]
+fn the_output_actions_travel_as_snake_case_with_an_output() {
+    // Same pin as the indexed workspace actions above: the exact JSON shape
+    // a client sends, and its decode back into the same request.
+    for (action, tag) in [
+        (
+            Action::MoveFocusedWindowToOutput { output: 2 },
+            "move_focused_window_to_output",
+        ),
+        (Action::FocusOutput { output: 2 }, "focus_output"),
+    ] {
+        let request = Request::Action(action);
+        assert_eq!(
+            json_of(&request),
+            json!({ "type": "action", "action": tag, "output": 2 })
+        );
+        assert_eq!(
+            decode::<Request>(&encode(&request).unwrap()).unwrap(),
+            request
+        );
+    }
+}
+
+#[test]
+fn unknown_action_tags_are_rejected_like_unknown_request_types() {
+    // The no-`PROTOCOL_VERSION`-bump half of the argument: a new action tag
+    // is nested inside `Request::Action`, so an older server's decode of the
+    // whole request fails exactly the way an unknown `Request` tag does --
+    // answered with an ordinary `Error` while the server keeps serving (see
+    // the crate's `PROTOCOL_VERSION` doc), never a kill and never a silent
+    // misroute. An older client never sends a tag it doesn't know, so the
+    // other direction needs nothing.
+    assert!(
+        decode::<Request>(r#"{"type":"action","action":"hypothetical_future_action"}"#).is_err()
+    );
+}
+
+#[test]
 fn key_combos_travel_as_strings() {
     let request = Request::Key {
         keys: "ctrl+shift+t".parse().unwrap(),

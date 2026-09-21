@@ -213,6 +213,57 @@ impl World {
         self.fix_view(loc.output);
     }
 
+    /// Carries the focused window to the target output's active workspace,
+    /// and follows it there.
+    ///
+    /// The focused window is always on the focused output (that is what
+    /// [`World::focused_window`] reads), so the source is never in doubt.
+    /// Unknown output ids are ignored like out-of-range workspace indices,
+    /// moving with no window focused does nothing, and moving to the output
+    /// the window is already on does nothing -- the same three early returns
+    /// the workspace-index move makes. The window keeps its column preset
+    /// across (a width choice, not a per-output state), lands right of the
+    /// target's focused column like a newly opened window, and the source
+    /// output keeps whatever neighbour focus `take` leaves behind.
+    fn move_focused_window_to_output(&mut self, target: OutputId) {
+        let Some(t) = self.output_index(target) else {
+            return;
+        };
+        let Some(id) = self.focused_window() else {
+            return;
+        };
+        let Some(loc) = self.locate(id) else {
+            return;
+        };
+        if loc.output == t {
+            return;
+        }
+        let preset = self.outputs[loc.output].workspaces[loc.workspace].columns[loc.column].preset;
+        self.remove_window(loc);
+        self.outputs[t]
+            .active_workspace_mut()
+            .insert_column(id, preset, true);
+        self.outputs[t].normalize();
+        self.focused_output = t;
+        self.fix_view(t);
+    }
+
+    /// Moves keyboard focus to another output: its active workspace's
+    /// focused window becomes the focused window -- or nothing does, when
+    /// that workspace is empty, which is what "focused" already means on an
+    /// output with no windows (see [`World::focused_window`]). An unknown
+    /// id is ignored, so focus can never strand on an output that isn't
+    /// there. Nothing structural changes, so there is nothing to normalize;
+    /// the re-scroll keeps the newly focused column in view, the way every
+    /// other action ends in `fix_view`.
+    fn focus_output(&mut self, target: OutputId) {
+        let Some(o) = self.output_index(target) else {
+            return;
+        };
+        self.focused_output = o;
+        self.fix_view(o);
+    }
+
     /// Takes a window out of the tree, tidying the workspaces behind it.
     fn remove_window(&mut self, loc: Location) {
         let output = &mut self.outputs[loc.output];

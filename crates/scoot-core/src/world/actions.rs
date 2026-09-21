@@ -39,6 +39,10 @@ impl World {
             Action::MoveWindowToWorkspaceIndex(index) => {
                 self.reshape(|o| o.move_focused_window_to_workspace_index(index));
             }
+            // Cross-output: these cannot go through `reshape`, which only
+            // touches the focused output's tree.
+            Action::MoveFocusedWindowToOutput(id) => self.move_focused_window_to_output(id),
+            Action::FocusOutput(id) => self.focus_output(id),
             Action::FocusWindowId(id) => {
                 if let Some(loc) = self.locate(id) {
                     self.focus_location(loc);

@@ -117,7 +117,7 @@
 
 use std::collections::BTreeMap;
 
-use scoot_core::{Action, WindowId, WindowInfo};
+use scoot_core::{Action, Arrangement, OutputId, WindowId, WindowInfo};
 use smithay::desktop::Window;
 use smithay::output::Output;
 use smithay::reexports::wayland_protocols_wlr::foreign_toplevel::v1::server::zwlr_foreign_toplevel_handle_v1::{
@@ -214,6 +214,17 @@ struct Toplevel {
     /// Whether this window has been reported as `activated`, i.e. whether the
     /// last `state` event sent for it carried the bit.
     activated: bool,
+    /// The output this window's handles were last told it is on -- the core
+    /// id behind the `wl_output` objects the last `output_enter` named.
+    ///
+    /// Compared against the arrangement on every `apply`, so a window a
+    /// cross-output move carried is told `output_leave` for the old screen
+    /// and `output_enter` for the new one (milestone 19, phase F). `None`
+    /// only when the window was announced with no output to name (no outputs
+    /// at all, or a client holding no `wl_output`): then the next `apply`
+    /// records without sending, because the protocol guarantees a `leave`
+    /// only ever follows an `enter` for the same output.
+    output: Option<OutputId>,
     /// One handle per client that has been told about this window -- several
     /// if a client bound the manager more than once, which is legal.
     ///
@@ -342,15 +353,18 @@ impl State {
         //
         // The output the window is actually on -- which at this point, before
         // the core has placed it, is the primary by `output_of_window`'s
-        // fallback, and stays the primary until something moves a window
-        // across outputs (nothing does yet). Announcing a window on an output
-        // it is not on would be worse than announcing it on one.
+        // fallback, and stays the primary until a cross-output move carries
+        // it elsewhere (which `refresh_wlr_output_membership` then tells
+        // these same handles about). Announcing a window on an output it is
+        // not on would be worse than announcing it on one.
         let output = self.output_of_window(id);
+        let output_id = output.as_ref().and_then(|o| self.outputs.id_of(o));
         let management = &mut self.foreign_toplevel_management;
         let mut toplevel = Toplevel {
             title: info.title.clone(),
             app_id: info.app_id.clone(),
             activated: false,
+            output: output_id,
             handles: Vec::new(),
         };
         management.managers.retain(|manager| {
@@ -472,6 +486,71 @@ impl State {
         }
     }
 
+    /// Brings every window's `output_enter` membership back in step with the
+    /// arrangement the core just published.
+    ///
+    /// Called from `shell.rs`'s `apply`, which every event and action that
+    /// can move a window ends in -- so a cross-output move is told as one
+    /// `output_leave` for the old screen plus one `output_enter` for the new
+    /// one, closed by `done`, on every handle of exactly the window that
+    /// moved. Windows that stayed put cost one map lookup and one `Option`
+    /// compare each, and send nothing.
+    ///
+    /// What this deliberately does *not* send: a `leave` when a window
+    /// closes (its `closed` covers the handle's whole death -- nothing may
+    /// be sent after it), when a window moves between workspaces of one
+    /// output (membership is per output, and no code ever sent leave there),
+    /// or when the stored output is `None` (no `enter` was ever sent for it,
+    /// and the protocol guarantees a `leave` only ever follows an `enter`
+    /// for the same output).
+    pub(super) fn refresh_wlr_output_membership(&mut self, arrangement: &Arrangement) {
+        for placement in &arrangement.placements {
+            let Some(toplevel) = self
+                .foreign_toplevel_management
+                .toplevels
+                .get_mut(&placement.id)
+            else {
+                continue;
+            };
+            if toplevel.output == Some(placement.output) {
+                continue;
+            }
+            let old = toplevel.output.and_then(|id| self.outputs.get(id));
+            let new = self.outputs.get(placement.output);
+            for handle in &toplevel.handles {
+                // The handle's own client, so the `wl_output` objects below
+                // belong to the client they are sent to -- the same
+                // wrong-client panic `wlr_toplevel_output_bound` guards
+                // against. A handle whose client is gone sends nothing; its
+                // `destroyed` reaps it.
+                let Some(client) = handle.client() else {
+                    continue;
+                };
+                let mut said = false;
+                if let Some(old) = old {
+                    for wl_output in old.client_outputs(&client) {
+                        handle.output_leave(&wl_output);
+                        said = true;
+                    }
+                }
+                if let Some(new) = new {
+                    for wl_output in new.client_outputs(&client) {
+                        handle.output_enter(&wl_output);
+                        said = true;
+                    }
+                }
+                // Only with something to close: a bare `done` would read as
+                // a change to a client that draws on it, and a client
+                // holding no `wl_output` for either screen has nothing to
+                // redraw from this move.
+                if said {
+                    handle.done();
+                }
+            }
+            toplevel.output = Some(placement.output);
+        }
+    }
+
     /// A client bound a `wl_output`. Every handle it already holds has to be
     /// told the window is on that screen.
     ///
@@ -549,11 +628,18 @@ impl State {
         // `management` mutably (each new handle is pushed into its entry),
         // so per-window resolution cannot borrow `self` from inside it --
         // and zipping keeps the two in step without a lookup per window.
-        let outputs: Vec<Option<Output>> = self
+        // Resolved to core ids up front for the same reason: the membership
+        // refresh below diffs those, and the announce above already sent
+        // `output_enter` for exactly these outputs.
+        let outputs: Vec<Option<OutputId>> = self
             .foreign_toplevel_management
             .toplevels
             .keys()
-            .map(|id| self.output_of_window(*id))
+            .map(|id| {
+                self.output_of_window(*id)
+                    .as_ref()
+                    .and_then(|output| self.outputs.id_of(output))
+            })
             .collect();
         let management = &mut self.foreign_toplevel_management;
         for ((id, toplevel), output) in management.toplevels.iter_mut().zip(outputs) {
@@ -587,7 +673,14 @@ impl State {
                 return;
             };
             manager.toplevel(&handle);
-            toplevel.describe(&handle, output.as_ref(), client);
+            // The membership the refresh below diffs against: this announce
+            // just sent `output_enter` for exactly this output (or none, when
+            // the client holds no `wl_output` for it -- then the bind hook
+            // sends the enter later, and the stored id still tells it which
+            // output that bind has to be for).
+            toplevel.output = output;
+            let smithay_output = output.and_then(|id| self.outputs.get(id));
+            toplevel.describe(&handle, smithay_output, client);
             toplevel.handles.push(handle);
         }
         management.managers.push(manager);

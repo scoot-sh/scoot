@@ -373,6 +373,7 @@ impl State {
                         | scoot_ipc::Action::FocusWindowId { .. }
                         | scoot_ipc::Action::FocusWorkspace { .. }
                         | scoot_ipc::Action::FocusWorkspaceIndex { .. }
+                        | scoot_ipc::Action::FocusOutput { .. }
                 ) {
                     self.clicked_layer = None;
                 }
@@ -606,6 +607,11 @@ impl State {
     ///   then only re-sets the index it already has and re-normalises an
     ///   already-normalised tree, which is the reasoning PR #54's fast path
     ///   states for skipping `act` there.
+    /// - `FocusOutput`: the focused output already is that id -- one `Copy`
+    ///   compare, no workspace lookup. `MoveFocusedWindowToOutput` is not a
+    ///   focus action by this function's cut (like every other `Move*` it
+    ///   stays on the full path), even though the core follows the window:
+    ///   the same line `MoveWindowToWorkspaceIndex` already holds.
     /// - `FocusColumn` / `FocusWindow`: relative steps whose no-op-ness
     ///   needs the focused column's position in its workspace (and the
     ///   stack position within it), which `World` does not expose.
@@ -632,6 +638,14 @@ impl State {
                         || (*direction == scoot_ipc::Vertical::Down
                             && workspaces.active + 1 >= workspaces.count)
                 }),
+            // `FocusOutput`: the focused output already is that id. An
+            // unknown id never equals it, so it stays on the full path and
+            // keeps whatever handling `act` gives it today -- the same edge
+            // `FocusWindowId` documents for an id that names no window.
+            scoot_ipc::Action::FocusOutput { output } => self
+                .world
+                .focused_output()
+                .is_some_and(|focused| focused.0 == *output),
             _ => false,
         }
     }

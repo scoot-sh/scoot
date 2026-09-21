@@ -220,3 +220,50 @@ fn the_action_path_itself_is_closed_while_locked() {
     fixture.settle();
     assert_eq!(fixture.report().closes, 1);
 }
+
+/// The cross-output actions under lock (milestone 19, phase F): neither the
+/// IPC gate nor the `act` backstop may let them through, and neither may
+/// wedge the session -- the arrangement before and after is identical.
+///
+/// Output 1 is named deliberately: it is a *valid* output here, so an
+/// unchanged arrangement proves the refusal did it, not a same-output or
+/// unknown-output no-op. The response shape is the other discriminator: a
+/// refusal is an `Error`, never an `Ok`.
+#[test]
+fn the_cross_output_actions_are_refused_while_locked() {
+    let mut fixture = Fixture::new();
+    fixture.run(Step::MapWindow);
+    fixture.run(Step::Lock);
+    let before = fixture.state.world.arrange();
+
+    for action in [
+        scoot_ipc::Action::MoveFocusedWindowToOutput { output: 1 },
+        scoot_ipc::Action::FocusOutput { output: 1 },
+    ] {
+        let response = fixture.state.handle_request(Request::Action(action));
+        assert!(
+            matches!(response, Response::Error { .. }),
+            "a cross-output action must be refused while locked, got {response:?}"
+        );
+    }
+    // And through the backstop directly, for the caller-added-later shape.
+    fixture
+        .state
+        .act(scoot_core::Action::MoveFocusedWindowToOutput(
+            scoot_core::OutputId(1),
+        ));
+    fixture
+        .state
+        .act(scoot_core::Action::FocusOutput(scoot_core::OutputId(1)));
+    fixture.settle();
+    assert_eq!(
+        fixture.state.world.arrange(),
+        before,
+        "a refused cross-output action moved something while locked"
+    );
+    assert_eq!(
+        fixture.report().closes,
+        0,
+        "a refused cross-output action reached a window"
+    );
+}

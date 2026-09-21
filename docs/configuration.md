@@ -113,7 +113,8 @@ What a second output **is**, today:
   focuses the bar, and an `exclusive` launcher mapped where the pointer is
   takes the keyboard there (the pointer's output wins ties);
 - a window list that names the output each window is on
-  (`wlr-foreign-toplevel-management` `output_enter` per window's own output);
+  (`wlr-foreign-toplevel-management` `output_enter` per window's own output,
+  paired with `output_leave` when a move carries it across);
 - its own composited strip: every output has a render target of its own and
   the render loop draws each one, so `scootctl screenshot --output 2` answers
   with the second output's own pixels, a screen capture of it (`grim -o
@@ -139,9 +140,11 @@ What a second output **is**, today:
 What it is **not**, yet — the work tracked in
 `docs/backlog/core/multi-output.md` (milestone 19, phase E and beyond):
 
-- new windows still open on the first output, and nothing moves a window
-  across outputs yet — cross-output moves (and the `output_leave` events
-  they need) belong to a future phase;
+- new windows still open on the first output; moving one across outputs, and
+  focusing another output from the keyboard, is a config bind away (see
+  [Moving across outputs](#moving-across-outputs)) — there are deliberately
+  no default binds for either yet, while which combos they should take stays
+  an open decision;
 - no per-output mode/scale/position configuration surface:
   `wlr-output-management` `apply`/`test` stay refused;
 - `--tty` driving two connectors at once (phase E, hardware-gated).
@@ -430,12 +433,33 @@ handles `scootctl action ...` (and its `scoot msg` alias) and a config file's
 focus-column|move-column|consume-or-expel   left|right
 focus-window|move-window                    up|down
 focus-workspace|move-window-to-workspace    up|down
-focus-window-id ID | focus-workspace-index N | move-window-to-workspace-index N | cycle-column-width | close | spawn COMMAND... | quit
+focus-window-id ID | focus-workspace-index N | move-window-to-workspace-index N | focus-output ID | move-window-to-output ID | cycle-column-width | close | spawn COMMAND... | quit
 ```
 
 e.g. `"focus-column left"`, `"close"`, or `"spawn foot -e htop"` (split on
 whitespace, not run through a shell, so a path or argument containing a space
 can't be expressed this way).
+
+### Moving across outputs
+
+With more than one output, two actions reach across screens — and neither
+has a default bind, by decision (which combos they should take is its own
+open question; see the multi-output milestone). Add your own, e.g.:
+
+```toml
+[binds]
+"super+comma" = "focus-output 1"
+"super+period" = "focus-output 2"
+"super+shift+comma" = "move-window-to-output 1"
+"super+shift+period" = "move-window-to-output 2"
+```
+
+The ids are what `scootctl outputs` reports (stable for the session, unlike
+workspace positions). `move-window-to-output` carries the focused window to
+that output's active workspace and follows it there; `focus-output` focuses
+that output's active workspace (or nothing, when it holds no windows). An
+unknown id does nothing. Both are refused while the session is locked, like
+every other action.
 
 Two failure behaviors specific to `[binds]`, both worth knowing since they
 fail silently rather than as a startup error:
@@ -548,6 +572,10 @@ a Linux-session concept with no meaning there. See
 [tty.md](tty.md#vt-switching) for why they always win over a config-file
 bind — at startup and on every `scootctl reload`, which layers them back on
 last rather than letting a reloaded file strip the recovery path.
+
+No default bind moves a window across outputs or focuses another output —
+both are config binds you add yourself (see [Moving across
+outputs](#moving-across-outputs)).
 
 ## Example `config.toml`
 

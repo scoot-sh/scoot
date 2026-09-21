@@ -70,7 +70,7 @@ fn random_usable_area(rng: &mut Rng) -> Rect {
     }
 }
 
-fn random_action(rng: &mut Rng, windows: &[WindowId]) -> Action {
+fn random_action(rng: &mut Rng, windows: &[WindowId], outputs: &[OutputId]) -> Action {
     let horizontal = if rng.chance(50) {
         Horizontal::Left
     } else {
@@ -81,7 +81,7 @@ fn random_action(rng: &mut Rng, windows: &[WindowId]) -> Action {
     } else {
         Vertical::Down
     };
-    match rng.below(12) {
+    match rng.below(14) {
         0 => Action::FocusColumn(horizontal),
         1 => Action::FocusWindow(vertical),
         2 => Action::MoveColumn(horizontal),
@@ -107,7 +107,25 @@ fn random_action(rng: &mut Rng, windows: &[WindowId]) -> Action {
             1 => usize::MAX / 2,
             other => other,
         }),
+        // The cross-output halves: usually a live output, sometimes a stale
+        // or wild id off the same wire -- and the window must survive all of
+        // them (an unknown id leaves it where it was, and focus stays valid).
+        11 => Action::MoveFocusedWindowToOutput(random_output(rng, outputs)),
+        12 => Action::FocusOutput(random_output(rng, outputs)),
         _ => Action::CloseFocused,
+    }
+}
+
+/// Usually one of the live outputs, sometimes a plausible-but-unknown id or
+/// a wild one: an output id comes off the IPC wire as an unbounded number,
+// like a workspace index.
+fn random_output(rng: &mut Rng, outputs: &[OutputId]) -> OutputId {
+    match rng.below(8) {
+        0 => OutputId(u64::MAX),
+        1 => OutputId(u64::MAX / 2),
+        2 => OutputId(999),
+        _ if !outputs.is_empty() => outputs[rng.below(outputs.len())],
+        _ => OutputId(1),
     }
 }
 
@@ -153,7 +171,7 @@ fn random_step(world: &mut World, rng: &mut Rng, next_id: &mut u64) {
             area: random_usable_area(rng),
         },
         _ => {
-            world.handle_action(random_action(rng, &windows));
+            world.handle_action(random_action(rng, &windows, &outputs));
             return;
         }
     };

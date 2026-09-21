@@ -228,3 +228,107 @@ fn a_client_with_only_the_other_output_is_served_without_an_enter() {
         "a client with no first-output object stopped being served: {log:?}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Cross-output moves: `output_leave` pairing (milestone 19, phase F)
+// ---------------------------------------------------------------------------
+
+/// A window carried across outputs is told `output_leave` for the old screen
+/// and `output_enter` for the new one, closed by `done` -- fail-first: with
+/// no membership refresh the move sends nothing and the taskbar shows the
+/// window on a screen it left.
+///
+/// The leave comes first: the protocol orders membership as "stops being
+/// visible here, becomes visible there", and a client diffing the two needs
+/// the pair in that order rather than a moment where the window is on both.
+#[test]
+fn a_window_moved_across_outputs_is_told_leave_then_enter() {
+    let mut fixture = two_output_fixture();
+    fixture.run(Step::BindOutputAt(0));
+    fixture.run(Step::BindOutputAt(1));
+    fixture.run(Step::BindManager);
+    fixture.run(Step::MapWindow);
+    fixture.take_log();
+
+    fixture
+        .state
+        .act(Action::MoveFocusedWindowToOutput(OutputId(2)));
+    fixture.settle();
+    assert_eq!(
+        fixture.take_log(),
+        vec![Seen::OutputLeave(0), Seen::OutputEnter(0), Seen::Done(0)],
+        "a cross-output move did not pair leave with enter"
+    );
+}
+
+/// ...and back again: the stored membership follows the window rather than
+/// sticking to the first move, so the second move pairs the other way round
+/// instead of repeating (or dropping) the first pair.
+#[test]
+fn a_window_moved_back_is_told_leave_then_enter_again() {
+    let mut fixture = two_output_fixture();
+    fixture.run(Step::BindOutputAt(0));
+    fixture.run(Step::BindOutputAt(1));
+    fixture.run(Step::BindManager);
+    fixture.run(Step::MapWindow);
+    fixture.take_log();
+
+    fixture
+        .state
+        .act(Action::MoveFocusedWindowToOutput(OutputId(2)));
+    fixture.settle();
+    fixture.take_log();
+
+    fixture
+        .state
+        .act(Action::MoveFocusedWindowToOutput(OutputId(1)));
+    fixture.settle();
+    assert_eq!(
+        fixture.take_log(),
+        vec![Seen::OutputLeave(0), Seen::OutputEnter(0), Seen::Done(0)],
+        "moving the window back did not pair leave with enter"
+    );
+}
+
+/// Closing a window sends `closed` with no `leave` first: the handle's whole
+/// death is the `closed` event, and nothing may be sent on it after -- a
+/// leave-then-closed sequence would also break the protocol's guarantee that
+/// a `leave` only ever follows an `enter` the client can still use.
+#[test]
+fn closing_a_window_sends_closed_without_a_leave() {
+    let mut fixture = two_output_fixture();
+    fixture.run(Step::BindOutputAt(0));
+    fixture.run(Step::BindOutputAt(1));
+    fixture.run(Step::BindManager);
+    fixture.run(Step::MapWindow);
+    fixture.take_log();
+
+    fixture.run(Step::CloseWindow(0));
+    assert_eq!(
+        fixture.take_log(),
+        vec![Seen::Closed(0)],
+        "closing a window paired its close with a leave"
+    );
+}
+
+/// A client holding no `wl_output` for either screen hears nothing about the
+/// move -- and in particular no bare `done`: with no object to name on either
+/// side there is no batch to close, and a client that draws on `done` must
+/// not redraw over a change it was never told.
+#[test]
+fn a_move_is_silent_to_a_client_with_no_output_objects() {
+    let mut fixture = two_output_fixture();
+    fixture.run(Step::BindManager);
+    fixture.run(Step::MapWindow);
+    fixture.take_log();
+
+    fixture
+        .state
+        .act(Action::MoveFocusedWindowToOutput(OutputId(2)));
+    fixture.settle();
+    assert_eq!(
+        fixture.take_log(),
+        Vec::new(),
+        "a client with no wl_output was told about a move it cannot name"
+    );
+}

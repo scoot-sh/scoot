@@ -132,12 +132,14 @@ impl Outputs {
     ///
     /// What still goes through here is startup placement
     /// (`place_pointer_at_output_centre` centres on the primary once -- the
-    /// pointer starts on the first screen), new-window placement
-    /// (`foreign_toplevel_management.rs` falls back to the first output --
-    /// windows open on output 1 until a later phase moves them across
-    /// outputs), and `resize_output`, which only the single-output backends
-    /// (`--nested`'s host configure, `--tty` hotplug) can reach. Per-output
-    /// resize is the `--tty` multi-CRTC phase's (milestone 19, phase E).
+    /// pointer starts on the first screen), new-window placement (windows
+    /// open on output 1 -- `MoveFocusedWindowToOutput` is what moves them
+    /// across outputs afterwards, and `foreign_toplevel_management.rs`'s
+    /// `output_of_window` falls back to the first output for a window that
+    /// has never been mapped), and `resize_output`, which only the
+    /// single-output backends (`--nested`'s host configure, `--tty` hotplug)
+    /// can reach. Per-output resize is the `--tty` multi-CRTC phase's
+    /// (milestone 19, phase E).
     ///
     /// The sites that already resolve an output *per surface* rather than
     /// through here are `layer_shell.rs`'s `new_layer_surface` (which honours
