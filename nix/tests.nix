@@ -12,6 +12,9 @@
 # - `[binds]` keys needing TOML quoting round-trip byte-equal through
 #   nix -> TOML -> python (then live through the real loader on Linux);
 # - `enable = false` manages no files and installs nothing;
+# - the session script is written beside the config: a relocated
+#   `configFile` carries its script with it (nothing left at the
+#   default path), the default keeps `scoot/session.sh`;
 # - the session entry is additive (default session untouched) and carries
 #   the `providedSessions` nixpkgs requires of every session package;
 # - the two settings failure modes behave as documented (see below).
@@ -157,8 +160,12 @@ let
   };
   hmRelocated = evalHome {
     enable = true;
-    configFile = "scoot/custom.toml";
+    # A different directory than the default `scoot/`, so the script
+    # pairing below proves the script follows the config rather than
+    # staying at the default path.
+    configFile = "myscoot/custom.toml";
     settings.layout.gap = 4;
+    sessionScript = "waybar &\nexec foot\n";
   };
 
   # --- NixOS evaluations under test ---
@@ -281,6 +288,22 @@ let
       true
     )
 
+    # The session script follows the config: a relocated config carries
+    # its script beside it, with nothing left at the default path...
+    (
+      assert hmRelocated.config.xdg.configFile ? "myscoot/session.sh";
+      true
+    )
+    (
+      assert !(hmRelocated.config.xdg.configFile ? "scoot/session.sh");
+      true
+    )
+    # ...while the default config keeps the default script path.
+    (
+      assert hmFull.config.xdg.configFile ? "scoot/session.sh";
+      true
+    )
+
     # The representable-but-wrong scoot type (a string for `gap`)
     # type-checks: the refusal happens at session start, fail-safe
     # (whole file discarded for defaults, session still boots) -- NOT
@@ -298,7 +321,9 @@ let
 
   emptyToml = hmEmpty.config.xdg.configFile."scoot/config.toml".source;
   fullToml = hmFull.config.xdg.configFile."scoot/config.toml".source;
-  relocatedToml = hmRelocated.config.xdg.configFile."scoot/custom.toml".source;
+  relocatedToml = hmRelocated.config.xdg.configFile."myscoot/custom.toml".source;
+  relocatedSessionText = hmRelocated.config.xdg.configFile."myscoot/session.sh".text;
+  relocatedSessionExe = hmRelocated.config.xdg.configFile."myscoot/session.sh".executable;
   portalsFile = hmEmpty.config.xdg.configFile."xdg-desktop-portal/scoot-portals.conf".source;
   sessionText = hmFull.config.xdg.configFile."scoot/session.sh".text;
   sessionExe = hmFull.config.xdg.configFile."scoot/session.sh".executable;
@@ -327,6 +352,13 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ python3 ]; } ''
   # 3. Relocated config renders under the overridden name with content.
   python3 -c 'import sys,tomllib; assert tomllib.load(open(sys.argv[1],"rb")) == {"layout": {"gap": 4}}' ${relocatedToml}
   echo "ok: configFile override relocates the rendered file"
+
+  # 3b. Relocated session script: written beside the relocated config
+  # (the pairing pin -- eval already asserts nothing stays at the
+  # default path), shebang + executable bit.
+  printf '%s' '${relocatedSessionText}' | head -1 | grep -q '^#!/bin/sh$'
+  test "${if relocatedSessionExe then "yes" else "no"}" = yes
+  echo "ok: session script follows the relocated config"
 
   # 4. Portals file is the shipped one, selecting backends.
   grep -q '^default=gtk' ${portalsFile}

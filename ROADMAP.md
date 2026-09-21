@@ -77,6 +77,14 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[home-manager `sessionScript` follows `configFile` (gh
+  #174)](docs/backlog/resolved/hm-session-script-path-done.md)**
+  (2026-09-21) — the script path is derived from the config's directory
+  (`<dirOf configFile>/session.sh`), so a relocated config keeps its
+  script beside it instead of silently splitting the pair; the default
+  still renders `scoot/session.sh` byte-identically, and `hmRelocated`
+  now pins the pairing. Flake-only, zero `.rs`.
+
 - **[`packages.scoot` no longer ships `scootctl` (gh
   #172)](docs/backlog/resolved/scoot-package-ships-scootctl-done.md)**
   (2026-09-21) — `cargoBuildFlags = [ "-p" "scoot" ]`, packaging matching

@@ -404,7 +404,8 @@ falsify. Read `flexwm` there as `scoot`.
   `scoot` on both systems (the 529440-byte redundant `scootctl` is gone,
   byte-count matched to #172's pre-fix `ls`); wrappers, `apps` and module
   checks all still resolve, live IPC proven against the packaged pair.
-- [home-manager `sessionScript` vs `configFile` override](./packaging/hm-session-script-path.md) — gh #174: script path hardcoded while config moves; fix either direction + pin the pairing in `hmRelocated`.
+- [home-manager `sessionScript` vs `configFile` override](./resolved/hm-session-script-path-done.md)
+  — RESOLVED 2026-09-21 (gh #174): script path derived from `configFile`'s directory (`scoot/session.sh` by default, byte-identical), `hmRelocated` pins the pairing.
 - [CI never exercises the Nix packaging](./packaging/ci-nix-packaging.md) — gh #173: no `nix flake check` / `nix build` in CI; take at least the cheap `flake check` half.
 - [NixOS session entry can't launch a shell](./packaging/nixos-session-command.md) — gh #171: fixed `Exec=scoot --tty` ignores the HM-written `session.sh`; needs a session-command option (default bare, additive entry).
 - [Flake polish: `homeModules` alias, Darwin default, nixfmt](./packaging/flake-polish.md) — gh #175: four one-line items (legacy output name warning, Darwin installs wrongly-named binary, `compositor-deps.nix` unformatted, `nixfmt-rfc-style` alias).

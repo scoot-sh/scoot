@@ -19,6 +19,21 @@ let
   # the config, never the session. See
   # docs/configuration.md#failure-semantics.
   configFile = tomlFormat.generate "scoot-config.toml" cfg.settings;
+
+  # Session script path: beside the rendered config, derived from
+  # `configFile`'s directory, so a relocated config keeps its script
+  # next to it (`scoot/session.sh` by default -- `dirOf` answers
+  # `"scoot"`, i.e. the default path is unchanged). A bare filename
+  # (`configFile = "config.toml"`) has no directory (`dirOf` answers
+  # `"."`); the script then lands at the config root as `session.sh`.
+  # `configFile` is relative to $XDG_CONFIG_HOME by contract (see the
+  # option), so an absolute path is already user error on the config
+  # half and stays one here.
+  scriptPath =
+    let
+      d = builtins.dirOf cfg.configFile;
+    in
+    if d == "." || d == "" then "session.sh" else "${d}/session.sh";
 in
 {
   options.programs.scoot = {
@@ -90,9 +105,10 @@ in
     # Behavior half of "Starting a session" (see
     # docs/configuration.md#starting-a-session): the config declares the
     # baseline, a script carries ordering/conditionals. When set, this
-    # text is written executable next to the config; launch it with
-    # `scoot -- ~/.config/scoot/session.sh` (or exec it from your
-    # greetd/startwm entry). Null writes no file.
+    # text is written executable beside the config (at
+    # `<dirOf configFile>/session.sh` -- `scoot/session.sh` by default);
+    # launch it with `scoot -- ~/.config/<that path>` (or exec it from
+    # your greetd/startwm entry). Null writes no file.
     sessionScript = lib.mkOption {
       type = lib.types.nullOr lib.types.lines;
       default = null;
@@ -102,8 +118,9 @@ in
         exec foot
       '';
       description = ''
-        Session startup script, written executable to
-        `scoot/session.sh` next to the config. Null writes no file.
+        Session startup script, written executable beside the rendered
+        config at `<dirOf configFile>/session.sh` (`scoot/session.sh`
+        with the default `configFile`). Null writes no file.
       '';
     };
 
@@ -137,7 +154,7 @@ in
 
     xdg.configFile.${cfg.configFile}.source = configFile;
 
-    xdg.configFile."scoot/session.sh" = lib.mkIf (cfg.sessionScript != null) {
+    xdg.configFile.${scriptPath} = lib.mkIf (cfg.sessionScript != null) {
       executable = true;
       text = "#!/bin/sh\n" + cfg.sessionScript;
     };
