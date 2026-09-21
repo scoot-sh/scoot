@@ -63,7 +63,8 @@ no second monitor. `crates/scoot/src/compositor/outputs.rs`'s doc on
     window on output 1 appears in output 1's IPC screenshot and `grim -o
     headless` but not in output 2's (`w2`/`g2` hash the empty session);
     `wayland-info` shows both `wl_output`s. Benchmarks (release, dev VM,
-    800x800, best-of-5): single-output before/after overlapping (pixman
+    800x800, min-of-5 with ranges stated alongside — never best-of without
+    spread, per project rule): single-output before/after overlapping (pixman
     empty 74–77µs → 67–75µs; the 8-window scene is noisier, 100–131µs →
     68–145µs across runs — noise dominates, no structural regression, the
     added work is O(1) map ops); two-vs-one scaling ~2x pixman

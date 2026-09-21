@@ -157,9 +157,9 @@ fn resolve_with(
 /// What draws this session's frames, and what it draws into.
 ///
 /// Built once by `headless::init_named` and rebuilt by
-/// `State::resize_output`; lives in `State::backend` and is `take`n for the
-/// duration of a frame so the render path can hold `&mut State` and `&mut`
-/// the renderer at the same time.
+/// `State::resize_output`; lives in `State::backends`, keyed by output, and
+/// is `take`n for the duration of a frame so the render path can hold
+/// `&mut State` and `&mut` the renderer at the same time.
 pub struct Backend {
     /// Which renderer is drawing, and the target it draws into.
     pipeline: Pipeline,

@@ -54,7 +54,7 @@ use crate::compositor::screencopy::FORMATS;
 use crate::compositor::test_support::{Harness, wait_for};
 
 /// The headless framebuffer these tests render into. Only the drain test
-/// actually draws; it needs a real `PixmanRenderer` behind `State::backend`,
+/// actually draws; it needs a real `PixmanRenderer` behind `State::backends`,
 /// which is what a headless harness (unlike a bare one) provides.
 const CANVAS: i32 = 32;
 
@@ -179,7 +179,7 @@ enum ImportOutcome {
 type Fixture = Harness<Step, Ack>;
 
 impl Fixture {
-    /// A compositor with a real `PixmanRenderer` behind `State::backend` --
+    /// A compositor with a real `PixmanRenderer` behind `State::backends` --
     /// which is what makes an import possible at all.
     fn start() -> Self {
         let mut fixture = Harness::headless(Appearance::default(), CANVAS);
