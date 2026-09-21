@@ -289,7 +289,8 @@ Two cases, behaving differently by design:
 ## Reference: live defaults
 
 Every key below is present in `settings` exactly as shown (values are the
-live defaults). Pasted from a real
+live defaults; the two commented-unset keys stay commented — uncommenting
+either changes the session, as noted below). Pasted from a real
 `scoot --print-default-config` emission on 2026-09-21 (dev-VM Linux
 build from the tree at `6fb8773`), not hand-written — regenerate rather
 than edit by hand if it ever looks stale:
@@ -380,11 +381,12 @@ commands = []
 "super+shift+9" = "move-window-to-workspace-index 8"
 ```
 
-(Differences from the raw emission are mechanical and stated: comment
-lines unwrapped where the emission's prose wraps, `#`-commented keys
+(Differences from the raw emission are mechanical and stated: the emission's
+14-line file-header prose is dropped, comment lines unwrapped where the
+emission's prose wraps, `#`-commented keys
 uncommented with their default values filled in — except `cursor_theme`
 and `tty.gpu`, which stay commented exactly as emitted because they are
 unset by default (placeholders, not values: setting either changes the
-session) — and the trailing note
+session) — the 3-line `corner_radius` comment is dropped, and the trailing note
 about `--tty` VT binds folded into
 [configuration.md](configuration.md#binds). The values are untouched.)

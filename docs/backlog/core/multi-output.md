@@ -3,10 +3,17 @@ title: "Multi-output: more than one monitor at a time"
 status: "open"
 area: "core"
 priority: "high"
-blocked: "sequenced behind the `scootctl` split and milestone 6 (user, 2026-09-19) — not a technical block"
+blocked: "phases A–D landed; phase E (--tty multi-CRTC) needs real two-connector hardware"
 ---
 
 # Multi-output: more than one monitor at a time
+
+> **Live tracker: [Milestone 19](../roadmap/19-multi-output.md)** (promoted
+> 2026-09-20). Phases A (render/capture), B (layer shell), C (session
+> lock), D (workspaces/output-management/pointer) have landed; phase E
+> (`--tty` multi-CRTC) waits on hardware. The per-phase records live in
+> the milestone file; what follows is the original spec, kept for the
+> design questions it posed.
 
 Requested 2026-09-19. This is the biggest user-facing gap scoot has, and
 `README.md`'s "Not yet" list leads with it: *"One output. Plug in a second

@@ -442,7 +442,7 @@ Worth knowing before you write against it:
   whatever moved.
 - **One head per output, still read-only.** `--headless --outputs N`
   announces N heads (see above); `apply`/`test` stay refused — more outputs
-  make client-driven configuration possible, not required.
+  don't change that.
 
 ## Screen capture (`ext-image-copy-capture-v1`)
 
