@@ -677,13 +677,22 @@ alive.
   draw.** Some compositors wait up to a second for lock surfaces so the
   transition doesn't flash black; waiting means rendering the unlocked
   session for that whole second.
-- **One output.** A lock surface is configured per `wl_output` and scoot has
-  exactly one, so the one live surface a lock may hold is configured to that
-  output's size, and the first blanked frame on it is what sends `locked`; a
-  second `get_lock_surface` for the same output is refused with the
-  protocol's `duplicate_output` error even when it names the output through a
-  different `wl_output` bind (destroying the first surface frees the output
-  for a rebuild).
+- **One lock surface per output.** A lock surface is configured to the size
+  of the `wl_output` it names, and each output's frame shows that output's
+  own surface over the opaque backdrop -- never another output's. The
+  keyboard goes to the surface on the output under the pointer (falling back
+  to the first surface when the pointer is over no output, or its output has
+  none), and pointer input is hit-tested per output the same way, so exactly
+  one surface holds each at a time. `locked` is sent only once *every*
+  output has shown its blanked frame: an output with no surface counts on
+  its backdrop frame, but one whose surface is admitted and not yet drawn
+  holds the confirmation open, because its screen is still showing a
+  placeholder rather than the locker's blank. A surface admitted after the
+  lock already confirmed is sized and shown with no second confirmation. A
+  second `get_lock_surface` for an already-covered output is refused with
+  the protocol's `duplicate_output` error even when it names the output
+  through a different `wl_output` bind (destroying the first surface frees
+  the output for a rebuild).
 
 ## Idle detection
 

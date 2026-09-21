@@ -521,12 +521,19 @@ impl State {
     /// "nowhere" is a real answer and it misses rather than hitting another
     /// screen's surface.
     ///
+    /// The output under `position`, if any, plus its logical origin -- shared
+    /// with the session-lock focus and hit-testing, which resolve the same
+    /// question over lock surfaces rather than layer maps.
+    ///
     /// Costs one geometry lookup per output until it hits -- on the
     /// per-motion hot path, but a linear scan over a handful of outputs
     /// against a hit test that already locks a map and walks a surface tree.
     /// The geometry is answered once and handed back with the output, so the
     /// hit test does not look it up a second time for the origin.
-    fn output_under(&self, position: Point<f64, Logical>) -> Option<(Output, Point<i32, Logical>)> {
+    pub(super) fn output_under(
+        &self,
+        position: Point<f64, Logical>,
+    ) -> Option<(Output, Point<i32, Logical>)> {
         self.outputs.iter().find_map(|output| {
             self.space.output_geometry(output).and_then(|geometry| {
                 let left = geometry.loc.x as f64;

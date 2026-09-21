@@ -201,11 +201,8 @@ impl State {
         // (`SessionLockHandler::lock` resets it at lock time) -- a lock screen
         // with a password field needs a pointer.
         let elements = if locked {
-            let origin = geometry
-                .map(|geometry| geometry.loc.to_physical_precise_round(scale))
-                .unwrap_or_default();
             let (lock_surfaces, backdrop) =
-                self.lock_elements(renderer, origin, scale, (width, height));
+                self.lock_elements(renderer, output, scale, (width, height));
             let mut elements = Vec::with_capacity(cursor_elements.len() + lock_surfaces.len() + 1);
             elements.extend(cursor_elements.into_iter().map(Elements::Cursor));
             elements.extend(lock_surfaces.into_iter().map(Elements::Surface));
