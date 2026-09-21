@@ -50,8 +50,9 @@ Linux, and daily-driven on `--tty`** (2026-09-18).
   framebuffer (screenshots, screen captures, gamma and frame callbacks all
   work per output) — and workspace groups, output-management heads and the
   pointer clamp are per-output too — but new windows still open on the first
-  output, nothing moves one across outputs yet, and `--tty` still drives one
-  connector (a second monitor there stays dark).
+  output (moving one across, and focusing another output from the keyboard,
+  is a config bind away — no defaults ship for either yet), and `--tty`
+  still drives one connector (a second monitor there stays dark).
 - **No XWayland.** X11-only applications do not run.
 - **GPU scanout is new and narrow.** `--tty --renderer gles` scans out from
   the GPU, but only in a `gpu-scanout` build (`nix build .#scoot-gpu`), only on the primary plane (no

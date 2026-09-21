@@ -43,7 +43,7 @@ pub const ACTIONS_HELP: &str = "\
     focus-column|move-column|consume-or-expel   left|right
     focus-window|move-window                    up|down
     focus-workspace|move-window-to-workspace    up|down
-    focus-window-id ID | focus-workspace-index N | move-window-to-workspace-index N | cycle-column-width | close | spawn COMMAND... | quit
+    focus-window-id ID | focus-workspace-index N | move-window-to-workspace-index N | focus-output ID | move-window-to-output ID | cycle-column-width | close | spawn COMMAND... | quit
 ";
 
 pub const USAGE: &str = "\
@@ -73,7 +73,7 @@ ACTIONS:
     focus-column|move-column|consume-or-expel   left|right
     focus-window|move-window                    up|down
     focus-workspace|move-window-to-workspace    up|down
-    focus-window-id ID | focus-workspace-index N | move-window-to-workspace-index N | cycle-column-width | close | spawn COMMAND... | quit
+    focus-window-id ID | focus-workspace-index N | move-window-to-workspace-index N | focus-output ID | move-window-to-output ID | cycle-column-width | close | spawn COMMAND... | quit
 ";
 
 #[derive(Debug, PartialEq)]
@@ -281,6 +281,12 @@ pub fn action(args: &mut impl Iterator<Item = String>) -> Result<Action, Error> 
         },
         "move-window-to-workspace-index" => Action::MoveWindowToWorkspaceIndex {
             index: number("a workspace index", args.next())?,
+        },
+        "focus-output" => Action::FocusOutput {
+            output: number("an output id", args.next())?,
+        },
+        "move-window-to-output" => Action::MoveFocusedWindowToOutput {
+            output: number("an output id", args.next())?,
         },
         "cycle-column-width" => Action::CycleColumnWidth,
         "close" => Action::CloseFocused,
@@ -547,6 +553,29 @@ mod tests {
         // and `3` ambiguous.
         assert!(parse_msg_args(&["action", "move-window-to-workspace-index", "down"]).is_err());
         assert!(parse_msg_args(&["action", "move-window-to-workspace-index"]).is_err());
+    }
+
+    #[test]
+    fn the_output_actions_take_an_output_id() {
+        // Output ids, not workspace positions: ids are stable for the
+        // session (`scootctl outputs` reports them), while a workspace index
+        // only means anything within one output's list.
+        assert_eq!(
+            parse_msg_args(&["action", "focus-output", "2"]),
+            Ok(Msg {
+                request: Request::Action(Action::FocusOutput { output: 2 }),
+                out: None,
+            })
+        );
+        assert_eq!(
+            parse_msg_args(&["action", "move-window-to-output", "2"]),
+            Ok(Msg {
+                request: Request::Action(Action::MoveFocusedWindowToOutput { output: 2 }),
+                out: None,
+            })
+        );
+        assert!(parse_msg_args(&["action", "focus-output", "down"]).is_err());
+        assert!(parse_msg_args(&["action", "move-window-to-output"]).is_err());
     }
 
     #[test]

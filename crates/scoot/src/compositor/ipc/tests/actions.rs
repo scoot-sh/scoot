@@ -26,7 +26,7 @@
 use std::os::fd::AsFd;
 use std::sync::mpsc::{Receiver, Sender};
 
-use scoot_core::WindowId;
+use scoot_core::{OutputId, WindowId};
 use smithay::desktop::Window;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use wayland_client::protocol::{
@@ -440,6 +440,11 @@ fn focusing_over_ipc_takes_the_keyboard_back_from_a_clicked_taskbar() {
             direction: scoot_ipc::Vertical::Down,
         },
         scoot_ipc::Action::FocusWorkspaceIndex { index: 0 },
+        // Already-there (a single-output fixture has only output 1), so
+        // this leg pins the no-op path's click-spend rather than a real
+        // switch -- the real switch is `focus_output_moves_focus_across`
+        // below.
+        scoot_ipc::Action::FocusOutput { output: 1 },
     ];
     for (n, action) in covered.into_iter().enumerate() {
         fixture.click_taskbar();
@@ -488,6 +493,10 @@ fn already_focused_actions_spend_the_click_without_an_apply() {
         scoot_ipc::Action::FocusWorkspace {
             direction: scoot_ipc::Vertical::Up,
         },
+        // The focused output already is output 1: no `act`, only the
+        // keyboard half -- and the click above is still spent, which the
+        // shared assertions check.
+        scoot_ipc::Action::FocusOutput { output: output.0 },
     ];
     for (n, action) in noop.into_iter().enumerate() {
         fixture.click_taskbar();
@@ -870,5 +879,220 @@ fn a_move_to_index_over_ipc_leaves_a_clicked_taskbars_keyboard_alone() {
     assert!(
         fixture.state.clicked_layer.is_some(),
         "a move-to-index spent the taskbar's click"
+    );
+}
+
+// -- cross-output moves + output focus (milestone 19, phase F) -------------
+
+/// [`Fixture::drive`] with a second headless output beside the first: both
+/// windows still open on output 1, so every cross-output assertion starts
+/// from the same shape.
+fn drive_two_outputs() -> Fixture {
+    let mut fixture = Harness::headless(Appearance::default(), CANVAS);
+    crate::compositor::headless::add_output(&mut fixture.state, "headless-2", CANVAS, CANVAS)
+        .expect("a second headless output");
+    fixture.spawn(run_client);
+    let Ack::Ready = fixture.run(Step::TakeLog) else {
+        panic!("the client never mapped its windows and taskbar");
+    };
+    assert_eq!(
+        fixture.state.focus,
+        Some(WindowId(2)),
+        "the second window should have focus before anything is clicked"
+    );
+    fixture
+}
+
+/// The output `scoot msg windows` reports for `id`, which is the core's own
+/// placement truth -- what a move has to change for the window to really be
+/// on the other screen, rather than merely focused there.
+fn snapshot_output(fixture: &Fixture, id: WindowId) -> u64 {
+    fixture
+        .state
+        .window_snapshots()
+        .into_iter()
+        .find(|snapshot| snapshot.id == id.0)
+        .expect("the window is listed")
+        .output
+}
+
+#[test]
+fn move_window_to_output_carries_the_window_and_follows_over_ipc() {
+    // The new action through the whole `State` path: IPC conversion, the
+    // lock gate (open session here), `act`, `apply`. `drive` maps two
+    // windows onto output 1 with window 2 focused, so naming output 2 must
+    // carry exactly the focused window there and follow it -- focus still
+    // naming the same window, now reported on the other screen.
+    let mut fixture = drive_two_outputs();
+    let focused = fixture.state.focus.expect("a focused window");
+
+    fixture.state.needs_render = false;
+    let response = fixture.state.handle_request(Request::Action(
+        scoot_ipc::Action::MoveFocusedWindowToOutput { output: 2 },
+    ));
+    assert!(
+        matches!(response, Response::Ok { locked: false }),
+        "the move-to-output action was not served"
+    );
+    assert_eq!(
+        fixture.state.focus,
+        Some(focused),
+        "the move did not follow the window it carried"
+    );
+    assert_eq!(
+        fixture.state.world.focused_output(),
+        Some(OutputId(2)),
+        "focus did not follow the window to the other output"
+    );
+    assert_eq!(
+        snapshot_output(&fixture, focused),
+        2,
+        "the carried window is not reported on the target output"
+    );
+    // The window left behind is still exactly where it was -- the
+    // data-loss shape this rules out is a move that drops a window in
+    // neither tree.
+    let mut outputs: Vec<u64> = fixture
+        .state
+        .window_snapshots()
+        .into_iter()
+        .map(|snapshot| snapshot.id)
+        .collect();
+    outputs.sort();
+    assert_eq!(outputs, vec![1, 2], "a move lost a window");
+    fixture.assert_keyboard_follows_focus("a real move-to-output");
+    assert!(
+        fixture.state.needs_render,
+        "a real move-to-output laid nothing out"
+    );
+
+    // An unknown output id over the same path: served, and the window stays
+    // where the move above put it -- still focused, still on output 2.
+    fixture.state.needs_render = false;
+    let response = fixture.state.handle_request(Request::Action(
+        scoot_ipc::Action::MoveFocusedWindowToOutput { output: 99 },
+    ));
+    assert!(
+        matches!(response, Response::Ok { locked: false }),
+        "the unknown-output move was not served"
+    );
+    assert_eq!(
+        fixture.state.focus,
+        Some(focused),
+        "an unknown-output move lost the focused window"
+    );
+    assert_eq!(
+        snapshot_output(&fixture, focused),
+        2,
+        "an unknown-output move relocated the window"
+    );
+}
+
+#[test]
+fn focus_output_moves_focus_across_outputs_over_ipc() {
+    // Window 2 carried over first (so each output holds one window), then
+    // focus driven back and forth by output id -- keyboard included, which
+    // is the whole point of the action for a keyboard user stuck on one
+    // screen.
+    let mut fixture = drive_two_outputs();
+    let moved = fixture.state.focus.expect("a focused window");
+    let response = fixture.state.handle_request(Request::Action(
+        scoot_ipc::Action::MoveFocusedWindowToOutput { output: 2 },
+    ));
+    assert!(matches!(response, Response::Ok { .. }));
+
+    let response = fixture
+        .state
+        .handle_request(Request::Action(scoot_ipc::Action::FocusOutput {
+            output: 1,
+        }));
+    assert!(
+        matches!(response, Response::Ok { locked: false }),
+        "focusing output 1 was not served"
+    );
+    assert_eq!(
+        fixture.state.world.focused_output(),
+        Some(OutputId(1)),
+        "focusing output 1 did not move the focused output"
+    );
+    let other = *fixture
+        .state
+        .windows
+        .keys()
+        .find(|id| **id != moved)
+        .expect("two windows");
+    assert_eq!(
+        fixture.state.focus,
+        Some(other),
+        "focusing output 1 did not focus its window"
+    );
+    fixture.assert_keyboard_follows_focus("focusing output 1");
+
+    let response = fixture
+        .state
+        .handle_request(Request::Action(scoot_ipc::Action::FocusOutput {
+            output: 2,
+        }));
+    assert!(
+        matches!(response, Response::Ok { locked: false }),
+        "focusing output 2 was not served"
+    );
+    assert_eq!(fixture.state.focus, Some(moved));
+    fixture.assert_keyboard_follows_focus("focusing output 2");
+
+    // An unknown output id: served, focus untouched -- it can never strand
+    // on an output that isn't there.
+    let response = fixture
+        .state
+        .handle_request(Request::Action(scoot_ipc::Action::FocusOutput {
+            output: 99,
+        }));
+    assert!(
+        matches!(response, Response::Ok { locked: false }),
+        "the unknown-output focus was not served"
+    );
+    assert_eq!(
+        fixture.state.world.focused_output(),
+        Some(OutputId(2)),
+        "an unknown-output focus moved the focused output"
+    );
+    assert_eq!(
+        fixture.state.focus,
+        Some(moved),
+        "an unknown-output focus moved window focus"
+    );
+}
+
+#[test]
+fn a_cross_output_move_over_ipc_leaves_a_clicked_taskbars_keyboard_alone() {
+    // The click-spend boundary for the new move, mirroring the
+    // move-to-index pin above it: carrying a window changes arrangement, so
+    // it stays out of the focus-family spend match -- this test fails if it
+    // ever lands in it. (FocusOutput *is* in that match; the `covered` test
+    // at the top pins its spend.)
+    let mut fixture = drive_two_outputs();
+    let focus_before = fixture.state.focus;
+
+    fixture.click_taskbar();
+    let response = fixture.state.handle_request(Request::Action(
+        scoot_ipc::Action::MoveFocusedWindowToOutput { output: 2 },
+    ));
+    assert!(
+        matches!(response, Response::Ok { locked: false }),
+        "the move-to-output action was not served"
+    );
+
+    assert_eq!(
+        fixture.state.focus, focus_before,
+        "a move-to-output moved window focus"
+    );
+    assert_eq!(
+        fixture.keyboard_surface(),
+        Some(fixture.clicked_surface()),
+        "a move-to-output ripped the keyboard out of the clicked taskbar"
+    );
+    assert!(
+        fixture.state.clicked_layer.is_some(),
+        "a move-to-output spent the taskbar's click"
     );
 }

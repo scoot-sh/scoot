@@ -66,6 +66,23 @@ pub enum Action {
     MoveWindowToWorkspaceIndex {
         index: usize,
     },
+    /// Carry the focused window to the *active* workspace of another output,
+    /// by the output id `scootctl outputs` reports (not a position: output
+    /// ids are stable for the session, unlike workspace indices) -- the
+    /// wire half of `scoot_core::Action::MoveFocusedWindowToOutput`. An
+    /// unknown id leaves the window where it is, like an out-of-range
+    /// workspace index. Additive: a client that never sends this tag
+    /// decodes exactly as before, so no `PROTOCOL_VERSION` bump.
+    MoveFocusedWindowToOutput {
+        output: u64,
+    },
+    /// Move keyboard focus to another output, by the output id `scootctl
+    /// outputs` reports -- the wire half of
+    /// `scoot_core::Action::FocusOutput`. An unknown id does nothing.
+    /// Additive like the move above: no `PROTOCOL_VERSION` bump.
+    FocusOutput {
+        output: u64,
+    },
     CloseFocused,
     Spawn {
         command: Vec<String>,

@@ -119,6 +119,25 @@ pub enum Action {
     /// where it is. Moving to the already-active workspace, or with no
     /// window focused, likewise does nothing.
     MoveWindowToWorkspaceIndex(usize),
+    /// Carry the focused window to the *active* workspace of another output,
+    /// by the output's [`OutputId`](crate::OutputId), and follow it there.
+    /// The cross-output half of
+    /// [`Action::MoveWindowToWorkspaceIndex`]'s mirror: a workspace index
+    /// only means anything within one output's list, so no index can express
+    /// "the other screen".
+    ///
+    /// The same ignore rule as the workspace-index moves: an id this core
+    /// doesn't know does nothing, and the window stays where it is. Moving
+    /// with no window focused, or to the output the window is already on,
+    /// likewise does nothing. The source output keeps whatever neighbour
+    /// focus taking the window leaves behind.
+    MoveFocusedWindowToOutput(OutputId),
+    /// Move keyboard focus to another output, by its
+    /// [`OutputId`](crate::OutputId), focusing that output's active
+    /// workspace's focused window -- or nothing, when that workspace is
+    /// empty, which is what "focused" already means on an output with no
+    /// windows. An id this core doesn't know does nothing.
+    FocusOutput(OutputId),
     CloseFocused,
     Spawn(Vec<String>),
     Quit,

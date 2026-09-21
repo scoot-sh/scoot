@@ -1,5 +1,5 @@
 use super::*;
-use crate::{Action, Vertical};
+use crate::{Action, Vertical, Workspaces};
 
 const SECOND: Rect = Rect::new(1000, 0, 800, 600);
 
@@ -285,4 +285,206 @@ fn a_new_output_is_usable_edge_to_edge() {
             .map(|(_, area)| *area)
             .collect::<Vec<_>>()
     );
+}
+
+// -- cross-output moves + output focus (milestone 19, phase F) -------------
+
+/// Two side-by-side outputs with one window each, focused on the first.
+fn two_output_world() -> World {
+    let mut world = world();
+    add_output(&mut world, 2, SECOND);
+    open(&mut world, 1);
+    open_on(&mut world, 2, 2, false);
+    world.handle_action(Action::FocusWindowId(WindowId(1)));
+    assert_eq!(focused(&world), Some(1));
+    assert_eq!(world.focused_output(), Some(OutputId(1)));
+    world
+}
+
+/// The column preset holding `id`, read white-box: the move must carry the
+/// window's width choice across, not reset it to the default.
+fn preset_of(world: &World, id: u64) -> usize {
+    world
+        .outputs
+        .iter()
+        .flat_map(|output| &output.workspaces)
+        .flat_map(|ws| &ws.columns)
+        .find(|column| column.windows.contains(&WindowId(id)))
+        .map(|column| column.preset)
+        .expect("window is in the tree")
+}
+
+#[test]
+fn moving_the_focused_window_to_another_output_carries_it_and_follows() {
+    let mut world = two_output_world();
+    // A second window on the source output, so the fallback below has a
+    // neighbour to land on rather than an empty output.
+    open(&mut world, 3);
+    world.handle_action(Action::FocusWindowId(WindowId(1)));
+    world.handle_action(Action::MoveFocusedWindowToOutput(OutputId(2)));
+    // The window is on the target's active workspace, visible, focused --
+    // and focus followed it there.
+    let placed = placement(&world, 1);
+    assert_eq!(placed.output, OutputId(2));
+    assert!(placed.visible);
+    assert_eq!(focused(&world), Some(1));
+    assert_eq!(world.focused_output(), Some(OutputId(2)));
+    assert_eq!(world.arrange().focused_output, Some(OutputId(2)));
+    // The window that stayed put is untouched...
+    let stayed = placement(&world, 2);
+    assert_eq!(stayed.output, OutputId(2));
+    // ...and the source output keeps working: its remaining window is
+    // focused there (the neighbour `take` leaves behind), so focusing back
+    // lands somewhere sane.
+    world.handle_action(Action::FocusOutput(OutputId(1)));
+    assert_eq!(focused(&world), Some(3));
+}
+
+#[test]
+fn the_move_carries_the_column_preset() {
+    let mut world = two_output_world();
+    world.handle_action(Action::CycleColumnWidth);
+    assert_eq!(preset_of(&world, 1), 1);
+    world.handle_action(Action::MoveFocusedWindowToOutput(OutputId(2)));
+    assert_eq!(preset_of(&world, 1), 1);
+}
+
+#[test]
+fn moving_to_the_window_s_current_output_changes_nothing() {
+    let mut world = two_output_world();
+    let before = world.arrange();
+    world.handle_action(Action::MoveFocusedWindowToOutput(OutputId(1)));
+    assert_eq!(world.arrange(), before);
+    assert_eq!(focused(&world), Some(1));
+}
+
+#[test]
+fn moving_to_an_unknown_output_leaves_the_window_where_it_is() {
+    let mut world = two_output_world();
+    let before = world.arrange();
+    // A stale id off a wire, and the extremes a client can spell --
+    // mirroring the out-of-range workspace-index case, including the
+    // promise the window is never lost: it stays where it was.
+    for id in [99, u64::MAX / 2, u64::MAX] {
+        world.handle_action(Action::MoveFocusedWindowToOutput(OutputId(id)));
+        assert_eq!(world.arrange(), before, "output {id}");
+        assert_eq!(focused(&world), Some(1), "output {id}");
+        assert_eq!(world.focused_output(), Some(OutputId(1)), "output {id}");
+    }
+}
+
+#[test]
+fn moving_with_no_focused_window_does_nothing() {
+    // Two empty outputs: no window focused, so nothing to carry -- to the
+    // active output (the already-there shape) or anywhere else.
+    let mut world = world();
+    add_output(&mut world, 2, SECOND);
+    world.handle_action(Action::MoveFocusedWindowToOutput(OutputId(1)));
+    world.handle_action(Action::MoveFocusedWindowToOutput(OutputId(2)));
+    world.handle_action(Action::MoveFocusedWindowToOutput(OutputId(99)));
+    let empty = Some(Workspaces {
+        count: 1,
+        active: 0,
+    });
+    assert_eq!(world.workspaces(OutputId(1)), empty);
+    assert_eq!(world.workspaces(OutputId(2)), empty);
+    assert_eq!(world.focused_window(), None);
+}
+
+#[test]
+fn moving_the_only_window_empties_but_keeps_the_source_output() {
+    let mut world = world();
+    add_output(&mut world, 2, SECOND);
+    open(&mut world, 1);
+    world.handle_action(Action::MoveFocusedWindowToOutput(OutputId(2)));
+    assert_eq!(placement(&world, 1).output, OutputId(2));
+    assert_eq!(focused(&world), Some(1));
+    // The source output is left empty -- valid, still exactly one empty
+    // workspace, still focusable back to (focusing nothing, not garbage).
+    assert_eq!(
+        world.workspaces(OutputId(1)),
+        Some(Workspaces {
+            count: 1,
+            active: 0
+        })
+    );
+    world.handle_action(Action::FocusOutput(OutputId(1)));
+    assert_eq!(world.focused_output(), Some(OutputId(1)));
+    assert_eq!(focused(&world), None);
+}
+
+#[test]
+fn focus_output_moves_focus_to_that_output() {
+    let mut world = two_output_world();
+    world.handle_action(Action::FocusOutput(OutputId(2)));
+    assert_eq!(world.focused_output(), Some(OutputId(2)));
+    assert_eq!(focused(&world), Some(2));
+    assert!(placement(&world, 2).visible);
+    // ...and back: focusing is symmetric, not a one-way trip.
+    world.handle_action(Action::FocusOutput(OutputId(1)));
+    assert_eq!(focused(&world), Some(1));
+}
+
+#[test]
+fn focus_output_on_an_empty_output_focuses_nothing() {
+    // Defined behavior, pinned: an output with no windows has no focused
+    // window -- the same `None` an emptied focused output already reads as
+    // everywhere else -- and the output itself is still the focused one, so
+    // a subsequent workspace action resolves against it, not against stale
+    // state.
+    let mut world = world();
+    add_output(&mut world, 2, SECOND);
+    open(&mut world, 1);
+    world.handle_action(Action::FocusOutput(OutputId(2)));
+    assert_eq!(world.focused_output(), Some(OutputId(2)));
+    assert_eq!(focused(&world), None);
+    assert_eq!(world.arrange().focused, None);
+    assert_eq!(world.arrange().focused_output, Some(OutputId(2)));
+}
+
+#[test]
+fn focus_output_on_an_unknown_output_is_ignored() {
+    let mut world = two_output_world();
+    for id in [99, u64::MAX] {
+        world.handle_action(Action::FocusOutput(OutputId(id)));
+        assert_eq!(world.focused_output(), Some(OutputId(1)), "output {id}");
+        assert_eq!(focused(&world), Some(1), "output {id}");
+    }
+}
+
+#[test]
+fn rapid_move_focus_move_sequences_stay_consistent() {
+    // The wedge/shape this guards: a move that loses a window (in neither
+    // tree) or strands focus on a nonexistent output. After every step each
+    // window is placed exactly once and focus names a live window or none.
+    let mut world = two_output_world();
+    let steps = [
+        Action::MoveFocusedWindowToOutput(OutputId(2)),
+        Action::FocusOutput(OutputId(1)),
+        Action::MoveFocusedWindowToOutput(OutputId(2)),
+        Action::FocusOutput(OutputId(2)),
+        Action::MoveFocusedWindowToOutput(OutputId(1)),
+        Action::FocusWindowId(WindowId(2)),
+        Action::MoveFocusedWindowToOutput(OutputId(1)),
+        Action::FocusOutput(OutputId(99)),
+        Action::MoveFocusedWindowToOutput(OutputId(99)),
+    ];
+    for step in steps {
+        world.handle_action(step.clone());
+        let arrangement = world.arrange();
+        let mut placed: Vec<u64> = arrangement.placements.iter().map(|p| p.id.0).collect();
+        placed.sort();
+        assert_eq!(placed, vec![1, 2], "a move lost a window: {step:?}");
+        assert!(world.focused_output().is_some(), "focus stranded: {step:?}");
+        if let Some(focus) = focused(&world) {
+            assert!(
+                placed.contains(&focus),
+                "focus names a window that is nowhere: {step:?}"
+            );
+        }
+    }
+    // Both windows end on output 1, window 2 focused there.
+    assert_eq!(placement(&world, 1).output, OutputId(1));
+    assert_eq!(placement(&world, 2).output, OutputId(1));
+    assert_eq!(focused(&world), Some(2));
 }

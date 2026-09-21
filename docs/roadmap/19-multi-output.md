@@ -293,6 +293,86 @@ no second monitor. `crates/scoot/src/compositor/outputs.rs`'s doc on
   window (mirroring move-to-workspace-index's carry-and-follow), keyboard
   on the source output falls back per existing rules. Out: per-output
   scale/mode surface, runtime output add/remove, default binds.
+  - **DONE (2026-09-21, Phase F PR).** Single diff, no split: the leave
+    pairing turned out to be one refresh method plus its hook, not a
+    sprawl -- see below.
+  - **Core** (`scoot-core`, no redesign -- the tripwire did not fire:
+    `reshape` stays for within-output actions, the two new actions are
+    plain `World` methods). `MoveFocusedWindowToOutput(OutputId)` takes the
+    focused window (always on the focused output, by construction) into the
+    target's *active* workspace right of its focused column, carrying the
+    column preset, and follows it there; the source keeps `take`'s
+    neighbour focus. `FocusOutput(OutputId)` sets `focused_output` -- the
+    focused window derives as the active workspace's focused window, or
+    `None` on an empty output (decided from what focus means on an empty
+    output today: exactly that `None`, and the arrangement reports it).
+    Unknown ids are ignored in both (mirroring the out-of-range workspace
+    rule -- focus can never strand on a nonexistent output, and a move can
+    never lose a window), as are move-with-no-focus and move-to-current.
+  - **Wire + grammar, additive, no `PROTOCOL_VERSION` bump.**
+    `MoveFocusedWindowToOutput { output }` / `FocusOutput { output }`
+    (`snake_case` tags, `u64` output *ids* -- stable for the session, unlike
+    workspace positions); the unknown-tag decode check proves an older
+    server answers a new tag with `Error` and keeps serving, the same
+    degradation the move-index action shipped under. Shared
+    `scootctl::action` arms (`move-window-to-output ID`, `focus-output
+    ID`) cover CLI, `scoot msg` alias and config `[binds]`/`[autostart]` by
+    construction; `action_string` emits both back byte-identically (pinned).
+    `scoot --help`'s embedded grammar updated alongside (containment test).
+  - **Compositor integration.** `State::act`'s lock gate and IPC's
+    `Request::Action` refusal cover both with no new code (pinned under
+    lock: refused, arrangement identical). `FocusOutput` spends
+    `clicked_layer` and takes the already-there fast path (one `Copy`
+    compare); `MoveFocusedWindowToOutput` does neither -- the exact cut
+    `MoveWindowToWorkspaceIndex` already holds (a carry changes arrangement;
+    the click-spend boundary test fails if it ever lands in the match).
+  - **`output_leave` pairing: the wlr handle only.** Checked all three
+    lists against their protocol XMLs: `ext-foreign-toplevel-list-v1` has
+    no output events at all (zero `output` mentions in its XML -- nothing
+    to pair); `ext-workspace-v1`'s group `output_leave` fires when an
+    output is *removed from a group*, and groups never change outputs
+    (pinned: a move sends no group enter/leave while workspaces do move);
+    `wlr-foreign-toplevel-management-v1`'s handle `output_leave` is the one
+    moves owe. Each handle's last-told output is now stored (core id, set
+    at announce/bind to exactly what the `enter` named) and `apply` diffs
+    the fresh arrangement against it: leave-old + enter-new + `done` on
+    exactly the moved window's handles, per-client objects (the
+    wrong-client panic guard included), `done` only when something was
+    said. Close sends `closed` with no `leave` (pinned -- the handle's
+    death is the `closed`); workspace switches within an output send
+    nothing (unchanged, pre-existing). Unmap has no boundary in scoot
+    (handles live creation-to-destruction), so there is no unmap path to
+    pair.
+  - **Pointer rule, recorded.** Moves and output-focus never touch the
+    pointer (only startup centres it, only motion clamps it): after a
+    carried follow the keyboard is on the target output while the pointer
+    rests on the source, until motion re-resolves it -- which only matters
+    for layer/exclusive derivation, never for which window holds the keys.
+  - **Single-output byte-identical:** full nextest green unmodified (plus
+    the whole ext-workspace + wlr + input + config sets green under
+    `SCOOT_TEST_RENDERER=gles` too), smoke green, and the one-output motion
+    path untouched (no hot path changed -- see benchmark note).
+  - **Benchmark (none owed, stated not skipped).** The two actions are
+    per-request cold (keybinding/IPC rate, like every other action);
+    `arrange` already walks all outputs and is unchanged; the one addition
+    to a shared path is `apply`'s membership walk -- one map lookup plus
+    one `Option` compare per window, allocation-free, sending nothing when
+    nothing moved. Nothing here runs per event or per frame, so there is
+    nothing to measure before/after.
+  - **Fail-first pins (new tests, red proven where behavior is new):**
+    core move/focus/preset/unknown/empty/rapid-sequence (5 red on the
+    no-op placeholder, green on the behavior); wlr leave+enter+done both
+    directions (red with the `apply` hook disabled, green restored) plus
+    close-without-leave and silent-to-outputless-client (green throughout);
+    ext-workspace group-stability across a move; IPC carry+follow,
+    unknown-output, cross-output focus both ways, already-there
+    no-`apply`, click-spend boundary both directions; config bind
+    parse+emit round-trip; scootctl parse; IPC wire shape + unknown-tag
+    rejection; lock refusal of both actions via IPC and via `act` with the
+    arrangement byte-identical.
+  - **Live proof on the dev VM (`--headless --outputs 2`):** see the PR
+    description for the wire logs (leave/enter per output on a live taskbar
+    client) and the per-output screenshots (window pixels move screens).
 
 ## Verification per phase (in addition to the standard set)
 

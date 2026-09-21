@@ -149,6 +149,12 @@ impl State {
             }
         }
         self.set_focus(arrangement.focused);
+        // The one place cross-output moves reach `wlr-foreign-toplevel-management-v1`:
+        // every event and action that can move a window ends here, so diffing
+        // the arrangement just published against what each handle was last
+        // told sends `output_leave` + `output_enter` for exactly the windows
+        // that changed screens -- and nothing for the ones that didn't.
+        self.refresh_wlr_output_membership(&arrangement);
         // The one place workspace changes reach `ext-workspace-v1` clients:
         // every event and action that can add, drop or switch a workspace
         // ends here (see `ext_workspace.rs`). Costs one snapshot compare per

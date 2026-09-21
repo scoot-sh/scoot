@@ -755,6 +755,8 @@ fn action_string(action: &Action) -> String {
         Action::MoveWindowToWorkspaceIndex(index) => {
             format!("move-window-to-workspace-index {index}")
         }
+        Action::MoveFocusedWindowToOutput(id) => format!("move-window-to-output {}", id.0),
+        Action::FocusOutput(id) => format!("focus-output {}", id.0),
         Action::CycleColumnWidth => "cycle-column-width".to_owned(),
         Action::CloseFocused => "close".to_owned(),
         Action::Spawn(command) => format!("spawn {}", command.join(" ")),
@@ -1444,6 +1446,40 @@ mod tests {
             ),
             Some(Bound::Action(Action::MoveWindowToWorkspaceIndex(2)))
         );
+    }
+
+    #[test]
+    fn the_output_actions_parse_through_a_bind_and_emit_back() {
+        // The config-grammar half of the cross-output item: both new action
+        // strings through the shared `scootctl::action` parser (which is
+        // what makes them bindable with no default binds shipped), and back
+        // out through `action_string` byte-identically, so a
+        // `--print-default-config` emission containing one would reload.
+        for (spelling, action) in [
+            (
+                "move-window-to-output 2",
+                Action::MoveFocusedWindowToOutput(scoot_core::OutputId(2)),
+            ),
+            (
+                "focus-output 2",
+                Action::FocusOutput(scoot_core::OutputId(2)),
+            ),
+        ] {
+            let (_dir, path) = write_temp(&format!("[binds]\n\"super+F1\" = \"{spelling}\"\n"));
+            let loaded = load_from(&path, true).expect("valid config");
+            assert_eq!(
+                loaded.keybindings.match_key(
+                    keysym_named("F1").unwrap(),
+                    Modifiers {
+                        super_: true,
+                        ..Modifiers::default()
+                    }
+                ),
+                Some(Bound::Action(action.clone())),
+                "{spelling} did not parse through a bind"
+            );
+            assert_eq!(action_string(&action), spelling);
+        }
     }
 
     #[test]
