@@ -288,10 +288,10 @@ Two cases, behaving differently by design:
 
 ## Reference: live defaults
 
-Every key below is present in `settings` exactly as shown (uncommented;
-values are the live defaults). Pasted from a real
-`scoot --print-default-config` emission on 2026-09-20 (dev-VM Linux
-build of `main` at `82371df`), not hand-written — regenerate rather
+Every key below is present in `settings` exactly as shown (values are the
+live defaults). Pasted from a real
+`scoot --print-default-config` emission on 2026-09-21 (dev-VM Linux
+build from the tree at `6fb8773`), not hand-written — regenerate rather
 than edit by hand if it ever looks stale:
 
 Two keys describe less than the packaged binary decides: setting
@@ -317,10 +317,11 @@ focus_ring_width = 3
 focus_ring_active_color = "#6ba6fa"
 focus_ring_inactive_color = "#595961"
 background_color = "#14141a"
+corner_radius = 0
 cursor_size = 16
 cursor_color = "#ffffff"
 # Unset follows $XCURSOR_THEME, then "default"; name one here only to override that.
-cursor_theme = "Adwaita"
+# cursor_theme = "Adwaita"
 prefer_no_csd = true
 
 [output]
@@ -334,7 +335,7 @@ backend = "pixman"
 [tty]
 # Unset means the automatic search picks; --gpu PATH wins over this when both name one.
 # Name the display controller (prefer a stable /dev/dri/by-path/... alias):
-gpu = "/dev/dri/card0"
+# gpu = "/dev/dri/card0"
 
 [autostart]
 # Action strings to run once each, in file order, at session startup.
@@ -381,6 +382,9 @@ commands = []
 
 (Differences from the raw emission are mechanical and stated: comment
 lines unwrapped where the emission's prose wraps, `#`-commented keys
-uncommented with their default values filled in, and the trailing note
+uncommented with their default values filled in — except `cursor_theme`
+and `tty.gpu`, which stay commented exactly as emitted because they are
+unset by default (placeholders, not values: setting either changes the
+session) — and the trailing note
 about `--tty` VT binds folded into
 [configuration.md](configuration.md#binds). The values are untouched.)

@@ -586,6 +586,17 @@ be revisited.
   mechanically. Five doc corrections, one precision restructure (dmabuf's
   own subsection anchor), and one code bug filed-not-fixed (`scoot --help`
   hides `--renderer` under `--tty`).
+- [README + docs consistency re-audit](./resolved/readme-rereview-done.md)
+  — RESOLVED 2026-09-21 (coordinator-directed, no gh issue): every
+  user-facing surface since PR #159 re-verified against `README.md` and
+  `docs/` (both `--help` outputs and `--print-default-config` run live,
+  defaults vs `Config::default()`, binds vs defaults, IPC actions vs
+  `scoot-ipc`, protocol versions unchanged). Twelve of thirteen
+  surfaces already consistent; six fixes — README "Not yet" retitled
+  past one-output, three stale one-output sentences in `docs/`,
+  the `nix.md` live-defaults paste (missing `corner_radius`,
+  `cursor_theme`/`gpu` shown as defaults while unset), and one word
+  in the CI paragraph.
 
 ### Found asking how a session starts its own programs (2026-09-19)
 
