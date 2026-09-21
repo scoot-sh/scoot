@@ -28,8 +28,9 @@ click-delivery path (`Request::Click` move-then-press-release →
 focus → `pointer_button` delivery to `pointer.current_focus`) delivers
 every click shape from the report to a real layer client, live over
 `--nested` and in-harness. The field failure was most likely environmental
-(client-side input region / host-side event swallowing / a bar with
-nothing mapped to hit — note the companion finding below), not a scoot
+(client-side input region, or a bar with nothing mapped to hit — note the
+companion finding below; host-side swallowing is mechanistically impossible
+here since socket-injected clicks bypass the host entirely), not a scoot
 input defect. A pinning test lands so the path stays green.
 
 ## Evidence

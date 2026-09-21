@@ -164,9 +164,11 @@ fn a_click_reaches_the_bar_press_and_release() {
         "moving over the bar should enter the bar's surface (gh #182)"
     );
 
-    // The button half, both edges, every button the report names and the
-    // middle one for completeness: a client that only ever sees presses, or
-    // only releases, still can't work its icons.
+    // The button half, each edge separately, every button the report names
+    // and the middle one for completeness: a client that only ever sees
+    // presses, or only releases, still can't work its icons — so the press
+    // and the release each get their own assertion rather than one
+    // before/after compare across the pair.
     for button in [
         scoot_ipc::PointerButton::Left,
         scoot_ipc::PointerButton::Right,
@@ -174,12 +176,18 @@ fn a_click_reaches_the_bar_press_and_release() {
     ] {
         let before = fixture.serials().button;
         fixture.state.pointer_button(button, true);
+        fixture.settle();
+        let pressed = fixture.serials().button;
+        assert_ne!(
+            before, pressed,
+            "pressing {button:?} over the bar should send the bar's client a button press (gh #182)"
+        );
         fixture.state.pointer_button(button, false);
         fixture.settle();
         let after = fixture.serials().button;
         assert_ne!(
-            before, after,
-            "pressing and releasing {button:?} over the bar should send the bar's client a button event (gh #182)"
+            pressed, after,
+            "releasing {button:?} over the bar should send the bar's client a button release (gh #182)"
         );
     }
 
@@ -195,14 +203,20 @@ fn a_click_reaches_the_bar_press_and_release() {
     fixture
         .state
         .pointer_button(scoot_ipc::PointerButton::Left, true);
+    fixture.settle();
+    let pressed = fixture.serials().button;
+    assert_ne!(
+        before, pressed,
+        "pressing on the launcher should send its client a button press (gh #182)"
+    );
     fixture
         .state
         .pointer_button(scoot_ipc::PointerButton::Left, false);
     fixture.settle();
     assert_ne!(
-        before,
+        pressed,
         fixture.serials().button,
-        "clicking the launcher should send its client a button event (gh #182)"
+        "releasing on the launcher should send its client a button release (gh #182)"
     );
 }
 
