@@ -203,6 +203,8 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
+use scoot_core::OutputId;
+
 use smithay::output::{Output, WeakOutput};
 use smithay::reexports::wayland_server::backend::ClientId;
 use smithay::reexports::wayland_server::protocol::wl_buffer::WlBuffer;
@@ -446,6 +448,18 @@ pub struct Screencopy {
 /// it.
 struct Capture {
     session: Session,
+    /// The output this session captures, as the id the core, the render
+    /// targets and the IPC layer know it by.
+    ///
+    /// Resolved once in `new_session` from the session's source rather than
+    /// per tick: sources name an output that lives as long as the session
+    /// does (outputs are never removed), so the binding cannot go stale.
+    /// `None` is a source that named nothing usable -- refused with
+    /// `stopped` at creation by `capture_constraints`, and failed the same
+    /// way here if a frame ever parks on it. What this buys is the rule
+    /// every serve path obeys: a session is only ever handed its *own*
+    /// output's pixels, never another's.
+    output: Option<OutputId>,
     /// The frame whose `capture` request has arrived and whose pixels have not
     /// been written yet.
     ///
@@ -612,24 +626,33 @@ impl ImageCopyCaptureHandler for State {
     /// not name an output at all. Refusing is `stopped` on the session the
     /// client just made, which is the protocol's own way of saying "not this
     /// one".
+    ///
+    /// Answered from the *source's own* output's render target: the size a
+    /// session is told must be the size its captures are written from, and
+    /// handing one output's size for another's pixels would mislabel a whole
+    /// screen.
     fn capture_constraints(&mut self, source: &ImageCaptureSource) -> Option<BufferConstraints> {
         let weak = source.user_data().get::<WeakOutput>()?;
-        // Compared against the *primary* output rather than merely upgraded,
-        // and deliberately not against "any output this compositor has":
-        // `upgrade` answers "some output still exists", which is not the
-        // question -- the capture below reads this compositor's one
-        // framebuffer, which is the primary output's (see `Outputs::primary`),
-        // so a source naming any other output must not be told a size it
-        // would then be handed the wrong pixels for.
-        if self.outputs.primary() != Some(&weak.upgrade()?) {
-            return None;
-        }
-        Some(constraints(self.backend.as_ref()?))
+        let output = weak.upgrade()?;
+        let id = self.outputs.id_of(&output)?;
+        Some(constraints(self.backends.get(&id)?))
     }
 
     fn new_session(&mut self, session: Session) {
+        // The output binding this session's captures are served from (see
+        // `Capture::output`): resolved here, once, from the source Smithay
+        // hands over -- `output_source_created` recorded the weak handle
+        // when the source was made, so it is there by the time a session
+        // names it.
+        let output = session
+            .source()
+            .user_data()
+            .get::<WeakOutput>()
+            .and_then(|weak| weak.upgrade())
+            .and_then(|output| self.outputs.id_of(&output));
         self.screencopy.sessions.push(Capture {
             session,
+            output,
             pending: None,
             delivered: None,
         });
@@ -711,11 +734,18 @@ impl ImageCopyCaptureHandler for State {
 }
 
 impl State {
-    /// Copies the framebuffer into whichever parked capture frames are due.
+    /// Copies each output's framebuffer into whichever parked capture frames
+    /// on that output are due.
     ///
     /// Called from the frame tick, immediately after [`State::render`], so the
     /// pixels a capture sees are the ones that frame just drew. Costs a `Vec`
     /// length check when no client is capturing, which is the normal case.
+    ///
+    /// One read-back per output with a due session, served only to that
+    /// output's sessions: sharing one read-back across outputs would hand a
+    /// session another screen's pixels, and serving a session whose output
+    /// has no render target from a different one would do the same -- so a
+    /// missing target fails its sessions instead.
     pub(super) fn service_captures(&mut self) {
         let serial = self.frame_serial;
         if !self
@@ -738,17 +768,28 @@ impl State {
         if self.session_lock.awaiting_blank() {
             return;
         }
-        let Some(mut backend) = self.backend.take() else {
-            // No render target at all, which nothing can produce after
-            // `headless::init_named` -- but a frame that is never answered is
-            // a client that waits forever, so say so rather than return.
-            fail_due(
-                &mut self.screencopy.sessions,
-                serial,
-                CaptureFailureReason::Unknown,
-            );
-            return;
-        };
+        // Sessions whose source names no output cannot be served at all: the
+        // session owes its frame a `stopped` failure, not a copy -- and
+        // specifically not a copy of some other output, which is what
+        // answering it from any framebuffer would be.
+        for capture in &mut self.screencopy.sessions {
+            if capture.due(serial) && capture.output.is_none() {
+                if let Some(frame) = capture.pending.take() {
+                    frame.fail(CaptureFailureReason::Stopped);
+                }
+            }
+        }
+        // The outputs with something due, in session order. A `Vec`, not a
+        // set: at most eight outputs, and this only runs on ticks with a
+        // parked capture -- the normal case returned above.
+        let mut ids: Vec<OutputId> = Vec::new();
+        for capture in &self.screencopy.sessions {
+            if let Some(id) = capture.output {
+                if capture.due(serial) && !ids.contains(&id) {
+                    ids.push(id);
+                }
+            }
+        }
         let presented = Duration::from(self.screencopy.clock.now());
         // Read here, on the tick the captures are served on, rather than
         // cached: see `xrgb_needs_forcing`. No TOCTOU between this and the
@@ -756,14 +797,30 @@ impl State {
         // thread, nothing dispatches in the middle of it, and nothing writes
         // `appearance` at all today.
         let force_xrgb_alpha = xrgb_needs_forcing(self.appearance.background_color.a);
-        deliver(
-            &mut backend,
-            &mut self.screencopy.sessions,
-            serial,
-            presented,
-            force_xrgb_alpha,
-        );
-        self.backend = Some(backend);
+        for id in ids {
+            let Some(mut backend) = self.take_backend(id) else {
+                // No render target for this output, which nothing can produce
+                // after `headless::init_named` -- but a frame that is never
+                // answered is a client that waits forever, so say so rather
+                // than return. Failed, never served from another output.
+                fail_due(
+                    &mut self.screencopy.sessions,
+                    serial,
+                    CaptureFailureReason::Unknown,
+                    Some(id),
+                );
+                continue;
+            };
+            deliver(
+                &mut backend,
+                &mut self.screencopy.sessions,
+                serial,
+                presented,
+                force_xrgb_alpha,
+                id,
+            );
+            self.put_backend(id, backend);
+        }
         // `render()` flushes at its end, and `post_dispatch` flushes after
         // every wakeup -- but this runs *between* the two, and the `ready`
         // event a client is blocked on is queued here. Under the real event
@@ -777,19 +834,26 @@ impl State {
     /// Re-advertises the buffer size to every live session.
     ///
     /// Called from [`State::resize_output`](super::State), the only thing that
-    /// changes the framebuffer's size after startup: a client holding a
-    /// session sized for the old mode has to be told to re-allocate, or its
-    /// next capture is failed with `buffer_constraints` and it never learns
-    /// why. Sends the whole constraint batch plus `done`, which is what the
+    /// changes a framebuffer's size after startup: a client holding a session
+    /// sized for the old mode has to be told to re-allocate, or its next
+    /// capture is failed with `buffer_constraints` and it never learns why.
+    /// Sends the whole constraint batch plus `done`, which is what the
     /// protocol requires of an update ("regardless of whether it sends the
     /// initial constraints or an update").
+    ///
+    /// Per session, from its own output's render target: every other
+    /// output's size is unchanged, and telling a session another output's
+    /// size would size its next buffer for the wrong pixels.
     pub(super) fn refresh_capture_constraints(&mut self) {
-        let Some(backend) = self.backend.as_ref() else {
-            return;
-        };
-        let constraints = constraints(backend);
         for capture in &self.screencopy.sessions {
-            capture.session.update_constraints(constraints.clone());
+            let Some(constraints) = capture
+                .output
+                .and_then(|id| self.backends.get(&id))
+                .map(constraints)
+            else {
+                continue;
+            };
+            capture.session.update_constraints(constraints);
         }
     }
 }
@@ -814,18 +878,22 @@ fn constraints(backend: &Backend) -> BufferConstraints {
     }
 }
 
-/// Reads the framebuffer back once and writes it into every due frame.
+/// Reads one output's framebuffer back once and writes it into every due
+/// frame on that output.
 ///
-/// One read-back for all of them: `copy_framebuffer` allocates and fills a
+/// One read-back per output: `copy_framebuffer` allocates and fills a
 /// fresh pixman image every call (confirmed in the pinned rev's
 /// `PixmanRenderer`), so doing it per session would cost a full extra copy of
-/// the screen for each client watching.
+/// the screen for each client watching -- but sharing one read-back across
+/// outputs would hand a session another screen's pixels, so the sharing
+/// stops at the output boundary.
 fn deliver(
     backend: &mut Backend,
     sessions: &mut [Capture],
     serial: u64,
     presented: Duration,
     force_xrgb_alpha: bool,
+    only: OutputId,
 ) {
     let (width, height) = backend.size();
 
@@ -849,6 +917,7 @@ fn deliver(
             presented,
             force_xrgb_alpha,
             (width, height),
+            only,
         )
     });
     if let Err(failure) = outcome {
@@ -866,11 +935,11 @@ fn deliver(
                 "could not map the framebuffer for a screen capture"
             ),
         }
-        fail_due(sessions, serial, CaptureFailureReason::Unknown);
+        fail_due(sessions, serial, CaptureFailureReason::Unknown, Some(only));
     }
 }
 
-/// Writes one read-back frame into every due capture session.
+/// Writes one read-back frame into every due capture session on `only`.
 ///
 /// Split out of [`deliver`] only so the read-back's callback stays readable;
 /// the `(width, height)` pair is the backend's own size, which is also what
@@ -882,6 +951,7 @@ fn write_due_captures(
     presented: Duration,
     force_xrgb_alpha: bool,
     (width, height): (i32, i32),
+    only: OutputId,
 ) {
     // pixman lays a 32-bit image out at `stride * height` bytes with the
     // stride rounded up to a multiple of four -- i.e. exactly `width * 4` for
@@ -900,13 +970,18 @@ fn write_due_captures(
             len = pixels.len(),
             "the framebuffer read back too small to capture"
         );
-        fail_due(sessions, serial, CaptureFailureReason::Unknown);
+        fail_due(sessions, serial, CaptureFailureReason::Unknown, Some(only));
         return;
     }
 
     let damage: Vec<Rectangle<i32, BufferCoords>> =
         vec![Rectangle::from_size((width, height).into())];
     for capture in sessions {
+        // Another output's sessions are another read-back's business (see
+        // `deliver`): skipped, never answered from these pixels.
+        if capture.output != Some(only) {
+            continue;
+        }
         if !capture.due(serial) {
             continue;
         }
@@ -951,8 +1026,21 @@ fn write_due_captures(
 
 /// Answers every parked frame that was due with `reason`, for the paths where
 /// no pixels could be produced at all.
-fn fail_due(sessions: &mut [Capture], serial: u64, reason: CaptureFailureReason) {
+///
+/// `only` scopes the failure to one output's sessions -- `None` is every due
+/// session, the shape the single-output paths always had. Scoped failures
+/// are what keep a missing render target on one output from failing another
+/// output's captures, which would be answered, not just noisy.
+fn fail_due(
+    sessions: &mut [Capture],
+    serial: u64,
+    reason: CaptureFailureReason,
+    only: Option<OutputId>,
+) {
     for capture in sessions {
+        if only.is_some_and(|only| capture.output != Some(only)) {
+            continue;
+        }
         if !capture.due(serial) {
             continue;
         }

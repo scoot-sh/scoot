@@ -90,11 +90,13 @@ impl CompositorHandler for State {
         // the ioctl pair would be per-commit cost (including a blocking wait
         // on the client's GPU job) for a mapping that does not exist. The flag
         // comes first because it is the cheaper test and the one that is false
-        // in almost every session.
+        // in almost every session. Any backend answers for all of them: every
+        // output's target is built with the session's one renderer kind.
         if self.imports_dmabufs
             && self
-                .backend
-                .as_ref()
+                .backends
+                .values()
+                .next()
                 .is_some_and(Backend::maps_dmabufs_on_the_cpu)
         {
             super::dmabuf::sync_committed_dmabufs(surface);

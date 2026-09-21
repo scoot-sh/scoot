@@ -753,11 +753,11 @@ impl Connection {
         // request.
         if screenshot {
             // Which output was asked for, before any of the machinery below:
-            // only the composited one can be captured, and answering another
-            // id from its framebuffer would mislabel a whole screen (see
-            // `State::screenshot_refusal`). After the rate limit above so
-            // that message is unchanged, and before the capture so a refused
-            // id costs no render.
+            // only an output this session has can be captured, and answering
+            // one id from another output's framebuffer would mislabel a whole
+            // screen (see `State::screenshot_refusal`). After the rate limit
+            // above so that message is unchanged, and before the capture so
+            // a refused id costs no render.
             let asked = match request {
                 Request::Screenshot { output } => output,
                 // `screenshot` is that variant's own `matches!`, so this is
@@ -794,7 +794,7 @@ impl Connection {
                     )));
                 }
             };
-            match state.start_screenshot(self.conn, stream) {
+            match state.start_screenshot(self.conn, stream, asked) {
                 ShotStart::Dispatched => {
                     // Stamped at dispatch, like the synchronous capture was
                     // stamped at completion: the event-loop cost (render and

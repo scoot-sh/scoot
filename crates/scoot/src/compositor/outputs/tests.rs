@@ -471,24 +471,29 @@ fn an_extra_output_is_refused_before_the_primary_one_exists() {
 }
 
 #[test]
-fn only_the_composited_output_can_be_screenshotted() {
-    // The wrong-pixels guard. With two outputs and one framebuffer, a capture
-    // of the second one has no pixels to answer with, and handing back the
-    // first one's would label a picture of one screen as another.
+fn every_output_can_be_screenshotted_and_no_other_id_can() {
+    // The wrong-pixels guard, per output: each output has a render target of
+    // its own, so a capture of the second one is answered from its own
+    // framebuffer -- never refused, and never answered from the first one's.
+    // (Before per-output render targets this asserted the opposite: output 2
+    // refused with "composites one output".) An id naming no output at all
+    // is still refused, with one output or with two.
     let harness = session(2);
     assert_eq!(harness.state.screenshot_refusal(None), None);
     assert_eq!(harness.state.screenshot_refusal(Some(1)), None);
+    assert_eq!(
+        harness.state.screenshot_refusal(Some(2)),
+        None,
+        "a capture of the second output has its own framebuffer now"
+    );
     let refusal = harness
         .state
-        .screenshot_refusal(Some(2))
-        .expect("a capture of the second output is refused");
+        .screenshot_refusal(Some(99))
+        .expect("an id naming no output is refused");
     assert!(
-        refusal.contains("output 2") && refusal.contains("composites one output"),
+        refusal.contains("output 99") && refusal.contains("no such output"),
         "the refusal should name what was asked for and why: {refusal}"
     );
-    // An id naming no output at all is refused the same way, with one output
-    // or with two.
-    assert!(harness.state.screenshot_refusal(Some(99)).is_some());
 }
 
 #[test]

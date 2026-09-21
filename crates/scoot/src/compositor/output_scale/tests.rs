@@ -716,7 +716,8 @@ impl Fixture {
     fn render(&mut self) -> Vec<u8> {
         self.state.request_render();
         self.state.render();
-        let backend = self.state.backend.as_mut().expect("a backend");
+        let output = self.state.outputs.primary_id().expect("an output");
+        let backend = self.state.backends.get_mut(&output).expect("a backend");
         backend
             .capture(<[u8]>::to_vec)
             .expect("a framebuffer readback")

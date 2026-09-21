@@ -56,8 +56,11 @@
 //! screen, which is the ordinary case, not a bypass (it changes no pixels'
 //! content, only their color temperature).
 
+use std::collections::HashMap;
 use std::io::Read;
 use std::os::unix::io::{AsFd, OwnedFd};
+
+use scoot_core::OutputId;
 
 use smithay::reexports::wayland_protocols_wlr::gamma_control::v1::server::{
     zwlr_gamma_control_manager_v1, zwlr_gamma_control_manager_v1::ZwlrGammaControlManagerV1,
@@ -80,10 +83,11 @@ mod tests;
 /// clamp.
 pub(super) const FALLBACK_GAMMA_SIZE: u32 = 256;
 
-/// Holds the `zwlr_gamma_control_manager_v1` global alive and tracks the one
-/// live control. scoot has exactly one output, so "at most one live control
-/// per output" is a single [`Option`]: a second `get_gamma_control` fails the
-/// old control and takes its place.
+/// Holds the `zwlr_gamma_control_manager_v1` global alive and tracks the live
+/// controls, one per output. scoot has at most eight outputs, so "at most
+/// one live control per output" is a map from the id the core knows each one
+/// by: a second `get_gamma_control` on the same output fails the old control
+/// and takes its place, while a control on another output is untouched.
 pub(crate) struct GammaControlState {
     /// Held only to keep the manager global alive -- like
     /// `output_manager_state`, nothing reads this field again after `new`.
@@ -93,12 +97,13 @@ pub(crate) struct GammaControlState {
     /// ([`FALLBACK_GAMMA_SIZE`]); overwritten from the real CRTC by
     /// `tty::init` once the DRM surface exists.
     size: u32,
-    /// The live control, if any. Compared by object identity on destroy, so
-    /// tearing down a superseded (already `failed`) control cannot clear a
-    /// newer one. This is the only ramp record: `None` is the default linear
-    /// ramp, `Some` is a client ramp still in force -- there is deliberately
-    /// no copy of the ramp itself, nothing reads it back (see `set_gamma`).
-    current: Option<ZwlrGammaControlV1>,
+    /// The live control per output, if any. Compared by object identity on
+    /// destroy, so tearing down a superseded (already `failed`) control
+    /// cannot clear a newer one -- on its own output or any other. This is
+    /// the only ramp record: `None` is the default linear ramp, `Some` is a
+    /// client ramp still in force -- there is deliberately no copy of the
+    /// ramp itself, nothing reads it back (see `set_gamma`).
+    current: HashMap<OutputId, ZwlrGammaControlV1>,
 }
 
 impl GammaControlState {
@@ -111,7 +116,7 @@ impl GammaControlState {
         Self {
             manager_global,
             size: FALLBACK_GAMMA_SIZE,
-            current: None,
+            current: HashMap::new(),
         }
     }
 
@@ -136,9 +141,31 @@ impl GammaControlState {
     /// periodic set -- failing it makes the client re-push promptly.
     pub(super) fn crtc_changed(&mut self, size: u32) {
         self.size = size;
-        if let Some(current) = self.current.take() {
+        for (_, current) in self.current.drain() {
             current.failed();
         }
+    }
+
+    /// Which output's live control `control` is, if any.
+    ///
+    /// Compared by object identity: a superseded (already `failed`) control
+    /// is not current on any output, and a control on one output is never
+    /// current on another. Linear over at most eight entries, on a
+    /// per-`set_gamma`/destroy path -- never per frame.
+    fn output_of(&self, control: &ZwlrGammaControlV1) -> Option<OutputId> {
+        self.current
+            .iter()
+            .find(|(_, current)| *current == control)
+            .map(|(id, _)| *id)
+    }
+
+    /// How many outputs hold a live control. Test-only: the per-output
+    /// exclusivity suites assert coexistence here rather than through a
+    /// second client round trip, which could not tell "two live controls"
+    /// from "one control answering twice".
+    #[cfg(test)]
+    pub(super) fn live_control_count(&self) -> usize {
+        self.current.len()
     }
 
     /// The expected `set_gamma` fd length in bytes: three ramps of `size`
@@ -231,12 +258,7 @@ impl Dispatch2<ZwlrGammaControlV1, State> for GammaControlUserData {
                 // state to apply. (A client that destroys and re-creates gets
                 // a fresh object, which *is* current, so this only drops
                 // requests on dead objects.)
-                let is_current = state
-                    .gamma_control
-                    .current
-                    .as_ref()
-                    .is_some_and(|current| current == resource);
-                if !is_current {
+                if state.gamma_control.output_of(resource).is_none() {
                     return;
                 }
                 set_gamma(state, resource, fd);
@@ -250,13 +272,9 @@ impl Dispatch2<ZwlrGammaControlV1, State> for GammaControlUserData {
         // A disconnect destroys the object without the request above ever
         // running -- same restore either way. The identity check matters:
         // destroying a superseded control must not restore the default over
-        // the live one's ramp.
-        let is_current = state
-            .gamma_control
-            .current
-            .as_ref()
-            .is_some_and(|current| current == resource);
-        if is_current {
+        // the live one's ramp, on its own output or any other.
+        if let Some(id) = state.gamma_control.output_of(resource) {
+            state.gamma_control.current.remove(&id);
             restore_default(state);
         }
     }
@@ -278,24 +296,35 @@ fn get_gamma_control(
     id: New<ZwlrGammaControlV1>,
     output: &smithay::reexports::wayland_server::protocol::wl_output::WlOutput,
 ) {
-    // The primary output only (see `Outputs::primary`): there is one gamma
-    // ramp, on the one `--tty` CRTC, so a control for any other output is
-    // `failed` rather than a second control over the same hardware.
+    // The named output's own control -- or `failed` for an output this
+    // compositor does not have (one that went away, or a request that
+    // arrived before `headless::init` created the first output there is).
+    // Initializing-then-failing, rather than posting a protocol error without
+    // initializing, keeps this on the protocol's own rails: the "output
+    // doesn't support gamma tables" case is exactly what `failed` is for, and
+    // it avoids the never-initialized-object shape `dispatch.rs` documents
+    // for the `wl_shm` guards.
     let known = state
         .outputs
-        .primary()
-        .is_some_and(|known| known.owns(output));
+        .iter()
+        .find(|known| known.owns(output))
+        .and_then(|known| state.outputs.id_of(known));
     let control: ZwlrGammaControlV1 = data_init.init(id, GammaControlUserData);
-    if !known {
+    let Some(output_id) = known else {
         control.failed();
         return;
-    }
-    // Exclusivity transfer: at most one live control per output. The old one
-    // is told it lost control and stops affecting anything (see the
-    // `is_current` gates); the hardware keeps showing its ramp until the new
+    };
+    // Exclusivity transfer, per output: at most one live control each. The
+    // old one is told it lost control and stops affecting anything (see the
+    // `output_of` gates); the hardware keeps showing its ramp until the new
     // control sets one or goes away, which is what wlroots does too -- there
     // is no "no control" state that would restore the default mid-transfer.
-    if let Some(old) = state.gamma_control.current.replace(control.clone()) {
+    // A control on any other output is untouched.
+    if let Some(old) = state
+        .gamma_control
+        .current
+        .insert(output_id, control.clone())
+    {
         old.failed();
     }
     control.gamma_size(state.gamma_control.size);
@@ -350,16 +379,22 @@ fn set_gamma(state: &mut State, resource: &ZwlrGammaControlV1, fd: OwnedFd) {
         // The object is dead from here: `failed` means "no longer valid"
         // and the client should destroy it. The hardware keeps showing the
         // last ramp it accepted; there is no record to update, so nothing
-        // can go stale.
-        state.gamma_control.current = None;
+        // can go stale. Removed from its own output only -- a control on any
+        // other output is untouched.
+        if let Some(id) = state.gamma_control.output_of(resource) {
+            state.gamma_control.current.remove(&id);
+        }
         resource.failed();
     }
 }
 
-/// Restores the default linear ramp when the current control goes away --
+/// Restores the default linear ramp when a live control goes away --
 /// explicit destroy or client disconnect.
+///
+/// Takes no control to remove: `destroyed` (the only caller) has already
+/// taken it out of its output's slot, so reaching here with a stale entry
+/// would mean restoring the default over another output's live ramp.
 fn restore_default(state: &mut State) {
-    state.gamma_control.current = None;
     if let Some(tty) = state.tty.as_ref() {
         // Nothing to signal failure on: the object this would be about is
         // already gone. A failed restore leaves the last ramp on the hardware

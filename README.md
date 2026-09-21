@@ -47,8 +47,11 @@ Linux, and daily-driven on `--tty`** (2026-09-18).
 
 - **One output is composited.** Plug in a second monitor and it stays dark.
   `--headless --outputs N` now creates several virtual outputs for testing,
-  each with its own geometry and its own scrolling strip, but only the first
-  is drawn and `--tty` still drives one connector.
+  each with its own geometry, its own scrolling strip and its own composited
+  framebuffer (screenshots, screen captures, gamma and frame callbacks all
+  work per output) — but layer zones, the lock screen, workspace groups and
+  output management are still first-output-only, and `--tty` still drives
+  one connector.
 - **No XWayland.** X11-only applications do not run.
 - **GPU scanout is new and narrow.** `--tty --renderer gles` scans out from
   the GPU, but only in a `gpu-scanout` build, only on the primary plane (no

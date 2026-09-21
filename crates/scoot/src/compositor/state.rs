@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::time::Instant;
 
-use scoot_core::{Action, Config, Size, WindowId, World};
+use scoot_core::{Action, Config, OutputId, Size, WindowId, World};
 use smithay::desktop::{LayerSurface, PopupManager, Space, Window, WindowSurfaceType};
 use smithay::input::keyboard::Keycode;
 use smithay::input::{Seat, SeatState};
@@ -245,7 +245,7 @@ pub struct State {
     /// never disagree with `output_scale`: that field is fixed for the
     /// process's life and nothing writes either one after `new`.
     pub integer_scale: i32,
-    /// Which renderer [`Self::backend`] composites with, resolved once from
+    /// Which renderer [`Self::backends`]' entries composite with, resolved once from
     /// `--renderer`/`[renderer] backend` (see `render::resolve`) and fixed
     /// for the process's lifetime. Kept here rather than read back off the
     /// live `Backend` because `resize_output` *replaces* that backend and has
@@ -253,13 +253,28 @@ pub struct State {
     /// the path where there is no backend to ask, because building the
     /// previous one failed.
     pub renderer: RendererKind,
-    pub backend: Option<Backend>,
-    /// Set only under `--nested`: the connection presenting `backend`'s
+    /// One render target per output, keyed by the id the core knows it by.
+    ///
+    /// A `HashMap` rather than a second `Vec` beside [`Outputs`](super::outputs::Outputs):
+    /// outputs are added once and never removed, looked up by id on every
+    /// capture path, and number at most eight -- so the map stays tiny and
+    /// the per-frame render loop walks [`Outputs`](super::outputs::Outputs)
+    /// by index (creation order, which is what makes the primary first)
+    /// rather than this.
+    ///
+    /// Every output created by `headless::init_named` or `headless::add_output`
+    /// gets exactly one entry, built with the session's renderer; the entry
+    /// lives as long as the output does. A capture, a gamma ramp or a
+    /// screenshot resolves its *own* output's entry here -- never another
+    /// output's -- which is what keeps one screen's pixels from being served
+    /// as another's.
+    pub backends: HashMap<OutputId, Backend>,
+    /// Set only under `--nested`: the connection presenting the primary
     /// framebuffer as a window in a host compositor, and forwarding that
     /// window's input back into this seat. `None` under `--headless`.
     pub host: Option<Host>,
     /// Set only under `--tty`: the session, DRM device/surface and dumb
-    /// buffers presenting `backend`'s framebuffer on a real display, and
+    /// buffers presenting the primary framebuffer on a real display, and
     /// the libinput context feeding this seat from real input devices.
     /// `None` under `--headless`/`--nested`.
     pub tty: Option<Tty>,
@@ -617,6 +632,12 @@ pub struct State {
     /// "no" would leave a client's live preview frozen, which is why the
     /// conservative direction is the one taken.
     ///
+    /// Shared across outputs: a redraw with damage on any output moves it,
+    /// so a session on a static output may be handed one redundant copy when
+    /// another output animates. Correct, just occasionally wasteful -- and
+    /// the waste is one shm copy on a tick that already paid a read-back,
+    /// never a wrong pixel.
+    ///
     /// Wraps rather than saturates (`wrapping_add`), which is unreachable in
     /// practice -- 2^64 frames at 60 Hz is ~9.7 billion years -- and is a
     /// comparison against a stored copy in any case, never an ordering.
@@ -754,7 +775,7 @@ impl State {
             output_scale: scale,
             integer_scale: super::output_scale::integer_scale(scale),
             renderer,
-            backend: None,
+            backends: HashMap::new(),
             host: None,
             tty: None,
             appearance,
@@ -1126,6 +1147,46 @@ impl ClientData for ClientState {
             DisconnectReason::ProtocolError(error) => {
                 tracing::warn!(?id, ?error, "wayland client killed by a protocol error");
             }
+        }
+    }
+}
+
+impl State {
+    /// Takes output `id`'s render target out of the map, so the render path
+    /// can hold `&mut State` and `&mut` the renderer at the same time.
+    ///
+    /// The take-and-put-back pair is the same shape the single-backend code
+    /// used (`backend.take()` around `draw_frame`); per output it also means
+    /// a frame for output A never holds output B's target.
+    pub(super) fn take_backend(&mut self, id: OutputId) -> Option<Backend> {
+        self.backends.remove(&id)
+    }
+
+    /// Puts a taken render target back. Unconditional insert: ids are never
+    /// reused and nothing else writes this map mid-frame, so the slot is
+    /// always empty here.
+    pub(super) fn put_backend(&mut self, id: OutputId, backend: Backend) {
+        self.backends.insert(id, backend);
+    }
+
+    /// Takes the primary output's render target, for the suites that draw
+    /// one-output sessions by hand. `None` before any output exists -- the
+    /// same shape `take_backend` has, so a test that needs the missing case
+    /// can assert on it rather than on a panic.
+    #[cfg(test)]
+    pub(super) fn take_primary_backend(&mut self) -> Option<Backend> {
+        let id = self.outputs.primary_id()?;
+        self.take_backend(id)
+    }
+
+    /// Puts the primary output's render target back. The counterpart the
+    /// suites above pair with [`State::take_primary_backend`]: a no-op
+    /// without a primary output, so a test that took `None` drops nothing
+    /// anywhere.
+    #[cfg(test)]
+    pub(super) fn put_primary_backend(&mut self, backend: Backend) {
+        if let Some(id) = self.outputs.primary_id() {
+            self.put_backend(id, backend);
         }
     }
 }

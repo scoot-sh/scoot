@@ -207,9 +207,14 @@ impl Fixture {
     /// The advertisement is derived from the built one, so a test that pins a
     /// renderer-specific answer has to branch on the built one too.
     fn renderer(&self) -> RendererKind {
+        let id = self
+            .state
+            .outputs
+            .primary_id()
+            .expect("an output behind the fixture");
         self.state
-            .backend
-            .as_ref()
+            .backends
+            .get(&id)
             .expect("a headless backend behind the fixture")
             .renderer()
     }
@@ -416,10 +421,15 @@ fn every_advertised_format_is_one_the_renderer_imports() {
          candidate that is the correct behaviour, and this assertion is how \
          you find out that is where you are"
     );
+    let output = fixture
+        .state
+        .outputs
+        .primary_id()
+        .expect("an output behind the fixture");
     let backend = fixture
         .state
-        .backend
-        .as_ref()
+        .backends
+        .get(&output)
         .expect("a headless backend behind the fixture");
     for (code, modifier) in seen.table {
         let code = Fourcc::try_from(code).expect("an advertised fourcc is a real one");
@@ -584,10 +594,15 @@ fn a_renderer_with_only_other_explicit_modifiers_advertises_nothing() {
 /// the backend answers each honestly. A copy of the rule here would be a
 /// second place for it to drift.
 fn expected_table(fixture: &Fixture) -> Vec<(u32, u64)> {
+    let output = fixture
+        .state
+        .outputs
+        .primary_id()
+        .expect("an output behind the fixture");
     let backend = fixture
         .state
-        .backend
-        .as_ref()
+        .backends
+        .get(&output)
         .expect("a headless backend behind the fixture");
     tranche(|format| backend.imports_dmabuf_format(format))
         .map(|format| (format.code as u32, u64::from(format.modifier)))

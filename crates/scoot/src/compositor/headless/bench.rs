@@ -61,6 +61,7 @@ use wayland_client::{Connection, Dispatch, Proxy, QueueHandle};
 use wayland_protocols::xdg::shell::client::{xdg_surface, xdg_toplevel, xdg_wm_base};
 
 use crate::compositor::decorations::Appearance;
+use crate::compositor::headless;
 use crate::compositor::test_support::{Harness, test_renderer};
 
 /// The framebuffer each scene renders into. 800 square, matching the
@@ -94,7 +95,25 @@ type Fixture = Harness<(), ()>;
 /// A live compositor with a real headless backend and `windows` windows in
 /// the core.
 fn scene(windows: u64) -> Fixture {
+    scene_outputs(windows, 1)
+}
+
+/// The same, with `outputs` side-by-side outputs. Windows open on the first
+/// (see `shell.rs`'s `add_window`), so a two-output scene is one populated
+/// strip plus empty ones -- the honest shape for the per-output scaling
+/// question: what does each additional output's own frame cost when nothing
+/// on it moves.
+fn scene_outputs(windows: u64, outputs: i32) -> Fixture {
     let mut fixture = Harness::headless(Appearance::default(), CANVAS);
+    for index in 2..=outputs {
+        headless::add_output(
+            &mut fixture.state,
+            &format!("headless-{index}"),
+            CANVAS,
+            CANVAS,
+        )
+        .expect("another headless output");
+    }
     for index in 0..windows {
         fixture.state.world.handle_event(CoreEvent::WindowOpened {
             id: WindowId(index + 1),
@@ -205,6 +224,47 @@ fn render_frame_cost() {
             "render [{renderer}], {label}: BEST {:?} per frame ({ROUNDS} frames, \
          {CANVAS}x{CANVAS})",
             best / ROUNDS
+        );
+    }
+}
+
+/// What each additional output costs per frame: the same scenes as
+/// [`render_frame_cost`] with a second (empty) output beside the first.
+///
+/// One populated strip plus one empty one (see [`scene_outputs`]): the
+/// honest scaling shape for a compositor whose extra screens usually show
+/// their own windows -- an empty second output is the floor, not the
+/// ceiling, and a second populated one can only cost more compositing, never
+/// more frame-loop structure. Alternates one- and two-output scenes within
+/// each run so drift lands on both alike.
+#[test]
+#[ignore = "prints per-frame render timings for a human; asserts nothing"]
+fn render_frame_cost_multi_output() {
+    let renderer = test_renderer();
+    for (label, windows) in [("empty desktop", 0), ("8 windows", RING_WINDOWS)] {
+        let mut single = scene_outputs(windows, 1);
+        let mut double = scene_outputs(windows, 2);
+        render_frames(&mut single, WARMUP);
+        render_frames(&mut double, WARMUP);
+        let mut best_single = Duration::MAX;
+        let mut best_double = Duration::MAX;
+        for run in 1..=RUNS {
+            let one = render_frames(&mut single, ROUNDS);
+            let two = render_frames(&mut double, ROUNDS);
+            best_single = best_single.min(one);
+            best_double = best_double.min(two);
+            println!(
+                "render [{renderer}], {label}: one output {one:?} total, {:?} per frame; \
+                 two outputs {two:?} total, {:?} per frame \
+                 ({ROUNDS} frames, {CANVAS}x{CANVAS}, run {run}/{RUNS})",
+                one / ROUNDS,
+                two / ROUNDS,
+            );
+        }
+        println!(
+            "render [{renderer}], {label}: BEST one {:?} vs two {:?} per frame",
+            best_single / ROUNDS,
+            best_double / ROUNDS,
         );
     }
 }

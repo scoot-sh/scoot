@@ -349,7 +349,7 @@ fn gamma_size_then_accept() {
     // The destroy restored the default: nothing current.
     harness.settle();
     assert!(
-        harness.state.gamma_control.current.is_none(),
+        harness.state.gamma_control.current.is_empty(),
         "destroying the current control must retire it"
     );
 }
@@ -520,7 +520,7 @@ fn gamma_destroying_superseded_control_restores_nothing() {
     // Destroying the live third control restored the default: nothing current.
     harness.settle();
     assert!(
-        harness.state.gamma_control.current.is_none(),
+        harness.state.gamma_control.current.is_empty(),
         "destroying the current control must retire it"
     );
 }
@@ -549,7 +549,7 @@ fn gamma_disconnect_restores_default() {
     );
     harness.settle();
     assert!(
-        harness.state.gamma_control.current.is_none(),
+        harness.state.gamma_control.current.is_empty(),
         "a disconnect must retire the live control"
     );
 }

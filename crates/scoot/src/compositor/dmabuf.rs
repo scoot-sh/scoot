@@ -727,7 +727,7 @@ impl DmabufHandler for State {
         dmabuf: Dmabuf,
         notifier: ImportNotifier,
     ) {
-        let Some(backend) = self.backend.as_mut() else {
+        if self.backends.is_empty() {
             tracing::debug!(
                 format = ?dmabuf.format().code,
                 "dmabuf import refused: this session has no renderer"
@@ -741,8 +741,24 @@ impl DmabufHandler for State {
         // render path re-imports from that cache on every commit. What this
         // call is *for* is establishing that the mapping can be made at all,
         // before the client is told its buffer exists.
-        match backend.import_dmabuf(&dmabuf) {
-            Ok(()) => {
+        //
+        // Into every backend, not just one: each output has its own renderer
+        // with its own cache, and a window may be shown on any output -- an
+        // import proven on the primary alone would fail to map when the
+        // window moves to the second screen. All backends share the session's
+        // renderer kind, so they agree; the first refusal decides. A refusal
+        // past the first leaves the earlier backends' mappings cached, which
+        // `drain_cache` drops with the buffer -- the same shape a retried
+        // import would rebuild.
+        let mut refused: Option<String> = None;
+        for backend in self.backends.values_mut() {
+            if let Err(error) = backend.import_dmabuf(&dmabuf) {
+                refused = Some(error);
+                break;
+            }
+        }
+        match refused {
+            None => {
                 if !self.imports_dmabufs {
                     // Once per session, on the transition only: the line a
                     // "why is this client blank / why did it die" report needs
@@ -764,7 +780,7 @@ impl DmabufHandler for State {
                     tracing::debug!(%error, "dmabuf imported, but the client was already gone");
                 }
             }
-            Err(error) => {
+            Some(error) => {
                 tracing::debug!(
                     %error,
                     format = ?dmabuf.format().code,
@@ -845,11 +861,15 @@ pub(super) fn schedule_cache_drain(state: &mut State) {
 /// cache is still a session worth keeping up.
 fn drain_cache(state: &mut State) {
     state.dmabuf_drain_queued = false;
-    let Some(backend) = state.backend.as_mut() else {
+    if state.backends.is_empty() {
         return;
     };
-    if let Err(error) = backend.cleanup_texture_cache() {
-        tracing::debug!(%error, "dropping expired dmabuf mappings failed");
+    // Every backend: each output's renderer holds its own cache, so draining
+    // one would leak the mappings a multi-output session built in the rest.
+    for backend in state.backends.values_mut() {
+        if let Err(error) = backend.cleanup_texture_cache() {
+            tracing::debug!(%error, "dropping expired dmabuf mappings failed");
+        }
     }
 }
 

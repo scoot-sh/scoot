@@ -188,10 +188,11 @@ impl<S, A> Harness<S, A> {
             // `Backend::renderer`): this is what makes a `gles` run of the
             // suite a claim about GLES rather than about whatever the
             // compositor fell back to.
+            let primary = state.outputs.primary_id().expect("an output");
             assert_eq!(
                 state
-                    .backend
-                    .as_ref()
+                    .backends
+                    .get(&primary)
                     .expect("a headless backend")
                     .renderer(),
                 renderer,
@@ -449,12 +450,22 @@ impl<S, A> Harness<S, A> {
         self.pixels()
     }
 
-    /// Reads the framebuffer back *without* rendering first -- what a
-    /// screenshot would see of whatever is already there, which is how a test
-    /// asserts on the frame the compositor drew by itself.
+    /// Reads the primary output's framebuffer back *without* rendering first
+    /// -- what a screenshot would see of whatever is already there, which is
+    /// how a test asserts on the frame the compositor drew by itself.
     pub(crate) fn pixels(&mut self) -> Vec<u8> {
+        self.pixels_of(
+            self.state
+                .outputs
+                .primary_id()
+                .expect("a headless harness has an output"),
+        )
+    }
+
+    /// Reads output `id`'s framebuffer back without rendering first.
+    pub(crate) fn pixels_of(&mut self, id: scoot_core::OutputId) -> Vec<u8> {
         let canvas = self.canvas.expect("a headless harness has a framebuffer");
-        let backend = self.state.backend.as_mut().expect("a backend");
+        let backend = self.state.backends.get_mut(&id).expect("a backend");
         assert_eq!(
             backend.size(),
             (canvas, canvas),

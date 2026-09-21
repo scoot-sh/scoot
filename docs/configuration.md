@@ -102,23 +102,24 @@ What a second output **is**, today:
 - its own output in `scootctl outputs`, with its own id, rectangle and name;
 - its own workspaces and its own scrolling strip in the layout, so a window is
   on exactly one output and nothing scrolls across a boundary;
-- a layer surface naming it is configured against it and unmapped from it
-  (but not sent frame callbacks: only the first output's layer surfaces are,
-  so an animated bar on a second output stops after its first draw).
+- a layer surface naming it is configured against it and unmapped from it;
+- its own composited strip: every output has a render target of its own and
+  the render loop draws each one, so `scootctl screenshot --output 2` answers
+  with the second output's own pixels, a screen capture of it (`grim -o
+  headless-2`) reads its own framebuffer, a gamma control names it
+  specifically, and its layer surfaces get frame callbacks at its own
+  cadence. Each output is `--width` by `--height`, like the first.
 
 What it is **not**, yet — the work tracked in
-`docs/backlog/core/multi-output.md`:
+`docs/backlog/core/multi-output.md` (milestone 19, phases B–E):
 
-- **nothing is composited on it.** scoot draws one framebuffer, the first
-  output's. Nothing is displayed on a headless output in any case, but the
-  consequence to know is that `scootctl screenshot --output 2` is *refused*
-  rather than answered from the first output's pixels — a picture of one
-  screen labelled as another would be worse than an error.
 - a bar on a second output reserves no space anywhere (exclusive zones are
   computed for the first output only), the pointer is hit-tested against the
   first output's layer surfaces, `wlr-output-management` publishes one head,
   `ext-workspace` publishes one group, and a session lock covers the first
-  output.
+  output. A second output also shows whatever the layout placed there — and
+  new windows still open on the first output, since nothing moves a window
+  across outputs yet.
 
 ## Starting a session
 

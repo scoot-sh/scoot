@@ -570,7 +570,7 @@ fn park_across_deferred_lock(fixture: &mut Fixture) -> Instant {
     // No render target: the lock's own render draws nothing and -- headless
     // confirming on render -- confirms nothing either. `pending` survives,
     // the way it survives a `--tty` render that defers to the vblank.
-    let backend = fixture.state.backend.take().expect("a backend");
+    let backend = fixture.state.take_primary_backend().expect("a backend");
     fixture.run(Step::LockNoWait);
     assert!(
         fixture.state.session_lock.is_locked(),
@@ -594,7 +594,7 @@ fn park_across_deferred_lock(fixture: &mut Fixture) -> Instant {
         "the blank tick must have dropped the timer: a parked capture is \
          none of frame_tick's re-arm conditions"
     );
-    fixture.state.backend = Some(backend);
+    fixture.state.put_primary_backend(backend);
     t0
 }
 
@@ -706,7 +706,7 @@ fn a_confirm_with_no_parked_capture_costs_one_tick() {
     let mut fixture = Fixture::start();
     fixture.run(Step::MapWindow(WINDOW_BGRA));
 
-    let backend = fixture.state.backend.take().expect("a backend");
+    let backend = fixture.state.take_primary_backend().expect("a backend");
     fixture.run(Step::LockNoWait);
     assert!(fixture.state.session_lock.awaiting_blank());
     let _ = fixture
@@ -716,7 +716,7 @@ fn a_confirm_with_no_parked_capture_costs_one_tick() {
     fixture.state.needs_render = false;
     fixture.tick(Duration::from_millis(50));
     assert!(!fixture.state.timer_armed);
-    fixture.state.backend = Some(backend);
+    fixture.state.put_primary_backend(backend);
 
     fixture.state.note_flip_completed(Some(7));
     assert!(
@@ -833,7 +833,7 @@ fn parked_captures_on_two_sessions_are_all_delivered_by_one_confirm() {
         );
     }
 
-    let backend = fixture.state.backend.take().expect("a backend");
+    let backend = fixture.state.take_primary_backend().expect("a backend");
     fixture.run(Step::LockNoWait);
     assert!(fixture.state.session_lock.awaiting_blank());
     let _ = fixture
@@ -843,7 +843,7 @@ fn parked_captures_on_two_sessions_are_all_delivered_by_one_confirm() {
     fixture.state.needs_render = false;
     fixture.tick(Duration::from_millis(50));
     assert!(!fixture.state.timer_armed);
-    fixture.state.backend = Some(backend);
+    fixture.state.put_primary_backend(backend);
 
     fixture.state.note_flip_completed(Some(7));
     assert!(
@@ -893,7 +893,7 @@ fn a_parked_capture_outlives_a_locker_that_dies_mid_wait() {
     fixture.run(Step::CaptureWithoutWaiting);
 
     let locker = fixture.spawn(run_client);
-    let backend = fixture.state.backend.take().expect("a backend");
+    let backend = fixture.state.take_primary_backend().expect("a backend");
     fixture.run_on(locker, Step::LockNoWait);
     assert!(fixture.state.session_lock.awaiting_blank());
     let _ = fixture
@@ -908,7 +908,7 @@ fn a_parked_capture_outlives_a_locker_that_dies_mid_wait() {
     fixture.state.needs_render = false;
     fixture.tick(Duration::from_millis(50));
     assert!(!fixture.state.timer_armed);
-    fixture.state.backend = Some(backend);
+    fixture.state.put_primary_backend(backend);
 
     fixture.state.note_flip_completed(Some(7));
     assert!(
