@@ -101,14 +101,19 @@ no second monitor. `crates/scoot/src/compositor/outputs.rs`'s doc on
     output from its drawn bounding box (`output_of_window`, primary fallback
     while unmapped -- where new windows open), at announce, at manager bind
     and at `wl_output` bind. Single-output is byte-identical: full nextest
-    green, and the one-output motion path measures overlapping before/after
-    (release, dev VM, 200k `pointer_move` x5: 444-533ns/event before,
-    351-382 after; two-output 407-541 before, 396-437 after -- an early
+    green, and the one-output motion path measures after-≤-before (release,
+    dev VM, 200k `pointer_move` x5: 444-533ns/event before, 351-382 after
+    — disjoint ranges, direction safe, absolute cost ~0.4µs/event negligible;
+    the after-faster direction has no mechanism in the diff and is read as
+    environmental noise, not a speedup claim; two-output 407-541 before,
+    396-437 after -- an early
     138ns two-output reading never reproduced and is recorded as a
     governor/warmup artifact, not a number). Fail-first pins: a bar on
     output 2 shrinks only output 2 (zone leak), clicking it focuses it
     (wrong-output focus), both-bars, disconnect-release, and
-    pointer-output-wins for two `exclusive` launchers. Live proof on the dev
+    pointer-output-wins for two `exclusive` launchers (5 of the 6 new
+    layer-shell tests fail pre-fix; the 2 new `wlr-output-bind` tests pass
+    pre-fix as regression pins, not fail-first pins). Live proof on the dev
     VM (`--headless --outputs 2`, real waybar 0.15.0): bar on `headless-2`
     gives usable `(400,30,400,270)` with output 1 whole; IPC screenshots and
     `grim -o headless-2` agree (bar pixels on output 2's top rows, background
