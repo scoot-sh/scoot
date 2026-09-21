@@ -590,11 +590,11 @@ be revisited.
   windows; a single-window benchmark will show nothing. Milestone 6 changes
   the calculus, which is why it is sequenced after it.
 - [Fractional-scale ring-hole drift in the painted-ring origin refresh](./resolved/ring-hole-fractional-drift-done.md) — RESOLVED 2026-09-21: the reuse check compares `plan.inner`/`plan.outer` too (one more comparison on the already-computed plan, still allocation-free); pinned by the ticket's x=1→2 instance fail-first plus an in-harness brute-force sweep (1.25/1.5/1.75/1.33) and an integer-scale never-repaints test.
-- [Ring and content corners do not line up at fractional scale](./rendering/rounded-ring-content-fractional-mismatch.md)
-  — OPEN (gh #205, 2026-09-21): `corner_radius = 10` at `scale = 1.5` shows
-  a visible ring-vs-content mismatch; integer scales suspected clean.
-  Suspect divergent logical-to-device radius routes
-  (`physical_radius` vs `ring_layout` canvas vs client buffer scale).
+- [Ring and content corners do not line up at fractional scale](./resolved/rounded-ring-content-fractional-mismatch-done.md)
+  — RESOLVED 2026-09-21 (gh #205, PR #207): ticket hypothesis falsified
+  (2.0 fails like 1.5); real cause was `src: None` defaulting to logical
+  size on physical-pixel strip buffers — explicit full-buffer `src` both
+  strips, GLES fixed by the same change.
 - [dma-buf capture buffers for `ext-image-copy-capture-v1`](./protocols/screencopy-dmabuf-capture.md)
   — filed out of milestone 6 stage 4, which was expected to cover it and
   should not have: importing a client's dma-buf and *rendering into* one are

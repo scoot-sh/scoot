@@ -1,12 +1,27 @@
 ---
-title: "corner_radius: ring and window content corners do not line up at fractional output scale"
-status: "open"
-area: "rendering"
-priority: "medium"
+title: "corner_radius: ring and window content corners do not line up at fractional output scale — RESOLVED"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
 ---
 
-# corner_radius: ring and window content corners do not line up at fractional output scale
+# corner_radius: ring and window content corners do not line up at fractional output scale — RESOLVED
+
+RESOLVED 2026-09-21 (gh #205, PR #207, merge `ed12adb`): the ticket's
+hypothesis (divergent logical-to-device radius routes) was FALSIFIED — scale
+2.0 failed identically to 1.5, and the content-vs-clip red census passes at
+every scale. Real root cause: `Decorations::push_painted` left `src: None` in
+`MemoryRenderBufferRenderElement::from_buffer`, so src defaulted to the
+element's logical size while the strip buffer holds physical pixels (at 1.0
+they coincide, which is why the scale-1.0-only suite never caught it). Fix:
+explicit full-buffer `src` via a `strip_src` helper, both strips. GLES was
+equally broken and fixed by the same renderer-generic change. Review: NO
+BLOCKING FINDINGS (src-default premise re-derived in pinned Smithay source,
+all 15 `from_buffer` sites censused with no further twins, live texel-by-texel
+spot-check re-run); benchmark delta ±3% against ±7% baseline drift judged a
+sufficient smoke check for two stack structs. Original entry below, kept
+verbatim.
 
 Filed as gh issue #205 (2026-09-21). With `corner_radius` set, the focus
 ring curves but the corner it curves around does not match the window

@@ -77,6 +77,15 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[Ring/content corner alignment at fractional
+  scale](docs/backlog/resolved/rounded-ring-content-fractional-mismatch-done.md)**
+  (2026-09-21, gh #205, PR #207) — the ticket's radius-rounding hypothesis
+  falsified (2.0 fails like 1.5); the real bug was `src: None` sampling the
+  top-left logical sub-rect of physical-pixel ring-strip buffers. Explicit
+  full-buffer `src` on both strips; GLES fixed by the same renderer-generic
+  change; ±3% cost delta against ±7% baseline drift. Review clean with its
+  own texel-by-texel live spot-check.
+
 - **[Set a column's width
   directly](docs/backlog/resolved/set-column-width-done.md)**
   (2026-09-21, gh #204, PR #206) — `set-column-width N` (0-based into
