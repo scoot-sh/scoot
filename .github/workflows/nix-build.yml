@@ -33,8 +33,11 @@
 # this repo is check-only by decision, so that artifact stays covered the
 # way it is today (local `nix build` on a Mac).
 #
-# gpu-scanout is deliberately NOT built here: that package shape is gh
-# #177's ticket, not this one's.
+# gpu-scanout is deliberately NOT built here: `packages.scoot-gpu` exists
+# since PR #198, but each main-push build pays a full Smithay rebuild the
+# cargo cache can't help with, and the two packaged artifacts above are the
+# ones users install. The `-gpu` derivation stays covered the way it was
+# before it existed (local `nix build .#scoot-gpu`).
 
 name: nix build (packaged artifacts)
 
