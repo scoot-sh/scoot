@@ -41,11 +41,12 @@ in
 
     # No default here: without an overlay there is no `pkgs.scoot`, and a
     # wrong guess would silently install someone else's build. The flake
-    # wrapper (`homeManagerModules.scoot` in `flake.nix`) fills this with
-    # the flake's own build via `mkDefault`; direct-module users set it
-    # explicitly (see the `example`), or leave it null for a files-only
-    # setup -- the module manages files regardless, and asserts nothing
-    # about the package.
+    # wrapper (`homeModules.scoot`, still aliased as
+    # `homeManagerModules.scoot`, in `flake.nix`) fills this with the
+    # flake's own build via `mkDefault` on Linux and with null (files
+    # only) on Darwin; direct-module users set it explicitly (see the
+    # `example`), or leave it null for a files-only setup -- the module
+    # manages files regardless, and asserts nothing about the package.
     package = lib.mkOption {
       type = lib.types.nullOr lib.types.package;
       default = null;
