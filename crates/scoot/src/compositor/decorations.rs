@@ -447,12 +447,12 @@ pub enum RingElement<R: Renderer> {
 /// input to the paint, so a stale buffer is impossible by construction: any
 /// change repaints before the element is built.
 ///
-/// Position is deliberately *not* an input: the paint is
-/// position-independent (the same window paints the same strips wherever it
-/// sits), so a move must not repaint -- only the strips' draw origins go
-/// stale, and [`Decorations::push_painted`] refreshes those in place on
-/// every cache hit (see `refresh_strip_origins`). Keying on position instead
-/// would repaint every window on every scroll frame for identical pixels.
+/// Position is deliberately *not* an input: the key is independent of
+/// position (a move alone must not repaint) -- only the strips' draw
+/// origins go stale, and [`Decorations::push_painted`] refreshes those in
+/// place on every cache hit (see `refresh_strip_origins`). Keying on
+/// position instead would repaint every window on every scroll frame for
+/// identical pixels.
 /// (At fractional scales the *in-canvas* paint offsets still move with
 /// absolute position through rounding phases even for one key -- the refresh
 /// compares those separately and repaints exactly then, rather than widening
