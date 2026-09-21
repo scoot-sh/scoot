@@ -330,7 +330,7 @@ falsify. Read `flexwm` there as `scoot`.
 
 ### Core / config / rendering
 - [No `scoot --version`](./config/cli-version-flag.md) — a build can only be identified by starting it; print `env!("CARGO_PKG_VERSION")` plus the IPC protocol number (`scoot` and `scootctl` spellings decided deliberately, output pinned by tests).
-- [[nested] top-layer content missing from frames with no toplevels](./rendering/layer-content-without-toplevels.md) — field bug (gh #183): bar renders iff a window exists while its zone stays reserved; suspect layer composition keyed off window existence.- [`--width`/`--height` are unbounded `i32`s](./resolved/width-height-bounded-done.md)
+- [[nested] top-layer content missing from frames with no toplevels](./resolved/layer-content-without-toplevels-done.md) — CLOSED 2026-09-21 as could-not-reproduce (gh #183): a real Top-layer bar with a committed buffer draws with zero toplevels on current `main` and on the reported rev alike (live `--nested` matrix + harness pixel pins); the field symptom is the designed bufferless-bar shape (zone reserved, nothing painted), so the client had committed no buffer — no compositor change.- [`--width`/`--height` are unbounded `i32`s](./resolved/width-height-bounded-done.md)
   — RESOLVED 2026-09-17: refused past 65535 per axis at parse (the most DRM
   itself can report for a mode axis); `Rect::inset`/`right()`/`bottom()`,
   `scroll_into_view` and the arrange on-screen test saturate.
