@@ -77,6 +77,12 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[`scoot --version` / `scootctl --version` (gh
+  #176)](docs/backlog/resolved/cli-version-flag-done.md)**
+  (2026-09-21) — both print `scoot <version> (ipc protocol <N>)` from one
+  shared helper with no session needed; the bare `version` word stays the
+  remote IPC request. Nine CLI tests, no wire change.
+
 - **[Flake polish: `homeModules` alias, Darwin default, nixfmt (gh
   #175)](docs/backlog/resolved/flake-polish-done.md)**
   (2026-09-21) — `homeModules` alias over legacy

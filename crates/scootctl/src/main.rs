@@ -32,6 +32,13 @@ fn run() -> Result<(), Box<dyn Error>> {
             scootctl::output::write_str(scootctl::USAGE)?;
             Ok(())
         }
+        scootctl::Command::Version => {
+            // A single `\n`-terminated line, so `print_line`, not
+            // `write_str`. A closed pipe is a quiet success here too:
+            // `scootctl --version | head -c0` exits 0.
+            scootctl::output::print_line(&scootctl::version_string())?;
+            Ok(())
+        }
         scootctl::Command::Msg { request, out } => scootctl::run(&request, out.as_deref()),
     }
 }

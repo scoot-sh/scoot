@@ -329,7 +329,7 @@ falsify. Read `flexwm` there as `scoot`.
 - [`--tty` hotplug follow-up: confirm the two unreproduced paths on real hardware](./core/tty-hotplug-confirmation.md) — gh #48 stays open: new-mode-list on the same connector, and fallback to a *different* connector, both need vfkit/laptop hardware with before/after proof.
 
 ### Core / config / rendering
-- [No `scoot --version`](./config/cli-version-flag.md) — a build can only be identified by starting it; print `env!("CARGO_PKG_VERSION")` plus the IPC protocol number (`scoot` and `scootctl` spellings decided deliberately, output pinned by tests).
+- [`scoot --version`](./resolved/cli-version-flag-done.md) — RESOLVED 2026-09-21: `scoot --version` and `scootctl --version` print `scoot <version> (ipc protocol <N>)` from one shared helper (no drift, no session needed); the bare `version` word stays the remote IPC request by deliberate spelling decision.
 - [[nested] top-layer content missing from frames with no toplevels](./resolved/layer-content-without-toplevels-done.md) — CLOSED 2026-09-21 as could-not-reproduce (gh #183): a real Top-layer bar with a committed buffer draws with zero toplevels on current `main` and on the reported rev alike (live `--nested` matrix + harness pixel pins); the field symptom is the designed bufferless-bar shape (zone reserved, nothing painted), so the client had almost certainly committed no buffer — no compositor change.- [`--width`/`--height` are unbounded `i32`s](./resolved/width-height-bounded-done.md)
   — RESOLVED 2026-09-17: refused past 65535 per axis at parse (the most DRM
   itself can report for a mode axis); `Rect::inset`/`right()`/`bottom()`,

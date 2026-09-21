@@ -15,6 +15,7 @@ scoot --nested   [--width 1-65535] [--height 1-65535] [--renderer pixman|gles] [
 scoot --tty      [--gpu PATH] [--mode WxH] [--renderer pixman|gles] [--socket PATH] [--config PATH] [-- COMMAND...]
 scoot msg REQUEST          # the scootctl client, kept as an alias (see below)
 scoot --print-default-config   # emit a starting config file to stdout
+scoot --version                # identify this build without starting anything
 scoot --help
 ```
 
@@ -36,6 +37,7 @@ duplicated here.
 | `--socket PATH` | Where the IPC control socket lives, overriding `$SCOOT_SOCKET` and the default `$XDG_RUNTIME_DIR/scoot.sock`. See [ipc.md](ipc.md#the-socket). |
 | `--config PATH` | Load this TOML file instead of searching the default paths. |
 | `-- COMMAND...` | Spawn this command once the session is up, after `[autostart]` entries (see [Starting a session](#starting-a-session)). |
+| `--version` | Print `scoot <version> (ipc protocol <N>)` — the binary's own version plus the IPC protocol number — and exit. Needs no compositor; `scootctl --version` prints the same line, so a client can check compatibility against a remote compositor before connecting. |
 | `--help` | Usage, every request and every action. |
 
 Environment scoot reads: `$XDG_RUNTIME_DIR` (required — a missing one is a
