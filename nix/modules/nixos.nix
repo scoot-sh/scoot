@@ -95,7 +95,8 @@ in
       # path. It is a string rather than an argv list for the same
       # reason: an `Exec=` line is a command line, and auto-escaping
       # would fight wrapper paths and per the Desktop Entry Spec the
-      # quoting is the author's anyway. The cost is stated plainly: a
+      # quoting is the author's anyway. The cost is stated in the option
+      # description itself (not just here): a
       # set value replaces the whole line, so dropping `--tty` (or the
       # binary path) breaks the entry loudly at the greeter, not at
       # eval -- copy the example shape. The entry stays additive and
@@ -105,7 +106,7 @@ in
         type = lib.types.nullOr lib.types.str;
         default = null;
         example = lib.literalExpression ''
-          "''${config.programs.scoot.package}/bin/scoot --tty -- ~/.config/scoot/session.sh"
+          "''${config.programs.scoot.package}/bin/scoot --tty -- /home/alice/.config/scoot/session.sh"
         '';
         description = ''
           Full `Exec=` command line for the login-screen session entry.
@@ -114,10 +115,15 @@ in
           meaning. Set it to run something inside the session: the usual
           shape is `<package>/bin/scoot --tty -- <command>`, e.g. the
           home-manager module's `sessionScript` output at
-          `~/.config/scoot/session.sh` (see `programs.scoot.sessionScript`
-          and docs/nix.md, which show the pairing together). A wrapper
-          script path (logging, environment setup) works too -- that is
-          the gh-issue-#171 acceptance shape.
+          `/home/alice/.config/scoot/session.sh` (for a user `alice`;
+          see `programs.scoot.sessionScript` and docs/nix.md, which show
+          the pairing together). A wrapper script path (logging,
+          environment setup) works too -- that is the gh-issue-#171
+          acceptance shape. A set value replaces the whole line, so
+          dropping `--tty` (or the binary path) breaks the entry loudly
+          at the greeter, not at eval -- copy the example shape. `Exec=`
+          lines get no shell expansion (`~` and `$HOME` arrive
+          literally), so always use an absolute path.
         '';
       };
     };
@@ -146,14 +152,19 @@ in
       }
       {
         # Loud at eval, not an empty `Exec=` at login: an explicitly
-        # empty command would render a .desktop with nothing to launch.
+        # empty or whitespace-only command would render a .desktop with
+        # nothing (or blanks) to launch. (`builtins.match` returns null
+        # on no match, so the second disjunct is false exactly for
+        # empty/blank strings.)
         # (The default null is the empty case that matters -- bare
         # `--tty`, byte-identical to before -- and never reaches here.)
-        assertion = cfg.session.command == null || cfg.session.command != "";
+        assertion =
+          cfg.session.command == null || builtins.match "^[[:space:]]*$" cfg.session.command == null;
         message = ''
-          programs.scoot.session.command is set but empty: either leave
-          it null for the default bare `<package>/bin/scoot --tty`
-          entry, or set the full Exec= command line to run.
+          programs.scoot.session.command is set but empty or blank:
+          either leave it null for the default bare
+          `<package>/bin/scoot --tty` entry, or set the full Exec=
+          command line to run.
         '';
       }
     ];

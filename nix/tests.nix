@@ -20,7 +20,7 @@
 # - `session.command` renders verbatim into `Exec=` (bare `--tty` default
 #   byte-identical, `-- COMMAND` append, wrapper-script path, quoting
 #   with spaces/quotes/pipes intact), stays inert with the entry off,
-#   and refuses empty / package-less combinations at eval;
+#   and refuses empty/blank and package-less combinations at eval;
 # - the two settings failure modes behave as documented (see below).
 {
   lib,
@@ -315,6 +315,19 @@ let
             package = fakePkg;
             session.enable = true;
             session.command = "";
+          }).config;
+      true
+    )
+    # ...and so is a whitespace-only one (it would render an `Exec=`
+    # of nothing but blanks that fails the same way).
+    (
+      assert
+        !allAssertionsHold
+          (evalNixos {
+            enable = true;
+            package = fakePkg;
+            session.enable = true;
+            session.command = "   ";
           }).config;
       true
     )
