@@ -102,7 +102,7 @@ Branch `backlog/nixos-session-command`, from `main` at `b737f71`.
   policy. aarch64-linux green + x86_64-linux eval green is the full
   runnable coverage.
 
-## Follow-up evidence (review round, uncommitted tree atop `e56275d`)
+## Follow-up evidence (review round, committed as `0d84eff`)
 
 - Mac: `nix fmt -- --check nix/modules/nixos.nix nix/modules/home.nix
   nix/tests.nix` → exit 0 (one nixfmt reflow applied to the new
