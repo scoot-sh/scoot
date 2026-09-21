@@ -146,6 +146,35 @@ fn layer_focus(layer: &LayerSurface) -> LayerFocus {
     }
 }
 
+/// The `exclusive` surface on `output`'s map that should hold the keyboard,
+/// if one should at all -- one output's share of
+/// [`State::layer_keyboard_focus`]'s derivation.
+///
+/// Walks `overlay` then `top`, most recently mapped first, which is the same
+/// front-to-back order the render stack and pointer hit-testing use: the
+/// spec leaves "top-most" within one layer implementation-defined, and
+/// answering it the same way everywhere means the surface that takes the
+/// keyboard is the one actually drawn in front.
+///
+/// Takes one layer-map guard and drops it before returning, per this
+/// module's guard discipline.
+fn exclusive_on(output: &Output) -> Option<LayerKeyboardFocus> {
+    let map = layer_map_for_output(output);
+    for &layer in &ABOVE_WINDOWS {
+        let exclusive = map
+            .layers_on(layer)
+            .rev()
+            .find(|found| layer_focus(found) == LayerFocus::Exclusive);
+        if let Some(found) = exclusive {
+            return Some(LayerKeyboardFocus {
+                surface: found.wl_surface().clone(),
+                exclusive: true,
+            });
+        }
+    }
+    None
+}
+
 impl WlrLayerShellHandler for State {
     fn shell_state(&mut self) -> &mut WlrLayerShellState {
         &mut self.layer_shell_state
@@ -216,8 +245,9 @@ impl WlrLayerShellHandler for State {
         // client may name any output in `get_layer_surface`, and unmapping
         // from the wrong map would leave the dead surface arranged forever --
         // holding an `Arc` to it, and leaving `clicked_layer` pointing at a
-        // surface nobody can reach. `render()`'s `cleanup()` is no safety net
-        // for that: it only walks the primary output's map.
+        // surface nobody can reach. `render()`'s per-output `cleanup()` is no
+        // safety net for that: it sweeps every output's own map, so a surface
+        // arranged on the wrong one is never even visited.
         let Some(output) = self.output_of_layer_role(&surface) else {
             return;
         };
@@ -425,47 +455,90 @@ impl State {
     /// Cheap to call often, which is why every mutation above just calls it:
     /// the comparison against what the core already has means a bar that
     /// repeats the same exclusive zone on every frame costs one rectangle
-    /// comparison, not a re-layout.
+    /// comparison per output, not a re-layout.
     ///
-    /// Still the primary output's zone only (see `Outputs::primary`): a zone
-    /// per output is the multi-output item, and until then a bar on a
-    /// secondary output reserves nothing anywhere -- it does not reserve the
-    /// wrong output's edge.
+    /// One zone per output: a bar's exclusive zone shrinks the usable area
+    /// of the output the bar is mapped on, and no other's (see
+    /// `outputs.rs`'s "one scrolling strip per output"). Each output's map
+    /// already arranges in that output's local coordinates; the translation
+    /// by the output's origin is what files it in the global coordinates the
+    /// core lays out in. A single `apply()` at the end covers every output
+    /// whose zone moved, so two bars committing in one dispatch still lay
+    /// out once.
+    ///
+    /// No allocation on this per-commit path: each step clones its `(id,
+    /// output)` -- an `Arc` bump -- and `usable_area` answers by value.
     pub(super) fn refresh_layer_zone(&mut self) {
-        let Some((id, output)) = self
-            .outputs
-            .primary_entry()
-            .map(|(id, output)| (id, output.clone()))
-        else {
-            return;
-        };
-        // The zone is output-local; the core's rectangles are global. One
-        // output at (0, 0) makes these identical today, but the translation
-        // is what makes that a fact about the setup rather than an
-        // assumption baked into the arithmetic.
-        let origin = self
-            .space
-            .output_geometry(&output)
-            .map(|geometry| geometry.loc)
-            .unwrap_or_default();
-        let zone = layer_map_for_output(&output).non_exclusive_zone();
-        let area = Rect::new(
-            origin.x.saturating_add(zone.loc.x),
-            origin.y.saturating_add(zone.loc.y),
-            zone.size.w,
-            zone.size.h,
-        );
-        // Nothing to do when it hasn't moved -- and this is the common case,
-        // since every commit a bar makes comes through here while its
-        // exclusive zone stays exactly the same.
-        if self.world.usable_area(id) == Some(area) {
-            return;
+        let count = self.outputs.len();
+        let mut changed = false;
+        for index in 0..count {
+            let Some((id, output)) = self.outputs.at(index) else {
+                continue;
+            };
+            // The zone is output-local; the core's rectangles are global. The
+            // translation is what makes "one output at (0, 0)" a fact about
+            // the setup rather than an assumption baked into the arithmetic.
+            let origin = self
+                .space
+                .output_geometry(&output)
+                .map(|geometry| geometry.loc)
+                .unwrap_or_default();
+            // The guard is gone by the end of the statement
+            // (`non_exclusive_zone` answers by value), so the
+            // `handle_event` below never runs under a layer-map lock.
+            let zone = layer_map_for_output(&output).non_exclusive_zone();
+            let area = Rect::new(
+                origin.x.saturating_add(zone.loc.x),
+                origin.y.saturating_add(zone.loc.y),
+                zone.size.w,
+                zone.size.h,
+            );
+            // Nothing to do when it hasn't moved -- and this is the common
+            // case, since every commit a bar makes comes through here while
+            // its exclusive zone stays exactly the same.
+            if self.world.usable_area(id) == Some(area) {
+                continue;
+            }
+            self.world
+                .handle_event(CoreEvent::OutputUsableAreaChanged { id, area });
+            changed = true;
         }
-        self.world
-            .handle_event(CoreEvent::OutputUsableAreaChanged { id, area });
-        self.apply();
+        if changed {
+            self.apply();
+        }
     }
 
+    /// The output containing `position`, in the same global logical
+    /// coordinates the pointer moves in, and where that output sits in them
+    /// -- the one a hit test at that point, or a focus derivation for the
+    /// pointer sitting there, belongs to, and the origin its map's local
+    /// coordinates are translated by.
+    ///
+    /// The first output in creation order whose geometry holds the point, so
+    /// the answer is deterministic where two geometries touch. `None` over
+    /// no output at all: the pointer starts at the origin before any output
+    /// exists, and a client-driven absolute move can name any coordinate, so
+    /// "nowhere" is a real answer and it misses rather than hitting another
+    /// screen's surface.
+    ///
+    /// Costs one geometry lookup per output until it hits -- on the
+    /// per-motion hot path, but a linear scan over a handful of outputs
+    /// against a hit test that already locks a map and walks a surface tree.
+    /// The geometry is answered once and handed back with the output, so the
+    /// hit test does not look it up a second time for the origin.
+    fn output_under(&self, position: Point<f64, Logical>) -> Option<(Output, Point<i32, Logical>)> {
+        self.outputs.iter().find_map(|output| {
+            self.space.output_geometry(output).and_then(|geometry| {
+                let left = geometry.loc.x as f64;
+                let top = geometry.loc.y as f64;
+                (position.x >= left
+                    && position.x < left + geometry.size.w as f64
+                    && position.y >= top
+                    && position.y < top + geometry.size.h as f64)
+                    .then(|| (output.clone(), geometry.loc))
+            })
+        })
+    }
     /// The layer surface under `position` on one of `layers`, if any, plus
     /// the specific (sub)surface within it and where that sits globally --
     /// the same shape [`State::surface_under`] returns for a window.
@@ -504,19 +577,17 @@ impl State {
     /// function rather than two loops: pointer motion runs this at libinput's
     /// rate, and a second walk would have cost far more than the clone.
     ///
-    /// The primary output's map only (see `Outputs::primary`): hit-testing
-    /// the output the pointer is *on* is the multi-output item. A position
-    /// over another output falls outside this map's extent, so it misses
-    /// rather than hitting the wrong surface.
+    /// The output under the pointer, not the primary one: each output has a
+    /// layer map of its own, arranged in that output's local coordinates, so
+    /// hit-testing the wrong map is both a miss (a position over another
+    /// output falls outside this map's extent) and, where two outputs'
+    /// extents overlap the same local point, a hit on the wrong screen's
+    /// surface. A position over no output misses -- see
+    /// [`State::output_under`].
     fn layer_hit(&self, layers: &[Layer], position: Point<f64, Logical>) -> Option<LayerHit> {
-        let output = self.outputs.primary()?;
-        let origin = self
-            .space
-            .output_geometry(output)
-            .map(|geometry| geometry.loc)
-            .unwrap_or_default();
+        let (output, origin) = self.output_under(position)?;
         let local = position - origin.to_f64();
-        let map = layer_map_for_output(output);
+        let map = layer_map_for_output(&output);
         for &layer in layers {
             let Some(found) = map.layer_under(layer, local) else {
                 continue;
@@ -558,28 +629,45 @@ impl State {
     /// click-focused `on_demand` surface does not -- a bar's own menu is
     /// exactly the case that would otherwise fight itself. See `popup.rs`.
     ///
-    /// The primary output's map only (see `Outputs::primary`): walking every
-    /// output's map, and deciding which one's `exclusive` surface wins, is
-    /// the multi-output item.
+    /// Per output, with the pointer's output first: the pointer position
+    /// picks the output (the milestone-19 focus decision -- no new
+    /// focus-follows-pointer doctrine, the existing derivation applies
+    /// unchanged within the picked output), and the other outputs follow in
+    /// creation order. That order is the tie-break two `exclusive` surfaces
+    /// on two screens need, and it is also what keeps a mapped launcher
+    /// usable when the pointer sits on the other screen: any output's
+    /// `exclusive` surface still outranks every window, exactly as one
+    /// screen's did. A derivation with no pointer at all (unreachable past
+    /// startup -- the pointer is centred on the primary there) walks every
+    /// map in creation order, which is what the single-output session reads
+    /// as the primary's map.
     pub(super) fn layer_keyboard_focus(&self) -> Option<LayerKeyboardFocus> {
-        let output = self.outputs.primary()?;
-        let map = layer_map_for_output(output);
-        for &layer in &ABOVE_WINDOWS {
-            let exclusive = map
-                .layers_on(layer)
-                .rev()
-                .find(|found| layer_focus(found) == LayerFocus::Exclusive);
-            if let Some(found) = exclusive {
-                return Some(LayerKeyboardFocus {
-                    surface: found.wl_surface().clone(),
-                    exclusive: true,
-                });
+        // Owned, so no borrow of `self.outputs` outlives the pointer read --
+        // and an `Output` clone is an `Arc` bump, not a copy of anything
+        // drawn. `None` where the pointer is over no output (see
+        // `output_under`), which simply skips the preferred-output pass.
+        let preferred = self.seat.get_pointer().and_then(|pointer| {
+            self.output_under(pointer.current_location())
+                .map(|(output, _)| output)
+        });
+        if let Some(ref output) = preferred {
+            if let Some(found) = exclusive_on(output) {
+                return Some(found);
+            }
+        }
+        for output in self.outputs.iter() {
+            if preferred.as_ref() == Some(output) {
+                continue;
+            }
+            if let Some(found) = exclusive_on(output) {
+                return Some(found);
             }
         }
         let clicked = self.clicked_layer.as_ref()?;
-        // Membership in the map, not just liveness: `layer_destroyed`
+        // Membership in a map, not just liveness: `layer_destroyed`
         // unmaps, and a surface that is no longer arranged is no longer on
-        // screen to be typed into.
+        // screen to be typed into. Any output's map, since a click is a
+        // click wherever the pointer has since moved.
         //
         // The `Never` half is the derived safety net, not the mechanism:
         // `commit_layer_surface` forgets the click on the commit that stops
@@ -587,7 +675,11 @@ impl State {
         // between that commit and this call. Keeping it means this function
         // still states the whole policy on its own rather than depending on
         // that clear having run first.
-        let still_mapped = map.layers().any(|found| found == clicked);
+        let still_mapped = self.outputs.iter().any(|output| {
+            layer_map_for_output(output)
+                .layers()
+                .any(|found| found == clicked)
+        });
         (still_mapped && layer_focus(clicked) != LayerFocus::Never).then(|| LayerKeyboardFocus {
             surface: clicked.wl_surface().clone(),
             exclusive: false,

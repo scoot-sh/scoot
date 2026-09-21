@@ -103,6 +103,15 @@ What a second output **is**, today:
 - its own workspaces and its own scrolling strip in the layout, so a window is
   on exactly one output and nothing scrolls across a boundary;
 - a layer surface naming it is configured against it and unmapped from it;
+  a surface naming no output lands on the first output;
+- its own exclusive zones: a bar on one output shrinks that output's tiling
+  area and no other's, and gives it back when it exits or its client dies;
+- its own layer-shell input and keyboard derivation: the pointer is
+  hit-tested against the output under it, a click on that output's bar
+  focuses the bar, and an `exclusive` launcher mapped where the pointer is
+  takes the keyboard there (the pointer's output wins ties);
+- a window list that names the output each window is on
+  (`wlr-foreign-toplevel-management` `output_enter` per window's own output);
 - its own composited strip: every output has a render target of its own and
   the render loop draws each one, so `scootctl screenshot --output 2` answers
   with the second output's own pixels, a screen capture of it (`grim -o
@@ -111,14 +120,12 @@ What a second output **is**, today:
   cadence. Each output is `--width` by `--height`, like the first.
 
 What it is **not**, yet — the work tracked in
-`docs/backlog/core/multi-output.md` (milestone 19, phases B–E):
+`docs/backlog/core/multi-output.md` (milestone 19, phases C–E):
 
-- a bar on a second output reserves no space anywhere (exclusive zones are
-  computed for the first output only), the pointer is hit-tested against the
-  first output's layer surfaces, `wlr-output-management` publishes one head,
-  `ext-workspace` publishes one group, and a session lock covers the first
-  output. A second output also shows whatever the layout placed there — and
-  new windows still open on the first output, since nothing moves a window
+- `wlr-output-management` publishes one head, `ext-workspace` publishes one
+  group, and a session lock covers the first output. A second output also
+  shows whatever the layout placed there — and new windows still open on the
+  first output, since nothing moves a window
   across outputs yet.
 
 ## Starting a session

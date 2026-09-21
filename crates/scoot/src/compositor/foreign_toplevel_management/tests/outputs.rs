@@ -12,6 +12,20 @@
 //! it.
 
 use super::*;
+use crate::compositor::test_support::Harness;
+
+/// A live compositor with two side-by-side outputs and one connected client.
+///
+/// The extra output is added before the client connects, so the registry
+/// announces both in creation order: `BindOutputAt(0)` is the primary, where
+/// new windows open, and `BindOutputAt(1)` is the second.
+fn two_output_fixture() -> Fixture {
+    let mut fixture = Harness::headless(Appearance::default(), CANVAS);
+    crate::compositor::headless::add_output(&mut fixture.state, "headless-2", CANVAS, CANVAS)
+        .expect("a second headless output");
+    fixture.spawn(run_client);
+    fixture
+}
 
 /// The subset of a log that is about outputs, which is all these tests assert
 /// on -- the rest of the announcement burst is `mod.rs`'s subject.
@@ -157,5 +171,60 @@ fn a_client_binding_the_output_with_no_handles_yet_is_harmless() {
     assert_eq!(
         output_events(&fixture.take_log()),
         vec![Seen::OutputEnter(0), Seen::OutputEnter(0)],
+    );
+}
+
+// ---------------------------------------------------------------------------
+// More than one output: a window is announced on the output it is on
+// ---------------------------------------------------------------------------
+
+/// A window is announced with the output it is on, and a bind of any other
+/// output stays silent. New windows open on the first output, so binding the
+/// first screen hears the enter and binding the second hears nothing -- the
+/// same window, the same handle, told per output rather than announced on
+/// the primary unconditionally.
+#[test]
+fn a_window_is_announced_on_its_own_output_and_no_other() {
+    let mut fixture = two_output_fixture();
+    fixture.run(Step::BindOutputAt(0));
+    fixture.run(Step::BindManager);
+    fixture.take_log();
+
+    fixture.run(Step::MapWindow);
+    assert_eq!(
+        output_events(&fixture.take_log()),
+        vec![Seen::OutputEnter(0)],
+        "a window on the first output was not announced on it"
+    );
+
+    // The second screen arrives late: no window is on it, so no enter.
+    fixture.run(Step::BindOutputAt(1));
+    assert_eq!(
+        output_events(&fixture.take_log()),
+        Vec::new(),
+        "binding the second output announced a window that is not on it"
+    );
+}
+
+/// A client holding only the second screen's `wl_output` is still served a
+/// window on the first -- it just never gets an `output_enter` for an output
+/// it has no object for.
+#[test]
+fn a_client_with_only_the_other_output_is_served_without_an_enter() {
+    let mut fixture = two_output_fixture();
+    fixture.run(Step::BindOutputAt(1));
+    fixture.run(Step::BindManager);
+    fixture.take_log();
+
+    fixture.run(Step::MapWindow);
+    let log = fixture.take_log();
+    assert_eq!(
+        output_events(&log),
+        Vec::new(),
+        "a client with no first-output object was told an enter"
+    );
+    assert!(
+        log.contains(&Seen::Toplevel(0)),
+        "a client with no first-output object stopped being served: {log:?}"
     );
 }

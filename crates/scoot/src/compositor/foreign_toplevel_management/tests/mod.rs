@@ -163,6 +163,11 @@ struct TestClient {
     /// the manager.
     manager_name: Option<(u32, u32)>,
     output_name: Option<(u32, u32)>,
+    /// Every `wl_output` global in registry order, so a test with more than
+    /// one output can bind a specific screen (see [`Step::BindOutputAt`]).
+    /// [`Step::BindOutput`] keeps binding the last one announced, exactly as
+    /// before -- with a single output the two are the same object.
+    output_names: Vec<(u32, u32)>,
     list_name: Option<(u32, u32)>,
     compositor: Option<wl_compositor::WlCompositor>,
     wm_base: Option<xdg_wm_base::XdgWmBase>,
@@ -226,7 +231,10 @@ impl Dispatch<wl_registry::WlRegistry, ()> for TestClient {
         };
         match interface.as_str() {
             "zwlr_foreign_toplevel_manager_v1" => client.manager_name = Some((name, version)),
-            "wl_output" => client.output_name = Some((name, version)),
+            "wl_output" => {
+                client.output_name = Some((name, version));
+                client.output_names.push((name, version));
+            }
             "ext_foreign_toplevel_list_v1" => client.list_name = Some((name, version)),
             "wl_compositor" => {
                 client.compositor = Some(registry.bind(name, version.min(4), qh, ()))
@@ -434,6 +442,11 @@ enum Step {
     /// Bind a `wl_output`. Separate from the manager so a test can choose the
     /// order, which is what the `output_bound` hook exists for.
     BindOutput,
+    /// Bind the `index`-th `wl_output` global in registry order (0 is the
+    /// primary output) -- for fixtures with more than one output, where a
+    /// window is announced on the output it is on and a bind of any other
+    /// output must stay silent.
+    BindOutputAt(usize),
     /// Bind an `ext_foreign_toplevel_list_v1` as well, for the cross-protocol
     /// check.
     BindList,
@@ -528,6 +541,15 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
             }
             Step::BindOutput => {
                 let global = client.output_name.ok_or("no wl_output")?;
+                let output: wl_output::WlOutput = registry.bind(global.0, global.1.min(4), &qh, ());
+                client.outputs.push(output);
+            }
+            Step::BindOutputAt(index) => {
+                let global = client
+                    .output_names
+                    .get(index)
+                    .copied()
+                    .ok_or_else(|| format!("no wl_output at index {index}"))?;
                 let output: wl_output::WlOutput = registry.bind(global.0, global.1.min(4), &qh, ());
                 client.outputs.push(output);
             }

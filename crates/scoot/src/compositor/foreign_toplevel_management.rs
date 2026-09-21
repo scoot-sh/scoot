@@ -289,6 +289,36 @@ fn state_array(activated: bool) -> Vec<u8> {
 }
 
 impl State {
+    /// The output a window is on, for the `output_enter` its handles are told.
+    ///
+    /// Read off where the window is actually drawn -- the first output whose
+    /// geometry overlaps the window's bounding box in the `Space` -- rather
+    /// than filed at creation, because "which output" is a fact about the
+    /// layout, and the layout is what `apply()` just pushed onto the space.
+    /// A window with no bounding box yet (announced from `add_window` before
+    /// the core has placed it, or never mapped) reads as the primary output,
+    /// which is where new windows open (`shell.rs` files `WindowOpened`
+    /// there too). `None` only when there is no output at all.
+    ///
+    /// Costs one bounding-box read and one geometry overlap per output until
+    /// it hits. Announcement and binds are cold paths (per window, per
+    /// `wl_output` bind), not per-event ones.
+    fn output_of_window(&self, id: WindowId) -> Option<Output> {
+        let window = self.windows.get(&id)?;
+        let bbox = self.space.element_bbox(window);
+        let placed = bbox.and_then(|bbox| {
+            self.outputs
+                .iter()
+                .find(|output| {
+                    self.space
+                        .output_geometry(output)
+                        .is_some_and(|region| region.overlaps(bbox))
+                })
+                .cloned()
+        });
+        placed.or_else(|| self.outputs.primary().cloned())
+    }
+
     /// Announces a new window to every client subscribed to the list.
     ///
     /// Called from [`State::add_window`](super::State) with the info that
@@ -310,11 +340,12 @@ impl State {
         // per-manager loop below can borrow `self.foreign_toplevel_management`
         // mutably at the same time.
         //
-        // The primary output only (see `Outputs::primary`): an `output_enter`
-        // per output a window is actually on is the multi-output item, and
-        // announcing a window on an output it is not on would be worse than
-        // announcing it on one.
-        let output = self.outputs.primary().cloned();
+        // The output the window is actually on -- which at this point, before
+        // the core has placed it, is the primary by `output_of_window`'s
+        // fallback, and stays the primary until something moves a window
+        // across outputs (nothing does yet). Announcing a window on an output
+        // it is not on would be worse than announcing it on one.
+        let output = self.output_of_window(id);
         let management = &mut self.foreign_toplevel_management;
         let mut toplevel = Toplevel {
             title: info.title.clone(),
@@ -452,14 +483,28 @@ impl State {
     /// show windows belonging to no output forever. `ext_workspace.rs`'s
     /// `workspace_group_output_bound` is the same hook for the same reason.
     pub(super) fn wlr_toplevel_output_bound(&mut self, output: &Output, wl_output: &WlOutput) {
-        // The primary output, not any of them: that is the only one handles
-        // are ever told they entered (see `open_wlr_toplevel`), so a bind of
-        // another must not produce an `output_enter` that was never announced.
-        if self.outputs.primary() != Some(output) {
-            return;
-        }
+        // Only the windows actually on the bound output are told they
+        // entered it: a bind of any other output must not produce an
+        // `output_enter` that was never announced. (Every window `open`
+        // announced is on the output `output_of_window` resolved for it, so
+        // the two agree.)
         let bound = wl_output.id();
-        for toplevel in self.foreign_toplevel_management.toplevels.values() {
+        // Resolved up front, one immutable pass: the loop below only reads
+        // the toplevel map, so both borrows can coexist -- but resolving
+        // inside it would re-walk the space per handle instead of per window.
+        // In key order (`toplevels` is a `BTreeMap`), so the membership test
+        // below is a binary search rather than a scan.
+        let on_this_output: Vec<WindowId> = self
+            .foreign_toplevel_management
+            .toplevels
+            .keys()
+            .filter(|id| self.output_of_window(**id).as_ref() == Some(output))
+            .copied()
+            .collect();
+        for (id, toplevel) in self.foreign_toplevel_management.toplevels.iter() {
+            if on_this_output.binary_search(id).is_err() {
+                continue;
+            }
             for handle in &toplevel.handles {
                 // Load-bearing, not tidiness: wayland-backend *panics* when an
                 // event carries an object belonging to a different client than
@@ -500,9 +545,18 @@ impl State {
         manager: ZwlrForeignToplevelManagerV1,
     ) {
         let version = manager.version();
-        let output = self.outputs.primary().cloned();
+        // One immutable pass first, in key order: the walk below holds
+        // `management` mutably (each new handle is pushed into its entry),
+        // so per-window resolution cannot borrow `self` from inside it --
+        // and zipping keeps the two in step without a lookup per window.
+        let outputs: Vec<Option<Output>> = self
+            .foreign_toplevel_management
+            .toplevels
+            .keys()
+            .map(|id| self.output_of_window(*id))
+            .collect();
         let management = &mut self.foreign_toplevel_management;
-        for (id, toplevel) in &mut management.toplevels {
+        for ((id, toplevel), output) in management.toplevels.iter_mut().zip(outputs) {
             let created = client.create_resource::<ZwlrForeignToplevelHandleV1, _, State>(
                 dh,
                 version,

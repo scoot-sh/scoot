@@ -93,6 +93,23 @@ fuzzel                    # a launcher, on the overlay layer
   that surface, not to whatever window is behind it, and clicking a bar does
   not move window focus.
 
+### More than one output
+
+Each output keeps its own layer surfaces, its own exclusive zones and its
+own keyboard derivation:
+
+- A bar reserves the edge of the output it is mapped on, and no other's. A
+  bar on the second screen never shrinks the first screen's tiling area.
+- A surface that names an output (`get_layer_surface` with a `wl_output`)
+  appears on that output. A surface that names none appears on the first
+  output — the compositor's choice, and where new windows open too.
+- Pointer input and keyboard focus follow the output under the pointer: a
+  click on a second-screen bar focuses that bar, and an `exclusive`
+  launcher mapped where the pointer is takes the keyboard there. If
+  `exclusive` surfaces are mapped on two screens at once, the pointer's
+  screen wins; any screen's `exclusive` surface still outranks every window,
+  so a launcher stays usable with the pointer on the other screen.
+
 ### Keyboard focus
 
 Following the protocol's `keyboard_interactivity`:

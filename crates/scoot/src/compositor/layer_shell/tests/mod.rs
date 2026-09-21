@@ -64,6 +64,7 @@ mod adversarial;
 mod frames;
 mod input;
 mod layout;
+mod multi_output;
 mod popup;
 mod popup_serial;
 mod teardown;
@@ -201,6 +202,11 @@ enum Step {
     /// Create a layer surface and commit it *without* a buffer, which is what
     /// earns it its initial configure.
     CreateLayer(LayerSpec),
+    /// The same, but naming the output the surface asks to appear on -- the
+    /// index of the client's `wl_output` globals in registry order, where 0
+    /// is the primary output. [`Step::CreateLayer`] passes none, which the
+    /// protocol defines as "the compositor chooses".
+    CreateLayerOn { spec: LayerSpec, output: usize },
     /// Create a layer surface and set everything up, but never commit -- so
     /// none of it has taken effect yet, since every one of those requests is
     /// double-buffered state.
@@ -423,6 +429,11 @@ struct TestClient {
     wm_base: Option<xdg_wm_base::XdgWmBase>,
     layer_shell: Option<zwlr_layer_shell_v1::ZwlrLayerShellV1>,
     seat: Option<wl_seat::WlSeat>,
+    /// Every `wl_output` global in registry order, so a test can name the
+    /// output a layer surface asks to appear on (see
+    /// [`Step::CreateLayerOn`]). Bound for addressing only: nothing here
+    /// asserts on output events.
+    outputs: Vec<wl_output::WlOutput>,
     /// Created from the seat's `Capabilities` event, so the client never
     /// asks for a keyboard the compositor didn't advertise.
     keyboard: Option<wl_keyboard::WlKeyboard>,
@@ -533,6 +544,11 @@ impl Dispatch<wl_registry::WlRegistry, ()> for TestClient {
                 client.layer_shell = Some(registry.bind(name, version.min(4), qh, ()));
             }
             "wl_seat" => client.seat = Some(registry.bind(name, version.min(5), qh, ())),
+            "wl_output" => {
+                client
+                    .outputs
+                    .push(registry.bind(name, version.min(4), qh, ()));
+            }
             "ext_session_lock_manager_v1" => {
                 client.lock_manager = Some(registry.bind(name, version.min(1), qh, ()));
             }
@@ -1012,15 +1028,29 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 // window's own pixels land, and a fixed buffer size is what
                 // makes that a fixed number.
             }
-            Step::CreateLayer(spec) | Step::CreateLayerWithoutCommit(spec) => {
+            Step::CreateLayer(spec)
+            | Step::CreateLayerWithoutCommit(spec)
+            | Step::CreateLayerOn { spec, .. } => {
                 let spec = *spec;
+                // `None` is the protocol's "the compositor chooses"; `Some`
+                // is the output the client asked for, by registry index.
+                let requested = match &step {
+                    Step::CreateLayerOn { output, .. } => Some(
+                        client
+                            .outputs
+                            .get(*output)
+                            .cloned()
+                            .ok_or_else(|| format!("no wl_output at index {output}"))?,
+                    ),
+                    _ => None,
+                };
                 let surface = compositor.create_surface(&qh, ());
                 let index = layers.len();
                 client.layer_sizes.push(None);
                 client.layer_configures.push(0);
                 let layer = layer_shell.get_layer_surface(
                     &surface,
-                    None,
+                    requested.as_ref(),
                     spec.layer,
                     "scoot-test".into(),
                     &qh,

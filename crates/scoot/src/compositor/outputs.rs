@@ -110,28 +110,27 @@ impl Outputs {
     /// `screencopy.rs`'s `capture_constraints` and `gamma_control.rs`'s
     /// `get_gamma_control`), because answering any of them from another
     /// output's framebuffer would hand a client a picture of one screen
-    /// labelled as another. What remains here are the later phases' sites,
-    /// and they do not all change the same way:
+    /// labelled as another. Layer shell neither (milestone 19, phase B):
+    /// `refresh_layer_zone` keeps a zone per output, `layer_hit` resolves
+    /// the output under the pointer, `layer_keyboard_focus` walks every
+    /// output's map with the pointer's output first, and
+    /// `foreign_toplevel_management.rs` announces each window on the output
+    /// it is on. What remains here are the later phases' sites, and they do
+    /// not all change the same way:
     ///
-    /// - `layer_shell.rs`'s `refresh_layer_zone` needs a zone *per* output
-    ///   rather than one (frame callbacks and dead-surface cleanup already
-    ///   walk every output's map -- see `headless.rs`'s `render`);
-    /// - `layer_hit` needs the output under the pointer;
-    /// - `layer_keyboard_focus` has to consider more than one `LayerMap`;
     /// - `session_lock.rs`'s `new_surface` fallback, `configure_all`,
     ///   confirmation (`locked` must wait for *every* output's blanked frame
     ///   -- the security-relevant one) and the locked render path;
-    /// - `ext_workspace.rs` needs a group per output, and
-    ///   `foreign_toplevel_management.rs` an `output_enter` per output a
-    ///   window is on;
+    /// - `ext_workspace.rs` needs a group per output;
     /// - `output_management.rs` needs a head per output;
     /// - `input.rs`'s pointer clamp needs the union of the outputs, or the
     ///   one the pointer is on.
     ///
-    /// The two sites that already resolve an output *per surface* rather than
+    /// The sites that already resolve an output *per surface* rather than
     /// through here are `layer_shell.rs`'s `new_layer_surface` (which honours
-    /// the client's requested `wl_output`) and [`State::output_of_layer`],
-    /// which finds the map a layer surface is actually in.
+    /// the client's requested `wl_output`, defaulting to the primary when it
+    /// names none) and [`State::output_of_layer`], which finds the map a
+    /// layer surface is actually in.
     ///
     /// [`State::output_of_layer`]: super::State::output_of_layer
     pub(crate) fn primary(&self) -> Option<&Output> {
