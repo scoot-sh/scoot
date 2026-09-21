@@ -28,9 +28,9 @@
 //!
 //! ## Read-only: enumeration is implemented, reconfiguration is refused
 //!
-//! scoot publishes exactly one [`Output`] here -- the primary one (see
-//! [`Outputs::primary`](super::outputs::Outputs::primary)) -- created once at
-//! startup and never moved, rotated, disabled or rescaled. There is
+//! scoot publishes one head per [`Output`](super::outputs::Outputs) here --
+//! created once at startup and never moved, rotated, disabled or rescaled --
+//! each read from its own output (see below). There is
 //! nothing for `apply` to apply. So the halves are split at the one seam the
 //! protocol gives: `zwlr_output_manager_v1.create_configuration` is the only
 //! way into the write half, and every configuration it hands out answers
@@ -111,13 +111,15 @@
 //! ## When the advertised state changes
 //!
 //! [`State::refresh_output_heads`] is the one path, and it is driven from the
-//! only two places that ever change the output's state -- `headless::init_named`
-//! and `State::resize_output`, the two callers of `headless.rs`'s `set_mode`,
-//! which is the sole caller of `Output::change_current_state`. A bind runs it
+//! three places that ever change the outputs' state -- `headless::init_named`
+//! and `headless::add_output` for arrival, [`State::resize_output`] for a mode
+//! change (both resize callers reach it through `headless.rs`'s `set_mode`,
+//! the sole caller of `Output::change_current_state`). A bind runs it
 //! too, so a manager bound later starts from the snapshot every other manager
 //! has already been sent. It diffs against [`OutputManagement::published`] and
 //! sends nothing when nothing moved, so it is safe to call from anywhere and
-//! is not on any per-frame or per-event path.
+//! is not on any per-frame or per-event path: one [`HeadState`] read and a
+//! compare per output, and no serial bump when nothing changed.
 //!
 //! A `--tty` VT switch changes nothing here *by itself*, and that is the right
 //! answer: the [`Output`] object is untouched across one (the session pauses
@@ -160,6 +162,8 @@ use smithay::reexports::wayland_server::{
 use smithay::utils::{Logical, Point, Transform};
 use smithay::wayland::{Dispatch2, GlobalDispatch2};
 
+use scoot_core::OutputId;
+
 use super::State;
 
 mod configuration;
@@ -183,15 +187,17 @@ const VERSION: u32 = 4;
 /// Everything this compositor keeps for `wlr-output-management-unstable-v1`.
 ///
 /// [`Self::published`] means exactly one thing: **what every registered
-/// manager has already been told**. It is never read as "what the output is" --
-/// that is the [`Output`], re-read on every refresh -- and the two meet in
-/// exactly one place ([`State::refresh_output_heads`]), which is also the only
-/// writer. Keeping every manager in lockstep is what makes one shared snapshot
-/// correct rather than one per client.
+/// manager has already been told, per output**. It is never read as "what the
+/// outputs are" -- those are the [`Output`]s, re-read on every refresh -- and
+/// the two meet in exactly one place ([`State::refresh_output_heads`]), which
+/// is also the only writer. Keeping every manager in lockstep is what makes
+/// one shared snapshot correct rather than one per client. One entry per
+/// output, in creation order; outputs are never removed, so entries only ever
+/// arrive.
 #[derive(Debug, Default)]
 pub struct OutputManagement {
     managers: Vec<Manager>,
-    published: Option<HeadState>,
+    published: Vec<(OutputId, HeadState)>,
     /// The serial last sent on `done`. Advances once per change batch, shared
     /// by every manager because every manager is sent the same batch.
     serial: u32,
@@ -266,12 +272,12 @@ impl HeadState {
     /// Whether `other` is the same head, i.e. whether the properties the
     /// protocol only lets a head object state *once* still hold.
     ///
-    /// Always true today: scoot creates its one output in
-    /// `headless::init_named` and never renames or replaces it, so only the
-    /// mutable half below can ever differ. It is checked rather than assumed
-    /// because the alternative failure is silent -- a head object that keeps
-    /// reporting the name it was created with while the output has another
-    /// one.
+    /// Always true today: scoot creates its outputs in
+    /// `headless::init_named`/`headless::add_output` and never renames or
+    /// replaces one, so only the mutable half below can ever differ. It is
+    /// checked rather than assumed because the alternative failure is
+    /// silent -- a head object that keeps reporting the name it was created
+    /// with while the output has another one.
     fn is_same_head(&self, other: &Self) -> bool {
         self.name == other.name
             && self.description == other.description
@@ -285,15 +291,22 @@ impl HeadState {
 #[derive(Debug)]
 struct Manager {
     manager: ZwlrOutputManagerV1,
-    /// `None` before the output exists (a manager bound by a client during
-    /// `State::new`, before `headless::init_named` has run) and after the head
-    /// has been retired.
-    head: Option<Head>,
+    /// One entry per output this client has been told about, in creation
+    /// order. Empty before the first output exists (a manager bound by a
+    /// client during `State::new`, before `headless::init_named` has run).
+    heads: Vec<Head>,
 }
 
-/// The head object handed to one client, and the mode objects under it.
+/// The head object handed to one client for one output, and the mode objects
+/// under it.
 #[derive(Debug)]
 struct Head {
+    /// Which output this head stands for. Stored here rather than on the
+    /// object itself, for the same reason the workspace handles keep their
+    /// position in the manager's list: a second copy of the fact on the
+    /// object would be free to drift from the list the events are computed
+    /// against.
+    output: OutputId,
     /// [`Weak`] because version 3 lets a client `release` the head while
     /// keeping its manager; an update then has nowhere to go and is skipped
     /// rather than resurrecting an object the client said it was done with.
@@ -306,7 +319,8 @@ struct Head {
 }
 
 impl Manager {
-    /// Brings this manager up to date and closes the batch with `done`.
+    /// Brings this manager up to date, one head per output, and closes the
+    /// batch with a single `done`.
     ///
     /// Returns whether it can still be kept in step. `false` means drop it:
     /// its client is gone, or an object could not be created for it and it has
@@ -314,51 +328,65 @@ impl Manager {
     fn apply(
         &mut self,
         dh: &DisplayHandle,
-        published: Option<&HeadState>,
-        current: Option<&HeadState>,
+        published: &[(OutputId, HeadState)],
+        current: &[(OutputId, HeadState)],
         serial: u32,
     ) -> bool {
-        // A head whose identity changed is a *different* head, so the old
-        // objects are retired and new ones announced rather than updated.
-        // Unreachable today (see `is_same_head`), and the same branch covers
-        // the two reachable shapes: no head yet, and a head that went away.
-        let carried_over = match (published, current, &self.head) {
-            (Some(published), Some(current), Some(_)) if published.is_same_head(current) => {
-                Some(published)
-            }
-            _ => None,
-        };
-        if carried_over.is_none() {
-            self.retire_head();
-        }
-        let Some(current) = current else {
-            self.manager.done(serial);
-            return true;
-        };
         let Ok(client) = dh.get_client(self.manager.id()) else {
             return false;
         };
-        let updated = match carried_over {
-            Some(published) => self.update(dh, &client, published, current, serial),
-            None => self.announce(dh, &client, current, serial),
-        };
-        if !updated {
-            return false;
+        for (id, state) in current {
+            // A head whose identity changed is a *different* head, so the old
+            // objects are retired and new ones announced rather than updated.
+            // Unreachable today (see `is_same_head`), and the same branch
+            // covers the reachable shape: no head for this output yet.
+            let published_state = published
+                .iter()
+                .find(|(known, _)| known == id)
+                .map(|(_, state)| state);
+            let carried_over = published_state
+                .filter(|known| known.is_same_head(state))
+                .filter(|_| self.heads.iter().any(|head| head.output == *id));
+            if carried_over.is_none() {
+                self.retire_head(*id);
+            }
+            let updated = match carried_over {
+                Some(known) => self.update(dh, &client, *id, known, state, serial),
+                None => self.announce(dh, &client, *id, state, serial),
+            };
+            if !updated {
+                return false;
+            }
+        }
+        // Heads for outputs that no longer exist. Unreachable -- outputs are
+        // never removed -- kept so a head object can never outlive its output
+        // if that ever changes.
+        let gone: Vec<OutputId> = self
+            .heads
+            .iter()
+            .map(|head| head.output)
+            .filter(|id| !current.iter().any(|(known, _)| known == id))
+            .collect();
+        for id in gone {
+            self.retire_head(id);
         }
         self.manager.done(serial);
         true
     }
 
-    /// Tells this client's head and modes that they are gone, and forgets them.
+    /// Tells this client's head for `output` and its modes that they are
+    /// gone, and forgets them.
     ///
     /// Innermost first: a mode object belongs to the head, so it is retired
     /// before the head that introduced it. Both become inert per the protocol;
     /// the client destroys them in its own time, and the [`Weak`]s here stop
-    /// upgrading either way.
-    fn retire_head(&mut self) {
-        let Some(head) = self.head.take() else {
+    /// upgrading either way. A no-op when this client has no head for the
+    /// output.
+    fn retire_head(&mut self, output: OutputId) {
+        let Some(index) = self.heads.iter().position(|head| head.output == output) else {
             return;
         };
+        let head = self.heads.remove(index);
         for (_, mode) in &head.modes {
             if let Ok(mode) = mode.upgrade() {
                 mode.finished();
@@ -369,19 +397,20 @@ impl Manager {
         }
     }
 
-    /// Creates this client's head and every mode under it, and states the whole
-    /// of `current` on them.
+    /// Creates this client's head for `output` and every mode under it, and
+    /// states the whole of `current` on them.
     fn announce(
         &mut self,
         dh: &DisplayHandle,
         client: &Client,
+        output: OutputId,
         current: &HeadState,
         serial: u32,
     ) -> bool {
         let version = self.manager.version();
         let created = client.create_resource::<ZwlrOutputHeadV1, _, State>(dh, version, HeadData);
         let Ok(head) = created else {
-            return self.give_up("zwlr_output_head_v1", serial);
+            return self.give_up(output, "zwlr_output_head_v1", serial);
         };
         self.manager.head(&head);
         head.name(current.name.clone());
@@ -400,17 +429,18 @@ impl Manager {
                 // head has already been introduced and half described, and the
                 // client is owed a `finished` on it rather than a partial head
                 // it will never hear about again.
-                self.head = Some(Head {
+                self.heads.push(Head {
+                    output,
                     head: head.downgrade(),
                     modes,
                 });
-                return self.give_up("zwlr_output_mode_v1", serial);
+                return self.give_up(output, "zwlr_output_mode_v1", serial);
             };
             modes.push((*mode, object.downgrade()));
         }
         // `enabled` before the four properties it makes meaningful, which the
-        // protocol says are "only sent if the output is enabled". scoot's one
-        // output is always enabled: there is no disabled state to reach, and
+        // protocol says are "only sent if the output is enabled". scoot's
+        // outputs are always enabled: there is no disabled state to reach, and
         // no request that could ask for one.
         head.enabled(1);
         if let Some(mode) = mode_object(&modes, current.current_mode) {
@@ -424,33 +454,37 @@ impl Manager {
             // backend, so adaptive sync is off and nothing can turn it on.
             head.adaptive_sync(AdaptiveSyncState::Disabled);
         }
-        self.head = Some(Head {
+        self.heads.push(Head {
+            output,
             head: head.downgrade(),
             modes,
         });
         true
     }
 
-    /// Sends only what changed between `published` and `current`.
+    /// Sends only what changed between `published` and `current` on this
+    /// client's head for `output`.
     fn update(
         &mut self,
         dh: &DisplayHandle,
         client: &Client,
+        output: OutputId,
         published: &HeadState,
         current: &HeadState,
         serial: u32,
     ) -> bool {
         // Taken out so the mode list can be extended while `self` stays free
         // for `give_up`; put back on every path that keeps the manager.
-        let Some(mut entry) = self.head.take() else {
+        let Some(index) = self.heads.iter().position(|head| head.output == output) else {
             return true;
         };
+        let mut entry = self.heads.remove(index);
         let Ok(head) = entry.head.upgrade() else {
             // The client released the head but kept the manager. Its mode
             // objects are kept as they are: they are inert to this client
             // already, and re-announcing a head it asked to be rid of is not
             // something the protocol offers.
-            self.head = Some(entry);
+            self.heads.push(entry);
             return true;
         };
         // New modes first, so `current_mode` below can name one of them.
@@ -460,8 +494,8 @@ impl Manager {
                 continue;
             }
             let Some(object) = create_mode(dh, client, &head, version, *mode, current) else {
-                self.head = Some(entry);
-                return self.give_up("zwlr_output_mode_v1", serial);
+                self.heads.push(entry);
+                return self.give_up(output, "zwlr_output_mode_v1", serial);
             };
             entry.modes.push((*mode, object.downgrade()));
         }
@@ -483,7 +517,7 @@ impl Manager {
         if current.scale != published.scale {
             head.scale(current.scale);
         }
-        self.head = Some(entry);
+        self.heads.push(entry);
         true
     }
 
@@ -502,12 +536,12 @@ impl Manager {
     /// knows nothing more is coming. `finished` is a destructor event, so
     /// nothing may be sent on the manager afterwards -- hence the immediate
     /// `false`, which drops this entry.
-    fn give_up(&mut self, what: &str, serial: u32) -> bool {
+    fn give_up(&mut self, output: OutputId, what: &str, serial: u32) -> bool {
         tracing::warn!(
             interface = what,
             "could not create an output-management object; dropping this manager"
         );
-        self.retire_head();
+        self.retire_head(output);
         self.manager.done(serial);
         self.manager.finished();
         false
@@ -566,19 +600,23 @@ fn mode_object(
 }
 
 impl State {
-    /// Brings every bound manager up to date with the output.
+    /// Brings every bound manager up to date with every output.
     ///
-    /// Called from the two sites that change the output's state
-    /// (`headless::init_named` and [`State::resize_output`], the only callers
-    /// of `headless.rs`'s `set_mode`) and from a fresh bind. Costs one
-    /// [`HeadState`] read and a compare when nothing changed, and sends
-    /// nothing at all in that case -- no `done`, no serial bump.
+    /// Called from the three sites that change the outputs' state
+    /// (`headless::init_named` and `headless::add_output` for arrival,
+    /// [`State::resize_output`] for a mode change) and from a fresh bind.
+    /// Costs one [`HeadState`] read and a compare per output when nothing
+    /// changed, and sends nothing at all in that case -- no `done`, no
+    /// serial bump.
     pub(super) fn refresh_output_heads(&mut self) {
-        // One head, the primary output's (see `Outputs::primary`): a head
-        // per output is the multi-output item. Publishing a secondary output
-        // as a head would offer a display-configuration client a screen this
-        // compositor cannot describe a mode or a position for.
-        let current = self.outputs.primary().map(HeadState::of);
+        // One head per output, in creation order: a display-configuration
+        // client is offered every screen this compositor drives, each
+        // described from its own output's mode and position.
+        let current: Vec<(OutputId, HeadState)> = self
+            .outputs
+            .iter_with_ids()
+            .map(|(id, output)| (id, HeadState::of(output)))
+            .collect();
         if self.output_management.published == current {
             return;
         }
@@ -591,24 +629,25 @@ impl State {
         // which a plain `+= 1` eventually would.
         management.serial = management.serial.wrapping_add(1);
         let serial = management.serial;
-        // Moved out so the per-manager loop can borrow `management` mutably.
-        let published = management.published.take();
+        // Borrowed, not moved out: `apply` only reads both snapshots, so the
+        // per-manager loop needs no ownership shuffle.
+        let published = &management.published;
         management
             .managers
-            .retain_mut(|manager| manager.apply(&dh, published.as_ref(), current.as_ref(), serial));
+            .retain_mut(|manager| manager.apply(&dh, published, &current, serial));
         management.published = current;
     }
 
-    /// Builds a freshly bound manager's whole world: the head, its modes, and
-    /// the `done` that makes it one atomic picture.
+    /// Builds a freshly bound manager's whole world: a head per output with
+    /// its modes, and the `done` that makes it one atomic picture.
     fn announce_output_heads(
         &mut self,
         dh: &DisplayHandle,
         client: &Client,
         manager: ZwlrOutputManagerV1,
     ) {
-        // First, so `published` is what the output says right now. Everything
-        // below is built from `published` rather than from the `Output`
+        // First, so `published` is what the outputs say right now. Everything
+        // below is built from `published` rather than from the `Output`s
         // directly, which is what keeps this manager in lockstep with the ones
         // already bound: the next refresh diffs from a snapshot this client
         // really was sent.
@@ -616,16 +655,21 @@ impl State {
         let serial = self.output_management.serial;
         let mut entry = Manager {
             manager,
-            head: None,
+            heads: Vec::new(),
         };
-        let announced = match self.output_management.published.as_ref() {
-            Some(published) => entry.announce(dh, client, published, serial),
-            // No output yet -- only reachable before `headless::init_named`
-            // has run. A bare `done` is the honest answer: the client is up to
-            // date, there is simply nothing to be up to date about, and the
-            // head arrives in its own batch once the output exists.
-            None => true,
-        };
+        // No output yet -- only reachable before `headless::init_named`
+        // has run. A bare `done` is the honest answer: the client is up to
+        // date, there is simply nothing to be up to date about, and each head
+        // arrives in its own batch once its output exists. Borrowed, not
+        // cloned: `entry` is a local, so holding `published` across the loop
+        // borrows nothing `announce` needs mutably.
+        let mut announced = true;
+        for (id, state) in &self.output_management.published {
+            announced = entry.announce(dh, client, *id, state, serial);
+            if !announced {
+                break;
+            }
+        }
         if !announced {
             // Counted at bind but never registered, so the claim is given
             // back: the client is gone, and a leak here would be a counter

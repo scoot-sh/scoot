@@ -35,10 +35,13 @@
 //!
 //! This is the foundation, not the whole of multi-output (see
 //! `docs/backlog/core/multi-output.md`). Every output has a render target of
-//! its own (milestone 19, phase A); the protocol sites that still assume one
-//! output go through [`Outputs::primary`] rather than a
-//! const, so `grep primary()` enumerates them for the item that makes them
-//! per-output.
+//! its own (milestone 19, phase A), and the protocol sites went per-output
+//! phase by phase after that -- layer shell (B), session lock (C),
+//! workspaces, output management and the pointer clamp (D) -- so
+//! `grep primary()` now enumerates only what is deliberately single-output:
+//! startup placement, new-window placement, and the single-output backends'
+//! resize. Driving a second connector (milestone 19, phase E) is what is
+//! left.
 //!
 //! [`State`]: super::State
 
@@ -115,19 +118,26 @@ impl Outputs {
     /// the output under the pointer, `layer_keyboard_focus` walks every
     /// output's map with the pointer's output first, and
     /// `foreign_toplevel_management.rs` announces each window on the output
-    /// it is on. What remains here are the later phases' sites, and they do
-    /// not all change the same way:
-    ///
-    /// - `ext_workspace.rs` needs a group per output;
-    /// - `output_management.rs` needs a head per output;
-    /// - `input.rs`'s pointer clamp needs the union of the outputs, or the
-    ///   one the pointer is on.
+    /// it is on. Workspaces, output management and the pointer clamp neither
+    /// (milestone 19, phase D): `ext_workspace.rs` keeps a group per output
+    /// with independent active indices, `output_management.rs` a head per
+    /// output, and `input.rs`'s pointer clamp covers the union of every
+    /// output's geometry.
     ///
     /// Session lock no longer goes through here (milestone 19, phase C):
     /// `new_surface` resolves the named output with no fallback, each
     /// surface is configured to its own output's size, `locked` waits for
     /// *every* output's blanked frame, and the locked render path composites
     /// each output's surfaces onto its own target.
+    ///
+    /// What still goes through here is startup placement
+    /// (`place_pointer_at_output_centre` centres on the primary once -- the
+    /// pointer starts on the first screen), new-window placement
+    /// (`foreign_toplevel_management.rs` falls back to the first output --
+    /// windows open on output 1 until a later phase moves them across
+    /// outputs), and `resize_output`, which only the single-output backends
+    /// (`--nested`'s host configure, `--tty` hotplug) can reach. Per-output
+    /// resize is the `--tty` multi-CRTC phase's (milestone 19, phase E).
     ///
     /// The sites that already resolve an output *per surface* rather than
     /// through here are `layer_shell.rs`'s `new_layer_surface` (which honours
@@ -185,6 +195,13 @@ impl Outputs {
     /// Every output, in creation order.
     pub(crate) fn iter(&self) -> impl Iterator<Item = &Output> + '_ {
         self.entries.iter().map(|entry| &entry.output)
+    }
+
+    /// Every output with the core id it was registered under, in creation
+    /// order -- what the per-output protocol publishers diff against.
+    /// Allocation-free like [`Outputs::iter`].
+    pub(crate) fn iter_with_ids(&self) -> impl Iterator<Item = (OutputId, &Output)> + '_ {
+        self.entries.iter().map(|entry| (entry.id, &entry.output))
     }
 
     /// How many outputs this compositor has -- what bounds the render loop's

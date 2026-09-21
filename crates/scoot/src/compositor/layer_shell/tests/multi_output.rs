@@ -16,6 +16,7 @@
 
 use super::*;
 use scoot_core::OutputId;
+use smithay::utils::Point;
 
 /// The client's `wl_output` registry index of the second output -- 0 is the
 /// primary, matching the order `headless::add_output` creates them in.
@@ -259,5 +260,61 @@ fn exclusive_surfaces_on_both_outputs_the_pointer_output_wins() {
         fixture.keyboard().focused,
         Some(Focused::Layer(0)),
         "the keyboard falls back to the surviving launcher when the second goes away"
+    );
+}
+
+/// A fast relative fling across the seam lands on the second output and
+/// enters its bar there (milestone 19, phase D): the union clamp lets
+/// libinput-rate motion cross outputs -- hundreds of per-event clamps in a
+/// row with no focus or event loss -- and the per-output hit test applies
+/// unchanged on arrival. Fail-first: clamping to the primary holds every
+/// step at 199, so the pointer never leaves output 1 and the bar is never
+/// entered.
+#[test]
+fn a_relative_fling_across_the_seam_enters_the_second_outputs_bar() {
+    let mut fixture = two_output_fixture();
+    fixture.run(Step::CreateLayerOn {
+        spec: LayerSpec::bar(24).with_keyboard(KeyboardInteractivity::OnDemand),
+        output: SECOND,
+    });
+    fixture.run(Step::MapLayer {
+        index: 0,
+        color: BAR_BGRA,
+    });
+
+    // From deep on output 1, hundreds of single-pixel relative steps -- the
+    // rate and shape of a real fling -- across the seam at `X2` and up onto
+    // the bar, which spans `X2..2*X2` on `x` and the top 24 rows.
+    fixture.state.pointer_move(50.0, 100.0);
+    for _ in 0..250 {
+        fixture.state.pointer_move_relative(1.0, 0.0, 1.0, 0.0);
+    }
+    for _ in 0..88 {
+        fixture.state.pointer_move_relative(0.0, -1.0, 0.0, -1.0);
+    }
+    let location = fixture
+        .state
+        .seat
+        .get_pointer()
+        .expect("a pointer")
+        .current_location();
+    assert_eq!(
+        (location.x, location.y),
+        (300.0, 12.0),
+        "the fling must cross the seam instead of sticking at output 1's edge"
+    );
+    let (output, _) = fixture
+        .state
+        .output_under(Point::from((location.x, location.y)))
+        .expect("the landing point is on an output");
+    assert_eq!(
+        fixture.state.outputs.id_of(&output),
+        Some(OutputId(2)),
+        "the landing point resolves to the second output"
+    );
+    assert_eq!(
+        fixture.pointer_focus(),
+        Some(Focused::Layer(0)),
+        "the flung pointer entered the second output's bar, with no click and no focus loss"
     );
 }

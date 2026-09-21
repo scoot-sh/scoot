@@ -195,6 +195,12 @@ pub fn add_output(
     state
         .world
         .handle_event(CoreEvent::OutputAdded { id, area });
+    // The head a display-configuration client sees for this output. `apply()`
+    // below reaches the workspace groups through `refresh_workspaces`, but
+    // output heads refresh only from here (and `init_named` and
+    // `resize_output`): without this, a manager bound before this output
+    // existed would never hear about it.
+    state.refresh_output_heads();
     // The core lays out against one more output now, and `apply()` is what
     // pushes that arrangement onto the windows; it ends in `request_render()`.
     state.apply();

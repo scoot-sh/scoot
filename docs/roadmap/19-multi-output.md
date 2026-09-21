@@ -194,6 +194,88 @@ no second monitor. `crates/scoot/src/compositor/outputs.rs`'s doc on
   the `apply`/`test` refusal stays as documented); `input.rs` pointer
   clamp over the union (or the output under the pointer — decide from the
   focus decision above, record it).
+  - **DONE (2026-09-21, Phase D PR).** Three halves, no core change — the
+    milestone's no-redesign tripwire did not fire, and why not is load-bearing:
+    new windows always open on the first output (`shell.rs` files
+    `WindowOpened` with the first output's id, and every focus path keeps the
+    focused output there), so every non-first output's workspace list is
+    permanently the single empty workspace and `FocusWorkspaceIndex`
+    (focused-output-relative) suffices for every reachable switch. A switch
+    pending on a non-focused output is ignored rather than misrouted, loudly
+    in debug builds — the branch a future cross-output-move phase turns into
+    a real output-targeted action.
+  - **`ext-workspace-v1`: one group per output** (`ext_workspace.rs`).
+    `Manager` holds a `Group` per output (group object, positional handle
+    slots, staged `pending_activate`); `published` is one snapshot per
+    output with a reused `current` scratch, so the per-`apply` refresh
+    allocates nothing and sends nothing (no events, no `done`) when every
+    snapshot matches. `refresh_workspaces` diffs per output through the
+    unchanged `diff.rs` and closes with one `done` per manager; `announce`
+    builds one group block per output (group, capabilities, that output's
+    `output_enter`s, handles) before that `done`; `workspace_group_output_bound`
+    enters only the bound output's group; `commit` checks bounds and
+    already-active against the *group's* output's list. Single-output is
+    wire-identical: one group block + one `done`, exactly the old sequence.
+  - **`wlr-output-management`: one head per output**
+    (`output_management.rs`). `published` is one `HeadState` per output,
+    each manager one `Head` per output (with its own modes, retired
+    innermost-first like before); updates touch only the heads whose output
+    moved, and one `done` still closes the batch. `headless::add_output`
+    now runs `refresh_output_heads`, so an output added after a bind still
+    announces its head. `configuration.rs` untouched — `apply`/`test`
+    still answer `failed`, pinned with two heads bound.
+  - **Pointer clamp: the union of the outputs** (`input.rs`,
+    `clamp_to_output_union`). Decided from the focus decision as the
+    milestone requires: the pointer picks the output, so the clamp must let
+    motion *reach* the next output — clamping to the output under the
+    pointer would trap relative motion on one screen forever (pinned: held
+    at 199 pre-fix). Half-open bounds mirror `output_under`, so the seam
+    pixel belongs to the output on its right; uneven outputs leave dead
+    zones where the pointer may rest and misses exactly like an off-output
+    absolute move (absolute motion is never clamped). A single output takes
+    the old per-extent expression exactly (fast path), so one-output
+    sessions neither behave nor measure differently.
+  - **Benchmark (owed: the clamp runs per relative-motion event).**
+    Release, dev VM, 200k oscillating `pointer_move_relative` x5 with 20k
+    warmup (pre-warmup runs showed the known governor artifact — two ~180ns
+    readings among ~700ns — recorded, not used): single-output 561ns/event
+    median before (558–588), 665ns without the fast path (629–672,
+    disjoint — real), 567ns with it (512–620, overlapping — residual
+    gone); two-output 576ns before, 737ns after on the union loop, which
+    has no production producer until phase E (`--headless` moves absolutely,
+    single-output `--tty` takes the fast path) and is disclosed, not
+    claimed. Absolute cost sub-µs either way: ~0.6% of one 16ms frame per
+    second at a 1kHz device rate.
+  - **Bind/refresh allocation check.** Refresh allocates nothing (reused
+    `changes` + `current` buffers, snapshot swap); bind allocates O(#outputs)
+    small vecs at client-bind rate, the same class as the pre-existing
+    per-workspace vec — no new flood path, and the shared 8-bind budget is
+    untouched.
+  - **Single-output byte-identical:** full nextest (1297 passed) with every
+    pre-existing suite green unmodified, the whole ext-workspace +
+    output-management + input + outputs + layer-shell set green under
+    `SCOOT_TEST_RENDERER=gles` too (240 passed), smoke green, and a live
+    400x300 output-2 screenshot hashing to phase A's known-empty
+    `0d5affbe…` while output 1 shows the window.
+  - **Fail-first pins (17 new tests, 11 fail pre-fix):** clamp trapping,
+    seam ownership, far-edge stop and dead-zone rest (4 fail, 1 absolute-miss
+    pin passes throughout); one-head-per-output bind, late-add announce and
+    release-isolation (3 fail, stop + 2 refusal pins pass throughout);
+    one-group-per-output bind, late-`wl_output` enters and
+    activate-on-output-2-leaves-output-1 (3 fail, first-output switch +
+    stop pins pass throughout); the 338-event relative fling across the
+    seam entering output 2's bar (fails held at 199 pre-fix).
+  - **Live proof on the dev VM (`--headless --outputs 2`, 400x300):**
+    pixman — `wayland-info` shows both `wl_output`s, `wlr-randr` both heads
+    (`headless` at 0,0, `headless-2` at 400,0, current+preferred modes);
+    `foot` opens on output 1 (IPC `"output": 1`), output-1 shot shows it
+    while output-2's hashes the known-empty session; pointer driven to
+    (600,150) and clicked with the session stable and window focus sane;
+    the ext-workspace bind burst dumped from a real client (two groups,
+    per-group `output_enter`s, one `done`). GLES — both heads in
+    `wlr-randr`, per-output IPC screenshots differ correctly, `grim -o
+    headless-2` serves the screencopy path. No live `--tty` (single output
+    there until phase E — stated).
 - **E. `--tty` multi-CRTC (hardware-gated).** One connector is chosen at
   startup and hotplug *switches* rather than *adds*; driving two at once
   is a different shape. Needs real two-connector hardware (Asahi) — like

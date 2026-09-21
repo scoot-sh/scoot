@@ -215,9 +215,11 @@ protocols, so a panel's workspace module, a workspace switcher or an
 indicator can list workspaces, follow which one is active and switch between
 them. The global is `ext_workspace_manager_v1`.
 
-- **One workspace group**, carrying scoot's single output. A client that
-  binds `wl_output` after the manager still gets an `output_enter` for it, so
-  registry order doesn't matter.
+- **One workspace group per output**, each carrying its own output. A client
+  that binds `wl_output` after the manager still gets an `output_enter` for
+  it on that output's group, so registry order doesn't matter. Each group's
+  workspaces are positions in that output's own list with that output's own
+  active index: switching on one output never disturbs another's.
 - **One `ext_workspace_handle_v1` per workspace**, named `"1"`, `"2"`, … in
   layout order, with matching one-dimensional `coordinates` — sort by those,
   not by name (`"10"` sorts before `"2"` as a string). The active one carries
@@ -245,15 +247,21 @@ Worth knowing before you write against it:
 - **`deactivate`, `remove`, `assign` and `create_workspace` are ignored**,
   and no capability is advertised for them: an output always has exactly one
   active workspace, workspaces are created and dropped by the layout itself
-  rather than by the user, and there is only one group.
+  rather than by the user, and a workspace belongs to the output whose group
+  announced it.
 - **`activate` is a request, not a guarantee** (as the protocol says): one
   naming a workspace that vanished between the client reading the list and
-  the `commit` arriving is dropped, and one for the workspace that is already
-  active does nothing.
+  the `commit` arriving is dropped, one for the workspace that is already
+  active does nothing, and one for an output that is not the focused output
+  is dropped unless it is already active there too — switching another
+  output's workspaces from a bar is a later phase's work, and silently
+  switching the wrong output would be worse than refusing.
 - **An agent switches by number too.** `scoot msg action
-  focus-workspace-index N` drives the same core action `activate` does.
-- **Multiple outputs will change the shape of this** — a group per output is
-  what the protocol is built for — but scoot has exactly one output today.
+  focus-workspace-index N` drives the same core action `activate` does, on
+  the focused output.
+- **With one output the wire is exactly what it always was** — one group,
+  one `done` per batch. A second output adds a second group block before
+  that `done`, nothing else.
 - **One client may hold at most 8 binds** across this manager, both
   window-list globals and the display manager combined; a ninth is answered
   `done` then `finished` rather than announced. A bar binds this global once.
@@ -382,18 +390,19 @@ transform from. `wl_output` says what the screen *is*; this is the management
 protocol on top of it. This is the wlr protocol rather than an `ext-` one
 only because no `ext-` successor exists yet.
 
-**It is read-only. `apply` and `test` always answer `failed`.** scoot has
-exactly one output, whose mode, position, scale and transform are fixed for
-the life of the process, so there is nothing a configuration could change; a
-configuration that reported `succeeded` and changed nothing would give you a
-Display page whose buttons appear to work. `wlr-randr --output <name> --pos
-100,100` prints `failed to apply configuration` and exits non-zero.
+**It is read-only. `apply` and `test` always answer `failed`.** scoot's
+outputs are fixed for the life of the process — created at startup, never
+moved, disabled or rescaled by a client — so there is nothing a
+configuration could change; a configuration that reported `succeeded` and
+changed nothing would give you a Display page whose buttons appear to work.
+`wlr-randr --output <name> --pos 100,100` prints `failed to apply
+configuration` and exits non-zero.
 
-- **One `zwlr_output_head_v1`**, carrying its `name` (the same one
-  `wl_output` reports — a DRM connector name like `HDMI-A-1` under `--tty`,
-  `headless` otherwise), `description`, `make`, `model`, `enabled`,
-  `position`, `transform`, `scale` and `adaptive_sync` (always `disabled`;
-  scoot has no VRR support).
+- **One `zwlr_output_head_v1` per output**, each carrying its own `name` (the
+  same one `wl_output` reports — a DRM connector name like `HDMI-A-1` under
+  `--tty`, `headless`, `headless-2`, … otherwise), `description`, `make`,
+  `model`, `enabled`, `position`, `transform`, `scale` and `adaptive_sync`
+  (always `disabled`; scoot has no VRR support).
 - **A `zwlr_output_mode_v1` per mode the output knows**, with its size,
   refresh rate and whether it is preferred. Binding announces everything
   immediately.
