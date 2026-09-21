@@ -539,6 +539,10 @@ be revisited.
   carries-and-follows (new `MoveWindowToWorkspaceIndex` core/IPC/config
   action mirroring `FocusWorkspaceIndex`'s ignore-out-of-range rule); agent
   window placement is absolute, not stepped.
+- [An action that sets a column's width directly](./core/set-column-width.md)
+  — OPEN (gh #204, 2026-09-21): `cycle-column-width` can't land on a width;
+  proposed `set-column-width INDEX` into `[layout] column_widths`, mirroring
+  the workspace-index precedent (out-of-range rule, toggle explicitly out).
 - [No config reload](./resolved/config-reload-done.md) — RESOLVED 2026-09-20:
   `scootctl reload` re-applies gap, appearance and keybindings live with an
   applied-vs-refused reply; scale/gpu/renderer/autostart/cursor stay
