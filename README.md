@@ -55,7 +55,7 @@ Linux, and daily-driven on `--tty`** (2026-09-18).
   connector.
 - **No XWayland.** X11-only applications do not run.
 - **GPU scanout is new and narrow.** `--tty --renderer gles` scans out from
-  the GPU, but only in a `gpu-scanout` build, only on the primary plane (no
+  the GPU, but only in a `gpu-scanout` build (`nix build .#scoot-gpu`), only on the primary plane (no
   overlay or cursor planes), and it has never run on a real GPU — every
   measurement so far is a software rasteriser's. `--headless`/`--nested`
   still read every frame back to main memory as pixman does.
@@ -73,6 +73,7 @@ Clone, then, from the flake at the repo root:
 
 ```sh
 nix build                            # ./result/bin/scoot
+nix build .#scoot-gpu                    # ...with the --tty GPU scanout tier
 nix build .#scootctl                 # ./result/bin/scootctl, the client alone
 nix run . -- --headless -- foot      # build and run it in one step
 nix run .#scootctl -- windows        # the client, from anywhere

@@ -1,7 +1,7 @@
 ---
 item: "6"
 title: "Real GPU rendering pipeline"
-status: "in-progress"
+status: "done"
 area: "backend"
 pr: 147
 commit: null

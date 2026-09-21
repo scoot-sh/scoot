@@ -108,6 +108,7 @@ risky part comes last:
 ```sh
 git clone https://github.com/scoot-sh/scoot && cd scoot
 nix build                      # -> ./result/bin/scoot
+nix build .#scoot-gpu          # -> ./result-scoot-gpu/bin/scoot, with the gpu-scanout tier (Test 4)
 mkdir -p /tmp/fx
 ```
 
@@ -380,7 +381,8 @@ hardware, where rasterising stops being a CPU's problem, scanout should win
 — but that sentence is an extrapolation, and this test is what turns it into
 a number.
 
-Needs a `--features gpu-scanout` build (see `docs/tty.md`), and the `--tty`
+Needs a `gpu-scanout` build (`nix build .#scoot-gpu`, or
+`cargo build -p scoot --features gpu-scanout` — see `docs/tty.md`), and the `--tty`
 seat.
 
 **Expect correctness questions before performance ones.** Scanout has never

@@ -396,7 +396,15 @@ falsify. Read `flexwm` there as `scoot`.
 - [Pin the fd-pressure grace conjunction's boundaries](./resolved/fd-pressure-grace-boundary-pins-done.md) — RESOLVED 2026-09-18 (pin, no behavior change): `pressure_refusal`'s pure conjunction split out as `pressure_refusal_for` and pinned at both operators and both graces (129 refused, 128 passes; either half alone passes); the ceiling record's 400 stands as "two at grace", the permitted maximum is 404
 
 ### Packaging / tooling
-- [Nix package can reach neither GPU tier](./packaging/nix-gpu-tiers.md) — gh #177 (HIGH): packaged `--renderer gles` panics in Smithay's `dlopen` (no EGL in RUNPATH; needs wrapper/RUNPATH + a pre-flight check) and no `gpu-scanout` build exists (proposed `packages.scoot-gpu`). The Test 4 machine filed it.
+- [Nix package can reach neither GPU tier](./resolved/nix-gpu-tiers-done.md)
+  — RESOLVED 2026-09-21 (gh #177): `packages.scoot` force-links libEGL
+  (niri's `--no-as-needed` trick, Linux-only) so packaged `--renderer gles`
+  reaches the OS's EGL drivers (dev-VM proof: `the GLES renderer is up`
+  over llvmpipe); new `packages.scoot-gpu` carries `gpu-scanout` (`ldd`
+  shows libgbm); a `dlopen` pre-flight turns a missing libEGL into the
+  designed startup error (proven live with the library hidden). Mesa ICDs
+  stay the host OS's by decision. Test 4 on Asahi stays open; roadmap row 6
+  fixed toward done-on-paper at the same time (also closes #178.6).
 - [`packages.scoot` ships `scootctl` too](./resolved/scoot-package-ships-scootctl-done.md)
   — RESOLVED 2026-09-21: `cargoBuildFlags = [ "-p" "scoot" ]` (packaging
   matches the docs; the split is the documented design and the `scootctl`

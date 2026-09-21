@@ -235,8 +235,11 @@ running with no GPU at all is a hard requirement here, not a fallback tier.
   renderer is up device=/dev/dri/renderD128 software=false`) — trust that
   line over the flag name.
 - **A wrong `--renderer gles` is a startup error, not a silent downgrade.**
-  If no EGL device can drive it, scoot says so and names each failure rather
-  than quietly compositing with the other renderer.
+  If no EGL device can drive it -- including a box with no loadable libEGL
+  at all, which the compositor probes before Smithay's first EGL touch so
+  the missing library reports instead of panicking -- scoot says so and
+  names each failure rather than quietly compositing with the other
+  renderer.
 - **dma-buf clients follow the renderer.** This used to be a known gap — the
   advertised buffer formats were the CPU renderer's whichever renderer was
   active, so a GPU buffer the GLES renderer could not import was refused, and
@@ -258,6 +261,8 @@ There is one optional Cargo feature, **`gpu-scanout`**, off by default:
 
 ```sh
 cargo build -p scoot --features gpu-scanout
+# ... or from the flake, which carries the same feature as a package:
+nix build .#scoot-gpu
 ```
 
 It is what the `--tty` GPU scanout tier is built behind (Smithay's
