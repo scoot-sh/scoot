@@ -97,6 +97,9 @@ impl GlesBackend {
     /// the same way it treats pixman failing, i.e. as "the render target is
     /// not there" (see that function's doc).
     pub(super) fn new(width: i32, height: i32) -> Result<Self, Box<dyn Error>> {
+        // Before Smithay's first EGL touch (see `lib_loadable`): on a box
+        // with no loadable libEGL that touch panics instead of failing.
+        lib_loadable(LIB_EGL_SONAME).map_err(|cause| format!("{cause}{FALL_BACK_HINT}"))?;
         let mut candidates: Vec<EGLDevice> = EGLDevice::enumerate()
             .map_err(|error| format!("could not enumerate EGL devices: {error}{FALL_BACK_HINT}"))?
             .collect();
@@ -170,6 +173,56 @@ impl GlesBackend {
 /// true and always actionable there is that the default renderer needs
 /// nothing this one could not find.
 const FALL_BACK_HINT: &str = "; --renderer pixman, the default, needs no GPU at all";
+
+/// The `dlopen` soname Smithay loads libEGL under (see `lib_loadable`).
+pub(super) const LIB_EGL_SONAME: &str = "libEGL.so.1";
+
+/// Whether `soname` can be `dlopen`ed right now.
+///
+/// Smithay reaches libEGL through `libloading` behind a `LazyLock` whose
+/// miss handler is `.expect("Failed to load LibEGL")` (`ffi.rs:148` at the
+/// pinned rev) -- the only `Library::new(...).expect(...)` in either the EGL
+/// or the GLES backend, checked in source. So on a box with no loadable
+/// libEGL, the first EGL touch panics instead of returning the per-candidate
+/// startup error this tier was designed to report (gh #177: the packaged
+/// `--renderer gles` died exactly there, before device enumeration ever
+/// ran). Both GLES tiers probe here first and report the designed error when
+/// there is nothing to load. `catch_unwind` is not an alternative: the
+/// workspace's release profile sets `panic = "abort"`, which turns that
+/// panic into a process abort no handler can intercept.
+///
+/// Once per session startup at most (both callers run before the session
+/// exists), so the one `CString` allocation is off every hot path by
+/// construction. `libc` is already a direct dependency, so this adds none.
+pub(super) fn lib_loadable(soname: &str) -> Result<(), Box<dyn Error>> {
+    let name =
+        std::ffi::CString::new(soname).map_err(|_| format!("{soname}: invalid library name"))?;
+    // SAFETY: `dlopen`/`dlclose`/`dlerror` are plain C calls with no
+    // Rust-side invariants to uphold; the `CString` outlives the call, the
+    // handle is closed on this thread before returning, and the `dlerror`
+    // text (if any) is copied out before any further dl* call could
+    // overwrite it.
+    unsafe {
+        libc::dlerror(); // Clear any stale error an earlier call left behind.
+        let handle = libc::dlopen(name.as_ptr(), libc::RTLD_NOW | libc::RTLD_LOCAL);
+        if handle.is_null() {
+            let text = libc::dlerror();
+            // `dlerror` may itself report nothing (or a non-UTF8 byte
+            // string); either way the operator gets a loud startup error
+            // naming the soname, never a backtrace.
+            let detail = if text.is_null() {
+                "unknown loader error".to_owned()
+            } else {
+                std::ffi::CStr::from_ptr(text)
+                    .to_string_lossy()
+                    .into_owned()
+            };
+            return Err(format!("could not load {soname}: {detail}").into());
+        }
+        libc::dlclose(handle);
+    }
+    Ok(())
+}
 
 /// One candidate device, all the way to a renderbuffer that really binds.
 ///
@@ -249,4 +302,35 @@ fn describe(device: &EGLDevice) -> String {
             |_| "no device node".to_owned(),
             |path: &PathBuf| path.display().to_string(),
         )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The probe passes wherever the suite runs: like `render/tests.rs`'s
+    /// GLES tests, this assumes a loadable libEGL on any machine running
+    /// the suite (the dev VM serves llvmpipe; CI resolves a software EGL)
+    /// -- and fails loudly rather than skipping where that breaks.
+    #[test]
+    fn libegl_loads_where_the_suite_runs() {
+        assert!(lib_loadable(LIB_EGL_SONAME).is_ok());
+    }
+
+    /// The gh #177 shape: a box with no such library gets a loud `Err`
+    /// naming the soname -- what both GLES tiers turn into the designed
+    /// startup error -- and never a panic. A bogus soname keeps Smithay's
+    /// own `LazyLock` untouched, so this runs safely alongside the GLES
+    /// suites under both runners.
+    #[test]
+    fn a_missing_library_is_a_named_error_not_a_panic() {
+        let missing = "libscoot-probe-no-such-library.so.1";
+        let error = lib_loadable(missing).expect_err("a missing library must fail the probe");
+        let text = error.to_string();
+        assert!(
+            text.contains("could not load"),
+            "a loud load failure, not a backtrace: {text}"
+        );
+        assert!(text.contains(missing), "the error names the soname: {text}");
+    }
 }

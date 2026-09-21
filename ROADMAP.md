@@ -77,6 +77,18 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[Nix package reaches both GPU tiers (gh
+  #177)](docs/backlog/resolved/nix-gpu-tiers-done.md)**
+  (2026-09-21) — `packages.scoot` force-links libEGL (nixpkgs niri's
+  `--no-as-needed` trick, Linux-only) so packaged `--renderer gles`
+  reaches the OS's EGL drivers instead of panicking in Smithay's
+  `dlopen` (proven on the dev VM: `the GLES renderer is up` over
+  llvmpipe); new `packages.scoot-gpu` carries `gpu-scanout` (`ldd`
+  shows libgbm, default still doesn't); a `dlopen` pre-flight turns a
+  missing libEGL into the designed startup error (proven live with the
+  library hidden in a mount namespace). Mesa ICDs stay the host OS's
+  by decision; Test 4 on the Asahi hardware stays open.
+
 - **[CI guards the Nix packaging (gh
   #173)](docs/backlog/resolved/ci-nix-packaging-done.md)**
   (2026-09-21) — `nix flake check -L` every PR in both jobs (each its own

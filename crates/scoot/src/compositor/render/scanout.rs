@@ -118,6 +118,12 @@ impl ScanoutBackend {
     /// node's fd and the exporter's the display node's. **Untested** -- this
     /// project has no such machine to try it on, and saying so is the point.
     pub(crate) fn new(gbm: &GbmDevice<DrmDeviceFd>) -> Result<Self, Box<dyn Error>> {
+        // Before Smithay's first EGL touch: without it that touch panics
+        // instead of failing (see `gles::lib_loadable`). An `Err` here
+        // reaches `try_scanout`, which falls back to the cpu renderer and
+        // dumb buffers the same way it does when the device cannot drive
+        // scanout.
+        super::gles::lib_loadable(super::gles::LIB_EGL_SONAME)?;
         // SAFETY: `EGLDisplay::new`'s contract is that nothing *else* in this
         // process calls `eglGetPlatformDisplay`/`eglTerminate` behind
         // smithay's back, so smithay's own refcounting of displays stays

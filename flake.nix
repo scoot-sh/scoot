@@ -42,6 +42,9 @@
       # `nix build` / `nix run`, for getting the binaries without a dev shell.
       # `scoot` is the whole compositor (plus the `scoot msg` client alias),
       # built `-p scoot` so `$out/bin` carries only the `scoot` binary;
+      # `scoot-gpu` is the same binary with the `gpu-scanout` build feature
+      # (`--tty --renderer gles` scans out from the GPU instead of reading
+      # back; needs OS EGL drivers -- see docs/nix.md);
       # `scootctl` is the standalone remote-control client that drives a
       # compositor running elsewhere (a VM) over its socket. On Linux the
       # default is the compositor; on Darwin the compositor is cfg'd out of
@@ -116,6 +119,54 @@
             # -lfoo resolves against. Checked by building, not by assuming.
             buildInputs = pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux (
               import ./vm/compositor-deps.nix pkgs
+            );
+
+            # Smithay reaches libEGL through `dlopen`, not a link-time
+            # `DT_NEEDED`, so the cc wrapper's RUNPATH logic (correct for
+            # `-lfoo` above) puts nothing in the RUNPATH for it -- and
+            # `--renderer gles` dies in Smithay's ffi with `Failed to load
+            # LibEGL` before device enumeration ever runs (gh #177). Forced
+            # the way nixpkgs' own niri package does it
+            # (`pkgs/by-name/ni/niri/package.nix`: "Force linking with
+            # libEGL ... so they can be discovered by `dlopen()`"):
+            # `--no-as-needed -lEGL` lands libEGL.so.1 in `DT_NEEDED`, which
+            # the loader resolves through the RUNPATH the cc wrapper builds
+            # from `buildInputs` -- so the `dlopen` then finds the
+            # already-loaded handle. No wrapper script and no
+            # `LD_LIBRARY_PATH` leaking into every spawned client;
+            # `readelf -d` shows the `NEEDED` entry, which is the audit. A
+            # `postFixup` `patchelf --add-rpath` would do the same job with
+            # a hand-computed store path; this reuses the wrapper's own
+            # path computation instead of duplicating it.
+            #
+            # Deliberately derivation-only, never an in-tree `RUSTFLAGS` or
+            # cargo config: CI's `ldd` gate asserts the plain `cargo build`
+            # links no libEGL, and that gate must keep passing. The closure
+            # always carries libglvnd, so this costs GPU-free operation
+            # nothing: libEGL *loads* everywhere, and what fails on a
+            # driverless box is device enumeration -- the designed startup
+            # error, reached through the compositor's own pre-flight probe.
+            #
+            # Mesa's vendor ICDs are NOT bundled here: they come from the
+            # host OS's OpenGL setup (on NixOS, `hardware.graphics`), the
+            # standard nixpkgs pattern -- bundling Mesa would risk shadowing
+            # the host's drivers (notably Asahi's) with wrong ones. So
+            # `--renderer gles` from this package needs an OS that provides
+            # EGL drivers; see docs/nix.md.
+            #
+            # Linux-only: these are GNU-ld flags and Apple's ld rejects
+            # them (`ld: unknown option: --push-state`), and there is no
+            # libEGL to link on Darwin anyway -- the compositor is cfg'd
+            # out there, so nothing reaches EGL. (Upstream niri, where this
+            # trick comes from, is Linux-only and never hits the question.)
+            env.RUSTFLAGS = pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isLinux (
+              toString (
+                map (arg: "-C link-arg=" + arg) [
+                  "-Wl,--push-state,--no-as-needed"
+                  "-lEGL"
+                  "-Wl,--pop-state"
+                ]
+              )
             );
 
             # The workspace's release profile sets `strip = true`, but nixpkgs'
@@ -203,12 +254,58 @@
           # Linux gets the compositor, Darwin gets the client.
           default = if pkgs.stdenv.hostPlatform.isDarwin then scootctl else scoot;
           inherit scoot scootctl;
+          # The GPU scanout tier as a package (gh #177): off by default in
+          # the build above because `backend_gbm` is a link-time libgbm
+          # dependency and GPU-free operation is a fixed decision (see
+          # `crates/scoot/Cargo.toml`), opted into here, where linking
+          # libgbm is the point. `overrideAttrs` keeps everything the base
+          # package sets (`cargoBuildFlags`, `buildInputs` -- libgbm is
+          # already in `vm/compositor-deps.nix` -- the EGL link forcing
+          # above, stripping, `doCheck`); the binary stays named `scoot`
+          # (`mainProgram` unchanged), so this is a second build of the
+          # same binary with the scanout tier compiled in. `ldd` on the two
+          # is the audit: `scoot-gpu` links libgbm, `scoot` does not.
+          #
+          # `cargoBuildFeatures`, not `buildFeatures`: the issue proposed
+          # the latter, but the build proved it a no-op -- `buildFeatures`
+          # is an argument to `buildRustPackage` (consumed when the base
+          # derivation is called, turned into `cargoBuildFeatures`), while
+          # `overrideAttrs` can only change the resulting derivation's
+          # own attrs. Overriding `buildFeatures` built an unfeatured
+          # binary (proven by `ldd`: no libgbm); `cargoBuildFeatures` is
+          # the attr the cargo hook actually reads
+          # (`build-rust-package/default.nix`), and the rebuild log shows
+          # `--features=gpu-scanout` in the hook flags.
+          # Darwin note: `gpu-scanout` enables Smithay's `backend_gbm`,
+          # which only compiles on Linux -- but Smithay itself is a
+          # Linux-only dependency of this crate, so on Darwin the feature
+          # resolves without building anything new and the package stays
+          # the same client-shaped binary. Proven by building, not by
+          # assuming; if that ever stops holding, gate this to Linux.
+          scoot-gpu = scoot.overrideAttrs (old: {
+            pname = "scoot-gpu";
+            cargoBuildFeatures = [ "gpu-scanout" ];
+            meta = old.meta // {
+              # The base description already says the honest per-system
+              # thing (compositor on Linux, `scoot msg` client on Darwin);
+              # the suffix names the one difference, per system too.
+              description =
+                old.meta.description
+                + (
+                  if pkgs.stdenv.hostPlatform.isDarwin then
+                    " (gpu-scanout build feature: Linux-only, same client binary here)"
+                  else
+                    " (gpu-scanout build feature: --tty --renderer gles scans out from the GPU)"
+                );
+            };
+          });
         }
       );
 
       # So `nix run . -- --headless -- foot` and `nix run . -- msg windows`
-      # work, and `nix run .#scootctl -- windows` runs the standalone client
-      # anywhere. Each `mainProgram` would resolve without the explicit
+      # work, `nix run .#scootctl -- windows` runs the standalone client
+      # anywhere, and `nix run .#scoot-gpu -- --tty -- ...` runs the scanout
+      # build. Each `mainProgram` would resolve without the explicit
       # naming; keeping it explicit rather than implied.
       apps = forEach (pkgs: {
         default = {
@@ -218,6 +315,10 @@
         scootctl = {
           type = "app";
           program = pkgs.lib.getExe self.packages.${pkgs.stdenv.hostPlatform.system}.scootctl;
+        };
+        scoot-gpu = {
+          type = "app";
+          program = pkgs.lib.getExe self.packages.${pkgs.stdenv.hostPlatform.system}.scoot-gpu;
         };
       });
 

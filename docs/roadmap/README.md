@@ -17,8 +17,7 @@ Every file here predates the rename to `scoot` (2026-09-18). The shipped
 entries keep the old name, `flexwm`, verbatim, for the same reason they are
 verbatim in every other respect: their nix store paths, typed input strings,
 screenshot paths and commands record what was actually run, and renaming
-through them would falsify that record. Read `flexwm` as `scoot`. (Item 6,
-the one entry still `status: planned`, happens to name neither.)
+through them would falsify that record. Read `flexwm` as `scoot`.
 
 | Item | Title | Status | PR |
 | ---- | ----- | ------ | -- |
@@ -30,7 +29,7 @@ the one entry still `status: planned`, happens to name neither.)
 | [5](./05-cursor-rendering.md) | Cursor rendering for `--tty` | done | #8 |
 | [5a](./05a-merge-authority.md) | Merge-authority history | done | — |
 | [5b](./05b-vt-switch-eperm.md) | VT-switch-back `EPERM` | done | #9 |
-| [6](./06-gpu-pipeline.md) | Real GPU rendering pipeline | **planned** | — |
+| [6](./06-gpu-pipeline.md) | Real GPU rendering pipeline | done on paper — unverified on a real GPU | #129, #130, #133, #135, #147 |
 | [7](./07-shm-resize-crash.md) | `wl_shm_pool.resize(0)` crash-DoS | done | #12 |
 | [8](./08-client-cursor-surface.md) | Client-supplied cursor images | done | #13 |
 | [9](./09-ipc-hardening.md) | IPC hardening | done | #14 |
@@ -44,5 +43,6 @@ the one entry still `status: planned`, happens to name neither.)
 | [17](./17-drm-device-selection.md) | DRM device-selection fallback + `--gpu` | done | #27 |
 | [18](./18-session-lock.md) | `ext-session-lock-v1` | done | #25 |
 
-Item 6 is the only remaining *ordered* milestone; everything else current
+Every numbered roadmap item is built (item 6 done on paper, item 19 in
+progress); everything else current
 lives in [`docs/backlog/`](../backlog/).

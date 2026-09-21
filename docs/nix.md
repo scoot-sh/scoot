@@ -2,6 +2,7 @@
 
 - [Consuming the flake](#consuming-the-flake)
 - [Platform notes](#platform-notes)
+- [GPU tiers from the flake](#gpu-tiers-from-the-flake)
 - [Home-manager module](#home-manager-module)
 - [NixOS module](#nixos-module)
 - [Settings failure modes](#settings-failure-modes)
@@ -31,10 +32,13 @@ environment.systemPackages = [ inputs.scoot.packages.${pkgs.system}.scoot ];
 
 `packages.<system>.scoot` is the compositor alone (`$out/bin` carries only
 the `scoot` binary, with the `scoot msg` client alias kept on it),
+`packages.<system>.scoot-gpu` the same binary with the `gpu-scanout` build
+feature (see [GPU tiers](#gpu-tiers-from-the-flake) below),
 `packages.<system>.scootctl` the standalone
 remote-control client, and `packages.<system>.default` is whichever is
 honest on that system (see [Platform notes](#platform-notes)). `apps`
-mirrors the same two (`nix run . -- ...`, `nix run .#scootctl -- ...`).
+mirrors all three (`nix run . -- ...`, `nix run .#scootctl -- ...`,
+`nix run .#scoot-gpu -- --tty -- ...`).
 
 ## Platform notes
 
@@ -50,6 +54,31 @@ The modules below follow the same split: the home-manager module
 manages the config file on any system (useful on macOS too, to keep the
 config you deploy to a Linux box next to the machine that edits it),
 while the NixOS module's session entry only means anything on NixOS.
+
+## GPU tiers from the flake
+
+Two packages, matching the two GPU tiers in
+[tty.md](tty.md#which-renderer-draws-the-frames):
+
+- `packages.<system>.scoot` (the default on Linux) composites on the CPU
+  with pixman and needs no GPU at all. `--renderer gles` is available from
+  this package -- the offscreen tier, still read back to main memory -- but
+  it needs EGL drivers from the **host OS**, not from the derivation: the
+  package ships libglvnd (the dispatch library Smithay `dlopen`s) while
+  Mesa's vendor ICDs come from the system (on NixOS, `hardware.graphics`
+  enabled). That split is the standard nixpkgs pattern, and it is
+  deliberate: bundling Mesa would risk shadowing the host's drivers --
+  notably Asahi's -- with wrong ones. On a box with no working EGL,
+  `--renderer gles` is a loud startup error naming the pixman default, not
+  a panic and not a silent downgrade (previously it panicked in Smithay's
+  `dlopen`; gh #177).
+- `packages.<system>.scoot-gpu` adds the `gpu-scanout` Cargo feature: under
+  `--tty --renderer gles` the frame is composited straight into the buffer
+  the CRTC scans out, with no read-back. Same binary name (`scoot`), the
+  same EGL-driver requirement as above, plus a real DRM seat. Scanout
+  drives the primary plane only and has never run on a real GPU -- every
+  measurement so far is a software rasteriser's (see
+  [Asahi.md](../Asahi.md)'s Test 4, which is what settles that).
 
 ## Home-manager module
 
