@@ -232,6 +232,74 @@ fn an_exclusive_zone_moves_windows_out_of_the_way() {
     );
 }
 
+/// The gh #183 cell no other test covers: a mapped bar with zero windows
+/// mapped. The zone is reserved and the bar's own pixels reach the
+/// framebuffer -- composition never had a window-count gate, and this pins
+/// that, so a bar on an empty desktop cannot regress to wallpaper-only
+/// while still holding its exclusive zone.
+#[test]
+fn a_mapped_bar_draws_with_no_windows_mapped() {
+    let mut fixture = Fixture::new();
+    fixture.run(Step::CreateLayer(LayerSpec::bar(30)));
+    fixture.run(Step::MapLayer {
+        index: 0,
+        color: BAR_BGRA,
+    });
+
+    assert_eq!(
+        fixture.usable(),
+        Rect::new(0, 30, CANVAS, CANVAS - 30),
+        "the zone is reserved with no windows"
+    );
+    let pixels = fixture.render();
+    assert_pixel(
+        &pixels,
+        CANVAS / 2,
+        15,
+        BAR_BGRA,
+        "the bar with no windows mapped",
+    );
+    assert_pixel(
+        &pixels,
+        CANVAS / 2,
+        CANVAS - 1,
+        BACKGROUND_BGRA,
+        "bare desktop below the bar",
+    );
+}
+
+/// The bufferless half of the #183 pin: a bar that committed (so it holds
+/// its zone) but never attached a buffer draws nothing with zero windows
+/// either -- reserved, not painted, with no crash and no garbage. The
+/// zero-window counterpart to
+/// `a_bar_reserves_its_zone_from_its_initial_commit_not_its_first_buffer`.
+#[test]
+fn a_bufferless_bar_reserves_but_draws_nothing_with_no_windows_mapped() {
+    let mut fixture = Fixture::new();
+    fixture.run(Step::CreateLayer(LayerSpec::bar(30)));
+
+    assert_eq!(
+        fixture.usable(),
+        Rect::new(0, 30, CANVAS, CANVAS - 30),
+        "the zone is reserved with no windows and no buffer"
+    );
+    let pixels = fixture.render();
+    assert_pixel(
+        &pixels,
+        CANVAS / 2,
+        15,
+        BACKGROUND_BGRA,
+        "nothing drawn where the bar will be",
+    );
+    assert_pixel(
+        &pixels,
+        CANVAS / 2,
+        CANVAS - 1,
+        BACKGROUND_BGRA,
+        "bare desktop below",
+    );
+}
+
 /// Two bars on the same edge stack: the second is placed below the first and
 /// the reserved strip is the sum, which is what `LayerMap` means by
 /// arranging exclusive surfaces first and shrinking the zone as it goes.

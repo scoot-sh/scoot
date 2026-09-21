@@ -77,6 +77,17 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[Top-layer bar content with no toplevels (gh
+  #183)](docs/backlog/resolved/layer-content-without-toplevels-done.md)**
+  (2026-09-21) — closed as could-not-reproduce, no compositor change: a
+  real exclusive-zone bar with a committed buffer draws with zero
+  toplevels on current `main` *and* on the reported rev `4f8707c` alike
+  (live `--nested` screenshot matrix — magenta fraction 1 in all three
+  cells at both revs — plus harness pixel pins for the mapped and the
+  bufferless zero-window cases, sensitivity-proven). The field symptom is
+  the designed bufferless-bar shape (zone reserved, nothing painted), so
+  quickshell had committed no bar buffer while the workspace was empty;
+  shared root with #182 refuted on the render half as well.
 - **[Layer-shell pointer clicks (gh
   #182)](docs/backlog/resolved/layer-shell-pointer-clicks-done.md)**
   (2026-09-21) — closed as could-not-reproduce, no compositor change: the
