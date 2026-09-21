@@ -80,7 +80,7 @@ programs.scoot = {
 | `package` | flake's own build | The binary installed to your profile. `null` installs no binary (files only). |
 | `settings` | `{ }` | Free-form config, rendered verbatim to TOML (see below). Empty renders a valid minimal file: the compositor runs it as pure defaults. |
 | `configFile` | `"scoot/config.toml"` | Where the rendered TOML lands, relative to `$XDG_CONFIG_HOME`. Keep the default unless you pass the same path via `--config` wherever you launch scoot. |
-| `sessionScript` | `null` | Startup script text, written executable to `scoot/session.sh` next to the config. Launch it with `scoot -- ~/.config/scoot/session.sh` (or exec it from your greetd/startwm entry). `null` writes no file. |
+| `sessionScript` | `null` | Startup script text, written executable beside the rendered config at `<dirOf configFile>/session.sh` (`scoot/session.sh` with the default `configFile`). Launch it with `scoot -- ~/.config/scoot/session.sh` for the default (or `~/.config/<that path>` after a `configFile` override), or exec it from your greetd/startwm entry. `null` writes no file. |
 | `portals.enable` | `true` | Install `scoot-portals.conf` to the per-user xdg-desktop-portal lookup path (`~/.config/xdg-desktop-portal/`), so ScreenCast/Screenshot resolve to the `wlr` backend inside a scoot session. Inert outside one (nothing reads it until `XDG_CURRENT_DESKTOP=scoot`). Turn off if you manage portal backends some other way. |
 
 The example above renders byte-for-byte to:
