@@ -77,6 +77,14 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[CI guards the Nix packaging (gh
+  #173)](docs/backlog/resolved/ci-nix-packaging-done.md)**
+  (2026-09-21) — `nix flake check -L` every PR in both jobs (each its own
+  systems) plus `nix fmt --check` over all tracked `.nix`, proven to fire
+  on a module typo cargo can't see; `nix build .#scoot .#scootctl`
+  main-only (5m10s cold, no reusable cache — per-push tax declined).
+  Workflow + docs only, zero `.rs`.
+
 - **[NixOS `session.command` (gh
   #171)](docs/backlog/resolved/nixos-session-command-done.md)**
   (2026-09-21) — the greeter entry's `Exec=` is no longer fixed: a

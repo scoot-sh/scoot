@@ -120,6 +120,30 @@ jobs:
         shell: nix develop --command bash -euo pipefail {0}
         run: cargo fmt --all --check
 
+      # The flake's own outputs -- `packages`, the `homeModules`/`nixosModules`
+      # wrappers, `checks.*.scoot-modules` -- are what a Nix consumer installs,
+      # and nothing else in this job evaluates them: `nix develop` reads only
+      # `devShells`. `nix flake check` evals every output for this system and
+      # builds and runs the module suite, so a change that breaks the packaging
+      # while `cargo build` stays green fails here (gh #173 -- proven by
+      # breaking a module option and watching this step go red while cargo
+      # stayed green; see the resolved ticket). Plain `run`, not `nix develop`:
+      # these are nix commands, not shell commands. Directly after `cargo fmt`
+      # -- the first step that realises the dev shell, so the store is warm --
+      # and before the Smithay builds below, so a broken package fails fast.
+      # `-L` is log detail, per the issue.
+      - name: nix fmt --check (all tracked .nix)
+        # `git ls-files` rather than a hand-listed set, so a new `.nix` file is
+        # covered without anyone remembering to list it; explicit paths rather
+        # than `nix fmt -- --check .` (deprecated directory form) or bare
+        # `nix fmt` (reads empty stdin and errors -- a pre-existing nixfmt
+        # quirk). Resolves to the flake's own `formatter` (pkgs.nixfmt).
+        run: |
+          git ls-files -z '*.nix' | xargs -0 nix fmt -- --check
+
+      - name: nix flake check
+        run: nix flake check -L
+
       # Also a superset of the documented `-p scoot --all-targets`, for the
       # same reason: their dependencies are built here anyway.
       - name: cargo clippy
@@ -355,6 +379,15 @@ jobs:
       - name: cargo check
         shell: nix develop --command bash -euo pipefail {0}
         run: cargo check --workspace --all-targets
+
+      # The Darwin half of gh #173: `nix flake check` on Linux omits the
+      # Darwin systems (and vice versa), so the Linux job above never
+      # evaluates `packages.aarch64-darwin.*`, the Darwin `apps`, or the
+      # Darwin module checks. Same command, seconds on a warm store; the
+      # `.nix` format pin lives in the Linux job only (formatting is
+      # system-independent -- running it twice would prove nothing twice).
+      - name: nix flake check
+        run: nix flake check -L
 
       - name: Save the cargo cache
         # Same condition as the Linux job's save -- see the comment there for

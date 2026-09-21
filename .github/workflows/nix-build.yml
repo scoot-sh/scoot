@@ -1,0 +1,70 @@
+# The expensive half of gh #173 -- the packaged artifacts users install.
+#
+# WHY THIS IS NOT IN ci.yml: `nix build` compiles the full release
+# dependency tree (Smithay included) inside the Nix store, which shares
+# nothing with ci.yml's cargo `target/` cache -- and this repo deliberately
+# keeps no Nix store cache (see ci.yml's note on magic-nix-cache), so every
+# run pays the full build from scratch. Measured 5m10s cold on the 4-vCPU
+# dev VM for both packages together (2026-09-21, branch
+# `backlog/ci-nix-packaging`), which is the same core count as these
+# runners, so that number is representative, not a lower bound. That cost
+# belongs on each merge to main, not on every PR push: ci.yml's every-PR
+# `nix flake check` already evals every output for its system and runs the
+# module suite (`checks.*.scoot-modules`), so what only this workflow can
+# catch is a *compile* breakage under `buildRustPackage` -- a stale
+# `cargoLock.outputHashes` after a Smithay rev bump, a missing
+# `buildInputs` C library, a file the build reads that fell out of the
+# fileset `src`. Rare, and worth one post-merge run rather than a per-push
+# tax. A red main here names the merge that broke the packaged build, and
+# is fixed forward like any other main-red. (Nightly was the other option;
+# it leaves main red for up to a day, which is strictly worse.)
+#
+# The `--version` lines turn "it compiled" into "the artifact runs": both
+# print without starting a session, so they need no seat, no socket and no
+# GPU. Separate `nix build` invocations (rather than one command building
+# both) only so each artifact gets a deterministic out-link for those
+# lines; the derivations built are the same either way.
+#
+# WHAT THIS CANNOT COVER: the same runner limits as ci.yml (no seat, no
+# VT, no /dev/dri, no GPU) -- this builds the binaries and prints their
+# versions, it never starts a session. Behavior stays on the dev VM behind
+# `cargo` and `scripts/smoke-test.sh`. The Darwin package
+# (`packages.aarch64-darwin.*`) is likewise not built here -- macOS CI in
+# this repo is check-only by decision, so that artifact stays covered the
+# way it is today (local `nix build` on a Mac).
+#
+# gpu-scanout is deliberately NOT built here: that package shape is gh
+# #177's ticket, not this one's.
+
+name: nix build (packaged artifacts)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: nix build .#scoot .#scootctl
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: DeterminateSystems/nix-installer-action@v23
+
+      # No Nix store cache -- the same deliberate call as ci.yml; see the
+      # header there for why magic-nix-cache is not used.
+      - name: nix build .#scoot .#scootctl, and run the packaged binaries
+        run: |
+          nix build .#scoot --out-link result-scoot --print-out-paths
+          nix build .#scootctl --out-link result-scootctl --print-out-paths
+          ./result-scoot/bin/scoot --version
+          ./result-scootctl/bin/scootctl --version
