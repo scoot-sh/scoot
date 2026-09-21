@@ -9,7 +9,7 @@ blocked: null
 # No `scoot --version`: a build can only be identified by starting it — DONE
 
 Requested as gh issue #176. Resolved 2026-09-21 as decided, with the
-ticket's shape intact: `scoot --version` and `scootctl --version` print
+ticket's shape intact (PR #195): `scoot --version` and `scootctl --version` print
 `scoot 0.1.0 (ipc protocol 3)` — the same `env!("CARGO_PKG_VERSION")`
 the IPC `version` reply reads (agree by construction) plus the IPC
 protocol number — and exit 0 with no compositor running.
