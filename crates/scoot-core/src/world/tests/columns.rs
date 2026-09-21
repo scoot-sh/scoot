@@ -172,6 +172,92 @@ fn column_width_cycles_through_presets() {
 }
 
 #[test]
+fn set_column_width_lands_on_the_named_preset() {
+    // The absolute half of the cycle above: one action lands on entry N of
+    // the width list instead of stepping past every other entry. The test
+    // world's list is `[0.5, 1.0]`, so index 1 is full width.
+    let mut world = world();
+    open(&mut world, 1);
+    assert_eq!(placement(&world, 1).rect.w, 485);
+
+    assert!(world.handle_action(Action::SetColumnWidth(1)).is_empty());
+    assert_eq!(placement(&world, 1).rect.w, 980);
+    assert_eq!(focused(&world), Some(1));
+
+    world.handle_action(Action::SetColumnWidth(0));
+    assert_eq!(placement(&world, 1).rect.w, 485);
+    assert_eq!(focused(&world), Some(1));
+}
+
+#[test]
+fn an_out_of_range_column_width_index_is_ignored() {
+    let mut world = world();
+    open(&mut world, 1);
+    let before = placement(&world, 1);
+    // One past the end, and the two extremes a client could send over a
+    // protocol that takes an unbounded number -- mirroring the
+    // workspace-index case, including the promise nothing moves.
+    for index in [2, usize::MAX / 2, usize::MAX] {
+        assert!(world.handle_action(Action::SetColumnWidth(index)).is_empty());
+        assert_eq!(placement(&world, 1), before, "index {index}");
+        assert_eq!(focused(&world), Some(1), "index {index}");
+    }
+}
+
+#[test]
+fn an_out_of_range_set_keeps_learned_widths() {
+    // The `handle_action` guard's pin: an ignored index must change nothing
+    // at all, not even the learned minimums a *landed* set clears (see the
+    // next test). Without the guard this narrows to the preset width.
+    let mut world = world();
+    open(&mut world, 1);
+    world.handle_event(Event::FrameObserved {
+        id: WindowId(1),
+        requested: Size::new(485, 580),
+        actual: Size::new(600, 580),
+    });
+    assert_eq!(placement(&world, 1).rect.w, 600);
+    world.handle_action(Action::SetColumnWidth(usize::MAX));
+    assert_eq!(placement(&world, 1).rect.w, 600);
+}
+
+#[test]
+fn set_column_width_forgets_learned_widths() {
+    // Choosing a width on purpose overrides what frames taught, exactly like
+    // `choosing_a_width_forgets_learned_widths` pins for the cycle.
+    let mut world = world();
+    open(&mut world, 1);
+    world.handle_event(Event::FrameObserved {
+        id: WindowId(1),
+        requested: Size::new(485, 580),
+        actual: Size::new(600, 580),
+    });
+    world.handle_action(Action::SetColumnWidth(0));
+    assert_eq!(placement(&world, 1).rect.w, 485);
+}
+
+#[test]
+fn set_column_width_on_an_empty_workspace_does_nothing() {
+    // No column to resize: the action must not reach one that isn't there.
+    let mut world = world();
+    world.handle_action(Action::SetColumnWidth(0));
+    world.handle_action(Action::SetColumnWidth(3));
+    assert_eq!(focused(&world), None);
+    assert!(world.arrange().placements.is_empty());
+}
+
+#[test]
+fn set_column_width_with_no_outputs_does_nothing() {
+    // Nothing to index into: the action must not reach a tree that isn't
+    // there. `reshape` already guards this, but it is the shape a protocol
+    // client can provoke (bind, then the output goes away).
+    let mut world = World::new(config());
+    world.handle_action(Action::SetColumnWidth(0));
+    world.handle_action(Action::SetColumnWidth(usize::MAX));
+    assert_eq!(world.workspaces(OutputId(1)), None);
+}
+
+#[test]
 fn layout_actions_on_an_empty_workspace_do_nothing() {
     let mut world = world();
     let actions = [
@@ -181,6 +267,8 @@ fn layout_actions_on_an_empty_workspace_do_nothing() {
         Action::MoveWindow(Vertical::Down),
         Action::ConsumeOrExpel(Horizontal::Left),
         Action::CycleColumnWidth,
+        Action::SetColumnWidth(0),
+        Action::SetColumnWidth(3),
         Action::FocusWorkspace(Vertical::Down),
         Action::MoveWindowToWorkspace(Vertical::Down),
         Action::CloseFocused,

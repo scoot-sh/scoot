@@ -26,6 +26,19 @@ impl World {
                 self.forget_learned_widths();
                 self.reshape(|o| o.active_workspace_mut().cycle_preset(presets));
             }
+            Action::SetColumnWidth(index) => {
+                // The range check lives here as well as in `set_preset` so
+                // an ignored index changes nothing at all -- not even learned
+                // widths: `forget_learned_widths` below would otherwise narrow
+                // a column whose preset never moved, making the "no-op" half
+                // observable in the arrangement. `reshape`'s own `fix_view`
+                // is idempotent, so it needs no such guard (the ignored
+                // workspace-index path already runs it the same way).
+                if index < presets {
+                    self.forget_learned_widths();
+                    self.reshape(|o| o.active_workspace_mut().set_preset(index, presets));
+                }
+            }
             Action::FocusWorkspace(dir) => self.reshape(|o| o.focus_workspace(dir)),
             // The focused output's workspaces, like every other `reshape`
             // action here. With more than one output this needs to say

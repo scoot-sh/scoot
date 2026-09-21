@@ -81,14 +81,13 @@ fn random_action(rng: &mut Rng, windows: &[WindowId], outputs: &[OutputId]) -> A
     } else {
         Vertical::Down
     };
-    match rng.below(14) {
+    match rng.below(15) {
         0 => Action::FocusColumn(horizontal),
         1 => Action::FocusWindow(vertical),
         2 => Action::MoveColumn(horizontal),
         3 => Action::MoveWindow(vertical),
         4 => Action::ConsumeOrExpel(horizontal),
-        5 => Action::CycleColumnWidth,
-        6 => Action::FocusWorkspace(vertical),
+        5 => Action::CycleColumnWidth,        6 => Action::FocusWorkspace(vertical),
         7 => Action::MoveWindowToWorkspace(vertical),
         8 if !windows.is_empty() => Action::FocusWindowId(windows[rng.below(windows.len())]),
         // Usually a plausible position, sometimes a wild one: this index
@@ -112,6 +111,15 @@ fn random_action(rng: &mut Rng, windows: &[WindowId], outputs: &[OutputId]) -> A
         // them (an unknown id leaves it where it was, and focus stays valid).
         11 => Action::MoveFocusedWindowToOutput(random_output(rng, outputs)),
         12 => Action::FocusOutput(random_output(rng, outputs)),
+        // The absolute width half: usually a plausible position, sometimes a
+        // wild one off the same wire -- and the column must survive all of
+        // them (an out-of-range index is ignored, and the stored preset stays
+        // a valid index into the width list).
+        13 => Action::SetColumnWidth(match rng.below(8) {
+            0 => usize::MAX,
+            1 => usize::MAX / 2,
+            other => other,
+        }),
         _ => Action::CloseFocused,
     }
 }

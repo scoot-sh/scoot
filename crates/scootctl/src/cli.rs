@@ -43,7 +43,7 @@ pub const ACTIONS_HELP: &str = "\
     focus-column|move-column|consume-or-expel   left|right
     focus-window|move-window                    up|down
     focus-workspace|move-window-to-workspace    up|down
-    focus-window-id ID | focus-workspace-index N | move-window-to-workspace-index N | focus-output ID | move-window-to-output ID | cycle-column-width | close | spawn COMMAND... | quit
+    focus-window-id ID | focus-workspace-index N | move-window-to-workspace-index N | focus-output ID | move-window-to-output ID | cycle-column-width | set-column-width N | close | spawn COMMAND... | quit
 ";
 
 pub const USAGE: &str = "\
@@ -73,7 +73,7 @@ ACTIONS:
     focus-column|move-column|consume-or-expel   left|right
     focus-window|move-window                    up|down
     focus-workspace|move-window-to-workspace    up|down
-    focus-window-id ID | focus-workspace-index N | move-window-to-workspace-index N | focus-output ID | move-window-to-output ID | cycle-column-width | close | spawn COMMAND... | quit
+    focus-window-id ID | focus-workspace-index N | move-window-to-workspace-index N | focus-output ID | move-window-to-output ID | cycle-column-width | set-column-width N | close | spawn COMMAND... | quit
 ";
 
 #[derive(Debug, PartialEq)]
@@ -289,6 +289,9 @@ pub fn action(args: &mut impl Iterator<Item = String>) -> Result<Action, Error> 
             output: number("an output id", args.next())?,
         },
         "cycle-column-width" => Action::CycleColumnWidth,
+        "set-column-width" => Action::SetColumnWidth {
+            index: number("a column width index", args.next())?,
+        },
         "close" => Action::CloseFocused,
         "spawn" => {
             let command: Vec<String> = args.collect();
@@ -540,8 +543,7 @@ mod tests {
     }
 
     #[test]
-    fn move_window_to_workspace_index_takes_a_number() {
-        assert_eq!(
+    fn move_window_to_workspace_index_takes_a_number() {        assert_eq!(
             parse_msg_args(&["action", "move-window-to-workspace-index", "3"]),
             Ok(Msg {
                 request: Request::Action(Action::MoveWindowToWorkspaceIndex { index: 3 }),
@@ -553,6 +555,22 @@ mod tests {
         // and `3` ambiguous.
         assert!(parse_msg_args(&["action", "move-window-to-workspace-index", "down"]).is_err());
         assert!(parse_msg_args(&["action", "move-window-to-workspace-index"]).is_err());
+    }
+
+    #[test]
+    fn set_column_width_takes_a_number() {
+        assert_eq!(
+            parse_msg_args(&["action", "set-column-width", "2"]),
+            Ok(Msg {
+                request: Request::Action(Action::SetColumnWidth { index: 2 }),
+                out: None,
+            })
+        );
+        // A number, not a direction -- mirroring the workspace-index pair:
+        // sharing the `cycle-column-width` name would make `2` ambiguous
+        // against a bare cycle.
+        assert!(parse_msg_args(&["action", "set-column-width", "down"]).is_err());
+        assert!(parse_msg_args(&["action", "set-column-width"]).is_err());
     }
 
     #[test]

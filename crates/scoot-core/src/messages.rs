@@ -93,6 +93,19 @@ pub enum Action {
     /// other windows (niri's consume-or-expel).
     ConsumeOrExpel(Horizontal),
     CycleColumnWidth,
+    /// Set the focused column's width to one specific entry of
+    /// [`Config::column_widths`](crate::Config::column_widths), by its
+    /// position in that list (0-based). The absolute half of
+    /// [`Action::CycleColumnWidth`]'s stepping: cycling cannot land on a
+    /// width, it can only step past it -- so "widen this column to the whole
+    /// output" is one keypress here instead of N cycle steps from wherever
+    /// the column already is.
+    ///
+    /// The same ignore rule as [`Action::FocusWorkspaceIndex`]: an index past
+    /// the end of the list does nothing, and with no window focused (or no
+    /// output at all) there is no column to resize. Like cycling, choosing a
+    /// width on purpose overrides any widths learned from frames.
+    SetColumnWidth(usize),
     FocusWorkspace(Vertical),
     /// Activate one specific workspace of the focused output, by its position
     /// in [`World::workspaces`](crate::World::workspaces)' list. Out of range

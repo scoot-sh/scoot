@@ -750,33 +750,41 @@ fn relative_steps_stay_on_the_full_path() {
 fn a_layout_action_over_ipc_leaves_a_clicked_taskbars_keyboard_alone() {
     // The boundary the predicate above draws: an action that changes
     // arrangement rather than where focus is reported to be must not spend a
-    // deliberate keyboard placement. `CycleColumnWidth` never moves focus,
-    // so the click -- and the keyboard it placed -- has to survive it.
+    // deliberate keyboard placement. Neither width action moves focus, so the
+    // click -- and the keyboard it placed -- has to survive both, including
+    // the indexed set (which stays out of the focus-family match exactly
+    // like the cycle it mirrors).
     let mut fixture = Fixture::drive();
     let focus_before = fixture.state.focus;
 
-    fixture.click_taskbar();
-    let response = fixture
-        .state
-        .handle_request(Request::Action(scoot_ipc::Action::CycleColumnWidth));
-    assert!(
-        matches!(response, Response::Ok { locked: false }),
-        "the layout action was not served"
-    );
+    for (n, action) in [
+        scoot_ipc::Action::CycleColumnWidth,
+        scoot_ipc::Action::SetColumnWidth { index: 1 },
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        fixture.click_taskbar();
+        let response = fixture.state.handle_request(Request::Action(action));
+        assert!(
+            matches!(response, Response::Ok { locked: false }),
+            "layout action {n} was not served"
+        );
 
-    assert_eq!(
-        fixture.state.focus, focus_before,
-        "a layout action moved window focus"
-    );
-    assert_eq!(
-        fixture.keyboard_surface(),
-        Some(fixture.clicked_surface()),
-        "a layout action ripped the keyboard out of the clicked taskbar"
-    );
-    assert!(
-        fixture.state.clicked_layer.is_some(),
-        "a layout action spent the taskbar's click"
-    );
+        assert_eq!(
+            fixture.state.focus, focus_before,
+            "layout action {n} moved window focus"
+        );
+        assert_eq!(
+            fixture.keyboard_surface(),
+            Some(fixture.clicked_surface()),
+            "layout action {n} ripped the keyboard out of the clicked taskbar"
+        );
+        assert!(
+            fixture.state.clicked_layer.is_some(),
+            "layout action {n} spent the taskbar's click"
+        );
+    }
 }
 
 #[test]
@@ -845,6 +853,84 @@ fn move_window_to_workspace_index_carries_the_focused_window_there() {
         fixture.state.focus,
         Some(focused),
         "an out-of-range move-to-index lost the focused window"
+    );
+}
+
+#[test]
+fn set_column_width_lands_through_the_whole_state_path() {
+    // The new action through conversion, `act`, `apply`: the focused
+    // window's column takes the named preset's width, focus stays put, and a
+    // render is requested. `drive` maps two windows, each its own column at
+    // the default (middle) preset, so naming index 0 narrows the focused
+    // one -- a relative width comparison, not a pixel pin, so no canvas
+    // geometry is baked in.
+    let mut fixture = Fixture::drive();
+    let focused = fixture.state.focus.expect("a focused window");
+    let before = fixture
+        .state
+        .world
+        .arrange()
+        .get(focused)
+        .expect("a placed window")
+        .rect
+        .w;
+
+    fixture.state.needs_render = false;
+    let response =
+        fixture
+            .state
+            .handle_request(Request::Action(scoot_ipc::Action::SetColumnWidth {
+                index: 0,
+            }));
+    assert!(
+        matches!(response, Response::Ok { locked: false }),
+        "the set-column-width action was not served"
+    );
+    assert_eq!(
+        fixture.state.focus,
+        Some(focused),
+        "a set-column-width moved window focus"
+    );
+    let after = fixture
+        .state
+        .world
+        .arrange()
+        .get(focused)
+        .expect("a placed window")
+        .rect
+        .w;
+    assert!(
+        after < before,
+        "a set-column-width to preset 0 did not narrow the column ({before} -> {after})"
+    );
+    assert!(
+        fixture.state.needs_render,
+        "a real set-column-width laid nothing out"
+    );
+
+    // Out of range over the same path: no width 99 exists, so the
+    // arrangement is byte-identical and focus is untouched -- the stale-list
+    // shape workspace-index already promises, now for widths.
+    let arrangement = fixture.state.world.arrange();
+    let response =
+        fixture
+            .state
+            .handle_request(Request::Action(scoot_ipc::Action::SetColumnWidth {
+                index: 99,
+            }));
+    assert!(
+        matches!(response, Response::Ok { locked: false }),
+        "the out-of-range set-column-width was not served"
+    );
+    assert_eq!(
+        fixture.state.world.arrange(),
+        arrangement,
+        "an out-of-range set-column-width moved anything at all"
+    );
+    assert_eq!(
+        fixture.state.focus,
+        Some(focused),
+        "an out-of-range set-column-width lost the focused window"
     );
 }
 
