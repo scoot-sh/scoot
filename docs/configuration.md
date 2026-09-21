@@ -14,7 +14,7 @@ scoot --headless [--width 1-65535] [--height 1-65535] [--outputs 1-8] [--rendere
 scoot --nested   [--width 1-65535] [--height 1-65535] [--renderer pixman|gles] [--socket PATH] [--config PATH] [-- COMMAND...]
 scoot --tty      [--gpu PATH] [--mode WxH] [--renderer pixman|gles] [--socket PATH] [--config PATH] [-- COMMAND...]
 scoot msg REQUEST          # the scootctl client, kept as an alias (see below)
-scoot --print-default-config   # emit a starting config file to stdout
+scoot --print-default-config [--write]   # emit a starting config file to stdout, or place it directly with --write
 scoot --version                # identify this build without starting anything
 scoot --help
 ```
@@ -216,7 +216,15 @@ No config file yet? `scoot --print-default-config >
 ~/.config/scoot/config.toml` writes a starting one to stdout (never to a
 path, so it cannot clobber anything), generated from the same defaults this
 page documents — every key present and commented out with its default as the
-value, so the file as-is is exactly the defaults. (On a machine with no
+value, so the file as-is is exactly the defaults. `scoot
+--print-default-config --write` places that same emission at the default
+location directly (`$XDG_CONFIG_HOME/scoot/config.toml`, else
+`~/.config/scoot/config.toml`) and prints `wrote <path>`: it creates the
+parent directory when missing, writes the file private to you (`0o600`),
+and refuses loudly rather than overwriting anything already there —
+including a symlink, which is refused as itself without being followed.
+There is no custom destination and no overwrite: stdout composes for every
+other path (`> wherever`). (On a machine with no
 `scoot` binary — macOS, where only the `scootctl` client builds — copy the
 [example below](#example-configtoml) instead.)
 

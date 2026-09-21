@@ -77,6 +77,13 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[`--print-default-config --write`
+  convenience](docs/backlog/resolved/default-config-write-done.md)**
+  (2026-09-21) — the stdout emitter's follow-up: `--write` places the same
+  emission at the default location (parents created, `0o600`, symlinks
+  refused as themselves), refusing loudly instead of overwriting — one
+  winner under concurrency. Coordinator-directed, no gh issue.
+
 - **[SIGHUP trigger for config
   reload](docs/backlog/resolved/reload-sighup-trigger-done.md)**
   (2026-09-21) — `kill -HUP` drives the shared reload path (no reply

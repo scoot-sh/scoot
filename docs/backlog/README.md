@@ -555,6 +555,12 @@ be revisited.
   — RESOLVED 2026-09-20: `scoot --print-default-config` emits a commented
   starting file to stdout, generated from the live defaults, parsing back to
   all of them exactly.
+- [`--print-default-config --write`: refuse-to-overwrite convenience](./resolved/default-config-write-done.md)
+  — RESOLVED 2026-09-21: the follow-up the entry above left open. `--write`
+  places the same emission at the default location (parents created, `0o600`,
+  symlinks refused as themselves) and refuses loudly — one winner under
+  concurrency — instead of overwriting; no custom path, no `scootctl`
+  surface.
 - [`scoot --help` hides `--renderer` under `--tty`](./resolved/cli-help-tty-missing-renderer-done.md)
   — RESOLVED 2026-09-20: one-line `--help` fix (`--tty` usage line names
   `[--renderer pixman|gles]`, no behavior change) plus a usage-vs-parser
