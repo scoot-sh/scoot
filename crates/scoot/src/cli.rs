@@ -16,7 +16,7 @@ USAGE:
     scoot --headless [--width 1-65535] [--height 1-65535] [--outputs 1-8] [--renderer pixman|gles] [--socket PATH] [--config PATH] [-- COMMAND...]
     scoot --nested [--width 1-65535] [--height 1-65535] [--renderer pixman|gles] [--socket PATH] [--config PATH] [-- COMMAND...]
     scoot --tty [--gpu PATH] [--mode WxH] [--renderer pixman|gles] [--socket PATH] [--config PATH] [-- COMMAND...]
-    scoot --print-default-config
+    scoot --print-default-config [--write]
     scoot --version
     scoot msg REQUEST
     scoot --help
@@ -145,15 +145,22 @@ pub enum Command {
     /// the IPC request's (see `scootctl`'s `Command::Version` doc for why
     /// the two spellings must not share a word).
     Version,
-    /// `scoot --print-default-config`: emit a starting config file,
-    /// generated from the compositor's own live defaults, to stdout (see
-    /// `compositor::config::default_config_toml`). Stdout, never a path:
-    /// it cannot clobber an existing config and it composes
+    /// `scoot --print-default-config [--write]`: emit a starting config file,
+    /// generated from the compositor's own live defaults (see
+    /// `compositor::config::default_config_toml`). Stdout by default, so it
+    /// cannot clobber an existing config and it composes
     /// (`scoot --print-default-config > ~/.config/scoot/config.toml`).
-    /// A first-arg flag like `--help`, not a backend and not `msg`: it needs
-    /// no running compositor -- producing a file before a session is
-    /// configured is the whole point.
-    PrintDefaultConfig,
+    /// With `--write` it goes to the default config location instead (see
+    /// `compositor::config::write_default_config`), which refuses loudly
+    /// rather than overwriting anything already there. A first-arg flag like
+    /// `--help`, not a backend and not `msg`: it needs no running
+    /// compositor -- producing a file before a session is configured is the
+    /// whole point.
+    PrintDefaultConfig {
+        /// Place the emission at the default config location instead of
+        /// printing it, refusing when anything already exists there.
+        write: bool,
+    },
     Compositor(CompositorOptions),
     Msg {
         request: Request,
@@ -265,7 +272,7 @@ pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Command, Error> 
     match args.next().as_deref() {
         None | Some("--help" | "-h" | "help") => Ok(Command::Help),
         Some("--version") => Ok(Command::Version),
-        Some("--print-default-config") => Ok(Command::PrintDefaultConfig),
+        Some("--print-default-config") => print_default_config(args),
         Some("--headless") => compositor(args, false, false).map(Command::Compositor),
         Some("--nested") => compositor(args, true, false).map(Command::Compositor),
         Some("--tty") => compositor(args, false, true).map(Command::Compositor),
@@ -273,6 +280,22 @@ pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Command, Error> 
             request: msg.request,
             out: msg.out,
         }),
+        Some(other) => Err(Error::Unknown(other.to_owned())),
+    }
+}
+
+/// `scoot --print-default-config [--write]`: the only trailing argument the
+/// flag takes is `--write`. Anything else is refused rather than ignored --
+/// a typo'd `--wirte` silently emitting to stdout would be exactly the "it
+/// ran, but not the way you asked" shape every other invalid flag in this
+/// file refuses (see [`renderer`]).
+fn print_default_config(mut args: impl Iterator<Item = String>) -> Result<Command, Error> {
+    match args.next().as_deref() {
+        None => Ok(Command::PrintDefaultConfig { write: false }),
+        Some("--write") => match args.next().as_deref() {
+            None => Ok(Command::PrintDefaultConfig { write: true }),
+            Some(extra) => Err(Error::Unknown(extra.to_owned())),
+        },
         Some(other) => Err(Error::Unknown(other.to_owned())),
     }
 }
@@ -456,22 +479,45 @@ mod tests {
     #[test]
     fn print_default_config_parses_to_its_own_command() {
         // A first-arg flag like `--help`, not a backend and not `msg`: it
-        // needs no running compositor, and it takes no further arguments.
+        // needs no running compositor, and bare it emits to stdout.
         assert_eq!(
             parse_args(&["--print-default-config"]),
-            Ok(Command::PrintDefaultConfig)
+            Ok(Command::PrintDefaultConfig { write: false })
+        );
+    }
+
+    #[test]
+    fn print_default_config_write_parses_and_anything_else_is_refused() {
+        // The one trailing argument the flag takes. A typo is an error, not
+        // a silent stdout emission -- see `print_default_config`.
+        assert_eq!(
+            parse_args(&["--print-default-config", "--write"]),
+            Ok(Command::PrintDefaultConfig { write: true })
+        );
+        assert_eq!(
+            parse_args(&["--print-default-config", "--wirte"]),
+            Err(Error::Unknown("--wirte".into()))
+        );
+        assert_eq!(
+            parse_args(&["--print-default-config", "--write", "--write"]),
+            Err(Error::Unknown("--write".into()))
+        );
+        assert_eq!(
+            parse_args(&["--print-default-config", "foo"]),
+            Err(Error::Unknown("foo".into()))
         );
     }
 
     #[test]
     fn usage_names_print_default_config_on_its_own_line() {
-        // The `--help` surface for the new flag: its own usage line, so a
-        // user reading `--help` can discover it without knowing the ticket.
+        // The `--help` surface for the flag and its one argument: its own
+        // usage line, so a user reading `--help` can discover it without
+        // knowing the ticket.
         assert!(
             USAGE
                 .lines()
-                .any(|line| line.trim() == "scoot --print-default-config"),
-            "--help hides the default-config flag"
+                .any(|line| line.trim() == "scoot --print-default-config [--write]"),
+            "--help hides the default-config flag or its --write argument"
         );
     }
 

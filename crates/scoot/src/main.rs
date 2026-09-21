@@ -46,13 +46,24 @@ fn run() -> Result<(), Box<dyn Error>> {
             Ok(())
         }
         cli::Command::Msg { request, out } => scootctl::run(&request, out.as_deref()),
-        cli::Command::PrintDefaultConfig => print_default_config(),
+        cli::Command::PrintDefaultConfig { write } => print_default_config(write),
         cli::Command::Compositor(options) => start_compositor(options),
     }
 }
 
 #[cfg(target_os = "linux")]
-fn print_default_config() -> Result<(), Box<dyn Error>> {
+fn print_default_config(write: bool) -> Result<(), Box<dyn Error>> {
+    if write {
+        // The refuse-to-overwrite convenience: same bytes stdout would have
+        // carried, placed at the default config location instead. The one
+        // summary line goes through the same EPIPE contract (`scoot
+        // --print-default-config --write | head -c0` is a quiet success);
+        // a refusal is an `Err`, which `main` reports on stderr and exits
+        // FAILURE for -- loud even when stdout is closed.
+        let path = compositor::config::write_default_config()?;
+        scootctl::output::print_line(&format!("wrote {}", path.display()))?;
+        return Ok(());
+    }
     // `USAGE` already ends in a newline, so `write_str`, not `print_line` --
     // and the same EPIPE contract as `--help`: a closed pipe
     // (`scoot --print-default-config | head -c0`) is a quiet success, not a
@@ -62,7 +73,7 @@ fn print_default_config() -> Result<(), Box<dyn Error>> {
 }
 
 #[cfg(not(target_os = "linux"))]
-fn print_default_config() -> Result<(), Box<dyn Error>> {
+fn print_default_config(_write: bool) -> Result<(), Box<dyn Error>> {
     // The emission is generated from the compositor's own defaults, which
     // live in the Linux-gated config module -- so there is no `scoot` binary
     // here that could emit them. Copy the example out of

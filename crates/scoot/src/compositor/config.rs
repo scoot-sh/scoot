@@ -807,7 +807,13 @@ pub fn load(explicit: Option<&Path>) -> Result<LoadedConfig, ConfigFileError> {
 /// A pure function of the two env vars it needs, like
 /// `scoot_ipc::socket::resolve`, so this is testable without touching real
 /// environment state.
-fn default_path(xdg_config_home: Option<OsString>, home: Option<OsString>) -> Option<PathBuf> {
+///
+/// Shared by both readers and the one writer: [`load`] (and
+/// [`startup_path`]) resolve the file to read through this, and
+/// [`write_default_config`] resolves the file to create through this -- so
+/// `--write` can never disagree with startup about where the default config
+/// lives.
+pub fn default_path(xdg_config_home: Option<OsString>, home: Option<OsString>) -> Option<PathBuf> {
     let non_empty = |v: &OsString| !v.is_empty();
     xdg_config_home
         .filter(non_empty)
@@ -816,6 +822,148 @@ fn default_path(xdg_config_home: Option<OsString>, home: Option<OsString>) -> Op
             home.filter(non_empty)
                 .map(|dir| PathBuf::from(dir).join(".config/scoot/config.toml"))
         })
+}
+
+// -- `--print-default-config --write` ----------------------------------------
+
+/// What `scoot --print-default-config --write` can fail with. Every variant
+/// is a loud refusal -- a non-zero exit naming the path -- never a silent
+/// fallback and never a clobber.
+#[derive(Debug)]
+pub enum WriteDefaultConfigError {
+    /// No default location resolves at all (neither `XDG_CONFIG_HOME` nor
+    /// `HOME` is set and non-empty): nowhere sensible to write, and writing
+    /// to the current directory instead would strand a config where neither
+    /// the user nor the loader looks for it.
+    NoBaseDir,
+    /// The parent directory is missing and could not be created.
+    Mkdir { path: PathBuf, source: io::Error },
+    /// Something already exists at the default location, so there is nothing
+    /// to do. This includes a symlink: `create_new` (`O_CREAT|O_EXCL`)
+    /// refuses the link itself without following it, so neither a live
+    /// target nor a dangling link is ever clobbered through this path.
+    Exists { path: PathBuf },
+    /// The file was created but its bytes could not be written (a
+    /// permissions failure past create, a full disk, ...). A mid-write
+    /// failure removes the partial file best-effort (see
+    /// [`finish_new_file_write`]), so this never leaves a torn config
+    /// behind to confuse the next startup.
+    Write { path: PathBuf, source: io::Error },
+}
+
+impl fmt::Display for WriteDefaultConfigError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NoBaseDir => write!(
+                f,
+                "could not resolve the default config location: \
+                 neither XDG_CONFIG_HOME nor HOME is set"
+            ),
+            Self::Mkdir { path, source } => write!(
+                f,
+                "could not create the config directory `{}`: {}",
+                path.display(),
+                source
+            ),
+            Self::Exists { path } => write!(
+                f,
+                "refusing to overwrite the existing config file `{}`",
+                path.display()
+            ),
+            Self::Write { path, source } => write!(
+                f,
+                "could not write the default config to `{}`: {}",
+                path.display(),
+                source
+            ),
+        }
+    }
+}
+
+impl std::error::Error for WriteDefaultConfigError {}
+
+/// Writes the [`default_config_toml`] emission to the default config
+/// location and returns that path, creating the parent directory when it is
+/// missing. The content is the same `String` stdout would have carried --
+/// one function, not a second formatter -- so the anti-drift pins cover
+/// both.
+///
+/// The create is `O_CREAT|O_EXCL` (`create_new`), not check-then-truncate:
+/// two concurrent invocations leave exactly one winner and one [`Exists`]
+/// refusal, never a torn file. The new file is mode `0o600` at creation --
+/// the config may one day hold sensitive values, matching the socket's
+/// posture -- and `0o600` carries no group/other bits for any umask to
+/// strip, so it stays private under every umask.
+///
+/// Resolution is [`default_path`] with the same two live env vars [`load`]
+/// reads: `--write` and startup cannot disagree about where the default
+/// config lives.
+pub fn write_default_config() -> Result<PathBuf, WriteDefaultConfigError> {
+    let Some(path) = default_path(
+        std::env::var_os("XDG_CONFIG_HOME"),
+        std::env::var_os("HOME"),
+    ) else {
+        return Err(WriteDefaultConfigError::NoBaseDir);
+    };
+    write_default_config_to(&path)?;
+    Ok(path)
+}
+
+/// The env-free core of [`write_default_config`], over an explicit path so
+/// tests can exercise it without touching process environment state.
+fn write_default_config_to(path: &Path) -> Result<(), WriteDefaultConfigError> {
+    if let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        fs::create_dir_all(parent).map_err(|source| WriteDefaultConfigError::Mkdir {
+            path: parent.to_owned(),
+            source,
+        })?;
+    }
+    let text = default_config_toml();
+    use std::os::unix::fs::OpenOptionsExt as _;
+    let file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(path)
+        .map_err(|source| {
+            if source.kind() == io::ErrorKind::AlreadyExists {
+                WriteDefaultConfigError::Exists {
+                    path: path.to_owned(),
+                }
+            } else {
+                WriteDefaultConfigError::Write {
+                    path: path.to_owned(),
+                    source,
+                }
+            }
+        })?;
+    finish_new_file_write(file, path, text.as_bytes())
+}
+
+/// Completes a create-new write. A mid-write I/O error (disk full, quota,
+/// ...) removes the partial file best-effort first: a torn config at the
+/// default location would read back as malformed on the next startup, which
+/// is worse than no file at all. The unlink is best-effort deliberately --
+/// on a full disk there may be nothing left to unlink with -- and its
+/// outcome never shadows the write error, which is what the refusal
+/// reports.
+fn finish_new_file_write(
+    mut file: fs::File,
+    path: &Path,
+    bytes: &[u8],
+) -> Result<(), WriteDefaultConfigError> {
+    use std::io::Write as _;
+    if let Err(source) = file.write_all(bytes) {
+        let _ = fs::remove_file(path);
+        return Err(WriteDefaultConfigError::Write {
+            path: path.to_owned(),
+            source,
+        });
+    }
+    Ok(())
 }
 
 /// Loads `path`. `explicit` says whether this came from `--config`, which is
@@ -2616,5 +2764,229 @@ mod tests {
         );
         let parsed = Color::parse(&spelled).expect("the emitted alpha form must parse");
         assert_eq!(hex(parsed), spelled, "the alpha form is not a fixed point");
+    }
+
+    // -- `--print-default-config --write` ------------------------------------
+
+    /// The default write location is the same resolution the loader reads:
+    /// with neither env var set there is no path at all, which is what
+    /// [`write_default_config`] refuses as `NoBaseDir` rather than writing
+    /// to the current directory.
+    #[test]
+    fn no_base_dir_resolves_to_no_path() {
+        assert_eq!(default_path(None, None), None);
+    }
+
+    /// The ticket's first acceptance: an existing file is refused loudly --
+    /// a `NoBaseDir`-shaped refusal naming the path, never a truncate --
+    /// and its bytes are untouched.
+    #[test]
+    fn write_refuses_an_existing_file_and_leaves_it_untouched() {
+        let dir = tempfile::tempdir().expect("a temp dir");
+        let path = dir.path().join("scoot/config.toml");
+        fs::create_dir_all(path.parent().expect("a parent")).expect("parents");
+        fs::write(&path, b"sentinel").expect("sentinel");
+        let error = write_default_config_to(&path).expect_err("an existing file must be refused");
+        assert!(
+            matches!(error, WriteDefaultConfigError::Exists { .. }),
+            "wrong refusal for an existing file: {error:?}"
+        );
+        assert!(
+            error.to_string().contains(path.to_str().expect("utf-8")),
+            "the refusal must name the path: {error}"
+        );
+        assert_eq!(
+            fs::read(&path).expect("re-read"),
+            b"sentinel",
+            "a refused write touched the existing file"
+        );
+    }
+
+    /// File-vs-stdout identity: the write path emits through the same
+    /// [`default_config_toml`], so the anti-drift pins cover both by
+    /// construction -- and this pins the construction.
+    #[test]
+    fn write_is_byte_identical_to_the_stdout_emission() {
+        let dir = tempfile::tempdir().expect("a temp dir");
+        let path = dir.path().join("scoot/config.toml");
+        write_default_config_to(&path).expect("a fresh path writes");
+        assert_eq!(
+            fs::read_to_string(&path).expect("re-read"),
+            default_config_toml()
+        );
+    }
+
+    /// Missing parents are created, like any tool writing its own config.
+    #[test]
+    fn write_creates_missing_parents() {
+        let dir = tempfile::tempdir().expect("a temp dir");
+        let path = dir.path().join("a/b/c/config.toml");
+        assert!(!path.parent().expect("a parent").exists());
+        write_default_config_to(&path).expect("missing parents are created");
+        assert_eq!(
+            fs::read_to_string(&path).expect("re-read"),
+            default_config_toml()
+        );
+    }
+
+    /// The created file is private to the user (`0o600`, matching the
+    /// socket's posture -- the config may one day hold sensitive values).
+    /// Set at creation, where no umask can add bits back.
+    #[test]
+    fn write_is_private_to_the_user() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = tempfile::tempdir().expect("a temp dir");
+        let path = dir.path().join("scoot/config.toml");
+        write_default_config_to(&path).expect("a fresh path writes");
+        let mode = fs::metadata(&path).expect("stat").permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "the written config is not private: {mode:o}");
+    }
+
+    /// A symlink at the default location is refused *as the link* --
+    /// `O_EXCL` applies before any traversal -- so neither a live target
+    /// nor a dangling link is clobbered through this path.
+    #[test]
+    fn write_refuses_a_symlink_without_touching_its_target() {
+        let dir = tempfile::tempdir().expect("a temp dir");
+        let target = dir.path().join("real.toml");
+        fs::write(&target, b"sentinel").expect("target");
+        let link = dir.path().join("config.toml");
+        std::os::unix::fs::symlink(&target, &link).expect("symlink");
+        let error = write_default_config_to(&link).expect_err("a symlink must be refused");
+        assert!(
+            matches!(error, WriteDefaultConfigError::Exists { .. }),
+            "wrong refusal for a symlink: {error:?}"
+        );
+        assert_eq!(
+            fs::read(&target).expect("re-read"),
+            b"sentinel",
+            "a refused write followed the symlink onto its target"
+        );
+        assert!(
+            fs::symlink_metadata(&link)
+                .expect("lstat")
+                .file_type()
+                .is_symlink(),
+            "a refused write replaced the symlink"
+        );
+
+        // Dangling links refuse the same way: the refusal is about the link
+        // itself existing, not about what it points at.
+        let dangling = dir.path().join("dangling.toml");
+        std::os::unix::fs::symlink(dir.path().join("nope.toml"), &dangling)
+            .expect("dangling symlink");
+        assert!(
+            matches!(
+                write_default_config_to(&dangling).expect_err("dangling refused"),
+                WriteDefaultConfigError::Exists { .. }
+            ),
+            "a dangling symlink took a different refusal path"
+        );
+    }
+
+    /// Two concurrent invocations leave exactly one winner and one refusal,
+    /// never a torn file: the race is on the create-new itself (parents
+    /// pre-created so `mkdir` is not what serializes them).
+    #[test]
+    fn concurrent_double_invoke_leaves_one_winner_and_an_intact_file() {
+        use std::sync::{Arc, Barrier};
+        let dir = tempfile::tempdir().expect("a temp dir");
+        let path = dir.path().join("scoot/config.toml");
+        fs::create_dir_all(path.parent().expect("a parent")).expect("parents");
+        let racers = 8;
+        let barrier = Arc::new(Barrier::new(racers));
+        let handles: Vec<_> = (0..racers)
+            .map(|_| {
+                let (barrier, path) = (Arc::clone(&barrier), path.clone());
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    write_default_config_to(&path).is_ok()
+                })
+            })
+            .collect();
+        let winners = handles
+            .into_iter()
+            .map(|handle| handle.join().expect("racer"))
+            .filter(|won| *won)
+            .count();
+        assert_eq!(
+            winners, 1,
+            "concurrent invocations must leave exactly one winner, not {winners}"
+        );
+        assert_eq!(
+            fs::read_to_string(&path).expect("re-read"),
+            default_config_toml(),
+            "the winner's file is torn"
+        );
+    }
+
+    /// An unwritable parent is a loud refusal naming the path, not a panic
+    /// and not a file elsewhere.
+    #[test]
+    fn an_unwritable_parent_is_a_loud_refusal() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = tempfile::tempdir().expect("a temp dir");
+        let locked = dir.path().join("locked");
+        fs::create_dir(&locked).expect("locked dir");
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o555)).expect("lock");
+        let path = locked.join("scoot/config.toml");
+        let error = write_default_config_to(&path).expect_err("an unwritable dir must be refused");
+        assert!(
+            error.to_string().contains(locked.to_str().expect("utf-8")),
+            "the refusal must name the path: {error}"
+        );
+        assert!(!path.exists(), "a refused write left a file behind");
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).expect("unlock");
+    }
+
+    /// A mid-write I/O failure (disk full, quota, ...) removes the partial
+    /// file: a torn config at the default location would read back as
+    /// malformed on the next startup, which is worse than no file at all.
+    /// Proven through [`finish_new_file_write`] over a read-only handle,
+    /// where every write deterministically fails the way ENOSPC would.
+    #[test]
+    fn a_mid_write_failure_removes_the_partial_file() {
+        let dir = tempfile::tempdir().expect("a temp dir");
+        let path = dir.path().join("config.toml");
+        fs::write(&path, b"partial").expect("partial");
+        let read_only = fs::File::open(&path).expect("a read-only handle");
+        let error = finish_new_file_write(read_only, &path, b"more bytes")
+            .expect_err("a failed write must be an error");
+        assert!(
+            matches!(error, WriteDefaultConfigError::Write { .. }),
+            "wrong error for a failed write: {error:?}"
+        );
+        assert!(!path.exists(), "a failed write left a partial file behind");
+    }
+
+    /// Emits-then-loads: the written file parses back through the loader to
+    /// the live defaults, closing the ticket's loop end to end.
+    #[test]
+    fn a_written_file_loads_back_to_the_live_defaults() {
+        let dir = tempfile::tempdir().expect("a temp dir");
+        let path = dir.path().join("scoot/config.toml");
+        write_default_config_to(&path).expect("a fresh path writes");
+        let loaded = load(Some(&path)).expect("the written file must load");
+        assert_eq!(
+            loaded.config,
+            Config::default(),
+            "the written [layout] drifted from Config::default()"
+        );
+        assert!(
+            loaded.keybindings.same_bindings_as(&Keybindings::default()),
+            "the written [binds] drifted from Keybindings::default()"
+        );
+        assert_eq!(loaded.scale, 1.0, "the written [output] drifted");
+        assert_eq!(loaded.gpu, None, "the written [tty] drifted");
+        assert_eq!(loaded.renderer, None, "the written [renderer] drifted");
+        assert!(
+            loaded.autostart.is_empty(),
+            "the written [autostart] drifted"
+        );
+        assert_eq!(
+            loaded.appearance,
+            Appearance::default(),
+            "the written [appearance] drifted from Appearance::default()"
+        );
     }
 }
