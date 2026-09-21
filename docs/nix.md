@@ -29,8 +29,9 @@ environment.systemPackages = [ inputs.scoot.packages.${pkgs.system}.scoot ];
 # nix run github:scoot-sh/scoot -- --headless -- foot
 ```
 
-`packages.<system>.scoot` is the compositor (with the `scoot msg` client
-alias kept on it), `packages.<system>.scootctl` the standalone
+`packages.<system>.scoot` is the compositor alone (`$out/bin` carries only
+the `scoot` binary, with the `scoot msg` client alias kept on it),
+`packages.<system>.scootctl` the standalone
 remote-control client, and `packages.<system>.default` is whichever is
 honest on that system (see [Platform notes](#platform-notes)). `apps`
 mirrors the same two (`nix run . -- ...`, `nix run .#scootctl -- ...`).

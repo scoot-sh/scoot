@@ -77,6 +77,13 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[`packages.scoot` no longer ships `scootctl` (gh
+  #172)](docs/backlog/resolved/scoot-package-ships-scootctl-done.md)**
+  (2026-09-21) — `cargoBuildFlags = [ "-p" "scoot" ]`, packaging matching
+  the documented split: `packages.scoot` bin carries only `scoot` on Linux
+  and Darwin alike (the 529440-byte redundant client is gone),
+  `scootctl`/wrappers/`apps`/module checks all still resolve, live IPC
+  proven against the packaged pair. Flake-only, zero `.rs`.
 - **[Top-layer bar content with no toplevels (gh
   #183)](docs/backlog/resolved/layer-content-without-toplevels-done.md)**
   (2026-09-21) — closed as could-not-reproduce, no compositor change: a
