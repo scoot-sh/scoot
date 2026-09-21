@@ -59,7 +59,8 @@ Where each command ran is stated; store paths are raw. Base: `main` at
   `packages.scootctl` bin holds ONLY `scootctl` (620624 bytes).
 - Darwin `scoot` still honest: `<scoot>/bin/scoot --headless` prints
   `scoot: the compositor only runs on Linux; \`scoot msg\` works
-  everywhere`, exit 0.
+  everywhere`, exit 1 (non-Linux `start_compositor` returns `Err`, and
+  `main` maps any error to failure by design).
 - Dev VM (aarch64-linux, via the 9p mount `/mnt/scoot`, verified to carry
   the fix at `flake.nix:96`),
   `nix build /mnt/scoot#scoot /mnt/scoot#scootctl --print-out-paths`:
