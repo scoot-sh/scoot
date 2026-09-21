@@ -129,6 +129,22 @@ A clean break, with **no fallback to the old names**:
 A config file left at `~/.config/flexwm/config.toml` is **not** loaded — move
 it, or pass `--config PATH`.
 
+The session-identity half of the same rename — these live in *your* files
+rather than scoot's, which is why they bite. If your own setup named the old
+desktop, update it:
+
+| Was | Is | Who it breaks |
+| --- | --- | --- |
+| `XDG_CURRENT_DESKTOP=flexwm` (set by your own wrapper or session script) | `=scoot` (the compositor now exports this to every child itself, unconditionally) | anything matching on it — notably portal backend selection |
+| `DesktopNames=flexwm` in a hand-rolled session `.desktop` | `DesktopNames=scoot` | greeter entries |
+| `flexwm-portals.conf` | `scoot-portals.conf` | portal backend selection stops resolving |
+
+The repo moved too: `github:yackey-labs/flexwm` → `github:scoot-sh/scoot`.
+GitHub redirects the old URL, so an existing clone keeps working while
+silently pointing at the old name — update `origin` by hand (`git remote
+set-url origin https://github.com/scoot-sh/scoot.git`) and repoint any
+pinned flake input (`scoot.url = "github:scoot-sh/scoot"`).
+
 The names clients see followed too: the `wl_seat` name, `wl_output`'s `make`
 (and the `xdg_output` description built from it) and the `--nested` window's
 own title/app-id are all `scoot` now, so anything matching on those strings

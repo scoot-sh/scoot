@@ -5,6 +5,7 @@
 - [GPU tiers from the flake](#gpu-tiers-from-the-flake)
 - [Home-manager module](#home-manager-module)
 - [NixOS module](#nixos-module)
+- [Migrating from a hand-rolled packaging](#migrating-from-a-hand-rolled-packaging)
 - [Settings failure modes](#settings-failure-modes)
 - [Reference: live defaults](#reference-live-defaults)
 
@@ -146,6 +147,12 @@ user content lives. Field names, types and defaults are documented in
 is at the bottom of this page, pasted from a real
 `scoot --print-default-config` emission, not hand-written.
 
+After `home-manager switch`, apply the new settings without re-logging in:
+`scoot msg reload` (`scootctl reload` is the same client) re-reads the file
+and re-applies what can move live; startup-only fields are refused with a
+message rather than silently kept (see
+[configuration.md](configuration.md#reloading-the-config)).
+
 ## NixOS module
 
 ```nix
@@ -200,12 +207,67 @@ session list for the autologin target — so on a box that auto-logs-in,
 adding *any* session package can move that target. If you use
 `autoLogin`, pin `services.displayManager.defaultSession` explicitly.
 
+A complete session, as one config — the home-manager side declares the
+config and the startup script, the NixOS side points the greeter entry at
+that script:
+
+```nix
+# Home configuration (user `alice`):
+programs.scoot = {
+  enable = true;
+  settings = {
+    output.scale = 2.0;
+    binds."super+t" = "spawn foot";
+  };
+  sessionScript = ''
+    waybar &
+    exec foot
+  '';
+};
+
+# System configuration:
+programs.scoot = {
+  enable = true;
+  session.enable = true;
+  session.command = "${config.programs.scoot.package}/bin/scoot --tty -- /home/alice/.config/scoot/session.sh";
+};
+```
+
+The greeter starts scoot with the session script instead of a bare
+compositor. The script path is absolute (`Exec=` lines get no shell
+expansion), and it is the default `<dirOf configFile>/session.sh` — a
+`configFile` override moves both halves, so keep them paired.
+
 The config file itself is per-user, so it stays in the home-manager
 module above — the NixOS module owns the binary and the login entry,
 nothing else. (Direct-module users, not via this flake: set
 `programs.scoot.package` explicitly on both sides; there is no overlay,
 so no `pkgs.scoot` exists to default to, and the NixOS module fails
 loudly at eval instead of writing a session entry with no binary.)
+
+## Migrating from a hand-rolled packaging
+
+Converting an existing `flexwm` setup to the flake is three renames, all
+silent at build time:
+
+- **`${pkg}/bin/flexwm` → `${pkg}/bin/scoot`** in any
+  `writeShellScriptBin` wrapper or `Exec=` line. Nix interpolates the store
+  path without checking the binary exists, so a stale path builds fine and
+  fails at the login screen.
+- **`xdg.configFile."flexwm/config.toml"` → `programs.scoot.settings`**
+  (or `"scoot/config.toml"`). This is the dangerous one: scoot only reads
+  the `scoot` path, and a missing file at the default path is silent by
+  design (see
+  [configuration.md](configuration.md#failure-semantics)) — so a stale path
+  boots happily on built-in defaults, silently dropping scale and binds.
+  Move the content into `settings` and delete the old entry, otherwise your
+  real config sits orphaned at a path nothing reads while the module renders
+  defaults where scoot looks.
+- **The module split**: `homeModules.scoot` (the legacy spelling
+  `homeManagerModules.scoot` still resolves) owns the config file;
+  `nixosModules.scoot` owns the binary and the login-screen entry. A
+  hand-rolled `xdg.configFile` next to the module manages a file scoot
+  never reads — keep the module's and delete the hand-rolled one.
 
 ## Settings failure modes
 
@@ -231,6 +293,14 @@ values are the live defaults). Pasted from a real
 `scoot --print-default-config` emission on 2026-09-20 (dev-VM Linux
 build of `main` at `82371df`), not hand-written — regenerate rather
 than edit by hand if it ever looks stale:
+
+Two keys describe less than the packaged binary decides: setting
+`backend = "gles"` needs EGL drivers from the host OS (on NixOS,
+`hardware.graphics` enabled) and is a loud startup error without them,
+and the `--tty` scanout tier needs `packages.scoot-gpu` instead of
+`packages.scoot` — see [GPU tiers from the
+flake](#gpu-tiers-from-the-flake). `[tty] gpu` is unaffected by packaging
+either way: it names a host DRM device path, not a build feature.
 
 ```toml
 [layout]

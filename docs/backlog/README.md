@@ -617,7 +617,7 @@ exactly what `State::spawn` started), and two gaps. They share a mechanism
   home-manager left as a pointer for the flake ticket. The entry's design
   argument stands: config is *state*, the session script is *behavior*, and
   the reason that line holds is that one vocabulary parses in three doors.
-- [Docs gaps found converting a real NixOS config](./meta/nixos-conversion-docs-gaps.md) — gh #178: CHANGELOG session-identity strings, repo-move notice, a migration section in `docs/nix.md`, packaged-renderer honesty, an end-to-end session example, plus two small stalenesses.
+- [Docs gaps found converting a real NixOS config](./resolved/nixos-conversion-docs-gaps-done.md) — RESOLVED 2026-09-21 (gh #178): CHANGELOG session-identity strings + repo-move notice, a migration section in `docs/nix.md`, a packaged-renderer pointer on the live-defaults reference, an end-to-end session example on the new `session.command` surface, the `scoot msg reload` one-liner. Two premises stale at fix time, corrected not preserved: the roadmap row (fixed by #198 already) and the renderer premise (fixed by #198's GPU tiers).
 
 ### Meta
 - [Split the CLI out into `scootctl`](./resolved/rename-flex-family-done.md) — CLOSED 2026-09-20: the `flexwm` → `scoot` rename half landed 2026-09-18 (PR #128); the crate split landed 2026-09-20 ([record](./resolved/scootctl-split-done.md)): new `scootctl` lib+bin crate, `scoot msg` kept as a permanent alias, Darwin default is `scootctl`. A status bar stays separate.
