@@ -77,6 +77,19 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[NixOS-conversion docs gaps (gh
+  #178)](docs/backlog/resolved/nixos-conversion-docs-gaps-done.md)**
+  (2026-09-21) — docs-only: the CHANGELOG rename entry gains its
+  session-identity half (`XDG_CURRENT_DESKTOP`, `DesktopNames`,
+  `scoot-portals.conf` — framed as the converter's own files, since none
+  of the old names ever existed in-tree) plus the `yackey-labs/flexwm` →
+  `scoot-sh/scoot` move; `docs/nix.md` gains a migration section (wrapper
+  binary, orphaned-config fail-safe warning, module split), an end-to-end
+  session example on the `session.command` surface (eval-rendered, not
+  booted), a packaged-renderer pointer on the live-defaults reference, and
+  the `scoot msg reload` one-liner. Two premises stale at fix time: the
+  roadmap row (#198 fixed it) and the renderer premise (#198's GPU tiers).
+
 - **[Nix package reaches both GPU tiers (gh
   #177)](docs/backlog/resolved/nix-gpu-tiers-done.md)**
   (2026-09-21) — `packages.scoot` force-links libEGL (nixpkgs niri's
