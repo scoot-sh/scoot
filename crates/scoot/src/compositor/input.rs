@@ -402,8 +402,9 @@ impl State {
         self.pointer_move_quietly(location.x, location.y);
     }
 
-    /// Moves the pointer by a relative delta, clamped to the current
-    /// output's bounds. `--tty`'s only source of pointer motion: unlike
+    /// Moves the pointer by a relative delta, clamped to the union of every
+    /// output's bounds (see [`State::clamp_to_output_union`]). `--tty`'s only
+    /// source of pointer motion: unlike
     /// nested's host-forwarded motion (already absolute) or IPC's
     /// `pointer move X Y`, libinput reports relative dx/dy for a plain
     /// mouse, with no absolute position of its own -- this is what turns
@@ -425,24 +426,8 @@ impl State {
         let Some(pointer) = self.seat.get_pointer() else {
             return;
         };
-        // The *logical* output extent, not the physical one: the pointer
-        // lives in logical coordinates (`pointer_move`, the core and every
-        // surface all use them), while `current_mode()` is the physical
-        // framebuffer size. Clamping against the physical size at a scale != 1
-        // lets the pointer be driven past the last logical pixel -- off the
-        // real desktop and, under `--tty`, onto a coordinate no output
-        // contains. `logical_size` is the same rectangle the core and the
-        // `Space` use, so the clamp can never disagree with what is on screen.
-        // The primary output's extent (see `Outputs::primary`): clamping to
-        // the union of every output, or to the one the pointer is on, is the
-        // multi-output item. Unreachable with more than one output today --
-        // this is `--tty`'s relative motion, and `--tty` has one output;
-        // `--outputs` is `--headless`, whose only pointer source is the
-        // absolute IPC one, which does not clamp at all.
-        let (width, height) = self.outputs.primary().map(logical_size).unwrap_or((0, 0));
         let current = pointer.current_location();
-        let x = clamp_to_extent(current.x + dx, width);
-        let y = clamp_to_extent(current.y + dy, height);
+        let (x, y) = self.clamp_to_output_union(current.x + dx, current.y + dy);
         // The absolute core, not `pointer_move`: activity was announced
         // above, and the relative deltas here are the raw device pairs, not
         // the clamped position change -- the relative event reports the
@@ -1011,13 +996,98 @@ impl State {
     }
 }
 
+/// Clamps a pointer target to the union of every output's logical geometry
+/// (milestone 19, phase D).
+///
+/// The union, not the output under the pointer: the milestone's focus
+/// decision is that the pointer position picks the output, and a clamp to
+/// the output the pointer is already on would make that unreachable --
+/// relative motion past the first output's edge would clamp back onto it,
+/// trapping the pointer on one screen forever. The union lets motion cross
+/// onto the next output, and the existing focus derivation then applies
+/// there unchanged.
+///
+/// The union is a bounding box, not a union of pixels: with uneven outputs
+/// it contains dead zones over no output, where the pointer may rest and
+/// where [`State::output_under`] misses exactly as an off-output absolute
+/// move does. Bounds are half-open like [`State::output_under`]'s, so the
+/// seam pixel between two adjacent outputs belongs to the one on its
+/// right/below and the far edge clamps to `right - 1`.
+///
+/// Logical, not physical: the pointer lives in logical coordinates
+/// (`pointer_move`, the core and every surface all use them), while
+/// `current_mode()` is the physical framebuffer size. Clamping against the
+/// physical size at a scale != 1 lets the pointer be driven past the last
+/// logical pixel. [`State::space`]'s geometries are the same logical
+/// rectangles the core lays out in (see [`logical_size`], which agrees with
+/// them by construction), so the clamp can never disagree with what is on
+/// screen.
+///
+/// Costs one geometry lookup per output -- on the per-motion hot path, but
+/// a linear scan over a handful of outputs against the hit test,
+/// constraint resolution and socket writes every motion already pays (see
+/// `move_absolute`'s measured ranges). A single output takes the old
+/// per-extent clamp exactly (see below), so one-output sessions neither
+/// behave nor measure differently.
+///
+/// [`State::space`]: super::State::space
+impl State {
+    fn clamp_to_output_union(&self, x: f64, y: f64) -> (f64, f64) {
+        if self.outputs.len() == 1 {
+            // The fast path, and the only production shape until phase E drives
+            // a second `--tty` connector: relative motion is `--tty` libinput's,
+            // and `--tty` has one output. The old expression exactly -- the
+            // primary's logical extent through `clamp_to_extent` -- so the
+            // single-output motion path keeps its measured cost (release, dev
+            // VM, 200k `pointer_move_relative` x5: 561ns/event median before,
+            // 665ns without this branch, back to overlapping after) as well as
+            // its behavior. The branch predicts perfectly in production: this
+            // is `--tty`'s only pointer source, and it never sees two outputs
+            // before phase E.
+            let (width, height) = self.outputs.primary().map(logical_size).unwrap_or((0, 0));
+            return (clamp_to_extent(x, width), clamp_to_extent(y, height));
+        }
+        let mut bounds: Option<(i32, i32, i32, i32)> = None;
+        for output in self.outputs.iter() {
+            let Some(geometry) = self.space.output_geometry(output) else {
+                continue;
+            };
+            // Saturating: the sum is config-derived, not client-derived, and a
+            // saturated edge merely stacks two outputs rather than wrapping one
+            // into negative coordinates (same reasoning as `add_output`'s).
+            let right = geometry.loc.x.saturating_add(geometry.size.w);
+            let bottom = geometry.loc.y.saturating_add(geometry.size.h);
+            bounds = Some(match bounds {
+                Some((left, top, right_edge, bottom_edge)) => (
+                    left.min(geometry.loc.x),
+                    top.min(geometry.loc.y),
+                    right_edge.max(right),
+                    bottom_edge.max(bottom),
+                ),
+                None => (geometry.loc.x, geometry.loc.y, right, bottom),
+            });
+        }
+        let Some((left, top, right, bottom)) = bounds else {
+            // No output yet: the old path read a `(0, 0)` extent here, which
+            // clamps every coordinate to `0.0`.
+            return (0.0, 0.0);
+        };
+        (
+            clamp_to_extent(x - left as f64, right.saturating_sub(left)) + left as f64,
+            clamp_to_extent(y - top as f64, bottom.saturating_sub(top)) + top as f64,
+        )
+    }
+}
+
 /// Clamps a coordinate to `[0, extent)`, `extent` being a dimension in
 /// logical pixels (so `extent == 0` -- no output yet -- clamps everything to
 /// `0`, same as the pointer starting at the origin before any output exists).
-/// Logical, not physical: see `pointer_move_relative`'s comment on why the two
+/// Logical, not physical: see [`State::clamp_to_output_union`] on why the two
 /// differ once an output scale is set.
 /// Pulled out of `pointer_move_relative` so it's testable without a live
 /// seat, same rationale as `first_free` in `nested/buffers.rs`.
+///
+/// [`State::clamp_to_output_union`]: super::State::clamp_to_output_union
 fn clamp_to_extent(value: f64, extent: i32) -> f64 {
     value.clamp(0.0, (extent - 1).max(0) as f64)
 }

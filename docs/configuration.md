@@ -122,15 +122,27 @@ What a second output **is**, today:
   each configured to its own output's size, each drawn onto its own screen,
   with the keyboard on the pointer's output's surface -- and `locked` waits
   for every output's blanked frame, so no screen confirms while another
-  still shows the desktop.
+  still shows the desktop;
+- its own workspaces in `ext-workspace-v1`: one group per output, each with
+  that output's list and active index, so a bar reads its own screen and a
+  switch on one output never disturbs another's;
+- its own head in `wlr-output-management`: one head per output with its own
+  name, mode and position (`apply`/`test` stay refused — see
+  [protocols.md](protocols.md#display-information-wlr-output-management-v1));
+- a pointer that crosses it: relative motion clamps to the union of every
+  output's geometry, so the mouse reaches the second screen instead of
+  trapping on the first — the seam pixel belongs to the output on its right,
+  and absolute motion is never clamped.
 
 What it is **not**, yet — the work tracked in
-`docs/backlog/core/multi-output.md` (milestone 19, phases D–E):
+`docs/backlog/core/multi-output.md` (milestone 19, phase E and beyond):
 
-- `wlr-output-management` publishes one head, and `ext-workspace` publishes
-  one group. A second output also shows whatever the layout placed there —
-  and new windows still open on the first output, since nothing moves a
-  window across outputs yet.
+- new windows still open on the first output, and nothing moves a window
+  across outputs yet — cross-output moves (and the `output_leave` events
+  they need) belong to a future phase;
+- no per-output mode/scale/position configuration surface:
+  `wlr-output-management` `apply`/`test` stay refused;
+- `--tty` driving two connectors at once (phase E, hardware-gated).
 
 ## Starting a session
 

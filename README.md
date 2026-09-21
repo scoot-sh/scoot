@@ -49,8 +49,10 @@ Linux, and daily-driven on `--tty`** (2026-09-18).
   `--headless --outputs N` now creates several virtual outputs for testing,
   each with its own geometry, its own scrolling strip and its own composited
   framebuffer (screenshots, screen captures, gamma and frame callbacks all
-  work per output) — but workspace groups and output management are still
-  first-output-only, and `--tty` still drives one connector.
+  work per output) — and workspace groups, output-management heads and the
+  pointer clamp are per-output too — but new windows still open on the first
+  output, nothing moves one across outputs yet, and `--tty` still drives one
+  connector.
 - **No XWayland.** X11-only applications do not run.
 - **GPU scanout is new and narrow.** `--tty --renderer gles` scans out from
   the GPU, but only in a `gpu-scanout` build, only on the primary plane (no
@@ -121,10 +123,12 @@ about device choice, hotplug and modes is in [docs/tty.md](docs/tty.md). Run
 `--headless --outputs N` (1–8) creates N virtual outputs side by side, so
 per-output behaviour is testable with no second monitor: each gets its own
 `wl_output`, its own place in the coordinate space, its own scrolling
-strip, its own composited strip, its own layer-shell zones and input, and
-its own lock surface — so `scootctl screenshot --output 2` answers with the
-second output's own pixels, a bar on one output reserves space only there,
-and a session lock blanks every output before it confirms.
+strip, its own composited strip, its own layer-shell zones and input, its
+own lock surface, its own workspace group and output-management head — so
+`scootctl screenshot --output 2` answers with the second output's own
+pixels, a bar on one output reserves space only there, the pointer crosses
+onto the second screen instead of trapping on the first, and a session lock
+blanks every output before it confirms.
 `--nested` and `--tty` warn and ignore the flag, having one host window and
 one CRTC respectively. See
 [docs/configuration.md](docs/configuration.md#more-than-one-output) for what a

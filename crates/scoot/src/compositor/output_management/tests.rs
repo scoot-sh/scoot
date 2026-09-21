@@ -1125,3 +1125,173 @@ fn reusing_a_configuration_is_a_protocol_error() {
         "unexpected error: {error}"
     );
 }
+
+// -- more than one output (milestone 19, phase D) ---------------------------
+
+/// A live compositor with two side-by-side outputs and one connected client.
+/// Output 2 is `CANVAS` square at `(CANVAS, 0)`, named `headless-2`.
+fn two_outputs() -> Fixture {
+    let mut fixture = Harness::headless(Appearance::default(), CANVAS);
+    headless::add_output(&mut fixture.state, "headless-2", CANVAS, CANVAS)
+        .expect("a second output");
+    fixture.spawn(run_client);
+    fixture
+}
+
+/// The whole burst one head is announced with at version 4, for an output
+/// that is not the primary: its own name, description, model and position,
+/// in the order this compositor sends them. `head` and `first_mode` are the
+/// keys the client will have assigned.
+fn announced_named(
+    head: u32,
+    first_mode: u32,
+    name: &str,
+    position: (i32, i32),
+    modes: &[i32],
+    current: usize,
+    version: u32,
+) -> Vec<Seen> {
+    let mut seen = vec![
+        Seen::Head(head),
+        Seen::Name(head, name.to_string()),
+        Seen::Description(head, format!("scoot - {name} - {name}")),
+    ];
+    if version >= 2 {
+        seen.push(Seen::Make(head, "scoot".to_string()));
+        seen.push(Seen::Model(head, name.to_string()));
+    }
+    for (index, size) in modes.iter().enumerate() {
+        let key = first_mode + index as u32;
+        seen.push(Seen::Mode(head, key));
+        seen.push(Seen::ModeSize(key, *size, *size));
+        seen.push(Seen::ModeRefresh(key, REFRESH));
+        if index == current {
+            seen.push(Seen::ModePreferred(key));
+        }
+    }
+    seen.push(Seen::Enabled(head, 1));
+    seen.push(Seen::CurrentMode(head, first_mode + current as u32));
+    seen.push(Seen::Position(head, position.0, position.1));
+    seen.push(Seen::Transform(
+        head,
+        WEnum::Value(wl_output::Transform::Normal),
+    ));
+    seen.push(Seen::Scale(head, 1.0));
+    if version >= 4 {
+        seen.push(Seen::AdaptiveSync(
+            head,
+            WEnum::Value(AdaptiveSyncState::Disabled),
+        ));
+    }
+    seen
+}
+
+/// Binding with two outputs announces one head per output -- fail-first:
+/// with one head pinned to the primary, the second output is invisible to
+/// every display-configuration client.
+#[test]
+fn binding_announces_one_head_per_output() {
+    let mut fixture = two_outputs();
+    fixture.run(Step::BindManager(4));
+
+    // Serial 2, not 1: `init` announced the first head before this client
+    // connected, and adding the second output announced nothing to nobody --
+    // but the serial still advanced, which is what the bind carries.
+    let mut expected = announced(0, 0, &[CANVAS], 0, 4);
+    expected.extend(announced_named(
+        1,
+        1,
+        "headless-2",
+        (CANVAS, 0),
+        &[CANVAS],
+        0,
+        4,
+    ));
+    expected.push(Seen::Done(2));
+    assert_eq!(fixture.take_log(), expected);
+    assert_eq!(fixture.tracked(), 1, "the manager should be registered");
+}
+
+/// An output added after a manager bound still gets its head -- the runtime
+/// half of the announcement above, pinned because `add_output` is also what
+/// the startup path builds outputs 2..N with.
+#[test]
+fn adding_an_output_announces_its_head_to_an_already_bound_manager() {
+    let mut fixture = Fixture::new();
+    fixture.run(Step::BindManager(4));
+    fixture.take_log();
+
+    headless::add_output(&mut fixture.state, "headless-2", CANVAS, CANVAS)
+        .expect("a second output");
+    fixture.settle();
+
+    // Key 1, not 0: the client already holds the first output's head and
+    // mode from the bind above, and keys are assigned in arrival order.
+    let mut expected = announced_named(1, 1, "headless-2", (CANVAS, 0), &[CANVAS], 0, 4);
+    expected.push(Seen::Done(2));
+    assert_eq!(fixture.take_log(), expected);
+}
+
+/// Releasing one head leaves the other in step: a resize of the first output
+/// updates only the first head, and nothing at all is sent for the released
+/// one -- no cross-talk between heads of one manager.
+#[test]
+fn releasing_one_head_leaves_the_other_in_step() {
+    let mut fixture = two_outputs();
+    fixture.run(Step::BindManager(4));
+    fixture.take_log();
+    fixture.run(Step::ReleaseHead(1));
+    fixture.take_log();
+
+    // `resize_output` is primary-only, so this is the first head's update
+    // and the released head's silence, in one batch.
+    fixture.state.resize_output(RESIZED, RESIZED);
+    fixture.settle();
+    assert_eq!(
+        fixture.take_log(),
+        vec![
+            Seen::Mode(0, 2),
+            Seen::ModeSize(2, RESIZED, RESIZED),
+            Seen::ModeRefresh(2, REFRESH),
+            Seen::ModePreferred(2),
+            Seen::CurrentMode(0, 2),
+            Seen::Done(3),
+        ]
+    );
+}
+
+/// `stop` with two heads ends the manager and nothing else: both heads stay
+/// valid with no `finished` on either, exactly as with one.
+#[test]
+fn stop_with_two_heads_ends_only_the_manager() {
+    let mut fixture = two_outputs();
+    fixture.run(Step::BindManager(4));
+    fixture.take_log();
+
+    fixture.run(Step::Stop(0));
+    assert_eq!(fixture.take_log(), vec![Seen::ManagerFinished]);
+    assert_eq!(fixture.tracked(), 0, "the manager should be gone");
+}
+
+/// The `apply`/`test` refusal survives a second head: reconfiguration stays
+/// refused per configuration, not per head, and a second screen does not
+/// make it real.
+#[test]
+fn apply_is_still_refused_with_two_heads() {
+    let mut fixture = two_outputs();
+    fixture.run(Step::BindManager(4));
+    fixture.take_log();
+
+    fixture.run(Step::Apply);
+    assert_eq!(fixture.take_log(), vec![Seen::ConfigurationFailed]);
+}
+
+#[test]
+fn test_is_still_refused_with_two_heads() {
+    let mut fixture = two_outputs();
+    fixture.run(Step::BindManager(4));
+    fixture.take_log();
+
+    fixture.run(Step::Test);
+    assert_eq!(fixture.take_log(), vec![Seen::ConfigurationFailed]);
+}

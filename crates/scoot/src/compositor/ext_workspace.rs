@@ -60,18 +60,29 @@
 //!   the layout itself (a new one appears as soon as the trailing empty one
 //!   is used, an emptied one is dropped when it is left). A user cannot
 //!   create or delete one, so a client cannot either.
-//! - **`assign`**: there is one workspace group, because one output is
-//!   published.
+//! - **`assign`**: a workspace belongs to the output whose group announced
+//!   it. A client cannot move one, because nothing in the compositor can
+//!   either -- windows stay on the output they opened on (see below).
 //!
-//! ## One group, because one output is published
+//! ## A group per output
 //!
-//! The single group carries the primary [`Output`] (see
-//! [`Outputs::primary`](super::outputs::Outputs::primary)). Multi-output
-//! support has to make this a group per output -- the protocol is built for
-//! it (a group is "a set of outputs", and a bar reads its workspaces per
-//! group) -- and that is the same list of sites `Outputs::primary`'s own doc
-//! enumerates, plus [`Action::FocusWorkspaceIndex`], which today means "of
-//! the focused output".
+//! Every output gets its own group carrying that output (see
+//! [`Outputs::iter_with_ids`](super::outputs::Outputs::iter_with_ids)): a
+//! bar reads its workspaces per group, which is what the protocol is built
+//! for. Each group's handles are positions in *that* output's list, and each
+//! output's active index moves independently -- switching on one output
+//! never disturbs another's.
+//!
+//! What `activate` targets is the group its handle came from, not the
+//! focused output: the bounds and already-active checks run against that
+//! output's list. A real switch still goes through
+//! [`Action::FocusWorkspaceIndex`], which is focused-output-relative, so a
+//! switch pending on an output that is not the focused one is ignored rather
+//! than misrouted (see `commit_workspace_requests`). That branch is
+//! unreachable while windows only open on the first output -- every other
+//! output's list is permanently the single empty workspace -- and a later
+//! phase that moves windows across outputs is where it becomes reachable,
+//! alongside an output-targeted action to serve it.
 //!
 //! ## Batching
 //!
@@ -90,7 +101,7 @@
 //! compositor must process a series of requests preceding a commit request
 //! atomically"). A client that never sends `commit` never switches anything.
 
-use scoot_core::{Action, Workspaces};
+use scoot_core::{Action, OutputId, Workspaces};
 use smithay::output::Output;
 use smithay::reexports::wayland_protocols::ext::workspace::v1::server::ext_workspace_group_handle_v1::{
     self, ExtWorkspaceGroupHandleV1, GroupCapabilities,
@@ -125,20 +136,26 @@ const VERSION: u32 = 1;
 ///
 /// The `published` snapshot is the one piece of cached state here, and it
 /// means exactly one thing: **what every registered manager has already been
-/// told**. It is never read as "what the workspaces are" -- that is
-/// [`World::workspaces`], re-read on every refresh -- and the two are brought
-/// back together in exactly one place ([`State::refresh_workspaces`]), which
-/// is also the only writer. Keeping every manager in lockstep is what makes
-/// one shared snapshot correct rather than needing one per client: a manager
-/// that binds later is built from `published` *after* a refresh, so it starts
-/// out agreeing with everyone else.
+/// told, per output**. It is never read as "what the workspaces are" -- that
+/// is [`World::workspaces`], re-read on every refresh -- and the two are
+/// brought back together in exactly one place
+/// ([`State::refresh_workspaces`]), which is also the only writer. Keeping
+/// every manager in lockstep is what makes one shared snapshot correct rather
+/// than needing one per client: a manager that binds later is built from
+/// `published` *after* a refresh, so it starts out agreeing with everyone
+/// else. One entry per output, in creation order.
 #[derive(Debug, Default)]
 pub struct ExtWorkspaceState {
     managers: Vec<Manager>,
-    published: Workspaces,
+    published: Vec<(OutputId, Workspaces)>,
     /// Reused across refreshes rather than allocated per refresh: this runs
     /// on every `State::apply`.
     changes: Vec<Change>,
+    /// Scratch for one refresh's per-output snapshots -- `published`'s
+    /// challenger -- reused for the same reason. Its allocation survives
+    /// across refreshes; only the previous snapshot's is ever dropped, and
+    /// that one becomes this one on the next pass (see `refresh_workspaces`).
+    current: Vec<(OutputId, Workspaces)>,
 }
 
 impl ExtWorkspaceState {
@@ -151,8 +168,8 @@ impl ExtWorkspaceState {
         Self::default()
     }
 
-    /// The manager owning `handle`, and which workspace position it stands
-    /// for.
+    /// The manager owning `handle`, which output's group it stands on, and
+    /// which workspace position within that group.
     ///
     /// This is also what makes a stale handle inert without storing a flag on
     /// it: a handle is live exactly while some registered manager still lists
@@ -162,26 +179,41 @@ impl ExtWorkspaceState {
     /// unequal (a [`Weak`]'s id carries a serial). All three fall out as
     /// `None`, which every request handler treats as "ignore", exactly as the
     /// protocol requires for an inert object.
-    fn locate(&mut self, handle: &ExtWorkspaceHandleV1) -> Option<(&mut Manager, usize)> {
+    fn locate(&mut self, handle: &ExtWorkspaceHandleV1) -> Option<(&mut Manager, OutputId, usize)> {
         self.managers.iter_mut().find_map(|manager| {
-            let index = manager
-                .workspaces
+            manager
+                .groups
                 .iter()
-                .position(|slot| *slot == *handle)?;
-            Some((manager, index))
+                .find_map(|group| {
+                    group
+                        .workspaces
+                        .iter()
+                        .position(|slot| *slot == *handle)
+                        .map(|index| (group.output, index))
+                })
+                .map(|(output, index)| (manager, output, index))
         })
     }
 }
 
 /// One client's bound `ext_workspace_manager_v1` and the objects created for
-/// it.
+/// it: one group per output.
 #[derive(Debug)]
 struct Manager {
     manager: ExtWorkspaceManagerV1,
-    /// The one group. [`Weak`] because a client may destroy the group handle
-    /// while keeping the manager -- the workspaces stay, unassigned to any
-    /// group, which is a state the protocol names explicitly.
-    group: Weak<ExtWorkspaceGroupHandleV1>,
+    groups: Vec<Group>,
+}
+
+/// One output's group and its workspace handles, as one client sees them.
+#[derive(Debug)]
+struct Group {
+    /// Which output's workspaces this group announces.
+    output: OutputId,
+    /// The group object. `None` until the first refresh (or bind) creates it;
+    /// a dead [`Weak`] afterwards because the client destroyed its group
+    /// handle while keeping the manager -- the workspaces stay, unassigned
+    /// to any group, which is a state the protocol names explicitly.
+    group: Option<Weak<ExtWorkspaceGroupHandleV1>>,
     /// One slot per workspace, in the core's own order: slot `n` is the
     /// `n`-th workspace of the output. [`Weak`] again, and for a sharper
     /// reason -- a client may `destroy` any of these at any time, and a
@@ -201,7 +233,13 @@ struct Manager {
 }
 
 impl Manager {
-    /// Sends one batch of changes and the single `done` that closes it.
+    /// Sends one output's batch of changes to this manager's group for it.
+    ///
+    /// Creates the group on first sight -- with the `workspace_group` and
+    /// `capabilities` events and the `output_enter`s for the `wl_output`s
+    /// this client holds, exactly as a bind-time group is built -- so a
+    /// manager bound before an output existed still gets that output's
+    /// group once there is something to say about it.
     ///
     /// Returns whether this manager can still be kept in step. `false` means
     /// drop it: either its client is gone, or a new object could not be
@@ -209,27 +247,93 @@ impl Manager {
     /// never be trusted again, because every index after the gap would
     /// address the wrong workspace. Dropping it stops the events; the
     /// client's own objects are untouched and its requests are simply ignored
-    /// from then on (see [`ExtWorkspaceState::locate`]).
-    fn apply(&mut self, dh: &DisplayHandle, current: Workspaces, changes: &[Change]) -> bool {
-        if changes.is_empty() {
-            return true;
-        }
-        let Ok(client) = dh.get_client(self.manager.id()) else {
-            return false;
+    /// from then on (see [`ExtWorkspaceState::locate`]). The `done` that
+    /// closes the batch is the caller's: one per manager per refresh, not
+    /// one per output.
+    fn apply_output(
+        &mut self,
+        dh: &DisplayHandle,
+        client: &Client,
+        output: OutputId,
+        smithay_output: Option<&Output>,
+        current: Workspaces,
+        changes: &[Change],
+    ) -> bool {
+        let version = self.manager.version();
+        // The entry, created (but not the object) on first sight.
+        let position = match self.groups.iter().position(|group| group.output == output) {
+            Some(position) => position,
+            None => {
+                self.groups.push(Group {
+                    output,
+                    group: None,
+                    workspaces: Vec::new(),
+                    pending_activate: None,
+                });
+                self.groups.len() - 1
+            }
+        };
+        // The object, created on first sight with everything a bind-time
+        // group carries. A dead `Weak` (the client destroyed its group
+        // handle) is not resurrected: the workspaces below are still sent,
+        // unassigned to any group, exactly as for a group destroyed at bind
+        // time.
+        let group = match &self.groups[position].group {
+            None => {
+                let created = client
+                    .create_resource::<ExtWorkspaceGroupHandleV1, _, State>(dh, version, GroupData);
+                let Ok(object) = created else {
+                    tracing::warn!(
+                        ?output,
+                        "could not create an ext_workspace_group_handle_v1; \
+                         dropping this workspace manager"
+                    );
+                    // Closed even though the batch is incomplete, so a
+                    // client waiting for `done` before it redraws is left
+                    // out of date rather than waiting forever, then
+                    // `finished` so it knows nothing more is coming --
+                    // dropping the entry below only stops *this* side
+                    // tracking it, the client's object would otherwise
+                    // dangle with no events for the rest of its life.
+                    // `finished` is a destructor event, so nothing may be
+                    // sent on the manager after it; the `destroyed`
+                    // callback it queues runs later (wayland-backend
+                    // defers destructors to its next cleanup, never
+                    // re-entrantly through this `retain_mut`) and re-runs
+                    // the same idempotent `retain`.
+                    self.manager.done();
+                    self.manager.finished();
+                    return false;
+                };
+                self.manager.workspace_group(&object);
+                // Mandatory once per object even though it is empty here --
+                // the protocol requires `capabilities` after creation, and
+                // an empty set is how a client learns not to offer a "new
+                // workspace" button.
+                object.capabilities(GroupCapabilities::empty());
+                if let Some(smithay_output) = smithay_output {
+                    for wl_output in smithay_output.client_outputs(client) {
+                        object.output_enter(&wl_output);
+                    }
+                }
+                self.groups[position].group = Some(object.downgrade());
+                Some(object)
+            }
+            Some(weak) => weak.upgrade().ok(),
         };
         // Taken once for the whole batch rather than per change: it is the
         // same object every time, and `None` (the client destroyed its group
         // handle) is not a reason to stop sending workspace events.
-        let group = self.group.upgrade().ok();
+        let group_entry = &mut self.groups[position];
         for change in changes {
             match *change {
                 Change::Restated { index, active } => {
-                    if let Some(handle) = self.handle(index) {
+                    if let Some(handle) = group_entry.handle(index) {
                         handle.state(workspace_state(active));
                     }
                 }
                 Change::Removed { index } => {
-                    if let Some(handle) = self.handle(index) {
+                    if let Some(handle) = group_entry.handle(index) {
                         // The group has to let go of a workspace before it is
                         // removed: the protocol is explicit that a compositor
                         // "must only remove a workspace not currently
@@ -243,7 +347,7 @@ impl Manager {
                 Change::Added { index, active } => {
                     let created = client.create_resource::<ExtWorkspaceHandleV1, _, State>(
                         dh,
-                        self.manager.version(),
+                        version,
                         WorkspaceData,
                     );
                     let Ok(handle) = created else {
@@ -252,26 +356,14 @@ impl Manager {
                             "could not create an ext_workspace_handle_v1; \
                              dropping this workspace manager"
                         );
-                        // Closed even though the batch is incomplete, so a
-                        // client waiting for `done` before it redraws is left
-                        // out of date rather than waiting forever, then
-                        // `finished` so it knows nothing more is coming --
-                        // dropping the entry below only stops *this* side
-                        // tracking it, the client's object would otherwise
-                        // dangle with no events for the rest of its life.
-                        // `finished` is a destructor event, so nothing may be
-                        // sent on the manager after it; the `destroyed`
-                        // callback it queues runs later (wayland-backend
-                        // defers destructors to its next cleanup, never
-                        // re-entrantly through this `retain_mut`) and re-runs
-                        // the same idempotent `retain`.
+                        // Same incomplete-batch close as above.
                         self.manager.done();
                         self.manager.finished();
                         return false;
                     };
                     debug_assert_eq!(
                         index,
-                        self.workspaces.len(),
+                        group_entry.workspaces.len(),
                         "workspace handles are positional"
                     );
                     self.manager.workspace(&handle);
@@ -279,7 +371,7 @@ impl Manager {
                     if let Some(group) = &group {
                         group.workspace_enter(&handle);
                     }
-                    self.workspaces.push(handle.downgrade());
+                    group_entry.workspaces.push(handle.downgrade());
                 }
             }
         }
@@ -287,11 +379,12 @@ impl Manager {
         // keeps `workspaces.len()` equal to the workspace count, which every
         // index in the next batch is computed against. A no-op when the list
         // grew instead.
-        self.workspaces.truncate(current.count);
-        self.manager.done();
+        group_entry.workspaces.truncate(current.count);
         true
     }
+}
 
+impl Group {
     /// The live handle at `index`, if the client still has one there.
     fn handle(&self, index: usize) -> Option<ExtWorkspaceHandleV1> {
         self.workspaces.get(index)?.upgrade().ok()
@@ -299,61 +392,135 @@ impl Manager {
 }
 
 impl State {
-    /// Brings every bound manager up to date with the core's workspaces.
+    /// Brings every bound manager up to date with every output's workspaces.
     ///
     /// Called from `State::apply`, which is the choke point every workspace
     /// change passes through: opening, closing or retitling a window, and
     /// every action (`act`) from a keybinding, from IPC, or from this
     /// protocol's own `activate`. The cost when nothing changed -- which is
     /// most calls, since `apply` also runs for moves within a workspace -- is
-    /// one `Option` compare of two `usize`s.
+    /// one snapshot compare per output, with no allocation: the challenger
+    /// is built in the reused `current` scratch and both buffers are handed
+    /// back afterwards.
     pub(super) fn refresh_workspaces(&mut self) {
-        let Some(current) = self
-            .outputs
-            .primary_id()
-            .and_then(|id| self.world.workspaces(id))
-        else {
+        if self.outputs.is_empty() {
             // No output, so nothing to describe. Unreachable after
             // `headless::init` (which adds the output before the event loop
             // runs) and deliberately *not* published as "zero workspaces":
             // leaving `published` alone means a later refresh diffs against
             // what clients were actually told.
             return;
-        };
-        if self.ext_workspace.published == current {
-            return;
         }
         let dh = self.display_handle.clone();
         let ext = &mut self.ext_workspace;
-        // Moved out so the per-manager loop can borrow `ext` mutably, and put
-        // back at the end so the allocation survives to the next refresh.
+        // Moved out so the per-manager loop can borrow `ext`, and put back
+        // at the end so the allocations survive to the next refresh.
         let mut changes = std::mem::take(&mut ext.changes);
-        changes.clear();
-        diff::changes(ext.published, current, &mut changes);
-        ext.published = current;
-        ext.managers
-            .retain_mut(|manager| manager.apply(&dh, current, &changes));
+        let mut current = std::mem::take(&mut ext.current);
+        current.clear();
+        for (id, _) in self.outputs.iter_with_ids() {
+            // Unknown to the core: skip, leaving `published` alone for the
+            // same reason as the no-output return above. Unreachable after
+            // `init_named`/`add_output` (both file `OutputAdded`
+            // synchronously before any refresh can run), but a second lookup
+            // that could come back empty is exactly what `resize_output`
+            // refuses to do twice.
+            if let Some(workspaces) = self.world.workspaces(id) {
+                current.push((id, workspaces));
+            }
+        }
+        if current.is_empty() {
+            // Every output unknown to the core: describe nothing and publish
+            // nothing, the same reason as the no-output return above. Without
+            // this the swap below would forget what clients were told.
+            // Unreachable for the same reason the per-output skip is, but the
+            // cost is one `is_empty`.
+            ext.changes = changes;
+            ext.current = current;
+            return;
+        }
+        // Fast path: every snapshot matches -- no events, and no `done`.
+        let unchanged = current.len() == ext.published.len()
+            && current
+                .iter()
+                .zip(ext.published.iter())
+                .all(|(a, b)| a == b);
+        if !unchanged {
+            ext.managers.retain_mut(|manager| {
+                let Ok(client) = dh.get_client(manager.manager.id()) else {
+                    return false;
+                };
+                let mut changed = false;
+                for (id, state) in &current {
+                    let told = ext
+                        .published
+                        .iter()
+                        .find(|(known, _)| known == id)
+                        .map(|(_, workspaces)| *workspaces)
+                        .unwrap_or_default();
+                    if told == *state {
+                        continue;
+                    }
+                    changes.clear();
+                    diff::changes(told, *state, &mut changes);
+                    changed |= !changes.is_empty();
+                    let smithay_output = self.outputs.get(*id);
+                    if !manager.apply_output(&dh, &client, *id, smithay_output, *state, &changes) {
+                        return false;
+                    }
+                }
+                if changed {
+                    manager.manager.done();
+                }
+                true
+            });
+            // `current` becomes the new snapshot; the previous one becomes
+            // the scratch buffer, so neither allocation is lost.
+            std::mem::swap(&mut ext.published, &mut current);
+            current.clear();
+        }
         ext.changes = changes;
+        ext.current = current;
     }
 
-    /// Applies whatever a client staged before this `commit`.
+    /// Applies whatever clients staged before this `commit` -- every group
+    /// with a pending `activate`, in creation order.
     ///
     /// Bounds-checked here rather than when `activate` arrived, because the
     /// list can change in between -- that is the whole reason the protocol
     /// batches: a client acts on the state it last saw, and the compositor
-    /// decides against the state it has.
+    /// decides against the state it has. Checked against the *group's*
+    /// output's list, never another output's: an `activate` names a position
+    /// in the list its handle came from.
     fn commit_workspace_requests(&mut self, manager: &ExtWorkspaceManagerV1) {
-        let pending = self
-            .ext_workspace
-            .managers
-            .iter_mut()
-            .find(|entry| entry.manager == *manager)
-            .and_then(|entry| entry.pending_activate.take());
-        let published = self
-            .outputs
-            .primary_id()
-            .and_then(|id| self.world.workspaces(id));
-        let (Some(index), Some(current)) = (pending, published) else {
+        loop {
+            let next = self
+                .ext_workspace
+                .managers
+                .iter_mut()
+                .find(|entry| entry.manager == *manager)
+                .and_then(|entry| {
+                    entry.groups.iter_mut().find_map(|group| {
+                        group
+                            .pending_activate
+                            .take()
+                            .map(|index| (group.output, index))
+                    })
+                });
+            let Some((output, index)) = next else {
+                break;
+            };
+            self.commit_one_workspace_request(output, index);
+        }
+    }
+
+    /// Applies one staged `activate` on one output's group.
+    fn commit_one_workspace_request(&mut self, output: OutputId, index: usize) {
+        let Some(current) = self.world.workspaces(output) else {
+            // The output is gone: nothing to switch to. Unreachable --
+            // outputs are never removed -- and ignoring is the safe answer
+            // either way: a refused request must not disturb anything, so
+            // the session comes back as the user left it.
             return;
         };
         if index >= current.count {
@@ -368,6 +535,26 @@ impl State {
             tracing::debug!(
                 index,
                 "ignoring an ext-workspace activate: the session is locked"
+            );
+            return;
+        }
+        // A real switch pending on an output that is not the focused one.
+        // Unreachable while windows only open on the first output (see
+        // `shell.rs`): every other output's list is permanently the single
+        // empty workspace, so a valid, non-active index cannot name one. The
+        // switch below goes through `FocusWorkspaceIndex`, which is
+        // focused-output-relative, so reaching it for another output would
+        // switch the wrong screen -- the harm this phase pins. Ignored
+        // rather than misrouted, loudly in debug builds.
+        if Some(output) != self.world.focused_output() && index != current.active {
+            debug_assert!(
+                false,
+                "workspace switch for a non-focused output has no output-targeted action yet"
+            );
+            tracing::debug!(
+                ?output,
+                index,
+                "ignoring an ext-workspace activate for a non-focused output"
             );
             return;
         }
@@ -404,8 +591,9 @@ impl State {
         self.act(Action::FocusWorkspaceIndex(index));
     }
 
-    /// A client bound a `wl_output`. If it is this compositor's output and
-    /// that client has a workspace group, the group has to say so.
+    /// A client bound a `wl_output`. If it is an output this compositor has
+    /// and that client has the workspace group for it, the group has to say
+    /// so.
     ///
     /// The protocol asks for `output_enter` "whenever an output is assigned
     /// to the workspace group **or a new `wl_output` object is bound by the
@@ -413,12 +601,11 @@ impl State {
     /// the manager before the output (registry order is the server's choice,
     /// not the client's) would see a group with no outputs in it forever.
     pub(super) fn workspace_group_output_bound(&mut self, output: &Output, wl_output: &WlOutput) {
-        // The primary output, not any of them: the group carries exactly that
-        // one output (see the `output_enter` in `announce_workspaces` below),
-        // so a bind of any other must not tell the group it entered.
-        if self.outputs.primary() != Some(output) {
+        // The output's own group, not every group: a bind of one output must
+        // not tell another output's group it entered.
+        let Some(id) = self.outputs.id_of(output) else {
             return;
-        }
+        };
         let bound = wl_output.id();
         for manager in &self.ext_workspace.managers {
             // Load-bearing, not tidiness: wayland-backend *panics* when an
@@ -442,7 +629,13 @@ impl State {
             if !manager.manager.id().same_client_as(&bound) {
                 continue;
             }
-            let Ok(group) = manager.group.upgrade() else {
+            let Some(group) = manager
+                .groups
+                .iter()
+                .find(|group| group.output == id)
+                .and_then(|group| group.group.as_ref())
+                .and_then(|weak| weak.upgrade().ok())
+            else {
                 continue;
             };
             group.output_enter(wl_output);
@@ -450,8 +643,8 @@ impl State {
         }
     }
 
-    /// Builds a freshly bound manager's whole world: the group, its outputs,
-    /// a handle per workspace, and the `done` that makes it one atomic
+    /// Builds a freshly bound manager's whole world: one group per output
+    /// with its workspaces, and the single `done` that makes it one atomic
     /// picture.
     fn announce_workspaces(
         &mut self,
@@ -463,71 +656,79 @@ impl State {
         // below is built from `published` rather than from the core directly,
         // which is what keeps this new manager in lockstep with the ones
         // already bound: the next refresh diffs from a snapshot this client
-        // really was sent.
+        // really was sent. Borrowed: the failure paths below need `self`
+        // back for the budget give-back, and they run only after the borrow
+        // ends -- and this is bind rate either way, not a hot path.
         self.refresh_workspaces();
-        let published = self.ext_workspace.published;
-        let created = client.create_resource::<ExtWorkspaceGroupHandleV1, _, State>(
-            dh,
-            manager.version(),
-            GroupData,
-        );
-        let Ok(group) = created else {
-            tracing::warn!("could not create an ext_workspace_group_handle_v1");
-            // Counted at bind but never registered (see below), so the claim
-            // is given back: the client is gone, and a leak here would be a
-            // counter that only grows.
-            self.bind_budget.release_bind(&client.id(), &manager.id());
-            // Still closed with a `done`: a client that waits for one before
-            // drawing would otherwise wait forever. `finished` for the same
-            // reason as in `Manager::apply`: this manager is never registered,
-            // so it would never be sent anything again, and `finished` is the
-            // protocol's only way to say so. Destructor event -- nothing may
-            // be sent on `manager` after it, hence the immediate return.
-            manager.done();
-            manager.finished();
-            return;
-        };
-        manager.workspace_group(&group);
-        // Mandatory once per object even though it is empty here -- the
-        // protocol requires `capabilities` after creation, and an empty set
-        // is how a client learns not to offer a "new workspace" button.
-        group.capabilities(GroupCapabilities::empty());
-        if let Some(output) = self.outputs.primary() {
-            for wl_output in output.client_outputs(client) {
-                group.output_enter(&wl_output);
-            }
-        }
-        let mut workspaces = Vec::with_capacity(published.count);
-        for index in 0..published.count {
-            let created = client.create_resource::<ExtWorkspaceHandleV1, _, State>(
+        let mut groups = Vec::with_capacity(self.ext_workspace.published.len());
+        for slot in 0..self.ext_workspace.published.len() {
+            let (id, state) = self.ext_workspace.published[slot];
+            let created = client.create_resource::<ExtWorkspaceGroupHandleV1, _, State>(
                 dh,
                 manager.version(),
-                WorkspaceData,
+                GroupData,
             );
-            let Ok(handle) = created else {
-                tracing::warn!(index, "could not create an ext_workspace_handle_v1");
-                // Same give-back as above: counted, never registered.
+            let Ok(group) = created else {
+                tracing::warn!("could not create an ext_workspace_group_handle_v1");
+                // Counted at bind but never registered (see below), so the claim
+                // is given back: the client is gone, and a leak here would be a
+                // counter that only grows.
                 self.bind_budget.release_bind(&client.id(), &manager.id());
-                // Deliberately not registered: a manager holding a short list
-                // would address every later workspace by the wrong index. So,
-                // as above, the incomplete batch is closed and then the object
-                // is finished rather than left silent forever.
+                // Still closed with a `done`: a client that waits for one before
+                // drawing would otherwise wait forever. `finished` for the same
+                // reason as in `apply_output`: this manager is never registered,
+                // so it would never be sent anything again, and `finished` is the
+                // protocol's only way to say so. Destructor event -- nothing may
+                // be sent on `manager` after it, hence the immediate return.
                 manager.done();
                 manager.finished();
                 return;
             };
-            manager.workspace(&handle);
-            describe(&handle, index, index == published.active);
-            group.workspace_enter(&handle);
-            workspaces.push(handle.downgrade());
+            manager.workspace_group(&group);
+            // Mandatory once per object even though it is empty here -- the
+            // protocol requires `capabilities` after creation, and an empty set
+            // is how a client learns not to offer a "new workspace" button.
+            group.capabilities(GroupCapabilities::empty());
+            if let Some(output) = self.outputs.get(id) {
+                for wl_output in output.client_outputs(client) {
+                    group.output_enter(&wl_output);
+                }
+            }
+            let mut workspaces = Vec::with_capacity(state.count);
+            for index in 0..state.count {
+                let created = client.create_resource::<ExtWorkspaceHandleV1, _, State>(
+                    dh,
+                    manager.version(),
+                    WorkspaceData,
+                );
+                let Ok(handle) = created else {
+                    tracing::warn!(index, "could not create an ext_workspace_handle_v1");
+                    // Same give-back as above: counted, never registered.
+                    self.bind_budget.release_bind(&client.id(), &manager.id());
+                    // Deliberately not registered: a manager holding a short list
+                    // would address every later workspace by the wrong index. So,
+                    // as above, the incomplete batch is closed and then the object
+                    // is finished rather than left silent forever.
+                    manager.done();
+                    manager.finished();
+                    return;
+                };
+                manager.workspace(&handle);
+                describe(&handle, index, index == state.active);
+                group.workspace_enter(&handle);
+                workspaces.push(handle.downgrade());
+            }
+            groups.push(Group {
+                output: id,
+                group: Some(group.downgrade()),
+                workspaces,
+                pending_activate: None,
+            });
         }
         manager.done();
-        self.ext_workspace.managers.push(Manager {
-            manager,
-            group: group.downgrade(),
-            workspaces,
-            pending_activate: None,
-        });
+        self.ext_workspace
+            .managers
+            .push(Manager { manager, groups });
     }
 }
 
@@ -711,9 +912,18 @@ impl Dispatch2<ExtWorkspaceHandleV1, State> for WorkspaceData {
         match request {
             ext_workspace_handle_v1::Request::Activate => {
                 match state.ext_workspace.locate(handle) {
-                    // Staged, not applied: the protocol's `commit` is what
-                    // says the client has finished asking.
-                    Some((manager, index)) => manager.pending_activate = Some(index),
+                    // Staged on that output's group, not applied: the
+                    // protocol's `commit` is what says the client has
+                    // finished asking.
+                    Some((manager, output, index)) => {
+                        if let Some(group) = manager
+                            .groups
+                            .iter_mut()
+                            .find(|group| group.output == output)
+                        {
+                            group.pending_activate = Some(index);
+                        }
+                    }
                     None => tracing::debug!(
                         "ignoring activate on a workspace handle that is no longer live"
                     ),

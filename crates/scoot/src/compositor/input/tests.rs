@@ -1517,3 +1517,128 @@ fn a_reload_that_binds_a_held_key_forwards_its_release() {
         "the release was swallowed for a press the client received"
     );
 }
+
+// -- pointer clamp across more than one output (milestone 19, phase D) ------
+
+/// Both outputs square at this size unless a test says otherwise: output 1
+/// covers `0..MULTI_SIZE` on both axes, output 2 covers
+/// `MULTI_SIZE..2*MULTI_SIZE` on `x`.
+const MULTI_SIZE: i32 = 200;
+
+/// A live `State` with two side-by-side headless outputs, the second
+/// `second_height` tall. Scale 1, so logical and physical pixels agree and
+/// every coordinate below reads literally.
+fn two_output_state(second_height: i32) -> State {
+    let mut event_loop: EventLoop<'static, State> = EventLoop::try_new().expect("an event loop");
+    let display: Display<State> = Display::new().expect("a wayland display");
+    let mut state = State::new(
+        &mut event_loop,
+        display,
+        Config::default(),
+        Keybindings::default(),
+        Appearance::default(),
+        1.0,
+        crate::compositor::test_support::test_renderer(),
+    )
+    .expect("a compositor state with a wayland socket");
+    headless::init(&mut state, MULTI_SIZE, MULTI_SIZE).expect("a headless backend");
+    headless::add_output(&mut state, "headless-2", MULTI_SIZE, second_height)
+        .expect("a second output");
+    state
+}
+
+fn pointer_at(state: &State) -> (f64, f64) {
+    let pointer = state.seat.get_pointer().expect("a pointer");
+    let location = pointer.current_location();
+    (location.x, location.y)
+}
+
+/// The trapping harm, fail-first: with two outputs side by side, a relative
+/// motion past the first output's right edge must land on the second output.
+/// Clamping to the primary output's extent instead holds the pointer at 199
+/// forever -- the user can never reach their second screen.
+#[test]
+fn relative_motion_crosses_onto_the_second_output_instead_of_trapping() {
+    let mut state = two_output_state(MULTI_SIZE);
+    state.pointer_move(199.0, 100.0);
+    state.pointer_move_relative(10.0, 0.0, 10.0, 0.0);
+    assert_eq!(
+        pointer_at(&state),
+        (209.0, 100.0),
+        "relative motion past output 1's right edge must reach output 2"
+    );
+}
+
+/// The seam pixel belongs to the second output -- half-open bounds, mirroring
+/// `output_under` -- and the clamp must let the pointer stand on it.
+#[test]
+fn the_seam_pixel_belongs_to_the_output_on_its_right() {
+    let mut state = two_output_state(MULTI_SIZE);
+    state.pointer_move(199.0, 100.0);
+    state.pointer_move_relative(1.0, 0.0, 1.0, 0.0);
+    assert_eq!(
+        pointer_at(&state),
+        (200.0, 100.0),
+        "the clamp must let the pointer stand on the seam pixel"
+    );
+    let (output, _) = state
+        .output_under(Point::from((200.0, 100.0)))
+        .expect("the seam pixel is on an output");
+    assert_eq!(
+        state.outputs.id_of(&output),
+        Some(scoot_core::OutputId(2)),
+        "half-open bounds: the boundary pixel belongs to the output on its right"
+    );
+}
+
+/// The far edge: the union's far corner clamps to `right - 1`, the same
+/// convention the single-output clamp uses per output.
+#[test]
+fn relative_motion_stops_at_the_far_edge_of_the_union() {
+    let mut state = two_output_state(MULTI_SIZE);
+    state.pointer_move(390.0, 100.0);
+    state.pointer_move_relative(100.0, 0.0, 100.0, 0.0);
+    assert_eq!(
+        pointer_at(&state),
+        (399.0, 100.0),
+        "the union of two 200px outputs clamps x to 399"
+    );
+}
+
+/// Absolute motion is never clamped -- a client-driven move off every output
+/// stays where it was put, and the miss resolves to no output, exactly as
+/// with one output. The union clamp is a relative-motion bound, not a cage.
+#[test]
+fn absolute_motion_off_every_output_is_left_alone() {
+    let mut state = two_output_state(MULTI_SIZE);
+    state.pointer_move(-50.0, -50.0);
+    assert_eq!(
+        pointer_at(&state),
+        (-50.0, -50.0),
+        "absolute motion is not clamped"
+    );
+    assert!(
+        state.output_under(Point::from((-50.0, -50.0))).is_none(),
+        "off-output coordinates miss, as with one output"
+    );
+}
+
+/// Uneven outputs leave a dead zone -- inside the union box but over no
+/// output. The pointer may rest there (the union is a bounding box, not a
+/// union of pixels), and it still misses rather than hitting the wrong
+/// output.
+#[test]
+fn the_pointer_can_rest_in_a_dead_zone_between_uneven_outputs() {
+    let mut state = two_output_state(100);
+    state.pointer_move(250.0, 150.0);
+    assert!(
+        state.output_under(Point::from((250.0, 150.0))).is_none(),
+        "(250, 150) is past output 2's bottom edge and output 1's right edge"
+    );
+    state.pointer_move_relative(10.0, 0.0, 10.0, 0.0);
+    assert_eq!(
+        pointer_at(&state),
+        (260.0, 150.0),
+        "relative motion inside the union box is allowed even over no output"
+    );
+}

@@ -60,6 +60,7 @@ use crate::compositor::decorations::Appearance;
 use crate::compositor::test_support::{Harness, wait_for};
 
 mod keyboard;
+mod multi_output;
 
 /// The framebuffer these tests render into. Nothing here reads a pixel; it
 /// only has to be a valid size for the headless backend.
@@ -135,6 +136,9 @@ struct TestClient {
     /// Registry names, bound on demand so a test can control the order in
     /// which the client binds the output and the workspace manager.
     output_name: Option<(u32, u32)>,
+    /// Every `wl_output` global, in registry order -- what a test binds when
+    /// it needs a specific output rather than "the output".
+    output_names: Vec<(u32, u32)>,
     manager_name: Option<(u32, u32)>,
     compositor: Option<wl_compositor::WlCompositor>,
     wm_base: Option<xdg_wm_base::XdgWmBase>,
@@ -211,7 +215,10 @@ impl Dispatch<wl_registry::WlRegistry, ()> for TestClient {
             // Not bound here: which of these a client binds first is the
             // server's choice of registry order in real life, and one test
             // is specifically about binding them the awkward way round.
-            "wl_output" => client.output_name = Some((name, version)),
+            "wl_output" => {
+                client.output_name = Some((name, version));
+                client.output_names.push((name, version));
+            }
             "ext_workspace_manager_v1" => client.manager_name = Some((name, version)),
             "wl_compositor" => {
                 client.compositor = Some(registry.bind(name, version.min(4), qh, ()))
@@ -410,6 +417,9 @@ enum Step {
     /// Bind `wl_output`. Deliberately separate from the registry pass so a
     /// test can bind it before or after the workspace manager.
     BindOutput,
+    /// Bind the `index`-th `wl_output` global in registry order -- what a
+    /// test binds when it needs a specific output rather than "the output".
+    BindOutputAt(usize),
     /// Bind another `ext_workspace_manager_v1`.
     BindManager,
     /// Create an `xdg_toplevel` (and ack its configure). No buffer: what
@@ -497,6 +507,15 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
             Step::BindOutput => {
                 let output: wl_output::WlOutput =
                     registry.bind(output_global.0, output_global.1.min(4), &qh, ());
+                client.outputs.push(output);
+            }
+            Step::BindOutputAt(index) => {
+                let (name, version) = client
+                    .output_names
+                    .get(index)
+                    .copied()
+                    .ok_or("no such wl_output")?;
+                let output: wl_output::WlOutput = registry.bind(name, version.min(4), &qh, ());
                 client.outputs.push(output);
             }
             Step::BindManager => {
