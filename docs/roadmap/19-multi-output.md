@@ -126,6 +126,69 @@ no second monitor. `crates/scoot/src/compositor/outputs.rs`'s doc on
   vblank-confirmation work exists to prevent, across screens); focus rule
   one surface per output; locked render path per output. Heaviest review
   of the five.
+  - **DONE (2026-09-21, Phase C PR).** `new_surface` resolves the named
+    output with no fallback (unresolvable is ignored, unreachable past
+    startup); `configure_output` replaces `configure_all`, so a resize
+    reconfigures only the output that moved; `locked` fires only once every
+    output's blank is recorded (`SessionLock::confirmed`, cleared wherever
+    `pending` is written); keyboard goes to the pointer's output's surface
+    with fallback to the first current one (the milestone focus decision --
+    derivation still happens at map/unmap/transition, never on bare motion,
+    exactly like layer-shell); pointer hit-testing resolves each surface
+    against its admitted output; the locked frame draws each output's own
+    surface at framebuffer-local origin (the old path drew every surface at
+    the output's *global* origin into an output-sized target, so a second
+    output's surface landed entirely off-screen -- found live, pinned
+    fail-first); frame callbacks and presentation feedback are scoped to the
+    output's own surfaces. The duplicate-output refusal is untouched.
+  - **The confirm rule, exactly:** an output records on a drawn locked
+    frame; no surface there counts on its backdrop frame (so a locker
+    covering some outputs still gets `locked`, and zero-surface locks
+    confirm as pinned); an admitted-but-undrawn surface with a live role
+    blocks its output (its screen shows a placeholder, not the locker's
+    blank); a destroyed role never blocks (detected via Smithay's own
+    attribute reset, so no post-destroy commit is needed -- a silent teardown
+    cannot wedge a pending lock). The undrawn half applies only with more
+    than one output: with exactly one, the first blanked frame confirms
+    whatever the surface state, the long-pinned single-output semantic, so
+    the whole existing lock suite reads the new code as the old. A surface
+    admitted after confirm is sized and shown with no second confirmation
+    (decided + pinned). `--tty` is provably untouched: its branch never
+    reaches the new bookkeeping (short-circuit case analysis in the render
+    tail), and it has one output until phase E -- code-read + harness, no
+    live `--tty`, stated.
+  - **Single-output byte-identical:** full nextest (1281 passed) + the whole
+    lock suite green unchanged, pixman and GLES (`SCOOT_TEST_RENDERER=gles`
+    lock/layer/outputs: 198 passed); `clippy --workspace --all-targets`,
+    `fmt --check --all`, smoke (19 ok) clean. No hot path touched (the new
+    bookkeeping runs only on frames drawn while a lock awaits confirmation;
+    the render filter is per locked frame, which renders on demand, not
+    continuously) -- so no benchmark is owed, stated not skipped.
+  - **Fail-first pins (10 new tests, 7 fail pre-fix):** both-surfaces cover
+    own outputs (sizes white-box + per-output censuses); keyboard follows
+    the pointer's output at map/unmap with first-surface fallback;
+    output-1-only blanks output 2 with no surface and still confirms;
+    `locked` waits for the last blank (admitted-undrawn holds it, mapping
+    releases it); duplicate refusal per physical output (regression pin);
+    differs-per-output sizes (120 + 80x60, configures + censuses);
+    unlock restores both outputs (regression pin); full destroy
+    mid-confirmation unblocks; role-only destroy + silence unblocks (pins
+    the no-commit carve-out); post-confirm late surface needs no second
+    confirmation.
+  - **Live proof on the dev VM (`--headless --outputs 2`, 400x300):**
+    pixman -- single-batch lock + both surfaces admitted pre-first-frame,
+    forced-render screenshots while output 2 was admitted-undrawn (out1
+    120000 magenta, out2 120000 black, `locked` still 0 after a sync
+    barrier), then `LOCKED` only after output 2 mapped (out1 magenta, out2
+    cyan, 120000 each); output-2-only takeover (out1 black, out2 cyan,
+    `locked` +2ms, configure 400x300); locker death turns both screens
+    solid red (120000 each). GLES -- both surfaces live (magenta/cyan
+    censuses, `locked` +20ms). Foot blanked off both screens throughout.
+    Method note: the locktool's `dispatch_pending` settle never drains the
+    client socket, so `locked` timestamps skew late -- every ordering
+    reading above was taken through a roundtrip barrier, and promptness
+    (confirm on the first completing frame) is the harness's claim, not the
+    log's.
 - **D. Workspaces + output management + pointer.** `ext-workspace-v1`
   group per output; `wlr-output-management` head per output (read half —
   the `apply`/`test` refusal stays as documented); `input.rs` pointer

@@ -65,6 +65,7 @@ mod first_click;
 mod ime_popup;
 mod input;
 mod lifecycle;
+mod multi_output;
 mod per_output;
 mod teardown;
 mod vblank_confirm;
@@ -126,7 +127,7 @@ enum Which {
 
 /// Everything one client has been told, which is the only evidence these
 /// tests accept about focus and input.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 struct Report {
     keyboard_focus: Option<Which>,
     keys: u32,
@@ -134,10 +135,15 @@ struct Report {
     buttons: u32,
     /// `xdg_toplevel.close` events -- what a `CloseFocused` action sends.
     closes: u32,
-    /// `ext_session_lock_v1.locked` events, cumulative.
+    /// `locked` events, cumulative.
     locked: u32,
     /// ...and `finished`, which is how a refusal arrives.
     finished: u32,
+    /// The size and serial the compositor configured each lock surface to,
+    /// by creation order -- the white-box half of "each surface is sized to
+    /// its own output", which pixels alone cannot pin (a missed configure
+    /// kills the client before any pixel exists).
+    lock_configures: Vec<Option<(u32, u32, u32)>>,
 }
 
 /// One instruction for a client thread.
@@ -156,10 +162,19 @@ enum Step {
     /// *second* `wl_output` bind. Smithay refuses the same resource twice
     /// (`DuplicateOutput`, "Output is already locked") while admitting a
     /// second bind of the same global; scoot refuses that shape too, per
-    /// physical output (see `per_output`). So this step is how a refusal is
+    /// physical output (see `per_output`) -- so this step is how a refusal is
     /// provoked -- and, after a full destroy of the first surface, how a
     /// rebuild is admitted.
     LockSurfaceSecondBind { lock: usize, color: Option<[u8; 4]> },
+    /// `get_lock_surface` naming the client's `output`-th `wl_output`
+    /// global -- the multi-output shape, where each output is a distinct
+    /// global rather than a second bind of one. Acked and optionally drawn,
+    /// like [`Step::LockSurface`].
+    LockSurfaceOn {
+        lock: usize,
+        output: usize,
+        color: Option<[u8; 4]>,
+    },
     /// Map a full-output `overlay` layer surface with a solid
     /// [`OVERLAY_BGRA`] buffer -- a bar or a launcher, drawn in front of
     /// every window.
@@ -285,6 +300,11 @@ struct TestClient {
     /// The `wl_output` global's name and version, kept so the second bind
     /// above can be made after the initial roundtrip.
     output_global: Option<(u32, u32)>,
+    /// Every `wl_output` global in announcement order -- the per-output
+    /// handle the multi-output tests name surfaces with. `output` above is
+    /// `outputs[0]`; with one output `output2` names the same physical
+    /// output through a second bind, while with two it names the second.
+    outputs: Vec<wl_output::WlOutput>,
     seat: Option<wl_seat::WlSeat>,
     keyboard: Option<wl_keyboard::WlKeyboard>,
     pointer: Option<wl_pointer::WlPointer>,
@@ -363,6 +383,9 @@ impl Dispatch<wl_registry::WlRegistry, ()> for TestClient {
                 if client.output.is_none() {
                     client.output = Some(registry.bind(name, version.min(3), qh, ()))
                 }
+                client
+                    .outputs
+                    .push(registry.bind(name, version.min(3), qh, ()));
             }
             "ext_session_lock_manager_v1" => {
                 client.lock_manager = Some(registry.bind(name, version.min(1), qh, ()));
@@ -888,6 +911,29 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                     color,
                 )?;
             }
+            Step::LockSurfaceOn {
+                lock,
+                output,
+                color,
+            } => {
+                let named = client
+                    .outputs
+                    .get(output)
+                    .cloned()
+                    .ok_or("no such wl_output")?;
+                lock_surface_step(
+                    &mut client,
+                    &mut queue,
+                    &compositor,
+                    &shm,
+                    &qh,
+                    &locks,
+                    &mut lock_surfaces,
+                    lock,
+                    named,
+                    color,
+                )?;
+            }
             Step::MapOverlayLayer => {
                 let layer_shell = client.layer_shell.clone().ok_or("no zwlr_layer_shell_v1")?;
                 let surface = compositor.create_surface(&qh, ());
@@ -1013,6 +1059,7 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                     closes: client.closes,
                     locked: client.locked,
                     finished: client.finished,
+                    lock_configures: client.lock_configures.clone(),
                 });
             }
         }

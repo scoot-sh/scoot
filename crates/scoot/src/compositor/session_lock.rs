@@ -61,10 +61,13 @@
 //!   locked -- the protocol's "the compositor must stop rendering ...
 //!   normal clients".
 //! - **Keyboard focus** (`shell.rs::refresh_keyboard_focus`): a lock surface,
-//!   or nobody. Never a window, never a layer surface.
+//!   or nobody. Never a window, never a layer surface. With more than one
+//!   output, the pointer's output picks the surface (see
+//!   [`SessionLock::keyboard_focus`).
 //! - **Pointer focus** (`state.rs::surface_under`, and the explicit
 //!   [`State::refresh_pointer_focus`] at every lock transition): the hit test
-//!   only ever sees lock surfaces. The refresh matters as much as the hit
+//!   only ever sees lock surfaces, each against the output it was admitted
+//!   for. The refresh matters as much as the hit
 //!   test -- `wl_pointer.button` goes to whatever the pointer last *entered*,
 //!   so without moving focus at the moment of locking, the first click after
 //!   a lock would still land in the window underneath.
@@ -230,16 +233,17 @@
 //!
 //! The gather loop asks no focus question of its own, and needs none: the
 //! two parenting constraints above hold regardless of how many lock surfaces
-//! exist. Single-output is real but single-surface is enforced, not assumed:
+//! exist. One live surface per output is enforced, not assumed:
 //! [`SessionLockHandler::new_surface`] refuses a second live surface for an
-//! already-covered output with `duplicate_output`, so at most one current
-//! surface exists per output -- and an xdg popup on it can only be the lock
-//! client's own (unfocused popups on a second surface cannot arise), while
-//! IME popups stay pinned to the focused field by the compositor-assigned
-//! parenting above.
+//! already-covered output with `duplicate_output`, so each output's frame
+//! holds at most its own current surface -- and an xdg popup on it can only
+//! be the lock client's own, while IME popups stay pinned to the focused
+//! field by the compositor-assigned parenting above.
 
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
+
+use scoot_core::OutputId;
 
 use smithay::backend::input::InputTime;
 use smithay::backend::renderer::element::Kind;
@@ -350,6 +354,19 @@ pub struct SessionLock {
     /// Dropping a [`SessionLocker`] sends `finished` instead, which is how
     /// every refusal below tells a client its lock did not take.
     pending: Option<SessionLocker>,
+    /// The outputs whose blanked frame has been recorded for the pending
+    /// lock. `locked` goes out only once *every* output is in here (see
+    /// [`SessionLock::note_blanked`]) -- confirming on the first output's
+    /// frame would expose a live desktop on the screens that haven't blanked
+    /// yet, which is the bug the vblank-confirmation work exists to prevent.
+    ///
+    /// Empty unless [`SessionLock::pending`] is `Some`: cleared at every site
+    /// that writes `pending` ([`SessionLockHandler::lock`]'s sweep and fresh
+    /// install, [`SessionLockHandler::unlock`], [`State::confirm_lock`]).
+    /// A `Vec`, not a set: a session has a handful of outputs, and this only
+    /// ever grows on a frame drawn while a lock awaits confirmation -- a cold
+    /// path, never a hot one.
+    confirmed: Vec<OutputId>,
     /// The in-flight flip carrying the blanked frame, if confirmation is
     /// waiting on a vblank for it rather than going out with the render.
     ///
@@ -382,12 +399,11 @@ pub struct SessionLock {
     /// unconfirmed, whether or not `blank_flip` names a flip.
     blank_deadline: Option<Instant>,
     /// Every lock surface this compositor has been handed and not yet dropped,
-    /// in creation order -- the first *current* one holds the keyboard, which
-    /// is the focus rule the protocol itself suggests. At most one *live*
-    /// surface per output per lock (see [`SessionLock::surface_outputs`):
-    /// a second `get_lock_surface` for an already-covered output is refused
-    /// in [`SessionLockHandler::new_surface`], so with one output this list
-    /// holds at most one current surface.
+    /// in creation order. At most one *live* surface per output per lock (see
+    /// [`SessionLock::surface_outputs`]): a second `get_lock_surface` for an
+    /// already-covered output is refused in
+    /// [`SessionLockHandler::new_surface`]. The keyboard goes to the surface
+    /// on the pointer's output (see [`SessionLock::keyboard_focus`]).
     ///
     /// Not every entry is necessarily current: see this module's "Which lock
     /// surfaces count". Nothing may read this field directly -- reads go
@@ -470,6 +486,7 @@ impl SessionLock {
             manager: SessionLockManagerState::new::<State, _>(display, |_| true),
             owner: None,
             pending: None,
+            confirmed: Vec::new(),
             blank_flip: None,
             blank_deadline: None,
             surfaces: Vec::new(),
@@ -500,6 +517,108 @@ impl SessionLock {
     /// drawing the lock screen is precisely what clears this.
     pub(super) fn awaiting_blank(&self) -> bool {
         self.pending.is_some()
+    }
+
+    /// Records that `output` presented a locked frame for the pending lock,
+    /// reporting whether the wait is now complete -- every output recorded --
+    /// so the caller can send `locked`.
+    ///
+    /// `id` is the output's core id, `expected` how many outputs must record
+    /// before the lock confirms (the render loop's output count, read once up
+    /// front -- outputs are only ever added at startup, so it cannot go stale
+    /// mid-frame).
+    ///
+    /// An output records when it drew a locked frame, with two qualifications:
+    ///
+    /// - An output with no current surface records on its backdrop frame:
+    ///   the solid-colour fallback *is* that output's locked frame, so a
+    ///   locker covering only some outputs still gets `locked`. With zero
+    ///   surfaces anywhere that is every output, which is the long-pinned
+    ///   zero-surface confirmation, unchanged.
+    /// - An output whose admitted surface is mapped records; one whose
+    ///   surface is admitted but undrawn -- acked, no buffer yet -- does
+    ///   not, while its role is still alive. The locker is mid-startup on
+    ///   that screen and the backdrop is a placeholder, not its blank, so
+    ///   confirming would hand it the guarantee while one screen still shows
+    ///   nothing of its. A surface whose role is gone never blocks, mapped
+    ///   or not: its screen shows the fallback finally (see
+    ///   [`State::lock_surface_destroyed`]), and waiting for a teardown to
+    ///   draw would hang the locker.
+    ///
+    /// The undrawn-surface half applies only with more than one output. With
+    /// exactly one, the first blanked frame confirms whatever the surface
+    /// state -- the single-output pin `per_output.rs` records -- so the
+    /// whole existing single-output suite reads this function as "record and
+    /// complete".
+    ///
+    /// No allocation past the first record per output per lock; runs only on
+    /// frames drawn while a lock awaits confirmation.
+    pub(super) fn note_blanked(&mut self, id: OutputId, output: &Output, expected: usize) -> bool {
+        if self.pending.is_none() {
+            return false;
+        }
+        if expected > 1 && self.output_blocks_confirm(output) {
+            return false;
+        }
+        if !self.confirmed.contains(&id) {
+            self.confirmed.push(id);
+        }
+        self.confirmed.len() >= expected
+    }
+
+    /// Whether `output`'s screen is not its locked blank yet: a current
+    /// surface admitted for it that has drawn nothing and may still do so.
+    fn output_blocks_confirm(&self, output: &Output) -> bool {
+        self.current()
+            .filter(|surface| self.is_admitted_for(surface, output))
+            .any(|surface| self.surface_blocks_confirm(surface))
+    }
+
+    /// Whether an admitted surface's screen is still a placeholder: mapped
+    /// surfaces never block (their pixels are on screen), and neither do
+    /// torn-down ones (their backdrop is final) -- only a live role that has
+    /// not drawn yet.
+    fn surface_blocks_confirm(&self, surface: &LockSurface) -> bool {
+        if is_mapped(surface) {
+            return false;
+        }
+        if self
+            .acked
+            .get(&surface.wl_surface().id())
+            .is_some_and(|acked| acked.role_destroyed)
+        {
+            // Destroyed and committed since (see
+            // `prepare_post_destroy_lock_commit`): the teardown the naive
+            // "unmapped blocks" rule would wait on forever.
+            return false;
+        }
+        // A role destroyed without any commit since leaves no flag behind,
+        // but Smithay's own `destroyed` hook reset the role attributes
+        // synchronously -- last ack, pending configures and server state all
+        // gone -- which a live role never reads as: a configure the client
+        // has not acked yet is still sitting in `pending_configures`, and an
+        // acked one in `last_acked`. All three empty can only mean the reset
+        // ran, i.e. the role is gone and the backdrop is final.
+        !with_states(surface.wl_surface(), |states| {
+            states
+                .data_map
+                .get::<LockSurfaceData>()
+                .is_some_and(|data| {
+                    let attributes = data.lock().expect("lock surface attributes");
+                    attributes.last_acked.is_none()
+                        && attributes.pending_configures.is_empty()
+                        && attributes.server_pending.is_none()
+                })
+        })
+    }
+
+    /// Whether `surface` was admitted for `output` -- the render, callback
+    /// and feedback scoping predicate, and the per-output half of the
+    /// duplicate check [`SessionLock::surface_for_output`] answers.
+    fn is_admitted_for(&self, surface: &LockSurface, output: &Output) -> bool {
+        self.surface_outputs
+            .get(&surface.wl_surface().id())
+            .is_some_and(|admitted| admitted == output)
     }
 
     /// A blanked frame was rendered for the pending lock but, under `--tty`,
@@ -624,8 +743,14 @@ impl SessionLock {
         })
     }
 
-    /// The surface the keyboard goes to while locked: the current lock's first
-    /// surface, or nobody.
+    /// The surface the keyboard goes to while locked: the current surface on
+    /// the pointer's output, or the first current surface when the pointer is
+    /// over no output (or its output has no surface).
+    ///
+    /// The pointer picks the output -- the milestone-19 focus decision, the
+    /// same rule `layer_keyboard_focus` applies -- and the existing
+    /// derivation applies within it. With one output the preferred surface
+    /// *is* the first, so the single-output answer is unchanged.
     ///
     /// Liveness, not mapped-ness, deliberately -- the opposite of
     /// `layer_shell.rs`'s rule, and for the opposite reason. There, a surface
@@ -638,9 +763,10 @@ impl SessionLock {
     /// than `alive()`: handing the keyboard to a *former* locker's surface is
     /// not "better than nobody", it is the whole password going to whoever
     /// left it there.
-    fn keyboard_focus(&self) -> Option<WlSurface> {
-        self.current()
-            .next()
+    fn keyboard_focus(&self, preferred: Option<&Output>) -> Option<WlSurface> {
+        preferred
+            .and_then(|output| self.surface_for_output(output))
+            .or_else(|| self.current().next())
             .map(|surface| surface.wl_surface().clone())
     }
 
@@ -669,8 +795,19 @@ impl SessionLock {
         }
     }
 
-    /// The render elements of every *mapped* lock surface, front-most first,
-    /// each preceded by the popups parented to it.
+    /// The render elements of every *mapped* lock surface admitted for
+    /// `output`, front-most first, each preceded by the popups parented to
+    /// it.
+    ///
+    /// Scoped to the output being drawn: each output's framebuffer is that
+    /// output's size, in that output's local coordinates (see
+    /// `Space::render_elements_for_region`, which translates the unlocked
+    /// path the same way), so a surface drawn at another output's global
+    /// origin would land off-target -- and a surface drawn onto another
+    /// output's screen would put one screen's lock pixels where they do not
+    /// belong. At most one live surface per output (see
+    /// [`SessionLockHandler::new_surface`]), so this is one surface's
+    /// elements plus its popups, or nothing but the backdrop.
     ///
     /// Mapped-ness here is `last_acked`, which Smithay's own pre-commit hook
     /// maintains as "has a buffer" (`session_lock/surface.rs`), the same test
@@ -696,15 +833,22 @@ impl SessionLock {
     fn surface_elements<R>(
         &self,
         renderer: &mut R,
-        origin: Point<i32, Physical>,
+        output: &Output,
         scale: f64,
     ) -> Vec<WaylandSurfaceRenderElement<R>>
     where
         R: Renderer + ImportAll,
         R::TextureId: Texture + Send + Clone + 'static,
     {
+        // Framebuffer-local, not global: the target is this output's size,
+        // so the global origin another output sits at would push its surface
+        // out of its own frame (see `lock_elements`).
+        let origin = Point::<i32, Physical>::default();
         let mut elements = Vec::new();
-        for surface in self.current() {
+        for surface in self
+            .current()
+            .filter(|surface| self.is_admitted_for(surface, output))
+        {
             if !is_mapped(surface) {
                 continue;
             }
@@ -740,8 +884,8 @@ impl SessionLock {
         elements
     }
 
-    /// Sends this frame's callbacks to every current lock surface and the
-    /// popups parented to it.
+    /// Sends this frame's callbacks to every current lock surface admitted
+    /// for `output`, and the popups parented to it.
     ///
     /// Sent to all of them rather than only the ones that produced an
     /// element, matching `render()`'s window, cursor and layer-surface loops
@@ -758,7 +902,10 @@ impl SessionLock {
     /// client's own unseen buffer, redrawn the same way `window.send_frame`
     /// (see `headless.rs::render`) wakes every window unconditionally.
     fn send_frames(&self, output: &Output, time: Duration) {
-        for surface in self.current() {
+        for surface in self
+            .current()
+            .filter(|surface| self.is_admitted_for(surface, output))
+        {
             send_frames_surface_tree(
                 surface.wl_surface(),
                 output,
@@ -778,20 +925,24 @@ impl SessionLock {
         }
     }
 
-    /// Takes every current lock surface's (and its popups') committed
-    /// presentation feedback into `output_feedback` -- the take half of what
-    /// [`SessionLock::send_frames`] is the frame-callback half of, over the
-    /// same surface set: while locked these are the only client surfaces any
-    /// frame shows, so they are the only ones any locked frame may stamp.
-    /// `flags` is the presenting frame's flags, applied to every surface
-    /// alike (there is no per-surface zero-copy path behind a pixman copy).
+    /// Takes every current lock surface admitted for `output` (and its
+    /// popups') committed presentation feedback into `output_feedback` -- the
+    /// take half of what [`SessionLock::send_frames`] is the frame-callback
+    /// half of, over the same surface set: while locked these are the only
+    /// client surfaces any frame shows, so they are the only ones any locked
+    /// frame may stamp. `flags` is the presenting frame's flags, applied to
+    /// every surface alike (there is no per-surface zero-copy path behind a
+    /// pixman copy).
     pub(super) fn take_presentation_feedback(
         &self,
         output: &Output,
         output_feedback: &mut OutputPresentationFeedback,
         flags: wp_presentation_feedback::Kind,
     ) {
-        for surface in self.current() {
+        for surface in self
+            .current()
+            .filter(|surface| self.is_admitted_for(surface, output))
+        {
             take_presentation_feedback_surface_tree(
                 surface.wl_surface(),
                 output_feedback,
@@ -832,34 +983,22 @@ impl SessionLock {
         before != self.surfaces.len()
     }
 
-    /// Configures every current lock surface to `size`.
+    /// Configures every current lock surface admitted for `output` to `size`.
     ///
-    /// Called when the output's mode changes: a lock surface's size is an
+    /// Called when that output's mode changes: a lock surface's size is an
     /// exact requirement (committing a buffer of any other size is a protocol
-    /// error), so a resized output has to reconfigure them or the next commit
-    /// kills the lock client.
-    fn configure_all(&self, size: (i32, i32)) {
-        for surface in self.current() {
+    /// error), so a resized output has to reconfigure its own surfaces or the
+    /// next commit kills the lock client. Scoped to the output that moved --
+    /// reconfiguring every surface to one output's size would kill the lock
+    /// clients of all the others the moment outputs differ. A no-op when the
+    /// session isn't locked (there are none).
+    fn configure_output(&self, output: &Output, size: (i32, i32)) {
+        for surface in self
+            .current()
+            .filter(|surface| self.is_admitted_for(surface, output))
+        {
             configure(surface, size);
         }
-    }
-
-    /// The current lock surface under `position`, if any.
-    fn surface_under(
-        &self,
-        position: Point<f64, Logical>,
-        origin: Point<i32, Logical>,
-    ) -> Option<(WlSurface, Point<f64, Logical>)> {
-        self.current()
-            .find_map(|surface| {
-                under_from_surface_tree(
-                    surface.wl_surface(),
-                    position,
-                    origin,
-                    WindowSurfaceType::ALL,
-                )
-            })
-            .map(|(surface, location)| (surface, location.to_f64()))
     }
 }
 
@@ -950,8 +1089,11 @@ impl SessionLockHandler for State {
         {
             self.session_lock.pending = None;
             // The wait belonged to the dead lock: a late vblank for its flip
-            // must not confirm whatever lock comes next.
+            // must not confirm whatever lock comes next. Its recorded blanks
+            // go with it: they are evidence about the dead lock's frames, not
+            // about the replacement's.
             self.session_lock.cancel_blank_wait();
+            self.session_lock.confirmed.clear();
         }
         if self.session_lock.pending.is_some() {
             tracing::info!("refusing a session lock: another client's lock is still taking effect");
@@ -993,8 +1135,9 @@ impl SessionLockHandler for State {
         } else {
             // Any wait still recorded here belongs to the lock just replaced
             // (or to nothing, on the fresh-lock path) -- the new lock
-            // records its own once its blanked frame presents.
+            // records its own once its blanked frames present.
             self.session_lock.cancel_blank_wait();
+            self.session_lock.confirmed.clear();
             self.session_lock.pending = Some(confirmation);
         }
 
@@ -1027,8 +1170,10 @@ impl SessionLockHandler for State {
         // would keep an unlocked session waiting to confirm a lock.
         self.session_lock.pending = None;
         // The wait belonged to the lock just ended: a late vblank for its
-        // flip must not confirm anything afterwards.
+        // flip must not confirm anything afterwards -- and recorded blanks
+        // for it must not complete a later lock's wait.
         self.session_lock.cancel_blank_wait();
+        self.session_lock.confirmed.clear();
         self.session_lock.surfaces.clear();
         self.session_lock.surface_outputs.clear();
         // Deliberately not [`State::lock_transition`]: this is the one lock
@@ -1075,13 +1220,15 @@ impl SessionLockHandler for State {
             tracing::warn!("ignoring a lock surface from a lock this compositor did not accept");
             return;
         }
-        // The output the client named, falling back to the primary one for a
-        // resource that no longer resolves (see `Outputs::primary` for what
-        // multi-output has to revisit here -- most of all that `locked` must
-        // wait for every output's blanked frame, not the first).
-        let Some(output) =
-            Output::from_resource(&output).or_else(|| self.outputs.primary().cloned())
-        else {
+        // The output the client named. No fallback: with more than one
+        // output a surface that names nothing resolvable has no size to be
+        // configured to and no screen to be drawn on, so it is ignored rather
+        // than shown somewhere the locker did not ask for. Unreachable in
+        // practice -- outputs are only ever added at startup, never removed
+        // mid-session -- but written as a fallthrough rather than an
+        // `expect`, because a panic on the commit path would take every
+        // client's unsaved state with it.
+        let Some(output) = Output::from_resource(&output) else {
             tracing::warn!("no output for a lock surface");
             return;
         };
@@ -1411,12 +1558,14 @@ impl State {
         self.refresh_pointer_focus();
     }
 
-    /// Confirms a pending lock now that a blanked frame has been drawn.
+    /// Confirms a pending lock now that every output's blanked frame has been
+    /// drawn.
     ///
-    /// Called from `headless.rs::render` after a successful frame -- but only
-    /// where there is no scanout to wait for. `--headless`/`--nested` have
-    /// none, and the framebuffer a screenshot reads *is* this frame, so this
-    /// is exact there. Under `--tty` the render loop calls
+    /// Called from `headless.rs::render` after a frame whose blanks complete
+    /// the set (see [`SessionLock::note_blanked`]) -- but only where there is
+    /// no scanout to wait for. `--headless`/`--nested` have none, and the
+    /// framebuffer a screenshot reads *is* this frame, so this is exact
+    /// there. Under `--tty` the render loop calls
     /// [`SessionLock::await_vblank`] instead (see it for which flip is
     /// tracked and what bounds the wait), and confirmation arrives through
     /// [`State::note_flip_completed`] (the flip's vblank) or
@@ -1441,6 +1590,10 @@ impl State {
     pub(super) fn confirm_lock(&mut self) {
         if let Some(confirmation) = self.session_lock.pending.take() {
             tracing::debug!("session lock confirmed: a blanked frame has been drawn");
+            // The recorded per-output blanks belonged to the wait just taken:
+            // without this a later lock could start one output already
+            // "confirmed" from frames it never drew.
+            self.session_lock.confirmed.clear();
             // A no-op if the client died in the meantime: the generated event
             // sender discards the send error for a destroyed object. The
             // session stays locked either way -- `owner` is untouched here --
@@ -1567,7 +1720,7 @@ impl State {
     pub(super) fn lock_elements<R>(
         &mut self,
         renderer: &mut R,
-        origin: Point<i32, Physical>,
+        output: &Output,
         scale: f64,
         size: (i32, i32),
     ) -> (Vec<WaylandSurfaceRenderElement<R>>, SolidColorRenderElement)
@@ -1575,8 +1728,8 @@ impl State {
         R: Renderer + ImportAll,
         R::TextureId: Texture + Send + Clone + 'static,
     {
-        let surfaces = self.session_lock.surface_elements(renderer, origin, scale);
-        let backdrop = self.session_lock.backdrop_element(origin, size);
+        let surfaces = self.session_lock.surface_elements(renderer, output, scale);
+        let backdrop = self.session_lock.backdrop_element(Point::default(), size);
         (surfaces, backdrop)
     }
 
@@ -1596,13 +1749,26 @@ impl State {
     }
 
     /// The keyboard focus while locked, for `shell.rs::refresh_keyboard_focus`.
+    ///
+    /// The pointer's output picks the surface (see
+    /// [`SessionLock::keyboard_focus`]); with one output that is the first
+    /// current surface, exactly as before.
     pub(super) fn lock_keyboard_focus(&self) -> Option<WlSurface> {
-        self.session_lock.keyboard_focus()
+        // Owned, so no borrow of `self.outputs` outlives the pointer read --
+        // and an `Output` clone is an `Arc` bump. `None` where the pointer is
+        // over no output, which simply skips the preferred-output pass.
+        let preferred = self.seat.get_pointer().and_then(|pointer| {
+            self.output_under(pointer.current_location())
+                .map(|(output, _)| output)
+        });
+        self.session_lock.keyboard_focus(preferred.as_ref())
     }
 
     /// The lock surface under `position`, if any -- the whole of pointer
     /// hit-testing while locked.
     ///
+    /// Each surface is hit-tested against the output it was admitted for, so
+    /// a position over one output can only ever enter that output's surface.
     /// Asks the surface tree, so a client's own `set_input_region` is
     /// honoured exactly as it is for a window; a lock surface that excludes
     /// a point simply gets no pointer there, and nothing behind it is
@@ -1611,13 +1777,26 @@ impl State {
         &self,
         position: Point<f64, Logical>,
     ) -> Option<(WlSurface, Point<f64, Logical>)> {
-        let origin = self
-            .outputs
-            .primary()
-            .and_then(|output| self.space.output_geometry(output))
-            .map(|geometry| geometry.loc)
-            .unwrap_or_default();
-        self.session_lock.surface_under(position, origin)
+        self.session_lock
+            .current()
+            .find_map(|surface| {
+                let output = self
+                    .session_lock
+                    .surface_outputs
+                    .get(&surface.wl_surface().id())?;
+                let origin = self
+                    .space
+                    .output_geometry(output)
+                    .map(|geometry| geometry.loc)
+                    .unwrap_or_default();
+                under_from_surface_tree(
+                    surface.wl_surface(),
+                    position,
+                    origin,
+                    WindowSurfaceType::ALL,
+                )
+            })
+            .map(|(surface, location)| (surface, location.to_f64()))
     }
 
     /// Drops `surface` if it is one of the lock surfaces, reporting whether
@@ -1647,8 +1826,8 @@ impl State {
         before != self.session_lock.surfaces.len()
     }
 
-    /// Reconfigures every lock surface for a new output size.
-    pub(super) fn resize_lock_surfaces(&mut self, size: (i32, i32)) {
-        self.session_lock.configure_all(size);
+    /// Reconfigures the resized output's lock surfaces for its new size.
+    pub(super) fn resize_lock_surfaces(&mut self, output: &Output, size: (i32, i32)) {
+        self.session_lock.configure_output(output, size);
     }
 }

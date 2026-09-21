@@ -117,16 +117,20 @@ What a second output **is**, today:
   with the second output's own pixels, a screen capture of it (`grim -o
   headless-2`) reads its own framebuffer, a gamma control names it
   specifically, and its layer surfaces get frame callbacks at its own
-  cadence. Each output is `--width` by `--height`, like the first.
+  cadence. Each output is `--width` by `--height`, like the first;
+- its own session-lock surface: a locker puts one surface up per output,
+  each configured to its own output's size, each drawn onto its own screen,
+  with the keyboard on the pointer's output's surface -- and `locked` waits
+  for every output's blanked frame, so no screen confirms while another
+  still shows the desktop.
 
 What it is **not**, yet — the work tracked in
-`docs/backlog/core/multi-output.md` (milestone 19, phases C–E):
+`docs/backlog/core/multi-output.md` (milestone 19, phases D–E):
 
-- `wlr-output-management` publishes one head, `ext-workspace` publishes one
-  group, and a session lock covers the first output. A second output also
-  shows whatever the layout placed there — and new windows still open on the
-  first output, since nothing moves a window
-  across outputs yet.
+- `wlr-output-management` publishes one head, and `ext-workspace` publishes
+  one group. A second output also shows whatever the layout placed there —
+  and new windows still open on the first output, since nothing moves a
+  window across outputs yet.
 
 ## Starting a session
 

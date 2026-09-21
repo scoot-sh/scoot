@@ -447,14 +447,15 @@ impl State {
             // blanked frame (see `SessionLock::await_vblank`): the previous,
             // possibly unlocked, frame can otherwise stay on scanout for up
             // to one more vblank after `locked` has gone out. Headless and
-            // nested have no scanout, so the drawn frame *is* the shown one
-            // and confirms at once, exactly as before.
+            // nested have no scanout, so the drawn frame *is* the shown one.
             //
-            // Per output, and idempotent past the first: confirming on the
-            // primary's blanked frame is the standing rule, and waiting for
-            // *every* output's is phase C's (`locked` must wait for every
-            // output's blanked frame -- the security-relevant half). Until
-            // then a second confirmation is a no-op, never an early unlock.
+            // Recorded per output, and confirmed only once every output's
+            // blanked frame is in (see `SessionLock::note_blanked`): with
+            // more than one screen, confirming on the first output's frame
+            // would expose a live desktop on the ones that haven't blanked.
+            // A second confirmation is a no-op, never an early unlock -- and
+            // with one output the record completes on the first drawn frame,
+            // exactly as before.
             if frame.drew_a_frame {
                 if self.session_lock.awaiting_blank() && self.tty.is_some() {
                     let now = Instant::now();
@@ -483,7 +484,11 @@ impl State {
                             );
                         }
                     }
-                } else {
+                } else if !self.session_lock.awaiting_blank()
+                    || self.session_lock.note_blanked(id, &output, count)
+                {
+                    // Either no lock is waiting (a no-op, as before) or this
+                    // output's blanked frame just completed the set.
                     self.confirm_lock();
                 }
             }
@@ -820,10 +825,12 @@ impl State {
         // A lock surface's configured size is an *exact* requirement -- the
         // next buffer that doesn't match it is a `dimensions_mismatch`
         // protocol error, i.e. a killed lock client on a locked session -- so
-        // a resized output has to reconfigure them. A no-op when the session
-        // isn't locked (there are none). Logical, not physical: a lock
-        // surface's configure size is in surface-local logical coordinates.
-        self.resize_lock_surfaces(logical);
+        // a resized output has to reconfigure its own surfaces. A no-op when
+        // the session isn't locked (there are none). Logical, not physical: a
+        // lock surface's configure size is in surface-local logical
+        // coordinates. Scoped to the output that moved: another output's
+        // surfaces keep their own size.
+        self.resize_lock_surfaces(&output, logical);
         // Layer surfaces are anchored to the output's edges, so every one of
         // them has moved or resized -- `LayerMap::arrange` recomputes their
         // rectangles against the new mode and configures whoever needs a new

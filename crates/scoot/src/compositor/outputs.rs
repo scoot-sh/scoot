@@ -118,13 +118,16 @@ impl Outputs {
     /// it is on. What remains here are the later phases' sites, and they do
     /// not all change the same way:
     ///
-    /// - `session_lock.rs`'s `new_surface` fallback, `configure_all`,
-    ///   confirmation (`locked` must wait for *every* output's blanked frame
-    ///   -- the security-relevant one) and the locked render path;
     /// - `ext_workspace.rs` needs a group per output;
     /// - `output_management.rs` needs a head per output;
     /// - `input.rs`'s pointer clamp needs the union of the outputs, or the
     ///   one the pointer is on.
+    ///
+    /// Session lock no longer goes through here (milestone 19, phase C):
+    /// `new_surface` resolves the named output with no fallback, each
+    /// surface is configured to its own output's size, `locked` waits for
+    /// *every* output's blanked frame, and the locked render path composites
+    /// each output's surfaces onto its own target.
     ///
     /// The sites that already resolve an output *per surface* rather than
     /// through here are `layer_shell.rs`'s `new_layer_surface` (which honours
