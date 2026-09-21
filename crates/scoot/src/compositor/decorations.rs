@@ -453,6 +453,10 @@ pub enum RingElement<R: Renderer> {
 /// stale, and [`Decorations::push_painted`] refreshes those in place on
 /// every cache hit (see `refresh_strip_origins`). Keying on position instead
 /// would repaint every window on every scroll frame for identical pixels.
+/// (At fractional scales the *in-canvas* paint offsets still move with
+/// absolute position through rounding phases even for one key -- the refresh
+/// compares those separately and repaints exactly then, rather than widening
+/// this key.)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct PaintedKey {
     /// Logical window size (the paint's inputs, before scaling).
@@ -484,10 +488,22 @@ struct PaintedRing {
     top: Option<MemoryRenderBuffer>,
     bottom: Option<MemoryRenderBuffer>,
     /// Where the strips draw, and at what logical size: computed at build
-    /// alongside the buffers. Canvases only change with the key; origins
-    /// are refreshed per frame from the live rect (see `refresh_strip_origins`).
+    /// alongside the buffers. Origins are refreshed per frame from the live
+    /// rect (see `refresh_strip_origins`); canvases can move with position at
+    /// fractional scales even when the key is unchanged, so they are part of
+    /// the reuse decision, not assumed stable.
     top_at: Option<StripGeometry>,
     bottom_at: Option<StripGeometry>,
+    /// The full-canvas paint inputs the buffers were painted from
+    /// ([`StripPlan`]'s `inner`/`outer`): at fractional scales these move
+    /// with absolute position through rounding phases even when the strip
+    /// canvases match, so the refresh compares them too -- otherwise a
+    /// canvas-matching move reuses a buffer whose ring hole sits up to 1px
+    /// off the window clip (see `refresh_strip_origins`). `None` exactly when
+    /// the strips are (never built, or a failed build): the poison contract
+    /// below keys off `top_at`, and these follow it.
+    inner_at: Option<Rectangle<i32, Physical>>,
+    outer_at: Option<Rectangle<i32, Physical>>,
     pixels: Vec<u8>,
     key: Option<PaintedKey>,
 }
@@ -495,7 +511,9 @@ struct PaintedRing {
 /// Where one painted strip draws: its origin in exact physical pixels, its
 /// size in logical pixels (what the element is built at), and its canvas in
 /// physical pixels (what the cached buffer holds -- the refresh path
-/// compares this to decide whether the buffers still fit).
+/// compares this, plus the full-canvas paint inputs `PaintedRing` stores
+/// alongside, to decide whether the buffers still fit and still paint the
+/// right rows).
 #[derive(Debug, Clone, Copy)]
 struct StripGeometry {
     loc: Point<f64, Physical>,
@@ -624,7 +642,7 @@ impl Decorations {
     /// allocation and no renderer touch. A hit still re-derives the strips'
     /// origins from the live rect -- moves and scrolls change no key input
     /// -- repainting only when fractional-scale rounding changed a strip
-    /// canvas out from under the cached buffers.
+    /// canvas or an in-canvas paint offset out from under the cached buffers.
     #[allow(clippy::too_many_arguments)]
     fn push_painted<R>(
         &mut self,
@@ -657,6 +675,8 @@ impl Decorations {
             bottom: None,
             top_at: None,
             bottom_at: None,
+            inner_at: None,
+            outer_at: None,
             pixels: Vec::new(),
             key: None,
         });
@@ -665,10 +685,11 @@ impl Decorations {
             build_strips(rect, appearance, color, scale, entry);
         } else if entry.top_at.is_some() && !refresh_strip_origins(rect, appearance, scale, entry) {
             // A fractional-scale rounding boundary moved under a cached ring
-            // and a strip canvas no longer matches its buffer: repaint this
-            // frame. At integer scales the canvases are exact, so this never
-            // fires and a move costs two origin stores, not a repaint. The
-            // `top_at` guard keeps the poison contract below: a window whose
+            // and a strip canvas -- or an in-canvas paint offset -- no longer
+            // matches what the buffers were painted for: repaint this frame.
+            // At integer scales neither can move without the key, so this
+            // never fires and a move costs two origin stores, not a repaint.
+            // The `top_at` guard keeps the poison contract below: a window whose
             // last build failed stays on the silent square fallback until
             // its key changes, rather than retrying (and warning) every
             // frame.
@@ -723,6 +744,8 @@ impl Decorations {
                 entry.bottom = None;
                 entry.top_at = None;
                 entry.bottom_at = None;
+                entry.inner_at = None;
+                entry.outer_at = None;
                 self.push_fallback(elements, id, rect, thickness, color, bounds, scale);
             }
         }
@@ -769,7 +792,8 @@ fn ring_color(arrangement: &Arrangement, id: WindowId, appearance: &Appearance) 
 ///
 /// Pure -- the same inputs give the same plan -- which is what makes the
 /// per-frame refresh sound: recomputing the plan for the live rect and
-/// finding the same strip canvases means the cached buffers still fit, and
+/// finding the same strip canvases *and* the same in-canvas paint inputs
+/// means the cached buffers still fit and still paint the right rows, and
 /// only their origins went stale.
 struct StripPlan {
     top: StripGeometry,
@@ -863,11 +887,13 @@ fn plan_strips(rect: Rect, appearance: &Appearance, scale: f64) -> Option<StripP
 /// `fix_view`, `move-column` -- so a cache hit must still re-derive where
 /// the strips draw.
 ///
-/// Returns `false` when the cached buffers no longer fit -- a degenerate
-/// plan, a first build that never happened, or a fractional-scale rounding
-/// boundary that moved a strip canvas across a pixel boundary -- so the
-/// caller repaints instead. No allocation and no renderer touch on `true`:
-/// two origin stores.
+/// Returns `false` when the cached buffers no longer paint the right rows --
+/// a degenerate plan, a first build that never happened, a fractional-scale
+/// rounding boundary that moved a strip canvas across a pixel boundary, or
+/// one that moved an in-canvas paint offset (`inner`/`outer`) while the
+/// canvases happened to match -- so the caller repaints instead. No
+/// allocation and no renderer touch on `true`: two origin stores plus the
+/// comparisons below, all on values `plan_strips` already computed.
 fn refresh_strip_origins(
     rect: Rect,
     appearance: &Appearance,
@@ -881,6 +907,17 @@ fn refresh_strip_origins(
         return false;
     };
     if top_at.canvas != plan.top.canvas || bottom_at.canvas != plan.bottom.canvas {
+        return false;
+    }
+    // The paint content also depends on absolute position through rounding
+    // phases: at fractional scales the in-canvas offsets can move while the
+    // canvases match, and reusing the buffers would then land the ring hole
+    // up to 1px off the window clip. `outer` is `(0, 0, canvas)` -- compared
+    // explicitly because the full-canvas height is invisible in the strip
+    // canvases (shifting it by a row shifts the bottom strip's origin by the
+    // same exact amount, leaving both strip canvases unchanged). At integer
+    // scales neither offset can move without the key, so this never fires.
+    if entry.inner_at != Some(plan.inner) || entry.outer_at != Some(plan.outer) {
         return false;
     }
     // The key is unchanged, so size, thickness and scale are too -- the
@@ -909,6 +946,8 @@ fn build_strips(
     entry.bottom = None;
     entry.top_at = None;
     entry.bottom_at = None;
+    entry.inner_at = None;
+    entry.outer_at = None;
     let Some(plan) = plan_strips(rect, appearance, scale) else {
         tracing::warn!("cannot paint a focus ring with no pixels; falling back to a square ring");
         return;
@@ -963,6 +1002,8 @@ fn build_strips(
     ));
     entry.top_at = Some(plan.top);
     entry.bottom_at = Some(plan.bottom);
+    entry.inner_at = Some(plan.inner);
+    entry.outer_at = Some(plan.outer);
 }
 
 /// Sizes `pixels` for a strip canvas, zeroes it, and paints the shared ring
@@ -1461,5 +1502,220 @@ mod tests {
                 element.geometry(1.0.into())
             );
         }
+    }
+
+    // -- refresh_strip_origins (fractional-scale ring-hole drift) ---------------
+
+    /// The painted path's inputs for the drift tests: thickness 2 (the
+    /// ticket's instance) and a nonzero radius so the strips actually paint.
+    fn painted_appearance() -> Appearance {
+        Appearance {
+            focus_ring_width: 2,
+            corner_radius: 8,
+            ..Appearance::default()
+        }
+    }
+
+    fn painted_entry(rect: Rect, appearance: &Appearance, scale: f64) -> PaintedRing {
+        let mut entry = PaintedRing {
+            top: None,
+            bottom: None,
+            top_at: None,
+            bottom_at: None,
+            inner_at: None,
+            outer_at: None,
+            pixels: Vec::new(),
+            key: None,
+        };
+        build_strips(
+            rect,
+            appearance,
+            appearance.focus_ring_active_color,
+            scale,
+            &mut entry,
+        );
+        assert!(
+            entry.top_at.is_some(),
+            "the drift tests need a successfully built entry for {rect:?} at scale {scale}"
+        );
+        entry
+    }
+
+    /// The ticket's concrete instance (scale 1.25, thickness 2, 100px window,
+    /// x=1→2): both plans agree on the strip canvases, but the in-canvas
+    /// paint offsets move, so reusing the buffers would land the ring hole
+    /// 1px off the window clip until a key change repaints.
+    #[test]
+    fn fractional_scale_move_with_matching_canvases_still_repaints() {
+        let appearance = painted_appearance();
+        let scale = 1.25;
+        let before_rect = Rect::new(1, 50, 100, 100);
+        let after_rect = Rect::new(2, 50, 100, 100);
+        let before = plan_strips(before_rect, &appearance, scale).expect("a plan");
+        let after = plan_strips(after_rect, &appearance, scale).expect("a plan");
+        assert_eq!(
+            before.top.canvas, after.top.canvas,
+            "the test only means something if the canvases match"
+        );
+        assert_eq!(
+            before.bottom.canvas, after.bottom.canvas,
+            "the test only means something if the canvases match"
+        );
+        assert_ne!(
+            before.inner, after.inner,
+            "the test only means something if the paint inputs actually move"
+        );
+        let mut entry = painted_entry(before_rect, &appearance, scale);
+        assert!(
+            !refresh_strip_origins(after_rect, &appearance, scale, &mut entry),
+            "canvas-matching move at scale {scale} must repaint: the ring hole drifted"
+        );
+    }
+
+    /// Integer scales have no rounding phases: a move never changes a canvas
+    /// or a paint offset, so the added comparison must never fire there and
+    /// the session stays byte-identical to before the fix.
+    #[test]
+    fn integer_scale_moves_never_repaint() {
+        let appearance = painted_appearance();
+        for scale in [1.0, 2.0, 3.0] {
+            for x in -20..20 {
+                let before_rect = Rect::new(x, 50, 100, 100);
+                let after_rect = Rect::new(x + 1, 50, 100, 100);
+                let mut entry = painted_entry(before_rect, &appearance, scale);
+                assert!(
+                    refresh_strip_origins(after_rect, &appearance, scale, &mut entry),
+                    "integer-scale move {x}→{} at scale {scale} must reuse the buffers",
+                    x + 1,
+                );
+            }
+        }
+    }
+
+    /// A drift-triggered repaint settles: rebuilding for the new position and
+    /// refreshing again is a hit, so the window does not oscillate between
+    /// repaint and reuse every frame.
+    #[test]
+    fn repaint_after_drift_settles_into_a_hit() {
+        let appearance = painted_appearance();
+        let scale = 1.25;
+        let before_rect = Rect::new(1, 50, 100, 100);
+        let after_rect = Rect::new(2, 50, 100, 100);
+        let mut entry = painted_entry(before_rect, &appearance, scale);
+        assert!(!refresh_strip_origins(
+            after_rect,
+            &appearance,
+            scale,
+            &mut entry
+        ));
+        build_strips(
+            after_rect,
+            &appearance,
+            appearance.focus_ring_active_color,
+            scale,
+            &mut entry,
+        );
+        assert!(
+            refresh_strip_origins(after_rect, &appearance, scale, &mut entry),
+            "refreshing the position just repainted for must be a hit"
+        );
+    }
+
+    /// The reviewer's brute-force shape, pinned in-harness: across the
+    /// ticket's fractional scales (1.25/1.5/1.75/1.33), several thicknesses
+    /// and a sweep of 1px moves in both axes, the refresh repaints exactly
+    /// when the new plan disagrees with the cached one on a strip canvas or
+    /// a paint offset -- no missed drift, no spurious repaint. (At integer
+    /// scales the plans never disagree on a move, which is what
+    /// `integer_scale_moves_never_repaint` pins.)
+    ///
+    /// Whether a scale/thickness pair *can* drift is arithmetic, not a bug:
+    /// when `thickness * scale` is an integer there is no rounding phase for
+    /// the offsets to move through (e.g. thickness 2 at 1.5), so every move
+    /// there is a clean hit or a canvas-driven repaint. The sweep covers
+    /// thicknesses 1..=4 so each scale has pairs that drift through the
+    /// offsets alone, and asserts each scale actually produced some -- a
+    /// scale with zero such pairs would pin nothing for that scale.
+    #[test]
+    fn fractional_sweep_repaints_exactly_on_plan_disagreement() {
+        for scale in [1.25, 1.5, 1.75, 4.0 / 3.0] {
+            let mut drift_pairs = 0;
+            let mut checked_pairs = 0;
+            for thickness in 1..=4 {
+                let appearance = Appearance {
+                    focus_ring_width: thickness,
+                    corner_radius: 8,
+                    ..Appearance::default()
+                };
+                // 1px moves along x (the ticket's shape) and along y (which
+                // moves the bottom strip's origin through its own phases).
+                let moves: Vec<(Rect, Rect)> = (-40..40)
+                    .map(|x| (Rect::new(x, 50, 100, 100), Rect::new(x + 1, 50, 100, 100)))
+                    .chain(
+                        (-40..40)
+                            .map(|y| (Rect::new(7, y, 100, 100), Rect::new(7, y + 1, 100, 100))),
+                    )
+                    .collect();
+                for (before_rect, after_rect) in moves {
+                    let before = plan_strips(before_rect, &appearance, scale).expect("a plan");
+                    let after = plan_strips(after_rect, &appearance, scale).expect("a plan");
+                    let plans_agree = before.top.canvas == after.top.canvas
+                        && before.bottom.canvas == after.bottom.canvas
+                        && before.inner == after.inner
+                        && before.outer == after.outer;
+                    let mut entry = painted_entry(before_rect, &appearance, scale);
+                    let hit = refresh_strip_origins(after_rect, &appearance, scale, &mut entry);
+                    assert_eq!(
+                        hit, plans_agree,
+                        "scale {scale} thickness {thickness} move {before_rect:?}→{after_rect:?}: \
+                         refresh disagrees with the plans",
+                    );
+                    checked_pairs += 1;
+                    if !plans_agree
+                        && before.top.canvas == after.top.canvas
+                        && before.bottom.canvas == after.bottom.canvas
+                    {
+                        drift_pairs += 1;
+                    }
+                }
+            }
+            assert!(
+                drift_pairs > 0,
+                "scale {scale}: the sweep must actually contain canvas-matching \
+                 drift pairs, or it pins nothing ({checked_pairs} pairs checked)"
+            );
+        }
+    }
+
+    /// A failed build leaves the entry poisoned (`top_at`/`bottom_at` empty);
+    /// the refresh must report a miss rather than claiming a hit or touching
+    /// the empty entry, so the poison contract from #184 holds: the window
+    /// stays on the silent square fallback until its key changes instead of
+    /// retrying every frame.
+    #[test]
+    fn refresh_on_a_poisoned_entry_reports_a_miss() {
+        let appearance = painted_appearance();
+        let mut entry = PaintedRing {
+            top: None,
+            bottom: None,
+            top_at: None,
+            bottom_at: None,
+            inner_at: None,
+            outer_at: None,
+            pixels: Vec::new(),
+            key: None,
+        };
+        assert!(
+            !refresh_strip_origins(Rect::new(10, 50, 100, 100), &appearance, 1.0, &mut entry),
+            "a poisoned entry must never report a hit"
+        );
+        assert!(
+            entry.top_at.is_none() && entry.bottom_at.is_none(),
+            "a miss must not populate a poisoned entry"
+        );
+        assert!(
+            entry.inner_at.is_none() && entry.outer_at.is_none(),
+            "a miss must not populate a poisoned entry's paint inputs either"
+        );
     }
 }

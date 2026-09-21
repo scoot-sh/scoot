@@ -77,6 +77,15 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[Fractional-scale ring-hole
+  drift](docs/backlog/resolved/ring-hole-fractional-drift-done.md)**
+  (2026-09-21) — the PR #184 follow-up: the painted-ring reuse check
+  compares the in-canvas paint offsets (`plan.inner`/`plan.outer`) alongside
+  the strip canvases, closing the ≤1px ring-hole offset a canvas-matching
+  move could leave at fractional scales until the next key change. Still
+  allocation-free, integer scales provably untouched (a dedicated
+  never-repaints sweep); pinned fail-first plus an in-harness brute-force
+  sweep over 1.25/1.5/1.75/1.33.
 - **[Rounded window
   corners](docs/backlog/resolved/rounded-window-corners-done.md)**
   (2026-09-20) — `[appearance] corner_radius` (logical px, default `0` =
