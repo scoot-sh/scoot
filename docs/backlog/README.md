@@ -282,6 +282,7 @@ falsify. Read `flexwm` there as `scoot`.
 - [`msg key` hard-codes `_L` modifier keysyms](./resolved/msg-key-modifier-resolution-done.md) — RESOLVED 2026-09-17 (PR #83): modifiers resolve through the keymap probe like `type_text` (either hand's key; toggle-option layouts work); `msg key A` still refuses
 - [`msg type`: dead keys, compose, inactive layouts](./resolved/msg-type-dead-keys-compose-done.md) — RESOLVED 2026-09-18 (PR #121): two-key dead-led sequences from the session-locale compose table (é on `de`, dead-ASCII gaps closed — all 95 ASCII on all fourteen swept Latin layouts); inactive groups, lock/latch levels and `Multi_key` 3-key sequences stay refused
 - [`zwp_tablet_manager_v2` (drawing-tablet input)](./resolved/tablet-v2-done.md)
+- [[nested] pointer clicks never reach layer-shell surfaces](./input/layer-shell-pointer-clicks.md) — field bug (gh #182): clicks on a noctalia bar/launcher are no-ops while toplevel clicks work; suspect the layer hit-test/focus handoff never establishes layer focus.
 
 ### --tty / backend
 - [Config-file key for the DRM device](./resolved/tty-gpu-config-key-done.md)
@@ -325,9 +326,11 @@ falsify. Read `flexwm` there as `scoot`.
   Gamma LUT length re-read per CRTC, live control failed only on change.
   Four fail-first harness tests; the switch itself unverified live
   (single-CRTC dev VM), legacy blind-probe limit stated in the record.
+- [`--tty` hotplug follow-up: confirm the two unreproduced paths on real hardware](./core/tty-hotplug-confirmation.md) — gh #48 stays open: new-mode-list on the same connector, and fallback to a *different* connector, both need vfkit/laptop hardware with before/after proof.
 
 ### Core / config / rendering
-- [`--width`/`--height` are unbounded `i32`s](./resolved/width-height-bounded-done.md)
+- [No `scoot --version`](./config/cli-version-flag.md) — a build can only be identified by starting it; print `env!("CARGO_PKG_VERSION")` plus the IPC protocol number (`scoot` and `scootctl` spellings decided deliberately, output pinned by tests).
+- [[nested] top-layer content missing from frames with no toplevels](./rendering/layer-content-without-toplevels.md) — field bug (gh #183): bar renders iff a window exists while its zone stays reserved; suspect layer composition keyed off window existence.- [`--width`/`--height` are unbounded `i32`s](./resolved/width-height-bounded-done.md)
   — RESOLVED 2026-09-17: refused past 65535 per axis at parse (the most DRM
   itself can report for a mode axis); `Rect::inset`/`right()`/`bottom()`,
   `scroll_into_view` and the arrange on-screen test saturate.
@@ -393,6 +396,12 @@ falsify. Read `flexwm` there as `scoot`.
 - [Pin the fd-pressure grace conjunction's boundaries](./resolved/fd-pressure-grace-boundary-pins-done.md) — RESOLVED 2026-09-18 (pin, no behavior change): `pressure_refusal`'s pure conjunction split out as `pressure_refusal_for` and pinned at both operators and both graces (129 refused, 128 passes; either half alone passes); the ceiling record's 400 stands as "two at grace", the permitted maximum is 404
 
 ### Packaging / tooling
+- [Nix package can reach neither GPU tier](./packaging/nix-gpu-tiers.md) — gh #177 (HIGH): packaged `--renderer gles` panics in Smithay's `dlopen` (no EGL in RUNPATH; needs wrapper/RUNPATH + a pre-flight check) and no `gpu-scanout` build exists (proposed `packages.scoot-gpu`). The Test 4 machine filed it.
+- [`packages.scoot` ships `scootctl` too](./packaging/scoot-package-ships-scootctl.md) — gh #172: no `cargoBuildFlags`, so the workspace build contradicts the documented split. Either `-p scoot` or document the bundle.
+- [home-manager `sessionScript` vs `configFile` override](./packaging/hm-session-script-path.md) — gh #174: script path hardcoded while config moves; fix either direction + pin the pairing in `hmRelocated`.
+- [CI never exercises the Nix packaging](./packaging/ci-nix-packaging.md) — gh #173: no `nix flake check` / `nix build` in CI; take at least the cheap `flake check` half.
+- [NixOS session entry can't launch a shell](./packaging/nixos-session-command.md) — gh #171: fixed `Exec=scoot --tty` ignores the HM-written `session.sh`; needs a session-command option (default bare, additive entry).
+- [Flake polish: `homeModules` alias, Darwin default, nixfmt](./packaging/flake-polish.md) — gh #175: four one-line items (legacy output name warning, Darwin installs wrongly-named binary, `compositor-deps.nix` unformatted, `nixfmt-rfc-style` alias).
 - [Nix `src = self` invalidates the build on doc-only edits](./resolved/nix-src-fileset-done.md)
   — RESOLVED 2026-09-18: `src` is a `lib.fileset` union of `Cargo.toml`,
   `Cargo.lock`, `crates/` (every other `./` read in the flake re-verified
@@ -590,6 +599,7 @@ exactly what `State::spawn` started), and two gaps. They share a mechanism
   home-manager left as a pointer for the flake ticket. The entry's design
   argument stands: config is *state*, the session script is *behavior*, and
   the reason that line holds is that one vocabulary parses in three doors.
+- [Docs gaps found converting a real NixOS config](./meta/nixos-conversion-docs-gaps.md) — gh #178: CHANGELOG session-identity strings, repo-move notice, a migration section in `docs/nix.md`, packaged-renderer honesty, an end-to-end session example, plus two small stalenesses.
 
 ### Meta
 - [Split the CLI out into `scootctl`](./resolved/rename-flex-family-done.md) — CLOSED 2026-09-20: the `flexwm` → `scoot` rename half landed 2026-09-18 (PR #128); the crate split landed 2026-09-20 ([record](./resolved/scootctl-split-done.md)): new `scootctl` lib+bin crate, `scoot msg` kept as a permanent alias, Darwin default is `scootctl`. A status bar stays separate.
