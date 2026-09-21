@@ -109,7 +109,11 @@ in
     # text is written executable beside the config (at
     # `<dirOf configFile>/session.sh` -- `scoot/session.sh` by default);
     # launch it with `scoot -- ~/.config/<that path>` (or exec it from
-    # your greetd/startwm entry). Null writes no file.
+    # your greetd/startwm entry). On NixOS, the matching half is the
+    # NixOS module's `programs.scoot.session.command`: set it to the full
+    # `<package>/bin/scoot --tty -- ~/.config/<that path>` line so the
+    # greeter entry runs this script instead of a bare compositor (see
+    # docs/nix.md, which shows the pairing together). Null writes no file.
     sessionScript = lib.mkOption {
       type = lib.types.nullOr lib.types.lines;
       default = null;
@@ -121,7 +125,13 @@ in
       description = ''
         Session startup script, written executable beside the rendered
         config at `<dirOf configFile>/session.sh` (`scoot/session.sh`
-        with the default `configFile`). Null writes no file.
+        with the default `configFile`). Launch it with
+        `scoot -- ~/.config/scoot/session.sh` for the default (or
+        `~/.config/<that path>` after a `configFile` override), or exec
+        it from your greetd/startwm entry -- on NixOS, set the NixOS
+        module's `programs.scoot.session.command` to the full
+        `<package>/bin/scoot --tty -- ~/.config/<that path>` line so the
+        login-screen entry runs it. Null writes no file.
       '';
     };
 

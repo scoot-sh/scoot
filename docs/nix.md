@@ -86,7 +86,7 @@ programs.scoot = {
 | `package` | flake's own build (Linux), `null` (macOS) | The binary installed to your profile. `null` installs no binary (files only). |
 | `settings` | `{ }` | Free-form config, rendered verbatim to TOML (see below). Empty renders a valid minimal file: the compositor runs it as pure defaults. |
 | `configFile` | `"scoot/config.toml"` | Where the rendered TOML lands, relative to `$XDG_CONFIG_HOME`. Keep the default unless you pass the same path via `--config` wherever you launch scoot. |
-| `sessionScript` | `null` | Startup script text, written executable beside the rendered config at `<dirOf configFile>/session.sh` (`scoot/session.sh` with the default `configFile`). Launch it with `scoot -- ~/.config/scoot/session.sh` for the default (or `~/.config/<that path>` after a `configFile` override), or exec it from your greetd/startwm entry. `null` writes no file. |
+| `sessionScript` | `null` | Startup script text, written executable beside the rendered config at `<dirOf configFile>/session.sh` (`scoot/session.sh` with the default `configFile`). Launch it with `scoot -- ~/.config/scoot/session.sh` for the default (or `~/.config/<that path>` after a `configFile` override), or exec it from your greetd/startwm entry — on NixOS, that launch line goes in the NixOS module's `session.command` (see below), which is what makes the greeter entry run this script instead of a bare compositor. `null` writes no file. |
 | `portals.enable` | `true` | Install `scoot-portals.conf` to the per-user xdg-desktop-portal lookup path (`~/.config/xdg-desktop-portal/`), so ScreenCast/Screenshot resolve to the `wlr` backend inside a scoot session. Inert outside one (nothing reads it until `XDG_CURRENT_DESKTOP=scoot`). Turn off if you manage portal backends some other way. |
 
 The example above renders byte-for-byte to:
@@ -128,6 +128,9 @@ programs.scoot = {
   enable = true;
   # package defaults to the flake's own scoot build, like above.
   session.enable = true;   # opt-in login-screen entry (default false)
+  # Run the home-manager session script from the greeter entry
+  # (pairs with `sessionScript` above; default null is a bare `--tty`):
+  # session.command = "${config.programs.scoot.package}/bin/scoot --tty -- ~/.config/scoot/session.sh";
 };
 ```
 
@@ -136,13 +139,21 @@ programs.scoot = {
 | `enable` | `false` | Install `package` system-wide. |
 | `package` | flake's own `scoot` build | The binary to install and to launch from the session entry. |
 | `session.enable` | `false` | Add a scoot entry to the display-manager/greetd session menu. |
+| `session.command` | `null` | Full `Exec=` line for the session entry. `null` renders the bare `<package>/bin/scoot --tty` (existing configs unchanged). Set it to run something inside the session — usually `<package>/bin/scoot --tty -- <command>`, e.g. the home-manager `sessionScript` output (`~/.config/scoot/session.sh` with defaults), or a wrapper script path that launches scoot itself (logging, environment setup). |
 
 The session entry **adds a session alongside existing ones, never
 replacing the default**: the module writes a `scoot.desktop`
-(`Exec=<package>/bin/scoot --tty`, `DesktopNames=scoot` — which is what
+(`Exec=<package>/bin/scoot --tty` by default, `DesktopNames=scoot` — which is what
 sets `XDG_CURRENT_DESKTOP=scoot` when launched from a display manager)
 into `services.displayManager.sessionPackages`, the additive list
-greetd/tuigreet, GDM and SDDM read. It never sets
+greetd/tuigreet, GDM and SDDM read. With `session.command` set, `Exec=`
+is that string verbatim — the pairing with the home-manager module is
+`session.command = "<package>/bin/scoot --tty --
+~/.config/scoot/session.sh"`, so the greeter starts the compositor with
+your session script instead of a bare one; a wrapper script path works
+the same way (the wrapper launches scoot itself). The value renders
+verbatim, so desktop-entry quoting (spaces, quotes, pipes) is yours to
+get right — copy the example shape. It never sets
 `services.displayManager.defaultSession` (the pre-select) or
 `services.greetd.settings.default_session` / `initial_session` (what
 actually runs), so enabling it puts scoot in the menu next to your

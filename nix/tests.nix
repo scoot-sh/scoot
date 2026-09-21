@@ -17,6 +17,10 @@
 #   default path), the default keeps `scoot/session.sh`;
 # - the session entry is additive (default session untouched) and carries
 #   the `providedSessions` nixpkgs requires of every session package;
+# - `session.command` renders verbatim into `Exec=` (bare `--tty` default
+#   byte-identical, `-- COMMAND` append, wrapper-script path, quoting
+#   with spaces/quotes/pipes intact), stays inert with the entry off,
+#   and refuses empty / package-less combinations at eval;
 # - the two settings failure modes behave as documented (see below).
 {
   lib,
@@ -178,6 +182,43 @@ let
     package = fakePkg;
     session.enable = true;
   };
+  # `session.command` as the common `-- COMMAND` append (e.g. the
+  # home-manager module's `sessionScript` output).
+  osSessionCmd = evalNixos {
+    enable = true;
+    package = fakePkg;
+    session.enable = true;
+    session.command = "${fakePkg}/bin/scoot --tty -- ${fakePkg}/bin/my-shell";
+  };
+  # `session.command` as the gh-#171 acceptance shape: a wrapper script
+  # path replacing the whole Exec line (it launches scoot itself, plus
+  # stderr to a log) -- what a plain `--` append cannot express.
+  sessionWrapper = pkgs.writeShellScriptBin "scoot-session" ''
+    exec ${fakePkg}/bin/scoot --tty -- noctalia-shell 2>/tmp/scoot-session.log
+  '';
+  osSessionWrapper = evalNixos {
+    enable = true;
+    package = fakePkg;
+    session.enable = true;
+    session.command = "${sessionWrapper}/bin/scoot-session";
+  };
+  # Quoting through the desktop file: the command is rendered verbatim
+  # (spaces, quotes, pipes and redirection intact), so what the user
+  # wrote is what the greeter launches.
+  trickyCmd = "${fakePkg}/bin/scoot --tty -- sh -c 'exec foot 2>/tmp/scoot.log | cat'";
+  osSessionQuoting = evalNixos {
+    enable = true;
+    package = fakePkg;
+    session.enable = true;
+    session.command = trickyCmd;
+  };
+  # A command with the entry off installs no entry (the option is inert
+  # without `session.enable`).
+  osCmdNoSession = evalNixos {
+    enable = true;
+    package = fakePkg;
+    session.command = "${fakePkg}/bin/scoot --tty -- ${fakePkg}/bin/my-shell";
+  };
   osOff = evalNixos { enable = false; };
 
   # --- eval-time structural pins (fail `nix flake check` at eval) ---
@@ -223,6 +264,22 @@ let
       true
     )
     (
+      assert allAssertionsHold osSessionCmd.config;
+      true
+    )
+    (
+      assert allAssertionsHold osSessionWrapper.config;
+      true
+    )
+    (
+      assert allAssertionsHold osSessionQuoting.config;
+      true
+    )
+    (
+      assert allAssertionsHold osCmdNoSession.config;
+      true
+    )
+    (
       assert allAssertionsHold osOff.config;
       true
     )
@@ -233,6 +290,31 @@ let
           (evalNixos {
             enable = true;
             session.enable = true;
+          }).config;
+      true
+    )
+    # ...likewise with a command set: no package still refuses, so a
+    # wrapper-shaped command never renders a broken entry on its own.
+    (
+      assert
+        !allAssertionsHold
+          (evalNixos {
+            enable = true;
+            session.enable = true;
+            session.command = "${sessionWrapper}/bin/scoot-session";
+          }).config;
+      true
+    )
+    # An explicitly empty command is refused (it would render an empty
+    # `Exec=` that fails at the greeter, not at eval).
+    (
+      assert
+        !allAssertionsHold
+          (evalNixos {
+            enable = true;
+            package = fakePkg;
+            session.enable = true;
+            session.command = "";
           }).config;
       true
     )
@@ -259,6 +341,17 @@ let
       assert osSession.config.services.displayManager.defaultSession == null;
       true
     )
+    # ...whatever the command (a custom Exec line never pre-selects or
+    # auto-runs anything either -- the never-strand rule holds for the
+    # wrapper shape too)...
+    (
+      assert osSessionCmd.config.services.displayManager.defaultSession == null;
+      true
+    )
+    (
+      assert osSessionWrapper.config.services.displayManager.defaultSession == null;
+      true
+    )
     # ...exactly one session package added...
     (
       assert builtins.length osSession.config.services.displayManager.sessionPackages == 1;
@@ -275,6 +368,11 @@ let
     # ...and nothing added when the session entry stays off.
     (
       assert osBin.config.services.displayManager.sessionPackages == [ ];
+      true
+    )
+    # ...including when a command is set but the entry stays off.
+    (
+      assert osCmdNoSession.config.services.displayManager.sessionPackages == [ ];
       true
     )
 
@@ -329,6 +427,9 @@ let
   sessionExe = hmFull.config.xdg.configFile."scoot/session.sh".executable;
   desktopPkg = builtins.head osSession.config.services.displayManager.sessionPackages;
   desktopFile = "${desktopPkg}/share/wayland-sessions/scoot.desktop";
+  cmdDesktopFile = "${builtins.head osSessionCmd.config.services.displayManager.sessionPackages}/share/wayland-sessions/scoot.desktop";
+  wrapperDesktopFile = "${builtins.head osSessionWrapper.config.services.displayManager.sessionPackages}/share/wayland-sessions/scoot.desktop";
+  quotingDesktopFile = "${builtins.head osSessionQuoting.config.services.displayManager.sessionPackages}/share/wayland-sessions/scoot.desktop";
 in
 assert lib.all (x: x) _pins;
 runCommand "scoot-modules-check" { nativeBuildInputs = [ python3 ]; } ''
@@ -377,6 +478,26 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ python3 ]; } ''
   grep -q '^DesktopNames=scoot$' ${desktopFile}
   grep -q '^Type=Application$' ${desktopFile}
   echo "ok: wayland-session entry points at the package"
+
+  # 6b. Default is byte-identical with the option present-but-null: the
+  # exact-match `$` anchor above already proves no `-- COMMAND` suffix
+  # (or anything else) leaked into the bare entry.
+
+  # 6c. session.command as `-- COMMAND` append renders verbatim.
+  grep -q "^Exec=${fakePkg}/bin/scoot --tty -- ${fakePkg}/bin/my-shell$" ${cmdDesktopFile}
+  echo "ok: session.command appends the session command to Exec"
+
+  # 6d. session.command as a wrapper path (the gh-#171 acceptance
+  # shape): the whole Exec line is the wrapper, which launches scoot
+  # itself.
+  grep -q "^Exec=${sessionWrapper}/bin/scoot-session$" ${wrapperDesktopFile}
+  echo "ok: session.command expresses the wrapper-script entry"
+
+  # 6e. Quoting through the desktop file: spaces, quotes, pipes and
+  # redirection survive verbatim (fixed-string match, so no regex
+  # metacharacter can hide a mangling).
+  grep -F "Exec=${trickyCmd}" ${quotingDesktopFile}
+  echo "ok: session.command with quoting-needing characters renders verbatim"
 
   # 7. A representable-but-wrong scoot type renders as TOML (it is the
   #    loader, at session start, that refuses it -- fail-safe).

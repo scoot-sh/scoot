@@ -77,6 +77,14 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[NixOS `session.command` (gh
+  #171)](docs/backlog/resolved/nixos-session-command-done.md)**
+  (2026-09-21) — the greeter entry's `Exec=` is no longer fixed: a
+  null-default option takes the full command line (bare `--tty`
+  byte-identical by default, `-- COMMAND` append and wrapper-script
+  path both expressible), paired with the HM `sessionScript` docs both
+  sides, pinned in `nix/tests.nix`. Flake-only, zero `.rs`.
+
 - **[`scoot --version` / `scootctl --version` (gh
   #176)](docs/backlog/resolved/cli-version-flag-done.md)**
   (2026-09-21) — both print `scoot <version> (ipc protocol <N>)` from one
