@@ -79,6 +79,42 @@ no second monitor. `crates/scoot/src/compositor/outputs.rs`'s doc on
   frame-callback/cleanup walks over all maps;
   `foreign_toplevel_management` `output_enter` per output a window is on.
   (Admission + unmap already resolve per surface — foundation did those.)
+  - **DONE (2026-09-21, Phase B PR).** `refresh_layer_zone` walks every
+    output, translating each map's `non_exclusive_zone` by that output's
+    origin and filing one `OutputUsableAreaChanged` per moved zone, with a
+    single `apply()` covering every output that moved (one rectangle compare
+    per output on the no-change path; no allocation -- an `Arc` bump per
+    output). `layer_hit` resolves the output under the pointer first
+    (`output_under`: first geometry in creation order containing the point,
+    miss over no output) and hit-tests that output's map, which fixes
+    pointer motion, clicks and `focus_under_pointer` at once. The no-output
+    choice stays primary ("the compositor chooses"), now documented in
+    `docs/protocols.md` alongside the per-output zone/focus rules.
+    `layer_keyboard_focus` derives per output with the pointer's output
+    first and the rest in creation order -- the tie-break two `exclusive`
+    surfaces need, and what keeps a mapped launcher usable with the pointer
+    on the other screen (any output's `exclusive` still outranks every
+    window, as one screen's did); `clicked_layer` membership is checked
+    across all maps. The render tail's dead-layer sweep asks for a zone
+    re-derivation plus focus refresh when *any* output's map dropped a
+    surface (was: primary only). `output_enter` resolves each window's own
+    output from its drawn bounding box (`output_of_window`, primary fallback
+    while unmapped -- where new windows open), at announce, at manager bind
+    and at `wl_output` bind. Single-output is byte-identical: full nextest
+    green, and the one-output motion path measures overlapping before/after
+    (release, dev VM, 200k `pointer_move` x5: 444-533ns/event before,
+    351-382 after; two-output 407-541 before, 396-437 after -- an early
+    138ns two-output reading never reproduced and is recorded as a
+    governor/warmup artifact, not a number). Fail-first pins: a bar on
+    output 2 shrinks only output 2 (zone leak), clicking it focuses it
+    (wrong-output focus), both-bars, disconnect-release, and
+    pointer-output-wins for two `exclusive` launchers. Live proof on the dev
+    VM (`--headless --outputs 2`, real waybar 0.15.0): bar on `headless-2`
+    gives usable `(400,30,400,270)` with output 1 whole; IPC screenshots and
+    `grim -o headless-2` agree (bar pixels on output 2's top rows, background
+    on output 1's); bars on both hold `(0,40,400,260)` + `(400,30,400,270)`;
+    killing the output-2 bar restores `(400,0,400,300)` with output 1
+    untouched. Pixel suites green under `SCOOT_TEST_RENDERER=gles` too.
 - **C. Session lock per output.** Drop the single-output fallback in
   `new_surface`; size each surface to its own output; **`locked` waits for
   *every* output's blanked frame** (security-relevant — the bug the

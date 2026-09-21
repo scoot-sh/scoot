@@ -397,7 +397,7 @@ impl State {
         // about the same frame.
         let mut retry_render = false;
         let mut lock_dropped = false;
-        let mut primary_dead_layers = false;
+        let mut dead_layers = false;
         let time = self.start_time.elapsed();
         for index in 0..count {
             let Some((id, output)) = self.outputs.at(index) else {
@@ -619,12 +619,16 @@ impl State {
                     layers.cleanup();
                     before != layers.len()
                 };
-                // Zone re-derivation stays primary-scoped (phase B owns
-                // per-output zones): only the primary output's sweep can ask
-                // for it. A non-primary map still sweeps its dead surfaces
-                // above, so nothing accumulates there.
-                if dropped_dead && Some(&output) == self.outputs.primary() {
-                    primary_dead_layers = true;
+                // Zone re-derivation is per output (`refresh_layer_zone`
+                // compares each output's own zone and no-ops where nothing
+                // moved), so a sweep on any output can ask for it -- and a
+                // dead surface on any output may have been holding the
+                // keyboard, which is why the focus refresh rides along.
+                // (`layer_destroyed` is the usual path back for both, but
+                // this branch exists precisely for the teardown orders it
+                // misses.)
+                if dropped_dead {
+                    dead_layers = true;
                 }
             }
         }
@@ -640,12 +644,12 @@ impl State {
             // outlives focus changes entirely (see `session_lock.rs`).
             self.lock_transition();
         }
-        if primary_dead_layers {
+        if dead_layers {
             self.refresh_layer_zone();
             // One of those dead surfaces may have been holding the keyboard
             // (`layer_destroyed` is the usual path back, but this branch
             // exists precisely for the teardown orders it misses), and
-            // `refresh_layer_zone` returns early when the zone didn't move.
+            // `refresh_layer_zone` returns early when no zone moved.
             self.refresh_keyboard_focus();
         }
         self.space.refresh();

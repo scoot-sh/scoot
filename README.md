@@ -121,9 +121,10 @@ about device choice, hotplug and modes is in [docs/tty.md](docs/tty.md). Run
 
 `--headless --outputs N` (1–8) creates N virtual outputs side by side, so
 per-output behaviour is testable with no second monitor: each gets its own
-`wl_output`, its own place in the coordinate space and its own scrolling
-strip. One of them is composited — the first — so `scootctl screenshot
---output 2` is refused rather than answered with the first output's pixels.
+`wl_output`, its own place in the coordinate space, its own scrolling
+strip, its own composited strip and its own layer-shell zones and input —
+so `scootctl screenshot --output 2` answers with the second output's own
+pixels, and a bar on one output reserves space only there.
 `--nested` and `--tty` warn and ignore the flag, having one host window and
 one CRTC respectively. See
 [docs/configuration.md](docs/configuration.md#more-than-one-output) for what a
