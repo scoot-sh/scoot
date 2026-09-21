@@ -123,6 +123,89 @@ fn clicking_a_bar_does_not_refocus_the_window_behind_it() {
     );
 }
 
+/// A click on a bar reaches the bar's own client: the `wl_pointer.enter`
+/// the move establishes, then the press and the release -- the exact
+/// `Request::Click` shape (move-then-press-release) the field report's
+/// `scoot msg pointer click 30 15` takes. Asserted on what the client's
+/// `wl_pointer` was actually sent, not on the compositor's hit test, which
+/// is what was never pinned and what the report says is dead.
+/// gh issue #182.
+///
+/// Closed as could-not-reproduce (live `--nested` probes on current `main`
+/// *and* on the reported rev both deliver every click shape, and this test
+/// passes unmodified): kept as the pin so the path stays green, in the
+/// field report's own shapes -- a 30px exclusive-zone bar clicked left and
+/// right, plus the launcher overlay the report names, plus the middle
+/// button for completeness.
+#[test]
+fn a_click_reaches_the_bar_press_and_release() {
+    let mut fixture = Fixture::new();
+    fixture.run(Step::MapWindow);
+    fixture.run(Step::CreateLayer(LayerSpec::bar(30)));
+    fixture.run(Step::MapLayer {
+        index: 0,
+        color: BAR_BGRA,
+    });
+    fixture.run(Step::CreateLayer(
+        LayerSpec::launcher(60).with_keyboard(KeyboardInteractivity::OnDemand),
+    ));
+    fixture.run(Step::MapLayer {
+        index: 1,
+        color: BAR_BGRA,
+    });
+
+    // The move half: the bar's client must be told the pointer entered its
+    // surface, or the button below has nowhere to go.
+    fixture.state.pointer_move(30.0, 15.0);
+    fixture.settle();
+    assert_eq!(
+        fixture.pointer_focus(),
+        Some(Focused::Layer(0)),
+        "moving over the bar should enter the bar's surface (gh #182)"
+    );
+
+    // The button half, both edges, every button the report names and the
+    // middle one for completeness: a client that only ever sees presses, or
+    // only releases, still can't work its icons.
+    for button in [
+        scoot_ipc::PointerButton::Left,
+        scoot_ipc::PointerButton::Right,
+        scoot_ipc::PointerButton::Middle,
+    ] {
+        let before = fixture.serials().button;
+        fixture.state.pointer_button(button, true);
+        fixture.state.pointer_button(button, false);
+        fixture.settle();
+        let after = fixture.serials().button;
+        assert_ne!(
+            before, after,
+            "pressing and releasing {button:?} over the bar should send the bar's client a button event (gh #182)"
+        );
+    }
+
+    // ...and the launcher overlay the report names takes a click too.
+    fixture.state.pointer_move(ON_LAUNCHER.0, ON_LAUNCHER.1);
+    fixture.settle();
+    assert_eq!(
+        fixture.pointer_focus(),
+        Some(Focused::Layer(1)),
+        "moving over the launcher should enter the launcher's surface (gh #182)"
+    );
+    let before = fixture.serials().button;
+    fixture
+        .state
+        .pointer_button(scoot_ipc::PointerButton::Left, true);
+    fixture
+        .state
+        .pointer_button(scoot_ipc::PointerButton::Left, false);
+    fixture.settle();
+    assert_ne!(
+        before,
+        fixture.serials().button,
+        "clicking the launcher should send its client a button event (gh #182)"
+    );
+}
+
 // -------------------------------------------------------------------------
 // Keyboard interactivity
 //
