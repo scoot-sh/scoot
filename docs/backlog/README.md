@@ -397,7 +397,13 @@ falsify. Read `flexwm` there as `scoot`.
 
 ### Packaging / tooling
 - [Nix package can reach neither GPU tier](./packaging/nix-gpu-tiers.md) — gh #177 (HIGH): packaged `--renderer gles` panics in Smithay's `dlopen` (no EGL in RUNPATH; needs wrapper/RUNPATH + a pre-flight check) and no `gpu-scanout` build exists (proposed `packages.scoot-gpu`). The Test 4 machine filed it.
-- [`packages.scoot` ships `scootctl` too](./packaging/scoot-package-ships-scootctl.md) — gh #172: no `cargoBuildFlags`, so the workspace build contradicts the documented split. Either `-p scoot` or document the bundle.
+- [`packages.scoot` ships `scootctl` too](./resolved/scoot-package-ships-scootctl-done.md)
+  — RESOLVED 2026-09-21: `cargoBuildFlags = [ "-p" "scoot" ]` (packaging
+  matches the docs; the split is the documented design and the `scootctl`
+  derivation already shows the shape). `packages.scoot` bin carries only
+  `scoot` on both systems (the 529440-byte redundant `scootctl` is gone,
+  byte-count matched to #172's pre-fix `ls`); wrappers, `apps` and module
+  checks all still resolve, live IPC proven against the packaged pair.
 - [home-manager `sessionScript` vs `configFile` override](./packaging/hm-session-script-path.md) — gh #174: script path hardcoded while config moves; fix either direction + pin the pairing in `hmRelocated`.
 - [CI never exercises the Nix packaging](./packaging/ci-nix-packaging.md) — gh #173: no `nix flake check` / `nix build` in CI; take at least the cheap `flake check` half.
 - [NixOS session entry can't launch a shell](./packaging/nixos-session-command.md) — gh #171: fixed `Exec=scoot --tty` ignores the HM-written `session.sh`; needs a session-command option (default bare, additive entry).

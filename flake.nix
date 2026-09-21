@@ -40,7 +40,8 @@
     in
     {
       # `nix build` / `nix run`, for getting the binaries without a dev shell.
-      # `scoot` is the whole compositor (plus the `scoot msg` client alias);
+      # `scoot` is the whole compositor (plus the `scoot msg` client alias),
+      # built `-p scoot` so `$out/bin` carries only the `scoot` binary;
       # `scootctl` is the standalone remote-control client that drives a
       # compositor running elsewhere (a VM) over its socket. On Linux the
       # default is the compositor; on Darwin the compositor is cfg'd out of
@@ -91,6 +92,20 @@
           scoot = pkgs.rustPlatform.buildRustPackage {
             pname = "scoot";
             inherit version src cargoLock;
+
+            # Just this crate, not the whole workspace: `$out/bin` carries
+            # only `scoot` (the `scoot msg` alias is part of that binary,
+            # not a second one) -- the mirror of the `scootctl` package's
+            # flag below. Without this, `buildRustPackage` builds the
+            # whole workspace and ships a redundant `scootctl` (gh #172).
+            # Behavior-preserving for the shipped binary: the `scootctl`
+            # binary unit enables no features on any shared crate (it
+            # depends on bare `scoot-ipc` plus `serde_json`), so the
+            # `scoot` unit graph is identical either way.
+            cargoBuildFlags = [
+              "-p"
+              "scoot"
+            ];
 
             nativeBuildInputs = [ pkgs.pkg-config ];
             # The same list the dev shell uses, Linux-only for the same reason:
