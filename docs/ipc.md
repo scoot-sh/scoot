@@ -42,7 +42,7 @@ compositor running in a VM.
 
 | Request | What it does |
 | --- | --- |
-| `version` | Protocol version of the running compositor. |
+| `version` | Version and IPC protocol of the running compositor — needs a session. `scootctl --version` (or `scoot --version`) answers locally with no session, printing the binaries' own line (`scoot <version> (ipc protocol <N>)`) so a client can check compatibility before connecting. |
 | `outputs` | Every output's name, rectangle, usable rectangle and scale. |
 | `windows` | Every window: id, app id, title, icon, focus, popup grab. |
 | `action ACTION [ARGUMENT...]` | Run a layout action — see [Actions](#actions). |

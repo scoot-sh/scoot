@@ -18,5 +18,5 @@ pub mod cli;
 pub mod msg;
 pub mod output;
 
-pub use cli::{Command, Error, Msg, USAGE, action, parse, parse_msg};
+pub use cli::{Command, Error, Msg, USAGE, action, parse, parse_msg, version_string};
 pub use msg::run;

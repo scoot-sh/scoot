@@ -119,6 +119,8 @@ is the same client kept as a permanent alias on the compositor binary.
 `--tty` needs a seat (`seatd` or logind) with a DRM device on it; everything
 about device choice, hotplug and modes is in [docs/tty.md](docs/tty.md). Run
 `scoot --help` for every flag, `scootctl --help` for every request and action.
+`scoot --version` (or `scootctl --version`) identifies a build — its own
+version plus the IPC protocol number — without starting anything.
 
 `--headless --outputs N` (1–8) creates N virtual outputs side by side, so
 per-output behaviour is testable with no second monitor: each gets its own

@@ -36,6 +36,15 @@ fn run() -> Result<(), Box<dyn Error>> {
             scootctl::output::write_str(cli::USAGE)?;
             Ok(())
         }
+        cli::Command::Version => {
+            // One `\n`-terminated line, so `print_line`, not `write_str`.
+            // A closed pipe is a quiet success here too:
+            // `scoot --version | head -c0` exits 0. Needs no compositor --
+            // identifying a build without starting it is the whole point --
+            // so this arm runs on every platform, like `--help`.
+            scootctl::output::print_line(&scootctl::version_string())?;
+            Ok(())
+        }
         cli::Command::Msg { request, out } => scootctl::run(&request, out.as_deref()),
         cli::Command::PrintDefaultConfig => print_default_config(),
         cli::Command::Compositor(options) => start_compositor(options),

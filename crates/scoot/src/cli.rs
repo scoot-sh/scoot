@@ -17,6 +17,7 @@ USAGE:
     scoot --nested [--width 1-65535] [--height 1-65535] [--renderer pixman|gles] [--socket PATH] [--config PATH] [-- COMMAND...]
     scoot --tty [--gpu PATH] [--mode WxH] [--renderer pixman|gles] [--socket PATH] [--config PATH] [-- COMMAND...]
     scoot --print-default-config
+    scoot --version
     scoot msg REQUEST
     scoot --help
 
@@ -136,6 +137,14 @@ impl fmt::Display for RendererKind {
 #[derive(Debug, PartialEq)]
 pub enum Command {
     Help,
+    /// `scoot --version`: identify this build without starting anything.
+    /// Prints [`scootctl::version_string`] -- the same line `scootctl
+    /// --version` prints, byte for byte -- and exits. A first-arg flag like
+    /// `--help` and `--print-default-config`, not a backend and not `msg`:
+    /// it needs no running compositor, and the bare `version` word stays
+    /// the IPC request's (see `scootctl`'s `Command::Version` doc for why
+    /// the two spellings must not share a word).
+    Version,
     /// `scoot --print-default-config`: emit a starting config file,
     /// generated from the compositor's own live defaults, to stdout (see
     /// `compositor::config::default_config_toml`). Stdout, never a path:
@@ -255,6 +264,7 @@ pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Command, Error> 
     let mut args = args.into_iter();
     match args.next().as_deref() {
         None | Some("--help" | "-h" | "help") => Ok(Command::Help),
+        Some("--version") => Ok(Command::Version),
         Some("--print-default-config") => Ok(Command::PrintDefaultConfig),
         Some("--headless") => compositor(args, false, false).map(Command::Compositor),
         Some("--nested") => compositor(args, true, false).map(Command::Compositor),
@@ -389,6 +399,58 @@ mod tests {
     #[test]
     fn no_arguments_prints_help() {
         assert_eq!(parse_args(&[]), Ok(Command::Help));
+    }
+
+    #[test]
+    fn version_parses_to_its_own_command() {
+        // A first-arg flag like `--help`, not a backend and not `msg`: it
+        // needs no running compositor, and trailing arguments are ignored
+        // the way `--help foo` still prints help.
+        assert_eq!(parse_args(&["--version"]), Ok(Command::Version));
+        assert_eq!(
+            parse_args(&["--version", "--headless", "foo"]),
+            Ok(Command::Version)
+        );
+    }
+
+    #[test]
+    fn version_is_first_arg_only_like_help() {
+        // `scoot --headless --version` is not `--version`, the way
+        // `scoot --headless --help` is not help: backend flags consume the
+        // rest of the line, and `--version` is not one of theirs.
+        assert_eq!(
+            parse_args(&["--headless", "--version"]),
+            Err(Error::Unknown("--version".into()))
+        );
+    }
+
+    #[test]
+    fn usage_names_version_on_its_own_line() {
+        // The `--help` surface for the new flag: its own usage line, so a
+        // user reading `--help` can discover it without knowing the ticket.
+        assert!(
+            USAGE.lines().any(|line| line.trim() == "scoot --version"),
+            "--help hides the version flag"
+        );
+    }
+
+    #[test]
+    fn version_line_names_this_binarys_version_and_the_protocol() {
+        // Both binaries print the one shared helper, so their lines agree
+        // by construction -- this pins the other half: the helper names
+        // *this* binary's `CARGO_PKG_VERSION` (the same `env!` the IPC
+        // `version` reply reads) and the live `PROTOCOL_VERSION`, so a
+        // workspace version split or a protocol bump without the string
+        // fails here rather than shipping a line that lies.
+        let line = scootctl::version_string();
+        assert!(
+            line.contains(env!("CARGO_PKG_VERSION")),
+            "version line does not name this build: {line}"
+        );
+        assert!(
+            line.contains(&format!("(ipc protocol {})", scoot_ipc::PROTOCOL_VERSION)),
+            "version line does not track PROTOCOL_VERSION: {line}"
+        );
     }
 
     #[test]

@@ -51,6 +51,7 @@ scootctl -- remote-control client for the scoot Wayland compositor
 
 USAGE:
     scootctl REQUEST
+    scootctl --version
     scootctl --help
 
 REQUESTS:
@@ -78,6 +79,17 @@ ACTIONS:
 #[derive(Debug, PartialEq)]
 pub enum Command {
     Help,
+    /// `scootctl --version`: identify this build without touching the
+    /// socket. A first-arg flag like `--help`, answered locally -- never a
+    /// request, so it needs no running compositor.
+    ///
+    /// Deliberately *not* the bare `version` word: that already means the
+    /// IPC `Request::Version`, answered by the compositor over the socket.
+    /// Giving one spelling two transports (local when idle, remote when a
+    /// session happens to be up) would make `scootctl version`'s failure
+    /// mode depend on whether a compositor is running; the flag keeps the
+    /// two apart.
+    Version,
     Msg {
         request: Request,
         out: Option<PathBuf>,
@@ -126,8 +138,32 @@ impl fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
+/// The `scoot --version` / `scootctl --version` line: the suite's own
+/// version plus the IPC protocol number, so a client can check
+/// compatibility against a remote compositor before connecting.
+///
+/// Derived from the same two constants the wire uses --
+/// `env!("CARGO_PKG_VERSION")`, which the IPC `version` reply also reads
+/// (so the two agree by construction), and [`scoot_ipc::PROTOCOL_VERSION`]
+/// -- never a duplicated literal, so the string cannot go stale when
+/// either moves. Both binaries print this one helper's return, byte for
+/// byte, so a packaging check can compare their outputs directly.
+///
+/// `env!` here reads *this* crate's version, which is `version.workspace`
+/// -- the same workspace version the `scoot` binary's own `env!` reads --
+/// so the two binaries' lines agree as long as the workspace version is
+/// shared (a test below pins that).
+pub fn version_string() -> String {
+    format!(
+        "scoot {} (ipc protocol {})",
+        env!("CARGO_PKG_VERSION"),
+        scoot_ipc::PROTOCOL_VERSION
+    )
+}
+
 /// Parses a full client argv (without the program name): `--help` (or
-/// nothing) is help, anything else is a request verb.
+/// nothing) is help, `--version` is the local version line, anything else
+/// is a request verb.
 ///
 /// Collects into one `Vec` first so the verb stays at the head for
 /// [`parse_msg`]'s contract -- a cold path (one process per invocation), so
@@ -136,6 +172,7 @@ pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Command, Error> 
     let args: Vec<String> = args.into_iter().collect();
     match args.first().map(String::as_str) {
         None | Some("--help" | "-h" | "help") => Ok(Command::Help),
+        Some("--version") => Ok(Command::Version),
         Some(_) => {
             let Msg { request, out } = message(args.into_iter())?;
             Ok(Command::Msg { request, out })
@@ -371,6 +408,77 @@ mod tests {
         // `cli` tests), so editing one copy without the other fails here.
         assert!(USAGE.contains(REQUESTS_HELP), "USAGE lost REQUESTS_HELP");
         assert!(USAGE.contains(ACTIONS_HELP), "USAGE lost ACTIONS_HELP");
+    }
+
+    #[test]
+    fn version_flag_parses_to_its_own_command() {
+        // A first-arg flag like `--help`, not a request: it is answered
+        // locally, with no socket and no running compositor.
+        assert_eq!(parse_args(&["--version"]), Ok(Command::Version));
+    }
+
+    #[test]
+    fn version_flag_is_first_arg_like_help() {
+        // Trailing arguments are ignored, the way `--help foo` still
+        // prints help; a flag in front is not `--version` at all, the way
+        // `--headless --help` is not help either.
+        assert_eq!(
+            parse_args(&["--version", "--headless", "foo"]),
+            Ok(Command::Version)
+        );
+        assert_eq!(
+            parse_args(&["--headless", "--version"]),
+            Err(Error::Unknown("--headless".into()))
+        );
+    }
+
+    #[test]
+    fn a_bare_version_word_stays_the_ipc_request() {
+        // The spelling decision, pinned: `version` (bare) is the remote
+        // request answered by the compositor over the socket --
+        // `scootctl version` with no session running must fail, not answer
+        // locally -- while `--version` is the local flag. One spelling, one
+        // transport each.
+        assert_eq!(
+            parse_args(&["version"]),
+            Ok(Command::Msg {
+                request: Request::Version,
+                out: None,
+            })
+        );
+        assert_eq!(parse_args(&["--version"]), Ok(Command::Version));
+    }
+
+    #[test]
+    fn version_string_tracks_both_constants() {
+        // The no-drift pin: the expected line is recomputed from the same
+        // two constants the helper derives from, so moving either constant
+        // without the string fails here. A hardcoded `"3"` surviving a
+        // `PROTOCOL_VERSION` 3 -> 4 is exactly what this catches.
+        assert_eq!(
+            version_string(),
+            format!(
+                "scoot {} (ipc protocol {})",
+                env!("CARGO_PKG_VERSION"),
+                scoot_ipc::PROTOCOL_VERSION
+            )
+        );
+        // And the shape the ticket fixes: `scoot 0.1.0 (ipc protocol 3)`,
+        // one line, no trailing newline (`print_line` adds it).
+        assert!(version_string().starts_with("scoot "));
+        assert!(!version_string().ends_with('\n'));
+    }
+
+    #[test]
+    fn usage_names_version_on_its_own_line() {
+        // The `--help` surface for the new flag: its own usage line, so a
+        // user reading `--help` can discover it without knowing the ticket.
+        assert!(
+            USAGE
+                .lines()
+                .any(|line| line.trim() == "scootctl --version"),
+            "--help hides the version flag"
+        );
     }
 
     #[test]
