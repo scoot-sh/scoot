@@ -170,7 +170,7 @@ fn unlocking_brings_the_session_back() {
 fn the_locked_event_waits_for_a_blanked_frame() {
     let mut fixture = Fixture::new();
     fixture.run(Step::MapWindow);
-    let backend = fixture.state.backend.take().expect("a backend");
+    let backend = fixture.state.take_primary_backend().expect("a backend");
 
     fixture.send_step(0, Step::Lock);
     // The client's own `Step::Lock` gives up on its five-second deadline
@@ -203,7 +203,7 @@ fn the_locked_event_waits_for_a_blanked_frame() {
         "the lock must not be confirmed before a frame has been drawn"
     );
 
-    fixture.state.backend = Some(backend);
+    fixture.state.put_primary_backend(backend);
     fixture.render();
     assert!(
         fixture.state.session_lock.pending.is_none(),

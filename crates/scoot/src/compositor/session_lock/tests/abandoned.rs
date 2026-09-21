@@ -167,11 +167,11 @@ fn a_lock_given_up_with_a_surface_up_still_shows_the_abandoned_screen() {
     let mut fixture = Fixture::new();
     // No render target, so the lock is accepted but never confirmed -- which
     // is exactly (and only) the window in which `destroy` is legal.
-    let backend = fixture.state.backend.take().expect("a backend");
+    let backend = fixture.state.take_primary_backend().expect("a backend");
     fixture.run(Step::LockNoWait);
     fixture.run(Step::map_lock_surface(0));
     fixture.run(Step::DestroyLock { lock: 0 });
-    fixture.state.backend = Some(backend);
+    fixture.state.put_primary_backend(backend);
     let pixels = fixture.render();
     assert!(
         fixture.state.session_lock.abandoned(),
@@ -190,7 +190,7 @@ fn a_lock_given_up_with_a_surface_up_still_shows_the_abandoned_screen() {
 #[test]
 fn a_lock_given_up_takes_the_keyboard_and_the_pointer_with_it() {
     let mut fixture = Fixture::new();
-    let backend = fixture.state.backend.take().expect("a backend");
+    let backend = fixture.state.take_primary_backend().expect("a backend");
     fixture.run(Step::LockNoWait);
     fixture.run(Step::map_lock_surface(0));
     fixture.state.pointer_move(30.0, 30.0);
@@ -204,7 +204,7 @@ fn a_lock_given_up_takes_the_keyboard_and_the_pointer_with_it() {
     assert_eq!(held.pointer_focus, Some(Which::Lock(0)), "and the pointer");
 
     fixture.run(Step::DestroyLock { lock: 0 });
-    fixture.state.backend = Some(backend);
+    fixture.state.put_primary_backend(backend);
     fixture.state.type_text("password").expect("typed text");
     fixture.state.pointer_move(30.0, 30.0);
     fixture.state.pointer_button(PointerButton::Left, true);
@@ -235,11 +235,11 @@ fn a_lock_given_up_takes_the_keyboard_and_the_pointer_with_it() {
 #[test]
 fn a_surface_from_a_given_up_lock_does_not_survive_a_takeover() {
     let mut fixture = Fixture::new();
-    let backend = fixture.state.backend.take().expect("a backend");
+    let backend = fixture.state.take_primary_backend().expect("a backend");
     fixture.run(Step::LockNoWait);
     fixture.run(Step::map_lock_surface(0));
     fixture.run(Step::DestroyLock { lock: 0 });
-    fixture.state.backend = Some(backend);
+    fixture.state.put_primary_backend(backend);
     fixture.render();
     assert!(fixture.state.session_lock.abandoned());
 
@@ -349,7 +349,7 @@ fn a_takeover_waits_for_the_blanked_frame_the_replaced_lock_never_drew() {
         "the window is on screen before any lock"
     );
 
-    let backend = fixture.state.backend.take().expect("a backend");
+    let backend = fixture.state.take_primary_backend().expect("a backend");
     fixture.run(Step::LockNoWait);
     fixture.disconnect(0);
     assert!(
@@ -380,7 +380,7 @@ fn a_takeover_waits_for_the_blanked_frame_the_replaced_lock_never_drew() {
     // Which is the entire point, stated in pixels: reading the framebuffer
     // without rendering first shows what a client told `locked` here would
     // have been told about.
-    fixture.state.backend = Some(backend);
+    fixture.state.put_primary_backend(backend);
     assert!(
         contains(&fixture.pixels(), WINDOW_BGRA),
         "the unlocked session is still the last frame drawn"
@@ -416,7 +416,7 @@ fn a_takeover_of_a_confirmed_lock_is_still_confirmed_immediately() {
         fixture.state.session_lock.pending.is_none(),
         "the first lock was confirmed by that frame"
     );
-    let backend = fixture.state.backend.take().expect("a backend");
+    let backend = fixture.state.take_primary_backend().expect("a backend");
     fixture.disconnect(0);
 
     let second = fixture.connect();
@@ -427,5 +427,5 @@ fn a_takeover_of_a_confirmed_lock_is_still_confirmed_immediately() {
          blank after it"
     );
     assert_eq!(fixture.report_of(second).locked, 1);
-    fixture.state.backend = Some(backend);
+    fixture.state.put_primary_backend(backend);
 }

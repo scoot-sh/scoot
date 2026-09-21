@@ -441,6 +441,10 @@ standard-protocol path, for tools that will never speak scoot's own IPC.
 
 What to know before pointing a client at it:
 
+- **Each output is captured from its own framebuffer.** A source made from
+  the second output (`grim -o headless-2`) is accepted and reads that
+  output's own pixels — never the first output's. A source naming no output
+  of this compositor is answered `stopped`.
 - **Output capture only.** A source can be made from a `wl_output`; there is
   no toplevel capture source manager, so a *single window* cannot be captured
   on its own. The global is not advertised at all, so a client takes its
@@ -705,10 +709,11 @@ All three selection globals, on every backend:
 ## Night light (`wlr-gamma-control-v1`)
 
 `zwlr_gamma_control_manager_v1` (version 1), so `gammastep` and `wlsunset`
-work, on every backend. One control per output, and scoot has exactly one: a
-second `get_gamma_control` transfers control, the old control gets `failed`
-and stops affecting anything, and destroying the live control (or
-disconnecting with one held) restores the default linear ramp.
+work, on every backend. One control per output: a second `get_gamma_control`
+on the same output transfers control, the old control gets `failed` and stops
+affecting anything, while a control on any other output is untouched — and
+destroying a live control (or disconnecting with one held) restores the
+default linear ramp.
 
 - **Under `--tty`**, the ramp is pushed to the CRTC gamma LUT, so the screen
   really warms. The advertised `gamma_size` is the CRTC's own (256 on the

@@ -60,7 +60,7 @@ fn headless_render_still_confirms_immediately() {
 #[test]
 fn a_blanked_frame_without_its_vblank_sends_no_locked() {
     let mut fixture = Fixture::new();
-    let backend = fixture.state.backend.take().expect("a backend");
+    let backend = fixture.state.take_primary_backend().expect("a backend");
     fixture.send_step(0, Step::LockNoWait);
     fixture.settle();
     drain_lock_nowait_ack(&mut fixture);
@@ -90,7 +90,7 @@ fn a_blanked_frame_without_its_vblank_sends_no_locked() {
     );
     assert_eq!(report.finished, 0);
 
-    fixture.state.backend = Some(backend);
+    fixture.state.put_primary_backend(backend);
 }
 
 /// The tracked flip's vblank confirms the lock: the client hears `locked`
@@ -98,7 +98,7 @@ fn a_blanked_frame_without_its_vblank_sends_no_locked() {
 #[test]
 fn the_tracked_flips_vblank_confirms_the_lock() {
     let mut fixture = Fixture::new();
-    let backend = fixture.state.backend.take().expect("a backend");
+    let backend = fixture.state.take_primary_backend().expect("a backend");
     fixture.send_step(0, Step::LockNoWait);
     fixture.settle();
     drain_lock_nowait_ack(&mut fixture);
@@ -114,7 +114,7 @@ fn the_tracked_flips_vblank_confirms_the_lock() {
         "the tracked flip's vblank confirms the lock"
     );
 
-    fixture.state.backend = Some(backend);
+    fixture.state.put_primary_backend(backend);
     fixture.settle();
     let report = fixture.report();
     assert_eq!(report.locked, 1);
@@ -127,7 +127,7 @@ fn the_tracked_flips_vblank_confirms_the_lock() {
 #[test]
 fn a_vblank_for_the_previous_frame_does_not_confirm() {
     let mut fixture = Fixture::new();
-    let backend = fixture.state.backend.take().expect("a backend");
+    let backend = fixture.state.take_primary_backend().expect("a backend");
     fixture.send_step(0, Step::LockNoWait);
     fixture.settle();
     drain_lock_nowait_ack(&mut fixture);
@@ -150,7 +150,7 @@ fn a_vblank_for_the_previous_frame_does_not_confirm() {
     fixture.state.note_flip_completed(Some(8));
     assert!(fixture.state.session_lock.pending.is_none());
 
-    fixture.state.backend = Some(backend);
+    fixture.state.put_primary_backend(backend);
     fixture.settle();
     assert_eq!(fixture.report().locked, 1);
 }
@@ -161,7 +161,7 @@ fn a_vblank_for_the_previous_frame_does_not_confirm() {
 #[test]
 fn a_stale_vblank_after_invalidation_does_not_confirm() {
     let mut fixture = Fixture::new();
-    let backend = fixture.state.backend.take().expect("a backend");
+    let backend = fixture.state.take_primary_backend().expect("a backend");
     fixture.send_step(0, Step::LockNoWait);
     fixture.settle();
     drain_lock_nowait_ack(&mut fixture);
@@ -186,7 +186,7 @@ fn a_stale_vblank_after_invalidation_does_not_confirm() {
     fixture.state.note_flip_completed(Some(8));
     assert!(fixture.state.session_lock.pending.is_none());
 
-    fixture.state.backend = Some(backend);
+    fixture.state.put_primary_backend(backend);
     fixture.settle();
     assert_eq!(fixture.report().locked, 1);
 }
@@ -203,7 +203,7 @@ fn no_vblank_within_the_bound_confirms_anyway() {
         "the no-hang bound is one second"
     );
     let mut fixture = Fixture::new();
-    let backend = fixture.state.backend.take().expect("a backend");
+    let backend = fixture.state.take_primary_backend().expect("a backend");
     fixture.send_step(0, Step::LockNoWait);
     fixture.settle();
     drain_lock_nowait_ack(&mut fixture);
@@ -229,7 +229,7 @@ fn no_vblank_within_the_bound_confirms_anyway() {
         .note_blank_timeout(t0 + LOCK_VBLANK_TIMEOUT + Duration::from_secs(60));
     assert!(fixture.state.session_lock.pending.is_none());
 
-    fixture.state.backend = Some(backend);
+    fixture.state.put_primary_backend(backend);
     fixture.settle();
     let report = fixture.report();
     assert_eq!(report.locked, 1);
@@ -244,7 +244,7 @@ fn no_vblank_within_the_bound_confirms_anyway() {
 #[test]
 fn a_represented_flip_restarts_the_bound_and_re_arms() {
     let mut fixture = Fixture::new();
-    let backend = fixture.state.backend.take().expect("a backend");
+    let backend = fixture.state.take_primary_backend().expect("a backend");
     fixture.send_step(0, Step::LockNoWait);
     fixture.settle();
     drain_lock_nowait_ack(&mut fixture);
@@ -279,14 +279,14 @@ fn a_represented_flip_restarts_the_bound_and_re_arms() {
         .note_blank_timeout(t0 + Duration::from_millis(500) + LOCK_VBLANK_TIMEOUT);
     assert!(fixture.state.session_lock.pending.is_none());
 
-    fixture.state.backend = Some(backend);
+    fixture.state.put_primary_backend(backend);
     fixture.settle();
     assert_eq!(fixture.report().locked, 1);
 }
 #[test]
 fn unlock_cancels_the_wait_without_a_stale_confirm() {
     let mut fixture = Fixture::new();
-    let backend = fixture.state.backend.take().expect("a backend");
+    let backend = fixture.state.take_primary_backend().expect("a backend");
     fixture.send_step(0, Step::LockNoWait);
     fixture.settle();
     drain_lock_nowait_ack(&mut fixture);
@@ -303,7 +303,7 @@ fn unlock_cancels_the_wait_without_a_stale_confirm() {
     assert!(fixture.state.session_lock.pending.is_none());
     assert!(!fixture.state.session_lock.is_locked());
 
-    fixture.state.backend = Some(backend);
+    fixture.state.put_primary_backend(backend);
     fixture.settle();
     assert_eq!(fixture.report().locked, 0);
 }
@@ -319,7 +319,7 @@ fn unlock_cancels_the_wait_without_a_stale_confirm() {
 #[test]
 fn rapid_cycles_do_not_cross_confirm() {
     let mut fixture = Fixture::new();
-    let backend = fixture.state.backend.take().expect("a backend");
+    let backend = fixture.state.take_primary_backend().expect("a backend");
     // First lock, with its blanked frame aboard flip 7...
     fixture.send_step(0, Step::LockNoWait);
     fixture.settle();
@@ -355,7 +355,7 @@ fn rapid_cycles_do_not_cross_confirm() {
     fixture.state.note_flip_completed(Some(9));
     assert!(fixture.state.session_lock.pending.is_none());
 
-    fixture.state.backend = Some(backend);
+    fixture.state.put_primary_backend(backend);
     fixture.settle();
     let report = fixture.report();
     assert_eq!(report.locked, 1);

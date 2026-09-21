@@ -45,6 +45,34 @@ no second monitor. `crates/scoot/src/compositor/outputs.rs`'s doc on
   per-output frame callbacks. Exit: two virtual outputs each show their
   own strip live; screenshot/screencopy per output pinned; single-output
   byte-identical.
+  - **DONE (2026-09-21, Phase A PR).** `State::backend: Option<Backend>` is
+    now `State::backends: HashMap<OutputId, Backend>` — one render target
+    per output, built with the session's renderer by both `init_named` and
+    `add_output`, so no output ever exists without its own pixels. `render`
+    walks outputs in creation order, taking and returning each target (no
+    per-frame allocation: an `Arc` bump per output plus the frame's own
+    elements). Screenshots resolve the asked output's target
+    (`screenshot_refusal` now refuses only unknown ids); screencopy records
+    each session's output at `new_session` and serves each output's due
+    sessions from its own read-back; gamma holds one live control per
+    output with transfers scoped to the output; frame callbacks go to the
+    windows/layers overlapping each output's own geometry. Single-output is
+    byte-identical: full nextest + `cargo test` green, and a 400x300 empty
+    IPC screenshot hashes identically (`0d5affbe…fc0db`) on main and on the
+    branch. Live proof on the dev VM (`--headless --outputs 2`): a `foot`
+    window on output 1 appears in output 1's IPC screenshot and `grim -o
+    headless` but not in output 2's (`w2`/`g2` hash the empty session);
+    `wayland-info` shows both `wl_output`s. Benchmarks (release, dev VM,
+    800x800, best-of-5): single-output before/after overlapping (pixman
+    empty 74–77µs → 67–75µs; the 8-window scene is noisier, 100–131µs →
+    68–145µs across runs — noise dominates, no structural regression, the
+    added work is O(1) map ops); two-vs-one scaling ~2x pixman
+    (47→101µs empty, 68→145µs 8-window) and ~1.5x gles/llvmpipe
+  (1.70→2.58ms empty). Per-output memory: one framebuffer (~6.4 MiB at
+  1600x1000 pixman, same for the GLES renderbuffer plus its own EGL
+  display/context) plus its damage tracker per output. `locked`
+    confirmation still fires on the first blanked frame — waiting for
+    *every* output's is phase C's, recorded there.
 - **B. Layer shell per output.** `refresh_layer_zone` per output;
   `layer_hit` under the pointer; `layer_keyboard_focus` + render's
   frame-callback/cleanup walks over all maps;

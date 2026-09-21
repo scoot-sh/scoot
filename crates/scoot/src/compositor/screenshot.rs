@@ -120,9 +120,9 @@ const SHOT_WRITE_TIMEOUT: Duration = Duration::from_secs(10);
 /// layout `wl_shm`'s own `Argb8888` uses), owned so the renderer's mapping
 /// can be released before the encode starts.
 pub struct RawCapture {
-    width: i32,
-    height: i32,
-    bgra: Vec<u8>,
+    pub(super) width: i32,
+    pub(super) height: i32,
+    pub(super) bgra: Vec<u8>,
 }
 
 /// One capture on its way through the worker.
@@ -223,46 +223,49 @@ impl State {
 
     /// Why a `screenshot --output ID` cannot be answered, or `None` if it can.
     ///
-    /// [`State::capture_pixels`] reads the one framebuffer this compositor
-    /// composites, which is the primary output's (see `Outputs::primary`). An
-    /// id naming any other output therefore has no pixels to hand back, and
-    /// the only honest answer is a refusal: answering it from the primary
-    /// output's framebuffer would hand an agent a picture of one screen
-    /// labelled as another, which is precisely the targeting error this
-    /// protocol exists to avoid. `None` for the id -- `scoot msg screenshot`
-    /// with no `--output` -- always means the composited output.
-    ///
-    /// Reachable only with `--headless --outputs N` (`N > 1`); with one
-    /// output the sole refusable id is one that names no output at all.
+    /// [`State::capture_pixels_for`] reads the framebuffer of the output the
+    /// id names -- every output has one of its own (see `State::backends`).
+    /// An id naming no output therefore has no pixels to hand back, and the
+    /// only honest answer is a refusal: answering it from another output's
+    /// framebuffer would hand an agent a picture of one screen labelled as
+    /// another, which is precisely the targeting error this protocol exists
+    /// to avoid. `None` -- `scoot msg screenshot` with no `--output` --
+    /// always means the primary output, the one every single-output session
+    /// has always captured.
     pub(super) fn screenshot_refusal(&self, output: Option<u64>) -> Option<String> {
         let asked = OutputId(output?);
-        match self.outputs.primary_id() {
-            Some(primary) if primary == asked => None,
-            Some(primary) => Some(format!(
-                "output {} cannot be captured: scoot composites one output, {}. \
-                 Omit --output, or ask for that one",
-                asked.0, primary.0
-            )),
-            None => Some(format!(
-                "output {} cannot be captured: this session has no output yet",
-                asked.0
-            )),
+        if self.outputs.get(asked).is_some() {
+            return None;
         }
+        Some(format!(
+            "output {} cannot be captured: this session has no such output",
+            asked.0
+        ))
     }
 
-    /// Renders anything outstanding, then captures the screen's raw pixels.
+    /// Renders anything outstanding, then captures output `id`'s raw pixels.
     ///
     /// Synchronous, on the event-loop thread: both steps touch the renderer
     /// and its framebuffer, which are not `Send`. What this does *not* do is
     /// the swizzle or the PNG encode -- those are [`encode_png`], pure over
     /// the returned bytes, on the worker.
-    pub fn capture_pixels(&mut self) -> Result<RawCapture, String> {
+    ///
+    /// `None` is "before any output exists" rather than a fallback to
+    /// another output's framebuffer: there is no output whose pixels may
+    /// stand in for another's. Callers resolve the id first (see
+    /// [`State::screenshot_refusal`], which refuses the ids this cannot
+    /// answer); a `None` here is an unreachable-by-then `Err`, never a
+    /// capture of the wrong screen.
+    pub fn capture_pixels_for(&mut self, id: Option<OutputId>) -> Result<RawCapture, String> {
         self.render();
-        let Some(mut backend) = self.backend.take() else {
+        let Some(id) = id else {
             return Err("no backend to capture".into());
         };
+        let Some(mut backend) = self.take_backend(id) else {
+            return Err(format!("output {} has no render target", id.0));
+        };
         let captured = read_back(&mut backend);
-        self.backend = Some(backend);
+        self.put_backend(id, backend);
         captured
     }
 
@@ -270,11 +273,21 @@ impl State {
     /// synchronously, hands the pixels to the encode worker, and parks the
     /// reply-to-be until the completion channel delivers it.
     ///
+    /// `output` is the `--output` id the request named, or `None` for the
+    /// primary output; `connection.rs` has already refused the ids nothing
+    /// can answer (see [`State::screenshot_refusal`]), so this resolves its
+    /// own output's framebuffer here and never another's.
+    ///
     /// `stream` is a clone of the connection's socket, sharing its file
     /// status flags (non-blocking, like the original -- the same sharing
     /// `PendingIdle` relies on), through which the answer is written when it
     /// is ready.
-    pub fn start_screenshot(&mut self, conn: u64, stream: UnixStream) -> ShotStart {
+    pub fn start_screenshot(
+        &mut self,
+        conn: u64,
+        stream: UnixStream,
+        output: Option<u64>,
+    ) -> ShotStart {
         if self.shot_inflight(conn) {
             return ShotStart::Refused(
                 "a screenshot from this connection is still being encoded; \
@@ -298,7 +311,11 @@ impl State {
                 self.pending_shots.len()
             ));
         }
-        let capture = match self.capture_pixels() {
+        let id = match output {
+            Some(asked) => Some(OutputId(asked)),
+            None => self.outputs.primary_id(),
+        };
+        let capture = match self.capture_pixels_for(id) {
             Ok(capture) => capture,
             Err(message) => return ShotStart::Failed(message),
         };

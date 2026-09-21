@@ -121,7 +121,7 @@ fn lock_captures_input_before_the_first_blanked_frame_confirms_it() {
 
     // No render target: the accept runs, but no frame can blank the screen
     // or confirm the lock.
-    let backend = fixture.state.backend.take().expect("a backend");
+    let backend = fixture.state.take_primary_backend().expect("a backend");
     fixture.send_step(0, Step::LockNoWait);
     fixture.settle();
     let ack = fixture.wait_for_ack(0);
@@ -153,7 +153,7 @@ fn lock_captures_input_before_the_first_blanked_frame_confirms_it() {
 
     // The framebuffer still holds the desktop: the accepted-but-unconfirmed
     // window, read back without rendering anything new.
-    fixture.state.backend = Some(backend);
+    fixture.state.put_primary_backend(backend);
     let stale = fixture.pixels();
     assert!(
         contains(&stale, WINDOW_BGRA),

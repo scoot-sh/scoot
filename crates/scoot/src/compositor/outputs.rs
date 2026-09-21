@@ -34,9 +34,9 @@
 //! # What is *not* per-output yet
 //!
 //! This is the foundation, not the whole of multi-output (see
-//! `docs/backlog/core/multi-output.md`). Exactly one output -- [the
-//! primary](Outputs::primary) -- has a render target, and the protocol sites
-//! that still assume one output go through [`Outputs::primary`] rather than a
+//! `docs/backlog/core/multi-output.md`). Every output has a render target of
+//! its own (milestone 19, phase A); the protocol sites that still assume one
+//! output go through [`Outputs::primary`] rather than a
 //! const, so `grep primary()` enumerates them for the item that makes them
 //! per-output.
 //!
@@ -45,6 +45,8 @@
 use scoot_core::OutputId;
 use smithay::output::Output;
 
+#[cfg(test)]
+mod per_output;
 #[cfg(test)]
 mod tests;
 
@@ -100,29 +102,22 @@ impl Outputs {
         id
     }
 
-    /// The output every site that still assumes a single output acts on, and
-    /// the only one with a render target behind it.
+    /// The output every site that still assumes a single output acts on.
     ///
-    /// Both halves of that sentence are load-bearing, and they are the same
-    /// output by construction: `headless::init_named` creates the first
-    /// output together with the one [`Backend`](super::render::Backend), and
-    /// `headless::add_output` refuses to run before it (so a later output can
-    /// never become the primary). A capture, a gamma ramp or a screenshot
-    /// aimed at any other output must therefore be *refused*, never answered
-    /// from this one's framebuffer -- see `screencopy.rs`'s
-    /// `capture_constraints`, `gamma_control.rs`'s `get_gamma_control` and
-    /// `screenshot.rs`'s output check.
-    ///
-    /// This replaces `headless.rs`'s old `OUTPUT_ID` const as the one named
-    /// place the "there is exactly one output" assumption lives. Every caller
-    /// is a site the multi-output item (`docs/backlog/core/multi-output.md`)
-    /// has to revisit, and they do not all change the same way:
+    /// The render loop, screenshots, screen capture and gamma controls no
+    /// longer go through here -- each of those resolves its *own* output (see
+    /// `headless.rs`'s `render`, `screenshot.rs`'s output check,
+    /// `screencopy.rs`'s `capture_constraints` and `gamma_control.rs`'s
+    /// `get_gamma_control`), because answering any of them from another
+    /// output's framebuffer would hand a client a picture of one screen
+    /// labelled as another. What remains here are the later phases' sites,
+    /// and they do not all change the same way:
     ///
     /// - `layer_shell.rs`'s `refresh_layer_zone` needs a zone *per* output
-    ///   rather than one;
+    ///   rather than one (frame callbacks and dead-surface cleanup already
+    ///   walk every output's map -- see `headless.rs`'s `render`);
     /// - `layer_hit` needs the output under the pointer;
-    /// - `layer_keyboard_focus` and `render()`'s frame-callback/cleanup pass
-    ///   have to walk more than one `LayerMap`;
+    /// - `layer_keyboard_focus` has to consider more than one `LayerMap`;
     /// - `session_lock.rs`'s `new_surface` fallback, `configure_all`,
     ///   confirmation (`locked` must wait for *every* output's blanked frame
     ///   -- the security-relevant one) and the locked render path;
@@ -170,9 +165,42 @@ impl Outputs {
             .map(|entry| &entry.output)
     }
 
+    /// The id `output` was registered under, if this compositor has it.
+    ///
+    /// The reverse of [`Outputs::get`], for the paths that arrive holding a
+    /// Smithay [`Output`] -- a capture source's upgraded weak handle, a
+    /// gamma control's `wl_output` -- and need the id the core, the render
+    /// targets and the IPC layer know it by. Identity by `Output` equality,
+    /// the same comparison the capture and gamma guards already used
+    /// against [`Outputs::primary`].
+    pub(crate) fn id_of(&self, output: &Output) -> Option<OutputId> {
+        self.entries
+            .iter()
+            .find(|entry| entry.output == *output)
+            .map(|entry| entry.id)
+    }
+
     /// Every output, in creation order.
     pub(crate) fn iter(&self) -> impl Iterator<Item = &Output> + '_ {
         self.entries.iter().map(|entry| &entry.output)
+    }
+
+    /// How many outputs this compositor has -- what bounds the render loop's
+    /// index walk (see `State::render`, which cannot hold the borrow an
+    /// iterator would keep while drawing).
+    pub(crate) fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// The `index`-th output and its id, cloned, or `None` past the end.
+    ///
+    /// Cloned rather than borrowed: the render loop draws with `&mut State`,
+    /// which no borrow of this collection can outlive. An [`Output`] clone
+    /// is an `Arc` bump, not a copy of anything drawn.
+    pub(crate) fn at(&self, index: usize) -> Option<(OutputId, Output)> {
+        self.entries
+            .get(index)
+            .map(|entry| (entry.id, entry.output.clone()))
     }
 
     /// Whether no output has been created yet -- true only before

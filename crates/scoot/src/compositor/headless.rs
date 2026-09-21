@@ -55,9 +55,9 @@ pub fn init(state: &mut State, width: i32, height: i32) -> Result<(), Box<dyn Er
 /// labels the screen the way it would under any other compositor, or
 /// [`OUTPUT_NAME`] where there is no connector.
 ///
-/// The output this creates is the one [`Outputs::primary`] hands back, and
-/// the only one with a [`Backend`] behind it; [`add_output`] puts further
-/// headless outputs beside it and refuses to run before it.
+/// The output this creates is the one [`Outputs::primary`] hands back;
+/// [`add_output`] puts further headless outputs beside it -- each with its
+/// own [`Backend`] -- and refuses to run before it.
 ///
 /// [`Outputs::primary`]: super::outputs::Outputs::primary
 pub fn init_named(
@@ -89,21 +89,14 @@ pub fn init_named(
         &mut state.screencopy.dmabuf,
         &backend,
     );
-    // One backend, one output, and `state.backend` is *replaced* while
-    // `state.outputs` is *appended to* -- so calling this twice would leave
-    // `primary()` naming output 1 while the backend belongs to output 2.
-    // Every capture and gamma path compares against `primary()`, so they
-    // would then refuse the one output that actually has pixels, and
-    // `render()` would draw output 1's geometry into output 2's target.
-    // Unreachable today (one call, at startup) and cheap to keep that way;
-    // `Outputs::add` got a structural guard for the same reason.
+    // One backend per output, and `state.backends` is keyed by the same id
+    // `state.outputs` hands out -- so calling this twice would hand out a
+    // second id with a second backend, and nothing names the wrong one.
+    // Unreachable today (one call, at startup) and cheap to keep that way.
     debug_assert!(
         state.outputs.is_empty(),
-        "the headless backend was initialised twice: the second output would \
-         be appended while the backend is replaced, leaving primary() and the \
-         backend naming different outputs"
+        "the headless backend was initialised twice"
     );
-    state.backend = Some(backend);
     // The GPU scanout tier's `DrmCompositor` was built before this output
     // existed (`tty::init` runs first, because `--tty` is where the size
     // comes from), so it is still tracking a static copy of the mode. Point
@@ -116,6 +109,7 @@ pub fn init_named(
     }
     let area = logical_area(state, &output, width, height);
     let id = state.outputs.add(output);
+    state.backends.insert(id, backend);
     // The cursor's startup position: centred, not at the origin Smithay
     // leaves it at. Here rather than per-backend, so all three backends
     // place it at the same init point -- the cursor draws only under `--tty`
@@ -146,15 +140,14 @@ pub fn init_named(
 /// This is what `--headless --outputs N` builds outputs 2..N with (see
 /// `cli.rs`). It creates a real `wl_output` global, maps the output into the
 /// `Space` and tells the core about it, so a client can address it and the
-/// core gives it its own scrolling strip -- but it deliberately builds **no
-/// render target**: this compositor composites one framebuffer, the primary
-/// output's, and making the render loop per-output is the multi-output item
-/// rather than this one. Nothing is shown on a headless output in any case.
+/// core gives it its own scrolling strip -- plus a render target of its own,
+/// built with the session's renderer at the same size, so the render loop
+/// composites every output's own strip.
 ///
 /// Refuses before [`init_named`] has run rather than trusting `run`'s call
-/// order: the invariant that [`Outputs::primary`] is the output with the
-/// backend is what lets a capture, a gamma ramp or a screenshot refuse any
-/// *other* output instead of quietly answering from the wrong framebuffer.
+/// order: a later output must never become the primary, and there must never
+/// be an output with no render target for a capture to be answered from
+/// another one's framebuffer.
 ///
 /// [`Outputs::primary`]: super::outputs::Outputs::primary
 pub fn add_output(
@@ -163,7 +156,7 @@ pub fn add_output(
     width: i32,
     height: i32,
 ) -> Result<OutputId, Box<dyn Error>> {
-    if state.outputs.is_empty() || state.backend.is_none() {
+    if state.outputs.is_empty() || state.backends.is_empty() {
         return Err("an additional output needs the primary one to exist first".into());
     }
     // Measured off the previous output's *logical* geometry, not off `width`:
@@ -185,8 +178,20 @@ pub fn add_output(
         .map(|geometry| geometry.loc.x.saturating_add(geometry.size.w))
         .unwrap_or(0);
     let output = create_output(state, name, width, height, (x, 0));
+    // The render target behind this output: same renderer, same size as the
+    // primary's. Built before the output is registered, so a failure leaves
+    // nothing half-added -- the output never exists without its target, and
+    // no capture path can resolve one and answer from another's.
+    let backend = Backend::new(
+        &output,
+        width,
+        height,
+        state.renderer,
+        ScanoutHandoff::default(),
+    )?;
     let area = logical_area(state, &output, width, height);
     let id = state.outputs.add(output);
+    state.backends.insert(id, backend);
     state
         .world
         .handle_event(CoreEvent::OutputAdded { id, area });
@@ -356,213 +361,292 @@ impl State {
             self.needs_render = false;
             return;
         }
-        // The primary output, which is the one this framebuffer shows (see
-        // `Outputs::primary`): a second `--outputs` output has no render
-        // target of its own, and drawing it is the multi-output item.
+        // One framebuffer per output, drawn in creation order (so the primary
+        // is first). Each output composites its own strip into its own render
+        // target -- never another output's -- which is what keeps one
+        // screen's pixels from being served as another's (see
+        // `State::backends`).
         //
-        // Order matters: `backend.take()` must not run unless the output is
-        // also present, or a None output would leave it taken and never put
-        // back -- silently and permanently losing the backend on the next
-        // render attempt.
-        let Some(output) = self.outputs.primary().cloned() else {
+        // Walked by index rather than by iterator: drawing takes `&mut State`
+        // (see `draw_frame`), which no borrow of `self.outputs` can outlive,
+        // so each step clones its `(id, output)` -- an `Arc` bump, no
+        // allocation -- and releases the borrow before drawing. The count is
+        // read once up front; outputs are only ever added at startup, never
+        // removed mid-frame, so it cannot go stale inside this loop.
+        //
+        // Order matters per step the same way it used to for the single
+        // output: a missing backend skips its output without touching the
+        // others, and a taken backend is always put back before the next
+        // output draws -- silently losing one would wedge that output's
+        // captures and gamma on every frame after.
+        let locked = self.session_lock.is_locked();
+        let count = self.outputs.len();
+        if count == 0 {
             return;
-        };
-        let Some(mut backend) = self.backend.take() else {
-            return;
-        };
+        }
+        // Cleared on the first attempted draw, not unconditionally up front:
+        // the tail below re-arms it on purpose (`lock_transition`,
+        // `refresh_layer_zone`'s `apply`, a refused-flip retry), and a clear
+        // after the loop would wipe those re-arms -- while never clearing it
+        // when no output drew (no backend taken) keeps the old "a frame with
+        // nothing to draw leaves the dirty flag alone" shape the suites
+        // around `take_primary_backend` pin down.
+        let mut attempted = false;
         // Read once, here, so the element gathering, the clear colour and
         // the frame callbacks below are all answering the same question
         // about the same frame.
-        let locked = self.session_lock.is_locked();
-        // The frame itself, drawn with whichever renderer this session is
-        // carrying. See `render.rs` for why the choice of renderer is an
-        // enum dispatched once per frame rather than a type parameter
-        // threaded through `State`.
-        let frame = render::draw_frame(self, &mut backend, &output, locked);
-        self.backend = Some(backend);
-        self.needs_render = false;
-        // A refused `--tty` flip (see `FrameOutcome::retry_render`): nothing is in
-        // flight, so no `VBlank` will ever arrive to retry it the way
-        // `present_skipped` retries an in-flight skip -- re-arm the frame
-        // timer directly so the re-presented frame goes out on the next
-        // tick instead of waiting for unrelated damage. After the flag
-        // clear above, so this request survives it; bounded at the source
-        // (`present_retry.rs`), so a device that keeps refusing goes quiet
-        // instead of pinning the loop.
-        if frame.retry_render {
-            self.request_render();
-        }
-
-        // The frame a pending session lock has been waiting for. Only after
-        // one has actually been drawn -- never after a failed bind or a
-        // failed render, which would leave whatever was on screen before the
-        // lock exactly where it was -- may the client be told `locked`. A
-        // lock that could not be confirmed stays pending and stays *locked*;
-        // the alternative, giving up and unlocking, would turn a renderer
-        // failure into an unrequested unlock (see `session_lock.rs`).
-        //
-        // Where there is a scanout to wait for (`--tty`), confirmation
-        // additionally waits for the vblank of the flip carrying the blanked
-        // frame (see `SessionLock::await_vblank`): the previous, possibly
-        // unlocked, frame can otherwise stay on scanout for up to one more
-        // vblank after `locked` has gone out. Headless and nested have no
-        // scanout, so the drawn frame *is* the shown one and confirms at
-        // once, exactly as before.
-        if frame.drew_a_frame {
-            if self.session_lock.awaiting_blank() && self.tty.is_some() {
-                let now = Instant::now();
-                if self.session_lock.await_vblank(frame.blank_seq, now) {
-                    // This frame needs a timer watching the fallback
-                    // deadline: a newly armed wait has none yet, and a
-                    // freshly issued flip restarted the bound out from
-                    // under the previous one (see `await_vblank`). One
-                    // shot each, dropped when they fire: the vblank path
-                    // takes the wait first in the ordinary case, so a timer
-                    // only ever fires for a vblank that never came -- and a
-                    // stale one finds no wait and drops.
-                    if let Err(error) = self
-                        .loop_handle
-                        .insert_source(Timer::from_duration(LOCK_VBLANK_TIMEOUT), blank_timeout)
-                    {
-                        // error!, not warn!: without this timer a lock whose
-                        // vblank never arrives hangs its locker forever --
-                        // the one failure mode this wait exists to prevent.
-                        // The vblank path itself still works; only the
-                        // fallback is gone.
-                        tracing::error!(
-                            %error,
-                            "could not arm the session-lock vblank fallback timer; \
-                             a lock whose vblank never arrives will hang its locker"
-                        );
-                    }
-                }
-            } else {
-                self.confirm_lock();
-            }
-        }
-
-        // Presentation feedback for the frame that just went out, before the
-        // frame callbacks below (Smithay's ordering: drain feedback first,
-        // then tell clients to draw next). Taken if and only if something
-        // was actually shown: a `--tty` flip issued, a `--nested` commit
-        // handed to the host, or -- with no presenter at all -- a frame
-        // drawn into the framebuffer, which *is* the final image there. A
-        // rendered-but-dropped frame (busy CRTC, no free host buffer, size
-        // mismatch, failed bind or draw) leaves pending feedback queued for
-        // the next presented frame rather than stamping a time nothing was
-        // shown at; while locked only the lock surfaces are stamped (see
-        // `presentation_time.rs` for the rule and the per-backend timestamp
-        // semantics).
-        //
-        // `vsync` is the backend, not the flip: `--tty` page flips are
-        // vblank-synchronized whenever one is issued, and this arm only runs
-        // when one was.
-        //
-        // `seq` is per-backend per the protocol's `presented` contract (see
-        // `presented_frame`): the issued-flip number on `--tty`, zero
-        // everywhere else -- headless has no retrace to count and nested
-        // output is self-refreshing with no queryable count.
-        if let Some(seq) = super::presentation_time::presented_frame(
-            self.host.is_some(),
-            frame.host_committed,
-            self.tty.is_some(),
-            frame.blank_seq,
-            frame.drew_a_frame,
-        ) {
-            self.present_feedback(
-                &output,
-                self.tty.is_some(),
-                frame.cursor_surface.as_ref(),
-                seq,
-            );
-        }
-
+        let mut retry_render = false;
+        let mut lock_dropped = false;
+        let mut primary_dead_layers = false;
         let time = self.start_time.elapsed();
-        // A client cursor surface is never in `self.space`, so the window
-        // loop below can't reach it -- and a well-behaved client with an
-        // animated cursor (a spinner, a throbber) attaches one frame,
-        // requests a callback, and waits for it before attaching the next.
-        // Without this it waits forever and the animation freezes on its
-        // first frame.
-        //
-        // Scoped to the frames that presented this cursor (`--tty`, pointer
-        // present, the status a live client surface) rather than sent
-        // unconditionally: waking a client to draw cursor frames that
-        // nothing on screen is showing is exactly the kind of pointless
-        // work this compositor's own render loop avoids. It is deliberately
-        // *not* narrowed further to "the surface produced at least one
-        // element" -- a surface with no buffer yet produces none, and a
-        // client that asks for a callback before its first attach (legal,
-        // if unusual) would then stall on the very frame that should unstick
-        // it.
-        //
-        // Outside the lock branch below because the cursor is drawn either
-        // way, and while locked that surface can only belong to the lock
-        // client: `wl_pointer.set_cursor` is refused unless the asking client
-        // holds pointer focus or a pointer grab (Smithay's
-        // `allow_setting_cursor`), and locking resets the image, drops grabs
-        // and moves pointer focus onto the lock surface.
-        if let Some(surface) = &frame.cursor_surface {
-            send_frames_surface_tree(surface, &output, time, Some(Duration::ZERO), |_, _| {
-                Some(output.clone())
-            });
-        }
-        if locked {
-            // Lock surfaces are the only clients told to draw: "the
-            // compositor must stop rendering and providing input to normal
-            // clients". A client with no frame callback stops drawing by
-            // itself, so this is both what the protocol asks for and what
-            // keeps every window and bar in the session from burning CPU
-            // behind a lock screen. They get one again on the first frame
-            // after unlocking.
-            if self.lock_post_frame(&output, time) {
-                // A lock surface was dropped, and it may have been the one
-                // holding the keyboard, the pointer or a grab -- and what is
-                // drawn just changed. Pointer focus has to be re-derived
-                // explicitly and not just hit-tested: `wl_pointer.button`
-                // goes to whatever the pointer last entered, and a grab
-                // outlives focus changes entirely (see `session_lock.rs`).
-                self.lock_transition();
+        for index in 0..count {
+            let Some((id, output)) = self.outputs.at(index) else {
+                continue;
+            };
+            let Some(mut backend) = self.take_backend(id) else {
+                // No render target for this output: skipped, leaving the
+                // others to draw. Unreachable past startup -- both makers
+                // (`init_named`, `add_output`) insert the target with the
+                // output, and nothing removes one -- except for the suites
+                // that take the primary's out by hand to prove a frame with
+                // nothing to draw confirms no lock and stamps nothing (see
+                // `take_primary_backend`). Skipped rather than logged: this
+                // runs per frame, so a log here would flood at 60Hz.
+                continue;
+            };
+            if !attempted {
+                attempted = true;
+                self.needs_render = false;
             }
-        } else {
-            for window in self.space.elements() {
-                window.send_frame(&output, time, Some(Duration::ZERO), |_, _| {
+            // The frame itself, drawn with whichever renderer this session is
+            // carrying. See `render.rs` for why the choice of renderer is an
+            // enum dispatched once per frame rather than a type parameter
+            // threaded through `State`.
+            let frame = render::draw_frame(self, &mut backend, &output, locked);
+            self.put_backend(id, backend);
+            // A refused `--tty` flip (see `FrameOutcome::retry_render`):
+            // nothing is in flight, so no `VBlank` will ever arrive to retry
+            // it the way `present_skipped` retries an in-flight skip --
+            // re-armed once below for the whole frame rather than per
+            // output. After the flag clear below, so this request survives
+            // it; bounded at the source (`present_retry.rs`), so a device
+            // that keeps refusing goes quiet instead of pinning the loop.
+            retry_render |= frame.retry_render;
+
+            // The frame a pending session lock has been waiting for. Only
+            // after one has actually been drawn -- never after a failed bind
+            // or a failed render, which would leave whatever was on screen
+            // before the lock exactly where it was -- may the client be told
+            // `locked`. A lock that could not be confirmed stays pending and
+            // stays *locked*; the alternative, giving up and unlocking, would
+            // turn a renderer failure into an unrequested unlock (see
+            // `session_lock.rs`).
+            //
+            // Where there is a scanout to wait for (`--tty`), confirmation
+            // additionally waits for the vblank of the flip carrying the
+            // blanked frame (see `SessionLock::await_vblank`): the previous,
+            // possibly unlocked, frame can otherwise stay on scanout for up
+            // to one more vblank after `locked` has gone out. Headless and
+            // nested have no scanout, so the drawn frame *is* the shown one
+            // and confirms at once, exactly as before.
+            //
+            // Per output, and idempotent past the first: confirming on the
+            // primary's blanked frame is the standing rule, and waiting for
+            // *every* output's is phase C's (`locked` must wait for every
+            // output's blanked frame -- the security-relevant half). Until
+            // then a second confirmation is a no-op, never an early unlock.
+            if frame.drew_a_frame {
+                if self.session_lock.awaiting_blank() && self.tty.is_some() {
+                    let now = Instant::now();
+                    if self.session_lock.await_vblank(frame.blank_seq, now) {
+                        // This frame needs a timer watching the fallback
+                        // deadline: a newly armed wait has none yet, and a
+                        // freshly issued flip restarted the bound out from
+                        // under the previous one (see `await_vblank`). One
+                        // shot each, dropped when they fire: the vblank path
+                        // takes the wait first in the ordinary case, so a timer
+                        // only ever fires for a vblank that never came -- and a
+                        // stale one finds no wait and drops.
+                        if let Err(error) = self
+                            .loop_handle
+                            .insert_source(Timer::from_duration(LOCK_VBLANK_TIMEOUT), blank_timeout)
+                        {
+                            // error!, not warn!: without this timer a lock whose
+                            // vblank never arrives hangs its locker forever --
+                            // the one failure mode this wait exists to prevent.
+                            // The vblank path itself still works; only the
+                            // fallback is gone.
+                            tracing::error!(
+                                %error,
+                                "could not arm the session-lock vblank fallback timer; \
+                                 a lock whose vblank never arrives will hang its locker"
+                            );
+                        }
+                    }
+                } else {
+                    self.confirm_lock();
+                }
+            }
+
+            // Presentation feedback for the frame that just went out, before
+            // the frame callbacks below (Smithay's ordering: drain feedback
+            // first, then tell clients to draw next). Taken if and only if
+            // something was actually shown: a `--tty` flip issued, a
+            // `--nested` commit handed to the host, or -- with no presenter
+            // at all -- a frame drawn into the framebuffer, which *is* the
+            // final image there. A rendered-but-dropped frame (busy CRTC, no
+            // free host buffer, size mismatch, failed bind or draw) leaves
+            // pending feedback queued for the next presented frame rather
+            // than stamping a time nothing was shown at; while locked only
+            // the lock surfaces are stamped (see `presentation_time.rs` for
+            // the rule and the per-backend timestamp semantics).
+            //
+            // `vsync` is the backend, not the flip: `--tty` page flips are
+            // vblank-synchronized whenever one is issued, and this arm only
+            // runs when one was.
+            //
+            // `seq` is per-backend per the protocol's `presented` contract
+            // (see `presented_frame`): the issued-flip number on `--tty`,
+            // zero everywhere else -- headless has no retrace to count and
+            // nested output is self-refreshing with no queryable count.
+            //
+            // Per output: `--nested` and `--tty` have exactly one output, so
+            // only `--headless` ever reaches a second iteration here, and it
+            // has no presenter -- each output's drawn frame is its own shown
+            // one.
+            if let Some(seq) = super::presentation_time::presented_frame(
+                self.host.is_some(),
+                frame.host_committed,
+                self.tty.is_some(),
+                frame.blank_seq,
+                frame.drew_a_frame,
+            ) {
+                self.present_feedback(
+                    &output,
+                    self.tty.is_some(),
+                    frame.cursor_surface.as_ref(),
+                    seq,
+                );
+            }
+
+            // A client cursor surface is never in `self.space`, so the window
+            // loop below can't reach it -- and a well-behaved client with an
+            // animated cursor (a spinner, a throbber) attaches one frame,
+            // requests a callback, and waits for it before attaching the next.
+            // Without this it waits forever and the animation freezes on its
+            // first frame.
+            //
+            // Scoped to the frames that presented this cursor (`--tty`, pointer
+            // present, the status a live client surface) rather than sent
+            // unconditionally: waking a client to draw cursor frames that
+            // nothing on screen is showing is exactly the kind of pointless
+            // work this compositor's own render loop avoids. It is deliberately
+            // *not* narrowed further to "the surface produced at least one
+            // element" -- a surface with no buffer yet produces none, and a
+            // client that asks for a callback before its first attach (legal,
+            // if unusual) would then stall on the very frame that should unstick
+            // it.
+            //
+            // Outside the lock branch below because the cursor is drawn either
+            // way, and while locked that surface can only belong to the lock
+            // client: `wl_pointer.set_cursor` is refused unless the asking client
+            // holds pointer focus or a pointer grab (Smithay's
+            // `allow_setting_cursor`), and locking resets the image, drops grabs
+            // and moves pointer focus onto the lock surface.
+            if let Some(surface) = &frame.cursor_surface {
+                send_frames_surface_tree(surface, &output, time, Some(Duration::ZERO), |_, _| {
                     Some(output.clone())
                 });
             }
-            // Layer surfaces aren't in `self.space` either, and a bar's clock
-            // stops at whatever second it first drew without this -- the same
-            // frame-callback starvation the cursor surface had. Sent to every
-            // mapped layer surface rather than only the ones that produced an
-            // element, matching both the window loop above and the cursor's own
-            // reasoning: a client may legitimately ask for a callback before its
-            // first attach, and withholding it would stall the very frame that
-            // unsticks it.
-            let dropped_dead_layers = {
-                let mut layers = layer_map_for_output(&output);
-                for layer in layers.layers() {
-                    layer.send_frame(&output, time, Some(Duration::ZERO), |_, _| {
-                        Some(output.clone())
-                    });
+            if locked {
+                // Lock surfaces are the only clients told to draw: "the
+                // compositor must stop rendering and providing input to normal
+                // clients". A client with no frame callback stops drawing by
+                // itself, so this is both what the protocol asks for and what
+                // keeps every window and bar in the session from burning CPU
+                // behind a lock screen. They get one again on the first frame
+                // after unlocking.
+                //
+                // OR-ed across outputs and transitioned once below: a dropped
+                // lock surface may have held the keyboard, the pointer or a
+                // grab (see below), and re-deriving focus per output would
+                // derive it twice for one drop.
+                lock_dropped |= self.lock_post_frame(&output, time);
+            } else {
+                // Frame callbacks for this output's own windows: a window
+                // overlapping this output's geometry is told to draw, with
+                // this output as the token -- which is what paces it at this
+                // output's cadence rather than another's. A window with no
+                // bbox yet (never mapped, nothing to overlap-test) is told
+                // unconditionally, matching the old unconditional loop: a
+                // client may legitimately ask for a callback before its first
+                // attach, and withholding it would stall the very frame that
+                // unsticks it.
+                let geometry = self.space.output_geometry(&output);
+                for window in self.space.elements() {
+                    let on_this_output = match (geometry, self.space.element_bbox(window)) {
+                        (Some(region), Some(bbox)) => region.overlaps(bbox),
+                        _ => true,
+                    };
+                    if on_this_output {
+                        window.send_frame(&output, time, Some(Duration::ZERO), |_, _| {
+                            Some(output.clone())
+                        });
+                    }
                 }
-                // Second line of defence behind `layer_destroyed` (see
-                // `layer_shell.rs`), for a client whose implicit teardown ran in
-                // an order that left a dead surface mapped. `cleanup` only walks
-                // the list -- no work at all with no layer surfaces -- and
-                // re-arranges if it removed one, which is why the zone is
-                // re-derived below when it did.
-                let before = layers.len();
-                layers.cleanup();
-                before != layers.len()
-            };
-            if dropped_dead_layers {
-                self.refresh_layer_zone();
-                // One of those dead surfaces may have been holding the keyboard
-                // (`layer_destroyed` is the usual path back, but this branch
-                // exists precisely for the teardown orders it misses), and
-                // `refresh_layer_zone` returns early when the zone didn't move.
-                self.refresh_keyboard_focus();
+                // Layer surfaces aren't in `self.space` either, and a bar's clock
+                // stops at whatever second it first drew without this -- the same
+                // frame-callback starvation the cursor surface had. Sent to every
+                // mapped layer surface on this output rather than only the ones
+                // that produced an element, matching both the window loop above
+                // and the cursor's own reasoning: a client may legitimately ask
+                // for a callback before its first attach, and withholding it
+                // would stall the very frame that unsticks it.
+                let dropped_dead = {
+                    let mut layers = layer_map_for_output(&output);
+                    for layer in layers.layers() {
+                        layer.send_frame(&output, time, Some(Duration::ZERO), |_, _| {
+                            Some(output.clone())
+                        });
+                    }
+                    // Second line of defence behind `layer_destroyed` (see
+                    // `layer_shell.rs`), for a client whose implicit teardown ran in
+                    // an order that left a dead surface mapped. `cleanup` only walks
+                    // the list -- no work at all with no layer surfaces -- and
+                    // re-arranges if it removed one, which is why the zone is
+                    // re-derived below when it did.
+                    let before = layers.len();
+                    layers.cleanup();
+                    before != layers.len()
+                };
+                // Zone re-derivation stays primary-scoped (phase B owns
+                // per-output zones): only the primary output's sweep can ask
+                // for it. A non-primary map still sweeps its dead surfaces
+                // above, so nothing accumulates there.
+                if dropped_dead && Some(&output) == self.outputs.primary() {
+                    primary_dead_layers = true;
+                }
             }
+        }
+        if retry_render {
+            self.request_render();
+        }
+        if lock_dropped {
+            // A lock surface was dropped, and it may have been the one
+            // holding the keyboard, the pointer or a grab -- and what is
+            // drawn just changed. Pointer focus has to be re-derived
+            // explicitly and not just hit-tested: `wl_pointer.button`
+            // goes to whatever the pointer last entered, and a grab
+            // outlives focus changes entirely (see `session_lock.rs`).
+            self.lock_transition();
+        }
+        if primary_dead_layers {
+            self.refresh_layer_zone();
+            // One of those dead surfaces may have been holding the keyboard
+            // (`layer_destroyed` is the usual path back, but this branch
+            // exists precisely for the teardown orders it misses), and
+            // `refresh_layer_zone` returns early when the zone didn't move.
+            self.refresh_keyboard_focus();
         }
         self.space.refresh();
         self.popups.cleanup();
@@ -646,11 +730,11 @@ impl State {
         // frame in flight, to arrive at exactly the same pipeline. What is
         // left is the recorded framebuffer size, which capture clients read.
         if self
-            .backend
-            .as_ref()
+            .backends
+            .get(&id)
             .is_some_and(super::render::Backend::is_scanout)
         {
-            if let Some(backend) = &mut self.backend {
+            if let Some(backend) = self.backends.get_mut(&id) {
                 backend.note_resized(width, height);
             }
         } else {
@@ -661,7 +745,9 @@ impl State {
                 self.renderer,
                 ScanoutHandoff::default(),
             ) {
-                Ok(backend) => self.backend = Some(backend),
+                Ok(backend) => {
+                    self.backends.insert(id, backend);
+                }
                 Err(error) => {
                     tracing::warn!(%error, "could not resize the render target");
                     // Back to the mode that is actually being rendered. The
@@ -964,8 +1050,9 @@ mod tests {
 
         assert!(!state.resize_output(UNBUILDABLE.0, UNBUILDABLE.1));
 
+        let output = state.outputs.primary_id().expect("an output");
         assert_eq!(
-            state.backend.as_ref().expect("a backend").size(),
+            state.backends.get(&output).expect("a backend").size(),
             (CANVAS, CANVAS),
             "a failed resize replaced the render target with one at another size"
         );
