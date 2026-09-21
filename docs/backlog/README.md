@@ -658,3 +658,33 @@ exactly what `State::spawn` started), and two gaps. They share a mechanism
 
 ### Meta
 - [Split the CLI out into `scootctl`](./resolved/rename-flex-family-done.md) — CLOSED 2026-09-20: the `flexwm` → `scoot` rename half landed 2026-09-18 (PR #128); the crate split landed 2026-09-20 ([record](./resolved/scootctl-split-done.md)): new `scootctl` lib+bin crate, `scoot msg` kept as a permanent alias, Darwin default is `scootctl`. A status bar stays separate.
+
+### Not-yet removal plan (2026-09-21, macOS excluded)
+
+One entry per README "Not yet" bullet, filed so each has a costed landing
+spot. Order across tracks: cursor/`column_widths` + XWayland spike +
+TTY-enumeration first (independent); TTY add/remove → placement → default
+binds → scale/mode surface; Asahi proof gates scanout planes; autostart
+policy → renderer/GPU reword. Batch Asahi trips (multi-CRTC + scanout +
+scale/mode) into one hardware session.
+
+- [Multi-output remainder: --tty multi-CRTC, placement, default binds](./core/multi-output-remainder.md)
+  — OPEN, **HIGH**: milestone 19 phases E–I (E1 enumerate, E2 render +
+  hotplug add/remove, G pointer-output placement, H default output binds).
+  E + scale/mode hardware-gated. Pairs with the existing
+  [per-output scale/mode](./core/per-output-scale-mode.md) entry, which
+  stays last.
+- [XWayland support](./protocols/xwayland-support.md)
+  — OPEN, low: spike → skeleton → core mapping → focus-gate security half
+  → clipboard/DnD → capture/packaging/docs. No Smithay bump needed
+  (pinned 0.7.0 carries `xwayland/`). Opt-in flag recommended; X11 trust
+  consequences documented, not waived.
+- [GPU scanout: real-GPU proof, then cursor + overlay planes](./rendering/gpu-scanout-planes.md)
+  — OPEN, medium, Asahi-gated: Test 4 proof first (split render/display
+  is the known hazard), then cursor → overlay → `ALLOW_SCANOUT` last with
+  its capture fix. Headless/nested read-back stays by design. Pairs with
+  the existing [measurement](./rendering/gpu-vs-cpu-measured.md) entry.
+- [Config reload: from partial to full](./core/config-reload-full.md)
+  — OPEN, medium: cursor → `column_widths` → `output.scale` →
+  autostart spawn-delta → renderer/GPU reworded to restart semantics.
+  SIGHUP inherits free; no wire bump (strings migrate, no third list).

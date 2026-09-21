@@ -1,0 +1,110 @@
+---
+title: "Config reload: from partial to full (live except renderer + DRM device)"
+status: "open"
+area: "core"
+priority: "medium"
+blocked: null
+---
+
+# Config reload: from partial to full
+
+`resolved/config-reload-done.md` + `resolved/reload-sighup-trigger-done.md`
+shipped partial-with-refusal as the honest shape (`Request::Reload` →
+`State::reload`, `compositor/reload.rs:92-123` → `config::reload_from`,
+`config.rs:448-459` strict, failed reload keeps running config). Live
+today: `layout.gap`, appearance ring/background/corner/`prefer_no_csd`,
+`binds`. This entry tracks making each refused field live; the target end
+state is **live except `renderer.backend` + `tty.gpu`, which need a
+restart and get reworded to say so**. Then `README.md:62-66` clears. SIGHUP
+inherits every phase free (shared `State::reload()`).
+
+## Phase 0 — groundwork (no behavior change)
+
+Extract per-field appliers out of `apply_reload` (`reload.rs:129-256`)
+keeping the pure-compare-first/mutate-after invariant (`:129-130`).
+Settle the `startup_*` snapshot rule (`mod.rs:133-134` written once,
+diff-only): every phase that starts applying a field advances its
+snapshot or compares against the live value — otherwise the second
+reload re-reports it (pin `reload/tests.rs:321-333`). Keep the
+`{applied, refused}` reply/log shape throughout.
+
+## Phase 1 — cursor rebuild (lowest risk)
+
+`Cursor::new`-once (`cursor.rs:184-247`, built from `state.rs:744-746`,
+"deliberately no way to rebuild" `:184-191`) gains a rebuild path:
+regenerate `shapes` (`:142-152`), re-resolve `themed` via `refresh_themed`
+(`:269-277`), update `size`; also write `self.appearance.cursor_*`
+(never written on reload today, unlike ring fields `:154-178`),
+re-export `XCURSOR_*` for future children (`mod.rs:265-279`), request a
+render (no `apply()`/re-arrange). `Theme::load` (`cursor/theme.rs:105-134`)
+never fails — synchronous on the loop is fine. Visible only on `--tty`.
+
+## Phase 2 — column_widths / default_column_width
+
+Refusal is structural (`reload.rs:12-19`, `world/mod.rs:85-92`):
+`Column.preset: usize` (`world/tree.rs:39-48`) indexes the list in
+`arrange` (`arrange.rs:93-108`); a shorter list indexes OOB (backstop:
+`world/tests/reload.rs:80-93`). Pick clamping (`min(preset, len-1)`,
+matching `default_column_width`'s existing clamp `config.rs:65-69`) or
+proportional remap; `set_config`'s `validated()` + `fix_all_views()`
+(`world/mod.rs:93-105`) already does the rest. `default_column_width`
+alone (read only at `place_window`, `world/mod.rs:194-200`) can ship
+ahead. `cycle_preset` (`world/actions.rs:12`) follows automatically.
+Under session lock like gap (no lock-content disclosure,
+`reload.rs:46-55`).
+
+## Phase 3 — output.scale (medium risk, all four steps together)
+
+1. Re-advertise via `set_mode` + `smithay_scale(new)`
+   (`output_scale.rs:103-109`, `headless.rs:278-304`) — `wl_output.scale`
+   re-sent to bound clients.
+2. Fractional companions: surface-walk re-send of `set_preferred_scale` +
+   `preferred_buffer_scale` (`output_scale.rs:158-197`; today only the
+   bind-time moment exists).
+3. Layout: recompute logical geometry (`output_scale.rs:138-149`,
+   `headless.rs:255-268`), core areas, `fix_all_views`, `apply()` +
+   render. Cursor hotspot math already takes scale per frame.
+4. Resize per-output framebuffers (`configuration.md:113-123`).
+`--nested` keeps refusing non-1.0 (host owns scale, `mod.rs:90-99`).
+Per-output scale stays out (milestone 19's surface). Expect churn:
+clients that cache scale may lag
+(`ghostty-fails-at-1-5-done.md`, `output_scale.rs:170-176`).
+
+## Phase 4 — autostart re-run policy (semantics first)
+
+Mechanism is one line (`state.act`, as `mod.rs:303-305`); the policy is
+the work. Recommended: run-only-new-`Spawn`-entries (diff vs
+`startup_autostart`, advance snapshot — never full re-drain, never
+non-spawn actions; a reloaded `quit` must not kill the session,
+`config.rs:1144-1157`). Under lock: skip/defer, unlike gap/binds
+(`reload.rs:46-55`).
+
+## Phases 5–6 — renderer.backend + tty.gpu: restart semantics, not live swap
+
+Live renderer swap (rebuild every `Pipeline`, `render.rs:221-245`,
+re-import all client textures, scanout-tier framebuffer contract
+`:254-267`, non-atomic, no rollback) and live DRM re-open (new device
+through libseat, `tty/gpu.rs:19-29,123-145,193-215`, re-pick
+connector/mode, rebuild surfaces, drop old master — a restart keeping
+clients, every step fallible mid-flight with fail-closed no-display risk)
+are both disproportionate. Keep refusing; reword to name restart. No
+third reply list (that would bump `PROTOCOL_VERSION` 3→4 per
+`scoot-ipc/src/lib.rs:40-47`; migrating strings applied↔refused needs no
+bump).
+
+## Tests and docs
+
+Per phase in existing harnesses: cursor rebuild applies + idempotent;
+core remap units + `reload/tests.rs` applied-preset assertions;
+headless live-rescale (wire `scale` event, fractional re-send, geometry
+halving, nested refusal); spawn-delta runs once, non-spawn refused, lock
+skips, no double-run. Unmodified pins: `reload/tests.rs`
+(validate-before-apply, vanished path, pathless, VT guard),
+`input/tests.rs` held-key, `sighup` (10), `world/tests/reload.rs`
+backstop. Docs move fields Refused→Applied per phase
+(`configuration.md:234-238,276-334` + per-table Startup-only tags,
+`reload.rs:10-44`, `response.rs:156-160`, `output_scale.rs:31-45`,
+`cursor.rs:184-191`, `config.rs:267-309,567-569`).
+
+Ship order: cursor → `default_column_width`, then `column_widths` →
+`output.scale` → autostart policy → reword renderer/GPU.
