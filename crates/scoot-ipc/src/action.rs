@@ -41,6 +41,16 @@ pub enum Action {
         direction: Horizontal,
     },
     CycleColumnWidth,
+    /// Set the focused column's width to one specific entry of the session's
+    /// `column_widths` list, by its position in that list (0-based; out of
+    /// range does nothing, like `FocusWorkspaceIndex`) -- the wire half of
+    /// `scoot_core::Action::SetColumnWidth`. The absolute half of
+    /// `CycleColumnWidth`'s stepping: cycling cannot land on a width, it can
+    /// only step past it. Additive: a client that never sends this tag
+    /// decodes exactly as before, so no `PROTOCOL_VERSION` bump.
+    SetColumnWidth {
+        index: usize,
+    },
     FocusWorkspace {
         direction: Vertical,
     },

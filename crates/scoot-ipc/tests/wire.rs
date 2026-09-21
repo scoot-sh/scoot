@@ -62,6 +62,21 @@ fn the_indexed_workspace_actions_travel_as_snake_case_with_an_index() {
 }
 
 #[test]
+fn set_column_width_travels_as_snake_case_with_an_index() {
+    // Same pin as the indexed workspace actions above: the exact JSON shape
+    // a client sends, and its decode back into the same request.
+    let request = Request::Action(Action::SetColumnWidth { index: 2 });
+    assert_eq!(
+        json_of(&request),
+        json!({ "type": "action", "action": "set_column_width", "index": 2 })
+    );
+    assert_eq!(
+        decode::<Request>(&encode(&request).unwrap()).unwrap(),
+        request
+    );
+}
+
+#[test]
 fn the_output_actions_travel_as_snake_case_with_an_output() {
     // Same pin as the indexed workspace actions above: the exact JSON shape
     // a client sends, and its decode back into the same request.

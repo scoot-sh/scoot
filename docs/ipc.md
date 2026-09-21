@@ -75,10 +75,10 @@ all three.
 focus-column|move-column|consume-or-expel   left|right
 focus-window|move-window                    up|down
 focus-workspace|move-window-to-workspace    up|down
-focus-window-id ID | focus-workspace-index N | move-window-to-workspace-index N | focus-output ID | move-window-to-output ID | cycle-column-width | close | spawn COMMAND... | quit
+focus-window-id ID | focus-workspace-index N | move-window-to-workspace-index N | focus-output ID | move-window-to-output ID | cycle-column-width | set-column-width N | close | spawn COMMAND... | quit
 ```
 
-`focus-workspace-index N` and `move-window-to-workspace-index N` are 0-based; out of range does nothing (a move leaves the window where it is). `focus-output ID` and `move-window-to-output ID` take an output id as `scootctl outputs` reports it (output ids are stable for the session, unlike workspace positions); an unknown id does nothing. A move carries the focused window to the target output's active workspace and follows it there; focusing an output with no windows focuses nothing. `spawn` is
+`focus-workspace-index N` and `move-window-to-workspace-index N` are 0-based; out of range does nothing (a move leaves the window where it is). `set-column-width N` is 0-based into the session's `[layout] column_widths`; out of range does nothing, like a stale workspace index. `focus-output ID` and `move-window-to-output ID` take an output id as `scootctl outputs` reports it (output ids are stable for the session, unlike workspace positions); an unknown id does nothing. A move carries the focused window to the target output's active workspace and follows it there; focusing an output with no windows focuses nothing. `spawn` is
 split on whitespace and not run through a shell, so an argument containing a
 space can't be expressed this way. Every action is refused while the session
 is locked.
@@ -207,7 +207,7 @@ The focus-family actions do take the keyboard back. `focus-column`,
 `focus-workspace-index` each spend a click that had given a *click-focused*
 (`on_demand`) layer surface the keyboard, so after one, keystrokes go to the
 window `windows` reports as focused. The other actions — `move-*`, `close`,
-`spawn`, `cycle-column-width`, `quit` — change arrangement rather than where
+`spawn`, `cycle-column-width`, `set-column-width`, `quit` — change arrangement rather than where
 focus is reported to be, so they leave a deliberate keyboard placement alone,
 as does a keybinding. An `exclusive` layer surface keeps the keyboard through
 all of them, by protocol, until it unmaps.

@@ -338,7 +338,7 @@ while locked anyway).
 | Field | Type | Default | Meaning |
 |---|---|---|---|
 | `gap` | integer (pixels) | `12` | Gap between columns, between windows stacked in a column, and at output edges. Clamped into `0..=10000`: negatives become `0`, and anything above `10000` becomes `10000` — already wider than the long edge of an 8K display, and it keeps the layout's own integer arithmetic well away from overflow. A gap that large leaves no usable area, so windows end up 1x1; it's a guard against a typo or a probe, not a usable setting. Re-applied live by `scootctl reload`. |
-| `column_widths` | array of floats | `[0.333…, 0.5, 0.666…]` (i.e. `1/3`, `1/2`, `2/3`) | Column widths as fractions of the output width, in the order `cycle-column-width` steps through. Non-finite or non-positive entries are dropped; an empty list falls back to the built-in three. Startup-only — a reload refuses changes (see [Reloading the config](#reloading-the-config)). |
+| `column_widths` | array of floats | `[0.333…, 0.5, 0.666…]` (i.e. `1/3`, `1/2`, `2/3`) | Column widths as fractions of the output width, in the order `cycle-column-width` steps through and `set-column-width N` indexes into (0-based). Non-finite or non-positive entries are dropped; an empty list falls back to the built-in three. Startup-only — a reload refuses changes (see [Reloading the config](#reloading-the-config)). |
 | `default_column_width` | integer (unsigned) | `1` | Index into `column_widths` used for newly created columns (`1` selects `0.5`, i.e. half the output). Too large is clamped to the last valid index; negative isn't a valid value for this field at all, so it's a whole-file parse error, not a clamp. Startup-only — a reload refuses changes. |
 
 ## `[appearance]`
@@ -433,7 +433,7 @@ handles `scootctl action ...` (and its `scoot msg` alias) and a config file's
 focus-column|move-column|consume-or-expel   left|right
 focus-window|move-window                    up|down
 focus-workspace|move-window-to-workspace    up|down
-focus-window-id ID | focus-workspace-index N | move-window-to-workspace-index N | focus-output ID | move-window-to-output ID | cycle-column-width | close | spawn COMMAND... | quit
+focus-window-id ID | focus-workspace-index N | move-window-to-workspace-index N | focus-output ID | move-window-to-output ID | cycle-column-width | set-column-width N | close | spawn COMMAND... | quit
 ```
 
 e.g. `"focus-column left"`, `"close"`, or `"spawn foot -e htop"` (split on
@@ -565,6 +565,23 @@ workspaces open, or either index action with a stale number — does nothing:
 it neither creates a workspace nor falls back to the last one. (The
 workspace set is dynamic: empty workspaces are dropped, so an index only
 means anything against the list it was read from.)
+
+`set-column-width N` lands the focused column directly on entry `N` of
+`[layout] column_widths` (0-based) instead of stepping past every other
+entry like `cycle-column-width` — the closest thing to "fullscreen" scoot
+has. An index past the end of the list does nothing, like a stale workspace
+index. It has no default bind, by decision: the width list is yours to size,
+so no key family maps onto it the way digits map onto workspaces (the same
+call phase F made for the output actions above). Add your own, e.g. with a
+`1.0` entry in the list:
+
+```toml
+[layout]
+column_widths = [0.3333333333333333, 0.5, 1.0]
+
+[binds]
+"super+f" = "set-column-width 2"
+```
 
 `--tty` additionally binds `Ctrl+Alt+F1` through `Ctrl+Alt+F12` to VT
 switching — not present under `--headless`/`--nested`, since VT switching is

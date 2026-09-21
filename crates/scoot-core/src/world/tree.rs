@@ -155,6 +155,26 @@ impl Workspace {
         }
     }
 
+    /// Sets the focused column's width preset to `index` -- the absolute
+    /// half of [`cycle_preset`](Self::cycle_preset)'s stepping.
+    ///
+    /// Ignoring rather than clamping, like
+    /// [`focus_workspace_index`](Self::focus_workspace_index): a stale or
+    /// wild index must not silently land the column on some other width.
+    /// An empty workspace has no column to resize. `presets` is the width
+    /// list's length, so a stored preset always stays a valid index into it
+    /// (any `index`, including every `usize` a wire client can send, past a
+    /// zero-length list is ignored too).
+    pub(super) fn set_preset(&mut self, index: usize, presets: usize) {
+        let Some(column) = self.columns.get_mut(self.focused) else {
+            return;
+        };
+        if index >= presets {
+            return;
+        }
+        column.preset = index;
+    }
+
     /// Joins the neighbouring column, or leaves the current one when it holds
     /// other windows (niri's consume-or-expel).
     pub(super) fn consume_or_expel(&mut self, dir: Horizontal) {
