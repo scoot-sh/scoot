@@ -156,7 +156,7 @@ impl<S, A> Harness<S, A> {
     /// [`Harness::pixels`] would panic. For suites that assert on the wire, or
     /// that render offscreen themselves.
     pub(crate) fn bare(appearance: Appearance) -> Self {
-        Self::build(appearance, None)
+        Self::build(appearance, None, 1.0)
     }
 
     /// A compositor with a real headless backend rendering into a
@@ -164,10 +164,22 @@ impl<S, A> Harness<S, A> {
     /// back with a real renderer -- `PixmanRenderer`, or `GlesRenderer`
     /// under `SCOOT_TEST_RENDERER=gles` (see [`test_renderer`]).
     pub(crate) fn headless(appearance: Appearance, canvas: i32) -> Self {
-        Self::build(appearance, Some(canvas))
+        Self::build(appearance, Some(canvas), 1.0)
     }
 
-    fn build(appearance: Appearance, canvas: Option<i32>) -> Self {
+    /// The same at an output scale other than 1.0: the framebuffer stays
+    /// `canvas` physical pixels square while the core arranges in
+    /// `canvas / scale` (rounded up) logical ones -- the shape a fractional
+    /// `[output] scale` session renders at. Clients that size their buffers
+    /// from `wp_fractional_scale_v1` + `wp_viewporter` draw the way real
+    /// toolkits do at that scale; clients that don't are upscaled from
+    /// scale-1 buffers, exactly like a scale-unaware client on a real
+    /// fractional session.
+    pub(crate) fn headless_scaled(appearance: Appearance, canvas: i32, scale: f64) -> Self {
+        Self::build(appearance, Some(canvas), scale)
+    }
+
+    fn build(appearance: Appearance, canvas: Option<i32>, scale: f64) -> Self {
         let renderer = test_renderer();
         let mut event_loop: EventLoop<'static, State> =
             EventLoop::try_new().expect("an event loop");
@@ -178,7 +190,7 @@ impl<S, A> Harness<S, A> {
             Config::default(),
             Keybindings::default(),
             appearance,
-            1.0,
+            scale,
             renderer,
         )
         .expect("a compositor state with a wayland socket");
