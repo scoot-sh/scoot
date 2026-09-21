@@ -248,9 +248,16 @@ Every pull request runs `.github/workflows/ci.yml`, which does the above
 plus `cargo fmt`, `cargo clippy -D warnings`, `scripts/smoke-test.sh` under
 `--headless`, an `ldd` check that the default build links no GPU stack
 (`libgbm` is the live assertion; `libEGL`/`libGLESv2` are belt-and-braces,
-since both are `dlopen`ed and never appear in `ldd` either way), and a macOS
+since both are `dlopen`ed and never appear in `ldd` either way), a `nix fmt`
+check over all tracked `.nix` files, `nix flake check -L` (Linux and macOS
+jobs each cover their own systems' outputs, modules and checks), and a macOS
 `cargo check --workspace --all-targets` (on a Mac that is the `scootctl`
-client plus the compositor crate with its Linux halves cfg'd out). It runs the
+client plus the compositor crate with its Linux halves cfg'd out). The
+packaged artifacts themselves (`nix build .#scoot .#scootctl`) build on every
+merge to main via `.github/workflows/nix-build.yml` instead of on every PR --
+a full release Smithay build the cargo cache cannot reuse, so it would tax
+every push; the every-PR `flake check` already evals every output and runs
+the module suite. It runs the
 build and test steps through `nix develop` (the smoke test's own tools come
 via `nix shell` pinned to the same lockfile), so the flake stays the only
 dependency list. **A green check

@@ -406,7 +406,8 @@ falsify. Read `flexwm` there as `scoot`.
   checks all still resolve, live IPC proven against the packaged pair.
 - [home-manager `sessionScript` vs `configFile` override](./resolved/hm-session-script-path-done.md)
   — RESOLVED 2026-09-21 (gh #174): script path derived from `configFile`'s directory (`scoot/session.sh` by default, byte-identical), `hmRelocated` pins the pairing.
-- [CI never exercises the Nix packaging](./packaging/ci-nix-packaging.md) — gh #173: no `nix flake check` / `nix build` in CI; take at least the cheap `flake check` half.
+- [CI never exercises the Nix packaging](./resolved/ci-nix-packaging-done.md)
+  — RESOLVED 2026-09-21 (gh #173): `nix flake check -L` every PR (Linux + macOS jobs, each its own systems) plus `nix fmt --check` over all tracked `.nix`; `nix build .#scoot .#scootctl` main-only (5m10s cold, zero cache reuse — per-push tax declined).
 - [NixOS session entry can't launch a shell](./resolved/nixos-session-command-done.md)
   — RESOLVED 2026-09-21 (gh #171): `session.command` (nullOr str, default null = bare `--tty`, byte-identical) takes the full `Exec=` line — append shape and wrapper-script path both expressible, HM `sessionScript` pairing documented both sides.
 - [Flake polish: `homeModules` alias, Darwin default, nixfmt](./resolved/flake-polish-done.md)
