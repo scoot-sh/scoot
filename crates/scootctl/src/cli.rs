@@ -543,7 +543,8 @@ mod tests {
     }
 
     #[test]
-    fn move_window_to_workspace_index_takes_a_number() {        assert_eq!(
+    fn move_window_to_workspace_index_takes_a_number() {
+        assert_eq!(
             parse_msg_args(&["action", "move-window-to-workspace-index", "3"]),
             Ok(Msg {
                 request: Request::Action(Action::MoveWindowToWorkspaceIndex { index: 3 }),

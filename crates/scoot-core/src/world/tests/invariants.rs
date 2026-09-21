@@ -87,7 +87,8 @@ fn random_action(rng: &mut Rng, windows: &[WindowId], outputs: &[OutputId]) -> A
         2 => Action::MoveColumn(horizontal),
         3 => Action::MoveWindow(vertical),
         4 => Action::ConsumeOrExpel(horizontal),
-        5 => Action::CycleColumnWidth,        6 => Action::FocusWorkspace(vertical),
+        5 => Action::CycleColumnWidth,
+        6 => Action::FocusWorkspace(vertical),
         7 => Action::MoveWindowToWorkspace(vertical),
         8 if !windows.is_empty() => Action::FocusWindowId(windows[rng.below(windows.len())]),
         // Usually a plausible position, sometimes a wild one: this index

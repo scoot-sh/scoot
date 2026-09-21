@@ -198,7 +198,11 @@ fn an_out_of_range_column_width_index_is_ignored() {
     // protocol that takes an unbounded number -- mirroring the
     // workspace-index case, including the promise nothing moves.
     for index in [2, usize::MAX / 2, usize::MAX] {
-        assert!(world.handle_action(Action::SetColumnWidth(index)).is_empty());
+        assert!(
+            world
+                .handle_action(Action::SetColumnWidth(index))
+                .is_empty()
+        );
         assert_eq!(placement(&world, 1), before, "index {index}");
         assert_eq!(focused(&world), Some(1), "index {index}");
     }

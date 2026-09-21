@@ -77,7 +77,8 @@ fn set_column_width_travels_as_snake_case_with_an_index() {
 }
 
 #[test]
-fn the_output_actions_travel_as_snake_case_with_an_output() {    // Same pin as the indexed workspace actions above: the exact JSON shape
+fn the_output_actions_travel_as_snake_case_with_an_output() {
+    // Same pin as the indexed workspace actions above: the exact JSON shape
     // a client sends, and its decode back into the same request.
     for (action, tag) in [
         (
