@@ -77,6 +77,18 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[README + docs consistency
+  re-audit](docs/backlog/resolved/readme-rereview-done.md)**
+  (2026-09-21) — docs-only: every user-facing surface since PR #159
+  re-verified against `README.md` and `docs/` (both `--help` outputs
+  and `--print-default-config` run live, including a Linux emission
+  from the dev VM). Twelve of thirteen surfaces already consistent;
+  six fixes: README "Not yet" retitled past one-output, three stale
+  one-output sentences in `docs/`, the `nix.md` live-defaults paste
+  (missing `corner_radius`, `cursor_theme`/`gpu` shown as defaults
+  while unset), one word in the CI paragraph. Coordinator-directed,
+  no gh issue.
+
 - **[NixOS-conversion docs gaps (gh
   #178)](docs/backlog/resolved/nixos-conversion-docs-gaps-done.md)**
   (2026-09-21) — docs-only: the CHANGELOG rename entry gains its

@@ -138,12 +138,12 @@ for its modifier only when no key on the layout can hold it.
 
 ## What the replies carry
 
-**`outputs`**, one entry per output (scoot has exactly one):
+**`outputs`**, one entry per output:
 
 | Field | Meaning |
 | --- | --- |
 | `id` | The output's id, which a window's `output` names. |
-| `name` | `HDMI-A-1`, `eDP-1`, … under `--tty` — the DRM connector name; `headless` otherwise. |
+| `name` | `HDMI-A-1`, `eDP-1`, … under `--tty` — the DRM connector name; `headless`, `headless-2`, … otherwise. |
 | `rect` | The output's full rectangle, in logical pixels. "How big is the screen." |
 | `usable` | The full output minus whatever a bar reserved at its edges (layer-shell exclusive zones) — where windows actually go. "Where can a window be." |
 | `scale` | The output scale; `rect` and `usable` are logical, screenshots are physical. |

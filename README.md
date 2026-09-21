@@ -45,14 +45,13 @@ Linux, and daily-driven on `--tty`** (2026-09-18).
 
 ## Not yet
 
-- **One output is composited.** Plug in a second monitor and it stays dark.
-  `--headless --outputs N` now creates several virtual outputs for testing,
+- **Multi-output is partial.** `--headless --outputs N` now creates several virtual outputs for testing,
   each with its own geometry, its own scrolling strip and its own composited
   framebuffer (screenshots, screen captures, gamma and frame callbacks all
   work per output) — and workspace groups, output-management heads and the
   pointer clamp are per-output too — but new windows still open on the first
   output, nothing moves one across outputs yet, and `--tty` still drives one
-  connector.
+  connector (a second monitor there stays dark).
 - **No XWayland.** X11-only applications do not run.
 - **GPU scanout is new and narrow.** `--tty --renderer gles` scans out from
   the GPU, but only in a `gpu-scanout` build (`nix build .#scoot-gpu`), only on the primary plane (no
@@ -248,7 +247,7 @@ standards.
 Every pull request runs `.github/workflows/ci.yml`, which does the above
 plus `cargo fmt`, `cargo clippy -D warnings`, `scripts/smoke-test.sh` under
 `--headless`, an `ldd` check that the default build links no GPU stack
-(`libgbm` is the live assertion; `libEGL`/`libGLESv2` are belt-and-braces,
+(`libgbm`/`libdrm` are the live assertions; `libEGL`/`libGLESv2` are belt-and-braces,
 since both are `dlopen`ed and never appear in `ldd` either way), a `nix fmt`
 check over all tracked `.nix` files, `nix flake check -L` (Linux and macOS
 jobs each cover their own systems' outputs, modules and checks), and a macOS

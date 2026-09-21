@@ -372,9 +372,10 @@ Worth knowing before you write against it:
   `ShellRoot` with no window and no input event sends nothing at all when you
   call `activate()` — no request reaches the compositor. With a real
   `PanelWindow` and a real click it works. Test it with a window.
-- **`output_leave` is never sent.** scoot has one output, a window is on it
-  for its whole life, and switching workspaces does not move it — the same
-  answer wlroots-based compositors give.
+- **`output_leave` is never sent.** Nothing moves a window across outputs
+  yet — a window stays on the output it opened on for its whole life, and
+  switching workspaces does not move it — the same answer wlroots-based
+  compositors give.
 - **`parent` is never sent** (the version 3 event). scoot's layout has no
   parent/child relation; every `xdg_toplevel` is an independent column entry,
   dialogs included.
@@ -439,8 +440,9 @@ Worth knowing before you write against it:
   caused it: a display plugged in or resized while scoot was on another VT
   could not be acted on then, so the switch back re-probes and applies
   whatever moved.
-- **Multiple outputs will change the shape of this**, but scoot has exactly
-  one output today.
+- **One head per output, still read-only.** `--headless --outputs N`
+  announces N heads (see above); `apply`/`test` stay refused — more outputs
+  make client-driven configuration possible, not required.
 
 ## Screen capture (`ext-image-copy-capture-v1`)
 
@@ -951,7 +953,7 @@ advertised three ways, matching what clients actually support:
 
 Real limits rather than polish:
 
-- **Startup only, and one output.** The scale is read once when scoot starts
+- **Startup only, and session-wide.** The scale is read once when scoot starts
   and never changes; `scootctl reload` refuses it with a message rather than
   applying it, and there is no per-output setting.
   Changing it means restarting scoot.
