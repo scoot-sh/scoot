@@ -528,6 +528,12 @@ be revisited.
   is the security-relevant one. Promoted 2026-09-20 to **Milestone 19**
   ([plan](../roadmap/19-multi-output.md), in progress, phases A–D
   VM-testable, E hardware-gated) — this entry stays the detailed spec.
+  Phases A–F have landed (render, layer shell, lock, workspaces, moves);
+  only phase E (`--tty` multi-CRTC) waits on hardware.
+- [Per-output scale/mode configuration surface](./core/per-output-scale-mode.md)
+  — deliberately left out of milestone 19: needs the design questions
+  answered (indexed sections vs runtime `apply`, bind-time scale × N) and
+  two-connector hardware to verify against. Do not build blind.
 - [Workspace shortcuts: no numbered bind, and no move-to-index action at all](./resolved/workspace-index-keybindings-done.md)
   — RESOLVED 2026-09-20: `Super+1`..`9` focuses and `Super+Shift+1`..`9`
   carries-and-follows (new `MoveWindowToWorkspaceIndex` core/IPC/config
