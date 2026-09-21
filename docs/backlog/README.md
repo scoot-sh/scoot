@@ -282,7 +282,7 @@ falsify. Read `flexwm` there as `scoot`.
 - [`msg key` hard-codes `_L` modifier keysyms](./resolved/msg-key-modifier-resolution-done.md) — RESOLVED 2026-09-17 (PR #83): modifiers resolve through the keymap probe like `type_text` (either hand's key; toggle-option layouts work); `msg key A` still refuses
 - [`msg type`: dead keys, compose, inactive layouts](./resolved/msg-type-dead-keys-compose-done.md) — RESOLVED 2026-09-18 (PR #121): two-key dead-led sequences from the session-locale compose table (é on `de`, dead-ASCII gaps closed — all 95 ASCII on all fourteen swept Latin layouts); inactive groups, lock/latch levels and `Multi_key` 3-key sequences stay refused
 - [`zwp_tablet_manager_v2` (drawing-tablet input)](./resolved/tablet-v2-done.md)
-- [[nested] pointer clicks never reach layer-shell surfaces](./input/layer-shell-pointer-clicks.md) — field bug (gh #182): clicks on a noctalia bar/launcher are no-ops while toplevel clicks work; suspect the layer hit-test/focus handoff never establishes layer focus.
+- [[nested] pointer clicks never reach layer-shell surfaces](./resolved/layer-shell-pointer-clicks-done.md) — CLOSED 2026-09-21 as could-not-reproduce (gh #182): the issue's exact `--nested` probes deliver every click shape on current `main` and on the reported rev alike; kept as a wire-level pinning test, no compositor change. Shared root with #183 refuted for the input path.
 
 ### --tty / backend
 - [Config-file key for the DRM device](./resolved/tty-gpu-config-key-done.md)

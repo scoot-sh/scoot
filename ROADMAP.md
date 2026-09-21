@@ -77,6 +77,15 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[Layer-shell pointer clicks (gh
+  #182)](docs/backlog/resolved/layer-shell-pointer-clicks-done.md)**
+  (2026-09-21) — closed as could-not-reproduce, no compositor change: the
+  issue's exact `--nested` probes (`pointer click` at two bar points plus
+  right-click, over a real exclusive-zone bar) deliver `enter` + press +
+  release on current `main` and on the reported rev alike, with and
+  without a toplevel mapped. Kept as a wire-level pinning test (bar
+  left/right/middle plus the launcher overlay); shared root with #183
+  refuted for the input path.
 - **[Fractional-scale ring-hole
   drift](docs/backlog/resolved/ring-hole-fractional-drift-done.md)**
   (2026-09-21) — the PR #184 follow-up: the painted-ring reuse check
