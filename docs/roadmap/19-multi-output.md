@@ -278,9 +278,12 @@ no second monitor. `crates/scoot/src/compositor/outputs.rs`'s doc on
     there until phase E — stated).
 - **E. `--tty` multi-CRTC (hardware-gated).** One connector is chosen at
   startup and hotplug *switches* rather than *adds*; driving two at once
-  is a different shape. Needs real two-connector hardware (Asahi) — like
-  `gpu-vs-cpu-measured.md`, this phase waits on the user's machine and
-  does not block A–D.
+  is a different shape. Needs real two-connector hardware, and note what
+  that means now that `gpu-vs-cpu-measured` has been *answered* on the
+  Asahi machine (2026-09-21) while this stayed blocked: the constraint
+  there was the GPU, which that machine has; the constraint here is a
+  **second connector**, which it does not — only `card2-eDP-1` exists
+  until a USB-C/DP-alt display is attached. Does not block A–D.
 - **F. Cross-output window moves + focus (staged 2026-09-21, the last
   "partially implemented" gap).** All of A–D deliberately left windows
   opening on output 1 with no way across: no move primitive, no

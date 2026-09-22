@@ -375,7 +375,19 @@
           # host's on `LD_LIBRARY_PATH` is the same driver-shadowing hazard
           # `packages.scoot` refuses to risk by bundling ICDs. libglvnd is the
           # vendor-neutral dispatch; it finds the host's real driver through
-          # `/run/opengl-driver`, so it shadows nothing.
+          # `/run/opengl-driver`, so it shadows no *driver* -- verified live on
+          # Asahi, where a `gles` run through this path reaches
+          # `GL Renderer: "Apple M2 (G14G B0)"`.
+          #
+          # It is not, however, true that it shadows *nothing*: glibc resolves
+          # `LD_LIBRARY_PATH` ahead of `DT_RUNPATH`, and the export is
+          # inherited by every child of the shell, so a GL app launched from
+          # `nix develop` (a client the compositor spawns included) gets this
+          # libglvnd rather than its own pinned one. That is the same
+          # "`LD_LIBRARY_PATH` leaking into every spawned client" the package
+          # itself avoids. Accepted here and only here: glvnd's ABI is stable,
+          # this is a dev shell rather than anything shipped, and the
+          # alternative is a test suite that cannot run on a NixOS host.
           shellHook = pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
             export LIBRARY_PATH="''${LIBRARY_PATH:+$LIBRARY_PATH:}${pkgs.lib.makeLibraryPath (import ./vm/compositor-deps.nix pkgs)}"
             export LD_LIBRARY_PATH="''${LD_LIBRARY_PATH:+$LD_LIBRARY_PATH:}${

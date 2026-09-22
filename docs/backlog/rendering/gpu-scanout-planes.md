@@ -6,18 +6,20 @@ priority: "medium"
 blocked: null
 ---
 
-# GPU scanout: real-GPU proof, then cursor + overlay planes
+# GPU scanout: cursor + overlay planes (phase 1 landed — the real-GPU proof is in)
 
-Maps to the README bullet clause-by-clause (`README.md:57-61`): (a)
-`gpu-scanout`-build-only, (b) primary-plane-only, (c) never run on a real
-GPU — plus the headless/nested read-back footnote, which is **design, not
-TODO** (scanout is tty-only: headless has no CRTC, nested presents bytes
-to its host; `render/gles.rs:15-24`, `docs/tty.md:207-213`). The bullet
-clears when (1) Asahi numbers exist in the roadmap file, (2) cursor +
-overlay planes ride KMS with capture still correct; `scoot-gpu` stays a
-deliberate opt-in (link-time libgbm) throughout. Measurement methodology
-lives in [gpu-vs-cpu-measured](./gpu-vs-cpu-measured.md) — this entry is
-the correctness work beside it.
+Maps to the README bullet clause-by-clause (`README.md:57-65`): (a)
+`gpu-scanout`-build-only, (b) primary-plane-only — plus the headless/nested
+read-back footnote, which is **design, not TODO** (scanout is tty-only:
+headless has no CRTC, nested presents bytes to its host;
+`render/gles.rs:15-24`, `docs/tty.md:207-213`). A third clause, "never run
+on a real GPU", was the reason this entry had a phase 1 at all; the
+2026-09-21 Asahi run retired it and the README no longer carries it. The
+bullet now clears on one thing alone: cursor + overlay planes riding KMS
+with capture still correct. `scoot-gpu` stays a deliberate opt-in
+(link-time libgbm) throughout. Measurement methodology and the numbers live
+in [gpu-vs-cpu-measured](../resolved/gpu-vs-cpu-measured-done.md) — this
+entry is the correctness work beside it.
 
 ## Phase 1 — real-GPU proof on Asahi — **DONE 2026-09-21**
 
@@ -40,11 +42,11 @@ Linux, 2026-09-21)"; re-runnable as `scripts/asahi-test4.sh`.
   across all 4.096M pixels except an 18×34 box at the cursor (max channel
   delta 3/255); same tier across rounds is `AE = 0`.
 - **Performance**: 4.2–5.1x less compositor CPU under damage, ~0.2 W less
-  power, +7–17 MB RSS, zero idle CPU on both tiers. Numbers, spreads and
+  power, +7–16 MB RSS, zero idle CPU on both tiers. Numbers, spreads and
   caveats in the roadmap file.
 
 VM baseline for comparison (`06-gpu-pipeline.md:406-502`): KMS plumbing
-proven on virtio-gpu; scanout ~1.5x dumb-tier CPU there vs 17–32x for
+proven on virtio-gpu; scanout ~1.5x dumb-tier CPU there vs 18–31x for
 offscreen GLES — read-back was the dominant cost.
 
 ## Phase 2 — overlay + cursor planes (after phase 1 green)

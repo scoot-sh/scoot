@@ -16,31 +16,76 @@
 # `compare` if it happens to be around and prints the command to run later if
 # not, so nothing on the benchmark VT needs installing.
 #
-# Overrides: ROUNDS, OUT, and anything tty-tier-bench.sh takes.
+# To re-read a finished run instead of measuring a new one:
+#
+#   ANALYSE_ONLY=1 OUT=/tmp/scoot-asahi-test4 scripts/asahi-test4.sh
+#
+# Overrides: ROUNDS, OUT, ANALYSE_ONLY, OVERWRITE, and anything
+# tty-tier-bench.sh takes.
 set -uo pipefail
 
 cd "$(dirname "$0")/.." || exit 1
 
 ROUNDS=${ROUNDS:-2}
 OUT=${OUT:-/tmp/scoot-asahi-test4}
+ANALYSE_ONLY=${ANALYSE_ONLY:-0}
 export ROUNDS OUT
+
+# Never measure into a directory that already holds a run. This is the
+# evidence, and a benchmark run rewrites `summary.tsv`, `environment.txt` and
+# the per-round logs in place -- so pointing this script at a finished run's
+# directory *destroys that run*, which is exactly what happened on
+# 2026-09-21: `OUT=/tmp/scoot-tier-bench scripts/asahi-test4.sh`, intended as
+# "re-read the old numbers", instead re-ran the benchmark, failed every round
+# on a busy seat, and left four `came_up=no` rows where four rounds of real
+# measurements had been. The PNGs and power samples survived only because a
+# failed round returns before writing them.
+#
+# CLAUDE.md treats the implementer's recorded evidence as a cache entry keyed
+# to a tree state. A tool that silently invalidates that cache when asked to
+# read it is the wrong shape, so reading is now a mode and overwriting takes
+# an explicit flag.
+if [ -e "$OUT/summary.tsv" ] && [ "$ANALYSE_ONLY" != 1 ]; then
+    if [ "${OVERWRITE:-0}" = 1 ]; then
+        echo "OVERWRITE=1 given; replacing the run in $OUT" >&2
+    else
+        echo "$OUT already holds a run ($OUT/summary.tsv exists)." >&2
+        echo >&2
+        echo "  to re-read it:        ANALYSE_ONLY=1 OUT=$OUT $0" >&2
+        echo "  to measure afresh:    OUT=<a new directory> $0" >&2
+        echo "  to overwrite it:      OVERWRITE=1 OUT=$OUT $0   (destroys the numbers in it)" >&2
+        exit 1
+    fi
+fi
 
 # Both tiers must come from one tree or the A/B says nothing, so this checks
 # for the builds rather than making them: a `nix build` here would silently
 # rebuild against whatever the working tree says *now*, which is not
 # necessarily what the other tier was built from.
-missing=
-for p in result-scoot/bin/scoot result-scoot-gpu/bin/scoot result-scootctl/bin/scootctl; do
-    [ -x "$p" ] || missing="$missing $p"
-done
-if [ -n "$missing" ]; then
-    echo "missing:$missing" >&2
-    echo >&2
-    echo "build all three from the same tree first:" >&2
-    echo "  nix build .#scoot     -o result-scoot" >&2
-    echo "  nix build .#scoot-gpu -o result-scoot-gpu" >&2
-    echo "  nix build .#scootctl  -o result-scootctl" >&2
-    exit 1
+#
+# Only when actually measuring, though. Re-reading a finished run needs
+# nothing but bash -- which is the whole point of `tty-tier-bench.sh`'s
+# "analysis happens afterwards, off this machine's critical path", and the
+# point of offering ANALYSE_ONLY as the way to re-derive numbers from an
+# archived run. Demanding three `nix build` symlinks in order to read a TSV
+# would make that offer hollow on any machine that no longer has them.
+if [ "$ANALYSE_ONLY" != 1 ]; then
+    missing=
+    for p in result-scoot/bin/scoot result-scoot-gpu/bin/scoot result-scootctl/bin/scootctl; do
+        [ -x "$p" ] || missing="$missing $p"
+    done
+    if [ -n "$missing" ]; then
+        echo "missing:$missing" >&2
+        echo >&2
+        echo "build all three from the same tree first:" >&2
+        echo "  nix build .#scoot     -o result-scoot" >&2
+        echo "  nix build .#scoot-gpu -o result-scoot-gpu" >&2
+        echo "  nix build .#scootctl  -o result-scootctl" >&2
+        echo >&2
+        echo "or, to re-read a run that already exists:" >&2
+        echo "  ANALYSE_ONLY=1 OUT=<that run's directory> $0" >&2
+        exit 1
+    fi
 fi
 
 # Everything this script prints also lands in one file. The run happens on a
@@ -48,18 +93,51 @@ fi
 # a text console is not evidence -- so the report has to be readable
 # afterwards, from anywhere, without having watched it.
 mkdir -p "$OUT" || exit 1
+# The report is suffixed in analyse-only mode so that re-reading a run cannot
+# overwrite the report the run itself wrote.
 REPORT="$OUT/test4-report.txt"
+[ "$ANALYSE_ONLY" = 1 ] && REPORT="$OUT/test4-reanalysis.txt"
 {
     echo "Asahi.md Test 4 -- $(date -Is)"
-    echo "script: $0  rounds: $ROUNDS  out: $OUT"
+    if [ "$ANALYSE_ONLY" = 1 ]; then echo "script: $0  out: $OUT"; else echo "script: $0  rounds: $ROUNDS  out: $OUT"; fi
+    [ "$ANALYSE_ONLY" = 1 ] && echo "ANALYSE_ONLY: re-reading an existing run, measuring nothing"
 } > "$REPORT"
 
-scripts/tty-tier-bench.sh 2>&1 | tee -a "$REPORT"
-rc=${PIPESTATUS[0]}
-[ "$rc" = 0 ] || exit "$rc"
+if [ "$ANALYSE_ONLY" != 1 ]; then
+    scripts/tty-tier-bench.sh 2>&1 | tee -a "$REPORT"
+    rc=${PIPESTATUS[0]}
+    [ "$rc" = 0 ] || exit "$rc"
+fi
 
 SUMMARY="$OUT/summary.tsv"
 [ -s "$SUMMARY" ] || { echo "no summary at $SUMMARY" | tee -a "$REPORT" >&2; exit 1; }
+
+# Refuse a summary whose shape this analysis was not written for, rather than
+# reading the wrong columns. The format has already changed once -- the
+# 2026-09-21 run 1 wrote 16 columns, before the two power columns existed --
+# and every field index below would silently shift by one against such a file,
+# turning `width_jiffies/width_events` into `width_events/width_ms`. That
+# produced a plausible-looking and completely wrong relayout figure when a
+# later analysis pass pooled the two runs by hand.
+# Compared as text, not just counted: a future 18-column file with columns
+# renamed or reordered would pass a field count and be misread just as
+# silently as the 16-column one, and checking the whole header costs the same
+# one line.
+expected_header='round	tier	came_up	paused	connector	scanout	idle_jiffies	idle_secs	idle_uW_mean	move_jiffies	move_events	move_ms	move_uW_mean	width_jiffies	width_events	width_ms	width_uW_mean	rss_kB'
+actual_header=$(head -1 "$SUMMARY")
+if [ "$actual_header" != "$expected_header" ]; then
+    {
+        echo "refusing to analyse $SUMMARY: its header is not the one this analysis reads."
+        echo "  expected ($(printf '%s' "$expected_header" | awk -F'\t' '{print NF}') columns): $expected_header"
+        echo "  found    ($(printf '%s' "$actual_header" | awk -F'\t' '{print NF}') columns): $actual_header"
+        echo
+        echo "A 16-column file is the pre-2026-09-21 format (no power columns); its"
+        echo "width_* fields sit one place to the left and would be read as the wrong"
+        echo "quantities entirely. The measurements themselves are fine -- read them by"
+        echo "hand, or re-run into a new directory."
+    } | tee -a "$REPORT" >&2
+    exit 1
+fi
 
 # One block, teed once at the end of it, so the report file and the console
 # get the same bytes in the same order.
@@ -78,11 +156,21 @@ function med(s,   a,n,i,j,t) { n=split(s,a," ")
   return (n%2) ? a[(n+1)/2]+0 : (a[n/2]+a[n/2+1])/2 }
 function lo(s,   a,n,i,v) { n=split(s,a," "); v=a[1]+0; for(i=2;i<=n;i++) if(a[i]+0<v) v=a[i]+0; return v }
 function watts(s, cnt) { return cnt ? sprintf("%.2f", med(s)/1e6) : "n/a" }
+# "too small to measure" rather than a fatal division: a median of 0 means the
+# scene cost under one jiffy, which is a real (and good) outcome, not an error.
+function ratio(a, b) { return (b > 0) ? sprintf("%.2fx", a/b) : "n/a (gpu median is 0 -- scene too cheap to measure)" }
 function hi(s,   a,n,i,v) { n=split(s,a," "); v=a[1]+0; for(i=2;i<=n;i++) if(a[i]+0>v) v=a[i]+0; return v }
 NR==1 { next }
+$3=="died" { bad[$2] = bad[$2] " r" $1 "(compositor died mid-round)"; next }
 $3!="yes" { bad[$2] = bad[$2] " r" $1 "(did not start)"; next }
 $4=="yes" { bad[$2] = bad[$2] " r" $1 "(VT paused)"; next }
 { isecs = $8 }
+# A scene with no events cannot be normalised per event, and dividing by it
+# would abort the whole analysis (awk makes division by zero fatal) *after*
+# the tables have printed -- leaving the operator, who has already switched
+# VTs, a report that silently stops at the ratios. Reachable with a short
+# MOVE_SECS/WIDTH_SECS.
+$11+0 == 0 || $15+0 == 0 { bad[$2] = bad[$2] " r" $1 "(a scene recorded no events)"; next }
 {
   t=$2; rounds[t]++
   scan[t]=$6; conn[t]=$5
@@ -114,10 +202,15 @@ END {
   print ""
   if ("dumb" in rounds && "gpu" in rounds) {
     print "ratios, dumb / gpu (>1 means the GPU tier is cheaper):"
-    printf "  motion CPU     %.2fx\n", med(mv["dumb"])/med(mv["gpu"])
-    printf "  relayout CPU   %.2fx\n", med(wd["dumb"])/med(wd["gpu"])
-    printf "  RSS            %+.1f MB on gpu (%+.0f%%)\n",
-      (med(rss["gpu"])-med(rss["dumb"]))/1024, 100*(med(rss["gpu"])/med(rss["dumb"])-1)
+    # Every denominator is guarded. A tier whose median scene cost rounds to
+    # 0 jiffies is not far-fetched -- a headless rehearsal recorded 1 jiffy
+    # across 143 motion events -- and an unguarded ratio would make awk abort
+    # here, taking the rest of the report with it.
+    printf "  motion CPU     %s\n", ratio(med(mv["dumb"]), med(mv["gpu"]))
+    printf "  relayout CPU   %s\n", ratio(med(wd["dumb"]), med(wd["gpu"]))
+    if (med(rss["dumb"]) > 0)
+      printf "  RSS            %+.1f MB on gpu (%+.0f%%)\n",
+        (med(rss["gpu"])-med(rss["dumb"]))/1024, 100*(med(rss["gpu"])/med(rss["dumb"])-1)
     if (nmv["gpu"] && nmv["dumb"])
       printf "  power, motion  %+.2f W on gpu\n", (med(pmv["gpu"])-med(pmv["dumb"]))/1e6
     if (nwd["gpu"] && nwd["dumb"])
@@ -132,7 +225,11 @@ END {
 # The correctness comparison, on the pinned scene: two freshly mapped windows
 # with the pointer parked, which both tiers reach identically. The number to
 # expect if the ONLY difference is renderer rounding is one least-significant
-# bit per pixel per channel, i.e. w*h/255/4 -- about 4016 at 2560x1600. Much
+# bit per pixel. Two yardsticks, because they differ by 3x and the wrong one
+# invites a false investigation: ONE channel of four differing everywhere is
+# w*h/255/4, about 4016 at 2560x1600; all three colour channels differing
+# everywhere measures about 12044 (measured, ImageMagick 7.1.2 Q16-HDRI, by
+# adding 1/255 to R,G,B and comparing). Much
 # larger means the tiers really drew different things and wants investigating;
 # `compare -metric AE` is an absolute-error sum, not a count of differing
 # pixels, which this project has misread before.
@@ -157,7 +254,9 @@ elif [ -z "$CMP" ]; then
     echo "$pairs pair(s) captured; ImageMagick is not installed here, so compare them later with:"
     echo "  nix shell nixpkgs#imagemagick -c compare -metric AE \\"
     echo "    $OUT/r1-dumb-pinned.png $OUT/r1-gpu-pinned.png null:"
-    echo "expected if only renderer rounding differs at 2560x1600: about 4016"
+    echo "yardsticks at 2560x1600 if only renderer rounding differed: ~4016 for one"
+    echo "channel of four, ~12044 for all three colour channels. Far below either means"
+    echo "the tiers drew the same frame; far above means go and look at the crop."
 fi
 
 echo

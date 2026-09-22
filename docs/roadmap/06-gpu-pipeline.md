@@ -493,7 +493,7 @@ IPC pointer moves on a `--tty` session, two runs each:
 | `scanout="dumb"` (pixman) | 27, 24 | 3369ms, 3339ms |
 | `scanout="gpu"` (gles) | 36, 37 | 3425ms, 3414ms |
 
-~1.5x, against the **17-32x** stage 2 measured for offscreen GLES on the same
+~1.5x, against the **18-31x** stage 2 measured for offscreen GLES on the same
 rasteriser. That gap is the read-back and the dumb-buffer memcpy this tier
 removes, and it is the only part of the performance story this VM can show.
 The part it cannot: what any of this costs on a real GPU, where the
@@ -550,8 +550,9 @@ pinned scene (two freshly mapped `foot` windows, pointer parked), dumb vs
 gpu is identical across all 4.096M pixels except an 18x34 box at physical
 1911,1184 with a max channel delta of 3/255 -- the cursor, at
 1280,800 x 1.5 = 1920,1200; the crop holds 118 distinct colours and the same
-crop elsewhere differs by zero. `AE = 1.003` against the ~4016 that one
-least-significant bit per pixel would give at this resolution. The control:
+crop elsewhere differs by zero. `AE = 1.003` against the ~4016 (one channel
+of four) or ~12044 (all three colour channels, measured) that a whole-frame
+one-least-significant-bit difference gives at this resolution. The control:
 same tier, different rounds, `AE = 0` exactly, so the scene is genuinely
 pinned rather than merely similar. Note the contrast with the VM, where the
 whole frame differed by one LSB from pixman's `srgba(20,20,25)` rounding;
@@ -561,10 +562,10 @@ here even that is gone and only the cursor's antialiasing differs.
 
 | scene | dumb + pixman | gpu scanout | ratio |
 | ----- | ------------- | ----------- | ----- |
-| large-damage motion | 0.455 j/ev (0.443-0.461) | **0.090** (0.087-0.097) | **4.8-5.1x** |
-| full relayout | 3.34 j/ev (3.32-3.43) | **0.797** (0.790-0.802) | **4.2-4.3x** |
+| large-damage motion | 0.4553 j/ev (0.4430-0.4613) | **0.0908** (0.0872-0.0972) | **4.8-5.1x** |
+| full relayout | 3.358 j/ev (3.32-3.43) | **0.796** (0.790-0.814) | **4.2-4.3x** |
 
-As a share of one core: motion **20.8% -> 4.2%**, relayout **51.9% ->
+As a share of one core: motion **20.8% -> 4.3%**, relayout **52.0% ->
 14.0%**. Per-event normalisation matters -- the tiers get through different
 event counts in the same fixed window (156 vs 176 relayouts), so a per-round
 total would compare different amounts of work.
@@ -578,11 +579,13 @@ not see is exactly what it said it could not see.
 **Idle, memory, power:**
 
 - **Idle: 0 jiffies over 10s on both tiers, every round.** Neither wakes when
-  nothing moves; idle power is identical (5.52 W whole-system). The
-  fast-but-busy trade does not exist here.
-- **Memory: +7 to +17 MB RSS** for the GBM swapchain (75.5->92.4 MB in run 1,
-  87.3->94.8 MB in run 2 -- the baseline moves too, so this is a range). The
-  one column the dumb tier wins.
+  nothing moves; idle power is indistinguishable (medians 5.510 W dumb and
+  5.505 W gpu whole-system, per-round means spanning 5.411-5.533). The
+  fast-but-busy trade does not exist here. Keep that 0.12 W within-tier band
+  in view when reading the damage-power figure below: it is over half of it.
+- **Memory: +7 to +16 MB RSS** for the GBM swapchain (medians 76.2->92.4 MB
+  in run 1, 87.3->94.8 MB in run 2 -- the baseline moves too, so this is a
+  range). The one column the dumb tier wins.
 - **Power: scanout draws *less*, not more.** Whole-system draw under damage
   is 0.22 W lower under motion (6.26->6.04) and 0.25 W lower under relayout
   (6.36->6.11), about 3.5% of system draw. The "may cut CPU wakeups and raise
@@ -597,6 +600,31 @@ rounds, against the **31x and 18x** the same bench measured on llvmpipe.
 `GL Renderer: "Apple M2 (G14G B0)"`, GLES 3.2 Mesa 26.2.2, `software=false`
 and genuinely so this time. One test per process: the two bench tests
 otherwise run concurrently in one process and contend.
+
+Two qualifications on that word "parity", because it is doing more work than
+the data supports. **The statistics differ from the ones they sit beside:**
+the M2 figures are medians of all 30 per-run values, while the llvmpipe
+table above is medians of per-round *minima*. The ratio survives either
+choice (median-of-minima on the M2 gives 49.8 vs 54.0µs, still parity), but
+the two columns are not the same statistic. **And parity here may be a
+floor, not an equality:** adding 8 windows' worth of focus-ring elements
+costs pixman +2.3µs on the M2 while it cost *2x* on the VM, which suggests a
+fixed per-frame cost dominating both renderers rather than the two genuinely
+matching. The safe reading is "the 18-31x penalty is gone", not "the two
+renderers are equal".
+
+**One artefact caveat.** Run 1's `summary.tsv` and `environment.txt` were
+destroyed after the fact by pointing the entry-point script at its own output
+directory (the script now refuses that and offers `ANALYSE_ONLY=1`). The
+*file* is no longer re-checkable, but **the rows are**: they were captured
+verbatim by review before the loss and are transcribed in
+`docs/backlog/resolved/gpu-vs-cpu-measured-done.md` under "Run 1's raw rows,
+recovered", where `idle_uW_mean` re-derives from the surviving `.power` files
+8-of-8 exactly -- one full column checkable against disk today. Run 2 is
+intact and independently carries the correctness result, the ratios and all
+the power figures. Run 1's screenshots, power samples and r3-r4 logs survive
+(the clobbering run defaulted to `ROUNDS=2`, so rounds 1 and 2 lost their
+logs as well).
 
 **What this still does not establish.** The motion scene is *large-bbox*
 damage (the injected path jumps across ~900x600 logical pixels), so the

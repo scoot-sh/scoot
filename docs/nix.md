@@ -80,7 +80,7 @@ Two packages, matching the two GPU tiers in
   drives the primary plane only -- no overlay or cursor planes -- but it is
   measured rather than merely reasoned now: on an Apple M2 under Asahi Linux
   it costs 4--5x less compositor CPU under damage than the default tier, for
-  7--17 MB more RSS (see [Asahi.md](../Asahi.md)'s Test 4, which settled
+  7--16 MB more RSS (see [Asahi.md](../Asahi.md)'s Test 4, which settled
   that on 2026-09-21).
 
 ## Home-manager module

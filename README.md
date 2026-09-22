@@ -60,7 +60,7 @@ Linux, and daily-driven on `--tty`** (2026-09-18).
   `--headless`/`--nested` still read every frame back to main memory as
   pixman does. It is no longer unproven: on an Apple M2 under Asahi Linux it
   costs **4–5x less CPU** than the default tier under damage (and ~0.2 W
-  less), draws the same pixels, and uses 7–17 MB more memory (numbers and
+  less), draws the same pixels, and uses 7–16 MB more memory (numbers and
   method in [Asahi.md](Asahi.md), Test 4).
   pixman is still the default and still the right answer on a GPU-less box.
 - **Config reload is partial.** `scootctl reload` (or `kill -HUP` on the

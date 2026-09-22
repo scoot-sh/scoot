@@ -581,7 +581,7 @@ be revisited.
   extrapolation held and then some: GPU scanout costs **4.2–5.1x less
   compositor CPU** under damage (llvmpipe had it ~1.5x *worse*), draws the
   same pixels bar the cursor's antialiasing, and draws ~0.2 W *less* power —
-  for +7–17 MB RSS. Offscreen GLES reached **parity** with pixman where
+  for +7–16 MB RSS. Offscreen GLES reached **parity** with pixman where
   llvmpipe measured 18–31x. Both tiers use zero CPU at idle. Two
   methodology lessons: the VM's unpaced-injection benchmark measures nothing
   on hardware 14x faster per IPC round trip (damage gets coalesced away), and

@@ -25,7 +25,7 @@ docs/backlog`, `rg -l 'area: "protocols"' docs/roadmap`.
 | 4b | [Window decorations](docs/roadmap/04b-decorations.md) | done |
 | 5 | [Cursor rendering for `--tty`](docs/roadmap/05-cursor-rendering.md) | done |
 | 5b | [VT-switch-back `EPERM`](docs/roadmap/05b-vt-switch-eperm.md) | done |
-| 6 | [Real GPU rendering pipeline](docs/roadmap/06-gpu-pipeline.md) | **done on paper — unverified on a real GPU** |
+| 6 | [Real GPU rendering pipeline](docs/roadmap/06-gpu-pipeline.md) | done — **verified on a real GPU 2026-09-21** (one claim left: `Modifier::Invalid` on an `Invalid`-only driver) |
 | 7–18 | [Backlog-driven hardening and protocol work](docs/roadmap/) | done |
 | 19 | [Multi-output](docs/roadmap/19-multi-output.md) | **in progress (phases A–D + F done, E hardware-gated)** |
 
@@ -42,11 +42,18 @@ behind these four stages was a software rasteriser's, and three things were
 claimed rather than shown. Where they stand now:
 
 - **GPU scanout is faster than the CPU path — shown.** 4–5x less compositor
-  CPU under damage (20.8% of a core → 4.2% under pointer motion; 51.9% →
-  14.0% under a full relayout), the same pixels bar the cursor's
-  antialiasing, ~0.2 W *less* power, 7–17 MB more RSS, and no measurable CPU
-  at idle on either tier. The VM's extrapolation was right, including its
-  reasoning: the read-back it deletes was the dominant cost.
+  CPU under damage (20.8% of a core → 4.3% under *large-damage* pointer
+  motion, the injected path jumping ~900×600 logical pixels per event, not a
+  small cursor-rect move; 52.0% → 14.0% under a full relayout), the same
+  pixels bar the cursor's antialiasing, ~0.2 W *less* power, 7–16 MB more
+  RSS, and no measurable CPU at idle on either tier. The VM's extrapolation
+  was right about the direction. Its *reasoning* does not transfer verbatim,
+  though, and it would be wrong to say the deleted read-back explains this
+  number: the dumb tier never reads back — it composites with pixman and
+  memcpys the damaged region into a DRM dumb buffer (`tty/dumb.rs`,
+  `tty/buffers.rs`). The 18–31x read-back cost was the *gles-offscreen*
+  tier's. What this A/B measures is the GPU rasterising instead of the CPU
+  **plus** the deleted memcpy, and it cannot separate the two.
 - **The split render/display topology works — shown, and more cheaply than
   designed for.** One `GbmDevice` serving allocator, exporter and EGL is
   enough on the machine where AGX owns the render node and `apple,dcp` owns

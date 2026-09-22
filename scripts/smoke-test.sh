@@ -5,6 +5,11 @@
 # presents itself, so this is the regression net for every backend, not just
 # --headless.
 #
+# The number of `ok:` lines is environment-dependent, so do not quote it as a
+# fixed target: the dmabuf check needs `wayland-info` and the ANSI check needs
+# `$LOG` to be a regular file, so a run can legitimately report one or two
+# fewer than another on the same commit. `rc=0` is the pass condition.
+#
 # MODE selects the backend (default --headless); RENDERER selects which
 # renderer draws the frames it checks (default pixman, or `gles` under
 # --headless/--nested), e.g. RENDERER=gles scripts/smoke-test.sh. For
@@ -248,6 +253,28 @@ fi
 
 echo "--- version ---"
 "$SCOOT" msg version
+
+echo "--- the log is plain text, since it is going to a file and not a terminal ---"
+# `$LOG` is a redirected stdout, so `init_logging`'s `IsTerminal` gate must
+# have turned colour off. Guarded here because the un-guarded version of this
+# bug was not cosmetic: escapes between a field name and its value made
+# `scanout="gpu"` unmatchable by an obvious grep, and the Asahi Test 4 harness
+# duly reported the presentation tier as absent on a run where it had come up
+# (see Asahi.md's Test 4 traps). Every log consumer in scripts/ greps this
+# shape, and a one-line regression would silently break all of them.
+# Only when `$LOG` really is a file. It is caller-overridable, and a caller
+# who points it at `/dev/tty` or `/dev/stdout` from a terminal makes colour
+# legitimately *on* -- asserting against that would fail correct behaviour.
+if [ -f "$LOG" ]; then
+    if grep -qa "$(printf '\033')" "$LOG"; then
+        echo "BUG: the compositor wrote ANSI escapes to a redirected log"
+        grep -a "$(printf '\033')" "$LOG" | head -3 | cat -v
+        exit 1
+    fi
+    echo "ok: no ANSI escapes in the redirected log"
+else
+    echo "skipped: \$LOG is not a regular file, so colour may legitimately be on"
+fi
 
 echo "--- opening a terminal ---"
 "$SCOOT" msg action spawn foot
@@ -554,9 +581,11 @@ if command -v wayland-info >/dev/null 2>&1; then
     # earlier in the log), so an unanchored `head -1` grabs one of those and
     # the name extraction below comes up empty -- that misread failed the
     # whole script on any machine with wayland-info installed. The first
-    # pattern tolerates the ANSI escapes tracing writes between a field name
-    # and its value; the second then pulls the bare socket name out of that
-    # match.
+    # pattern tolerates ANSI escapes between a field name and its value; the
+    # second then pulls the bare socket name out of that match. A current
+    # build writes no escapes to a redirected log at all (`init_logging` gates
+    # colour on `IsTerminal`), so that tolerance is now only for logs from
+    # older builds -- and the assertion below keeps it that way.
     wayland_socket=$(grep 'scoot is up' "$LOG" | grep -o 'wayland[^"]*"[^"]*"' | head -1 | grep -o 'wayland-[0-9]*' || true)
     if [ -z "$wayland_socket" ]; then
         echo "BUG: could not find the Wayland socket name in $LOG"

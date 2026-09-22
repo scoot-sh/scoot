@@ -388,9 +388,15 @@ fn post_dispatch(state: &mut State) {
 /// `scanout="gpu"` in a redirected log and silently matched nothing, because
 /// what is really in the bytes is `scanout\x1b[0m\x1b[2m=\x1b[0m"gpu"`.
 ///
-/// No test: the entire decision is one `IsTerminal` call the OS answers, and
-/// a test could only assert that the test harness's own captured stdout is
-/// not a terminal -- which measures nextest, not this.
+/// `stdout`, not `stderr`, because that is where `tracing_subscriber::fmt()`
+/// writes by default; if the writer is ever pointed elsewhere, this has to
+/// follow it or the gate silently tests the wrong file descriptor.
+///
+/// Guarded by `scripts/smoke-test.sh`, which redirects the compositor's
+/// stdout to a file and asserts the file contains no escapes, rather than by
+/// a unit test: in-process, the assertion could only say that the test
+/// runner's own captured stdout is not a terminal, which measures nextest.
+/// The regression is only observable from outside the process.
 fn init_logging() {
     use std::io::IsTerminal;
 

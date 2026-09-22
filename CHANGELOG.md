@@ -27,7 +27,7 @@ you run `--tty --renderer gles` from a `gpu-scanout` build, the README and
 real GPU and that every number behind it came from a software rasteriser.
 On an Apple M2 under Asahi Linux it now measures **4–5x less compositor CPU
 than the default tier under damage**, the same pixels, about 0.2 W less
-power, and 7–17 MB more memory — with both tiers using no measurable CPU at
+power, and 7–16 MB more memory — with both tiers using no measurable CPU at
 idle. pixman is still the default and still the right choice on a machine
 without a real GPU. Method, spreads and what it does not cover:
 [Asahi.md](Asahi.md)'s Test 4.
