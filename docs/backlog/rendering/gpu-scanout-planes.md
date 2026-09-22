@@ -75,6 +75,67 @@ same Asahi M2 is the candidate -- whether `apple,dcp` exposes usable cursor
 and overlay planes at all is the first thing phase 2 has to establish, and
 `scripts/asahi-test4.sh` is the harness to extend for it.
 
+## PROGRESS — step 1 (cursor plane) implemented, live proof pending
+
+(branch `cursor-plane-step1`, 2026-09-22; ticket stays OPEN, steps 2-3
+remain).
+
+- **The ticket's gate, answered with a surprise.** The dev-VM virtio-gpu
+  *does* expose a cursor plane -- `drm_info` on `/dev/dri/card0` shows two
+  planes on CRTC 0: Plane 0 (object 33, `type = Primary`) and Plane 1
+  (object 34, `type = Cursor`). The "historically has no cursor plane"
+  premise was wrong; verified live, per the ticket's own instruction not to
+  assume. So the VM can validate the *active* shape, not just the fallback.
+- **The Asahi plane inventory is still unknown.** Test 4's evidence names
+  the primary plane (`plane::Handle(35)`) but no inventory was ever taken;
+  `scripts/asahi-test4.sh` carries no plane enumeration. NOT extended in
+  this step, per scope -- the exact commands for the user are filed in the
+  PR description.
+- **What landed.** `tty/scanout.rs`: `select_planes` (pure: primary narrowed
+  to the surface's own plane as before, cursor list rides along whole,
+  overlay dropped), `build` takes the device's real `cursor_size`
+  (`DrmDevice::cursor_size`, replacing the `(64, 64)` placeholder) and passes
+  `gbm: Some` only where the cursor list is non-empty (`None` otherwise --
+  the fallback is structural, byte-identical by construction), and
+  `render_and_queue` passes `ALLOW_CURSOR_PLANE_SCANOUT` instead of
+  `FrameFlags::empty()`. That flag is the whole of step 1's per-frame delta:
+  without it Smithay assigns nothing to any plane (traced at the pinned rev,
+  `try_assign_element`'s early return), so construction alone would have been
+  dead code. It is *not* step 3: `ALLOW_SCANOUT` (primary + overlay direct
+  scanout) stays out, pinned by a unit test, with `COLOR_FORMATS` untouched.
+- **The capture claim, verified against the pinned source.** The ticket said
+  capture was "unaffected" -- it is not, where a cursor plane is active. A
+  plane-assigned cursor is never drawn into the swapchain slot, and
+  `note_frame`/`frame` (`render/scanout.rs`) record and read exactly that
+  slot -- so captures (IPC screenshots, `ext-image-copy-capture-v1`) show the
+  screen *without* the cursor on those sessions. Documented where the capture
+  lives (`render/scanout.rs` module doc, `screencopy.rs` cursor section,
+  `docs/tty.md`), not fixed: compositing the cursor back in would be a second
+  cursor render on a path whose point is reading one buffer. `paint_cursors`
+  semantics are unchanged in the other direction (captures always contained
+  the cursor under `--tty`; now they do except where plane-assigned).
+- **Bug-bash, traced.** Cursor-plane claim failure mid-session falls back to
+  compositing per frame inside Smithay (`try_assign_cursor_plane` returns
+  `None`: no free plane, oversized element, buffer/export failure -- all
+  traced, none wedges); cursor size 0/huge is the device's own value passed
+  through, with oversize degrading to compositing by the same path; hotplug
+  connector switch rebuilds via `adopt_surface`, re-reading the fresh
+  surface's cursor list while keeping the device's size; session lock still
+  gathers the (reset-to-default) cursor element, so the lock-screen pointer
+  rides the plane over the blank in the same atomic commit -- visibility
+  unchanged, mechanism only; VT switch pause/resume goes through
+  `reset_state` + drain as before, plane state rebuilt on the next frame.
+- **Blocked live half.** The dev VM's disk is 100% full (32G: 12G shared
+  `/var/cargo-target`, ~10G `/tmp` targets from other agents, 4.4G
+  `/var/tmp`), so the `gpu-scanout` build's final link cannot complete there.
+  Freed 311M unilaterally (101M own incremental + 211M archived prior-boot
+  journals, current boot untouched) -- still short of the ~160M binary plus
+  crate-workspace headroom. No feature build, no feature tests, no `--tty`
+  proof, no `ldd` yet; nothing of anyone else's touched. Needs ~500M freed
+  by the coordinator (or another agent finishing), then: feature build +
+  `ldd` libgbm assert, feature unit tests, full gate, `--tty` tier proof
+  (`scanout="gpu"` + `cursor_planes=1` + screenshot comparison vs dumb).
+
 
 ## What done looks like
 

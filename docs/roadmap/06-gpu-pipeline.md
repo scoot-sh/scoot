@@ -629,11 +629,12 @@ logs as well).
 **What this still does not establish.** The motion scene is *large-bbox*
 damage (the injected path jumps across ~900x600 logical pixels), so the
 4.8-5.1x is for substantial damage and not for a small cursor-rect move,
-which was not measured. One panel, one resolution, one machine. Scanout is
-still primary-plane only -- cursor and overlay planes are phase 2 of
-`docs/backlog/rendering/gpu-scanout-planes.md`, which this unblocks -- and
-the `Modifier::Invalid` widening still has not met a driver that reports
-`Invalid`-only.
+which was not measured. One panel, one resolution, one machine. Overlay
+planes are still untouched -- but the cursor step has landed: step 1 of
+`docs/backlog/rendering/gpu-scanout-planes.md` (cursor plane with graceful
+fallback, `ALLOW_CURSOR_PLANE_SCANOUT` only, captures documented as
+primary-plane reads) is implemented; the `Modifier::Invalid` widening still
+has not met a driver that reports `Invalid`-only.
 
 ## Stage 4: the dmabuf advertisement follows the renderer
 

@@ -718,7 +718,7 @@ fn open_device(
     // it. Tried before the dumb buffers are allocated, so a session that gets
     // it never pays for two full-screen dumb buffers it will never write to.
     #[cfg(feature = "gpu-scanout")]
-    let surface = match try_scanout(&drm_fd, surface, (width, height), wanted) {
+    let surface = match try_scanout(&drm, &drm_fd, surface, (width, height), wanted) {
         Ok((presenter, scanout)) => {
             return Ok(Device {
                 drm,
@@ -795,6 +795,7 @@ fn open_device(
 #[cfg(feature = "gpu-scanout")]
 #[allow(clippy::type_complexity)]
 fn try_scanout(
+    drm: &DrmDevice,
     drm_fd: &DrmDeviceFd,
     surface: smithay::backend::drm::DrmSurface,
     size: (i32, i32),
@@ -828,8 +829,24 @@ fn try_scanout(
         }
     };
     let formats = backend.renderer_formats();
-    match scanout::ScanoutPresenter::new(surface, gbm, formats, size) {
+    // The device's own hardware cursor size, read here because this is the
+    // one place that holds the `DrmDevice`: the presenter keeps it for CRTC
+    // switches, which cannot change it (a property of the device, not the
+    // CRTC), and hands it to `DrmCompositor` as the cursor plane's buffer
+    // bound.
+    let cursor_size = drm.cursor_size();
+    match scanout::ScanoutPresenter::new(surface, gbm, formats, cursor_size, size) {
         Ok(presenter) => {
+            // info!, not debug!: whether the cursor rides its own KMS plane
+            // or stays composited decides what a capture sees (the capture
+            // reads the primary plane only), so it belongs next to the tier
+            // line above, not buried where only a bug hunt looks.
+            tracing::info!(
+                cursor_planes = presenter.cursor_planes(),
+                cursor_width = cursor_size.w,
+                cursor_height = cursor_size.h,
+                "drm: scanout cursor planes"
+            );
             let handoff = ScanoutHandoff {
                 backend: Some(Box::new(backend)),
             };
