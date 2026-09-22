@@ -402,8 +402,17 @@ fn post_dispatch(state: &mut State) {
 fn init_logging() {
     use std::io::IsTerminal;
 
-    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
+    // The Smithay drm-compositor target is capped at `warn`: its only
+    // `info!` at the pinned rev is the per-frame "failed to test cursor
+    // plane state" on hardware whose kernel refuses the cursor TEST
+    // (virtio-gpu does, every frame with damage), which would otherwise log
+    // a line per frame indefinitely. Nothing else in that target logs at
+    // `info`, so nothing else is lost -- and `RUST_LOG` still overrides all
+    // of this per the usual `EnvFilter` rules when bringup needs the line
+    // back (`RUST_LOG=info,smithay::backend::drm::compositor=info`).
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+        tracing_subscriber::EnvFilter::new("info,smithay::backend::drm::compositor=warn")
+    });
     tracing_subscriber::fmt()
         .with_env_filter(filter)
         .with_ansi(std::io::stdout().is_terminal())

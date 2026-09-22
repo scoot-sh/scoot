@@ -44,6 +44,29 @@
 //! the allocator will reuse the freed address for the next slot, a cached
 //! export aliases it, and a stale frame is served as a current one. Keep
 //! `slots_dropped` set on all of them.
+//!
+//! # What a capture sees when the cursor rides its own plane
+//!
+//! Step 1 of `docs/backlog/rendering/gpu-scanout-planes.md` lets Smithay
+//! assign the cursor element to a KMS cursor plane (the cursor-plane frame
+//! flags in `tty/scanout.rs`). A plane-assigned cursor is *not*
+//! drawn into the swapchain slot -- it reaches the screen through its own
+//! commit -- so the dma-buf recorded here carries the screen *without* the
+//! cursor, and every consumer of [`Captures::frame_mut`] (IPC screenshots,
+//! `ext-image-copy-capture-v1`) shows a cursorless screen on exactly those
+//! sessions. Where the CRTC has no cursor plane nothing changes: the cursor
+//! stays composited into the primary plane and captures keep showing it, as
+//! does `screencopy.rs`'s cursor section.
+//!
+//! That is a semantic change, not a bug, and it is stated here rather than
+//! fixed here: compositing the cursor back into the capture would be a second
+//! render of the cursor on a path whose whole point is reading one buffer.
+//! It is live-observed on virtio-gpu (captures byte-identical across cursor
+//! moves); `paint_cursors=false` stays accepted-and-
+//! ignored throughout: the flag never changes which buffer the cursor is
+//! drawn into, only whether a session whose cursor rides the cursor plane
+//! shows it in captures (it does not) or one whose cursor stays composited
+//! does (it does, exactly as before this step).
 
 use std::error::Error;
 

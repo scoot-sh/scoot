@@ -211,7 +211,24 @@ running with no GPU at all is a hard requirement here, not a fallback tier.
   still warns and keeps pixman, because the read-back-and-copy shape it
   would otherwise take is strictly worse than compositing on the CPU.
   `--headless` and `--nested` are still read-back in every build.
-- **Scanout is primary-plane only.** No overlay or cursor planes yet. It has
+- **Scanout is primary-plane only, plus an attempted cursor plane.** Overlay planes are still untouched (step 2 of
+  `docs/backlog/rendering/gpu-scanout-planes.md`); the cursor plane is
+  attempted on CRTCs that expose one, with per-frame fallback to compositing
+  where the plane cannot be claimed -- and on the dev VM's virtio-gpu that
+  fallback is every frame (the kernel refuses the atomic TEST), so there the
+  cursor stays composited exactly as before. Active cursor-plane scanout
+  awaits hardware whose TEST accepts. Two paravirt caveats, both measured on the dev
+  VM's virtio-gpu: the kernel hides the cursor plane until the session sets
+  `CURSOR_PLANE_HOTSPOT` (which scoot does once per `--tty` session --
+  without it the inventory is primary-only despite the plane existing), and
+  the cap must land before `DrmDevice::new` (with `ATOMIC` first) or the
+  plane is visible to queries but unknown to commits. On virtio the plane
+  then scans out live (pointer-tracked, captures cursorless). One consequence to know: a capture (IPC
+  screenshots, `ext-image-copy-capture-v1`) reads the primary plane only, so
+  on a session whose cursor is plane-assigned the capture shows the screen
+  *without* the cursor; where the cursor is composited, captures keep showing
+  it. The startup log says which it is (`drm: scanout cursor planes
+  cursor_planes=N ...`). It has
   now run on a real GPU: on an Apple M2 under Asahi Linux (`2560x1600@60`)
   it costs **4–5x less compositor CPU** than the default dumb-buffer tier
   under damage — 20.8% of a core down to 4.3% under large-damage pointer
@@ -278,7 +295,15 @@ scans out from the GPU instead of reading each frame back; without it,
 `--tty` warns and keeps pixman however `gles` was asked for.
 
 One limit worth knowing before you turn it on: scanout drives the **primary
-plane only** — no overlay or cursor planes. The case for it is no longer
+plane, attempting the cursor plane** — no overlay planes. The cursor plane is attempted
+where the CRTC exposes one (the dev VM's virtio-gpu does: one `Cursor` plane
+per `drm_info`) and silently not elsewhere; a plane-assigned cursor is absent
+from captures, which read the primary plane only. Whether `apple,dcp`
+exposes a usable cursor plane is still unknown (no plane inventory exists
+from the Asahi runs). Virtio's own footnote: its cursor plane needs the
+session's `CURSOR_PLANE_HOTSPOT` cap to be enumerated at all (set before
+`DrmDevice::new`, `ATOMIC` first, or commits fail unknown-plane), after
+which it scans out live on virtio. The case for scanout is no longer
 reasoned but measured, on an Apple M2 under Asahi Linux: **4–5x less
 compositor CPU** under damage, the same pixels, ~0.2 W less power, 7–16 MB
 more RSS (see [`../Asahi.md`](../Asahi.md)'s Test 4). On a machine whose

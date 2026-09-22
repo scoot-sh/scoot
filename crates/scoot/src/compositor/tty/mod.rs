@@ -64,6 +64,9 @@ use smithay::backend::session::{Event as SessionEvent, Session};
 use smithay::backend::udev::UdevBackend;
 use smithay::reexports::calloop::LoopHandle;
 use smithay::reexports::drm::control::{Mode, connector, crtc};
+// `DrmControl` (not `Device`): this module owns a `struct Device` of its
+// own, and the trait is only ever named once, below.
+use smithay::reexports::drm::{ClientCapability, Device as DrmControl};
 use smithay::reexports::input::Libinput;
 use smithay::utils::{DeviceFd, Physical, Rectangle};
 
@@ -701,6 +704,48 @@ fn open_device(
     // resolved backlog entry in
     // `docs/backlog/resolved/drm-master-unprivileged-resolved.md`.
     let drm_fd = DrmDeviceFd::new(DeviceFd::from(fd));
+    // Ask the kernel to stop hiding paravirtualized cursor planes from this
+    // client (`CURSOR_PLANE_HOTSPOT`). Since kernel 6.x the DRM core hides a
+    // paravirt cursor plane (virtio-gpu, vmwgfx) from any client without this
+    // cap, on the grounds that such planes carry hotspot semantics a legacy
+    // client gets wrong -- and Smithay's `DrmDevice::new` (pinned rev) sets
+    // only `UNIVERSAL_PLANES` + `ATOMIC`, so without this the surface's plane
+    // inventory never contains the cursor plane even where one exists, and
+    // the scanout tier silently keeps compositing the cursor. Measured on the
+    // dev VM: plane 34 is present per `drm_info` yet absent from
+    // `surface.planes()` until this call, after which it enumerates.
+    //
+    // This sits *before* `DrmDevice::new`, not after, and the position is
+    // load-bearing rather than tidy: `AtomicDrmDevice::new` snapshots
+    // `plane_handles()` into its property mapping exactly once, at
+    // construction (`device/atomic.rs`). A cursor plane revealed only later
+    // (via `surface.planes()`, which re-queries fresh) makes every commit
+    // fail with `UnknownPlane` -- a black screen, since the primary never
+    // flips either. And `ATOMIC` is set first because the kernel refuses
+    // `CURSOR_PLANE_HOTSPOT` until `ATOMIC` is set (measured: `EINVAL`
+    // otherwise); re-setting both inside `DrmDevice::new` is idempotent, so
+    // setting them early cannot disturb Smithay's own cap setup.
+    //
+    // The promise the cap makes -- treating the plane like a mouse cursor
+    // with a correctly-managed hotspot -- is one this backend already keeps:
+    // cursor elements arrive hotspot-subtracted
+    // (`cursor::element_location`), and Smithay never writes `HOTSPOT_X/Y`,
+    // so they stay zero and the image's top-left lands where the element
+    // says. A kernel without the cap answers `EINVAL` and has no hiding to
+    // lift, so that is debug-logged rather than warned: the cursor simply
+    // stays composited, today's behavior.
+    for cap in [
+        ClientCapability::Atomic,
+        ClientCapability::CursorPlaneHotspot,
+    ] {
+        if let Err(error) = DrmControl::set_client_capability(&drm_fd, cap, true) {
+            tracing::debug!(
+                ?cap,
+                %error,
+                "drm: could not set client capability; paravirtualized cursor planes, if any, stay hidden"
+            );
+        }
+    }
     let (mut drm, notifier) = DrmDevice::new(drm_fd.clone(), true).map_err(|error| {
         gpu::Rejection::Unusable(format!(
             "could not be initialized as a DRM device ({error})"
@@ -718,7 +763,7 @@ fn open_device(
     // it. Tried before the dumb buffers are allocated, so a session that gets
     // it never pays for two full-screen dumb buffers it will never write to.
     #[cfg(feature = "gpu-scanout")]
-    let surface = match try_scanout(&drm_fd, surface, (width, height), wanted) {
+    let surface = match try_scanout(&drm, &drm_fd, surface, (width, height), wanted) {
         Ok((presenter, scanout)) => {
             return Ok(Device {
                 drm,
@@ -795,6 +840,7 @@ fn open_device(
 #[cfg(feature = "gpu-scanout")]
 #[allow(clippy::type_complexity)]
 fn try_scanout(
+    drm: &DrmDevice,
     drm_fd: &DrmDeviceFd,
     surface: smithay::backend::drm::DrmSurface,
     size: (i32, i32),
@@ -828,8 +874,24 @@ fn try_scanout(
         }
     };
     let formats = backend.renderer_formats();
-    match scanout::ScanoutPresenter::new(surface, gbm, formats, size) {
+    // The device's own hardware cursor size, read here because this is the
+    // one place that holds the `DrmDevice`: the presenter keeps it for CRTC
+    // switches, which cannot change it (a property of the device, not the
+    // CRTC), and hands it to `DrmCompositor` as the cursor plane's buffer
+    // bound.
+    let cursor_size = drm.cursor_size();
+    match scanout::ScanoutPresenter::new(surface, gbm, formats, cursor_size, size) {
         Ok(presenter) => {
+            // info!, not debug!: whether the cursor rides its own KMS plane
+            // or stays composited decides what a capture sees (the capture
+            // reads the primary plane only), so it belongs next to the tier
+            // line above, not buried where only a bug hunt looks.
+            tracing::info!(
+                cursor_planes = presenter.cursor_planes(),
+                cursor_width = cursor_size.w,
+                cursor_height = cursor_size.h,
+                "drm: scanout cursor planes"
+            );
             let handoff = ScanoutHandoff {
                 backend: Some(Box::new(backend)),
             };
