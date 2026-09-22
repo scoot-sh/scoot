@@ -64,10 +64,11 @@ Linux, and daily-driven on `--tty`** (2026-09-18).
   method in [Asahi.md](Asahi.md), Test 4).
   pixman is still the default and still the right answer on a GPU-less box.
 - **Config reload is partial.** `scootctl reload` (or `kill -HUP` on the
-  compositor) re-applies the gap, the
+  compositor) re-applies the layout (gap, column widths, default column
+  width), the
   appearance (including the cursor size, color and theme) and the keybindings
-  live; output scale, DRM device, renderer,
-  autostart and column widths stay startup-only and a reload refuses them
+  live; output scale, DRM device, renderer and
+  autostart stay startup-only and a reload refuses them
   with a message rather than silently ignoring them.
 - **No macOS adapter.** `scoot-core` is kept platform-independent so one can
   exist, but nothing drives the Accessibility API yet. On macOS you get

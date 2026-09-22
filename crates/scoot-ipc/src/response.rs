@@ -156,7 +156,7 @@ pub enum Response {
     /// What a `Reload` request answers on success: which config fields were
     /// re-applied live, and which differed from the running session but
     /// cannot be (`output.scale`, `tty.gpu`, `renderer.backend`,
-    /// `autostart.commands`, `layout.column_widths` --
+    /// `autostart.commands` --
     /// each refused explicitly, never silently ignored).
     ///
     /// Both lists name only fields that *differed*: a field the file and the

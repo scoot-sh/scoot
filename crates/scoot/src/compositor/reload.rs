@@ -9,14 +9,17 @@
 //!
 //! # What applies, and what refuses
 //!
-//! - `[layout] gap`: applied through `World::set_config` (which clamps like
-//!   `new`), then `apply()` recomputes the arrangement and requests a
-//!   render. `column_widths`/`default_column_width` are refused when they
-//!   differ: existing columns hold presets into that list, and a shorter
-//!   list would index out of range in `arrange` -- so the refusal is
-//!   structural, not taste. (The gap-only `Config` handed to `set_config`
-//!   keeps the running widths, which is what makes that panic unreachable
-//!   rather than merely avoided.)
+//! - `[layout] gap`, `column_widths` and `default_column_width`: applied
+//!   through `World::set_config` (which validates like `new` and clamps
+//!   every live column preset into a shorter width list, the same clamp
+//!   `Config::validated` already applies to `default_column_width` --
+//!   clamping rather than a proportional remap, so only a column that would
+//!   otherwise index past the end of the new list moves, and no window
+//!   silently changes relative size), then `apply()` recomputes the
+//!   arrangement and requests a render. New columns take the reloaded
+//!   default from their next creation on; `cycle-column-width` steps, and
+//!   `set-column-width N` range-checks, against the new list's length from
+//!   the same reload on.
 //! - `[appearance]` ring width and colors, background, `corner_radius`,
 //!   `prefer_no_csd`, and the cursor fields (`cursor_size`, `cursor_color`,
 //!   `cursor_theme`): applied -- every reader takes the ring/background
@@ -57,8 +60,9 @@
 //! a client surface -- and the cursor rebuild replaces only those pixels
 //! without touching `status` (which shape shows; the lock reset it to the
 //! default at lock time), so a locked frame draws the same shape from new
-//! pixels, never new content. Gap and binds are
-//! input-side, and binds cannot fire actions while locked anyway
+//! pixels, never new content. Gap, column widths and binds are
+//! input-side -- widths only re-derive column frames from config
+//! proportions, never from what a client drew -- and binds cannot fire actions while locked anyway
 //! (`input::key` forwards them to the lock client). Refusing under lock
 //! would strand an agent that edits the file mid-lock with an error for a
 //! request that is safe to serve.
@@ -159,6 +163,8 @@ impl State {
         // placement, so `apply()` would reconfigure every window for nothing.
         if report.applied.iter().any(|name| {
             name == field::GAP
+                || name == field::COLUMN_WIDTHS
+                || name == field::DEFAULT_COLUMN_WIDTH
                 || name == field::RING_WIDTH
                 || name == field::RING_ACTIVE
                 || name == field::RING_INACTIVE
@@ -174,27 +180,34 @@ impl State {
         report
     }
 
-    /// `[layout]`: `gap` applies through `World::set_config` (which clamps
-    /// like `new`); the width fields refuse, structurally (see the module
-    /// doc).
+    /// `[layout]`: `gap`, `column_widths` and `default_column_width` apply
+    /// through one `World::set_config` (which validates like `new` and
+    /// clamps live presets into a shorter width list, so `arrange` stays in
+    /// range). Each field reports under its own name, but a single swap
+    /// serves all three -- widths, default and gap are one `Config`, never
+    /// a half-applied session. Compared against the live world config, and
+    /// the stored config is exactly what was compared, so the next reload
+    /// agrees silently.
     fn apply_layout_reload(&mut self, fresh: &LoadedConfig, report: &mut Report) {
-        if fresh.config.gap != self.world.config().gap {
-            let mut config = self.world.config().clone();
+        let live = self.world.config();
+        let gap = fresh.config.gap != live.gap;
+        let widths = fresh.config.column_widths != live.column_widths;
+        let default = fresh.config.default_column_width != live.default_column_width;
+        if gap || widths || default {
+            let mut config = live.clone();
             config.gap = fresh.config.gap;
+            config.column_widths.clone_from(&fresh.config.column_widths);
+            config.default_column_width = fresh.config.default_column_width;
             self.world.set_config(config);
-            report.applied.push(field::GAP.to_owned());
-        }
-        if fresh.config.column_widths != self.world.config().column_widths {
-            report.refused.push(refused(
-                field::COLUMN_WIDTHS,
-                "startup-only: live columns hold presets into this list",
-            ));
-        }
-        if fresh.config.default_column_width != self.world.config().default_column_width {
-            report.refused.push(refused(
-                field::DEFAULT_COLUMN_WIDTH,
-                "startup-only: new columns take it once, at creation",
-            ));
+            if gap {
+                report.applied.push(field::GAP.to_owned());
+            }
+            if widths {
+                report.applied.push(field::COLUMN_WIDTHS.to_owned());
+            }
+            if default {
+                report.applied.push(field::DEFAULT_COLUMN_WIDTH.to_owned());
+            }
         }
     }
 
