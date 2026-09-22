@@ -576,14 +576,17 @@ be revisited.
   `[--renderer pixman|gles]`, no behavior change) plus a usage-vs-parser
   pinning test; the stale unconditional `--tty`-warns-and-keeps-pixman
   claim corrected everywhere it appeared.
-- [CPU vs GPU rendering has never been measured on a real GPU](./rendering/gpu-vs-cpu-measured.md)
-  — **HIGH**, blocked on the user's Asahi machine. Every GPU number the
-  project has is llvmpipe's. What *is* known: offscreen GLES cost 17–32x
-  pixman and scanout costs ~1.5x on the same rasteriser, so the read-back
-  was the dominant cost — but "therefore it wins on real hardware" is an
-  extrapolation, not a measurement. Runbook is `Asahi.md`'s Test 4. Note
-  FPS is the wrong headline for a damage-driven compositor; idle CPU, frame
-  cost under damage, RSS and power are the numbers that decide it.
+- [CPU vs GPU rendering, measured on a real GPU](./resolved/gpu-vs-cpu-measured-done.md)
+  — RESOLVED 2026-09-21 on the user's Apple M2 under Asahi Linux. The
+  extrapolation held and then some: GPU scanout costs **4.2–5.1x less
+  compositor CPU** under damage (llvmpipe had it ~1.5x *worse*), draws the
+  same pixels bar the cursor's antialiasing, and draws ~0.2 W *less* power —
+  for +7–17 MB RSS. Offscreen GLES reached **parity** with pixman where
+  llvmpipe measured 18–31x. Both tiers use zero CPU at idle. Two
+  methodology lessons: the VM's unpaced-injection benchmark measures nothing
+  on hardware 14x faster per IPC round trip (damage gets coalesced away), and
+  "confirm which tier is live" nearly failed because the compositor
+  colourised redirected logs.
 - [Rounded window corners](./resolved/rounded-window-corners-done.md) — the cost
   is not the corners, it is that a rounded window is no longer opaque, so
   what is behind it can no longer be skipped. Measure with *overlapping*
@@ -680,11 +683,15 @@ scale/mode) into one hardware session.
   → clipboard/DnD → capture/packaging/docs. No Smithay bump needed
   (pinned 0.7.0 carries `xwayland/`). Opt-in flag recommended; X11 trust
   consequences documented, not waived.
-- [GPU scanout: real-GPU proof, then cursor + overlay planes](./rendering/gpu-scanout-planes.md)
-  — OPEN, medium, Asahi-gated: Test 4 proof first (split render/display
-  is the known hazard), then cursor → overlay → `ALLOW_SCANOUT` last with
-  its capture fix. Headless/nested read-back stays by design. Pairs with
-  the existing [measurement](./rendering/gpu-vs-cpu-measured.md) entry.
+- [GPU scanout: cursor + overlay planes](./rendering/gpu-scanout-planes.md)
+  — OPEN, medium, no longer hardware-gated. **Phase 1 landed 2026-09-21**:
+  the tier comes up on real hardware and the known hazard was not one — one
+  GBM device serving allocator + exporter + EGL is enough on the split
+  render/display topology, so the separable construction is not needed.
+  What remains is cursor → overlay → `ALLOW_SCANOUT` last with its capture
+  fix, and phase 2's own first question is whether `apple,dcp` exposes
+  usable cursor/overlay planes at all. Headless/nested read-back stays by
+  design. Numbers: [the measurement entry](./resolved/gpu-vs-cpu-measured-done.md).
 - [Config reload: from partial to full](./core/config-reload-full.md)
   — OPEN, medium: cursor → `column_widths` → `output.scale` →
   autostart spawn-delta → renderer/GPU reworded to restart semantics.

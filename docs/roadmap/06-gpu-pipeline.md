@@ -503,6 +503,9 @@ answer there, and is still the default.
 
 ### What this does *not* establish
 
+**Answered on real hardware 2026-09-21 -- see the next section. Kept as
+written, because what it was right to disclaim is the point.**
+
 `is_software()` is false-but-llvmpipe on this VM (see the stage-2 correction
 above), so **every number here is a software rasteriser's**. What the VM
 proves is the KMS plumbing -- modeset, page flip, vblank pairing, VT recovery,
@@ -513,6 +516,92 @@ but untested: `DrmCompositor::new` takes the allocator and the framebuffer
 exporter separately, so the allocator's `GbmDevice` would wrap the render
 node's fd and the exporter's the display node's, with no `MultiRenderer` and
 no speculative multi-GPU abstraction added here.
+
+### Evidence (Apple M2 / AGX under Asahi Linux, 2026-09-21)
+
+The section above is now settled, and one of its hedges turned out to be
+unnecessary. Runbook and raw output: `Asahi.md`'s Test 4, driven by
+`scripts/asahi-test4.sh`. Two runs -- four alternating rounds at `650a187`,
+then two at `52672b8` after the first run left two gaps -- on an Apple M2
+(`apple,t8112`), NixOS aarch64, `eDP-1` at `2560x1600@60`, `scale = 1.5`, on
+battery.
+
+**The tier comes up, and the split topology needs nothing special.**
+
+```
+drm: driving this device path=/dev/dri/card2 connector=eDP-1
+     width=2560 height=1600 scanout="gpu"
+```
+
+AGX owns `renderD128`; `apple,dcp` owns `card2`'s CRTCs; **one `GbmDevice`
+serving allocator, exporter and EGL is enough**. The separable construction
+reserved above for exactly this machine is not required, which is the
+cheapest possible outcome -- no `MultiRenderer`, no multi-GPU abstraction,
+and the code that shipped needs no change. Mode set atomically on
+`crtc::Handle(45)`/`plane::Handle(35)`; both tiers logged the same four
+warnings, so nothing fell back.
+
+**The frames are right, and the capture reads the right buffer.** On a
+pinned scene (two freshly mapped `foot` windows, pointer parked), dumb vs
+gpu is identical across all 4.096M pixels except an 18x34 box at physical
+1911,1184 with a max channel delta of 3/255 -- the cursor, at
+1280,800 x 1.5 = 1920,1200; the crop holds 118 distinct colours and the same
+crop elsewhere differs by zero. `AE = 1.003` against the ~4016 that one
+least-significant bit per pixel would give at this resolution. The control:
+same tier, different rounds, `AE = 0` exactly, so the scene is genuinely
+pinned rather than merely similar. Note the contrast with the VM, where the
+whole frame differed by one LSB from pixman's `srgba(20,20,25)` rounding;
+here even that is gone and only the cursor's antialiasing differs.
+
+**Performance, per damage event, medians with spread:**
+
+| scene | dumb + pixman | gpu scanout | ratio |
+| ----- | ------------- | ----------- | ----- |
+| large-damage motion | 0.455 j/ev (0.443-0.461) | **0.090** (0.087-0.097) | **4.8-5.1x** |
+| full relayout | 3.34 j/ev (3.32-3.43) | **0.797** (0.790-0.802) | **4.2-4.3x** |
+
+As a share of one core: motion **20.8% -> 4.2%**, relayout **51.9% ->
+14.0%**. Per-event normalisation matters -- the tiers get through different
+event counts in the same fixed window (156 vs 176 relayouts), so a per-round
+total would compare different amounts of work.
+
+**So the extrapolation held, and the reasoning behind it was right.** The VM
+measured scanout at ~1.5x *worse* than the dumb tier because there the
+rasterising was llvmpipe's problem; remove the read-back on hardware where
+rasterising is the GPU's job and the tier wins by 4-5x. What the VM could
+not see is exactly what it said it could not see.
+
+**Idle, memory, power:**
+
+- **Idle: 0 jiffies over 10s on both tiers, every round.** Neither wakes when
+  nothing moves; idle power is identical (5.52 W whole-system). The
+  fast-but-busy trade does not exist here.
+- **Memory: +7 to +17 MB RSS** for the GBM swapchain (75.5->92.4 MB in run 1,
+  87.3->94.8 MB in run 2 -- the baseline moves too, so this is a range). The
+  one column the dumb tier wins.
+- **Power: scanout draws *less*, not more.** Whole-system draw under damage
+  is 0.22 W lower under motion (6.26->6.04) and 0.25 W lower under relayout
+  (6.36->6.11), about 3.5% of system draw. The "may cut CPU wakeups and raise
+  GPU draw, net effect genuinely unknown" question resolves in scanout's
+  favour on this hardware.
+
+**Also measured, and it retires the stage-2 caveat too.** The offscreen GLES
+tier -- no scanout, `--headless`, so no seat needed -- is at *parity* with
+pixman on the same `headless::bench` scenes: 55.0µs vs 56.4µs (empty
+desktop) and 57.3µs vs 56.0µs (8 windows), 30 samples each over 6 alternating
+rounds, against the **31x and 18x** the same bench measured on llvmpipe.
+`GL Renderer: "Apple M2 (G14G B0)"`, GLES 3.2 Mesa 26.2.2, `software=false`
+and genuinely so this time. One test per process: the two bench tests
+otherwise run concurrently in one process and contend.
+
+**What this still does not establish.** The motion scene is *large-bbox*
+damage (the injected path jumps across ~900x600 logical pixels), so the
+4.8-5.1x is for substantial damage and not for a small cursor-rect move,
+which was not measured. One panel, one resolution, one machine. Scanout is
+still primary-plane only -- cursor and overlay planes are phase 2 of
+`docs/backlog/rendering/gpu-scanout-planes.md`, which this unblocks -- and
+the `Modifier::Invalid` widening still has not met a driver that reports
+`Invalid`-only.
 
 ## Stage 4: the dmabuf advertisement follows the renderer
 

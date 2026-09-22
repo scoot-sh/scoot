@@ -9,6 +9,29 @@ scoot has not cut a numbered release yet; entries are dated.
 
 ## Unreleased
 
+### 2026-09-21 — logs are plain text when they are not going to a terminal
+
+- **`scoot`'s log output no longer contains colour escape sequences when
+  stdout is redirected or piped.** Colour is still there when you are
+  watching a terminal. Before this, `scoot --tty … > session.log` or
+  `… | tee session.log` wrote sequences like
+  `scanout\x1b[0m\x1b[2m=\x1b[0m"gpu"` into the file, so `grep` for a field
+  name found nothing and any saved log was awkward to read. Nothing to do
+  about it — existing logs are unaffected, only newly written ones change.
+
+### 2026-09-21 — GPU scanout has run on a real GPU
+
+No behaviour change; this is a claim in the docs becoming a measurement. If
+you run `--tty --renderer gles` from a `gpu-scanout` build, the README and
+[docs/tty.md](docs/tty.md) previously told you the tier had never run on a
+real GPU and that every number behind it came from a software rasteriser.
+On an Apple M2 under Asahi Linux it now measures **4–5x less compositor CPU
+than the default tier under damage**, the same pixels, about 0.2 W less
+power, and 7–17 MB more memory — with both tiers using no measurable CPU at
+idle. pixman is still the default and still the right choice on a machine
+without a real GPU. Method, spreads and what it does not cover:
+[Asahi.md](Asahi.md)'s Test 4.
+
 ### 2026-09-19 — `--nested` follows the host window's size, and an idle session stops talking
 
 Two things from running scoot nested inside

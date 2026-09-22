@@ -77,9 +77,11 @@ Two packages, matching the two GPU tiers in
   `--tty --renderer gles` the frame is composited straight into the buffer
   the CRTC scans out, with no read-back. Same binary name (`scoot`), the
   same EGL-driver requirement as above, plus a real DRM seat. Scanout
-  drives the primary plane only and has never run on a real GPU -- every
-  measurement so far is a software rasteriser's (see
-  [Asahi.md](../Asahi.md)'s Test 4, which is what settles that).
+  drives the primary plane only -- no overlay or cursor planes -- but it is
+  measured rather than merely reasoned now: on an Apple M2 under Asahi Linux
+  it costs 4--5x less compositor CPU under damage than the default tier, for
+  7--17 MB more RSS (see [Asahi.md](../Asahi.md)'s Test 4, which settled
+  that on 2026-09-21).
 
 ## Home-manager module
 

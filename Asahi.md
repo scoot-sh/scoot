@@ -10,13 +10,17 @@ far" section below, pinned to `f688ac9`, and the verification set at the end
 — the old name stands, because that is what was typed and logged then.
 Renaming those would falsify the record. **Two of the three were answered on 2026-09-18**
 — see the results table and section immediately below; the runbook itself is
-kept intact for re-runs on other Apple Silicon models.
+kept intact for re-runs on other Apple Silicon models. **Test 4 (added
+later, and the largest of them) was answered on 2026-09-21**: its results sit
+at the end of its own section, and `scripts/asahi-test4.sh` now runs the
+whole of it as one command that writes its own report.
 
 | What it unblocks | Priority | Needs a VT? | Status |
 | --- | --- | --- | --- |
 | [Ghostty fails at `scale = 1.5`](docs/backlog/resolved/ghostty-fails-at-1-5-done.md) | high → none | no | **RESOLVED, not reproducible** (2026-09-18) |
 | [Does `--gpu` actually fix this machine](docs/backlog/resolved/tty-gpu-config-key-done.md) — the residual on a resolved entry | — | yes | **closed**: not needed, the search works (2026-09-18) |
 | Issue #48's unconfirmed connector fallback | — | yes | still open — needs an external display |
+| [Test 4: CPU vs GPU on a real GPU](docs/backlog/resolved/gpu-vs-cpu-measured-done.md) | high → none | yes | **ANSWERED** (2026-09-21): scanout comes up on the split topology and costs 4–5x less CPU |
 
 ## Results so far (run 2026-09-18, `main` at `f688ac9`)
 
@@ -436,6 +440,96 @@ scoot --tty --renderer gles -- foot        # gpu-scanout build
 Confirm which tier you are actually on before trusting a number — the log
 line is `scanout="gpu"` versus the dumb tier's absence of it, and
 `--renderer gles` without the feature silently keeps pixman with a warning.
+
+### ANSWERED, 2026-09-21 — scanout comes up, and it wins by 4–5x
+
+Run it with `scripts/asahi-test4.sh`, which is the whole of this test as one
+command: it drives `scripts/tty-tier-bench.sh` for the alternating rounds and
+prints the analysis into `$OUT/test4-report.txt`. Two runs, four rounds
+(`650a187`, raw in `/tmp/scoot-tier-bench`) then two (`52672b8`, raw in
+`/tmp/scoot-asahi-test4`); the second exists because the first left two gaps,
+named below.
+
+**Correctness first, as this section asked for.** It comes up:
+
+```
+drm: driving this device path=/dev/dri/card2 connector=eDP-1
+     width=2560 height=1600 scanout="gpu"
+```
+
+Mode set atomically on `crtc::Handle(45)`/`plane::Handle(35)`,
+`2560x1600@60` (`vrefresh: 60` in the mode it chose), logical 1707×1067 at
+`scale = 1.5`. **The split render/display topology needs no special
+handling**: one `GbmDevice` serving allocator, exporter and EGL is enough
+even though AGX owns `renderD128` and `apple,dcp` owns `card2`'s CRTCs. The
+separable-construction fallback `docs/roadmap/06-gpu-pipeline.md` reserved
+for this case is not required. Both tiers logged an identical set of four
+warnings (`card1` rejected for no KMS pipeline, unprivileged DRM master,
+gamma size 0, stale mode blob) — nothing silently fell back to the dumb
+tier.
+
+**And the frames are right.** Comparing the pinned-scene captures — two
+freshly mapped `foot` windows, pointer parked at 1280,800 — the two tiers
+are identical across all 4.096M pixels *except* an 18×34 box at physical
+1911,1184, with a maximum channel delta of 3/255. That box is the cursor:
+1280,800 × 1.5 = physical 1920,1200, the crop holds 118 distinct colours
+(an antialiased glyph, not a flat block), and the same crop taken anywhere
+else differs by exactly zero. The control matters as much as the result —
+the same tier captured in different rounds gives `AE = 0`, byte-identical,
+so the scene really is pinned and the 18×34 box is the whole difference.
+For scale, if every pixel differed by one least-significant bit the AE would
+be about 4016; it is 1.003.
+
+**Performance, per damage event, medians with spread:**
+
+| scene | dumb + pixman | gpu scanout | |
+| --- | --- | --- | --- |
+| large-damage motion | 0.455 j/ev (0.443–0.461) | **0.090 j/ev** (0.087–0.097) | **4.8–5.1x cheaper** |
+| full relayout | 3.34 j/ev (3.32–3.43) | **0.797 j/ev** (0.790–0.802) | **4.2–4.3x cheaper** |
+
+As a share of one core over the fixed windows: motion cost **20.8%** on the
+dumb tier against **4.2%** on scanout; relayout **51.9%** against **14.0%**.
+Every round of every run agrees within ±1% per tier, and the two runs' ratios
+agree with each other.
+
+**The other three metrics this section asked for, in its own order:**
+
+1. **Idle CPU: zero jiffies over 10s on both tiers**, every round. Neither
+   wakes when nothing moves, so the "fast but busy" trade this section
+   worried about does not exist here. Idle power is identical (5.52 W both,
+   whole-system).
+2. **Frame cost under damage:** above.
+3. **Memory: +7 to +17 MB RSS** for the GBM swapchain (75.5→92.4 MB in run
+   1, 87.3→94.8 MB in run 2 — the baseline itself moves, so treat this as a
+   range, not a constant). The one column the dumb tier wins.
+4. **Power — the one this section called "genuinely unknown".** It does
+   **not** trade CPU wakeups for GPU draw: whole-system draw under damage is
+   **lower** on scanout, by **0.22 W** under motion (6.26→6.04) and
+   **0.25 W** under relayout (6.36→6.11), roughly 3.5% of total system draw
+   on battery. Run 1 missed this by sampling power at idle only, which
+   answers the least interesting form of the question — both tiers sleep, so
+   idle power is equal by construction.
+
+**What this does not say.** The motion scene is *large-bbox* damage: the
+injected pointer path jumps across ~900×600 logical pixels, so each frame's
+damage bounding box is big. The 4.8–5.1x is for substantial damage; a small
+cursor-rect move is a different measurement and was not made. Both figures
+are one panel at one resolution on one machine, and scanout remains
+primary-plane only — cursor and overlay planes are phase 2 of
+`docs/backlog/rendering/gpu-scanout-planes.md`, which this unblocks.
+
+Two harness traps found while running it, in the tradition of the ones above.
+First, the compositor coloured its log output unconditionally, so
+`scanout="gpu"` in a redirected log is really
+`scanout\x1b[0m\x1b[2m=\x1b[0m"gpu"` — the harness read the tier as absent on
+a run where it had come up, i.e. it mis-reported the single most important
+field in this test. Every `tee` capture this document recommends was
+affected; fixed in `225719e`, gated on `IsTerminal`. Second, the dev VM's
+"300 unpaced pointer moves" cannot be copied here: an IPC round trip costs
+~0.8 ms on this machine against the VM's ~11 ms, so an unpaced burst arrives
+~20x faster than the panel refreshes and is correctly coalesced away (3000
+moves produced 16 jiffies). Damage is now driven at a fixed rate below the
+refresh rate for a fixed wall-clock window.
 
 ## What to send back
 
