@@ -1,9 +1,9 @@
 ---
-title: "GPU scanout: real-GPU proof, then cursor + overlay planes"
+title: "GPU scanout: cursor + overlay planes (phase 1 landed — the real-GPU proof is in)"
 status: "open"
 area: "rendering"
 priority: "medium"
-blocked: "phase 1 needs the user's Asahi machine — no VM or container can answer it"
+blocked: null
 ---
 
 # GPU scanout: real-GPU proof, then cursor + overlay planes
@@ -19,27 +19,29 @@ deliberate opt-in (link-time libgbm) throughout. Measurement methodology
 lives in [gpu-vs-cpu-measured](./gpu-vs-cpu-measured.md) — this entry is
 the correctness work beside it.
 
-## Phase 1 — real-GPU proof on Asahi (gates everything else)
+## Phase 1 — real-GPU proof on Asahi — **DONE 2026-09-21**
 
-Runbook `Asahi.md:371-438` (Test 4). `nix build .#scoot-gpu`
-(`flake.nix:257-301`) or `cargo build -p scoot --features gpu-scanout`;
-alternate pixman/scanout tiers ≥4 rounds same scene; confirm tier from the
-log (`scanout="gpu"`) before trusting any number — `--renderer gles`
-without the feature silently keeps pixman. Metrics in order: idle-CPU
-jiffies, frame cost under damage, RSS, power. Medians + spread, never
-best-of. **Correctness before performance**: if it does not come up,
-that is the more valuable result — file it in
-`docs/roadmap/06-gpu-pipeline.md` next to `:504-515`.
+Ran on the user's Apple M2 (`apple,t8112`) under Asahi Linux, `eDP-1` at
+`2560x1600@60`. Evidence: `Asahi.md` Test 4's results section and
+`docs/roadmap/06-gpu-pipeline.md`'s "Evidence (Apple M2 / AGX under Asahi
+Linux, 2026-09-21)"; re-runnable as `scripts/asahi-test4.sh`.
 
-Known hazard — split render/display: AGX owns the render node,
-`apple,dcp` owns the CRTCs (`Asahi.md:24-26`, `docs/tty.md:35-52`), but
-current code wraps **one** GBM device for allocator + exporter + EGL
-(`tty/scanout.rs:100-105,227-234`, `render/scanout.rs:106-120`
-"expressible later … **Untested**"). Phase 1 records whether
-single-device `DrmCompositor::new` succeeds on `apple,dcp` or the split
-construction (already separable per `06-gpu-pipeline.md:511-515`) is
-required. Either outcome defines phase 2; failure does not block its
-design.
+- **It comes up**: `drm: driving this device path=/dev/dri/card2
+  connector=eDP-1 width=2560 height=1600 scanout="gpu"`, mode set atomically
+  on `crtc::Handle(45)`/`plane::Handle(35)`.
+- **The known hazard was not one.** Single-device `DrmCompositor::new`
+  succeeds on `apple,dcp` even though AGX owns the render node: **one GBM
+  device serving allocator + exporter + EGL is enough**, so the split
+  construction reserved at `06-gpu-pipeline.md` is *not* required and
+  `render/scanout.rs`'s "expressible later … **Untested**" note needs no
+  follow-up. That is the cheapest of the two outcomes this phase was written
+  to distinguish.
+- **The frames are right**: pinned-scene captures identical to the dumb tier
+  across all 4.096M pixels except an 18×34 box at the cursor (max channel
+  delta 3/255); same tier across rounds is `AE = 0`.
+- **Performance**: 4.2–5.1x less compositor CPU under damage, ~0.2 W less
+  power, +7–17 MB RSS, zero idle CPU on both tiers. Numbers, spreads and
+  caveats in the roadmap file.
 
 VM baseline for comparison (`06-gpu-pipeline.md:406-502`): KMS plumbing
 proven on virtio-gpu; scanout ~1.5x dumb-tier CPU there vs 17–32x for
@@ -65,13 +67,22 @@ contract.
    (`render/scanout.rs:92-103,228-293`) silently returns the wrong buffer.
    Lands with a capture fix in the same change, never a flag flip.
 
-Hardware gate: phase-1 Asahi confirmation + a device with usable
-cursor/overlay planes; the virtio-gpu VM cannot validate this.
+Hardware gate: phase 1 is now confirmed, so what remains is a device with
+usable cursor/overlay planes; the virtio-gpu VM cannot validate this. The
+same Asahi M2 is the candidate -- whether `apple,dcp` exposes usable cursor
+and overlay planes at all is the first thing phase 2 has to establish, and
+`scripts/asahi-test4.sh` is the harness to extend for it.
+
 
 ## What done looks like
 
-Asahi numbers recorded, cursor + overlay on KMS planes with capture
-correct, `docs/tty.md:207-216,273-277` and `06-gpu-pipeline.md:504-515`
-updated, `gpu-vs-cpu-measured.md` closed or re-scoped, `Asahi.md` Test 4
-appended with results. `flake.nix:257-301` `scoot-gpu` unchanged unless
-Asahi drivers expose link/packaging issues.
+Done for phase 1 (2026-09-21): Asahi numbers recorded in
+`06-gpu-pipeline.md`, `Asahi.md` Test 4 appended with results,
+`gpu-vs-cpu-measured.md` resolved to
+`../resolved/gpu-vs-cpu-measured-done.md`, `docs/tty.md`, `docs/nix.md`,
+`README.md` and `ROADMAP.md` no longer say "never run on a real GPU", and
+`scoot-gpu` needed no packaging change (the Asahi drivers exposed none).
+
+Still open, and all that is left here: cursor + overlay planes on KMS with
+capture still correct, and the README bullet losing its
+primary-plane-only clause.

@@ -55,10 +55,14 @@ Linux, and daily-driven on `--tty`** (2026-09-18).
   still drives one connector (a second monitor there stays dark).
 - **No XWayland.** X11-only applications do not run.
 - **GPU scanout is new and narrow.** `--tty --renderer gles` scans out from
-  the GPU, but only in a `gpu-scanout` build (`nix build .#scoot-gpu`), only on the primary plane (no
-  overlay or cursor planes), and it has never run on a real GPU — every
-  measurement so far is a software rasteriser's. `--headless`/`--nested`
-  still read every frame back to main memory as pixman does.
+  the GPU, but only in a `gpu-scanout` build (`nix build .#scoot-gpu`) and
+  only on the primary plane — no overlay or cursor planes yet.
+  `--headless`/`--nested` still read every frame back to main memory as
+  pixman does. It is no longer unproven: on an Apple M2 under Asahi Linux it
+  costs **4–5x less CPU** than the default tier under damage (and ~0.2 W
+  less), draws the same pixels, and uses 7–17 MB more memory (numbers and
+  method in [Asahi.md](Asahi.md), Test 4).
+  pixman is still the default and still the right answer on a GPU-less box.
 - **Config reload is partial.** `scootctl reload` (or `kill -HUP` on the
   compositor) re-applies the gap, the
   appearance (including the cursor size, color and theme) and the keybindings

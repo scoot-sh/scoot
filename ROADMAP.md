@@ -34,19 +34,29 @@ per-backend, with GPU-free operation kept as a hard requirement) was the last
 item on the original ordered list, and all four of its stages have landed —
 which means **every milestone on that list is now built**.
 
-**"Done on paper" is deliberate wording, not modesty.** No part of this
-milestone has ever run on a real GPU. The dev VM's EGL device answers
-`is_software() == false` and is then served by llvmpipe, so every number and
-every green run behind these four stages is a software rasteriser's. Three
-things are consequently claimed rather than shown: that GPU scanout is faster
-than the CPU path (the shape is encouraging — read-back cost 17–32x pixman,
-scanout ~1.5x on the same rasteriser — but that is an extrapolation), that
-the split render/display topology works (AGX has the render node,
-`apple,dcp` owns the connectors; designed for, never exercised), and that the
-`Modifier::Invalid` widening behaves on a driver that actually reports
-`Invalid`-only. `Asahi.md`'s Test 4 and
-`docs/backlog/rendering/gpu-vs-cpu-measured.md` are where that gets settled.
-Scanout is also primary-plane only — no overlay or cursor planes. Two of its four stages have landed
+**It has now run on a real GPU, and two of the three open claims are
+settled** (2026-09-21, Apple M2 under Asahi Linux — `Asahi.md`'s Test 4).
+Before that, no part of this milestone had: the dev VM's EGL device answers
+`is_software() == false` and is then served by llvmpipe, so every number
+behind these four stages was a software rasteriser's, and three things were
+claimed rather than shown. Where they stand now:
+
+- **GPU scanout is faster than the CPU path — shown.** 4–5x less compositor
+  CPU under damage (20.8% of a core → 4.2% under pointer motion; 51.9% →
+  14.0% under a full relayout), the same pixels bar the cursor's
+  antialiasing, ~0.2 W *less* power, 7–17 MB more RSS, and no measurable CPU
+  at idle on either tier. The VM's extrapolation was right, including its
+  reasoning: the read-back it deletes was the dominant cost.
+- **The split render/display topology works — shown, and more cheaply than
+  designed for.** One `GbmDevice` serving allocator, exporter and EGL is
+  enough on the machine where AGX owns the render node and `apple,dcp` owns
+  the connectors; the separable construction reserved for that case is not
+  needed.
+- **The `Modifier::Invalid` widening on a driver that reports
+  `Invalid`-only — still unshown.** No such driver has been met.
+
+Scanout is also primary-plane only — no overlay or cursor planes, which is
+phase 2 of `docs/backlog/rendering/gpu-scanout-planes.md`, now unblocked. Two of its four stages have landed
 (PR #129: the renderer seam, pixman still the only implementation, provably
 zero behaviour change; PR #130: the GLES pipeline behind
 `--renderer pixman|gles` and `[renderer] backend`, off by default, every
@@ -161,7 +171,8 @@ each item's own file records why it landed when it did.
   shows libgbm, default still doesn't); a `dlopen` pre-flight turns a
   missing libEGL into the designed startup error (proven live with the
   library hidden in a mount namespace). Mesa ICDs stay the host OS's
-  by decision; Test 4 on the Asahi hardware stays open.
+  by decision; Test 4 on the Asahi hardware is now answered (2026-09-21 --
+  see milestone 6 above and `Asahi.md`).
 
 - **[CI guards the Nix packaging (gh
   #173)](docs/backlog/resolved/ci-nix-packaging-done.md)**

@@ -376,8 +376,28 @@ fn post_dispatch(state: &mut State) {
     let _ = state.display_handle.flush_clients();
 }
 
+/// Colour only when a human is actually looking at a terminal.
+///
+/// `tracing_subscriber::fmt()` writes to stdout with ANSI on unconditionally
+/// -- it never asks whether stdout is a terminal -- so every redirected or
+/// piped capture used to arrive full of escape sequences. That is not
+/// cosmetic here: this project's own hardware runbook captures logs with
+/// `2>&1 | tee /tmp/fx/tty-auto.log` (`Asahi.md:278`), and a pipe is never a
+/// terminal, so the canonical evidence path was the polluted one. It bit
+/// `scripts/tty-tier-bench.sh`, which read the tier from
+/// `scanout="gpu"` in a redirected log and silently matched nothing, because
+/// what is really in the bytes is `scanout\x1b[0m\x1b[2m=\x1b[0m"gpu"`.
+///
+/// No test: the entire decision is one `IsTerminal` call the OS answers, and
+/// a test could only assert that the test harness's own captured stdout is
+/// not a terminal -- which measures nextest, not this.
 fn init_logging() {
+    use std::io::IsTerminal;
+
     let filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
-    tracing_subscriber::fmt().with_env_filter(filter).init();
+    tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_ansi(std::io::stdout().is_terminal())
+        .init();
 }
