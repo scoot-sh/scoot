@@ -294,7 +294,8 @@ the binary and the fallback logs loudly (hazard 3 above is the pin).
 
 ## PROGRESS — Phase 1 (skeleton) landed; ticket stays OPEN for Phase 2+
 
-Phase-1 PR: **[TBD — the `xwayland-phase1-skeleton` PR]**. Scope keeps
+Phase-1 PR: **#221 (`xwayland-phase1-skeleton`, commit `772dbc0`)** — open
+for review, not merged by the implementer. Scope keeps
 exactly to the 8-item list above: own `xwayland` Cargo feature (named
 `xwayland`, not the sketch's `xwayland-server`), `compositor/xwayland/`
 around `spawn` + `open_abstract_socket=true` + READY→`start_wm` with both
