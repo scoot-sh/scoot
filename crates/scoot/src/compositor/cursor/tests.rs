@@ -200,6 +200,47 @@ fn cursor_new_clamps_a_degenerate_or_absurd_size() {
     }
 }
 
+/// `rebuild` swaps the whole cursor -- bitmaps, theme, re-resolution -- for
+/// the new values, in place: the same `Cursor` draws at the new size
+/// afterwards, and a degenerate size clamps exactly as `new` clamps it.
+///
+/// Needs only a renderer, not a whole compositor: the element's geometry is
+/// the rebuilt buffer's real size, and `theme()` names what was resolved.
+#[test]
+fn rebuild_redraws_the_same_cursor_at_the_new_size_theme_and_color() {
+    let mut renderer = PixmanRenderer::new().expect("a pixman renderer");
+    let mut cursor = Cursor::new(DEFAULT_SIZE, Color::new(1.0, 1.0, 1.0, 1.0), NO_THEME);
+    let geometry = cursor.element(&mut renderer, (0.0, 0.0).into(), 1.0)[0].geometry(1.0.into());
+    assert_eq!(
+        (geometry.size.w, geometry.size.h),
+        (DEFAULT_SIZE, DEFAULT_SIZE)
+    );
+
+    let fill = Color::parse("#ff0000").expect("a valid color");
+    cursor.rebuild(48, fill, Some("scoot-test-no-such-theme-either"));
+    let geometry = cursor.element(&mut renderer, (0.0, 0.0).into(), 1.0)[0].geometry(1.0.into());
+    assert_eq!(
+        (geometry.size.w, geometry.size.h),
+        (48, 48),
+        "the rebuilt cursor should draw at the new size"
+    );
+    assert_eq!(
+        cursor.theme().size(),
+        48,
+        "the reloaded theme should pick images at the new size"
+    );
+
+    // Degenerate input clamps at the allocation, like `new` -- and the theme
+    // name still resolves (to nothing installed, i.e. the fallback shapes).
+    cursor.rebuild(0, fill, NO_THEME);
+    let geometry = cursor.element(&mut renderer, (0.0, 0.0).into(), 1.0)[0].geometry(1.0.into());
+    assert_eq!(
+        (geometry.size.w, geometry.size.h),
+        (Appearance::MIN_CURSOR_SIZE, Appearance::MIN_CURSOR_SIZE),
+        "a degenerate rebuild size should clamp"
+    );
+}
+
 #[test]
 fn a_zero_hotspot_leaves_the_pointer_location_unchanged() {
     let pointer = Point::<f64, Logical>::from((12.5, 30.0));

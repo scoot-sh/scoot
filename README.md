@@ -61,8 +61,9 @@ Linux, and daily-driven on `--tty`** (2026-09-18).
   still read every frame back to main memory as pixman does.
 - **Config reload is partial.** `scootctl reload` (or `kill -HUP` on the
   compositor) re-applies the gap, the
-  appearance and the keybindings live; output scale, DRM device, renderer,
-  autostart and cursor bitmap stay startup-only and a reload refuses them
+  appearance (including the cursor size, color and theme) and the keybindings
+  live; output scale, DRM device, renderer,
+  autostart and column widths stay startup-only and a reload refuses them
   with a message rather than silently ignoring them.
 - **No macOS adapter.** `scoot-core` is kept platform-independent so one can
   exist, but nothing drives the Accessibility API yet. On macOS you get
