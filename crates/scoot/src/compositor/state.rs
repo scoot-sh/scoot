@@ -1027,9 +1027,19 @@ impl State {
     /// one (see [`State::mint_spawn_token`] for which bounds apply and what a
     /// full table means). Takes `&mut` for the token table; both callers
     /// (`act`, `run`) already hold it mutably.
-    pub fn spawn(&mut self, command: &[String]) {
+    ///
+    /// Reports whether the entry is decided: `true` when the child started
+    /// (tracked for the reaper below), or when there was nothing to start
+    /// (an empty command is a silent no-op, startup's shape -- unreachable
+    /// through any parser, which refuses a missing command at load). A
+    /// failed `spawn` (a missing program) warns and reports `false`, so the
+    /// config-reload delta can keep the entry pending for the next reload
+    /// instead of marking it seen. The OS error itself lives only in that
+    /// `warn!`: threading it out through `act`'s effect loop would widen
+    /// both signatures to duplicate what the log already says.
+    pub fn spawn(&mut self, command: &[String]) -> bool {
         let Some((program, args)) = command.split_first() else {
-            return;
+            return true;
         };
         let mut child = Command::new(program);
         child.args(args).env("WAYLAND_DISPLAY", &self.socket_name);
@@ -1080,6 +1090,7 @@ impl State {
                 // the loop thread -- so no reap is lost and none is doubled.
                 self.spawned_children.insert(child.id());
                 tracing::info!(?command, "spawned");
+                true
             }
             Err(error) => {
                 // The child never started, so nothing will ever redeem this:
@@ -1089,6 +1100,7 @@ impl State {
                     self.xdg_activation.remove_token(&token);
                 }
                 tracing::warn!(?command, %error, "could not spawn");
+                false
             }
         }
     }

@@ -118,11 +118,18 @@ impl State {
     /// through `handle_event`, never through here, so a client mapping or
     /// closing a window while locked is still tracked (it is simply not
     /// drawn) and the session is intact when it unlocks.
-    pub fn act(&mut self, action: Action) {
+    ///
+    /// Reports whether every spawn the action produced was accepted by
+    /// [`State::spawn`] -- vacuously `true` for actions that spawn nothing,
+    /// `false` when locked (nothing ran). Only the config-reload delta
+    /// reads it, to keep a failed spawn pending for the next reload; every
+    /// other caller ignores it.
+    pub fn act(&mut self, action: Action) -> bool {
         if self.session_lock.is_locked() {
             tracing::debug!(?action, "ignoring an action: the session is locked");
-            return;
+            return false;
         }
+        let mut accepted = true;
         for effect in self.world.handle_action(action) {
             match effect {
                 Effect::Close(id) => {
@@ -130,11 +137,15 @@ impl State {
                         toplevel.send_close();
                     }
                 }
-                Effect::Spawn(command) => self.spawn(&command),
+                // `&=`, not `&&=`: every entry must be attempted even after
+                // an earlier one failed, so a bad program mid-list cannot
+                // stop the entries after it.
+                Effect::Spawn(command) => accepted &= self.spawn(&command),
                 Effect::Quit => self.loop_signal.stop(),
             }
         }
         self.apply();
+        accepted
     }
 
     /// Pushes the core's arrangement onto the windows: position, size, focus.

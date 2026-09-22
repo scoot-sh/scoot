@@ -62,8 +62,12 @@
 //!   (`quit` included) is refused by name and never acted on. Seen means "in
 //!   the `startup_autostart` snapshot", by value per occurrence: an edited
 //!   entry is new, a removed-then-re-added entry runs again, and duplicates
-//!   count per occurrence. The snapshot advances past the whole fresh list
-//!   on every unlocked reload, so a second identical reload is silent.
+//!   count per occurrence. A spawn the OS refuses (a missing program) is
+//!   refused by name and stays pending -- retried on the next reload, never
+//!   silently dropped -- so `applied` means the entry started, not merely
+//!   that it was attempted. The snapshot advances past decided entries only
+//!   (accepted spawns, refused non-spawns), which is why a second identical
+//!   reload is silent.
 //!
 //! Every refusal names the field; nothing is silently ignored. Both lists
 //! name only fields that *differed* -- a field the file and the session
@@ -94,9 +98,10 @@
 //! new spawn entries -- a spawned program at lock time could disclose a
 //! window onto, or interfere with, the locked session -- nor drops them.
 //! The snapshot freezes, the reply refuses the field as skipped-while-locked,
-//! and the first unlocked reload runs what is still pending. Deferred, not
-//! denied. (An empty delta -- a pure removal, or nothing new at all -- stays
-//! silent even under lock; there is nothing actionable to skip.)
+//! and the first unlocked reload decides what is still pending: new spawns
+//! run, non-spawns refuse by name. Deferred, not denied. (An empty delta --
+//! a pure removal, or nothing new at all -- stays silent even under lock;
+//! there is nothing actionable to skip.)
 
 use scoot_core::Action;
 use scoot_ipc::Response;
@@ -182,9 +187,10 @@ impl State {
     /// `State::appearance`/cursor/world/binds alongside every report entry,
     /// so a second reload diffs against what the first applied and
     /// re-reports nothing. (`startup_autostart` is the one snapshot that
-    /// advances: every *unlocked* reload moves it past the whole fresh
-    /// autostart list, decided entries never re-report; a *locked* reload
-    /// freezes it, deferring the delta to the first unlocked reload.)
+    /// advances: every *unlocked* reload moves it past the entries the reload
+    /// decided (accepted spawns, refused non-spawns) -- a failed spawn stays
+    /// pending and retries, so decided entries never re-report; a *locked*
+    /// reload freezes it, deferring the delta to the first unlocked reload.)
     fn apply_reload(&mut self, fresh: &LoadedConfig) -> Report {
         let mut report = Report::default();
         self.apply_layout_reload(fresh, &mut report);
@@ -397,30 +403,45 @@ impl State {
     /// `[autostart] commands`: run-only-new-`Spawn`-entries, through the
     /// same `act` path startup drains (so the lock backstop, the spawn
     /// environment and the per-entry ordering apply unchanged), then advance
-    /// the snapshot past the whole fresh list.
+    /// the snapshot past the decided entries.
     ///
     /// Never a full re-drain -- entries the snapshot already holds stay
     /// silent -- and never a non-spawn action: a reloaded `quit` is refused
     /// by name rather than handed to `act`, which would end the session.
-    /// Under lock nothing runs and the snapshot freezes (see the module
-    /// doc): the delta defers to the first unlocked reload.
+    /// A spawn the OS refuses stays pending rather than decided: it is
+    /// refused by name (the cause is in the log), the snapshot does not
+    /// advance past it, and the next reload retries it. Under lock nothing
+    /// runs and the snapshot freezes (see the module doc): the delta defers
+    /// to the first unlocked reload.
     fn apply_autostart_reload(&mut self, fresh: &LoadedConfig, report: &mut Report) {
         let delta = autostart_delta(&fresh.autostart, &self.startup_autostart);
         if self.session_lock.is_locked() {
             if !delta.run.is_empty() || !delta.refuse.is_empty() {
                 report.refused.push(refused(
                     field::AUTOSTART,
-                    "skipped while locked: new entries run on the first unlocked reload",
+                    "skipped while locked: pending entries are decided on the first unlocked reload",
                 ));
             }
             return;
         }
+        let mut accepted = Vec::new();
+        let mut failed = Vec::new();
         for action in &delta.run {
             tracing::info!(?action, "running a new autostart entry from config reload");
-            self.act(action.clone());
+            if self.act(action.clone()) {
+                accepted.push(action.clone());
+            } else {
+                failed.push(action.clone());
+            }
         }
-        if !delta.run.is_empty() {
+        if !accepted.is_empty() {
             report.applied.push(field::AUTOSTART.to_owned());
+        }
+        for action in &failed {
+            report.refused.push(refused(
+                field::AUTOSTART,
+                &format!("{action:?} failed to start; still pending, retried on the next reload"),
+            ));
         }
         for action in &delta.refuse {
             report.refused.push(refused(
@@ -428,7 +449,22 @@ impl State {
                 &format!("{action:?} is not a spawn entry; only new spawn entries run on reload"),
             ));
         }
-        self.startup_autostart = fresh.autostart.clone();
+        // The snapshot becomes the fresh list minus the still-failing
+        // spawns. Removals shrink it -- nothing is remembered past the file,
+        // so a removed-then-re-added entry runs again -- decided entries
+        // never re-report, and a failed spawn stays out so the next reload
+        // sees it as unseen and retries it. Each failed occurrence removes
+        // exactly one fresh occurrence, so duplicates keep the
+        // per-occurrence accounting `autostart_delta` computes; a failed
+        // entry always names a fresh occurrence (it came out of this
+        // reload's own delta), so the search below always lands.
+        let mut snapshot = fresh.autostart.clone();
+        for action in &failed {
+            if let Some(index) = snapshot.iter().position(|entry| entry == action) {
+                snapshot.remove(index);
+            }
+        }
+        self.startup_autostart = snapshot;
     }
 
     /// `[binds]`: rebuilt from defaults plus the file (see
@@ -482,7 +518,9 @@ fn scale_reload(fresh: f64, live: f64, nested: bool) -> ScaleReload {
 #[derive(Debug, Default, PartialEq, Eq)]
 struct AutostartDelta {
     /// Unseen `Spawn` entries, in file order: the caller runs each through
-    /// `act` and reports the field applied.
+    /// `act`, reports the field applied for what started, and refuses by
+    /// name what the OS would not start (which stays pending for the next
+    /// reload).
     run: Vec<Action>,
     /// Unseen non-`Spawn` entries, in file order: the caller refuses each by
     /// name. A reloaded `quit` lands here, never in `run` -- handing it to

@@ -309,7 +309,9 @@ defaults plus the file, so a reload both adds and overrides binds) -- plus
 new `[autostart]` spawn entries (each entry the session has not seen yet
 runs once, in file order, through the same path startup drains; a reloaded
 entry that is not a `spawn` -- `quit` included -- is refused by name and
-never acted on. Seen is by value per occurrence: an edited entry counts as
+never acted on; a `spawn` whose program fails to start is refused by name
+instead of reported applied, and stays pending -- the next reload retries
+it. Seen is by value per occurrence: an edited entry counts as
 new, a removed-then-re-added entry runs again, and a second identical
 reload is silent).
 
@@ -352,8 +354,9 @@ lock path already publishes and re-sends config-derived scale values to
 surfaces still showing the blanked frame). New autostart entries are the
 one thing a locked reload skips: a spawned program at lock time could
 disclose a window onto, or interfere with, the locked session, so the
-reload refuses the field as skipped-while-locked and runs the still-pending
-entries on the first unlocked reload instead -- deferred, not denied.
+reload refuses the field as skipped-while-locked and decides the still-pending
+entries on the first unlocked reload instead -- new spawns run, non-spawns
+are refused by name; deferred, not denied.
 
 ## `[layout]`
 
@@ -556,12 +559,15 @@ Three behaviors worth knowing, plus the reload rule:
   run once each, in file order, through the same path startup drains --
   new `spawn` entries only. A reloaded entry that is not a `spawn`
   (`quit` included) is refused by name and never acted on, so a reloaded
-  `quit` cannot end the session. Seen is by value per occurrence: editing
+  `quit` cannot end the session. A `spawn` whose program fails to start is
+  refused by name and stays pending: the next reload retries it, so
+  `applied` means the entry started, never merely that it was attempted.
+  Seen is by value per occurrence: editing
   an entry in place counts as new, removing one and re-adding it runs it
   again, duplicates count per occurrence, and a second identical reload is
   silent. A reload under session lock skips new entries (refused as
-  skipped-while-locked) and runs them on the first unlocked reload
-  instead (see [Reloading the config](#reloading-the-config)).
+  skipped-while-locked) and decides the still-pending ones on the first
+  unlocked reload instead (see [Reloading the config](#reloading-the-config)).
 
 ## Default keybindings
 
