@@ -352,8 +352,35 @@
           # nothing to find on NixOS without an explicit LIBRARY_PATH. (The
           # VM's system profile hits the same gap outside any dev shell --
           # that's fixed separately, in configuration.nix.)
+          #
+          # `LD_LIBRARY_PATH` is a separate problem from `LIBRARY_PATH` above,
+          # and only libglvnd goes on it. `LIBRARY_PATH` is link time; Smithay
+          # **dlopens** `libEGL.so.1` at *run* time, and a plain `cargo build`
+          # deliberately links no libEGL at all (CI's `ldd` gate asserts that,
+          # and the package instead link-injects `-lEGL` by derivation-only
+          # RUSTFLAGS -- see `packages.scoot` above). NixOS has no global
+          # `libEGL.so.1`: `/run/opengl-driver/lib` carries the vendor ICD
+          # (`libEGL_mesa.so`), not the dispatch library. So without this, two
+          # tests that reach EGL (`render::gles::tests::
+          # libegl_loads_where_the_suite_runs` and `render::tests::
+          # a_capture_covers_the_whole_target_at_the_backends_own_size`) fail
+          # in `nix develop` on any NixOS host -- found on the Asahi M2,
+          # 2026-09-21, where `cargo nextest run --workspace` was 2-red for
+          # this reason alone while the dev VM stayed green (its *system*
+          # profile supplies the path, per configuration.nix) and CI stayed
+          # green (it resolves a software EGL).
+          #
+          # Only libglvnd, never the whole `compositor-deps` list: that list
+          # includes `libgbm`/`mesa`, and putting nixpkgs' Mesa ahead of the
+          # host's on `LD_LIBRARY_PATH` is the same driver-shadowing hazard
+          # `packages.scoot` refuses to risk by bundling ICDs. libglvnd is the
+          # vendor-neutral dispatch; it finds the host's real driver through
+          # `/run/opengl-driver`, so it shadows nothing.
           shellHook = pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
             export LIBRARY_PATH="''${LIBRARY_PATH:+$LIBRARY_PATH:}${pkgs.lib.makeLibraryPath (import ./vm/compositor-deps.nix pkgs)}"
+            export LD_LIBRARY_PATH="''${LD_LIBRARY_PATH:+$LD_LIBRARY_PATH:}${
+              pkgs.lib.makeLibraryPath [ pkgs.libglvnd ]
+            }"
           '';
         };
       });
