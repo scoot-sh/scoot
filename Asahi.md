@@ -576,6 +576,8 @@ cursor-rect move is a different measurement and was not made. Both figures
 are one panel at one resolution on one machine, and scanout remains
 primary-plane only — cursor and overlay planes are phase 2 of
 `docs/backlog/resolved/gpu-scanout-planes-done.md`, which this unblocks.
+(That was the state at the time of this run; cursor and overlay steps have
+since landed — see the resolved record.)
 
 **Corrections to earlier drafts of this section**, collected here rather than
 left inline, because a result is hard to read with its own revision history

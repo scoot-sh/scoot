@@ -37,8 +37,16 @@ it rides on this capture fix, not before it. Live on virtio-gpu
 a VT pause/resume cycle, cross-tier diff confined to the cursor box,
 commit-health clean (`UnknownPlane` 0, primary flipping, cursor plane
 pointer-tracked), and a compositor-trace session showing zero
-primary-direct assignments. Review: PENDING (coordinator runs
-`scoot-reviewer` as the merge gate; this header records the outcome).
+primary-direct assignments. Review: NO BLOCKING FINDINGS (merge as staged;
+the layering argument is sound and the flag is inert on virtio *and* Asahi
+— one `GbmFramebufferExporter::new`, hardcoded `NodeFilter::None`).
+Recorded caveats for whoever widens the exporter next: (1) the
+force/refusal halves have never fired and are not test-pinned (mark-set and
+mark-clear only) — proven dormant-correct by trace, not proven working, so
+exporter-widening must carry a live force-path verification on hardware
+that actually goes direct; (2) `capture_pixels_for` renders twice on the
+stale path (second render a no-op when clean) — one wasted full render per
+stale screenshot once direct exists, consider an early return then.
 Original entry below, kept verbatim.
 
 ---
