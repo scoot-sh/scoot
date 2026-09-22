@@ -531,9 +531,10 @@ be revisited.
   Phases A–F have landed (render, layer shell, lock, workspaces, moves);
   only phase E (`--tty` multi-CRTC) waits on hardware.
 - [Per-output scale/mode configuration surface](./core/per-output-scale-mode.md)
-  — deliberately left out of milestone 19: needs the design questions
-  answered (indexed sections vs runtime `apply`, bind-time scale × N) and
-  two-connector hardware to verify against. Do not build blind.
+  — deliberately left out of milestone 19: design answered 2026-09-22
+  (`[[outputs]]` config shape, per-output scale enumeration, apply/test
+  follows config) and build-ready as a spec — still needs two-connector
+  hardware to verify against. Do not build blind.
 - [Workspace shortcuts: no numbered bind, and no move-to-index action at all](./resolved/workspace-index-keybindings-done.md)
   — RESOLVED 2026-09-20: `Super+1`..`9` focuses and `Super+Shift+1`..`9`
   carries-and-follows (new `MoveWindowToWorkspaceIndex` core/IPC/config
