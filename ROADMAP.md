@@ -94,6 +94,14 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[GPU scanout overlay planes
+  (step 2)](docs/backlog/rendering/gpu-scanout-planes.md)** (2026-09-22,
+  PR #217) — overlay list populated per CRTC (rides whole; no candidates
+  exist yet so nothing can be claimed — verified no production surface is
+  `ScanoutCandidate`, hence "at most the cursor ever goes missing" holds).
+  Virtio has zero overlay planes (fallback proven live). Ticket stays OPEN
+  for `ALLOW_SCANOUT` + capture fix.
+
 - **[GPU scanout cursor plane
   (step 1)](docs/backlog/rendering/gpu-scanout-planes.md)** (2026-09-22,
   PR #216) — KMS cursor plane driven where the CRTC exposes one
