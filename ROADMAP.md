@@ -87,6 +87,14 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[Config reload phase 3: `output.scale`
+  live](docs/backlog/core/config-reload-full.md)** (2026-09-22, PR #213) —
+  re-advertise + fractional companion re-send + geometry refile + `apply()`;
+  `--nested` still refuses non-1.0; outputs recompacted order-preservingly
+  (review found preserve-positions diverged from fresh startup — fixed
+  in-round with a fail-first pin). No protocol bump. Ticket stays OPEN for
+  autostart → reword.
+
 - **[Config reload phase 2: `column_widths`
   live](docs/backlog/core/config-reload-full.md)** (2026-09-22, PR #211) —
   clamping `min(preset, len-1)` after `validated()`; shorter lists pull OOB

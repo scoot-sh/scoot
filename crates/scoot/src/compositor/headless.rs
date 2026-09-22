@@ -889,7 +889,7 @@ impl State {
     ///
     /// Each output keeps its physical mode -- only the advertised scale
     /// moves, through the same `set_mode` startup uses, so bound `wl_output`
-    /// clients hear the new integer -- and the outputs are recompac ted
+    /// clients hear the new integer -- and the outputs are recompacted
     /// order-preservingly onto the new logical widths (each sits immediately
     /// right of the previous one's new right edge, exactly the fold
     /// `add_output` builds fresh sessions with), so a rescaled session ends

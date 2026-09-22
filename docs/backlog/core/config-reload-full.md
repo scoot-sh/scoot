@@ -26,7 +26,7 @@ blocked: null
 > length, under session lock like gap. Remaining: Phase 3 (`output.scale`),
 > Phase 4 (autostart policy), Phases 5–6 (renderer/GPU reword).
 >
-> PROGRESS 2026-09-22: Phase 3 LANDED (PR TBD). `output.scale` reloads live:
+> PROGRESS 2026-09-22: Phase 3 LANDED (PR #213, merge `06318e4`). `output.scale` reloads live:
 > the new value is re-advertised to every output via `set_mode` (bound
 > `wl_output` clients hear the new integer) and re-sent to every live
 > surface (`preferred_scale` plus the integer companion, walked over every
@@ -36,7 +36,10 @@ blocked: null
 > as refusals; `--nested` keeps refusing non-1.0 (the host owns the scale);
 > framebuffers need no rebuild (physical pixels never moved; the damage
 > tracker evaluates geometry at the live scale). Same `Reloaded` variant, no
-> `PROTOCOL_VERSION` bump. Remaining: Phase 4 (autostart policy), Phases 5–6
+> `PROTOCOL_VERSION` bump. Review found rescale broke output adjacency vs a
+> fresh session — fixed in-round by order-preserving recompaction with a
+> fail-first pin; a wire-side (`wl_output.geometry`) position pin was
+> suggested and stays open. Remaining: Phase 4 (autostart policy), Phases 5–6
 > (renderer/GPU reword).
 
 `resolved/config-reload-done.md` + `resolved/reload-sighup-trigger-done.md`
