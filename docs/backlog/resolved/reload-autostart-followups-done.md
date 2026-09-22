@@ -8,7 +8,7 @@ blocked: null
 
 # Config reload autostart follow-ups — RESOLVED
 
-RESOLVED 2026-09-22 (PR #TBD, coordinator-filed ticket, no gh issue):
+RESOLVED 2026-09-22 (PR #215, coordinator-filed ticket, no gh issue):
 all three findings decided in one small PR, no protocol change
 (`Response::Reloaded` keeps its `{applied, refused}` string shape, so no
 `PROTOCOL_VERSION` bump).

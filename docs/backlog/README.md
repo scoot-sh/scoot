@@ -700,7 +700,7 @@ scale/mode) into one hardware session.
   except `renderer.backend` + `tty.gpu`. SIGHUP inherits; no wire bump.
   Review remainder filed as [autostart
   follow-ups](./resolved/reload-autostart-followups-done.md) — RESOLVED
-  2026-09-22 (PR #TBD): failed spawns refuse by name and retry on the next
+  2026-09-22 (PR #215): failed spawns refuse by name and retry on the next
   reload (per-entry snapshot via a `spawn`→`act` acceptance bool), the
   locked-skip message promises only a decision, and the
   removal-while-locked cancellation is pinned.
