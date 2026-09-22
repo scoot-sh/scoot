@@ -1453,8 +1453,8 @@ mod tests {
     fn the_output_actions_parse_through_a_bind_and_emit_back() {
         // The config-grammar half of the cross-output item: both new action
         // strings through the shared `scootctl::action` parser (which is
-        // what makes them bindable with no default binds shipped), and back
-        // out through `action_string` byte-identically, so a
+        // what makes ids 3+ bindable -- the defaults ship 1 and 2 only), and
+        // back out through `action_string` byte-identically, so a
         // `--print-default-config` emission containing one would reload.
         for (spelling, action) in [
             (
@@ -1487,8 +1487,7 @@ mod tests {
     fn set_column_width_parses_through_a_bind_and_emits_back() {
         // The config-grammar half of this item: the new action string through
         // the shared `scootctl::action` parser (which is what makes it
-        // bindable with no default binds shipped, like the output actions),
-        // and back out through `action_string` byte-identically, so a
+        // bindable with no default bind shipped), and back out through `action_string` byte-identically, so a
         // `--print-default-config` emission containing one would reload.
         let spelling = "set-column-width 3";
         let action = Action::SetColumnWidth(3);
@@ -2758,9 +2757,9 @@ mod tests {
             );
             binds += 1;
         }
-        // "All 36 of them" (see docs/configuration.md): a dropped default
+        // "All 40 of them" (see docs/configuration.md): a dropped default
         // bind must fail loudly here, not just shrink the file.
-        assert_eq!(binds, 36, "a default bind was added or lost");
+        assert_eq!(binds, 40, "a default bind was added or lost");
     }
 
     /// Commented scalar values are pinned to their live defaults, not just

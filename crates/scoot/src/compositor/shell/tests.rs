@@ -383,3 +383,126 @@ fn an_enormous_minimum_size_cannot_overflow_the_focus_ring_arithmetic() {
         "a window filling the usable area should still have side rings: {rects:?}"
     );
 }
+
+// -------------------------------------------------------------------------
+// New-window placement: the pointer's output (milestone 19, phase G)
+// -------------------------------------------------------------------------
+
+/// One instruction for the placement client: it waits to be told before it
+/// maps, so the test -- not a thread race -- decides where the pointer is
+/// when the window opens.
+enum PlaceStep {
+    Map,
+}
+
+enum PlaceAck {
+    Mapped,
+}
+
+/// Maps one window through the same `declare_min_size` path the hint tests
+/// use, then parks holding the connection so the window stays mapped while
+/// the test asserts on where the core put it.
+fn run_placing_client(
+    stream: UnixStream,
+    steps: std::sync::mpsc::Receiver<PlaceStep>,
+    acks: std::sync::mpsc::Sender<PlaceAck>,
+) -> Result<(), String> {
+    let Ok(PlaceStep::Map) = steps.recv() else {
+        return Err("the placement client never got its map step".to_string());
+    };
+    let connection = declare_min_size(stream, (400, 300)).map_err(|e| e.to_string())?;
+    // Held, not dropped: closing the connection would unmap the window
+    // before the test looks at it.
+    let _held = connection;
+    acks.send(PlaceAck::Mapped).map_err(|e| e.to_string())?;
+    while steps.recv().is_ok() {}
+    Ok(())
+}
+
+/// A live compositor with two side-by-side headless outputs and one client
+/// that maps a single window on request. Unlike `drive` above this goes
+/// through the real backend (so the outputs have space geometry for the
+/// pointer to resolve against) rather than filing `OutputAdded` at the core
+/// alone.
+fn drive_two_outputs() -> crate::compositor::test_support::Harness<PlaceStep, PlaceAck> {
+    use crate::compositor::test_support::Harness;
+    let mut harness = Harness::headless(Appearance::default(), PLACE_CANVAS);
+    crate::compositor::headless::add_output(
+        &mut harness.state,
+        "headless-2",
+        PLACE_CANVAS,
+        PLACE_CANVAS,
+    )
+    .expect("a second headless output");
+    harness.spawn(run_placing_client);
+    harness
+}
+
+/// Each headless output's size here: output 1 spans x `0..PLACE_CANVAS`,
+/// output 2 `PLACE_CANVAS..2 * PLACE_CANVAS`.
+const PLACE_CANVAS: i32 = 400;
+
+/// Files `WindowOpened` where the milestone-19 focus doctrine says: the
+/// output under the pointer. Fail-first: with the output hardcoded to the
+/// first, the placement lands on output 1 whatever the pointer says.
+#[test]
+fn a_new_window_opens_on_the_pointers_output() {
+    let mut harness = drive_two_outputs();
+    harness
+        .state
+        .pointer_move(f64::from(PLACE_CANVAS) + 100.0, 100.0);
+    let PlaceAck::Mapped = harness.run(PlaceStep::Map);
+    let placements = harness.state.world.arrange().placements;
+    assert_eq!(
+        placements.len(),
+        1,
+        "expected exactly the one mapped window: {placements:?}"
+    );
+    assert_eq!(
+        placements[0].output,
+        OutputId(2),
+        "a window opened with the pointer on output 2 was not placed on it"
+    );
+}
+
+/// The same path with the pointer on the first output -- the pre-G behavior,
+/// kept as a regression pin (and what every single-output session reads as:
+/// the pointer starts centred on the primary, and the fallback below covers
+/// wherever else it can be).
+#[test]
+fn a_new_window_opens_on_the_first_output_with_the_pointer_there() {
+    let mut harness = drive_two_outputs();
+    harness.state.pointer_move(100.0, 100.0);
+    let PlaceAck::Mapped = harness.run(PlaceStep::Map);
+    let placements = harness.state.world.arrange().placements;
+    assert_eq!(
+        placements.len(),
+        1,
+        "expected exactly the one mapped window: {placements:?}"
+    );
+    assert_eq!(
+        placements[0].output,
+        OutputId(1),
+        "a window opened with the pointer on output 1 was not placed on it"
+    );
+}
+
+/// The fallback leg: with the pointer over no output (reachable -- absolute
+/// motion is never clamped), the window still opens, on the primary.
+#[test]
+fn a_new_window_with_the_pointer_over_no_output_falls_back_to_primary() {
+    let mut harness = drive_two_outputs();
+    harness.state.pointer_move(-50.0, -50.0);
+    let PlaceAck::Mapped = harness.run(PlaceStep::Map);
+    let placements = harness.state.world.arrange().placements;
+    assert_eq!(
+        placements.len(),
+        1,
+        "expected exactly the one mapped window: {placements:?}"
+    );
+    assert_eq!(
+        placements[0].output,
+        OutputId(1),
+        "a window opened with the pointer over no output did not fall back to the primary"
+    );
+}

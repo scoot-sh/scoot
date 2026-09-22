@@ -307,9 +307,10 @@ impl State {
     /// than filed at creation, because "which output" is a fact about the
     /// layout, and the layout is what `apply()` just pushed onto the space.
     /// A window with no bounding box yet (announced from `add_window` before
-    /// the core has placed it, or never mapped) reads as the primary output,
-    /// which is where new windows open (`shell.rs` files `WindowOpened`
-    /// there too). `None` only when there is no output at all.
+    /// the core has placed it, or never mapped) reads as the pointer's
+    /// output, which is where the window is about to open (`shell.rs` files
+    /// `WindowOpened` there too), falling back to the primary when the
+    /// pointer is over no output. `None` only when there is no output at all.
     ///
     /// Costs one bounding-box read and one geometry overlap per output until
     /// it hits. Announcement and binds are cold paths (per window, per
@@ -327,7 +328,9 @@ impl State {
                 })
                 .cloned()
         });
-        placed.or_else(|| self.outputs.primary().cloned())
+        placed
+            .or_else(|| self.pointer_output())
+            .or_else(|| self.outputs.primary().cloned())
     }
 
     /// Announces a new window to every client subscribed to the list.
@@ -352,8 +355,9 @@ impl State {
         // mutably at the same time.
         //
         // The output the window is actually on -- which at this point, before
-        // the core has placed it, is the primary by `output_of_window`'s
-        // fallback, and stays the primary until a cross-output move carries
+        // the core has placed it, is the pointer's output by
+        // `output_of_window`'s fallback (the primary when the pointer names
+        // no output), and stays that output until a cross-output move carries
         // it elsewhere (which `refresh_wlr_output_membership` then tells
         // these same handles about). Announcing a window on an output it is
         // not on would be worse than announcing it on one.

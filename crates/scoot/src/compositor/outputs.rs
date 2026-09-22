@@ -132,10 +132,11 @@ impl Outputs {
     ///
     /// What still goes through here is startup placement
     /// (`place_pointer_at_output_centre` centres on the primary once -- the
-    /// pointer starts on the first screen), new-window placement (windows
-    /// open on output 1 -- `MoveFocusedWindowToOutput` is what moves them
-    /// across outputs afterwards, and `foreign_toplevel_management.rs`'s
-    /// `output_of_window` falls back to the first output for a window that
+    /// pointer starts on the first screen), the no-output-under-the-pointer
+    /// fallback for new-window placement (windows open on the pointer's
+    /// output -- `MoveFocusedWindowToOutput` is what moves them across
+    /// outputs afterwards, and `foreign_toplevel_management.rs`'s
+    /// `output_of_window` reports the pointer's output for a window that
     /// has never been mapped), and `resize_output`, which only the
     /// single-output backends (`--nested`'s host configure, `--tty` hotplug)
     /// can reach. Per-output resize is the `--tty` multi-CRTC phase's

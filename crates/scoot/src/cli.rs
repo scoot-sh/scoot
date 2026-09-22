@@ -185,9 +185,9 @@ pub struct CompositorOptions {
     /// `--headless` only, and `compositor::run` warns and ignores it on the
     /// other two backends -- `--nested` presents one window in its host and
     /// `--tty` drives one CRTC, so neither has anywhere to put a second
-    /// output. Exactly one output -- the first -- gets a render target; the
-    /// rest exist as `wl_output` globals with their own geometry and their own
-    /// scrolling strip in the core, which is what makes per-output protocol
+    /// output. Every output gets a render target of its own, alongside its
+    /// `wl_output` global, its geometry and its own scrolling strip in the
+    /// core, which is what makes per-output rendering and protocol
     /// behaviour testable without a second monitor. Nothing is shown on a
     /// headless output in any case.
     pub outputs: i32,
