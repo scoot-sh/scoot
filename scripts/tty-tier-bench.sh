@@ -103,6 +103,13 @@ ENVLOG="$OUT/environment.txt"
 # bare `scripts/tty-tier-bench.sh`, with no environment at all, able to do it
 # again. Recorded evidence is a cache entry keyed to a tree state (CLAUDE.md);
 # nothing should be able to invalidate it as a side effect.
+#
+# Keying on `summary.tsv` alone is sufficient rather than lazy: the header is
+# written below, before `run_round` can create any log, PNG, `.power` or
+# `.outputs` file, so no directory this script produced can hold round
+# artefacts without it. The only directory it misses is one where someone
+# deleted `summary.tsv` and kept the rest, which is indistinguishable from
+# "I cleared this to re-run".
 if [ -e "$SUMMARY" ] && [ "${OVERWRITE:-0}" != 1 ]; then
     echo "$OUT already holds a run ($SUMMARY exists); refusing to overwrite it." >&2
     echo "  measure afresh:  OUT=<a new directory> $0" >&2

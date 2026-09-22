@@ -27,7 +27,7 @@ comparable with each other.
 | the VM measured (llvmpipe) | the M2 measured |
 | --- | --- |
 | offscreen GLES, frame read back: **17-32x slower** than pixman | **parity**: 55.0 vs 56.4µs (empty), 57.3 vs 56.0µs (8 windows) |
-| GPU scanout: **~1.5x slower** than the dumb tier | **4.2-5.1x faster**: 0.455 -> 0.090 j/ev motion, 3.34 -> 0.797 j/ev relayout |
+| GPU scanout: **~1.5x slower** than the dumb tier | **4.2-5.1x faster**: 0.455 -> 0.090 j/ev motion, 3.358 -> 0.796 j/ev relayout |
 
 The entry's own reasoning was that the read-back, not the rasterising, was
 the dominant cost, so scanout should win where rasterising is the GPU's job.
@@ -102,9 +102,13 @@ round	tier	came_up	paused	connector	scanout	idle_jiffies	idle_secs	idle_uW_mean	
 4	gpu	yes	no	?	none	0	10	5486500	66	709	15011	141	177	10052	95984
 ```
 
-Its `environment.txt`, from the same capture: `2026-09-21T22:05:23-04:00`;
-`Linux 7.1.5 aarch64  apple,j413 apple,t8112`; harness tree
-`650a1872f221a750ca37b6f16010beaad01cd60a`; binaries
+Its `environment.txt`, from the same capture, quoted as it read -- the host
+string really has no separators (`tr -d '\0'` concatenates the device-tree
+entries) and run 1's file labelled the SHA `git:`, the `harness tree:`
+relabel having come later:
+`date: 2026-09-21T22:05:23-04:00`;
+`host: Linux 7.1.5 aarch64  apple,j413apple,t8112apple,arm-platform`;
+`git: 650a1872f221a750ca37b6f16010beaad01cd60a`; binaries
 `/nix/store/mf5nm9vmjrhq049w23dq3v3brymhsldb-scoot-0.1.0` and
 `/nix/store/b1kkl6s3h5vwcz9g0bgx4avkggch4jj2-scoot-gpu-0.1.0`;
 `gbm linkage: dumb=0 gpu=1`; `backend: --tty`; `vt: 2  session: 5`; seat

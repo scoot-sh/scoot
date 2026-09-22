@@ -471,8 +471,15 @@ sits at those four paths now is seat-failure output from 23:10. What does not
 survive: its numeric
 rows and its recorded environment. The figures below were computed from that
 file while it existed, and independently recomputed from it by review before
-it was lost — two parties, same values — but the artifact is gone and nobody
-should cite it as re-checkable. **Run 2 (`/tmp/scoot-asahi-test4`) is
+it was lost — two parties, same values.
+
+**The rows themselves are recovered**, so they *are* still checkable: review
+held a verbatim capture, and the table is transcribed in
+[`docs/backlog/resolved/gpu-vs-cpu-measured-done.md`](docs/backlog/resolved/gpu-vs-cpu-measured-done.md)
+under "Run 1's raw rows, recovered". What makes that more than one party's
+word for it: `idle_uW_mean` was computed from the `.power` files, which
+survived untouched, so that whole column re-derives from disk today — 8 of 8
+exact. What is gone is the *original file*, not the numbers. **Run 2 (`/tmp/scoot-asahi-test4`) is
 complete and intact**, and on its own establishes the correctness result, the
 ratios and every power figure. The script now refuses to measure into a
 directory that already holds a run, and `ANALYSE_ONLY=1` re-reads one.
@@ -527,7 +534,7 @@ the captures are byte-identical `md5`-wise within a tier.
 | scene | dumb + pixman | gpu scanout | |
 | --- | --- | --- | --- |
 | large-damage motion | 0.455 j/ev (0.443–0.461) | **0.090 j/ev** (0.087–0.097) | **4.8–5.1x cheaper** |
-| full relayout | 3.34 j/ev (3.32–3.43) | **0.797 j/ev** (0.790–0.802) | **4.2–4.3x cheaper** |
+| full relayout | 3.358 j/ev (3.32–3.43) | **0.796 j/ev** (0.790–0.814) | **4.2–4.3x cheaper** |
 
 All six rounds pooled; the medians are `0.4553`/`0.0908` and `3.358`/`0.796`.
 The ranges above are the two runs' **ratios of medians** — 5.09x and 4.79x

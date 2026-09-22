@@ -5,6 +5,11 @@
 # presents itself, so this is the regression net for every backend, not just
 # --headless.
 #
+# The number of `ok:` lines is environment-dependent, so do not quote it as a
+# fixed target: the dmabuf check needs `wayland-info` and the ANSI check needs
+# `$LOG` to be a regular file, so a run can legitimately report one or two
+# fewer than another on the same commit. `rc=0` is the pass condition.
+#
 # MODE selects the backend (default --headless); RENDERER selects which
 # renderer draws the frames it checks (default pixman, or `gles` under
 # --headless/--nested), e.g. RENDERER=gles scripts/smoke-test.sh. For

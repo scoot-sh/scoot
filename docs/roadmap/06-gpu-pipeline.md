@@ -563,7 +563,7 @@ here even that is gone and only the cursor's antialiasing differs.
 | scene | dumb + pixman | gpu scanout | ratio |
 | ----- | ------------- | ----------- | ----- |
 | large-damage motion | 0.455 j/ev (0.443-0.461) | **0.090** (0.087-0.097) | **4.8-5.1x** |
-| full relayout | 3.34 j/ev (3.32-3.43) | **0.797** (0.790-0.802) | **4.2-4.3x** |
+| full relayout | 3.358 j/ev (3.32-3.43) | **0.796** (0.790-0.814) | **4.2-4.3x** |
 
 As a share of one core: motion **20.8% -> 4.3%**, relayout **52.0% ->
 14.0%**. Per-event normalisation matters -- the tiers get through different
@@ -615,12 +615,16 @@ renderers are equal".
 
 **One artefact caveat.** Run 1's `summary.tsv` and `environment.txt` were
 destroyed after the fact by pointing the entry-point script at its own output
-directory (the script now refuses that and offers `ANALYSE_ONLY=1`). Its
-per-round rows were computed while the file existed and independently
-recomputed from it by review, but they are no longer re-checkable; run 2 is
+directory (the script now refuses that and offers `ANALYSE_ONLY=1`). The
+*file* is no longer re-checkable, but **the rows are**: they were captured
+verbatim by review before the loss and are transcribed in
+`docs/backlog/resolved/gpu-vs-cpu-measured-done.md` under "Run 1's raw rows,
+recovered", where `idle_uW_mean` re-derives from the surviving `.power` files
+8-of-8 exactly -- one full column checkable against disk today. Run 2 is
 intact and independently carries the correctness result, the ratios and all
-the power figures. Run 1's screenshots, power samples and r3-r4 logs survive (the clobbering
-run defaulted to `ROUNDS=2`, so rounds 1 and 2 lost their logs as well).
+the power figures. Run 1's screenshots, power samples and r3-r4 logs survive
+(the clobbering run defaulted to `ROUNDS=2`, so rounds 1 and 2 lost their
+logs as well).
 
 **What this still does not establish.** The motion scene is *large-bbox*
 damage (the injected path jumps across ~900x600 logical pixels), so the

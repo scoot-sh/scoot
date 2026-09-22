@@ -306,10 +306,10 @@ durable belongs in `CLAUDE.md` or `ROADMAP.md`/`docs/`, not duplicated here.
   it reads as safe to tell it "check out `<commit>^` if it helps verify the
   before/after claim", which is what the dispatch prompt did. `git checkout`
   is branch-mutating whoever runs it. The reflog of that session shows what
-  followed: `HEAD` moved **three** times, not once —
-  `22:42:09 asahi-tier-bench → asahi-tier-bench` (harmless),
+  followed: **four checkouts, three of them real moves** —
+  `22:42:09 asahi-tier-bench → asahi-tier-bench` (a no-op),
   then `23:01:32 asahi-tier-bench → main`, then
-  `23:02:08` back and off again. The 23:01:32 move is the one that matters:
+  `23:02:08` back to the branch and off to `main` again. The 23:01:32 move is the one that matters:
   the reviewer took the shared checkout off the PR branch onto `main` as
   *cleanup*, believing `main` was the state it had found, and it sat there
   until the orchestrator's own `23:04:52` checkout. Nothing was lost only
