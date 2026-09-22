@@ -108,7 +108,7 @@ ENVLOG="$OUT/environment.txt"
 } > "$ENVLOG"
 cat "$ENVLOG"
 
-printf 'round\ttier\tcame_up\tpaused\tconnector\tscanout\tidle_jiffies\tidle_secs\tidle_uW_mean\tmove_jiffies\tmove_events\tmove_ms\twidth_jiffies\twidth_events\twidth_ms\trss_kB\n' > "$SUMMARY"
+printf 'round\ttier\tcame_up\tpaused\tconnector\tscanout\tidle_jiffies\tidle_secs\tidle_uW_mean\tmove_jiffies\tmove_events\tmove_ms\tmove_uW_mean\twidth_jiffies\twidth_events\twidth_ms\twidth_uW_mean\trss_kB\n' > "$SUMMARY"
 
 PID=
 cleanup() {
@@ -130,6 +130,13 @@ cpu_jiffies() {
     awk '{ s=$0; sub(/^[0-9]+ \(.*\) /, "", s); split(s, f, " "); print f[12] + f[13] }' "/proc/$p/stat"
 }
 rss_kb() { awk '/^VmRSS:/ {print $2}' "/proc/$1/status" 2>/dev/null; }
+# Mean of a file of `power_now` samples, in microwatts. The sysfs value is
+# signed -- negative while discharging -- so take the magnitude; a machine on
+# AC reads ~0 and the mean is then meaningless, which `environment.txt`'s
+# `ac_online` line is there to disclose.
+power_mean() {
+    awk '{ s += ($1 < 0 ? -$1 : $1); n++ } END { if (n) printf "%.0f", s/n; else print "-" }' "$1" 2>/dev/null
+}
 now_ms() { echo $(( $(date +%s%N) / 1000000 )); }
 
 run_round() {
@@ -180,20 +187,35 @@ run_round() {
         case "$last" in
             *libseat*|*"Permission denied"*|*busy*|*"seat "*)
                 why="startup failed, SEAT not GPU: $last -- another session is holding the seat. Launch this from the VT you are sitting on." ;;
+            *"could not load"*)
+                # An absent library is this box's setup, not this GPU's
+                # answer, and conflating the two would report a missing
+                # libEGL as "scanout does not work on Apple Silicon". The
+                # compositor's own message already names the pixman fallback.
+                why="startup failed on a MISSING LIBRARY, not the GPU: $last" ;;
             *gbm*|*GBM*|*egl*|*EGL*|*gles*|*scanout*|*drm*|*DRM*)
                 why="startup failed inside the GPU/DRM path: $last -- THIS IS THE TEST 4 ANSWER, keep $tag.log" ;;
         esac
         echo "  !! $why"
-            printf '%s\t%s\tno\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-\n' "$round" "$tier" >> "$SUMMARY"
+            printf '%s\t%s\tno\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-\n' "$round" "$tier" >> "$SUMMARY"
         cleanup; PID=
         sleep 1
         return 0
     fi
 
     export SCOOT_SOCKET="$sock"
-    local connector scanout
-    connector=$(grep -oE 'connector=[^ ]+' "$log" | head -1 | cut -d= -f2)
-    scanout=$(grep -oE 'scanout="[a-z]+"' "$log" | head -1 | cut -d'"' -f2)
+    # Strip ANSI first. The compositor used to colour its output even when
+    # stdout was a file, so `scanout="gpu"` was really
+    # `scanout\e[0m\e[2m=\e[0m"gpu"` in the bytes and the naive pattern below
+    # matched nothing -- which reported the *most important field in this
+    # whole benchmark* as absent on a run where the tier had in fact come up.
+    # That is fixed at the source (compositor/mod.rs `init_logging`), and
+    # stripping stays here anyway: these logs are also read back from older
+    # runs and from any build predating that fix.
+    local connector scanout plain
+    plain=$(sed -e 's/\x1b\[[0-9;]*m//g' "$log")
+    connector=$(printf '%s\n' "$plain" | grep -oE 'connector=[^ ]+' | head -1 | cut -d= -f2)
+    scanout=$(printf '%s\n' "$plain" | grep -oE 'scanout="[a-z]+"' | head -1 | cut -d'"' -f2)
     echo "  up: connector=${connector:-?} scanout=${scanout:-none}"
     "$ctl" outputs > "$OUT/$tag.outputs" 2>&1
 
@@ -202,6 +224,25 @@ run_round() {
     sleep 1.5
     "$ctl" wait-idle --quiet-ms 500 --timeout-ms 8000 >/dev/null 2>&1
     "$ctl" windows > "$OUT/$tag.windows" 2>&1
+
+    # Correctness capture, taken HERE and not at the end of the round: two
+    # windows freshly mapped at their default widths with the pointer parked
+    # at a fixed spot is a scene both tiers reach identically, so the only
+    # thing left between the two PNGs is how each renderer drew it.
+    #
+    # The first version of this script captured after the damage scenes
+    # instead, and the comparison was worthless: `cycle-column-width` had run
+    # a different number of times on each tier (156 vs 176 in the 2026-09-21
+    # run, since each tier gets through a different count in a fixed window),
+    # so the captures showed different column layouts and different cursor
+    # positions. Within a single tier, captures from different rounds differed
+    # by AE 13853-46852 -- swamping any renderer difference, which for
+    # 2560x1600 would be about 4016 if every pixel differed by one
+    # least-significant bit. The end-of-round capture is kept too, as a record
+    # of where each round finished; it is `-end` and is not the comparison.
+    "$ctl" pointer move 1280 800 >/dev/null 2>&1
+    "$ctl" wait-idle --quiet-ms 500 --timeout-ms 8000 >/dev/null 2>&1
+    "$ctl" screenshot --out "$OUT/$tag-pinned.png" >/dev/null 2>&1
 
     # --- scene 1: idle. Nothing moving; sample power across the same window.
     local j0 j1 idle_j
@@ -214,7 +255,7 @@ run_round() {
     j1=$(cpu_jiffies "$PID")
     idle_j=$(( j1 - j0 ))
     local uw
-    uw=$(awk '{ s += ($1 < 0 ? -$1 : $1); n++ } END { if (n) printf "%.0f", s/n; else print "-" }' "$OUT/$tag.power")
+    uw=$(power_mean "$OUT/$tag.power")
 
     # --- scene 2: cursor damage, PACED. The dev VM's comparable number
     # (06-gpu-pipeline.md "Benchmark") was 300 unpaced IPC pointer moves, and
@@ -228,12 +269,22 @@ run_round() {
     # fixed wall-clock window: each event then gets its own frame on both
     # tiers, and the jiffy counts compare CPU spent presenting the *same
     # number of frames* rather than the same number of coalesced bursts.
+    # Power is sampled *inside* the damage loops too, roughly once a second.
+    # The first run of this script sampled it at idle only, which answered the
+    # least interesting version of the question: both tiers sleep completely
+    # when nothing moves, so idle power is identical by construction. What the
+    # backlog entry actually wants to know is whether the GPU tier trades CPU
+    # wakeups for GPU draw *while presenting*, and that needs a sample taken
+    # while it is presenting.
     local t0 t1 move_j move_ms x y n
+    : > "$OUT/$tag.power-move"
     j0=$(cpu_jiffies "$PID"); t0=$(now_ms); n=0
     while [ "$(( $(now_ms) - t0 ))" -lt $(( MOVE_SECS * 1000 )) ]; do
         n=$(( n + 1 ))
         x=$(( 200 + (n * 7) % 900 )); y=$(( 150 + (n * 11) % 600 ))
         "$ctl" pointer move "$x" "$y" >/dev/null 2>&1
+        [ $(( n % 60 )) -eq 0 ] &&
+            cat /sys/class/power_supply/macsmc-battery/power_now 2>/dev/null >> "$OUT/$tag.power-move"
         sleep "$MOVE_GAP"
     done
     t1=$(now_ms); j1=$(cpu_jiffies "$PID")
@@ -246,10 +297,13 @@ run_round() {
     # show its advantage, since a full-output frame is the read-back and the
     # dumb-buffer memcpy it deletes.
     local width_j width_ms
+    : > "$OUT/$tag.power-width"
     j0=$(cpu_jiffies "$PID"); t0=$(now_ms); n=0
     while [ "$(( $(now_ms) - t0 ))" -lt $(( WIDTH_SECS * 1000 )) ]; do
         n=$(( n + 1 ))
         "$ctl" action cycle-column-width >/dev/null 2>&1
+        [ $(( n % 20 )) -eq 0 ] &&
+            cat /sys/class/power_supply/macsmc-battery/power_now 2>/dev/null >> "$OUT/$tag.power-width"
         sleep "$WIDTH_GAP"
     done
     t1=$(now_ms); j1=$(cpu_jiffies "$PID")
@@ -275,16 +329,20 @@ run_round() {
     # Correctness evidence: the frame the tier actually presented, read back
     # through the capture path the tier owns.
     "$ctl" wait-idle --quiet-ms 500 --timeout-ms 8000 >/dev/null 2>&1
-    "$ctl" screenshot --out "$OUT/$tag.png" >/dev/null 2>&1
+    "$ctl" screenshot --out "$OUT/$tag-end.png" >/dev/null 2>&1
 
-    printf '%s\t%s\tyes\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+    local uw_move uw_width
+    uw_move=$(power_mean "$OUT/$tag.power-move")
+    uw_width=$(power_mean "$OUT/$tag.power-width")
+
+    printf '%s\t%s\tyes\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
         "$round" "$tier" "$paused" "${connector:-?}" "${scanout:-none}" \
         "$idle_j" "$IDLE_SECS" "$uw" \
-        "$move_j" "$MOVES_DONE" "$move_ms" \
-        "$width_j" "$WIDTHS_DONE" "$width_ms" "${rss:--}" >> "$SUMMARY"
+        "$move_j" "$MOVES_DONE" "$move_ms" "${uw_move:--}" \
+        "$width_j" "$WIDTHS_DONE" "$width_ms" "${uw_width:--}" "${rss:--}" >> "$SUMMARY"
     echo "  idle=${idle_j}j/${IDLE_SECS}s power=${uw}uW" \
-         "moves=${move_j}j/${MOVES_DONE}ev/${move_ms}ms" \
-         "widths=${width_j}j/${WIDTHS_DONE}ev/${width_ms}ms rss=${rss}kB"
+         "moves=${move_j}j/${MOVES_DONE}ev/${move_ms}ms/${uw_move}uW" \
+         "widths=${width_j}j/${WIDTHS_DONE}ev/${width_ms}ms/${uw_width}uW rss=${rss}kB"
 
     "$ctl" action quit >/dev/null 2>&1
     for _ in $(seq 50); do kill -0 "$PID" 2>/dev/null || break; sleep 0.1; done
