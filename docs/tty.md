@@ -214,9 +214,11 @@ running with no GPU at all is a hard requirement here, not a fallback tier.
 - **Scanout is primary-plane only.** No overlay or cursor planes yet. It has
   now run on a real GPU: on an Apple M2 under Asahi Linux (`2560x1600@60`)
   it costs **4–5x less compositor CPU** than the default dumb-buffer tier
-  under damage — 20.8% of a core down to 4.2% under pointer motion, 51.9%
-  down to 14.0% under a full relayout — while drawing the same pixels and
-  drawing about 0.2 W *less* power. It costs 7–17 MB more RSS for the GBM
+  under damage — 20.8% of a core down to 4.3% under large-damage pointer
+  motion (the injected path jumps ~900×600 logical pixels per event, so this
+  is not a small cursor-rect move), 52.0% down to 14.0% under a full
+  relayout — while drawing the same pixels and
+  drawing about 0.2 W *less* power. It costs 7–16 MB more RSS for the GBM
   swapchain, and both tiers use no measurable CPU at idle. Numbers and method
   in [`../Asahi.md`](../Asahi.md)'s Test 4.
 - **A resize is expensive under `gles`, and `--nested` now resizes.** Every
@@ -278,7 +280,7 @@ scans out from the GPU instead of reading each frame back; without it,
 One limit worth knowing before you turn it on: scanout drives the **primary
 plane only** — no overlay or cursor planes. The case for it is no longer
 reasoned but measured, on an Apple M2 under Asahi Linux: **4–5x less
-compositor CPU** under damage, the same pixels, ~0.2 W less power, 7–17 MB
+compositor CPU** under damage, the same pixels, ~0.2 W less power, 7–16 MB
 more RSS (see [`../Asahi.md`](../Asahi.md)'s Test 4). On a machine whose
 "GPU" is a software rasteriser the tier is still a loss, which is why pixman
 remains the default.

@@ -550,8 +550,9 @@ pinned scene (two freshly mapped `foot` windows, pointer parked), dumb vs
 gpu is identical across all 4.096M pixels except an 18x34 box at physical
 1911,1184 with a max channel delta of 3/255 -- the cursor, at
 1280,800 x 1.5 = 1920,1200; the crop holds 118 distinct colours and the same
-crop elsewhere differs by zero. `AE = 1.003` against the ~4016 that one
-least-significant bit per pixel would give at this resolution. The control:
+crop elsewhere differs by zero. `AE = 1.003` against the ~4016 (one channel
+of four) or ~12044 (all three colour channels, measured) that a whole-frame
+one-least-significant-bit difference gives at this resolution. The control:
 same tier, different rounds, `AE = 0` exactly, so the scene is genuinely
 pinned rather than merely similar. Note the contrast with the VM, where the
 whole frame differed by one LSB from pixman's `srgba(20,20,25)` rounding;
@@ -564,7 +565,7 @@ here even that is gone and only the cursor's antialiasing differs.
 | large-damage motion | 0.455 j/ev (0.443-0.461) | **0.090** (0.087-0.097) | **4.8-5.1x** |
 | full relayout | 3.34 j/ev (3.32-3.43) | **0.797** (0.790-0.802) | **4.2-4.3x** |
 
-As a share of one core: motion **20.8% -> 4.2%**, relayout **51.9% ->
+As a share of one core: motion **20.8% -> 4.3%**, relayout **52.0% ->
 14.0%**. Per-event normalisation matters -- the tiers get through different
 event counts in the same fixed window (156 vs 176 relayouts), so a per-round
 total would compare different amounts of work.
@@ -597,6 +598,26 @@ rounds, against the **31x and 18x** the same bench measured on llvmpipe.
 `GL Renderer: "Apple M2 (G14G B0)"`, GLES 3.2 Mesa 26.2.2, `software=false`
 and genuinely so this time. One test per process: the two bench tests
 otherwise run concurrently in one process and contend.
+
+Two qualifications on that word "parity", because it is doing more work than
+the data supports. **The statistics differ from the ones they sit beside:**
+the M2 figures are medians of all 30 per-run values, while the llvmpipe
+table above is medians of per-round *minima*. The ratio survives either
+choice (median-of-minima on the M2 gives 49.8 vs 54.0µs, still parity), but
+the two columns are not the same statistic. **And parity here may be a
+floor, not an equality:** adding 8 windows' worth of focus-ring elements
+costs pixman +2.3µs on the M2 while it cost *2x* on the VM, which suggests a
+fixed per-frame cost dominating both renderers rather than the two genuinely
+matching. The safe reading is "the 18-31x penalty is gone", not "the two
+renderers are equal".
+
+**One artefact caveat.** Run 1's `summary.tsv` and `environment.txt` were
+destroyed after the fact by pointing the entry-point script at its own output
+directory (the script now refuses that and offers `ANALYSE_ONLY=1`). Its
+per-round rows were computed while the file existed and independently
+recomputed from it by review, but they are no longer re-checkable; run 2 is
+intact and independently carries the correctness result, the ratios and all
+the power figures. Run 1's screenshots, power samples and r2-r4 logs survive.
 
 **What this still does not establish.** The motion scene is *large-bbox*
 damage (the injected path jumps across ~900x600 logical pixels), so the

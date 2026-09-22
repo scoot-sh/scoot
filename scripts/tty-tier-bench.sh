@@ -45,9 +45,14 @@ OUT=${OUT:-/tmp/scoot-tier-bench}
 ROUNDS=${ROUNDS:-4}
 IDLE_SECS=${IDLE_SECS:-10}
 # Damage is driven for a fixed wall-clock window at a fixed rate, not for a
-# fixed event count -- see scene 2. 60/s of cursor damage and 20/s of
-# full-output relayout both sit under a 60Hz panel's refresh, so each event
-# gets its own frame instead of being coalesced away.
+# fixed event count -- see scene 2. These gaps target 60/s of cursor damage
+# and 20/s of full-output relayout; the *achieved* rates are lower (~46/s and
+# ~15.5/s measured on an M2) because each iteration also pays a `scootctl`
+# round trip and two `date` forks. That is fine and does not need correcting:
+# what matters is staying under the panel's refresh so each event gets its
+# own frame rather than being coalesced away, and everything is normalised
+# per event afterwards. The recorded event count is the denominator, never
+# the intended one.
 MOVE_SECS=${MOVE_SECS:-15}
 MOVE_GAP=${MOVE_GAP:-0.0155}
 WIDTH_SECS=${WIDTH_SECS:-10}
@@ -245,7 +250,8 @@ run_round() {
     # so the captures showed different column layouts and different cursor
     # positions. Within a single tier, captures from different rounds differed
     # by AE 13853-46852 -- swamping any renderer difference, which for
-    # 2560x1600 would be about 4016 if every pixel differed by one
+    # 2560x1600 would be about 4016 (one channel of four) or about 12044
+    # (all three colour channels, measured) if every pixel differed by one
     # least-significant bit. The end-of-round capture is kept too, as a record
     # of where each round finished; it is `-end` and is not the comparison.
     "$ctl" pointer move 1280 800 >/dev/null 2>&1
@@ -326,6 +332,22 @@ run_round() {
     # counts would look excellent for exactly the wrong reason. The log line
     # is `session paused; drm master released` (tty/mod.rs:1217). A row this
     # matches is not a slower number, it is not a number at all.
+    # Is it even still alive? The pause check below covers a compositor that
+    # was *stopped*; this covers one that *died* -- a DRM error three rounds
+    # in, say. Without it, `cpu_jiffies` returns empty, bash arithmetic reads
+    # that as 0, and the round is written out as a success with a large
+    # NEGATIVE jiffy count (`$(( "" - 312 ))`), which the analysis then folds
+    # into its medians with no exclusion. A negative measurement is worse than
+    # a missing one: nothing downstream can tell it is impossible.
+    if ! kill -0 "$PID" 2>/dev/null; then
+        echo "  !! the compositor DIED mid-round -- see $tag.log; row recorded as died"
+        printf '%s\t%s\tdied\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-\n' \
+            "$round" "$tier" >> "$SUMMARY"
+        PID=
+        sleep 1
+        return 0
+    fi
+
     local paused=no
     if grep -q 'session paused' "$log"; then
         paused=yes

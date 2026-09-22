@@ -39,7 +39,7 @@ Against the four metrics this entry named, in its order:
    wakes when nothing moves, so the "fast but busy is worse on a laptop"
    concern does not apply. Idle power identical at 5.52 W.
 2. **Frame cost under damage** -- the table above; 20.8% of one core down to
-   4.2% under motion, 51.9% down to 14.0% under relayout.
+   4.3% under large-damage motion, 52.0% down to 14.0% under relayout.
 3. **RSS** -- +7 to +17 MB for the GBM swapchain (the baseline moves between
    runs, so it is a range). The one metric the dumb tier wins.
 4. **Power** -- called "genuinely unknown and the most interesting number

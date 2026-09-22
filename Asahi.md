@@ -437,9 +437,18 @@ scoot --tty -- foot
 scoot --tty --renderer gles -- foot        # gpu-scanout build
 ```
 
-Confirm which tier you are actually on before trusting a number — the log
-line is `scanout="gpu"` versus the dumb tier's absence of it, and
-`--renderer gles` without the feature silently keeps pixman with a warning.
+Confirm which tier you are actually on before trusting a number. The startup
+line names the tier either way — `scanout="gpu"` or `scanout="dumb"`, from
+`presenter.tier()` at `tty/mod.rs:501` — and `--renderer gles` without the
+feature silently keeps pixman with a warning.
+
+**A missing `scanout=` field means your grep failed, not that you are on the
+dumb tier.** This instruction used to say the dumb tier was recognisable by
+the *absence* of the field, which is wrong and wrong in the dangerous
+direction: it is exactly what a log full of ANSI escapes looks like, and that
+misreading is what cost the 2026-09-21 run its first analysis (see the traps
+at the end of this section). Strip escapes before grepping an older log:
+`sed 's/\x1b\[[0-9;]*m//g'`.
 
 ### ANSWERED, 2026-09-21 — scanout comes up, and it wins by 4–5x
 
@@ -449,10 +458,28 @@ prints the analysis into `$OUT/test4-report.txt`. Two runs: four rounds (raw
 in `/tmp/scoot-tier-bench`) then two (raw in `/tmp/scoot-asahi-test4`); the
 second exists because the first left two gaps, named below.
 
+**Run 1's `summary.tsv` and `environment.txt` no longer exist, and that is
+worth knowing before trying to re-derive anything from them.** They were
+destroyed after the fact by `OUT=/tmp/scoot-tier-bench scripts/asahi-test4.sh`
+— intended as "re-read the old numbers", which at the time re-ran the
+benchmark into the evidence directory, failed every round on the busy seat,
+and left four `came_up=no` rows where four rounds of measurements had been.
+What survives from run 1: every screenshot, every power sample, the
+`.outputs`/`.windows` dumps, and the r2–r4 logs. What does not: its numeric
+rows and its recorded environment. The figures below were computed from that
+file while it existed, and independently recomputed from it by review before
+it was lost — two parties, same values — but the artifact is gone and nobody
+should cite it as re-checkable. **Run 2 (`/tmp/scoot-asahi-test4`) is
+complete and intact**, and on its own establishes the correctness result, the
+ratios and every power figure. The script now refuses to measure into a
+directory that already holds a run, and `ANALYSE_ONLY=1` re-reads one.
+
 **What the numbers are keyed to.** Both runs measured *byte-identical
 binaries* — `/nix/store/mf5nm9…-scoot-0.1.0` and
 `/nix/store/b1kkl6s…-scoot-gpu-0.1.0`, both `nix build`s of `main` at
 `499083b`, which is also why the two runs are comparable with each other.
+(Run 1's store paths are quoted from its overwritten `environment.txt` as
+recorded in review, and run 2's are still on disk and match.)
 The harness trees differ (`650a187`, then `52672b8`) because the harness was
 fixed between runs; the compositor under test was not rebuilt and did not
 change. `environment.txt` in each output directory records both, and the
@@ -485,8 +512,12 @@ are identical across all 4.096M pixels *except* an 18×34 box at physical
 else differs by exactly zero. The control matters as much as the result —
 the same tier captured in different rounds gives `AE = 0`, byte-identical,
 so the scene really is pinned and the 18×34 box is the whole difference.
-For scale, if every pixel differed by one least-significant bit the AE would
-be about 4016; it is 1.003.
+For scale, a whole-frame one-least-significant-bit difference at this
+resolution measures `AE ≈ 4016` if one channel of four differs everywhere,
+or `AE ≈ 12044` if all three colour channels do (measured, not derived — add
+`1/255` to R, G and B and compare). Observed: **1.003**, four orders of
+magnitude below either. The `AE = 0` control is the stronger half of this:
+the captures are byte-identical `md5`-wise within a tier.
 
 **Performance, per damage event, medians with spread:**
 
@@ -495,28 +526,45 @@ be about 4016; it is 1.003.
 | large-damage motion | 0.455 j/ev (0.443–0.461) | **0.090 j/ev** (0.087–0.097) | **4.8–5.1x cheaper** |
 | full relayout | 3.34 j/ev (3.32–3.43) | **0.797 j/ev** (0.790–0.802) | **4.2–4.3x cheaper** |
 
-As a share of one core over the fixed windows: motion cost **20.8%** on the
-dumb tier against **4.2%** on scanout; relayout **51.9%** against **14.0%**.
-Every round of every run agrees within ±1% per tier, and the two runs' ratios
-agree with each other.
+All six rounds pooled; the medians are `0.4553`/`0.0907` and `3.358`/`0.796`,
+and the per-run ratios (5.07x and 4.79x motion, 4.18x and 4.30x relayout) are
+what the ranges above come from. As a share of one core over the fixed
+windows: motion cost **20.8%** on the dumb tier against **4.3%** on scanout;
+relayout **52.0%** against **14.0%**.
+
+**Round-to-round spread, since the ratio is large enough not to need
+flattering.** Against each tier's own median: motion −2.7%/+1.3% (dumb) and
+−3.9%/+7.1% (gpu); relayout −1.2%/+2.2% (dumb) and −0.8%/+2.2% (gpu). An
+earlier version of this section said "within ±1% per tier", which overstated
+the tightness by about 5x and contradicted the min–max column printed
+directly above it. The gpu motion column spans 11% min-to-max; the effect
+being measured is 400%, so it survives the honest number comfortably.
 
 **The other three metrics this section asked for, in its own order:**
 
-1. **Idle CPU: zero jiffies over 10s on both tiers**, every round. Neither
-   wakes when nothing moves, so the "fast but busy" trade this section
-   worried about does not exist here. Idle power is identical (5.52 W both,
-   whole-system).
+1. **Idle CPU: zero jiffies over 10s on both tiers**, every round of both
+   runs. Neither wakes when nothing moves, so the "fast but busy" trade this
+   section worried about does not exist here. Idle power is
+   indistinguishable: medians 5.510 W (dumb) and 5.505 W (gpu), whole-system,
+   with per-round means spanning 5.411–5.527 and 5.481–5.533. Note that
+   0.12 W within-tier idle band when reading the damage-power figure below —
+   it is over half the difference that figure reports.
 2. **Frame cost under damage:** above.
-3. **Memory: +7 to +17 MB RSS** for the GBM swapchain (75.5→92.4 MB in run
-   1, 87.3→94.8 MB in run 2 — the baseline itself moves, so treat this as a
-   range, not a constant). The one column the dumb tier wins.
-4. **Power — the one this section called "genuinely unknown".** It does
-   **not** trade CPU wakeups for GPU draw: whole-system draw under damage is
-   **lower** on scanout, by **0.22 W** under motion (6.26→6.04) and
-   **0.25 W** under relayout (6.36→6.11), roughly 3.5% of total system draw
-   on battery. Run 1 missed this by sampling power at idle only, which
-   answers the least interesting form of the question — both tiers sleep, so
-   idle power is equal by construction.
+3. **Memory: +7 to +16 MB RSS** for the GBM swapchain (medians: 76.2→92.4 MB
+   in run 1, 87.3→94.8 MB in run 2 — the baseline itself moves, so this is a
+   range, not a constant). The one column the dumb tier wins. An earlier
+   version quoted run 1's dumb figure as 75.5 MB, which is that round set's
+   *mean* in a section that says medians throughout.
+4. **Power — the one this section called "genuinely unknown".** On this
+   hardware it does **not** trade CPU wakeups for GPU draw: whole-system
+   draw under damage is **lower** on scanout, by **0.22 W** under motion
+   (6.26→6.04) and **0.25 W** under relayout (6.36→6.11), roughly 3.5% of
+   total system draw on battery. **Read that as a direction, not a precise
+   quantity**: it rests on run 2 alone (run 1 sampled power at idle only),
+   so n = 2 rounds per tier at 12 samples per motion scene and 8 per relayout
+   scene, and the within-tier idle band above is half its size. Both signs
+   agree across both scenes and both rounds, which is the part worth
+   trusting.
 
 **What this does not say.** The motion scene is *large-bbox* damage: the
 injected pointer path jumps across ~900×600 logical pixels, so each frame's
