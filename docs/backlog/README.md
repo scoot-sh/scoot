@@ -698,3 +698,7 @@ scale/mode) into one hardware session.
   refused by name, locked reloads defer to the first unlocked one) plus
   renderer/GPU refusals reworded to restart semantics. End state: live
   except `renderer.backend` + `tty.gpu`. SIGHUP inherits; no wire bump.
+  Review remainder filed as [autostart
+  follow-ups](./core/reload-autostart-followups.md) (failed-spawn
+  snapshot/wording, locked-skip message for non-spawns, two unpinned
+  paths).
