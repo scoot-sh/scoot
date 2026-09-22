@@ -94,6 +94,15 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[Config reload autostart
+  follow-ups](docs/backlog/resolved/reload-autostart-followups-done.md)**
+  (2026-09-22, PR #TBD) — the three PR #214 review findings, one small PR:
+  a failed spawn refuses by name and retries on the next reload
+  (per-entry snapshot; `applied` means the entry started), the locked-skip
+  message promises only a decision (`pending entries are decided on the
+  first unlocked reload`), and the removal-while-locked cancellation is
+  pinned. No `PROTOCOL_VERSION` bump (strings are payload; wire shape
+  pinned). Coordinator-filed ticket, no gh issue.
 - **[Config reload complete: autostart spawn-delta + restart
   wording](docs/backlog/resolved/config-reload-full-done.md)**
   (2026-09-22, PR #214) — only entries the session has not seen run (new

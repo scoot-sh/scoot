@@ -69,8 +69,9 @@ Linux, and daily-driven on `--tty`** (2026-09-18).
   it), the
   appearance (including the cursor size, color and theme), the keybindings,
   and new `[autostart]` spawn entries (only entries the session has not seen
-  run; a reloaded non-`spawn` entry is refused by name, and a locked reload
-  skips new entries until the first unlocked one) live; the DRM device
+  run; a reloaded non-`spawn` entry is refused by name, a spawn whose program
+  fails to start is refused by name and retried on the next reload, and a locked reload
+  defers new entries to the first unlocked one) live; the DRM device
   (`[tty] gpu`) and the renderer (`[renderer] backend`) take effect on
   restart, and a reload refuses them
   with a message naming that rather than silently ignoring them.

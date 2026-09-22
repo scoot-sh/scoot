@@ -187,7 +187,8 @@ unknown request tag is a decode error the server answers and keeps serving.
 ```
 
 `applied` names the fields re-applied live (including `autostart.commands`
-when new spawn entries ran), `refused` the ones that
+when new spawn entries started -- a spawn entry that fails to start is
+refused by name instead, and stays pending for the next reload), `refused` the ones that
 differed but cannot be (each with its reason: the two restart fields, a
 non-`spawn` autostart entry by name, or a locked-skipped autostart delta).
 Both name only fields that

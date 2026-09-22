@@ -13,13 +13,18 @@
 //! `keybindings_for` below instead.
 
 use std::fs;
+use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
+use std::sync::mpsc::{Receiver, Sender};
 use std::time::{Duration, Instant};
 
 use scoot_core::{Action, Config, Event, Horizontal, OutputId, WindowId, WindowInfo};
 use scoot_ipc::{Request, Response};
 use smithay::reexports::calloop::EventLoop;
 use smithay::reexports::wayland_server::Display;
+use wayland_protocols::ext::session_lock::v1::client::{
+    ext_session_lock_manager_v1, ext_session_lock_v1,
+};
 
 use super::{ScaleReload, autostart_delta, field, scale_reload};
 use crate::compositor::config;
@@ -29,7 +34,7 @@ use crate::compositor::keybindings::{Bound, Keybindings, Modifiers};
 use crate::compositor::state::State;
 use crate::compositor::test_support::{
     Harness, assert_marker_never_appears, locker, marker_path, test_renderer, touch_entry,
-    wait_for_marker,
+    wait_for, wait_for_marker,
 };
 
 const CANVAS: i32 = 200;
@@ -1262,5 +1267,506 @@ fn reload_under_lock_skips_new_spawns_without_advancing_the_snapshot() {
     assert!(
         harness.state.session_lock.is_locked(),
         "the reload under test must not disturb the lock"
+    );
+}
+
+// -- Follow-ups: failed-spawn honesty, lock wording, removal cancellation ---
+
+/// A program path no machine provides, so `Command::spawn` fails
+/// deterministically (ENOENT) wherever this runs.
+const MISSING_PROGRAM: &str = "/nonexistent-scoot-reload-probe";
+
+#[test]
+fn a_failed_spawn_is_refused_and_stays_pending_for_the_next_reload() {
+    // Finding 1, fail-first: the old code reported `applied` and marked the
+    // entry seen, so the failure lived only in the log and no later reload
+    // ever retried it. Now the reply refuses the entry by name, the
+    // snapshot does not advance past it, and the identical next reload
+    // retries (and refuses again) rather than going silent.
+    let mut fixture = Fixture::with_config("");
+    fixture.rewrite(&format!(
+        "[autostart]\ncommands = [\"spawn {MISSING_PROGRAM}\"]\n"
+    ));
+    let response = fixture.reload();
+    assert!(
+        applied(&response).is_empty(),
+        "nothing started, so nothing may report applied: {response:?}"
+    );
+    assert!(
+        refused(&response)
+            .iter()
+            .any(|entry| entry.starts_with(field::AUTOSTART)
+                && entry.contains("Spawn")
+                && entry.contains("retried")),
+        "the failed entry should be refused by name, still pending: {response:?}"
+    );
+    assert!(
+        fixture.state.startup_autostart.is_empty(),
+        "a failed spawn must not advance the snapshot -- it stays pending"
+    );
+
+    let second = fixture.reload();
+    assert!(
+        applied(&second).is_empty(),
+        "the retry also started nothing: {second:?}"
+    );
+    assert!(
+        refused(&second)
+            .iter()
+            .any(|entry| entry.starts_with(field::AUTOSTART) && entry.contains("Spawn")),
+        "the still-failing entry is retried, not silently dropped: {second:?}"
+    );
+    assert!(
+        fixture.state.startup_autostart.is_empty(),
+        "two failures advance nothing"
+    );
+}
+
+#[test]
+fn a_failed_spawn_runs_once_its_program_appears() {
+    // The other half of finding 1: pending really means pending. The entry
+    // fails while its program is missing, then runs exactly once after an
+    // executable appears at that path -- decided on success, silent after.
+    let program = marker_path("late-prog");
+    let marker = marker_path("late-marker");
+    let mut fixture = Fixture::with_config("");
+    fixture.rewrite(&format!(
+        "[autostart]\ncommands = [\"spawn {}\"]\n",
+        program.display()
+    ));
+    let first = fixture.reload();
+    assert!(
+        applied(&first).is_empty()
+            && refused(&first)
+                .iter()
+                .any(|entry| entry.starts_with(field::AUTOSTART)),
+        "missing program: refused, not applied: {first:?}"
+    );
+
+    fs::write(&program, format!("#!/bin/sh\ntouch {}\n", marker.display()))
+        .expect("a probe program");
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&program, fs::Permissions::from_mode(0o755))
+            .expect("an executable probe program");
+    }
+
+    let second = fixture.reload();
+    assert!(
+        applied(&second).contains(&field::AUTOSTART.to_owned()),
+        "with the program present the pending entry should run: {second:?}"
+    );
+    wait_for_marker(&marker);
+    let program_text = program.to_string_lossy().into_owned();
+    assert_eq!(
+        fixture.state.startup_autostart,
+        vec![spawn_action(&[&program_text])],
+        "success decides the entry"
+    );
+
+    let third = fixture.reload();
+    assert!(
+        applied(&third).is_empty() && refused(&third).is_empty(),
+        "the entry ran once and stays decided: {third:?}"
+    );
+    let _ = fs::remove_file(&program);
+}
+
+#[test]
+fn a_spawn_failing_mid_list_does_not_stop_later_entries() {
+    // Bug bash: one bad entry must cost only itself. Both neighbours run,
+    // the reply mixes applied (for what ran) with a refusal naming the
+    // failure, the snapshot advances past exactly the two that ran, and the
+    // next reload retries only the failure.
+    let first = marker_path("mid-first");
+    let last = marker_path("mid-last");
+    let mut fixture = Fixture::with_config("");
+    fixture.rewrite(&format!(
+        "[autostart]\ncommands = [\"{}\", \"spawn {MISSING_PROGRAM}\", \"{}\"]\n",
+        touch_entry(&first),
+        touch_entry(&last)
+    ));
+    let response = fixture.reload();
+    wait_for_marker(&first);
+    wait_for_marker(&last);
+    assert!(
+        applied(&response).contains(&field::AUTOSTART.to_owned()),
+        "the entries that ran should apply: {response:?}"
+    );
+    assert_eq!(
+        refused(&response)
+            .iter()
+            .filter(|entry| entry.starts_with(field::AUTOSTART))
+            .count(),
+        1,
+        "exactly the failing entry refuses: {response:?}"
+    );
+    assert_eq!(
+        fixture.state.startup_autostart,
+        vec![
+            spawn_action(&["touch", &first.to_string_lossy()]),
+            spawn_action(&["touch", &last.to_string_lossy()]),
+        ],
+        "the snapshot advances past what ran, not what failed"
+    );
+
+    let second = fixture.reload();
+    assert!(
+        applied(&second).is_empty(),
+        "the retry runs nothing new: {second:?}"
+    );
+    assert_eq!(
+        refused(&second)
+            .iter()
+            .filter(|entry| entry.starts_with(field::AUTOSTART))
+            .count(),
+        1,
+        "only the failure retries: {second:?}"
+    );
+}
+
+#[test]
+fn duplicate_failing_entries_are_each_refused_and_each_retried() {
+    // Bug bash: per-occurrence counting cuts both ways. Two identical bad
+    // entries are two attempts (matching the duplicate-runs-twice rule the
+    // delta pins above), two refusals, and two pending retries -- not one
+    // of each, and not a silent second occurrence.
+    let mut fixture = Fixture::with_config("");
+    fixture.rewrite(&format!(
+        "[autostart]\ncommands = [\"spawn {MISSING_PROGRAM}\", \"spawn {MISSING_PROGRAM}\"]\n"
+    ));
+    let response = fixture.reload();
+    assert!(
+        applied(&response).is_empty(),
+        "nothing started: {response:?}"
+    );
+    assert_eq!(
+        refused(&response)
+            .iter()
+            .filter(|entry| entry.starts_with(field::AUTOSTART))
+            .count(),
+        2,
+        "each failing occurrence refuses: {response:?}"
+    );
+    assert!(
+        fixture.state.startup_autostart.is_empty(),
+        "neither occurrence advances the snapshot"
+    );
+
+    let second = fixture.reload();
+    assert_eq!(
+        refused(&second)
+            .iter()
+            .filter(|entry| entry.starts_with(field::AUTOSTART))
+            .count(),
+        2,
+        "both occurrences retry: {second:?}"
+    );
+}
+
+#[test]
+fn entries_without_a_command_never_reach_the_delta() {
+    // Bug bash: `""` has no tokens and bare `spawn` names no command, so
+    // both are load-time skips (fail-open, like every malformed entry) --
+    // the file loads with no autostart at all and the reload is silent in
+    // both lists. No spawn is attempted, so there is nothing to refuse.
+    let mut fixture = Fixture::with_config("");
+    fixture.rewrite("[autostart]\ncommands = [\"\", \"spawn\"]\n");
+    let response = fixture.reload();
+    assert!(
+        applied(&response).is_empty() && refused(&response).is_empty(),
+        "command-less entries are skipped at load, never delta entries: {response:?}"
+    );
+    assert!(
+        fixture.state.startup_autostart.is_empty(),
+        "nothing parsed, nothing to decide"
+    );
+}
+
+/// A session-lock client that unlocks on demand. The shared [`locker`]
+/// parks holding the lock until the harness ends it (an abandoned lock
+/// stays locked by design); these sequences need a real
+/// `unlock_and_destroy` mid-test, so they bring their own script on the
+/// same `Harness<(), ()>` shape: lock, ack, then park until the test sends
+/// a step, at which point unlock, ack, and exit. A dropped step channel
+/// (the harness ending the test still locked) is a clean exit too.
+struct UnlockingLocker {
+    manager: Option<ext_session_lock_manager_v1::ExtSessionLockManagerV1>,
+    locked: bool,
+}
+
+impl wayland_client::Dispatch<wayland_client::protocol::wl_registry::WlRegistry, ()>
+    for UnlockingLocker
+{
+    fn event(
+        client: &mut Self,
+        registry: &wayland_client::protocol::wl_registry::WlRegistry,
+        event: wayland_client::protocol::wl_registry::Event,
+        _: &(),
+        _: &wayland_client::Connection,
+        qh: &wayland_client::QueueHandle<Self>,
+    ) {
+        if let wayland_client::protocol::wl_registry::Event::Global {
+            name,
+            interface,
+            version,
+        } = event
+            && interface.as_str() == "ext_session_lock_manager_v1"
+        {
+            client.manager = Some(registry.bind(name, version.min(1), qh, ()));
+        }
+    }
+}
+
+impl wayland_client::Dispatch<ext_session_lock_manager_v1::ExtSessionLockManagerV1, ()>
+    for UnlockingLocker
+{
+    fn event(
+        _: &mut Self,
+        _: &ext_session_lock_manager_v1::ExtSessionLockManagerV1,
+        _: ext_session_lock_manager_v1::Event,
+        _: &(),
+        _: &wayland_client::Connection,
+        _: &wayland_client::QueueHandle<Self>,
+    ) {
+    }
+}
+
+impl wayland_client::Dispatch<ext_session_lock_v1::ExtSessionLockV1, ()> for UnlockingLocker {
+    fn event(
+        client: &mut Self,
+        _: &ext_session_lock_v1::ExtSessionLockV1,
+        event: ext_session_lock_v1::Event,
+        _: &(),
+        _: &wayland_client::Connection,
+        _: &wayland_client::QueueHandle<Self>,
+    ) {
+        if let ext_session_lock_v1::Event::Locked = event {
+            client.locked = true;
+        }
+    }
+}
+
+fn unlocking_locker(
+    stream: UnixStream,
+    steps: Receiver<()>,
+    acks: Sender<()>,
+) -> Result<(), String> {
+    use wayland_client::Connection;
+    let conn = Connection::from_socket(stream).map_err(|e| e.to_string())?;
+    let mut queue = conn.new_event_queue();
+    let qh = queue.handle();
+    let _registry = conn.display().get_registry(&qh, ());
+    let mut client = UnlockingLocker {
+        manager: None,
+        locked: false,
+    };
+    queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+    let manager = client
+        .manager
+        .take()
+        .ok_or("no ext_session_lock_manager_v1")?;
+    let lock = manager.lock(&qh, ());
+    queue.flush().map_err(|e| e.to_string())?;
+    acks.send(()).map_err(|e| e.to_string())?;
+    // Parked holding the lock until the test sends the unlock step -- or
+    // the harness ends the test, which drops the step channel.
+    if steps.recv().is_err() {
+        return Ok(());
+    }
+    // Smithay only routes `unlock_and_destroy` once `locked` has been
+    // sent, and headless confirms on a drawn frame -- so wait for the
+    // confirmation event rather than racing it. The test side requested a
+    // render before sending the step; these round trips are what let the
+    // compositor draw it.
+    wait_for(
+        &mut queue,
+        &mut client,
+        "the session lock confirmation",
+        |seen| seen.locked.then_some(()),
+    )?;
+    lock.unlock_and_destroy();
+    queue.flush().map_err(|e| e.to_string())?;
+    acks.send(()).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Locks the session with a real lock client (the [`unlocking_locker`]
+/// script, which the test later unlocks), dispatching until the lock
+/// lands -- the same wait the parked-`locker` tests inline.
+fn lock_with(harness: &mut Harness<(), ()>) -> usize {
+    let client = harness.spawn(unlocking_locker);
+    harness.wait_for_ack(client);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !harness.state.session_lock.is_locked() {
+        assert!(
+            Instant::now() < deadline,
+            "the lock request never landed; the reload below would pass unlocked"
+        );
+        harness
+            .event_loop
+            .dispatch(Some(Duration::from_millis(5)), &mut harness.state)
+            .expect("a compositor dispatch");
+    }
+    client
+}
+
+/// Sends the unlock step and dispatches until the session is unlocked.
+///
+/// Requests a render first: these sequences map no lock surface, and the
+/// lock only confirms (sending `locked`, which Smithay requires before it
+/// routes `unlock_and_destroy`) on a drawn frame.
+fn unlock(harness: &mut Harness<(), ()>, client: usize) {
+    harness.state.request_render();
+    harness.send_step(client, ());
+    harness.wait_for_ack(client);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while harness.state.session_lock.is_locked() {
+        assert!(
+            Instant::now() < deadline,
+            "the unlock never landed; the reload below would pass locked"
+        );
+        harness
+            .event_loop
+            .dispatch(Some(Duration::from_millis(5)), &mut harness.state)
+            .expect("a compositor dispatch");
+    }
+}
+
+fn lock_harness() -> (Harness<(), ()>, PathBuf, tempfile::TempDir) {
+    let mut harness: Harness<(), ()> = Harness::headless(Appearance::default(), CANVAS);
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let path = dir.path().join("config.toml");
+    fs::write(&path, "").expect("a config file");
+    harness.state.config_path = Some(path.clone());
+    (harness, path, dir)
+}
+
+#[test]
+fn a_quit_only_locked_reload_defers_without_promising_a_run() {
+    // Finding 2, fail-first: the old skip message promised "new entries run
+    // on the first unlocked reload", which is strictly false for a quit --
+    // on unlock it lands in `refuse`, never runs. The reworded message
+    // promises only that pending entries are *decided*. Pinned end to end:
+    // quit-only delta under lock, unlock, then the quit refuses by name
+    // while the session keeps serving.
+    let (mut harness, path, _dir) = lock_harness();
+    let client = lock_with(&mut harness);
+
+    fs::write(&path, "[autostart]\ncommands = [\"quit\"]\n").expect("a rewritten config file");
+    let response = harness.state.handle_request(Request::Reload);
+    assert!(
+        applied(&response).is_empty(),
+        "a locked reload must apply nothing: {response:?}"
+    );
+    let entry = refused(&response)
+        .iter()
+        .find(|entry| entry.starts_with(field::AUTOSTART))
+        .unwrap_or_else(|| panic!("the skipped delta should be refused as locked: {response:?}"))
+        .to_owned();
+    assert!(
+        entry.contains("locked") && entry.contains("decided"),
+        "the skip should name the lock and promise only a decision: {entry}"
+    );
+    assert!(
+        !entry.contains("run on the first"),
+        "a quit never runs, so the message must not promise a run: {entry}"
+    );
+    assert!(
+        harness.state.startup_autostart.is_empty(),
+        "a locked reload must not advance the snapshot -- the quit stays pending"
+    );
+
+    unlock(&mut harness, client);
+    let unlocked = harness.state.handle_request(Request::Reload);
+    assert!(
+        applied(&unlocked).is_empty(),
+        "a reloaded quit must apply nothing: {unlocked:?}"
+    );
+    assert!(
+        refused(&unlocked)
+            .iter()
+            .any(|entry| entry.starts_with(field::AUTOSTART) && entry.contains("Quit")),
+        "on unlock the quit is decided as a refusal by name: {unlocked:?}"
+    );
+
+    // ...and the session is still alive to serve: a later spawn entry
+    // applies on the same state the quit sequence just passed through.
+    let marker = marker_path("quit-locked-alive");
+    fs::write(
+        &path,
+        format!(
+            "[autostart]\ncommands = [\"quit\", \"{}\"]\n",
+            touch_entry(&marker)
+        ),
+    )
+    .expect("a rewritten config file");
+    let third = harness.state.handle_request(Request::Reload);
+    assert!(
+        applied(&third).contains(&field::AUTOSTART.to_owned()),
+        "the session should still serve after the quit sequence: {third:?}"
+    );
+    wait_for_marker(&marker);
+}
+
+#[test]
+fn a_removed_while_locked_entry_never_runs() {
+    // Finding 3: the three-step cancellation the lock-skip exists to
+    // protect. Add-while-locked defers (snapshot frozen), remove-while-
+    // locked recomputes the delta to nothing (silent, not a skip -- there
+    // is nothing actionable left), and after unlock the entry still never
+    // runs: nothing was ever queued.
+    let (mut harness, path, _dir) = lock_harness();
+    let client = lock_with(&mut harness);
+
+    let marker = marker_path("removed-locked");
+    fs::write(
+        &path,
+        format!("[autostart]\ncommands = [\"{}\"]\n", touch_entry(&marker)),
+    )
+    .expect("a rewritten config file");
+    let added = harness.state.handle_request(Request::Reload);
+    assert!(
+        applied(&added).is_empty(),
+        "a locked reload must apply nothing: {added:?}"
+    );
+    assert!(
+        refused(&added)
+            .iter()
+            .any(|entry| entry.starts_with(field::AUTOSTART) && entry.contains("locked")),
+        "the skipped spawn should be refused as locked, not silent: {added:?}"
+    );
+    assert!(
+        harness.state.startup_autostart.is_empty(),
+        "a locked reload must not advance the snapshot -- the entry stays pending"
+    );
+
+    fs::write(&path, "[autostart]\ncommands = []\n").expect("a rewritten config file");
+    let removed = harness.state.handle_request(Request::Reload);
+    assert!(
+        applied(&removed).is_empty() && refused(&removed).is_empty(),
+        "with the entry gone there is nothing actionable to skip: {removed:?}"
+    );
+    assert!(
+        harness.state.startup_autostart.is_empty(),
+        "the removal must not mark anything seen"
+    );
+
+    unlock(&mut harness, client);
+    let after = harness.state.handle_request(Request::Reload);
+    assert!(
+        applied(&after).is_empty() && refused(&after).is_empty(),
+        "after unlock the cancelled entry stays silent: {after:?}"
+    );
+    harness.settle();
+    assert_marker_never_appears(&marker);
+    assert!(
+        harness.state.startup_autostart.is_empty(),
+        "a cancelled entry never enters the snapshot"
+    );
+    assert!(
+        !harness.state.session_lock.is_locked(),
+        "the sequence must end unlocked"
     );
 }
