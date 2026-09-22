@@ -102,7 +102,9 @@ own keyboard derivation:
   bar on the second screen never shrinks the first screen's tiling area.
 - A surface that names an output (`get_layer_surface` with a `wl_output`)
   appears on that output. A surface that names none appears on the first
-  output — the compositor's choice, and where new windows open too.
+  output — the compositor's choice. New windows, by contrast, open on the
+  output under the pointer (falling back to the first when the pointer is
+  over no output).
 - Pointer input and keyboard focus follow the output under the pointer: a
   click on a second-screen bar focuses that bar, and an `exclusive`
   launcher mapped where the pointer is takes the keyboard there. If
@@ -383,7 +385,7 @@ Worth knowing before you write against it:
   outputs** — one `output_leave` for the old screen plus one `output_enter`
   for the new one, closed by `done`, on exactly the window that moved (which
   is the only thing that can change a window's screen: new windows open on
-  the first output, and switching workspaces does not move one). Closing a
+  the pointer's output, and switching workspaces does not move one). Closing a
   window sends `closed` with no `leave` first — the handle's death is the
   `closed` event, and nothing may be sent on it after. A client holding no
   `wl_output` for either screen hears nothing about the move, not even a

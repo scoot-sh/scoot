@@ -546,6 +546,27 @@ impl State {
             })
         })
     }
+
+    /// The output under the pointer right now, if the pointer is over one.
+    ///
+    /// What new windows open on (`shell.rs` files `WindowOpened` under this
+    /// output's id, falling back to the primary when the pointer names no
+    /// output) and what `output_of_window` reports for a window with no
+    /// bounding box yet -- the milestone-19 focus decision in both cases: the
+    /// pointer position picks the output, then the existing derivation
+    /// applies unchanged. `None` when the seat has no pointer (unreachable
+    /// past startup) or the pointer rests over no output (absolute motion is
+    /// never clamped, and uneven outputs leave dead zones), in which case
+    /// both callers fall back to the primary.
+    ///
+    /// Cold path (once per window-open, per announce, per `wl_output` bind),
+    /// so the geometry scan costs nothing beside the hit tests beside it.
+    pub(super) fn pointer_output(&self) -> Option<Output> {
+        let pointer = self.seat.get_pointer()?;
+        let (output, _) = self.output_under(pointer.current_location())?;
+        Some(output)
+    }
+
     /// The layer surface under `position` on one of `layers`, if any, plus
     /// the specific (sub)surface within it and where that sits globally --
     /// the same shape [`State::surface_under`] returns for a window.

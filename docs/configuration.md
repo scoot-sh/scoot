@@ -140,11 +140,11 @@ What a second output **is**, today:
 What it is **not**, yet — the work tracked in
 `docs/backlog/core/multi-output.md` (milestone 19, phase E and beyond):
 
-- new windows still open on the first output; moving one across outputs, and
-  focusing another output from the keyboard, is a config bind away (see
-  [Moving across outputs](#moving-across-outputs)) — there are deliberately
-  no default binds for either yet, while which combos they should take stays
-  an open decision;
+- new windows open on the output under the pointer (falling back to the
+  first output when the pointer is over no output); moving one across
+  outputs, and focusing another output from the keyboard, is bound by
+  default for outputs 1 and 2 (see [Moving across
+  outputs](#moving-across-outputs)) — ids 3+ stay manual;
 - no per-output mode/scale/position configuration surface:
   `wlr-output-management` `apply`/`test` stay refused;
 - `--tty` driving two connectors at once (phase E, hardware-gated).
@@ -442,9 +442,10 @@ can't be expressed this way).
 
 ### Moving across outputs
 
-With more than one output, two actions reach across screens — and neither
-has a default bind, by decision (which combos they should take is its own
-open question; see the multi-output milestone). Add your own, e.g.:
+With more than one output, two actions reach across screens — and the first
+two outputs have default binds, promoted from the manual example (bare Super
+focuses, Shift carries the focused window there, the same split the
+workspace digits keep):
 
 ```toml
 [binds]
@@ -453,6 +454,10 @@ open question; see the multi-output milestone). Add your own, e.g.:
 "super+shift+comma" = "move-window-to-output 1"
 "super+shift+period" = "move-window-to-output 2"
 ```
+
+Those four lines are the defaults: uncommenting them in a file printed by
+`scoot --print-default-config` changes nothing. Outputs 3 and up stay
+manual — add your own binds naming those ids, in the same form.
 
 The ids are what `scootctl outputs` reports (stable for the session, unlike
 workspace positions). `move-window-to-output` carries the focused window to
@@ -549,12 +554,14 @@ Three behaviors worth knowing:
 | `Super+Ctrl+Shift+k` | Move window to workspace up |
 | `Super+1`..`Super+9` | Focus workspace 1–9 directly (index 0–8) |
 | `Super+Shift+1`..`Super+Shift+9` | Move window to workspace 1–9 directly (index 0–8) |
+| `Super+comma` / `Super+period` | Focus output 1 / 2 |
+| `Super+Shift+comma` / `Super+Shift+period` | Move window to output 1 / 2 directly |
 | `Super+r` | Cycle column width |
 | `Super+q` | Close focused window |
 | `Super+Return` | Spawn `foot` |
 | `Super+Shift+e` | Quit |
 
-All 36 of them — vim motions (`h`/`j`/`k`/`l`) for direction, Super as
+All 40 of them — vim motions (`h`/`j`/`k`/`l`) for direction, Super as
 scoot's own modifier throughout. Quit is deliberately `Super+Shift+e`, not
 `Super+Shift+q`: that combo is one slipped Shift away from `Super+q` (close
 focused window), and a slip of the finger shouldn't be able to end the whole
@@ -590,9 +597,10 @@ a Linux-session concept with no meaning there. See
 bind — at startup and on every `scootctl reload`, which layers them back on
 last rather than letting a reloaded file strip the recovery path.
 
-No default bind moves a window across outputs or focuses another output —
-both are config binds you add yourself (see [Moving across
-outputs](#moving-across-outputs)).
+Moving a window across outputs, or focusing another output, is bound by
+default for outputs 1 and 2 (`Super+comma`/`Super+period` and Shift for the
+carry — see [Moving across outputs](#moving-across-outputs)); outputs 3 and
+up are config binds you add yourself.
 
 ## Example `config.toml`
 

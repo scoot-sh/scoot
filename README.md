@@ -151,6 +151,8 @@ second output does and does not do yet.
 | `Super+Ctrl+Shift+j` / `Super+Ctrl+Shift+k` | Move window to workspace down / up |
 | `Super+1`..`Super+9` | Focus workspace 1–9 directly |
 | `Super+Shift+1`..`Super+Shift+9` | Move window to workspace 1–9 directly |
+| `Super+comma` / `Super+period` | Focus output 1 / 2 |
+| `Super+Shift+comma` / `Super+Shift+period` | Move window to output 1 / 2 directly |
 | `Super+r` | Cycle column width |
 | `Super+q` | Close focused window |
 | `Super+Return` | Spawn `foot` |

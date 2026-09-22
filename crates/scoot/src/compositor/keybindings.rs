@@ -13,7 +13,7 @@
 //! identity plus explicit modifiers is both simpler and how real WM
 //! keybindings (e.g. niri, sway) already work.
 
-use scoot_core::{Action, Horizontal, Vertical};
+use scoot_core::{Action, Horizontal, OutputId, Vertical};
 use smithay::input::keyboard::{Keysym, ModifiersState};
 
 /// The modifiers a keybinding can require. Lock states (`caps_lock`,
@@ -186,6 +186,34 @@ impl Default for Keybindings {
             // from Super+q (close-focused), and a slip shouldn't be able to
             // end the whole session.
             (SUPER_SHIFT, Keysym::e, Bound::Action(Action::Quit)),
+            // Across outputs, for the first two (ids 3+ stay manual -- no key
+            // family maps onto eight outputs the way digits map onto nine
+            // workspaces). Bare Super focuses, Shift carries the focused
+            // window and follows it there: the same split the workspace
+            // digits keep, and the combos the docs have shown as the manual
+            // example since phase F -- promoting them changes no documented
+            // spelling, and a user's own identical bind keeps working by
+            // overriding the same combo through `insert`.
+            (
+                SUPER,
+                Keysym::comma,
+                Bound::Action(Action::FocusOutput(OutputId(1))),
+            ),
+            (
+                SUPER,
+                Keysym::period,
+                Bound::Action(Action::FocusOutput(OutputId(2))),
+            ),
+            (
+                SUPER_SHIFT,
+                Keysym::comma,
+                Bound::Action(Action::MoveFocusedWindowToOutput(OutputId(1))),
+            ),
+            (
+                SUPER_SHIFT,
+                Keysym::period,
+                Bound::Action(Action::MoveFocusedWindowToOutput(OutputId(2))),
+            ),
         ];
         // Numbered workspaces, 1-based on the keycap and 0-based in the
         // core: `Super+3` focuses index 2, `Super+Shift+3` carries the
@@ -447,6 +475,41 @@ mod tests {
                 i + 1
             );
         }
+    }
+
+    #[test]
+    fn output_focus_and_move_are_bound_by_default() {
+        // The documented manual binds, promoted: `Super+comma`/`Super+period`
+        // focus outputs 1/2, `Super+Shift` carries the focused window there --
+        // the same bare-focus / Shift-move split the workspace digits keep.
+        // Ids 3+ stay manual (no key family maps onto eight outputs the way
+        // digits map onto nine workspaces).
+        use scoot_core::OutputId;
+        let table = Keybindings::default();
+        assert_eq!(
+            table.match_key(Keysym::comma, SUPER),
+            Some(Bound::Action(Action::FocusOutput(OutputId(1)))),
+            "Super+comma"
+        );
+        assert_eq!(
+            table.match_key(Keysym::period, SUPER),
+            Some(Bound::Action(Action::FocusOutput(OutputId(2)))),
+            "Super+period"
+        );
+        assert_eq!(
+            table.match_key(Keysym::comma, SUPER_SHIFT),
+            Some(Bound::Action(Action::MoveFocusedWindowToOutput(OutputId(
+                1
+            )))),
+            "Super+Shift+comma"
+        );
+        assert_eq!(
+            table.match_key(Keysym::period, SUPER_SHIFT),
+            Some(Bound::Action(Action::MoveFocusedWindowToOutput(OutputId(
+                2
+            )))),
+            "Super+Shift+period"
+        );
     }
 
     #[test]

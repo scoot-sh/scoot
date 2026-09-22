@@ -179,10 +179,10 @@ fn a_client_binding_the_output_with_no_handles_yet_is_harmless() {
 // ---------------------------------------------------------------------------
 
 /// A window is announced with the output it is on, and a bind of any other
-/// output stays silent. New windows open on the first output, so binding the
-/// first screen hears the enter and binding the second hears nothing -- the
-/// same window, the same handle, told per output rather than announced on
-/// the primary unconditionally.
+/// output stays silent. A window opened with the pointer on the first output
+/// is announced there, so binding the first screen hears the enter and
+/// binding the second hears nothing -- the same window, the same handle,
+/// told per output rather than announced on the primary unconditionally.
 #[test]
 fn a_window_is_announced_on_its_own_output_and_no_other() {
     let mut fixture = two_output_fixture();
@@ -330,5 +330,140 @@ fn a_move_is_silent_to_a_client_with_no_output_objects() {
         fixture.take_log(),
         Vec::new(),
         "a client with no wl_output was told about a move it cannot name"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// New-window placement: the pointer's output (milestone 19, phase G)
+// ---------------------------------------------------------------------------
+
+/// A window opened with the pointer on the second output is announced on
+/// that output -- fail-first: with `WindowOpened` filed on the first output
+/// unconditionally, a client holding only the second screen's object hears
+/// nothing, and the core places the window there.
+#[test]
+fn a_new_window_opens_on_the_pointers_output() {
+    let mut fixture = two_output_fixture();
+    // Only the second screen's object: an enter here names output 2, and
+    // nothing else can produce one (`OutputEnter` is keyed by handle, so
+    // the discrimination is which object hears it, not the event's value).
+    fixture.run(Step::BindOutputAt(1));
+    fixture.run(Step::BindManager);
+    fixture.take_log();
+
+    // Each output is CANVAS wide, so this point is on the second screen.
+    fixture.state.pointer_move(f64::from(CANVAS) + 100.0, 100.0);
+    fixture.run(Step::MapWindow);
+    assert_eq!(
+        output_events(&fixture.take_log()),
+        vec![Seen::OutputEnter(0)],
+        "a window opened with the pointer on output 2 was not announced on it"
+    );
+    let placements = fixture.state.world.arrange().placements;
+    assert_eq!(
+        placements.len(),
+        1,
+        "expected exactly the one mapped window: {placements:?}"
+    );
+    assert_eq!(
+        placements[0].output,
+        OutputId(2),
+        "a window opened with the pointer on output 2 was not placed on it"
+    );
+    let snapshots = fixture.state.window_snapshots();
+    assert_eq!(
+        snapshots.len(),
+        1,
+        "expected exactly the one mapped window: {snapshots:?}"
+    );
+    assert_eq!(
+        snapshots[0].output, 2,
+        "the IPC `output` field does not name the output the window opened on"
+    );
+}
+
+/// The mirror: a client holding only the first screen's object hears nothing
+/// about that same window -- fail-first the other way round, since the old
+/// code announced everything on the first output.
+#[test]
+fn a_new_window_on_the_second_output_is_silent_on_the_first() {
+    let mut fixture = two_output_fixture();
+    fixture.run(Step::BindOutputAt(0));
+    fixture.run(Step::BindManager);
+    fixture.take_log();
+
+    fixture.state.pointer_move(f64::from(CANVAS) + 100.0, 100.0);
+    fixture.run(Step::MapWindow);
+    let log = fixture.take_log();
+    assert_eq!(
+        output_events(&log),
+        Vec::new(),
+        "a window on output 2 was announced on the first output: {log:?}"
+    );
+    assert!(
+        log.contains(&Seen::Toplevel(0)),
+        "a client with no second-output object stopped being served: {log:?}"
+    );
+}
+
+/// The same path with the pointer on the first output: the window opens
+/// there -- the pre-G behavior, kept as a regression pin.
+#[test]
+fn a_new_window_opens_on_the_first_output_with_the_pointer_there() {
+    let mut fixture = two_output_fixture();
+    fixture.run(Step::BindOutputAt(0));
+    fixture.run(Step::BindOutputAt(1));
+    fixture.run(Step::BindManager);
+    fixture.take_log();
+
+    fixture.state.pointer_move(100.0, 100.0);
+    fixture.run(Step::MapWindow);
+    assert_eq!(
+        output_events(&fixture.take_log()),
+        vec![Seen::OutputEnter(0)],
+        "a window opened with the pointer on output 1 was not announced on it"
+    );
+    let placements = fixture.state.world.arrange().placements;
+    assert_eq!(
+        placements.len(),
+        1,
+        "expected exactly the one mapped window: {placements:?}"
+    );
+    assert_eq!(
+        placements[0].output,
+        OutputId(1),
+        "a window opened with the pointer on output 1 was not placed on it"
+    );
+}
+
+/// A window opened with the pointer over no output at all falls back to the
+/// primary -- absolute motion is never clamped, so off-output (and, with
+/// uneven outputs, dead-zone) pointer positions are reachable, and they must
+/// still open somewhere rather than nowhere.
+#[test]
+fn a_new_window_with_the_pointer_over_no_output_falls_back_to_primary() {
+    let mut fixture = two_output_fixture();
+    fixture.run(Step::BindOutputAt(0));
+    fixture.run(Step::BindOutputAt(1));
+    fixture.run(Step::BindManager);
+    fixture.take_log();
+
+    fixture.state.pointer_move(-50.0, -50.0);
+    fixture.run(Step::MapWindow);
+    assert_eq!(
+        output_events(&fixture.take_log()),
+        vec![Seen::OutputEnter(0)],
+        "a window opened with the pointer over no output was not announced on the primary"
+    );
+    let placements = fixture.state.world.arrange().placements;
+    assert_eq!(
+        placements.len(),
+        1,
+        "expected exactly the one mapped window: {placements:?}"
+    );
+    assert_eq!(
+        placements[0].output,
+        OutputId(1),
+        "a window opened with the pointer over no output did not fall back to the primary"
     );
 }

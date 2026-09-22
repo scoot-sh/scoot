@@ -29,7 +29,16 @@ impl State {
         // about when a window came into existence.
         self.open_foreign_toplevel(id, &info);
         self.open_wlr_toplevel(id, &info);
-        let output = self.world.outputs().first().map(|(id, _)| *id);
+        // The pointer's output, falling back to the primary when the pointer
+        // names no output (or, before any output exists, to nothing -- the
+        // core parks the window until one appears). The milestone-19 focus
+        // doctrine: the pointer position picks the output. With one output
+        // this reads as the first id either way, which is what the
+        // single-output session has always filed.
+        let output = self
+            .pointer_output()
+            .and_then(|output| self.outputs.id_of(&output))
+            .or_else(|| self.outputs.primary_id());
         self.world.handle_event(Event::WindowOpened {
             id,
             info,
