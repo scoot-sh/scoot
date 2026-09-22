@@ -97,6 +97,18 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[XWayland Phase 1 skeleton](docs/backlog/protocols/xwayland-support.md)**
+  (2026-09-22, PR #221) — opt-in `--xwayland`/`[xwayland]` (default off,
+  own cargo feature): server spawn + abstract socket + READY ordering,
+  handler impls (activation steal refused by default), loud Wayland-only
+  fallback, `DISPLAY` plumbing, no-token-for-X deferred to Phase 2 with
+  documented policy (review accepted: nil exposure today). Mapping
+  exclusion proven three ways (constructor absence). Review clean; two
+  lows fixed in-round (WM-failure `DISPLAY` withdrawal, emission guard).
+  Ticket stays OPEN for mapping → focus gate → clipboard → capture.
+  Remainder filed as [WM-failure
+  pin](./docs/backlog/protocols/xwayland-phase1-wm-failure-pin.md).
+
 - **[XWayland Phase 0 spike](docs/backlog/protocols/xwayland-support.md)**
   (2026-09-22, PR #220, docs-only) — break-site inventory re-verified at
   the pinned rev (two ticket corrections: single `XWayland::spawn`, no

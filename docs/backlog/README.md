@@ -680,10 +680,13 @@ scale/mode) into one hardware session.
   [per-output scale/mode](./core/per-output-scale-mode.md) entry, which
   stays last.
 - [XWayland support](./protocols/xwayland-support.md)
-  — OPEN, low: spike → skeleton → core mapping → focus-gate security half
-  → clipboard/DnD → capture/packaging/docs. No Smithay bump needed
-  (pinned 0.7.0 carries `xwayland/`). Opt-in flag recommended; X11 trust
-  consequences documented, not waived.
+  — OPEN, low: spike (PR #220) + skeleton (PR #221) landed; remaining core
+  mapping → focus-gate security half → clipboard/DnD → capture/packaging/
+  docs. No Smithay bump needed (pinned 0.7.0 carries `xwayland/`). Opt-in
+  flag recommended; X11 trust consequences documented, not waived.
+  Review remainder filed as [WM-failure
+  pin](./protocols/xwayland-phase1-wm-failure-pin.md) (deterministic rival-
+  claimant test recipe for the `xdisplay` clear).
 - [GPU scanout: cursor + overlay planes](./resolved/gpu-scanout-planes-done.md)
   — RESOLVED 2026-09-22 (coordinator-filed, no gh issue): all three phase-2
   steps landed — cursor plane active where exposed (PR #216), overlay planes

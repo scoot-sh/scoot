@@ -71,7 +71,9 @@
 //!   log plus a Wayland-only session -- never a crash, never a hang. A
 //!   mid-session death arrives as `XWaylandEvent::Error` (pre-`READY`) or
 //!   the XWM `disconnected` callback (post-`READY`, see `handlers.rs`);
-//!   both log loudly and the session survives. What neither clears is the
+//!   a `READY`-then-WM-attach-failure clears `xdisplay` the same way;
+//!   all three log loudly and the session survives. What none of the three
+//!   clears is the
 //!   already-exported `DISPLAY`: children spawned while the server lived
 //!   keep pointing at a dead `:N`, and so do later children through process
 //!   inheritance. That staleness fails loudly at the X client (connection
@@ -272,8 +274,11 @@ pub fn start(
                             // only while our server is believed live", and
                             // a WM-less server is not live for our
                             // purposes -- same as the pre-READY death
-                            // below), so later spawns inherit rather than
-                            // point at the half-session. The grab manager
+                            // below), so no explicit `DISPLAY` is handed
+                            // out anymore. The process-wide staleness is
+                            // unchanged (see the module doc): later spawns
+                            // still inherit the exported `:N`. The grab
+                            // manager
                             // stays (created at spawn, `can_view`-gated,
                             // harmless without X surfaces), and the server
                             // process itself is untouched (reaped with the
