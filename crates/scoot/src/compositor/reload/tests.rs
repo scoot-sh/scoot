@@ -1345,7 +1345,7 @@ fn a_failed_spawn_runs_once_its_program_appears() {
 
     fs::write(&program, format!("#!/bin/sh\ntouch {}\n", marker.display()))
         .expect("a probe program");
-    #[cfg(target_os = "linux")]
+    #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         fs::set_permissions(&program, fs::Permissions::from_mode(0o755))
@@ -1769,4 +1769,42 @@ fn a_removed_while_locked_entry_never_runs() {
         !harness.state.session_lock.is_locked(),
         "the sequence must end unlocked"
     );
+}
+
+#[test]
+fn a_removed_then_readded_entry_runs_again() {
+    // The snapshot tracks the live file, not history: add runs, removal is
+    // silent and shrinks the snapshot, and re-adding the identical entry
+    // runs it again. Regression pin for a grow-only snapshot (extend
+    // without shrink), which made the re-add silent forever: removal
+    // memory must never outlive the file.
+    let marker = marker_path("readded");
+    let entry = touch_entry(&marker);
+    let mut fixture = Fixture::with_config("");
+    fixture.rewrite(&format!("[autostart]\ncommands = [\"{entry}\"]\n"));
+    let added = fixture.reload();
+    assert!(
+        applied(&added).contains(&field::AUTOSTART.to_owned()),
+        "the new entry should apply: {added:?}"
+    );
+    wait_for_marker(&marker);
+
+    fixture.rewrite("[autostart]\ncommands = []\n");
+    let removed = fixture.reload();
+    assert!(
+        applied(&removed).is_empty() && refused(&removed).is_empty(),
+        "removal runs nothing and refuses nothing: {removed:?}"
+    );
+    assert!(
+        fixture.state.startup_autostart.is_empty(),
+        "removal must shrink the snapshot -- nothing is remembered past the file"
+    );
+
+    fixture.rewrite(&format!("[autostart]\ncommands = [\"{entry}\"]\n"));
+    let readded = fixture.reload();
+    assert!(
+        applied(&readded).contains(&field::AUTOSTART.to_owned()),
+        "the re-added entry is new again and must run: {readded:?}"
+    );
+    wait_for_marker(&marker);
 }

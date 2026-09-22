@@ -449,14 +449,22 @@ impl State {
                 &format!("{action:?} is not a spawn entry; only new spawn entries run on reload"),
             ));
         }
-        // Decided entries only: accepted spawns and refused non-spawns never
-        // re-report, while a failed spawn stays out so the next reload sees
-        // it as unseen and retries it. The multiset diff in
-        // `autostart_delta` is order-insensitive, so appending in file order
-        // keeps the snapshot readable without changing what the next delta
-        // computes.
-        self.startup_autostart.extend(accepted);
-        self.startup_autostart.extend(delta.refuse);
+        // The snapshot becomes the fresh list minus the still-failing
+        // spawns. Removals shrink it -- nothing is remembered past the file,
+        // so a removed-then-re-added entry runs again -- decided entries
+        // never re-report, and a failed spawn stays out so the next reload
+        // sees it as unseen and retries it. Each failed occurrence removes
+        // exactly one fresh occurrence, so duplicates keep the
+        // per-occurrence accounting `autostart_delta` computes; a failed
+        // entry always names a fresh occurrence (it came out of this
+        // reload's own delta), so the search below always lands.
+        let mut snapshot = fresh.autostart.clone();
+        for action in &failed {
+            if let Some(index) = snapshot.iter().position(|entry| entry == action) {
+                snapshot.remove(index);
+            }
+        }
+        self.startup_autostart = snapshot;
     }
 
     /// `[binds]`: rebuilt from defaults plus the file (see
