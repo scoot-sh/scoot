@@ -55,8 +55,16 @@ Linux, and daily-driven on `--tty`** (2026-09-18).
   still drives one connector (a second monitor there stays dark).
 - **No XWayland.** X11-only applications do not run.
 - **GPU scanout is new and narrow.** `--tty --renderer gles` scans out from
-  the GPU, but only in a `gpu-scanout` build (`nix build .#scoot-gpu`) and
-  only on the primary plane — no overlay or cursor planes yet.
+  the GPU, but only in a `gpu-scanout` build (`nix build .#scoot-gpu`).
+  The cursor rides its own KMS plane where the CRTC exposes one (and an
+  overlay plane where that is all there is), overlay planes are enumerated
+  per CRTC, and frames may go direct on the primary (`ALLOW_SCANOUT`) — with
+  the capture fix that makes the last one safe: a direct frame marks the
+  capture recording, and a capture served off a marked recording forces one
+  composite frame first, so screenshots and screen captures stay correct.
+  No window leaves the primary plane yet (nothing is marked a scanout
+  candidate, and the framebuffer exporter admits no client buffers), and a
+  plane-assigned cursor is absent from captures by design.
   `--headless`/`--nested` still read every frame back to main memory as
   pixman does. It is no longer unproven: on an Apple M2 under Asahi Linux it
   costs **4–5x less CPU** than the default tier under damage (and ~0.2 W

@@ -257,6 +257,15 @@ impl State {
     /// answer); a `None` here is an unreachable-by-then `Err`, never a
     /// capture of the wrong screen.
     pub fn capture_pixels_for(&mut self, id: Option<OutputId>) -> Result<RawCapture, String> {
+        // Scanout-tier only: force one composite frame first when the
+        // recording is stale-or-missing, so the read below serves current
+        // pixels rather than a pre-direct composite. No-op on every other
+        // tier (persistent framebuffer, current by construction) and when
+        // the recording is already a fresh composite.
+        #[cfg(feature = "gpu-scanout")]
+        if let Some(id) = id {
+            self.ensure_scanout_capture_current(id);
+        }
         self.render();
         let Some(id) = id else {
             return Err("no backend to capture".into());

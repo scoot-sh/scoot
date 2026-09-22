@@ -683,15 +683,16 @@ scale/mode) into one hardware session.
   → clipboard/DnD → capture/packaging/docs. No Smithay bump needed
   (pinned 0.7.0 carries `xwayland/`). Opt-in flag recommended; X11 trust
   consequences documented, not waived.
-- [GPU scanout: cursor + overlay planes](./rendering/gpu-scanout-planes.md)
-  — OPEN, medium, no longer hardware-gated. **Phase 1 landed 2026-09-21**:
-  the tier comes up on real hardware and the known hazard was not one — one
-  GBM device serving allocator + exporter + EGL is enough on the split
-  render/display topology, so the separable construction is not needed.
-  What remains is cursor → overlay → `ALLOW_SCANOUT` last with its capture
-  fix, and phase 2's own first question is whether `apple,dcp` exposes
-  usable cursor/overlay planes at all. Headless/nested read-back stays by
-  design. Numbers: [the measurement entry](./resolved/gpu-vs-cpu-measured-done.md).
+- [GPU scanout: cursor + overlay planes](./resolved/gpu-scanout-planes-done.md)
+  — RESOLVED 2026-09-22 (coordinator-filed, no gh issue): all three phase-2
+  steps landed — cursor plane active where exposed (PR #216), overlay planes
+  enumerated per CRTC (PR #217), and `ALLOW_SCANOUT` with its capture fix in
+  the same change (direct frames mark the recording, captures served off a
+  marked recording force one composite frame first, loud refusal where the
+  force cannot draw). No window leaves the primary yet (no candidates, and
+  the exporter stays `NodeFilter::None`), so the flag is assignment-inert
+  and the fix is proven by pins + trace + byte-identity live. Numbers:
+  [the measurement entry](./resolved/gpu-vs-cpu-measured-done.md).
 - [Config reload: from partial to full](./resolved/config-reload-full-done.md)
   — RESOLVED 2026-09-22 (all phases): autostart spawn-delta (only entries
   the session has not seen run, new spawns once each, reloaded non-spawn

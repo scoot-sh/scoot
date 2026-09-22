@@ -1,9 +1,46 @@
 ---
-title: "GPU scanout: cursor + overlay planes (steps 1-2 landed — the real-GPU proof is in)"
-status: "open"
-area: "rendering"
-priority: "medium"
+title: "GPU scanout: cursor + overlay planes — RESOLVED"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+---
+
+# GPU scanout: cursor + overlay planes — RESOLVED
+
+RESOLVED 2026-09-22 (coordinator-filed, no gh issue; branch
+`allow-scanout-capture-fix`, PR #NNN): step 3, `ALLOW_SCANOUT` with its
+capture fix in the same change. The flag is the whole of the KMS delta
+(`tty/scanout.rs`: `FRAME_FLAGS = ALLOW_SCANOUT`, pinned to exclude the
+`ANY` bit); the fix is two halves that land with it, never apart — a direct
+frame marks the capture recording (`ScanoutFrame::primary_direct` →
+`Captures::note_direct`), and a capture served off a marked recording forces
+one composite-only frame first (`State::ensure_scanout_capture_current`,
+funnelled through by both IPC `screenshot` and `ext-image-copy-capture-v1`'s
+`service_captures`, hence shell thumbnails and overviews too), failing
+loudly at `Backend::capture` where the force cannot draw. No `COLOR_FORMATS`
+change, no candidate marking, no packaging or wire change (refusal strings
+are payload; `PROTOCOL_VERSION` stays 3).
+
+The gating answer, established before the flip and shaping all the evidence:
+direct scanout is unreachable on two independent grounds, so the flag is
+assignment-inert on this tree and the fix is proven by harness/unit pins +
+pinned-source trace, stated here rather than live. (1) No window element is
+a scanout candidate (all `Kind::Unspecified`), so no overlay assignment can
+take one. (2) The framebuffer exporter stays `NodeFilter::None`, which
+rejects every client dmabuf in `can_add_framebuffer`, while shm-backed and
+solid elements never produce an exportable buffer at all -- so
+`element_config` fails every primary-direct attempt before any hardware is
+touched. Widening the exporter is what would make the bit do anything, and
+it rides on this capture fix, not before it. Live on virtio-gpu
+(`cursor_planes=1 overlay_planes=0`): byte-identity across cursor moves and
+a VT pause/resume cycle, cross-tier diff confined to the cursor box,
+commit-health clean (`UnknownPlane` 0, primary flipping, cursor plane
+pointer-tracked), and a compositor-trace session showing zero
+primary-direct assignments. Review: PENDING (coordinator runs
+`scoot-reviewer`; this header gains the PR number on creation). Original
+entry below, kept verbatim.
+
 ---
 
 # GPU scanout: cursor + overlay planes (steps 1-2 landed — the real-GPU proof is in)

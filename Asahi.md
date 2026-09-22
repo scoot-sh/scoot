@@ -575,7 +575,7 @@ damage bounding box is big. The 4.8–5.1x is for substantial damage; a small
 cursor-rect move is a different measurement and was not made. Both figures
 are one panel at one resolution on one machine, and scanout remains
 primary-plane only — cursor and overlay planes are phase 2 of
-`docs/backlog/rendering/gpu-scanout-planes.md`, which this unblocks.
+`docs/backlog/resolved/gpu-scanout-planes-done.md`, which this unblocks.
 
 **Corrections to earlier drafts of this section**, collected here rather than
 left inline, because a result is hard to read with its own revision history

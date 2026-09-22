@@ -211,12 +211,21 @@ running with no GPU at all is a hard requirement here, not a fallback tier.
   still warns and keeps pixman, because the read-back-and-copy shape it
   would otherwise take is strictly worse than compositing on the CPU.
   `--headless` and `--nested` are still read-back in every build.
-- **Scanout is primary-plane only, plus attempted cursor and overlay planes.**
+- **Scanout drives every plane it can claim, with captures kept correct.**
   The cursor plane is attempted on CRTCs that expose one, with per-frame
   fallback to compositing where the plane cannot be claimed; overlay planes
-  ride along whole from the CRTC's inventory the same way (step 2 of
-  `docs/backlog/rendering/gpu-scanout-planes.md`), and likewise fall back
-  per frame. Two paravirt caveats, both measured on the dev
+  ride along whole from the CRTC's inventory the same way, and likewise fall
+  back per frame. Step 3 of
+  `docs/backlog/resolved/gpu-scanout-planes-done.md` additionally passes
+  `ALLOW_SCANOUT`, so a frame *may* go direct on the primary plane instead
+  of compositing into the swapchain slot. Two halves landed together, never
+  apart: the direct arm is reported per frame and marks the capture
+  recording (`Captures::note_direct`), and a capture served off a marked
+  recording forces one composite-only frame first
+  (`State::ensure_scanout_capture_current`, through both IPC `screenshot`
+  and `ext-image-copy-capture-v1`) -- a session where the force cannot draw
+  fails the capture loudly rather than serving the stale buffer. Two
+  paravirt caveats, both measured on the dev
   VM's virtio-gpu: the kernel hides the cursor plane until the session sets
   `CURSOR_PLANE_HOTSPOT` (which scoot does once per `--tty` session --
   without it the inventory is primary-only despite the plane existing), and
@@ -225,10 +234,13 @@ running with no GPU at all is a hard requirement here, not a fallback tier.
   such cap (`UNIVERSAL_PLANES` exposes them), and virtio-gpu has none to
   expose anyway -- its inventory is one primary plus one cursor plane. On virtio the cursor
   then scans out live (pointer-tracked, captures cursorless). Narrower than it
-  sounds: no window surface is ever a scanout candidate (every one is built
-  `Kind::Unspecified`), so an overlay plane can carry at most the cursor --
-  never a window -- until step 3 marks candidates together with its capture
-  fix. One consequence to know: a capture (IPC
+  sounds, twice over: no window surface is ever a scanout candidate (every
+  one is built `Kind::Unspecified`), so an overlay plane can carry at most
+  the cursor -- never a window -- and candidate-marking is a separate
+  semantic change, still out; and the framebuffer exporter stays
+  `NodeFilter::None`, which rejects every client buffer before any hardware
+  is touched, so no frame this tree produces can take the primary direct
+  yet either. One consequence to know: a capture (IPC
   screenshots, `ext-image-copy-capture-v1`) reads the primary plane only, so
   on a session whose cursor is plane-assigned the capture shows the screen
   *without* the cursor; where the cursor is composited, captures keep showing
@@ -300,16 +312,20 @@ scans out from the GPU instead of reading each frame back; without it,
 `--tty` warns and keeps pixman however `gles` was asked for.
 
 One limit worth knowing before you turn it on: scanout drives the **primary
-plane, attempting the cursor and overlay planes** — direct scanout of client
-buffers (`ALLOW_SCANOUT`) stays out until step 3. The cursor plane is attempted
+plane, attempting the cursor and overlay planes**, and since step 3 passes
+`ALLOW_SCANOUT` a frame may additionally go direct on the primary. The
+cursor plane is attempted
 where the CRTC exposes one (the dev VM's virtio-gpu does: one `Cursor` plane
 per `drm_info`) and silently not elsewhere; overlay planes ride along whole
 from the same inventory (virtio exposes none: `overlay_planes=0`) and fall
 back per frame the same way. A plane-assigned cursor is absent
 from captures, which read the primary plane only -- and no window can ride an
-overlay yet (nothing is marked a scanout candidate; that marking lands with
-step 3's capture fix, since a candidate window would leave the buffer
-captures read). Whether `apple,dcp`
+overlay yet (nothing is marked a scanout candidate; that marking is a
+separate semantic change, still out), while no frame at all can take the
+primary direct yet either (the framebuffer exporter stays
+`NodeFilter::None`, rejecting every client buffer before hardware is
+touched). A capture served where the recording went stale-direct forces one
+composite frame first, so captures stay correct throughout. Whether `apple,dcp`
 exposes usable cursor or overlay planes is still unknown (no plane inventory exists
 from the Asahi runs). Virtio's own footnote: its cursor plane needs the
 session's `CURSOR_PLANE_HOTSPOT` cap to be enumerated at all (set before

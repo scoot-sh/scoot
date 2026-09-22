@@ -75,17 +75,26 @@ use super::present_retry::{self, PresentRetries};
 type Compositor =
     DrmCompositor<GbmAllocator<DrmDeviceFd>, GbmFramebufferExporter<DrmDeviceFd>, u64, DrmDeviceFd>;
 
-/// The per-frame plane assignment this tier allows: the cursor plane and the
-/// overlay planes.
+/// The per-frame plane assignment this tier allows: every plane Smithay can
+/// drive -- cursor, overlay, and direct scanout on the primary.
 ///
-/// This is steps 1+2 of `docs/backlog/rendering/gpu-scanout-planes.md`, and
-/// the flags are the whole of their KMS delta beyond construction: without
-/// them Smithay assigns nothing to any plane (see `try_assign_element`'s
-/// early return at the pinned rev), so populating `Planes.cursor`/`overlay`
-/// alone would be dead code. `ALLOW_SCANOUT`'s remaining bits -- the primary
-/// direct-scanout bits -- stay out: that is step 3, and it lands with a
-/// capture fix, never as a flag flip (a directly scanned-out client buffer
-/// is not in the swapchain slot captures read).
+/// This is step 3 of `docs/backlog/resolved/gpu-scanout-planes-done.md`: steps
+/// 1+2 populated the plane lists and passed the cursor/overlay bits, and the
+/// primary bit is the whole of this step's KMS delta. It lands together with
+/// the capture fix below, never as a flag flip alone: a directly scanned-out
+/// client buffer is not in the swapchain slot captures read, so a frame that
+/// goes direct must mark the recording (`Captures::note_direct`) and a
+/// capture served off a marked recording must force a composite frame first
+/// (`frame_flags(true)`, via `State::ensure_scanout_capture_current`).
+///
+/// Two things the primary bit does *not* carry with it, both pinned below:
+/// `ALLOW_PRIMARY_PLANE_SCANOUT_ANY` (which is not a member of `ALLOW_SCANOUT`
+/// at the pinned rev) stays out, so a direct element must still match the
+/// swapchain format; and the framebuffer exporter stays `NodeFilter::None`
+/// (see `build`), which rejects every client buffer before any hardware is
+/// touched -- so on this tree the bit is reachable only where a future
+/// exporter widening allows it, and that widening rides on the capture fix
+/// landing here.
 ///
 /// The overlay bit's reachable effect is deliberately narrow. Smithay's
 /// `try_assign_overlay_plane` only considers elements of kind
@@ -94,15 +103,32 @@ type Compositor =
 /// (`render/elements.rs`, both call sites), only cursor elements are
 /// `Kind::Cursor`, and `Rounded` forwards its inner kind unchanged. So no
 /// window can ever ride an overlay plane until something is marked a
-/// scanout candidate, and that marking lands with step 3's capture fix, not
-/// here: marking one now would let whole windows leave the buffer captures
-/// read. What the bit does today is let the *cursor* ride an overlay where
-/// a CRTC has overlays but no cursor plane (the cursor plane is still tried
-/// first), with the same cursorless-capture consequence step 1 documented.
+/// scanout candidate, and that marking is a separate semantic change, not
+/// part of this step: marking one now would let whole windows leave the
+/// buffer captures read. What the bit does today is let the *cursor* ride an
+/// overlay where a CRTC has overlays but no cursor plane (the cursor plane is
+/// still tried first), with the same cursorless-capture consequence step 1
+/// documented.
 ///
-/// Pinned below against gaining the primary bits by accident.
-const PLANE_FRAME_FLAGS: FrameFlags =
-    FrameFlags::ALLOW_CURSOR_PLANE_SCANOUT.union(FrameFlags::ALLOW_OVERLAY_PLANE_SCANOUT);
+/// Pinned below: the full set equals `ALLOW_SCANOUT`, and the forced set is
+/// exactly the steps-1+2 pair.
+const FRAME_FLAGS: FrameFlags = FrameFlags::ALLOW_SCANOUT;
+
+/// The flags for one frame: the full set, or the composite-only subset for a
+/// frame a capture is about to read.
+///
+/// Forced frames (see `ScanoutPresenter::arm_force_composite`) drop exactly
+/// the primary bit, landing whole in the swapchain slot while letting the
+/// cursor still ride its plane -- so a forced capture keeps the documented
+/// cursorless-where-plane-assigned contract rather than gaining a second
+/// cursor render. Pure, so the two sets are pinnable without a DRM device.
+fn frame_flags(force_composite: bool) -> FrameFlags {
+    if force_composite {
+        FRAME_FLAGS.difference(FrameFlags::ALLOW_PRIMARY_PLANE_SCANOUT)
+    } else {
+        FRAME_FLAGS
+    }
+}
 
 /// Colour formats offered to `DrmCompositor::new`, in order. `Argb8888` first
 /// because it is the format every read-back consumer in this compositor
@@ -123,6 +149,13 @@ pub(crate) struct ScanoutFrame {
     /// Whether this frame's content actually changed anything on screen --
     /// what `State::frame_serial` counts.
     pub(crate) damaged: bool,
+    /// Whether the primary plane went direct-scanout on this frame instead
+    /// of compositing into the swapchain slot. Only such a frame owes the
+    /// capture recording a `note_direct`: the slot it would otherwise record
+    /// was never drawn into. Always false for an undamaged or failed frame
+    /// (nothing reached any plane), and read by `render::draw_frame_scanout`
+    /// right after this returns.
+    pub(crate) primary_direct: bool,
 }
 
 /// `DrmCompositor`, plus what is needed to rebuild it on a different CRTC and
@@ -174,6 +207,21 @@ pub(crate) struct ScanoutPresenter {
     /// "re-render" to `drm_event`. Either way exactly one `request_render`
     /// results, and the bound in `present_retry.rs` counts both.
     retry_armed: bool,
+    /// Whether the next frame that reaches the presenter must composite
+    /// whole into the swapchain slot instead of allowing primary direct
+    /// scanout. Set only by [`arm_force_composite`](Self::arm_force_composite),
+    /// taken -- never read -- by [`render_and_queue`](Self::render_and_queue),
+    /// so one arming buys exactly one composite frame however many frames
+    /// look.
+    ///
+    /// Armed by `State::ensure_scanout_capture_current` just before the
+    /// render whose pixels a capture is about to read, together with an
+    /// `invalidate_scanout` (which forces the full damage a static screen
+    /// would otherwise draw nothing on). A frame that never reaches the
+    /// presenter -- no `DrmCompositor`, or a render that headed elsewhere --
+    /// leaves it armed, costing at most one composite frame later; that is
+    /// the safe direction to fail in.
+    force_composite: bool,
     /// Whether the swapchain's slots have been freed since the render path
     /// last looked. Set by every path that frees slots -- the ones that
     /// rebuild or resize the swapchain, and also a failed `render_frame`,
@@ -194,7 +242,7 @@ pub(crate) struct ScanoutPresenter {
     /// by construction: with no planes Smithay's overlay assignment exits
     /// before touching anything. Read alongside `cursor_planes` for the same
     /// startup log line. (Even where non-zero, no window element can be
-    /// assigned yet -- see `PLANE_FRAME_FLAGS` -- so this count decides
+    /// assigned yet -- see `FRAME_FLAGS` -- so this count decides
     /// cursor-sized consequences only.)
     overlay_planes: usize,
     /// The DRM device's hardware cursor size, as passed to
@@ -252,6 +300,7 @@ impl ScanoutPresenter {
             next_flip: 0,
             retries: PresentRetries::new(),
             retry_armed: false,
+            force_composite: false,
             slots_dropped: false,
             cursor_planes,
             overlay_planes,
@@ -264,24 +313,27 @@ impl ScanoutPresenter {
     ///
     /// Two choices here are still stage-3 scope decisions, not defaults:
     ///
-    /// - **`planes` carries primary plus cursor plus overlay, never a
-    ///   client buffer on the primary.** Overlay planes ride along whole
-    ///   from [`select_planes`]; see there for why they are not narrowed.
-    /// - **`PLANE_FRAME_FLAGS`, not `DEFAULT`.** `DEFAULT` is
-    ///   `ALLOW_SCANOUT`, which lets a client's own buffer be scanned out
-    ///   directly on the primary plane instead of being composited into the
-    ///   swapchain slot. That is a real optimisation and it is not this
-    ///   stage's: it would mean the frame is *not* in the swapchain buffer,
-    ///   so `render::scanout`'s capture path -- screenshots and
-    ///   `ext-image-copy-capture-v1`, which this project treats as
-    ///   first-class -- would silently start returning something that is not
-    ///   what is on screen. The cursor and overlay bits alone have the
+    /// - **The exporter stays `NodeFilter::None`.** This is now the *sole*
+    ///   gate on primary direct scanout reaching hardware: with it,
+    ///   `element_config` at the pinned rev rejects every client buffer in
+    ///   `can_add_framebuffer` (and memory-backed or solid elements never
+    ///   produce an exportable buffer at all), so `PrimaryPlaneElement::Element`
+    ///   is unreachable however the flags read. Widening the filter is what
+    ///   would make step 3's primary bit do anything -- and it rides on the
+    ///   capture fix that landed with the bit, not before it.
+    /// - **`FRAME_FLAGS`, not a subset.** `ALLOW_SCANOUT` lets a client's own
+    ///   buffer be scanned out directly on the primary plane instead of being
+    ///   composited into the swapchain slot -- so `render::scanout`'s capture
+    ///   path, which reads that slot, marks the recording on a direct frame
+    ///   (`ScanoutFrame::primary_direct`) and forces one composite frame
+    ///   before serving a capture off a marked recording
+    ///   (`arm_force_composite`). The cursor and overlay bits alone keep the
     ///   narrower contract: only the cursor element may leave the primary
     ///   plane (no window element is a scanout candidate, so none may ride
-    ///   an overlay -- see `PLANE_FRAME_FLAGS`), and the capture
-    ///   consequence -- a capture reads the primary plane only, so a
-    ///   plane-assigned cursor is absent from it -- is documented where the
-    ///   capture lives rather than left to be discovered.
+    ///   an overlay -- see `FRAME_FLAGS`), and the capture consequence -- a
+    ///   capture reads the primary plane only, so a plane-assigned cursor is
+    ///   absent from it -- is documented where the capture lives rather than
+    ///   left to be discovered.
     fn build(
         planes: &Planes,
         surface: DrmSurface,
@@ -296,9 +348,11 @@ impl ScanoutPresenter {
             gbm.clone(),
             GbmBufferFlags::RENDERING | GbmBufferFlags::SCANOUT,
         );
-        // `NodeFilter::None` disables direct scan-out of *client* buffers,
-        // which is the same decision `PLANE_FRAME_FLAGS` makes above, made
-        // again at the layer that would have to import them.
+        // `NodeFilter::None` disables direct scan-out of *client* buffers:
+        // with it no element this tree produces can take the primary plane
+        // direct (see `build`'s doc), so the flags' primary bit is inert
+        // until a future widening -- which rides on the capture fix, not
+        // before it.
         let exporter = GbmFramebufferExporter::new(gbm.clone(), NodeFilter::None);
         // `Some` only where a cursor plane exists to drive with it. Without
         // one the cursor state -- its pixman renderer, its `CURSOR | WRITE`
@@ -367,14 +421,21 @@ impl ScanoutPresenter {
         self.compositor.surface()
     }
 
-    /// Composites `elements` straight into a swapchain slot and queues that
-    /// slot for scan-out.
+    /// Composites `elements` into a swapchain slot -- or hands the primary
+    /// plane to one of them direct -- and queues the result for scan-out.
     ///
     /// `on_frame` is handed the GBM buffer the frame landed in, and only when
-    /// the frame actually drew something -- `render::draw_frame_scanout` uses
-    /// it to record the dma-buf a capture reads. A frame with no damage
-    /// deliberately does not call it: the previous frame is still what is on
-    /// screen, so the recorded buffer must stay the previous one.
+    /// the frame actually drew something *into the swapchain*: a damaged
+    /// frame whose primary went direct reports that in the returned
+    /// [`ScanoutFrame::primary_direct`](ScanoutFrame) instead, so
+    /// `render::draw_frame_scanout` can mark the capture recording rather
+    /// than leaving it pointing at a slot that was never drawn into. A frame
+    /// with no damage deliberately calls neither: the previous frame is still
+    /// what is on screen, so the recorded buffer must stay the previous one.
+    ///
+    /// Which of the two it is comes from [`frame_flags`]: a frame armed by
+    /// [`arm_force_composite`](Self::arm_force_composite) composites whole,
+    /// every other frame may go direct.
     ///
     /// An empty frame is the *normal* no-damage case, not a failure: nothing
     /// is queued, no retry is armed and no warning is logged, exactly as the
@@ -392,42 +453,51 @@ impl ScanoutPresenter {
         R::TextureId: Texture + 'static,
         E: RenderElement<R>,
     {
-        let result =
-            match self
-                .compositor
-                .render_frame(renderer, elements, clear_color, PLANE_FRAME_FLAGS)
-            {
-                Ok(result) => result,
-                Err(error) => {
-                    // Smithay frees the swapchain on its way out of this
-                    // error: `render_frame`'s own `Err` arm calls
-                    // `self.swapchain.reset_buffers()` before returning
-                    // (`drm/compositor/mod.rs:2343` at the pinned rev), and
-                    // that sets every slot to `Default::default()`
-                    // (`allocator/swapchain.rs:234`), dropping the
-                    // `Arc<InternalSlot>`s the export pool is keyed on.
-                    //
-                    // So this path frees slots exactly like a rebuild does,
-                    // and has to say so. Without this the next `acquire()`
-                    // allocates identically-sized slots that the allocator
-                    // will happily place at the addresses just freed, a
-                    // cached export aliases one by pointer, and `note_frame`
-                    // serves a *stale* dma-buf -- so every IPC screenshot
-                    // and `ext-image-copy-capture-v1` frame shows an old
-                    // screen until something else rebuilds the swapchain.
-                    // For an agent driving this compositor that is acting on
-                    // a screen that is not there, which is worse than the
-                    // failed frame that caused it.
-                    self.slots_dropped = true;
-                    tracing::warn!(%error, "could not render the frame for scanout");
-                    return ScanoutFrame {
-                        drew: false,
-                        flip: None,
-                        damaged: false,
-                    };
-                }
-            };
+        let flags = frame_flags(std::mem::take(&mut self.force_composite));
+        let result = match self
+            .compositor
+            .render_frame(renderer, elements, clear_color, flags)
+        {
+            Ok(result) => result,
+            Err(error) => {
+                // Smithay frees the swapchain on its way out of this
+                // error: `render_frame`'s own `Err` arm calls
+                // `self.swapchain.reset_buffers()` before returning
+                // (`drm/compositor/mod.rs:2343` at the pinned rev), and
+                // that sets every slot to `Default::default()`
+                // (`allocator/swapchain.rs:234`), dropping the
+                // `Arc<InternalSlot>`s the export pool is keyed on.
+                //
+                // So this path frees slots exactly like a rebuild does,
+                // and has to say so. Without this the next `acquire()`
+                // allocates identically-sized slots that the allocator
+                // will happily place at the addresses just freed, a
+                // cached export aliases one by pointer, and `note_frame`
+                // serves a *stale* dma-buf -- so every IPC screenshot
+                // and `ext-image-copy-capture-v1` frame shows an old
+                // screen until something else rebuilds the swapchain.
+                // For an agent driving this compositor that is acting on
+                // a screen that is not there, which is worse than the
+                // failed frame that caused it.
+                self.slots_dropped = true;
+                tracing::warn!(%error, "could not render the frame for scanout");
+                return ScanoutFrame {
+                    drew: false,
+                    flip: None,
+                    damaged: false,
+                    primary_direct: false,
+                };
+            }
+        };
         let damaged = !result.is_empty;
+        // The capture contract's branch: a damaged frame lives either in the
+        // swapchain slot (recorded for captures through `on_frame`) or on
+        // the primary plane direct (reported so the recording is marked, not
+        // left pointing at a slot this frame never drew into). An undamaged
+        // frame is neither -- the screen still shows the previous frame, and
+        // so must the recording.
+        let primary_direct =
+            damaged && matches!(&result.primary_element, PrimaryPlaneElement::Element(_));
         if damaged && let PrimaryPlaneElement::Swapchain(element) = &result.primary_element {
             on_frame(element.buffer());
         }
@@ -444,6 +514,7 @@ impl ScanoutPresenter {
                 drew: true,
                 flip: None,
                 damaged: false,
+                primary_direct: false,
             };
         }
 
@@ -456,6 +527,7 @@ impl ScanoutPresenter {
                     drew: true,
                     flip: Some(flip),
                     damaged: true,
+                    primary_direct,
                 }
             }
             Err(error) => {
@@ -465,6 +537,7 @@ impl ScanoutPresenter {
                     drew: true,
                     flip: None,
                     damaged: true,
+                    primary_direct,
                 }
             }
         }
@@ -517,6 +590,22 @@ impl ScanoutPresenter {
         std::mem::take(&mut self.retry_armed)
     }
 
+    /// Arms one fully-composited frame: the next frame that reaches
+    /// [`render_and_queue`](Self::render_and_queue) renders with the primary
+    /// direct-scanout bit off, landing whole in the swapchain slot.
+    ///
+    /// Armed by `State::ensure_scanout_capture_current` just before the
+    /// render whose pixels a capture is about to read (IPC `screenshot` and
+    /// `ext-image-copy-capture-v1` both funnel through there), always paired
+    /// there with an [`invalidate_scanout`](Self::invalidate_scanout) so the
+    /// forced frame also carries full damage. The cursor may still ride its
+    /// plane on a forced frame -- only the primary bit is dropped -- which is
+    /// what keeps the cursorless-where-plane-assigned capture contract
+    /// unchanged.
+    pub(crate) fn arm_force_composite(&mut self) {
+        self.force_composite = true;
+    }
+
     /// Takes whether the swapchain's slots have been freed since the render
     /// path last looked (see the field's doc).
     pub(crate) fn take_slots_dropped(&mut self) -> bool {
@@ -558,8 +647,9 @@ impl ScanoutPresenter {
         self.invalidate_scanout();
     }
 
-    /// The scanout bookkeeping shared by reactivation and the hotplug paths:
-    /// after either, nothing about what the CRTC is showing can be trusted.
+    /// The scanout bookkeeping shared by reactivation and the hotplug paths --
+    /// and by the capture fix's forced composite frame, which needs full
+    /// damage, not just composite flags.
     ///
     /// `reset_buffers` drops every swapchain slot, which is both what makes
     /// the next frame a full redraw (there is no buffer age left to trust)
@@ -568,7 +658,12 @@ impl ScanoutPresenter {
     /// them: a CRTC that has just been reconfigured is new device state, and
     /// the first transient refusal on it must arm a retry rather than answer
     /// `Quiet` off a streak it never earned.
-    pub(super) fn invalidate_scanout(&mut self) {
+    ///
+    /// `pub(crate)` rather than `pub(super)`: the capture paths
+    /// (`State::ensure_scanout_capture_current` in `render.rs`) invalidate
+    /// from outside the `tty` tree, for the same full-redraw reason the
+    /// reactivation path does.
+    pub(crate) fn invalidate_scanout(&mut self) {
         self.compositor.reset_buffers();
         self.slots_dropped = true;
         self.retries = PresentRetries::new();
@@ -841,18 +936,38 @@ mod tests {
     }
 
     #[test]
-    fn the_frame_flags_are_cursor_plus_overlay_and_nothing_else() {
-        // The step-2/step-3 boundary as a pin: the cursor and overlay bits
-        // on, both direct-scanout primary bits off. Gaining either primary
-        // bit would let a non-cursor element leave the swapchain slot
-        // captures read -- step 3's hazard, one stage early -- so this fails
-        // loudly rather than drifting. `ALLOW_SCANOUT` itself stays out for
-        // the same reason: it is the primary bit plus both of these.
-        assert!(PLANE_FRAME_FLAGS.contains(FrameFlags::ALLOW_CURSOR_PLANE_SCANOUT));
-        assert!(PLANE_FRAME_FLAGS.contains(FrameFlags::ALLOW_OVERLAY_PLANE_SCANOUT));
-        assert!(!PLANE_FRAME_FLAGS.intersects(FrameFlags::ALLOW_PRIMARY_PLANE_SCANOUT));
-        assert!(!PLANE_FRAME_FLAGS.intersects(FrameFlags::ALLOW_PRIMARY_PLANE_SCANOUT_ANY));
-        assert_ne!(PLANE_FRAME_FLAGS, FrameFlags::ALLOW_SCANOUT);
-        assert_ne!(PLANE_FRAME_FLAGS, FrameFlags::DEFAULT);
+    fn the_frame_flags_are_allow_scanout_but_never_the_any_bit() {
+        // The step-3 flag state as a pin: the full `ALLOW_SCANOUT` set --
+        // cursor, overlay, *and* primary direct scanout -- but never
+        // `ALLOW_PRIMARY_PLANE_SCANOUT_ANY`, which is not a member of
+        // `ALLOW_SCANOUT` at the pinned rev and would additionally let a
+        // format-mismatched element take the primary. Losing the primary
+        // bit regresses step 3 to steps 1+2; gaining the ANY bit widens
+        // direct scanout past the capture fix's contract -- so both fail
+        // loudly rather than drifting.
+        assert_eq!(FRAME_FLAGS, FrameFlags::ALLOW_SCANOUT);
+        assert!(FRAME_FLAGS.contains(FrameFlags::ALLOW_PRIMARY_PLANE_SCANOUT));
+        assert!(FRAME_FLAGS.contains(FrameFlags::ALLOW_OVERLAY_PLANE_SCANOUT));
+        assert!(FRAME_FLAGS.contains(FrameFlags::ALLOW_CURSOR_PLANE_SCANOUT));
+        assert!(!FRAME_FLAGS.intersects(FrameFlags::ALLOW_PRIMARY_PLANE_SCANOUT_ANY));
+        assert_eq!(FRAME_FLAGS, FrameFlags::DEFAULT);
+    }
+
+    #[test]
+    fn a_forced_capture_frame_is_cursor_plus_overlay_and_nothing_else() {
+        // The capture fix's complement to the pin above: a frame forced for
+        // capture must land whole in the swapchain slot, so the forced flags
+        // are exactly the steps-1+2 set -- cursor plus overlay, both primary
+        // bits out. A forced frame gaining a primary bit would let the very
+        // frame a capture is about to read go direct, which is the
+        // silently-wrong-buffer harm step 3 exists to close.
+        let forced = frame_flags(true);
+        assert!(forced.contains(FrameFlags::ALLOW_CURSOR_PLANE_SCANOUT));
+        assert!(forced.contains(FrameFlags::ALLOW_OVERLAY_PLANE_SCANOUT));
+        assert!(!forced.intersects(FrameFlags::ALLOW_PRIMARY_PLANE_SCANOUT));
+        assert!(!forced.intersects(FrameFlags::ALLOW_PRIMARY_PLANE_SCANOUT_ANY));
+        assert_ne!(forced, FrameFlags::ALLOW_SCANOUT);
+        // And the unforced frame is the full set the pin above names.
+        assert_eq!(frame_flags(false), FrameFlags::ALLOW_SCANOUT);
     }
 }
