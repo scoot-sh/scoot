@@ -300,6 +300,17 @@ durable belongs in `CLAUDE.md` or `ROADMAP.md`/`docs/`, not duplicated here.
   or `docs/`, merging a PR), do it from a throwaway `git worktree add
   /tmp/<name> <branch>` and remove it after pushing. Skip the worktree only
   once no implementer is active.
+  **"Read-only agent" does not exempt the agent's git commands, and the
+  orchestrator is the one who usually forgets this** (2026-09-21, PR #210).
+  `scoot-reviewer` never edits, commits or merges — and that is exactly why
+  it reads as safe to tell it "check out `<commit>^` if it helps verify the
+  before/after claim", which is what the dispatch prompt did. `git checkout`
+  is branch-mutating whoever runs it: had the reviewer taken that suggestion
+  while the orchestrator was mid-commit in the same checkout, it would have
+  moved `HEAD` out from under it. It came back a no-op self-checkout and
+  nothing was lost, but the near-miss is the point. Ask a reviewer to verify
+  a historical commit in its **own** `git worktree`, or hand it the artifact
+  (a diff, a built binary, a store path) instead of a commit to check out.
 - **The same collision can happen between two implementers, not just the
   orchestrator and one — this also happened once.** Two `scoot-implementer`
   agents were dispatched close together, reasoned safe because their file sets
