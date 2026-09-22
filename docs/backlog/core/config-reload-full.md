@@ -25,6 +25,19 @@ blocked: null
 > defaults; `cycle_preset` / `set-column-width` follow against the new
 > length, under session lock like gap. Remaining: Phase 3 (`output.scale`),
 > Phase 4 (autostart policy), Phases 5–6 (renderer/GPU reword).
+>
+> PROGRESS 2026-09-22: Phase 3 LANDED (PR TBD). `output.scale` reloads live:
+> the new value is re-advertised to every output via `set_mode` (bound
+> `wl_output` clients hear the new integer) and re-sent to every live
+> surface (`preferred_scale` plus the integer companion, walked over every
+> window/layer/lock/cursor tree and their popups), every logical geometry is
+> recomputed and filed with the core, and `apply()` re-derives the
+> arrangement. Out-of-range values apply as their load-clamped selves, never
+> as refusals; `--nested` keeps refusing non-1.0 (the host owns the scale);
+> framebuffers need no rebuild (physical pixels never moved; the damage
+> tracker evaluates geometry at the live scale). Same `Reloaded` variant, no
+> `PROTOCOL_VERSION` bump. Remaining: Phase 4 (autostart policy), Phases 5–6
+> (renderer/GPU reword).
 
 `resolved/config-reload-done.md` + `resolved/reload-sighup-trigger-done.md`
 shipped partial-with-refusal as the honest shape (`Request::Reload` →

@@ -65,9 +65,10 @@ Linux, and daily-driven on `--tty`** (2026-09-18).
   pixman is still the default and still the right answer on a GPU-less box.
 - **Config reload is partial.** `scootctl reload` (or `kill -HUP` on the
   compositor) re-applies the layout (gap, column widths, default column
-  width), the
+  width), the output scale (except under `--nested`, where the host owns
+  it), the
   appearance (including the cursor size, color and theme) and the keybindings
-  live; output scale, DRM device, renderer and
+  live; DRM device, renderer and
   autostart stay startup-only and a reload refuses them
   with a message rather than silently ignoring them.
 - **No macOS adapter.** `scoot-core` is kept platform-independent so one can

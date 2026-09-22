@@ -62,11 +62,13 @@ impl CompositorHandler for State {
 
     /// A new `wl_surface` exists: tell it the integer `preferred_buffer_scale`.
     ///
-    /// This is the only call site. Smithay runs `new_surface` for every
+    /// This is the bind-time call site. Smithay runs `new_surface` for every
     /// surface `wl_compositor.create_surface` makes (subsurfaces included), and
-    /// the scale is fixed for the process's life, so this always fires before
-    /// any commit -- a per-commit call would be a no-op cache hit on the hot
-    /// path, not defence in depth. See `send_preferred_buffer_scale`'s doc.
+    /// this always fires before any commit -- a per-commit call would be a
+    /// no-op cache hit on the hot path, not defence in depth. A config reload
+    /// re-sends the same value to every live surface at once (see
+    /// `output_scale.rs`'s `resend_output_scale`), so the two can never
+    /// disagree. See `send_preferred_buffer_scale`'s doc.
     fn new_surface(&mut self, surface: &WlSurface) {
         send_preferred_buffer_scale(surface, self.integer_scale);
     }

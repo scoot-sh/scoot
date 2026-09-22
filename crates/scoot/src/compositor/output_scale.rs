@@ -28,13 +28,15 @@
 //!   `on_commit_buffer_handler` calls `ensure_viewport_valid`, so there is no
 //!   handler trait to implement here.
 //!
-//! # Start-up only, and only one output
+//! # Live-reloadable, and only one output
 //!
-//! [`State::output_scale`](super::State) is resolved once from
-//! the config and never changes. That is why the preferred scale is set in
-//! [`FractionalScaleHandler::new_fractional_scale`] -- the one moment a
-//! surface's fractional-scale object appears -- rather than re-asserted on
-//! every commit the way a compositor that supports live scale changes must.
+//! [`State::output_scale`](super::State) is resolved from the config at
+//! startup and re-applied live by `scootctl reload` (see `reload.rs`): the
+//! new value is re-advertised to every output (`headless.rs`'s
+//! `rescale_outputs`, via the same `set_mode` startup uses) and re-sent to
+//! every live surface ([`State::resend_output_scale`], over every window,
+//! layer, lock and cursor tree -- a surface created *after* the reload hears
+//! it at the same two bind-time moments below, so neither path can disagree).
 //! Every output shares that one scale -- `headless.rs` creates each with it,
 //! and nothing sets a per-output scale -- so there is one scale for every
 //! surface. A scale per output is part of the multi-output item (see
@@ -42,13 +44,15 @@
 //!
 //! `--nested` is explicitly scale-1-only: the host compositor owns the scale
 //! of the window scoot is drawn in, and forward-scaled output would only
-//! double-count it. `compositor::run` warns and forces 1.0 there.
+//! double-count it. `compositor::run` warns and forces 1.0 there, and a
+//! reload refuses a non-1.0 value rather than applying it.
 
+use smithay::desktop::{PopupManager, layer_map_for_output};
 use smithay::output::{Output, Scale};
 use smithay::reexports::wayland_server::DisplayHandle;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-use smithay::utils::{Logical, Size, Transform};
-use smithay::wayland::compositor::{send_surface_state, with_states};
+use smithay::utils::{IsAlive, Logical, Size, Transform};
+use smithay::wayland::compositor::{get_children, send_surface_state, with_states};
 use smithay::wayland::fractional_scale::{FractionalScaleHandler, with_fractional_scale};
 use smithay::wayland::viewporter::ViewporterState;
 
@@ -154,8 +158,10 @@ pub(super) fn logical_size(output: &Output) -> (i32, i32) {
 /// A no-op for a surface that never created a fractional-scale object (the
 /// common case for clients that only understand `wl_output.scale`): the state
 /// is recorded either way, and `with_fractional_scale`'s `set_preferred_scale`
-/// only emits when an object exists.
-fn set_preferred_scale(surface: &WlSurface, scale: f64) {
+/// only emits when an object exists. Called at the two bind-time moments
+/// below and, on a config reload, for every live surface at once (see
+/// [`State::resend_output_scale`]).
+pub(super) fn set_preferred_scale(surface: &WlSurface, scale: f64) {
     with_states(surface, |states| {
         with_fractional_scale(states, |fractional_scale| {
             fractional_scale.set_preferred_scale(scale);
@@ -171,7 +177,7 @@ fn set_preferred_scale(surface: &WlSurface, scale: f64) {
 /// `wp_fractional_scale_v1` is entitled to the integer companion too, and
 /// sending it is what a client is otherwise left to infer. It is **not**
 /// established that this fixes the reported Ghostty-at-`1.5` symptom — see
-/// `docs/backlog/protocols/ghostty-fails-at-1-5.md`, which keeps that
+/// `docs/backlog/resolved/ghostty-fails-at-1-5-done.md`, which keeps that
 /// confirmation open, and the finding that GTK4 does not act on this event
 /// while a fractional object exists.
 ///
@@ -189,10 +195,90 @@ pub(super) fn send_preferred_buffer_scale(surface: &WlSurface, integer_scale: i3
 
 impl FractionalScaleHandler for State {
     /// A client created a `wp_fractional_scale_v1` for `surface`. This is the
-    /// one moment it needs to hear the scale: it is fixed for the process's
-    /// life (see this module's doc), so there is nothing to re-send later.
+    /// one moment it needs to hear the scale at bind time; a config reload
+    /// re-sends it to every live surface at once (see
+    /// [`State::resend_output_scale`]), so neither path can disagree.
     fn new_fractional_scale(&mut self, surface: WlSurface) {
         set_preferred_scale(&surface, self.output_scale);
+    }
+}
+
+impl State {
+    /// Re-sends the live output scale to every surface in the session: the
+    /// fractional `preferred_scale` plus its integer companion, down each
+    /// root's whole subsurface tree and across every popup parented to it.
+    ///
+    /// The roots are every surface a scale object can hang off: each known
+    /// window's toplevel (mapped or not -- an unmapped window's client still
+    /// holds its objects), each output's layer surfaces, each live lock
+    /// surface, and the client cursor surface. `send_surface_state` only
+    /// emits where the integer actually moved and early-returns below
+    /// `wl_compositor` v6, so a session whose integer companion did not
+    /// change (1.5 to 1.25: `ceil` is 2 both ways) pays only version checks.
+    ///
+    /// Role-less surfaces are not visited: a surface created but not yet
+    /// assigned a toplevel, layer, or other role belongs to none of the
+    /// roots above, and Smithay keeps no public global surface list to close
+    /// that gap. A reload landing between such a surface's creation and its
+    /// role assignment leaves its scale events one reload stale; the next
+    /// reload (or the client's own re-bind) heals it. Real clients create
+    /// and role their surfaces in one commit burst, so the gap is a
+    /// microsecond misfire, not a steady state.
+    ///
+    /// Cold reload path only -- nothing here runs per frame or per commit,
+    /// so the per-surface walk and the one small root `Vec` are acceptable
+    /// where they would not be on the commit path (`handlers.rs` keeps its
+    /// own no-op cache hit there for exactly that reason).
+    ///
+    /// Known churn, documented not fixed: a client that cached the scale at
+    /// bind time and never re-reads the events may lag one step behind until
+    /// it does (see `docs/backlog/resolved/ghostty-fails-at-1-5-done.md`). The
+    /// events are all re-sent; acting on them is the client's half.
+    pub(super) fn resend_output_scale(&self) {
+        let scale = self.output_scale;
+        let integer = self.integer_scale;
+        // Owned first, sent after: collecting ends each borrow of `self`
+        // before any protocol send, so no borrow of the state outlives into
+        // the walk. One small `Vec`, on the cold reload path only.
+        let mut roots: Vec<WlSurface> = Vec::new();
+        roots.extend(
+            self.windows
+                .values()
+                .filter_map(|window| window.toplevel())
+                .map(|toplevel| toplevel.wl_surface().clone()),
+        );
+        for output in self.outputs.iter() {
+            roots.extend(
+                layer_map_for_output(output)
+                    .layers()
+                    .map(|layer| layer.wl_surface().clone()),
+            );
+        }
+        roots.extend(self.session_lock.live_surfaces());
+        if let Some(cursor) = self.cursor.surface() {
+            roots.push(cursor.clone());
+        }
+        for root in &roots {
+            resend_scale_tree(root, scale, integer);
+            for (popup, _) in PopupManager::popups_for_surface(root) {
+                resend_scale_tree(popup.wl_surface(), scale, integer);
+            }
+        }
+    }
+}
+
+/// Re-sends `scale` (and its integer companion) to `surface` and every
+/// subsurface below it. Dead subtrees are skipped at their root: a surface
+/// whose client is gone keeps its handle until the destroy hook runs, and
+/// queueing protocol events at it is harmless but pointless.
+fn resend_scale_tree(surface: &WlSurface, scale: f64, integer: i32) {
+    if !surface.alive() {
+        return;
+    }
+    set_preferred_scale(surface, scale);
+    send_preferred_buffer_scale(surface, integer);
+    for child in get_children(surface) {
+        resend_scale_tree(&child, scale, integer);
     }
 }
 

@@ -883,6 +883,95 @@ impl State {
         true
     }
 
+    /// Re-applies a new output scale to every output, after
+    /// [`State::output_scale`](super::State::output_scale) has already been
+    /// updated to it.
+    ///
+    /// Each output keeps its physical mode and its position -- only the
+    /// advertised scale moves, through the same `set_mode` startup uses, so
+    /// bound `wl_output` clients hear the new integer -- and the new logical
+    /// geometry (see `output_scale.rs`'s `logical_size`) is filed with the
+    /// core per output, position included (unlike `resize_output`'s
+    /// origin-only rectangle, which is correct only for its single-output
+    /// backends). Lock surfaces are reconfigured to their output's new
+    /// logical size and layer surfaces re-arranged against it, the same two
+    /// steps a resize runs; output-management heads and capture constraints
+    /// are refreshed from the same sites. The caller runs `apply()` after,
+    /// which pushes the re-derived arrangement onto the windows and renders.
+    ///
+    /// Deliberately *not* rebuilding any render target: the framebuffer is
+    /// physical pixels, and a pure scale change leaves every output's
+    /// physical mode exactly the size it was (stated as a `debug_assert`
+    /// below). The damage tracker needs no reset either: it reads the
+    /// output's mode live (`OutputModeSource::Auto`) and evaluates every
+    /// element's geometry at the current scale, so each moved element
+    /// damages both its old and its new region on the first post-rescale
+    /// frame by construction.
+    pub(super) fn rescale_outputs(&mut self, scale: f64) {
+        // Walked by index with cloned outputs, like the render loop: the
+        // steps below take `&mut State`, which no borrow of `self.outputs`
+        // can outlive. An `Output` clone is an `Arc` bump, no allocation
+        // beyond the one small `Vec` this cold path keeps.
+        let count = self.outputs.len();
+        let mut moved: Vec<(OutputId, Output, Rect)> = Vec::new();
+        for index in 0..count {
+            let Some((id, output)) = self.outputs.at(index) else {
+                continue;
+            };
+            let Some(mode) = output.current_mode() else {
+                // Unreachable: `init_named` sets a mode before any caller
+                // exists, and nothing since removes one. Logged, not
+                // skipped silently: a `false`-shaped quiet skip is what
+                // `resize_output` treats as seriously as a crash.
+                tracing::warn!("could not rescale: the output has no mode yet");
+                continue;
+            };
+            // `None` for the location: the output stays where it is, which
+            // is what keeps a second output's position past a rescale.
+            set_mode(&output, mode.size.w, mode.size.h, None, scale);
+            let Some(geometry) = self.space.output_geometry(&output) else {
+                continue;
+            };
+            debug_assert!(
+                self.backends
+                    .get(&id)
+                    .is_none_or(|backend| backend.size() == (mode.size.w, mode.size.h)),
+                "a pure scale change must leave the physical render target alone"
+            );
+            moved.push((
+                id,
+                output,
+                Rect::new(
+                    geometry.loc.x,
+                    geometry.loc.y,
+                    geometry.size.w,
+                    geometry.size.h,
+                ),
+            ));
+        }
+        for (id, output, area) in &moved {
+            // A lock surface's configured size is an *exact* requirement
+            // (see `resize_output`); a rescaled output reconfigures its own
+            // surfaces the same way. A no-op while unlocked.
+            self.resize_lock_surfaces(output, (area.w, area.h));
+            // Layer surfaces are anchored to the output's edges, so every
+            // one of them has moved -- same step as the resize path.
+            layer_map_for_output(output).arrange();
+            self.world.handle_event(CoreEvent::OutputChanged {
+                id: *id,
+                area: *area,
+            });
+        }
+        // The scale changed, so every output-management client is a scale, a
+        // mode and a `done` behind; captures re-read sizes that did not move
+        // (a no-op that keeps this path from drifting from the resize one);
+        // and the core's usable areas are re-reported now that every
+        // `OutputChanged` above has landed.
+        self.refresh_output_heads();
+        self.refresh_capture_constraints();
+        self.refresh_layer_zone();
+    }
+
     /// Marks the screen dirty and makes sure the frame ticker is running to
     /// actually redraw it.
     pub fn request_render(&mut self) {
