@@ -18,8 +18,9 @@ command (`scripts/asahi-test4.sh`, which writes its own report). Full
 evidence with method and caveats:
 [`docs/roadmap/06-gpu-pipeline.md`](../../roadmap/06-gpu-pipeline.md),
 "Evidence (Apple M2 / AGX under Asahi Linux, 2026-09-21)". Two runs -- four
-alternating rounds at `650a187`, then two at `52672b8` closing two gaps the
-first left.
+alternating rounds, then two more closing the gaps the first left -- both
+measuring byte-identical `nix build`s of `499083b`, which is what makes them
+comparable with each other.
 
 ## What it said, and what the answer was
 

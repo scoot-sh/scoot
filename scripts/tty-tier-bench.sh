@@ -91,7 +91,11 @@ ENVLOG="$OUT/environment.txt"
 {
     echo "date: $(date -Is)"
     echo "host: $(uname -srm)  $(tr -d '\0' < /proc/device-tree/compatible 2>/dev/null)"
-    echo "git: $(git -C "$(dirname "$0")/.." rev-parse HEAD 2>/dev/null) $(git -C "$(dirname "$0")/.." status --porcelain 2>/dev/null | head -5)"
+    # The harness tree, which is NOT the cache key for the numbers: the
+    # binaries under test carry their own provenance, and the store paths
+    # printed below are it. The two differ whenever the harness is edited
+    # without rebuilding, which is the normal case.
+    echo "harness tree: $(git -C "$(dirname "$0")/.." rev-parse HEAD 2>/dev/null) $(git -C "$(dirname "$0")/.." status --porcelain 2>/dev/null | head -5)"
     echo "ctl:  $SCOOTCTL ($("$SCOOTCTL" --version 2>&1))"
     echo "dumb: $SCOOT_DUMB -> $(readlink -f "$SCOOT_DUMB") ($("$SCOOT_DUMB" --version 2>&1))"
     echo "gpu:  $SCOOT_GPU -> $(readlink -f "$SCOOT_GPU") ($("$SCOOT_GPU" --version 2>&1))"
@@ -101,6 +105,10 @@ ENVLOG="$OUT/environment.txt"
     echo "seat holders (--tty scoot processes, the live session included):"
     pgrep -af -- '--tty' | sed 's/^/  /'
     echo "drm:"
+    # shellcheck disable=SC2012 # `ls -l` deliberately, not `find`: the point
+    # of this line in the record is the permission bits and ACL marker
+    # (`crw-rw----+`) on the DRM nodes, which is what says whether the seat
+    # could have opened them at all. The filenames are kernel-assigned.
     ls -l /dev/dri/ | sed 's/^/  /'
     for s in /sys/class/drm/card*-*/status; do echo "  $s: $(cat "$s")"; done
     echo "power: ac_online=$(cat /sys/class/power_supply/macsmc-ac/online 2>/dev/null) battery=$(cat /sys/class/power_supply/macsmc-battery/status 2>/dev/null)"

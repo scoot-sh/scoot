@@ -445,10 +445,18 @@ line is `scanout="gpu"` versus the dumb tier's absence of it, and
 
 Run it with `scripts/asahi-test4.sh`, which is the whole of this test as one
 command: it drives `scripts/tty-tier-bench.sh` for the alternating rounds and
-prints the analysis into `$OUT/test4-report.txt`. Two runs, four rounds
-(`650a187`, raw in `/tmp/scoot-tier-bench`) then two (`52672b8`, raw in
-`/tmp/scoot-asahi-test4`); the second exists because the first left two gaps,
-named below.
+prints the analysis into `$OUT/test4-report.txt`. Two runs: four rounds (raw
+in `/tmp/scoot-tier-bench`) then two (raw in `/tmp/scoot-asahi-test4`); the
+second exists because the first left two gaps, named below.
+
+**What the numbers are keyed to.** Both runs measured *byte-identical
+binaries* — `/nix/store/mf5nm9…-scoot-0.1.0` and
+`/nix/store/b1kkl6s…-scoot-gpu-0.1.0`, both `nix build`s of `main` at
+`499083b`, which is also why the two runs are comparable with each other.
+The harness trees differ (`650a187`, then `52672b8`) because the harness was
+fixed between runs; the compositor under test was not rebuilt and did not
+change. `environment.txt` in each output directory records both, and the
+store paths are the ones that matter.
 
 **Correctness first, as this section asked for.** It comes up:
 

@@ -521,10 +521,14 @@ no speculative multi-GPU abstraction added here.
 
 The section above is now settled, and one of its hedges turned out to be
 unnecessary. Runbook and raw output: `Asahi.md`'s Test 4, driven by
-`scripts/asahi-test4.sh`. Two runs -- four alternating rounds at `650a187`,
-then two at `52672b8` after the first run left two gaps -- on an Apple M2
-(`apple,t8112`), NixOS aarch64, `eDP-1` at `2560x1600@60`, `scale = 1.5`, on
-battery.
+`scripts/asahi-test4.sh`. Two runs -- four alternating rounds, then two more
+after the first left two gaps -- on an Apple M2 (`apple,t8112`), NixOS
+aarch64, `eDP-1` at `2560x1600@60`, `scale = 1.5`, on battery. Both runs
+measured byte-identical binaries (`/nix/store/mf5nm9...-scoot-0.1.0` and
+`/nix/store/b1kkl6s...-scoot-gpu-0.1.0`, both `nix build`s of `499083b`),
+which is what makes the two runs comparable with each other; the harness
+tree differs between them (`650a187`, then `52672b8`) because the harness
+was fixed in between, not the compositor.
 
 **The tier comes up, and the split topology needs nothing special.**
 
