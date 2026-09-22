@@ -9,14 +9,13 @@ blocked: null
 # Config reload: from partial to full
 
 > PROGRESS 2026-09-21: Phase 0 + Phase 1 LANDED (PR #209, merge `a279cc0`).
-> `apply_reload` is split into per-field appliers (compare-first/mutate-after
-> kept); cursor theme/size/color reload live via `Cursor::rebuild`
-> (per-child `XCURSOR_*` export, render without `apply()`). Review caught
-> one wrong security-relevant doc claim (cursor IS drawn under lock —
-> front-most by design; safety holds because rebuild never touches shape
-> selection). Remaining: Phase 2 (`column_widths`), Phase 3
-> (`output.scale`), Phase 4 (autostart policy), Phases 5–6 (renderer/GPU
-> reword). The seams land where those phases need them.
+> `apply_reload` split into per-field appliers; cursor theme/size/color
+> reload live via `Cursor::rebuild` (per-child `XCURSOR_*` export, render
+> without `apply()`). Phase 2 LANDED (PR #211, merge `6481f38`): clamping
+> `min(preset, len-1)` in `set_config` after `validated()` (empty→defaults,
+> underflow impossible); set-column-width/cycle follow against the new list.
+> Review clean both rounds. Remaining: Phase 3 (`output.scale`), Phase 4
+> (autostart policy), Phases 5–6 (renderer/GPU reword).
 >
 > PROGRESS 2026-09-22: Phase 2 LANDED (PR #211). `column_widths` /
 > `default_column_width` reload live through one `World::set_config`: a

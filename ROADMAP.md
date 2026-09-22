@@ -87,6 +87,13 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[Config reload phase 2: `column_widths`
+  live](docs/backlog/core/config-reload-full.md)** (2026-09-22, PR #211) —
+  clamping `min(preset, len-1)` after `validated()`; shorter lists pull OOB
+  columns in, longer lists touch nothing; set-column-width/cycle follow.
+  Review clean with live 1176→582px proof. Ticket stays OPEN for scale →
+  autostart → reword.
+
 - **[Config reload phases 0+1: applier split +
   cursor](docs/backlog/core/config-reload-full.md)** (2026-09-21, PR #209)
   — `apply_reload` split into per-field appliers (behavior-preserving);
