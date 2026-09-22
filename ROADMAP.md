@@ -96,7 +96,7 @@ each item's own file records why it landed when it did.
 
 - **[Config reload complete: autostart spawn-delta + restart
   wording](docs/backlog/resolved/config-reload-full-done.md)**
-  (2026-09-22, PR #TBD) — only entries the session has not seen run (new
+  (2026-09-22, PR #214) — only entries the session has not seen run (new
   `spawn` entries once each through startup's `act` path; a reloaded `quit`
   refused by name, never acted on; locked reloads skip and defer to the
   first unlocked one), and the `tty.gpu` / `renderer.backend` refusals now

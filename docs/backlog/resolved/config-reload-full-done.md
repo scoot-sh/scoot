@@ -8,7 +8,7 @@ blocked: null
 
 # Config reload: from partial to full (live except renderer + DRM device) — RESOLVED
 
-RESOLVED 2026-09-22 (PR #TBD): Phase 4 (autostart spawn-delta policy) +
+RESOLVED 2026-09-22 (PR #214): Phase 4 (autostart spawn-delta policy) +
 Phases 5–6 (renderer/GPU restart reword), completing the ticket — all
 phases landed, end state **live except `renderer.backend` + `tty.gpu`,
 which need a restart**. Coordinator-filed, no gh issue, so no `Fixes:`
@@ -151,7 +151,7 @@ backstop. Docs move fields Refused→Applied per phase
 Ship order: cursor → `default_column_width`, then `column_widths` →
 `output.scale` → autostart policy → reword renderer/GPU.
 
-## What the final PR did (2026-09-22, PR #TBD)
+## What the final PR did (2026-09-22, PR #214)
 
 Phase 4, run-only-new-`Spawn`-entries: `apply_autostart_reload`
 (`reload.rs`) diffs the fresh list against `startup_autostart` as a
