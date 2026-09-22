@@ -97,6 +97,14 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[XWayland Phase 0 spike](docs/backlog/protocols/xwayland-support.md)**
+  (2026-09-22, PR #220, docs-only) — break-site inventory re-verified at
+  the pinned rev (two ticket corrections: single `XWayland::spawn`, no
+  `delegate_xwayland_shell!`), live measurements (READY ~70ms, 55MB RSS,
+  30/30 storm, steal refused), opt-in flag + config key decided (default
+  off), conditional GO with top-3 risks + scoped Phase 1. Ticket stays
+  OPEN; review found no blocking issues.
+
 - **[GPU scanout `ALLOW_SCANOUT` + capture fix
   (step 3)](docs/backlog/resolved/gpu-scanout-planes-done.md)** (2026-09-22,
   branch `allow-scanout-capture-fix`, PR #218) — the flag WITH its capture

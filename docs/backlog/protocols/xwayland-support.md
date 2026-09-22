@@ -194,8 +194,8 @@ xwininfo 1.1.6. Raw logs: `/tmp/xwspike0-events.log` (852 lines),
 
 ### Measurements (raw, dev VM)
 
-- **Startup:** `XWAYLAND_READY` at t=70ms and t=84ms post-spawn (two
-  runs); `DISPLAY=:6`. Fresh Xwayland RSS **55,184 KB** / VSZ 255,452 KB
+- **Startup:** `XWAYLAND_READY` at t=70ms post-spawn (preserved run;
+  a second unpreserved run read 84ms); `DISPLAY=:6`. Fresh Xwayland RSS **55,184 KB** / VSZ 255,452 KB
   with one client mapped — the always-on cost, measured not estimated.
 - **Title/class timing (xterm 410):** spawn → visible in
   `xwininfo -root -tree` **76ms**; spawn → `WM_CLASS` via xprop **96ms**;
@@ -281,7 +281,7 @@ default sessions byte-identical.
 
 No technical blocker: the API exists at the pinned rev, the event flow
 is measured end to end, the steal gate refuses by default, and the cost
-is quantified (70–84ms startup, ~55 MB RSS, ms-scale event path).
+is quantified (~70ms startup on the preserved run, ~55 MB RSS, ms-scale event path).
 Top 3 risks for Phase 1+: (1) focus/activation policy — X11 has no
 serials, so `map_window_request` focus and every `active_window_request`
 must default-refuse (the exact hole `activation-serial-validation`
