@@ -133,8 +133,19 @@ not. Item by item:
    (2) lands, the companion follows the same winning output, or
    `wl_output.scale` and `preferred_buffer_scale` disagree for that
    surface (the agreement `integer_scale`, `output_scale.rs:125-127`, pins
-   today is session-global).
-4. **The reload re-send walk must group roots by output.**
+   today is session-global). Name the bind-time caller too: `new_surface`
+   (`handlers.rs:72-73`) passes the session-global integer to still
+   role-less surfaces — under per-output scales a new surface keeps the
+   session integer until the next reload re-send, the same staleness class
+   as the documented role-less gap.
+4. **The IPC snapshot must fill scale per output.** `OutputSnapshot` is
+   built per output (`ipc.rs:665-690`, per-output `name`/`rect`/`usable`)
+   but fills `scale: self.output_scale` (`ipc.rs:681`), the session-global
+   scalar. Under mixed scales an agent doing physical↔logical targeting
+   math off that field mis-places 2x on the second output — the
+   agent-facing surface, so it matters to the computer-use half. Fill per
+   output from the new map; no wire change, the field exists.
+5. **The reload re-send walk must group roots by output.**
    `resend_output_scale` (`output_scale.rs:245-275`) collects window
    toplevels, per-output layer surfaces, lock surfaces and the cursor into
    one `Vec` and sends one scale to all. Per output it must send each root
@@ -145,20 +156,20 @@ not. Item by item:
    role-less-surface gap (`output_scale.rs` re-send doc) multiplies by the
    number of distinct scales — still healed by the next reload, still worth
    restating, not re-solving.
-5. **Cursor hotspot follows the pointer's output scale.**
+6. **Cursor hotspot follows the pointer's output scale.**
    `surface_hotspot` is logical (`cursor.rs:540-549`); `element_location`
    scales pointer-minus-hotspot into physical (`cursor.rs:562-571`). One
    global cursor surface means one scale per frame: the output under the
    pointer, recomputed on output crossing — including the fractional exact-
    subtraction the doc pins (`cursor.rs:556-561`), which must hold per
    output, not just session-wide.
-6. **Already per-output, no change:** `logical_size`
+7. **Already per-output, no change:** `logical_size`
    (`output_scale.rs:142-153`) derives per output from its own mode+scale;
    `add_output` steps off the previous output's *logical* geometry
    (`headless.rs:163-179`) — mixed scales tile correctly through the same
    code; output-management heads refresh per output
    (`headless.rs:1001`, `resize_output`'s `refresh_output_heads` precedent).
-7. **`--nested` stays scale-1-only and is out of scope for per-output.**
+8. **`--nested` stays scale-1-only and is out of scope for per-output.**
    The host owns the scale (`output_scale.rs:45-48`; reload refuses under
    nested, `reload.rs:362-379`), and there is exactly one output — nothing
    here applies.
