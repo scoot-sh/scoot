@@ -99,7 +99,7 @@ each item's own file records why it landed when it did.
 
 - **[GPU scanout `ALLOW_SCANOUT` + capture fix
   (step 3)](docs/backlog/resolved/gpu-scanout-planes-done.md)** (2026-09-22,
-  branch `allow-scanout-capture-fix`, PR #NNN) — the flag WITH its capture
+  branch `allow-scanout-capture-fix`, PR #218) — the flag WITH its capture
   fix, never apart: direct frames mark the recording
   (`ScanoutFrame::primary_direct` → `Captures::note_direct`), captures
   served off a marked recording force one composite-only frame first

@@ -9,7 +9,7 @@ blocked: null
 # GPU scanout: cursor + overlay planes — RESOLVED
 
 RESOLVED 2026-09-22 (coordinator-filed, no gh issue; branch
-`allow-scanout-capture-fix`, PR #NNN): step 3, `ALLOW_SCANOUT` with its
+`allow-scanout-capture-fix`, PR #218): step 3, `ALLOW_SCANOUT` with its
 capture fix in the same change. The flag is the whole of the KMS delta
 (`tty/scanout.rs`: `FRAME_FLAGS = ALLOW_SCANOUT`, pinned to exclude the
 `ANY` bit); the fix is two halves that land with it, never apart — a direct
@@ -38,8 +38,8 @@ a VT pause/resume cycle, cross-tier diff confined to the cursor box,
 commit-health clean (`UnknownPlane` 0, primary flipping, cursor plane
 pointer-tracked), and a compositor-trace session showing zero
 primary-direct assignments. Review: PENDING (coordinator runs
-`scoot-reviewer`; this header gains the PR number on creation). Original
-entry below, kept verbatim.
+`scoot-reviewer` as the merge gate; this header records the outcome).
+Original entry below, kept verbatim.
 
 ---
 
