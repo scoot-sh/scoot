@@ -1,12 +1,12 @@
 ---
-title: "GPU scanout: cursor + overlay planes (phase 1 landed — the real-GPU proof is in)"
+title: "GPU scanout: cursor + overlay planes (steps 1-2 landed — the real-GPU proof is in)"
 status: "open"
 area: "rendering"
 priority: "medium"
 blocked: null
 ---
 
-# GPU scanout: cursor + overlay planes (phase 1 landed — the real-GPU proof is in)
+# GPU scanout: cursor + overlay planes (steps 1-2 landed — the real-GPU proof is in)
 
 Maps to the README bullet clause-by-clause (`README.md:57-65`): (a)
 `gpu-scanout`-build-only, (b) primary-plane-only — plus the headless/nested
@@ -250,6 +250,118 @@ launcher wrapper measured at 0j) was caught by checking `comm` and redone;
 cargo-over-9p sometimes reports no-op `Finished` where a rebuild was
 expected -- attested binaries since via `strings`+`ldd`+behavior, and forced
 relinks where it mattered.
+
+
+## PROGRESS — step 2 (overlay planes) implemented + live-proven on virtio 2026-09-22
+
+(branch `overlay-planes-step2`; ticket stays OPEN, step 3 remains).
+
+- **Overlay inventory, virtio-gpu: zero, verified live.** `drm_info` on
+  `/dev/dri/card0` shows two planes on the single CRTC: object 33
+  (`Primary`) and object 34 (`Cursor`) — no `Overlay` type anywhere. The
+  ticket's "virtio historically exposes no overlay planes" holds on this
+  machine. So the VM validates the *fallback* shape live (enumerated zero,
+  behaved byte-identically), not active overlay scanout.
+- **Asahi `apple,dcp` overlay inventory: still unknown.** Same gap as the
+  cursor had. NOT extending `scripts/asahi-test4.sh` per scope — the exact
+  user commands are filed here for the coordinator to run on the hardware:
+  ```sh
+  drm_info | grep -E '"type"|CRTCs|Object ID'   # one-line per-plane inventory
+  drm_info | sed -n '/Planes/,$p'              # full per-plane dump (formats, FB, CRTC_X/Y)
+  ```
+  What to look for: any plane with `"type" = Overlay`, which CRTCs it is on,
+  and (while the gpu tier runs) whether its `FB ID` goes non-zero.
+- **What landed.** `tty/scanout.rs`: `select_planes` passes the overlay list
+  through whole (`inventory.overlay.clone()`); `PLANE_FRAME_FLAGS`
+  (renamed from `CURSOR_FRAME_FLAGS`) is cursor bit + overlay bit;
+  `ScanoutPresenter` gains `overlay_planes` (set in `new`, re-read in
+  `adopt_surface` with the re-emit log extended to both counts);
+  `render_and_queue` passes the widened flags; the startup line is now
+  `drm: scanout cursor planes cursor_planes=N overlay_planes=M ...`
+  (message kept grep-stable, field added). `render/scanout.rs` + `screencopy.rs`
+  capture docs extended to the overlay shape (below).
+- **The whole-vs-narrowed decision, traced not assumed.** Overlay rides
+  whole like the cursor, NOT narrowed like the primary, for three pinned-rev
+  reasons: (1) there is no per-plane choice to make at construction —
+  Smithay claims one plane per frame from the handed-over lists and falls
+  back to compositing wherever none can be claimed (oversized element,
+  failed TEST, occupied plane — all `trace!`, none wedging the frame);
+  (2) `DrmCompositor::new` sorts the overlay list front-to-back itself, so
+  narrowing would only risk dropping a plane it could have used; (3)
+  construction cannot newly fail because of it — the swapchain format search
+  (`find_supported_format`) reads the *primary* plane's formats only, so an
+  overlay-only format gap can refuse one frame's assignment but never the
+  compositor's construction. Per-CRTC enumeration + mixed fallback come free:
+  every surface carries its own CRTC's inventory, `adopt_surface` re-reads
+  the fresh one, and the empty-overlay CRTC selects the empty list (the old
+  construction behaving exactly).
+- **The capture answer (load-bearing): at most the cursor is ever missing —
+  document, no escalation, no composite-fix.** Smithay's
+  `try_assign_overlay_plane` only considers elements of kind
+  `ScanoutCandidate` or `Cursor`, and this tree builds *every* window, popup
+  and layer-shell surface as `Kind::Unspecified` (both
+  `render_elements_from_surface_tree` call sites in `render/elements.rs`;
+  `Rounded` forwards its inner kind unchanged) — only cursor elements are
+  `Kind::Cursor`, and the cursor plane is tried before the overlay. So no
+  window can ride an overlay plane on any hardware until something is marked
+  a scanout candidate, and that marking belongs to step 3 *with* its capture
+  fix: marking one now would let whole windows leave the buffer captures
+  read, which is exactly the misleading-capture harm this ticket says to
+  escalate on rather than document. What the overlay bit does today is let
+  the cursor ride an overlay where a CRTC has overlays but no cursor plane —
+  the same cursorless-capture consequence step 1 already documents, widened
+  by one plane kind. Measured live (virtio, cursor plane active, zero
+  overlays): captures across a cursor move byte-identical (`AE = 0`, same
+  md5); cross-tier same-position diff 281 px raw / 177 px at 5% fuzz out of
+  1.6M (0.018%), all inside the cursor's third (middle/right thirds `AE =
+  0`); same-tier dumb move footprint ~77 px. Nothing window-sized is missing.
+- **No new log spam: EnvFilter untouched.** The only `info!` in Smithay's
+  `drm-compositor` target at the pinned rev is still the cursor TEST-fail
+  line step 1 dampened (verified by grep — one hit); every overlay
+  assignment failure path (`try_assign_plane` and callers) logs at `trace!`.
+  The existing `info,smithay::backend::drm::compositor=warn` default covers
+  both with nothing to extend and nothing duplicated.
+- **Explicitly still out, pinned again:** `ALLOW_SCANOUT` (both primary
+  bits — the flags test asserts their absence alongside `!= ALLOW_SCANOUT`
+  and `!= DEFAULT`), `COLOR_FORMATS` expansion (untouched), per-output
+  scale/mode, packaging. No `PROTOCOL_VERSION` bump: no IPC shape, request,
+  action or reply field was added or changed — the diff is KMS plane
+  assignment plus log fields, none of which crosses the socket.
+- **README bullet: verified, no clause clears — step 3 still owns it.**
+  Overlay-active scanout of windows does not exist yet (nothing is a
+  candidate), so the "primary-plane-only" clause still describes what runs.
+  Flagged, not fixed: the bullet's cursor half ("no overlay or cursor planes
+  yet") went stale under step 1 (PR #216 attempted the cursor plane without
+  touching the line) — left for step 3's bullet rewrite per this ticket's
+  scope, stated here so it is not mistaken for step-2 drift.
+- **Bug-bash, live where reachable.** Overlay attach failure mid-session:
+  unreachable on virtio (no planes to attach); the refusal path is Smithay's
+  per-frame TEST→`Err`→composite, unchanged in shape from the cursor's and
+  observed at zero occurrences (`failed to test` count 0, `UnknownPlane`
+  count 0). COMMIT failure / lock / VT / hotplug with overlay state: with
+  `overlay_planes=0` there is no overlay state to disturb — `reactivate`,
+  `invalidate_scanout` and `use_mode` do not branch on the counts, and
+  `adopt_surface`'s only new branch is the log condition (single CRTC here,
+  so the re-emit is code-read plus the mixed-inventory unit pin, same bar
+  step 1's fix was held to). Zero-overlay CRTC alongside an overlay CRTC:
+  each `adopt_surface` re-reads the fresh surface's own inventory — pinned by
+  the mixed unit test (cursor-empty/overlay-full selects exactly that).
+- **Numbers (dev VM, llvmpipe — smoke only, never a GPU verdict).**
+  Full gate at the branch head: feature build links, `ldd` pair 1 vs 0 gbm
+  refs (default binary additionally `strings`-clean of the new log line);
+  7 scanout unit tests green (3 new: ride-whole, empty-fallback, mixed);
+  `nextest --workspace` **1425 passed, 6 skipped**; feature-package nextest
+  **1270 passed, 6 skipped**; both clippys `-D warnings` clean;
+  `fmt --all --check` clean; `smoke-test.sh` rc=0, 20 oks.
+  Live `--tty` (seat checked free, `/tmp/scoot-overlay2` prefix, released
+  after): `scanout="gpu"`, `cursor_planes=1 overlay_planes=0`; cursor plane
+  FB 46 active with pointer-tracked CRTC_X/Y; primary FB 42→45 across a
+  spawn (commits healthy, flips on damage, still on damage-only);
+  alternating A/B G,D,G,D,G,D × 60 large jumps, real PIDs (`comm=scoot`
+  checked): gpu `[5,5,5]`, dumb `[6,9,6]`, idle 0–1j both tiers, RSS
+  ~123.7MB vs ~42.4MB. Smaller absolutes than step 1's A/B (tighter,
+  sleep-free move loop lets damage coalesce) — same method both tiers, gpu
+  no worse in all three pairs; reported only as no-regression.
 
 
 ## What done looks like

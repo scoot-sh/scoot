@@ -211,21 +211,29 @@ running with no GPU at all is a hard requirement here, not a fallback tier.
   still warns and keeps pixman, because the read-back-and-copy shape it
   would otherwise take is strictly worse than compositing on the CPU.
   `--headless` and `--nested` are still read-back in every build.
-- **Scanout is primary-plane only, plus an attempted cursor plane.** Overlay planes are still untouched (step 2 of
-  `docs/backlog/rendering/gpu-scanout-planes.md`); the cursor plane is
-  attempted on CRTCs that expose one, with per-frame fallback to compositing
-  where the plane cannot be claimed. Two paravirt caveats, both measured on the dev
+- **Scanout is primary-plane only, plus attempted cursor and overlay planes.**
+  The cursor plane is attempted on CRTCs that expose one, with per-frame
+  fallback to compositing where the plane cannot be claimed; overlay planes
+  ride along whole from the CRTC's inventory the same way (step 2 of
+  `docs/backlog/rendering/gpu-scanout-planes.md`), and likewise fall back
+  per frame. Two paravirt caveats, both measured on the dev
   VM's virtio-gpu: the kernel hides the cursor plane until the session sets
   `CURSOR_PLANE_HOTSPOT` (which scoot does once per `--tty` session --
   without it the inventory is primary-only despite the plane existing), and
   the cap must land before `DrmDevice::new` (with `ATOMIC` first) or the
-  plane is visible to queries but unknown to commits. On virtio the plane
-  then scans out live (pointer-tracked, captures cursorless). One consequence to know: a capture (IPC
+  plane is visible to queries but unknown to commits. Overlay planes need no
+  such cap (`UNIVERSAL_PLANES` exposes them), and virtio-gpu has none to
+  expose anyway -- its inventory is one primary plus one cursor plane. On virtio the cursor
+  then scans out live (pointer-tracked, captures cursorless). Narrower than it
+  sounds: no window surface is ever a scanout candidate (every one is built
+  `Kind::Unspecified`), so an overlay plane can carry at most the cursor --
+  never a window -- until step 3 marks candidates together with its capture
+  fix. One consequence to know: a capture (IPC
   screenshots, `ext-image-copy-capture-v1`) reads the primary plane only, so
   on a session whose cursor is plane-assigned the capture shows the screen
   *without* the cursor; where the cursor is composited, captures keep showing
   it. The startup log says which it is (`drm: scanout cursor planes
-  cursor_planes=N ...`). It has
+  cursor_planes=N overlay_planes=M ...`). It has
   now run on a real GPU: on an Apple M2 under Asahi Linux (`2560x1600@60`)
   it costs **4–5x less compositor CPU** than the default dumb-buffer tier
   under damage — 20.8% of a core down to 4.3% under large-damage pointer
@@ -292,11 +300,17 @@ scans out from the GPU instead of reading each frame back; without it,
 `--tty` warns and keeps pixman however `gles` was asked for.
 
 One limit worth knowing before you turn it on: scanout drives the **primary
-plane, attempting the cursor plane** — no overlay planes. The cursor plane is attempted
+plane, attempting the cursor and overlay planes** — direct scanout of client
+buffers (`ALLOW_SCANOUT`) stays out until step 3. The cursor plane is attempted
 where the CRTC exposes one (the dev VM's virtio-gpu does: one `Cursor` plane
-per `drm_info`) and silently not elsewhere; a plane-assigned cursor is absent
-from captures, which read the primary plane only. Whether `apple,dcp`
-exposes a usable cursor plane is still unknown (no plane inventory exists
+per `drm_info`) and silently not elsewhere; overlay planes ride along whole
+from the same inventory (virtio exposes none: `overlay_planes=0`) and fall
+back per frame the same way. A plane-assigned cursor is absent
+from captures, which read the primary plane only -- and no window can ride an
+overlay yet (nothing is marked a scanout candidate; that marking lands with
+step 3's capture fix, since a candidate window would leave the buffer
+captures read). Whether `apple,dcp`
+exposes usable cursor or overlay planes is still unknown (no plane inventory exists
 from the Asahi runs). Virtio's own footnote: its cursor plane needs the
 session's `CURSOR_PLANE_HOTSPOT` cap to be enumerated at all (set before
 `DrmDevice::new`, `ATOMIC` first, or commits fail unknown-plane), after

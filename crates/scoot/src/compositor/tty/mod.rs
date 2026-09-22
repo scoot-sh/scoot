@@ -885,9 +885,12 @@ fn try_scanout(
             // info!, not debug!: whether the cursor rides its own KMS plane
             // or stays composited decides what a capture sees (the capture
             // reads the primary plane only), so it belongs next to the tier
-            // line above, not buried where only a bug hunt looks.
+            // line above, not buried where only a bug hunt looks. The
+            // overlay count rides on the same line for the same reason: a
+            // plane-assigned element of any kind is absent from captures.
             tracing::info!(
                 cursor_planes = presenter.cursor_planes(),
+                overlay_planes = presenter.overlay_planes(),
                 cursor_width = cursor_size.w,
                 cursor_height = cursor_size.h,
                 "drm: scanout cursor planes"

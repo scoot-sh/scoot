@@ -147,10 +147,12 @@
 //! - under `--tty` on the dumb tier the cursor is a render element in the one
 //!   framebuffer this module reads back, so a capture always contains it;
 //! - under `--tty` on the GPU scanout tier the cursor is in the capture only
-//!   where no KMS cursor plane carries it: a plane-assigned cursor reaches
-//!   the screen through its own commit and is never drawn into the swapchain
-//!   slot the capture reads (see `render::scanout`'s module doc). The startup
-//!   log says which it is (`drm: scanout cursor planes` with the count).
+//!   where no KMS plane carries it (a cursor plane, or an overlay plane on
+//!   a CRTC that has overlays but no cursor plane): a plane-assigned cursor
+//!   reaches the screen through its own commit and is never drawn into the
+//!   swapchain slot the capture reads (see `render::scanout`'s module doc).
+//!   The startup log says which it is (`drm: scanout cursor planes` with
+//!   both counts).
 //!
 //! `scoot msg screenshot` reads through the same buffer and follows the same
 //! rule on all three.
