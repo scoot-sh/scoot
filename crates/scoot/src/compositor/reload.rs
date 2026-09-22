@@ -52,10 +52,12 @@
 //! # While locked
 //!
 //! A reload applies under session lock, deliberately. Nothing in the applied
-//! set can disclose locked content: appearance changes touch nothing the
-//! locked frame draws (the render path draws
-//! the lock surface and nothing else while locked -- the reloaded cursor
-//! included, which is not drawn there at all), gap and binds are
+//! set can disclose locked content: the ring, background and cursor pixels
+//! are all derived from config values and installed theme files, never from
+//! a client surface -- and the cursor rebuild replaces only those pixels
+//! without touching `status` (which shape shows; the lock reset it to the
+//! default at lock time), so a locked frame draws the same shape from new
+//! pixels, never new content. Gap and binds are
 //! input-side, and binds cannot fire actions while locked anyway
 //! (`input::key` forwards them to the lock client). Refusing under lock
 //! would strand an agent that edits the file mid-lock with an error for a
@@ -243,7 +245,12 @@ impl State {
         // exactly what was compared, so the next reload agrees silently.
         // `Theme::load` never fails (an unresolvable name is an empty theme
         // drawn as the fallback shapes), so there is no failure half to
-        // guard: the writes below cannot partially happen.
+        // guard: the writes below cannot partially happen. Known corner, not
+        // a bug: reloading `cursor_theme` back to unset resolves through
+        // `$XCURSOR_THEME`, which startup already overwrote with the
+        // resolved name -- so the session keeps the startup value rather
+        // than re-reading the outer environment. Self-consistent and
+        // idempotent; only a restart picks up an externally changed variable.
         let cursor_size = appearance.cursor_size != live.cursor_size;
         let cursor_color = appearance.cursor_color != live.cursor_color;
         let cursor_theme = appearance.cursor_theme != live.cursor_theme;

@@ -1012,7 +1012,9 @@ impl State {
     /// The child inherits `WAYLAND_DISPLAY` and the IPC socket path, the
     /// session-identity environment (`XDG_CURRENT_DESKTOP`,
     /// `XDG_SESSION_TYPE`, `XDG_SESSION_DESKTOP` -- see `session_env` for
-    /// which are unconditional and which fill a vacuum), and -- unless the
+    /// which are unconditional and which fill a vacuum), the live cursor
+    /// theme (`XCURSOR_THEME`/`XCURSOR_SIZE`, read off the rebuilt `Cursor`
+    /// so a reloaded theme reaches future children), and -- unless the
     /// token table is full -- a fresh activation token in
     /// `XDG_ACTIVATION_TOKEN`, so it can activate its own window when it maps
     /// one (see [`State::mint_spawn_token`] for which bounds apply and what a
