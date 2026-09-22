@@ -283,7 +283,7 @@ run_round() {
         n=$(( n + 1 ))
         x=$(( 200 + (n * 7) % 900 )); y=$(( 150 + (n * 11) % 600 ))
         "$ctl" pointer move "$x" "$y" >/dev/null 2>&1
-        [ $(( n % 60 )) -eq 0 ] &&
+        [ $(( n % 60 )) -eq 0 ] || [ "$n" = 1 ] &&
             cat /sys/class/power_supply/macsmc-battery/power_now 2>/dev/null >> "$OUT/$tag.power-move"
         sleep "$MOVE_GAP"
     done
@@ -302,7 +302,7 @@ run_round() {
     while [ "$(( $(now_ms) - t0 ))" -lt $(( WIDTH_SECS * 1000 )) ]; do
         n=$(( n + 1 ))
         "$ctl" action cycle-column-width >/dev/null 2>&1
-        [ $(( n % 20 )) -eq 0 ] &&
+        [ $(( n % 20 )) -eq 0 ] || [ "$n" = 1 ] &&
             cat /sys/class/power_supply/macsmc-battery/power_now 2>/dev/null >> "$OUT/$tag.power-width"
         sleep "$WIDTH_GAP"
     done
