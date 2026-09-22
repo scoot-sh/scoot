@@ -41,9 +41,10 @@
 //!   grab states, the handler impls) sit behind the feature gate.
 //! - **`DISPLAY` is set only while our server is believed live.**
 //!   `State::xdisplay` is `Some` from the synchronous display-number lock at
-//!   spawn until a pre-`READY` death clears it -- and `State::spawn` plus
-//!   `compositor::run`'s process export both read exactly that. When it is
-//!   `None` (never enabled, or the server died) both leave `DISPLAY`
+//!   spawn until a pre-`READY` death or a failed window-manager attach
+//!   clears it -- and `State::spawn` plus `compositor::run`'s process export
+//!   both read exactly that. When it is `None` (never enabled, spawn failed,
+//!   server died, or no WM to manage it) both leave `DISPLAY`
 //!   untouched, so a host-provided `DISPLAY` under `--nested` survives: no
 //!   clobber. The number itself is never hard-coded -- the lock scan picks a
 //!   free one, and `READY` carries the same number back -- so a rapid
@@ -263,9 +264,24 @@ pub fn start(
                             );
                         }
                         Err(error) => {
+                            // No window manager means no reparenting, no
+                            // surface association, no map requests -- X
+                            // clients could still connect, but to a bare
+                            // server this session cannot manage. Withdraw
+                            // the number (the `xdisplay` invariant is "set
+                            // only while our server is believed live", and
+                            // a WM-less server is not live for our
+                            // purposes -- same as the pre-READY death
+                            // below), so later spawns inherit rather than
+                            // point at the half-session. The grab manager
+                            // stays (created at spawn, `can_view`-gated,
+                            // harmless without X surfaces), and the server
+                            // process itself is untouched (reaped with the
+                            // session through `XWaylandClientData`).
+                            state.xdisplay = None;
                             tracing::error!(
                                 %error,
-                                "XWayland is up but its window manager could not attach; continuing Wayland-only"
+                                "XWayland is up but its window manager could not attach; withdrawing DISPLAY and continuing Wayland-only"
                             );
                         }
                     }

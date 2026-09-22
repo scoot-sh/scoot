@@ -2747,6 +2747,7 @@ mod tests {
             "[output]",
             "[renderer]",
             "[tty]",
+            "[xwayland]",
             "[autostart]",
             "[binds]",
         ] {

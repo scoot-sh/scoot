@@ -337,8 +337,9 @@ pub struct State {
     #[cfg(feature = "xwayland")]
     pub xwm: Option<xwayland::X11Wm>,
     /// The X display number while our server is believed live: set from the
-    /// synchronous lock at spawn, cleared on a pre-`READY` death (see
-    /// `xwayland.rs`). `State::spawn` and `run`'s process export read
+    /// synchronous lock at spawn, cleared on a pre-`READY` death or a failed
+    /// window-manager attach (see `xwayland.rs` -- a WM-less server is not
+    /// live for our purposes). `State::spawn` and `run`'s process export read
     /// exactly this -- `Some` sets `DISPLAY`, `None` leaves it untouched
     /// (no clobber of a host `DISPLAY` under `--nested`). Unconditional
     /// (a plain `u32`, no Smithay type), so the plumbing compiles and is
