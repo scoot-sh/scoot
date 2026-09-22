@@ -465,7 +465,10 @@ destroyed after the fact by `OUT=/tmp/scoot-tier-bench scripts/asahi-test4.sh`
 benchmark into the evidence directory, failed every round on the busy seat,
 and left four `came_up=no` rows where four rounds of measurements had been.
 What survives from run 1: every screenshot, every power sample, the
-`.outputs`/`.windows` dumps, and the r2–r4 logs. What does not: its numeric
+`.outputs`/`.windows` dumps, and the **r3–r4** logs — the clobbering run
+defaulted to `ROUNDS=2`, so rounds 1 and 2 lost their logs as well, and what
+sits at those four paths now is seat-failure output from 23:10. What does not
+survive: its numeric
 rows and its recorded environment. The figures below were computed from that
 file while it existed, and independently recomputed from it by review before
 it was lost — two parties, same values — but the artifact is gone and nobody
@@ -526,9 +529,13 @@ the captures are byte-identical `md5`-wise within a tier.
 | large-damage motion | 0.455 j/ev (0.443–0.461) | **0.090 j/ev** (0.087–0.097) | **4.8–5.1x cheaper** |
 | full relayout | 3.34 j/ev (3.32–3.43) | **0.797 j/ev** (0.790–0.802) | **4.2–4.3x cheaper** |
 
-All six rounds pooled; the medians are `0.4553`/`0.0907` and `3.358`/`0.796`,
-and the per-run ratios (5.07x and 4.79x motion, 4.18x and 4.30x relayout) are
-what the ranges above come from. As a share of one core over the fixed
+All six rounds pooled; the medians are `0.4553`/`0.0908` and `3.358`/`0.796`.
+The ranges above are the two runs' **ratios of medians** — 5.09x and 4.79x
+motion, 4.20x and 4.30x relayout — and naming the convention matters, because
+an earlier version quoted 5.07x and 4.18x here: 5.07 is the median of the
+four per-round *ratios* (a third statistic, inconsistent with the medians in
+the same sentence, which divide to 5.09) and 4.18 does not reproduce under
+any convention. As a share of one core over the fixed
 windows: motion cost **20.8%** on the dumb tier against **4.3%** on scanout;
 relayout **52.0%** against **14.0%**.
 
@@ -561,7 +568,7 @@ being measured is 400%, so it survives the honest number comfortably.
    (6.26→6.04) and **0.25 W** under relayout (6.36→6.11), roughly 3.5% of
    total system draw on battery. **Read that as a direction, not a precise
    quantity**: it rests on run 2 alone (run 1 sampled power at idle only),
-   so n = 2 rounds per tier at 12 samples per motion scene and 8 per relayout
+   so n = 2 rounds per tier at 12 samples per motion scene and 8–9 per relayout
    scene, and the within-tier idle band above is half its size. Both signs
    agree across both scenes and both rounds, which is the part worth
    trusting.

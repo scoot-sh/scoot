@@ -257,10 +257,18 @@ echo "--- the log is plain text, since it is going to a file and not a terminal 
 # duly reported the presentation tier as absent on a run where it had come up
 # (see Asahi.md's Test 4 traps). Every log consumer in scripts/ greps this
 # shape, and a one-line regression would silently break all of them.
-if grep -qa "$(printf '\033')" "$LOG"; then
-    echo "BUG: the compositor wrote ANSI escapes to a redirected log"
-    grep -a "$(printf '\033')" "$LOG" | head -3 | cat -v
-    exit 1
+# Only when `$LOG` really is a file. It is caller-overridable, and a caller
+# who points it at `/dev/tty` or `/dev/stdout` from a terminal makes colour
+# legitimately *on* -- asserting against that would fail correct behaviour.
+if [ -f "$LOG" ]; then
+    if grep -qa "$(printf '\033')" "$LOG"; then
+        echo "BUG: the compositor wrote ANSI escapes to a redirected log"
+        grep -a "$(printf '\033')" "$LOG" | head -3 | cat -v
+        exit 1
+    fi
+    echo "ok: no ANSI escapes in the redirected log"
+else
+    echo "skipped: \$LOG is not a regular file, so colour may legitimately be on"
 fi
 
 echo "--- opening a terminal ---"

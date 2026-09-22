@@ -579,11 +579,13 @@ not see is exactly what it said it could not see.
 **Idle, memory, power:**
 
 - **Idle: 0 jiffies over 10s on both tiers, every round.** Neither wakes when
-  nothing moves; idle power is identical (5.52 W whole-system). The
-  fast-but-busy trade does not exist here.
-- **Memory: +7 to +17 MB RSS** for the GBM swapchain (75.5->92.4 MB in run 1,
-  87.3->94.8 MB in run 2 -- the baseline moves too, so this is a range). The
-  one column the dumb tier wins.
+  nothing moves; idle power is indistinguishable (medians 5.510 W dumb and
+  5.505 W gpu whole-system, per-round means spanning 5.411-5.533). The
+  fast-but-busy trade does not exist here. Keep that 0.12 W within-tier band
+  in view when reading the damage-power figure below: it is over half of it.
+- **Memory: +7 to +16 MB RSS** for the GBM swapchain (medians 76.2->92.4 MB
+  in run 1, 87.3->94.8 MB in run 2 -- the baseline moves too, so this is a
+  range). The one column the dumb tier wins.
 - **Power: scanout draws *less*, not more.** Whole-system draw under damage
   is 0.22 W lower under motion (6.26->6.04) and 0.25 W lower under relayout
   (6.36->6.11), about 3.5% of system draw. The "may cut CPU wakeups and raise
@@ -617,7 +619,8 @@ directory (the script now refuses that and offers `ANALYSE_ONLY=1`). Its
 per-round rows were computed while the file existed and independently
 recomputed from it by review, but they are no longer re-checkable; run 2 is
 intact and independently carries the correctness result, the ratios and all
-the power figures. Run 1's screenshots, power samples and r2-r4 logs survive.
+the power figures. Run 1's screenshots, power samples and r3-r4 logs survive (the clobbering
+run defaulted to `ROUNDS=2`, so rounds 1 and 2 lost their logs as well).
 
 **What this still does not establish.** The motion scene is *large-bbox*
 damage (the injected path jumps across ~900x600 logical pixels), so the

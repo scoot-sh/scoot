@@ -20,7 +20,8 @@
 #
 #   ANALYSE_ONLY=1 OUT=/tmp/scoot-asahi-test4 scripts/asahi-test4.sh
 #
-# Overrides: ROUNDS, OUT, ANALYSE_ONLY, and anything tty-tier-bench.sh takes.
+# Overrides: ROUNDS, OUT, ANALYSE_ONLY, OVERWRITE, and anything
+# tty-tier-bench.sh takes.
 set -uo pipefail
 
 cd "$(dirname "$0")/.." || exit 1
@@ -45,31 +46,46 @@ export ROUNDS OUT
 # read it is the wrong shape, so reading is now a mode and overwriting takes
 # an explicit flag.
 if [ -e "$OUT/summary.tsv" ] && [ "$ANALYSE_ONLY" != 1 ]; then
-    echo "$OUT already holds a run ($OUT/summary.tsv exists)." >&2
-    echo >&2
-    echo "  to re-read it:        ANALYSE_ONLY=1 OUT=$OUT $0" >&2
-    echo "  to measure afresh:    OUT=<a new directory> $0" >&2
-    echo "  to overwrite it:      OVERWRITE=1 OUT=$OUT $0   (destroys the numbers in it)" >&2
-    [ "${OVERWRITE:-0}" = 1 ] || exit 1
-    echo "OVERWRITE=1 given; replacing the run in $OUT" >&2
+    if [ "${OVERWRITE:-0}" = 1 ]; then
+        echo "OVERWRITE=1 given; replacing the run in $OUT" >&2
+    else
+        echo "$OUT already holds a run ($OUT/summary.tsv exists)." >&2
+        echo >&2
+        echo "  to re-read it:        ANALYSE_ONLY=1 OUT=$OUT $0" >&2
+        echo "  to measure afresh:    OUT=<a new directory> $0" >&2
+        echo "  to overwrite it:      OVERWRITE=1 OUT=$OUT $0   (destroys the numbers in it)" >&2
+        exit 1
+    fi
 fi
 
 # Both tiers must come from one tree or the A/B says nothing, so this checks
 # for the builds rather than making them: a `nix build` here would silently
 # rebuild against whatever the working tree says *now*, which is not
 # necessarily what the other tier was built from.
-missing=
-for p in result-scoot/bin/scoot result-scoot-gpu/bin/scoot result-scootctl/bin/scootctl; do
-    [ -x "$p" ] || missing="$missing $p"
-done
-if [ -n "$missing" ]; then
-    echo "missing:$missing" >&2
-    echo >&2
-    echo "build all three from the same tree first:" >&2
-    echo "  nix build .#scoot     -o result-scoot" >&2
-    echo "  nix build .#scoot-gpu -o result-scoot-gpu" >&2
-    echo "  nix build .#scootctl  -o result-scootctl" >&2
-    exit 1
+#
+# Only when actually measuring, though. Re-reading a finished run needs
+# nothing but bash -- which is the whole point of `tty-tier-bench.sh`'s
+# "analysis happens afterwards, off this machine's critical path", and the
+# point of offering ANALYSE_ONLY as the way to re-derive numbers from an
+# archived run. Demanding three `nix build` symlinks in order to read a TSV
+# would make that offer hollow on any machine that no longer has them.
+if [ "$ANALYSE_ONLY" != 1 ]; then
+    missing=
+    for p in result-scoot/bin/scoot result-scoot-gpu/bin/scoot result-scootctl/bin/scootctl; do
+        [ -x "$p" ] || missing="$missing $p"
+    done
+    if [ -n "$missing" ]; then
+        echo "missing:$missing" >&2
+        echo >&2
+        echo "build all three from the same tree first:" >&2
+        echo "  nix build .#scoot     -o result-scoot" >&2
+        echo "  nix build .#scoot-gpu -o result-scoot-gpu" >&2
+        echo "  nix build .#scootctl  -o result-scootctl" >&2
+        echo >&2
+        echo "or, to re-read a run that already exists:" >&2
+        echo "  ANALYSE_ONLY=1 OUT=<that run's directory> $0" >&2
+        exit 1
+    fi
 fi
 
 # Everything this script prints also lands in one file. The run happens on a
@@ -83,7 +99,7 @@ REPORT="$OUT/test4-report.txt"
 [ "$ANALYSE_ONLY" = 1 ] && REPORT="$OUT/test4-reanalysis.txt"
 {
     echo "Asahi.md Test 4 -- $(date -Is)"
-    echo "script: $0  rounds: $ROUNDS  out: $OUT"
+    if [ "$ANALYSE_ONLY" = 1 ]; then echo "script: $0  out: $OUT"; else echo "script: $0  rounds: $ROUNDS  out: $OUT"; fi
     [ "$ANALYSE_ONLY" = 1 ] && echo "ANALYSE_ONLY: re-reading an existing run, measuring nothing"
 } > "$REPORT"
 
@@ -103,13 +119,22 @@ SUMMARY="$OUT/summary.tsv"
 # turning `width_jiffies/width_events` into `width_events/width_ms`. That
 # produced a plausible-looking and completely wrong relayout figure when a
 # later analysis pass pooled the two runs by hand.
-cols=$(head -1 "$SUMMARY" | awk -F'\t' '{print NF}')
-if [ "$cols" != 18 ]; then
+# Compared as text, not just counted: a future 18-column file with columns
+# renamed or reordered would pass a field count and be misread just as
+# silently as the 16-column one, and checking the whole header costs the same
+# one line.
+expected_header='round	tier	came_up	paused	connector	scanout	idle_jiffies	idle_secs	idle_uW_mean	move_jiffies	move_events	move_ms	move_uW_mean	width_jiffies	width_events	width_ms	width_uW_mean	rss_kB'
+actual_header=$(head -1 "$SUMMARY")
+if [ "$actual_header" != "$expected_header" ]; then
     {
-        echo "refusing to analyse $SUMMARY: $cols columns, expected 18."
-        echo "A 16-column file is the pre-2026-09-21 format (no power columns);"
-        echo "its width_* fields sit one place to the left and would be misread."
-        echo "The measurements themselves are fine -- read them by hand, or re-run."
+        echo "refusing to analyse $SUMMARY: its header is not the one this analysis reads."
+        echo "  expected ($(printf '%s' "$expected_header" | awk -F'\t' '{print NF}') columns): $expected_header"
+        echo "  found    ($(printf '%s' "$actual_header" | awk -F'\t' '{print NF}') columns): $actual_header"
+        echo
+        echo "A 16-column file is the pre-2026-09-21 format (no power columns); its"
+        echo "width_* fields sit one place to the left and would be read as the wrong"
+        echo "quantities entirely. The measurements themselves are fine -- read them by"
+        echo "hand, or re-run into a new directory."
     } | tee -a "$REPORT" >&2
     exit 1
 fi

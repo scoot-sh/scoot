@@ -25,7 +25,8 @@
 # python or ImageMagick -- bash, coreutils, the two scoot builds and foot.
 #
 # Overrides: SCOOT_DUMB, SCOOT_GPU, SCOOTCTL (binaries), OUT (output dir),
-# ROUNDS, IDLE_SECS, MOVE_SECS/MOVE_GAP, WIDTH_SECS/WIDTH_GAP, BACKEND.
+# ROUNDS, IDLE_SECS, MOVE_SECS/MOVE_GAP, WIDTH_SECS/WIDTH_GAP, BACKEND,
+# OVERWRITE=1 (replace a run already in OUT -- destroys its numbers).
 set -uo pipefail
 
 # Same lesson as nested-resize-repro.sh: default to the tree you invoked from
@@ -91,6 +92,24 @@ command -v foot >/dev/null || { echo "foot is not on PATH -- it is the test clie
 mkdir -p "$OUT"
 SUMMARY="$OUT/summary.tsv"
 ENVLOG="$OUT/environment.txt"
+
+# Refuse to measure into a directory that already holds a run. The guard lives
+# *here*, beside the `> "$SUMMARY"` truncation that does the damage, rather
+# than only in `asahi-test4.sh`: this script is documented in its own header
+# as the thing you run on the VT, and its default `OUT` is
+# `/tmp/scoot-tier-bench` -- which is exactly the directory whose four rounds
+# of measurements were destroyed on 2026-09-21 by a second run. Guarding only
+# the wrapper would have stopped that day's specific repro while leaving a
+# bare `scripts/tty-tier-bench.sh`, with no environment at all, able to do it
+# again. Recorded evidence is a cache entry keyed to a tree state (CLAUDE.md);
+# nothing should be able to invalidate it as a side effect.
+if [ -e "$SUMMARY" ] && [ "${OVERWRITE:-0}" != 1 ]; then
+    echo "$OUT already holds a run ($SUMMARY exists); refusing to overwrite it." >&2
+    echo "  measure afresh:  OUT=<a new directory> $0" >&2
+    echo "  re-read that one: ANALYSE_ONLY=1 OUT=$OUT scripts/asahi-test4.sh" >&2
+    echo "  overwrite it:    OVERWRITE=1 OUT=$OUT $0   (destroys the numbers in it)" >&2
+    exit 1
+fi
 
 # --- the record's cache key (CLAUDE.md: evidence is keyed to a tree state) ---
 {

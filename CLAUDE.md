@@ -305,12 +305,25 @@ durable belongs in `CLAUDE.md` or `ROADMAP.md`/`docs/`, not duplicated here.
   `scoot-reviewer` never edits, commits or merges — and that is exactly why
   it reads as safe to tell it "check out `<commit>^` if it helps verify the
   before/after claim", which is what the dispatch prompt did. `git checkout`
-  is branch-mutating whoever runs it: had the reviewer taken that suggestion
-  while the orchestrator was mid-commit in the same checkout, it would have
-  moved `HEAD` out from under it. It came back a no-op self-checkout and
-  nothing was lost, but the near-miss is the point. Ask a reviewer to verify
+  is branch-mutating whoever runs it. The reflog of that session shows what
+  followed: `HEAD` moved **three** times, not once —
+  `22:42:09 asahi-tier-bench → asahi-tier-bench` (harmless),
+  then `23:01:32 asahi-tier-bench → main`, then
+  `23:02:08` back and off again. The 23:01:32 move is the one that matters:
+  the reviewer took the shared checkout off the PR branch onto `main` as
+  *cleanup*, believing `main` was the state it had found, and it sat there
+  until the orchestrator's own `23:04:52` checkout. Nothing was lost only
+  because no commit happened in that window — timing, not safety. Two
+  lessons, and the second is the less obvious one: ask a reviewer to inspect
   a historical commit in its **own** `git worktree`, or hand it the artifact
-  (a diff, a built binary, a store path) instead of a commit to check out.
+  (a diff, a built binary, a store path) instead of a commit to check out;
+  and note that an agent *restoring* what it believes was the original branch
+  is its own hazard, because its belief about the original is a snapshot from
+  whenever it started.
+  (An earlier version of this entry said the checkout "came back a no-op …
+  and nothing was lost", which was written from the one no-op move and missed
+  the other three. Review caught it in the reflog. A near-miss recorded
+  mildly teaches the mild lesson.)
 - **The same collision can happen between two implementers, not just the
   orchestrator and one — this also happened once.** Two `scoot-implementer`
   agents were dispatched close together, reasoned safe because their file sets
