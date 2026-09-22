@@ -15,12 +15,12 @@
 use std::fs;
 use std::path::PathBuf;
 
-use scoot_core::{Action, Config, Event, Horizontal, WindowId, WindowInfo};
+use scoot_core::{Action, Config, Event, Horizontal, OutputId, WindowId, WindowInfo};
 use scoot_ipc::{Request, Response};
 use smithay::reexports::calloop::EventLoop;
 use smithay::reexports::wayland_server::Display;
 
-use super::field;
+use super::{ScaleReload, field, scale_reload};
 use crate::compositor::config;
 use crate::compositor::decorations::{Appearance, Color};
 use crate::compositor::headless;
@@ -162,7 +162,7 @@ fn reload_applies_gap_appearance_and_binds_and_lists_them() {
 }
 
 #[test]
-fn reload_applies_column_widths_and_refuses_startup_only_fields() {
+fn reload_applies_column_widths_scale_and_refuses_startup_only_fields() {
     let mut fixture = Fixture::with_config("");
     fixture.rewrite(
         r#"
@@ -189,17 +189,19 @@ fn reload_applies_column_widths_and_refuses_startup_only_fields() {
     );
     let response = fixture.reload();
     // `gap = 12` is the running default, `backend = "pixman"` is the running
-    // renderer: agreeing fields stay silent in both lists.
+    // renderer: agreeing fields stay silent in both lists. `scale = 2.0`
+    // applies live now (Phase 3), alongside the widths and the new bind.
     assert_eq!(
         applied(&response),
         &[
             field::COLUMN_WIDTHS.to_owned(),
             field::DEFAULT_COLUMN_WIDTH.to_owned(),
+            field::SCALE.to_owned(),
             field::BINDS.to_owned(),
         ],
-        "the width fields should apply alongside the new bind: {response:?}"
+        "the width and scale fields should apply alongside the new bind: {response:?}"
     );
-    for name in [field::SCALE, field::GPU, field::AUTOSTART] {
+    for name in [field::GPU, field::AUTOSTART] {
         assert!(
             refused_names(&response).contains(&name),
             "{name} was not refused: {response:?}"
@@ -208,11 +210,288 @@ fn reload_applies_column_widths_and_refuses_startup_only_fields() {
     assert_eq!(fixture.state.world.config().gap, 12);
     assert_eq!(fixture.state.world.config().column_widths, vec![0.25, 0.75]);
     assert_eq!(fixture.state.world.config().default_column_width, 0);
-    assert_eq!(fixture.state.output_scale, 1.0);
+    assert_eq!(fixture.state.output_scale, 2.0);
+    assert_eq!(fixture.state.integer_scale, 2);
     assert!(
         fixture.state.needs_render,
         "a width change reloaded without requesting a render"
     );
+}
+
+#[test]
+fn reload_applies_output_scale_and_halves_the_logical_geometry() {
+    // The Phase 3 pin: `scale = 2.0` moves from the file into the live
+    // session under its own applied name, the precomputed integer follows,
+    // the 200px headless canvas becomes a 100x100 logical desktop, and the
+    // core lays out against the halved area -- with a render requested.
+    let mut fixture = Fixture::with_config("");
+    // A mapped window, so the arrangement the reload recomputes is a real
+    // one, not an empty session's.
+    fixture.state.world.handle_event(Event::WindowOpened {
+        id: WindowId(1),
+        info: WindowInfo::default(),
+        output: None,
+        focus: true,
+    });
+    let before = fixture
+        .state
+        .world
+        .arrange()
+        .get(WindowId(1))
+        .expect("the opened window is placed")
+        .rect
+        .w;
+
+    fixture.rewrite("[output]\nscale = 2.0\n");
+    fixture.state.needs_render = false;
+    let response = fixture.reload();
+    assert_eq!(
+        applied(&response),
+        &[field::SCALE.to_owned()],
+        "the new scale should apply: {response:?}"
+    );
+    assert!(
+        refused(&response).is_empty(),
+        "nothing here should refuse: {response:?}"
+    );
+    assert_eq!(fixture.state.output_scale, 2.0);
+    assert_eq!(fixture.state.integer_scale, 2);
+    let output = fixture
+        .state
+        .outputs
+        .primary()
+        .expect("the headless output")
+        .clone();
+    let geometry = fixture
+        .state
+        .space
+        .output_geometry(&output)
+        .expect("the mapped output's geometry");
+    assert_eq!(
+        (geometry.size.w, geometry.size.h),
+        (CANVAS / 2, CANVAS / 2),
+        "the logical desktop should halve at scale 2"
+    );
+    let usable = fixture.state.world.usable_areas();
+    assert_eq!(usable.len(), 1, "one output, one usable area");
+    assert_eq!(
+        (usable[0].w, usable[0].h),
+        (CANVAS / 2, CANVAS / 2),
+        "the core should lay out against the halved area"
+    );
+    let after = fixture
+        .state
+        .world
+        .arrange()
+        .get(WindowId(1))
+        .expect("the window is still placed")
+        .rect
+        .w;
+    assert!(
+        after < before,
+        "the mapped window should relayout into the smaller desktop: {before} -> {after}"
+    );
+    assert!(
+        fixture.state.needs_render,
+        "a scale change reloaded without requesting a render"
+    );
+}
+
+#[test]
+fn a_second_scale_reload_reports_nothing() {
+    // The snapshot rule for the scale pair: the first reload stores exactly
+    // what it compared (`output_scale` plus its integer), so the second
+    // diffs against what the first applied rather than re-reporting it.
+    let mut fixture = Fixture::with_config("[output]\nscale = 2.0\n");
+    let first = fixture.reload();
+    assert_eq!(
+        applied(&first),
+        &[field::SCALE.to_owned()],
+        "the first reload should apply the scale: {first:?}"
+    );
+    fixture.state.needs_render = false;
+    let second = fixture.reload();
+    assert!(
+        applied(&second).is_empty() && refused(&second).is_empty(),
+        "the second reload changed nothing it was asked to -- and says so: {second:?}"
+    );
+    assert!(
+        !fixture.state.needs_render,
+        "an idempotent second reload must not request a render"
+    );
+}
+
+#[test]
+fn an_out_of_range_scale_applies_as_its_clamped_self() {
+    // Invalid values are clamped per the existing parse rules
+    // (`into_scale`), never refused: the file asked for 100, the session
+    // runs the 4.0 it clamps to, and says applied.
+    let mut fixture = Fixture::with_config("");
+    fixture.rewrite("[output]\nscale = 100.0\n");
+    let response = fixture.reload();
+    assert_eq!(
+        applied(&response),
+        &[field::SCALE.to_owned()],
+        "the clamped scale should apply: {response:?}"
+    );
+    assert!(
+        refused(&response).is_empty(),
+        "clamping is not a refusal: {response:?}"
+    );
+    assert_eq!(
+        fixture.state.output_scale,
+        crate::compositor::output_scale::MAX_SCALE
+    );
+    assert_eq!(fixture.state.integer_scale, 4);
+}
+
+#[test]
+fn a_non_finite_scale_falls_back_to_one_silently() {
+    // TOML can spell `nan`; it resolves to 1.0 like its absence would, so a
+    // session already at 1.0 agrees with it in both lists.
+    let mut fixture = Fixture::with_config("");
+    fixture.rewrite("[output]\nscale = nan\n");
+    let response = fixture.reload();
+    assert!(
+        applied(&response).is_empty() && refused(&response).is_empty(),
+        "a non-finite scale agreeing with the live 1.0 says nothing: {response:?}"
+    );
+    assert_eq!(fixture.state.output_scale, 1.0);
+}
+
+#[test]
+fn scale_reloads_round_trip_through_fractional_and_back() {
+    // Fractional to integer to fractional, back to back with no settle in
+    // between: every step reports applied against the live value the
+    // previous step stored, and the integer companion tracks the `ceil`.
+    let mut fixture = Fixture::with_config("");
+    for (text, scale, integer) in [
+        ("[output]\nscale = 1.5\n", 1.5, 2),
+        ("[output]\nscale = 2.0\n", 2.0, 2),
+        ("[output]\nscale = 1.5\n", 1.5, 2),
+        ("[output]\nscale = 1.0\n", 1.0, 1),
+    ] {
+        fixture.rewrite(text);
+        let response = fixture.reload();
+        assert_eq!(
+            applied(&response),
+            &[field::SCALE.to_owned()],
+            "each rescale should apply: {response:?}"
+        );
+        assert_eq!(fixture.state.output_scale, scale);
+        assert_eq!(fixture.state.integer_scale, integer);
+    }
+    fixture.state.needs_render = false;
+    let settled = fixture.reload();
+    assert!(
+        applied(&settled).is_empty() && refused(&settled).is_empty(),
+        "the round trip should settle silently: {settled:?}"
+    );
+    assert!(!fixture.state.needs_render);
+}
+
+#[test]
+fn rescale_recompacts_outputs_like_a_fresh_session() {
+    // Review follow-up pin: two 200px outputs at scale 1 sit at x=0 and
+    // x=200. A reload to 2.0 must recompact them to x=0 and x=100 -- what a
+    // session started at 2.0 builds -- not preserve x=200 behind a gap, and
+    // the trip back to 1.0 must not overlap. A window on the second output
+    // follows it both ways.
+    let mut fixture = Fixture::with_config("");
+    let second = headless::add_output(&mut fixture.state, "headless-2", CANVAS, CANVAS)
+        .expect("a second headless output");
+    fixture.state.world.handle_event(Event::WindowOpened {
+        id: WindowId(1),
+        info: WindowInfo::default(),
+        output: Some(second),
+        focus: true,
+    });
+    assert_eq!(origin_of(&fixture.state, OutputId(1)), (0, 0));
+    assert_eq!(origin_of(&fixture.state, second), (CANVAS, 0));
+    let placed = fixture
+        .state
+        .world
+        .arrange()
+        .get(WindowId(1))
+        .expect("the opened window is placed")
+        .rect;
+    assert!(
+        placed.x >= CANVAS,
+        "the window should open on the second output: {placed:?}"
+    );
+
+    fixture.rewrite("[output]\nscale = 2.0\n");
+    let response = fixture.reload();
+    assert_eq!(
+        applied(&response),
+        &[field::SCALE.to_owned()],
+        "the rescale should apply: {response:?}"
+    );
+    assert_eq!(origin_of(&fixture.state, OutputId(1)), (0, 0));
+    assert_eq!(
+        origin_of(&fixture.state, second),
+        (CANVAS / 2, 0),
+        "the second output should recompact against the first, like a fresh session at 2.0"
+    );
+    let moved = fixture
+        .state
+        .world
+        .arrange()
+        .get(WindowId(1))
+        .expect("the window is still placed")
+        .rect;
+    assert!(
+        (CANVAS / 2..CANVAS).contains(&moved.x),
+        "the window should follow the second output into its new area: {moved:?}"
+    );
+
+    fixture.rewrite("[output]\nscale = 1.0\n");
+    let back = fixture.reload();
+    assert_eq!(
+        applied(&back),
+        &[field::SCALE.to_owned()],
+        "the trip back should apply too: {back:?}"
+    );
+    assert_eq!(
+        origin_of(&fixture.state, second),
+        (CANVAS, 0),
+        "the trip back must not leave the outputs overlapping"
+    );
+    let home = fixture
+        .state
+        .world
+        .arrange()
+        .get(WindowId(1))
+        .expect("the window is still placed")
+        .rect;
+    assert!(
+        home.x >= CANVAS,
+        "the window should follow the second output home: {home:?}"
+    );
+}
+
+/// Where the `Space` puts `id`'s output -- the position a recompact moves.
+fn origin_of(state: &State, id: OutputId) -> (i32, i32) {
+    let output = state.outputs.get(id).expect("a known output");
+    let geometry = state
+        .space
+        .output_geometry(output)
+        .expect("a mapped output's geometry");
+    (geometry.loc.x, geometry.loc.y)
+}
+
+#[test]
+fn scale_reload_decides_apply_agree_and_nested_refusal() {
+    // The pure decision pin: a change applies, an agreement stays silent,
+    // and under `--nested` any change refuses (the host owns the scale).
+    // Pure so the nested refusal pins without a host connection, which no
+    // test harness can fake.
+    assert_eq!(scale_reload(2.0, 1.0, false), ScaleReload::Apply);
+    assert_eq!(scale_reload(1.5, 1.0, false), ScaleReload::Apply);
+    assert_eq!(scale_reload(1.0, 1.0, false), ScaleReload::Agree);
+    assert_eq!(scale_reload(2.0, 2.0, false), ScaleReload::Agree);
+    assert_eq!(scale_reload(2.0, 1.0, true), ScaleReload::RefuseNested);
+    assert_eq!(scale_reload(1.0, 1.0, true), ScaleReload::Agree);
 }
 
 #[test]

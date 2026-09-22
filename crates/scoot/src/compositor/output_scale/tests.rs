@@ -20,6 +20,7 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use scoot_core::Config;
+use scoot_ipc::{Request, Response};
 use smithay::output::{Mode, Output, PhysicalProperties, Scale, Subpixel};
 use smithay::reexports::calloop::EventLoop;
 use smithay::reexports::wayland_server::Display;
@@ -267,10 +268,20 @@ enum Step {
     /// `wl_compositor`, round trip, and report the preferred scales it was
     /// sent plus the `wl_output.scale`.
     Negotiate,
+    /// Report the scale values the client has been sent so far, without
+    /// creating anything -- what a reload's re-send is measured against.
+    ReportScales,
     /// Map an `xdg_toplevel` whose buffer is `buffer`x`buffer` physical
     /// pixels, with an optional viewport destination of `destination` logical
     /// pixels (the shape a fractional-scale client draws at).
     MapWindow {
+        buffer: i32,
+        destination: Option<(i32, i32)>,
+    },
+    /// Like `MapWindow`, but with a `wp_fractional_scale_v1` object on the
+    /// toplevel surface itself -- the shape a real fractional-scale client
+    /// takes, and the surface a reload's re-send has to reach.
+    MapScaledWindow {
         buffer: i32,
         destination: Option<(i32, i32)>,
     },
@@ -285,6 +296,11 @@ enum Ack {
         preferred_buffer_scale: Option<i32>,
         /// How many times that event arrived across several commits.
         preferred_buffer_scale_events: u32,
+        output_scale: Option<i32>,
+    },
+    Scales {
+        preferred_scale: Option<f64>,
+        preferred_buffer_scale: Option<i32>,
         output_scale: Option<i32>,
     },
     Done,
@@ -587,6 +603,13 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 };
                 keep_alive.push((surface, None, None, Some(fractional)));
             }
+            Step::ReportScales => {
+                outcome = Ack::Scales {
+                    preferred_scale: client.preferred_scale,
+                    preferred_buffer_scale: client.preferred_buffer_scale,
+                    output_scale: client.output_scale,
+                };
+            }
             Step::MapWindow {
                 buffer,
                 destination,
@@ -610,6 +633,32 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 surface.commit();
                 keep_alive.push((surface, Some(xdg), Some(toplevel), None));
             }
+            Step::MapScaledWindow {
+                buffer,
+                destination,
+            } => {
+                let (buffer, destination) = (*buffer, *destination);
+                let surface = compositor.create_surface(&qh, ());
+                // The fractional object first, so it exists before the
+                // commits below -- the same order a real client takes.
+                let fractional = manager.get_fractional_scale(&surface, &qh, ());
+                let index = client.serials.len();
+                client.serials.push(None);
+                let xdg = wm_base.get_xdg_surface(&surface, &qh, SurfaceIndex(index));
+                let toplevel = xdg.get_toplevel(&qh, ());
+                surface.commit();
+                let serial = wait_for_serial(&mut queue, &mut client, index)?;
+                xdg.ack_configure(serial);
+                if let Some((width, height)) = destination {
+                    let viewport = viewporter.get_viewport(&surface, &qh, ());
+                    viewport.set_destination(width, height);
+                }
+                let buf = solid_buffer(&shm, &qh, buffer, buffer, WINDOW_BGRA);
+                surface.attach(Some(&buf), 0, 0);
+                surface.damage(0, 0, buffer, buffer);
+                surface.commit();
+                keep_alive.push((surface, Some(xdg), Some(toplevel), Some(fractional)));
+            }
         }
         queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
         acks.send(outcome).map_err(|e| e.to_string())?;
@@ -625,6 +674,9 @@ struct Fixture {
     steps: Option<Sender<Step>>,
     acks: Receiver<Ack>,
     client: Option<JoinHandle<Result<(), String>>>,
+    /// Held so the config file `install_config` writes stays alive while
+    /// the session reloads from it.
+    _config_dir: Option<tempfile::TempDir>,
 }
 
 impl Fixture {
@@ -663,7 +715,34 @@ impl Fixture {
             steps: Some(step_tx),
             acks: ack_rx,
             client: Some(handle),
+            _config_dir: None,
         }
+    }
+
+    /// Points the session's reload path at a temp file holding `contents` --
+    /// the shape `reload/tests.rs` builds its `State` in, so this fixture's
+    /// live client can watch a real `Request::Reload` land on the wire.
+    fn install_config(&mut self, contents: &str) {
+        let dir = tempfile::tempdir().expect("a temp dir");
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, contents).expect("a config file");
+        self.state.config_path = Some(path);
+        self._config_dir = Some(dir);
+    }
+
+    /// Rewrites the installed config file and serves a real `Request::Reload`
+    /// against the live session, then settles so the client hears every
+    /// re-sent event before its next step runs.
+    fn reload_with(&mut self, contents: &str) -> Response {
+        let path = self
+            .state
+            .config_path
+            .clone()
+            .expect("install_config ran first");
+        std::fs::write(&path, contents).expect("a rewritten config file");
+        let response = self.state.handle_request(Request::Reload);
+        self.settle();
+        response
     }
 
     fn run(&mut self, step: Step) -> Ack {
@@ -859,5 +938,118 @@ fn a_scaled_surface_lands_at_the_physical_rectangle() {
         bgra_at(&pixels, 2, 2),
         WINDOW_BGRA,
         "nothing should be drawn at the top-left corner"
+    );
+}
+
+/// A config reload re-sends the whole scale story on the wire: `wl_output`'s
+/// integer, the fractional `preferred_scale`, and its integer companion --
+/// to a mapped window's surface that negotiated all three *before* the
+/// reload, which the bind-time tests above never exercise. The window
+/// relayouts into the halved desktop and still draws, so this is also the
+/// reload-with-windows-mapped proof: buffers rescale through the new
+/// arrangement rather than sticking at the old one.
+#[test]
+fn a_reload_rescales_what_a_live_client_sees() {
+    let mut fixture = Fixture::new(1.0);
+    fixture.install_config("");
+
+    // One mapped window with a fractional-scale object on its own surface --
+    // the shape a real fractional-scale client takes -- drawing real pixels.
+    fixture.run(Step::MapScaledWindow {
+        buffer: 20,
+        destination: None,
+    });
+    let Ack::Scales {
+        preferred_scale,
+        preferred_buffer_scale,
+        output_scale,
+    } = fixture.run(Step::ReportScales)
+    else {
+        panic!("the report step must send the cached scales");
+    };
+    assert_eq!(preferred_scale, Some(1.0));
+    assert_eq!(
+        preferred_buffer_scale, None,
+        "scale 1 sends no integer event"
+    );
+    assert_eq!(output_scale, Some(1));
+    let before = fixture.render();
+    let placed = fixture.window_rect();
+    assert_eq!(
+        bgra_at(&before, placed.x + 5, placed.y + 5),
+        WINDOW_BGRA,
+        "the mapped window should draw before the reload"
+    );
+
+    // The reload itself, through the real request path.
+    let response = fixture.reload_with("[output]\nscale = 2.0\n");
+    let Response::Reloaded { applied, refused } = response else {
+        panic!("a valid scale reload should report, not error: {response:?}");
+    };
+    assert_eq!(applied, &["output.scale".to_owned()]);
+    assert!(
+        refused.is_empty(),
+        "nothing here should refuse: {refused:?}"
+    );
+    assert_eq!(fixture.state.output_scale, 2.0);
+    assert_eq!(fixture.state.integer_scale, 2);
+
+    // The pre-existing surface hears the new scale without re-binding: the
+    // fractional value, the integer companion (whose cache moved off its
+    // scale-1 default), and `wl_output.scale` together.
+    let Ack::Scales {
+        preferred_scale,
+        preferred_buffer_scale,
+        output_scale,
+    } = fixture.run(Step::ReportScales)
+    else {
+        panic!("the report step must send the cached scales");
+    };
+    assert_eq!(
+        preferred_scale,
+        Some(2.0),
+        "the fractional re-send never reached the pre-existing surface"
+    );
+    assert_eq!(
+        preferred_buffer_scale,
+        Some(2),
+        "the integer companion re-send never reached the pre-existing surface"
+    );
+    assert_eq!(
+        output_scale,
+        Some(2),
+        "the wl_output re-advertise never reached the bound client"
+    );
+
+    // The desktop halved (200px canvas, scale 2), and the mapped window
+    // drew again inside it -- at its new physical rectangle.
+    let output = fixture
+        .state
+        .outputs
+        .primary()
+        .expect("the headless output")
+        .clone();
+    let geometry = fixture
+        .state
+        .space
+        .output_geometry(&output)
+        .expect("the mapped output's geometry");
+    assert_eq!(
+        (geometry.size.w, geometry.size.h),
+        (CANVAS / 2, CANVAS / 2),
+        "the logical desktop should halve at scale 2"
+    );
+    let after = fixture.render();
+    let moved = fixture.window_rect();
+    assert!(
+        moved.w < placed.w,
+        "the window should relayout into the smaller desktop: {} -> {}",
+        placed.w,
+        moved.w
+    );
+    assert_eq!(
+        bgra_at(&after, moved.x * 2 + 5, moved.y * 2 + 5),
+        WINDOW_BGRA,
+        "the mapped window's pixels are not at its rescaled rectangle {moved:?}"
     );
 }

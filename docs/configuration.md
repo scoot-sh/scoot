@@ -234,7 +234,7 @@ other path (`> wherever`). (On a machine with no
 **Most settings are read once at startup; some can be reloaded live.**
 `scootctl reload` (see [Reloading the config](#reloading-the-config))
 re-reads this same file and re-applies the layout (gap, column widths and
-the default column width), the appearance (including
+the default column width), the output scale, the appearance (including
 the cursor size, color and theme) and the
 keybindings. Everything else is startup-only and a reload refuses it with a
 message rather than silently ignoring it.
@@ -294,7 +294,12 @@ nothing — only the compositor installs the handler.
 **Applied:** `[layout] gap`, `column_widths` and `default_column_width`
 (the arrangement is recomputed and the screen
 redrawn; a shorter width list clamps live columns onto the nearest
-surviving entry, and new windows take the reloaded default), the `[appearance]` focus-ring width and colors, the background
+surviving entry, and new windows take the reloaded default), the `[output] scale`
+(the new integer is re-advertised on `wl_output`, the fractional value and
+its integer companion are re-sent to every live surface, the logical
+geometry is recomputed and the arrangement re-derived -- clients that
+cached the scale may lag until they re-read the events; under `--nested` a
+non-1.0 value is refused, since the host owns the scale), the `[appearance]` focus-ring width and colors, the background
 color, `corner_radius`, `prefer_no_csd`, and the cursor `cursor_size`,
 `cursor_color` and `cursor_theme` (the fallback bitmaps are rebuilt, the
 theme reloaded, and the screen redrawn without re-arranging -- cursor
@@ -302,8 +307,7 @@ pixels are not placement), and the whole `[binds]` table (rebuilt from the
 defaults plus the file, so a reload both adds and overrides binds).
 
 **Refused, explicitly:**
-`[output] scale`
-(clients were told it at bind time), `[tty] gpu` (the session already
+`[tty] gpu` (the session already
 drives its device), `[renderer] backend` (the live renderer holds client
 textures), and `[autostart] commands` (entries run once, at session start —
 a reload never re-runs them).
@@ -312,7 +316,7 @@ The reply says which was which:
 
 ```json
 { "type": "reloaded", "applied": ["layout.gap", "binds"],
-  "refused": ["output.scale (startup-only: clients were told the scale at bind time)"] }
+  "refused": ["tty.gpu (startup-only: the session already drives its device)"] }
 ```
 
 Both lists name only fields that *differed* — a field the file and the
@@ -337,7 +341,9 @@ A reload applies while the session is locked: nothing in the applied set
 can disclose locked content (appearance changes touch nothing the locked
 frame draws; gap, column widths and binds are input-side -- widths only
 re-derive column frames from config proportions -- and binds cannot fire actions
-while locked anyway).
+while locked anyway; a scale change only re-derives the same geometry the
+lock path already publishes and re-sends config-derived scale values to
+surfaces still showing the blanked frame).
 
 ## `[layout]`
 
@@ -390,7 +396,7 @@ pure white *is* exactly representable.)
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
-| `scale` | float | `1.0` | Output scale advertised to clients and rendered at. `1.0` renders identically to no setting at all; anything else advertises `ceil(scale)` on `wl_output` and `wl_surface.preferred_buffer_scale`, and the exact value through `wp_fractional_scale_v1`/`wp_viewporter` (see [protocols.md](protocols.md#output-scaling)). Clamped into `0.5..=4.0` with a warning, and a non-finite value falls back to `1.0`; startup-only — a reload refuses changes (see [Reloading the config](#reloading-the-config)). `--nested` ignores a non-1.0 value with a warning, since the host owns the scale of the window scoot draws inside. |
+| `scale` | float | `1.0` | Output scale advertised to clients and rendered at. `1.0` renders identically to no setting at all; anything else advertises `ceil(scale)` on `wl_output` and `wl_surface.preferred_buffer_scale`, and the exact value through `wp_fractional_scale_v1`/`wp_viewporter` (see [protocols.md](protocols.md#output-scaling)). Clamped into `0.5..=4.0` with a warning, and a non-finite value falls back to `1.0`; re-applied live by `scootctl reload` (see [Reloading the config](#reloading-the-config)). `--nested` ignores a non-1.0 value with a warning at startup and refuses it on reload, since the host owns the scale of the window scoot draws inside. |
 
 ## `[renderer]`
 

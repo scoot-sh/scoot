@@ -564,8 +564,8 @@ pub fn default_config_toml() -> String {
          # commented for the real default (see docs/configuration.md, which these\n\
          # comments summarize, not replace).\n\
          #\n\
-         # Gap, column widths, the ring/background/cursor appearance fields,
-         # and binds re-apply live
+         # Gap, column widths, the output scale, the ring/background/cursor
+         # appearance fields, and binds re-apply live
          # with `scootctl reload`; everything else is startup-only and a
          # reload refuses it with a message.\n",
     );

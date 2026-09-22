@@ -226,24 +226,27 @@ pub struct State {
     /// assuming.
     pub outputs: Outputs,
     /// The output scale resolved from `[output] scale` (see
-    /// `output_scale.rs`), fixed for the process's lifetime. Read by
-    /// `headless`'s `set_mode` (which applies it to the `Output`), by the
-    /// `wp_fractional_scale_v1` handler (which advertises it per surface), and
-    /// by `ipc.rs` (which reports it to an agent that must convert between
-    /// logical rects and physical screenshot pixels). It is *not* the source
-    /// the input clamp reads: that goes through `output_scale::logical_size`,
-    /// which derives the logical extent from the `Output` itself, so a site
-    /// handling input can never disagree with what the `Space` laid out.
-    /// `compositor::run` forces this to 1.0 under `--nested`, where the host
-    /// compositor owns the scale.
+    /// `output_scale.rs`), set at startup and re-applied live by a config
+    /// reload (see `reload.rs`) -- except under `--nested`, where it stays
+    /// the forced 1.0. Read by `headless`'s `set_mode` (which applies it to
+    /// the `Output`), by the `wp_fractional_scale_v1` handler (which
+    /// advertises it per surface), and by `ipc.rs` (which reports it to an
+    /// agent that must convert between logical rects and physical screenshot
+    /// pixels). It is *not* the source the input clamp reads: that goes
+    /// through `output_scale::logical_size`, which derives the logical
+    /// extent from the `Output` itself, so a site handling input can never
+    /// disagree with what the `Space` laid out. `compositor::run` forces
+    /// this to 1.0 under `--nested`, where the host compositor owns the
+    /// scale.
     pub output_scale: f64,
     /// The integer form of [`Self::output_scale`] -- `ceil(output_scale)`, the
     /// value sent on `wl_surface.preferred_buffer_scale` and the same one
     /// Smithay advertises on `wl_output.scale` (see `output_scale.rs`'s
-    /// `integer_scale`). Precomputed once at construction because
-    /// `CompositorHandler::commit` reads it on every surface commit, and it can
-    /// never disagree with `output_scale`: that field is fixed for the
-    /// process's life and nothing writes either one after `new`.
+    /// `integer_scale`). Recomputed alongside `output_scale` wherever that
+    /// moves (construction, config reload), never anywhere else, so the two
+    /// can never disagree: it is read on every surface commit
+    /// (`CompositorHandler::commit`) and on every fractional-scale bind
+    /// without recomputing the `ceil` on those hot paths.
     pub integer_scale: i32,
     /// Which renderer [`Self::backends`]' entries composite with, resolved once from
     /// `--renderer`/`[renderer] backend` (see `render::resolve`) and fixed

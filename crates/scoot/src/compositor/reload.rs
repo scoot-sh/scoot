@@ -32,6 +32,14 @@
 //!   placement), so no `apply()` runs.
 //!   `XCURSOR_THEME`/`XCURSOR_SIZE` for future children follow from the same
 //!   rebuild -- see `State::spawn`, which exports the live theme per child.
+//! - `[output] scale`: re-advertised to every output (bound `wl_output`
+//!   clients hear the new integer through the same `set_mode` startup uses)
+//!   and re-sent to every live surface (the fractional `preferred_scale`
+//!   plus its integer companion, walked over every window, layer, lock and
+//!   cursor tree), then re-laid-out: every logical geometry is recomputed
+//!   and filed with the core, the arrangement recomputed and the screen
+//!   redrawn. Under `--nested` a non-1.0 value refuses -- the host owns the
+//!   scale there -- rather than applying.
 //! - `[binds]`: rebuilt from defaults plus the file (see
 //!   [`keybindings_for`](super::config::keybindings_for)), with the `--tty`
 //!   `Ctrl+Alt+F1..F12` recovery bindings layered on last when this session
@@ -41,11 +49,10 @@
 //!   never consults the table mid-hold: the press records its keycode in
 //!   `suppressed_keys` (or doesn't), and the release is routed by that set,
 //!   not by what the table says now (see `input::key`).
-//! - `[output] scale`, `[tty] gpu`, `[renderer] backend`,
-//!   `[autostart] commands`: refused when they differ from what the session
-//!   runs. Each names something fixed before the first frame (the scale
-//!   clients were told at bind time, the device already driven, the renderer
-//!   with client textures in it, commands that ran once at startup).
+//! - `[tty] gpu`, `[renderer] backend`, `[autostart] commands`: refused when
+//!   they differ from what the session runs. Each names something fixed
+//!   before the first frame (the device already driven, the renderer with
+//!   client textures in it, commands that ran once at startup).
 //!
 //! Every refusal names the field; nothing is silently ignored. Both lists
 //! name only fields that *differed* -- a field the file and the session
@@ -63,7 +70,12 @@
 //! pixels, never new content. Gap, column widths and binds are
 //! input-side -- widths only re-derive column frames from config
 //! proportions, never from what a client drew -- and binds cannot fire actions while locked anyway
-//! (`input::key` forwards them to the lock client). Refusing under lock
+//! (`input::key` forwards them to the lock client). A scale change only
+//! re-derives the same geometry the lock path already publishes (lock
+//! surfaces are reconfigured to their output's new logical size, exactly as
+//! a `--tty` hotplug resize does) and re-sends config-derived scale values
+//! to surfaces that keep showing the blanked frame -- no client pixels move
+//! across the lock boundary. Refusing under lock
 //! would strand an agent that edits the file mid-lock with an error for a
 //! request that is safe to serve.
 
@@ -71,6 +83,7 @@ use scoot_ipc::Response;
 
 use super::State;
 use super::config::{self, LoadedConfig};
+use super::output_scale::integer_scale;
 
 #[cfg(test)]
 mod tests;
@@ -153,6 +166,7 @@ impl State {
         let mut report = Report::default();
         self.apply_layout_reload(fresh, &mut report);
         self.apply_appearance_reload(fresh, &mut report);
+        self.apply_scale_reload(fresh, &mut report);
         self.apply_startup_only_reload(fresh, &mut report);
         self.apply_binds_reload(fresh, &mut report);
 
@@ -165,6 +179,7 @@ impl State {
             name == field::GAP
                 || name == field::COLUMN_WIDTHS
                 || name == field::DEFAULT_COLUMN_WIDTH
+                || name == field::SCALE
                 || name == field::RING_WIDTH
                 || name == field::RING_ACTIVE
                 || name == field::RING_INACTIVE
@@ -302,18 +317,44 @@ impl State {
         }
     }
 
-    /// The fields with no live state to compare against: `[output] scale`,
-    /// `[tty] gpu`, `[renderer] backend`, `[autostart] commands`. Each diffs
-    /// against the `startup_*` snapshot (or the fixed live value, where the
-    /// session carries one) and refuses when it differs -- see the module
-    /// doc for why none of these applies live.
-    fn apply_startup_only_reload(&self, fresh: &LoadedConfig, report: &mut Report) {
-        if fresh.scale != self.output_scale {
-            report.refused.push(refused(
-                field::SCALE,
-                "startup-only: clients were told the scale at bind time",
-            ));
+    /// `[output] scale`: re-advertised to every output and re-sent to every
+    /// live surface, then re-laid-out (see `rescale_outputs` and
+    /// `resend_output_scale`). Compared against the live
+    /// `State::output_scale`, and that field -- plus its precomputed integer
+    /// -- is exactly what is stored, so a second reload agrees silently.
+    /// `fresh.scale` is already load-clamped (including the non-finite
+    /// fallback), so an out-of-range value applies as its clamped self,
+    /// never as a refusal.
+    ///
+    /// Under `--nested` a differing value refuses instead: the host owns the
+    /// scale there (`compositor::run` forced the live value to 1.0 with a
+    /// warning), so any difference is a non-1.0 ask by construction.
+    fn apply_scale_reload(&mut self, fresh: &LoadedConfig, report: &mut Report) {
+        match scale_reload(fresh.scale, self.output_scale, self.host.is_some()) {
+            ScaleReload::Agree => {}
+            ScaleReload::RefuseNested => {
+                report.refused.push(refused(
+                    field::SCALE,
+                    "refused under --nested: the host compositor owns the window's scale",
+                ));
+            }
+            ScaleReload::Apply => {
+                self.output_scale = fresh.scale;
+                self.integer_scale = integer_scale(fresh.scale);
+                self.rescale_outputs(fresh.scale);
+                self.resend_output_scale();
+                report.applied.push(field::SCALE.to_owned());
+            }
         }
+    }
+
+    /// The fields with no live state to compare against: `[tty] gpu`,
+    /// `[renderer] backend`, `[autostart] commands`. Each diffs against the
+    /// `startup_*` snapshot (or the fixed live value, where the session
+    /// carries one) and refuses when it differs -- see the module doc for
+    /// why none of these applies live. (`[output] scale` used to refuse
+    /// here too; it applies live now, through `apply_scale_reload` above.)
+    fn apply_startup_only_reload(&self, fresh: &LoadedConfig, report: &mut Report) {
         if fresh.gpu != self.startup_gpu {
             report.refused.push(refused(
                 field::GPU,
@@ -351,6 +392,32 @@ impl State {
 struct Report {
     applied: Vec<String>,
     refused: Vec<String>,
+}
+
+/// What a reloaded `[output] scale` does: applies live, agrees silently, or
+/// refuses under `--nested`.
+#[derive(Debug, PartialEq, Eq)]
+enum ScaleReload {
+    /// The file and the session agree: silent in both lists.
+    Agree,
+    /// A new value on a backend the compositor scales itself: re-advertise,
+    /// re-send, re-lay-out, report applied.
+    Apply,
+    /// A differing value under `--nested`, where the host owns the scale.
+    RefuseNested,
+}
+
+/// Diffs a reloaded scale against the live one. Pure so the `--nested`
+/// refusal pins without a host connection, which no test harness can fake:
+/// `nested` is whether the session presents into a host compositor.
+fn scale_reload(fresh: f64, live: f64, nested: bool) -> ScaleReload {
+    if fresh == live {
+        ScaleReload::Agree
+    } else if nested {
+        ScaleReload::RefuseNested
+    } else {
+        ScaleReload::Apply
+    }
 }
 
 fn refused(field: &str, reason: &str) -> String {

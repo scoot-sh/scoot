@@ -727,6 +727,19 @@ impl SessionLock {
             .filter(move |surface| is_current(owner, surface))
     }
 
+    /// Every current lock surface's `wl_surface`, cloned, for the config
+    /// reload's scale re-send (see `output_scale.rs`'s
+    /// `resend_output_scale`): the one reader outside this module's own
+    /// render/focus paths, asking the same "which surfaces count" question
+    /// through [`SessionLock::current`] rather than the weaker ones. Empty
+    /// while unlocked. Allocates one small `Vec`, on the cold reload path
+    /// only.
+    pub(super) fn live_surfaces(&self) -> Vec<WlSurface> {
+        self.current()
+            .map(|surface| surface.wl_surface().clone())
+            .collect()
+    }
+
     /// The current surface admitted for `output`, if any -- the duplicate
     /// check [`SessionLockHandler::new_surface`] refuses on.
     ///

@@ -11,7 +11,7 @@ use smithay::desktop::layer_map_for_output;
 use smithay::desktop::utils::send_frames_surface_tree;
 use smithay::output::{Mode, Output, PhysicalProperties, Subpixel};
 use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
-use smithay::utils::Transform;
+use smithay::utils::{Logical, Point, Transform};
 
 use super::State;
 use super::output_scale::smithay_scale;
@@ -881,6 +881,126 @@ impl State {
         // `request_render()`, so the frame is still requested exactly once.
         self.apply();
         true
+    }
+
+    /// Re-applies a new output scale to every output, after
+    /// [`State::output_scale`](super::State::output_scale) has already been
+    /// updated to it.
+    ///
+    /// Each output keeps its physical mode -- only the advertised scale
+    /// moves, through the same `set_mode` startup uses, so bound `wl_output`
+    /// clients hear the new integer -- and the outputs are recompac ted
+    /// order-preservingly onto the new logical widths (each sits immediately
+    /// right of the previous one's new right edge, exactly the fold
+    /// `add_output` builds fresh sessions with), so a rescaled session ends
+    /// up laid out like a session started at the new scale rather than
+    /// preserving stale positions into a gap or an overlap. The new logical
+    /// geometry (see `output_scale.rs`'s `logical_size`) is filed with the
+    /// core per output, position included (unlike `resize_output`'s
+    /// origin-only rectangle, which is correct only for its single-output
+    /// backends). Lock surfaces are reconfigured to their output's new
+    /// logical size and layer surfaces re-arranged against it, the same two
+    /// steps a resize runs; output-management heads and capture constraints
+    /// are refreshed from the same sites. The caller runs `apply()` after,
+    /// which pushes the re-derived arrangement onto the windows and renders.
+    ///
+    /// A move crosses two stores that must agree: the Space-side location
+    /// `output_geometry` (and with it the input clamp, the render elements
+    /// and the core areas) reads, rewritten by re-mapping the already-mapped
+    /// output, and the Output-side location the wire (`wl_output.geometry`,
+    /// `xdg_output.logical_position`, the output-management heads)
+    /// advertises, re-sent through `set_mode`'s location. Passing a location
+    /// `set_mode` never touches the Space side, and mapping never announces
+    /// anything -- either half alone leaves the two disagreeing.
+    ///
+    /// Deliberately *not* rebuilding any render target: the framebuffer is
+    /// physical pixels, and a pure scale change leaves every output's
+    /// physical mode exactly the size it was (stated as a `debug_assert`
+    /// below). The damage tracker needs no reset either: it reads the
+    /// output's mode live (`OutputModeSource::Auto`) and evaluates every
+    /// element's geometry at the current scale, so each moved element
+    /// damages both its old and its new region on the first post-rescale
+    /// frame by construction.
+    pub(super) fn rescale_outputs(&mut self, scale: f64) {
+        // Walked by index with cloned outputs, like the render loop: the
+        // steps below take `&mut State`, which no borrow of `self.outputs`
+        // can outlive. An `Output` clone is an `Arc` bump, no allocation
+        // beyond the one small `Vec` this cold path keeps.
+        let count = self.outputs.len();
+        let mut moved: Vec<(OutputId, Output, Rect)> = Vec::new();
+        // The running left edge, in the new logical pixels. Saturating like
+        // `add_output`, for the same config-scale overflow rationale.
+        let mut x = 0i32;
+        for index in 0..count {
+            let Some((id, output)) = self.outputs.at(index) else {
+                continue;
+            };
+            let Some(mode) = output.current_mode() else {
+                // Unreachable: `init_named` sets a mode before any caller
+                // exists, and nothing since removes one. Logged, not
+                // skipped silently: a `false`-shaped quiet skip is what
+                // `resize_output` treats as seriously as a crash.
+                tracing::warn!("could not rescale: the output has no mode yet");
+                continue;
+            };
+            let position = Point::<i32, Logical>::from((x, 0));
+            // `None` where the output already sits there, so nothing
+            // re-announces an identical geometry: a single-output session
+            // recompacts onto its own origin, and its wire traffic stays
+            // exactly what the scale change alone sends.
+            let location = self
+                .space
+                .output_geometry(&output)
+                .map(|geometry| geometry.loc != position)
+                .unwrap_or(true)
+                .then_some(position);
+            self.space.map_output(&output, position);
+            set_mode(&output, mode.size.w, mode.size.h, location, scale);
+            let Some(geometry) = self.space.output_geometry(&output) else {
+                // Unreachable even beyond the mode arm above: the output was
+                // just (re-)mapped into this space. Same loud-skip rule.
+                tracing::warn!("could not rescale: the output has no geometry to file");
+                continue;
+            };
+            debug_assert!(
+                self.backends
+                    .get(&id)
+                    .is_none_or(|backend| backend.size() == (mode.size.w, mode.size.h)),
+                "a pure scale change must leave the physical render target alone"
+            );
+            x = x.saturating_add(geometry.size.w);
+            moved.push((
+                id,
+                output,
+                Rect::new(
+                    geometry.loc.x,
+                    geometry.loc.y,
+                    geometry.size.w,
+                    geometry.size.h,
+                ),
+            ));
+        }
+        for (id, output, area) in &moved {
+            // A lock surface's configured size is an *exact* requirement
+            // (see `resize_output`); a rescaled output reconfigures its own
+            // surfaces the same way. A no-op while unlocked.
+            self.resize_lock_surfaces(output, (area.w, area.h));
+            // Layer surfaces are anchored to the output's edges, so every
+            // one of them has moved -- same step as the resize path.
+            layer_map_for_output(output).arrange();
+            self.world.handle_event(CoreEvent::OutputChanged {
+                id: *id,
+                area: *area,
+            });
+        }
+        // The scale changed, so every output-management client is a scale, a
+        // mode and a `done` behind; captures re-read sizes that did not move
+        // (a no-op that keeps this path from drifting from the resize one);
+        // and the core's usable areas are re-reported now that every
+        // `OutputChanged` above has landed.
+        self.refresh_output_heads();
+        self.refresh_capture_constraints();
+        self.refresh_layer_zone();
     }
 
     /// Marks the screen dirty and makes sure the frame ticker is running to
