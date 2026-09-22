@@ -291,3 +291,39 @@ independent; audit against `Space` borrows before mapping anything;
 (3) `--tty` packaging — the `PATH` requirement becomes a silent
 Wayland-only session on logins unless `vm/compositor-deps.nix` carries
 the binary and the fallback logs loudly (hazard 3 above is the pin).
+
+## PROGRESS — Phase 1 (skeleton) landed; ticket stays OPEN for Phase 2+
+
+Phase-1 PR: **[TBD — the `xwayland-phase1-skeleton` PR]**. Scope keeps
+exactly to the 8-item list above: own `xwayland` Cargo feature (named
+`xwayland`, not the sketch's `xwayland-server`), `compositor/xwayland/`
+around `spawn` + `open_abstract_socket=true` + READY→`start_wm` with both
+hazard fixes, `state.rs` fields, `handlers.rs` impls
+(`active_window_request` deliberately unimplemented — the default no-op
+*is* the steal refusal, spike-verified), `mod.rs` start between
+`init_named` and the `WAYLAND_DISPLAY` export with loud Wayland-only
+fallback, `DISPLAY` plumbing + knob (`--xwayland`, `[xwayland] enabled`,
+OR-ed, default off), reload refusal (`xwayland.enabled`, restart-named),
+smoke section, `protocols.md` skeleton rows + trust note. No
+`PROTOCOL_VERSION` bump (no wire change: no new IPC request, reply, or
+action — the knob is CLI/config surface only). `shell.rs`/`elements.rs`
+mapping and Phases 2–4 explicitly not started: X clients connect, get a
+display, and map nowhere.
+
+Two deviations from the sketch worth recording: (1) the knob parses in
+*every* build flavour (the `--renderer gles` precedent) — a non-`xwayland`
+build warns once and runs Wayland-only rather than refusing a flag its
+`--help` advertises; only the Smithay types sit behind the feature gate.
+(2) `State::spawn` mints activation tokens exactly as before in Phase 1
+(no launch path can distinguish X children yet), so the "X children get
+`DISPLAY` only, no token" rule lands as documented policy constraining
+Phase 2+'s launch path, not as a spawn branch today.
+
+Phase-2 entry points, measured during Phase-1 verification: the XWM is a
+*reparenting* manager (test windows move out of the root's children into
+frames — an `xwininfo -root -tree` probe for a mapped X window must walk
+one level down); test-log capture needs an explicit DEBUG floor (the
+compositor's production default is INFO, the handler refusals log at
+DEBUG); `/var/cargo-target` on the dev VM fills fast with per-flavour
+test binaries (freed 10.8 GiB with `cargo clean -p scoot` mid-branch —
+shared cache, every agent rebuilds only `scoot` itself afterwards).

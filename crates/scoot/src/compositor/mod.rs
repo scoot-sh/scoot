@@ -53,6 +53,7 @@ mod toplevel_icon;
 mod tty;
 mod wayland_accept;
 mod wl_buffers;
+mod xwayland;
 
 /// The harness the real-`wayland-client` test suites share. Not a module of
 /// the compositor proper -- it exists only under `cfg(test)`.
@@ -209,6 +210,42 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
         }
     }
 
+    // Opt-in XWayland (Phase-1 skeleton): after the outputs exist (an X
+    // client maps nowhere yet, but the server is session-scoped, so it
+    // starts once the session does) and before the `WAYLAND_DISPLAY` export
+    // below, so the `DISPLAY` export joins it and both reach every spawned
+    // child. `resolve` ORs the flag with the config key -- a flag can only
+    // say yes -- and records the answer in `startup_xwayland` for reload to
+    // diff against. A spawn failure is a loud log plus a Wayland-only
+    // session, never a crash (see `xwayland.rs`); without the Cargo feature
+    // the knob warns once and does the same.
+    let xwayland = xwayland::resolve(options.xwayland, loaded.xwayland);
+    state.startup_xwayland = xwayland;
+    if xwayland {
+        #[cfg(feature = "xwayland")]
+        match xwayland::start(state.loop_handle.clone(), &mut state) {
+            Ok(display_number) => {
+                tracing::info!(
+                    display = display_number,
+                    "XWayland server starting; X11 clients can connect once it is ready"
+                );
+            }
+            Err(xwayland::StartError::Spawn(error)) => {
+                tracing::error!(
+                    %error,
+                    "XWayland was requested but the server could not be started; \
+                     continuing Wayland-only -- X11 applications will not run"
+                );
+            }
+            Err(error @ xwayland::StartError::Insert(_)) => return Err(error.into()),
+        }
+        #[cfg(not(feature = "xwayland"))]
+        tracing::warn!(
+            "XWayland was requested (--xwayland or [xwayland] enabled) but this build \
+             has no xwayland support (Cargo feature `xwayland`); continuing Wayland-only"
+        );
+    }
+
     // Order matters, and it's load-bearing, not incidental: `--nested`
     // connects to the *host* compositor via the caller's own WAYLAND_DISPLAY
     // (nested::init reads it via Connection::connect_to_env). That has to
@@ -239,6 +276,13 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
     // read.
     unsafe {
         std::env::set_var("WAYLAND_DISPLAY", &state.socket_name);
+        // The X display, iff our server is believed live (see
+        // `xwayland.rs`): `None` leaves `DISPLAY` untouched, so a
+        // host-provided value under `--nested` survives an XWayland-off
+        // session -- no clobber.
+        if let Some(display) = state.xdisplay {
+            std::env::set_var(xwayland::DISPLAY_ENV, xwayland::display_value(display));
+        }
         if let Some(path) = &state.ipc_path {
             std::env::set_var(scoot_ipc::SOCKET_ENV, path);
         }

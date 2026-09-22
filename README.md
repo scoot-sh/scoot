@@ -71,7 +71,7 @@ Linux, and daily-driven on `--tty`** (2026-09-18).
   less), draws the same pixels, and uses 7–16 MB more memory (numbers and
   method in [Asahi.md](Asahi.md), Test 4).
   pixman is still the default and still the right answer on a GPU-less box.
-- **Config reload is live, except two restart fields.** `scootctl reload` (or `kill -HUP` on the
+- **Config reload is live, except three restart fields.** `scootctl reload` (or `kill -HUP` on the
   compositor) re-applies the layout (gap, column widths, default column
   width), the output scale (except under `--nested`, where the host owns
   it), the
@@ -80,7 +80,8 @@ Linux, and daily-driven on `--tty`** (2026-09-18).
   run; a reloaded non-`spawn` entry is refused by name, a spawn whose program
   fails to start is refused by name and retried on the next reload, and a locked reload
   defers new entries to the first unlocked one) live; the DRM device
-  (`[tty] gpu`) and the renderer (`[renderer] backend`) take effect on
+  (`[tty] gpu`), the renderer (`[renderer] backend`) and the XWayland knob
+  (`[xwayland] enabled`) take effect on
   restart, and a reload refuses them
   with a message naming that rather than silently ignoring them.
 - **No macOS adapter.** `scoot-core` is kept platform-independent so one can

@@ -359,10 +359,23 @@ where
         };
         let geometry = window.geometry();
         let location = (mapped - geometry.loc - region.loc).to_physical_precise_round(scale);
-        // No X11 arm: this crate builds without xwayland, so `Wayland` is
-        // the only variant -- and if that ever changes this match fails to
-        // compile rather than silently dropping windows.
+        // No X11 arm: without the `xwayland` feature `Wayland` is the only
+        // variant -- and if that ever changes this match fails to compile
+        // rather than silently dropping windows. With the feature the `X11`
+        // variant exists, and the Phase-1 skeleton answers it loudly: no
+        // X11 window can exist yet (nothing constructs
+        // `Window::new_x11_window` until Phase 2 maps one), so reaching
+        // here is a bug, and a bug that logs per frame beats one that
+        // silently drops the window -- or one that panics the session.
+        #[cfg(not(feature = "xwayland"))]
         let WindowSurface::Wayland(toplevel) = window.underlying_surface();
+        #[cfg(feature = "xwayland")]
+        let WindowSurface::Wayland(toplevel) = window.underlying_surface() else {
+            tracing::error!(
+                "an X11 window reached the render path before Phase 2 maps one; skipping it"
+            );
+            continue;
+        };
         let surface = toplevel.wl_surface();
         for (popup, popup_offset) in PopupManager::popups_for_surface(surface) {
             let offset = (geometry.loc + popup_offset - popup.geometry().loc)
