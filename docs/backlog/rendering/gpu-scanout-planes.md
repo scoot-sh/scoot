@@ -223,14 +223,15 @@ snapshots once) and moved the cap to between `DrmDeviceFd::new` and
 `DrmDevice::new` -- with one correction to the reviewer's prescription:
 `CURSOR_PLANE_HOTSPOT` needs `ATOMIC` set first (measured `EINVAL`
 otherwise, matching drm-rs's own doc), so the code sets `ATOMIC` then
-`HOTSPOT` pre-`new`; Smithay re-setting both inside `::new` is idempotent
-(strace-verified `{3,1}=0,{6,1}=0` then `{2,1}=0,{3,1}=0`).
+`HOTSPOT` pre-`new`; the `ATOMIC` re-set inside Smithay's `::new` is idempotent
+(Smithay sets `UNIVERSAL_PLANES` + `ATOMIC`, never `HOTSPOT` — that one is set
+once, by scoot; strace-verified `{3,1}=0,{6,1}=0` then `{2,1}=0,{3,1}=0`).
 
 End-state on virtio-gpu is now **plane-ACTIVE, not fallback**: `UnknownPlane`
-count 0, plane 34 shows `FB ID: 46` on CRTC 37, and it **tracks the pointer
-with the hotspot offset** (`(800,500)` -> plane at `(800,500)`... precisely
-`(192,892)` for pointer `(200,900)`, i.e. image top-left = pointer - hotspot
-(8,8), correct by construction). Screenshots across a move are **byte-identical
+count 0, plane 34 shows `FB ID: 46` on CRTC 37, and `CRTC_X/Y` track the
+pointer across moves (image top-left = pointer − the live cursor's hotspot;
+e.g. `(192,892)` for pointer `(200,900)` with the 8px-hotspot cursor that
+was live then — the default arrow uses hotspot `(0,0)` and tracks 1:1). Screenshots across a move are **byte-identical
 (`AE = 0`)** -- the cursor is on the plane, invisible to capture, exactly the
 documented consequence, now live-observed with before/after crops (cursorless
 vs dumb-tier cursor-ful at the same coords). Notably the earlier TEST refusal

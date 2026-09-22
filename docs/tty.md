@@ -214,10 +214,7 @@ running with no GPU at all is a hard requirement here, not a fallback tier.
 - **Scanout is primary-plane only, plus an attempted cursor plane.** Overlay planes are still untouched (step 2 of
   `docs/backlog/rendering/gpu-scanout-planes.md`); the cursor plane is
   attempted on CRTCs that expose one, with per-frame fallback to compositing
-  where the plane cannot be claimed -- and on the dev VM's virtio-gpu that
-  fallback is every frame (the kernel refuses the atomic TEST), so there the
-  cursor stays composited exactly as before. Active cursor-plane scanout
-  awaits hardware whose TEST accepts. Two paravirt caveats, both measured on the dev
+  where the plane cannot be claimed. Two paravirt caveats, both measured on the dev
   VM's virtio-gpu: the kernel hides the cursor plane until the session sets
   `CURSOR_PLANE_HOTSPOT` (which scoot does once per `--tty` session --
   without it the inventory is primary-only despite the plane existing), and

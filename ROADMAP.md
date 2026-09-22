@@ -94,6 +94,16 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[GPU scanout cursor plane
+  (step 1)](docs/backlog/rendering/gpu-scanout-planes.md)** (2026-09-22,
+  PR #216) — KMS cursor plane driven where the CRTC exposes one
+  (`ALLOW_CURSOR_PLANE_SCANOUT` only, overlay dropped, `ALLOW_SCANOUT`
+  still out); virtio-gpu needed `CURSOR_PLANE_HOTSPOT` pre-`DrmDevice::new`
+  (review caught the post-`new` ordering blacking the screen — screenshots
+  are blind to scanout health, commit-health assertions now required).
+  Plane-active on virtio (FB-tracked, captures cursorless as documented).
+  Ticket stays OPEN for overlay → `ALLOW_SCANOUT` + capture fix.
+
 - **[Config reload autostart
   follow-ups](docs/backlog/resolved/reload-autostart-followups-done.md)**
   (2026-09-22, PR #215) — the three PR #214 review findings, one small PR:
