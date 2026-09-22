@@ -23,9 +23,21 @@ license.workspace = true
 # Off by default does not mean unexercised: the standard verification set is
 # run twice, once per feature flavour, and `ldd` on both binaries is the proof
 # that the default one really is free of libgbm.
+#
+# `xwayland` compiles the opt-in XWayland skeleton (`compositor/xwayland/` --
+# an X11 server inside the session, off by default behind `--xwayland` and
+# `[xwayland] enabled`, default sessions byte-identical). Unlike
+# `gpu-scanout` above this adds no link-time system library (Smithay's
+# `xwayland` feature pulls pure-Rust `x11rb` -- the X protocol over a socket
+# -- plus `encoding_rs` and `scopeguard`), so the `ldd` pair this re-proves
+# per change is expected to show *no* new `DT_NEEDED` entry on either side;
+# the cost is binary size and the runtime `Xwayland` binary on `PATH`, which
+# is why the session knob stays opt-in (see `docs/protocols.md`'s trust
+# note: any X client can keylog/snoop by design).
 [features]
 default = []
 gpu-scanout = ["smithay/backend_gbm"]
+xwayland = ["smithay/xwayland"]
 
 [dependencies]
 scoot-core.workspace = true
@@ -105,6 +117,14 @@ libc = "0.2"
 # (smithay itself depends on it), so this adds no new version, just a
 # direct dev-dependency on one already resolved.
 tempfile = "3"
+# The X11 client half of compositor/xwayland/tests.rs: those tests drive a
+# real X client (create, map, override-redirect map) against the live
+# XWayland server to pin the Phase-1 boundary -- the client connects and
+# maps, and nothing enters the core. The same version Smithay itself pins
+# (0.13.0 at the pinned rev), so under the `xwayland` feature this unifies
+# with the copy already in the tree rather than adding a second one; plain
+# `connect` + core protocol needs no extra features.
+x11rb = "0.13"
 # The *client* half of input-method-v2, for
 # compositor/input_method/tests.rs: those tests drive a real input method
 # (the privileged half of the IME pair) through a real compositor, which is

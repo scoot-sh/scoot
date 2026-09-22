@@ -49,13 +49,13 @@
 //!   never consults the table mid-hold: the press records its keycode in
 //!   `suppressed_keys` (or doesn't), and the release is routed by that set,
 //!   not by what the table says now (see `input::key`).
-//! - `[tty] gpu`, `[renderer] backend`: refused when they differ from what
-//!   the session runs, naming restart as the remedy. Each names something
-//!   fixed before the first frame (the device already driven, the renderer
-//!   with client textures in it) that no live swap can reach proportionate
-//!   to its risk -- rebuilding either mid-session is a restart keeping
-//!   clients, every step fallible mid-flight -- so the refusal stands and
-//!   says so.
+//! - `[tty] gpu`, `[renderer] backend`, `[xwayland] enabled`: refused when
+//!   they differ from what the session runs, naming restart as the remedy.
+//!   Each names something fixed before the first frame (the device already
+//!   driven, the renderer with client textures in it, the X server started
+//!   once or never) that no live swap can reach proportionate to its risk
+//!   -- rebuilding any of them mid-session is a restart keeping clients,
+//!   every step fallible mid-flight -- so the refusal stands and says so.
 //! - `[autostart] commands`: the spawn delta applies -- entries the session
 //!   has not seen run once each, in file order, through the same `act` path
 //!   startup drains. New `Spawn` entries only: a reloaded non-spawn action
@@ -132,6 +132,7 @@ mod field {
     pub const SCALE: &str = "output.scale";
     pub const GPU: &str = "tty.gpu";
     pub const BACKEND: &str = "renderer.backend";
+    pub const XWAYLAND: &str = "xwayland.enabled";
     pub const AUTOSTART: &str = "autostart.commands";
     pub const BINDS: &str = "binds";
 }
@@ -378,10 +379,11 @@ impl State {
         }
     }
 
-    /// The fields with no live state to compare against: `[tty] gpu` and
-    /// `[renderer] backend`. Each diffs against the `startup_*` snapshot (or
-    /// the fixed live value, where the session carries one) and refuses when
-    /// it differs -- see the module doc for why neither applies live.
+    /// The fields with no live state to compare against: `[tty] gpu`,
+    /// `[renderer] backend` and `[xwayland] enabled`. Each diffs against the
+    /// `startup_*` snapshot (or the fixed live value, where the session
+    /// carries one) and refuses when it differs -- see the module doc for
+    /// why none applies live.
     /// (`[output] scale` used to refuse here too; it applies live now,
     /// through `apply_scale_reload` above. `[autostart]` runs its spawn
     /// delta instead, through `apply_autostart_reload` below.)
@@ -396,6 +398,19 @@ impl State {
             report.refused.push(refused(
                 field::BACKEND,
                 "takes effect on restart: the live renderer holds client textures",
+            ));
+        }
+        // The X server starts once at startup (or never), so flipping the
+        // knob later cannot do what it says: starting one mid-session would
+        // hand existing children a `DISPLAY` some of them already read as
+        // absent, and stopping one would orphan every connected X client.
+        // Compared against the request snapshot, not `xdisplay` liveness --
+        // an enabled-but-crashed server still refuses, because "start one
+        // now" is the same unstartable ask.
+        if fresh.xwayland != self.startup_xwayland {
+            report.refused.push(refused(
+                field::XWAYLAND,
+                "takes effect on restart: the X server starts once at startup (and needs an `xwayland` build)",
             ));
         }
     }

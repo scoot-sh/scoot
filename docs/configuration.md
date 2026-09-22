@@ -3,16 +3,16 @@
 - [Command-line flags](#command-line-flags)
 - [The config file](#the-config-file)
 - [Reloading the config](#reloading-the-config)
-- [`[layout]`](#layout) · [`[appearance]`](#appearance) · [`[output]`](#output) · [`[renderer]`](#renderer) · [`[tty]`](#tty) · [`[autostart]`](#autostart) · [`[binds]`](#binds)
+- [`[layout]`](#layout) · [`[appearance]`](#appearance) · [`[output]`](#output) · [`[renderer]`](#renderer) · [`[tty]`](#tty) · [`[xwayland]`](#xwayland) · [`[autostart]`](#autostart) · [`[binds]`](#binds)
 - [Default keybindings](#default-keybindings)
 - [Example `config.toml`](#example-configtoml)
 
 ## Command-line flags
 
 ```
-scoot --headless [--width 1-65535] [--height 1-65535] [--outputs 1-8] [--renderer pixman|gles] [--socket PATH] [--config PATH] [-- COMMAND...]
-scoot --nested   [--width 1-65535] [--height 1-65535] [--renderer pixman|gles] [--socket PATH] [--config PATH] [-- COMMAND...]
-scoot --tty      [--gpu PATH] [--mode WxH] [--renderer pixman|gles] [--socket PATH] [--config PATH] [-- COMMAND...]
+scoot --headless [--width 1-65535] [--height 1-65535] [--outputs 1-8] [--renderer pixman|gles] [--xwayland] [--socket PATH] [--config PATH] [-- COMMAND...]
+scoot --nested   [--width 1-65535] [--height 1-65535] [--renderer pixman|gles] [--xwayland] [--socket PATH] [--config PATH] [-- COMMAND...]
+scoot --tty      [--gpu PATH] [--mode WxH] [--renderer pixman|gles] [--xwayland] [--socket PATH] [--config PATH] [-- COMMAND...]
 scoot msg REQUEST          # the scootctl client, kept as an alias (see below)
 scoot --print-default-config [--write]   # emit a starting config file to stdout, or place it directly with --write
 scoot --version                # identify this build without starting anything
@@ -34,6 +34,7 @@ duplicated here.
 | `--renderer pixman\|gles` | Which renderer composites each frame. Config-file form: `[renderer] backend`. See [tty.md](tty.md#which-renderer-draws-the-frames). |
 | `--gpu PATH` | Which DRM device `--tty` drives. Config-file form: `[tty] gpu`. Ignored with a warning outside `--tty`. See [tty.md](tty.md#which-drm-device---tty-drives). |
 | `--mode WxH` | Which connector mode `--tty` picks. Ignored with a warning outside `--tty`. |
+| `--xwayland` | Run an XWayland server inside the session, so X11-only applications get a `DISPLAY` to connect to. Config-file form: `[xwayland] enabled` (either one turns it on). Opt-in and off by default — the server costs a whole extra process (~55 MB RSS) plus a `Xwayland` binary on `PATH`, and any X client can keylog/snoop by design (see [protocols.md](protocols.md#xwayland-opt-in-skeleton)). Needs an `xwayland` build; without one it warns and the session runs Wayland-only. Phase-1 skeleton: the server starts and `DISPLAY` is exported, but no X window enters the layout yet. |
 | `--socket PATH` | Where the IPC control socket lives, overriding `$SCOOT_SOCKET` and the default `$XDG_RUNTIME_DIR/scoot.sock`. See [ipc.md](ipc.md#the-socket). |
 | `--config PATH` | Load this TOML file instead of searching the default paths. |
 | `-- COMMAND...` | Spawn this command once the session is up, after `[autostart]` entries (see [Starting a session](#starting-a-session)). |
@@ -53,7 +54,10 @@ both are logind's to set, and scoot keeps its owner's values), and —
 unless the token table is full — a fresh
 `$XDG_ACTIVATION_TOKEN`. A token the compositor was itself started with is
 removed rather than passed on: it is a receipt for someone else's user
-action.
+action. `$DISPLAY` joins them while the session's XWayland server is
+believed live (`--xwayland` / `[xwayland] enabled` — see
+[`[xwayland]`](#xwayland)); otherwise `DISPLAY` is left untouched, so a
+host-provided value under `--nested` survives.
 
 ### Portals and the D-Bus activation environment
 
@@ -208,9 +212,9 @@ session script carries the behavior half — see
 `--config PATH` loads a TOML file explicitly. Without it, scoot looks for
 `$XDG_CONFIG_HOME/scoot/config.toml`, falling back to
 `~/.config/scoot/config.toml` if `$XDG_CONFIG_HOME` is unset or empty, and
-runs on built-in defaults if neither exists. Seven optional tables:
+runs on built-in defaults if neither exists. Eight optional tables:
 `[layout]`, `[appearance]`, `[output]`, `[renderer]`, `[tty]`,
-`[autostart]`, `[binds]`.
+`[xwayland]`, `[autostart]`, `[binds]`.
 Every field in every table is itself optional and defaults independently, so
 a config that only sets `gap` leaves everything else — including the rest of
 `[layout]` — at its built-in default.
@@ -236,9 +240,9 @@ other path (`> wherever`). (On a machine with no
 re-reads this same file and re-applies the layout (gap, column widths and
 the default column width), the output scale, the appearance (including
 the cursor size, color and theme), the
-keybindings, and new `[autostart]` spawn entries. Only `[tty] gpu` and
-`[renderer] backend` need a restart, and a reload refuses them with a
-message naming that rather than silently ignoring them.
+keybindings, and new `[autostart]` spawn entries. Only `[tty] gpu`,
+`[renderer] backend` and `[xwayland] enabled` need a restart, and a reload
+refuses them with a message naming that rather than silently ignoring them.
 
 ### Failure semantics
 
@@ -317,8 +321,9 @@ reload is silent).
 
 **Refused, explicitly, pending a restart:**
 `[tty] gpu` (the session already
-drives its device) and `[renderer] backend` (the live renderer holds client
-textures) -- both take effect on restart, and the refusal says so.
+drives its device), `[renderer] backend` (the live renderer holds client
+textures) and `[xwayland] enabled` (the X server starts once at startup, or
+never) -- all three take effect on restart, and each refusal says so.
 
 The reply says which was which:
 
@@ -422,6 +427,12 @@ pure white *is* exactly representable.)
 | Field | Type | Default | Meaning |
 |---|---|---|---|
 | `gpu` | string (device path) | unset | Which DRM device `--tty` drives, when the automatic choice is wrong — the config-file form of `--gpu PATH` (see [tty.md](tty.md#which-drm-device---tty-drives)). Unset means the automatic search picks: Smithay's primary GPU first, then every other DRM device on the seat until one works. Set means exactly that device, no fallback: a wrong path is a clean startup error naming the key and what failed, so this key is fail-closed where every other config field degrades gracefully. `--gpu` wins when both name one; an empty value (`gpu = ""`) is a startup error naming the key, on every backend. Only means anything under `--tty`; on `--headless` or `--nested` a set non-empty value is ignored with a warning. Takes effect on restart — a reload refuses changes with a message naming that. |
+
+## `[xwayland]`
+
+| Field | Type | Default | Meaning |
+|---|---|---|---|
+| `enabled` | boolean | `false` | Whether to run an XWayland server inside the session, so X11-only applications get a `DISPLAY` to connect to — the config-file form of `--xwayland`, and either one turns it on (a flag can only say yes, so the two are OR-ed). Off unless asked: the server is a whole extra process (~55 MB RSS) plus a hard `PATH` dependency on the `Xwayland` binary, and any X client can keylog/snoop by design (see [protocols.md](protocols.md#xwayland-opt-in-skeleton)). Needs an `xwayland` Cargo-feature build; without one the knob parses but warns and the session runs Wayland-only. A missing binary at startup is the same shape: a loud log line, then a Wayland-only session, never a crash. Takes effect on restart — a reload refuses changes with a message naming that. Phase-1 skeleton: the server starts and `DISPLAY` is exported to spawned children (add it to the `dbus-update-activation-environment` line in your session script alongside `WAYLAND_DISPLAY` if anything D-Bus activated needs X), but no X window enters the layout yet — X clients connect and map nowhere. |
 
 ## `[binds]`
 

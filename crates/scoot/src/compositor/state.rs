@@ -73,6 +73,8 @@ use super::shm_pools::ShmPools;
 use super::tty::Tty;
 use super::wayland_accept::WaylandListener;
 use super::wl_buffers::WlBuffers;
+#[cfg(feature = "xwayland")]
+use super::xwayland;
 
 #[cfg(test)]
 mod tests;
@@ -103,6 +105,14 @@ pub struct State {
     /// entries to the first unlocked reload) -- see `reload.rs`.
     pub startup_gpu: Option<PathBuf>,
     pub startup_autostart: Vec<Action>,
+    /// Whether the session asked for XWayland (`--xwayland` or `[xwayland]
+    /// enabled` -- see `xwayland::resolve`), seeded once in `run`, never
+    /// written after. What a reload diffs `[xwayland] enabled` against: the
+    /// server starts once at startup, so a change refuses with "takes
+    /// effect on restart" (see `reload.rs`) -- like `[tty] gpu` above, this
+    /// is a request snapshot, not liveness (`xdisplay` says whether the
+    /// server is actually up).
+    pub startup_xwayland: bool,
 
     /// The layout. Everything else here exists to serve it.
     pub world: World,
@@ -308,6 +318,40 @@ pub struct State {
 
     pub compositor_state: CompositorState,
     pub xdg_shell_state: XdgShellState,
+    /// `xwayland_shell_v1`: the association half of the opt-in XWayland
+    /// skeleton (see `xwayland.rs`). Always constructed, like
+    /// `xdg_shell_state` above -- and harmless when the session never asked:
+    /// Smithay's `can_view` gate admits only XWayland's own client, which
+    /// exists solely between a successful `XWayland::spawn` and session end,
+    /// so no regular client ever sees the global and no dispatch of ours is
+    /// reachable without a running server. What only exists on demand is the
+    /// window manager below (at `READY`) and the keyboard-grab manager
+    /// (alongside a successful spawn).
+    #[cfg(feature = "xwayland")]
+    pub xwayland_shell_state: xwayland::XWaylandShellState,
+    /// The running X11 window manager, if the session asked for XWayland
+    /// and its server reached `READY` (see `xwayland::start`). `None`
+    /// otherwise -- never asked, binary absent, server died pre-`READY`, or
+    /// the WM attach failed. Read by `XwmHandler::xwm_state` (see
+    /// `handlers.rs`); Phase 1 never maps through it.
+    #[cfg(feature = "xwayland")]
+    pub xwm: Option<xwayland::X11Wm>,
+    /// The X display number while our server is believed live: set from the
+    /// synchronous lock at spawn, cleared on a pre-`READY` death or a failed
+    /// window-manager attach (see `xwayland.rs` -- a WM-less server is not
+    /// live for our purposes). `State::spawn` and `run`'s process export read
+    /// exactly this -- `Some` sets `DISPLAY`, `None` leaves it untouched
+    /// (no clobber of a host `DISPLAY` under `--nested`). Unconditional
+    /// (a plain `u32`, no Smithay type), so the plumbing compiles and is
+    /// tested in every build flavour; without the feature it stays `None`.
+    pub xdisplay: Option<u32>,
+    /// `zwp_xwayland_keyboard_grab_manager_v1`: created alongside a
+    /// successful spawn, never in `new` (see `xwayland::start` for why the
+    /// timing matters and why a never-asked session stays
+    /// byte-identical). Phase 1 answers no grab for any surface (see
+    /// `handlers.rs`); the focus half is Phase 3.
+    #[cfg(feature = "xwayland")]
+    pub xwayland_grab: Option<xwayland::XWaylandKeyboardGrabState>,
     /// `zwlr_layer_shell_v1`: bars, docks, wallpapers and notification
     /// daemons. Unlike the two `#[allow(dead_code)]` states below this one is
     /// read again -- `WlrLayerShellHandler::shell_state` (see
@@ -693,6 +737,11 @@ impl State {
         let dh = display.handle();
         let compositor_state = CompositorState::new_v6::<Self>(&dh);
         let xdg_shell_state = XdgShellState::new::<Self>(&dh);
+        // Always constructed, even for Wayland-only sessions: the global it
+        // registers admits only XWayland's own client (see the field doc),
+        // so this is invisible protocol surface, not a behaviour change.
+        #[cfg(feature = "xwayland")]
+        let xwayland_shell_state = xwayland::XWaylandShellState::new::<Self>(&dh);
         let xdg_decoration_state = XdgDecorationState::new::<Self>(&dh);
         let layer_shell_state = WlrLayerShellState::new::<Self>(&dh);
         let ext_workspace = ExtWorkspaceState::new(&dh);
@@ -764,6 +813,7 @@ impl State {
             config_path: None,
             startup_gpu: None,
             startup_autostart: Vec::new(),
+            startup_xwayland: false,
             world: World::new(config),
             windows: HashMap::new(),
             requested: HashMap::new(),
@@ -790,6 +840,13 @@ impl State {
             cursor,
             compositor_state,
             xdg_shell_state,
+            #[cfg(feature = "xwayland")]
+            xwayland_shell_state,
+            #[cfg(feature = "xwayland")]
+            xwm: None,
+            xdisplay: None,
+            #[cfg(feature = "xwayland")]
+            xwayland_grab: None,
             layer_shell_state,
             ext_workspace,
             foreign_toplevels,
@@ -1021,7 +1078,11 @@ impl State {
     /// `XDG_SESSION_TYPE`, `XDG_SESSION_DESKTOP` -- see `session_env` for
     /// which are unconditional and which fill a vacuum), the live cursor
     /// theme (`XCURSOR_THEME`/`XCURSOR_SIZE`, read off the rebuilt `Cursor`
-    /// so a reloaded theme reaches future children), and -- unless the
+    /// so a reloaded theme reaches future children), and -- while the
+    /// session's XWayland server is believed live -- `DISPLAY` for X11
+    /// clients (see `xwayland.rs`; unset there means inherit, so a
+    /// host-provided `DISPLAY` under `--nested` survives when XWayland is
+    /// off), and -- unless the
     /// token table is full -- a fresh activation token in
     /// `XDG_ACTIVATION_TOKEN`, so it can activate its own window when it maps
     /// one (see [`State::mint_spawn_token`] for which bounds apply and what a
@@ -1045,6 +1106,20 @@ impl State {
         child.args(args).env("WAYLAND_DISPLAY", &self.socket_name);
         if let Some(path) = &self.ipc_path {
             child.env(scoot_ipc::SOCKET_ENV, path);
+        }
+        // The X display while our server is believed live, and nothing
+        // otherwise: `None` inherits, so enabling nothing clobbers nothing
+        // (a host `DISPLAY` under `--nested` survives). Set explicitly --
+        // like `WAYLAND_DISPLAY` above -- rather than relying on the
+        // process environment, so the contract reads at this site and a
+        // test-harness `State` (whose process environment was never
+        // settled) still gets it right. Unconditional: without the Cargo
+        // feature `xdisplay` stays `None` and this is a no-op.
+        if let Some(display) = self.xdisplay {
+            child.env(
+                super::xwayland::DISPLAY_ENV,
+                super::xwayland::display_value(display),
+            );
         }
         // The same `resolve` `run` applied to the process environment (see
         // `session_env`): re-resolving here is idempotent there, and keeps a

@@ -13,9 +13,9 @@ pub const USAGE: &str = "\
 scoot -- a scrolling-tiling Wayland compositor
 
 USAGE:
-    scoot --headless [--width 1-65535] [--height 1-65535] [--outputs 1-8] [--renderer pixman|gles] [--socket PATH] [--config PATH] [-- COMMAND...]
-    scoot --nested [--width 1-65535] [--height 1-65535] [--renderer pixman|gles] [--socket PATH] [--config PATH] [-- COMMAND...]
-    scoot --tty [--gpu PATH] [--mode WxH] [--renderer pixman|gles] [--socket PATH] [--config PATH] [-- COMMAND...]
+    scoot --headless [--width 1-65535] [--height 1-65535] [--outputs 1-8] [--renderer pixman|gles] [--xwayland] [--socket PATH] [--config PATH] [-- COMMAND...]
+    scoot --nested [--width 1-65535] [--height 1-65535] [--renderer pixman|gles] [--xwayland] [--socket PATH] [--config PATH] [-- COMMAND...]
+    scoot --tty [--gpu PATH] [--mode WxH] [--renderer pixman|gles] [--xwayland] [--socket PATH] [--config PATH] [-- COMMAND...]
     scoot --print-default-config [--write]
     scoot --version
     scoot msg REQUEST
@@ -247,6 +247,20 @@ pub struct CompositorOptions {
     /// standard sizes. Meaningless outside `--tty`, where `compositor::run`
     /// ignores it with a warning, for the same reason as `gpu`.
     pub mode: Option<(u16, u16)>,
+    /// Run an XWayland server inside the session, so X11-only applications
+    /// get a `DISPLAY` to connect to. Opt-in and off by default: the server
+    /// costs a whole extra process (~55 MB RSS measured) plus a hard `PATH`
+    /// dependency on the `Xwayland` binary, and any X client can
+    /// keylog/snoop by design (see `docs/protocols.md`'s trust note), so it
+    /// is an explicit choice, never a default. The config-file form is
+    /// `[xwayland] enabled`; either one turns it on (a flag can only say
+    /// yes, so the two are OR-ed in `compositor::run`). Phase-1 skeleton:
+    /// the server starts and `DISPLAY` is exported, but no X window enters
+    /// the layout yet -- X clients connect and map nowhere (see
+    /// `compositor::xwayland`). Needs an `xwayland` Cargo-feature build;
+    /// without one this warns and the session runs Wayland-only, the way
+    /// `--renderer gles` degrades without `gpu-scanout`.
+    pub xwayland: bool,
 }
 
 impl Default for CompositorOptions {
@@ -263,6 +277,7 @@ impl Default for CompositorOptions {
             gpu: None,
             renderer: None,
             mode: None,
+            xwayland: false,
         }
     }
 }
@@ -329,6 +344,7 @@ fn compositor(
             }
             "--renderer" => options.renderer = Some(renderer("--renderer", args.next())?),
             "--mode" => options.mode = Some(mode("--mode", args.next())?),
+            "--xwayland" => options.xwayland = true,
             "--" => {
                 options.command = args.by_ref().collect();
                 break;
@@ -758,6 +774,38 @@ mod tests {
             parse_args(&["--tty", "--gpu"]),
             Err(Error::Missing("a path after --gpu"))
         );
+    }
+
+    #[test]
+    fn xwayland_is_off_by_default_and_on_with_the_flag() {
+        // Opt-in, on every backend: the flag can only say yes, so the
+        // default must be off (see `CompositorOptions::xwayland`).
+        for mode in ["--headless", "--nested", "--tty"] {
+            let Ok(Command::Compositor(options)) = parse_args(&[mode]) else {
+                panic!("expected compositor for {mode}");
+            };
+            assert!(!options.xwayland, "{mode}");
+            let Ok(Command::Compositor(options)) = parse_args(&[mode, "--xwayland"]) else {
+                panic!("expected compositor for {mode} --xwayland");
+            };
+            assert!(options.xwayland, "{mode}");
+        }
+    }
+
+    #[test]
+    fn usage_names_xwayland_on_every_backend_line() {
+        // The `--help` surface for the flag: each backend line carries it,
+        // so a user reading `--help` can discover it without knowing the
+        // ticket.
+        for mode in ["--headless", "--nested", "--tty"] {
+            assert!(
+                USAGE.lines().any(
+                    |line| line.trim_start().starts_with(&format!("scoot {mode}"))
+                        && line.contains("[--xwayland]")
+                ),
+                "--help hides --xwayland on {mode}"
+            );
+        }
     }
 
     #[test]

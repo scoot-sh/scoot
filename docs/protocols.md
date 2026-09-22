@@ -43,11 +43,14 @@ read your files anyway.
 | `wp-presentation-time` | 2 | [Presentation feedback](#presentation-time-feedback-wp_presentation). |
 | `wp-alpha-modifier-v1` | 1 | [Whole-surface opacity](#rendering-hints). |
 | `wp-content-type-v1` | 1 | Accepted, [no effect](#rendering-hints). |
+| `xwayland_shell_v1` | 1 | [XWayland, opt-in skeleton](#xwayland-opt-in-skeleton): X-window-to-surface association; no X window enters the layout yet. |
+| `zwp_xwayland_keyboard_grab_manager_v1` | 1 | [XWayland, opt-in skeleton](#xwayland-opt-in-skeleton): the grab manager exists; no grab is ever granted yet. |
 
 **Not implemented:**
 
-- **XWayland.** X11 clients do not run. There is no XWayland integration in
-  the tree at all — not ruled out, just not written.
+- **XWayland window mapping.** The server half above is an opt-in skeleton
+  (`--xwayland`, needs an `xwayland` build): X11 clients connect and get a
+  `DISPLAY`, but their windows map nowhere yet. See below.
 
 The rest of this list *is* deliberate:
 
@@ -66,6 +69,31 @@ The rest of this list *is* deliberate:
 - **Maximized, minimized and fullscreen window states.** scoot has no concept
   of any of them, so the state bits are never sent and the matching requests
   do nothing — a taskbar's minimise button is inert rather than lying.
+
+## XWayland (opt-in skeleton)
+
+`--xwayland` (or `[xwayland] enabled` in the config file — either one turns
+it on) starts an XWayland server inside the session, and `DISPLAY` is
+exported to everything the session spawns. Off by default, and needs a
+build with the `xwayland` Cargo feature: without one the knob warns and
+the session runs Wayland-only, and a missing `Xwayland` binary at startup
+is the same shape (a loud log line, then a Wayland-only session — the
+session never fails to start over X).
+
+Phase-1 skeleton means exactly this: the server starts, X11 clients
+connect, and their windows map nowhere. No X window enters the layout,
+`scoot msg windows`, or either foreign-toplevel list; map and configure
+requests are refused (logged at `debug`), and no keyboard grab is ever
+granted. "Xwayland starts" is not "X apps work" — window mapping, the
+focus/activation gate, and clipboard/DnD/IME are later phases (see
+`docs/backlog/protocols/xwayland-support.md`, which stays open).
+
+**Trust model: running one X client extends full trust to it.** The
+same-uid boundary above bites harder here than anywhere else in this file:
+X11 clients can keylog and snoop on each other *by design* — no exploit,
+no bug, the protocol works that way. Starting the server is harmless on
+its own; connecting your first X client is the trust decision. Wayland
+clients stay isolated from each other as before.
 
 ## Layer shell (bars, wallpapers, launchers)
 

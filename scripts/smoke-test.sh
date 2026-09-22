@@ -146,6 +146,9 @@ if [ -n "$SMOKE_PREFIX" ]; then
     CONFIG_TEMPLATE="$SMOKE_PREFIX-config-XXXXXX.toml"
     CAPITAL_TEMPLATE="$SMOKE_PREFIX-capital-XXXXXX.toml"
     BROKEN_TEMPLATE="$SMOKE_PREFIX-broken-XXXXXX.toml"
+    XWAYLAND_SOCK="$SMOKE_PREFIX-xwayland.sock"
+    XWAYLAND_LOG="$SMOKE_PREFIX-xwayland.log"
+    XWAYLAND_DISPLAY_MARKER="$SMOKE_PREFIX-xdisplay.txt"
 else
     SOCKET=${SOCKET:-/run/user/$(id -u)/scoot-smoke.sock}
     SHOT=${SHOT:-/tmp/scoot-smoke.png}
@@ -162,6 +165,9 @@ else
     CONFIG_TEMPLATE=/tmp/scoot-smoke-config-XXXXXX.toml
     CAPITAL_TEMPLATE=/tmp/scoot-smoke-capital-XXXXXX.toml
     BROKEN_TEMPLATE=/tmp/scoot-smoke-broken-XXXXXX.toml
+    XWAYLAND_SOCK="/run/user/$(id -u)/scoot-smoke-xwayland.sock"
+    XWAYLAND_LOG=/tmp/scoot-smoke-xwayland.log
+    XWAYLAND_DISPLAY_MARKER=/tmp/scoot-smoke-xdisplay.txt
 fi
 export SCOOT_SOCKET="$SOCKET"
 
@@ -837,3 +843,99 @@ run_broken_config_test() {
     echo "ok: normal operation (spawning a window) works after the fallback"
 }
 ( run_broken_config_test ) || exit 1
+
+echo "=== xwayland: the opt-in server starts, or falls back loudly ==="
+run_xwayland_test() {
+    local socket="$XWAYLAND_SOCK"
+    local log="$XWAYLAND_LOG"
+    local marker="$XWAYLAND_DISPLAY_MARKER"
+    rm -f "$socket" "$log" "$marker"
+
+    "$SCOOT" "$MODE" --width 1200 --height 800 "${RENDERER_ARGS[@]}" --xwayland \
+        --socket "$socket" >"$log" 2>&1 &
+    # Not `local` -- and EXIT, not RETURN -- see run_config_bind_test's
+    # identical trap for why.
+    pid=$!
+    trap 'kill "$pid" 2>/dev/null || true' EXIT
+    export SCOOT_SOCKET="$socket"
+
+    for _ in $(seq 1 60); do
+        [ -S "$socket" ] && break
+        sleep 0.1
+    done
+    if [ ! -S "$socket" ]; then
+        echo "xwayland test: the control socket never appeared; compositor log:"
+        tail -20 "$log"
+        return 1
+    fi
+
+    if command -v Xwayland >/dev/null 2>&1; then
+        # The server half: READY is an info-level line, so the default log
+        # level shows it.
+        local ready=0
+        for _ in $(seq 1 100); do
+            if grep -q "XWayland is ready" "$log"; then
+                ready=1
+                break
+            fi
+            sleep 0.2
+        done
+        if [ "$ready" -ne 1 ]; then
+            echo "BUG: --xwayland with the binary present never became ready; compositor log:"
+            tail -30 "$log"
+            return 1
+        fi
+        echo "ok: the XWayland server reached READY under --xwayland"
+
+        # DISPLAY reaches spawned children: the child writes what it saw.
+        "$SCOOT" msg action spawn sh -c 'echo $DISPLAY > '"$marker"
+        local seen=""
+        for _ in $(seq 1 100); do
+            if [ -f "$marker" ]; then
+                seen=$(cat "$marker")
+                break
+            fi
+            sleep 0.2
+        done
+        case "$seen" in
+            :[0-9]*)
+                echo "ok: a spawned child saw DISPLAY=$seen"
+                ;;
+            *)
+                echo "BUG: a spawned child did not see the session's DISPLAY (saw '$seen')"
+                tail -30 "$log"
+                return 1
+                ;;
+        esac
+    else
+        echo "no Xwayland binary on PATH -- asserting the loud Wayland-only fallback instead"
+        if ! grep -q "continuing Wayland-only" "$log"; then
+            echo "BUG: --xwayland with no binary neither started a server nor said so loudly; compositor log:"
+            tail -30 "$log"
+            return 1
+        fi
+        echo "ok: the missing binary fell back loudly to a Wayland-only session"
+    fi
+
+    # Either way the session underneath is a working compositor whose core
+    # the X server never disturbs: it answers, and no X window enters it.
+    "$SCOOT" msg version >/dev/null || return 1
+    if [ "$("$SCOOT" msg windows | jq '.windows | length')" -ne 0 ]; then
+        echo "BUG: the xwayland session lists windows nobody opened"
+        "$SCOOT" msg windows
+        return 1
+    fi
+    echo "ok: the xwayland session answers with an empty window list"
+}
+( run_xwayland_test ) || exit 1
+
+echo "--- the default session never mentions xwayland ---"
+# The main session above runs without --xwayland: nothing in the
+# opt-in path may log (or otherwise surface) there. Case-insensitive --
+# this catches XWayland, X11Wm, DISPLAY and xdisplay alike.
+if grep -qi "xwayland\|x11wm\|xdisplay" "$LOG"; then
+    echo "BUG: the default (Wayland-only) session mentions xwayland:"
+    grep -ai "xwayland\|x11wm\|xdisplay" "$LOG" | head -5
+    exit 1
+fi
+echo "ok: the default session's log never mentions xwayland"

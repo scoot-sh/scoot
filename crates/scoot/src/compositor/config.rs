@@ -264,6 +264,23 @@ impl RendererConfig {
     }
 }
 
+/// `[xwayland]`. One field today: `enabled`, whether to run an XWayland
+/// server inside the session so X11-only applications get a `DISPLAY`.
+/// `Option`-everything for the same reason [`LayoutConfig`] is: a partial
+/// table leaves the rest at their defaults.
+///
+/// Off unless both the file and the flag agree it is on -- more precisely,
+/// `compositor::run` ORs this with `--xwayland`, since a flag can only say
+/// yes. Needs an `xwayland` Cargo-feature build; without one the knob parses
+/// but warns and the session runs Wayland-only (see `compositor::xwayland`).
+/// Takes effect on restart, like `[tty] gpu` and `[renderer] backend` -- a
+/// reload refuses changes with a message naming that (see `reload.rs`).
+#[derive(Debug, Default, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+struct XwaylandConfig {
+    enabled: Option<bool>,
+}
+
 /// `[autostart]`. One field: `commands`, a flat list of action strings in
 /// exactly the grammar `scootctl action ...` (and a config file's `[binds]`
 /// values) use -- see `scootctl::action`, reused here rather than duplicated.
@@ -330,6 +347,8 @@ struct FileConfig {
     #[serde(default)]
     tty: Option<TtyConfig>,
     #[serde(default)]
+    xwayland: Option<XwaylandConfig>,
+    #[serde(default)]
     autostart: Option<AutostartConfig>,
     #[serde(default)]
     binds: HashMap<String, String>,
@@ -361,6 +380,12 @@ pub struct LoadedConfig {
     /// is unset too. `--renderer` wins over this when both name one; see
     /// `render::resolve`, which is also where `--tty` overrides both.
     pub renderer: Option<RendererKind>,
+    /// Whether the file asks for an XWayland server in the session. `false`
+    /// (the default) means Wayland-only; `true` means start one, OR-ed with
+    /// `--xwayland` in `compositor::run` (see [`XwaylandConfig`]). Needs an
+    /// `xwayland` Cargo-feature build, and takes effect on restart -- a
+    /// reload refuses changes with a message naming that (see `reload.rs`).
+    pub xwayland: bool,
     /// The `[autostart] commands` that parsed, in file order. Entries that
     /// did not parse were already warned about and dropped at load (see
     /// [`AutostartConfig::into_actions`]); an empty `Vec` -- no table, no
@@ -384,6 +409,7 @@ impl LoadedConfig {
             scale: 1.0,
             gpu: None,
             renderer: None,
+            xwayland: false,
             autostart: Vec::new(),
         }
     }
@@ -408,6 +434,7 @@ impl LoadedConfig {
         let scale = file.output.unwrap_or_default().into_scale();
         let gpu = file.tty.and_then(|tty| tty.gpu);
         let renderer = file.renderer.unwrap_or_default().into_kind();
+        let xwayland = file.xwayland.unwrap_or_default().enabled.unwrap_or(false);
         let autostart = file.autostart.unwrap_or_default().into_actions();
         let keybindings = keybindings_for(&file.binds, vt);
         Self {
@@ -417,6 +444,7 @@ impl LoadedConfig {
             scale,
             gpu,
             renderer,
+            xwayland,
             autostart,
         }
     }
@@ -529,7 +557,7 @@ pub fn enforce_vt_binds(table: &mut Keybindings) {
 /// Emits a starting config file generated from the compositor's own live
 /// defaults: [`Config::default`], [`Appearance::default`],
 /// [`Keybindings::default`], scale 1.0, no `[tty] gpu`, no `[renderer]`
-/// backend, and no `[autostart]` entries.
+/// backend, xwayland off, and no `[autostart]` entries.
 ///
 /// Every key is present and commented out with its default as the value, so
 /// the emitted file as-is *is* the defaults -- uncomment a line to set it
@@ -572,11 +600,11 @@ pub fn default_config_toml() -> String {
          # commented for the real default (see docs/configuration.md, which these\n\
          # comments summarize, not replace).\n\
          #\n\
-         # Gap, column widths, the output scale, the ring/background/cursor
-         # appearance fields, binds, and new [autostart] spawn entries
-         # re-apply live with `scootctl reload`; [tty] gpu and [renderer]
-         # backend take effect on restart and a reload refuses them with a
-         # message.\n",
+          # Gap, column widths, the output scale, the ring/background/cursor
+          # appearance fields, binds, and new [autostart] spawn entries
+          # re-apply live with `scootctl reload`; [tty] gpu, [renderer]
+          # backend and [xwayland] enabled take effect on restart and a reload
+          # refuses them with a message.\n",
     );
 
     out.push_str("\n[layout]\n");
@@ -648,6 +676,15 @@ pub fn default_config_toml() -> String {
          # Name the display controller (prefer a stable /dev/dri/by-path/... alias):\n",
     );
     out.push_str("# gpu = \"/dev/dri/card0\"\n");
+
+    out.push_str("\n[xwayland]\n");
+    out.push_str(
+        "# Run an XWayland server inside the session (opt-in X11 support, off\n\
+          # by default). --xwayland wins when either names it: the two are OR-ed.\n\
+          # Needs an `xwayland` Cargo-feature build; without one the knob warns\n\
+          # and the session runs Wayland-only. Takes effect on restart.\n",
+    );
+    out.push_str("# enabled = false\n");
 
     out.push_str("\n[autostart]\n");
     out.push_str("# Action strings to run once each, in file order, at session startup.\n");
@@ -2527,6 +2564,48 @@ mod tests {
     // -- [tty] ------------------------------------------------------------
 
     #[test]
+    fn an_xwayland_enabled_key_round_trips_and_defaults_off() {
+        let file: FileConfig = toml::from_str("[xwayland]\nenabled = true\n").expect("valid toml");
+        assert_eq!(
+            file.xwayland,
+            Some(XwaylandConfig {
+                enabled: Some(true)
+            })
+        );
+        assert!(LoadedConfig::from_file(file).xwayland);
+
+        // Missing table, missing key, and explicit false all mean off --
+        // the flag is what can still turn it on (see `compositor::run`).
+        for toml in ["", "[xwayland]\n", "[xwayland]\nenabled = false\n"] {
+            let file: FileConfig = toml::from_str(toml).expect("valid toml");
+            assert!(
+                !LoadedConfig::from_file(file).xwayland,
+                "{toml:?} should leave xwayland off"
+            );
+        }
+    }
+
+    #[test]
+    fn deny_unknown_fields_rejects_an_xwayland_typo() {
+        assert!(toml::from_str::<FileConfig>("[xwayland]\nenable = true\n").is_err());
+        assert!(toml::from_str::<FileConfig>("[xways]\nenabled = true\n").is_err());
+    }
+
+    #[test]
+    fn an_xwayland_enabled_of_the_wrong_type_is_a_whole_file_fallback() {
+        // Same rule as any other type mismatch (see the module doc): the
+        // file is discarded, not the key.
+        let (_dir, path) = write_temp("[layout]\ngap = 20\n\n[xwayland]\nenabled = \"yes\"\n");
+        let loaded = load_from(&path, true).expect("a parse failure must never fail startup");
+        assert!(!loaded.xwayland);
+        assert_eq!(
+            loaded.config.gap,
+            Config::default().gap,
+            "the whole file is discarded, including a valid [layout]"
+        );
+    }
+
+    #[test]
     fn a_tty_gpu_key_round_trips() {
         let file: FileConfig =
             toml::from_str("[tty]\ngpu = \"/dev/dri/card1\"\n").expect("valid toml");
@@ -2668,6 +2747,7 @@ mod tests {
             "[output]",
             "[renderer]",
             "[tty]",
+            "[xwayland]",
             "[autostart]",
             "[binds]",
         ] {
