@@ -611,6 +611,12 @@ impl ScanoutPresenter {
 /// plane the CRTC could use, and `DrmCompositor` assumes the primary it is
 /// given is the one the surface commits against -- handing it a different
 /// one would be a plane the surface never claimed.
+///
+/// The cursor list is only as complete as the kernel lets it be: on
+/// paravirtualized drivers the cursor plane is hidden until the session sets
+/// `CURSOR_PLANE_HOTSPOT`, which `open_device` does right after building the
+/// `DrmDevice` (see its comment) -- before this surface exists, so the
+/// snapshot here already includes it.
 fn surface_planes(surface: &DrmSurface) -> Planes {
     select_planes(surface.planes(), surface.plane())
 }
@@ -656,7 +662,7 @@ mod tests {
 
     use std::num::NonZeroU32;
 
-    use smithay::backend::allocator::FormatSet;
+    use smithay::backend::allocator::format::FormatSet;
     use smithay::reexports::drm::control::PlaneType;
 
     use super::*;

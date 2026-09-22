@@ -64,6 +64,9 @@ use smithay::backend::session::{Event as SessionEvent, Session};
 use smithay::backend::udev::UdevBackend;
 use smithay::reexports::calloop::LoopHandle;
 use smithay::reexports::drm::control::{Mode, connector, crtc};
+// `DrmControl` (not `Device`): this module owns a `struct Device` of its
+// own, and the trait is only ever named once, below.
+use smithay::reexports::drm::{ClientCapability, Device as DrmControl};
 use smithay::reexports::input::Libinput;
 use smithay::utils::{DeviceFd, Physical, Rectangle};
 
@@ -706,6 +709,31 @@ fn open_device(
             "could not be initialized as a DRM device ({error})"
         ))
     })?;
+    // Ask the kernel to stop hiding paravirtualized cursor planes from this
+    // client (`CURSOR_PLANE_HOTSPOT`). Since kernel 6.x the DRM core hides a
+    // paravirt cursor plane (virtio-gpu, vmwgfx) from any client without this
+    // cap, on the grounds that such planes carry hotspot semantics a legacy
+    // client gets wrong -- and Smithay's `DrmDevice::new` (pinned rev) sets
+    // only `UNIVERSAL_PLANES` + `ATOMIC`, so without this the surface's plane
+    // inventory never contains the cursor plane even where one exists, and
+    // the scanout tier silently keeps compositing the cursor. Measured on the
+    // dev VM: plane 34 is present per `drm_info` yet absent from
+    // `surface.planes()` until this call, after which it enumerates. The
+    // promise the cap makes -- treating the plane like a mouse cursor with a
+    // correctly-managed hotspot -- is one this backend already keeps: cursor
+    // elements arrive hotspot-subtracted (`cursor::element_location`), and
+    // Smithay never writes `HOTSPOT_X/Y`, so they stay zero and the image's
+    // top-left lands where the element says. A kernel without the cap answers
+    // `EINVAL` and has no hiding to lift, so that is debug-logged rather
+    // than warned: the cursor simply stays composited, today's behavior.
+    if let Err(error) =
+        DrmControl::set_client_capability(&drm, ClientCapability::CursorPlaneHotspot, true)
+    {
+        tracing::debug!(
+            %error,
+            "drm: no cursor-plane hotspot capability; paravirtualized cursor planes, if any, stay hidden"
+        );
+    }
 
     let surface = create_surface(&mut drm, connector, mode).ok_or_else(|| {
         gpu::Rejection::Unusable("has no crtc usable with the chosen connector".to_owned())

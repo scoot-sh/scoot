@@ -136,6 +136,67 @@ remain).
   `ldd` libgbm assert, feature unit tests, full gate, `--tty` tier proof
   (`scanout="gpu"` + `cursor_planes=1` + screenshot comparison vs dumb).
 
+## PROGRESS — live half unblocked 2026-09-22: VirtIO hides its cursor plane
+without `CURSOR_PLANE_HOTSPOT`, and refuses the TEST when shown
+
+Disk freed by the coordinator; verification completed on the dev VM
+(`cursor-plane-step1`, past `cf3b4a4` — see the second commit). Two findings,
+one requiring a scope delta, one bounding the outcome:
+
+- **The plane exists but is hidden without a cap the ticket never names.**
+  `drm_info`/modetest see plane 34 (`Cursor`), yet `surface.planes()` came
+  back `primary=[33], cursor=[], overlay=[]` and the tier logged
+  `cursor_planes=0`. Traced with `strace -v`: `SET_CLIENT_CAP{2,1}` and
+  `{3,1}` both succeed, yet `GETPLANERESOURCES` returns count=1 on the
+  session's fd while a directly-opened fd gets 2. Root cause, from drm-0.14's
+  own `ClientCapability` doc: **since kernel 6.x the DRM core hides a
+  paravirtualized cursor plane from clients without
+  `DRM_CLIENT_CAP_CURSOR_PLANE_HOTSPOT`** (virtio-gpu, vmwgfx); Smithay's
+  `DrmDevice::new` (pinned rev) sets only `UNIVERSAL_PLANES` + `ATOMIC`.
+  Proven by experiment: setting the hotspot cap on the live fd flips
+  `plane_handles()` from `[33]` to `[33, 34]`. **Scope delta (kept small):**
+  `open_device` now sets `CursorPlaneHotspot` once per `--tty` session
+  (~8 lines + comment), failing debug-quiet on kernels without the cap
+  (which have no hiding to lift). After it the tier logs `cursor_planes=1`.
+  The cap's promise (hotspot-managed mouse cursor) is already kept: cursor
+  elements arrive hotspot-subtracted and Smithay never writes `HOTSPOT_X/Y`
+  (verified absent at the pinned rev), so they stay zero.
+- **With the plane visible, virtio refuses the atomic TEST.** Per-frame
+  trace (`smithay::backend::drm::compositor=trace`): `trying to render
+  element ... on cursor plane::Handle(34)` every frame, then `failed to test
+  cursor plane::Handle(34) state`, then the element composites into the
+  primary as designed (`drm_info` while running: plane 34 `FB ID: 0`,
+  primary 33 flipping). The `using legacy fbadd` warn is Smithay-internal
+  (pinned rev, out of scope). So on virtio-gpu step 1 lands as
+  **attempt-every-frame + graceful fallback**, not active scanout -- the
+  fallback the ticket designed for the no-plane case, exercised harder. The
+  capture consequence documented earlier does *not* materialize here (the
+  cursor stays composited, captures keep showing it); it awaits hardware
+  whose TEST accepts.
+- **Numbers (dev VM, llvmpipe -- smoke only, never a GPU verdict).**
+  Screenshot matrix, pinned single-foot scene: same-tier control `AE = 0`;
+  same-tier cursor move `(800,500)->(200,900)`: `AE = 91.7`, deterministic
+  across sessions, localized *exclusively* at the two cursor neighborhoods
+  (middle-region crop `AE = 0`) -- the composited cursor moving, nothing
+  else. Cross-tier same position (gpu-fallback vs dumb): `AE = 829.6`,
+  **max channel delta 1/255, zero pixels above 1%** -- tiers agree to
+  rasterizer precision (stronger max-delta than Phase 1's Asahi 3/255).
+  Jiffies, real compositor PIDs, single rounds each (no alternation -- a
+  smoke, not a benchmark): idle 10s `0` both tiers; 60 large-jump pointer
+  moves: dumb `32j` (0.53 j/ev, same ballpark as Asahi dumb 0.455), gpu
+  `21j` (0.35 j/ev). VmRSS gpu tier 130 MB. llvmpipe numbers say nothing
+  about real GPUs; reported only as no-regression.
+- Full gate on the VM: feature build links, `ldd` shows `libgbm.so.1`
+  (default build shows zero gbm refs); 5 new tests **execute green**
+  (5 passed); `nextest --workspace` **1425 passed, 6 skipped**;
+  both `clippy -- -D warnings` clean; `fmt --all --check` clean;
+  `smoke-test.sh` `rc=0` (20 oks). One real bug found by the gate: the new
+  tests used `smithay::backend::allocator::FormatSet`, which does not exist
+  at the pinned rev (it is `allocator::format::FormatSet`) -- fixed; it also
+  exposed that the Mac `check`/`clippy` runs never compile this
+  Linux-only code at all (smithay is a `target_os=linux` dep), so that
+  half of the earlier evidence was vacuous and is corrected here.
+
 
 ## What done looks like
 

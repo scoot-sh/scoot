@@ -216,7 +216,12 @@ running with no GPU at all is a hard requirement here, not a fallback tier.
   `docs/backlog/rendering/gpu-scanout-planes.md`); the cursor rides a KMS
   cursor plane on CRTCs that expose one and stays composited into the primary
   plane everywhere else, with per-frame fallback to compositing where the
-  plane cannot be claimed. One consequence to know: a capture (IPC
+  plane cannot be claimed. Two paravirt caveats, both measured on the dev
+  VM's virtio-gpu: the kernel hides the cursor plane until the session sets
+  `CURSOR_PLANE_HOTSPOT` (which scoot does once per `--tty` session --
+  without it the inventory is primary-only despite the plane existing), and
+  even shown, virtio refuses the atomic TEST for the cursor state, so there
+  the tier attempts the plane every frame and falls back every frame. One consequence to know: a capture (IPC
   screenshots, `ext-image-copy-capture-v1`) reads the primary plane only, so
   on a session whose cursor is plane-assigned the capture shows the screen
   *without* the cursor; where the cursor is composited, captures keep showing
@@ -293,7 +298,10 @@ where the CRTC exposes one (the dev VM's virtio-gpu does: one `Cursor` plane
 per `drm_info`) and silently not elsewhere; a plane-assigned cursor is absent
 from captures, which read the primary plane only. Whether `apple,dcp`
 exposes a usable cursor plane is still unknown (no plane inventory exists
-from the Asahi runs). The case for scanout is no longer
+from the Asahi runs). Virtio's own footnote: its cursor plane needs the
+session's `CURSOR_PLANE_HOTSPOT` cap to be enumerated at all, and even then
+its kernel refuses the atomic TEST, so on virtio the tier enumerates the
+plane, attempts it per frame, and composites the cursor every frame. The case for scanout is no longer
 reasoned but measured, on an Apple M2 under Asahi Linux: **4–5x less
 compositor CPU** under damage, the same pixels, ~0.2 W less power, 7–16 MB
 more RSS (see [`../Asahi.md`](../Asahi.md)'s Test 4). On a machine whose

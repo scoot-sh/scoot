@@ -341,12 +341,16 @@ What lands:
 ### Deliberate scope decisions, each of which could have gone the other way
 
 - **`planes: Some(primary only)`, `gbm: None`.** No cursor plane, no overlay
-  planes.
+  planes. *(Superseded by step 1 of
+  `docs/backlog/rendering/gpu-scanout-planes.md`: cursor planes now ride
+  along with `gbm: Some` where one exists; described here as it landed.)*
 - **`FrameFlags::empty()`, not `DEFAULT`.** `DEFAULT` is `ALLOW_SCANOUT`,
   which lets a client's own buffer be scanned out directly on the primary
   plane. That is a real optimisation and it is not this stage's -- with it the
   frame is *not* in the swapchain buffer, so the capture path would silently
-  start returning something that is not what is on screen.
+  start returning something that is not what is on screen. *(Narrowed by the
+  same step 1: the cursor-plane bit alone is now passed; primary/overlay
+  direct scanout stays out.)*
 - **`PresentRetries` is reused, not replaced**, against the letter of the
   staging note below. A refused `queue_frame` is the same hazard as a refused
   `page_flip`: nothing is in flight, so no completion event will retry it and
@@ -633,7 +637,11 @@ which was not measured. One panel, one resolution, one machine. Overlay
 planes are still untouched -- but the cursor step has landed: step 1 of
 `docs/backlog/rendering/gpu-scanout-planes.md` (cursor plane with graceful
 fallback, `ALLOW_CURSOR_PLANE_SCANOUT` only, captures documented as
-primary-plane reads) is implemented; the `Modifier::Invalid` widening still
+primary-plane reads) is implemented, including the `CURSOR_PLANE_HOTSPOT`
+cap without which paravirt kernels hide the plane entirely. Live on
+virtio-gpu it enumerates (`cursor_planes=1`) but the kernel refuses the
+atomic TEST, so there it attempts per frame and composites per frame --
+active scanout still awaits a real GPU; the `Modifier::Invalid` widening still
 has not met a driver that reports `Invalid`-only.
 
 ## Stage 4: the dmabuf advertisement follows the renderer
