@@ -233,7 +233,8 @@ other path (`> wherever`). (On a machine with no
 
 **Most settings are read once at startup; some can be reloaded live.**
 `scootctl reload` (see [Reloading the config](#reloading-the-config))
-re-reads this same file and re-applies the gap, the appearance (including
+re-reads this same file and re-applies the layout (gap, column widths and
+the default column width), the appearance (including
 the cursor size, color and theme) and the
 keybindings. Everything else is startup-only and a reload refuses it with a
 message rather than silently ignoring it.
@@ -290,16 +291,17 @@ No file watching: a live-edited config would fire mid-keystroke, while both
 triggers above say exactly when. A HUP to the `scootctl` client itself means
 nothing — only the compositor installs the handler.
 
-**Applied:** `[layout] gap` (the arrangement is recomputed and the screen
-redrawn), the `[appearance]` focus-ring width and colors, the background
+**Applied:** `[layout] gap`, `column_widths` and `default_column_width`
+(the arrangement is recomputed and the screen
+redrawn; a shorter width list clamps live columns onto the nearest
+surviving entry, and new windows take the reloaded default), the `[appearance]` focus-ring width and colors, the background
 color, `corner_radius`, `prefer_no_csd`, and the cursor `cursor_size`,
 `cursor_color` and `cursor_theme` (the fallback bitmaps are rebuilt, the
 theme reloaded, and the screen redrawn without re-arranging -- cursor
 pixels are not placement), and the whole `[binds]` table (rebuilt from the
 defaults plus the file, so a reload both adds and overrides binds).
 
-**Refused, explicitly:** `[layout] column_widths` and
-`default_column_width` (live columns hold presets into that list),
+**Refused, explicitly:**
 `[output] scale`
 (clients were told it at bind time), `[tty] gpu` (the session already
 drives its device), `[renderer] backend` (the live renderer holds client
@@ -333,7 +335,8 @@ Two guarantees the applied set pins:
 
 A reload applies while the session is locked: nothing in the applied set
 can disclose locked content (appearance changes touch nothing the locked
-frame draws; gap and binds are input-side, and binds cannot fire actions
+frame draws; gap, column widths and binds are input-side -- widths only
+re-derive column frames from config proportions -- and binds cannot fire actions
 while locked anyway).
 
 ## `[layout]`
@@ -341,8 +344,8 @@ while locked anyway).
 | Field | Type | Default | Meaning |
 |---|---|---|---|
 | `gap` | integer (pixels) | `12` | Gap between columns, between windows stacked in a column, and at output edges. Clamped into `0..=10000`: negatives become `0`, and anything above `10000` becomes `10000` — already wider than the long edge of an 8K display, and it keeps the layout's own integer arithmetic well away from overflow. A gap that large leaves no usable area, so windows end up 1x1; it's a guard against a typo or a probe, not a usable setting. Re-applied live by `scootctl reload`. |
-| `column_widths` | array of floats | `[0.333…, 0.5, 0.666…]` (i.e. `1/3`, `1/2`, `2/3`) | Column widths as fractions of the output width, in the order `cycle-column-width` steps through and `set-column-width N` indexes into (0-based). Non-finite or non-positive entries are dropped; an empty list falls back to the built-in three. Startup-only — a reload refuses changes (see [Reloading the config](#reloading-the-config)). |
-| `default_column_width` | integer (unsigned) | `1` | Index into `column_widths` used for newly created columns (`1` selects `0.5`, i.e. half the output). Too large is clamped to the last valid index; negative isn't a valid value for this field at all, so it's a whole-file parse error, not a clamp. Startup-only — a reload refuses changes. |
+| `column_widths` | array of floats | `[0.333…, 0.5, 0.666…]` (i.e. `1/3`, `1/2`, `2/3`) | Column widths as fractions of the output width, in the order `cycle-column-width` steps through and `set-column-width N` indexes into (0-based). Non-finite or non-positive entries are dropped; an empty list falls back to the built-in three. Re-applied live by `scootctl reload` (a shorter list clamps live columns onto the nearest surviving entry; see [Reloading the config](#reloading-the-config)). |
+| `default_column_width` | integer (unsigned) | `1` | Index into `column_widths` used for newly created columns (`1` selects `0.5`, i.e. half the output). Too large is clamped to the last valid index; negative isn't a valid value for this field at all, so it's a whole-file parse error, not a clamp. Re-applied live by `scootctl reload` (new windows take the reloaded default; live columns hold still). |
 
 ## `[appearance]`
 

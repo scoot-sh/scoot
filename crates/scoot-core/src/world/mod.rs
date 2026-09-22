@@ -82,24 +82,27 @@ impl World {
     /// edges, and a `view_x` that was correct for the old gap can leave the
     /// focused column off screen under the new one.
     ///
-    /// What this deliberately does *not* touch: existing columns keep their
-    /// width presets, which is why a reload may only shrink or grow
-    /// `column_widths` through the compositor's refusal path -- a preset
-    /// past the end of a shorter list would index out of range in `arrange`.
-    /// See `reload`'s `layout.column_widths` refusal. The `debug_assert`
-    /// below is the backstop: any future caller handing a list shorter than
-    /// a live preset fails loudly in test/debug instead of panicking a
-    /// release session in `arrange`.
+    /// A shorter incoming `column_widths` clamps every live column preset
+    /// into it (`min(preset, len - 1)`), the same clamp
+    /// [`Config::validated`](crate::Config::validated) already applies to
+    /// `default_column_width`. Clamping rather than a proportional remap, so
+    /// no window silently changes relative size: only a column that would
+    /// otherwise index past the end of the new list moves, and it lands on
+    /// the nearest surviving width. (Validation keeps the list non-empty, so
+    /// `len - 1` is always a valid index.) `arrange` then stays in range for
+    /// whatever this was handed -- a longer list, or an equal one, leaves
+    /// every preset untouched.
     pub fn set_config(&mut self, config: Config) {
         let config = config.validated();
-        debug_assert!(
-            self.outputs
-                .iter()
-                .flat_map(|output| &output.workspaces)
-                .flat_map(|workspace| &workspace.columns)
-                .all(|column| column.preset < config.column_widths.len()),
-            "live column preset past the end of the incoming width list"
-        );
+        let last = config.column_widths.len() - 1;
+        for column in self
+            .outputs
+            .iter_mut()
+            .flat_map(|output| &mut output.workspaces)
+            .flat_map(|workspace| &mut workspace.columns)
+        {
+            column.preset = column.preset.min(last);
+        }
         self.config = config;
         self.fix_all_views();
     }

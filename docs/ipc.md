@@ -46,7 +46,7 @@ compositor running in a VM.
 | `outputs` | Every output's name, rectangle, usable rectangle and scale. |
 | `windows` | Every window: id, app id, title, icon, focus, popup grab. |
 | `action ACTION [ARGUMENT...]` | Run a layout action — see [Actions](#actions). |
-| `reload` | Re-read the config file the session started from and re-apply what can be re-applied live (gap, appearance, keybindings) — see [configuration.md](configuration.md#reloading-the-config). Answers `reloaded` with applied-vs-refused field lists, or `error` (running config untouched) when the file cannot load or validate. |
+| `reload` | Re-read the config file the session started from and re-apply what can be re-applied live (layout, appearance, keybindings) — see [configuration.md](configuration.md#reloading-the-config). Answers `reloaded` with applied-vs-refused field lists, or `error` (running config untouched) when the file cannot load or validate. |
 | `screenshot [--output ID] [--out FILE]` | Capture the screen as PNG. Without `--out`, the PNG goes to stdout. `--output` names which output to capture; every output has a framebuffer of its own, so the capture is that output's own pixels. An id naming no output is refused rather than answered with another output's pixels. Omitting it always means the first output (id 1). |
 | `pointer move X Y` | Move the pointer to logical coordinates. |
 | `pointer click X Y [left\|right\|middle]` | Move, then press and release. |

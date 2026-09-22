@@ -17,6 +17,15 @@ blocked: null
 > selection). Remaining: Phase 2 (`column_widths`), Phase 3
 > (`output.scale`), Phase 4 (autostart policy), Phases 5–6 (renderer/GPU
 > reword). The seams land where those phases need them.
+>
+> PROGRESS 2026-09-22: Phase 2 LANDED (PR #211). `column_widths` /
+> `default_column_width` reload live through one `World::set_config`: a
+> shorter list clamps live presets (`min(preset, len-1)`, the existing
+> `validated()` clamp precedent — no window silently changes relative
+> size), longer lists touch nothing, an emptied list falls back to the
+> defaults; `cycle_preset` / `set-column-width` follow against the new
+> length, under session lock like gap. Remaining: Phase 3 (`output.scale`),
+> Phase 4 (autostart policy), Phases 5–6 (renderer/GPU reword).
 
 `resolved/config-reload-done.md` + `resolved/reload-sighup-trigger-done.md`
 shipped partial-with-refusal as the honest shape (`Request::Reload` →

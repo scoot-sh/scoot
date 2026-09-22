@@ -69,16 +69,69 @@ fn set_config_keeps_existing_columns_placeable() {
     let _ = world.arrange();
 }
 
-// The backstop for `set_config`'s `debug_assert!`: a caller handing a list
-// shorter than a live preset is a bug the compositor's refusal path must
-// have caught first, so this fails loudly instead of letting `arrange`
-// index out of range. Gated on `debug_assertions` because release compiles
-// the assert out -- without the gate this test would fail a release run by
-// succeeding.
+// The clamp pins for `set_config`'s width-list handling: a caller handing a
+// list shorter than a live preset clamps the preset into range instead of
+// leaving `arrange` indexing out of range (the refusal path that used to sit
+// in front of this is gone -- a reload now applies width changes live).
 #[test]
-#[cfg(debug_assertions)]
-#[should_panic(expected = "live column preset")]
-fn set_config_shouts_when_a_live_preset_outruns_the_incoming_list() {
+fn set_config_clamps_a_live_preset_past_a_shorter_list() {
+    let mut world = World::new(Config {
+        column_widths: vec![0.25, 0.5, 0.75, 1.0],
+        default_column_width: 3,
+        ..config()
+    });
+    world.handle_event(Event::OutputAdded {
+        id: OutputId(1),
+        area: SCREEN,
+    });
+    open(&mut world, 1);
+    // The open window sits on the default preset, the last of four.
+    world.set_config(Config {
+        column_widths: vec![0.5],
+        ..config()
+    });
+    assert_eq!(world.config().column_widths, vec![0.5]);
+    // Must not panic: the clamped preset keeps every `arrange` index in
+    // range, and the column lands on the nearest surviving width -- the
+    // 0.5 entry, 485px of the 980px usable width (see `tests::config`).
+    let placed = placement(&world, 1);
+    assert_eq!(placed.rect.w, 485);
+}
+
+#[test]
+fn set_config_leaves_presets_alone_when_the_list_grows_or_holds() {
+    let mut world = world();
+    open(&mut world, 1);
+    open(&mut world, 2);
+    world.handle_action(crate::Action::SetColumnWidth(1));
+    world.set_config(Config {
+        column_widths: vec![0.25, 0.5, 0.75, 1.0],
+        ..config()
+    });
+    // Window 2's column keeps preset 1 (the 0.5 entry, 485px); window 1's
+    // keeps the default preset 0 (the 0.25 entry, 238px).
+    assert_eq!(placement(&world, 2).rect.w, 485);
+    assert_eq!(placement(&world, 1).rect.w, 238);
+    let _ = world.arrange();
+}
+
+#[test]
+fn set_config_clamps_the_default_for_windows_opened_after() {
+    let mut world = world();
+    world.set_config(Config {
+        column_widths: vec![0.25],
+        default_column_width: 9,
+        ..config()
+    });
+    assert_eq!(world.config().default_column_width, 0);
+    open(&mut world, 1);
+    let _ = world.arrange();
+}
+
+#[test]
+fn set_config_repairs_an_emptied_width_list_before_clamping() {
+    // `validated()` replaces an empty list with the defaults first, so the
+    // clamp below always has a non-empty list -- `len - 1` cannot underflow.
     let mut world = World::new(Config {
         column_widths: vec![0.25, 0.5, 0.75, 1.0],
         default_column_width: 3,
@@ -90,7 +143,12 @@ fn set_config_shouts_when_a_live_preset_outruns_the_incoming_list() {
     });
     open(&mut world, 1);
     world.set_config(Config {
-        column_widths: vec![0.5],
+        column_widths: vec![0.0, f64::NAN],
         ..config()
     });
+    assert_eq!(
+        world.config().column_widths,
+        Config::default().column_widths
+    );
+    let _ = world.arrange();
 }
