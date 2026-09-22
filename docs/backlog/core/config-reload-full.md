@@ -8,6 +8,16 @@ blocked: null
 
 # Config reload: from partial to full
 
+> PROGRESS 2026-09-21: Phase 0 + Phase 1 LANDED (PR #209, merge `a279cc0`).
+> `apply_reload` is split into per-field appliers (compare-first/mutate-after
+> kept); cursor theme/size/color reload live via `Cursor::rebuild`
+> (per-child `XCURSOR_*` export, render without `apply()`). Review caught
+> one wrong security-relevant doc claim (cursor IS drawn under lock —
+> front-most by design; safety holds because rebuild never touches shape
+> selection). Remaining: Phase 2 (`column_widths`), Phase 3
+> (`output.scale`), Phase 4 (autostart policy), Phases 5–6 (renderer/GPU
+> reword). The seams land where those phases need them.
+
 `resolved/config-reload-done.md` + `resolved/reload-sighup-trigger-done.md`
 shipped partial-with-refusal as the honest shape (`Request::Reload` →
 `State::reload`, `compositor/reload.rs:92-123` → `config::reload_from`,

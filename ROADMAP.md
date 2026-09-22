@@ -77,6 +77,14 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[Config reload phases 0+1: applier split +
+  cursor](docs/backlog/core/config-reload-full.md)** (2026-09-21, PR #209)
+  — `apply_reload` split into per-field appliers (behavior-preserving);
+  cursor theme/size/color now reload live with idempotent second reloads
+  and SIGHUP inheritance; phases 2+ refusal strings byte-identical, no
+  protocol bump. Review caught a false under-lock doc claim (fixed in-round).
+  Ticket stays OPEN for `column_widths` → scale → autostart → reword.
+
 - **[Multi-output remainder G+H: pointer-output placement + default output
   binds](docs/backlog/core/multi-output-remainder.md)** (2026-09-21,
   PR #208) — new windows file under the pointer's output (shared helper, so
