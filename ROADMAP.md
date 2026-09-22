@@ -77,6 +77,15 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[Multi-output remainder G+H: pointer-output placement + default output
+  binds](docs/backlog/core/multi-output-remainder.md)** (2026-09-21,
+  PR #208) — new windows file under the pointer's output (shared helper, so
+  wlr announce and core filing agree; primary fallback), and four new
+  default binds (`Super+comma/period` focus, `+Shift` move; 36→40).
+  Single-output byte-identical by construction. Review clean with its own
+  live `--headless --outputs 2` spot-checks. Remainder file stays OPEN for
+  hardware-gated E1/E2.
+
 - **[Ring/content corner alignment at fractional
   scale](docs/backlog/resolved/rounded-ring-content-fractional-mismatch-done.md)**
   (2026-09-21, gh #205, PR #207) — the ticket's radius-rounding hypothesis

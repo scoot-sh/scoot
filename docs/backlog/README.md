@@ -669,8 +669,9 @@ policy → renderer/GPU reword. Batch Asahi trips (multi-CRTC + scanout +
 scale/mode) into one hardware session.
 
 - [Multi-output remainder: --tty multi-CRTC, placement, default binds](./core/multi-output-remainder.md)
-  — OPEN, **HIGH**: milestone 19 phases E–I (E1 enumerate, E2 render +
-  hotplug add/remove, G pointer-output placement, H default output binds).
+  — OPEN, **HIGH**: milestone 19 phases E–I. G (pointer-output placement)
+  + H (default `Super+comma/period` output binds) LANDED 2026-09-21
+  (PR #208). Remaining: E1 enumerate, E2 render + hotplug add/remove.
   E + scale/mode hardware-gated. Pairs with the existing
   [per-output scale/mode](./core/per-output-scale-mode.md) entry, which
   stays last.

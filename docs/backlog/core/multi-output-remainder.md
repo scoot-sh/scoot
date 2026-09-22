@@ -50,7 +50,7 @@ scale/mode surface is its own entry
   (`hotplug.rs` tests, `:45-46`; existing `reselect` contract
   `gpu.rs:523-536` preserved for the *first* plug).
 
-## G — New-window placement policy
+## G — New-window placement policy — LANDED 2026-09-21 (PR #208)
 
 `shell.rs:32` files `WindowOpened` with `world.outputs().first()`;
 `output_of_window` falls back to primary
@@ -60,7 +60,7 @@ Update the fallback comment and `outputs.rs:133-142` docs. Pins:
 `shell/tests`, `foreign_toplevel_management/tests/outputs.rs` template,
 IPC `output` field assertion.
 
-## H — Default binds for FocusOutput / MoveFocusedWindowToOutput
+## H — Default binds for FocusOutput / MoveFocusedWindowToOutput — LANDED 2026-09-21 (PR #208)
 
 Wire + grammar exist (`config.rs:758-759`, `cli.rs:43`, documented manual
 binds `configuration.md:443-462`); `Keybindings::default`
