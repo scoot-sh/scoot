@@ -342,16 +342,25 @@ What lands:
 
 - **`planes: Some(primary only)`, `gbm: None`.** No cursor plane, no overlay
   planes. *(Superseded by steps 1-2 of
-  `docs/backlog/rendering/gpu-scanout-planes.md`: cursor planes now ride
+  `docs/backlog/resolved/gpu-scanout-planes-done.md`: cursor planes now ride
   along with `gbm: Some` where one exists, and overlay planes ride along
   whole from the same inventory; described here as it landed.)*
 - **`FrameFlags::empty()`, not `DEFAULT`.** `DEFAULT` is `ALLOW_SCANOUT`,
   which lets a client's own buffer be scanned out directly on the primary
   plane. That is a real optimisation and it is not this stage's -- with it the
   frame is *not* in the swapchain buffer, so the capture path would silently
-  start returning something that is not what is on screen. *(Narrowed by the
-  same steps 1-2: the cursor- and overlay-plane bits are now passed;
-  primary direct scanout stays out.)*
+  start returning something that is not what is on screen. *(Retired by step
+  3 of the same ticket: the tier now passes `ALLOW_SCANOUT`, with the capture
+  fix the deferral was waiting for -- a direct frame marks the recording
+  (`Captures::note_direct`, via `ScanoutFrame::primary_direct`) and a capture
+  served off a marked recording forces one composite-only frame first
+  (`State::ensure_scanout_capture_current`, through both IPC `screenshot`
+  and `ext-image-copy-capture-v1`), failing loudly where the force cannot
+  draw. `ALLOW_PRIMARY_PLANE_SCANOUT_ANY` stays out, and the framebuffer
+  exporter stays `NodeFilter::None` -- which rejects every client buffer
+  before any hardware is touched, so no frame this tree produces can take
+  the primary direct yet. Widening the exporter is what would make the bit
+  do anything, and it rides on the capture fix, not before it.)*
 - **`PresentRetries` is reused, not replaced**, against the letter of the
   staging note below. A refused `queue_frame` is the same hazard as a refused
   `page_flip`: nothing is in flight, so no completion event will retry it and
@@ -407,6 +416,15 @@ entries; the pool is warm after four frames) and dropped wholesale whenever
 the swapchain is rebuilt -- signalled by the presenter through one
 `take_slots_dropped` flag, so the only thing that can free a slot is also the
 only thing that invalidates the pool.
+
+*(Extended by step 3 of `docs/backlog/resolved/gpu-scanout-planes-done.md`: a
+frame that goes primary-direct never drew into any slot, so it marks the
+recording instead of recording (`ScanoutFrame::primary_direct` →
+`Captures::note_direct`), and a capture served off a marked recording forces
+one composite-only frame first (`State::ensure_scanout_capture_current`) --
+failing loudly where the force cannot draw (no DRM master) rather than
+serving the stale buffer. The forced frame costs one full composite plus one
+swapchain realloc, and only when the recording is actually stale.)*
 
 ### Evidence (dev VM, `--tty` seat held 14:40-14:47Z and again 15:11-15:13Z, 2026-09-19)
 
@@ -636,7 +654,7 @@ damage (the injected path jumps across ~900x600 logical pixels), so the
 4.8-5.1x is for substantial damage and not for a small cursor-rect move,
 which was not measured. One panel, one resolution, one machine. Overlay
 planes are still untouched -- but the cursor step has landed: step 1 of
-`docs/backlog/rendering/gpu-scanout-planes.md` (cursor plane with graceful
+`docs/backlog/resolved/gpu-scanout-planes-done.md` (cursor plane with graceful
 fallback, `ALLOW_CURSOR_PLANE_SCANOUT` only, captures documented as
 primary-plane reads) is implemented, including the `CURSOR_PLANE_HOTSPOT`
 cap without which paravirt kernels hide the plane entirely. Live on

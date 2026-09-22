@@ -154,6 +154,17 @@
 //!   The startup log says which it is (`drm: scanout cursor planes` with
 //!   both counts).
 //!
+//! What a capture is *never* missing on any tier is a window. On the scanout
+//! tier a primary-direct frame leaves the previous composite in the slot the
+//! capture reads, so serving it would show a stale screen; instead the serve
+//! path forces one composite frame first
+//! (`State::ensure_scanout_capture_current`, called above `deliver`), and a
+//! session where the force could not draw (no DRM master) fails its due
+//! frames loudly rather than serving the stale buffer. Shell thumbnails and
+//! workspace overviews are ext-capture clients: they arrive through this
+//! same `deliver` path and inherit the same guarantee, there is no second
+//! pixel path to keep correct.
+//!
 //! `scoot msg screenshot` reads through the same buffer and follows the same
 //! rule on all three.
 //!
@@ -800,6 +811,19 @@ impl State {
                 }
             }
         }
+        // Scanout-tier only: force one composite frame per output whose
+        // recording is stale-or-missing, so the read below serves current
+        // pixels. No-op everywhere else, and where the recording is already
+        // a fresh composite.
+        #[cfg(feature = "gpu-scanout")]
+        for id in &ids {
+            self.ensure_scanout_capture_current(*id);
+        }
+        // Re-read: a forced composite above drew, advancing the serial, so
+        // deliveries stamp the frame they actually read rather than the one
+        // this tick started with.
+        #[cfg(feature = "gpu-scanout")]
+        let serial = self.frame_serial;
         let presented = Duration::from(self.screencopy.clock.now());
         // Read here, on the tick the captures are served on, rather than
         // cached: see `xrgb_needs_forcing`. No TOCTOU between this and the

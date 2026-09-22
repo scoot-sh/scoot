@@ -126,5 +126,5 @@ and r2's logs were overwritten with seat-failure output at 23:10).
   measurement and was not made.
 - One panel, one resolution, one machine.
 - Cursor and overlay planes: phase 2 of
-  [gpu-scanout-planes](../rendering/gpu-scanout-planes.md), which phase 1
+  [gpu-scanout-planes](./gpu-scanout-planes-done.md), which phase 1
   of this run unblocks.

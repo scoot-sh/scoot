@@ -47,6 +47,8 @@
 use std::error::Error;
 use std::fmt;
 
+#[cfg(feature = "gpu-scanout")]
+use scoot_core::OutputId;
 use smithay::backend::allocator::dmabuf::Dmabuf;
 use smithay::backend::allocator::{Format, Fourcc};
 use smithay::backend::renderer::damage::OutputDamageTracker;
@@ -336,6 +338,28 @@ impl Backend {
                 let scanout::ScanoutBackend {
                     renderer, captures, ..
                 } = &mut **gpu;
+                // A marked recording names the previous composite, not what
+                // is on screen (the last damaged frame went primary-direct).
+                // Refuse loudly rather than serve the stale buffer: both
+                // capture callers force a composite frame first (see
+                // `State::ensure_scanout_capture_current`), so reaching here
+                // means the force could not draw -- no DRM master, or a
+                // failed render -- and the refusal is transient, cleared by
+                // the next composite frame. `Bind` is the honest stage: there
+                // is no current buffer to bind. No new stage, so the
+                // presenter-copy path below -- which can never produce this
+                // -- keeps its exhaustive three-arm match.
+                //
+                // Checked before `frame_mut`: the mark refuses regardless of
+                // whether a stale composite is still behind it (and the
+                // immutable check cannot overlap the mutable borrow below).
+                if captures.is_direct() {
+                    return Err(CaptureError::new(
+                        CaptureStage::Bind,
+                        "the current frame is held for direct scanout; \
+                         retry once a composite frame lands",
+                    ));
+                }
                 let Some(frame) = captures.frame_mut() else {
                     return Err(CaptureError::new(
                         CaptureStage::Bind,
@@ -344,6 +368,23 @@ impl Backend {
                 };
                 capture_with(renderer, frame, region, use_pixels)
             }
+        }
+    }
+
+    /// Whether a capture served off this backend right now would read a
+    /// stale-or-missing buffer.
+    ///
+    /// Scanout-tier only: its captures read the last recorded swapchain
+    /// slot, which is missing before the first frame and stale after any
+    /// primary-direct one (see `scanout::Captures`). Every other tier reads
+    /// a persistent framebuffer that is current by construction, so this is
+    /// false there. What [`State::ensure_scanout_capture_current`] keys its
+    /// forced composite frame on.
+    #[cfg(feature = "gpu-scanout")]
+    pub(super) fn scanout_capture_stale(&self) -> bool {
+        match &self.pipeline {
+            Pipeline::Pixman(_) | Pipeline::Gles(_) => false,
+            Pipeline::Scanout(gpu) => gpu.captures.capture_stale(),
         }
     }
 
@@ -461,6 +502,51 @@ impl Backend {
             Pipeline::Scanout(gpu) => Renderer::cleanup_texture_cache(&mut gpu.renderer)
                 .map_err(|error| error.to_string()),
         }
+    }
+}
+
+#[cfg(feature = "gpu-scanout")]
+impl State {
+    /// Forces one fully-composited scanout frame when the capture recording
+    /// for `id` is stale-or-missing, so the capture served right after reads
+    /// current pixels.
+    ///
+    /// Both capture callers funnel through here before reading: IPC
+    /// `screenshot` (`capture_pixels_for`) and `ext-image-copy-capture-v1`
+    /// (`service_captures`) -- and through the latter, shell thumbnails and
+    /// workspace overviews, which are ext-capture clients and have no other
+    /// pixel path. A fresh composite recording short-circuits before
+    /// touching the presenter (one map lookup); otherwise: arm the
+    /// composite-only frame, invalidate the swapchain -- which forces the
+    /// full damage a static screen would otherwise draw nothing on, without
+    /// which the forced frame would record nothing new -- and render
+    /// immediately, synchronously on the event-loop thread like every other
+    /// capture-adjacent render.
+    ///
+    /// Costs one full composite plus one swapchain realloc, and only when
+    /// the recording is actually stale -- direct frames keep flipping
+    /// direct between captures. While paused (no DRM master) the render
+    /// draws nothing and the recording stays stale; the capture then fails
+    /// loudly at [`Backend::capture`] rather than serving the old screen.
+    /// Never arms without rendering in the same call: a bare arming would
+    /// spend its composite frame on unrelated damage and leave the capture
+    /// stale anyway. `request_render` also re-arms the frame timer; the
+    /// resulting tick finds nothing to do and drops itself, same as after
+    /// any other damage-driven frame.
+    pub(super) fn ensure_scanout_capture_current(&mut self, id: OutputId) {
+        if !self
+            .backends
+            .get(&id)
+            .is_some_and(Backend::scanout_capture_stale)
+        {
+            return;
+        }
+        if let Some(presenter) = self.tty.as_mut().and_then(Tty::scanout_mut) {
+            presenter.arm_force_composite();
+            presenter.invalidate_scanout();
+        }
+        self.request_render();
+        self.render();
     }
 }
 
@@ -719,6 +805,14 @@ fn draw_frame_scanout(
         let drawn = presenter.render_and_queue(renderer, &elements, clear_color, |buffer| {
             captures.note_frame(buffer);
         });
+        // The direct arm's half of the capture contract: the slot the
+        // recording points at was never drawn into by this frame, so mark
+        // it rather than leaving a stale composite readable as current. A
+        // capture served off the mark forces a composite frame first (see
+        // `ensure_scanout_capture_current`).
+        if drawn.primary_direct {
+            captures.note_direct();
+        }
         (drawn, presenter.take_retry_render())
     };
 

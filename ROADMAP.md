@@ -62,8 +62,11 @@ claimed rather than shown. Where they stand now:
 - **The `Modifier::Invalid` widening on a driver that reports
   `Invalid`-only — still unshown.** No such driver has been met.
 
-Scanout is also primary-plane only — no overlay or cursor planes, which is
-phase 2 of `docs/backlog/rendering/gpu-scanout-planes.md`, now unblocked. Two of its four stages have landed
+Scanout drives every plane it can claim — cursor plane active where exposed,
+overlay planes enumerated per CRTC, `ALLOW_SCANOUT` passed with its capture
+fix — which is phase 2 of `docs/backlog/resolved/gpu-scanout-planes-done.md`,
+now complete. No window leaves the primary plane yet (no scanout candidates,
+and the exporter stays `NodeFilter::None`), so captures stay correct. Two of its four stages have landed
 (PR #129: the renderer seam, pixman still the only implementation, provably
 zero behaviour change; PR #130: the GLES pipeline behind
 `--renderer pixman|gles` and `[renderer] backend`, off by default, every
@@ -94,8 +97,23 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[GPU scanout `ALLOW_SCANOUT` + capture fix
+  (step 3)](docs/backlog/resolved/gpu-scanout-planes-done.md)** (2026-09-22,
+  branch `allow-scanout-capture-fix`, PR #218) — the flag WITH its capture
+  fix, never apart: direct frames mark the recording
+  (`ScanoutFrame::primary_direct` → `Captures::note_direct`), captures
+  served off a marked recording force one composite-only frame first
+  (`State::ensure_scanout_capture_current`, both IPC `screenshot` and
+  `ext-image-copy-capture-v1`), loud refusal where the force cannot draw.
+  Gating answer first: direct is unreachable twice over (no candidates;
+  exporter stays `NodeFilter::None`), so the flag is assignment-inert and
+  the fix is proven by pins + pinned-source trace + live byte-identity
+  (cursor moves, VT cycle, cross-tier diff confined to the cursor box,
+  `UnknownPlane` 0). Ticket CLOSED; README bullet rewritten (cursor-half
+  staleness from #216 cleared too). Coordinator-filed, no gh issue.
+
 - **[GPU scanout overlay planes
-  (step 2)](docs/backlog/rendering/gpu-scanout-planes.md)** (2026-09-22,
+  (step 2)](docs/backlog/resolved/gpu-scanout-planes-done.md)** (2026-09-22,
   PR #217) — overlay list populated per CRTC (rides whole; no candidates
   exist yet so nothing can be claimed — verified no production surface is
   `ScanoutCandidate`, hence "at most the cursor ever goes missing" holds).
@@ -103,7 +121,7 @@ each item's own file records why it landed when it did.
   for `ALLOW_SCANOUT` + capture fix.
 
 - **[GPU scanout cursor plane
-  (step 1)](docs/backlog/rendering/gpu-scanout-planes.md)** (2026-09-22,
+  (step 1)](docs/backlog/resolved/gpu-scanout-planes-done.md)** (2026-09-22,
   PR #216) — KMS cursor plane driven where the CRTC exposes one
   (`ALLOW_CURSOR_PLANE_SCANOUT` only, overlay dropped, `ALLOW_SCANOUT`
   still out); virtio-gpu needed `CURSOR_PLANE_HOTSPOT` pre-`DrmDevice::new`
