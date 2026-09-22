@@ -139,6 +139,14 @@ remain).
 ## PROGRESS — live half unblocked 2026-09-22: VirtIO hides its cursor plane
 without `CURSOR_PLANE_HOTSPOT`, and refuses the TEST when shown
 
+> **PARTLY SUPERSEDED by the review follow-up below.** The hotspot root
+> cause stands; the "virtio refuses the atomic TEST" conclusion does not --
+> the refusal was the stale prop-mapping snapshot (post-cap placement), and
+> with the cap moved pre-`new` the TEST passes, commits succeed, and the
+> plane is ACTIVE. The fallback-behavior numbers below remain valid as
+> fallback characterization, but they describe the buggy head, not the
+> fixed one.
+
 Disk freed by the coordinator; verification completed on the dev VM
 (`cursor-plane-step1`, past `cf3b4a4` — see the second commit). Two findings,
 one requiring a scope delta, one bounding the outcome:
@@ -196,6 +204,51 @@ one requiring a scope delta, one bounding the outcome:
   exposed that the Mac `check`/`clippy` runs never compile this
   Linux-only code at all (smithay is a `target_os=linux` dep), so that
   half of the earlier evidence was vacuous and is corrected here.
+
+## PROGRESS — review follow-up: the post-cap position caused UnknownPlane
+black screens; atomic-first pre-`new` placement makes the plane ACTIVE
+
+`scoot-reviewer` blocked: `AtomicDrmDevice::new` snapshots
+`plane_handles()` into its property mapping once at construction, so the
+post-`DrmDevice::new` cap revealed plane 34 to `surface.planes()` (fresh
+query) but not to the mapping -- every commit failed `UnknownPlane(34)`,
+primary never flipped, black screen. The reviewer's live `drm_info`
+contradicted the earlier "primary flipping" claim (FB 0 on both planes);
+the post-cap jiffies comparison is void (non-presenting vs presenting),
+and screenshots were structurally blind to it (they read the swapchain,
+which renders fine either way) -- commit-health assertions
+(FB-flipping/UnknownPlane-absence) are now required per live claim on this
+ticket. Verified the mechanism against the pinned source (`device/atomic.rs`
+snapshots once) and moved the cap to between `DrmDeviceFd::new` and
+`DrmDevice::new` -- with one correction to the reviewer's prescription:
+`CURSOR_PLANE_HOTSPOT` needs `ATOMIC` set first (measured `EINVAL`
+otherwise, matching drm-rs's own doc), so the code sets `ATOMIC` then
+`HOTSPOT` pre-`new`; Smithay re-setting both inside `::new` is idempotent
+(strace-verified `{3,1}=0,{6,1}=0` then `{2,1}=0,{3,1}=0`).
+
+End-state on virtio-gpu is now **plane-ACTIVE, not fallback**: `UnknownPlane`
+count 0, plane 34 shows `FB ID: 46` on CRTC 37, and it **tracks the pointer
+with the hotspot offset** (`(800,500)` -> plane at `(800,500)`... precisely
+`(192,892)` for pointer `(200,900)`, i.e. image top-left = pointer - hotspot
+(8,8), correct by construction). Screenshots across a move are **byte-identical
+(`AE = 0`)** -- the cursor is on the plane, invisible to capture, exactly the
+documented consequence, now live-observed with before/after crops (cursorless
+vs dumb-tier cursor-ful at the same coords). Notably the earlier TEST refusal
+(`failed to test cursor plane state`) is GONE with the snapshot fixed -- it
+was the same root cause, not a driver limitation; zero occurrences on the
+fixed head. The per-frame `info!` dampening (`EnvFilter` default demoting
+`smithay::backend::drm::compositor` to `warn` -- its sole `info!` at the
+pinned rev is that line) is retained as defense-in-depth for other hardware.
+
+A/B jiffies, alternating sessions G,D,G,D,G,D, 60 large-jump events each,
+real PIDs: gpu `[21, 15, 14]` (median 15, 0.25 j/ev), dumb `[32, 31, 30]`
+(median 31, 0.52 j/ev) -- ranges do not overlap; llvmpipe smoke only, no GPU
+verdict. Measurement-hygiene notes: an early single-round comparison is
+superseded by this A/B; a mid-session PID mixup (a lingering `bash -c`
+launcher wrapper measured at 0j) was caught by checking `comm` and redone;
+cargo-over-9p sometimes reports no-op `Finished` where a rebuild was
+expected -- attested binaries since via `strings`+`ldd`+behavior, and forced
+relinks where it mattered.
 
 
 ## What done looks like

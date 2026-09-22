@@ -60,11 +60,13 @@
 //!
 //! That is a semantic change, not a bug, and it is stated here rather than
 //! fixed here: compositing the cursor back into the capture would be a second
-//! render of the cursor on a path whose whole point is reading one buffer,
-//! and the hardware that could observe it has not yet reported its plane
-//! inventory (see the ticket). `paint_cursors=false` sessions are unaffected
-//! in the other direction -- they already always contained the cursor under
-//! `--tty`, plane or no plane.
+//! render of the cursor on a path whose whole point is reading one buffer.
+//! It is live-observed on virtio-gpu (captures byte-identical across cursor
+//! moves); `paint_cursors=false` stays accepted-and-
+//! ignored throughout: the flag never changes which buffer the cursor is
+//! drawn into, only whether a session whose cursor rides the cursor plane
+//! shows it in captures (it does not) or one whose cursor stays composited
+//! does (it does, exactly as before this step).
 
 use std::error::Error;
 

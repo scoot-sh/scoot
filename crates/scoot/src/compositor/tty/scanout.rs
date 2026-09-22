@@ -278,9 +278,13 @@ impl ScanoutPresenter {
         // one the cursor state -- its pixman renderer, its `CURSOR | WRITE`
         // buffer pool -- would be allocated and then never consulted (Smithay
         // finds no plane to claim and composites the cursor as before), so
-        // `None` keeps the no-cursor-plane construction exactly what it was
-        // before this step: the graceful fallback is structural, not a flag
-        // something has to remember to check per frame.
+        // `None` keeps the no-cursor-plane construction behaving exactly as
+        // the old `None` + `(64, 64)` one did: with `cursor_state` absent,
+        // `try_assign_cursor_plane` returns before ever reading the stored
+        // `cursor_size` (traced at the pinned rev), so the device's real size
+        // sitting in that field is behaviorally inert -- the graceful
+        // fallback is structural, not a flag something has to remember to
+        // check per frame.
         let cursor_gbm = if planes.cursor.is_empty() {
             None
         } else {
@@ -585,7 +589,18 @@ impl ScanoutPresenter {
                 // own, so the count is re-read from the fresh plane set. The
                 // cursor *size* is a property of the device rather than the
                 // CRTC and rides along unchanged in `self.cursor_size`.
-                self.cursor_planes = planes.cursor.len();
+                let cursor_planes = planes.cursor.len();
+                if cursor_planes != self.cursor_planes {
+                    // info!, same bar as the startup line: whether the cursor
+                    // rides its own plane decides what a capture sees, so a
+                    // CRTC switch changing the answer must say so.
+                    tracing::info!(
+                        from = self.cursor_planes,
+                        to = cursor_planes,
+                        "drm: scanout cursor planes changed on the new crtc"
+                    );
+                    self.cursor_planes = cursor_planes;
+                }
                 // The old compositor's swapchain drops with it, so every
                 // dma-buf the render side exported from it is stale.
                 self.slots_dropped = true;
@@ -614,9 +629,10 @@ impl ScanoutPresenter {
 ///
 /// The cursor list is only as complete as the kernel lets it be: on
 /// paravirtualized drivers the cursor plane is hidden until the session sets
-/// `CURSOR_PLANE_HOTSPOT`, which `open_device` does right after building the
-/// `DrmDevice` (see its comment) -- before this surface exists, so the
-/// snapshot here already includes it.
+/// `CURSOR_PLANE_HOTSPOT`, which `open_device` does on the device fd before
+/// `DrmDevice::new` (see its comment -- the position matters, since
+/// `AtomicDrmDevice::new` snapshots the plane list once at construction) --
+/// so the snapshot here already includes it.
 fn surface_planes(surface: &DrmSurface) -> Planes {
     select_planes(surface.planes(), surface.plane())
 }

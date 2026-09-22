@@ -704,11 +704,6 @@ fn open_device(
     // resolved backlog entry in
     // `docs/backlog/resolved/drm-master-unprivileged-resolved.md`.
     let drm_fd = DrmDeviceFd::new(DeviceFd::from(fd));
-    let (mut drm, notifier) = DrmDevice::new(drm_fd.clone(), true).map_err(|error| {
-        gpu::Rejection::Unusable(format!(
-            "could not be initialized as a DRM device ({error})"
-        ))
-    })?;
     // Ask the kernel to stop hiding paravirtualized cursor planes from this
     // client (`CURSOR_PLANE_HOTSPOT`). Since kernel 6.x the DRM core hides a
     // paravirt cursor plane (virtio-gpu, vmwgfx) from any client without this
@@ -718,22 +713,44 @@ fn open_device(
     // inventory never contains the cursor plane even where one exists, and
     // the scanout tier silently keeps compositing the cursor. Measured on the
     // dev VM: plane 34 is present per `drm_info` yet absent from
-    // `surface.planes()` until this call, after which it enumerates. The
-    // promise the cap makes -- treating the plane like a mouse cursor with a
-    // correctly-managed hotspot -- is one this backend already keeps: cursor
-    // elements arrive hotspot-subtracted (`cursor::element_location`), and
-    // Smithay never writes `HOTSPOT_X/Y`, so they stay zero and the image's
-    // top-left lands where the element says. A kernel without the cap answers
-    // `EINVAL` and has no hiding to lift, so that is debug-logged rather
-    // than warned: the cursor simply stays composited, today's behavior.
-    if let Err(error) =
-        DrmControl::set_client_capability(&drm, ClientCapability::CursorPlaneHotspot, true)
-    {
-        tracing::debug!(
-            %error,
-            "drm: no cursor-plane hotspot capability; paravirtualized cursor planes, if any, stay hidden"
-        );
+    // `surface.planes()` until this call, after which it enumerates.
+    //
+    // This sits *before* `DrmDevice::new`, not after, and the position is
+    // load-bearing rather than tidy: `AtomicDrmDevice::new` snapshots
+    // `plane_handles()` into its property mapping exactly once, at
+    // construction (`device/atomic.rs`). A cursor plane revealed only later
+    // (via `surface.planes()`, which re-queries fresh) makes every commit
+    // fail with `UnknownPlane` -- a black screen, since the primary never
+    // flips either. And `ATOMIC` is set first because the kernel refuses
+    // `CURSOR_PLANE_HOTSPOT` until `ATOMIC` is set (measured: `EINVAL`
+    // otherwise); re-setting both inside `DrmDevice::new` is idempotent, so
+    // setting them early cannot disturb Smithay's own cap setup.
+    //
+    // The promise the cap makes -- treating the plane like a mouse cursor
+    // with a correctly-managed hotspot -- is one this backend already keeps:
+    // cursor elements arrive hotspot-subtracted
+    // (`cursor::element_location`), and Smithay never writes `HOTSPOT_X/Y`,
+    // so they stay zero and the image's top-left lands where the element
+    // says. A kernel without the cap answers `EINVAL` and has no hiding to
+    // lift, so that is debug-logged rather than warned: the cursor simply
+    // stays composited, today's behavior.
+    for cap in [
+        ClientCapability::Atomic,
+        ClientCapability::CursorPlaneHotspot,
+    ] {
+        if let Err(error) = DrmControl::set_client_capability(&drm_fd, cap, true) {
+            tracing::debug!(
+                ?cap,
+                %error,
+                "drm: could not set client capability; paravirtualized cursor planes, if any, stay hidden"
+            );
+        }
     }
+    let (mut drm, notifier) = DrmDevice::new(drm_fd.clone(), true).map_err(|error| {
+        gpu::Rejection::Unusable(format!(
+            "could not be initialized as a DRM device ({error})"
+        ))
+    })?;
 
     let surface = create_surface(&mut drm, connector, mode).ok_or_else(|| {
         gpu::Rejection::Unusable("has no crtc usable with the chosen connector".to_owned())

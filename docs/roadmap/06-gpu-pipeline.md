@@ -639,9 +639,10 @@ planes are still untouched -- but the cursor step has landed: step 1 of
 fallback, `ALLOW_CURSOR_PLANE_SCANOUT` only, captures documented as
 primary-plane reads) is implemented, including the `CURSOR_PLANE_HOTSPOT`
 cap without which paravirt kernels hide the plane entirely. Live on
-virtio-gpu it enumerates (`cursor_planes=1`) but the kernel refuses the
-atomic TEST, so there it attempts per frame and composites per frame --
-active scanout still awaits a real GPU; the `Modifier::Invalid` widening still
+virtio-gpu it enumerates (`cursor_planes=1`) and, once the cap placement was
+corrected pre-`DrmDevice::new` (post-placement caused `UnknownPlane` black
+screens -- see the ticket), scans out with pointer tracking; the
+`Modifier::Invalid` widening still
 has not met a driver that reports `Invalid`-only.
 
 ## Stage 4: the dmabuf advertisement follows the renderer
