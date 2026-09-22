@@ -18,11 +18,17 @@
 //!   keeps the running widths, which is what makes that panic unreachable
 //!   rather than merely avoided.)
 //! - `[appearance]` ring width and colors, background, `corner_radius`,
-//!   `prefer_no_csd`: applied -- every reader takes them live from
-//!   `State::appearance` (the render path, `XdgDecorationHandler`). The
-//!   cursor fields (`cursor_size`, `cursor_color`, `cursor_theme`) are
-//!   refused: `Cursor::new` consumes them once at startup into a bitmap and
-//!   a loaded theme, so writing them here would change nothing.
+//!   `prefer_no_csd`, and the cursor fields (`cursor_size`, `cursor_color`,
+//!   `cursor_theme`): applied -- every reader takes the ring/background
+//!   values live from `State::appearance` (the render path,
+//!   `XdgDecorationHandler`), and the cursor ones rebuild `Cursor` in place
+//!   (`Cursor::rebuild`: new fallback bitmaps, the theme reloaded, the
+//!   current shape re-resolved) with `State::appearance` written alongside
+//!   so the next reload diffs against what this one did. A render is
+//!   requested; the arrangement is untouched (cursor pixels are not
+//!   placement), so no `apply()` runs.
+//!   `XCURSOR_THEME`/`XCURSOR_SIZE` for future children follow from the same
+//!   rebuild -- see `State::spawn`, which exports the live theme per child.
 //! - `[binds]`: rebuilt from defaults plus the file (see
 //!   [`keybindings_for`](super::config::keybindings_for)), with the `--tty`
 //!   `Ctrl+Alt+F1..F12` recovery bindings layered on last when this session
@@ -48,7 +54,8 @@
 //! A reload applies under session lock, deliberately. Nothing in the applied
 //! set can disclose locked content: appearance changes touch nothing the
 //! locked frame draws (the render path draws
-//! the lock surface and nothing else while locked), gap and binds are
+//! the lock surface and nothing else while locked -- the reloaded cursor
+//! included, which is not drawn there at all), gap and binds are
 //! input-side, and binds cannot fire actions while locked anyway
 //! (`input::key` forwards them to the lock client). Refusing under lock
 //! would strand an agent that edits the file mid-lock with an error for a
@@ -124,11 +131,51 @@ impl State {
 
     /// Diffs a validated `fresh` load against the running session and swaps
     /// in what applies. Pure comparison first, mutation after -- and the
-    /// only mutation of live layout/appearance/binds state on this path, so
-    /// a failure above (which returns before this runs) cannot half-apply.
+    /// only mutation of live layout/appearance/cursor/binds state on this
+    /// path, so a failure above (which returns before this runs) cannot
+    /// half-apply.
+    ///
+    /// One applier per field family, in dependency order (layout before
+    /// appearance: the ring re-clamp reads the applied gap). Each compares
+    /// against the live value -- or, where there is no live value to read
+    /// (the device already driven, the entries already run), against the
+    /// `startup_*` snapshot `run` wrote once and nothing ever advances --
+    /// and writes `State::appearance`/cursor/world/binds alongside every
+    /// report entry, so a second reload diffs against what the first applied
+    /// and re-reports nothing.
     fn apply_reload(&mut self, fresh: &LoadedConfig) -> Report {
         let mut report = Report::default();
+        self.apply_layout_reload(fresh, &mut report);
+        self.apply_appearance_reload(fresh, &mut report);
+        self.apply_startup_only_reload(fresh, &mut report);
+        self.apply_binds_reload(fresh, &mut report);
 
+        // Recompute the arrangement and request a render when anything
+        // visible moved. A binds-only reload skips it: no placement changed,
+        // so there is nothing to configure and nothing dirty. A cursor-only
+        // reload redraws without re-arranging: cursor pixels are not
+        // placement, so `apply()` would reconfigure every window for nothing.
+        if report.applied.iter().any(|name| {
+            name == field::GAP
+                || name == field::RING_WIDTH
+                || name == field::RING_ACTIVE
+                || name == field::RING_INACTIVE
+                || name == field::BACKGROUND
+                || name == field::CORNER_RADIUS
+        }) {
+            self.apply();
+        } else if report.applied.iter().any(|name| {
+            name == field::CURSOR_SIZE || name == field::CURSOR_COLOR || name == field::CURSOR_THEME
+        }) {
+            self.request_render();
+        }
+        report
+    }
+
+    /// `[layout]`: `gap` applies through `World::set_config` (which clamps
+    /// like `new`); the width fields refuse, structurally (see the module
+    /// doc).
+    fn apply_layout_reload(&mut self, fresh: &LoadedConfig, report: &mut Report) {
         if fresh.config.gap != self.world.config().gap {
             let mut config = self.world.config().clone();
             config.gap = fresh.config.gap;
@@ -147,7 +194,14 @@ impl State {
                 "startup-only: new columns take it once, at creation",
             ));
         }
+    }
 
+    /// `[appearance]`: the ring/background/corner/`prefer_no_csd` fields
+    /// write `State::appearance` live; the cursor fields additionally
+    /// rebuild `Cursor` in place. Compared against the pre-mutation clone,
+    /// so every field diffs against the running session even when an
+    /// earlier one in this same reload already wrote.
+    fn apply_appearance_reload(&mut self, fresh: &LoadedConfig, report: &mut Report) {
         let appearance = &fresh.appearance;
         let live = self.appearance.clone();
         let mut appearance_changed = false;
@@ -182,33 +236,58 @@ impl State {
             // No re-render needed on its own: this only answers future
             // `zxdg_toplevel_decoration_v1` requests, it repaints nothing.
         }
-        if appearance.cursor_size != live.cursor_size {
-            report.refused.push(refused(
-                field::CURSOR_SIZE,
-                "startup-only: the fallback bitmap is built once, at startup",
-            ));
-        }
-        if appearance.cursor_color != live.cursor_color {
-            report.refused.push(refused(
-                field::CURSOR_COLOR,
-                "startup-only: the fallback bitmap is built once, at startup",
-            ));
-        }
-        if appearance.cursor_theme != live.cursor_theme {
-            report.refused.push(refused(
-                field::CURSOR_THEME,
-                "startup-only: the theme is loaded once, at startup",
-            ));
+        // The cursor triple: each field reports under its own name, but one
+        // rebuild serves all three -- bitmaps, theme and re-resolution are
+        // one atomic swap, never a half-rebuilt cursor. `fresh` is already
+        // load-clamped (including `cursor_size`), and what is stored here is
+        // exactly what was compared, so the next reload agrees silently.
+        // `Theme::load` never fails (an unresolvable name is an empty theme
+        // drawn as the fallback shapes), so there is no failure half to
+        // guard: the writes below cannot partially happen.
+        let cursor_size = appearance.cursor_size != live.cursor_size;
+        let cursor_color = appearance.cursor_color != live.cursor_color;
+        let cursor_theme = appearance.cursor_theme != live.cursor_theme;
+        if cursor_size || cursor_color || cursor_theme {
+            self.appearance.cursor_size = appearance.cursor_size;
+            self.appearance.cursor_color = appearance.cursor_color;
+            self.appearance
+                .cursor_theme
+                .clone_from(&appearance.cursor_theme);
+            self.cursor.rebuild(
+                appearance.cursor_size,
+                appearance.cursor_color,
+                appearance.cursor_theme.as_deref(),
+            );
+            if cursor_size {
+                report.applied.push(field::CURSOR_SIZE.to_owned());
+            }
+            if cursor_color {
+                report.applied.push(field::CURSOR_COLOR.to_owned());
+            }
+            if cursor_theme {
+                report.applied.push(field::CURSOR_THEME.to_owned());
+            }
+            appearance_changed = true;
         }
         // `Appearance::clamped` bounds the ring against half the gap at
         // load, and the gap may just have moved: re-clamp the applied ring
         // against the applied gap rather than trusting the file's
         // arithmetic. `clamped` warns on its own when it changes anything.
+        // (The cursor size needs no second clamp here: `rebuild` applies
+        // the same bound at the allocation, and the stored value is the
+        // load-clamped one both sides agree on.)
         if appearance_changed {
             let gap = self.world.config().gap;
             self.appearance = self.appearance.clone().clamped(gap);
         }
+    }
 
+    /// The fields with no live state to compare against: `[output] scale`,
+    /// `[tty] gpu`, `[renderer] backend`, `[autostart] commands`. Each diffs
+    /// against the `startup_*` snapshot (or the fixed live value, where the
+    /// session carries one) and refuses when it differs -- see the module
+    /// doc for why none of these applies live.
+    fn apply_startup_only_reload(&self, fresh: &LoadedConfig, report: &mut Report) {
         if fresh.scale != self.output_scale {
             report.refused.push(refused(
                 field::SCALE,
@@ -233,26 +312,17 @@ impl State {
                 "startup-only: entries run once, at session start",
             ));
         }
+    }
 
+    /// `[binds]`: rebuilt from defaults plus the file (see
+    /// [`keybindings_for`](super::config::keybindings_for)), swapped in
+    /// whole. A key held across the swap neither wedges nor drops -- see
+    /// the module doc.
+    fn apply_binds_reload(&mut self, fresh: &LoadedConfig, report: &mut Report) {
         if !fresh.keybindings.same_bindings_as(&self.keybindings) {
             self.keybindings = fresh.keybindings.clone();
             report.applied.push(field::BINDS.to_owned());
         }
-
-        // Recompute the arrangement and request a render when anything
-        // visible moved. A binds-only reload skips it: no placement changed,
-        // so there is nothing to configure and nothing dirty.
-        if report.applied.iter().any(|name| {
-            name == field::GAP
-                || name == field::RING_WIDTH
-                || name == field::RING_ACTIVE
-                || name == field::RING_INACTIVE
-                || name == field::BACKGROUND
-                || name == field::CORNER_RADIUS
-        }) {
-            self.apply();
-        }
-        report
     }
 }
 

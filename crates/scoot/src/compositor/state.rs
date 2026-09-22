@@ -279,16 +279,16 @@ pub struct State {
     /// `None` under `--headless`/`--nested`.
     pub tty: Option<Tty>,
 
-    /// The ring/background palette, the fallback cursor's size/color and the
-    /// `prefer_no_csd` policy, resolved from `[appearance]` (or its defaults)
-    /// once at startup -- see `config.rs` and `decorations.rs`'s module docs.
+    /// The ring/background palette, the fallback cursor's size/color/theme
+    /// and the `prefer_no_csd` policy, resolved from `[appearance]` (or its
+    /// defaults) once at startup -- see `config.rs` and `decorations.rs`'s
+    /// module docs.
     ///
     /// Read live wherever it is used -- the render path for the ring and
     /// background, `handlers.rs`'s `XdgDecorationHandler` for
-    /// `prefer_no_csd` -- with one exception: the two cursor fields, which
-    /// `Cursor::new` consumes once below to build a bitmap, so a later write
-    /// to those two here would change nothing. Nothing writes to this field
-    /// at all today.
+    /// `prefer_no_csd`, `Cursor` (rebuilt in place) for the cursor fields --
+    /// and written only by a config reload (see `reload.rs`), which is what
+    /// keeps a second reload diffing against the first one's results.
     pub appearance: Appearance,
     /// Per-window persistent ring buffers -- see `decorations.rs`'s module
     /// doc for why these live here rather than being rebuilt every frame.
@@ -1043,6 +1043,16 @@ impl State {
         child.env(session_env::CURRENT_DESKTOP, session_env.current_desktop);
         child.env(session_env::SESSION_TYPE, session_env.session_type);
         child.env(session_env::SESSION_DESKTOP, session_env.session_desktop);
+        // The cursor theme this reload cycle resolved, read live rather than
+        // inherited: a `cursor_theme`/`cursor_size` reload rebuilds `Cursor`
+        // after `run`'s process-wide export ran, and every compositor child
+        // is spawned here, so this is what keeps a future child drawing the
+        // same theme the compositor draws. Set explicitly (like
+        // `WAYLAND_DISPLAY` above) rather than by mutating the process
+        // environment on the loop thread, which no other thread can be
+        // proven not to read.
+        child.env("XCURSOR_THEME", self.cursor.theme().name());
+        child.env("XCURSOR_SIZE", self.cursor.theme().size().to_string());
         // Removed rather than overwritten: the compositor itself may have been
         // started with one (a launcher client, a nested session), and that
         // token is a receipt for someone else's user action -- handing it to

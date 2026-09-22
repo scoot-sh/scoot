@@ -180,9 +180,6 @@ fn reload_refuses_startup_only_fields_and_moves_nothing_else() {
         [tty]
         gpu = "/dev/dri/card9"
 
-        [appearance]
-        cursor_size = 24
-
         [autostart]
         commands = ["spawn waybar"]
 
@@ -203,7 +200,6 @@ fn reload_refuses_startup_only_fields_and_moves_nothing_else() {
         field::DEFAULT_COLUMN_WIDTH,
         field::SCALE,
         field::GPU,
-        field::CURSOR_SIZE,
         field::AUTOSTART,
     ] {
         assert!(
@@ -220,6 +216,127 @@ fn reload_refuses_startup_only_fields_and_moves_nothing_else() {
     assert!(
         !fixture.state.needs_render,
         "a refused-only reload must not reconfigure or redraw"
+    );
+}
+
+#[test]
+fn reload_rebuilds_the_cursor_and_reports_each_field() {
+    // The Phase 1 pin: all three cursor fields move from the file into the
+    // live session, each under its own applied name, with the rendered
+    // cursor rebuilt behind them -- and a render requested without a
+    // re-arrange (no placement changed, so `apply()` must not run its
+    // configure round-trip; `needs_render` witnesses the request).
+    let mut fixture = Fixture::with_config("");
+    fixture.rewrite(
+        r##"
+        [appearance]
+        cursor_size = 24
+        cursor_color = "#ff0000"
+        cursor_theme = "Adwaita"
+        "##,
+    );
+    let response = fixture.reload();
+    assert_eq!(
+        applied(&response),
+        &[
+            field::CURSOR_SIZE.to_owned(),
+            field::CURSOR_COLOR.to_owned(),
+            field::CURSOR_THEME.to_owned(),
+        ],
+        "each changed cursor field reports applied: {response:?}"
+    );
+    assert!(
+        refused(&response).is_empty(),
+        "nothing here should refuse: {response:?}"
+    );
+    assert_eq!(fixture.state.appearance.cursor_size, 24);
+    assert_eq!(
+        fixture.state.appearance.cursor_color,
+        Color::parse("#ff0000").expect("a parsable color")
+    );
+    assert_eq!(
+        fixture.state.appearance.cursor_theme.as_deref(),
+        Some("Adwaita")
+    );
+    assert_eq!(
+        fixture.state.cursor.theme().name(),
+        "Adwaita",
+        "the rebuilt cursor resolves the reloaded theme name"
+    );
+    assert_eq!(
+        fixture.state.cursor.theme().size(),
+        24,
+        "the rebuilt cursor picks theme images at the reloaded size"
+    );
+    assert!(
+        fixture.state.needs_render,
+        "a cursor change reloaded without requesting a render"
+    );
+}
+
+#[test]
+fn a_second_reload_after_a_cursor_change_reports_nothing() {
+    // The snapshot rule for the cursor triple (Phase 0): the first reload
+    // writes `State::appearance` alongside the rebuild, so the second diffs
+    // against what the first applied rather than re-reporting it.
+    let mut fixture = Fixture::with_config(
+        r##"
+        [appearance]
+        cursor_size = 24
+        cursor_color = "#ff0000"
+        cursor_theme = "Adwaita"
+        "##,
+    );
+    let first = fixture.reload();
+    assert!(
+        applied(&first).contains(&field::CURSOR_SIZE.to_owned()),
+        "the first reload should apply the cursor: {first:?}"
+    );
+    // Quiet the render the first reload requested, so `needs_render` below
+    // witnesses the second reload's own behavior and nothing else.
+    fixture.state.needs_render = false;
+    let second = fixture.reload();
+    assert!(
+        applied(&second).is_empty() && refused(&second).is_empty(),
+        "the second reload changed nothing it was asked to -- and says so: {second:?}"
+    );
+    assert!(
+        !fixture.state.needs_render,
+        "an idempotent second reload must not request a render"
+    );
+}
+
+#[test]
+fn reload_with_an_unresolvable_cursor_theme_still_applies() {
+    // `Theme::load` never fails: a name that matches nothing installed is
+    // an empty theme drawn as the fallback shapes, not an error and not a
+    // half-applied session. The config still differs, so it still reports
+    // applied -- and the next reload agrees silently.
+    let mut fixture = Fixture::with_config("");
+    fixture.rewrite(
+        r#"
+        [appearance]
+        cursor_theme = "a-theme-that-exists-nowhere"
+        "#,
+    );
+    let response = fixture.reload();
+    assert_eq!(
+        applied(&response),
+        &[field::CURSOR_THEME.to_owned()],
+        "an unresolvable theme still applies: {response:?}"
+    );
+    assert!(
+        !fixture.state.cursor.theme().is_loaded(),
+        "nothing installed under that name, so no theme should be loaded"
+    );
+    assert_eq!(
+        fixture.state.appearance.cursor_theme.as_deref(),
+        Some("a-theme-that-exists-nowhere")
+    );
+    let second = fixture.reload();
+    assert!(
+        applied(&second).is_empty() && refused(&second).is_empty(),
+        "the missing theme must not re-report on the next reload: {second:?}"
     );
 }
 

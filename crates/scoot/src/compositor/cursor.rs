@@ -22,8 +22,8 @@
 //!   double-headed arrow for a resize edge, a crosshair, and so on, with the
 //!   arrow below as the answer for every name none of those fits. Their size
 //!   and fill color are configurable (`[appearance]`'s
-//!   `cursor_size`/`cursor_color`, resolved once at startup -- see
-//!   [`Cursor::new`]).
+//!   `cursor_size`/`cursor_color`, built at startup and rebuilt by
+//!   [`Cursor::rebuild`] on a config reload -- see [`Cursor::new`]).
 //! - [`CursorImageStatus::Hidden`] -- nothing is drawn.
 //!
 //! A client reaches the `Named` path either through `wl_pointer.set_cursor`
@@ -129,16 +129,26 @@ fn generate_bitmap(size: i32, fill: [u8; 4], outline: [u8; 4]) -> Vec<u8> {
     pixels
 }
 
+/// The fill/outline byte pair one configured cursor color draws as: the
+/// fill is the color itself, the outline always black at the fill's own
+/// alpha (see [`Cursor::new`]). One function so `new` and `rebuild` cannot
+/// disagree about it.
+fn outline_pair(color: Color) -> ([u8; 4], [u8; 4]) {
+    let outline = Color::new(0.0, 0.0, 0.0, color.a);
+    (color.to_argb8888(), outline.to_argb8888())
+}
+
 /// The cursor's current image request and the persistent render buffers
 /// behind this compositor's own shapes. Those are built once (see
-/// [`Cursor::new`]) and never rebuilt -- same stable-`Id` reasoning as
-/// `decorations.rs`'s persistent per-window buffers, so a static cursor
-/// doesn't read as "new content" to the damage tracker on every frame it
-/// happens to still be visible, and a client flipping between `default` and
-/// `text` as the pointer crosses a text field re-uses two buffers rather than
-/// allocating on the way past. A client-supplied cursor surface needs no
-/// equivalent here: its texture is owned and cached by Smithay's own
-/// per-surface renderer state, keyed off the client's commits.
+/// [`Cursor::new`]) and rebuilt only by [`Cursor::rebuild`] on a config
+/// reload -- same stable-`Id` reasoning as `decorations.rs`'s persistent
+/// per-window buffers, so a static cursor doesn't read as "new content" to
+/// the damage tracker on every frame it happens to still be visible, and a
+/// client flipping between `default` and `text` as the pointer crosses a
+/// text field re-uses two buffers rather than allocating on the way past. A
+/// client-supplied cursor surface needs no equivalent here: its texture is
+/// owned and cached by Smithay's own per-surface renderer state, keyed off
+/// the client's commits.
 pub struct Cursor {
     /// One bitmap per [`Shape`], indexed by [`Shape::index`].
     ///
@@ -147,8 +157,8 @@ pub struct Cursor {
     /// tracker at the moment the pointer is moving fastest -- and because
     /// the whole set is small: `Shape::COUNT` bitmaps of `size * size * 4`
     /// bytes, i.e. ~10 KiB at the default 16px cursor and ~2.6 MiB at the
-    /// largest size `Appearance::MAX_CURSOR_SIZE` allows, once, for the
-    /// process's lifetime.
+    /// largest size `Appearance::MAX_CURSOR_SIZE` allows, per build rather
+    /// than per frame (`rebuild` replaces the whole set at once).
     shapes: [MemoryRenderBuffer; Shape::COUNT],
     /// The clamped edge length every bitmap in [`Self::shapes`] was built at,
     /// kept so [`Shape::hotspot`] can be asked about them. Not a hotspot
@@ -168,12 +178,14 @@ pub struct Cursor {
     ///
     /// The invariant that makes this safe to read in [`Cursor::element`]:
     /// **every write to `status` refreshes this field in the same
-    /// statement.** There are exactly two write sites -- the struct literal
-    /// in [`Cursor::new`] (immediately followed by a refresh) and
-    /// [`Cursor::set_status`] (which refreshes inline) -- and adding a third
-    /// without refreshing this would leave the previous shape's pixels drawn
-    /// under the new shape's name -- the single most likely way this module
-    /// could silently draw the wrong thing.
+    /// statement.** There are exactly three write sites -- the struct literal
+    /// in [`Cursor::new`] (immediately followed by a refresh),
+    /// [`Cursor::set_status`] (which refreshes inline), and
+    /// [`Cursor::rebuild`] (which reloads the whole theme and then
+    /// refreshes) -- and adding a fourth without refreshing this would leave
+    /// the previous shape's pixels drawn under the new shape's name -- the
+    /// single most likely way this module could silently draw the wrong
+    /// thing.
     ///
     /// `None` means "no theme image for this status": a hidden cursor, a
     /// client surface, or a named shape the theme does not carry. All three
@@ -183,12 +195,13 @@ pub struct Cursor {
 
 impl Cursor {
     /// Builds the fallback bitmap from the resolved `[appearance]` values and
-    /// keeps it for the process's lifetime.
+    /// keeps it for the process's lifetime, or until [`Cursor::rebuild`]
+    /// replaces it on a config reload.
     ///
     /// Called once, from `State::new`, with `appearance.cursor_size` and
-    /// `appearance.cursor_color`. There is deliberately no way to rebuild it
-    /// afterwards: nothing in this project reloads config after startup, and
-    /// inventing a path for it here would be an abstraction with no caller.
+    /// `appearance.cursor_color`. [`Cursor::rebuild`] is the only other path
+    /// that builds these buffers; nothing else may, which is what keeps the
+    /// stable-`Id` reasoning on [`Self::shapes`] honest (see that field).
     ///
     /// `size` is put through [`Appearance::clamp_cursor_size`] again rather
     /// than trusted. `Appearance::clamped` is the load-time gate (and the
@@ -209,30 +222,10 @@ impl Cursor {
     /// see-through middle.
     pub fn new(size: i32, color: Color, theme_name: Option<&str>) -> Self {
         let size = Appearance::clamp_cursor_size(size);
-        let outline = Color::new(0.0, 0.0, 0.0, color.a);
-        let (fill, outline) = (color.to_argb8888(), outline.to_argb8888());
+        let (fill, outline) = outline_pair(color);
         let theme = Theme::load(theme_name, size);
         let mut cursor = Self {
-            // `Shape::ALL` in its own order, indexed back by `Shape::index`
-            // -- see that constant's doc for why the order lives there and
-            // not here. `Shape::Arrow` is the one shape `shapes::generate`
-            // does not draw: it is `generate_bitmap` above, kept exactly as
-            // it has always been (see `shapes`'s module doc on the two
-            // outline styles), so it is routed here rather than there.
-            shapes: Shape::ALL.map(|shape| {
-                let pixels = match shape {
-                    Shape::Arrow => generate_bitmap(size, fill, outline),
-                    other => shapes::generate(other, size, fill, outline),
-                };
-                MemoryRenderBuffer::from_slice(
-                    &pixels,
-                    Fourcc::Argb8888,
-                    (size, size),
-                    1,
-                    Transform::Normal,
-                    None,
-                )
-            }),
+            shapes: Self::build_shapes(size, fill, outline),
             size,
             status: CursorImageStatus::default_named(),
             theme,
@@ -244,6 +237,63 @@ impl Cursor {
         // one such write.
         cursor.refresh_themed();
         cursor
+    }
+
+    /// Rebuilds the fallback bitmaps and re-resolves the theme from fresh
+    /// `[appearance]` values, on a config reload (`reload.rs`).
+    ///
+    /// The `status` is untouched -- whatever shape the pointer shows keeps
+    /// showing, redrawn from the new pixels -- but the theme is reloaded
+    /// whole (dropping the old image cache, which belonged to the old theme
+    /// at the old size) and [`Self::themed`] is re-resolved for that same
+    /// status, which is what keeps the field's invariant across the third
+    /// write site. `size` is clamped exactly as in [`Cursor::new`].
+    ///
+    /// Replacing the buffers (rather than reusing their `Id`s) is what makes
+    /// the new pixels actually appear: to the damage tracker these read as
+    /// new content for one frame, which is true -- the pixels did change.
+    /// `Theme::load` never fails (an unresolvable name is an empty theme,
+    /// drawn as the fallback shapes), so this cannot fail either, and
+    /// running it synchronously on the event loop is fine -- a reload is a
+    /// cold path, not a frame.
+    pub fn rebuild(&mut self, size: i32, color: Color, theme_name: Option<&str>) {
+        let size = Appearance::clamp_cursor_size(size);
+        let (fill, outline) = outline_pair(color);
+        self.shapes = Self::build_shapes(size, fill, outline);
+        self.size = size;
+        self.theme = Theme::load(theme_name, size);
+        self.refresh_themed();
+    }
+
+    /// The `Shape::COUNT` fallback bitmaps for one size/color pair, in
+    /// [`Shape::index`] order. `Shape::Arrow` is `generate_bitmap` above,
+    /// kept exactly as it has always been (see `shapes`'s module doc on the
+    /// two outline styles); every other shape is `shapes::generate`.
+    ///
+    /// Shared by [`Cursor::new`] and [`Cursor::rebuild`] so the two cannot
+    /// disagree about what a size/color pair draws.
+    fn build_shapes(
+        size: i32,
+        fill: [u8; 4],
+        outline: [u8; 4],
+    ) -> [MemoryRenderBuffer; Shape::COUNT] {
+        // `Shape::ALL` in its own order, indexed back by `Shape::index`
+        // -- see that constant's doc for why the order lives there and
+        // not here.
+        Shape::ALL.map(|shape| {
+            let pixels = match shape {
+                Shape::Arrow => generate_bitmap(size, fill, outline),
+                other => shapes::generate(other, size, fill, outline),
+            };
+            MemoryRenderBuffer::from_slice(
+                &pixels,
+                Fourcc::Argb8888,
+                (size, size),
+                1,
+                Transform::Normal,
+                None,
+            )
+        })
     }
 
     /// The machine's own cursor theme, as resolved at startup -- empty

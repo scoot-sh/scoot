@@ -233,7 +233,8 @@ other path (`> wherever`). (On a machine with no
 
 **Most settings are read once at startup; some can be reloaded live.**
 `scootctl reload` (see [Reloading the config](#reloading-the-config))
-re-reads this same file and re-applies the gap, the appearance and the
+re-reads this same file and re-applies the gap, the appearance (including
+the cursor size, color and theme) and the
 keybindings. Everything else is startup-only and a reload refuses it with a
 message rather than silently ignoring it.
 
@@ -291,13 +292,15 @@ nothing — only the compositor installs the handler.
 
 **Applied:** `[layout] gap` (the arrangement is recomputed and the screen
 redrawn), the `[appearance]` focus-ring width and colors, the background
-color, `corner_radius`, and `prefer_no_csd`, and the whole `[binds]` table (rebuilt from the
+color, `corner_radius`, `prefer_no_csd`, and the cursor `cursor_size`,
+`cursor_color` and `cursor_theme` (the fallback bitmaps are rebuilt, the
+theme reloaded, and the screen redrawn without re-arranging -- cursor
+pixels are not placement), and the whole `[binds]` table (rebuilt from the
 defaults plus the file, so a reload both adds and overrides binds).
 
 **Refused, explicitly:** `[layout] column_widths` and
 `default_column_width` (live columns hold presets into that list),
-`[appearance] cursor_size`, `cursor_color` and `cursor_theme` (the fallback
-bitmap and the loaded theme are built once at startup), `[output] scale`
+`[output] scale`
 (clients were told it at bind time), `[tty] gpu` (the session already
 drives its device), `[renderer] backend` (the live renderer holds client
 textures), and `[autostart] commands` (entries run once, at session start —
@@ -356,9 +359,9 @@ cursor.
 | `focus_ring_inactive_color` | `"#rrggbb"` / `"#rrggbbaa"` | `#595961` (muted gray) | Ring color around every other window. Re-applied live. |
 | `background_color` | `"#rrggbb"` / `"#rrggbbaa"` | `#141419` (near-black, pixel-sampled under pixman) | Cleared behind all window content — there's no separate background render element, this is the frame clear color. Re-applied live. |
 | `corner_radius` | integer (pixels) | `0` | Window corner radius in logical pixels; `0` is square. Rounds the window content (including its subsurfaces) and the focus ring together — a square ring around a rounded window would be worse than none — so whatever is behind a window shows through its corners. A negative value warns and becomes `0`, at startup and on `scootctl reload` (both validate the file through the same path). The effective radius is clamped per window to half its smaller dimension, so an absurd value rounds small windows into stadiums rather than breaking. Popups stay square (whether menus round too is a separate decision). Re-applied live. Costs a little per frame when non-zero (a few dozen extra composite ops per window, plus the opacity loss where corners reveal what is below — measured on the dev VM at ~+9% per frame on a three-window session under pixman, ~+30% under software GLES; the default `0` costs nothing). |
-| `cursor_size` | integer (pixels) | `16` | Both dimensions of the built-in pointer cursor. Clamped into `4..=256`: under `4` the shape is left with at most one interior pixel (none at all below 3), and a pointer that small is indistinguishable from a dead pixel; over `256` it covers a quarter of a 1080p display's height and the bitmap it allocates stops being small. A value outside `i32` altogether (or a float) is a whole-file parse error, not a clamp. Startup-only — a reload refuses changes. |
-| `cursor_color` | `"#rrggbb"` / `"#rrggbbaa"` | `#ffffff` (white) | Fill color of the built-in pointer cursor. Its 1px outline is always black, at this color's own alpha, and isn't separately configurable — the outline exists to keep the shape's edges visible against similarly-colored content. That doesn't help against a *dark* `cursor_color`: with a near-black fill, the outline blends into it and the pointer can be hard to spot against dark window content. An alpha of `00` makes the built-in cursor invisible; that's your call, not a clamped value. Startup-only — a reload refuses changes. |
-| `cursor_theme` | string | unset | Which installed xcursor theme named cursor shapes are drawn from (see [protocols.md](protocols.md#cursor-shapes-wp-cursor-shape-v1)). Unset means follow `$XCURSOR_THEME`, then `default` — i.e. whatever the rest of the desktop uses; an empty string means the same as unset. This only *names* a theme, it never makes scoot ship one, and a name that matches nothing installed is not an error: named shapes then come from scoot's own drawn set. Startup-only — a reload refuses changes. |
+| `cursor_size` | integer (pixels) | `16` | Both dimensions of the built-in pointer cursor. Clamped into `4..=256`: under `4` the shape is left with at most one interior pixel (none at all below 3), and a pointer that small is indistinguishable from a dead pixel; over `256` it covers a quarter of a 1080p display's height and the bitmap it allocates stops being small. A value outside `i32` altogether (or a float) is a whole-file parse error, not a clamp. Re-applied live by `scootctl reload` (the fallback bitmaps are rebuilt; drawn only under `--tty`). |
+| `cursor_color` | `"#rrggbb"` / `"#rrggbbaa"` | `#ffffff` (white) | Fill color of the built-in pointer cursor. Its 1px outline is always black, at this color's own alpha, and isn't separately configurable — the outline exists to keep the shape's edges visible against similarly-colored content. That doesn't help against a *dark* `cursor_color`: with a near-black fill, the outline blends into it and the pointer can be hard to spot against dark window content. An alpha of `00` makes the built-in cursor invisible; that's your call, not a clamped value. Re-applied live by `scootctl reload` (drawn only under `--tty`). |
+| `cursor_theme` | string | unset | Which installed xcursor theme named cursor shapes are drawn from (see [protocols.md](protocols.md#cursor-shapes-wp-cursor-shape-v1)). Unset means follow `$XCURSOR_THEME`, then `default` — i.e. whatever the rest of the desktop uses; an empty string means the same as unset. This only *names* a theme, it never makes scoot ship one, and a name that matches nothing installed is not an error: named shapes then come from scoot's own drawn set. Re-applied live by `scootctl reload` (the theme is reloaded and future children inherit the new `XCURSOR_THEME`/`XCURSOR_SIZE`; drawn only under `--tty`). |
 | `prefer_no_csd` | boolean | `true` | Whether to answer a client's `zxdg_toplevel_decoration_v1` request with `ServerSide`, so a well-behaved client stops drawing its own titlebar (which would otherwise double up with the ring). Re-applied live (answers future requests; repaints nothing). |
 
 `cursor_size` and `cursor_color` apply to scoot's own drawn shapes — the
