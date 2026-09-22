@@ -14,19 +14,23 @@
 
 use std::fs;
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 use scoot_core::{Action, Config, Event, Horizontal, OutputId, WindowId, WindowInfo};
 use scoot_ipc::{Request, Response};
 use smithay::reexports::calloop::EventLoop;
 use smithay::reexports::wayland_server::Display;
 
-use super::{ScaleReload, field, scale_reload};
+use super::{ScaleReload, autostart_delta, field, scale_reload};
 use crate::compositor::config;
 use crate::compositor::decorations::{Appearance, Color};
 use crate::compositor::headless;
 use crate::compositor::keybindings::{Bound, Keybindings, Modifiers};
 use crate::compositor::state::State;
-use crate::compositor::test_support::test_renderer;
+use crate::compositor::test_support::{
+    Harness, assert_marker_never_appears, locker, marker_path, test_renderer, touch_entry,
+    wait_for_marker,
+};
 
 const CANVAS: i32 = 200;
 
@@ -162,7 +166,7 @@ fn reload_applies_gap_appearance_and_binds_and_lists_them() {
 }
 
 #[test]
-fn reload_applies_column_widths_scale_and_refuses_startup_only_fields() {
+fn reload_applies_column_widths_scale_and_refuses_restart_fields() {
     let mut fixture = Fixture::with_config("");
     fixture.rewrite(
         r#"
@@ -181,7 +185,7 @@ fn reload_applies_column_widths_scale_and_refuses_startup_only_fields() {
         gpu = "/dev/dri/card9"
 
         [autostart]
-        commands = ["spawn waybar"]
+        commands = ["quit"]
 
         [binds]
         "super+n" = "close"
@@ -191,6 +195,8 @@ fn reload_applies_column_widths_scale_and_refuses_startup_only_fields() {
     // `gap = 12` is the running default, `backend = "pixman"` is the running
     // renderer: agreeing fields stay silent in both lists. `scale = 2.0`
     // applies live now (Phase 3), alongside the widths and the new bind.
+    // `quit` is the non-spawn autostart refusal (Phase 4 runs only new
+    // spawns, and never a quit); the gpu refusal names restart (Phase 5-6).
     assert_eq!(
         applied(&response),
         &[
@@ -207,6 +213,22 @@ fn reload_applies_column_widths_scale_and_refuses_startup_only_fields() {
             "{name} was not refused: {response:?}"
         );
     }
+    let gpu = refused(&response)
+        .iter()
+        .find(|entry| entry.starts_with(field::GPU))
+        .expect("the gpu refusal");
+    assert!(
+        gpu.contains("takes effect on restart"),
+        "the gpu refusal should name restart: {gpu}"
+    );
+    let autostart = refused(&response)
+        .iter()
+        .find(|entry| entry.starts_with(field::AUTOSTART))
+        .expect("the autostart refusal");
+    assert!(
+        autostart.contains("Quit"),
+        "the non-spawn autostart entry should be refused by name: {autostart}"
+    );
     assert_eq!(fixture.state.world.config().gap, 12);
     assert_eq!(fixture.state.world.config().column_widths, vec![0.25, 0.75]);
     assert_eq!(fixture.state.world.config().default_column_width, 0);
@@ -1025,5 +1047,220 @@ fn keybindings_for_keeps_the_vt_recovery_path_unstrippable() {
         ),
         Some(Bound::Action(Action::CloseFocused)),
         "off --tty the user's bind stands (there is no VT path to keep)"
+    );
+}
+
+// -- Phase 4: autostart spawn-delta ------------------------------------------
+
+fn spawn_action(command: &[&str]) -> Action {
+    Action::Spawn(command.iter().map(|word| (*word).to_owned()).collect())
+}
+
+#[test]
+fn new_spawn_entries_run_once_and_a_second_reload_is_silent() {
+    // The Phase 4 pin: a reload runs exactly the entries the session has
+    // not seen (here: one `touch`), reports them under the field name, and
+    // advances the snapshot -- so the identical next reload runs nothing
+    // and says nothing.
+    let marker = marker_path("delta");
+    let mut fixture = Fixture::with_config("");
+    fixture.rewrite(&format!(
+        "[autostart]\ncommands = [\"{}\"]\n",
+        touch_entry(&marker)
+    ));
+    let response = fixture.reload();
+    assert!(
+        applied(&response).contains(&field::AUTOSTART.to_owned()),
+        "the new spawn entry should apply: {response:?}"
+    );
+    assert!(
+        refused(&response).is_empty(),
+        "nothing here should refuse: {response:?}"
+    );
+    wait_for_marker(&marker);
+    assert_eq!(
+        fixture.state.startup_autostart,
+        vec![spawn_action(&["touch", &marker.to_string_lossy()])],
+        "the reload must advance the snapshot past what it ran"
+    );
+
+    let second = fixture.reload();
+    assert!(
+        applied(&second).is_empty() && refused(&second).is_empty(),
+        "the second reload changed nothing it was asked to -- and says so: {second:?}"
+    );
+    assert_marker_never_appears(&marker);
+}
+
+#[test]
+fn a_reloaded_quit_is_refused_and_applies_nothing() {
+    // The policy's sharp edge, pinned before it lands: `quit` parses as a
+    // legal autostart entry (startup runs it through `act`), but a reload
+    // must never hand it to `act` -- that path ends the session. It is
+    // refused by name, applies nothing, and is decided once: the identical
+    // next reload is silent.
+    let mut fixture = Fixture::with_config("");
+    fixture.rewrite("[autostart]\ncommands = [\"quit\"]\n");
+    let response = fixture.reload();
+    assert!(
+        applied(&response).is_empty(),
+        "a reloaded quit must apply nothing: {response:?}"
+    );
+    assert!(
+        refused(&response)
+            .iter()
+            .any(|entry| entry.starts_with(field::AUTOSTART) && entry.contains("Quit")),
+        "the quit entry should be refused by name: {response:?}"
+    );
+    let second = fixture.reload();
+    assert!(
+        applied(&second).is_empty() && refused(&second).is_empty(),
+        "the refused quit is decided, not re-refused: {second:?}"
+    );
+
+    // ...and the session is still alive to serve: a later spawn entry
+    // applies on the same state a quit reload just passed through.
+    let marker = marker_path("after-quit");
+    fixture.rewrite(&format!(
+        "[autostart]\ncommands = [\"quit\", \"{}\"]\n",
+        touch_entry(&marker)
+    ));
+    let third = fixture.reload();
+    assert!(
+        applied(&third).contains(&field::AUTOSTART.to_owned()),
+        "the session should still serve after a reloaded quit: {third:?}"
+    );
+    wait_for_marker(&marker);
+}
+
+#[test]
+fn device_and_renderer_refusals_name_restart() {
+    // Phases 5-6: the two fields that never go live keep refusing, but the
+    // refusal now names the remedy (a restart) instead of the opaque
+    // "startup-only".
+    let mut fixture = Fixture::with_config("");
+    fixture.rewrite("[renderer]\nbackend = \"gles\"\n\n[tty]\ngpu = \"/dev/dri/card9\"\n");
+    let response = fixture.reload();
+    assert!(applied(&response).is_empty());
+    for name in [field::GPU, field::BACKEND] {
+        let entry = refused(&response)
+            .iter()
+            .find(|entry| entry.starts_with(name))
+            .unwrap_or_else(|| panic!("{name} was not refused: {response:?}"))
+            .to_owned();
+        assert!(
+            entry.contains("takes effect on restart"),
+            "{name} should name restart as the remedy: {entry}"
+        );
+    }
+}
+
+#[test]
+fn autostart_delta_runs_only_unseen_spawns() {
+    // The decision underneath the reply: multiset difference against the
+    // snapshot, split by variant. Seen entries (in any order) stay silent;
+    // unseen spawns run; unseen anything-else refuses.
+    let seen = vec![spawn_action(&["waybar"]), Action::CloseFocused];
+    let delta = autostart_delta(
+        &[
+            spawn_action(&["waybar"]),
+            Action::CloseFocused,
+            spawn_action(&["mako"]),
+            Action::Quit,
+        ],
+        &seen,
+    );
+    assert_eq!(delta.run, vec![spawn_action(&["mako"])]);
+    assert_eq!(delta.refuse, vec![Action::Quit]);
+}
+
+#[test]
+fn autostart_delta_treats_an_edited_entry_as_new() {
+    // Diffing is by value, not by position: editing `mako` into `dunst`
+    // retires the old entry and runs the new one. Documented, not inferred
+    // -- there is no identity subtler than the action itself to key on.
+    let seen = vec![spawn_action(&["mako"])];
+    let delta = autostart_delta(&[spawn_action(&["dunst"])], &seen);
+    assert_eq!(delta.run, vec![spawn_action(&["dunst"])]);
+    assert!(delta.refuse.is_empty());
+}
+
+#[test]
+fn autostart_delta_runs_a_removed_then_readded_entry_again() {
+    // Removal advances the snapshot past the entry (the removal reload
+    // itself runs nothing); re-adding it is new again, so it runs again.
+    // Explicitly the semantics: there is no "ever ran" memory beyond the
+    // last unlocked snapshot.
+    let full = vec![spawn_action(&["waybar"]), spawn_action(&["mako"])];
+
+    let removal = autostart_delta(&[spawn_action(&["waybar"])], &full);
+    assert!(removal.run.is_empty() && removal.refuse.is_empty());
+
+    let readded = autostart_delta(&full, &[spawn_action(&["waybar"])]);
+    assert_eq!(readded.run, vec![spawn_action(&["mako"])]);
+}
+
+#[test]
+fn autostart_delta_runs_duplicate_entries_per_occurrence() {
+    // Two identical entries are two runs at startup, so the delta counts
+    // occurrences, not membership: one seen `touch` plus two fresh ones is
+    // one run, not zero and not two.
+    let seen = vec![spawn_action(&["a"])];
+    let delta = autostart_delta(&[spawn_action(&["a"]), spawn_action(&["a"])], &seen);
+    assert_eq!(delta.run, vec![spawn_action(&["a"])]);
+}
+
+#[test]
+fn reload_under_lock_skips_new_spawns_without_advancing_the_snapshot() {
+    // The lock half of the policy, against a real lock: new spawn entries
+    // neither run (a spawned program at lock time could disclose or
+    // interfere) nor are dropped -- the snapshot stays, so the first
+    // unlocked reload runs them. Deferred, not denied.
+    let mut harness: Harness<(), ()> = Harness::headless(Appearance::default(), CANVAS);
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let path = dir.path().join("config.toml");
+    fs::write(&path, "").expect("a config file");
+    harness.state.config_path = Some(path.clone());
+
+    let client = harness.spawn(locker);
+    harness.wait_for_ack(client);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !harness.state.session_lock.is_locked() {
+        assert!(
+            Instant::now() < deadline,
+            "the lock request never landed; the reload below would pass unlocked"
+        );
+        harness
+            .event_loop
+            .dispatch(Some(Duration::from_millis(5)), &mut harness.state)
+            .expect("a compositor dispatch");
+    }
+
+    let marker = marker_path("locked");
+    fs::write(
+        &path,
+        format!("[autostart]\ncommands = [\"{}\"]\n", touch_entry(&marker)),
+    )
+    .expect("a rewritten config file");
+    let response = harness.state.handle_request(Request::Reload);
+    assert!(
+        applied(&response).is_empty(),
+        "a locked reload must apply nothing: {response:?}"
+    );
+    assert!(
+        refused(&response)
+            .iter()
+            .any(|entry| entry.starts_with(field::AUTOSTART) && entry.contains("locked")),
+        "the skipped spawn should be refused as locked, not silent: {response:?}"
+    );
+    harness.settle();
+    assert_marker_never_appears(&marker);
+    assert!(
+        harness.state.startup_autostart.is_empty(),
+        "a locked reload must not advance the snapshot -- the entry stays pending"
+    );
+    assert!(
+        harness.state.session_lock.is_locked(),
+        "the reload under test must not disturb the lock"
     );
 }

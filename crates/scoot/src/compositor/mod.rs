@@ -123,8 +123,10 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
     // What `Request::Reload` re-reads: the same path startup used (the
     // explicit `--config` when one was given, else the resolved XDG default
     // -- even when no file existed there, so a file created later still
-    // reloads). Plus the startup-only values a reload diffs against; both
-    // come off `loaded` before the autostart drain below moves it.
+    // reloads). Plus the values a reload diffs against: the `[tty] gpu`
+    // snapshot (never advanced), and the `[autostart]` snapshot seeding the
+    // spawn delta (advanced by every unlocked reload; see `reload.rs`).
+    // Both come off `loaded` before the autostart drain below moves it.
     state.config_path = config::startup_path(
         options.config.as_deref(),
         std::env::var_os("XDG_CONFIG_HOME"),

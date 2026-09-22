@@ -50,6 +50,9 @@ use scoot_core::Config;
 use smithay::reexports::calloop::EventLoop;
 use smithay::reexports::wayland_server::{Client, Display};
 use wayland_client::EventQueue;
+use wayland_protocols::ext::session_lock::v1::client::{
+    ext_session_lock_manager_v1, ext_session_lock_v1,
+};
 
 use crate::cli::RendererKind;
 use crate::compositor::State;
@@ -559,6 +562,151 @@ pub(crate) fn wait_for<T, C>(
             return Err(format!("the compositor never sent {what}"));
         }
         thread::sleep(Duration::from_millis(1));
+    }
+}
+
+/// A minimal session-lock client: binds `ext_session_lock_manager_v1`, takes
+/// the lock, flushes the request onto the wire, acks, then parks holding the
+/// lock object until the harness drops it.
+///
+/// Shared because lock-gated behavior needs a *real* lock in more than one
+/// suite: `is_locked` is defined by a live lock object, not a settable flag,
+/// so neither the SIGHUP-under-lock test nor the reload-under-lock policy
+/// test can fake one. The script shape fits [`Harness::spawn`] directly
+/// (`Harness<(), ()>`). Dropped, never unlocked, at the end -- an abandoned
+/// lock stays locked by design, which is what those tests assert under.
+pub(crate) struct Locker {
+    manager: Option<ext_session_lock_manager_v1::ExtSessionLockManagerV1>,
+}
+
+impl wayland_client::Dispatch<wayland_client::protocol::wl_registry::WlRegistry, ()> for Locker {
+    fn event(
+        client: &mut Self,
+        registry: &wayland_client::protocol::wl_registry::WlRegistry,
+        event: wayland_client::protocol::wl_registry::Event,
+        _: &(),
+        _: &wayland_client::Connection,
+        qh: &wayland_client::QueueHandle<Self>,
+    ) {
+        if let wayland_client::protocol::wl_registry::Event::Global {
+            name,
+            interface,
+            version,
+        } = event
+            && interface.as_str() == "ext_session_lock_manager_v1"
+        {
+            client.manager = Some(registry.bind(name, version.min(1), qh, ()));
+        }
+    }
+}
+
+impl wayland_client::Dispatch<ext_session_lock_manager_v1::ExtSessionLockManagerV1, ()> for Locker {
+    fn event(
+        _: &mut Self,
+        _: &ext_session_lock_manager_v1::ExtSessionLockManagerV1,
+        _: ext_session_lock_manager_v1::Event,
+        _: &(),
+        _: &wayland_client::Connection,
+        _: &wayland_client::QueueHandle<Self>,
+    ) {
+    }
+}
+
+impl wayland_client::Dispatch<ext_session_lock_v1::ExtSessionLockV1, ()> for Locker {
+    fn event(
+        _: &mut Self,
+        _: &ext_session_lock_v1::ExtSessionLockV1,
+        _: ext_session_lock_v1::Event,
+        _: &(),
+        _: &wayland_client::Connection,
+        _: &wayland_client::QueueHandle<Self>,
+    ) {
+    }
+}
+
+/// The [`Locker`] client as a [`Harness::spawn`] script: lock, flush, ack,
+/// then park holding the lock until the harness ends the script.
+pub(crate) fn locker(
+    stream: UnixStream,
+    steps: Receiver<()>,
+    acks: Sender<()>,
+) -> Result<(), String> {
+    use wayland_client::Connection;
+    let conn = Connection::from_socket(stream).map_err(|e| e.to_string())?;
+    let mut queue = conn.new_event_queue();
+    let qh = queue.handle();
+    let _registry = conn.display().get_registry(&qh, ());
+    let mut client = Locker { manager: None };
+    queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+    let manager = client
+        .manager
+        .take()
+        .ok_or("no ext_session_lock_manager_v1")?;
+    let _lock = manager.lock(&qh, ());
+    queue.flush().map_err(|e| e.to_string())?;
+    acks.send(()).map_err(|e| e.to_string())?;
+    // Parked: the lock object lives until the harness ends this script.
+    while steps.recv().is_ok() {}
+    Ok(())
+}
+
+/// Probes for the autostart spawn-delta policy: autostart entries are
+/// whitespace-split action strings, so no `sh -c` probe survives them --
+/// `spawn touch <path>` is the whole probe vocabulary, and the path must be
+/// whitespace-free to be expressible at all (the same limitation
+/// `docs/configuration.md` documents for every spawn entry). Requires a real
+/// `touch`, like the suites that already spawn require a real `sh`.
+///
+/// A fresh `spawn touch` target: `temp_dir` joined with a space-free name
+/// (asserted, not assumed -- a space would silently split the entry into two
+/// arguments and the probe would touch the wrong path).
+pub(crate) fn marker_path(tag: &str) -> std::path::PathBuf {
+    let path = std::env::temp_dir().join(format!(
+        "scoot-reload-{}-{}-{tag}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("a clock")
+            .as_nanos()
+    ));
+    assert!(
+        !path.to_string_lossy().contains(char::is_whitespace),
+        "the marker path must survive the autostart whitespace split: {path:?}"
+    );
+    let _ = std::fs::remove_file(&path);
+    path
+}
+
+/// The autostart entry text for a `spawn touch` of `path`.
+pub(crate) fn touch_entry(path: &std::path::Path) -> String {
+    format!("spawn touch {}", path.display())
+}
+
+/// `touch` forks before the reload that spawned it returns, so a spawn lands
+/// in milliseconds; ten seconds of quiet is the proof it never ran.
+pub(crate) fn wait_for_marker(path: &std::path::Path) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !path.exists() {
+        assert!(
+            Instant::now() < deadline,
+            "the spawned autostart entry never ran: {path:?}"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let _ = std::fs::remove_file(path);
+}
+
+/// Bounded absence: a full second of quiet after a reload that must not have
+/// spawned. `touch` would have landed in milliseconds, so this is a proof,
+/// not a hope -- but it is a bound, and it says so.
+pub(crate) fn assert_marker_never_appears(path: &std::path::Path) {
+    let deadline = Instant::now() + Duration::from_secs(1);
+    while Instant::now() < deadline {
+        assert!(
+            !path.exists(),
+            "an autostart entry ran that must not have: {path:?}"
+        );
+        std::thread::sleep(Duration::from_millis(5));
     }
 }
 

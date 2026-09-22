@@ -94,6 +94,16 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[Config reload complete: autostart spawn-delta + restart
+  wording](docs/backlog/resolved/config-reload-full-done.md)**
+  (2026-09-22, PR #TBD) — only entries the session has not seen run (new
+  `spawn` entries once each through startup's `act` path; a reloaded `quit`
+  refused by name, never acted on; locked reloads skip and defer to the
+  first unlocked one), and the `tty.gpu` / `renderer.backend` refusals now
+  name restart (`takes effect on restart`). End state: live except those
+  two fields. No `PROTOCOL_VERSION` bump (strings are payload; wire shape
+  pinned). Review pending; ticket moved to `resolved/`.
+
 - **[Config reload phase 3: `output.scale`
   live](docs/backlog/core/config-reload-full.md)** (2026-09-22, PR #213) —
   re-advertise + fractional companion re-send + geometry refile + `apply()`;

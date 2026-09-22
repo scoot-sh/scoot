@@ -2,11 +2,10 @@
 //! `PROTOCOL_VERSION` bump.
 
 use scoot_ipc::{
-    Action, Horizontal, OutputSnapshot, PointerButton, Rect, Request, Response, Screenshot,
-    WindowSnapshot, decode, encode,
+    Action, Horizontal, OutputSnapshot, PROTOCOL_VERSION, PointerButton, Rect, Request, Response,
+    Screenshot, WindowSnapshot, decode, encode,
 };
 use serde_json::{Value, json};
-
 fn json_of<T: serde::Serialize>(value: &T) -> Value {
     serde_json::to_value(value).unwrap()
 }
@@ -186,6 +185,33 @@ fn a_reload_report_round_trips_with_both_lists() {
             "refused": ["output.scale"],
         })
     );
+    assert_eq!(
+        decode::<Response>(&encode(&response).unwrap()).unwrap(),
+        response
+    );
+}
+
+/// The Phase 4-6 record: the refusal *strings* moved (restart wording, the
+/// autostart spawn delta) while the reply *shape* did not -- so this still
+/// decodes as the same two string lists, and `PROTOCOL_VERSION` stays 3.
+/// Strings are payload, not wire format: an older client parses this reply
+/// exactly as it parsed the old strings.
+#[test]
+fn reworded_reload_refusals_are_payload_not_wire_format() {
+    assert_eq!(
+        PROTOCOL_VERSION, 3,
+        "no new reply variant or field shipped with the reload completion"
+    );
+    let response = Response::Reloaded {
+        applied: vec!["autostart.commands".into()],
+        refused: vec![
+            "tty.gpu (takes effect on restart: the session already drives its device)".into(),
+            "renderer.backend (takes effect on restart: the live renderer holds client textures)"
+                .into(),
+            "autostart.commands (Quit is not a spawn entry; only new spawn entries run on reload)"
+                .into(),
+        ],
+    };
     assert_eq!(
         decode::<Response>(&encode(&response).unwrap()).unwrap(),
         response

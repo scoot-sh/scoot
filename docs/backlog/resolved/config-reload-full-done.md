@@ -1,12 +1,20 @@
 ---
-title: "Config reload: from partial to full (live except renderer + DRM device)"
-status: "open"
-area: "core"
-priority: "medium"
+title: "Config reload: from partial to full (live except renderer + DRM device) — RESOLVED"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
 ---
 
-# Config reload: from partial to full
+# Config reload: from partial to full (live except renderer + DRM device) — RESOLVED
+
+RESOLVED 2026-09-22 (PR #TBD): Phase 4 (autostart spawn-delta policy) +
+Phases 5–6 (renderer/GPU restart reword), completing the ticket — all
+phases landed, end state **live except `renderer.backend` + `tty.gpu`,
+which need a restart**. Coordinator-filed, no gh issue, so no `Fixes:`
+line applies; the move itself is the close.
+Review: pending `scoot-reviewer` (coordinator's gate). Original entry
+below, kept verbatim.
 
 > PROGRESS 2026-09-21: Phase 0 + Phase 1 LANDED (PR #209, merge `a279cc0`).
 > `apply_reload` split into per-field appliers; cursor theme/size/color
@@ -142,3 +150,33 @@ backstop. Docs move fields Refused→Applied per phase
 
 Ship order: cursor → `default_column_width`, then `column_widths` →
 `output.scale` → autostart policy → reword renderer/GPU.
+
+## What the final PR did (2026-09-22, PR #TBD)
+
+Phase 4, run-only-new-`Spawn`-entries: `apply_autostart_reload`
+(`reload.rs`) diffs the fresh list against `startup_autostart` as a
+multiset by value (`autostart_delta`, pure and pinned: edited-in-place is
+new, removed-then-re-added runs again, duplicates per occurrence), runs
+each unseen `Spawn` through the same `state.act` startup drains, refuses
+each unseen non-spawn by name (a reloaded `quit` never reaches `act`),
+reports the field applied once, and advances the snapshot past the whole
+fresh list -- so a second identical reload is silent. Under lock it skips
+(a spawned program at lock time could disclose or interfere) *and* freezes
+the snapshot: deferred to the first unlocked reload, not dropped; an empty
+delta stays silent even under lock. SIGHUP inherits all of it through the
+shared `State::reload` (pinned: HUP runs new entries, never re-runs old
+ones, skips-while-locked).
+
+Phases 5–6: both refusals reworded to `takes effect on restart: ...`, no
+third reply list, `PROTOCOL_VERSION` stays 3 -- strings are payload, and
+the wire pin proves an older client parses the new strings as the same two
+lists. `README.md`'s reload line now reads "live, except two restart
+fields". Reload is a cold path (one file read + diff per request), so no
+benchmark. Fail-first: the quit/reword/spawn/lock pins were each proven
+red by neutering the policy before it landed green. Live dev-VM proof:
+headless session -- new entry runs only itself, second reload silent,
+reloaded `quit` refused with the session alive, restart strings in the
+reply, HUP shares the delta (runs new, silent on old), remove-then-re-add
+and edit-in-place per the diff semantics, rapid double reload converges.
+Lock+reload live was impossible on the VM (no lock client installed);
+the real-`ext-session-lock-v1` harness tests stand in its place.

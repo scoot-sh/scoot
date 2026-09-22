@@ -17,28 +17,24 @@
 //! socket) and a real `sh`, which the dev VM and any Unix test host have.
 
 use std::fs;
-use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
-use scoot_core::Config;
-use scoot_ipc::Response;
+use scoot_core::{Action, Config};
+use scoot_ipc::{Request, Response};
 use smithay::reexports::calloop::EventLoop;
 use smithay::reexports::wayland_server::Display;
-use wayland_client::protocol::wl_registry;
-use wayland_client::{Connection, Dispatch, QueueHandle};
-use wayland_protocols::ext::session_lock::v1::client::{
-    ext_session_lock_manager_v1, ext_session_lock_v1,
-};
 
 use super::{install, on_sighup};
 use crate::compositor::decorations::Appearance;
 use crate::compositor::headless;
 use crate::compositor::keybindings::Keybindings;
 use crate::compositor::state::State;
-use crate::compositor::test_support::{Harness, test_renderer};
+use crate::compositor::test_support::{
+    Harness, assert_marker_never_appears, locker, marker_path, test_renderer, touch_entry,
+    wait_for_marker,
+};
 
 /// Serializes every signal test in this module: the `SIGHUP` disposition and
 /// the wake fd are process-global. A poisoned lock still yields its inner
@@ -468,82 +464,11 @@ fn a_spawned_child_sees_default_sighup_and_an_empty_mask() {
 /// nothing in the applied set can disclose locked content, so refusing under
 /// lock would strand an agent that edited the file mid-lock.
 ///
-/// The lock is a real one -- a minimal `ext-session-lock-v1` client that
-/// sends the lock request and parks holding it -- because `is_locked` is
-/// defined by a live lock object, not a flag this test could set.
+/// The lock is a real one -- the shared [`locker`] client, which sends the
+/// lock request and parks holding it -- because `is_locked` is defined by a
+/// live lock object, not a flag this test could set.
 #[test]
 fn sighup_applies_while_the_session_is_locked() {
-    /// The whole lock client: bind the registry, take the lock, flush the
-    /// request onto the wire, report that, then park on the step channel
-    /// holding the lock object until the harness drops it.
-    struct Locker {
-        manager: Option<ext_session_lock_manager_v1::ExtSessionLockManagerV1>,
-    }
-
-    impl Dispatch<wl_registry::WlRegistry, ()> for Locker {
-        fn event(
-            client: &mut Self,
-            registry: &wl_registry::WlRegistry,
-            event: wl_registry::Event,
-            _: &(),
-            _: &Connection,
-            qh: &QueueHandle<Self>,
-        ) {
-            if let wl_registry::Event::Global {
-                name,
-                interface,
-                version,
-            } = event
-                && interface.as_str() == "ext_session_lock_manager_v1"
-            {
-                client.manager = Some(registry.bind(name, version.min(1), qh, ()));
-            }
-        }
-    }
-
-    impl Dispatch<ext_session_lock_manager_v1::ExtSessionLockManagerV1, ()> for Locker {
-        fn event(
-            _: &mut Self,
-            _: &ext_session_lock_manager_v1::ExtSessionLockManagerV1,
-            _: ext_session_lock_manager_v1::Event,
-            _: &(),
-            _: &Connection,
-            _: &QueueHandle<Self>,
-        ) {
-        }
-    }
-
-    impl Dispatch<ext_session_lock_v1::ExtSessionLockV1, ()> for Locker {
-        fn event(
-            _: &mut Self,
-            _: &ext_session_lock_v1::ExtSessionLockV1,
-            _: ext_session_lock_v1::Event,
-            _: &(),
-            _: &Connection,
-            _: &QueueHandle<Self>,
-        ) {
-        }
-    }
-
-    fn locker(stream: UnixStream, steps: Receiver<()>, acks: Sender<()>) -> Result<(), String> {
-        let conn = Connection::from_socket(stream).map_err(|e| e.to_string())?;
-        let mut queue = conn.new_event_queue();
-        let qh = queue.handle();
-        let _registry = conn.display().get_registry(&qh, ());
-        let mut client = Locker { manager: None };
-        queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
-        let manager = client
-            .manager
-            .take()
-            .ok_or("no ext_session_lock_manager_v1")?;
-        let _lock = manager.lock(&qh, ());
-        queue.flush().map_err(|e| e.to_string())?;
-        acks.send(()).map_err(|e| e.to_string())?;
-        // Parked: the lock object lives until the harness ends this script.
-        while steps.recv().is_ok() {}
-        Ok(())
-    }
-
     let _signal = SIGNAL_LOCK
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -586,6 +511,104 @@ fn sighup_applies_while_the_session_is_locked() {
     assert!(
         fixture.state.session_lock.is_locked(),
         "the HUP reload must not disturb the lock it applied under"
+    );
+}
+
+/// A HUP runs new autostart entries through the same spawn delta as an IPC
+/// reload: the shared `State::reload` owns the policy, not the trigger.
+/// (The IPC half pins the exact reply lists; here the marker file is the
+/// assertion, since a HUP has no reply channel.)
+#[test]
+fn hup_runs_new_autostart_entries_through_the_shared_delta() {
+    let marker = marker_path("hup-new");
+    let entry = touch_entry(&marker);
+    let mut fixture = Fixture::with_config(&format!("[autostart]\ncommands = [\"{entry}\"]\n"));
+    // SAFETY: as in `raise_and_settle`.
+    let raised = unsafe { libc::raise(libc::SIGHUP) };
+    assert_eq!(raised, 0, "raising SIGHUP at the test process failed");
+    fixture.settle();
+    wait_for_marker(&marker);
+    assert_eq!(
+        fixture.state.startup_autostart,
+        vec![Action::Spawn(vec![
+            "touch".to_owned(),
+            marker.to_string_lossy().into_owned()
+        ])],
+        "the HUP must advance the snapshot like an IPC reload does"
+    );
+}
+
+/// ...while a HUP must not re-run old ones: entries the snapshot already
+/// holds stay silent, so a HUP on an unchanged file spawns nothing. The
+/// snapshot is seeded here to what `run` would have written had the session
+/// started from this file (startup drained them).
+#[test]
+fn hup_does_not_rerun_old_autostart_entries() {
+    let marker = marker_path("hup-old");
+    let entry = touch_entry(&marker);
+    let mut fixture = Fixture::with_config(&format!("[autostart]\ncommands = [\"{entry}\"]\n"));
+    fixture.state.startup_autostart = vec![Action::Spawn(vec![
+        "touch".to_owned(),
+        marker.to_string_lossy().into_owned(),
+    ])];
+    // SAFETY: as in `raise_and_settle`.
+    let raised = unsafe { libc::raise(libc::SIGHUP) };
+    assert_eq!(raised, 0, "raising SIGHUP at the test process failed");
+    fixture.settle();
+    match fixture.state.handle_request(Request::Reload) {
+        Response::Reloaded { applied, refused } => assert!(
+            applied.is_empty() && refused.is_empty(),
+            "the HUP should have decided nothing new: {applied:?} / {refused:?}"
+        ),
+        other => panic!("the session did not survive its own HUP: {other:?}"),
+    }
+    assert_marker_never_appears(&marker);
+}
+
+/// A HUP under lock shares the skip-and-defer: new spawn entries neither
+/// run, nor advance the snapshot -- the first unlocked reload runs them.
+#[test]
+fn hup_with_new_spawn_entries_skips_while_locked() {
+    let _signal = SIGNAL_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut fixture: Harness<(), ()> = Harness::headless(Appearance::default(), CANVAS);
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let path = dir.path().join("config.toml");
+    fs::write(&path, "").expect("a config file");
+    fixture.state.config_path = Some(path.clone());
+    install(&fixture.event_loop.handle()).expect("the SIGHUP handler");
+
+    let client = fixture.spawn(locker);
+    fixture.wait_for_ack(client);
+    let deadline = Instant::now() + PATIENCE;
+    while !fixture.state.session_lock.is_locked() {
+        assert!(
+            Instant::now() < deadline,
+            "the lock request never landed; the HUP below would pass unlocked"
+        );
+        fixture
+            .event_loop
+            .dispatch(Some(Duration::from_millis(5)), &mut fixture.state)
+            .expect("a compositor dispatch");
+    }
+
+    let marker = marker_path("hup-locked");
+    let entry = touch_entry(&marker);
+    fs::write(&path, format!("[autostart]\ncommands = [\"{entry}\"]\n"))
+        .expect("a rewritten config file");
+    // SAFETY: the handler is installed on this fixture's loop above.
+    let raised = unsafe { libc::raise(libc::SIGHUP) };
+    assert_eq!(raised, 0, "raising SIGHUP at the test process failed");
+    fixture.tick(Duration::from_millis(500));
+    assert_marker_never_appears(&marker);
+    assert!(
+        fixture.state.startup_autostart.is_empty(),
+        "a locked HUP must not advance the snapshot -- the entry stays pending"
+    );
+    assert!(
+        fixture.state.session_lock.is_locked(),
+        "the HUP must not disturb the lock it skipped under"
     );
 }
 

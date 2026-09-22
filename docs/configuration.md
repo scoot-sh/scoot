@@ -231,13 +231,14 @@ other path (`> wherever`). (On a machine with no
 `scoot` binary — macOS, where only the `scootctl` client builds — copy the
 [example below](#example-configtoml) instead.)
 
-**Most settings are read once at startup; some can be reloaded live.**
+**Most settings are read once at startup; most can be reloaded live.**
 `scootctl reload` (see [Reloading the config](#reloading-the-config))
 re-reads this same file and re-applies the layout (gap, column widths and
 the default column width), the output scale, the appearance (including
-the cursor size, color and theme) and the
-keybindings. Everything else is startup-only and a reload refuses it with a
-message rather than silently ignoring it.
+the cursor size, color and theme), the
+keybindings, and new `[autostart]` spawn entries. Only `[tty] gpu` and
+`[renderer] backend` need a restart, and a reload refuses them with a
+message naming that rather than silently ignoring them.
 
 ### Failure semantics
 
@@ -304,19 +305,24 @@ color, `corner_radius`, `prefer_no_csd`, and the cursor `cursor_size`,
 `cursor_color` and `cursor_theme` (the fallback bitmaps are rebuilt, the
 theme reloaded, and the screen redrawn without re-arranging -- cursor
 pixels are not placement), and the whole `[binds]` table (rebuilt from the
-defaults plus the file, so a reload both adds and overrides binds).
+defaults plus the file, so a reload both adds and overrides binds) -- plus
+new `[autostart]` spawn entries (each entry the session has not seen yet
+runs once, in file order, through the same path startup drains; a reloaded
+entry that is not a `spawn` -- `quit` included -- is refused by name and
+never acted on. Seen is by value per occurrence: an edited entry counts as
+new, a removed-then-re-added entry runs again, and a second identical
+reload is silent).
 
-**Refused, explicitly:**
+**Refused, explicitly, pending a restart:**
 `[tty] gpu` (the session already
-drives its device), `[renderer] backend` (the live renderer holds client
-textures), and `[autostart] commands` (entries run once, at session start —
-a reload never re-runs them).
+drives its device) and `[renderer] backend` (the live renderer holds client
+textures) -- both take effect on restart, and the refusal says so.
 
 The reply says which was which:
 
 ```json
 { "type": "reloaded", "applied": ["layout.gap", "binds"],
-  "refused": ["tty.gpu (startup-only: the session already drives its device)"] }
+  "refused": ["tty.gpu (takes effect on restart: the session already drives its device)"] }
 ```
 
 Both lists name only fields that *differed* — a field the file and the
@@ -343,7 +349,11 @@ frame draws; gap, column widths and binds are input-side -- widths only
 re-derive column frames from config proportions -- and binds cannot fire actions
 while locked anyway; a scale change only re-derives the same geometry the
 lock path already publishes and re-sends config-derived scale values to
-surfaces still showing the blanked frame).
+surfaces still showing the blanked frame). New autostart entries are the
+one thing a locked reload skips: a spawned program at lock time could
+disclose a window onto, or interfere with, the locked session, so the
+reload refuses the field as skipped-while-locked and runs the still-pending
+entries on the first unlocked reload instead -- deferred, not denied.
 
 ## `[layout]`
 
@@ -402,13 +412,13 @@ pure white *is* exactly representable.)
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
-| `backend` | string (`"pixman"` or `"gles"`) | `"pixman"` | Which renderer composites each frame — the config-file form of `--renderer` (see [tty.md](tty.md#which-renderer-draws-the-frames)). `"pixman"` is the CPU renderer and needs no graphics device at all. `"gles"` draws with GLES on an EGL device; under `--tty` it needs a `--features gpu-scanout` build, where it scans out from the GPU, and warns and keeps pixman without one. `--renderer` wins when both name one, including `--renderer pixman` against a file asking for `gles`. A name that is neither is a warning and the default, like any other malformed value; but a name this build *knows* and then cannot build (`"gles"` with no working EGL) is a startup error — the second deliberate one — because silently drawing with the other renderer would be a session quietly different from the one you asked for. Startup-only — a reload refuses changes. |
+| `backend` | string (`"pixman"` or `"gles"`) | `"pixman"` | Which renderer composites each frame — the config-file form of `--renderer` (see [tty.md](tty.md#which-renderer-draws-the-frames)). `"pixman"` is the CPU renderer and needs no graphics device at all. `"gles"` draws with GLES on an EGL device; under `--tty` it needs a `--features gpu-scanout` build, where it scans out from the GPU, and warns and keeps pixman without one. `--renderer` wins when both name one, including `--renderer pixman` against a file asking for `gles`. A name that is neither is a warning and the default, like any other malformed value; but a name this build *knows* and then cannot build (`"gles"` with no working EGL) is a startup error — the second deliberate one — because silently drawing with the other renderer would be a session quietly different from the one you asked for. Takes effect on restart — a reload refuses changes with a message naming that. |
 
 ## `[tty]`
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
-| `gpu` | string (device path) | unset | Which DRM device `--tty` drives, when the automatic choice is wrong — the config-file form of `--gpu PATH` (see [tty.md](tty.md#which-drm-device---tty-drives)). Unset means the automatic search picks: Smithay's primary GPU first, then every other DRM device on the seat until one works. Set means exactly that device, no fallback: a wrong path is a clean startup error naming the key and what failed, so this key is fail-closed where every other config field degrades gracefully. `--gpu` wins when both name one; an empty value (`gpu = ""`) is a startup error naming the key, on every backend. Only means anything under `--tty`; on `--headless` or `--nested` a set non-empty value is ignored with a warning. Startup-only — a reload refuses changes. |
+| `gpu` | string (device path) | unset | Which DRM device `--tty` drives, when the automatic choice is wrong — the config-file form of `--gpu PATH` (see [tty.md](tty.md#which-drm-device---tty-drives)). Unset means the automatic search picks: Smithay's primary GPU first, then every other DRM device on the seat until one works. Set means exactly that device, no fallback: a wrong path is a clean startup error naming the key and what failed, so this key is fail-closed where every other config field degrades gracefully. `--gpu` wins when both name one; an empty value (`gpu = ""`) is a startup error naming the key, on every backend. Only means anything under `--tty`; on `--headless` or `--nested` a set non-empty value is ignored with a warning. Takes effect on restart — a reload refuses changes with a message naming that. |
 
 ## `[binds]`
 
@@ -528,7 +538,7 @@ runs through the same `act` path a keybind or IPC request would take.
 command runs, so an autostart list containing it is a session that starts
 and immediately exits.)
 
-Three behaviors worth knowing:
+Three behaviors worth knowing, plus the reload rule:
 
 - **Fail-open per entry.** A malformed entry (an unknown action, a missing
   argument, trailing text after the action) is skipped with a warning naming
@@ -542,9 +552,16 @@ Three behaviors worth knowing:
 - **No supervision.** An entry that exits instantly is reaped, not restarted;
   telling a deliberate quit from a crash loop is a service manager's job,
   not the compositor's.
-- **Never re-run.** Entries run once, at session start. `scootctl reload`
-  refuses `autostart.commands` changes with a message rather than running
-  anything a second time (see [Reloading the config](#reloading-the-config)).
+- **A reload runs the spawn delta.** Entries the session has not seen yet
+  run once each, in file order, through the same path startup drains --
+  new `spawn` entries only. A reloaded entry that is not a `spawn`
+  (`quit` included) is refused by name and never acted on, so a reloaded
+  `quit` cannot end the session. Seen is by value per occurrence: editing
+  an entry in place counts as new, removing one and re-adding it runs it
+  again, duplicates count per occurrence, and a second identical reload is
+  silent. A reload under session lock skips new entries (refused as
+  skipped-while-locked) and runs them on the first unlocked reload
+  instead (see [Reloading the config](#reloading-the-config)).
 
 ## Default keybindings
 

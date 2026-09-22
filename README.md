@@ -63,14 +63,17 @@ Linux, and daily-driven on `--tty`** (2026-09-18).
   less), draws the same pixels, and uses 7–16 MB more memory (numbers and
   method in [Asahi.md](Asahi.md), Test 4).
   pixman is still the default and still the right answer on a GPU-less box.
-- **Config reload is partial.** `scootctl reload` (or `kill -HUP` on the
+- **Config reload is live, except two restart fields.** `scootctl reload` (or `kill -HUP` on the
   compositor) re-applies the layout (gap, column widths, default column
   width), the output scale (except under `--nested`, where the host owns
   it), the
-  appearance (including the cursor size, color and theme) and the keybindings
-  live; DRM device, renderer and
-  autostart stay startup-only and a reload refuses them
-  with a message rather than silently ignoring them.
+  appearance (including the cursor size, color and theme), the keybindings,
+  and new `[autostart]` spawn entries (only entries the session has not seen
+  run; a reloaded non-`spawn` entry is refused by name, and a locked reload
+  skips new entries until the first unlocked one) live; the DRM device
+  (`[tty] gpu`) and the renderer (`[renderer] backend`) take effect on
+  restart, and a reload refuses them
+  with a message naming that rather than silently ignoring them.
 - **No macOS adapter.** `scoot-core` is kept platform-independent so one can
   exist, but nothing drives the Accessibility API yet. On macOS you get
   `scootctl`, the remote-control client, only.

@@ -46,7 +46,7 @@ compositor running in a VM.
 | `outputs` | Every output's name, rectangle, usable rectangle and scale. |
 | `windows` | Every window: id, app id, title, icon, focus, popup grab. |
 | `action ACTION [ARGUMENT...]` | Run a layout action — see [Actions](#actions). |
-| `reload` | Re-read the config file the session started from and re-apply what can be re-applied live (layout, output scale, appearance, keybindings) — see [configuration.md](configuration.md#reloading-the-config). Answers `reloaded` with applied-vs-refused field lists, or `error` (running config untouched) when the file cannot load or validate. |
+| `reload` | Re-read the config file the session started from and re-apply what can be re-applied live (layout, output scale, appearance, keybindings, new autostart spawn entries) — see [configuration.md](configuration.md#reloading-the-config). Answers `reloaded` with applied-vs-refused field lists, or `error` (running config untouched) when the file cannot load or validate. |
 | `screenshot [--output ID] [--out FILE]` | Capture the screen as PNG. Without `--out`, the PNG goes to stdout. `--output` names which output to capture; every output has a framebuffer of its own, so the capture is that output's own pixels. An id naming no output is refused rather than answered with another output's pixels. Omitting it always means the first output (id 1). |
 | `pointer move X Y` | Move the pointer to logical coordinates. |
 | `pointer click X Y [left\|right\|middle]` | Move, then press and release. |
@@ -183,11 +183,14 @@ unknown request tag is a decode error the server answers and keeps serving.
 
 ```json
 { "type": "reloaded", "applied": ["layout.gap", "binds"],
-  "refused": ["tty.gpu (startup-only: the session already drives its device)"] }
+  "refused": ["tty.gpu (takes effect on restart: the session already drives its device)"] }
 ```
 
-`applied` names the fields re-applied live, `refused` the ones that
-differed but cannot be (each with its reason). Both name only fields that
+`applied` names the fields re-applied live (including `autostart.commands`
+when new spawn entries ran), `refused` the ones that
+differed but cannot be (each with its reason: the two restart fields, a
+non-`spawn` autostart entry by name, or a locked-skipped autostart delta).
+Both name only fields that
 *differed*: two empty lists together mean the reload changed nothing it was
 asked to. A reload that could not load or validate the file answers
 `error` with the running config untouched (`scootctl` exits non-zero).
