@@ -75,19 +75,34 @@ use super::present_retry::{self, PresentRetries};
 type Compositor =
     DrmCompositor<GbmAllocator<DrmDeviceFd>, GbmFramebufferExporter<DrmDeviceFd>, u64, DrmDeviceFd>;
 
-/// The per-frame plane assignment this tier allows: the cursor plane only.
+/// The per-frame plane assignment this tier allows: the cursor plane and the
+/// overlay planes.
 ///
-/// This is step 1 of `docs/backlog/rendering/gpu-scanout-planes.md`, and the
-/// flag is the whole of its KMS delta beyond construction: without
-/// `ALLOW_CURSOR_PLANE_SCANOUT` Smithay assigns nothing to any plane (see
-/// `try_assign_element`'s early return at the pinned rev), so populating
-/// `Planes.cursor` alone would be dead code. `ALLOW_SCANOUT` -- the primary
-/// and overlay direct-scanout bits -- stays out: that is step 3, and it lands
-/// with a capture fix, never as a flag flip (a directly scanned-out client
-/// buffer is not in the swapchain slot captures read).
+/// This is steps 1+2 of `docs/backlog/rendering/gpu-scanout-planes.md`, and
+/// the flags are the whole of their KMS delta beyond construction: without
+/// them Smithay assigns nothing to any plane (see `try_assign_element`'s
+/// early return at the pinned rev), so populating `Planes.cursor`/`overlay`
+/// alone would be dead code. `ALLOW_SCANOUT`'s remaining bits -- the primary
+/// direct-scanout bits -- stay out: that is step 3, and it lands with a
+/// capture fix, never as a flag flip (a directly scanned-out client buffer
+/// is not in the swapchain slot captures read).
 ///
-/// Pinned below against gaining those bits by accident.
-const CURSOR_FRAME_FLAGS: FrameFlags = FrameFlags::ALLOW_CURSOR_PLANE_SCANOUT;
+/// The overlay bit's reachable effect is deliberately narrow. Smithay's
+/// `try_assign_overlay_plane` only considers elements of kind
+/// `ScanoutCandidate` or `Cursor`, and this tree constructs neither for any
+/// window surface -- every surface element is built `Kind::Unspecified`
+/// (`render/elements.rs`, both call sites), only cursor elements are
+/// `Kind::Cursor`, and `Rounded` forwards its inner kind unchanged. So no
+/// window can ever ride an overlay plane until something is marked a
+/// scanout candidate, and that marking lands with step 3's capture fix, not
+/// here: marking one now would let whole windows leave the buffer captures
+/// read. What the bit does today is let the *cursor* ride an overlay where
+/// a CRTC has overlays but no cursor plane (the cursor plane is still tried
+/// first), with the same cursorless-capture consequence step 1 documented.
+///
+/// Pinned below against gaining the primary bits by accident.
+const PLANE_FRAME_FLAGS: FrameFlags =
+    FrameFlags::ALLOW_CURSOR_PLANE_SCANOUT.union(FrameFlags::ALLOW_OVERLAY_PLANE_SCANOUT);
 
 /// Colour formats offered to `DrmCompositor::new`, in order. `Argb8888` first
 /// because it is the format every read-back consumer in this compositor
@@ -174,6 +189,14 @@ pub(crate) struct ScanoutPresenter {
     /// cursor stays composited into the primary plane exactly as before this
     /// step. Read once at startup for the log line that says which it is.
     cursor_planes: usize,
+    /// How many KMS overlay planes the compositor may assign elements to.
+    /// Zero where the CRTC has none -- the graceful fallback, byte-identical
+    /// by construction: with no planes Smithay's overlay assignment exits
+    /// before touching anything. Read alongside `cursor_planes` for the same
+    /// startup log line. (Even where non-zero, no window element can be
+    /// assigned yet -- see `PLANE_FRAME_FLAGS` -- so this count decides
+    /// cursor-sized consequences only.)
+    overlay_planes: usize,
     /// The DRM device's hardware cursor size, as passed to
     /// [`ScanoutPresenter::new`]. Kept so a CRTC switch rebuilds the
     /// compositor with the same bound: the size is a property of the device,
@@ -212,6 +235,7 @@ impl ScanoutPresenter {
         };
         let planes = surface_planes(&surface);
         let cursor_planes = planes.cursor.len();
+        let overlay_planes = planes.overlay.len();
         let compositor = Self::build(
             &planes,
             surface,
@@ -230,6 +254,7 @@ impl ScanoutPresenter {
             retry_armed: false,
             slots_dropped: false,
             cursor_planes,
+            overlay_planes,
             cursor_size,
         })
     }
@@ -239,11 +264,10 @@ impl ScanoutPresenter {
     ///
     /// Two choices here are still stage-3 scope decisions, not defaults:
     ///
-    /// - **`planes` carries primary plus cursor, never overlay.**
-    ///   `None` would hand the compositor every plane the CRTC has; overlay
-    ///   planes are step 2 of `docs/backlog/rendering/gpu-scanout-planes.md`
-    ///   and stay dropped by [`select_planes`] until then.
-    /// - **`CURSOR_FRAME_FLAGS`, not `DEFAULT`.** `DEFAULT` is
+    /// - **`planes` carries primary plus cursor plus overlay, never a
+    ///   client buffer on the primary.** Overlay planes ride along whole
+    ///   from [`select_planes`]; see there for why they are not narrowed.
+    /// - **`PLANE_FRAME_FLAGS`, not `DEFAULT`.** `DEFAULT` is
     ///   `ALLOW_SCANOUT`, which lets a client's own buffer be scanned out
     ///   directly on the primary plane instead of being composited into the
     ///   swapchain slot. That is a real optimisation and it is not this
@@ -251,9 +275,11 @@ impl ScanoutPresenter {
     ///   so `render::scanout`'s capture path -- screenshots and
     ///   `ext-image-copy-capture-v1`, which this project treats as
     ///   first-class -- would silently start returning something that is not
-    ///   what is on screen. The cursor bit alone has the narrower contract:
-    ///   only the cursor element may leave the primary plane, and the
-    ///   capture consequence -- a capture reads the primary plane only, so a
+    ///   what is on screen. The cursor and overlay bits alone have the
+    ///   narrower contract: only the cursor element may leave the primary
+    ///   plane (no window element is a scanout candidate, so none may ride
+    ///   an overlay -- see `PLANE_FRAME_FLAGS`), and the capture
+    ///   consequence -- a capture reads the primary plane only, so a
     ///   plane-assigned cursor is absent from it -- is documented where the
     ///   capture lives rather than left to be discovered.
     fn build(
@@ -271,7 +297,7 @@ impl ScanoutPresenter {
             GbmBufferFlags::RENDERING | GbmBufferFlags::SCANOUT,
         );
         // `NodeFilter::None` disables direct scan-out of *client* buffers,
-        // which is the same decision `CURSOR_FRAME_FLAGS` makes above, made
+        // which is the same decision `PLANE_FRAME_FLAGS` makes above, made
         // again at the layer that would have to import them.
         let exporter = GbmFramebufferExporter::new(gbm.clone(), NodeFilter::None);
         // `Some` only where a cursor plane exists to drive with it. Without
@@ -329,6 +355,13 @@ impl ScanoutPresenter {
         self.cursor_planes
     }
 
+    /// How many KMS overlay planes elements may ride on. Zero is the
+    /// fallback -- everything stays composited -- and is read alongside
+    /// [`cursor_planes`](Self::cursor_planes) for the same startup log line.
+    pub(super) fn overlay_planes(&self) -> usize {
+        self.overlay_planes
+    }
+
     /// The surface being driven, for the hotplug path's connector/mode moves.
     pub(super) fn surface(&self) -> &DrmSurface {
         self.compositor.surface()
@@ -362,7 +395,7 @@ impl ScanoutPresenter {
         let result =
             match self
                 .compositor
-                .render_frame(renderer, elements, clear_color, CURSOR_FRAME_FLAGS)
+                .render_frame(renderer, elements, clear_color, PLANE_FRAME_FLAGS)
             {
                 Ok(result) => result,
                 Err(error) => {
@@ -585,21 +618,28 @@ impl ScanoutPresenter {
         ) {
             Ok(compositor) => {
                 self.compositor = compositor;
-                // The other CRTC may or may not have a cursor plane of its
-                // own, so the count is re-read from the fresh plane set. The
-                // cursor *size* is a property of the device rather than the
-                // CRTC and rides along unchanged in `self.cursor_size`.
+                // Another CRTC may or may not have cursor or overlay planes
+                // of its own, so both counts are re-read from the fresh plane
+                // set. The cursor *size* is a property of the device rather
+                // than the CRTC and rides along unchanged in
+                // `self.cursor_size`.
                 let cursor_planes = planes.cursor.len();
-                if cursor_planes != self.cursor_planes {
+                let overlay_planes = planes.overlay.len();
+                if cursor_planes != self.cursor_planes || overlay_planes != self.overlay_planes {
                     // info!, same bar as the startup line: whether the cursor
                     // rides its own plane decides what a capture sees, so a
-                    // CRTC switch changing the answer must say so.
+                    // CRTC switch changing the answer must say so. The
+                    // overlay count rides along so the line stays the one
+                    // place that says what every plane is doing.
                     tracing::info!(
                         from = self.cursor_planes,
                         to = cursor_planes,
+                        overlay_from = self.overlay_planes,
+                        overlay_to = overlay_planes,
                         "drm: scanout cursor planes changed on the new crtc"
                     );
                     self.cursor_planes = cursor_planes;
+                    self.overlay_planes = overlay_planes;
                 }
                 // The old compositor's swapchain drops with it, so every
                 // dma-buf the render side exported from it is stale.
@@ -619,20 +659,21 @@ impl ScanoutPresenter {
 }
 
 /// The planes `DrmCompositor` may use: this surface's own primary plane,
-/// plus its cursor planes. Overlay planes stay out until step 2 of
-/// `docs/backlog/rendering/gpu-scanout-planes.md` -- see [`select_planes`].
+/// plus its cursor and overlay planes.
 ///
-/// The filter is not decoration. `DrmSurface::planes()` reports every primary
-/// plane the CRTC could use, and `DrmCompositor` assumes the primary it is
-/// given is the one the surface commits against -- handing it a different
-/// one would be a plane the surface never claimed.
+/// The primary filter is not decoration. `DrmSurface::planes()` reports every
+/// primary plane the CRTC could use, and `DrmCompositor` assumes the primary
+/// it is given is the one the surface commits against -- handing it a
+/// different one would be a plane the surface never claimed.
 ///
-/// The cursor list is only as complete as the kernel lets it be: on
-/// paravirtualized drivers the cursor plane is hidden until the session sets
-/// `CURSOR_PLANE_HOTSPOT`, which `open_device` does on the device fd before
-/// `DrmDevice::new` (see its comment -- the position matters, since
-/// `AtomicDrmDevice::new` snapshots the plane list once at construction) --
-/// so the snapshot here already includes it.
+/// The cursor and overlay lists are only as complete as the kernel lets them
+/// be: on paravirtualized drivers the cursor plane is hidden until the
+/// session sets `CURSOR_PLANE_HOTSPOT`, which `open_device` does on the
+/// device fd before `DrmDevice::new` (see its comment -- the position
+/// matters, since `AtomicDrmDevice::new` snapshots the plane list once at
+/// construction) -- so the snapshot here already includes it. Overlay planes
+/// need no such cap: `UNIVERSAL_PLANES` (which Smithay's `DrmDevice::new`
+/// sets itself) is what exposes them, and no client capability gates them.
 fn surface_planes(surface: &DrmSurface) -> Planes {
     select_planes(surface.planes(), surface.plane())
 }
@@ -640,13 +681,23 @@ fn surface_planes(surface: &DrmSurface) -> Planes {
 /// Picks the planes `DrmCompositor` may use out of a CRTC's full inventory.
 ///
 /// The primary is narrowed to the one plane the surface commits against (see
-/// [`surface_planes`]); the cursor list rides along whole, because a cursor
-/// plane needs no per-plane choice here -- Smithay claims one per frame and
-/// falls back to compositing where none can be claimed. The overlay list is
-/// dropped outright: overlay planes are step 2, and handing them over now
-/// would let Smithay assign window elements onto planes whose buffers are
-/// not in the swapchain slot captures read -- the same capture hazard step 3
-/// names for the primary plane, one stage early.
+/// [`surface_planes`]); the cursor and overlay lists ride along whole, not
+/// narrowed like the primary. There is no per-plane choice to make here:
+/// Smithay claims one plane per frame out of the handed-over lists and falls
+/// back to compositing wherever none can be claimed (oversized element,
+/// failed TEST, no free plane -- all traced at the pinned rev, none wedging
+/// the frame), and `DrmCompositor::new` sorts the overlay list into
+/// front-to-back order itself. Narrowing would only risk dropping a plane
+/// Smithay could have used. What also makes the whole-list handover safe is
+/// that construction cannot newly fail because of it: the swapchain format
+/// search (`find_supported_format` at the pinned rev) reads the *primary*
+/// plane's formats only, so an overlay-only format gap can refuse a frame's
+/// assignment but never the compositor's construction.
+///
+/// A CRTC with no overlay planes selects an empty overlay list, which is the
+/// graceful fallback: Smithay's overlay assignment exits before touching
+/// anything, `build` behaves exactly as the old primary-plus-cursor one did,
+/// and the frame is byte-identical.
 ///
 /// Split out from [`surface_planes`] so the selection is pinnable against a
 /// fake inventory: everything around it needs a live DRM fd.
@@ -660,7 +711,7 @@ fn select_planes(inventory: &Planes, primary: plane::Handle) -> Planes {
     Planes {
         primary,
         cursor: inventory.cursor.clone(),
-        overlay: Vec::new(),
+        overlay: inventory.overlay.clone(),
     }
 }
 
@@ -749,25 +800,59 @@ mod tests {
     }
 
     #[test]
-    fn overlay_planes_stay_dropped() {
-        // Step 2 scope: an overlay in the inventory must not reach the
-        // compositor, however many cursor planes do.
+    fn overlay_planes_ride_along_whole() {
+        // No per-plane choice is made here -- Smithay claims one per frame
+        // and falls back to compositing where none can be claimed -- so the
+        // whole list passes through untouched, exactly like the cursor list.
         let (inventory, primary) = inventory();
         let selected = select_planes(&inventory, primary);
-        assert!(selected.overlay.is_empty());
+        assert_eq!(selected.overlay.len(), 1);
+        assert_eq!(selected.overlay[0].handle, inventory.overlay[0].handle);
     }
 
     #[test]
-    fn the_frame_flags_are_the_cursor_bit_and_nothing_else() {
-        // The step-1/step-3 boundary as a pin: the cursor bit on, both
-        // direct-scanout bits off. Gaining either would let a non-cursor
-        // element leave the swapchain slot captures read -- step 3's hazard,
-        // one stage early -- so this fails loudly rather than drifting.
-        assert!(CURSOR_FRAME_FLAGS.contains(FrameFlags::ALLOW_CURSOR_PLANE_SCANOUT));
-        assert!(!CURSOR_FRAME_FLAGS.intersects(FrameFlags::ALLOW_PRIMARY_PLANE_SCANOUT));
-        assert!(!CURSOR_FRAME_FLAGS.intersects(FrameFlags::ALLOW_PRIMARY_PLANE_SCANOUT_ANY));
-        assert!(!CURSOR_FRAME_FLAGS.intersects(FrameFlags::ALLOW_OVERLAY_PLANE_SCANOUT));
-        assert_ne!(CURSOR_FRAME_FLAGS, FrameFlags::ALLOW_SCANOUT);
-        assert_ne!(CURSOR_FRAME_FLAGS, FrameFlags::DEFAULT);
+    fn no_overlay_plane_is_the_fallback_shape() {
+        // A CRTC with no overlay plane selects an empty overlay list, which
+        // is what keeps `build` behaving exactly as the old
+        // primary-plus-cursor construction did: Smithay's overlay assignment
+        // exits before touching anything, so the frame is byte-identical.
+        let (mut inventory, primary) = inventory();
+        inventory.overlay.clear();
+        let selected = select_planes(&inventory, primary);
+        assert!(selected.overlay.is_empty());
+        // Neither the primary nor the cursor list is affected by the missing
+        // overlay plane.
+        assert_eq!(selected.primary.len(), 1);
+        assert_eq!(selected.cursor.len(), 1);
+    }
+
+    #[test]
+    fn mixed_crtc_fallback_each_list_independent() {
+        // A CRTC with overlays but no cursor plane (and vice versa) selects
+        // each list on its own: the missing kind falls back while the
+        // present kind rides along. Per-CRTC enumeration is what makes a
+        // mixed pair of CRTCs correct, one `adopt_surface` at a time.
+        let (mut inventory, primary) = inventory();
+        inventory.cursor.clear();
+        let selected = select_planes(&inventory, primary);
+        assert!(selected.cursor.is_empty());
+        assert_eq!(selected.overlay.len(), 1);
+        assert_eq!(selected.primary.len(), 1);
+    }
+
+    #[test]
+    fn the_frame_flags_are_cursor_plus_overlay_and_nothing_else() {
+        // The step-2/step-3 boundary as a pin: the cursor and overlay bits
+        // on, both direct-scanout primary bits off. Gaining either primary
+        // bit would let a non-cursor element leave the swapchain slot
+        // captures read -- step 3's hazard, one stage early -- so this fails
+        // loudly rather than drifting. `ALLOW_SCANOUT` itself stays out for
+        // the same reason: it is the primary bit plus both of these.
+        assert!(PLANE_FRAME_FLAGS.contains(FrameFlags::ALLOW_CURSOR_PLANE_SCANOUT));
+        assert!(PLANE_FRAME_FLAGS.contains(FrameFlags::ALLOW_OVERLAY_PLANE_SCANOUT));
+        assert!(!PLANE_FRAME_FLAGS.intersects(FrameFlags::ALLOW_PRIMARY_PLANE_SCANOUT));
+        assert!(!PLANE_FRAME_FLAGS.intersects(FrameFlags::ALLOW_PRIMARY_PLANE_SCANOUT_ANY));
+        assert_ne!(PLANE_FRAME_FLAGS, FrameFlags::ALLOW_SCANOUT);
+        assert_ne!(PLANE_FRAME_FLAGS, FrameFlags::DEFAULT);
     }
 }

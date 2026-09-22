@@ -47,16 +47,25 @@
 //!
 //! # What a capture sees when the cursor rides its own plane
 //!
-//! Step 1 of `docs/backlog/rendering/gpu-scanout-planes.md` lets Smithay
-//! assign the cursor element to a KMS cursor plane (the cursor-plane frame
-//! flags in `tty/scanout.rs`). A plane-assigned cursor is *not*
+//! Steps 1+2 of `docs/backlog/rendering/gpu-scanout-planes.md` let Smithay
+//! assign the cursor element to a KMS cursor plane and (where the CRTC has
+//! overlays but no cursor plane) to an overlay plane (the cursor/overlay
+//! frame flags in `tty/scanout.rs`). A plane-assigned element is *not*
 //! drawn into the swapchain slot -- it reaches the screen through its own
 //! commit -- so the dma-buf recorded here carries the screen *without* the
 //! cursor, and every consumer of [`Captures::frame_mut`] (IPC screenshots,
 //! `ext-image-copy-capture-v1`) shows a cursorless screen on exactly those
-//! sessions. Where the CRTC has no cursor plane nothing changes: the cursor
-//! stays composited into the primary plane and captures keep showing it, as
-//! does `screencopy.rs`'s cursor section.
+//! sessions. Where the cursor stays composited nothing changes: captures
+//! keep showing it, as does `screencopy.rs`'s cursor section.
+//!
+//! What a capture can *never* be missing is a window. Smithay's overlay
+//! assignment only considers elements of kind `ScanoutCandidate` or
+//! `Cursor`, and this tree builds every window, popup and layer-shell
+//! surface element as `Kind::Unspecified` (only cursor elements are
+//! `Kind::Cursor`). So an overlay plane on this tier can carry at most the
+//! cursor -- never a toplevel -- and marking a window a scanout candidate
+//! is what step 3 owns, landing together with its capture fix rather than
+//! one stage early.
 //!
 //! That is a semantic change, not a bug, and it is stated here rather than
 //! fixed here: compositing the cursor back into the capture would be a second
@@ -64,9 +73,9 @@
 //! It is live-observed on virtio-gpu (captures byte-identical across cursor
 //! moves); `paint_cursors=false` stays accepted-and-
 //! ignored throughout: the flag never changes which buffer the cursor is
-//! drawn into, only whether a session whose cursor rides the cursor plane
-//! shows it in captures (it does not) or one whose cursor stays composited
-//! does (it does, exactly as before this step).
+//! drawn into, only whether a session whose cursor rides a plane shows it
+//! in captures (it does not) or one whose cursor stays composited does (it
+//! does, exactly as before these steps).
 
 use std::error::Error;
 

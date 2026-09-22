@@ -341,16 +341,17 @@ What lands:
 ### Deliberate scope decisions, each of which could have gone the other way
 
 - **`planes: Some(primary only)`, `gbm: None`.** No cursor plane, no overlay
-  planes. *(Superseded by step 1 of
+  planes. *(Superseded by steps 1-2 of
   `docs/backlog/rendering/gpu-scanout-planes.md`: cursor planes now ride
-  along with `gbm: Some` where one exists; described here as it landed.)*
+  along with `gbm: Some` where one exists, and overlay planes ride along
+  whole from the same inventory; described here as it landed.)*
 - **`FrameFlags::empty()`, not `DEFAULT`.** `DEFAULT` is `ALLOW_SCANOUT`,
   which lets a client's own buffer be scanned out directly on the primary
   plane. That is a real optimisation and it is not this stage's -- with it the
   frame is *not* in the swapchain buffer, so the capture path would silently
   start returning something that is not what is on screen. *(Narrowed by the
-  same step 1: the cursor-plane bit alone is now passed; primary/overlay
-  direct scanout stays out.)*
+  same steps 1-2: the cursor- and overlay-plane bits are now passed;
+  primary direct scanout stays out.)*
 - **`PresentRetries` is reused, not replaced**, against the letter of the
   staging note below. A refused `queue_frame` is the same hazard as a refused
   `page_flip`: nothing is in flight, so no completion event will retry it and
