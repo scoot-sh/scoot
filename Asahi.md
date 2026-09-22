@@ -378,7 +378,12 @@ deliberate.
 project has is llvmpipe's — a software rasteriser — so nothing measured so
 far says anything about real GPU performance. What the VM *did* establish is
 the shape: GLES rendering offscreen and reading each frame back cost
-**17–32x** pixman, and GPU scanout on the same rasteriser costs **~1.5x**.
+**18–31x** pixman, and GPU scanout on the same rasteriser costs **~1.5x**.
+(This paragraph said "17–32x" until 2026-09-21. That pair divides out of
+round 1 of the stage-2 bench — 1.978ms/62.2µs and 2.384ms/138.3µs — and
+`docs/roadmap/06-gpu-pipeline.md:872` had already retired those two figures
+for "flattering one scene and penalising the other for no reason beyond
+round order". The medians, 64.4µs and 131.0µs, give 30.7x and 18.2x.)
 Removing the read-back closed nearly the whole gap, which means the
 read-back was the dominant cost rather than the rasterising. On real
 hardware, where rasterising stops being a CPU's problem, scanout should win
@@ -458,42 +463,35 @@ prints the analysis into `$OUT/test4-report.txt`. Two runs: four rounds (raw
 in `/tmp/scoot-tier-bench`) then two (raw in `/tmp/scoot-asahi-test4`); the
 second exists because the first left two gaps, named below.
 
-**Run 1's `summary.tsv` and `environment.txt` no longer exist, and that is
-worth knowing before trying to re-derive anything from them.** They were
-destroyed after the fact by `OUT=/tmp/scoot-tier-bench scripts/asahi-test4.sh`
-— intended as "re-read the old numbers", which at the time re-ran the
-benchmark into the evidence directory, failed every round on the busy seat,
-and left four `came_up=no` rows where four rounds of measurements had been.
-What survives from run 1: every screenshot, every power sample, the
-`.outputs`/`.windows` dumps, and the **r3–r4** logs — the clobbering run
-defaulted to `ROUNDS=2`, so rounds 1 and 2 lost their logs as well, and what
-sits at those four paths now is seat-failure output from 23:10. What does not
-survive: its numeric
-rows and its recorded environment. The figures below were computed from that
-file while it existed, and independently recomputed from it by review before
-it was lost — two parties, same values.
-
-**The rows themselves are recovered**, so they *are* still checkable: review
-held a verbatim capture, and the table is transcribed in
-[`docs/backlog/resolved/gpu-vs-cpu-measured-done.md`](docs/backlog/resolved/gpu-vs-cpu-measured-done.md)
-under "Run 1's raw rows, recovered". What makes that more than one party's
-word for it: `idle_uW_mean` was computed from the `.power` files, which
-survived untouched, so that whole column re-derives from disk today — 8 of 8
-exact. What is gone is the *original file*, not the numbers. **Run 2 (`/tmp/scoot-asahi-test4`) is
-complete and intact**, and on its own establishes the correctness result, the
-ratios and every power figure. The script now refuses to measure into a
-directory that already holds a run, and `ANALYSE_ONLY=1` re-reads one.
-
 **What the numbers are keyed to.** Both runs measured *byte-identical
 binaries* — `/nix/store/mf5nm9…-scoot-0.1.0` and
 `/nix/store/b1kkl6s…-scoot-gpu-0.1.0`, both `nix build`s of `main` at
 `499083b`, which is also why the two runs are comparable with each other.
-(Run 1's store paths are quoted from its overwritten `environment.txt` as
-recorded in review, and run 2's are still on disk and match.)
 The harness trees differ (`650a187`, then `52672b8`) because the harness was
 fixed between runs; the compositor under test was not rebuilt and did not
 change. `environment.txt` in each output directory records both, and the
 store paths are the ones that matter.
+
+*Where run 1's raw file went.* `/tmp/scoot-tier-bench`'s `summary.tsv` and
+`environment.txt` were destroyed after the fact by
+`OUT=/tmp/scoot-tier-bench scripts/asahi-test4.sh` — intended as "re-read the
+old numbers", which at the time re-ran the benchmark into the evidence
+directory, failed every round on the busy seat, and left four `came_up=no`
+rows where four rounds of measurements had been. Every screenshot, every
+power sample and the `.outputs`/`.windows` dumps survive, as do the **r3–r4**
+logs (the clobbering run defaulted to `ROUNDS=2`, so rounds 1 and 2 hold
+seat-failure output from 23:10 instead). **The rows themselves are
+recovered** and remain checkable: review held a verbatim capture, transcribed
+in
+[`docs/backlog/resolved/gpu-vs-cpu-measured-done.md`](docs/backlog/resolved/gpu-vs-cpu-measured-done.md)
+under "Run 1's raw rows, recovered", and because `idle_uW_mean` was computed
+from the surviving `.power` files that whole column re-derives from disk
+today — 8 of 8 exact. What is gone is the original *file*, not the numbers,
+and run 1's store paths are quoted from that capture while run 2's are still
+on disk and match. Run 2 is complete and intact and on its own establishes
+the correctness result, the ratios and every power figure. Both scripts now
+refuse to measure into a directory that already holds a run; `ANALYSE_ONLY=1`
+re-reads one.
 
 **Correctness first, as this section asked for.** It comes up:
 
@@ -533,26 +531,19 @@ the captures are byte-identical `md5`-wise within a tier.
 
 | scene | dumb + pixman | gpu scanout | |
 | --- | --- | --- | --- |
-| large-damage motion | 0.455 j/ev (0.443–0.461) | **0.090 j/ev** (0.087–0.097) | **4.8–5.1x cheaper** |
+| large-damage motion | 0.4553 j/ev (0.4430–0.4613) | **0.0908 j/ev** (0.0872–0.0972) | **4.8–5.1x cheaper** |
 | full relayout | 3.358 j/ev (3.32–3.43) | **0.796 j/ev** (0.790–0.814) | **4.2–4.3x cheaper** |
 
-All six rounds pooled; the medians are `0.4553`/`0.0908` and `3.358`/`0.796`.
-The ranges above are the two runs' **ratios of medians** — 5.09x and 4.79x
-motion, 4.20x and 4.30x relayout — and naming the convention matters, because
-an earlier version quoted 5.07x and 4.18x here: 5.07 is the median of the
-four per-round *ratios* (a third statistic, inconsistent with the medians in
-the same sentence, which divide to 5.09) and 4.18 does not reproduce under
-any convention. As a share of one core over the fixed
-windows: motion cost **20.8%** on the dumb tier against **4.3%** on scanout;
-relayout **52.0%** against **14.0%**.
+All six rounds pooled. The two ranges are the runs' **ratios of medians** —
+5.09x and 4.79x motion, 4.20x and 4.30x relayout. As a share of one core over
+the fixed windows: motion cost **20.8%** on the dumb tier against **4.3%** on
+scanout; relayout **52.0%** against **14.0%**.
 
 **Round-to-round spread, since the ratio is large enough not to need
 flattering.** Against each tier's own median: motion −2.7%/+1.3% (dumb) and
-−3.9%/+7.1% (gpu); relayout −1.2%/+2.2% (dumb) and −0.8%/+2.2% (gpu). An
-earlier version of this section said "within ±1% per tier", which overstated
-the tightness by about 5x and contradicted the min–max column printed
-directly above it. The gpu motion column spans 11% min-to-max; the effect
-being measured is 400%, so it survives the honest number comfortably.
+−3.9%/+7.1% (gpu); relayout −1.2%/+2.2% (dumb) and −0.8%/+2.2% (gpu). The gpu
+motion column spans 11% min-to-max; the effect being measured is 400%, so it
+survives the honest number comfortably.
 
 **The other three metrics this section asked for, in its own order:**
 
@@ -566,9 +557,7 @@ being measured is 400%, so it survives the honest number comfortably.
 2. **Frame cost under damage:** above.
 3. **Memory: +7 to +16 MB RSS** for the GBM swapchain (medians: 76.2→92.4 MB
    in run 1, 87.3→94.8 MB in run 2 — the baseline itself moves, so this is a
-   range, not a constant). The one column the dumb tier wins. An earlier
-   version quoted run 1's dumb figure as 75.5 MB, which is that round set's
-   *mean* in a section that says medians throughout.
+   range, not a constant). The one column the dumb tier wins.
 4. **Power — the one this section called "genuinely unknown".** On this
    hardware it does **not** trade CPU wakeups for GPU draw: whole-system
    draw under damage is **lower** on scanout, by **0.22 W** under motion
@@ -587,6 +576,32 @@ cursor-rect move is a different measurement and was not made. Both figures
 are one panel at one resolution on one machine, and scanout remains
 primary-plane only — cursor and overlay planes are phase 2 of
 `docs/backlog/rendering/gpu-scanout-planes.md`, which this unblocks.
+
+**Corrections to earlier drafts of this section**, collected here rather than
+left inline, because a result is hard to read with its own revision history
+threaded through it. Each was found by review re-deriving the number instead
+of checking the prose:
+
+- *"Every round agrees within ±1% per tier"* overstated the tightness by
+  about 5x and contradicted the min–max column printed directly above it.
+  The real spreads are in the spread paragraph.
+- *Motion ratios of 5.07x and 4.18x.* 5.07 is the median of the four
+  per-round *ratios* — a third statistic, inconsistent with the medians
+  quoted beside it, which divide to 5.09 — and 4.18 reproduces under no
+  convention at all (it is 4.20). Hence the table now names its convention.
+- *Run 1's dumb RSS as 75.5 MB*, which is that round set's **mean** in a
+  section that says medians throughout. The median is 76.2, making the delta
+  +16.2 and the published range `+7 to +16 MB`.
+- *A relayout row of `3.34 (3.32–3.43)` and `0.797 (0.790–0.802)`.* The
+  medians were each one run's alone, and `0.802` was run 2's *maximum*: the
+  pooled maximum is `0.8136`, so a 1.5%-wide band was published where the
+  real one is 3.0%. A hidden spread in a table headed "medians with spread".
+- *A gpu motion median of `0.090`*, which truncates `0.09078` rather than
+  rounding it, in the flattering direction.
+- *"17–32x" for the llvmpipe read-back penalty* (above, in this test's
+  preamble). That pair divides out of round 1 of the stage-2 bench, which
+  `docs/roadmap/06-gpu-pipeline.md:872` had already retired for flattering
+  one scene and penalising the other; the medians give 18–31x.
 
 Two harness traps found while running it, in the tradition of the ones above.
 First, the compositor coloured its log output unconditionally, so

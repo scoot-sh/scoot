@@ -51,7 +51,7 @@ claimed rather than shown. Where they stand now:
   though, and it would be wrong to say the deleted read-back explains this
   number: the dumb tier never reads back — it composites with pixman and
   memcpys the damaged region into a DRM dumb buffer (`tty/dumb.rs`,
-  `tty/buffers.rs`). The 17–32x read-back cost was the *gles-offscreen*
+  `tty/buffers.rs`). The 18–31x read-back cost was the *gles-offscreen*
   tier's. What this A/B measures is the GPU rasterising instead of the CPU
   **plus** the deleted memcpy, and it cannot separate the two.
 - **The split render/display topology works — shown, and more cheaply than

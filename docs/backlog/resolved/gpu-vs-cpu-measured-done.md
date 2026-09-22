@@ -26,8 +26,8 @@ comparable with each other.
 
 | the VM measured (llvmpipe) | the M2 measured |
 | --- | --- |
-| offscreen GLES, frame read back: **17-32x slower** than pixman | **parity**: 55.0 vs 56.4µs (empty), 57.3 vs 56.0µs (8 windows) |
-| GPU scanout: **~1.5x slower** than the dumb tier | **4.2-5.1x faster**: 0.455 -> 0.090 j/ev motion, 3.358 -> 0.796 j/ev relayout |
+| offscreen GLES, frame read back: **18-31x slower** than pixman | **parity**: 55.0 vs 56.4µs (empty), 57.3 vs 56.0µs (8 windows) |
+| GPU scanout: **~1.5x slower** than the dumb tier | **4.2-5.1x faster**: 0.4553 -> 0.0908 j/ev motion, 3.358 -> 0.796 j/ev relayout |
 
 The entry's own reasoning was that the read-back, not the rasterising, was
 the dominant cost, so scanout should win where rasterising is the GPU's job.

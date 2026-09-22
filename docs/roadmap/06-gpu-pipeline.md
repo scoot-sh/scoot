@@ -493,7 +493,7 @@ IPC pointer moves on a `--tty` session, two runs each:
 | `scanout="dumb"` (pixman) | 27, 24 | 3369ms, 3339ms |
 | `scanout="gpu"` (gles) | 36, 37 | 3425ms, 3414ms |
 
-~1.5x, against the **17-32x** stage 2 measured for offscreen GLES on the same
+~1.5x, against the **18-31x** stage 2 measured for offscreen GLES on the same
 rasteriser. That gap is the read-back and the dumb-buffer memcpy this tier
 removes, and it is the only part of the performance story this VM can show.
 The part it cannot: what any of this costs on a real GPU, where the
@@ -562,7 +562,7 @@ here even that is gone and only the cursor's antialiasing differs.
 
 | scene | dumb + pixman | gpu scanout | ratio |
 | ----- | ------------- | ----------- | ----- |
-| large-damage motion | 0.455 j/ev (0.443-0.461) | **0.090** (0.087-0.097) | **4.8-5.1x** |
+| large-damage motion | 0.4553 j/ev (0.4430-0.4613) | **0.0908** (0.0872-0.0972) | **4.8-5.1x** |
 | full relayout | 3.358 j/ev (3.32-3.43) | **0.796** (0.790-0.814) | **4.2-4.3x** |
 
 As a share of one core: motion **20.8% -> 4.3%**, relayout **52.0% ->

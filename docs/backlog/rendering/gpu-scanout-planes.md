@@ -46,7 +46,7 @@ Linux, 2026-09-21)"; re-runnable as `scripts/asahi-test4.sh`.
   caveats in the roadmap file.
 
 VM baseline for comparison (`06-gpu-pipeline.md:406-502`): KMS plumbing
-proven on virtio-gpu; scanout ~1.5x dumb-tier CPU there vs 17–32x for
+proven on virtio-gpu; scanout ~1.5x dumb-tier CPU there vs 18–31x for
 offscreen GLES — read-back was the dominant cost.
 
 ## Phase 2 — overlay + cursor planes (after phase 1 green)
