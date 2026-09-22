@@ -11,7 +11,7 @@ use smithay::desktop::layer_map_for_output;
 use smithay::desktop::utils::send_frames_surface_tree;
 use smithay::output::{Mode, Output, PhysicalProperties, Subpixel};
 use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
-use smithay::utils::Transform;
+use smithay::utils::{Logical, Point, Transform};
 
 use super::State;
 use super::output_scale::smithay_scale;
@@ -887,9 +887,14 @@ impl State {
     /// [`State::output_scale`](super::State::output_scale) has already been
     /// updated to it.
     ///
-    /// Each output keeps its physical mode and its position -- only the
-    /// advertised scale moves, through the same `set_mode` startup uses, so
-    /// bound `wl_output` clients hear the new integer -- and the new logical
+    /// Each output keeps its physical mode -- only the advertised scale
+    /// moves, through the same `set_mode` startup uses, so bound `wl_output`
+    /// clients hear the new integer -- and the outputs are recompac ted
+    /// order-preservingly onto the new logical widths (each sits immediately
+    /// right of the previous one's new right edge, exactly the fold
+    /// `add_output` builds fresh sessions with), so a rescaled session ends
+    /// up laid out like a session started at the new scale rather than
+    /// preserving stale positions into a gap or an overlap. The new logical
     /// geometry (see `output_scale.rs`'s `logical_size`) is filed with the
     /// core per output, position included (unlike `resize_output`'s
     /// origin-only rectangle, which is correct only for its single-output
@@ -898,6 +903,15 @@ impl State {
     /// steps a resize runs; output-management heads and capture constraints
     /// are refreshed from the same sites. The caller runs `apply()` after,
     /// which pushes the re-derived arrangement onto the windows and renders.
+    ///
+    /// A move crosses two stores that must agree: the Space-side location
+    /// `output_geometry` (and with it the input clamp, the render elements
+    /// and the core areas) reads, rewritten by re-mapping the already-mapped
+    /// output, and the Output-side location the wire (`wl_output.geometry`,
+    /// `xdg_output.logical_position`, the output-management heads)
+    /// advertises, re-sent through `set_mode`'s location. Passing a location
+    /// `set_mode` never touches the Space side, and mapping never announces
+    /// anything -- either half alone leaves the two disagreeing.
     ///
     /// Deliberately *not* rebuilding any render target: the framebuffer is
     /// physical pixels, and a pure scale change leaves every output's
@@ -914,6 +928,9 @@ impl State {
         // beyond the one small `Vec` this cold path keeps.
         let count = self.outputs.len();
         let mut moved: Vec<(OutputId, Output, Rect)> = Vec::new();
+        // The running left edge, in the new logical pixels. Saturating like
+        // `add_output`, for the same config-scale overflow rationale.
+        let mut x = 0i32;
         for index in 0..count {
             let Some((id, output)) = self.outputs.at(index) else {
                 continue;
@@ -926,10 +943,23 @@ impl State {
                 tracing::warn!("could not rescale: the output has no mode yet");
                 continue;
             };
-            // `None` for the location: the output stays where it is, which
-            // is what keeps a second output's position past a rescale.
-            set_mode(&output, mode.size.w, mode.size.h, None, scale);
+            let position = Point::<i32, Logical>::from((x, 0));
+            // `None` where the output already sits there, so nothing
+            // re-announces an identical geometry: a single-output session
+            // recompacts onto its own origin, and its wire traffic stays
+            // exactly what the scale change alone sends.
+            let location = self
+                .space
+                .output_geometry(&output)
+                .map(|geometry| geometry.loc != position)
+                .unwrap_or(true)
+                .then_some(position);
+            self.space.map_output(&output, position);
+            set_mode(&output, mode.size.w, mode.size.h, location, scale);
             let Some(geometry) = self.space.output_geometry(&output) else {
+                // Unreachable even beyond the mode arm above: the output was
+                // just (re-)mapped into this space. Same loud-skip rule.
+                tracing::warn!("could not rescale: the output has no geometry to file");
                 continue;
             };
             debug_assert!(
@@ -938,6 +968,7 @@ impl State {
                     .is_none_or(|backend| backend.size() == (mode.size.w, mode.size.h)),
                 "a pure scale change must leave the physical render target alone"
             );
+            x = x.saturating_add(geometry.size.w);
             moved.push((
                 id,
                 output,

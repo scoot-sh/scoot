@@ -15,7 +15,7 @@
 use std::fs;
 use std::path::PathBuf;
 
-use scoot_core::{Action, Config, Event, Horizontal, WindowId, WindowInfo};
+use scoot_core::{Action, Config, Event, Horizontal, OutputId, WindowId, WindowInfo};
 use scoot_ipc::{Request, Response};
 use smithay::reexports::calloop::EventLoop;
 use smithay::reexports::wayland_server::Display;
@@ -388,6 +388,96 @@ fn scale_reloads_round_trip_through_fractional_and_back() {
         "the round trip should settle silently: {settled:?}"
     );
     assert!(!fixture.state.needs_render);
+}
+
+#[test]
+fn rescale_recompacts_outputs_like_a_fresh_session() {
+    // Review follow-up pin: two 200px outputs at scale 1 sit at x=0 and
+    // x=200. A reload to 2.0 must recompact them to x=0 and x=100 -- what a
+    // session started at 2.0 builds -- not preserve x=200 behind a gap, and
+    // the trip back to 1.0 must not overlap. A window on the second output
+    // follows it both ways.
+    let mut fixture = Fixture::with_config("");
+    let second = headless::add_output(&mut fixture.state, "headless-2", CANVAS, CANVAS)
+        .expect("a second headless output");
+    fixture.state.world.handle_event(Event::WindowOpened {
+        id: WindowId(1),
+        info: WindowInfo::default(),
+        output: Some(second),
+        focus: true,
+    });
+    assert_eq!(origin_of(&fixture.state, OutputId(1)), (0, 0));
+    assert_eq!(origin_of(&fixture.state, second), (CANVAS, 0));
+    let placed = fixture
+        .state
+        .world
+        .arrange()
+        .get(WindowId(1))
+        .expect("the opened window is placed")
+        .rect;
+    assert!(
+        placed.x >= CANVAS,
+        "the window should open on the second output: {placed:?}"
+    );
+
+    fixture.rewrite("[output]\nscale = 2.0\n");
+    let response = fixture.reload();
+    assert_eq!(
+        applied(&response),
+        &[field::SCALE.to_owned()],
+        "the rescale should apply: {response:?}"
+    );
+    assert_eq!(origin_of(&fixture.state, OutputId(1)), (0, 0));
+    assert_eq!(
+        origin_of(&fixture.state, second),
+        (CANVAS / 2, 0),
+        "the second output should recompact against the first, like a fresh session at 2.0"
+    );
+    let moved = fixture
+        .state
+        .world
+        .arrange()
+        .get(WindowId(1))
+        .expect("the window is still placed")
+        .rect;
+    assert!(
+        (CANVAS / 2..CANVAS).contains(&moved.x),
+        "the window should follow the second output into its new area: {moved:?}"
+    );
+
+    fixture.rewrite("[output]\nscale = 1.0\n");
+    let back = fixture.reload();
+    assert_eq!(
+        applied(&back),
+        &[field::SCALE.to_owned()],
+        "the trip back should apply too: {back:?}"
+    );
+    assert_eq!(
+        origin_of(&fixture.state, second),
+        (CANVAS, 0),
+        "the trip back must not leave the outputs overlapping"
+    );
+    let home = fixture
+        .state
+        .world
+        .arrange()
+        .get(WindowId(1))
+        .expect("the window is still placed")
+        .rect;
+    assert!(
+        home.x >= CANVAS,
+        "the window should follow the second output home: {home:?}"
+    );
+}
+
+/// Where the `Space` puts `id`'s output -- the position a recompact moves.
+fn origin_of(state: &State, id: OutputId) -> (i32, i32) {
+    let output = state.outputs.get(id).expect("a known output");
+    let geometry = state
+        .space
+        .output_geometry(output)
+        .expect("a mapped output's geometry");
+    (geometry.loc.x, geometry.loc.y)
 }
 
 #[test]

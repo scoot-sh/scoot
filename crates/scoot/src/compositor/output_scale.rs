@@ -225,6 +225,14 @@ impl State {
     /// and role their surfaces in one commit burst, so the gap is a
     /// microsecond misfire, not a steady state.
     ///
+    /// Unmapped popups share the gap: a popup tracked before it has a parent
+    /// (or before its first commit) waits in `PopupManager::unmapped_popups`,
+    /// which `popups_for_surface` never reads, so a reload in that window
+    /// misses it and the next reload heals it. Either miss is invisible
+    /// while stale: the render path gathers popups through the identical
+    /// per-root call -- subsurface-parented ones included -- so whatever the
+    /// re-send cannot see is also never drawn.
+    ///
     /// Cold reload path only -- nothing here runs per frame or per commit,
     /// so the per-surface walk and the one small root `Vec` are acceptable
     /// where they would not be on the commit path (`handlers.rs` keeps its
