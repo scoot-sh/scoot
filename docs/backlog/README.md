@@ -692,7 +692,9 @@ scale/mode) into one hardware session.
   fix, and phase 2's own first question is whether `apple,dcp` exposes
   usable cursor/overlay planes at all. Headless/nested read-back stays by
   design. Numbers: [the measurement entry](./resolved/gpu-vs-cpu-measured-done.md).
-- [Config reload: from partial to full](./core/config-reload-full.md)
-  — OPEN, medium: cursor → `column_widths` → `output.scale` →
-  autostart spawn-delta → renderer/GPU reworded to restart semantics.
-  SIGHUP inherits free; no wire bump (strings migrate, no third list).
+- [Config reload: from partial to full](./resolved/config-reload-full-done.md)
+  — RESOLVED 2026-09-22 (all phases): autostart spawn-delta (only entries
+  the session has not seen run, new spawns once each, reloaded non-spawn
+  refused by name, locked reloads defer to the first unlocked one) plus
+  renderer/GPU refusals reworded to restart semantics. End state: live
+  except `renderer.backend` + `tty.gpu`. SIGHUP inherits; no wire bump.

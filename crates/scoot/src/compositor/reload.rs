@@ -49,10 +49,21 @@
 //!   never consults the table mid-hold: the press records its keycode in
 //!   `suppressed_keys` (or doesn't), and the release is routed by that set,
 //!   not by what the table says now (see `input::key`).
-//! - `[tty] gpu`, `[renderer] backend`, `[autostart] commands`: refused when
-//!   they differ from what the session runs. Each names something fixed
-//!   before the first frame (the device already driven, the renderer with
-//!   client textures in it, commands that ran once at startup).
+//! - `[tty] gpu`, `[renderer] backend`: refused when they differ from what
+//!   the session runs, naming restart as the remedy. Each names something
+//!   fixed before the first frame (the device already driven, the renderer
+//!   with client textures in it) that no live swap can reach proportionate
+//!   to its risk -- rebuilding either mid-session is a restart keeping
+//!   clients, every step fallible mid-flight -- so the refusal stands and
+//!   says so.
+//! - `[autostart] commands`: the spawn delta applies -- entries the session
+//!   has not seen run once each, in file order, through the same `act` path
+//!   startup drains. New `Spawn` entries only: a reloaded non-spawn action
+//!   (`quit` included) is refused by name and never acted on. Seen means "in
+//!   the `startup_autostart` snapshot", by value per occurrence: an edited
+//!   entry is new, a removed-then-re-added entry runs again, and duplicates
+//!   count per occurrence. The snapshot advances past the whole fresh list
+//!   on every unlocked reload, so a second identical reload is silent.
 //!
 //! Every refusal names the field; nothing is silently ignored. Both lists
 //! name only fields that *differed* -- a field the file and the session
@@ -78,7 +89,16 @@
 //! across the lock boundary. Refusing under lock
 //! would strand an agent that edits the file mid-lock with an error for a
 //! request that is safe to serve.
+//!
+//! Autostart is the deliberate exception: a reload under lock neither runs
+//! new spawn entries -- a spawned program at lock time could disclose a
+//! window onto, or interfere with, the locked session -- nor drops them.
+//! The snapshot freezes, the reply refuses the field as skipped-while-locked,
+//! and the first unlocked reload runs what is still pending. Deferred, not
+//! denied. (An empty delta -- a pure removal, or nothing new at all -- stays
+//! silent even under lock; there is nothing actionable to skip.)
 
+use scoot_core::Action;
 use scoot_ipc::Response;
 
 use super::State;
@@ -157,17 +177,21 @@ impl State {
     /// One applier per field family, in dependency order (layout before
     /// appearance: the ring re-clamp reads the applied gap). Each compares
     /// against the live value -- or, where there is no live value to read
-    /// (the device already driven, the entries already run), against the
-    /// `startup_*` snapshot `run` wrote once and nothing ever advances --
-    /// and writes `State::appearance`/cursor/world/binds alongside every
-    /// report entry, so a second reload diffs against what the first applied
-    /// and re-reports nothing.
+    /// (the device already driven), against the `startup_*` snapshot `run`
+    /// wrote once and nothing ever advances -- and writes
+    /// `State::appearance`/cursor/world/binds alongside every report entry,
+    /// so a second reload diffs against what the first applied and
+    /// re-reports nothing. (`startup_autostart` is the one snapshot that
+    /// advances: every *unlocked* reload moves it past the whole fresh
+    /// autostart list, decided entries never re-report; a *locked* reload
+    /// freezes it, deferring the delta to the first unlocked reload.)
     fn apply_reload(&mut self, fresh: &LoadedConfig) -> Report {
         let mut report = Report::default();
         self.apply_layout_reload(fresh, &mut report);
         self.apply_appearance_reload(fresh, &mut report);
         self.apply_scale_reload(fresh, &mut report);
-        self.apply_startup_only_reload(fresh, &mut report);
+        self.apply_device_reload(fresh, &mut report);
+        self.apply_autostart_reload(fresh, &mut report);
         self.apply_binds_reload(fresh, &mut report);
 
         // Recompute the arrangement and request a render when anything
@@ -348,31 +372,63 @@ impl State {
         }
     }
 
-    /// The fields with no live state to compare against: `[tty] gpu`,
-    /// `[renderer] backend`, `[autostart] commands`. Each diffs against the
-    /// `startup_*` snapshot (or the fixed live value, where the session
-    /// carries one) and refuses when it differs -- see the module doc for
-    /// why none of these applies live. (`[output] scale` used to refuse
-    /// here too; it applies live now, through `apply_scale_reload` above.)
-    fn apply_startup_only_reload(&self, fresh: &LoadedConfig, report: &mut Report) {
+    /// The fields with no live state to compare against: `[tty] gpu` and
+    /// `[renderer] backend`. Each diffs against the `startup_*` snapshot (or
+    /// the fixed live value, where the session carries one) and refuses when
+    /// it differs -- see the module doc for why neither applies live.
+    /// (`[output] scale` used to refuse here too; it applies live now,
+    /// through `apply_scale_reload` above. `[autostart]` runs its spawn
+    /// delta instead, through `apply_autostart_reload` below.)
+    fn apply_device_reload(&self, fresh: &LoadedConfig, report: &mut Report) {
         if fresh.gpu != self.startup_gpu {
             report.refused.push(refused(
                 field::GPU,
-                "startup-only: the session already drives its device",
+                "takes effect on restart: the session already drives its device",
             ));
         }
         if fresh.renderer.is_some_and(|kind| kind != self.renderer) {
             report.refused.push(refused(
                 field::BACKEND,
-                "startup-only: the live renderer holds client textures",
+                "takes effect on restart: the live renderer holds client textures",
             ));
         }
-        if fresh.autostart != self.startup_autostart {
+    }
+
+    /// `[autostart] commands`: run-only-new-`Spawn`-entries, through the
+    /// same `act` path startup drains (so the lock backstop, the spawn
+    /// environment and the per-entry ordering apply unchanged), then advance
+    /// the snapshot past the whole fresh list.
+    ///
+    /// Never a full re-drain -- entries the snapshot already holds stay
+    /// silent -- and never a non-spawn action: a reloaded `quit` is refused
+    /// by name rather than handed to `act`, which would end the session.
+    /// Under lock nothing runs and the snapshot freezes (see the module
+    /// doc): the delta defers to the first unlocked reload.
+    fn apply_autostart_reload(&mut self, fresh: &LoadedConfig, report: &mut Report) {
+        let delta = autostart_delta(&fresh.autostart, &self.startup_autostart);
+        if self.session_lock.is_locked() {
+            if !delta.run.is_empty() || !delta.refuse.is_empty() {
+                report.refused.push(refused(
+                    field::AUTOSTART,
+                    "skipped while locked: new entries run on the first unlocked reload",
+                ));
+            }
+            return;
+        }
+        for action in &delta.run {
+            tracing::info!(?action, "running a new autostart entry from config reload");
+            self.act(action.clone());
+        }
+        if !delta.run.is_empty() {
+            report.applied.push(field::AUTOSTART.to_owned());
+        }
+        for action in &delta.refuse {
             report.refused.push(refused(
                 field::AUTOSTART,
-                "startup-only: entries run once, at session start",
+                &format!("{action:?} is not a spawn entry; only new spawn entries run on reload"),
             ));
         }
+        self.startup_autostart = fresh.autostart.clone();
     }
 
     /// `[binds]`: rebuilt from defaults plus the file (see
@@ -418,6 +474,45 @@ fn scale_reload(fresh: f64, live: f64, nested: bool) -> ScaleReload {
     } else {
         ScaleReload::Apply
     }
+}
+
+/// What a reloaded `[autostart] commands` decides: the unseen entries split
+/// by variant. Unseen means "absent from the snapshot", by value, counted
+/// per occurrence -- see `autostart_delta`.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct AutostartDelta {
+    /// Unseen `Spawn` entries, in file order: the caller runs each through
+    /// `act` and reports the field applied.
+    run: Vec<Action>,
+    /// Unseen non-`Spawn` entries, in file order: the caller refuses each by
+    /// name. A reloaded `quit` lands here, never in `run` -- handing it to
+    /// `act` would end the session.
+    refuse: Vec<Action>,
+}
+
+/// Diffs a reloaded autostart list against the entries the session has
+/// already decided (ran at startup, or ran/refused by an earlier unlocked
+/// reload). Pure so the matrix pins without spawning: a multiset difference
+/// by value, in file order -- an entry edited in place is a new entry
+/// (there is no identity subtler than the action itself to key on), a
+/// removed-then-re-added entry is new again (no memory past the last
+/// snapshot), and duplicates count per occurrence (two identical entries run
+/// twice at startup, so one seen plus two fresh is one run, not zero).
+fn autostart_delta(fresh: &[Action], seen: &[Action]) -> AutostartDelta {
+    let mut consumed = vec![false; seen.len()];
+    let mut delta = AutostartDelta::default();
+    for action in fresh {
+        let prior = seen
+            .iter()
+            .enumerate()
+            .find(|(index, seen)| !consumed[*index] && *seen == action);
+        match prior {
+            Some((index, _)) => consumed[index] = true,
+            None if matches!(action, Action::Spawn(_)) => delta.run.push(action.clone()),
+            None => delta.refuse.push(action.clone()),
+        }
+    }
+    delta
 }
 
 fn refused(field: &str, reason: &str) -> String {

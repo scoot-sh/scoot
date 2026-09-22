@@ -155,9 +155,16 @@ pub enum Response {
     },
     /// What a `Reload` request answers on success: which config fields were
     /// re-applied live, and which differed from the running session but
-    /// cannot be (`tty.gpu`, `renderer.backend`, `autostart.commands` --
-    /// each refused explicitly, never silently ignored; `output.scale` joins
-    /// them under `--nested`, where the host compositor owns the scale).
+    /// cannot be (`tty.gpu` and `renderer.backend`, which take effect on
+    /// restart -- each refused explicitly, never silently ignored -- plus
+    /// `output.scale` under `--nested`, where the host compositor owns the
+    /// scale, and any reloaded `[autostart]` entry that is not a new `spawn`,
+    /// refused by name; new spawns run, and report applied).
+    ///
+    /// A reload under session lock skips new autostart entries (refused as
+    /// skipped-while-locked, run on the first unlocked reload) while
+    /// everything else applies as usual -- see the compositor's `reload.rs`
+    /// for the while-locked argument.
     ///
     /// Both lists name only fields that *differed*: a field the file and the
     /// running session agree on appears in neither. Two empty lists together

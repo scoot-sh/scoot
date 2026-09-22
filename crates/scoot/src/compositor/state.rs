@@ -91,12 +91,16 @@ pub struct State {
     /// resolved at all (neither `XDG_CONFIG_HOME` nor `HOME` set), in which
     /// case a reload answers an error rather than guessing.
     pub config_path: Option<PathBuf>,
-    /// The startup-only config values a reload diffs against: `[tty] gpu`
+    /// The config values a reload diffs against snapshots for: `[tty] gpu`
     /// as the file named it (`None` when unset) and `[autostart] commands`
-    /// as they ran. Neither has live state to compare a reloaded file with
-    /// (the device is already driven, the entries already ran), so the
-    /// startup values are what decides "changed, and refused" versus
-    /// "agreed, silent". Set once in `run`, never written after.
+    /// as last decided. The gpu value has no live state to compare a
+    /// reloaded file with (the device is already driven), so the startup
+    /// value is what decides "changed, and refused" versus "agreed,
+    /// silent" -- set once in `run`, never written after. The autostart
+    /// list is the spawn-delta snapshot instead: seeded once in `run` with
+    /// what startup drained, then advanced past the whole fresh list by
+    /// every *unlocked* reload (a *locked* reload freezes it, deferring new
+    /// entries to the first unlocked reload) -- see `reload.rs`.
     pub startup_gpu: Option<PathBuf>,
     pub startup_autostart: Vec<Action>,
 

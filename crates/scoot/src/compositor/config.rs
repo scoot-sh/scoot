@@ -269,7 +269,11 @@ impl RendererConfig {
 /// values) use -- see `scootctl::action`, reused here rather than duplicated.
 /// No ordering, no conditionals, no supervision: entries run once each, in
 /// file order, before the `--` command (see `compositor::run`), and anything
-/// fancier belongs in the session script. Parsed lazily one at a time (see
+/// fancier belongs in the session script. A reload runs the spawn delta on
+/// top -- entries the session has not seen yet run once each (new `Spawn`
+/// entries only; anything else is refused by name), or skip while locked
+/// and run on the first unlocked reload instead (see `reload.rs`).
+/// Parsed lazily one at a time (see
 /// [`AutostartConfig::into_actions`]), so one bad entry can't take the rest
 /// down with it -- the same isolation philosophy [`apply_binds`] has for
 /// `[binds]`.
@@ -363,7 +367,11 @@ pub struct LoadedConfig {
     /// `commands` key, or nothing usable in it -- means nothing runs before
     /// the `--` command. `compositor::run` drains these through `State::act`
     /// before spawning `--`, so the full action grammar applies (a non-`spawn`
-    /// action at startup is the user's choice, documented as such).
+    /// action at startup is the user's choice, documented as such), and
+    /// seeds `State::startup_autostart` with them for the reload spawn
+    /// delta: a later reload runs only entries absent from that snapshot
+    /// (new spawns; anything else refuses by name), or skips while locked
+    /// (see `reload.rs`).
     pub autostart: Vec<Action>,
 }
 
@@ -565,9 +573,10 @@ pub fn default_config_toml() -> String {
          # comments summarize, not replace).\n\
          #\n\
          # Gap, column widths, the output scale, the ring/background/cursor
-         # appearance fields, and binds re-apply live
-         # with `scootctl reload`; everything else is startup-only and a
-         # reload refuses it with a message.\n",
+         # appearance fields, binds, and new [autostart] spawn entries
+         # re-apply live with `scootctl reload`; [tty] gpu and [renderer]
+         # backend take effect on restart and a reload refuses them with a
+         # message.\n",
     );
 
     out.push_str("\n[layout]\n");
@@ -642,6 +651,7 @@ pub fn default_config_toml() -> String {
 
     out.push_str("\n[autostart]\n");
     out.push_str("# Action strings to run once each, in file order, at session startup.\n");
+    out.push_str("# A reload runs entries the session has not seen yet (new spawns only).\n");
     out.push_str("# commands = []\n");
 
     out.push_str("\n[binds]\n");

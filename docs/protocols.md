@@ -967,10 +967,10 @@ advertised three ways, matching what clients actually support:
 
 Real limits rather than polish:
 
-- **Startup only, and session-wide.** The scale is read once when scoot starts
-  and never changes; `scootctl reload` refuses it with a message rather than
-  applying it, and there is no per-output setting.
-  Changing it means restarting scoot.
+- **Session-wide.** `scootctl reload` re-applies the scale live
+  (re-advertised on `wl_output`, re-sent to every live surface, geometry
+  recomputed), and there is no per-output setting.
+  Changing it per output means waiting on per-output configuration.
 - **`--nested` is scale-1 only.** The host compositor owns the scale of the
   window scoot is drawn inside, so a non-1.0 `scale` there would double-count
   it; scoot logs a warning and uses `1.0`.

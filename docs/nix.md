@@ -151,8 +151,8 @@ is at the bottom of this page, pasted from a real
 
 After `home-manager switch`, apply the new settings without re-logging in:
 `scoot msg reload` (`scootctl reload` is the same client) re-reads the file
-and re-applies what can move live; startup-only fields are refused with a
-message rather than silently kept (see
+and re-applies what can move live; the two restart fields are refused with a
+message naming that rather than silently kept (see
 [configuration.md](configuration.md#reloading-the-config)).
 
 ## NixOS module
