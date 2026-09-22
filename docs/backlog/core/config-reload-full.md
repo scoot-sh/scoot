@@ -18,7 +18,7 @@ blocked: null
 > (`output.scale`), Phase 4 (autostart policy), Phases 5–6 (renderer/GPU
 > reword). The seams land where those phases need them.
 >
-> PROGRESS 2026-09-22: Phase 2 LANDED (PR TBD). `column_widths` /
+> PROGRESS 2026-09-22: Phase 2 LANDED (PR #211). `column_widths` /
 > `default_column_width` reload live through one `World::set_config`: a
 > shorter list clamps live presets (`min(preset, len-1)`, the existing
 > `validated()` clamp precedent — no window silently changes relative
