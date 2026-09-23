@@ -8,7 +8,7 @@ blocked: null
 
 # Popup constraint adjustment — RESOLVED
 
-RESOLVED 2026-09-23 (PR #PRNUM). An `xdg_popup`'s geometry is flipped, slid
+RESOLVED 2026-09-23 (PR #225). An `xdg_popup`'s geometry is flipped, slid
 or resized per its positioner's `constraint_adjustment` into a target
 rectangle; the rules, and why each, are in
 `crates/scoot/src/compositor/popup_constraint.rs`:

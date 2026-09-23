@@ -101,7 +101,7 @@ each item's own file records why it landed when it did.
 ## Recently shipped (since 2026-09-15)
 
 - **[Popup constraint adjustment](docs/backlog/resolved/popup-constraint-adjustment-done.md)**
-  (2026-09-23, PR #PRNUM) — the regression PR #224 made visible (a menu at a
+  (2026-09-23, PR #225) — the regression PR #224 made visible (a menu at a
   shared output edge cut off) and the older one at every outer edge: an
   `xdg_popup` is flipped, slid or resized per its positioner into a target
   (`popup_constraint.rs`) — a window's popup into its output's usable area
