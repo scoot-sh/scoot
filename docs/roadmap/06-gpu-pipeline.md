@@ -364,8 +364,11 @@ What lands:
   slot's, and no client buffer here matches (opaque fourcc vs `AR24`;
   `LINEAR` vs an implicit modifier on virtio) -- so no frame this tree
   produces takes the primary direct yet. The capture fix was watched
-  working live with that check lifted in an experiment; lifting it for
-  real is `docs/backlog/core/gpu-primary-direct-format-gate.md`.)*
+  working live with that check lifted in an experiment. It was lifted for
+  real, per frame, afterwards: a fullscreen window covering its output now
+  goes primary-direct with `ANY`, every other frame carries no primary bit
+  at all, and a capture-streamed output stays composited
+  (`docs/backlog/resolved/gpu-primary-direct-format-gate-done.md`).)*
 - **`PresentRetries` is reused, not replaced**, against the letter of the
   staging note below. A refused `queue_frame` is the same hazard as a refused
   `page_flip`: nothing is in flight, so no completion event will retry it and

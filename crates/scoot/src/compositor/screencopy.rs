@@ -155,12 +155,16 @@
 //!   both counts).
 //!
 //! What a capture is *never* missing on any tier is a window. On the scanout
-//! tier a primary-direct frame leaves the previous composite in the slot the
+//! tier a primary-direct frame (a fullscreen window covering the output, see
+//! `render::primary_direct`) leaves the previous composite in the slot the
 //! capture reads, so serving it would show a stale screen; instead the serve
 //! path forces one composite frame first
 //! (`State::ensure_scanout_capture_current`, called above `deliver`), and a
 //! session where the force could not draw (no DRM master) fails its due
-//! frames loudly rather than serving the stale buffer. Shell thumbnails and
+//! frames loudly rather than serving the stale buffer. A session that is
+//! *streaming* -- a frame parked, or one asked for within the last second --
+//! keeps its output composited instead ([`Screencopy::streaming`]), so a
+//! recorder never pays the force per frame. Shell thumbnails and
 //! workspace overviews are ext-capture clients: they arrive through this
 //! same `deliver` path and inherit the same guarantee, there is no second
 //! pixel path to keep correct.
@@ -223,6 +227,8 @@
 
 use std::collections::HashMap;
 use std::time::Duration;
+#[cfg(feature = "gpu-scanout")]
+use std::time::Instant;
 
 use scoot_core::OutputId;
 
@@ -499,6 +505,36 @@ struct Capture {
     /// `None` is what makes a session's first frame exempt from waiting for
     /// the screen to change; see this module's doc.
     delivered: Option<u64>,
+    /// When this session's newest `capture` request arrived, or `None`
+    /// while it has made none.
+    ///
+    /// What [`Screencopy::streaming`] reads to keep a capture *stream* off
+    /// the scanout tier's primary-direct path (see there). Stamped on
+    /// arrival rather than on delivery, so the frame that answers the very
+    /// first request of a stream is already composited.
+    #[cfg(feature = "gpu-scanout")]
+    requested: Option<Instant>,
+}
+
+/// How recently a session must have asked for a frame for its output to
+/// count as being streamed (see [`Screencopy::streaming`]).
+///
+/// One second: anything capturing at 1 Hz or faster -- a recorder, a
+/// screen-share, a live overview -- keeps the output composited for as long
+/// as it runs, and the output goes back to primary-direct within a second
+/// of the last request. Slower than that, each capture pays the forced
+/// composite frame instead, which at that rate is noise.
+#[cfg(feature = "gpu-scanout")]
+const STREAM_WINDOW: Duration = Duration::from_secs(1);
+
+/// Whether a request stamped `requested` still counts at `now`: strictly
+/// inside [`STREAM_WINDOW`]. Pure, so the boundary is pinnable with
+/// synthetic instants. `saturating_duration_since`, so a stamp from the
+/// future (an `Instant` taken after `now` by a caller that read the clock
+/// first) counts as brand new rather than panicking or wrapping.
+#[cfg(feature = "gpu-scanout")]
+fn requested_recently(requested: Option<Instant>, now: Instant) -> bool {
+    requested.is_some_and(|at| now.saturating_duration_since(at) < STREAM_WINDOW)
 }
 
 impl Capture {
@@ -515,6 +551,45 @@ impl Capture {
 }
 
 impl Screencopy {
+    /// Whether a capture client is streaming `output` right now: some session
+    /// on it has a frame parked, or asked for one within the last
+    /// [`STREAM_WINDOW`].
+    ///
+    /// Read by `render::primary_direct` to keep a streamed output
+    /// composited. A direct frame is not in the swapchain slot a capture
+    /// reads, so every capture of a direct output forces a composite frame
+    /// first -- one full composite and a framebuffer re-export for the
+    /// client, per capture. For one
+    /// screenshot that is nothing; for a stream it is every frame, and
+    /// measured on the dev VM (a fullscreen client paced on frame callbacks
+    /// plus a continuous capture client) it cost more CPU than compositing
+    /// throughout and stretched both the client's and the capture's frame
+    /// intervals. So while a stream runs the output composites, exactly as
+    /// it did before primary-direct existed, and every capture reads a
+    /// current composite with nothing to force.
+    ///
+    /// Both halves matter. The window is what keeps a stream counted across
+    /// the gap between a delivery and the client's next request (without
+    /// it the frames in that gap go direct and every capture forces again);
+    /// the parked frame is what keeps one counted across a pause longer than
+    /// the window -- a recorder waiting on a still screen -- so the frame
+    /// that ends the pause is composited rather than forced.
+    ///
+    /// An idle session -- one that exists but is not asking (a thumbnail
+    /// source between refreshes) -- does not count, and neither does IPC
+    /// `screenshot`, which is one-shot and takes the force path.
+    ///
+    /// Allocation-free; runs only for an eligible frame (an unlocked output
+    /// a fullscreen window covers), over a list that is empty unless some
+    /// client is capturing.
+    #[cfg(feature = "gpu-scanout")]
+    pub(super) fn streaming(&self, output: OutputId, now: Instant) -> bool {
+        self.sessions.iter().any(|capture| {
+            capture.output == Some(output)
+                && (capture.pending.is_some() || requested_recently(capture.requested, now))
+        })
+    }
+
     /// Creates the `ext_image_copy_capture_manager_v1` and
     /// `ext_output_image_capture_source_manager_v1` globals, and the empty
     /// dmabuf state `dmabuf::advertise` later hangs `zwp_linux_dmabuf_v1` on.
@@ -676,6 +751,8 @@ impl ImageCopyCaptureHandler for State {
             output,
             pending: None,
             delivered: None,
+            #[cfg(feature = "gpu-scanout")]
+            requested: None,
         });
     }
 
@@ -703,6 +780,10 @@ impl ImageCopyCaptureHandler for State {
             return;
         }
         capture.pending = Some(frame);
+        #[cfg(feature = "gpu-scanout")]
+        {
+            capture.requested = Some(Instant::now());
+        }
         // Not `request_render()`: nothing about a capture request changed what
         // is on screen, and marking the screen dirty would redraw the whole
         // output for every capture *and* bump `frame_serial`, which would make

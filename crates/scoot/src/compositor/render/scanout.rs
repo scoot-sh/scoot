@@ -82,9 +82,11 @@
 //!
 //! # What a capture sees when the primary goes direct
 //!
-//! `tty/scanout.rs` passes `ALLOW_SCANOUT`, and its framebuffer exporter
-//! admits client dma-bufs, so a frame *may* land on the primary plane direct
-//! instead of in the swapchain slot -- in which case the dma-buf recorded
+//! A frame judged eligible (a fullscreen window covering the output -- see
+//! `render::primary_direct`) is handed `tty/scanout.rs`'s `DIRECT_FLAGS`, and
+//! its framebuffer exporter admits client dma-bufs, so that frame *may* land
+//! on the primary plane direct instead of in the swapchain slot -- in which
+//! case the dma-buf recorded
 //! here names the previous composite, which is not what is on screen.
 //! Serving it would hand every capture consumer (IPC screenshots,
 //! `ext-image-copy-capture-v1`, and through it shell thumbnails and
@@ -101,9 +103,12 @@
 //!   whose slot cannot be exported leaves it up).
 //! - **Force.** Before serving a capture off a stale-or-missing recording,
 //!   `State::ensure_scanout_capture_current` arms one composite-only frame
-//!   (`tty::scanout::ForceComposite`) and invalidates the swapchain (which
-//!   forces the full damage a static screen would otherwise draw nothing
-//!   on), then renders it immediately. The forced frame re-records through
+//!   (`tty::scanout::ForceComposite`) and renders it immediately --
+//!   invalidating the swapchain first only when there is no recording at
+//!   all ([`Captures::staleness`]), since a recording behind a direct frame
+//!   is refreshed by the plain composite (Smithay damages the whole output
+//!   coming back from direct scanout), with the reset as a fallback if
+//!   that frame records nothing. The forced frame re-records through
 //!   the normal path, so the capture reads fresh pixels. It keys on
 //!   [`Captures::capture_stale`], which is true for exactly the states
 //!   [`Captures::capture_target`] refuses -- the force fires for every
@@ -116,16 +121,23 @@
 //! by construction (the next composite frame clears the mark).
 //!
 //! **Reachability, stated rather than implied.** The whole sequence -- mark,
-//! refusal, force, clear -- is pinned against this code in `scanout/tests.rs`.
-//! It has not fired on a shipped build, because no frame goes primary-direct
-//! on any machine measured: Smithay only hands the primary plane to a client
-//! buffer whose framebuffer `Format` equals the swapchain slot's, and the
-//! opaque-fallback fourcc plus the `LINEAR`-vs-implicit modifier make that
-//! unequal on an `Argb8888` swapchain (traced and measured in
-//! `tty/scanout.rs`'s `FRAME_FLAGS` doc, with the one device shape that
-//! could match). It *has* fired live on the dev VM with that gate lifted in
-//! an uncommitted experiment. Lifting it for real is the change that makes
-//! these halves live.
+//! refusal, force, clear -- is pinned against this code in `scanout/tests.rs`,
+//! and it now fires in normal use: a fullscreen window covering its output
+//! goes primary-direct (`render::primary_direct` decides which frames may,
+//! `tty/scanout.rs`'s `DIRECT_FLAGS` says why `ANY` is safe there), so every
+//! capture of such an output forces one composite frame first. Watched live
+//! on the dev VM's virtio-gpu with a card0 dumb-buffer client: captures
+//! byte-correct through direct frames, a capture while VT-switched away
+//! refused with [`REFUSE_DIRECT`], and the next one after the switch back
+//! served.
+//!
+//! What it deliberately does *not* serve is a capture **stream**: forcing a
+//! composite for every frame of one measured worse than compositing
+//! throughout, so an output some capture client is streaming stays
+//! composited (`Screencopy::streaming`), and its captures read a current
+//! composite with nothing to force. The force is for one-shot captures --
+//! IPC `screenshot`, a thumbnail refresh -- where one extra composite frame
+//! is noise.
 
 use std::error::Error;
 
@@ -169,6 +181,12 @@ pub(crate) struct ScanoutBackend {
     /// (Apple Silicon: `apple,dcp` owns the CRTCs and has no render node) is
     /// the realistic one. `dmabuf.rs`'s path ladder answers then.
     pub(super) node: Option<libc::dev_t>,
+    /// What `render::primary_direct` decided about the last frame drawn
+    /// here. Read only to log a change -- the per-frame decision is made
+    /// afresh every frame and never from this -- so a session's log says
+    /// when it started or stopped going direct, and why, once per
+    /// transition rather than per frame.
+    pub(super) last_eligibility: super::primary_direct::PrimaryDirect,
 }
 
 /// The dma-bufs a capture reads, and the pool they are exported into once per
@@ -236,6 +254,7 @@ impl ScanoutBackend {
                 direct: false,
             },
             node: render_node(gbm),
+            last_eligibility: super::primary_direct::PrimaryDirect::NotCovered,
         })
     }
 
@@ -318,6 +337,17 @@ fn render_node(gbm: &GbmDevice<DrmDeviceFd>) -> Option<libc::dev_t> {
     Some(render.dev_id())
 }
 
+/// Why a capture recording is stale ([`Captures::staleness`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Stale {
+    /// Nothing recorded: before the first frame, or after the swapchain's
+    /// slots were freed (a rebuild, a resize, a failed render).
+    Empty,
+    /// A composite is recorded, but a primary-direct frame has been on
+    /// screen since.
+    Direct,
+}
+
 /// `Backend::capture`'s refusal while the recording is marked direct: the
 /// last damaged frame went to the primary plane, so the recorded composite is
 /// not what is on screen. Transient -- the next composite frame clears it.
@@ -362,7 +392,25 @@ impl Captures {
     /// other tier, which reads a persistent framebuffer instead of a
     /// recording.
     pub(super) fn capture_stale(&self) -> bool {
-        self.frame.is_none() || self.direct
+        self.staleness().is_some()
+    }
+
+    /// *Why* a capture served right now would be stale, or `None` when the
+    /// recording is a current composite. The two answers want different
+    /// forced frames (see `State::ensure_scanout_capture_current`): a
+    /// recording marked [`Stale::Direct`] is refreshed by any composite
+    /// frame -- Smithay damages the whole output when the primary returns
+    /// from direct scanout to the swapchain -- while [`Stale::Empty`] has
+    /// nothing to diff against and needs the swapchain reset that forces a
+    /// full redraw of a possibly static screen.
+    pub(super) fn staleness(&self) -> Option<Stale> {
+        if self.frame.is_none() {
+            Some(Stale::Empty)
+        } else if self.direct {
+            Some(Stale::Direct)
+        } else {
+            None
+        }
     }
 
     /// Marks the recording direct: the frame just drawn went to the primary

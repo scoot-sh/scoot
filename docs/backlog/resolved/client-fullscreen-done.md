@@ -47,7 +47,7 @@ below, kept verbatim.
 Filed 2026-09-22 out of the exporter-widening review (PR #222). Serves
 **daily-drive** first (a video player's or game's fullscreen button does
 nothing today, on every renderer) and is the precondition for zero-copy
-scanout on the GPU tier (see [format gate](../core/gpu-primary-direct-format-gate.md)
+scanout on the GPU tier (see [format gate](./gpu-primary-direct-format-gate-done.md)
 and [candidates](../core/gpu-scanout-candidates.md), which depends on this).
 
 ## What is missing

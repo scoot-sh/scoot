@@ -65,11 +65,11 @@ claimed rather than shown. Where they stand now:
 Scanout drives every plane it can claim — cursor plane active where exposed,
 overlay planes enumerated per CRTC, `ALLOW_SCANOUT` passed with its capture
 fix — which is phase 2 of `docs/backlog/resolved/gpu-scanout-planes-done.md`,
-now complete. No window leaves the primary plane yet (no scanout candidates;
-the exporter admits client dma-bufs since the exporter widening, but the
-primary still requires a swapchain format/modifier match no client buffer
-meets -- [format gate](docs/backlog/core/gpu-primary-direct-format-gate.md)),
-so captures stay correct. Two of its four stages have landed
+now complete. A fullscreen window covering its output now goes
+primary-direct (zero-copy), decided per frame, with captures forcing a
+composite first and capture streams kept composited
+([format gate](docs/backlog/resolved/gpu-primary-direct-format-gate-done.md));
+no window rides an overlay plane yet (no scanout candidates). Two of its four stages have landed
 (PR #129: the renderer seam, pixman still the only implementation, provably
 zero behaviour change; PR #130: the GLES pipeline behind
 `--renderer pixman|gles` and `[renderer] backend`, off by default, every
@@ -99,6 +99,27 @@ direction or because a live crash-DoS or daily-driver gap jumped the queue —
 each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
+
+- **[Zero-copy fullscreen on the GPU tier](docs/backlog/resolved/gpu-primary-direct-format-gate-done.md)**
+  (2026-09-23, PR #228) — a fullscreen window
+  covering its output is scanned out directly on the primary plane. Flags
+  are decided per frame (`render/primary_direct.rs`): `ALLOW_SCANOUT | ANY`
+  only for an unlocked, covered output with no capture stream and nothing
+  translucent or rounded in the frame; every other frame carries no primary
+  bit (it used to carry the format-matching one on every frame). `ANY` over
+  a `COLOR_FORMATS` change, with the safety argument traced on
+  `DIRECT_FLAGS`. The capture force now fires in normal use (a plain
+  composite frame; the swapchain reset only for an empty recording --
+  agent screenshot polling at 1-10 Hz measured 3-16x less compositor CPU
+  than composited, +3-7 ms median latency); a capture
+  stream keeps the output composited, because forcing per frame measured a
+  net loss (more CPU, 25 ms vs 23.6 ms client frame interval, 10% fewer
+  captures). Live on the dev VM at default config (direct, tiled-over-black
+  never direct, captures byte-correct, VT refusal and recovery, lock
+  composited, overlay/shm/SIGKILL/scale fallbacks); 14-17 vs 754-763
+  jiffies/10 s against llvmpipe compositing. Real GPU: `Asahi.md` Test 5.
+  [Candidates](docs/backlog/core/gpu-scanout-candidates.md) stays open for
+  overlay planes and scanout-tranche feedback.
 
 - **[Subsurface depth bound](docs/backlog/resolved/subsurface-depth-bound-done.md)**
   (2026-09-23, PR #227) — a client could crash the compositor by nesting
@@ -213,7 +234,7 @@ each item's own file records why it landed when it did.
   stays unreachable on every machine measured because Smithay's primary assignment
   compares whole `Format`s (opaque fourcc vs `AR24` swapchain; `LINEAR` vs
   implicit modifier) — filed as the [format
-  gate](docs/backlog/core/gpu-primary-direct-format-gate.md). Also: forced
+  gate](docs/backlog/resolved/gpu-primary-direct-format-gate-done.md). Also: forced
   frames drop the `ANY` bit too; `capture_pixels_for` renders before
   forcing, not after.
 

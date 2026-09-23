@@ -71,8 +71,12 @@ mod elements;
 mod gles;
 mod pixman;
 #[cfg(feature = "gpu-scanout")]
+mod primary_direct;
+#[cfg(feature = "gpu-scanout")]
 mod scanout;
 
+#[cfg(all(test, feature = "gpu-scanout"))]
+pub(crate) use primary_direct::PrimaryDirect;
 #[cfg(feature = "gpu-scanout")]
 pub(crate) use scanout::ScanoutBackend;
 
@@ -373,6 +377,17 @@ impl Backend {
         }
     }
 
+    /// Why a capture served off this backend right now would be stale, or
+    /// `None` when it would read current pixels (always, off the scanout
+    /// tier). See [`scanout::Captures::staleness`].
+    #[cfg(feature = "gpu-scanout")]
+    pub(super) fn scanout_capture_staleness(&self) -> Option<scanout::Stale> {
+        match &self.pipeline {
+            Pipeline::Pixman(_) | Pipeline::Gles(_) => None,
+            Pipeline::Scanout(gpu) => gpu.captures.staleness(),
+        }
+    }
+
     /// Imports a client's dma-buf into the renderer, answering whether it
     /// could be.
     ///
@@ -502,19 +517,27 @@ impl State {
     /// workspace overviews, which are ext-capture clients and have no other
     /// pixel path. A fresh composite recording short-circuits before
     /// touching the presenter (one map lookup); otherwise: arm the
-    /// composite-only frame, invalidate the swapchain -- which forces the
-    /// full damage a static screen would otherwise draw nothing on, without
-    /// which the forced frame would record nothing new -- and render
-    /// immediately, synchronously on the event-loop thread like every other
-    /// capture-adjacent render.
+    /// composite-only frame and render it immediately, synchronously on the
+    /// event-loop thread like every other capture-adjacent render. Whether
+    /// the swapchain is reset first depends on why the recording is stale
+    /// ([`force_needs_reset`]): a recording that is merely behind a direct
+    /// frame is refreshed by the plain composite frame, because Smithay
+    /// damages the whole output coming back from direct scanout; an empty
+    /// recording gets the reset, which forces the full damage a static
+    /// screen would otherwise draw nothing on. If the plain frame still
+    /// records nothing, the reset path runs after it, so a capture is never
+    /// left refused on a screen that simply stopped moving.
     ///
-    /// Costs one full composite plus one swapchain realloc (and one
-    /// re-export of a direct client's framebuffers on its next frame: the
-    /// forced frame never asks Smithay to consider the element for a plane,
-    /// so the element's framebuffer cache is not carried into that frame's
-    /// state and lapses -- measured on the dev VM, 2 exports per capture),
+    /// Costs one composite frame (plus, for an empty recording or that
+    /// fallback, a swapchain reallocation; and one re-export of a direct
+    /// client's framebuffers on its next frame: the forced frame never asks
+    /// Smithay to consider the element for a plane, so the element's
+    /// framebuffer cache is not carried into that frame's state and lapses),
     /// and only when the recording is actually stale -- direct frames keep
-    /// flipping direct between captures. While paused (no DRM master) the render
+    /// flipping direct between captures. A capture *stream* does not come
+    /// through here stale at all: `render::primary_direct` keeps a streamed
+    /// output composited (`Screencopy::streaming`), because paying this per
+    /// frame measured worse than compositing. While paused (no DRM master) the render
     /// draws nothing and the recording stays stale; the capture then fails
     /// loudly at [`Backend::capture`] rather than serving the old screen.
     /// Never arms without rendering in the same call: a bare arming would
@@ -523,26 +546,84 @@ impl State {
     /// resulting tick finds nothing to do and drops itself, same as after
     /// any other damage-driven frame.
     pub(super) fn ensure_scanout_capture_current(&mut self, id: OutputId) {
-        if !self
+        let Some(stale) = self
             .backends
             .get(&id)
-            .is_some_and(Backend::scanout_capture_stale)
-        {
+            .and_then(Backend::scanout_capture_staleness)
+        else {
             return;
-        }
+        };
         // debug!, not louder: this is the expected path for every capture
         // after a direct frame, and it is once per capture, never per frame
         // -- the line that shows the force path firing in a live session.
         tracing::debug!(
             output = id.0,
+            ?stale,
             "capture forces a composite frame: the recording is stale"
         );
+        let reset = force_needs_reset(stale);
+        self.force_scanout_composite(reset);
+        if reset
+            || !self
+                .backends
+                .get(&id)
+                .is_some_and(Backend::scanout_capture_stale)
+        {
+            return;
+        }
+        // The cheap frame did not record: nothing on screen changed *and*
+        // the primary was not direct any more (a direct frame whose commit
+        // was refused leaves the recording marked while the plane still
+        // shows the old composite), so Smithay had nothing to draw. The
+        // reset forces the full redraw that always records -- without it a
+        // static screen would refuse every capture until something moved.
+        tracing::debug!(
+            output = id.0,
+            "the forced composite drew nothing; resetting the swapchain and forcing again"
+        );
+        self.force_scanout_composite(true);
+    }
+
+    /// Arms one composite-only frame, optionally resets the swapchain (full
+    /// damage), and renders it now. See [`State::ensure_scanout_capture_current`].
+    fn force_scanout_composite(&mut self, reset: bool) {
         if let Some(presenter) = self.tty.as_mut().and_then(Tty::scanout_mut) {
             presenter.arm_force_composite();
-            presenter.invalidate_scanout();
+            if reset {
+                presenter.invalidate_scanout();
+            }
         }
         self.request_render();
         self.render();
+    }
+}
+
+/// Whether the composite frame a capture forces must first reset the
+/// swapchain, by why the recording is stale.
+///
+/// [`Stale::Direct`](scanout::Stale::Direct): no. The forced frame composites
+/// with both primary bits off, and when the primary goes from a client
+/// buffer back to a swapchain slot Smithay treats the whole output as damaged
+/// and flips that slot even if the renderer found nothing new to draw
+/// (`render_frame`'s `had_direct_scan_out` arm at the pinned rev; the frame
+/// is not `is_empty` because the primary plane is not skipped). The slot's
+/// content is right because the damage tracker and the swapchain ages both
+/// count composite frames only -- a direct frame neither renders nor
+/// `submitted()`s a slot -- so the diff it draws is against what that slot
+/// really holds. Resetting instead freed every swapchain buffer per capture,
+/// which the next frame then reallocated and re-registered with KMS.
+///
+/// [`Stale::Empty`](scanout::Stale::Empty): yes. There is no recording to
+/// diff against, and a static screen would otherwise draw nothing at all.
+///
+/// A cheap frame that still records nothing falls back to the reset (see
+/// the caller), so this is an optimisation that cannot leave a capture
+/// refused.
+#[cfg(feature = "gpu-scanout")]
+fn force_needs_reset(stale: scanout::Stale) -> bool {
+    match stale {
+        scanout::Stale::Empty => true,
+        scanout::Stale::Direct => false,
     }
 }
 
@@ -745,43 +826,31 @@ fn draw_frame_scanout(
     locked: bool,
 ) -> FrameOutcome {
     let mut outcome = FrameOutcome::default();
-    let frame = FrameContext {
-        size,
-        scale: output.current_scale().fractional_scale(),
-        geometry: state.space.output_geometry(output),
-        output: state.outputs.id_of(output),
-        locked,
-    };
     let scanout::ScanoutBackend {
-        renderer, captures, ..
-    } = gpu;
-    // Same rule as `draw_frame_with`: no window and no ring is laid out while
-    // locked, because no frame can show it.
-    let arrangement = if locked {
-        None
-    } else {
-        Some(state.world.arrange())
-    };
-    let ring_elements: Vec<Elements<_>> = ring_elements(
-        &mut state.decorations,
-        &state.appearance,
-        arrangement.as_ref(),
-        &frame,
         renderer,
-    );
+        captures,
+        last_eligibility,
+        ..
+    } = gpu;
     let clear_color: Color32F = if locked {
         state.lock_clear_color()
     } else {
         state.appearance.background_color.into()
     };
-    let (elements, cursor_surface) = state.gather_elements(
-        renderer,
-        output,
-        &frame,
-        ring_elements,
-        arrangement.as_ref(),
-    );
+    let (elements, cursor_surface, direct) =
+        scanout_frame_elements(state, renderer, size, output, locked);
     outcome.cursor_surface = cursor_surface;
+    if direct != *last_eligibility {
+        // debug!, and only on a change: this is the line that says a
+        // session started or stopped going direct, and why -- once per
+        // transition, never per frame.
+        tracing::debug!(
+            from = ?*last_eligibility,
+            to = ?direct,
+            "scanout: primary-direct eligibility changed"
+        );
+        *last_eligibility = direct;
+    }
 
     let (drawn, retry) = {
         // Unreachable in practice -- this pipeline only exists on a `--tty`
@@ -799,9 +868,15 @@ fn draw_frame_scanout(
         if presenter.take_slots_dropped() {
             captures.forget_slots();
         }
-        let drawn = presenter.render_and_queue(renderer, &elements, clear_color, |buffer| {
-            captures.note_frame(buffer);
-        });
+        let drawn = presenter.render_and_queue(
+            renderer,
+            &elements,
+            clear_color,
+            direct.allowed(),
+            |buffer| {
+                captures.note_frame(buffer);
+            },
+        );
         // The direct arm's half of the capture contract: the slot the
         // recording points at was never drawn into by this frame, so mark
         // it rather than leaving a stale composite readable as current. A
@@ -824,6 +899,92 @@ fn draw_frame_scanout(
         state.frame_serial = state.frame_serial.wrapping_add(1);
     }
     outcome
+}
+
+/// The scanout tier's frame list, and whether that frame may go
+/// primary-direct: what [`draw_frame_scanout`] composites and flags.
+///
+/// Generic over the renderer, although the tier only ever runs it with its
+/// `GlesRenderer`, so the harness can drive the very code the tier runs
+/// with whichever renderer a headless `State` carries (see
+/// [`State::primary_direct_now`]) -- the eligibility is a function of the
+/// gathered list, and gathering is renderer-agnostic.
+///
+/// The eligibility is judged from the list just gathered and the `locked`
+/// it was gathered with, so the flags and the elements describe the same
+/// frame. No window and no ring is laid out while locked (the same rule as
+/// `draw_frame_with`), because no frame can show them.
+#[cfg(feature = "gpu-scanout")]
+fn scanout_frame_elements<R>(
+    state: &mut State,
+    renderer: &mut R,
+    size: (i32, i32),
+    output: &Output,
+    locked: bool,
+) -> (
+    Vec<Elements<R>>,
+    Option<WlSurface>,
+    primary_direct::PrimaryDirect,
+)
+where
+    R: Renderer + ImportAll + ImportMem,
+    R::TextureId: Texture + Send + Clone + 'static,
+{
+    let frame = FrameContext {
+        size,
+        scale: output.current_scale().fractional_scale(),
+        geometry: state.space.output_geometry(output),
+        output: state.outputs.id_of(output),
+        locked,
+    };
+    let arrangement = if locked {
+        None
+    } else {
+        Some(state.world.arrange())
+    };
+    let ring_elements: Vec<Elements<R>> = ring_elements(
+        &mut state.decorations,
+        &state.appearance,
+        arrangement.as_ref(),
+        &frame,
+        renderer,
+    );
+    let (elements, cursor_surface) = state.gather_elements(
+        renderer,
+        output,
+        &frame,
+        ring_elements,
+        arrangement.as_ref(),
+    );
+    let direct = primary_direct::judge(state, output, locked, &elements);
+    (elements, cursor_surface, direct)
+}
+
+/// What [`draw_frame_scanout`] would decide about the primary output's next
+/// frame, judged over the list this headless session gathers -- the harness
+/// side of [`scanout_frame_elements`], which is the code the tier runs.
+#[cfg(all(test, feature = "gpu-scanout"))]
+impl State {
+    pub(super) fn primary_direct_now(&mut self) -> primary_direct::PrimaryDirect {
+        let (id, output) = self
+            .outputs
+            .at(0)
+            .expect("a headless harness has an output");
+        let mut backend = self.take_backend(id).expect("a render target");
+        let locked = self.session_lock.is_locked();
+        let size = backend.size;
+        let direct = match &mut backend.pipeline {
+            Pipeline::Pixman(cpu) => {
+                scanout_frame_elements(self, &mut cpu.renderer, size, &output, locked).2
+            }
+            Pipeline::Gles(gpu) => {
+                scanout_frame_elements(self, &mut gpu.renderer, size, &output, locked).2
+            }
+            Pipeline::Scanout(_) => unreachable!("no test builds a scanout pipeline"),
+        };
+        self.put_backend(id, backend);
+        direct
+    }
 }
 
 /// [`draw_frame`]'s body, over any renderer that can import client buffers,

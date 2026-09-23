@@ -403,3 +403,14 @@ fn an_unchanged_frame_reports_no_damage_at_age_one_but_full_damage_at_age_zero()
         .expect("a third render");
     assert!(third.damage.is_some());
 }
+
+#[cfg(feature = "gpu-scanout")]
+#[test]
+fn only_an_empty_recording_forces_a_swapchain_reset() {
+    // A direct-marked recording is refreshed by a plain composite frame
+    // (Smithay damages the whole output coming back from direct scanout);
+    // resetting there reallocated the swapchain on every screenshot of a
+    // direct window. An empty one has nothing to diff against.
+    assert!(force_needs_reset(scanout::Stale::Empty));
+    assert!(!force_needs_reset(scanout::Stale::Direct));
+}

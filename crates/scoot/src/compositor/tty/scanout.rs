@@ -75,59 +75,89 @@ use super::present_retry::{self, PresentRetries};
 type Compositor =
     DrmCompositor<GbmAllocator<DrmDeviceFd>, GbmFramebufferExporter<DrmDeviceFd>, u64, DrmDeviceFd>;
 
-/// The per-frame plane assignment this tier allows: every plane Smithay can
-/// drive -- cursor, overlay, and direct scanout on the primary.
+/// The per-frame plane assignment for a frame whose primary may go direct:
+/// every plane Smithay can drive -- cursor, overlay, and the primary plane
+/// handed to a client buffer *whatever its format* (`ANY`).
 ///
-/// This is step 3 of `docs/backlog/resolved/gpu-scanout-planes-done.md`: steps
-/// 1+2 populated the plane lists and passed the cursor/overlay bits, and the
-/// primary bit is the whole of this step's KMS delta. It lands together with
-/// the capture fix below, never as a flag flip alone: a directly scanned-out
-/// client buffer is not in the swapchain slot captures read, so a frame that
-/// goes direct must mark the recording (`Captures::note_direct`) and a
-/// capture served off a marked recording must force a composite frame first
-/// (`frame_flags(true)`, via `State::ensure_scanout_capture_current`).
+/// Which frames get it is not this constant's decision: [`frame_flags`]
+/// hands it only to a frame `render::primary_direct` judged eligible (a
+/// fullscreen window covering the output, unlocked, nothing translucent or
+/// rounded in the frame, no capture stream on the output) and not armed by
+/// a capture ([`ForceComposite`]). Every other frame gets
+/// [`COMPOSITE_FLAGS`], with no primary bit at all -- so `ANY` never reaches
+/// an arbitrary bottom window, and not even the format-matching
+/// `ALLOW_PRIMARY_PLANE_SCANOUT` does (it used to, on every frame, lock
+/// frames included; see `docs/backlog/resolved/gpu-primary-direct-format-gate-done.md`).
 ///
-/// `ALLOW_PRIMARY_PLANE_SCANOUT_ANY` (which is not a member of
-/// `ALLOW_SCANOUT` at the pinned rev) stays out, pinned below, so a direct
-/// element must still match the swapchain's format -- and that match is what
-/// keeps the primary bit from firing today wherever the swapchain comes up
-/// `Argb8888` (measured on the dev VM; the expected case everywhere, see
-/// below), now that the framebuffer exporter admits client buffers
-/// ([`EXPORTER_FILTER`]).
+/// # Why `ANY`, and why it is safe on an eligible frame
+///
 /// Traced at the pinned rev, `try_assign_primary_plane` has no element-kind
-/// test at all; its gate is `slot.format() != element_config.properties.format`,
+/// test; without `ANY` its gate is `slot.format() != element_config.properties.format`,
 /// a whole-`Format` comparison (fourcc *and* modifier) between the swapchain
-/// slot and the framebuffer the exporter made from the client buffer. Two
-/// things make that unequal for every buffer a client can send here, on an
-/// `Argb8888` swapchain:
+/// slot and the framebuffer the exporter made from the client buffer. The
+/// primary path exports with `allow_opaque_fallback`, so the client
+/// framebuffer is the opaque fourcc (`Xrgb8888`) while the swapchain is
+/// `Argb8888` (the first entry of [`COLOR_FORMATS`]) -- unequal for every
+/// buffer a client can send here. The modifier may differ as well on a
+/// device that takes modifiers (the client's `LINEAR` against an implicit
+/// swapchain), but not on the dev VM's virtio-gpu: it has no `IN_FORMATS`
+/// and no `ADDFB2_MODIFIERS`, so the swapchain is `Invalid` (measured
+/// `Testing Formats: [AR24, Invalid]`) and the client framebuffer is added
+/// without a modifier and comes back `Invalid` too (Smithay's trace names it
+/// `XR24`/`Invalid`). There only the fourcc differs.
 ///
-/// - **The fourcc.** The primary path exports with `allow_opaque_fallback`,
-///   so the client framebuffer's fourcc is always the opaque variant
-///   (`Argb8888` becomes `Xrgb8888`), while the swapchain is `Argb8888`
-///   wherever the plane takes it (the first entry of [`COLOR_FORMATS`]).
-/// - **The modifier.** `zwp_linux_dmabuf_v1` offers only `LINEAR`
-///   (`dmabuf.rs`), and Smithay refuses to export a client buffer with no
-///   explicit modifier; a swapchain allocated implicitly carries
-///   `Modifier::Invalid`. The dev VM's virtio-gpu is exactly that case
-///   (measured: `Testing Formats: [AR24, Invalid]`), so no reordering of
-///   `COLOR_FORMATS` alone could match there.
+/// So putting `Xrgb8888` first in `COLOR_FORMATS` might match on virtio --
+/// untried: rendering into an `Xrgb8888` swapchain, `render::read_back`'s
+/// ARGB assumption and the test commit were never exercised -- and would
+/// still leave modifier-capable devices unmatched. What rules it out is
+/// that it changes the format of *every* composited frame on every device
+/// to serve the one frame shape that may go direct. `ANY` changes nothing
+/// for a composited frame, so it is the lift taken.
 ///
-/// The one shape that would match without any change here: a device whose
-/// *renderer* cannot render `Argb8888` (or whose every `Argb8888` test
-/// commit fails), so the swapchain falls through to `Xrgb8888`, *and*
-/// allocates it with an explicit `LINEAR` modifier. A plane that only scans
-/// out `Xrgb8888` is not enough: `find_supported_format` accepts the opaque
-/// variant for the plane side and still allocates an `Argb8888` swapchain
-/// (the dev VM's primary is exactly that plane). No
-/// machine this project has measured does that (the Asahi swapchain format
-/// was never recorded -- `Asahi.md` Test 5 asks for it), and if one does, the
-/// capture fix below already covers it. Otherwise primary-direct scanout
-/// stays unreachable until the swapchain format or the `ANY` bit changes,
-/// which is its own decision with its own capture
-/// consequences (`docs/backlog/core/gpu-primary-direct-format-gate.md`), not
-/// this constant's. The capture fix below stays in place regardless: it is
-/// what makes that later change safe, and it already guards the exporter
-/// path that *is* reachable.
+/// Skipping the comparison does not hand KMS a buffer described wrongly:
+///
+/// - **The framebuffer carries its own format.** The client buffer is
+///   `AddFB2`'d with its own fourcc (`element_config` ->
+///   `framebuffer_from_wayland_buffer`), and with its own modifier where
+///   the device takes modifiers; the swapchain's format is never applied to
+///   it. Where the device takes none (virtio) it is added without one, and
+///   KMS reads it in the driver's implicit layout -- which is why Smithay
+///   refuses outright a client buffer that arrived without an explicit
+///   modifier, and why that is safe for what scoot admits: the only
+///   modifier `zwp_linux_dmabuf_v1` offers is `LINEAR`, and the one
+///   driver without modifier support this has run on (virtio) scans out
+///   linear -- a driver whose implicit layout is tiled would also have to
+///   lack modifier support entirely to be at risk, which no measured one
+///   does. What the
+///   comparison protected is only "the primary shows the same format it
+///   composites in", not "KMS reads the buffer right".
+/// - **The plane still has to take that exact format.** `try_assign_plane`
+///   refuses unless `plane.formats.contains(element format)`, fourcc and
+///   modifier, before any commit is built -- `ANY` skips the swapchain
+///   comparison, not the plane's own format list.
+/// - **The atomic `TEST_ONLY` commit judges the rest** -- scaling, a source
+///   crop, a buffer transform (Smithay refuses a non-`Normal` transform
+///   outright on a plane without a `rotation` property), a destination
+///   smaller than the CRTC. A refusal is cached per element and the element
+///   composites; a frame-level test failure falls back the same way
+///   (`test_state_complete`'s error arm).
+/// - **The one real difference, alpha, cannot show on the primary.** The
+///   opaque fallback means the display ignores the client's alpha channel.
+///   Smithay only tries the primary for the *bottom* visible element, with
+///   everything above it on its own plane, and only when that element is
+///   opaque and covers the whole output *or* the clear colour is
+///   black/transparent. Opaque, the alpha channel is 1 wherever it is shown;
+///   over black, a premultiplied pixel composited over the clear colour *is*
+///   its own RGB -- exactly what scanning it out ignoring alpha shows. The
+///   frame-level eligibility also refuses any element with a sub-1.0
+///   alpha, so no plane-alpha property is ever asked to stand in for it.
+///
+/// So what the ticket named as `ANY`'s risk -- a driver accepting a
+/// mismatched format and showing it with the wrong alpha -- does not apply
+/// to an opaque bottom element: the format is the buffer's own, and alpha
+/// is not visible there.
+///
+/// # Overlay and cursor
 ///
 /// The overlay bit's reachable effect is deliberately narrow. Smithay's
 /// `try_assign_overlay_plane` only considers elements of kind
@@ -135,46 +165,50 @@ type Compositor =
 /// window surface -- every surface element is built `Kind::Unspecified`
 /// (`render/elements.rs`, both call sites), only cursor elements are
 /// `Kind::Cursor`, and `Rounded` forwards its inner kind unchanged. So no
-/// window can ever ride an overlay plane until something is marked a
-/// scanout candidate, and that marking is a separate semantic change, not
-/// part of this step: marking one now would let whole windows leave the
-/// buffer captures read. What the bit does today is let the *cursor* ride an
-/// overlay where a CRTC has overlays but no cursor plane (the cursor plane is
-/// still tried first), with the same cursorless-capture consequence step 1
-/// documented.
+/// window can ride an overlay plane until something is marked a scanout
+/// candidate (`docs/backlog/core/gpu-scanout-candidates.md`). What the bit
+/// does today is let the *cursor* ride an overlay where a CRTC has overlays
+/// but no cursor plane (the cursor plane is still tried first), with the
+/// cursorless-capture consequence documented in `render::scanout`.
 ///
-/// Pinned below: the full set equals `ALLOW_SCANOUT`, and the forced set is
-/// exactly the steps-1+2 pair.
-const FRAME_FLAGS: FrameFlags = FrameFlags::ALLOW_SCANOUT;
+/// Pinned below, with [`COMPOSITE_FLAGS`] and [`frame_flags`]'s three rows.
+const DIRECT_FLAGS: FrameFlags =
+    FrameFlags::ALLOW_SCANOUT.union(FrameFlags::ALLOW_PRIMARY_PLANE_SCANOUT_ANY);
 
-/// The flags for one frame: the full set, or the composite-only subset for a
-/// frame a capture is about to read.
+/// The flags for every frame that must land whole in the swapchain slot:
+/// the cursor and overlay bits only, both primary bits out.
 ///
-/// Forced frames (see [`ForceComposite`]) drop both primary bits, landing
-/// whole in the swapchain slot while letting the cursor still ride its plane
-/// -- so a forced capture keeps the documented cursorless-where-plane-assigned
-/// contract rather than gaining a second cursor render. Pure, so the two sets
-/// are pinnable without a DRM device.
+/// The frame a capture is about to read ([`ForceComposite`]) and every
+/// frame `render::primary_direct` did not judge eligible -- a locked one,
+/// one with no fullscreen window covering the output, one with a capture
+/// stream running. The cursor may still ride its plane, which keeps the
+/// documented cursorless-where-plane-assigned capture contract rather than
+/// adding a second cursor render.
+const COMPOSITE_FLAGS: FrameFlags = composite_only(DIRECT_FLAGS);
+
+/// The flags for one frame.
 ///
-/// *Both* bits, although [`FRAME_FLAGS`] carries only one today: Smithay's
-/// `try_assign_primary_plane` proceeds when the flags intersect either
-/// (`ALLOW_PRIMARY_PLANE_SCANOUT | ALLOW_PRIMARY_PLANE_SCANOUT_ANY` at the
-/// pinned rev), so a forced frame that dropped only the first would still go
-/// direct the day `ANY` is added -- the frame a capture is about to read,
-/// silently off the swapchain. Measured, not hypothetical: adding `ANY` is
-/// exactly how the force path was exercised live on the dev VM, and it is
-/// the first thing the format-gate ticket would reach for.
-fn frame_flags(force_composite: bool) -> FrameFlags {
-    if force_composite {
-        composite_only(FRAME_FLAGS)
+/// [`DIRECT_FLAGS`] only when the frame is eligible *and* not armed by a
+/// capture; [`COMPOSITE_FLAGS`] otherwise. The arming always wins: a
+/// capture is about to read the slot this frame draws into, so it must
+/// draw into it whatever the eligibility says. Pure, so every row is
+/// pinnable without a DRM device.
+fn frame_flags(force_composite: bool, allow_primary_direct: bool) -> FrameFlags {
+    if allow_primary_direct && !force_composite {
+        DIRECT_FLAGS
     } else {
-        FRAME_FLAGS
+        COMPOSITE_FLAGS
     }
 }
 
 /// `flags` with every bit that lets a client buffer take the primary plane
-/// removed. Split out of [`frame_flags`] so the both-bits rule is pinned
-/// against a set that *does* carry `ANY`, which [`FRAME_FLAGS`] does not.
+/// removed.
+///
+/// *Both* bits: Smithay's `try_assign_primary_plane` proceeds when the flags
+/// intersect either (`ALLOW_PRIMARY_PLANE_SCANOUT |
+/// ALLOW_PRIMARY_PLANE_SCANOUT_ANY` at the pinned rev), so dropping only the
+/// first would still let an `ANY` frame go direct -- the frame a capture is
+/// about to read, silently off the swapchain.
 const fn composite_only(flags: FrameFlags) -> FrameFlags {
     flags.difference(
         FrameFlags::ALLOW_PRIMARY_PLANE_SCANOUT.union(FrameFlags::ALLOW_PRIMARY_PLANE_SCANOUT_ANY),
@@ -209,9 +243,11 @@ impl ForceComposite {
     }
 
     /// Takes the arming and answers this frame's flags: the composite-only
-    /// set exactly once after [`arm`](Self::arm), the full set otherwise.
-    pub(crate) fn take_flags(&mut self) -> FrameFlags {
-        frame_flags(std::mem::take(&mut self.armed))
+    /// set exactly once after [`arm`](Self::arm) whatever
+    /// `allow_primary_direct` says, and otherwise the direct set if and only
+    /// if the frame is eligible (see [`frame_flags`]).
+    pub(crate) fn take_flags(&mut self, allow_primary_direct: bool) -> FrameFlags {
+        frame_flags(std::mem::take(&mut self.armed), allow_primary_direct)
     }
 }
 
@@ -267,8 +303,9 @@ impl ForceComposite {
 /// mismatch is irrelevant: the import onto `card2` is what is tried, and
 /// refused cleanly if the display cannot take the buffer.
 ///
-/// What the widening reaches today, stated so nobody has to re-derive it:
-/// no primary-direct frame (see [`FRAME_FLAGS`]'s format gate), no window on
+/// What the widening reaches, stated so nobody has to re-derive it: a
+/// covering fullscreen window's buffer on the primary plane (only on frames
+/// [`DIRECT_FLAGS`] is handed to), no window on
 /// an overlay (no element is `Kind::ScanoutCandidate`), and no change to the
 /// cursor plane (it renders into buffers of its own through its own
 /// exporter, `NodeFilter::None` inside Smithay). The one newly reachable
@@ -370,9 +407,10 @@ pub(crate) struct ScanoutPresenter {
     /// [`ForceComposite`] for the one-arming-one-frame contract.
     ///
     /// Armed by `State::ensure_scanout_capture_current` just before the
-    /// render whose pixels a capture is about to read, together with an
+    /// render whose pixels a capture is about to read -- together with an
     /// `invalidate_scanout` (which forces the full damage a static screen
-    /// would otherwise draw nothing on).
+    /// would otherwise draw nothing on) only when there is no recording to
+    /// refresh, or when a plain forced frame recorded nothing.
     force_composite: ForceComposite,
     /// Whether the swapchain's slots have been freed since the render path
     /// last looked. Set by every path that frees slots -- the ones that
@@ -394,8 +432,8 @@ pub(crate) struct ScanoutPresenter {
     /// by construction: with no planes Smithay's overlay assignment exits
     /// before touching anything. Read alongside `cursor_planes` for the same
     /// startup log line. (Even where non-zero, no window element can be
-    /// assigned yet -- see `FRAME_FLAGS` -- so this count decides
-    /// cursor-sized consequences only.)
+    /// assigned to one -- see [`DIRECT_FLAGS`]'s overlay section -- so this
+    /// count decides cursor-sized consequences only.)
     overlay_planes: usize,
     /// The DRM device's hardware cursor size, as passed to
     /// [`ScanoutPresenter::new`]. Kept so a CRTC switch rebuilds the
@@ -463,26 +501,13 @@ impl ScanoutPresenter {
     /// The one `DrmCompositor::new` call, shared by startup and by a CRTC
     /// switch so the two cannot configure it differently.
     ///
-    /// Two choices here are scope decisions, not defaults:
-    ///
-    /// - **The exporter admits client buffers ([`EXPORTER_FILTER`]).** Which
-    ///   node filter, why `All` rather than a node, and what that does and
-    ///   does not make reachable are all on that constant. The exporter is no
-    ///   longer the gate on primary direct scanout; the swapchain format
-    ///   match is (see [`FRAME_FLAGS`]).
-    /// - **`FRAME_FLAGS`, not a subset.** `ALLOW_SCANOUT` lets a client's own
-    ///   buffer be scanned out directly on the primary plane instead of being
-    ///   composited into the swapchain slot -- so `render::scanout`'s capture
-    ///   path, which reads that slot, marks the recording on a direct frame
-    ///   (`ScanoutFrame::primary_direct`) and forces one composite frame
-    ///   before serving a capture off a marked recording
-    ///   (`arm_force_composite`). The cursor and overlay bits alone keep the
-    ///   narrower contract: only the cursor element may leave the primary
-    ///   plane (no window element is a scanout candidate, so none may ride
-    ///   an overlay -- see `FRAME_FLAGS`), and the capture consequence -- a
-    ///   capture reads the primary plane only, so a plane-assigned cursor is
-    ///   absent from it -- is documented where the capture lives rather than
-    ///   left to be discovered.
+    /// The exporter admits client buffers ([`EXPORTER_FILTER`]): which node
+    /// filter, why `All` rather than a node, and what that reaches are all
+    /// on that constant. Which *frames* may then hand the primary plane to
+    /// one of those buffers is decided per frame, not here -- see
+    /// [`frame_flags`] and `render::primary_direct` -- and the capture
+    /// consequence of a direct frame (the swapchain slot a capture reads was
+    /// not drawn into) is covered by `render::scanout`'s mark and force.
     fn build(
         planes: &Planes,
         surface: DrmSurface,
@@ -580,9 +605,17 @@ impl ScanoutPresenter {
     /// with no damage deliberately calls neither: the previous frame is still
     /// what is on screen, so the recorded buffer must stay the previous one.
     ///
-    /// Which of the two it is comes from [`frame_flags`]: a frame armed by
-    /// [`arm_force_composite`](Self::arm_force_composite) composites whole,
-    /// every other frame may go direct.
+    /// Which of the two it may be comes from [`frame_flags`]: a frame armed
+    /// by [`arm_force_composite`](Self::arm_force_composite) composites
+    /// whole, and so does every frame the caller did not judge eligible
+    /// (`allow_primary_direct` false -- see `render::primary_direct`). Only an
+    /// eligible, unarmed frame lets Smithay try the primary plane, and even
+    /// then Smithay decides: it may still composite (an element above the
+    /// candidate that no plane took, a failed `TEST_ONLY` commit, a buffer
+    /// with no framebuffer), which is why the outcome is reported back
+    /// rather than assumed from the flags: `allow_primary_direct` is what the
+    /// frame *may* do, [`ScanoutFrame::primary_direct`](ScanoutFrame) what it
+    /// *did*, and only the second may mark the capture recording.
     ///
     /// An empty frame is the *normal* no-damage case, not a failure: nothing
     /// is queued, no retry is armed and no warning is logged, exactly as the
@@ -593,6 +626,7 @@ impl ScanoutPresenter {
         renderer: &mut R,
         elements: &[E],
         clear_color: Color32F,
+        allow_primary_direct: bool,
         mut on_frame: impl FnMut(&smithay::backend::allocator::gbm::GbmBuffer),
     ) -> ScanoutFrame
     where
@@ -600,7 +634,7 @@ impl ScanoutPresenter {
         R::TextureId: Texture + 'static,
         E: RenderElement<R>,
     {
-        let flags = self.force_composite.take_flags();
+        let flags = self.force_composite.take_flags(allow_primary_direct);
         let result = match self
             .compositor
             .render_frame(renderer, elements, clear_color, flags)
@@ -738,15 +772,16 @@ impl ScanoutPresenter {
     }
 
     /// Arms one fully-composited frame: the next frame that reaches
-    /// [`render_and_queue`](Self::render_and_queue) renders with the primary
-    /// direct-scanout bit off, landing whole in the swapchain slot.
+    /// [`render_and_queue`](Self::render_and_queue) renders with both primary
+    /// direct-scanout bits off whatever its eligibility, landing whole in the
+    /// swapchain slot.
     ///
     /// Armed by `State::ensure_scanout_capture_current` just before the
     /// render whose pixels a capture is about to read (IPC `screenshot` and
-    /// `ext-image-copy-capture-v1` both funnel through there), always paired
-    /// there with an [`invalidate_scanout`](Self::invalidate_scanout) so the
-    /// forced frame also carries full damage. The cursor may still ride its
-    /// plane on a forced frame -- only the primary bit is dropped -- which is
+    /// `ext-image-copy-capture-v1` both funnel through there), paired there
+    /// with an [`invalidate_scanout`](Self::invalidate_scanout) only when the
+    /// forced frame needs full damage (see `render::force_needs_reset`). The cursor may still ride its
+    /// plane on a forced frame -- only the primary bits are dropped -- which is
     /// what keeps the cursorless-where-plane-assigned capture contract
     /// unchanged.
     pub(crate) fn arm_force_composite(&mut self) {
@@ -795,8 +830,9 @@ impl ScanoutPresenter {
     }
 
     /// The scanout bookkeeping shared by reactivation and the hotplug paths --
-    /// and by the capture fix's forced composite frame, which needs full
-    /// damage, not just composite flags.
+    /// and by the capture fix's forced composite frame when that needs full
+    /// damage, not just composite flags (an empty recording, or a plain
+    /// forced frame that recorded nothing).
     ///
     /// `reset_buffers` drops every swapchain slot, which is both what makes
     /// the next frame a full redraw (there is no buffer age left to trust)
@@ -1086,56 +1122,73 @@ mod tests {
         assert_eq!(selected.primary.len(), 1);
     }
 
+    /// Both bits that let a client buffer take the primary plane.
+    const PRIMARY_BITS: FrameFlags =
+        FrameFlags::ALLOW_PRIMARY_PLANE_SCANOUT.union(FrameFlags::ALLOW_PRIMARY_PLANE_SCANOUT_ANY);
+
     #[test]
-    fn the_frame_flags_are_allow_scanout_but_never_the_any_bit() {
-        // The step-3 flag state as a pin: the full `ALLOW_SCANOUT` set --
-        // cursor, overlay, *and* primary direct scanout -- but never
-        // `ALLOW_PRIMARY_PLANE_SCANOUT_ANY`, which is not a member of
-        // `ALLOW_SCANOUT` at the pinned rev and would additionally let a
-        // format-mismatched element take the primary. Losing the primary
-        // bit regresses step 3 to steps 1+2; gaining the ANY bit widens
-        // direct scanout past the capture fix's contract -- so both fail
-        // loudly rather than drifting.
-        assert_eq!(FRAME_FLAGS, FrameFlags::ALLOW_SCANOUT);
-        assert!(FRAME_FLAGS.contains(FrameFlags::ALLOW_PRIMARY_PLANE_SCANOUT));
-        assert!(FRAME_FLAGS.contains(FrameFlags::ALLOW_OVERLAY_PLANE_SCANOUT));
-        assert!(FRAME_FLAGS.contains(FrameFlags::ALLOW_CURSOR_PLANE_SCANOUT));
-        assert!(!FRAME_FLAGS.intersects(FrameFlags::ALLOW_PRIMARY_PLANE_SCANOUT_ANY));
-        assert_eq!(FRAME_FLAGS, FrameFlags::DEFAULT);
+    fn an_eligible_frame_may_hand_the_primary_to_any_format() {
+        // Row one of the contract: an eligible, unarmed frame carries every
+        // plane bit Smithay has *and* `ANY`, which is what lets a client's
+        // opaque-fallback (`XR24`) framebuffer take the primary from an
+        // `AR24` swapchain (see `DIRECT_FLAGS`). Losing `ANY` puts the
+        // format gate back -- no fullscreen window goes direct on any
+        // machine measured; losing the cursor or overlay bit regresses the
+        // plane steps.
+        let direct = frame_flags(false, true);
+        assert_eq!(direct, DIRECT_FLAGS);
+        assert!(direct.contains(FrameFlags::ALLOW_SCANOUT));
+        assert!(direct.contains(PRIMARY_BITS));
+        assert!(direct.contains(FrameFlags::ALLOW_OVERLAY_PLANE_SCANOUT));
+        assert!(direct.contains(FrameFlags::ALLOW_CURSOR_PLANE_SCANOUT));
+        // Nothing beyond the plane bits: `SKIP_CURSOR_ONLY_UPDATES` is a
+        // VRR policy this tier does not have.
+        assert_eq!(
+            direct,
+            FrameFlags::ALLOW_SCANOUT | FrameFlags::ALLOW_PRIMARY_PLANE_SCANOUT_ANY
+        );
     }
 
     #[test]
-    fn a_forced_capture_frame_is_cursor_plus_overlay_and_nothing_else() {
-        // The capture fix's complement to the pin above: a frame forced for
-        // capture must land whole in the swapchain slot, so the forced flags
-        // are exactly the steps-1+2 set -- cursor plus overlay, both primary
-        // bits out. A forced frame gaining a primary bit would let the very
-        // frame a capture is about to read go direct, which is the
-        // silently-wrong-buffer harm step 3 exists to close.
-        let forced = frame_flags(true);
-        assert!(forced.contains(FrameFlags::ALLOW_CURSOR_PLANE_SCANOUT));
-        assert!(forced.contains(FrameFlags::ALLOW_OVERLAY_PLANE_SCANOUT));
-        assert!(!forced.intersects(FrameFlags::ALLOW_PRIMARY_PLANE_SCANOUT));
-        assert!(!forced.intersects(FrameFlags::ALLOW_PRIMARY_PLANE_SCANOUT_ANY));
-        assert_ne!(forced, FrameFlags::ALLOW_SCANOUT);
-        // And the unforced frame is the full set the pin above names.
-        assert_eq!(frame_flags(false), FrameFlags::ALLOW_SCANOUT);
+    fn an_ineligible_frame_carries_no_primary_bit_at_all() {
+        // Row two: a frame not judged eligible (locked, no covering
+        // fullscreen window, a capture stream, a translucent or rounded
+        // element) gets neither primary bit -- not `ANY`, which would hand
+        // an arbitrary bottom window (a rounded one, over a black
+        // background) the primary, and not the format-matching bit either,
+        // which is no safer on a device whose swapchain happens to match.
+        // The cursor and overlay bits stay: the cursor still rides its
+        // plane.
+        let composite = frame_flags(false, false);
+        assert_eq!(composite, COMPOSITE_FLAGS);
+        assert!(!composite.intersects(PRIMARY_BITS));
+        assert_eq!(
+            composite,
+            FrameFlags::ALLOW_CURSOR_PLANE_SCANOUT | FrameFlags::ALLOW_OVERLAY_PLANE_SCANOUT
+        );
     }
 
     #[test]
-    fn a_forced_frame_drops_the_any_bit_too_the_day_the_full_set_gains_it() {
+    fn a_forced_capture_frame_composites_even_when_eligible() {
+        // Row three, the capture fix's: the frame a capture is about to read
+        // lands whole in the swapchain slot whatever its eligibility. A
+        // forced frame keeping a primary bit would let the very frame the
+        // capture reads go direct -- the silently-wrong-buffer harm the
+        // force exists to close, and now reachable on every eligible frame.
+        for eligible in [true, false] {
+            let forced = frame_flags(true, eligible);
+            assert_eq!(forced, COMPOSITE_FLAGS, "eligible = {eligible}");
+            assert!(!forced.intersects(PRIMARY_BITS));
+        }
+    }
+
+    #[test]
+    fn composite_only_drops_both_primary_bits() {
         // Smithay tries the primary plane when the flags intersect *either*
-        // primary bit, so a forced frame that dropped only
-        // `ALLOW_PRIMARY_PLANE_SCANOUT` would still go direct under a full
-        // set carrying `ANY` -- the frame a capture is about to read, off the
-        // swapchain. That is exactly the set the dev-VM force-path
-        // experiment ran with, and the first one the format-gate ticket
-        // would try.
-        let with_any = FrameFlags::ALLOW_SCANOUT | FrameFlags::ALLOW_PRIMARY_PLANE_SCANOUT_ANY;
-        let forced = composite_only(with_any);
-        assert!(!forced.intersects(
-            FrameFlags::ALLOW_PRIMARY_PLANE_SCANOUT | FrameFlags::ALLOW_PRIMARY_PLANE_SCANOUT_ANY
-        ));
+        // primary bit, so a composite set that dropped only
+        // `ALLOW_PRIMARY_PLANE_SCANOUT` would still go direct under `ANY`.
+        let forced = composite_only(DIRECT_FLAGS);
+        assert!(!forced.intersects(PRIMARY_BITS));
         assert_eq!(
             forced,
             FrameFlags::ALLOW_CURSOR_PLANE_SCANOUT | FrameFlags::ALLOW_OVERLAY_PLANE_SCANOUT
@@ -1144,17 +1197,20 @@ mod tests {
 
     #[test]
     fn one_arming_buys_exactly_one_composite_frame() {
-        // What `render_and_queue` runs, frame by frame: an unarmed frame may
-        // go direct, the frame right after an arming may not, and the one
-        // after that may again -- the arming is spent, not sticky. Arming
-        // twice before a frame still buys one frame (a capture and a
-        // screencopy tick both asking is one forced frame, not two).
+        // What `render_and_queue` runs, frame by frame, on an eligible
+        // output: an unarmed frame may go direct, the frame right after an
+        // arming may not, and the one after that may again -- the arming is
+        // spent, not sticky. Arming twice before a frame still buys one frame
+        // (a capture and a screencopy tick both asking is one forced frame,
+        // not two). An ineligible frame does not spend the arming's purpose
+        // for it either way: it composites regardless.
         let mut force = ForceComposite::default();
-        assert_eq!(force.take_flags(), FRAME_FLAGS);
+        assert_eq!(force.take_flags(true), DIRECT_FLAGS);
         force.arm();
         force.arm();
-        assert_eq!(force.take_flags(), frame_flags(true));
-        assert_eq!(force.take_flags(), FRAME_FLAGS);
+        assert_eq!(force.take_flags(true), COMPOSITE_FLAGS);
+        assert_eq!(force.take_flags(true), DIRECT_FLAGS);
+        assert_eq!(force.take_flags(false), COMPOSITE_FLAGS);
     }
 
     #[test]

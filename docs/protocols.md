@@ -118,6 +118,15 @@ it covers:
 
 Other outputs are untouched: fullscreen is per output.
 
+**On the GPU scanout tier** (`--tty --renderer gles`, `gpu-scanout` build),
+a covering fullscreen window whose buffer is a dma-buf the display can take
+is scanned out directly -- shown from the client's own buffer, with no
+compositing. Anything drawn over it (an `overlay` notification, a popup
+menu, a cursor the hardware cursor plane cannot carry), a translucent
+window (`wp_alpha_modifier_v1`), a lock screen, or a client capturing the
+screen makes those frames composite instead; nothing changes on screen
+either way. Mechanics and where it has been seen: [tty.md](tty.md).
+
 **What it keeps.** The window keeps its column: focus another column and the
 view scrolls there the usual way. Focused away, the fullscreen window keeps
 its fullscreen size and sits in the strip exactly where a column that wide
@@ -752,11 +761,20 @@ What to know before pointing a client at it:
   per session.
 - **While the session is locked, a capture sees the lock screen** — never the
   windows behind it, and never a half-drawn transition.
+- **On the GPU scanout tier a capture never sees a stale screen, including
+  under a fullscreen window scanned out directly.** A capture of such a
+  frame forces one composite frame first. A session that keeps capturing —
+  a frame waiting, or one asked for within the last second — keeps the
+  output composited instead, so a recorder or screen-share costs what it
+  always did; the output goes back to direct scanout about a second after
+  the last capture.
 - **The `paint_cursors` option is accepted and has no effect**, which is a
   known deviation. Under `--headless` and `--nested` nothing draws a cursor
   at all, so a capture never contains one. Under `--tty` the cursor is part
   of the one framebuffer a capture is read out of, so a capture always
-  contains it, flag or no flag.
+  contains it, flag or no flag — except on the GPU scanout tier where the
+  cursor rides a hardware cursor plane, where no capture contains it (see
+  [tty.md](tty.md)).
 - **Cursor capture sessions are refused.** `create_pointer_cursor_session`
   itself gets no event — the cursor-session object has no `stopped` of its
   own — but the `ext_image_copy_capture_session_v1` a client gets back from

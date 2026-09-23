@@ -93,15 +93,21 @@ fn the_whole_force_sequence_ends_in_a_capture_of_the_forced_frame() {
     //                                      primary bit
     //   frame 3  composite into slot B  -> mark cleared, capture reads B
     //   frame 4  unforced again         -> may go direct once more
+    //
+    // Every frame here is on an output judged eligible for primary-direct
+    // (a covering fullscreen window): that is the only case in which the
+    // unforced flags carry a primary bit at all.
     let mut captures = Captures::default();
     let mut force = ForceComposite::default();
     let (a, b) = (fake_dmabuf(), fake_dmabuf());
+    let primary =
+        FrameFlags::ALLOW_PRIMARY_PLANE_SCANOUT | FrameFlags::ALLOW_PRIMARY_PLANE_SCANOUT_ANY;
 
-    assert_eq!(force.take_flags(), FrameFlags::ALLOW_SCANOUT);
+    assert!(force.take_flags(true).contains(primary));
     composite(&mut captures, 0xa, &a);
     assert_eq!(target(&mut captures), Ok(a.clone()));
 
-    assert_eq!(force.take_flags(), FrameFlags::ALLOW_SCANOUT);
+    assert!(force.take_flags(true).contains(primary));
     captures.note_direct();
     assert_eq!(target(&mut captures), Err(REFUSE_DIRECT));
 
@@ -109,17 +115,15 @@ fn the_whole_force_sequence_ends_in_a_capture_of_the_forced_frame() {
     // refuse.
     assert!(captures.capture_stale());
     force.arm();
-    let forced = force.take_flags();
-    assert!(!forced.intersects(
-        FrameFlags::ALLOW_PRIMARY_PLANE_SCANOUT | FrameFlags::ALLOW_PRIMARY_PLANE_SCANOUT_ANY
-    ));
+    let forced = force.take_flags(true);
+    assert!(!forced.intersects(primary));
     composite(&mut captures, 0xb, &b);
     assert!(!captures.capture_stale());
     let read = target(&mut captures).expect("the forced composite is readable");
     assert_eq!(read, b);
     assert_ne!(read, a);
 
-    assert_eq!(force.take_flags(), FrameFlags::ALLOW_SCANOUT);
+    assert!(force.take_flags(true).contains(primary));
 }
 
 #[test]
@@ -220,4 +224,31 @@ fn the_pool_stays_bounded_past_a_deeper_swapchain() {
     let again = fake_dmabuf();
     composite(&mut captures, 0, &again);
     assert_eq!(target(&mut captures), Ok(again));
+}
+
+#[test]
+fn staleness_says_why_empty_before_a_frame_and_after_a_rebuild_direct_after_a_direct_frame() {
+    // What `ensure_scanout_capture_current` picks its forced frame by: an
+    // empty recording needs the swapchain reset (nothing to diff a static
+    // screen against), a direct-marked one does not. `capture_stale` stays
+    // exactly "some staleness", which is what the force keys on.
+    let mut captures = Captures::default();
+    assert_eq!(captures.staleness(), Some(Stale::Empty));
+    let a = fake_dmabuf();
+    composite(&mut captures, 0xa, &a);
+    assert_eq!(captures.staleness(), None);
+    assert!(!captures.capture_stale());
+    captures.note_direct();
+    assert_eq!(captures.staleness(), Some(Stale::Direct));
+    assert!(captures.capture_stale());
+    // A rebuild freed the slots while marked: empty wins -- there is no
+    // recording left at all, so the reset is owed.
+    captures.forget_slots();
+    assert_eq!(captures.staleness(), Some(Stale::Empty));
+    // The very first damaged frame went direct: marked *and* empty. Empty
+    // wins -- there is still no recording, so the conservative reset path is
+    // the one owed, not the plain frame.
+    let mut first = Captures::default();
+    first.note_direct();
+    assert_eq!(first.staleness(), Some(Stale::Empty));
 }
