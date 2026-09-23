@@ -21,7 +21,7 @@ scoot has not cut a numbered release yet; entries are dated.
   notification over it, a screen recording). An app is only told when its
   buffer could actually be shown that way: its window is opaque (an
   opaque-format buffer, or marked opaque), or the background is black and
-  there is no wallpaper under it. An app with a transparent window over
+  there is no wallpaper under it other than a plain black one. An app with a transparent window over
   scoot's default background, or over a wallpaper, is not told — the
   display would never be offered its buffer. Nothing to configure. Seen on
   the dev VM with a test client; not yet with a real GPU app or on real GPU

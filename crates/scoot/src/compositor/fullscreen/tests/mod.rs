@@ -100,6 +100,12 @@ enum Layer {
     /// see past.
     #[cfg(feature = "gpu-scanout")]
     Wallpaper { opaque: bool },
+    /// The same wallpaper as a `wp_single_pixel_buffer_manager_v1` buffer
+    /// scaled over the output with `wp_viewporter`: opaque, black or not.
+    /// Smithay's walk drops such a covering buffer and clears the frame to
+    /// its colour instead.
+    #[cfg(feature = "gpu-scanout")]
+    PixelWallpaper { black: bool },
 }
 
 /// The width [`Layer::Dock`] reserves at the left edge.
@@ -235,6 +241,12 @@ struct TestClient {
     /// complete one.
     #[cfg(feature = "gpu-scanout")]
     feedback: scanout_feedback::Feedbacks,
+    #[cfg(feature = "gpu-scanout")]
+    single_pixel: Option<
+        wayland_protocols::wp::single_pixel_buffer::v1::client::wp_single_pixel_buffer_manager_v1::WpSinglePixelBufferManagerV1,
+    >,
+    #[cfg(feature = "gpu-scanout")]
+    viewporter: Option<wayland_protocols::wp::viewporter::client::wp_viewporter::WpViewporter>,
     /// Per toplevel, by creation order: the `xdg_toplevel.configure` state
     /// waiting for its `xdg_surface.configure`, and every completed one.
     pending: Vec<Configured>,
@@ -287,6 +299,14 @@ impl Dispatch<wl_registry::WlRegistry, ()> for TestClient {
             }
             // v5, the version Mesa's EGL and quickshell bind (see
             // `dmabuf.rs`): feedback objects, `main_device` still sent.
+            #[cfg(feature = "gpu-scanout")]
+            "wp_single_pixel_buffer_manager_v1" => {
+                client.single_pixel = Some(registry.bind(name, version.min(1), qh, ()));
+            }
+            #[cfg(feature = "gpu-scanout")]
+            "wp_viewporter" => {
+                client.viewporter = Some(registry.bind(name, version.min(1), qh, ()));
+            }
             #[cfg(feature = "gpu-scanout")]
             "zwp_linux_dmabuf_v1" => {
                 client.dmabuf = Some(registry.bind(name, version.min(5), qh, ()));
@@ -422,6 +442,18 @@ impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, Index> for TestClient {
 wayland_client::delegate_noop!(TestClient: ignore wl_compositor::WlCompositor);
 #[cfg(feature = "gpu-scanout")]
 wayland_client::delegate_noop!(TestClient: ignore wayland_client::protocol::wl_region::WlRegion);
+#[cfg(feature = "gpu-scanout")]
+wayland_client::delegate_noop!(
+    TestClient: ignore wayland_protocols::wp::single_pixel_buffer::v1::client::wp_single_pixel_buffer_manager_v1::WpSinglePixelBufferManagerV1
+);
+#[cfg(feature = "gpu-scanout")]
+wayland_client::delegate_noop!(
+    TestClient: ignore wayland_protocols::wp::viewporter::client::wp_viewporter::WpViewporter
+);
+#[cfg(feature = "gpu-scanout")]
+wayland_client::delegate_noop!(
+    TestClient: ignore wayland_protocols::wp::viewporter::client::wp_viewport::WpViewport
+);
 wayland_client::delegate_noop!(TestClient: ignore wl_surface::WlSurface);
 wayland_client::delegate_noop!(TestClient: ignore wl_shm::WlShm);
 wayland_client::delegate_noop!(TestClient: ignore wl_shm_pool::WlShmPool);
@@ -704,7 +736,7 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                         0,
                     ),
                     #[cfg(feature = "gpu-scanout")]
-                    Layer::Wallpaper { .. } => (
+                    Layer::Wallpaper { .. } | Layer::PixelWallpaper { .. } => (
                         zwlr_layer_shell_v1::Layer::Background,
                         zwlr_layer_surface_v1::Anchor::all(),
                         (0, 0),
@@ -732,10 +764,30 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                     wait_for(&mut queue, &mut client, "a layer configure", |client| {
                         client.layer_configures[index]
                     })?;
+                #[cfg(feature = "gpu-scanout")]
+                if let Layer::PixelWallpaper { black } = kind {
+                    let pixels = client
+                        .single_pixel
+                        .clone()
+                        .ok_or("no wp_single_pixel_buffer_manager_v1")?;
+                    let viewporter = client.viewporter.clone().ok_or("no wp_viewporter")?;
+                    let channel = if black { 0 } else { u32::MAX / 2 };
+                    let buffer =
+                        pixels.create_u32_rgba_buffer(channel, channel, channel, u32::MAX, &qh, ());
+                    let viewport = viewporter.get_viewport(&surface, &qh, ());
+                    viewport.set_destination(width as i32, height as i32);
+                    surface.attach(Some(&buffer), 0, 0);
+                    surface.damage(0, 0, width as i32, height as i32);
+                    surface.commit();
+                    layers.push((surface, role));
+                    queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                    acks.send(Ack::Done).map_err(|e| e.to_string())?;
+                    continue;
+                }
                 let color = match kind {
                     Layer::Bar | Layer::Dock => BAR_BGRA,
                     #[cfg(feature = "gpu-scanout")]
-                    Layer::Wallpaper { .. } => OTHER_BGRA,
+                    Layer::Wallpaper { .. } | Layer::PixelWallpaper { .. } => OTHER_BGRA,
                     Layer::Notification | Layer::Launcher(_) => NOTE_BGRA,
                 };
                 let format = match kind {

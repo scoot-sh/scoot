@@ -114,12 +114,37 @@ fn whole() -> Vec<Rectangle<i32, Physical>> {
 }
 
 fn walk(elements: Vec<Entry>) -> Option<WalkEnd> {
-    smithay_walk(elements, OUTPUT, &mut JudgeScratch::default())
+    smithay_walk(
+        elements,
+        OUTPUT,
+        GREY,
+        |_| None,
+        &mut JudgeScratch::default(),
+    )
+    .end
 }
 
 /// Rule 6 with the element at `window` being the covering window's.
 fn decide(elements: Vec<Entry>, clear: Color32F, window: usize) -> PrimaryDirect {
-    rule6(walk(elements), clear, |index| index == window)
+    decide_with_solid(elements, clear, window, None)
+}
+
+/// [`decide`], with the element at `solid.0` a single-pixel buffer of colour
+/// `solid.1`.
+fn decide_with_solid(
+    elements: Vec<Entry>,
+    clear: Color32F,
+    window: usize,
+    solid: Option<(usize, Color32F)>,
+) -> PrimaryDirect {
+    let walked = smithay_walk(
+        elements,
+        OUTPUT,
+        clear,
+        |index| solid.and_then(|(at, colour)| (at == index).then_some(colour)),
+        &mut JudgeScratch::default(),
+    );
+    rule6(walked.end, walked.clear_color, |index| index == window)
 }
 
 #[test]
@@ -294,11 +319,76 @@ fn the_scratch_is_reused_across_frames() {
     let many: Vec<Rectangle<i32, Physical>> =
         (0..20).map(|i| rect(i * 10, 0, 9, OUTPUT.1)).collect();
     let frame = || vec![full(many.clone()), full(Vec::new())];
-    let _ = smithay_walk(frame(), OUTPUT, &mut scratch);
+    let _ = smithay_walk(frame(), OUTPUT, GREY, |_| None, &mut scratch);
     let (opaque, work) = (scratch.opaque.capacity(), scratch.work.capacity());
     for _ in 0..10 {
-        let _ = smithay_walk(frame(), OUTPUT, &mut scratch);
+        let _ = smithay_walk(frame(), OUTPUT, GREY, |_| None, &mut scratch);
         assert_eq!(scratch.opaque.capacity(), opaque);
         assert_eq!(scratch.work.capacity(), work);
     }
+}
+
+#[test]
+fn a_black_single_pixel_wallpaper_hands_the_primary_to_the_window_above_it() {
+    // Smithay's substitution: the covering single-pixel buffer is dropped,
+    // its colour clears the frame, and the element above it -- here an
+    // alpha window with no opaque region -- is the last one. Over black it
+    // passes the guard; over any other colour it does not.
+    let alpha_window = full(Vec::new());
+    let wallpaper = full(whole());
+    assert_eq!(
+        decide_with_solid(
+            vec![alpha_window.clone(), wallpaper.clone()],
+            GREY,
+            0,
+            Some((1, BLACK))
+        ),
+        PrimaryDirect::Eligible
+    );
+    assert_eq!(
+        decide_with_solid(
+            vec![alpha_window.clone(), wallpaper.clone()],
+            BLACK,
+            0,
+            Some((1, GREY))
+        ),
+        PrimaryDirect::NothingOpaqueCovers
+    );
+    // The same wallpaper as an ordinary buffer is what Smithay tries.
+    assert_eq!(
+        decide_with_solid(vec![alpha_window, wallpaper.clone()], BLACK, 0, None),
+        PrimaryDirect::NotTheWindow
+    );
+    // A single-pixel buffer alone on the output: nothing left to try.
+    assert_eq!(
+        decide_with_solid(vec![wallpaper], GREY, 0, Some((0, BLACK))),
+        PrimaryDirect::NothingOpaqueCovers
+    );
+}
+
+#[test]
+fn only_the_element_that_ends_the_walk_is_asked_for_its_colour() {
+    // The substitution applies to the first opaque, output-spanning element
+    // only: one that is not opaque over the output is never replaced.
+    let asked = std::cell::Cell::new(Vec::new());
+    let walked = smithay_walk(
+        vec![full(Vec::new()), full(whole()), full(whole())],
+        OUTPUT,
+        GREY,
+        |index| {
+            let mut seen = asked.take();
+            seen.push(index);
+            asked.set(seen);
+            None
+        },
+        &mut JudgeScratch::default(),
+    );
+    assert_eq!(asked.take(), vec![1]);
+    assert_eq!(
+        walked.end,
+        Some(WalkEnd {
+            index: 1,
+            spans_opaque: true
+        })
+    );
 }

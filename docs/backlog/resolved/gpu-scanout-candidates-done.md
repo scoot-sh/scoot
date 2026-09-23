@@ -47,6 +47,13 @@ eligibility half landed with the
   belong to the covering window's surface tree (`NotTheWindow` otherwise).
   Re-review caught the first cut of this rule accepting *any* opaque
   covering element -- a wallpaper under an alpha window made it eligible.
+  Round 3 added Smithay's single-pixel-buffer substitution to the mirror
+  (a covering single-pixel buffer is dropped and clears the frame to its
+  colour), without which an alpha window over a black single-pixel
+  wallpaper -- direct at PR #228 -- was refused. What is still not
+  mirrored is whether every element above the last got a plane: a pointer
+  composited on hardware with no cursor or overlay plane keeps the window
+  steered while the frames it is visible on composite.
   The walk's rectangle lists are per-output scratch kept across frames, so
   a client declaring many opaque rectangles does not allocate per frame.
   So the direct flags and the steering share one decision; a frame it

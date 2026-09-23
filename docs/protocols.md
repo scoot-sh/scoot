@@ -122,8 +122,8 @@ Other outputs are untouched: fullscreen is per output.
 a covering fullscreen window whose buffer is a dma-buf the display can take
 is scanned out directly -- shown from the client's own buffer, with no
 compositing -- provided it is opaque (an opaque-format buffer, or an opaque
-region covering it), or the background is black and no wallpaper lies
-under it. Anything drawn over it (an `overlay` notification, a popup
+region covering it), or the background is black and no wallpaper other than
+a black single-pixel-buffer one lies under it. Anything drawn over it (an `overlay` notification, a popup
 menu, a cursor the hardware cursor plane cannot carry), a translucent
 window (`wp_alpha_modifier_v1`), a lock screen, or a client capturing the
 screen makes those frames composite instead; nothing changes on screen
@@ -898,7 +898,8 @@ then be shown straight from its own memory instead of being composited.
   streamed by a capture client, nothing translucent, and the window's buffer
   the one the display would be offered: the window opaque over the whole
   output (an opaque-format buffer or an opaque region), or a black
-  background with no wallpaper under it. Otherwise -- a transparent window
+  background with no wallpaper under it (a black single-pixel-buffer
+  wallpaper counts as black background). Otherwise -- a transparent window
   over the default background, or over a wallpaper -- the display is never
   offered the window's buffer, and steering the client would cost it a
   reallocation for nothing (the rules in [tty.md](tty.md)). One known cost:

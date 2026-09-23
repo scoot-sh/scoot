@@ -69,6 +69,16 @@ additive, no version bump. `render/elements.rs` gains the `X11` arm;
 lock, per-output bookkeeping and decorations key off `Space<Window>` and
 follow for free — verify each gate tests `Window`, not `toplevel()`.
 
+**Note for Phase 2 (from PR #230, GPU scanout tier):** `State::fullscreen_surface`
+(`fullscreen.rs`, `gpu-scanout` builds) resolves the covering window through
+`Window::toplevel`, which is `None` for an X11 window. So a fullscreen X11
+window currently answers `NotCovered` in `render::primary_direct` and is
+never scanned out directly nor sent the per-surface scanout feedback
+(`dmabuf/scanout.rs`) -- composited like any other window, never wrong, but
+never zero-copy. When X11 windows map, extend `fullscreen_surface` to return
+the X11 surface's `wl_surface` (`X11Surface::wl_surface`), and check that
+rule 6's tree walk and the steering both accept it.
+
 ## Phase 3 — input / focus gate (the security half)
 
 Pointer hit-test and keyboard focus gain X11 branches

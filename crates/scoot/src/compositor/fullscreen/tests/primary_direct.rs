@@ -370,3 +370,34 @@ fn judge_cost() {
         println!("judge, {label}: {each:?} per frame ({verdict:?}, {ROUNDS} rounds)");
     }
 }
+
+#[test]
+fn over_a_black_single_pixel_wallpaper_an_alpha_window_is_tried() {
+    // Smithay drops a covering single-pixel buffer and clears the frame to
+    // its colour, making the element above it -- the window -- the last
+    // one. Black: the window passes the guard whatever its alpha, as it did
+    // before rule 6 existed (the regression review caught). Any other
+    // colour: nothing passes, as Smithay would try nothing.
+    for background in [appearance(), black()] {
+        let mut fixture = Fixture::with_appearance(background.clone());
+        fixture.done(Step::CreateLayer(Layer::PixelWallpaper { black: true }));
+        fixture.map(WINDOW_BGRA);
+        fullscreen_alpha(&mut fixture, false);
+        assert_eq!(
+            fixture.state.primary_direct_now(),
+            PrimaryDirect::Eligible,
+            "black single-pixel wallpaper, {:?}",
+            background.background_color
+        );
+        let mut fixture = Fixture::with_appearance(background.clone());
+        fixture.done(Step::CreateLayer(Layer::PixelWallpaper { black: false }));
+        fixture.map(WINDOW_BGRA);
+        fullscreen_alpha(&mut fixture, false);
+        assert_eq!(
+            fixture.state.primary_direct_now(),
+            PrimaryDirect::NothingOpaqueCovers,
+            "grey single-pixel wallpaper, {:?}",
+            background.background_color
+        );
+    }
+}

@@ -254,7 +254,9 @@ running with no GPU at all is a hard requirement here, not a fallback tier.
   (rule 6, mirroring Smithay's walk). That holds when the window is opaque
   over the whole output (an opaque-format buffer, or one whose surface
   declares an opaque region covering it), or when the background is black
-  and nothing visible lies under the window. A fullscreen app with an
+  and nothing visible lies under the window (a solid-colour wallpaper made
+  of a single-pixel buffer counts as the background: Smithay clears to its
+  colour instead of drawing it, so a black one qualifies). A fullscreen app with an
   alpha-format buffer and no opaque region is not eligible over the default
   background, nor over any wallpaper (Smithay would try the wallpaper, or
   nothing), and so is not steered either (below).

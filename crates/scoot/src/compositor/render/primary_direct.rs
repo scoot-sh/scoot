@@ -63,15 +63,25 @@
 //!    toward a scannable layout it could never use. Both were measured live
 //!    on the dev VM before this rule existed: steered, never direct.
 //!
-//!    Two parts of Smithay's walk are left out, both in the direction of
-//!    calling a frame eligible that Smithay then composites -- a missed
-//!    steer is a client's cost, a wrong one is only a hint: whether every
-//!    element above the last one got a plane of its own (it needs a DRM
-//!    device to know), and the single-pixel-buffer case, where Smithay drops
-//!    a covering single-pixel buffer and makes its colour the clear colour
-//!    (its colour needs the renderer's buffer; and the element above it is
-//!    the same window's anyway in the one shape that makes it -- a video
-//!    player's black root under its video subsurface).
+//!    The walk mirrors Smithay's single-pixel-buffer substitution too: when
+//!    the first opaque, output-spanning element is a single-pixel buffer (a
+//!    solid-colour wallpaper, or a video player's black root under its video
+//!    subsurface), Smithay drops it, makes its colour the clear colour, and
+//!    the element above it becomes the last -- so an alpha window over a
+//!    *black* single-pixel wallpaper is tried (and eligible), and over any
+//!    other colour it is not.
+//!
+//!    One part of Smithay's decision is left out, and it errs toward calling
+//!    a frame eligible that Smithay then composites (a steer that buys
+//!    nothing; never a missed one): Smithay tries the last element only if
+//!    every element above it got a plane of its own, which needs a DRM
+//!    device and a `TEST_ONLY` commit to know. The case that matters is the
+//!    pointer: on hardware with neither a cursor plane nor an overlay plane
+//!    for it, a visible pointer over the fullscreen window is composited, so
+//!    every frame it is visible composites -- while the window stays eligible
+//!    and steered. It goes direct again once the pointer is hidden (a video
+//!    player hides it) or moves off the output. The dev VM's virtio-gpu has a
+//!    cursor plane, so this has not been seen there.
 //!
 //! 4 and 5 scan the whole list rather than the one element Smithay would
 //! pick, because *which* element that is is Smithay's decision (the bottom
@@ -119,12 +129,13 @@
 
 use std::time::Instant;
 
-use smithay::backend::renderer::element::{Element, Id};
+use smithay::backend::renderer::element::{Element, Id, RenderElement, UnderlyingStorage};
 use smithay::backend::renderer::{Color32F, ImportAll, ImportMem, Renderer, Texture};
 use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{Physical, Rectangle, Scale};
 use smithay::wayland::compositor::{TraversalAction, with_surface_tree_downward};
+use smithay::wayland::single_pixel_buffer::get_single_pixel_buffer;
 
 use super::elements::Elements;
 use crate::compositor::State;
@@ -183,6 +194,7 @@ impl PrimaryDirect {
 /// has grown to the frame's region count.
 pub(super) fn judge<R>(
     state: &State,
+    renderer: &mut R,
     output: &Output,
     locked: bool,
     elements: &[Elements<R>],
@@ -219,14 +231,20 @@ where
         return refusal;
     }
     let scale = Scale::from(frame.scale);
-    let end = smithay_walk(
+    let walked = smithay_walk(
         elements
             .iter()
             .map(|element| (element.geometry(scale), element.opaque_regions(scale))),
         frame.size,
+        frame.clear_color,
+        |index| {
+            elements
+                .get(index)
+                .and_then(|element| solid_colour(element, renderer))
+        },
         scratch,
     );
-    rule6(end, frame.clear_color, |index| {
+    rule6(walked.end, walked.clear_color, |index| {
         elements
             .get(index)
             .is_some_and(|element| in_tree(covering, element.id()))
@@ -278,7 +296,13 @@ pub(super) struct WalkEnd {
 /// *with* it. For a covering fullscreen window, placed at the output origin,
 /// the two coincide; mirroring the arithmetic rather than correcting it keeps
 /// this Smithay's answer where they do not.
-fn smithay_walk<I, O>(elements: I, size: (i32, i32), scratch: &mut JudgeScratch) -> Option<WalkEnd>
+fn smithay_walk<I, O>(
+    elements: I,
+    size: (i32, i32),
+    mut clear_color: Color32F,
+    mut solid: impl FnMut(usize) -> Option<Color32F>,
+    scratch: &mut JudgeScratch,
+) -> Walked
 where
     I: IntoIterator<Item = (Rectangle<i32, Physical>, O)>,
     O: std::ops::Deref<Target = [Rectangle<i32, Physical>]>,
@@ -309,6 +333,13 @@ where
                 .filter_map(|region| region.intersection(output)),
         );
         let spans_opaque = opaque && visible.contains_rect(output);
+        if spans_opaque && let Some(colour) = solid(index) {
+            // Smithay's single-pixel-buffer substitution: the element is
+            // dropped, its colour clears the frame, and the element above it
+            // (already `end`, if any) stays the last one.
+            clear_color = colour;
+            break;
+        }
         end = Some(WalkEnd {
             index,
             spans_opaque,
@@ -317,7 +348,34 @@ where
             break;
         }
     }
-    end
+    Walked { end, clear_color }
+}
+
+/// What [`smithay_walk`] ends with: the last element on the visible list,
+/// and the clear colour the frame will actually be cleared to -- the one it
+/// was given, or a covering single-pixel buffer's.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct Walked {
+    pub(super) end: Option<WalkEnd>,
+    pub(super) clear_color: Color32F,
+}
+
+/// The colour of `element` if its buffer is a single-pixel buffer, as
+/// Smithay reads it for the substitution (`underlying_storage` ->
+/// `get_single_pixel_buffer` -> `rgba32f`). Asked only for the first
+/// opaque, output-spanning element, once per frame; a pointer read and a
+/// user-data lookup, no allocation.
+fn solid_colour<R>(element: &Elements<R>, renderer: &mut R) -> Option<Color32F>
+where
+    R: Renderer + ImportAll + ImportMem,
+    R::TextureId: Texture + 'static,
+{
+    match element.underlying_storage(renderer)? {
+        UnderlyingStorage::Wayland(buffer) => get_single_pixel_buffer(buffer)
+            .ok()
+            .map(|pixel| Color32F::from(pixel.rgba32f())),
+        _ => None,
+    }
 }
 
 /// Rule 6 over where the walk ended: Smithay's guard (the last element

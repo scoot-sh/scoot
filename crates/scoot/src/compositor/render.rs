@@ -1100,8 +1100,15 @@ where
         scale: frame.scale,
         clear_color,
     };
-    let direct =
-        primary_direct::judge(state, output, locked, &elements, &tried_with, judge_scratch);
+    let direct = primary_direct::judge(
+        state,
+        renderer,
+        output,
+        locked,
+        &elements,
+        &tried_with,
+        judge_scratch,
+    );
     (elements, cursor_surface, direct)
 }
 
@@ -1190,8 +1197,15 @@ impl State {
         };
         let started = std::time::Instant::now();
         for _ in 0..rounds {
-            let again =
-                primary_direct::judge(self, &output, locked, &elements, &tried_with, &mut scratch);
+            let again = primary_direct::judge(
+                self,
+                &mut cpu.renderer,
+                &output,
+                locked,
+                &elements,
+                &tried_with,
+                &mut scratch,
+            );
             std::hint::black_box(again);
         }
         let each = started.elapsed() / rounds.max(1);
