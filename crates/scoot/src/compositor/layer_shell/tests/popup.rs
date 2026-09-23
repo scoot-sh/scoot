@@ -1149,8 +1149,8 @@ fn a_layer_parented_popup_configures_maps_and_draws() {
         1,
         "exactly one configure, as for a window's popup"
     );
-    // The reason `WlrLayerShellHandler::new_popup` stays unimplemented, and
-    // the assertion that catches it if someone "fixes" that: the popup is
+    // The reason `WlrLayerShellHandler::new_popup` only checks and never
+    // tracks, and the assertion that catches it if someone "fixes" that: the popup is
     // already tracked once, through `XdgShellHandler::new_popup`. Tracking it
     // again there puts a second node for the same surface in the layer
     // surface's `PopupTree`, and `LayerSurface::send_frame` walks that tree

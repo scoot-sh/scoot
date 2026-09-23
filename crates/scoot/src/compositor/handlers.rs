@@ -55,6 +55,7 @@ use smithay::xwayland::xwm::{Reorder, ResizeEdge, X11Window, XwmId};
 
 use super::State;
 use super::output_scale::send_preferred_buffer_scale;
+use super::popup_parent::Admission;
 use super::render::Backend;
 use super::state::ClientState;
 
@@ -368,28 +369,40 @@ impl XdgShellHandler for State {
     /// the layer-shell request has set its parent, and `PopupManager::commit`
     /// moves it into the parent's tree from there.
     ///
-    /// That is why `WlrLayerShellHandler::new_popup` stays unimplemented:
-    /// tracking a popup a second time on that path puts a *second* node for
-    /// the same surface in the layer surface's `PopupTree` -- measured, see
+    /// That is why `WlrLayerShellHandler::new_popup` never tracks: tracking
+    /// a popup a second time on that path puts a *second* node for the same
+    /// surface in the layer surface's `PopupTree` -- measured, see
     /// `layer_shell/tests/popup.rs` -- which every tree walk then sees twice
-    /// and which a dismissal only half removes.
+    /// and which a dismissal only half removes. It only checks that the
+    /// popup may be adopted at all (`popup_parent::check_adoption`).
     ///
     /// The positioner is not read here: the popup's constraint adjustment is
     /// applied at its initial configure instead (see
     /// `send_popup_initial_configure`), which is the first point a layer
     /// surface's popup has a parent to be constrained against.
     ///
-    /// A popup whose parent chain loops back to itself is refused first,
-    /// and its client disconnected: tracking it would run Smithay's
-    /// unbounded walk up that chain, which never returns -- see
-    /// `popup_parent.rs`.
+    /// A popup that would loop, nest more than `MAX_POPUP_DEPTH` deep, or
+    /// let an existing chain grow later is refused first, and its client
+    /// disconnected: tracking it would run Smithay's unbounded walk up that
+    /// chain and its unbounded recursion down the tree -- see
+    /// `popup_parent.rs`. A popup on a surface that was a popup before has
+    /// the dead one reaped from the tree first, so its own children cannot
+    /// be inserted under the dead node (see `Admission::Reused`).
     fn new_popup(&mut self, surface: PopupSurface, _positioner: PositionerState) {
-        if super::popup_parent::refuse_if_cyclic(&surface) {
-            return;
+        match super::popup_parent::admit(&surface) {
+            Admission::Refused => return,
+            Admission::Reused => self.popups.cleanup(),
+            Admission::Fresh => {}
         }
         let _ = self
             .popups
             .track_popup(smithay::desktop::PopupKind::Xdg(surface));
+    }
+
+    /// Closes the popup's record and refuses a destroy that leaves child
+    /// popups behind -- see `popup_parent.rs`.
+    fn popup_destroyed(&mut self, surface: PopupSurface) {
+        super::popup_parent::popup_destroyed(&surface);
     }
 
     fn grab(&mut self, surface: PopupSurface, seat: wl_seat::WlSeat, serial: Serial) {

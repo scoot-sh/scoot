@@ -278,7 +278,10 @@ surfaces, and all of them map, draw, take clicks and take the keyboard.
   over, and closing it unwinds to the parent menu rather than closing the
   whole chain.
 - **A bar's own dropdowns work too** — a popup parented to a *layer* surface
-  (`zwlr_layer_surface_v1.get_popup`), not just to a window.
+  (`zwlr_layer_surface_v1.get_popup`), not just to a window. As the
+  protocol says, the popup must be created with a null parent and handed
+  to the bar before it is first configured; anything else is refused (see
+  below).
 - **A menu is kept on its screen.** A popup that lets the compositor adjust
   it (`xdg_positioner.set_constraint_adjustment`: flip, slide, resize —
   GTK3's context menus ask for all six) is flipped, slid or resized, in the
@@ -299,13 +302,37 @@ surfaces, and all of them map, draw, take clicks and take the keyboard.
   `xdg_popup.reposition`. It is not redone afterwards: a `reactive` popup
   whose window scrolls while it is open keeps its position (tracked in
   [`docs/backlog/core/popup-reactive-reconstrain.md`](backlog/core/popup-reactive-reconstrain.md)).
-- **A popup cannot be its own ancestor.** A popup whose parent chain loops
-  back to itself (its own `xdg_surface` named as its parent, or a longer
-  loop through a bare `xdg_surface`) is refused with a protocol error and its
-  client disconnected. Before, one such request froze the compositor.
-  The protocol's error is `xdg_wm_base.invalid_popup_parent`; scoot posts
-  that error's code on the popup itself, because the pinned Smithay keeps
-  the `xdg_wm_base` object private.
+- **Popups nest at most 64 deep, and cannot loop.** A menu, its submenu,
+  that submenu's submenu and so on may go 64 levels deep — real menus stop
+  at a handful — and a 65th is refused. That holds for how scoot itself
+  stores and draws them, not just for each popup's parent chain: no
+  application popup ever sits more than 64 levels down, however the client
+  got it there (an input method's candidate window over the deepest one
+  can add a 65th level; it is never anyone's parent). So is a popup that
+  is its own ancestor (its own `xdg_surface` named as its parent). Before, a chain a
+  few thousand deep crashed the compositor, and a loop froze it, taking
+  every other client down too. A refused popup's client is disconnected
+  with a protocol error, and so is a client that breaks one of the
+  protocol's rules that keep an open chain from growing afterwards, which
+  scoot enforces where the pinned Smithay does not:
+
+  | What the client did | Protocol error | Posted on |
+  |---|---|---|
+  | Nested a popup more than 64 deep, or made one its own ancestor | `xdg_wm_base.invalid_popup_parent` | the new `xdg_popup` |
+  | Made a popup of an `xdg_surface` with no live `xdg_toplevel` or `xdg_popup` (a bare one, or one whose popup was destroyed) | `xdg_wm_base.invalid_popup_parent` | the new `xdg_popup` |
+  | Called `get_popup` for a `wl_surface` whose popup is still alive (on the same `xdg_surface` or a second one) | `xdg_surface.already_constructed` | the new popup's `xdg_surface` |
+  | Destroyed a popup that still has child popups open | `xdg_wm_base.not_the_topmost_popup` | the destroyed popup's `xdg_surface` |
+  | Handed a bar (`zwlr_layer_surface_v1.get_popup`) a popup that was created with a parent, or was already configured | `xdg_wm_base.invalid_popup_parent` | the `xdg_popup` |
+
+  The `xdg_wm_base` errors are posted on another object because the pinned
+  Smithay keeps the client's `xdg_wm_base` private: the code is
+  `xdg_wm_base`'s, and the message starts with the error's name — read
+  that, since on `xdg_surface` the same number means something else. Each
+  refusal also logs a `warn` naming the client and the reason. Closing
+  menus innermost first, as GTK 3 does (and as wlroots and mutter also
+  require), is unaffected, and so is a client disconnecting with menus
+  open. An input method's candidate window over a menu's text field does
+  not count as the menu's child: the menu can close under it.
 - **The grab's serial has to name a real interaction.** A grab is refused —
   dismissed, with a warning in the compositor log naming the client and
   serial, since the protocol posts no error — unless its serial is a recent

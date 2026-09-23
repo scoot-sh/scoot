@@ -106,7 +106,10 @@ fn a_popup_parented_to_itself_is_refused_not_a_hang() {
 }
 
 /// The same loop, two popups long: a popup of a bare `xdg_surface`, then
-/// that `xdg_surface` made a popup of its own child.
+/// that `xdg_surface` made a popup of its own child. The loop can no longer
+/// even be built: its first popup is refused, because a parent with no live
+/// role object is (see `popup_parent.rs`) -- with the same error, and the
+/// same outcome for everyone else.
 #[test]
 fn a_two_popup_parent_loop_is_refused_not_a_hang() {
     let mut fixture = Fixture::one_output();
