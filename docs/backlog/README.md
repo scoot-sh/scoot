@@ -679,8 +679,8 @@ capture-cursor → resize-in-place → syncobj → nested dmabuf → VRR.
 - [VRR on the scanout tier](./core/gpu-vrr.md) — low, blocked on a VRR-capable display.
 
 ### GPU tier, after primary-direct (2026-09-23)
-- [GLES tier advertises only LINEAR dma-bufs](./core/gles-dmabuf-full-formats.md) — high: GPU clients forced into linear buffers; no NV12 for zero-copy video. Next up.
-- [Scanout-tranche feedback + `zero_copy` flag](./core/gpu-scanout-candidates.md) — after the above.
+- [GLES tier advertises only LINEAR dma-bufs](./resolved/gles-dmabuf-full-formats-done.md) — RESOLVED 2026-09-23 (PR #TBD): under `gles` the feedback is the driver's own import set (every fourcc at every explicit modifier, external-only YUV included), `Invalid` never offered next to explicit layouts (an implicit YUV buffer draws the wrong colour, measured), pixman byte-identical. On llvmpipe: 57 formats at `LINEAR`, `NV12`/`P010`/`YU12`/`YUYV` imported through `create_immed` and drawn correctly from dumb buffers. Real GPU: `Asahi.md` Test 6.
+- [Scanout-tranche feedback + `zero_copy` flag](./core/gpu-scanout-candidates.md) — next: now that the default tranche offers tiled layouts, a fullscreen client may pick one the display cannot scan out.
 - [Windows on overlay planes](./core/gpu-overlay-window-candidates.md) — low, blocked on overlay-capable hardware.
 
 ### Found reviewing client fullscreen (2026-09-23)

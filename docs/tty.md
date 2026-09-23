@@ -313,19 +313,37 @@ running with no GPU at all is a hard requirement here, not a fallback tier.
   the missing library reports instead of panicking -- scoot says so and
   names each failure rather than quietly compositing with the other
   renderer.
-- **dma-buf clients follow the renderer.** This used to be a known gap — the
-  advertised buffer formats were the CPU renderer's whichever renderer was
-  active, so a GPU buffer the GLES renderer could not import was refused, and
-  through `create_immed` that disconnects the client. Since the stage-4
-  change the `zwp_linux_dmabuf_v1` feedback names only what the *active*
-  renderer can really import, so there is nothing left to stay on `pixman`
-  for. Two consequences worth knowing: on a renderer that can import neither
-  of the formats scoot serves, no dmabuf global is advertised at all (GL
-  clients fall back to `wl_shm`, and a shell that waits for dmabuf feedback
-  before capturing — quickshell does — stays waiting), and `main_device` in
-  that feedback is the renderer's own DRM render node rather than a guessed
-  path, which is what makes a client's allocation land on the device the
-  import will happen on. See
+- **dma-buf clients follow the renderer, and on `gles` get the GPU's own
+  formats.** This used to be a known gap — the advertised buffer formats
+  were the CPU renderer's whichever renderer was active, so a GPU buffer the
+  GLES renderer could not import was refused, and through `create_immed`
+  that disconnects the client. Since the stage-4 change the
+  `zwp_linux_dmabuf_v1` feedback names only what the *active* renderer can
+  really import, so there is nothing left to stay on `pixman` for. Under
+  `gles` (both the offscreen tier and the `--tty` GPU scanout tier, whose
+  renderer is the one on the GBM device) that is the driver's whole import
+  set: every format at every explicit modifier it names, tiled and
+  compressed layouts and multi-plane YUV (`NV12`, `P010`, …) included —
+  where it used to be `Xrgb8888`/`Argb8888` at `LINEAR` only, which forced
+  every GL client into linear buffers and every video player into a
+  conversion. Implicit-modifier entries are never offered next to explicit
+  ones (a YUV buffer imported that way draws the wrong colours). On the dev
+  VM's llvmpipe that is 57 formats, all `LINEAR`, identical on both GLES
+  tiers; on real hardware it is recorded, not promised
+  ([`../Asahi.md`](../Asahi.md)'s Test 6). A multi-plane YUV buffer can go
+  direct on the primary plane only where that plane lists the format;
+  otherwise it composites. The same goes for a tiled layout: with those on
+  offer, a fullscreen GL client on real hardware may pick one the display
+  cannot scan out and composite rather than go direct — steering it toward
+  a scannable layout is a later, per-surface item
+  ([gpu-scanout-candidates](backlog/core/gpu-scanout-candidates.md)).
+  Two consequences worth knowing: on a renderer
+  that can import nothing scoot can vouch for, no dmabuf global is
+  advertised at all (GL clients fall back to `wl_shm`, and a shell that
+  waits for dmabuf feedback before capturing — quickshell does — stays
+  waiting), and `main_device` in that feedback is the renderer's own DRM
+  render node rather than a guessed path, which is what makes a client's
+  allocation land on the device the import will happen on. See
   [protocols.md](protocols.md#gpu-rendering-clients-zwp_linux_dmabuf_v1).
 
 ### The `gpu-scanout` build feature

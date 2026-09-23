@@ -22,6 +22,7 @@ whole of it as one command that writes its own report.
 | Issue #48's unconfirmed connector fallback | — | yes | still open — needs an external display |
 | [Test 4: CPU vs GPU on a real GPU](docs/backlog/resolved/gpu-vs-cpu-measured-done.md) | high → none | yes | **ANSWERED** (2026-09-21): scanout comes up on the split topology and costs 4–5x less CPU |
 | [Test 5: a fullscreen video scanned out directly](docs/backlog/resolved/gpu-primary-direct-format-gate-done.md) | medium | yes | open — seen on the dev VM only |
+| [Test 6: what the GLES tier advertises, and what GPU clients do with it](docs/backlog/resolved/gles-dmabuf-full-formats-done.md) | high | partly | open — seen on the dev VM's llvmpipe only (57 formats, all `LINEAR`) |
 
 ## Results so far (run 2026-09-18, `main` at `f688ac9`)
 
@@ -694,6 +695,101 @@ p=$(pgrep -x scoot); a=$(awk '{print $14+$15}' /proc/$p/stat); sleep 10
 b=$(awk '{print $14+$15}' /proc/$p/stat); echo "jiffies/10s: $((b-a))"
 ```
 
+## Test 6 — the GLES tier's dma-buf formats, and what GPU clients do with them
+
+Why: under `--renderer gles` the `zwp_linux_dmabuf_v1` feedback is now the
+GPU driver's whole import set — every format at every explicit modifier it
+names (`docs/protocols.md`, "GPU-rendering clients"), where it used to be
+`Xrgb8888`/`Argb8888` at `LINEAR` only. On the dev VM's llvmpipe that is 57
+formats, every one at `LINEAR`, because Mesa lists no other layout there;
+only this machine can say what AGX offers (tiled and compressed modifiers
+are expected), whether a GL client then allocates one of them instead of
+`LINEAR`, and whether a video player hands over `NV12` directly.
+
+Nothing here is claimed in advance. It is a record to capture.
+
+**Part A — the advertised table, both GLES tiers.** The offscreen tier needs
+no VT; run it from your normal session (or a VT). The `--tty` tier needs a
+VT, as in Test 4 (`Ctrl+Alt+F<n>` gets you back).
+
+```sh
+mkdir -p /tmp/fx
+# offscreen GLES (headless: no window appears; scoot keeps running after
+# the command exits, hence the kill)
+RUST_LOG=scoot=debug ./result-scoot-gpu/bin/scoot --headless --renderer gles \
+  -- sh -c 'wayland-info -i zwp_linux_dmabuf_v1 > /tmp/fx/t6-table-headless.txt' \
+  > /tmp/fx/t6-headless.log 2>&1 &
+sleep 5; kill %1
+# GPU scanout tier, from a VT
+RUST_LOG=scoot=debug ./result-scoot-gpu/bin/scoot --tty --renderer gles \
+  -- sh -c 'wayland-info -i zwp_linux_dmabuf_v1 > /tmp/fx/t6-table-tty.txt' \
+  > /tmp/fx/t6-tty.log 2>&1 &
+sleep 8; kill %%
+sed -i 's/\x1b\[[0-9;]*m//g' /tmp/fx/t6-*.log
+grep 'dmabuf feedback' /tmp/fx/t6-*.log
+grep -c '= ' /tmp/fx/t6-table-*.txt              # pairs per tier
+grep -v LINEAR /tmp/fx/t6-table-headless.txt | head -20   # the non-linear layouts
+grep -E "NV12|P010" /tmp/fx/t6-table-*.txt
+```
+
+(`wayland-info` is in `nixpkgs#wayland-utils`.) Read it as: a `pairs=` count
+well above 57 and `grep -v LINEAR` listing Apple-vendor modifiers is the
+expected shape; `pairs=2` would mean the driver answered no modifier query
+at all (the old table, kept on purpose — see `dmabuf::driver_tranche`);
+the two tiers' tables differing is worth a line on its own, since both
+renderers are Mesa's AGX driver.
+
+**Part B — a GL client and a video player, on the `--tty` tier.** Same VT
+session as Test 5, with the log flags from there:
+
+```sh
+RUST_LOG=info,scoot=debug ./result-scoot-gpu/bin/scoot --tty --renderer gles \
+  > /tmp/fx/t6b.log 2>&1 &
+# which modifier does Mesa pick from the new table?
+WAYLAND_DISPLAY=wayland-1 WAYLAND_DEBUG=1 es2gears_wayland 2> /tmp/fx/t6-gears.trace &
+sleep 5; scootctl screenshot --out /tmp/fx/t6-gears.png; kill %2
+grep -m3 'zwp_linux_buffer_params_v1.*add(' /tmp/fx/t6-gears.trace   # last two args: modifier hi, lo
+grep -c 'create_pool(' /tmp/fx/t6-gears.trace                        # >0 means it fell back to wl_shm
+# a video player handing over dma-bufs (hardware decode if this machine has one)
+WAYLAND_DISPLAY=wayland-1 mpv --fs --vo=dmabuf-wayland --hwdec=auto --msg-level=all=v \
+  --loop some-video.mkv > /tmp/fx/t6-mpv.log 2>&1 &
+sleep 10; scootctl screenshot --out /tmp/fx/t6-mpv.png
+sudo cat /sys/kernel/debug/dri/*/state > /tmp/fx/t6-kms-mpv.txt; kill %2
+grep -E 'Using DRM device|hwdec|upload|VO:|failed|error' /tmp/fx/t6-mpv.log | head -20
+```
+
+(`es2gears_wayland` is in `nixpkgs#mesa-demos`.) What each answer means:
+
+- **The GL client's `add(` modifier is not `0, 0`** (not `LINEAR`) and the
+  screenshot shows gears: GPU clients now render into their native layout
+  here, the point of this change. `0, 0` with the table offering other
+  layouts is Mesa's own choice and worth recording; a non-zero
+  `create_pool(` count means the client never used dma-bufs at all.
+- **The client disappears, or the log has `import refused`**: the promise
+  broke on this hardware — the most important thing this test can find.
+  Send the trace and the log.
+- **mpv plays, `--vo=dmabuf-wayland` is the active VO and the screenshot
+  shows the video**: zero-copy video into the compositor works. Its
+  `add(` lines (in a `WAYLAND_DEBUG=1` rerun) say which fourcc it sent —
+  `NV12` is the expected one. mpv refusing the VO or failing to upload says
+  this machine has no decoder path mpv can hand over, which is a finding
+  about the machine, not about scoot. On the dev VM it could not run at
+  all (no VA-API driver, and software frames cannot be uploaded to
+  `drm_prime` there); the same NV12 path is covered there by a test that
+  allocates the buffers itself.
+- **Direct scanout, re-checked.** With the new table a fullscreen GL client
+  may allocate a tiled layout the display controller cannot scan out, in
+  which case Test 5's fullscreen frames composite instead of going direct
+  (a missed optimisation, not a failure — steering fullscreen clients to a
+  scannable layout is the per-surface scanout tranche,
+  `docs/backlog/core/gpu-scanout-candidates.md`). If Test 5 is run on a
+  build with this change, note the modifier the client sent next to the
+  answer. And if a fullscreen buffer *does* go direct, check the fb's
+  modifier in `t5-kms-fullscreen.txt` against the client's `add(` modifier:
+  a tiled client buffer shown on an fb with no modifier (or `LINEAR`) is the
+  one exposure `DIRECT_FLAGS` in `tty/scanout.rs` names — a GBM import that
+  dropped the modifier — and would look like scrambled tiles on screen.
+
 ## What to send back
 
 - `ghostty --version`
@@ -704,6 +800,9 @@ b=$(awk '{print $14+$15}' /proc/$p/stat); echo "jiffies/10s: $((b-a))"
 - for Test 3: the log, plus which connector it started on and which you pulled
 - for Test 5: `/tmp/fx/t5.clean.log`, both `t5-kms-*.txt`, `t5-fs.png`,
   and the grep output
+- for Test 6: `/tmp/fx/t6-table-*.txt`, `/tmp/fx/t6-*.log`,
+  `/tmp/fx/t6-gears.trace` (or just its `add(` lines), `t6-gears.png`,
+  `t6-mpv.log`, `t6-mpv.png`, `t6-kms-mpv.txt`
 
 Raw logs beat a summary here. Both open entries were written after earlier
 investigations went wrong in ways only the raw output showed — a harness

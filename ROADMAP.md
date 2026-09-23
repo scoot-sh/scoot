@@ -100,6 +100,23 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[GLES tier advertises the driver's real dma-buf formats](docs/backlog/resolved/gles-dmabuf-full-formats-done.md)**
+  (2026-09-23, PR #TBD) — under `--renderer gles` (offscreen and the
+  `--tty` scanout tier) the `zwp_linux_dmabuf_v1` default feedback is the
+  driver's import set: every fourcc at every explicit modifier, external-only
+  YUV included, candidates first; pixman byte-identical. Smithay's
+  unconditional `Invalid` entries are never offered next to explicit
+  layouts (an implicit NV12/P010/YU12/YUYV buffer imports but draws 0/1024
+  correct pixels on llvmpipe, measured) and survive only as the candidates'
+  old `LINEAR` widening where the driver named no layout; `imports_linear`'s
+  doc corrected (the modifier attribute *is* attached when the extension is
+  present, so the old rule could offer `LINEAR` against a driver's own
+  list). New dumb-buffer suite imports and draws one buffer per advertised
+  layout class through `create_immed` under either renderer. Dev VM:
+  57 formats at `LINEAR` on both GLES tiers. Real GPU: `Asahi.md` Test 6.
+  Trade-off recorded: a fullscreen client may now pick a layout the display
+  cannot scan out — [scanout tranche](docs/backlog/core/gpu-scanout-candidates.md).
+
 - **[Zero-copy fullscreen on the GPU tier](docs/backlog/resolved/gpu-primary-direct-format-gate-done.md)**
   (2026-09-23, PR #228) — a fullscreen window
   covering its output is scanned out directly on the primary plane. Flags

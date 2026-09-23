@@ -21,7 +21,7 @@ read your files anyway.
 | `wlr-output-management-v1` | 4 | [Display information](#display-information-wlr-output-management-v1) — read-only. |
 | `ext-image-copy-capture-v1` | 1 | [Screen capture](#screen-capture-ext-image-copy-capture-v1), output only. |
 | `ext-image-capture-source-v1` | 1 | Output sources only; no toplevel source manager. |
-| `zwp_linux_dmabuf_v1` | 6 | [Real dmabuf import](#gpu-rendering-clients-zwp_linux_dmabuf_v1), `LINEAR` single-plane, formats derived from the active renderer. |
+| `zwp_linux_dmabuf_v1` | 6 | [Real dmabuf import](#gpu-rendering-clients-zwp_linux_dmabuf_v1), formats derived from the active renderer: `LINEAR` single-plane under pixman, the driver's own formats and modifiers (tiled, multi-plane YUV) under GLES. |
 | `ext-session-lock-v1` | 1 | [Screen locking](#screen-locking-ext-session-lock-v1). |
 | `ext-idle-notify-v1` | 2 | [Idle detection](#idle-detection). |
 | `idle-inhibit-v1` | 1 | [Idle inhibitors](#idle-detection). |
@@ -783,38 +783,67 @@ What to know before pointing a client at it:
 ### GPU-rendering clients (`zwp_linux_dmabuf_v1`)
 
 `zwp_linux_dmabuf_v1` is advertised (version 6), and dmabufs really are
-imported — a GPU-rendering client works here, with no GPU on the compositor
-side. The client renders with the GPU and hands over a dma-buf; scoot
-`mmap`s it and composites it with pixman, on the CPU, next to `wl_shm`
-clients in the same session. No `LIBGL_ALWAYS_SOFTWARE=1` needed.
+imported — a GPU-rendering client works here under either renderer. Under
+the default pixman renderer there is no GPU on the compositor side at all:
+the client renders with the GPU and hands over a dma-buf, and scoot `mmap`s
+it and composites it on the CPU, next to `wl_shm` clients in the same
+session. No `LIBGL_ALWAYS_SOFTWARE=1` needed. Under `--renderer gles` the
+buffer goes to the GPU driver instead, as a texture.
 
-What is advertised: `Xrgb8888` then `Argb8888`, `LINEAR` only, single-plane
-only — **minus anything the renderer this session is actually running
-cannot import.** A format in the table that could not then be imported
+What is advertised is **what the renderer this session is actually running
+can import**, because a format in the table that could not then be imported
 would kill the client that believed it
-(`zwp_linux_buffer_params_v1.create_immed` has no soft refusal), so the
-table is derived from that renderer's own importable set rather than fixed,
-and pinned over the wire by test. A client that ignores the feedback and
-offers a multi-plane or non-`LINEAR` buffer is refused: `failed` on the
-asynchronous `create`, which it survives, and a protocol error on
-`create_immed`, which the protocol prescribes.
+(`zwp_linux_buffer_params_v1.create_immed` has no soft refusal). The table
+is derived from that renderer rather than fixed, and pinned over the wire by
+test:
 
-"Can import" is read generously on purpose: a driver that lists a format
-only with `Modifier::Invalid` — which is what a display without
-`EGL_EXT_image_dma_buf_import_modifiers`, or one that refuses a modifier
-query for its own format, reports — does import a linear dma-buf, so the
-format is still offered, still at `LINEAR`.
+- **pixman:** `Xrgb8888` then `Argb8888`, `LINEAR` only, single-plane only —
+  the only layout a CPU mapping can read — minus either one pixman cannot
+  import.
+- **GLES (`--renderer gles`, on every backend, including the `--tty` GPU
+  scanout tier):** every format and modifier the GPU driver says it
+  imports. On real hardware that means GPU clients get their **native
+  tiled/compressed layouts** instead of being forced into slow linear
+  buffers, and video players can hand over **multi-plane YUV** (`NV12`,
+  `P010`, three-plane `YUV420`, packed `YUYV`, …) straight from a decoder,
+  composited through the driver's own YUV sampling. `Xrgb8888` and
+  `Argb8888` are listed first wherever the driver offers them at `LINEAR`, so
+  the pixman table is always the head of the GLES one.
+
+  Two things are deliberately left out of the GLES table. An **implicit
+  modifier** (`DRM_FORMAT_MOD_INVALID`, "the driver's default layout") is
+  never offered for a format the driver named explicit layouts for: a YUV
+  buffer imported that way is sampled as if it were RGB and shows the wrong
+  colours (measured, not assumed). And a format the driver lists without
+  naming *any* layout — a display without
+  `EGL_EXT_image_dma_buf_import_modifiers`, or a driver that refuses the
+  modifier query for it — is offered only if it is `Xrgb8888`/`Argb8888`,
+  at `LINEAR`, which such a driver is known to import; anything else there
+  would be a guess.
+
+A client that ignores the feedback and offers a layout the table never
+named gets whatever the renderer says: `failed` on the asynchronous
+`create`, which it survives, and a protocol error on `create_immed`, which
+the protocol prescribes. (Under GLES a client that allocates an implicit
+YUV buffer anyway is not killed — it just draws the wrong colours.)
+
+On the dev VM's software GL (Mesa llvmpipe) the GLES table is 57 formats,
+all at `LINEAR` — Mesa lists no other layout there. What it looks like on
+real GPU hardware is recorded per machine, not promised here. The line to
+look for is logged once at startup:
+`dmabuf feedback: advertising the renderer's importable formats pairs=… fourccs=…`
+(and the whole table at `RUST_LOG=scoot=debug`).
 
 Two edges of that derivation are worth knowing before you debug one of
-them. If the active renderer can import *neither* format — an EGL display
-with no dma-buf import capability at all — **no dmabuf global is
-advertised**. That steers GL clients onto `wl_shm` rather than killing
-them, but it is not free: they then render in software, and a shell that
-  waits for dmabuf feedback before capturing (below) waits forever. scoot
-logs `can import none of the dma-buf formats this compositor serves` when
-it happens, and `--renderer pixman` is the working session on such a
-machine. A compositor with no renderer at all advertises nothing here for
-the same reason.
+them. If the active renderer can import *nothing* this compositor can
+vouch for — an EGL display with no dma-buf import capability at all —
+**no dmabuf global is advertised**. That steers GL clients onto `wl_shm`
+rather than killing them, but it is not free: they then render in
+software, and a shell that waits for dmabuf feedback before capturing
+(below) waits forever. scoot logs `reported no dma-buf format it can be
+trusted to import` when it happens, and `--renderer pixman` is the working
+session on such a machine. A compositor with no renderer at all advertises
+nothing here for the same reason.
 
 `main_device` names a **render node**: the active renderer's own, where it
 can name one, else `/dev/dri/renderD128`, else `card0`, else `0`. The
@@ -831,8 +860,11 @@ every quickshell `ScreencopyView` stays blank despite the capture protocol
 working.
 
 **This follows `--renderer`**, and no longer asks you to avoid one: the
-table is the active renderer's, so `gles` advertises what GLES can import
-and pixman advertises what pixman can. See
+table is the active renderer's, so `gles` advertises what the GPU driver
+can import and pixman advertises what pixman can. The feedback is the
+default one only — one tranche, no `scanout` flag; a per-surface tranche
+steering clients toward buffers the display can scan out directly is a
+separate, later item. See
 [tty.md](tty.md#which-renderer-draws-the-frames).
 
 ## Screen locking (`ext-session-lock-v1`)

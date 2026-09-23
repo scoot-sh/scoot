@@ -64,7 +64,11 @@ Linux, and daily-driven on `--tty`** (2026-09-18).
   with a test client's dumb buffers; not yet with a GPU-rendered app, a
   real video player, or real GPU hardware — [Asahi.md](Asahi.md), Test 5).
   While something records or streams the screen, scoot composites as
-  usual. Not there yet:
+  usual. With `--renderer gles`, GPU apps are also offered their GPU's own
+  buffer formats — its native tiled layouts, and the YUV formats video
+  decoders produce — rather than only plain linear RGB (checked on the dev
+  VM's software GPU, which offers only linear layouts; what real hardware
+  offers is [Asahi.md](Asahi.md)'s Test 6). Not there yet:
   every other window is still composited, and where the display has a
   hardware cursor plane the pointer is missing from screenshots. Under
   `--headless`/`--nested` the GPU speedup does not apply: `gles` there
@@ -229,7 +233,7 @@ refusing: `[tty] gpu` naming a device that will not open, and
 | Lock the screen | `ext-session-lock-v1`, compositor-enforced | [protocols.md](docs/protocols.md#screen-locking-ext-session-lock-v1) |
 | Auto-lock or dim on idle | `ext-idle-notify-v1` + `idle-inhibit-v1` (`swayidle`) | [protocols.md](docs/protocols.md#idle-detection) |
 | Screenshot or screen-share | `ext-image-copy-capture-v1` (`grim`), plus `scootctl screenshot` | [protocols.md](docs/protocols.md#screen-capture-ext-image-copy-capture-v1) |
-| Run a GPU-rendering client with no GPU on the compositor | `zwp_linux_dmabuf_v1`, formats taken from whichever renderer is active | [protocols.md](docs/protocols.md#gpu-rendering-clients-zwp_linux_dmabuf_v1) |
+| Run a GPU-rendering client, with or without a GPU on the compositor | `zwp_linux_dmabuf_v1`, formats taken from whichever renderer is active (the GPU driver's own, YUV included, under `gles`) | [protocols.md](docs/protocols.md#gpu-rendering-clients-zwp_linux_dmabuf_v1) |
 | Clipboard manager, middle-click paste | `wlr-`/`ext-data-control`, `primary-selection-v1` | [protocols.md](docs/protocols.md#clipboard-and-primary-selection) |
 | Night light | `wlr-gamma-control-v1` (`wlsunset`, `gammastep`) | [protocols.md](docs/protocols.md#night-light-wlr-gamma-control-v1) |
 | A HiDPI display | `[output] scale`, integer and fractional | [protocols.md](docs/protocols.md#output-scaling) |
