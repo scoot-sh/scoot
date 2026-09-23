@@ -177,8 +177,10 @@ pub(super) enum Admission {
     /// Admitted, on a surface that has never been a popup before.
     Fresh,
     /// Admitted, on a surface that was a popup before, whose earlier
-    /// `xdg_popup` is dead (GTK re-shows a menu this way when it keeps the
-    /// `wl_surface`).
+    /// `xdg_popup` is dead. The protocol allows it -- a surface's role
+    /// outlives its role object, and a new one may be made once the old is
+    /// destroyed -- though no client measured does it: GTK 3 replaces the
+    /// `wl_surface` along with the popup each time it re-shows a menu.
     ///
     /// `new_popup` reaps dead popups from the tree (`PopupManager::cleanup`)
     /// before tracking this one. The earlier popup's node stays in its

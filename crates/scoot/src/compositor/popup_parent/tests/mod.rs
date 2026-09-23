@@ -11,7 +11,7 @@
 //! The client script works in batches: each [`Step::Batch`] sends all of its
 //! [`Op`]s and only then round-trips, so they reach the compositor in one
 //! flush, and are dispatched in one go, the way a hostile client would send
-//! them -- and the way a toolkit re-showing a menu does.
+//! them -- and the way a toolkit sends a burst of menu changes.
 //!
 //! Nothing here names a server-side symbol from `popup_parent.rs` (the cap
 //! is spelled out as [`CAP`]), so this file compiles against the code before
@@ -112,8 +112,9 @@ enum Op {
     Destroy(usize),
     /// Destroys popup `popup`'s `xdg_popup` and `xdg_surface`, then makes its
     /// `wl_surface` a popup again under `parent`, through a new
-    /// `xdg_surface` -- what GTK does when it re-shows a menu without
-    /// replacing the surface. The popup keeps its index.
+    /// `xdg_surface`, as a toolkit that re-showed a menu without replacing
+    /// its surface would (the protocol allows it; GTK 3 does not do it).
+    /// The popup keeps its index.
     Reincarnate { popup: usize, parent: Parent },
     /// `xdg_popup.reposition` on popup `popup`: one more walk up its chain.
     Reposition(usize),

@@ -173,8 +173,9 @@ fn a_chain_grown_under_a_bare_xdg_surface_is_refused_at_its_first_popup() {
 
 // --- a surface made a popup again -------------------------------------------
 
-/// A menu re-shown on the `wl_surface` it had before (GTK does this when it
-/// keeps the surface), with a submenu opened on it in the same flush. The
+/// A menu re-shown on the `wl_surface` it had before -- which the protocol
+/// allows, though GTK 3 was measured replacing the surface instead -- with
+/// a submenu opened on it in the same flush. The
 /// old popup's node is still in the window's popup tree then, and the tree
 /// finds a parent by surface alone: the submenu went under the *dead* node,
 /// where it was never drawn and never configured, and Smithay's own
