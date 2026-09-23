@@ -95,6 +95,15 @@ impl CompositorHandler for State {
         send_preferred_buffer_scale(surface, self.integer_scale);
     }
 
+    /// `surface` has just been made a subsurface of `parent`: records the
+    /// subtree now hanging below each of `parent`'s ancestors, which is what
+    /// the next `get_subsurface`'s depth check reads (see
+    /// `subsurface_depth.rs`). The check itself runs before Smithay links the
+    /// two, in `dispatch.rs`.
+    fn new_subsurface(&mut self, surface: &WlSurface, parent: &WlSurface) {
+        super::subsurface_depth::record_link(surface, parent);
+    }
+
     fn commit(&mut self, surface: &WlSurface) {
         on_commit_buffer_handler::<Self>(surface);
         // Immediately after the buffer handler, which is what makes the newly
