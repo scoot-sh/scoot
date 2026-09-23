@@ -63,8 +63,10 @@ Linux, and daily-driven on `--tty`** (2026-09-18).
   no compositing, when the display accepts that buffer (seen on the dev VM
   with a test client's dumb buffers; not yet with a GPU-rendered app, a
   real video player, or real GPU hardware — [Asahi.md](Asahi.md), Test 5).
-  While something records or streams the screen, scoot composites as
-  usual. Not there yet:
+  scoot also tells a fullscreen app which buffer layouts the display can
+  show that way, so an app that listens can pick one (not yet seen with a
+  real app — Test 6). While something records or streams the screen, scoot
+  composites as usual. Not there yet:
   every other window is still composited, and where the display has a
   hardware cursor plane the pointer is missing from screenshots. Under
   `--headless`/`--nested` the GPU speedup does not apply: `gles` there

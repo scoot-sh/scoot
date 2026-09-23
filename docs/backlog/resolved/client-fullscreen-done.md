@@ -40,7 +40,7 @@ to all four entry points. What was decided, where the rules live:
   widened the column for good (reproduced by a harness test; the old
   pairing fails it). It now reads Smithay's committed state.
 
-Direct scanout was out of scope; [candidates](../core/gpu-scanout-candidates.md)
+Direct scanout was out of scope; [candidates](./gpu-scanout-candidates-done.md)
 consumes `World::fullscreen_on` / `Placement::fullscreen`. Original entry
 below, kept verbatim.
 
@@ -48,7 +48,7 @@ Filed 2026-09-22 out of the exporter-widening review (PR #222). Serves
 **daily-drive** first (a video player's or game's fullscreen button does
 nothing today, on every renderer) and is the precondition for zero-copy
 scanout on the GPU tier (see [format gate](./gpu-primary-direct-format-gate-done.md)
-and [candidates](../core/gpu-scanout-candidates.md), which depends on this).
+and [candidates](./gpu-scanout-candidates-done.md), which depends on this).
 
 ## What is missing
 

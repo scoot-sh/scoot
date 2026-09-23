@@ -60,6 +60,23 @@
 //! so that is already an export error and a composited element. The only way
 //! a tiled buffer reaches it as a framebuffer is the lost-modifier case
 //! above, which this catches.
+//!
+//! # What a refusal is remembered for
+//!
+//! Every refused modifier is also recorded ([`LostLayouts`]), because the
+//! GPU scanout tier *invites* clients to allocate tiled layouts: the
+//! per-surface scanout tranche (`dmabuf::scanout`) offers a fullscreen
+//! window every layout the primary plane lists. Nothing short of a real
+//! import tells whether this device's GBM keeps a given modifier, so the
+//! scanout tranche learns it from here: a modifier this exporter has
+//! refused is dropped from the tranche and the window re-sent the smaller
+//! one, instead of being steered back into a layout that can only
+//! composite. The record is per device, not per compositor, so it outlives
+//! a CRTC switch (the presenter hands the same record to every rebuilt
+//! exporter).
+
+use std::cell::{Cell, RefCell};
+use std::rc::Rc;
 
 use smithay::backend::allocator::gbm::GbmBuffer;
 use smithay::backend::allocator::{Buffer, Modifier};
@@ -72,14 +89,72 @@ use smithay::wayland::dmabuf::get_dmabuf;
 #[cfg(test)]
 mod tests;
 
-/// [`GbmFramebufferExporter`], plus [`keeps_layout`] on client buffers. See
-/// the module doc.
+/// [`GbmFramebufferExporter`], plus [`keeps_layout`] on client buffers and a
+/// record of what that refused. See the module doc.
 #[derive(Debug)]
-pub(crate) struct LayoutKeepingExporter(GbmFramebufferExporter<DrmDeviceFd>);
+pub(crate) struct LayoutKeepingExporter {
+    inner: GbmFramebufferExporter<DrmDeviceFd>,
+    lost: Rc<LostLayouts>,
+}
 
 impl LayoutKeepingExporter {
-    pub(crate) fn new(inner: GbmFramebufferExporter<DrmDeviceFd>) -> Self {
-        Self(inner)
+    /// Wraps `inner`, recording every refusal into `lost` -- the presenter's
+    /// one record for this device, shared with the scanout tranche.
+    pub(crate) fn new(inner: GbmFramebufferExporter<DrmDeviceFd>, lost: Rc<LostLayouts>) -> Self {
+        Self { inner, lost }
+    }
+}
+
+/// The explicit client modifiers this device's GBM has been seen to lose,
+/// and a generation that changes whenever one is added.
+///
+/// Written only by [`LayoutKeepingExporter`] on a refusal; read by the GPU
+/// scanout tier to keep those modifiers out of the per-surface scanout
+/// tranche (`dmabuf::scanout`), which rebuilds when
+/// [`generation`](Self::generation) moves. Single-threaded by construction
+/// (`DrmCompositor` and the render path both live on the event-loop
+/// thread), hence `Cell`/`RefCell` behind an `Rc`.
+///
+/// Bounded without a cap, though not by the advertised table: Smithay checks
+/// only a buffer's *fourcc* against that table (`wayland/dmabuf/mod.rs`,
+/// the `formats.contains_key` check), not its modifier. What bounds it is
+/// that a modifier is only ever added once, and only after three real
+/// devices accepted it: the renderer's import (a refused one kills or fails
+/// the buffer before any element exists), GBM's import, and KMS's `AddFB2`
+/// (the framebuffer this compares against has to exist). So the record holds
+/// at most the explicit modifiers this machine's driver, GBM and display all
+/// take -- a few dozen on a modifier-rich GPU -- however many distinct
+/// values a client invents. Empty on every device where GBM keeps what it
+/// imports, which is every device measured so far.
+#[derive(Debug, Default)]
+pub(crate) struct LostLayouts {
+    modifiers: RefCell<Vec<Modifier>>,
+    generation: Cell<u64>,
+}
+
+impl LostLayouts {
+    /// Records `modifier` as lost, moving the generation only when it is
+    /// new. Called once per refused buffer (Smithay caches the refusal), so
+    /// the allocation a first push makes is off every frame path.
+    pub(crate) fn note(&self, modifier: Modifier) {
+        let mut modifiers = self.modifiers.borrow_mut();
+        if !modifiers.contains(&modifier) {
+            modifiers.push(modifier);
+            self.generation.set(self.generation.get().wrapping_add(1));
+        }
+    }
+
+    /// Changes whenever [`note`](Self::note) adds a modifier: what the
+    /// scanout tranche's cache is keyed on. One `Cell` read, per frame.
+    pub(crate) fn generation(&self) -> u64 {
+        self.generation.get()
+    }
+
+    /// The lost modifiers, for a tranche rebuild. A copy, because the
+    /// rebuild runs outside any borrow of this record and happens only when
+    /// the generation moved.
+    pub(crate) fn modifiers(&self) -> Vec<Modifier> {
+        self.modifiers.borrow().clone()
     }
 }
 
@@ -102,7 +177,7 @@ impl ExportFramebuffer<GbmBuffer> for LayoutKeepingExporter {
                 .map(|dmabuf| dmabuf.format().modifier),
             ExportBuffer::Allocator(_) => None,
         };
-        let framebuffer = self.0.add_framebuffer(drm, buffer, use_opaque)?;
+        let framebuffer = self.inner.add_framebuffer(drm, buffer, use_opaque)?;
         Ok(framebuffer.filter(|framebuffer| {
             let kept = keeps_layout(client_modifier, framebuffer.format().modifier);
             if !kept {
@@ -113,13 +188,18 @@ impl ExportFramebuffer<GbmBuffer> for LayoutKeepingExporter {
                     framebuffer = ?framebuffer.format().modifier,
                     "not scanning out a client buffer whose framebuffer lost its tiled layout"
                 );
+                // `keeps_layout` refuses only an explicit client modifier,
+                // so there is always one to record here.
+                if let Some(modifier) = client_modifier {
+                    self.lost.note(modifier);
+                }
             }
             kept
         }))
     }
 
     fn can_add_framebuffer(&self, buffer: &ExportBuffer<'_, GbmBuffer>) -> bool {
-        self.0.can_add_framebuffer(buffer)
+        self.inner.can_add_framebuffer(buffer)
     }
 }
 

@@ -21,7 +21,7 @@ read your files anyway.
 | `wlr-output-management-v1` | 4 | [Display information](#display-information-wlr-output-management-v1) — read-only. |
 | `ext-image-copy-capture-v1` | 1 | [Screen capture](#screen-capture-ext-image-copy-capture-v1), output only. |
 | `ext-image-capture-source-v1` | 1 | Output sources only; no toplevel source manager. |
-| `zwp_linux_dmabuf_v1` | 6 | [Real dmabuf import](#gpu-rendering-clients-zwp_linux_dmabuf_v1), formats derived from the active renderer: `LINEAR` single-plane under pixman, the driver's own formats and modifiers (tiled, multi-plane YUV) under GLES. |
+| `zwp_linux_dmabuf_v1` | 6 | [Real dmabuf import](#gpu-rendering-clients-zwp_linux_dmabuf_v1), formats derived from the active renderer: `LINEAR` single-plane under pixman, the driver's own formats and modifiers (tiled, multi-plane YUV) under GLES; a [scanout tranche](#per-surface-feedback-the-scanout-tranche) for a fullscreen window on the GPU scanout tier. |
 | `ext-session-lock-v1` | 1 | [Screen locking](#screen-locking-ext-session-lock-v1). |
 | `ext-idle-notify-v1` | 2 | [Idle detection](#idle-detection). |
 | `idle-inhibit-v1` | 1 | [Idle inhibitors](#idle-detection). |
@@ -40,7 +40,7 @@ read your files anyway.
 | `relative-pointer-v1` | 1 | [Relative pointer](#relative-pointer-and-pointer-constraints). |
 | `pointer-constraints-v1` | 1 | Pointer lock and confinement. |
 | `tablet-v2` | 1 | [Drawing tablets](#drawing-tablets-tablet-v2) — tools only, no pads. |
-| `wp-presentation-time` | 2 | [Presentation feedback](#presentation-time-feedback-wp_presentation). |
+| `wp-presentation-time` | 2 | [Presentation feedback](#presentation-time-feedback-wp_presentation); `zero_copy` for a buffer scanned out directly. |
 | `wp-alpha-modifier-v1` | 1 | [Whole-surface opacity](#rendering-hints). |
 | `wp-content-type-v1` | 1 | Accepted, [no effect](#rendering-hints). |
 | `xwayland_shell_v1` | 1 | [XWayland, opt-in skeleton](#xwayland-opt-in-skeleton): X-window-to-surface association; no X window enters the layout yet. |
@@ -121,7 +121,9 @@ Other outputs are untouched: fullscreen is per output.
 **On the GPU scanout tier** (`--tty --renderer gles`, `gpu-scanout` build),
 a covering fullscreen window whose buffer is a dma-buf the display can take
 is scanned out directly -- shown from the client's own buffer, with no
-compositing. Anything drawn over it (an `overlay` notification, a popup
+compositing -- provided it is opaque (an opaque-format buffer, or an opaque
+region covering it), or the background is black and no wallpaper other than
+a black single-pixel-buffer one lies under it. Anything drawn over it (an `overlay` notification, a popup
 menu, a cursor the hardware cursor plane cannot carry), a translucent
 window (`wp_alpha_modifier_v1`), a lock screen, or a client capturing the
 screen makes those frames composite instead; nothing changes on screen
@@ -869,11 +871,75 @@ working.
 
 **This follows `--renderer`**, and no longer asks you to avoid one: the
 table is the active renderer's, so `gles` advertises what the GPU driver
-can import and pixman advertises what pixman can. The feedback is the
-default one only — one tranche, no `scanout` flag; a per-surface tranche
-steering clients toward buffers the display can scan out directly is a
-separate, later item. See
+can import and pixman advertises what pixman can. See
 [tty.md](tty.md#which-renderer-draws-the-frames).
+
+#### Per-surface feedback: the scanout tranche
+
+The default feedback — the one every client gets, and what
+`get_surface_feedback` answers for almost every surface — is one tranche
+with no `scanout` flag. There is one exception, and it exists only on the
+GPU scanout tier (`--tty --renderer gles`, `gpu-scanout` build): the
+**fullscreen window covering an output** is sent per-surface feedback whose
+first tranche is flagged `scanout`, names the display device as
+`tranche_target_device`, and lists the layouts the output's primary plane
+can scan out directly. The default tranche follows it unchanged. A client
+that acts on it reallocates into one of those layouts, and its buffers can
+then be shown straight from its own memory instead of being composited.
+
+- **Nothing new is promised.** The scanout tranche is a subset of the
+  default table — the entries the plane would accept — so every pair in it
+  already imports; the format table and main tranche are the default's, entry
+  for entry. A client that allocates from it and then gets composited anyway
+  (a notification drawn over it, a capture stream) is imported like any
+  other.
+- **Who gets it.** Only the root surface of the window covering the output,
+  and only while that output can go direct at all: unlocked, not being
+  streamed by a capture client, nothing translucent, and the window's buffer
+  the one the display would be offered: the window opaque over the whole
+  output (an opaque-format buffer or an opaque region), or a black
+  background with no wallpaper under it (a black single-pixel-buffer
+  wallpaper counts as black background). Otherwise -- a transparent window
+  over the default background, or over a wallpaper -- the display is never
+  offered the window's buffer, and steering the client would cost it a
+  reallocation for nothing (the rules in [tty.md](tty.md)). One known cost:
+  the scanout feedback reaches a window only after it has redrawn at the
+  fullscreen size (before that it does not span the output), so a client
+  that acts on it reallocates its buffers twice on entering fullscreen --
+  once for the size, once for the layout. Subsurfaces are not steered. A surface that first asks
+  for feedback after its window went fullscreen gets the scanout feedback on
+  that first answer.
+- **When it changes.** Only on a change, never per frame. When the covering
+  window changes (it leaves fullscreen, unmaps, another window or workspace
+  takes the output) the old one gets the default feedback back at once. When
+  the same window still covers the output but a lock, a capture stream or a
+  translucent moment stops it going direct, it keeps the scanout feedback,
+  and gets the default back on the first frame drawn two seconds or more
+  later if it still cannot — so a shell refreshing a thumbnail, which counts
+  as streaming for a second, never makes the game reallocate. (The check
+  rides on drawn frames: a screen that draws nothing, like a still lock
+  screen, keeps the scanout feedback until it next draws, which is harmless —
+  every pair in it imports.) A notification or popup drawn over the window changes
+  nothing: it is transient, and the window goes direct again the moment it is
+  gone.
+- **What the plane accepts.** Explicit tiled or compressed modifiers only
+  where the plane names them (`IN_FORMATS`), `LINEAR` where the plane names
+  it, or — on a plane that names no modifiers at all, like the dev VM's
+  virtio-gpu — `LINEAR` for single-plane formats the plane lists. An
+  alpha format counts as its opaque twin (the display ignores alpha on the
+  bottom plane). Never an implicit modifier. A modifier the display's buffer
+  manager has been seen to lose on import is dropped from the tranche and the
+  window re-sent, because such a buffer can only ever composite.
+- **Logged once per plane set:** `dmabuf feedback: scanout tranche for
+  fullscreen windows pairs=… lost=… device=…`, or `the primary plane takes
+  none of the advertised formats; no scanout tranche` when there is nothing to
+  offer (then nothing is ever sent). On the dev VM it is `XR24` and `AR24` at
+  `LINEAR`. What a real GPU's tranche holds, and whether a GL client there
+  reallocates into it and goes direct, is `Asahi.md` Test 6 — not claimed
+  here.
+
+No other backend or tier sends per-surface feedback that differs from the
+default.
 
 ## Screen locking (`ext-session-lock-v1`)
 
@@ -1348,6 +1414,15 @@ flags) or that the update was superseded before it ever got there
   compositor. Under `--tty` it is when the page flip was issued to DRM, up to
   one vblank before the photons — and the `vsync` flag is set there, because
   the flip is vblank-synchronized; the other backends report no flags.
+- **`zero_copy` means the buffer went to the display directly.** Only on the
+  GPU scanout tier (`--tty --renderer gles`, `gpu-scanout` build), and only
+  for the surface whose buffer was scanned out on the primary plane that
+  frame — the covering fullscreen window, on a frame that
+  [went direct](#per-surface-feedback-the-scanout-tranche). Every composited
+  frame, and every other surface, is reported without it. A client cursor
+  carried by a hardware cursor or overlay plane is not reported `zero_copy`:
+  the cursor plane is a copy, and an overlay one is simply not counted
+  (under-reported, never misreported).
 - **`refresh` is the mode scoot advertises, not the panel's.** Always 60 Hz,
   including under `--tty` on a faster panel. A client pacing frames should
   trust the timestamps, not `refresh` plus arithmetic.

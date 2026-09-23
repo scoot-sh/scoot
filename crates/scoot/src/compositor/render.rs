@@ -48,11 +48,15 @@ use std::error::Error;
 use std::fmt;
 
 #[cfg(feature = "gpu-scanout")]
+use std::time::Instant;
+
+#[cfg(feature = "gpu-scanout")]
 use scoot_core::OutputId;
 use smithay::backend::allocator::dmabuf::Dmabuf;
 use smithay::backend::allocator::format::FormatSet;
 use smithay::backend::allocator::{Format, Fourcc};
 use smithay::backend::renderer::damage::OutputDamageTracker;
+use smithay::backend::renderer::element::Id;
 use smithay::backend::renderer::{
     Bind, Color32F, ExportMem, ImportAll, ImportDma, ImportMem, Renderer, Texture,
 };
@@ -852,6 +856,23 @@ pub(super) struct FrameOutcome {
     /// with a pointer). See `State::render`'s `send_frames_surface_tree`
     /// call.
     pub(super) cursor_surface: Option<WlSurface>,
+    /// The element whose client buffer this frame scanned out directly on
+    /// the primary plane, if it did: its surface's presentation feedback
+    /// carries `zero_copy` (see `presentation_time.rs`). Only the GPU
+    /// scanout tier can set it; every other tier copies every buffer.
+    pub(super) zero_copy: Option<Id>,
+}
+
+/// The colour a frame is cleared to: the lock screen's while locked, the
+/// configured background otherwise. One function for every tier -- and for
+/// `render::primary_direct`, whose rule 6 must judge the very colour
+/// `DrmCompositor::render_frame` is handed.
+fn frame_clear_color(state: &State, locked: bool) -> Color32F {
+    if locked {
+        state.lock_clear_color()
+    } else {
+        state.appearance.background_color.into()
+    }
 }
 
 /// Draws one frame with whichever renderer `backend` is carrying, and hands
@@ -920,16 +941,21 @@ fn draw_frame_scanout(
         renderer,
         captures,
         last_eligibility,
+        judge_scratch,
         ..
     } = gpu;
-    let clear_color: Color32F = if locked {
-        state.lock_clear_color()
-    } else {
-        state.appearance.background_color.into()
-    };
-    let (elements, cursor_surface, direct) =
-        scanout_frame_elements(state, renderer, size, output, locked);
+    let clear_color = frame_clear_color(state, locked);
+    let (elements, cursor_surface, direct) = scanout_frame_elements(
+        state,
+        renderer,
+        size,
+        output,
+        locked,
+        clear_color,
+        judge_scratch,
+    );
     outcome.cursor_surface = cursor_surface;
+    let output_id = state.outputs.id_of(output);
     if direct != *last_eligibility {
         // debug!, and only on a change: this is the line that says a
         // session started or stopped going direct, and why -- once per
@@ -958,6 +984,19 @@ fn draw_frame_scanout(
         if presenter.take_slots_dropped() {
             captures.forget_slots();
         }
+        // The scanout tranche for this plane set, rebuilt only when the key
+        // moves (startup, a CRTC switch, a modifier the exporter newly
+        // refused) -- one comparison on every other frame. Here because the
+        // presenter is what knows the plane; steering is below, once the
+        // frame is out.
+        if let Some(id) = output_id {
+            state.scanout_feedback.refresh(
+                id,
+                presenter.scanout_formats_key(),
+                state.dmabuf_default.as_ref(),
+                || presenter.scanout_formats(),
+            );
+        }
         let drawn = presenter.render_and_queue(
             renderer,
             &elements,
@@ -972,15 +1011,23 @@ fn draw_frame_scanout(
         // it rather than leaving a stale composite readable as current. A
         // capture served off the mark forces a composite frame first (see
         // `ensure_scanout_capture_current`).
-        if drawn.primary_direct {
+        if drawn.primary_direct.is_some() {
             captures.note_direct();
         }
         (drawn, presenter.take_retry_render())
     };
 
+    // Per-surface dma-buf feedback: the covering window is steered toward a
+    // layout the primary plane can take while this output is eligible, and
+    // back once it is not (see `dmabuf/scanout.rs`). Sends only on a change.
+    if let Some(id) = output_id {
+        state.steer_scanout_feedback(id, direct.allowed(), Instant::now);
+    }
+
     outcome.drew_a_frame = drawn.drew;
     outcome.blank_seq = drawn.flip;
     outcome.retry_render = retry;
+    outcome.zero_copy = drawn.primary_direct;
     // Exactly what `draw_frame_with` counts: whether the pixels moved. A
     // render that produced no damage left the previous frame on screen, and
     // counting it would make every capture session copy the same pixels
@@ -1011,6 +1058,8 @@ fn scanout_frame_elements<R>(
     size: (i32, i32),
     output: &Output,
     locked: bool,
+    clear_color: Color32F,
+    judge_scratch: &mut primary_direct::JudgeScratch,
 ) -> (
     Vec<Elements<R>>,
     Option<WlSurface>,
@@ -1046,7 +1095,20 @@ where
         ring_elements,
         arrangement.as_ref(),
     );
-    let direct = primary_direct::judge(state, output, locked, &elements);
+    let tried_with = primary_direct::TriedWith {
+        size: frame.size,
+        scale: frame.scale,
+        clear_color,
+    };
+    let direct = primary_direct::judge(
+        state,
+        renderer,
+        output,
+        locked,
+        &elements,
+        &tried_with,
+        judge_scratch,
+    );
     (elements, cursor_surface, direct)
 }
 
@@ -1063,17 +1125,93 @@ impl State {
         let mut backend = self.take_backend(id).expect("a render target");
         let locked = self.session_lock.is_locked();
         let size = backend.size;
+        let clear_color = frame_clear_color(self, locked);
+        let mut scratch = primary_direct::JudgeScratch::default();
         let direct = match &mut backend.pipeline {
             Pipeline::Pixman(cpu) => {
-                scanout_frame_elements(self, &mut cpu.renderer, size, &output, locked).2
+                scanout_frame_elements(
+                    self,
+                    &mut cpu.renderer,
+                    size,
+                    &output,
+                    locked,
+                    clear_color,
+                    &mut scratch,
+                )
+                .2
             }
             Pipeline::Gles(gpu) => {
-                scanout_frame_elements(self, &mut gpu.renderer, size, &output, locked).2
+                scanout_frame_elements(
+                    self,
+                    &mut gpu.renderer,
+                    size,
+                    &output,
+                    locked,
+                    clear_color,
+                    &mut scratch,
+                )
+                .2
             }
             Pipeline::Scanout(_) => unreachable!("no test builds a scanout pipeline"),
         };
         self.put_backend(id, backend);
         direct
+    }
+}
+
+/// Times [`primary_direct::judge`] alone over the primary output's current
+/// frame: the list is gathered once (as `draw_frame_scanout` would), then
+/// judged `rounds` times with one scratch, as the tier judges frame after
+/// frame. Answers the verdict and the mean time per call.
+#[cfg(all(test, feature = "gpu-scanout"))]
+impl State {
+    pub(super) fn judge_cost(
+        &mut self,
+        rounds: u32,
+    ) -> (primary_direct::PrimaryDirect, std::time::Duration) {
+        let (id, output) = self
+            .outputs
+            .at(0)
+            .expect("a headless harness has an output");
+        let mut backend = self.take_backend(id).expect("a render target");
+        let locked = self.session_lock.is_locked();
+        let size = backend.size;
+        let clear_color = frame_clear_color(self, locked);
+        let mut scratch = primary_direct::JudgeScratch::default();
+        let Pipeline::Pixman(cpu) = &mut backend.pipeline else {
+            unreachable!("the cost harness runs on pixman");
+        };
+        let (elements, _, verdict) = scanout_frame_elements(
+            self,
+            &mut cpu.renderer,
+            size,
+            &output,
+            locked,
+            clear_color,
+            &mut scratch,
+        );
+        let tried_with = primary_direct::TriedWith {
+            size,
+            scale: output.current_scale().fractional_scale(),
+            clear_color,
+        };
+        let started = std::time::Instant::now();
+        for _ in 0..rounds {
+            let again = primary_direct::judge(
+                self,
+                &mut cpu.renderer,
+                &output,
+                locked,
+                &elements,
+                &tried_with,
+                &mut scratch,
+            );
+            std::hint::black_box(again);
+        }
+        let each = started.elapsed() / rounds.max(1);
+        drop(elements);
+        self.put_backend(id, backend);
+        (verdict, each)
     }
 }
 
@@ -1152,11 +1290,7 @@ where
             // the lock colour rather than to the configured desktop
             // background -- which a user may have given an alpha, and which
             // is the colour the unlocked session is showing.
-            let clear_color: Color32F = if locked {
-                state.lock_clear_color()
-            } else {
-                state.appearance.background_color.into()
-            };
+            let clear_color = frame_clear_color(state, locked);
             let result =
                 damage.render_output(renderer, &mut framebuffer, age, &elements, clear_color);
             match result {

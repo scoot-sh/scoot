@@ -43,6 +43,8 @@ mod drawing;
 mod neighbours;
 #[cfg(feature = "gpu-scanout")]
 mod primary_direct;
+#[cfg(feature = "gpu-scanout")]
+mod scanout_feedback;
 mod transitions;
 
 /// The framebuffer, square. Room for two half-width columns, a bar and a
@@ -91,6 +93,19 @@ enum Layer {
     /// A dock down the left edge, on the `top` layer, reserving its width
     /// ([`DOCK_WIDTH`]) -- a left exclusive zone.
     Dock,
+    /// A wallpaper on the `background` layer, the whole output, reserving
+    /// nothing: opaque (an `Xrgb8888` buffer) or not (`Argb8888`, no opaque
+    /// region). Under a covering fullscreen window it stays in the frame's
+    /// element list, which is what `render::primary_direct`'s rule 6 has to
+    /// see past.
+    #[cfg(feature = "gpu-scanout")]
+    Wallpaper { opaque: bool },
+    /// The same wallpaper as a `wp_single_pixel_buffer_manager_v1` buffer
+    /// scaled over the output with `wp_viewporter`: opaque, black or not.
+    /// Smithay's walk drops such a covering buffer and clears the frame to
+    /// its colour instead.
+    #[cfg(feature = "gpu-scanout")]
+    PixelWallpaper { black: bool },
 }
 
 /// The width [`Layer::Dock`] reserves at the left edge.
@@ -159,6 +174,33 @@ enum Step {
     /// double-buffered surface state).
     #[cfg(feature = "gpu-scanout")]
     SetAlpha { window: usize, multiplier: u32 },
+    /// Ack the newest configure and draw at its size in `Xrgb8888`, with no
+    /// opaque region: an opaque-format buffer, the commonest real covering
+    /// window (Mesa's default EGL config, mpv, games).
+    #[cfg(feature = "gpu-scanout")]
+    DrawXrgb { window: usize },
+    /// Declare the `window`-th toplevel's surface opaque as a whole
+    /// (`wl_surface.set_opaque_region` with a region larger than any size it
+    /// will be given; Smithay clips it to the buffer), then commit. Smithay
+    /// applies an opaque region only when the buffer or its view next
+    /// changes, so a window that is already drawn needs a draw after this. What a
+    /// video player or game with an alpha-format buffer does to be scanned
+    /// out over a non-black background.
+    #[cfg(feature = "gpu-scanout")]
+    SetOpaque { window: usize },
+    /// The same, as `stripes` vertical rectangles that together cover the
+    /// output and none of which covers it alone -- the shape that takes
+    /// the rectangle subtraction in `render::primary_direct`'s rule 6.
+    #[cfg(feature = "gpu-scanout")]
+    SetOpaqueStripes { window: usize, stripes: i32 },
+    /// `zwp_linux_dmabuf_v1.get_surface_feedback` for the `window`-th
+    /// toplevel's surface: what a v4+ Mesa client does for every EGL window.
+    #[cfg(feature = "gpu-scanout")]
+    SurfaceFeedback { window: usize },
+    /// Report every complete feedback (`done`-terminated) the `window`-th
+    /// toplevel's surface feedback object has received.
+    #[cfg(feature = "gpu-scanout")]
+    Feedbacks { window: usize },
 }
 
 enum Ack {
@@ -166,6 +208,8 @@ enum Ack {
     Configured(Configured),
     Configures(Vec<Configured>),
     Pointer(Option<Entered>),
+    #[cfg(feature = "gpu-scanout")]
+    Feedbacks(Vec<scanout_feedback::SeenFeedback>),
 }
 
 /// A surface the pointer entered, by the order the script created it.
@@ -189,6 +233,20 @@ struct TestClient {
     lock_manager: Option<ext_session_lock_manager_v1::ExtSessionLockManagerV1>,
     #[cfg(feature = "gpu-scanout")]
     alpha_modifier: Option<wp_alpha_modifier_v1::WpAlphaModifierV1>,
+    #[cfg(feature = "gpu-scanout")]
+    dmabuf: Option<
+        wayland_protocols::wp::linux_dmabuf::zv1::client::zwp_linux_dmabuf_v1::ZwpLinuxDmabufV1,
+    >,
+    /// Per toplevel: the surface feedback being received, and every
+    /// complete one.
+    #[cfg(feature = "gpu-scanout")]
+    feedback: scanout_feedback::Feedbacks,
+    #[cfg(feature = "gpu-scanout")]
+    single_pixel: Option<
+        wayland_protocols::wp::single_pixel_buffer::v1::client::wp_single_pixel_buffer_manager_v1::WpSinglePixelBufferManagerV1,
+    >,
+    #[cfg(feature = "gpu-scanout")]
+    viewporter: Option<wayland_protocols::wp::viewporter::client::wp_viewporter::WpViewporter>,
     /// Per toplevel, by creation order: the `xdg_toplevel.configure` state
     /// waiting for its `xdg_surface.configure`, and every completed one.
     pending: Vec<Configured>,
@@ -238,6 +296,20 @@ impl Dispatch<wl_registry::WlRegistry, ()> for TestClient {
             #[cfg(feature = "gpu-scanout")]
             "wp_alpha_modifier_v1" => {
                 client.alpha_modifier = Some(registry.bind(name, version.min(1), qh, ()));
+            }
+            // v5, the version Mesa's EGL and quickshell bind (see
+            // `dmabuf.rs`): feedback objects, `main_device` still sent.
+            #[cfg(feature = "gpu-scanout")]
+            "wp_single_pixel_buffer_manager_v1" => {
+                client.single_pixel = Some(registry.bind(name, version.min(1), qh, ()));
+            }
+            #[cfg(feature = "gpu-scanout")]
+            "wp_viewporter" => {
+                client.viewporter = Some(registry.bind(name, version.min(1), qh, ()));
+            }
+            #[cfg(feature = "gpu-scanout")]
+            "zwp_linux_dmabuf_v1" => {
+                client.dmabuf = Some(registry.bind(name, version.min(5), qh, ()));
             }
             _ => {}
         }
@@ -368,6 +440,20 @@ impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, Index> for TestClient {
 }
 
 wayland_client::delegate_noop!(TestClient: ignore wl_compositor::WlCompositor);
+#[cfg(feature = "gpu-scanout")]
+wayland_client::delegate_noop!(TestClient: ignore wayland_client::protocol::wl_region::WlRegion);
+#[cfg(feature = "gpu-scanout")]
+wayland_client::delegate_noop!(
+    TestClient: ignore wayland_protocols::wp::single_pixel_buffer::v1::client::wp_single_pixel_buffer_manager_v1::WpSinglePixelBufferManagerV1
+);
+#[cfg(feature = "gpu-scanout")]
+wayland_client::delegate_noop!(
+    TestClient: ignore wayland_protocols::wp::viewporter::client::wp_viewporter::WpViewporter
+);
+#[cfg(feature = "gpu-scanout")]
+wayland_client::delegate_noop!(
+    TestClient: ignore wayland_protocols::wp::viewporter::client::wp_viewport::WpViewport
+);
 wayland_client::delegate_noop!(TestClient: ignore wl_surface::WlSurface);
 wayland_client::delegate_noop!(TestClient: ignore wl_shm::WlShm);
 wayland_client::delegate_noop!(TestClient: ignore wl_shm_pool::WlShmPool);
@@ -394,6 +480,18 @@ fn solid_buffer(
     height: i32,
     color: [u8; 4],
 ) -> (wl_buffer::WlBuffer, i32, i32) {
+    solid_buffer_in(shm, qh, width, height, color, wl_shm::Format::Argb8888)
+}
+
+/// [`solid_buffer`] in `format`.
+fn solid_buffer_in(
+    shm: &wl_shm::WlShm,
+    qh: &QueueHandle<TestClient>,
+    width: i32,
+    height: i32,
+    color: [u8; 4],
+    format: wl_shm::Format,
+) -> (wl_buffer::WlBuffer, i32, i32) {
     let width = if width > 0 { width } else { 40 };
     let height = if height > 0 { height } else { 40 };
     let stride = width * 4;
@@ -404,7 +502,7 @@ fn solid_buffer(
     let pixels: Vec<u8> = color.iter().copied().cycle().take(len).collect();
     file.write_all(&pixels).expect("a filled pool file");
     let pool = shm.create_pool(file.as_fd(), len as i32, qh, ());
-    let buffer = pool.create_buffer(0, width, height, stride, wl_shm::Format::Argb8888, qh, ());
+    let buffer = pool.create_buffer(0, width, height, stride, format, qh, ());
     pool.destroy();
     (buffer, width, height)
 }
@@ -637,6 +735,13 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                         (NOTE_SIZE, NOTE_SIZE),
                         0,
                     ),
+                    #[cfg(feature = "gpu-scanout")]
+                    Layer::Wallpaper { .. } | Layer::PixelWallpaper { .. } => (
+                        zwlr_layer_shell_v1::Layer::Background,
+                        zwlr_layer_surface_v1::Anchor::all(),
+                        (0, 0),
+                        -1,
+                    ),
                 };
                 let role = layer_shell.get_layer_surface(
                     &surface,
@@ -659,12 +764,39 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                     wait_for(&mut queue, &mut client, "a layer configure", |client| {
                         client.layer_configures[index]
                     })?;
+                #[cfg(feature = "gpu-scanout")]
+                if let Layer::PixelWallpaper { black } = kind {
+                    let pixels = client
+                        .single_pixel
+                        .clone()
+                        .ok_or("no wp_single_pixel_buffer_manager_v1")?;
+                    let viewporter = client.viewporter.clone().ok_or("no wp_viewporter")?;
+                    let channel = if black { 0 } else { u32::MAX / 2 };
+                    let buffer =
+                        pixels.create_u32_rgba_buffer(channel, channel, channel, u32::MAX, &qh, ());
+                    let viewport = viewporter.get_viewport(&surface, &qh, ());
+                    viewport.set_destination(width as i32, height as i32);
+                    surface.attach(Some(&buffer), 0, 0);
+                    surface.damage(0, 0, width as i32, height as i32);
+                    surface.commit();
+                    layers.push((surface, role));
+                    queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                    acks.send(Ack::Done).map_err(|e| e.to_string())?;
+                    continue;
+                }
                 let color = match kind {
                     Layer::Bar | Layer::Dock => BAR_BGRA,
+                    #[cfg(feature = "gpu-scanout")]
+                    Layer::Wallpaper { .. } | Layer::PixelWallpaper { .. } => OTHER_BGRA,
                     Layer::Notification | Layer::Launcher(_) => NOTE_BGRA,
                 };
+                let format = match kind {
+                    #[cfg(feature = "gpu-scanout")]
+                    Layer::Wallpaper { opaque: true } => wl_shm::Format::Xrgb8888,
+                    _ => wl_shm::Format::Argb8888,
+                };
                 let (buffer, width, height) =
-                    solid_buffer(&shm, &qh, width as i32, height as i32, color);
+                    solid_buffer_in(&shm, &qh, width as i32, height as i32, color, format);
                 surface.attach(Some(&buffer), 0, 0);
                 surface.damage(0, 0, width, height);
                 surface.commit();
@@ -693,6 +825,71 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 locks.push(manager.lock(&qh, ()));
                 queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
                 Ack::Done
+            }
+            #[cfg(feature = "gpu-scanout")]
+            Step::DrawXrgb { window } => {
+                let newest = client.configures[window]
+                    .last()
+                    .copied()
+                    .ok_or("no configure to ack")?;
+                ack_newest(&mut client, &windows[window], window, newest.serial);
+                let (buffer, width, height) = solid_buffer_in(
+                    &shm,
+                    &qh,
+                    newest.width,
+                    newest.height,
+                    WINDOW_BGRA,
+                    wl_shm::Format::Xrgb8888,
+                );
+                let surface = &windows[window].surface;
+                surface.attach(Some(&buffer), 0, 0);
+                surface.damage(0, 0, width, height);
+                surface.commit();
+                queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                Ack::Done
+            }
+            #[cfg(feature = "gpu-scanout")]
+            Step::SetOpaqueStripes { window, stripes } => {
+                let surface = &windows[window].surface;
+                let region = compositor.create_region(&qh, ());
+                let width = CANVAS / stripes.max(1);
+                for stripe in 0..stripes {
+                    let end = if stripe == stripes - 1 {
+                        1 << 16
+                    } else {
+                        width
+                    };
+                    region.add(stripe * width, 0, end, 1 << 16);
+                }
+                surface.set_opaque_region(Some(&region));
+                region.destroy();
+                surface.commit();
+                queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                Ack::Done
+            }
+            #[cfg(feature = "gpu-scanout")]
+            Step::SetOpaque { window } => {
+                let surface = &windows[window].surface;
+                let region = compositor.create_region(&qh, ());
+                region.add(0, 0, 1 << 16, 1 << 16);
+                surface.set_opaque_region(Some(&region));
+                region.destroy();
+                surface.commit();
+                queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                Ack::Done
+            }
+            #[cfg(feature = "gpu-scanout")]
+            Step::SurfaceFeedback { window } => {
+                let dmabuf = client.dmabuf.clone().ok_or("no zwp_linux_dmabuf_v1")?;
+                client.feedback.expect(window);
+                dmabuf.get_surface_feedback(&windows[window].surface, &qh, Index(window));
+                queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                Ack::Done
+            }
+            #[cfg(feature = "gpu-scanout")]
+            Step::Feedbacks { window } => {
+                queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                Ack::Feedbacks(client.feedback.complete(window))
             }
             #[cfg(feature = "gpu-scanout")]
             Step::SetAlpha { window, multiplier } => {

@@ -43,7 +43,7 @@ mod hotplug;
 mod layout_exporter;
 mod present_retry;
 #[cfg(feature = "gpu-scanout")]
-mod scanout;
+pub(super) mod scanout;
 
 pub(crate) use self::gpu::{ExplicitGpu, resolve};
 /// For `render::scanout`'s capture-sequence tests, which drive the capture

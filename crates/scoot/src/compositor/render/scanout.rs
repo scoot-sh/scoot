@@ -187,6 +187,10 @@ pub(crate) struct ScanoutBackend {
     /// when it started or stopped going direct, and why, once per
     /// transition rather than per frame.
     pub(super) last_eligibility: super::primary_direct::PrimaryDirect,
+    /// The rectangle lists `render::primary_direct`'s rule 6 works in, kept
+    /// here -- per output, across frames -- so judging a frame allocates only
+    /// while they grow.
+    pub(super) judge_scratch: super::primary_direct::JudgeScratch,
 }
 
 /// The dma-bufs a capture reads, and the pool they are exported into once per
@@ -255,6 +259,7 @@ impl ScanoutBackend {
             },
             node: render_node(gbm),
             last_eligibility: super::primary_direct::PrimaryDirect::NotCovered,
+            judge_scratch: Default::default(),
         })
     }
 

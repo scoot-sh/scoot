@@ -9,8 +9,10 @@ blocked: null
 # GPU scanout: the primary-direct format gate — RESOLVED
 
 RESOLVED 2026-09-23 (PR #228, branch `primary-direct-fullscreen`), together with the
-eligibility half of [candidates](../core/gpu-scanout-candidates.md), which
-stays open for overlay-plane candidates and per-surface scanout feedback.
+eligibility half of [candidates](./gpu-scanout-candidates-done.md). Its
+per-surface scanout feedback and `zero_copy` halves landed later (PR #230,
+same record), and overlay-plane candidates were split out to
+[windows on overlay planes](../core/gpu-overlay-window-candidates.md).
 A fullscreen window covering its output, on `--tty --renderer gles` in a
 `gpu-scanout` build, whose client submits a dma-buf the display can take,
 is now scanned out directly on the primary plane. Everything else
@@ -146,7 +148,7 @@ swapchain format was never recorded -- `Asahi.md` Test 5 asks for it):
    [client fullscreen](../resolved/client-fullscreen-done.md) (the state --
    landed 2026-09-22: a covering fullscreen window gets no ring, no rounded
    clip and no `top` layer over it) and
-   [candidates](./gpu-scanout-candidates.md) (the eligibility rule) -- both
+   [candidates](./gpu-scanout-candidates-done.md) (the eligibility rule) -- both
    must land before a default-config session can go direct.
 
 The one device shape that would already pass this gate: a swapchain that
@@ -211,7 +213,7 @@ let a forced capture frame go direct.
   `underlying_storage`, so a rounded window taken direct loses its corner
   clip. Decide whether the eligibility rule lives here (e.g. only when the
   element spans the output) or rides the
-  [candidates](./gpu-scanout-candidates.md) rule.
+  [candidates](./gpu-scanout-candidates-done.md) rule.
 - **Cost on the stale-capture path.** Each forced frame costs the direct
   client a framebuffer re-export on its next frame (the composite-only frame
   never runs `element_config` for it, so Smithay's per-element framebuffer

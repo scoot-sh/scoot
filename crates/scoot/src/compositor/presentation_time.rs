@@ -32,6 +32,26 @@
 //!   the other two backends report no flags, because there is no retrace to
 //!   synchronize to and no zero-copy path behind a pixman copy.
 //!
+//! ## `zero_copy`
+//!
+//! Set on exactly one surface's feedback, and only on the GPU scanout tier
+//! (`--tty --renderer gles`, `gpu-scanout` build): the surface whose client
+//! buffer the primary plane scanned out directly on that frame
+//! (`render::primary_direct` made it eligible; Smithay's plane assignment
+//! and the atomic test let it through). The frame reports that element
+//! (`FrameOutcome::zero_copy`, from the `DrmCompositor`'s own answer rather
+//! than the flags it was offered), and every other surface -- and every
+//! surface on a composited frame -- is reported without it.
+//!
+//! Deliberately *not* Smithay's `surface_presentation_feedback_flags_from_states`:
+//! at the pinned rev that marks every plane assignment `ZeroCopy`, the
+//! cursor plane included, and the cursor plane is not zero-copy -- Smithay
+//! renders the cursor element into a cursor buffer of its own. An overlay
+//! plane *would* be zero-copy, but on this tree only a cursor element can
+//! ride one (no window is a scanout candidate), and a client's cursor
+//! surface there is not reported `zero_copy`: under-reported, never
+//! misreported, which is what the flag was before this existed.
+//!
 //! None of the three reports fiction as measurement: each timestamp is a
 //! real reading of a real handoff, labelled by which handoff it was.
 //!
@@ -105,6 +125,7 @@
 
 use std::time::Duration;
 
+use smithay::backend::renderer::element::Id;
 use smithay::desktop::layer_map_for_output;
 use smithay::desktop::utils::{
     OutputPresentationFeedback, take_presentation_feedback_surface_tree,
@@ -138,18 +159,32 @@ impl State {
     /// callbacks to, so an animated cursor's pacing feedback and its draw
     /// pacing come from the same frame. `seq` is the frame's sequence number
     /// as [`presented_frame`] decided it: the issued-flip number on `--tty`,
-    /// zero everywhere else (see the module doc for why).
+    /// zero everywhere else (see the module doc for why). `zero_copy` is the
+    /// element this frame scanned out directly, if any
+    /// (`FrameOutcome::zero_copy`): its surface -- and only its -- is told
+    /// `zero_copy` (see the module doc).
     pub(super) fn present_feedback(
         &mut self,
         output: &Output,
         vsync: bool,
         cursor: Option<&WlSurface>,
         seq: u64,
+        zero_copy: Option<&Id>,
     ) {
         let flags = if vsync {
             wp_presentation_feedback::Kind::Vsync
         } else {
             wp_presentation_feedback::Kind::empty()
+        };
+        // Per surface: the shared flags, plus `zero_copy` for the one surface
+        // whose buffer went direct. Smithay ORs these into `presented`'s
+        // flags. An `Id` built from a surface is an `ObjectId` clone -- a
+        // reference-count bump -- and is only built on a direct frame.
+        let surface_flags = |surface: &WlSurface, _: &_| match zero_copy {
+            Some(direct) if *direct == Id::from_wayland_resource(surface) => {
+                flags | wp_presentation_feedback::Kind::ZeroCopy
+            }
+            _ => flags,
         };
         let mut feedback = OutputPresentationFeedback::new(output);
         if self.session_lock.is_locked() {
@@ -162,14 +197,14 @@ impl State {
                 window.take_presentation_feedback(
                     &mut feedback,
                     |_, _| Some(output.clone()),
-                    |_, _| flags,
+                    surface_flags,
                 );
             }
             for layer in layer_map_for_output(output).layers() {
                 layer.take_presentation_feedback(
                     &mut feedback,
                     |_, _| Some(output.clone()),
-                    |_, _| flags,
+                    surface_flags,
                 );
             }
         }
@@ -178,7 +213,7 @@ impl State {
                 cursor,
                 &mut feedback,
                 |_, _| Some(output.clone()),
-                |_, _| flags,
+                surface_flags,
             );
         }
         // The output mode's own refresh, like anvil's `winit` backend at the

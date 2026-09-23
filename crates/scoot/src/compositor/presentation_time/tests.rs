@@ -752,7 +752,9 @@ fn an_explicit_seq_reaches_the_wire_verbatim() {
         panic!("a feedback request answered with something else");
     };
     let output = fixture.state.outputs.primary().cloned().expect("an output");
-    fixture.state.present_feedback(&output, false, None, 42);
+    fixture
+        .state
+        .present_feedback(&output, false, None, 42, None);
     let Ack::Feedback { events } = fixture.run_on(0, Step::ReportFeedback) else {
         panic!("a feedback report answered with something else");
     };
@@ -761,6 +763,80 @@ fn an_explicit_seq_reaches_the_wire_verbatim() {
         42,
         "the presented seq is not the number the frame handed over"
     );
+}
+
+/// `wp_presentation_feedback.kind`'s bits, as the wire carries them.
+const VSYNC: u32 = 0x1;
+const ZERO_COPY: u32 = 0x8;
+
+/// Presents the client's next committed feedback through `present_feedback`
+/// directly -- with `vsync` and the given `zero_copy` element -- the same
+/// deterministic sequencing as `an_explicit_seq_reaches_the_wire_verbatim`,
+/// and returns the flags the `presented` event carried.
+fn present_directly(
+    fixture: &mut Fixture,
+    zero_copy: Option<&smithay::backend::renderer::element::Id>,
+) -> u32 {
+    use std::time::Duration;
+
+    let first = fixture.present_once();
+    assert!(Fixture::only_presented(&first).seq == 0, "slate not clean");
+    fixture.tick(Duration::from_millis(30));
+    fixture.send_step(0, Step::RequestFeedback);
+    let Ack::Done = fixture.wait_for_ack(0) else {
+        panic!("a feedback request answered with something else");
+    };
+    let output = fixture.state.outputs.primary().cloned().expect("an output");
+    fixture
+        .state
+        .present_feedback(&output, true, None, 7, zero_copy);
+    let Ack::Feedback { events } = fixture.run_on(0, Step::ReportFeedback) else {
+        panic!("a feedback report answered with something else");
+    };
+    Fixture::only_presented(&events).flags
+}
+
+/// The mapped window's `wl_surface`, compositor-side.
+fn window_surface(
+    fixture: &Fixture,
+) -> smithay::reexports::wayland_server::protocol::wl_surface::WlSurface {
+    fixture
+        .state
+        .windows
+        .values()
+        .next()
+        .and_then(smithay::desktop::Window::toplevel)
+        .expect("the mapped window")
+        .wl_surface()
+        .clone()
+}
+
+#[test]
+fn the_directly_scanned_out_surface_is_told_zero_copy() {
+    // What the GPU scanout tier hands the tail for a primary-direct frame:
+    // the element that went direct. Its surface's `presented` carries
+    // `zero_copy` on top of the backend's own `vsync`.
+    use smithay::backend::renderer::element::Id;
+
+    let mut fixture = Fixture::start();
+    let direct = Id::from_wayland_resource(&window_surface(&fixture));
+    assert_eq!(
+        present_directly(&mut fixture, Some(&direct)),
+        VSYNC | ZERO_COPY
+    );
+}
+
+#[test]
+fn a_composited_frame_and_another_surface_are_not_zero_copy() {
+    // No direct element (every composited frame, every other tier), or a
+    // direct element that is some other surface: no `zero_copy`. This is
+    // also what every frame reported before the flag existed.
+    use smithay::backend::renderer::element::Id;
+
+    let mut fixture = Fixture::start();
+    assert_eq!(present_directly(&mut fixture, None), VSYNC);
+    let other = Id::new();
+    assert_eq!(present_directly(&mut fixture, Some(&other)), VSYNC);
 }
 
 #[test]

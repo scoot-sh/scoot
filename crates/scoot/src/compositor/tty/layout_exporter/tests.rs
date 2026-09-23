@@ -6,7 +6,7 @@
 
 use smithay::backend::allocator::Modifier;
 
-use super::keeps_layout;
+use super::{LostLayouts, keeps_layout};
 
 const TILED: Modifier = Modifier::I915_x_tiled;
 const OTHER_TILED: Modifier = Modifier::I915_y_tiled;
@@ -40,4 +40,23 @@ fn linear_and_implicit_client_buffers_pass_as_they_always_have() {
     // Not a client dma-buf (a swapchain slot).
     assert!(keeps_layout(None, TILED));
     assert!(keeps_layout(None, Modifier::Invalid));
+}
+
+#[test]
+fn a_lost_modifier_is_recorded_once_and_moves_the_generation_once() {
+    // The scanout tranche rebuilds when the generation moves, so a second
+    // refusal of the same modifier (another buffer, another client) must not
+    // rebuild and re-send anything.
+    let lost = LostLayouts::default();
+    let start = lost.generation();
+    assert!(lost.modifiers().is_empty());
+    lost.note(TILED);
+    let once = lost.generation();
+    assert_ne!(once, start, "a new modifier moves the generation");
+    lost.note(TILED);
+    assert_eq!(lost.generation(), once, "the same modifier does not");
+    assert_eq!(lost.modifiers(), vec![TILED]);
+    lost.note(OTHER_TILED);
+    assert_ne!(lost.generation(), once);
+    assert_eq!(lost.modifiers(), vec![TILED, OTHER_TILED]);
 }
