@@ -53,21 +53,16 @@
 //! frame flags in `tty/scanout.rs`). A plane-assigned element is *not*
 //! drawn into the swapchain slot -- it reaches the screen through its own
 //! commit -- so the dma-buf recorded here carries the screen *without* the
-//! cursor, and every consumer of [`Captures::capture_target`] (IPC
-//! screenshots, `ext-image-copy-capture-v1`) shows a cursorless screen on
-//! exactly those sessions. Where the cursor stays composited nothing
-//! changes: captures keep showing it, as does `screencopy.rs`'s cursor
-//! section.
+//! cursor (and, over an underlay, with a transparent hole where it sits).
 //!
-//! That is a semantic change, not a bug, and it is stated here rather than
-//! fixed here: compositing the cursor back into the capture would be a second
-//! cursor render on a path whose whole point is reading one buffer.
-//! It is live-observed on virtio-gpu (captures byte-identical across cursor
-//! moves); `paint_cursors=false` stays accepted-and-
-//! ignored throughout: the flag never changes which buffer the cursor is
-//! drawn into, only whether a session whose cursor rides a plane shows it
-//! in captures (it does not) or one whose cursor stays composited does (it
-//! does, exactly as before these steps).
+//! So the recording carries, beside the slot, what that frame put into it of
+//! the cursor ([`CursorInFrame`], from the `DrmCompositor`'s own answer about
+//! which elements rode a plane), and every capture reconciles the slot with
+//! what it asked for -- `ext-image-copy-capture-v1`'s `paint_cursors`, IPC
+//! `screenshot`'s `cursor` -- by re-rendering the cursor's region
+//! (`render::capture_cursor`). A capture that wants the pointer therefore
+//! gets it on this tier exactly as it would on the dumb tier, and one that
+//! does not never gets it, whichever way the plane assignment went.
 //!
 //! What a capture can never be missing *without knowing it* is a window.
 //! Smithay's overlay assignment only considers elements of kind
@@ -147,6 +142,8 @@ use smithay::backend::drm::DrmDeviceFd;
 use smithay::backend::egl::{EGLContext, EGLDisplay};
 use smithay::backend::renderer::gles::GlesRenderer;
 
+use super::CursorInFrame;
+
 /// How many exported dma-bufs to keep. `DrmCompositor`'s swapchain holds four
 /// slots at the pinned rev (`Swapchain::new`), so four entries make the pool
 /// warm after four frames and never grow again. A larger swapchain would
@@ -191,6 +188,12 @@ pub(crate) struct ScanoutBackend {
     /// here -- per output, across frames -- so judging a frame allocates only
     /// while they grow.
     pub(super) judge_scratch: super::primary_direct::JudgeScratch,
+    /// What the capture path reuses between captures (see
+    /// `capture_cursor::PatchPool`).
+    pub(super) patch: super::capture_cursor::PatchPool<
+        GlesRenderer,
+        smithay::backend::renderer::gles::GlesRenderbuffer,
+    >,
 }
 
 /// The dma-bufs a capture reads, and the pool they are exported into once per
@@ -214,6 +217,14 @@ pub(super) struct Captures {
     /// fail loudly rather than serve the stale buffer (see
     /// `Backend::capture`).
     direct: bool,
+    /// What `frame` holds of the cursor: the cursor elements that frame
+    /// composited into the slot, and whether any rode a plane instead.
+    /// Written only together with `frame` (in [`record`](Self::record)), so
+    /// the two always describe the same frame; reset with it by
+    /// [`forget_slots`](Self::forget_slots). The capture path reads it to
+    /// draw the cursor into a capture that asked for one, or take it out of
+    /// one that did not (`render::capture_cursor`).
+    cursor: CursorInFrame,
 }
 
 impl ScanoutBackend {
@@ -256,10 +267,12 @@ impl ScanoutBackend {
                 exported: Vec::with_capacity(SLOT_POOL),
                 frame: None,
                 direct: false,
+                cursor: CursorInFrame::default(),
             },
             node: render_node(gbm),
             last_eligibility: super::primary_direct::PrimaryDirect::NotCovered,
             judge_scratch: Default::default(),
+            patch: Default::default(),
         })
     }
 
@@ -451,8 +464,20 @@ impl Captures {
     /// composite predates what is on screen, and a forced composite whose
     /// slot could not be exported has not changed that. Clearing it would
     /// serve the pre-direct screen as current.
-    pub(super) fn note_frame(&mut self, buffer: &GbmBuffer) {
-        self.record(std::ptr::from_ref(buffer) as usize, || buffer.export());
+    ///
+    /// `cursor` is what that frame put into the slot of the cursor (see the
+    /// field), recorded with the slot or not at all.
+    pub(super) fn note_frame(&mut self, buffer: &GbmBuffer, cursor: CursorInFrame) {
+        self.record(
+            std::ptr::from_ref(buffer) as usize,
+            || buffer.export(),
+            cursor,
+        );
+    }
+
+    /// What the recorded frame holds of the cursor (see the field).
+    pub(super) fn cursor(&self) -> CursorInFrame {
+        self.cursor
     }
 
     /// [`note_frame`](Self::note_frame)'s body, over the slot's pool key and
@@ -464,10 +489,12 @@ impl Captures {
         &mut self,
         key: usize,
         export: impl FnOnce() -> Result<Dmabuf, E>,
+        cursor: CursorInFrame,
     ) {
         if let Some(index) = self.exported.iter().position(|(slot, _)| *slot == key) {
             self.frame = Some(self.exported[index].1.clone());
             self.direct = false;
+            self.cursor = cursor;
             return;
         }
         match export() {
@@ -481,6 +508,7 @@ impl Captures {
                 self.exported.push((key, dmabuf.clone()));
                 self.frame = Some(dmabuf);
                 self.direct = false;
+                self.cursor = cursor;
             }
             Err(error) => {
                 tracing::warn!(
@@ -508,6 +536,7 @@ impl Captures {
         self.exported.clear();
         self.frame = None;
         self.direct = false;
+        self.cursor = CursorInFrame::default();
     }
 }
 

@@ -26,7 +26,7 @@ use smithay::desktop::{
 };
 use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-use smithay::utils::{Logical, Rectangle, Scale};
+use smithay::utils::{Logical, Point, Rectangle, Scale};
 use smithay::wayland::shell::wlr_layer::Layer;
 
 use crate::compositor::State;
@@ -114,6 +114,79 @@ impl FrameContext {
 }
 
 impl State {
+    /// Whether the frames this session draws carry the cursor.
+    ///
+    /// Only `--tty` puts one on screen (see `cursor.rs`'s module doc):
+    /// headless has no display and `--nested` shows the host's own. The
+    /// frame paths ask this whether to gather the cursor, and every cursor
+    /// change reaches one decision about redrawing it --
+    /// `State::cursor_changed`, which asks this too -- so the frame and its
+    /// redraw triggers cannot disagree. (`grep` for `tty.is_some()` beside
+    /// a cursor change should find nothing.)
+    ///
+    /// The test seam: a harness has no `Tty`, so the suites that need a
+    /// frame with the cursor composited into it (the shape every `--tty`
+    /// frame on the dumb tier has) set `frame_cursor_for_test` instead.
+    pub(crate) fn frame_draws_cursor(&self) -> bool {
+        #[cfg(test)]
+        if let Some(forced) = self.frame_cursor_for_test {
+            return forced;
+        }
+        self.tty.is_some()
+    }
+
+    /// The cursor's render elements for one frame of one output, at the
+    /// pointer's position *on that output*: the pointer's global logical
+    /// location minus the output's logical origin, which is what every
+    /// other element in the frame is placed against. With one output at the
+    /// origin (every `--tty` session today) that is the identity; with more
+    /// than one it is what keeps a pointer on one output off every other
+    /// output's frame (its elements land outside that framebuffer).
+    ///
+    /// Empty without a pointer, for a hidden cursor, and for a client
+    /// cursor surface with nothing committed yet.
+    pub(super) fn cursor_elements<R>(
+        &self,
+        renderer: &mut R,
+        frame: &FrameContext,
+    ) -> Vec<CursorElement<R>>
+    where
+        R: Renderer + ImportAll + ImportMem,
+        R::TextureId: Texture + Send + Clone + 'static,
+    {
+        match self.cursor_location(frame) {
+            Some(location) => self.cursor.element(renderer, location, frame.scale),
+            None => Vec::new(),
+        }
+    }
+
+    /// [`State::cursor_elements`], appended to `out` -- the capture path's
+    /// pooled list.
+    pub(super) fn cursor_elements_into<R>(
+        &self,
+        renderer: &mut R,
+        frame: &FrameContext,
+        out: &mut Vec<CursorElement<R>>,
+    ) where
+        R: Renderer + ImportAll + ImportMem,
+        R::TextureId: Texture + Send + Clone + 'static,
+    {
+        if let Some(location) = self.cursor_location(frame) {
+            self.cursor
+                .element_into(renderer, location, frame.scale, out);
+        }
+    }
+
+    /// The pointer's position on `frame`'s output, in that output's logical
+    /// coordinates, or `None` without a pointer.
+    fn cursor_location(&self, frame: &FrameContext) -> Option<Point<f64, Logical>> {
+        let mut location = self.seat.get_pointer()?.current_location();
+        if let Some(geometry) = frame.geometry {
+            location -= geometry.loc.to_f64();
+        }
+        Some(location)
+    }
+
     /// Everything this frame draws, front-most first, plus the client cursor
     /// surface it drew from if there was one.
     ///
@@ -124,8 +197,13 @@ impl State {
     /// split below maps its own: one `Vec<Elements<R>>` in, extended, done.
     ///
     /// The returned surface is set only on the frames that actually went
-    /// looking for one (`--tty` with a pointer); it is what the frame
+    /// looking for one (`cursor`, with a pointer); it is what the frame
     /// callback pass at the end of `render()` wakes.
+    ///
+    /// `cursor` is whether the list carries the cursor at all: the frame
+    /// paths pass [`State::frame_draws_cursor`] (only `--tty` draws one on
+    /// screen), and the capture path (`render::capture_cursor`) passes
+    /// `true`, because a capture may ask for the pointer on any backend.
     pub(super) fn gather_elements<R>(
         &mut self,
         renderer: &mut R,
@@ -133,7 +211,38 @@ impl State {
         frame: &FrameContext,
         ring_elements: Vec<Elements<R>>,
         arrangement: Option<&Arrangement>,
+        cursor: bool,
     ) -> (Vec<Elements<R>>, Option<WlSurface>)
+    where
+        R: Renderer + ImportAll + ImportMem,
+        R::TextureId: Texture + Send + Clone + 'static,
+    {
+        let mut elements = Vec::new();
+        let cursor_surface = self.gather_elements_into(
+            renderer,
+            output,
+            frame,
+            ring_elements,
+            arrangement,
+            cursor,
+            &mut elements,
+        );
+        (elements, cursor_surface)
+    }
+
+    /// [`State::gather_elements`], appended to `out` -- the capture path's
+    /// pooled list (`render/capture_cursor.rs`). `out` is expected empty.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn gather_elements_into<R>(
+        &mut self,
+        renderer: &mut R,
+        output: &Output,
+        frame: &FrameContext,
+        ring_elements: Vec<Elements<R>>,
+        arrangement: Option<&Arrangement>,
+        cursor: bool,
+        out: &mut Vec<Elements<R>>,
+    ) -> Option<WlSurface>
     where
         R: Renderer + ImportAll + ImportMem,
         R::TextureId: Texture + Send + Clone + 'static,
@@ -147,21 +256,13 @@ impl State {
         } = *frame;
         // The client-supplied cursor surface this frame drew from, if any.
         let mut cursor_surface: Option<WlSurface> = None;
-        // Only `--tty` ever draws a cursor -- see `cursor.rs`'s module doc;
-        // headless has no display and `--nested` already shows the host's
-        // own. The list is empty when there's nothing to draw (hidden, or a
-        // client cursor surface with no content yet) and can hold more than
-        // one element when a client's cursor surface has subsurfaces of its
-        // own.
-        let cursor_elements = if self.tty.is_some() {
-            match self.seat.get_pointer() {
-                Some(pointer) => {
-                    cursor_surface = self.cursor.surface().cloned();
-                    self.cursor
-                        .element(renderer, pointer.current_location(), scale)
-                }
-                None => Vec::new(),
-            }
+        // The list is empty when there's nothing to draw (no pointer,
+        // hidden, or a client cursor surface with no content yet) and can
+        // hold more than one element when a client's cursor surface has
+        // subsurfaces of its own.
+        let cursor_elements = if cursor && self.seat.get_pointer().is_some() {
+            cursor_surface = self.cursor.surface().cloned();
+            self.cursor_elements(renderer, frame)
         } else {
             Vec::new()
         };
@@ -211,14 +312,13 @@ impl State {
         // front, and it is this compositor's own shape
         // (`SessionLockHandler::lock` resets it at lock time) -- a lock screen
         // with a password field needs a pointer.
-        let elements = if locked {
+        if locked {
             let (lock_surfaces, backdrop) =
                 self.lock_elements(renderer, output, scale, (width, height));
-            let mut elements = Vec::with_capacity(cursor_elements.len() + lock_surfaces.len() + 1);
-            elements.extend(cursor_elements.into_iter().map(Elements::Cursor));
-            elements.extend(lock_surfaces.into_iter().map(Elements::Surface));
-            elements.push(Elements::Decoration(backdrop));
-            elements
+            out.reserve(cursor_elements.len() + lock_surfaces.len() + 1);
+            out.extend(cursor_elements.into_iter().map(Elements::Cursor));
+            out.extend(lock_surfaces.into_iter().map(Elements::Surface));
+            out.push(Elements::Decoration(backdrop));
         } else {
             let window_elements: Vec<Elements<R>> = match (geometry, arrangement, output_id) {
                 (Some(region), Some(arranged), Some(output_id)) => window_elements(
@@ -245,28 +345,21 @@ impl State {
             // clicked or typed into either.
             let above = layer_shell::above_windows(self.covered_by_fullscreen(output));
             let layers = layer_map_for_output(output);
-            let mut elements = Vec::with_capacity(
+            out.reserve(
                 cursor_elements.len() + window_elements.len() + ring_elements.len() + layers.len(),
             );
-            elements.extend(cursor_elements.into_iter().map(Elements::Cursor));
-            layer_elements(&layers, above, renderer, scale, &mut elements);
-            elements.extend(window_elements);
-            elements.extend(ring_elements);
-            layer_elements(
-                &layers,
-                &layer_shell::BELOW_WINDOWS,
-                renderer,
-                scale,
-                &mut elements,
-            );
+            out.extend(cursor_elements.into_iter().map(Elements::Cursor));
+            layer_elements(&layers, above, renderer, scale, out);
+            out.extend(window_elements);
+            out.extend(ring_elements);
+            layer_elements(&layers, &layer_shell::BELOW_WINDOWS, renderer, scale, out);
             // Nothing below this point needs the layer map, and the
             // frame-callback pass at the end of `render()` takes the same
             // per-output lock again -- holding this one across the render
             // would deadlock the compositor against itself.
             drop(layers);
-            elements
-        };
-        (elements, cursor_surface)
+        }
+        cursor_surface
     }
 }
 

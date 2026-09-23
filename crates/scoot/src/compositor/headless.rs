@@ -479,6 +479,13 @@ impl State {
         // nothing to draw leaves the dirty flag alone" shape the suites
         // around `take_primary_backend` pin down.
         let mut attempted = false;
+        // Whether something other than the cursor asked for this render:
+        // taken with the first attempted draw, like `needs_render`, so a
+        // re-arm by this render's own tail stays for the next one -- and
+        // given back below if any output's draw failed, since that output's
+        // scene change is then still not on screen.
+        let mut scene = false;
+        let mut every_output_drew = true;
         // Read once, here, so the element gathering, the clear colour and
         // the frame callbacks below are all answering the same question
         // about the same frame.
@@ -504,6 +511,7 @@ impl State {
             if !attempted {
                 attempted = true;
                 self.needs_render = false;
+                scene = std::mem::take(&mut self.scene_dirty);
             }
             // The frame itself, drawn with whichever renderer this session is
             // carrying. See `render.rs` for why the choice of renderer is an
@@ -511,6 +519,15 @@ impl State {
             // threaded through `State`.
             let frame = render::draw_frame(self, &mut backend, &output, locked);
             self.put_backend(id, backend);
+            // What `screencopy.rs` asks "has the scene moved since this
+            // session's last capture?" with: only a frame whose pixels moved
+            // (a render with no damage left the previous frame on screen)
+            // and that something other than the cursor asked for. See
+            // `State::frame_serial`.
+            if frame.damaged && scene {
+                self.frame_serial = self.frame_serial.wrapping_add(1);
+            }
+            every_output_drew &= frame.drew_a_frame;
             // A refused `--tty` flip (see `FrameOutcome::retry_render`):
             // nothing is in flight, so no `VBlank` will ever arrive to retry
             // it the way `present_skipped` retries an in-flight skip --
@@ -724,6 +741,15 @@ impl State {
                     dead_layers = true;
                 }
             }
+        }
+        // A draw that failed (a bind or render error, logged where it
+        // happened) left a scene change undrawn: keep it counted as one, so
+        // the next frame that draws -- even one only the cursor asked for --
+        // moves `frame_serial` and a capture that did not ask for the pointer
+        // is handed the change rather than kept on the old picture. Only the
+        // flag: nothing re-arms here that did not before.
+        if scene && !every_output_drew {
+            self.scene_dirty = true;
         }
         if retry_render {
             self.request_render();
@@ -1093,6 +1119,16 @@ impl State {
     /// Marks the screen dirty and makes sure the frame ticker is running to
     /// actually redraw it.
     pub fn request_render(&mut self) {
+        self.scene_dirty = true;
+        self.needs_render = true;
+        self.ensure_ticking();
+    }
+
+    /// [`State::request_render`] for a change to the cursor alone (see
+    /// `State::cursor_changed`, its one caller): the frame is redrawn the
+    /// same way, but its damage does not count as a scene change
+    /// ([`State::frame_serial`]).
+    pub(super) fn request_cursor_render(&mut self) {
         self.needs_render = true;
         self.ensure_ticking();
     }

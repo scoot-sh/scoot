@@ -331,9 +331,34 @@ pub struct State {
     pub decorations: Decorations,
     /// The pointer's last-requested image -- a client-supplied cursor
     /// surface, a named shape, or hidden -- plus the render buffer behind
-    /// the fallback shape. Drawn only under `--tty`; see `cursor.rs`'s
-    /// module doc.
+    /// the fallback shape. Drawn on screen only under `--tty` (see
+    /// `cursor.rs`'s module doc), and into a capture wherever the capture
+    /// asks for the pointer, on every backend (see
+    /// `render/capture_cursor.rs`).
     pub cursor: Cursor,
+    /// Bumped whenever the pointer moves or the cursor's image changes, on
+    /// every backend. The capture path's counterpart of `frame_serial` for
+    /// the one thing a capture can show that no frame has to draw: under
+    /// `--headless`/`--nested` the cursor is never in a frame, so moving it
+    /// renders nothing and leaves `frame_serial` where it was -- yet a
+    /// capture session that asked for the pointer (`paint_cursors`) sees
+    /// its content change. `screencopy.rs` keys such a session's "has the
+    /// source changed" test on both counters. Wraps, like `frame_serial`,
+    /// and for the same reason it cannot matter.
+    pub cursor_serial: u64,
+    /// Test-only override of [`State::frame_draws_cursor`]: `Some(true)`
+    /// makes a harness's frames composite the cursor the way every `--tty`
+    /// frame on the dumb tier does, which is the shape the capture path's
+    /// "remove the cursor" half needs to be driven against. `None` (the
+    /// default) is the production rule.
+    #[cfg(test)]
+    pub(crate) frame_cursor_for_test: Option<bool>,
+    /// Test-only failure injection: while set, the next `render::draw_frame`
+    /// takes the flag and reports a frame that did not draw -- the shape a
+    /// failed bind or render leaves (both only log). No harness can make a
+    /// real renderer fail on demand.
+    #[cfg(test)]
+    pub(crate) fail_next_draw_for_test: bool,
 
     pub compositor_state: CompositorState,
     pub xdg_shell_state: XdgShellState,
@@ -683,9 +708,21 @@ pub struct State {
 
     /// Something changed that the framebuffer doesn't show yet.
     pub needs_render: bool,
+    /// Whether the pending render was asked for by anything other than the
+    /// cursor: set by `request_render`, *not* by `request_cursor_render`
+    /// (the cursor's own path, from `State::cursor_changed`), and taken by
+    /// the next render that draws. What decides whether that render's
+    /// damage moves [`State::frame_serial`].
+    pub scene_dirty: bool,
     /// How many frames [`State::render`](super::State) has drawn whose damage
-    /// tracker reported at least one changed region -- i.e. how many times the
-    /// framebuffer's pixels may have changed since startup.
+    /// tracker reported at least one changed region *and* that something
+    /// other than the cursor asked for -- i.e. how many times the scene the
+    /// framebuffer shows, cursor aside, may have changed since startup. A
+    /// frame drawn only because the cursor moved or changed image (under
+    /// `--tty`, the one backend whose frames draw it) does not count: that
+    /// is [`State::cursor_serial`]'s, so a capture session that did not ask
+    /// for the pointer is not handed the same picture again every time the
+    /// pointer moves.
     ///
     /// **"May have changed", specifically**, and the distinction matters at
     /// both ends. It is *not* "how many times `render()` ran": `render()`
@@ -924,6 +961,12 @@ impl State {
             // here.
             needs_render: true,
             frame_serial: 0,
+            scene_dirty: true,
+            cursor_serial: 0,
+            #[cfg(test)]
+            frame_cursor_for_test: None,
+            #[cfg(test)]
+            fail_next_draw_for_test: false,
             timer_armed: false,
             last_commit: Instant::now(),
             pending_idle: Vec::new(),

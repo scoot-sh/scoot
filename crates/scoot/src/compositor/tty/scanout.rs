@@ -62,11 +62,12 @@ use smithay::backend::renderer::element::{Id, RenderElement};
 use smithay::backend::renderer::{Bind, Color32F, Renderer, Texture};
 use smithay::output::{Output, OutputModeSource};
 use smithay::reexports::drm::control::{Mode, crtc, plane};
-use smithay::utils::{Buffer, Size, Transform};
+use smithay::utils::{Buffer, Rectangle, Size, Transform};
 
 use super::layout_exporter::{LayoutKeepingExporter, LostLayouts};
 use super::present_retry::{self, PresentRetries};
 use crate::compositor::dmabuf::scanout::FormatsKey;
+use crate::compositor::render::{CursorInFrame, Plane};
 
 /// The concrete `DrmCompositor` this backend drives.
 ///
@@ -197,8 +198,9 @@ type Compositor = DrmCompositor<GbmAllocator<DrmDeviceFd>, LayoutKeepingExporter
 /// window can ride an overlay plane until something is marked a scanout
 /// candidate (`docs/backlog/core/gpu-overlay-window-candidates.md`). What the bit
 /// does today is let the *cursor* ride an overlay where a CRTC has overlays
-/// but no cursor plane (the cursor plane is still tried first), with the
-/// cursorless-capture consequence documented in `render::scanout`.
+/// but no cursor plane (the cursor plane is still tried first), which
+/// captures reconcile like any plane-assigned cursor (`render::scanout`,
+/// `render::capture_cursor`).
 ///
 /// Pinned below, with [`COMPOSITE_FLAGS`] and [`frame_flags`]'s three rows.
 const DIRECT_FLAGS: FrameFlags =
@@ -210,9 +212,10 @@ const DIRECT_FLAGS: FrameFlags =
 /// The frame a capture is about to read ([`ForceComposite`]) and every
 /// frame `render::primary_direct` did not judge eligible -- a locked one,
 /// one with no fullscreen window covering the output, one with a capture
-/// stream running. The cursor may still ride its plane, which keeps the
-/// documented cursorless-where-plane-assigned capture contract rather than
-/// adding a second cursor render.
+/// stream running. The cursor may still ride its plane: the slot is then
+/// recorded without it, and a capture that asked for the pointer re-renders
+/// its region (`render::capture_cursor`) rather than this frame being made
+/// to composite it.
 const COMPOSITE_FLAGS: FrameFlags = composite_only(DIRECT_FLAGS);
 
 /// The flags for one frame.
@@ -343,17 +346,19 @@ impl ForceComposite {
 /// cursor plane (it renders into buffers of its own through its own
 /// exporter, `NodeFilter::None` inside Smithay). The one newly reachable
 /// assignment is a *client cursor surface* whose buffer is a dma-buf riding
-/// an overlay plane where the cursor plane could not take it -- which has
-/// the cursorless-capture consequence the cursor plane already documents,
-/// and no overlay exists on the dev VM to exercise it. One variant of that
-/// is worse than "cursor missing": where a CRTC has an overlay plane with a
-/// zpos *below* the primary, Smithay may put an *opaque* element there as an
-/// underlay and punch a transparent hole in the primary above it -- so a
-/// capture, which reads only the swapchain slot, would show a transparent
-/// cut-out where the cursor is rather than the screen without it. It needs
-/// an opaque dma-buf cursor surface and underlay-capable hardware, neither
-/// seen here; recorded in `docs/backlog/core/capture-cursor-parity.md`
-/// rather than guarded in code.
+/// an overlay plane where the cursor plane could not take it. The worse
+/// variant of that: where a CRTC has an overlay plane with a zpos *below*
+/// the primary, Smithay may put an *opaque* element there as an underlay and
+/// punch a transparent hole in the primary above it, so the swapchain slot a
+/// capture reads holds a transparent cut-out where the cursor is. Captures
+/// handle both: the frame records the footprint of every cursor element that
+/// rode an overlay (`render_and_queue`'s `CursorInFrame::on_overlay`, read
+/// off `overlay_elements`), and every capture re-renders that footprint --
+/// with the cursor when it asked for the pointer, without it when it did not
+/// (`render::capture_cursor`) -- so no capture shows the hole. It needs an
+/// opaque dma-buf cursor surface and underlay-capable hardware, neither seen
+/// here (virtio has no overlay plane; pinned with a synthetic record); see
+/// `docs/backlog/resolved/capture-cursor-parity-done.md`.
 const EXPORTER_FILTER: NodeFilter = NodeFilter::All;
 
 /// Colour formats offered to `DrmCompositor::new`, in order. `Argb8888` first
@@ -725,13 +730,21 @@ impl ScanoutPresenter {
     /// is queued, no retry is armed and no warning is logged, exactly as the
     /// dumb tier simply never calls `present` when `render_output` reports no
     /// damage.
+    ///
+    /// `on_frame` is also handed what that slot holds of the cursor
+    /// ([`CursorInFrame`]), read off the `DrmCompositor`'s own answer about
+    /// which elements it put on a plane -- its cursor element and its
+    /// overlay (and underlay) elements -- rather than guessed from which
+    /// planes exist. `frame` is the output's `(scale, physical size)`, which
+    /// the cursor elements' geometry is measured and clamped in.
     pub(crate) fn render_and_queue<R, E>(
         &mut self,
         renderer: &mut R,
         elements: &[E],
         clear_color: Color32F,
         allow_primary_direct: bool,
-        mut on_frame: impl FnMut(&smithay::backend::allocator::gbm::GbmBuffer),
+        frame: (f64, (i32, i32)),
+        mut on_frame: impl FnMut(&smithay::backend::allocator::gbm::GbmBuffer, CursorInFrame),
     ) -> ScanoutFrame
     where
         R: Renderer + Bind<Dmabuf>,
@@ -786,7 +799,33 @@ impl ScanoutPresenter {
             _ => None,
         };
         if damaged && let PrimaryPlaneElement::Swapchain(element) = &result.primary_element {
-            on_frame(element.buffer());
+            let (scale, size) = frame;
+            // Which plane took an element, told apart because only an
+            // overlay can leave a hole in the slot (an underlay's hole
+            // punch -- see `CursorInFrame::on_overlay`).
+            let on_plane = |id: &Id| {
+                if result
+                    .cursor_element
+                    .is_some_and(|cursor| cursor.id() == id)
+                {
+                    Some(Plane::Cursor)
+                } else if result
+                    .overlay_elements
+                    .iter()
+                    .any(|overlay| overlay.id() == id)
+                {
+                    Some(Plane::Overlay)
+                } else {
+                    None
+                }
+            };
+            let cursor = CursorInFrame::of(
+                elements,
+                scale.into(),
+                Rectangle::from_size(size.into()),
+                on_plane,
+            );
+            on_frame(element.buffer(), cursor);
         }
         // Dropped before `queue_frame`, per `RenderFrameResult`'s own doc:
         // holding it keeps a swapchain slot out of circulation.
@@ -887,9 +926,12 @@ impl ScanoutPresenter {
     /// `ext-image-copy-capture-v1` both funnel through there), paired there
     /// with an [`invalidate_scanout`](Self::invalidate_scanout) only when the
     /// forced frame needs full damage (see `render::force_needs_reset`). The cursor may still ride its
-    /// plane on a forced frame -- only the primary bits are dropped -- which is
-    /// what keeps the cursorless-where-plane-assigned capture contract
-    /// unchanged.
+    /// plane on a forced frame -- only the primary bits are dropped -- so the
+    /// forced slot may lack the cursor, or (where the plane refused it this
+    /// time) hold it. Either is recorded with the slot, and the capture path
+    /// re-renders the cursor's region to whatever the capture asked for (see
+    /// `render::capture_cursor`), so a forced frame can neither drop the
+    /// pointer from a capture that wants it nor give one two.
     pub(crate) fn arm_force_composite(&mut self) {
         self.force_composite.arm();
     }

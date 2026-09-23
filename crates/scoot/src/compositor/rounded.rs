@@ -66,6 +66,7 @@ use std::cell::RefCell;
 
 use scoot_core::Rect;
 use smithay::backend::renderer::Renderer;
+use smithay::backend::renderer::element::utils::{Relocate, RelocateRenderElement};
 use smithay::backend::renderer::element::{Element, Id, Kind, RenderElement, UnderlyingStorage};
 use smithay::backend::renderer::utils::{CommitCounter, DamageSet, OpaqueRegions};
 use smithay::utils::user_data::UserDataMap;
@@ -372,6 +373,38 @@ impl<E> Rounded<E> {
             clip,
             radius,
             scratch: RefCell::new(Vec::new()),
+        }
+    }
+
+    /// This wrapper moved by `by` physical pixels: the inner element wrapped
+    /// in a relative [`RelocateRenderElement`], and the clip moved with it.
+    ///
+    /// Why `Rounded` has to do this itself rather than be wrapped in a
+    /// relocation from outside: [`RenderElement::draw`] finds the corner
+    /// rows from `dst`, the rect the element is drawn at, and the clip,
+    /// which is in output coordinates. An outside relocation moves `dst` and
+    /// leaves the clip where it was, so every corner cut would land `by`
+    /// pixels off. Moving both together keeps them in the same space, which
+    /// is the one thing the cut depends on. The capture path is the caller:
+    /// it re-renders a cursor-sized region of the output into a target of
+    /// that size (`render::capture_cursor`), which is a relocation of
+    /// everything in the frame by the region's origin.
+    pub fn relocate(self, by: Point<i32, Physical>) -> Rounded<RelocateRenderElement<E>>
+    where
+        E: Element,
+    {
+        let Self {
+            inner,
+            mut clip,
+            radius,
+            scratch,
+        } = self;
+        clip.loc += by;
+        Rounded {
+            inner: RelocateRenderElement::from_element(inner, by, Relocate::Relative),
+            clip,
+            radius,
+            scratch,
         }
     }
 

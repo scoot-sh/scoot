@@ -1274,7 +1274,11 @@ fn two_screenshots_in_one_write_are_throttled_like_two_separate_ones() {
     // cannot overtake.)
     let mut harness = Harness::with_output(32, 32);
     let mut client = harness.connect(None);
-    let batch = request_line(&Request::Screenshot { output: None }).repeat(2);
+    let batch = request_line(&Request::Screenshot {
+        output: None,
+        cursor: None,
+    })
+    .repeat(2);
     client.send(batch.as_bytes());
     let replies = client.expect_replies(&mut harness, 2);
     match &replies[0] {
@@ -1296,7 +1300,10 @@ fn one_connections_screenshot_limit_does_not_refuse_anothers() {
     let mut harness = Harness::with_output(32, 32);
     let mut first = harness.connect(None);
     let mut second = harness.connect(None);
-    let shot = request_line(&Request::Screenshot { output: None });
+    let shot = request_line(&Request::Screenshot {
+        output: None,
+        cursor: None,
+    });
     first.send(shot.as_bytes());
     assert!(matches!(
         first.expect_reply(&mut harness),
@@ -1331,7 +1338,10 @@ fn a_screenshot_waits_for_replies_still_going_out() {
     let batch = format!(
         "{}{}",
         request_line(&Request::Version).repeat(30),
-        request_line(&Request::Screenshot { output: None })
+        request_line(&Request::Screenshot {
+            output: None,
+            cursor: None,
+        })
     );
     assert!(
         batch.len() < super::super::line::DEFAULT_CAPACITY,
@@ -1355,7 +1365,13 @@ fn a_screenshot_waits_for_replies_still_going_out() {
     }
 
     // ...and once the queue has drained, the retry works.
-    client.send(request_line(&Request::Screenshot { output: None }).as_bytes());
+    client.send(
+        request_line(&Request::Screenshot {
+            output: None,
+            cursor: None,
+        })
+        .as_bytes(),
+    );
     assert!(
         matches!(client.expect_reply(&mut harness), Response::Screenshot(_)),
         "the retried capture failed"
@@ -1368,7 +1384,13 @@ fn a_screenshot_without_a_backend_is_an_error_not_a_panic() {
     // nothing to read back. `Harness::new` (no `with_output`) is that state.
     let mut harness = Harness::new();
     let mut client = harness.connect(None);
-    client.send(request_line(&Request::Screenshot { output: None }).as_bytes());
+    client.send(
+        request_line(&Request::Screenshot {
+            output: None,
+            cursor: None,
+        })
+        .as_bytes(),
+    );
     match client.expect_reply(&mut harness) {
         Response::Error { message } => {
             assert!(message.contains("no backend"), "wrong error: {message}")
@@ -1387,7 +1409,13 @@ fn a_screenshot_without_a_backend_is_an_error_not_a_panic() {
 fn a_screenshot_is_answered_and_the_connection_stays_usable() {
     let mut harness = Harness::with_output(32, 32);
     let mut client = harness.connect(None);
-    client.send(request_line(&Request::Screenshot { output: None }).as_bytes());
+    client.send(
+        request_line(&Request::Screenshot {
+            output: None,
+            cursor: None,
+        })
+        .as_bytes(),
+    );
     match client.expect_reply(&mut harness) {
         Response::Screenshot(shot) => {
             assert_eq!((shot.width, shot.height), (32, 32));
@@ -1414,7 +1442,13 @@ fn another_connections_version_is_answered_while_a_capture_encodes() {
     let mut harness = Harness::with_output(1600, 1000);
     let mut camera = harness.connect(None);
     let mut other = harness.connect(None);
-    camera.send(request_line(&Request::Screenshot { output: None }).as_bytes());
+    camera.send(
+        request_line(&Request::Screenshot {
+            output: None,
+            cursor: None,
+        })
+        .as_bytes(),
+    );
     harness.pump();
     assert_eq!(
         harness.state.pending_shot_count(),
@@ -1450,7 +1484,13 @@ fn a_request_pipelined_behind_a_capture_is_refused_until_it_lands() {
     // further turn, before the worker could possibly have delivered.
     let mut harness = Harness::with_output(1600, 1000);
     let mut client = harness.connect(None);
-    client.send(request_line(&Request::Screenshot { output: None }).as_bytes());
+    client.send(
+        request_line(&Request::Screenshot {
+            output: None,
+            cursor: None,
+        })
+        .as_bytes(),
+    );
     harness.pump();
     client.send(request_line(&Request::Version).as_bytes());
     harness.pump();
@@ -1484,7 +1524,13 @@ fn a_wait_idle_behind_a_capture_is_refused_until_it_lands() {
     // on a connection that already handed over and closed.
     let mut harness = Harness::with_output(1600, 1000);
     let mut client = harness.connect(None);
-    client.send(request_line(&Request::Screenshot { output: None }).as_bytes());
+    client.send(
+        request_line(&Request::Screenshot {
+            output: None,
+            cursor: None,
+        })
+        .as_bytes(),
+    );
     harness.pump();
     client.send(
         request_line(&Request::WaitIdle {
@@ -1529,7 +1575,10 @@ fn a_capture_is_refused_while_the_encoder_is_full() {
     // request reaps those instead of refusing past them (see below).
     let mut harness = Harness::with_output(32, 32);
     let mut seeder = harness.connect(None);
-    let shot = request_line(&Request::Screenshot { output: None });
+    let shot = request_line(&Request::Screenshot {
+        output: None,
+        cursor: None,
+    });
     seeder.send(shot.as_bytes());
     assert!(
         matches!(seeder.expect_reply(&mut harness), Response::Screenshot(_)),
@@ -1568,7 +1617,10 @@ fn respawning_the_encoder_reaps_captures_its_predecessor_left_behind() {
     // the worker is gone when the new capture arrives.
     let mut harness = Harness::with_output(32, 32);
     let mut seeder = harness.connect(None);
-    let shot = request_line(&Request::Screenshot { output: None });
+    let shot = request_line(&Request::Screenshot {
+        output: None,
+        cursor: None,
+    });
     seeder.send(shot.as_bytes());
     assert!(
         matches!(seeder.expect_reply(&mut harness), Response::Screenshot(_)),
@@ -1605,7 +1657,13 @@ fn a_client_that_disconnects_mid_encode_is_dropped_cleanly() {
     // compositor carries on serving everyone else.
     let mut harness = Harness::with_output(1600, 1000);
     let mut client = harness.connect(None);
-    client.send(request_line(&Request::Screenshot { output: None }).as_bytes());
+    client.send(
+        request_line(&Request::Screenshot {
+            output: None,
+            cursor: None,
+        })
+        .as_bytes(),
+    );
     harness.pump();
     assert_eq!(harness.state.pending_shot_count(), 1);
     drop(client);
@@ -1643,7 +1701,13 @@ fn a_capture_mid_wait_does_not_move_the_idle_baseline() {
     let baseline = harness.state.last_commit;
 
     let mut camera = harness.connect(None);
-    camera.send(request_line(&Request::Screenshot { output: None }).as_bytes());
+    camera.send(
+        request_line(&Request::Screenshot {
+            output: None,
+            cursor: None,
+        })
+        .as_bytes(),
+    );
     assert!(
         matches!(camera.expect_reply(&mut harness), Response::Screenshot(_)),
         "the capture failed"
@@ -1673,7 +1737,10 @@ fn the_encoder_serves_again_after_going_away() {
     let mut harness = Harness::with_output(32, 32);
     let mut first = harness.connect(None);
     let mut second = harness.connect(None);
-    let shot = request_line(&Request::Screenshot { output: None });
+    let shot = request_line(&Request::Screenshot {
+        output: None,
+        cursor: None,
+    });
     first.send(shot.as_bytes());
     assert!(
         matches!(first.expect_reply(&mut harness), Response::Screenshot(_)),

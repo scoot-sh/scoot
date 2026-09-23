@@ -508,14 +508,14 @@ read -r unfocused_x unfocused_y unfocused_w < <(
 )
 
 echo "--- parking the pointer clear of everything sampled below ---"
-# --tty is the one backend that draws a cursor (see cursor.rs), and the
-# pointer starts at the output's origin -- where the built-in arrow's opaque
-# black outline runs diagonally straight through the background sample at
-# (3,3) below, which is why that check read rgb(0,0,0) under --tty alone
-# while --headless/--nested passed. Parking the pointer is what makes that
-# sample measure the background; moving the sample instead would bake today's
-# cursor placement and size into a coordinate that has no reason to know
-# them. The focused window's middle is hundreds of pixels from all three
+# A screenshot draws the pointer on every backend (the IPC default -- see
+# docs/ipc.md), wherever it is; it was once only --tty's frames that did, and
+# with the pointer at the output's origin the built-in arrow's opaque black
+# outline ran diagonally straight through the background sample at (3,3)
+# below (rgb(0,0,0) under --tty alone). Parking the pointer is what makes
+# that sample measure the background; moving the sample instead would bake
+# today's cursor placement and size into a coordinate that has no reason to
+# know them. The focused window's middle is hundreds of pixels from all three
 # sampled pixels, and motion never moves keyboard focus here (input.rs has no
 # focus-follows-mouse), so the ring colors below still describe the focus
 # super+h left behind.

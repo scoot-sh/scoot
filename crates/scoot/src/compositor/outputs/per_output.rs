@@ -704,6 +704,67 @@ fn a_second_output_with_nothing_on_it_captures_blank_but_correct() {
     );
 }
 
+/// The pointer is drawn into the capture of the output it is on, at its
+/// position *on that output*, and into no other output's capture -- and a
+/// frame that composites the cursor (the `--tty` shape, forced here through
+/// the frame seam) does the same.
+#[test]
+fn the_pointer_is_drawn_only_into_the_output_it_is_on() {
+    let mut harness = session(2);
+    let second = harness
+        .state
+        .outputs
+        .get(OutputId(2))
+        .cloned()
+        .expect("a second output");
+    let origin = harness
+        .state
+        .space
+        .output_geometry(&second)
+        .expect("the second output is placed")
+        .loc;
+    assert!(origin.x > 0 || origin.y > 0, "the outputs must not overlap");
+    let shot = |harness: &mut Harness<Step, Ack>, id: OutputId| {
+        harness
+            .state
+            .capture_pixels_for(Some(id), true)
+            .expect("a capture")
+            .bgra
+    };
+
+    // On output 1.
+    harness.state.pointer_move(40.0, 40.0);
+    let blank_first = draw(&mut harness, OutputId(1));
+    let blank_second = harness.pixels_of(OutputId(2));
+    let pointer_on_first = shot(&mut harness, OutputId(1));
+    assert_ne!(pointer_on_first, blank_first, "output 1 shows the pointer");
+    assert_eq!(
+        shot(&mut harness, OutputId(2)),
+        blank_second,
+        "output 2 must not show a pointer that is on output 1"
+    );
+
+    // On output 2, at the same position on it.
+    harness
+        .state
+        .pointer_move(f64::from(origin.x) + 40.0, f64::from(origin.y) + 40.0);
+    assert_eq!(
+        shot(&mut harness, OutputId(1)),
+        blank_first,
+        "the pointer left output 1's capture"
+    );
+    let pointer_on_second = shot(&mut harness, OutputId(2));
+    assert_eq!(
+        pointer_on_second, pointer_on_first,
+        "at the same spot on an identical blank output: the same picture"
+    );
+
+    // Frames that composite the cursor place it the same way.
+    harness.state.frame_cursor_for_test = Some(true);
+    assert_eq!(draw(&mut harness, OutputId(1)), blank_first);
+    assert_eq!(harness.pixels_of(OutputId(2)), pointer_on_second);
+}
+
 /// `screenshot` serves each output's own framebuffer: the IPC read-back of
 /// output 2 is output 2's pixels, byte for byte.
 #[test]
@@ -715,11 +776,11 @@ fn screenshot_serves_each_output_own_framebuffer() {
 
     let first = harness
         .state
-        .capture_pixels_for(Some(OutputId(1)))
+        .capture_pixels_for(Some(OutputId(1)), false)
         .expect("a capture of the first output");
     let second = harness
         .state
-        .capture_pixels_for(Some(OutputId(2)))
+        .capture_pixels_for(Some(OutputId(2)), false)
         .expect("a capture of the second output");
     assert_eq!((first.width, first.height), (CANVAS, CANVAS));
     assert_eq!((second.width, second.height), (CANVAS, CANVAS));

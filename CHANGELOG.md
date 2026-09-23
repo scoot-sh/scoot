@@ -9,6 +9,25 @@ scoot has not cut a numbered release yet; entries are dated.
 
 ## Unreleased
 
+### 2026-09-23 — screenshots show the pointer the same way on every backend
+
+- **Screenshots now show the pointer on every backend and renderer**, and
+  leave it out only when asked. Before, whether it showed depended on how
+  the session ran: `--headless` and `--nested` screenshots never had it,
+  `--tty` ones always did, and on the GPU tier (`--tty --renderer gles`)
+  it went missing wherever the display carried it on a hardware cursor
+  plane. Now `scootctl screenshot` draws it in by default everywhere —
+  **so a `--headless` or `--nested` screenshot now has a pointer in it**
+  (at the centre of the screen until something moves it) — and
+  `scootctl screenshot --no-cursor` (IPC: `"cursor": false`) leaves it out.
+- **Screen-capture clients get the pointer exactly when they ask for it.**
+  `grim -c` (the `paint_cursors` option) now draws it in on every backend,
+  and plain `grim` never shows it — including under `--tty`'s default
+  renderer, where it used to be in every capture. A recorder or screen-share
+  that asked for the pointer also sees it move when nothing else on screen
+  changes — and one that did not is no longer sent a new, identical frame
+  every time the pointer moves under `--tty`.
+
 ### 2026-09-23 — fullscreen apps are told what the display can show directly (GPU tier)
 
 - **On the opt-in GPU tier (`--tty --renderer gles`, `gpu-scanout` build),

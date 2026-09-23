@@ -25,7 +25,9 @@ pub const REQUESTS_HELP: &str = "\
     action ACTION [ARGUMENT...]
     reload                          re-read the config file and re-apply
                                     what can be re-applied live
-    screenshot [--output ID] [--out FILE]
+    screenshot [--output ID] [--out FILE] [--no-cursor]
+                                    the pointer is drawn in unless
+                                    --no-cursor
     pointer move X Y | pointer click X Y [left|right|middle]
     pointer button left|right|middle press|release | pointer scroll DX DY
     key COMBO                       e.g. Return, ctrl+shift+t -- name the key
@@ -59,7 +61,9 @@ REQUESTS:
     action ACTION [ARGUMENT...]
     reload                          re-read the config file and re-apply
                                     what can be re-applied live
-    screenshot [--output ID] [--out FILE]
+    screenshot [--output ID] [--out FILE] [--no-cursor]
+                                    the pointer is drawn in unless
+                                    --no-cursor
     pointer move X Y | pointer click X Y [left|right|middle]
     pointer button left|right|middle press|release | pointer scroll DX DY
     key COMBO                       e.g. Return, ctrl+shift+t -- name the key
@@ -198,9 +202,11 @@ fn message(mut args: impl Iterator<Item = String>) -> Result<Msg, Error> {
         "action" => Request::Action(action(&mut args)?),
         "screenshot" => {
             let mut output = None;
+            let mut cursor = None;
             while let Some(flag) = args.next() {
                 match flag.as_str() {
                     "--output" => output = Some(number::<u64>("--output", args.next())?),
+                    "--no-cursor" => cursor = Some(false),
                     "--out" => {
                         out = Some(PathBuf::from(
                             args.next().ok_or(Error::Missing("a path after --out"))?,
@@ -209,7 +215,7 @@ fn message(mut args: impl Iterator<Item = String>) -> Result<Msg, Error> {
                     other => return Err(Error::Unknown(other.to_owned())),
                 }
             }
-            Request::Screenshot { output }
+            Request::Screenshot { output, cursor }
         }
         "pointer" => pointer(&mut args)?,
         "key" => {
@@ -671,8 +677,37 @@ mod tests {
         assert_eq!(
             parse_msg_args(&["screenshot", "--output", "2", "--out", "/tmp/shot.png"]),
             Ok(Msg {
-                request: Request::Screenshot { output: Some(2) },
+                request: Request::Screenshot {
+                    output: Some(2),
+                    cursor: None,
+                },
                 out: Some(PathBuf::from("/tmp/shot.png")),
+            })
+        );
+    }
+
+    #[test]
+    fn screenshot_no_cursor_asks_for_the_pointer_left_out() {
+        // Only the opt-out is a flag: leaving it off sends no field at all,
+        // which the server reads as its documented default (drawn in).
+        assert_eq!(
+            parse_msg_args(&["screenshot", "--no-cursor", "--out", "/tmp/shot.png"]),
+            Ok(Msg {
+                request: Request::Screenshot {
+                    output: None,
+                    cursor: Some(false),
+                },
+                out: Some(PathBuf::from("/tmp/shot.png")),
+            })
+        );
+        assert_eq!(
+            parse_msg_args(&["screenshot"]),
+            Ok(Msg {
+                request: Request::Screenshot {
+                    output: None,
+                    cursor: None,
+                },
+                out: None,
             })
         );
     }

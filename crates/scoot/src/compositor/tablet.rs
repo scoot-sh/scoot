@@ -288,9 +288,9 @@ impl State {
     /// all, so only it needs a redraw when the request changes.
     pub(super) fn set_tool_cursor_image(&mut self, image: CursorImageStatus) {
         self.cursor.set_status(image);
-        if self.tty.is_some() {
-            self.request_render();
-        }
+        // A redraw where frames draw the cursor, a capture tick where only
+        // captures do -- the same path as `SeatHandler::cursor_image`.
+        self.cursor_changed();
     }
 
     /// The known handle for `tool`, if the seat ever saw it enter

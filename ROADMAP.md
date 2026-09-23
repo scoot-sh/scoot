@@ -71,7 +71,9 @@ composite first and capture streams kept composited
 ([format gate](docs/backlog/resolved/gpu-primary-direct-format-gate-done.md));
 no window rides an overlay plane yet (no scanout candidates), and the
 fullscreen window is steered toward a layout the display can scan out
-([scanout tranche](docs/backlog/resolved/gpu-scanout-candidates-done.md)). Two of its four stages have landed
+([scanout tranche](docs/backlog/resolved/gpu-scanout-candidates-done.md)),
+and captures show the pointer as the request asks even where it rides the
+cursor plane ([capture cursor parity](docs/backlog/resolved/capture-cursor-parity-done.md)). Two of its four stages have landed
 (PR #129: the renderer seam, pixman still the only implementation, provably
 zero behaviour change; PR #130: the GLES pipeline behind
 `--renderer pixman|gles` and `[renderer] backend`, off by default, every
@@ -101,6 +103,37 @@ direction or because a live crash-DoS or daily-driver gap jumped the queue —
 each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
+
+- **[Captures carry the pointer the request asked for, on every tier](docs/backlog/resolved/capture-cursor-parity-done.md)**
+  (2026-09-23, PR #231) — `ext-image-copy-capture-v1` honours
+  `paint_cursors` (it was ignored everywhere) and IPC `screenshot` gains an
+  optional `cursor` field (default drawn in, user-confirmed; `scootctl
+  screenshot --no-cursor`; no protocol bump). Where the frame a capture
+  reads does not already hold the cursor as asked, the cursor's region --
+  where it is now, where the frame composited it, and where a cursor on an
+  overlay plane may have left an underlay hole -- is re-rendered from the
+  frame's own element list by the session's renderer and written over the
+  copy: the only way to take a composited cursor out, never two cursors,
+  and an underlay's hole filled whether or not the pointer was asked for
+  (review round 1 caught the not-asked case). What each frame holds of the
+  cursor is recorded with it (`CursorInFrame`; the `DrmCompositor`'s own
+  plane answer on the scanout tier). A premise of the dispatch was wrong:
+  headless and nested never drew a cursor, so their IPC screenshots now
+  show one, and plain `grim` on the dumb tier no longer does. Also: a
+  cursor-painting session re-serves on pointer changes alone (every cursor
+  path goes through `State::cursor_changed`), a cursor-only redraw no
+  longer re-serves a session that did not ask (209 → 1 frame in 5 s on the
+  dumb tier), a stream's region buffers are pooled per output, the cursor
+  is placed per output (multi-output), and `Rounded::relocate` keeps a
+  relocated window's corner cut. Dev VM: arrow pixels identical across the
+  scanout and dumb tiers (tiers differ only in the pre-existing 1-LSB clear
+  colour), exactly one cursor in each capture through primary-direct, IPC
+  == `grim` both ways; on the llvmpipe scanout tier with the cursor on its
+  plane a 0.4-0.9 ms region per pointer-requesting capture (29 → 37-39
+  jiffies per 40 screenshots) whose wall-latency effect is dominated by
+  whole-frame allocation page faults
+  ([follow-up](docs/backlog/core/capture-whole-frame-allocations.md)),
+  nothing elsewhere; hot-path additions 1-9 ns (release).
 
 - **[Scanout-tranche feedback + `zero_copy`](docs/backlog/resolved/gpu-scanout-candidates-done.md)**
   (2026-09-23, PR #230) — on the `--tty` GPU tier the

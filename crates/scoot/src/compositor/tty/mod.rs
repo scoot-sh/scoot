@@ -890,11 +890,13 @@ fn try_scanout(
     match scanout::ScanoutPresenter::new(surface, gbm, formats, cursor_size, size) {
         Ok(presenter) => {
             // info!, not debug!: whether the cursor rides its own KMS plane
-            // or stays composited decides what a capture sees (the capture
-            // reads the primary plane only), so it belongs next to the tier
-            // line above, not buried where only a bug hunt looks. The
-            // overlay count rides on the same line for the same reason: a
-            // plane-assigned element of any kind is absent from captures.
+            // or stays composited decides what the swapchain slot a capture
+            // reads holds of it (and so whether a capture that asks for the
+            // pointer pays for re-rendering its region -- see
+            // `render::capture_cursor`), so it belongs next to the tier line
+            // above, not buried where only a bug hunt looks. The overlay
+            // count rides on the same line for the same reason: a
+            // plane-assigned element of any kind is absent from that slot.
             tracing::info!(
                 cursor_planes = presenter.cursor_planes(),
                 overlay_planes = presenter.overlay_planes(),

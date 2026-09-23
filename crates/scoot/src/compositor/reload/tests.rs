@@ -73,6 +73,7 @@ impl Fixture {
         // Quiet the render the startup `apply` requested, so `needs_render`
         // below witnesses the reload's own `apply` and nothing else.
         state.needs_render = false;
+        state.scene_dirty = false;
         Self {
             state,
             path,
@@ -598,10 +599,40 @@ fn reload_rebuilds_the_cursor_and_reports_each_field() {
         24,
         "the rebuilt cursor picks theme images at the reloaded size"
     );
+    // A cursor change like any other (`State::cursor_changed`): news for
+    // every capture that asked for the pointer, and no scene change. This
+    // backend's frames do not draw the cursor, so nothing is re-rendered.
+    assert_ne!(fixture.state.cursor_serial, 0, "the cursor serial moved");
     assert!(
-        fixture.state.needs_render,
-        "a cursor change reloaded without requesting a render"
+        !fixture.state.scene_dirty,
+        "a cursor reload is not a scene change"
     );
+    assert!(
+        !fixture.state.needs_render,
+        "headless frames never draw the cursor: nothing to redraw"
+    );
+}
+
+#[test]
+fn a_cursor_reload_redraws_where_frames_draw_the_cursor() {
+    // The `--tty` shape (the frame seam): the rebuilt cursor has to reach
+    // the screen, through the cursor's own redraw.
+    let mut fixture = Fixture::with_config("");
+    fixture.state.frame_cursor_for_test = Some(true);
+    fixture.rewrite(
+        r##"
+        [appearance]
+        cursor_color = "#ff0000"
+        "##,
+    );
+    let response = fixture.reload();
+    assert_eq!(applied(&response), &[field::CURSOR_COLOR.to_owned()]);
+    assert!(fixture.state.needs_render, "the rebuilt cursor is redrawn");
+    assert!(
+        !fixture.state.scene_dirty,
+        "as a cursor change, not a scene one"
+    );
+    assert_ne!(fixture.state.cursor_serial, 0);
 }
 
 #[test]

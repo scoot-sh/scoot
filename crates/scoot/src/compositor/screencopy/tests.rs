@@ -53,6 +53,7 @@ use crate::compositor::test_support::{Harness, wait_for};
 use super::MAX_FRAMES_PER_CLIENT;
 use super::xrgb_needs_forcing;
 
+mod cursor;
 #[cfg(feature = "gpu-scanout")]
 mod streaming;
 

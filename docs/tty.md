@@ -223,16 +223,20 @@ running with no GPU at all is a hard requirement here, not a fallback tier.
   plane is visible to queries but unknown to commits. Overlay planes need no
   such cap (`UNIVERSAL_PLANES` exposes them), and virtio-gpu has none to
   expose anyway -- its inventory is one primary plus one cursor plane. On
-  virtio the cursor then scans out live (pointer-tracked, captures
-  cursorless). No window surface is ever an overlay candidate (every one is
+  virtio the cursor then scans out live (pointer-tracked; captures draw it
+  back in when they ask for it). No window surface is ever an overlay candidate (every one is
   built `Kind::Unspecified`), so an overlay plane carries at most the
   cursor -- never a window; candidate-marking is
   [`backlog/core/gpu-overlay-window-candidates.md`](backlog/core/gpu-overlay-window-candidates.md).
-  One consequence to know: a capture (IPC screenshots,
-  `ext-image-copy-capture-v1`) reads the primary plane only, so on a
-  session whose cursor is plane-assigned the capture shows the screen
-  *without* the cursor; where the cursor is composited, captures keep
-  showing it. The startup log says which it is (`drm: scanout cursor planes
+  A capture (IPC screenshots, `ext-image-copy-capture-v1`) reads the
+  primary plane's swapchain slot, which lacks a plane-assigned cursor --
+  so every capture reconciles the cursor with what it asked for rather
+  than with what the slot happens to hold: the cursor's region is
+  re-rendered from the frame's own element list, with the pointer or
+  without it, and written over the copy (see
+  [Captures and the pointer](#captures-and-the-pointer)). The pointer in a
+  capture is therefore the same on this tier as on the dumb tier. The
+  startup log still says which planes exist (`drm: scanout cursor planes
   cursor_planes=N overlay_planes=M ...`). It has
   now run on a real GPU: on an Apple M2 under Asahi Linux (`2560x1600@60`)
   it costs **4–5x less compositor CPU** than the default dumb-buffer tier
@@ -407,9 +411,11 @@ The cursor plane is attempted
 where the CRTC exposes one (the dev VM's virtio-gpu does: one `Cursor` plane
 per `drm_info`) and silently not elsewhere; overlay planes ride along whole
 from the same inventory (virtio exposes none: `overlay_planes=0`) and fall
-back per frame the same way. A plane-assigned cursor is absent
-from captures, which read the primary plane only -- and no window can ride an
-overlay yet (nothing is marked a scanout candidate). A capture of a frame
+back per frame the same way. A plane-assigned cursor is not in the
+swapchain slot captures read, so captures draw it back in when they ask for
+the pointer (see [Captures and the pointer](#captures-and-the-pointer)) --
+and no window can ride an overlay yet (nothing is marked a scanout
+candidate). A capture of a frame
 that went direct forces one composite frame first, and a capture stream
 keeps the output composited, so captures stay correct throughout --
 watched working on the dev VM. Whether `apple,dcp`
@@ -434,3 +440,74 @@ build` keeps producing the binary that does.
 `--renderer gles` is *not* in the same position and needs no feature:
 libEGL and libGLESv2 are `dlopen`ed, so a GPU-less machine only fails when
 that renderer is actually asked for, at startup, with a message.
+
+## Captures and the pointer
+
+Whether a capture shows the pointer is decided by the capture, never by
+the tier: an IPC `screenshot` draws it unless asked not to (`cursor:
+false`, `scootctl screenshot --no-cursor`), and an
+`ext-image-copy-capture-v1` session draws it exactly when it asked for
+`paint_cursors` (`grim -c`). What each tier's own frame holds differs, and
+the capture path reconciles the two:
+
+| Tier | The frame a capture reads | Pointer asked for | Pointer not asked for |
+| --- | --- | --- | --- |
+| dumb (pixman) | always holds the cursor | nothing to do | cursor region re-rendered without it |
+| GPU scanout, cursor on the cursor plane | lacks it | cursor region re-rendered with it | nothing to do |
+| GPU scanout, cursor on an overlay plane | lacks it, and may hold a transparent hole there (an underlay) | re-rendered with it | re-rendered without it (fills the hole) |
+| GPU scanout, plane refused this frame | holds it | nothing to do | re-rendered without it |
+| `--headless`, `--nested` | never holds it (no cursor on screen) | re-rendered with it | nothing to do |
+
+"Re-rendered" means the region under the cursor -- where it is now (when
+asked for), where the frame drew it, and where a cursor on an overlay plane
+may have left a hole -- is drawn again from the frame's own element list by
+the session's own renderer, into a cursor-sized target, and written over
+the captured copy. So the pointer in a capture is the same image, hotspot
+and scale the screen shows, a capture can never end up with two of them
+(the region is replaced, not blended over), and where a cursor rides an
+overlay plane *under* the primary (an underlay: Smithay punches a
+transparent hole in the primary above it) the hole is filled whether or not
+the pointer was asked for, including at a position the pointer has since
+left. Which elements the frame put on which plane is read from the
+`DrmCompositor`'s own answer for that frame, not guessed from the plane
+inventory. The underlay case has not been seen on hardware (virtio has no
+overlay plane); it is pinned with a synthetic frame record.
+
+A capture session that asked for the pointer is served a new frame when
+only the pointer moves or changes image; one that did not is not, even on
+the dumb tier, where moving the pointer redraws the frame (the redraw
+counts as a cursor change, not a scene change). A stream whose region is
+re-rendered every frame reuses one offscreen target and one pixel buffer
+per output rather than allocating them per frame.
+
+What it costs, measured on the dev VM (virtio-gpu, llvmpipe):
+
+- **Where the frame already matches the request** -- the dumb tier by
+  default, the GPU tier with `--no-cursor` -- nothing: no region, no
+  gather.
+- **pixman** draws a region in ~22 µs (harness); IPC screenshot latency on
+  the dumb tier and `--headless` is within run-to-run spread of the
+  previous build in both modes.
+- **The GPU tier with its cursor on the plane and the pointer asked for**
+  pays one region render and read-back per capture, 0.4-0.9 ms on
+  llvmpipe. Compositor CPU per 40 IPC screenshots went from 26 to 42-46
+  jiffies in the first measurement and 29 to 37-39 after the region's
+  buffers were pooled. The screenshot's *wall latency* is not a stable
+  measure of it: fresh-process medians moved +3.5 ms at first and +1.5 ms
+  after pooling, while with and without the cursor interleaved in one
+  process the pointer-requesting captures were the *faster* ones (p50
+  10.9-11.3 ms against 12.4-13.0 ms). The latency tracks page faults from
+  the capture path's whole-frame, multi-megabyte per-capture allocations
+  (which both modes pay, and which are
+  [a follow-up](backlog/core/capture-whole-frame-allocations.md)) and
+  process history, not the region.
+- **A capture stream asking for the pointer** on that tier delivers ~4%
+  fewer frames (436-439 against 453-457 in 10 s; mean interval 22.8 ms
+  against 22.0 ms) at the same compositor CPU; pooling the region's
+  buffers did not change it, so it is the GLES region render itself.
+- **A stream that did not ask for the pointer** is no longer re-served when
+  only the pointer moves: on the dumb tier, over a still window with the
+  pointer moving every 20 ms, 1 frame in 5 s at 12 jiffies, where it was
+  209 frames at 60-61.
+
+None of this has been measured on a real GPU.

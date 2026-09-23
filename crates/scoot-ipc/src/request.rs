@@ -5,6 +5,12 @@ use serde::{Deserialize, Serialize};
 use crate::action::Action;
 use crate::key::KeyCombo;
 
+/// Whether a [`Request::Screenshot`] that does not say draws the pointer:
+/// yes. An agent reading a screenshot needs to see where the pointer is --
+/// and needs that not to depend on which backend or renderer the session
+/// runs, which is what the default guarantees.
+pub const SCREENSHOT_CURSOR_DEFAULT: bool = true;
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PointerButton {
@@ -32,9 +38,19 @@ pub enum Request {
     /// picture of one screen labelled as another would be worse than an
     /// error. (Only `--headless --outputs N` can produce another output
     /// today; compositing more than one is future work.)
+    ///
+    /// `cursor` is whether the pointer is drawn into the capture, the same
+    /// on every backend and renderer: `Some(false)` leaves it out, and
+    /// omitting it means [`SCREENSHOT_CURSOR_DEFAULT`] (drawn in). Added
+    /// without a [`PROTOCOL_VERSION`](crate::PROTOCOL_VERSION) bump: a
+    /// request that omits it is the old shape exactly, and a server that
+    /// predates it ignores the field rather than refusing the request -- so
+    /// on such a server `cursor: false` has no effect.
     Screenshot {
         #[serde(skip_serializing_if = "Option::is_none")]
         output: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cursor: Option<bool>,
     },
     PointerMove {
         x: f64,

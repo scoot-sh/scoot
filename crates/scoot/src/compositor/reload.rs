@@ -218,10 +218,16 @@ impl State {
                 || name == field::CORNER_RADIUS
         }) {
             self.apply();
-        } else if report.applied.iter().any(|name| {
+        }
+        // A rebuilt cursor is a cursor change like any other: a redraw where
+        // frames draw it, and news for every capture that asked for the
+        // pointer (`State::cursor_changed`) -- on its own path so a reload
+        // that also moved placement pays both, and one that changed only the
+        // cursor re-serves no capture that did not ask for it.
+        if report.applied.iter().any(|name| {
             name == field::CURSOR_SIZE || name == field::CURSOR_COLOR || name == field::CURSOR_THEME
         }) {
-            self.request_render();
+            self.cursor_changed();
         }
         report
     }

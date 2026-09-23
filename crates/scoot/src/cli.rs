@@ -26,7 +26,9 @@ REQUESTS:
     action ACTION [ARGUMENT...]
     reload                          re-read the config file and re-apply
                                     what can be re-applied live
-    screenshot [--output ID] [--out FILE]
+    screenshot [--output ID] [--out FILE] [--no-cursor]
+                                    the pointer is drawn in unless
+                                    --no-cursor
     pointer move X Y | pointer click X Y [left|right|middle]
     pointer button left|right|middle press|release | pointer scroll DX DY
     key COMBO                       e.g. Return, ctrl+shift+t -- name the key

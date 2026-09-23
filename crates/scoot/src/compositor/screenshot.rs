@@ -243,7 +243,10 @@ impl State {
         ))
     }
 
-    /// Renders anything outstanding, then captures output `id`'s raw pixels.
+    /// Renders anything outstanding, then captures output `id`'s raw pixels,
+    /// with the pointer in them exactly when `cursor` says so -- on every
+    /// backend, whatever the frame itself holds (see
+    /// `render::capture_cursor`).
     ///
     /// Synchronous, on the event-loop thread: both steps touch the renderer
     /// and its framebuffer, which are not `Send`. What this does *not* do is
@@ -256,7 +259,11 @@ impl State {
     /// [`State::screenshot_refusal`], which refuses the ids this cannot
     /// answer); a `None` here is an unreachable-by-then `Err`, never a
     /// capture of the wrong screen.
-    pub fn capture_pixels_for(&mut self, id: Option<OutputId>) -> Result<RawCapture, String> {
+    pub fn capture_pixels_for(
+        &mut self,
+        id: Option<OutputId>,
+        cursor: bool,
+    ) -> Result<RawCapture, String> {
         self.render();
         // Scanout-tier only: force one composite frame when the recording is
         // stale-or-missing, so the read below serves current pixels rather
@@ -285,7 +292,17 @@ impl State {
         let Some(mut backend) = self.take_backend(id) else {
             return Err(format!("output {} has no render target", id.0));
         };
-        let captured = read_back(&mut backend);
+        let captured = read_back(&mut backend).map(|mut capture| {
+            // After the read, with the backend still taken: the cursor's
+            // region re-rendered to what was asked for, written over the
+            // copy. `None` is the frame already matching (or a region that
+            // could not be drawn, logged there) -- the copy stands as read.
+            if let Some(patch) = self.capture_cursor_patch(&mut backend, id, cursor) {
+                patch.apply(&mut capture.bgra, capture.width, capture.height);
+                backend.recycle_patch(patch);
+            }
+            capture
+        });
         self.put_backend(id, backend);
         captured
     }
@@ -297,7 +314,9 @@ impl State {
     /// `output` is the `--output` id the request named, or `None` for the
     /// primary output; `connection.rs` has already refused the ids nothing
     /// can answer (see [`State::screenshot_refusal`]), so this resolves its
-    /// own output's framebuffer here and never another's.
+    /// own output's framebuffer here and never another's. `cursor` is
+    /// whether the pointer is drawn in, already resolved against the
+    /// protocol's default (`scoot_ipc::SCREENSHOT_CURSOR_DEFAULT`).
     ///
     /// `stream` is a clone of the connection's socket, sharing its file
     /// status flags (non-blocking, like the original -- the same sharing
@@ -308,6 +327,7 @@ impl State {
         conn: u64,
         stream: UnixStream,
         output: Option<u64>,
+        cursor: bool,
     ) -> ShotStart {
         if self.shot_inflight(conn) {
             return ShotStart::Refused(
@@ -336,7 +356,7 @@ impl State {
             Some(asked) => Some(OutputId(asked)),
             None => self.outputs.primary_id(),
         };
-        let capture = match self.capture_pixels_for(id) {
+        let capture = match self.capture_pixels_for(id, cursor) {
             Ok(capture) => capture,
             Err(message) => return ShotStart::Failed(message),
         };

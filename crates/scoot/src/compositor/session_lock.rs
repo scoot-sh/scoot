@@ -1168,6 +1168,9 @@ impl SessionLockHandler for State {
         // answer to the enter is a later request, not a synchronous callback,
         // and by then only the lock client can send one.
         self.cursor.set_status(CursorImageStatus::default_named());
+        // A cursor change like any other (see `State::cursor_changed`); the
+        // transition below redraws the whole screen anyway.
+        self.cursor_changed();
         self.lock_transition();
     }
 

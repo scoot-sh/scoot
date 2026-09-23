@@ -8,7 +8,7 @@
 use std::os::unix::net::UnixStream;
 use std::time::{Duration, Instant};
 
-use scoot_ipc::{Request, Response, decode, encode};
+use scoot_ipc::{Request, Response, SCREENSHOT_CURSOR_DEFAULT, decode, encode};
 use smithay::reexports::calloop;
 use smithay::reexports::calloop::generic::Generic;
 use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
@@ -758,12 +758,14 @@ impl Connection {
             // screen (see `State::screenshot_refusal`). After the rate limit
             // above so that message is unchanged, and before the capture so
             // a refused id costs no render.
-            let asked = match request {
-                Request::Screenshot { output } => output,
+            let (asked, cursor) = match request {
+                Request::Screenshot { output, cursor } => {
+                    (output, cursor.unwrap_or(SCREENSHOT_CURSOR_DEFAULT))
+                }
                 // `screenshot` is that variant's own `matches!`, so this is
                 // unreachable; `None` is the "no output named" answer either
                 // way, never a capture of the wrong one.
-                _ => None,
+                _ => (None, SCREENSHOT_CURSOR_DEFAULT),
             };
             if let Some(message) = state.screenshot_refusal(asked) {
                 return self.answer(&Response::error(message));
@@ -794,7 +796,7 @@ impl Connection {
                     )));
                 }
             };
-            match state.start_screenshot(self.conn, stream, asked) {
+            match state.start_screenshot(self.conn, stream, asked, cursor) {
                 ShotStart::Dispatched => {
                     // Stamped at dispatch, like the synchronous capture was
                     // stamped at completion: the event-loop cost (render and
