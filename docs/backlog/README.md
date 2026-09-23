@@ -668,8 +668,9 @@ hard requirement; this is "the GPU tier is complete and safe", not "GPU
 becomes the primary path". Work order: exporter → candidates →
 capture-cursor → resize-in-place → syncobj → nested dmabuf → VRR.
 `screencopy-dmabuf-capture` (above) stays gated on measured need.
-- [Widen the scanout framebuffer exporter](./core/gpu-direct-scanout-exporter.md) — high: `NodeFilter::None` makes `ALLOW_SCANOUT` inert; carries the never-fired force-path verification.
-- [Scanout candidates + scanout-tranche feedback](./core/gpu-scanout-candidates.md) — high, blocked on the exporter: every window is `Kind::Unspecified`.
+- [Widen the scanout framebuffer exporter](./resolved/gpu-direct-scanout-exporter-done.md) — RESOLVED 2026-09-22: `NodeFilter::All` (a `Node` filter is inert: client dma-bufs carry no node without v6 `set_sampling_device`); force/refusal halves pinned and watched firing live on the dev VM under an uncommitted `ANY`-bit experiment. Found the next gate instead of direct scanout: the swapchain format match.
+- [Primary-direct format gate](./core/gpu-primary-direct-format-gate.md) — high: Smithay's primary assignment compares whole `Format`s, and no client buffer matches the `AR24`/implicit swapchain; the one thing between this tree and primary-direct scanout on any device.
+- [Scanout candidates + scanout-tranche feedback](./core/gpu-scanout-candidates.md) — high: every window is `Kind::Unspecified`, which gates *overlay* assignment (the primary has no kind check -- the format gate above is its blocker).
 - [Captures lose the pointer on the scanout tier](./core/capture-cursor-parity.md) — high (computer use): capture cursor behaviour must not depend on the renderer.
 - [GLES resize in place](./core/gles-resize-in-place.md) — medium: 16.6 ms EGL rebuild per distinct size vs 37 µs pixman.
 - [Explicit sync, `linux-drm-syncobj-v1`](./protocols/linux-drm-syncobj.md) — medium: pinned Smithay carries it; advertise only where the device can honour it.
@@ -710,7 +711,9 @@ scale/mode) into one hardware session.
   the same change (direct frames mark the recording, captures served off a
   marked recording force one composite frame first, loud refusal where the
   force cannot draw). No window leaves the primary yet (no candidates, and
-  the exporter stays `NodeFilter::None`), so the flag is assignment-inert
+  the exporter stayed `NodeFilter::None` until the [exporter
+  widening](./resolved/gpu-direct-scanout-exporter-done.md), after which the
+  format gate still holds), so the flag is assignment-inert
   and the fix is proven by pins + trace + byte-identity live. Numbers:
   [the measurement entry](./resolved/gpu-vs-cpu-measured-done.md).
 - [Config reload: from partial to full](./resolved/config-reload-full-done.md)

@@ -237,10 +237,24 @@ running with no GPU at all is a hard requirement here, not a fallback tier.
   sounds, twice over: no window surface is ever a scanout candidate (every
   one is built `Kind::Unspecified`), so an overlay plane can carry at most
   the cursor -- never a window -- and candidate-marking is a separate
-  semantic change, still out; and the framebuffer exporter stays
-  `NodeFilter::None`, which rejects every client buffer before any hardware
-  is touched, so no frame this tree produces can take the primary direct
-  yet either. One consequence to know: a capture (IPC
+  semantic change, still out; and although the framebuffer exporter now
+  admits client dma-bufs (it turns them into DRM framebuffers on the
+  scanout device, falling back to compositing on any refusal, never
+  touching the client), Smithay only puts one on the primary when its
+  format *and modifier* equal the swapchain's -- which never happens here:
+  the primary path compares the opaque fourcc (`XR24`) against an `AR24`
+  swapchain, and the `LINEAR` client modifier against, on virtio-gpu, an
+  implicit (`Invalid`) one. So no frame this tree produces takes the primary
+  direct yet, on any hardware. Direct scanout *has* been observed, on the
+  dev VM only, with that check lifted in an uncommitted experiment
+  (`ALLOW_PRIMARY_PLANE_SCANOUT_ANY` plus a full-output card0 dumb-buffer
+  client): the primary plane scanned out the client's `XR24`/`LINEAR`
+  framebuffer, every capture forced its composite frame and read the
+  current pixels, and a capture taken while VT-switched away refused with
+  "held for direct scanout; retry once a composite frame lands" rather than
+  serving a stale screen. Lifting the check for real is tracked in
+  [`backlog/core/gpu-primary-direct-format-gate.md`](backlog/core/gpu-primary-direct-format-gate.md).
+  One consequence to know: a capture (IPC
   screenshots, `ext-image-copy-capture-v1`) reads the primary plane only, so
   on a session whose cursor is plane-assigned the capture shows the screen
   *without* the cursor; where the cursor is composited, captures keep showing
@@ -322,10 +336,14 @@ back per frame the same way. A plane-assigned cursor is absent
 from captures, which read the primary plane only -- and no window can ride an
 overlay yet (nothing is marked a scanout candidate; that marking is a
 separate semantic change, still out), while no frame at all can take the
-primary direct yet either (the framebuffer exporter stays
-`NodeFilter::None`, rejecting every client buffer before hardware is
-touched). A capture served where the recording went stale-direct forces one
-composite frame first, so captures stay correct throughout. Whether `apple,dcp`
+primary direct yet either: the framebuffer exporter admits client
+dma-bufs, but Smithay's primary assignment requires the client
+framebuffer's format and modifier to equal the swapchain's, which no
+buffer a client can send here does (see the limitation above). A capture
+served where the recording went stale-direct forces one composite frame
+first, so captures stay correct throughout -- watched working on the dev VM
+with the format check lifted in an experiment, never on a shipped build,
+which cannot go direct. Whether `apple,dcp`
 exposes usable cursor or overlay planes is still unknown (no plane inventory exists
 from the Asahi runs). Virtio's own footnote: its cursor plane needs the
 session's `CURSOR_PLANE_HOTSPOT` cap to be enumerated at all (set before

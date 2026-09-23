@@ -282,6 +282,17 @@ socket, and the other shortens a wait rather than refusing it.
   immediately, while the capture it follows is still encoding — so the
   *second* request's reply arrives *first*. A client pipelining screenshots
   matches replies by content, not by position.
+- **The `--tty` GPU scanout tier can refuse a capture with a retry,
+  never a stale screen.** (`--renderer gles` in a `gpu-scanout` build only.)
+  There the capture reads the buffer the last composited frame landed in, so
+  it is refused as `nothing has been scanned out yet` before the first
+  frame, and as `the current frame is held for direct scanout; retry once a
+  composite frame lands` when the screen is showing a client's buffer
+  directly and a composite frame cannot be drawn to capture from (the
+  session is VT-switched away). Normally the capture forces that composite
+  frame itself and succeeds. The second refusal cannot occur in current
+  builds (no frame goes direct yet -- see [tty.md](tty.md)); it is listed
+  so a client treats it as retryable when it can.
 - **One capture in flight per connection.** The PNG encode runs on a worker
   thread, so other connections are answered while it runs — but the capture's
   own reply still has to go out before any later reply on that same

@@ -65,8 +65,11 @@ claimed rather than shown. Where they stand now:
 Scanout drives every plane it can claim — cursor plane active where exposed,
 overlay planes enumerated per CRTC, `ALLOW_SCANOUT` passed with its capture
 fix — which is phase 2 of `docs/backlog/resolved/gpu-scanout-planes-done.md`,
-now complete. No window leaves the primary plane yet (no scanout candidates,
-and the exporter stays `NodeFilter::None`), so captures stay correct. Two of its four stages have landed
+now complete. No window leaves the primary plane yet (no scanout candidates;
+the exporter admits client dma-bufs since the exporter widening, but the
+primary still requires a swapchain format/modifier match no client buffer
+meets -- [format gate](docs/backlog/core/gpu-primary-direct-format-gate.md)),
+so captures stay correct. Two of its four stages have landed
 (PR #129: the renderer seam, pixman still the only implementation, provably
 zero behaviour change; PR #130: the GLES pipeline behind
 `--renderer pixman|gles` and `[renderer] backend`, off by default, every
@@ -116,6 +119,23 @@ each item's own file records why it landed when it did.
   30/30 storm, steal refused), opt-in flag + config key decided (default
   off), conditional GO with top-3 risks + scoped Phase 1. Ticket stays
   OPEN; review found no blocking issues.
+
+- **[GPU scanout: framebuffer exporter widened, force path proven
+  live](docs/backlog/resolved/gpu-direct-scanout-exporter-done.md)**
+  (2026-09-22, branch `gpu-direct-scanout-exporter`) — exporter
+  `NodeFilter::None` → `All` (`Node(..)` would be inert: a client dma-buf's
+  node is set only by v6 `set_sampling_device`, which no measured client
+  sends); force/refusal halves pinned against the code that runs
+  (`Captures::capture_target`/`record`, `ForceComposite`) and watched firing
+  live on the dev VM with an uncommitted `ANY`-bit experiment (primary
+  scanning out the client's `XR24`/`LINEAR` fb, captures forced and
+  correct, paused capture refused loudly). Gating finding: primary-direct
+  stays unreachable on every device because Smithay's primary assignment
+  compares whole `Format`s (opaque fourcc vs `AR24` swapchain; `LINEAR` vs
+  implicit modifier) — filed as the [format
+  gate](docs/backlog/core/gpu-primary-direct-format-gate.md). Also: forced
+  frames drop the `ANY` bit too; `capture_pixels_for` renders before
+  forcing, not after.
 
 - **[GPU scanout `ALLOW_SCANOUT` + capture fix
   (step 3)](docs/backlog/resolved/gpu-scanout-planes-done.md)** (2026-09-22,

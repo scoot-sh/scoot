@@ -62,9 +62,16 @@ Linux, and daily-driven on `--tty`** (2026-09-18).
   the capture fix that makes the last one safe: a direct frame marks the
   capture recording, and a capture served off a marked recording forces one
   composite frame first, so screenshots and screen captures stay correct.
-  No window leaves the primary plane yet (nothing is marked a scanout
-  candidate, and the framebuffer exporter admits no client buffers), and a
-  plane-assigned cursor is absent from captures by design.
+  The framebuffer exporter now admits client dma-bufs, but no window leaves
+  the composited primary yet on any hardware: Smithay only hands the primary
+  to a client buffer whose format and modifier match the swapchain's, and on
+  this tree they never do (nothing is marked a scanout candidate for the
+  overlays either). Direct scanout has been seen only on the dev VM
+  (virtio-gpu) with that format check deliberately lifted in an uncommitted
+  experiment — which is how the capture fix was watched working live:
+  captures stayed correct through direct frames, and a capture taken while
+  VT-switched away failed with a retry message instead of returning a stale
+  screen. A plane-assigned cursor is absent from captures by design.
   `--headless`/`--nested` still read every frame back to main memory as
   pixman does. It is no longer unproven: on an Apple M2 under Asahi Linux it
   costs **4–5x less CPU** than the default tier under damage (and ~0.2 W

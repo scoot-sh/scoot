@@ -356,11 +356,16 @@ What lands:
   served off a marked recording forces one composite-only frame first
   (`State::ensure_scanout_capture_current`, through both IPC `screenshot`
   and `ext-image-copy-capture-v1`), failing loudly where the force cannot
-  draw. `ALLOW_PRIMARY_PLANE_SCANOUT_ANY` stays out, and the framebuffer
-  exporter stays `NodeFilter::None` -- which rejects every client buffer
-  before any hardware is touched, so no frame this tree produces can take
-  the primary direct yet. Widening the exporter is what would make the bit
-  do anything, and it rides on the capture fix, not before it.)*
+  draw. `ALLOW_PRIMARY_PLANE_SCANOUT_ANY` stays out. The framebuffer
+  exporter was widened afterwards (`NodeFilter::All`,
+  `docs/backlog/resolved/gpu-direct-scanout-exporter-done.md`), which
+  showed the exporter was not the last gate: Smithay's primary assignment
+  requires the client framebuffer's whole `Format` to equal the swapchain
+  slot's, and no client buffer here matches (opaque fourcc vs `AR24`;
+  `LINEAR` vs an implicit modifier on virtio) -- so no frame this tree
+  produces takes the primary direct yet. The capture fix was watched
+  working live with that check lifted in an experiment; lifting it for
+  real is `docs/backlog/core/gpu-primary-direct-format-gate.md`.)*
 - **`PresentRetries` is reused, not replaced**, against the letter of the
   staging note below. A refused `queue_frame` is the same hazard as a refused
   `page_flip`: nothing is in flight, so no completion event will retry it and

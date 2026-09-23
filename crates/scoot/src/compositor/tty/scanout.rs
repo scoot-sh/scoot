@@ -87,14 +87,34 @@ type Compositor =
 /// capture served off a marked recording must force a composite frame first
 /// (`frame_flags(true)`, via `State::ensure_scanout_capture_current`).
 ///
-/// Two things the primary bit does *not* carry with it, both pinned below:
-/// `ALLOW_PRIMARY_PLANE_SCANOUT_ANY` (which is not a member of `ALLOW_SCANOUT`
-/// at the pinned rev) stays out, so a direct element must still match the
-/// swapchain format; and the framebuffer exporter stays `NodeFilter::None`
-/// (see `build`), which rejects every client buffer before any hardware is
-/// touched -- so on this tree the bit is reachable only where a future
-/// exporter widening allows it, and that widening rides on the capture fix
-/// landing here.
+/// `ALLOW_PRIMARY_PLANE_SCANOUT_ANY` (which is not a member of
+/// `ALLOW_SCANOUT` at the pinned rev) stays out, pinned below, so a direct
+/// element must still match the swapchain's format -- and that match is what
+/// keeps the primary bit from firing on this tree today, on every device,
+/// now that the framebuffer exporter admits client buffers ([`EXPORTER_FILTER`]).
+/// Traced at the pinned rev, `try_assign_primary_plane` has no element-kind
+/// test at all; its gate is `slot.format() != element_config.properties.format`,
+/// a whole-`Format` comparison (fourcc *and* modifier) between the swapchain
+/// slot and the framebuffer the exporter made from the client buffer. Two
+/// things make that unequal for every buffer a client can send here:
+///
+/// - **The fourcc.** The primary path exports with `allow_opaque_fallback`,
+///   so the client framebuffer's fourcc is always the opaque variant
+///   (`Argb8888` becomes `Xrgb8888`), while the swapchain is `Argb8888`
+///   wherever the plane takes it (the first entry of [`COLOR_FORMATS`]).
+/// - **The modifier.** `zwp_linux_dmabuf_v1` offers only `LINEAR`
+///   (`dmabuf.rs`), and Smithay refuses to export a client buffer with no
+///   explicit modifier; a swapchain allocated implicitly carries
+///   `Modifier::Invalid`. The dev VM's virtio-gpu is exactly that case
+///   (measured: `Testing Formats: [AR24, Invalid]`), so no reordering of
+///   `COLOR_FORMATS` alone could match there.
+///
+/// So primary-direct scanout stays unreachable until the swapchain format or
+/// the `ANY` bit changes, which is its own decision with its own capture
+/// consequences (`docs/backlog/core/gpu-primary-direct-format-gate.md`), not
+/// this constant's. The capture fix below stays in place regardless: it is
+/// what makes that later change safe, and it already guards the exporter
+/// path that *is* reachable.
 ///
 /// The overlay bit's reachable effect is deliberately narrow. Smithay's
 /// `try_assign_overlay_plane` only considers elements of kind
@@ -117,18 +137,133 @@ const FRAME_FLAGS: FrameFlags = FrameFlags::ALLOW_SCANOUT;
 /// The flags for one frame: the full set, or the composite-only subset for a
 /// frame a capture is about to read.
 ///
-/// Forced frames (see `ScanoutPresenter::arm_force_composite`) drop exactly
-/// the primary bit, landing whole in the swapchain slot while letting the
-/// cursor still ride its plane -- so a forced capture keeps the documented
-/// cursorless-where-plane-assigned contract rather than gaining a second
-/// cursor render. Pure, so the two sets are pinnable without a DRM device.
+/// Forced frames (see [`ForceComposite`]) drop both primary bits, landing
+/// whole in the swapchain slot while letting the cursor still ride its plane
+/// -- so a forced capture keeps the documented cursorless-where-plane-assigned
+/// contract rather than gaining a second cursor render. Pure, so the two sets
+/// are pinnable without a DRM device.
+///
+/// *Both* bits, although [`FRAME_FLAGS`] carries only one today: Smithay's
+/// `try_assign_primary_plane` proceeds when the flags intersect either
+/// (`ALLOW_PRIMARY_PLANE_SCANOUT | ALLOW_PRIMARY_PLANE_SCANOUT_ANY` at the
+/// pinned rev), so a forced frame that dropped only the first would still go
+/// direct the day `ANY` is added -- the frame a capture is about to read,
+/// silently off the swapchain. Measured, not hypothetical: adding `ANY` is
+/// exactly how the force path was exercised live on the dev VM, and it is
+/// the first thing the format-gate ticket would reach for.
 fn frame_flags(force_composite: bool) -> FrameFlags {
     if force_composite {
-        FRAME_FLAGS.difference(FrameFlags::ALLOW_PRIMARY_PLANE_SCANOUT)
+        composite_only(FRAME_FLAGS)
     } else {
         FRAME_FLAGS
     }
 }
+
+/// `flags` with every bit that lets a client buffer take the primary plane
+/// removed. Split out of [`frame_flags`] so the both-bits rule is pinned
+/// against a set that *does* carry `ANY`, which [`FRAME_FLAGS`] does not.
+const fn composite_only(flags: FrameFlags) -> FrameFlags {
+    flags.difference(
+        FrameFlags::ALLOW_PRIMARY_PLANE_SCANOUT.union(FrameFlags::ALLOW_PRIMARY_PLANE_SCANOUT_ANY),
+    )
+}
+
+/// The capture fix's arming: one composite-only frame, bought by a capture
+/// that is about to read the swapchain slot.
+///
+/// Its own type rather than a bare `bool` on the presenter so that the exact
+/// code [`ScanoutPresenter::render_and_queue`] runs -- take the arming, turn
+/// it into this frame's flags -- is pinnable without a DRM device (see this
+/// module's tests and `render::scanout`'s capture-sequence test). Armed
+/// only by `State::ensure_scanout_capture_current` (through
+/// [`ScanoutPresenter::arm_force_composite`]); *taken*, never read, so one
+/// arming buys exactly one composite frame however many frames look.
+///
+/// A frame that never reaches the presenter -- no `DrmCompositor`, a render
+/// that headed elsewhere, a session holding no DRM master -- leaves it
+/// armed, costing at most one composite frame later. That is the safe
+/// direction to fail in: a spare composite frame is a little CPU, a missing
+/// one is a stale capture.
+#[derive(Debug, Default)]
+pub(crate) struct ForceComposite {
+    armed: bool,
+}
+
+impl ForceComposite {
+    /// Arms the next frame to composite whole.
+    pub(crate) fn arm(&mut self) {
+        self.armed = true;
+    }
+
+    /// Takes the arming and answers this frame's flags: the composite-only
+    /// set exactly once after [`arm`](Self::arm), the full set otherwise.
+    pub(crate) fn take_flags(&mut self) -> FrameFlags {
+        frame_flags(std::mem::take(&mut self.armed))
+    }
+}
+
+/// Which client buffers the framebuffer exporter may turn into DRM
+/// framebuffers for direct scanout: all of them, subject to the checks that
+/// actually decide it (below).
+///
+/// `NodeFilter` is compared, at the pinned rev, against `Dmabuf::node()` --
+/// and on this tree that is `None` for essentially every client buffer, so
+/// `Node(..)` would admit nothing either. The node is only ever set on a
+/// *client* dma-buf by the client's own `set_sampling_device` request
+/// (`zwp_linux_buffer_params_v1`, since v6 -- `wayland/dmabuf/dispatch.rs`),
+/// which the clients measured on this compositor do not send: quickshell
+/// binds v5 and Mesa's EGL queues v4 (`dmabuf.rs`), neither of which even
+/// has the request. The other writer, `MultiRenderer`'s import path, is not
+/// on this tree: scoot imports through a single `GlesRenderer`, whose EGL
+/// import never sets it (only EGL *export* does). `Node(render_node)` works
+/// for Smithay's anvil precisely because anvil's `MultiRenderer` stamps
+/// every imported buffer; copied here it would have been as inert as `None`.
+/// And `DrmNode` equality includes the node *type*, so even a buffer that
+/// did carry a hint would carry the render node `dmabuf.rs` advertises as
+/// `main_device`, never the primary node the GBM device is opened on.
+///
+/// `All` is safe because the node was never what decided whether a buffer
+/// can be scanned out -- the device is. Everything after this filter runs
+/// against the scanout device itself and falls back to compositing on any
+/// refusal, with no path back to the client:
+///
+/// - Only buffers the renderer already imported reach here at all (a
+///   refused import is `failed`/`create_immed`-fatal at `dmabuf_imported`,
+///   before any element exists), and on this tier the renderer's EGL display
+///   was made on this very GBM device (`render::scanout::ScanoutBackend::new`).
+/// - `framebuffer_from_wayland_buffer` refuses a buffer with no explicit
+///   modifier (Weston's rule: an implicit layout is not safe to hand to KMS)
+///   and returns no framebuffer for a non-dma-buf one (shm, single-pixel),
+///   then `gbm_bo_import`s onto the scanout device and `AddFB2`s it.
+/// - Any of those failing is an `Err` in `element_config`, cached per
+///   element and buffer so it is not retried every frame, and the element
+///   composites as it always has. Nothing on that path touches the client's
+///   `wl_buffer`, sends it an event or posts an error: a refused framebuffer
+///   cannot disconnect a client.
+/// - A framebuffer that exists still has to pass the atomic `TEST_ONLY`
+///   commit before any plane takes it (`try_assign_plane`).
+///
+/// This also settles the split render/display topology without a special
+/// case (Apple Silicon: AGX's `renderD128` renders, `apple,dcp`'s `card2`
+/// scans out, one GBM device on the display card serves allocator, exporter
+/// and EGL -- `06-gpu-pipeline.md`). There `Backend::render_node()` can only
+/// answer AGX's `renderD128` -- `card2` has no render node of its own, so
+/// the GBM rung is `None`, and whether the EGL device or `dmabuf.rs`'s path
+/// ladder answers, `renderD128` is the only render node on the machine --
+/// which is not the device the exporter imports onto. With `All` that
+/// mismatch is irrelevant: the import onto `card2` is what is tried, and
+/// refused cleanly if the display cannot take the buffer.
+///
+/// What the widening reaches today, stated so nobody has to re-derive it:
+/// no primary-direct frame (see [`FRAME_FLAGS`]'s format gate), no window on
+/// an overlay (no element is `Kind::ScanoutCandidate`), and no change to the
+/// cursor plane (it renders into buffers of its own through its own
+/// exporter, `NodeFilter::None` inside Smithay). The one newly reachable
+/// assignment is a *client cursor surface* whose buffer is a dma-buf riding
+/// an overlay plane where the cursor plane could not take it -- which has
+/// the cursorless-capture consequence the cursor plane already documents,
+/// and no overlay exists on the dev VM to exercise it.
+const EXPORTER_FILTER: NodeFilter = NodeFilter::All;
 
 /// Colour formats offered to `DrmCompositor::new`, in order. `Argb8888` first
 /// because it is the format every read-back consumer in this compositor
@@ -209,19 +344,15 @@ pub(crate) struct ScanoutPresenter {
     retry_armed: bool,
     /// Whether the next frame that reaches the presenter must composite
     /// whole into the swapchain slot instead of allowing primary direct
-    /// scanout. Set only by [`arm_force_composite`](Self::arm_force_composite),
-    /// taken -- never read -- by [`render_and_queue`](Self::render_and_queue),
-    /// so one arming buys exactly one composite frame however many frames
-    /// look.
+    /// scanout. Armed only by [`arm_force_composite`](Self::arm_force_composite),
+    /// taken by [`render_and_queue`](Self::render_and_queue) -- see
+    /// [`ForceComposite`] for the one-arming-one-frame contract.
     ///
     /// Armed by `State::ensure_scanout_capture_current` just before the
     /// render whose pixels a capture is about to read, together with an
     /// `invalidate_scanout` (which forces the full damage a static screen
-    /// would otherwise draw nothing on). A frame that never reaches the
-    /// presenter -- no `DrmCompositor`, or a render that headed elsewhere --
-    /// leaves it armed, costing at most one composite frame later; that is
-    /// the safe direction to fail in.
-    force_composite: bool,
+    /// would otherwise draw nothing on).
+    force_composite: ForceComposite,
     /// Whether the swapchain's slots have been freed since the render path
     /// last looked. Set by every path that frees slots -- the ones that
     /// rebuild or resize the swapchain, and also a failed `render_frame`,
@@ -300,7 +431,7 @@ impl ScanoutPresenter {
             next_flip: 0,
             retries: PresentRetries::new(),
             retry_armed: false,
-            force_composite: false,
+            force_composite: ForceComposite::default(),
             slots_dropped: false,
             cursor_planes,
             overlay_planes,
@@ -311,16 +442,13 @@ impl ScanoutPresenter {
     /// The one `DrmCompositor::new` call, shared by startup and by a CRTC
     /// switch so the two cannot configure it differently.
     ///
-    /// Two choices here are still stage-3 scope decisions, not defaults:
+    /// Two choices here are scope decisions, not defaults:
     ///
-    /// - **The exporter stays `NodeFilter::None`.** This is now the *sole*
-    ///   gate on primary direct scanout reaching hardware: with it,
-    ///   `element_config` at the pinned rev rejects every client buffer in
-    ///   `can_add_framebuffer` (and memory-backed or solid elements never
-    ///   produce an exportable buffer at all), so `PrimaryPlaneElement::Element`
-    ///   is unreachable however the flags read. Widening the filter is what
-    ///   would make step 3's primary bit do anything -- and it rides on the
-    ///   capture fix that landed with the bit, not before it.
+    /// - **The exporter admits client buffers ([`EXPORTER_FILTER`]).** Which
+    ///   node filter, why `All` rather than a node, and what that does and
+    ///   does not make reachable are all on that constant. The exporter is no
+    ///   longer the gate on primary direct scanout; the swapchain format
+    ///   match is (see [`FRAME_FLAGS`]).
     /// - **`FRAME_FLAGS`, not a subset.** `ALLOW_SCANOUT` lets a client's own
     ///   buffer be scanned out directly on the primary plane instead of being
     ///   composited into the swapchain slot -- so `render::scanout`'s capture
@@ -348,12 +476,10 @@ impl ScanoutPresenter {
             gbm.clone(),
             GbmBufferFlags::RENDERING | GbmBufferFlags::SCANOUT,
         );
-        // `NodeFilter::None` disables direct scan-out of *client* buffers:
-        // with it no element this tree produces can take the primary plane
-        // direct (see `build`'s doc), so the flags' primary bit is inert
-        // until a future widening -- which rides on the capture fix, not
-        // before it.
-        let exporter = GbmFramebufferExporter::new(gbm.clone(), NodeFilter::None);
+        // Shared by startup and every CRTC switch, so a rebuilt compositor
+        // cannot admit a different set of client buffers than the first one
+        // did. See `EXPORTER_FILTER` for the choice and what it reaches.
+        let exporter = GbmFramebufferExporter::new(gbm.clone(), EXPORTER_FILTER);
         // `Some` only where a cursor plane exists to drive with it. Without
         // one the cursor state -- its pixman renderer, its `CURSOR | WRITE`
         // buffer pool -- would be allocated and then never consulted (Smithay
@@ -453,7 +579,7 @@ impl ScanoutPresenter {
         R::TextureId: Texture + 'static,
         E: RenderElement<R>,
     {
-        let flags = frame_flags(std::mem::take(&mut self.force_composite));
+        let flags = self.force_composite.take_flags();
         let result = match self
             .compositor
             .render_frame(renderer, elements, clear_color, flags)
@@ -603,7 +729,7 @@ impl ScanoutPresenter {
     /// what keeps the cursorless-where-plane-assigned capture contract
     /// unchanged.
     pub(crate) fn arm_force_composite(&mut self) {
-        self.force_composite = true;
+        self.force_composite.arm();
     }
 
     /// Takes whether the swapchain's slots have been freed since the render
@@ -812,12 +938,16 @@ fn select_planes(inventory: &Planes, primary: plane::Handle) -> Planes {
 
 #[cfg(test)]
 mod tests {
-    //! The plane selection, decided without a DRM device.
+    //! The plane selection, frame flags, capture-force arming and exporter
+    //! filter, decided without a DRM device.
     //!
-    //! [`super::select_planes`] is the only part of this module that can be
-    //! exercised off real hardware: `build` needs a live `DrmSurface`, and
-    //! the per-frame claim-and-fallback inside Smithay is traced in the
-    //! module docs rather than re-proven here. The no-cursor-plane shape --
+    //! These are the parts of this module that can be exercised off real
+    //! hardware: `build` needs a live `DrmSurface`, and the per-frame
+    //! claim-and-fallback inside Smithay is traced in the module docs rather
+    //! than re-proven here. The capture side of the force path (the
+    //! recording's mark, refusal and clearing) is pinned in
+    //! `render::scanout`'s tests, which drive [`super::ForceComposite`]
+    //! through the same sequence. The no-cursor-plane shape --
     //! an empty cursor list in, `gbm: None` out -- is covered live on any
     //! CRTC without one; the dev VM's virtio-gpu has one, so its run proves
     //! the other shape instead.
@@ -969,5 +1099,56 @@ mod tests {
         assert_ne!(forced, FrameFlags::ALLOW_SCANOUT);
         // And the unforced frame is the full set the pin above names.
         assert_eq!(frame_flags(false), FrameFlags::ALLOW_SCANOUT);
+    }
+
+    #[test]
+    fn a_forced_frame_drops_the_any_bit_too_the_day_the_full_set_gains_it() {
+        // Smithay tries the primary plane when the flags intersect *either*
+        // primary bit, so a forced frame that dropped only
+        // `ALLOW_PRIMARY_PLANE_SCANOUT` would still go direct under a full
+        // set carrying `ANY` -- the frame a capture is about to read, off the
+        // swapchain. That is exactly the set the dev-VM force-path
+        // experiment ran with, and the first one the format-gate ticket
+        // would try.
+        let with_any = FrameFlags::ALLOW_SCANOUT | FrameFlags::ALLOW_PRIMARY_PLANE_SCANOUT_ANY;
+        let forced = composite_only(with_any);
+        assert!(!forced.intersects(
+            FrameFlags::ALLOW_PRIMARY_PLANE_SCANOUT | FrameFlags::ALLOW_PRIMARY_PLANE_SCANOUT_ANY
+        ));
+        assert_eq!(
+            forced,
+            FrameFlags::ALLOW_CURSOR_PLANE_SCANOUT | FrameFlags::ALLOW_OVERLAY_PLANE_SCANOUT
+        );
+    }
+
+    #[test]
+    fn one_arming_buys_exactly_one_composite_frame() {
+        // What `render_and_queue` runs, frame by frame: an unarmed frame may
+        // go direct, the frame right after an arming may not, and the one
+        // after that may again -- the arming is spent, not sticky. Arming
+        // twice before a frame still buys one frame (a capture and a
+        // screencopy tick both asking is one forced frame, not two).
+        let mut force = ForceComposite::default();
+        assert_eq!(force.take_flags(), FRAME_FLAGS);
+        force.arm();
+        force.arm();
+        assert_eq!(force.take_flags(), frame_flags(true));
+        assert_eq!(force.take_flags(), FRAME_FLAGS);
+    }
+
+    #[test]
+    fn the_exporter_admits_client_buffers_that_carry_no_node() {
+        // The widening, pinned against the comparison Smithay actually
+        // makes: `can_add_framebuffer` asks `import_node == dmabuf.node()`,
+        // and a client dma-buf's node is `None` unless the client sent
+        // `set_sampling_device` (v6), which the clients measured here do not.
+        // `NodeFilter::None` (what this tier had) admits nothing, and a
+        // `Node(..)` filter would admit nothing either for exactly those
+        // buffers -- only `All` makes the exporter reachable at all.
+        use smithay::backend::drm::DrmNode;
+        let unhinted: Option<DrmNode> = None;
+        assert_eq!(EXPORTER_FILTER, NodeFilter::All);
+        assert!(EXPORTER_FILTER == unhinted);
+        assert!(NodeFilter::None != unhinted);
     }
 }

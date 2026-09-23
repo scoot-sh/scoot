@@ -3,13 +3,31 @@ title: "GPU scanout: mark eligible window surfaces as scanout candidates, with s
 status: "open"
 area: "core"
 priority: "high"
-blocked: "gpu-direct-scanout-exporter must land first"
+blocked: null
 ---
 
 # GPU scanout: scanout candidates + per-surface scanout feedback
 
 Filed 2026-09-22 (coordinator, GPU-tier survey). Serves **daily-drive**.
-Depends on [the exporter widening](./gpu-direct-scanout-exporter.md).
+The [exporter widening](../resolved/gpu-direct-scanout-exporter-done.md) it
+depended on has landed (`NodeFilter::All`).
+
+**Correction from that change (2026-09-22), read before the rest:** the
+"What is missing" paragraph below says Smithay's *primary-direct*
+assignment only considers candidates. At the pinned rev it does not --
+`try_assign_primary_plane` has no kind check at all; what blocks it is a
+whole-`Format` match against the swapchain that no client buffer meets
+([format gate](./gpu-primary-direct-format-gate.md)). Candidate marking
+gates **overlay** assignment only. Two consequences for this ticket: a
+candidate window can reach an overlay once marked, independent of the
+format gate, so the capture question below (`note_direct` covers
+primary-direct only -- an overlay-assigned window is also absent from the
+swapchain slot) is a blocker the moment the first element is marked; and
+the eligibility rule here and the format-gate ticket's "which elements may
+be tried" question are the same decision -- make it once. On the rounded
+clip: `Rounded` forwards `underlying_storage` (and `kind`), so the element
+Smithay would scan out is the unclipped inner buffer -- the corners are
+lost, not approximated.
 
 ## What is missing
 
