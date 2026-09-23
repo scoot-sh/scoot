@@ -10,6 +10,7 @@ use smithay::wayland::shell::xdg::{ToplevelSurface, XdgToplevelSurfaceData};
 
 use super::State;
 use super::fullscreen::set_fullscreen_state;
+use super::output_clip;
 
 #[cfg(test)]
 mod tests;
@@ -190,6 +191,10 @@ impl State {
             }
             self.space
                 .map_element(window.clone(), (placement.rect.x, placement.rect.y), false);
+            // Beside the position, from the same placement: what the hit
+            // test filters by (see `output_clip.rs`), so the two cannot
+            // describe different arrangements.
+            output_clip::stamp(&window, placement.output);
             if let Some(toplevel) = window.toplevel() {
                 let size = Size::new(placement.rect.w, placement.rect.h);
                 // The size and the `fullscreen` bit in one configure, so a

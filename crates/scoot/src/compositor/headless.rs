@@ -207,6 +207,30 @@ pub fn add_output(
     Ok(id)
 }
 
+/// An output with no render target, at the origin: in the `Space`, in
+/// [`State::outputs`] and in the core, so windows are placed on it and the
+/// pointer finds them there, but nothing draws it (`render()` skips an
+/// output with no backend). For input suites on a bare harness that have no
+/// use for a renderer -- they still need a real output, because a window
+/// takes input only on the output it is placed on (see `output_clip.rs`).
+///
+/// [`State::outputs`]: super::State::outputs
+#[cfg(test)]
+pub(crate) fn add_output_without_backend(
+    state: &mut State,
+    name: &str,
+    width: i32,
+    height: i32,
+) -> OutputId {
+    let output = create_output(state, name, width, height, (0, 0));
+    let area = logical_area(state, &output, width, height);
+    let id = state.outputs.add(output);
+    state
+        .world
+        .handle_event(CoreEvent::OutputAdded { id, area });
+    id
+}
+
 /// The `wl_output` half of creating an output: the global, its mode and scale,
 /// and its place in the `Space`. Registering it with [`State::outputs`] and
 /// telling the core about it are the caller's, because the two callers do

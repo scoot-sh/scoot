@@ -9,6 +9,22 @@ scoot has not cut a numbered release yet; entries are dated.
 
 ## Unreleased
 
+### 2026-09-23 — windows stay on their own screen
+
+- **With more than one output, a window no longer draws onto — or takes
+  clicks from — the screen next to it.** A column scrolled part-way past the
+  edge of its screen, or a fullscreen window whose column you focused away
+  from, used to show on the neighbouring screen on top of that screen's own
+  windows, and a click there went to it. Now it is cut at the edge of its
+  own screen, and the neighbour shows (and clicks) its own windows. A menu
+  opened right at the shared edge is cut there too, the same as at the outer
+  edge of a screen.
+- **The focus ring and rounded corners now draw on the second and later
+  outputs.** They were built in the first output's coordinates, so on any
+  other output the ring landed off-screen and the corner rounding missed.
+- For scripts and agents: in `scootctl windows`, only the part of a
+  window's `rect` inside its own output's `rect` is drawn and clickable.
+
 ### 2026-09-22 — fullscreen works
 
 - **A video player's or game's fullscreen button now works** — any app

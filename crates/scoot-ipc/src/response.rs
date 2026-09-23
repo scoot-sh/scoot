@@ -78,6 +78,11 @@ pub struct WindowSnapshot {
     #[serde(default)]
     pub icon: Option<String>,
     pub output: u64,
+    /// Where the window is, in logical pixels. Only the part inside its
+    /// `output`'s own `rect` is drawn and takes input: a column scrolled
+    /// part-way past its output's edge (or a fullscreen window focused away
+    /// from, below) is cut at that edge, and the neighbouring output's own
+    /// content is what shows -- and what is clicked -- beyond it.
     pub rect: Rect,
     pub visible: bool,
     pub focused: bool,
@@ -111,7 +116,8 @@ pub struct WindowSnapshot {
     /// the focused one; focused away, it keeps that size and sits in the
     /// strip where a column that wide would, one ordinary gap from its
     /// neighbours (possibly partly `visible`, never overlapping the focused
-    /// window).
+    /// window, and like any window drawn and hit only within its own
+    /// output -- see `rect`).
     ///
     /// Defaulted like `popup_grab` above, for the same wire reason, so no
     /// `PROTOCOL_VERSION` bump. `false` from an older server is truthful: it

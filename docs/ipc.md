@@ -157,11 +157,11 @@ for its modifier only when no key on the layout can hold it.
 | `title` | The toplevel's title, same caveat. |
 | `icon` | The freedesktop icon name the client committed through `xdg-toplevel-icon-v1`, or `null`. Read off the surface's current state when asked, so it is never stale. A client that supplied raw pixel buffers instead of a name reads as `null`. |
 | `output` | The id of the output the window is on. |
-| `rect` | Where the window is, in logical pixels — what you click. A window that is not visible still reports the frame it *would* have — except a window stacked in the same column as a fullscreen one, which reports that fullscreen window's frame (it is behind it) until the fullscreen ends. |
+| `rect` | Where the window is, in logical pixels — what you click. Only the part inside its own output's `rect` (`scootctl outputs`) is drawn and clickable: a column scrolled part-way past its output's edge is cut there, and a click past that edge lands on whatever the neighbouring output shows. A window that is not visible still reports the frame it *would* have — except a window stacked in the same column as a fullscreen one, which reports that fullscreen window's frame (it is behind it) until the fullscreen ends. |
 | `visible` | `false` when the window is scrolled out of view, on an inactive workspace, or hidden behind a fullscreen window (every other window on an output a fullscreen window covers, including windows stacked in its own column). |
 | `focused` | Compositor *window* focus — not necessarily where keystrokes go; see below. |
 | `popup_grab` | Whether this window's own popup tree holds the keyboard — see below. |
-| `fullscreen` | Whether the window is fullscreen. While its column is focused it covers its output: `rect` equals that output's `rect`, and every other window on the output reports `visible: false`. Focused away, it keeps that size and sits in the strip where a column that wide would, one ordinary gap from its neighbours — it may still be partly `visible` beside the focused window, never overlapping it. |
+| `fullscreen` | Whether the window is fullscreen. While its column is focused it covers its output: `rect` equals that output's `rect`, and every other window on the output reports `visible: false`. Focused away, it keeps that size and sits in the strip where a column that wide would, one ordinary gap from its neighbours — it may still be partly `visible` beside the focused window, never overlapping it, and like any window is drawn and clickable only within its own output, however far its `rect` reaches past that output's edge. |
 
 Every success reply also carries **`locked`**: the session-lock state it was
 built under. An agent typing a password over IPC learns the unlock landed

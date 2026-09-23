@@ -749,6 +749,7 @@ fn draw_frame_scanout(
         size,
         scale: output.current_scale().fractional_scale(),
         geometry: state.space.output_geometry(output),
+        output: state.outputs.id_of(output),
         locked,
     };
     let scanout::ScanoutBackend {
@@ -850,6 +851,7 @@ where
         size,
         scale: output.current_scale().fractional_scale(),
         geometry: state.space.output_geometry(output),
+        output: state.outputs.id_of(output),
         locked,
     };
     // The core's arrangement, and this frame's ring segments built from it --

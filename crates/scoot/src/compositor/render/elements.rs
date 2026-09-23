@@ -12,7 +12,7 @@
 
 use std::collections::HashMap;
 
-use scoot_core::{Arrangement, Rect, WindowId};
+use scoot_core::{Arrangement, OutputId, Rect, WindowId};
 use smithay::backend::renderer::element::memory::MemoryRenderBufferRenderElement;
 use smithay::backend::renderer::element::solid::SolidColorRenderElement;
 use smithay::backend::renderer::element::surface::{
@@ -20,6 +20,7 @@ use smithay::backend::renderer::element::surface::{
 };
 use smithay::backend::renderer::element::{AsRenderElements, Kind, render_elements};
 use smithay::backend::renderer::{ImportAll, ImportMem, Renderer, Texture};
+use smithay::desktop::space::SpaceElement;
 use smithay::desktop::{
     LayerMap, PopupManager, Space, Window, WindowSurface, layer_map_for_output,
 };
@@ -32,6 +33,7 @@ use crate::compositor::State;
 use crate::compositor::cursor::CursorElement;
 use crate::compositor::decorations::{Appearance, Decorations, RingElement};
 use crate::compositor::layer_shell;
+use crate::compositor::output_clip::to_output_local;
 use crate::compositor::rounded::{Rounded, clip_rect, physical_radius};
 
 // What a frame can draw. Which kind covers which is decided by the *order*
@@ -76,6 +78,13 @@ pub(super) struct FrameContext {
     /// an output that isn't in the `Space`, which `headless::init_named`
     /// cannot produce.
     pub(super) geometry: Option<Rectangle<i32, Logical>>,
+    /// The core's id for this output: which windows and rings this frame
+    /// draws. A window is drawn only on the output it is placed on (see
+    /// `output_clip.rs`), so everything placed elsewhere is left out of the
+    /// frame entirely. `None` only for an output `Outputs` does not know,
+    /// which the render loop -- walking that very collection -- cannot
+    /// produce; such a frame draws no window rather than every window.
+    pub(super) output: Option<OutputId>,
     /// Whether the session is locked. Read once by the caller so elements,
     /// clear colour and frame callbacks are all answering the same question
     /// about the same frame.
@@ -133,6 +142,7 @@ impl State {
             size: (width, height),
             scale,
             geometry,
+            output: output_id,
             locked,
         } = *frame;
         // The client-supplied cursor surface this frame drew from, if any.
@@ -210,27 +220,22 @@ impl State {
             elements.push(Elements::Decoration(backdrop));
             elements
         } else {
-            let rounded = self.appearance.corner_radius > 0;
-            let window_elements: Vec<Elements<R>> = match (geometry, arrangement) {
-                (Some(region), Some(arranged)) if rounded => rounded_window_elements(
+            let window_elements: Vec<Elements<R>> = match (geometry, arrangement, output_id) {
+                (Some(region), Some(arranged), Some(output_id)) => window_elements(
                     &self.space,
                     &self.windows,
                     arranged,
+                    output_id,
                     renderer,
                     region,
                     scale,
                     self.appearance.corner_radius,
                 ),
-                (Some(region), _) => self
-                    .space
-                    .render_elements_for_region(renderer, &region, scale, 1.0)
-                    .into_iter()
-                    .map(Elements::Surface)
-                    .collect(),
-                // Unreachable while `output` is the primary output
-                // `headless::init_named` mapped into the space; an output that
+                // Unreachable: every output the render loop walks is in the
+                // space and in `Outputs`, and the arrangement is only `None`
+                // while locked, which is the other branch. An output that
                 // isn't in the space has no region to render.
-                (None, _) => Vec::new(),
+                _ => Vec::new(),
             };
             // While a fullscreen window covers this output, only the
             // overlay layer (notifications, OSDs) stays above it: the top
@@ -276,7 +281,9 @@ pub(super) fn map_ring<R: Renderer>(element: RingElement<R>) -> Elements<R> {
 
 /// This frame's ring, already mapped into frame elements: the painted
 /// rounded ring when the session rounds, the four solid bars otherwise,
-/// nothing while locked (`arrangement` is `None` then).
+/// nothing while locked (`arrangement` is `None` then). Only the rings of
+/// windows placed on this frame's output, in that output's coordinates --
+/// see `output_clip.rs`.
 ///
 /// Shared by both frame bodies (`draw_frame_with` and the scanout tier), so
 /// the radius branch cannot drift between them. Built before the framebuffer
@@ -292,47 +299,71 @@ where
     R: Renderer + ImportAll + ImportMem,
     R::TextureId: Texture + Send + Clone + 'static,
 {
-    match arrangement {
-        Some(arranged) if appearance.corner_radius > 0 => decorations
-            .elements_rounded(arranged, appearance, frame.bounds(), frame.scale, renderer)
+    match (arrangement, frame.output) {
+        (Some(arranged), Some(output)) if appearance.corner_radius > 0 => decorations
+            .elements_rounded(
+                arranged,
+                appearance,
+                output,
+                frame.bounds(),
+                frame.scale,
+                renderer,
+            )
             .into_iter()
             .map(map_ring)
             .collect(),
-        Some(arranged) => decorations
-            .elements(arranged, appearance, frame.bounds(), frame.scale)
+        (Some(arranged), Some(output)) => decorations
+            .elements(arranged, appearance, output, frame.bounds(), frame.scale)
             .into_iter()
             .map(Elements::Decoration)
             .collect(),
-        None => Vec::new(),
+        _ => Vec::new(),
     }
 }
 
-/// The rounded path's window list: like `Space::render_elements_for_region`,
-/// but per window, so each window's toplevel tree can be clipped to its own
-/// rounded rect while its popups stay square.
+/// The windows this frame draws, front-most first: every window placed on
+/// `output`, and no other (see `output_clip.rs`).
 ///
-/// Order, filtering and positioning replicate `render_elements_for_region`
-/// exactly (storage order reversed, bbox-overlap filter, render location
-/// minus region, `1.0` alpha): the only deliberate differences are the split
-/// of each window's elements into popup vs toplevel halves -- mirroring
-/// `Window`'s own `AsRenderElements` impl at the pinned rev
-/// (`desktop/space/wayland/window.rs`), popups first -- and the [`Rounded`]
-/// wrap on the toplevel half. A window whose effective radius is zero pushes
-/// its elements plain, so tiny windows cost nothing.
+/// Walks the arrangement rather than asking `Space::render_elements_for_region`
+/// for everything overlapping the region, because the region test is the
+/// bleed: a column scrolled half off the neighbouring output, or a
+/// fullscreen window focused away from, overlaps this output without being
+/// on it. The output filter is the only difference in *which* windows are
+/// drawn; order, the bbox-overlap filter, positioning and alpha replicate
+/// `render_elements_for_region` exactly (storage order reversed -- `apply()`
+/// maps the visible placements in arrangement order, re-inserting each at
+/// the top, so the two orders agree; render location minus the region;
+/// `1.0` alpha). The `element_location` lookup is also what skips a
+/// placement `apply()` has not mapped (an invisible one).
 ///
-/// The clip comes from the arrangement placement (the layout rect the ring is
-/// painted from too), not from the drawn surface: both edges then coincide by
+/// Square (`configured_radius == 0`, the default), each window's elements
+/// are its own `AsRenderElements` output -- popups first, then its surface
+/// tree -- so a single-output session draws exactly what it drew through
+/// `render_elements_for_region`.
+///
+/// Rounded, each window's toplevel tree is clipped to its own rounded rect
+/// while its popups stay square: the same split `Window`'s own impl makes at
+/// the pinned rev (`desktop/space/wayland/window.rs`), popups first, with a
+/// [`Rounded`] wrap on the toplevel half. A window whose effective radius is
+/// zero pushes its elements plain, so tiny windows cost nothing. The clip
+/// comes from the arrangement placement (the layout rect the ring is painted
+/// from too), not from the drawn surface: both edges then coincide by
 /// construction. A surface temporarily larger than its placement (a shrink
 /// still in flight) is cut to the placement rather than bleeding into the
-/// gap -- a behavior change, but only with rounding opted in.
+/// gap -- a behavior change, but only with rounding opted in. A fullscreen
+/// window is pushed plain, never wrapped: its corners are the output's
+/// corners.
 ///
-/// A fullscreen window is pushed plain, never wrapped: its corners are the
-/// output's corners.
+/// Both clip and location are in *this output's* coordinates (the placement
+/// minus the region's origin), which is what the framebuffer and the damage
+/// tracker are in. The first output sits at the origin, so for it this is
+/// the identity.
 #[allow(clippy::too_many_arguments)]
-fn rounded_window_elements<R>(
+fn window_elements<R>(
     space: &Space<Window>,
     windows: &HashMap<WindowId, Window>,
     arrangement: &Arrangement,
+    output: OutputId,
     renderer: &mut R,
     region: Rectangle<i32, Logical>,
     scale: f64,
@@ -343,27 +374,48 @@ where
     R::TextureId: Texture + Send + Clone + 'static,
 {
     let mut out = Vec::new();
+    let origin = Rect::new(region.loc.x, region.loc.y, region.size.w, region.size.h);
     // Back to front in storage, so reversed here: the same order
     // `render_elements_for_region` gathers in.
     for placement in arrangement.placements.iter().rev() {
+        if placement.output != output {
+            continue;
+        }
         let Some(window) = windows.get(&placement.id) else {
             continue;
         };
-        // The bbox filter, on the same bbox (popups included) --
-        // `Space::element_bbox` reads the same `InnerElement::bbox`.
-        let Some(bbox) = space.element_bbox(window) else {
-            continue;
-        };
-        if !region.overlaps(bbox) {
-            continue;
-        }
-        // The render location, minus the region: `render_location` is the
-        // mapped location minus the surface geometry's own offset.
+        // The mapped location, and from it the render location and the bbox
+        // (popups included) exactly as `InnerElement::render_location` and
+        // `InnerElement::bbox` compute them -- one space lookup rather than
+        // the two `element_location` + `element_bbox` would cost.
         let Some(mapped) = space.element_location(window) else {
             continue;
         };
         let geometry = window.geometry();
-        let location = (mapped - geometry.loc - region.loc).to_physical_precise_round(scale);
+        let render_location = mapped - geometry.loc;
+        // `SpaceElement::bbox` (popups included), not the inherent
+        // `Window::bbox` (the toplevel tree only), which is the one
+        // `InnerElement::bbox` reads.
+        let mut bbox = SpaceElement::bbox(window);
+        bbox.loc += render_location;
+        if !region.overlaps(bbox) {
+            continue;
+        }
+        let location = (render_location - region.loc).to_physical_precise_round(scale);
+        if configured_radius <= 0 {
+            out.extend(
+                AsRenderElements::<R>::render_elements::<WaylandSurfaceRenderElement<R>>(
+                    window,
+                    renderer,
+                    location,
+                    Scale::from(scale),
+                    1.0,
+                )
+                .into_iter()
+                .map(Elements::Surface),
+            );
+            continue;
+        }
         // No X11 arm: without the `xwayland` feature `Wayland` is the only
         // variant -- and if that ever changes this match fails to compile
         // rather than silently dropping windows. With the feature the `X11`
@@ -406,7 +458,7 @@ where
             1.0,
             Kind::Unspecified,
         );
-        let clip = clip_rect(placement.rect, scale);
+        let clip = clip_rect(to_output_local(placement.rect, origin), scale);
         // Never rounded while fullscreen: it covers the output edge to edge,
         // and a rounded clip would cut its corners back to the background.
         let radius = if placement.fullscreen {

@@ -64,6 +64,8 @@ use crate::compositor::decorations::Appearance;
 use crate::compositor::headless;
 use crate::compositor::test_support::{Harness, test_renderer};
 
+mod outputs;
+
 /// The framebuffer each scene renders into. 800 square, matching the
 /// headless-render benchmark recorded in
 /// `docs/backlog/resolved/present-skip-eats-frame-damage-done.md` so the two

@@ -31,7 +31,7 @@ use std::sync::Arc;
 use std::sync::mpsc::Sender;
 use std::time::Instant;
 
-use scoot_core::{Event, OutputId, Rect, WindowId};
+use scoot_core::{OutputId, Rect, WindowId};
 use scoot_ipc::PointerButton;
 use smithay::backend::input::KeyState;
 use smithay::input::keyboard::Keycode;
@@ -515,14 +515,17 @@ type Fixture = Harness<(), Ack>;
 /// interaction a legitimate token is minted from, delivered to the client
 /// itself. `claim` decides what the client then attaches to its tokens.
 fn drive(activate: bool, spare_tokens: usize, claim: Claim) -> (Fixture, Run) {
-    // No backend: an output is added to the core directly rather than through
-    // `headless::init`, which would also build a renderer and a render target
-    // nothing here draws to.
+    // No backend: a real output (the pointer only finds a window on the
+    // output it is placed on), but not through `headless::init`, which would
+    // also build a renderer and a render target nothing here draws to.
     let mut fixture = Harness::bare(Appearance::default());
-    fixture.state.world.handle_event(Event::OutputAdded {
-        id: OutputId(1),
-        area: OUTPUT,
-    });
+    let output = crate::compositor::headless::add_output_without_backend(
+        &mut fixture.state,
+        "headless-1",
+        OUTPUT.w,
+        OUTPUT.h,
+    );
+    assert_eq!(output, OutputId(1));
     // Created before the client connects so it reaches the client's
     // registry, and kept alive by `seat_state`'s own list of seats rather
     // than by this handle.

@@ -65,7 +65,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use scoot_core::{Arrangement, Rect, WindowId};
+use scoot_core::{Arrangement, OutputId, Rect, WindowId};
 use smithay::backend::allocator::Fourcc;
 use smithay::backend::renderer::Color32F;
 use smithay::backend::renderer::element::Kind;
@@ -76,6 +76,7 @@ use smithay::backend::renderer::element::solid::{SolidColorBuffer, SolidColorRen
 use smithay::backend::renderer::{ImportAll, ImportMem, Renderer, Texture};
 use smithay::utils::{Logical, Physical, Point, Rectangle, Size, Transform};
 
+use super::output_clip::to_output_local;
 use super::rounded::{
     RingPaint, clip_rect, element_canvas, paint_ring, physical_radius, ring_layout,
 };
@@ -570,6 +571,14 @@ impl Decorations {
     /// windows no longer present (closed) have theirs dropped, so this
     /// map can't grow without bound over a long-running session.
     ///
+    /// Only windows placed on `output` get a ring here, built relative to
+    /// `bounds` -- that output's own rectangle in global logical coordinates
+    /// -- because the frame it goes into starts at that output's origin (see
+    /// `output_clip.rs`). A window on another output is skipped, not
+    /// clipped: it is drawn on its own output's frame, ring and all, and on
+    /// no other. Its buffers are left alone, so each window's `Id`s are only
+    /// ever updated by the one output that draws it.
+    ///
     /// This is the square ring, unchanged: the rounded session reaches
     /// [`Decorations::elements_rounded`] instead, so this path stays
     /// byte-identical with no branch on the radius. Painted buffers from an
@@ -579,18 +588,21 @@ impl Decorations {
         &mut self,
         arrangement: &Arrangement,
         appearance: &Appearance,
+        output: OutputId,
         bounds: Rect,
         scale: f64,
     ) -> Vec<SolidColorRenderElement> {
         self.retain(arrangement);
         self.painted.clear();
+        let local_bounds = Rect::new(0, 0, bounds.w, bounds.h);
         let mut elements = Vec::new();
         for placement in &arrangement.placements {
-            if !placement.visible || placement.fullscreen {
+            if !placement.visible || placement.fullscreen || placement.output != output {
                 continue;
             }
             let color = ring_color(arrangement, placement.id, appearance);
-            let rects = ring_rects(placement.rect, appearance.focus_ring_width, bounds);
+            let rect = to_output_local(placement.rect, bounds);
+            let rects = ring_rects(rect, appearance.focus_ring_width, local_bounds);
             let ring = self.rings.entry(placement.id).or_default();
             push(&mut elements, &mut ring.top, rects.top, color, scale);
             push(&mut elements, &mut ring.bottom, rects.bottom, color, scale);
@@ -609,12 +621,14 @@ impl Decorations {
     /// Painted buffers are dropped when the session goes back to square
     /// (`corner_radius == 0` reaches [`Decorations::elements`] instead and
     /// never calls this), so toggling the radius does not leak them. The
-    /// same windows get no ring here as there: invisible ones and fullscreen
-    /// ones.
+    /// same windows get no ring here as there: invisible ones, fullscreen
+    /// ones and other outputs' ones -- and the same output-local
+    /// coordinates.
     pub fn elements_rounded<R>(
         &mut self,
         arrangement: &Arrangement,
         appearance: &Appearance,
+        output: OutputId,
         bounds: Rect,
         scale: f64,
         renderer: &mut R,
@@ -624,19 +638,20 @@ impl Decorations {
         R::TextureId: Texture + Send + Clone + 'static,
     {
         self.retain(arrangement);
+        let local_bounds = Rect::new(0, 0, bounds.w, bounds.h);
         let mut elements = Vec::new();
         for placement in &arrangement.placements {
-            if !placement.visible || placement.fullscreen {
+            if !placement.visible || placement.fullscreen || placement.output != output {
                 continue;
             }
             let color = ring_color(arrangement, placement.id, appearance);
             self.push_painted(
                 &mut elements,
                 placement.id,
-                placement.rect,
+                to_output_local(placement.rect, bounds),
                 appearance,
                 color,
-                bounds,
+                local_bounds,
                 scale,
                 renderer,
             );
@@ -1447,7 +1462,7 @@ mod tests {
         let arrangement = arrangement(vec![placement(1, Rect::new(100, 100, 200, 150))], 1);
         let mut decorations = Decorations::default();
 
-        let elements = decorations.elements(&arrangement, &appearance, SCREEN, 1.0);
+        let elements = decorations.elements(&arrangement, &appearance, OutputId(1), SCREEN, 1.0);
 
         assert_eq!(elements.len(), 4);
         let expected: Color32F = appearance.focus_ring_active_color.into();
@@ -1466,7 +1481,7 @@ mod tests {
 
         assert!(
             decorations
-                .elements(&arrangement, &appearance, SCREEN, 1.0)
+                .elements(&arrangement, &appearance, OutputId(1), SCREEN, 1.0)
                 .is_empty()
         );
     }
@@ -1485,8 +1500,58 @@ mod tests {
         );
         let mut decorations = Decorations::default();
 
-        let elements = decorations.elements(&arrangement, &appearance, SCREEN, 1.0);
+        let elements = decorations.elements(&arrangement, &appearance, OutputId(1), SCREEN, 1.0);
         assert_eq!(elements.len(), 4, "only the focused tiled window is ringed");
+    }
+
+    /// The second of two side-by-side outputs, as a frame of it sees it.
+    const SECOND: Rect = Rect::new(1200, 0, 1200, 800);
+
+    #[test]
+    fn a_window_on_another_output_gets_no_ring_here_even_overlapping_it() {
+        // Placed on the second output but hanging back over the first one's
+        // right edge: its ring belongs to the second output's frame alone.
+        let appearance = Appearance::default();
+        let mut overhang = placement(1, Rect::new(1000, 100, 400, 150));
+        overhang.output = OutputId(2);
+        let arrangement = arrangement(vec![overhang], 1);
+        let mut decorations = Decorations::default();
+
+        assert!(
+            decorations
+                .elements(&arrangement, &appearance, OutputId(1), SCREEN, 1.0)
+                .is_empty(),
+            "the first output drew the second output's ring"
+        );
+        assert_eq!(
+            decorations
+                .elements(&arrangement, &appearance, OutputId(2), SECOND, 1.0)
+                .len(),
+            3,
+            "its own output draws the ring, minus the side cut off at its left edge"
+        );
+    }
+
+    #[test]
+    fn a_ring_on_the_second_output_is_built_in_that_outputs_coordinates() {
+        let appearance = Appearance::default();
+        let width = appearance.focus_ring_width;
+        let mut window = placement(1, Rect::new(1300, 100, 200, 150));
+        window.output = OutputId(2);
+        let arrangement = arrangement(vec![window], 1);
+        let mut decorations = Decorations::default();
+
+        let elements = decorations.elements(&arrangement, &appearance, OutputId(2), SECOND, 1.0);
+        let top = elements
+            .iter()
+            .map(|element| element.geometry(1.0.into()))
+            .min_by_key(|geometry| (geometry.loc.y, geometry.loc.x))
+            .expect("a ring");
+        assert_eq!(
+            (top.loc.x, top.loc.y),
+            (100 - width, 100 - width),
+            "the top bar starts at the window's output-local corner, not its global one"
+        );
     }
 
     #[test]
@@ -1494,11 +1559,11 @@ mod tests {
         let appearance = Appearance::default();
         let mut decorations = Decorations::default();
         let with_window = arrangement(vec![placement(1, Rect::new(100, 100, 200, 150))], 1);
-        decorations.elements(&with_window, &appearance, SCREEN, 1.0);
+        decorations.elements(&with_window, &appearance, OutputId(1), SCREEN, 1.0);
         assert_eq!(decorations.rings.len(), 1);
 
         let closed = Arrangement::default();
-        decorations.elements(&closed, &appearance, SCREEN, 1.0);
+        decorations.elements(&closed, &appearance, OutputId(1), SCREEN, 1.0);
         assert!(decorations.rings.is_empty());
     }
 
@@ -1519,7 +1584,7 @@ mod tests {
         let b = placement(2, Rect::new(400, 100, 200, 150));
 
         let a_focused = arrangement(vec![a, b], 1);
-        let elements = decorations.elements(&a_focused, &appearance, SCREEN, 1.0);
+        let elements = decorations.elements(&a_focused, &appearance, OutputId(1), SCREEN, 1.0);
         assert_eq!(elements.len(), 8);
         for element in &elements {
             let expected = if element.geometry(1.0.into()).loc.x < 350 {
@@ -1531,7 +1596,7 @@ mod tests {
         }
 
         let b_focused = arrangement(vec![a, b], 2);
-        let elements = decorations.elements(&b_focused, &appearance, SCREEN, 1.0);
+        let elements = decorations.elements(&b_focused, &appearance, OutputId(1), SCREEN, 1.0);
         assert_eq!(elements.len(), 8);
         for element in &elements {
             let expected = if element.geometry(1.0.into()).loc.x < 350 {
