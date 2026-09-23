@@ -42,7 +42,7 @@ use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
 use std::os::unix::net::UnixStream;
 use std::sync::mpsc::{Receiver, Sender};
 
-use smithay::backend::allocator::{Fourcc, Modifier};
+use smithay::backend::allocator::{Format, Fourcc, Modifier};
 use smithay::reexports::drm;
 use smithay::reexports::drm::buffer::Buffer as _;
 use smithay::reexports::drm::control::Device as _;
@@ -54,9 +54,11 @@ use wayland_protocols::wp::linux_dmabuf::zv1::client::{
 };
 use wayland_protocols::xdg::shell::client::{xdg_surface, xdg_toplevel, xdg_wm_base};
 
+use super::super::DMABUF_CANDIDATES;
 use super::read_format_table;
 use crate::cli::RendererKind;
 use crate::compositor::decorations::Appearance;
+use crate::compositor::render::ImportSet;
 use crate::compositor::test_support::{Harness, wait_for};
 
 /// The framebuffer the window is composited into.
@@ -631,11 +633,42 @@ fn every_advertised_layout_imports_and_draws() {
          but not built by this suite: {untested:?}",
         fixture_renderer(&fixture)
     );
-    if drawn.is_empty() {
-        eprintln!(
-            "every_advertised_layout_imports_and_draws: asserted nothing -- this \
-             renderer advertises none of the suite's layouts at LINEAR"
-        );
+    // The independent guard, so this cannot pass by testing nothing: the
+    // loop above only visits what the *table* offers, so a derivation that
+    // silently dropped layouts would shrink it without failing. So ask the
+    // renderer itself -- `imports_dmabuf_format`, the driver's own set, not
+    // the table -- which of the suite's layouts it takes at `LINEAR`, and
+    // require every one of those that this renderer kind is meant to offer
+    // to have been drawn: every such layout under GLES (whose table *is* the
+    // driver's set), the candidates under pixman (whose table is the
+    // candidates, by design). A GPU that lists a layout only as tiled says
+    // "no" here too, so it cannot false-fail this.
+    let output = fixture
+        .state
+        .outputs
+        .primary_id()
+        .expect("an output behind the fixture");
+    let backend = fixture
+        .state
+        .backends
+        .get(&output)
+        .expect("a headless backend behind the fixture");
+    let driver = matches!(backend.dmabuf_import_set(), ImportSet::Driver(_));
+    for layout in LAYOUTS {
+        let offered = driver || DMABUF_CANDIDATES.contains(&layout.fourcc);
+        let imports = backend.imports_dmabuf_format(Format {
+            code: layout.fourcc,
+            modifier: Modifier::Linear,
+        });
+        if offered && imports {
+            assert!(
+                drawn.contains(&layout.fourcc),
+                "this renderer imports {:?} at LINEAR and should advertise it, but \
+                 it was never offered or drawn -- the advertisement lost a layout \
+                 (drew {drawn:?})",
+                layout.fourcc
+            );
+        }
     }
 }
 

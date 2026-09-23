@@ -286,7 +286,7 @@
 //!   on llvmpipe: the `layouts.rs` red fill drew zero red pixels at
 //!   `Invalid`, all of them at `LINEAR`). That is why the table never offers
 //!   it; a client that allocates implicitly anyway gets a wrong picture, not
-//!   a kill. On the async `create` path a refusal is the protocol's `failed`
+//!   a kill, on that driver. On the async `create` path a refusal is the protocol's `failed`
 //!   event and the client lives; on `create_immed` it dies, which is what the
 //!   protocol prescribes for a buffer the client already believes it holds.
 //! - **A pre-feedback client can still reach the implicit path, by design of
@@ -295,8 +295,10 @@
 //!   include `LINEAR` or `Invalid` (`wayland/dmabuf/dispatch.rs`, `bind`),
 //!   which under GLES now includes the YUV ones. Such a client allocates
 //!   implicitly and sends `Invalid`, and a YUV buffer imported that way draws
-//!   the wrong colours as above -- a wrong picture, never a kill, and only
-//!   for a client too old to have been told better. Modern clients bind v4+.
+//!   the wrong colours as above -- a wrong picture rather than a kill on the
+//!   one driver measured (llvmpipe; a driver refusing implicit YUV would
+//!   refuse the import instead), and only for a client too old to have been
+//!   told better. Modern clients bind v4+.
 //! - **Alpha-carrying YUV (`AYUV`, `Y410`, ...) composites as opaque under
 //!   GLES.** Smithay's `has_alpha` knows no YUV fourcc, so the renderer and
 //!   the damage/occlusion code both treat such a buffer as opaque -- the two
@@ -339,14 +341,18 @@
 //!   (`dmabuf/tests.rs::bind_storm_cost`, release, dev VM, 2000 binds, v3
 //!   minus v4): the llvmpipe table's 57 events cost 6.4 µs per bind, a
 //!   synthetic 408-entry table's 25.8-26.3 µs (~64 ns an event), on top of
-//!   the ~5 µs any bind costs. So a v3 storm amplifies each ~20-byte bind
-//!   request into ~8 KB and ~5x the compositor CPU of a bare bind, at the
-//!   client's own request rate -- and only while the client keeps reading:
-//!   wayland-backend caps each client's outgoing buffer at 4 KB and
-//!   disconnects a client whose socket will take no more
-//!   (`rs/server_impl/client.rs`, `write_message` failing), so a storm that
-//!   does not read its replies ends itself within a few dozen binds. Current
-//!   Mesa and quickshell bind v4/v5 and never take this path.
+//!   the ~5 µs any bind costs. So a v3 storm turns each bind request (at
+//!   least 40 bytes: `wl_registry.bind` carries the interface name) into 20
+//!   bytes of `modifier` event per entry -- ~1.1 KB at 57 entries, ~8 KB at
+//!   408 -- and ~2-5x the compositor CPU of a bare bind, at the client's own
+//!   request rate. It is bounded by the client reading its replies:
+//!   wayland-backend buffers at most 4 KB per client in user space, and once
+//!   a flush finds the client's socket full it disconnects the client
+//!   (`rs/server_impl/client.rs`, `write_message` failing). The socket
+//!   holds roughly the kernel's send buffer (`wmem_default`, 212992 bytes on
+//!   the dev VM, less per-message overhead), so a storm that never reads
+//!   ends itself after roughly 25 binds at 408 entries, or roughly 190 at
+//!   57. Current Mesa and quickshell bind v4/v5 and never take this path.
 //! - **Hotplug and mode changes need no re-send.** The feedback names the DRM
 //!   *device*, not a connector or a mode, and the tranche is a property of the
 //!   renderer, which no hotplug changes -- so `set_default_feedback` (which

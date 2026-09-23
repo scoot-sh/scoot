@@ -825,7 +825,9 @@ test:
 
 A client too old for feedback (protocol version 1 or 2) is told only
 fourccs, with no layout, and allocates implicitly; for a YUV format under
-GLES that is the wrong-colours path below — never a disconnect.
+GLES that is the wrong-colours path below — a wrong picture rather than a
+disconnect on the drivers measured (llvmpipe only; a driver that refuses
+implicit YUV imports would refuse it instead).
 
 A client that ignores the feedback and offers a layout the table never
 named gets whatever the renderer says: `failed` on the asynchronous

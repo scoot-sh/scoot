@@ -298,10 +298,15 @@ struct OutputGlobal(smithay::reexports::wayland_server::backend::GlobalId);
 /// Takes back what [`create_output`] did, for an output that was never
 /// registered: unmaps it from the `Space` and removes its `wl_output` global.
 ///
-/// Only for [`add_output`]'s failure path, which runs before any event loop
-/// dispatch in every caller (startup and tests), so no client has bound the
-/// global yet; `remove_global` is still the right call if one had, since it
-/// tells bound registries the global is gone.
+/// Only for [`add_output`]'s failure path, which today runs before any event
+/// loop dispatch in every caller (startup and tests): no client can have
+/// seen the global, so removing it at once is safe. **It would not be safe at
+/// runtime.** A client whose `wl_registry.bind` for this global is already in
+/// flight when it is removed gets a protocol error for binding a global that
+/// no longer exists; the safe pattern is `disable_global` (withdraw the
+/// announcement) now and `remove_global` some time later. If `add_output`
+/// ever runs on a live session -- output hotplug under `--headless` or
+/// `--nested` -- this is the function to change.
 fn discard_output(state: &mut State, output: &Output) {
     state.space.unmap_output(output);
     if let Some(OutputGlobal(global)) = output.user_data().get::<OutputGlobal>() {

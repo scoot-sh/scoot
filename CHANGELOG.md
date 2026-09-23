@@ -26,7 +26,8 @@ scoot has not cut a numbered release yet; entries are dated.
   the display takes.
 - **On a machine with more than one GPU, a `gles` session stays on the GPU
   it started on.** If that GPU cannot rebuild the renderer at a new size,
-  the resize is refused and the window keeps its size, instead of scoot
+  scoot keeps its output at the old size (under `--nested` the host window
+  has still been resized; scoot's picture inside it has not), instead of
   quietly moving to another GPU that might not accept the apps' buffers.
 
 ### 2026-09-23 — fullscreen video without compositing (GPU tier)
