@@ -245,4 +245,10 @@ fn staleness_says_why_empty_before_a_frame_and_after_a_rebuild_direct_after_a_di
     // recording left at all, so the reset is owed.
     captures.forget_slots();
     assert_eq!(captures.staleness(), Some(Stale::Empty));
+    // The very first damaged frame went direct: marked *and* empty. Empty
+    // wins -- there is still no recording, so the conservative reset path is
+    // the one owed, not the plain frame.
+    let mut first = Captures::default();
+    first.note_direct();
+    assert_eq!(first.staleness(), Some(Stale::Empty));
 }
