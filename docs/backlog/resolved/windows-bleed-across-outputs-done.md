@@ -8,7 +8,7 @@ blocked: null
 
 # Windows bleed onto the neighbouring output — RESOLVED
 
-RESOLVED 2026-09-23 (PR #TBD). A window is drawn and takes input only on the
+RESOLVED 2026-09-23 (PR #224). A window is drawn and takes input only on the
 output it is placed on; the rule and where it is applied are in
 `crates/scoot/src/compositor/output_clip.rs`'s module doc:
 
@@ -51,6 +51,19 @@ The "never over it" wording is now true across outputs as well and says so
 (`docs/protocols.md`, the `docs/ipc.md` `rect`/`fullscreen` rows, the
 `WindowSnapshot` docs); the unsourced "niri answers the same way" was
 dropped from `docs/protocols.md` and the `above_windows` doc.
+
+## Evidence
+
+Recorded in PR #224's description (exact commands, SHAs, raw numbers), with
+the artifacts on the dev VM: live repro script `/tmp/bleed-repro.sh`, before
+(`a02cea9`) `/tmp/bleed-before/`, after (`a9d1b60`) `/tmp/bleed-after/`;
+fail-first `/tmp/bleed-failfirst-a02cea9.txt`; single-output byte identity
+`/tmp/bleed-byteid/`; benchmarks `/tmp/bleed-bench-{before,after}.txt`;
+gate `/tmp/bleed-gate-a9d1b60.log`. Headline: output 1's screenshots go
+from showing output 2's window (with ring) across x 525-800 to pure
+background, and a click there stops focusing it; a two-output frame is
+~8% cheaper (the bleed is no longer composited); the per-motion hit test
+costs +19 ns on a window, nothing on background.
 
 ---
 
