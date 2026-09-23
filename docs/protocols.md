@@ -12,12 +12,12 @@ read your files anyway.
 
 | Protocol | Version | State |
 | --- | --- | --- |
-| `xdg-shell` | 7 | Windows and popups. Every `xdg_toplevel` is a column entry. |
+| `xdg-shell` | 7 | Windows and popups. Every `xdg_toplevel` is a column entry; [`set_fullscreen`](#fullscreen) is honoured. |
 | `xdg-decoration-v1` | 1 | `zxdg_decoration_manager_v1` — server-side decorations, so a client stops drawing its own titlebar; see [`prefer_no_csd`](configuration.md#appearance). scoot draws a focus ring, never a titlebar. |
 | `wlr-layer-shell-v1` | 5 | [Bars, docks, wallpapers, launchers](#layer-shell-bars-wallpapers-launchers). |
 | `ext-workspace-v1` | 1 | [Workspaces](#workspaces-ext-workspace-v1). |
 | `ext-foreign-toplevel-list-v1` | 1 | [Window lists](#window-lists-two-protocols), enumeration only. |
-| `wlr-foreign-toplevel-management-v1` | 3 | [Window lists](#window-lists-two-protocols), with `activate`/`close`. |
+| `wlr-foreign-toplevel-management-v1` | 3 | [Window lists](#window-lists-two-protocols), with `activate`/`close`/`set_fullscreen`. |
 | `wlr-output-management-v1` | 4 | [Display information](#display-information-wlr-output-management-v1) — read-only. |
 | `ext-image-copy-capture-v1` | 1 | [Screen capture](#screen-capture-ext-image-copy-capture-v1), output only. |
 | `ext-image-capture-source-v1` | 1 | Output sources only; no toplevel source manager. |
@@ -66,9 +66,70 @@ The rest of this list *is* deliberate:
   thumbnail is commonly requested through, and also not advertised. Stock
   quickshell routes per-window thumbnails here, so it falls back cleanly
   rather than failing.
-- **Maximized, minimized and fullscreen window states.** scoot has no concept
-  of any of them, so the state bits are never sent and the matching requests
-  do nothing — a taskbar's minimise button is inert rather than lying.
+- **Maximized and minimized window states.** scoot has no concept of either,
+  so the state bits are never sent and the matching requests do nothing — a
+  taskbar's minimise button is inert rather than lying. (Fullscreen is real:
+  see [Fullscreen](#fullscreen).) The `xdg_toplevel` `wm_capabilities` event
+  still lists `maximize` and `minimize` — Smithay's default set, unchanged
+  here — so a version 5+ client may show those buttons; pressing them does
+  nothing.
+
+## Fullscreen
+
+A client's fullscreen button works: `xdg_toplevel.set_fullscreen` puts the
+window into scoot's fullscreen state, and `unset_fullscreen` takes it out.
+The same state is reachable three more ways — a taskbar's
+`wlr-foreign-toplevel` `set_fullscreen`, the `Super+f` bind, and IPC
+`toggle-fullscreen` / `set-fullscreen ID on|off` ([ipc.md](ipc.md#actions)).
+
+**What the window is told.** Every request is answered with a configure, as
+the protocol requires, even one that changed nothing. Entering sends the
+`fullscreen` state bit with the output's whole size; leaving sends the bit
+cleared with the size the window had before. A request made before the
+window's first commit (`mpv --fs`, `foot --fullscreen`) is what its first
+configure carries, so its first frame is already fullscreen. Unmapping (a
+null buffer) discards the state, as xdg-shell says it must: a window that
+maps again comes back tiled.
+
+**What it covers.** While its column is the focused one of its output's
+active workspace, a fullscreen window covers that output edge to edge:
+the layout gaps, the focus ring and a bar's exclusive zone included, with
+no rounded corners even when `corner_radius` is set. On that output, while
+it covers:
+
+- the `background` and `bottom` layers are below it, as always;
+- the **`top` layer is hidden** — not drawn, not hit by the pointer (a click
+  where the bar was reaches the window), and given no keyboard, so a
+  launcher on the `top` layer that maps meanwhile waits until the output is
+  uncovered (launchers on `overlay`, such as fuzzel's default, are
+  unaffected);
+- the **`overlay` layer stays above it** — notifications and OSDs still
+  show, and still take clicks and an `exclusive` keyboard;
+- a **lock screen** covers everything, fullscreen windows included.
+
+Other outputs are untouched: fullscreen is per output.
+
+**What it keeps.** The window keeps its column: focus another column and the
+view scrolls there the usual way (the fullscreen window may still show at
+the side, at its fullscreen size, with the bar drawn over it again), focus
+back and it covers the screen again; switching workspaces works the same.
+Leaving restores the layout exactly. Other windows stacked in its column are
+hidden while it holds; focusing one of them ends the fullscreen, as does
+moving the window to another workspace or output, or consume/expel. A window
+that closes while fullscreen just leaves the layout. Only a column's focused
+window can go fullscreen — a request from a window stacked under another in
+its column is answered with a configure that leaves it tiled.
+
+**The output hint.** `set_fullscreen(output)` is honoured when the
+requesting window is the focused one and the session is unlocked: the window
+moves to that output (focus follows, as with `move-window-to-output`) and
+goes fullscreen there. Otherwise the hint is ignored and the window goes
+fullscreen on the output it is on — a client cannot move a window the user is
+not looking at to another screen.
+
+**While locked.** A window's own request is honoured (it is not drawn, and
+the session is as the client left it at unlock); requests on the user's
+behalf — a taskbar, the bind, IPC — are refused like every other action.
 
 ## XWayland (opt-in skeleton)
 
@@ -142,7 +203,9 @@ own keyboard derivation:
 
 ### Keyboard focus
 
-Following the protocol's `keyboard_interactivity`:
+Following the protocol's `keyboard_interactivity` — except under a
+fullscreen window, where the `top` layer is hidden and holds no keyboard
+([below](#fullscreen)):
 
 - `none` (the default, and what a bar, wallpaper or notification daemon asks
   for) never takes the keyboard.
@@ -373,8 +436,12 @@ Per window, on a `zwlr_foreign_toplevel_handle_v1`:
   on. Binding the global announces every window that already exists, oldest
   first — and a client that binds `wl_output` *after* the manager is sent the
   `output_enter` it missed as soon as it does.
-- **`state`, carrying `activated` and nothing else** — scoot's real window
-  focus, the same one `scoot msg windows` reports as `focused`.
+- **`state`, carrying `activated` and `fullscreen`** — scoot's real window
+  focus, the same one `scoot msg windows` reports as `focused`, and whether
+  the window is fullscreen, the same flag `scoot msg windows` reports.
+  `fullscreen` only exists from version 2 of the protocol, so a client that
+  bound version 1 is never sent it (a change to it alone sends such a client
+  nothing).
 - **Changes arrive in batches closed by `done`.** A window is announced
   before its toolkit has sent a title or taken focus, so its first batch is
   usually two empty strings and an empty state array.
@@ -395,9 +462,14 @@ What a client can ask for:
 - **`close`** sends the window's `xdg_toplevel.close`. Whether the window
   actually goes is up to its own client; `closed` follows if and when it
   does.
-- **`set_maximized`, `unset_maximized`, `set_minimized`, `unset_minimized`,
-  `set_fullscreen`, `unset_fullscreen` and `set_rectangle` are accepted and
-  do nothing.** `set_rectangle` is a minimise-animation hint scoot reads
+- **`set_fullscreen` / `unset_fullscreen`** put that window into
+  fullscreen and back, by the same rules as the window's own request and
+  `Super+f` (see [Fullscreen](#fullscreen)), without moving focus. The
+  optional output is honoured only for the focused window, like the
+  client's own hint. Refused while the session is locked, like `activate`
+  and `close`.
+- **`set_maximized`, `unset_maximized`, `set_minimized`, `unset_minimized`
+  and `set_rectangle` are accepted and do nothing.** `set_rectangle` is a minimise-animation hint scoot reads
   nothing from; unlike wlroots, an invalid rectangle is ignored rather than
   answered with a protocol error, because disconnecting a shell over a number
   nothing looks at would be worse.

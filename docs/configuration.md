@@ -469,7 +469,7 @@ handles `scootctl action ...` (and its `scoot msg` alias) and a config file's
 focus-column|move-column|consume-or-expel   left|right
 focus-window|move-window                    up|down
 focus-workspace|move-window-to-workspace    up|down
-focus-window-id ID | focus-workspace-index N | move-window-to-workspace-index N | focus-output ID | move-window-to-output ID | cycle-column-width | set-column-width N | close | spawn COMMAND... | quit
+focus-window-id ID | focus-workspace-index N | move-window-to-workspace-index N | focus-output ID | move-window-to-output ID | cycle-column-width | set-column-width N | toggle-fullscreen | set-fullscreen ID on|off | close | spawn COMMAND... | quit
 ```
 
 e.g. `"focus-column left"`, `"close"`, or `"spawn foot -e htop"` (split on
@@ -603,11 +603,12 @@ Three behaviors worth knowing, plus the reload rule:
 | `Super+comma` / `Super+period` | Focus output 1 / 2 |
 | `Super+Shift+comma` / `Super+Shift+period` | Move window to output 1 / 2 directly |
 | `Super+r` | Cycle column width |
+| `Super+f` | Toggle fullscreen |
 | `Super+q` | Close focused window |
 | `Super+Return` | Spawn `foot` |
 | `Super+Shift+e` | Quit |
 
-All 40 of them — vim motions (`h`/`j`/`k`/`l`) for direction, Super as
+All 41 of them — vim motions (`h`/`j`/`k`/`l`) for direction, Super as
 scoot's own modifier throughout. Quit is deliberately `Super+Shift+e`, not
 `Super+Shift+q`: that combo is one slipped Shift away from `Super+q` (close
 focused window), and a slip of the finger shouldn't be able to end the whole
@@ -621,20 +622,33 @@ means anything against the list it was read from.)
 
 `set-column-width N` lands the focused column directly on entry `N` of
 `[layout] column_widths` (0-based) instead of stepping past every other
-entry like `cycle-column-width` — the closest thing to "fullscreen" scoot
-has. An index past the end of the list does nothing, like a stale workspace
-index. It has no default bind, by decision: the width list is yours to size,
-so no key family maps onto it the way digits map onto workspaces (the same
-call phase F made for the output actions above). Add your own, e.g. with a
-`1.0` entry in the list:
+entry like `cycle-column-width`. An index past the end of the list does
+nothing, like a stale workspace index. It has no default bind, by decision:
+the width list is yours to size, so no key family maps onto it the way
+digits map onto workspaces (the same call phase F made for the output
+actions above). Add your own, e.g. with a `1.0` entry in the list for a
+column as wide as the screen that still keeps the gaps, the focus ring and
+your bar (`Super+f`, fullscreen, covers all three):
 
 ```toml
 [layout]
 column_widths = [0.3333333333333333, 0.5, 1.0]
 
 [binds]
-"super+f" = "set-column-width 2"
+"super+w" = "set-column-width 2"
 ```
+
+`Super+f` (`toggle-fullscreen`) puts the focused window into fullscreen and
+back. A fullscreen window covers its whole output while its column is the
+focused one — gaps, the focus ring and a bar's reserved strip included (bars
+on the `top` layer are hidden; notifications on `overlay` and the lock screen
+stay above it). It keeps its place in the strip: focus another column and the
+view scrolls there as usual, focus back and it covers the screen again, and
+leaving fullscreen puts the layout back exactly as it was. Moving the window
+to another workspace or output, or consuming/expelling it, ends fullscreen;
+so does moving focus to a window stacked in the same column. The same state
+is what a client's own fullscreen button asks for — see
+[protocols.md](protocols.md#fullscreen) for every way in.
 
 `--tty` additionally binds `Ctrl+Alt+F1` through `Ctrl+Alt+F12` to VT
 switching — not present under `--headless`/`--nested`, since VT switching is

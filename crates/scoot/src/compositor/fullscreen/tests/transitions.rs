@@ -224,6 +224,11 @@ fn ipc_set_fullscreen_targets_a_window_and_tells_it_even_while_invisible() {
         last.fullscreen,
         "an invisible window was not told: {last:?}"
     );
+    assert_eq!(
+        (last.width, last.height),
+        (CANVAS, CANVAS),
+        "told fullscreen without the output's size"
+    );
 
     // The snapshot agents read carries it.
     let snapshots = fixture.state.window_snapshots();
@@ -340,4 +345,31 @@ fn the_output_hint_is_ignored_for_a_window_that_is_not_focused() {
         "an unfocused window was moved to another output on a client's say-so"
     );
     assert_eq!(fixture.state.focus, Some(fixture.id(1)));
+}
+
+#[test]
+fn a_refused_request_is_answered_without_changing_the_window_s_size() {
+    // A window stacked under a fullscreen sibling cannot enter (only a
+    // column's focused window may be fullscreen). It is still answered,
+    // with the bit clear -- and not resized to the sibling's frame, which
+    // is what its own placement reads while it is hidden.
+    let mut fixture = Fixture::new();
+    fixture.map(WINDOW_BGRA);
+    fixture.map(OTHER_BGRA);
+    fixture
+        .state
+        .act(Action::ConsumeOrExpel(scoot_core::Horizontal::Left));
+    fixture.state.act(Action::ToggleFullscreen);
+    fixture.settle();
+    assert!(fixture.state.world.is_fullscreen(fixture.id(1)));
+    let before = *fixture.configures(0).last().unwrap();
+
+    let answer = fixture.configured(Step::SetFullscreen {
+        window: 0,
+        output: None,
+    });
+    assert!(!answer.fullscreen, "{answer:?}");
+    assert_eq!((answer.width, answer.height), (before.width, before.height));
+    assert!(!fixture.state.world.is_fullscreen(fixture.id(0)));
+    assert!(fixture.state.world.is_fullscreen(fixture.id(1)));
 }

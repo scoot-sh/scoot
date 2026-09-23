@@ -3,16 +3,20 @@ title: "GPU scanout: mark eligible window surfaces as scanout candidates, with s
 status: "open"
 area: "core"
 priority: "high"
-blocked: "client-fullscreen (the whole-output window state eligibility needs)"
+blocked: null
 ---
 
 # GPU scanout: scanout candidates + per-surface scanout feedback
 
 Filed 2026-09-22 (coordinator, GPU-tier survey). Serves **daily-drive**.
 The [exporter widening](../resolved/gpu-direct-scanout-exporter-done.md) it
-depended on has landed (`NodeFilter::All`). Depends on
-[client fullscreen](./client-fullscreen.md), which supplies the
-whole-output window state the eligibility rule below needs.
+depended on has landed (`NodeFilter::All`), and so has
+[client fullscreen](../resolved/client-fullscreen-done.md), which supplies the
+whole-output window state the eligibility rule below needs:
+`World::fullscreen_on(output)` (which window covers an output right now) and
+`Placement::fullscreen`. Under a covering window the compositor already draws
+no ring, no rounded clip and no `top` layer over it (`overlay` surfaces and
+the cursor may still be above it).
 
 ## What is missing
 
@@ -28,9 +32,10 @@ composited above it, that element opaque and covering the whole output (or
 a black/transparent clear colour), and then requires the client
 framebuffer's whole `Format` to equal the swapchain's
 ([format gate](./gpu-primary-direct-format-gate.md)). On default config no
-window meets the first half: scoot ignores client fullscreen
-([client fullscreen](./client-fullscreen.md)), the 3 px focus ring is
-composited over the focused window, and the background is not black. The
+window meets the first half unless it is fullscreen (see
+[client fullscreen](../resolved/client-fullscreen-done.md)): otherwise the
+3 px focus ring is composited over the focused window, and the background is
+not black. The
 eligibility rule here is therefore also what decides which windows may be
 *tried* for the primary -- one decision, shared with the format-gate ticket.
 
@@ -48,7 +53,7 @@ a candidate.
 
 - Decide the eligibility rule and write it down: the obvious first cut is a
   window that covers the whole output (fullscreen, from
-  [client fullscreen](./client-fullscreen.md), or a sole full-size column),
+  [client fullscreen](../resolved/client-fullscreen-done.md), or a sole full-size column),
   with nothing composited over it (the focus ring hidden or not drawn over a
   fullscreen window),
   unrounded (a rounded window's clip means it cannot be scanned out whole —

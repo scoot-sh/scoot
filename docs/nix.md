@@ -293,8 +293,8 @@ Two cases, behaving differently by design:
 Every key below is present in `settings` exactly as shown (values are the
 live defaults; the two commented-unset keys stay commented — uncommenting
 either changes the session, as noted below). Pasted from a real
-`scoot --print-default-config` emission on 2026-09-21 (dev-VM Linux
-build from the tree at `6fb8773`), not hand-written — regenerate rather
+`scoot --print-default-config` emission on 2026-09-22 (dev-VM Linux
+build from the tree at `e04d2b0`), not hand-written — regenerate rather
 than edit by hand if it ever looks stale:
 
 Two keys describe less than the packaged binary decides: setting
@@ -340,8 +340,12 @@ backend = "pixman"
 # Name the display controller (prefer a stable /dev/dri/by-path/... alias):
 # gpu = "/dev/dri/card0"
 
+[xwayland]
+# Run an XWayland server inside the session (opt-in X11 support, off by default). --xwayland wins when either names it: the two are OR-ed. Needs an `xwayland` Cargo-feature build; without one the knob warns and the session runs Wayland-only. Takes effect on restart.
+enabled = false
+
 [autostart]
-# Action strings to run once each, in file order, at session startup.
+# Action strings to run once each, in file order, at session startup. A reload runs entries the session has not seen yet (new spawns only).
 commands = []
 
 [binds]
@@ -360,9 +364,14 @@ commands = []
 "super+shift+ctrl+j" = "move-window-to-workspace down"
 "super+shift+ctrl+k" = "move-window-to-workspace up"
 "super+r" = "cycle-column-width"
+"super+f" = "toggle-fullscreen"
 "super+q" = "close"
 "super+Return" = "spawn foot"
 "super+shift+e" = "quit"
+"super+comma" = "focus-output 1"
+"super+period" = "focus-output 2"
+"super+shift+comma" = "move-window-to-output 1"
+"super+shift+period" = "move-window-to-output 2"
 "super+1" = "focus-workspace-index 0"
 "super+shift+1" = "move-window-to-workspace-index 0"
 "super+2" = "focus-workspace-index 1"

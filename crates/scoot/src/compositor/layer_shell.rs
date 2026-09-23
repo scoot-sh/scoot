@@ -115,9 +115,8 @@ const ABOVE_FULLSCREEN: [Layer; 1] = [Layer::Overlay];
 ///
 /// Consequence worth knowing: a launcher that maps on the *top* layer while
 /// a fullscreen window covers its output is neither shown nor given the
-/// keyboard until the fullscreen window stops covering (niri answers the
-/// same way). Launchers that use the overlay layer (fuzzel's and rofi's
-/// default) are unaffected.
+/// keyboard until the fullscreen window stops covering. Launchers that use
+/// the overlay layer (fuzzel's default) are unaffected.
 pub(super) fn above_windows(covered_by_fullscreen: bool) -> &'static [Layer] {
     if covered_by_fullscreen {
         &ABOVE_FULLSCREEN

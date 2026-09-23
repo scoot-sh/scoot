@@ -100,6 +100,19 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[Client fullscreen](docs/backlog/resolved/client-fullscreen-done.md)**
+  (2026-09-22, branch `client-fullscreen`) — a per-window fullscreen state
+  in `scoot-core`: covers the output (gaps, ring, bar zones) while its
+  column is focused, keeps its strip slot, restores the arrangement exactly;
+  consume/expel/moves end it. Wired to xdg `set_fullscreen` (output hint for
+  the focused window only, discarded on unmap), the wlr request + `fullscreen`
+  state bit (v2+), IPC `toggle-fullscreen`/`set-fullscreen` + snapshot field,
+  and `Super+f`. The `top` layer is hidden from drawing, pointer and
+  keyboard under a covering window; `overlay` and the lock stay above. Also
+  fixed frame learning pairing a commit with the latest configure sent
+  rather than the one acked. Unblocks
+  [scanout candidates](docs/backlog/core/gpu-scanout-candidates.md).
+
 - **[XWayland Phase 1 skeleton](docs/backlog/protocols/xwayland-support.md)**
   (2026-09-22, PR #221) — opt-in `--xwayland`/`[xwayland]` (default off,
   own cargo feature): server spawn + abstract socket + READY ordering,
@@ -694,7 +707,8 @@ each item's own file records why it landed when it did.
   the two are one list described twice. Enumeration (title, app id,
   `output_enter`), `activate` and `close`, and `activated` as the only state
   bit scoot can honestly answer — minimize/maximize/fullscreen are accepted
-  and ignored, because the core has no concept of any of them and deciding
+  and ignored (fullscreen since honoured, with its state bit: client
+  fullscreen, 2026-09-22), because the core has no concept of any of them and deciding
   what they mean in a scrolling-column layout is layout design, not wire
   format. No Smithay support at the pinned rev, so hand-rolled against the
   generated wlr bindings like `output_management.rs`. Verified live against

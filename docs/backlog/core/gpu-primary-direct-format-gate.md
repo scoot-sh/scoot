@@ -19,17 +19,17 @@ swapchain format was never recorded -- `Asahi.md` Test 5 asks for it):
 2. **An eligible bottom element.** Smithay only tries the primary for the
    bottom visible element when nothing composited sits above it (the cursor
    must be on its own plane) *and* the element is opaque and covers the whole
-   output, or the clear colour is black/transparent. scoot has no path to
-   that on its defaults: it does not honour client fullscreen at all
-   (`xdg_toplevel.set_fullscreen` has no handler, and the wlr
-   foreign-toplevel `SetFullscreen` is accepted and ignored,
-   `foreign_toplevel_management.rs`), the default focus ring (3 px) is a
-   composited element over the focused window, and the default background is
-   not black. The live experiment below needed ring 0, gap 0, one 1.0-wide
-   column and a black background to get there. That half is owned by
-   [client fullscreen](./client-fullscreen.md) (the state) and
-   [candidates](./gpu-scanout-candidates.md) (the eligibility rule) -- all
-   of it must land before a default-config session can go direct.
+   output, or the clear colour is black/transparent. When this was filed
+   scoot had no path to that on its defaults: it did not honour client
+   fullscreen at all, the default focus ring (3 px) is a composited element
+   over the focused window, and the default background is not black. The
+   live experiment below needed ring 0, gap 0, one 1.0-wide column and a
+   black background to get there. That half is owned by
+   [client fullscreen](../resolved/client-fullscreen-done.md) (the state --
+   landed 2026-09-22: a covering fullscreen window gets no ring, no rounded
+   clip and no `top` layer over it) and
+   [candidates](./gpu-scanout-candidates.md) (the eligibility rule) -- both
+   must land before a default-config session can go direct.
 
 The one device shape that would already pass this gate: a swapchain that
 falls through to `XR24` -- only when the *renderer* cannot render `AR24` or

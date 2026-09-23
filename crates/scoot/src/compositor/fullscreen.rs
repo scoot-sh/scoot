@@ -81,6 +81,45 @@ impl State {
             .is_some()
     }
 
+    /// Re-derives pointer focus when what covers any output changed since
+    /// the last `apply()`.
+    ///
+    /// `wl_pointer.button` goes to whatever surface the pointer last
+    /// *entered*, not whatever is under it now (see
+    /// `State::refresh_pointer_focus`, which the lock transitions call for
+    /// the same reason). Entering fullscreen under a pointer resting on the
+    /// bar, or on a window the fullscreen one now covers, would otherwise
+    /// send the next click to a surface that is no longer drawn -- until
+    /// the mouse happened to move. Leaving is the mirror image.
+    ///
+    /// Called from every `apply()`; costs one `fullscreen_on` per output and
+    /// no allocation when nothing changed, which is nearly always, and the
+    /// synthesized motion only when something did.
+    pub(super) fn refresh_fullscreen_cover(&mut self) {
+        let count = self.outputs.len();
+        // A slot only counts as changed when what covers it did: an output
+        // appearing with nothing on it, which is every output at startup,
+        // must not synthesize a pointer motion nothing asked for. An output
+        // that went away while covered did change what is on screen.
+        let mut changed = self
+            .fullscreen_covers
+            .get(count..)
+            .is_some_and(|gone| gone.iter().any(Option::is_some));
+        self.fullscreen_covers.resize(count, None);
+        for (index, (id, _)) in self.outputs.iter_with_ids().enumerate() {
+            let cover = self.world.fullscreen_on(id);
+            if let Some(slot) = self.fullscreen_covers.get_mut(index)
+                && *slot != cover
+            {
+                *slot = cover;
+                changed = true;
+            }
+        }
+        if changed {
+            self.refresh_pointer_focus();
+        }
+    }
+
     /// `xdg_toplevel.set_fullscreen` (`fullscreen: true`, with the client's
     /// optional output hint) or `unset_fullscreen` (`false`).
     ///
@@ -126,7 +165,27 @@ impl State {
         before: Option<bool>,
     ) {
         let now = self.world.is_fullscreen(id);
-        surface.with_pending_state(|state| set_fullscreen_state(state, now));
+        // The size moves with the bit, as `apply()` pairs them: an
+        // invisible window told it is fullscreen is also told the output's
+        // size (and its tiled size when it leaves), so it never renders one
+        // state at the other's size. Only when the bit actually flips: a
+        // refused request leaves the size alone -- which matters for a
+        // window stacked under a fullscreen sibling, whose placement is the
+        // sibling's frame, not a size it should ever be configured to. An
+        // unplaced window (no output yet) has no placement and keeps its
+        // size.
+        let size = self
+            .world
+            .arrange()
+            .get(id)
+            .map(|placed| placed.rect.size());
+        surface.with_pending_state(|state| {
+            let flips = state.states.contains(xdg_toplevel::State::Fullscreen) != now;
+            if flips && let Some(size) = size {
+                state.size = Some((size.w, size.h).into());
+            }
+            set_fullscreen_state(state, now);
+        });
         let sent = surface.send_pending_configure().is_some();
         if !sent && before == Some(now) {
             surface.send_configure();

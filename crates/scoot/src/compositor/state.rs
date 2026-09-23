@@ -123,6 +123,12 @@ pub struct State {
     /// surface can (see `clicked_layer` and `layer_shell.rs`), and this stays
     /// pointing at the window focus will come back to when it doesn't.
     pub focus: Option<WindowId>,
+    /// Which window covered each output, by output index, as of the last
+    /// `apply()` -- `World::fullscreen_on` for every output, remembered only
+    /// so `apply()` can tell when it changed (see
+    /// `State::refresh_fullscreen_cover`). Updated in place, so it allocates
+    /// only when an output is added.
+    pub(super) fullscreen_covers: Vec<Option<WindowId>>,
     /// The layer surface a click gave keyboard focus to, if any -- the one
     /// piece of the layer-shell focus policy that cannot be re-derived from
     /// the layer map, because nothing else records that a click happened.
@@ -816,6 +822,7 @@ impl State {
             windows: HashMap::new(),
             next_id: 0,
             focus: None,
+            fullscreen_covers: Vec::new(),
             clicked_layer: None,
             keyboard_on_layer: false,
             layers_awaiting_neutralize: Vec::new(),

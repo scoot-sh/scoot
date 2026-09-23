@@ -293,3 +293,32 @@ fn an_overlay_launcher_takes_the_keyboard_over_a_fullscreen_window() {
     assert_ne!(fixture.keyboard_focus(), Some(window));
     assert!(test_support::contains(&fixture.render(), NOTE_BGRA));
 }
+
+#[test]
+fn a_pointer_resting_on_the_bar_leaves_it_once_it_is_hidden() {
+    // `wl_pointer.button` goes to the surface last *entered*. With the
+    // pointer parked on the bar and fullscreen entered from the keyboard
+    // (no motion at all), the next click must not reach the bar: it is no
+    // longer drawn. (What it reaches instead is whatever is under the
+    // pointer at that moment -- the window once it has redrawn at its new
+    // size, nothing before -- which is the ordinary rule.)
+    let mut fixture = Fixture::new();
+    fixture.done(Step::CreateLayer(Layer::Bar));
+    fixture.map(WINDOW_BGRA);
+    fixture.state.pointer_move(5.0, 5.0);
+    fixture.settle();
+    assert_eq!(fixture.pointer(), Some(Entered::Layer(0)));
+
+    fixture.state.act(Action::ToggleFullscreen);
+    fixture.settle();
+    assert_ne!(
+        fixture.pointer(),
+        Some(Entered::Layer(0)),
+        "the pointer stayed on a bar that is no longer drawn"
+    );
+
+    // ...and back onto the bar when it returns, still without motion.
+    fixture.state.act(Action::ToggleFullscreen);
+    fixture.settle();
+    assert_eq!(fixture.pointer(), Some(Entered::Layer(0)));
+}

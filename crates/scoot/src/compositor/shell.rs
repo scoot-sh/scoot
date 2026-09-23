@@ -222,6 +222,9 @@ impl State {
         // output when nothing about the workspaces changed, which is the
         // common case, and no allocation either way.
         self.refresh_workspaces();
+        // Last, once the space holds the new arrangement: a change in what
+        // covers an output moves what the pointer is over.
+        self.refresh_fullscreen_cover();
         self.request_render();
     }
 
