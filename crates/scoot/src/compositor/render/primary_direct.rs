@@ -48,9 +48,15 @@
 //! pick, because *which* element that is is Smithay's decision (the bottom
 //! visible one, with everything above it on its own plane). Scanning all of
 //! them costs nothing that matters -- a handful of elements, no allocation
-//! -- and refuses nothing that could have gone direct: any other translucent
-//! or rounded element is composited above the candidate, which already stops
-//! Smithay trying the primary.
+//! -- and almost never refuses a frame that could have gone direct: a
+//! translucent or rounded element *above* the candidate is composited, which
+//! already stops Smithay trying the primary. The one exception is below it:
+//! a `background`/`bottom` layer surface under the covering window (a
+//! wallpaper) with a `wp_alpha_modifier_v1` factor under 1.0 refuses the
+//! frame, although Smithay would have skipped that surface as hidden behind
+//! an opaque window. That errs toward compositing -- a missed optimisation
+//! for an unusual wallpaper, never a wrong pixel -- and is left so rather
+//! than re-deriving Smithay's occlusion walk here.
 //!
 //! # What is deliberately *not* checked here
 //!

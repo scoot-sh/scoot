@@ -275,10 +275,11 @@ running with no GPU at all is a hard requirement here, not a fallback tier.
   than compositing throughout, so while a session is capturing (a frame
   parked, or one asked for within the last second) the output composites
   as it always did. Seen live on the dev VM's virtio-gpu, at default
-  config, with a test client allocating card0 dumb buffers (the only
-  client buffers that virtio can scan out): the primary on the client's
-  framebuffer, captures byte-correct, the VT-away refusal and recovery, a
-  lock over it composited; compositor CPU for that fullscreen client
+  config, with a test client allocating card0 dumb buffers (card0
+  allocations, dumb or GBM `LINEAR`, are the client buffers virtio can
+  import at all; a GL client's buffers there cannot): the primary on the
+  client's framebuffer, captures byte-correct, the VT-away refusal and
+  recovery, a lock over it composited; compositor CPU for that fullscreen client
   dropped from ~76% of a core (llvmpipe compositing) to ~1.5%. Not yet
   seen on real GPU hardware or with a real video player --
   [`../Asahi.md`](../Asahi.md)'s Test 5 asks for that. The log line
