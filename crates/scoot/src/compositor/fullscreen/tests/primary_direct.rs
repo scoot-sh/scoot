@@ -20,8 +20,14 @@ use crate::compositor::render::PrimaryDirect;
 use super::*;
 
 /// Maps a window, makes it fullscreen, and draws it at the size it was told.
+///
+/// The window declares itself opaque: its `Argb8888` buffer has an alpha
+/// channel, so without an opaque region nothing covers the output opaquely,
+/// and over this suite's non-black background Smithay would not try the
+/// primary at all (rule 6, pinned below).
 fn covering(fixture: &mut Fixture) {
     fixture.map(WINDOW_BGRA);
+    fixture.done(Step::SetOpaque { window: 0 });
     fixture.configured(Step::SetFullscreen {
         window: 0,
         output: None,
@@ -175,5 +181,52 @@ fn an_overlay_notification_is_left_to_smithay() {
     assert_eq!(fixture.state.primary_direct_now(), PrimaryDirect::Eligible);
     // The bar, which the covering window hides, is not in the frame at all.
     fixture.done(Step::CreateLayer(Layer::Bar));
+    assert_eq!(fixture.state.primary_direct_now(), PrimaryDirect::Eligible);
+}
+
+#[test]
+fn an_alpha_window_with_no_opaque_region_is_not_tried_over_a_grey_background() {
+    // The case review measured live: an `AR24` fullscreen client with no
+    // opaque region, over the default (non-black) background. Smithay never
+    // tries the primary for it, so the frame gets no direct flags and the
+    // window is not steered toward a scannable layout.
+    let mut fixture = Fixture::new();
+    fixture.map(WINDOW_BGRA);
+    fixture.configured(Step::SetFullscreen {
+        window: 0,
+        output: None,
+    });
+    fixture.done(Step::Draw {
+        window: 0,
+        color: WINDOW_BGRA,
+    });
+    assert_eq!(
+        fixture.state.primary_direct_now(),
+        PrimaryDirect::NothingOpaqueCovers
+    );
+    // Declaring itself opaque is what makes it a candidate. (With its next
+    // buffer: Smithay recomputes a surface's opaque regions only when the
+    // buffer or its view changes, which is when a real client sets one.)
+    fixture.done(Step::SetOpaque { window: 0 });
+    fixture.done(Step::Draw {
+        window: 0,
+        color: WINDOW_BGRA,
+    });
+    assert_eq!(fixture.state.primary_direct_now(), PrimaryDirect::Eligible);
+}
+
+#[test]
+fn over_black_an_alpha_window_is_tried_without_an_opaque_region() {
+    // ... and over a black background it needs nothing: Smithay's other arm.
+    let mut fixture = Fixture::with_appearance(black());
+    fixture.map(WINDOW_BGRA);
+    fixture.configured(Step::SetFullscreen {
+        window: 0,
+        output: None,
+    });
+    fixture.done(Step::Draw {
+        window: 0,
+        color: WINDOW_BGRA,
+    });
     assert_eq!(fixture.state.primary_direct_now(), PrimaryDirect::Eligible);
 }

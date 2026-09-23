@@ -821,7 +821,8 @@ grep 'scanout tranche\|scanout steering changed\|eligibility changed' /tmp/fx/t6
 grep -c 'get_surface_feedback' /tmp/fx/t6c-*.trace          # did the client ask at all
 grep 'tranche_flags\|tranche_target_device' /tmp/fx/t6c-gears.trace | head
 grep 'zwp_linux_buffer_params_v1.*add(' /tmp/fx/t6c-gears.trace | awk '{print $NF, $(NF-1)}' | uniq -c
-grep -o 'presented(.*' /tmp/fx/t6c-mpv.trace | awk -F', ' '{print $NF}' | sort | uniq -c
+grep 'wp_presentation_feedback[@#][0-9]*\.presented' /tmp/fx/t6c-mpv.trace \
+  | sed 's/.*, \([0-9]*\))$/\1/' | sort | uniq -c      # count, then flags in decimal
 ```
 
 (The `dmabuf scanout tranche` line at `debug` in `t6c.log` is the whole
@@ -849,10 +850,12 @@ above it is its size and the device it names.) What each answer means:
   layout`**, followed by a second `scanout tranche` line with `lost=1`: this
   machine's GBM loses that modifier; scoot dropped it from the tranche and
   re-sent it. Worth reporting with the modifier.
-- **mpv's `presented(` flags** end in the `kind` bits: `0x9` is `vsync |
-  zero_copy` (direct), `0x1` is composited. Seeing `0x9` confirms direct
-  scanout from the client's side; seeing only `0x1` while Test 5's lines
-  say the primary took the buffer would be a scoot bug.
+- **mpv's `presented` flags** are the event's last argument, which
+  `WAYLAND_DEBUG` prints in decimal and the pipeline above extracts: `9` is
+  `vsync | zero_copy` (direct), `1` is composited. Seeing `9` confirms direct
+  scanout from the client's side; seeing only `1` while Test 5's lines say
+  the primary took the buffer would be a scoot bug. (If mpv did not ask for
+  presentation feedback, the count is empty; nothing is wrong.)
 
 ## What to send back
 

@@ -20,13 +20,31 @@ use crate::compositor::dmabuf::scanout::{FormatsKey, REVERT_HOLD, Steer};
 use crate::compositor::render::PrimaryDirect;
 use crate::compositor::screencopy::{STREAM_WINDOW, requested_recently};
 
+/// A compositor with a black background. The windows here draw a fixed-size
+/// `Argb8888` buffer, which neither spans the output nor is opaque, so over
+/// any other background Smithay would not try the primary for them and the
+/// judgement would stop at rule 6 (`NothingOpaqueCovers`) before the stream
+/// rule these tests are about. Over black, Smithay's clear-colour arm makes
+/// any bottom element a candidate.
+fn start_black() -> Fixture {
+    let mut fixture = Harness::headless(
+        Appearance {
+            background_color: Color::new(0.0, 0.0, 0.0, 1.0),
+            ..opaque_appearance()
+        },
+        CANVAS,
+    );
+    fixture.spawn(run_client);
+    fixture
+}
+
 /// A covering fullscreen window steered with a scanout feedback built for a
 /// virtio-shaped plane (`dmabuf/scanout.rs`), as of `now`. The capture
 /// client binds no dma-buf feedback, so what is pinned here is the steering
 /// decision and who holds the scanout feedback; the wire is pinned in
 /// `fullscreen/tests/scanout_feedback.rs`.
 fn steered(now: Instant) -> (Fixture, WlSurface) {
-    let mut fixture = Fixture::start_opaque();
+    let mut fixture = start_black();
     fixture.run(Step::MapWindow(WINDOW_BGRA));
     assert!(fixture.state.act(Action::ToggleFullscreen));
     fixture.settle();
@@ -121,7 +139,7 @@ fn a_one_shot_capture_does_not_flap_the_scanout_feedback() {
 
 #[test]
 fn an_idle_session_does_not_count_and_a_capture_does() {
-    let mut fixture = Fixture::start_opaque();
+    let mut fixture = start_black();
     fixture.run(Step::MapWindow(WINDOW_BGRA));
     assert!(fixture.state.act(Action::ToggleFullscreen));
     fixture.settle();
@@ -150,7 +168,7 @@ fn an_idle_session_does_not_count_and_a_capture_does() {
 
 #[test]
 fn a_session_ending_ends_the_stream() {
-    let mut fixture = Fixture::start_opaque();
+    let mut fixture = start_black();
     fixture.run(Step::MapWindow(WINDOW_BGRA));
     assert!(fixture.state.act(Action::ToggleFullscreen));
     fixture.run(Step::StartSession {
@@ -169,7 +187,7 @@ fn a_frame_parked_past_the_window_still_counts() {
     // is due until the pixels move) for longer than the window. It is still
     // a stream, so the frame that ends the pause is composited rather than
     // forced. Asked at a `now` well past the window rather than by sleeping.
-    let mut fixture = Fixture::start_opaque();
+    let mut fixture = start_black();
     fixture.run(Step::MapWindow(WINDOW_BGRA));
     fixture.run(Step::StartSession {
         paint_cursors: false,
@@ -202,7 +220,7 @@ fn a_frame_parked_past_the_window_still_counts() {
 fn a_stream_on_an_uncovered_output_changes_nothing() {
     // The stream rule only ever runs on a covered output: without a
     // fullscreen window the answer is `NotCovered` with or without a capture.
-    let mut fixture = Fixture::start_opaque();
+    let mut fixture = start_black();
     fixture.run(Step::MapWindow(WINDOW_BGRA));
     fixture.run(Step::StartSession {
         paint_cursors: false,

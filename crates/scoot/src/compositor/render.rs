@@ -863,6 +863,18 @@ pub(super) struct FrameOutcome {
     pub(super) zero_copy: Option<Id>,
 }
 
+/// The colour a frame is cleared to: the lock screen's while locked, the
+/// configured background otherwise. One function for every tier -- and for
+/// `render::primary_direct`, whose rule 6 must judge the very colour
+/// `DrmCompositor::render_frame` is handed.
+fn frame_clear_color(state: &State, locked: bool) -> Color32F {
+    if locked {
+        state.lock_clear_color()
+    } else {
+        state.appearance.background_color.into()
+    }
+}
+
 /// Draws one frame with whichever renderer `backend` is carrying, and hands
 /// it to whichever presenters are watching.
 ///
@@ -931,13 +943,9 @@ fn draw_frame_scanout(
         last_eligibility,
         ..
     } = gpu;
-    let clear_color: Color32F = if locked {
-        state.lock_clear_color()
-    } else {
-        state.appearance.background_color.into()
-    };
+    let clear_color = frame_clear_color(state, locked);
     let (elements, cursor_surface, direct) =
-        scanout_frame_elements(state, renderer, size, output, locked);
+        scanout_frame_elements(state, renderer, size, output, locked, clear_color);
     outcome.cursor_surface = cursor_surface;
     let output_id = state.outputs.id_of(output);
     if direct != *last_eligibility {
@@ -1042,6 +1050,7 @@ fn scanout_frame_elements<R>(
     size: (i32, i32),
     output: &Output,
     locked: bool,
+    clear_color: Color32F,
 ) -> (
     Vec<Elements<R>>,
     Option<WlSurface>,
@@ -1077,7 +1086,12 @@ where
         ring_elements,
         arrangement.as_ref(),
     );
-    let direct = primary_direct::judge(state, output, locked, &elements);
+    let tried_with = primary_direct::TriedWith {
+        size: frame.size,
+        scale: frame.scale,
+        clear_color,
+    };
+    let direct = primary_direct::judge(state, output, locked, &elements, &tried_with);
     (elements, cursor_surface, direct)
 }
 
@@ -1094,12 +1108,15 @@ impl State {
         let mut backend = self.take_backend(id).expect("a render target");
         let locked = self.session_lock.is_locked();
         let size = backend.size;
+        let clear_color = frame_clear_color(self, locked);
         let direct = match &mut backend.pipeline {
             Pipeline::Pixman(cpu) => {
-                scanout_frame_elements(self, &mut cpu.renderer, size, &output, locked).2
+                scanout_frame_elements(self, &mut cpu.renderer, size, &output, locked, clear_color)
+                    .2
             }
             Pipeline::Gles(gpu) => {
-                scanout_frame_elements(self, &mut gpu.renderer, size, &output, locked).2
+                scanout_frame_elements(self, &mut gpu.renderer, size, &output, locked, clear_color)
+                    .2
             }
             Pipeline::Scanout(_) => unreachable!("no test builds a scanout pipeline"),
         };
@@ -1183,11 +1200,7 @@ where
             // the lock colour rather than to the configured desktop
             // background -- which a user may have given an alpha, and which
             // is the colour the unlocked session is showing.
-            let clear_color: Color32F = if locked {
-                state.lock_clear_color()
-            } else {
-                state.appearance.background_color.into()
-            };
+            let clear_color = frame_clear_color(state, locked);
             let result =
                 damage.render_output(renderer, &mut framebuffer, age, &elements, clear_color);
             match result {

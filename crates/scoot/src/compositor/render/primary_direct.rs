@@ -44,6 +44,21 @@
 //!    window never reaches the primary" a property of this check rather than
 //!    of an argument about which element ends up bottom-most.
 //!
+//! 6. **Smithay would try the primary at all**: the clear colour is black
+//!    or transparent, or some element in the frame is opaque over, and
+//!    spans, the whole output (see [`primary_can_be_tried`]). This is
+//!    Smithay's own precondition for trying the primary with the last
+//!    visible element (`drm/compositor/mod.rs`, the
+//!    `try_assign_primary_plane` guard in `render_frame` at the pinned rev),
+//!    mirrored here because a frame that fails it could never go direct
+//!    whatever flags it carried -- so the direct flag set adds nothing, and
+//!    the per-surface scanout feedback (`dmabuf/scanout.rs`) must not steer
+//!    a client toward a scannable layout for a frame that cannot use one. A
+//!    client whose buffer has an alpha channel and no opaque region, over
+//!    scoot's default (non-black) background, is that frame: measured live
+//!    on the dev VM, it was steered and never went direct before this rule
+//!    existed.
+//!
 //! 4 and 5 scan the whole list rather than the one element Smithay would
 //! pick, because *which* element that is is Smithay's decision (the bottom
 //! visible one, with everything above it on its own plane). Scanning all of
@@ -75,8 +90,9 @@
 //!   transform** the plane cannot express: the plane's own format list and
 //!   the atomic `TEST_ONLY` commit refuse it (and Smithay refuses a
 //!   non-`Normal` transform outright on a plane with no `rotation`
-//!   property); a covering but not-yet-resized buffer is not tried at all
-//!   over a non-black background (it does not span the output).
+//!   property). A covering but not-yet-resized buffer over a non-black
+//!   background is the exception: it does not span the output, so rule 6
+//!   already refuses the frame, as Smithay would not try it.
 //!
 //! # Captures
 //!
@@ -90,8 +106,9 @@
 use std::time::Instant;
 
 use smithay::backend::renderer::element::Element;
-use smithay::backend::renderer::{ImportAll, ImportMem, Renderer, Texture};
+use smithay::backend::renderer::{Color32F, ImportAll, ImportMem, Renderer, Texture};
 use smithay::output::Output;
+use smithay::utils::{Physical, Rectangle, Scale};
 
 use super::elements::Elements;
 use crate::compositor::State;
@@ -120,6 +137,10 @@ pub(crate) enum PrimaryDirect {
     Translucent,
     /// An element in the frame is a rounded window.
     Rounded,
+    /// Nothing in the frame is opaque over, and spans, the whole output, and
+    /// the clear colour is neither black nor transparent: Smithay would not
+    /// try the primary for any element (rule 6).
+    NothingOpaqueCovers,
 }
 
 impl PrimaryDirect {
@@ -132,15 +153,18 @@ impl PrimaryDirect {
 /// Decides whether this frame of `output` may go primary-direct.
 ///
 /// `locked` must be the value the element list was gathered with, and
-/// `elements` that list -- `draw_frame_scanout` passes both straight
-/// through. Allocation-free, and everything past the first two rules -- the
-/// clock read, the capture-session scan, the element scan -- only runs on an
-/// unlocked, covered output, which is the only case where it can matter.
+/// `elements` that list; `frame` is the size, scale and clear colour that
+/// frame is rendered with -- `draw_frame_scanout` passes all of them
+/// straight through. Everything past the first two rules -- the clock read,
+/// the capture-session scan, the element scans -- only runs on an unlocked,
+/// covered output, which is the only case where it can matter. Allocation-
+/// free except in one corner of rule 6 (see [`opaque_over`]).
 pub(super) fn judge<R>(
     state: &State,
     output: &Output,
     locked: bool,
     elements: &[Elements<R>],
+    frame: &TriedWith,
 ) -> PrimaryDirect
 where
     R: Renderer + ImportAll + ImportMem,
@@ -159,12 +183,87 @@ where
     {
         return PrimaryDirect::Streaming;
     }
-    judge_elements(elements.iter().map(|element| {
+    let refusal = judge_elements(elements.iter().map(|element| {
         (
             matches!(element, Elements::RoundedSurface(_)),
             element.alpha(),
         )
-    }))
+    }));
+    if refusal != PrimaryDirect::Eligible {
+        return refusal;
+    }
+    let scale = Scale::from(frame.scale);
+    let tried = primary_can_be_tried(
+        frame.clear_color,
+        frame.size,
+        elements
+            .iter()
+            .map(|element| (element.geometry(scale), element.opaque_regions(scale))),
+    );
+    if tried {
+        PrimaryDirect::Eligible
+    } else {
+        PrimaryDirect::NothingOpaqueCovers
+    }
+}
+
+/// What rule 6 needs to know about the frame beyond its element list: the
+/// physical size and scale it is rendered at, and the clear colour
+/// `DrmCompositor::render_frame` is handed -- the same three values Smithay
+/// makes its own decision with.
+pub(crate) struct TriedWith {
+    pub(crate) size: (i32, i32),
+    pub(crate) scale: f64,
+    pub(crate) clear_color: Color32F,
+}
+
+/// Rule 6: whether Smithay would try the primary plane for the last visible
+/// element of a frame with this clear colour, at this physical `size`, given
+/// each element's `(geometry, opaque regions)` in the frame's order.
+///
+/// Smithay's guard (`render_frame`, pinned rev) is: the clear colour is
+/// black or fully transparent, *or* the last visible element spans the
+/// output and is opaque over it. The last visible element is found by
+/// walking front to back and stopping at the first element that is opaque
+/// over, and spans, the whole output -- so "the last visible one is" and
+/// "some element is" are the same question, which is what makes this a scan
+/// rather than a re-derivation of Smithay's occlusion walk. (Smithay's
+/// underlay check needs an overlay plane below the primary with something on
+/// it; no window rides an overlay on this tree, so it cannot fire here.)
+///
+/// Opacity is judged exactly as Smithay judges it: the element's own opaque
+/// regions are subtracted from its geometry clipped to the output, without
+/// offsetting them by the element's location. For a covering fullscreen
+/// window, placed at the output origin, the two coordinate spaces coincide;
+/// mirroring the arithmetic rather than correcting it keeps this the same
+/// answer Smithay gives in the corner where they do not.
+fn primary_can_be_tried<I, O>(clear_color: Color32F, size: (i32, i32), elements: I) -> bool
+where
+    I: IntoIterator<Item = (Rectangle<i32, Physical>, O)>,
+    O: std::ops::Deref<Target = [Rectangle<i32, Physical>]>,
+{
+    let black = clear_color.r() == 0.0 && clear_color.g() == 0.0 && clear_color.b() == 0.0;
+    if black || clear_color.a() == 0.0 {
+        return true;
+    }
+    let output = Rectangle::<i32, Physical>::from_size(size.into());
+    elements.into_iter().any(|(geometry, opaque)| {
+        geometry
+            .intersection(output)
+            .is_some_and(|visible| visible.contains_rect(output) && opaque_over(&opaque, visible))
+    })
+}
+
+/// Whether `regions` together cover all of `area`. One region containing it
+/// -- an opaque-format buffer, or a surface that declared itself opaque
+/// whole -- answers without allocating, which is every covering window seen
+/// so far; only a region set that covers the area in several pieces takes
+/// Smithay's rectangle subtraction, which allocates a `Vec`.
+fn opaque_over(regions: &[Rectangle<i32, Physical>], area: Rectangle<i32, Physical>) -> bool {
+    if regions.iter().any(|region| region.contains_rect(area)) {
+        return true;
+    }
+    regions.len() > 1 && Rectangle::subtract_rects_many([area], regions.iter().copied()).is_empty()
 }
 
 /// Rules 4 and 5 over `(is_rounded, alpha)` per element: the part of

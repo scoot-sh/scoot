@@ -82,6 +82,11 @@
 //! The **root surface of the fullscreen window covering the output**, while
 //! `render::primary_direct` judges the output eligible -- the same judgement
 //! that hands the frame the direct flag set, shared rather than re-derived.
+//! That judgement includes Smithay's own precondition for trying the primary
+//! at all (its rule 6: something opaque over the whole output, or a black
+//! clear colour), so a client Smithay would never scan out -- an alpha
+//! buffer with no opaque region over a grey background -- is not asked to
+//! reallocate into a scannable layout it could never use.
 //! Subsurfaces are not steered: the window's root is what a fullscreen GL
 //! client or game renders into, and a subsurface cannot reach the primary
 //! unless everything drawn over the root is already a plane of its own.

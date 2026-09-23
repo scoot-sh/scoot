@@ -110,7 +110,11 @@ each item's own file records why it landed when it did.
   explicit modifiers only where `IN_FORMATS` names them, `LINEAR` for
   single-plane formats on a modifier-less plane, never `Invalid`, minus
   modifiers the layout exporter saw GBM lose) — a subset of the default, so
-  nothing new is promised. Eligibility is `render::primary_direct`'s. Sent
+  nothing new is promised. Eligibility is `render::primary_direct`'s, which
+  gained a rule 6 in review: Smithay's own precondition for trying the
+  primary (something opaque over the output, or a black clear colour), so an
+  alpha client with no opaque region over the grey default is neither given
+  the direct flags nor steered (it was, and never went direct). Sent
   only on a change: at once when the covering window changes, on the first
   frame after a 2 s hold for lock/stream/translucency (a thumbnail capture
   never flaps it),
@@ -164,8 +168,10 @@ each item's own file records why it landed when it did.
   never direct, captures byte-correct, VT refusal and recovery, lock
   composited, overlay/shm/SIGKILL/scale fallbacks); 14-17 vs 754-763
   jiffies/10 s against llvmpipe compositing. Real GPU: `Asahi.md` Test 5.
-  [Candidates](docs/backlog/resolved/gpu-scanout-candidates-done.md) stays open for
-  overlay planes and scanout-tranche feedback.
+  Its [candidates](docs/backlog/resolved/gpu-scanout-candidates-done.md)
+  remainder -- scanout-tranche feedback and `zero_copy` -- landed in PR #230;
+  overlay-plane candidates are split out
+  ([blocked](docs/backlog/core/gpu-overlay-window-candidates.md)).
 
 - **[Subsurface depth bound](docs/backlog/resolved/subsurface-depth-bound-done.md)**
   (2026-09-23, PR #227) — a client could crash the compositor by nesting

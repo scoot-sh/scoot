@@ -34,6 +34,17 @@ eligibility half landed with the
   no-modifier GBM import PR #228 measured going direct; `Invalid` never.
   `get_bpp` was wrongly assumed to mean single-plane (Smithay's table has
   `Nv12`/`Yuv420` at 12 bpp) -- caught by a pinned test, now `bpp % 8 == 0`.
+- **Only a frame Smithay would try is eligible (review of PR #230).** The
+  first cut steered while `render::primary_direct` said eligible even when
+  Smithay's own precondition for trying the primary (`render_frame`: the
+  bottom element opaque over and spanning the output, or a black/
+  transparent clear colour) could not hold. Review measured it live: an
+  `AR24` probe with no opaque region over the default grey background was
+  steered twice and never went direct (0 primary assignments). `judge` now
+  has a rule 6 (`NothingOpaqueCovers`) mirroring that precondition over the
+  frame list, so the direct flags and the steering share it; a frame it
+  refuses was never going to be tried, so PR #228's direct frames are
+  unchanged.
 - **The layout exporter's refusals feed back** (`tty/layout_exporter.rs`,
   `LostLayouts`): a modifier GBM was seen to lose is dropped from the
   tranche and the window re-sent. Static knowledge cannot find that case;

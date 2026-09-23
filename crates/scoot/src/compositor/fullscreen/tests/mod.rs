@@ -161,6 +161,15 @@ enum Step {
     /// double-buffered surface state).
     #[cfg(feature = "gpu-scanout")]
     SetAlpha { window: usize, multiplier: u32 },
+    /// Declare the `window`-th toplevel's surface opaque as a whole
+    /// (`wl_surface.set_opaque_region` with a region larger than any size it
+    /// will be given; Smithay clips it to the buffer), then commit. Smithay
+    /// applies an opaque region only when the buffer or its view next
+    /// changes, so a window that is already drawn needs a draw after this. What a
+    /// video player or game with an alpha-format buffer does to be scanned
+    /// out over a non-black background.
+    #[cfg(feature = "gpu-scanout")]
+    SetOpaque { window: usize },
     /// `zwp_linux_dmabuf_v1.get_surface_feedback` for the `window`-th
     /// toplevel's surface: what a v4+ Mesa client does for every EGL window.
     #[cfg(feature = "gpu-scanout")]
@@ -394,6 +403,8 @@ impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, Index> for TestClient {
 }
 
 wayland_client::delegate_noop!(TestClient: ignore wl_compositor::WlCompositor);
+#[cfg(feature = "gpu-scanout")]
+wayland_client::delegate_noop!(TestClient: ignore wayland_client::protocol::wl_region::WlRegion);
 wayland_client::delegate_noop!(TestClient: ignore wl_surface::WlSurface);
 wayland_client::delegate_noop!(TestClient: ignore wl_shm::WlShm);
 wayland_client::delegate_noop!(TestClient: ignore wl_shm_pool::WlShmPool);
@@ -717,6 +728,17 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                     .as_ref()
                     .ok_or("no ext_session_lock_manager_v1")?;
                 locks.push(manager.lock(&qh, ()));
+                queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                Ack::Done
+            }
+            #[cfg(feature = "gpu-scanout")]
+            Step::SetOpaque { window } => {
+                let surface = &windows[window].surface;
+                let region = compositor.create_region(&qh, ());
+                region.add(0, 0, 1 << 16, 1 << 16);
+                surface.set_opaque_region(Some(&region));
+                region.destroy();
+                surface.commit();
                 queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
                 Ack::Done
             }

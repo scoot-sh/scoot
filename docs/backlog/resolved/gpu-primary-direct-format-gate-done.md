@@ -9,8 +9,10 @@ blocked: null
 # GPU scanout: the primary-direct format gate — RESOLVED
 
 RESOLVED 2026-09-23 (PR #228, branch `primary-direct-fullscreen`), together with the
-eligibility half of [candidates](./gpu-scanout-candidates-done.md), which
-stays open for overlay-plane candidates and per-surface scanout feedback.
+eligibility half of [candidates](./gpu-scanout-candidates-done.md). Its
+per-surface scanout feedback and `zero_copy` halves landed later (PR #230,
+same record), and overlay-plane candidates were split out to
+[windows on overlay planes](../core/gpu-overlay-window-candidates.md).
 A fullscreen window covering its output, on `--tty --renderer gles` in a
 `gpu-scanout` build, whose client submits a dma-buf the display can take,
 is now scanned out directly on the primary plane. Everything else

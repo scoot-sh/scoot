@@ -115,11 +115,17 @@ impl LayoutKeepingExporter {
 /// (`DrmCompositor` and the render path both live on the event-loop
 /// thread), hence `Cell`/`RefCell` behind an `Rc`.
 ///
-/// Bounded without a cap: a modifier is only ever added once, and a client
-/// can only reach the exporter with a modifier the renderer imported, i.e.
-/// one the advertised table holds -- so the record can never outgrow that
-/// table. Empty on every device where GBM keeps what it imports, which is
-/// every device measured so far.
+/// Bounded without a cap, though not by the advertised table: Smithay checks
+/// only a buffer's *fourcc* against that table (`wayland/dmabuf/mod.rs`,
+/// the `formats.contains_key` check), not its modifier. What bounds it is
+/// that a modifier is only ever added once, and only after three real
+/// devices accepted it: the renderer's import (a refused one kills or fails
+/// the buffer before any element exists), GBM's import, and KMS's `AddFB2`
+/// (the framebuffer this compares against has to exist). So the record holds
+/// at most the explicit modifiers this machine's driver, GBM and display all
+/// take -- a few dozen on a modifier-rich GPU -- however many distinct
+/// values a client invents. Empty on every device where GBM keeps what it
+/// imports, which is every device measured so far.
 #[derive(Debug, Default)]
 pub(crate) struct LostLayouts {
     modifiers: RefCell<Vec<Modifier>>,

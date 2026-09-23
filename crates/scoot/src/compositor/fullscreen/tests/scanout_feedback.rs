@@ -220,11 +220,21 @@ impl Fixture {
     }
 }
 
+/// Maps a window that declares itself opaque (its `Argb8888` buffer has an
+/// alpha channel; without an opaque region Smithay would never try it over
+/// this suite's non-black background -- see
+/// `a_window_smithay_would_never_try_is_not_steered`).
+fn map_opaque(fixture: &mut Fixture, color: [u8; 4]) {
+    let window = fixture.state.windows.len();
+    fixture.map(color);
+    fixture.done(Step::SetOpaque { window });
+}
+
 /// A mapped window that asked for surface feedback, and the virtio-shaped
 /// scanout feedback installed: the starting point of most tests here.
 fn steerable() -> Fixture {
     let mut fixture = Fixture::new();
-    fixture.map(WINDOW_BGRA);
+    map_opaque(&mut fixture, WINDOW_BGRA);
     fixture.surface_feedback(0);
     fixture.install(&virtio_plane(), 0);
     fixture
@@ -398,6 +408,31 @@ fn a_translucent_moment_shorter_than_the_hold_sends_nothing() {
 }
 
 #[test]
+fn a_window_smithay_would_never_try_is_not_steered() {
+    // Review's live finding: an `AR24` fullscreen client with no opaque
+    // region, over the default (non-black) background, was steered toward a
+    // scannable layout and never went direct -- Smithay does not try the
+    // primary for it. Now the frame is not eligible, so nothing is sent; the
+    // same window declaring itself opaque is steered at once.
+    let mut fixture = Fixture::new();
+    fixture.map(WINDOW_BGRA);
+    fixture.surface_feedback(0);
+    fixture.install(&virtio_plane(), 0);
+    fixture.fullscreen(0);
+    assert_eq!(fixture.steer(), Steer::Idle);
+    assert_eq!(fixture.feedbacks(0).len(), 1, "the default, and only that");
+    // With its next buffer: Smithay recomputes opaque regions only when the
+    // buffer or its view changes.
+    fixture.done(Step::SetOpaque { window: 0 });
+    fixture.done(Step::Draw {
+        window: 0,
+        color: WINDOW_BGRA,
+    });
+    assert_eq!(fixture.steer(), Steer::Sent);
+    assert_eq!(fixture.feedbacks(0).len(), 2);
+}
+
+#[test]
 fn an_overlay_surface_above_does_not_revert() {
     // Not an eligibility rule: Smithay composites the frame a notification
     // is drawn over, and the window goes direct again, in the layout this
@@ -417,7 +452,7 @@ fn a_surface_asking_after_it_went_fullscreen_gets_the_scanout_feedback_first() {
     // window already being steered is answered with the scanout feedback,
     // not the default until its eligibility next changes.
     let mut fixture = Fixture::new();
-    fixture.map(WINDOW_BGRA);
+    map_opaque(&mut fixture, WINDOW_BGRA);
     fixture.install(&virtio_plane(), 0);
     fixture.fullscreen(0);
     assert_eq!(fixture.steer(), Steer::Sent, "steered before it asked");
@@ -433,7 +468,7 @@ fn a_surface_asking_after_it_went_fullscreen_gets_the_scanout_feedback_first() {
 #[test]
 fn a_plane_that_takes_nothing_advertised_steers_nothing() {
     let mut fixture = Fixture::new();
-    fixture.map(WINDOW_BGRA);
+    map_opaque(&mut fixture, WINDOW_BGRA);
     fixture.surface_feedback(0);
     fixture.install(&useless_plane(), 0);
     fixture.fullscreen(0);
@@ -447,7 +482,7 @@ fn a_rebuilt_tranche_moves_the_current_window_onto_it() {
     // sent the rebuilt feedback, and the default if the new plane takes
     // nothing at all.
     let mut fixture = Fixture::new();
-    fixture.map(WINDOW_BGRA);
+    map_opaque(&mut fixture, WINDOW_BGRA);
     fixture.surface_feedback(0);
     let only_xr24: FormatSet = std::iter::once(Format {
         code: Fourcc::Xrgb8888,
@@ -483,8 +518,8 @@ fn a_rebuilt_tranche_moves_the_current_window_onto_it() {
 #[test]
 fn another_window_covering_moves_the_scanout_feedback_to_it() {
     let mut fixture = Fixture::new();
-    fixture.map(WINDOW_BGRA);
-    fixture.map(OTHER_BGRA);
+    map_opaque(&mut fixture, WINDOW_BGRA);
+    map_opaque(&mut fixture, OTHER_BGRA);
     fixture.surface_feedback(0);
     fixture.surface_feedback(1);
     fixture.install(&virtio_plane(), 0);
