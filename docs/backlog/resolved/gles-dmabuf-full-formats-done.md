@@ -68,7 +68,7 @@ RESOLVED 2026-09-23 (PR #229, branch `gles-dmabuf-full-formats`).
 - **Known trade-off, not a regression of anything measured:** with tiled
   layouts on offer, a fullscreen GL client on real hardware may allocate a
   layout the display cannot scan out and composite instead of going
-  primary-direct. Steering it is [the scanout tranche](../core/gpu-scanout-candidates.md).
+  primary-direct. Steering it is [the scanout tranche](./gpu-scanout-candidates-done.md).
   Primary-direct has only ever been seen on the dev VM, whose table is
   still `LINEAR`-only.
 

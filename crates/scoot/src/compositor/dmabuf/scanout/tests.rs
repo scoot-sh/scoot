@@ -275,3 +275,68 @@ fn single_plane_means_packed_and_known() {
         assert!(!single_plane(unknown), "{unknown:?}");
     }
 }
+
+/// Prints what building the scanout tranche costs at a real GPU's size --
+/// startup and CRTC switches only, never a frame -- so "a few dozen fourccs
+/// by a few modifiers" is a measurement. Run by hand:
+///
+/// ```text
+/// cargo test --release -p scoot --bin scoot --features gpu-scanout scanout_tranche_cost -- --ignored --nocapture
+/// ```
+#[test]
+#[ignore = "prints a timing for a human; asserts nothing"]
+fn scanout_tranche_cost() {
+    const ROUNDS: u32 = 1_000;
+    // 24 fourccs x 17 modifiers advertised (408 pairs, the size
+    // `driver_tranche_cost` measures), against a plane listing 12 of those
+    // fourccs at 8 modifiers plus `Invalid`.
+    let fourccs = [
+        Fourcc::Xrgb8888,
+        Fourcc::Argb8888,
+        Fourcc::Abgr8888,
+        Fourcc::Xbgr8888,
+        Fourcc::Rgba8888,
+        Fourcc::Rgbx8888,
+        Fourcc::Bgra8888,
+        Fourcc::Bgrx8888,
+        Fourcc::Argb2101010,
+        Fourcc::Xrgb2101010,
+        Fourcc::Abgr2101010,
+        Fourcc::Xbgr2101010,
+        Fourcc::Abgr16161616f,
+        Fourcc::Xbgr16161616f,
+        Fourcc::Rgb565,
+        Fourcc::R8,
+        Fourcc::Gr88,
+        Fourcc::Nv12,
+        Fourcc::Nv21,
+        Fourcc::P010,
+        Fourcc::Yuv420,
+        Fourcc::Yvu420,
+        Fourcc::Yuyv,
+        Fourcc::Uyvy,
+    ];
+    let advertised: Vec<Format> = fourccs
+        .iter()
+        .flat_map(|code| (0u64..17).map(|m| f(*code, Modifier::from(m))))
+        .collect();
+    let plane: FormatSet = fourccs[..12]
+        .iter()
+        .flat_map(|code| {
+            (0u64..8)
+                .map(|m| f(*code, Modifier::from(m)))
+                .chain(std::iter::once(f(*code, Modifier::Invalid)))
+        })
+        .collect();
+    let started = std::time::Instant::now();
+    let mut kept = 0;
+    for _ in 0..ROUNDS {
+        kept = std::hint::black_box(scanout_tranche(&advertised, &plane, &[])).len();
+    }
+    let each = started.elapsed() / ROUNDS;
+    println!(
+        "scanout tranche: {} advertised x {} plane entries -> {kept} pairs in {each:?} ({ROUNDS} rounds)",
+        advertised.len(),
+        plane.iter().count()
+    );
+}

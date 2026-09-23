@@ -69,7 +69,9 @@ now complete. A fullscreen window covering its output now goes
 primary-direct (zero-copy), decided per frame, with captures forcing a
 composite first and capture streams kept composited
 ([format gate](docs/backlog/resolved/gpu-primary-direct-format-gate-done.md));
-no window rides an overlay plane yet (no scanout candidates). Two of its four stages have landed
+no window rides an overlay plane yet (no scanout candidates), and the
+fullscreen window is steered toward a layout the display can scan out
+([scanout tranche](docs/backlog/resolved/gpu-scanout-candidates-done.md)). Two of its four stages have landed
 (PR #129: the renderer seam, pixman still the only implementation, provably
 zero behaviour change; PR #130: the GLES pipeline behind
 `--renderer pixman|gles` and `[renderer] backend`, off by default, every
@@ -100,6 +102,26 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[Scanout-tranche feedback + `zero_copy`](docs/backlog/resolved/gpu-scanout-candidates-done.md)**
+  (2026-09-23, branch `gpu-scanout-feedback`) — on the `--tty` GPU tier the
+  fullscreen window covering an output gets per-surface dma-buf feedback
+  whose first tranche is flagged `scanout`, names the display device, and
+  lists the advertised pairs the primary plane accepts (opaque-twin fourcc,
+  explicit modifiers only where `IN_FORMATS` names them, `LINEAR` for
+  single-plane formats on a modifier-less plane, never `Invalid`, minus
+  modifiers the layout exporter saw GBM lose) — a subset of the default, so
+  nothing new is promised. Eligibility is `render::primary_direct`'s. Sent
+  only on a change: at once when the covering window changes, after a 2 s
+  hold for lock/stream/translucency (a thumbnail capture never flaps it),
+  never for an overlay above; cached per plane set, allocation-free per
+  frame. `wp_presentation` reports `zero_copy` for the surface scanned out
+  directly (the `DrmCompositor`'s answer, not the cursor plane). Dev VM:
+  tranche `XR24`/`AR24` `LINEAR`, sent/reverted live, `zero_copy` on
+  exactly Smithay's direct frames (260/260, 384/384), CPU unchanged vs
+  `main`. Real GL client reallocating into it: `Asahi.md` Test 6 Part C.
+  Overlay-plane candidates stay split out
+  ([blocked](docs/backlog/core/gpu-overlay-window-candidates.md)).
+
 - **[GLES tier advertises the driver's real dma-buf formats](docs/backlog/resolved/gles-dmabuf-full-formats-done.md)**
   (2026-09-23, PR #229) — under `--renderer gles` (offscreen and the
   `--tty` scanout tier) the `zwp_linux_dmabuf_v1` default feedback is the
@@ -115,7 +137,7 @@ each item's own file records why it landed when it did.
   layout class through `create_immed` under either renderer. Dev VM:
   57 formats at `LINEAR` on both GLES tiers. Real GPU: `Asahi.md` Test 6.
   Trade-off recorded: a fullscreen client may now pick a layout the display
-  cannot scan out — [scanout tranche](docs/backlog/core/gpu-scanout-candidates.md). Review found two harms the wider table made
+  cannot scan out — [scanout tranche](docs/backlog/resolved/gpu-scanout-candidates-done.md). Review found two harms the wider table made
   reachable, both fixed in the PR: GLES rebuilds (resize, added output)
   could migrate to another EGL device against a never-re-sent feedback —
   now pinned to the first build's device, failing rather than moving; and a
@@ -141,7 +163,7 @@ each item's own file records why it landed when it did.
   never direct, captures byte-correct, VT refusal and recovery, lock
   composited, overlay/shm/SIGKILL/scale fallbacks); 14-17 vs 754-763
   jiffies/10 s against llvmpipe compositing. Real GPU: `Asahi.md` Test 5.
-  [Candidates](docs/backlog/core/gpu-scanout-candidates.md) stays open for
+  [Candidates](docs/backlog/resolved/gpu-scanout-candidates-done.md) stays open for
   overlay planes and scanout-tranche feedback.
 
 - **[Subsurface depth bound](docs/backlog/resolved/subsurface-depth-bound-done.md)**
@@ -222,7 +244,7 @@ each item's own file records why it landed when it did.
   keyboard under a covering window; `overlay` and the lock stay above. Also
   fixed frame learning pairing a commit with the latest configure sent
   rather than the one acked. Unblocks
-  [scanout candidates](docs/backlog/core/gpu-scanout-candidates.md).
+  [scanout candidates](docs/backlog/resolved/gpu-scanout-candidates-done.md).
 
 - **[XWayland Phase 1 skeleton](docs/backlog/protocols/xwayland-support.md)**
   (2026-09-22, PR #221) — opt-in `--xwayland`/`[xwayland]` (default off,

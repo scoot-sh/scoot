@@ -195,7 +195,7 @@ type Compositor = DrmCompositor<GbmAllocator<DrmDeviceFd>, LayoutKeepingExporter
 /// (`render/elements.rs`, both call sites), only cursor elements are
 /// `Kind::Cursor`, and `Rounded` forwards its inner kind unchanged. So no
 /// window can ride an overlay plane until something is marked a scanout
-/// candidate (`docs/backlog/core/gpu-scanout-candidates.md`). What the bit
+/// candidate (`docs/backlog/core/gpu-overlay-window-candidates.md`). What the bit
 /// does today is let the *cursor* ride an overlay where a CRTC has overlays
 /// but no cursor plane (the cursor plane is still tried first), with the
 /// cursorless-capture consequence documented in `render::scanout`.

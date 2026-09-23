@@ -515,3 +515,46 @@ fn another_window_covering_moves_the_scanout_feedback_to_it() {
     assert_eq!(second.len(), 3);
     assert_eq!(second[2], second[0], "the old window is reverted");
 }
+
+/// Prints what the two per-frame calls the scanout tier makes cost on the
+/// steady states a fullscreen session sits in: the cache check plus a
+/// `Kept` steer (eligible, target unchanged), and a `Holding` steer (the
+/// one arm that reads the clock). Run by hand:
+///
+/// ```text
+/// cargo test --release -p scoot --bin scoot --features gpu-scanout steering_cost -- --ignored --nocapture
+/// ```
+#[test]
+#[ignore = "prints per-frame timings for a human; asserts nothing"]
+fn steering_cost() {
+    use crate::compositor::tty::scanout::ScanoutFormats;
+
+    const ROUNDS: u32 = 200_000;
+    let mut fixture = steerable();
+    fixture.fullscreen(0);
+    assert_eq!(fixture.steer(), Steer::Sent);
+    let output = fixture.state.outputs.primary_id().expect("an output");
+    let key = FormatsKey { planes: 0, lost: 0 };
+    for (label, eligible) in [("kept (eligible)", true), ("holding (ineligible)", false)] {
+        let now = Instant::now();
+        let started = Instant::now();
+        for _ in 0..ROUNDS {
+            let state = &mut fixture.state;
+            state.scanout_feedback.refresh(
+                output,
+                key,
+                state.dmabuf_default.as_ref(),
+                || -> ScanoutFormats<'_> { unreachable!("the key never moves here") },
+            );
+            let steer = state.steer_scanout_feedback(output, eligible, || now);
+            std::hint::black_box(steer);
+        }
+        let each = started.elapsed() / ROUNDS;
+        println!("scanout steering, {label}: {each:?} per frame ({ROUNDS} rounds)");
+    }
+    assert_eq!(
+        fixture.feedbacks(0).len(),
+        2,
+        "nothing was sent while measuring"
+    );
+}

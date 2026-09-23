@@ -227,7 +227,7 @@ running with no GPU at all is a hard requirement here, not a fallback tier.
   cursorless). No window surface is ever an overlay candidate (every one is
   built `Kind::Unspecified`), so an overlay plane carries at most the
   cursor -- never a window; candidate-marking is
-  [`backlog/core/gpu-scanout-candidates.md`](backlog/core/gpu-scanout-candidates.md).
+  [`backlog/core/gpu-overlay-window-candidates.md`](backlog/core/gpu-overlay-window-candidates.md).
   One consequence to know: a capture (IPC screenshots,
   `ext-image-copy-capture-v1`) reads the primary plane only, so on a
   session whose cursor is plane-assigned the capture shows the screen
@@ -286,7 +286,31 @@ running with no GPU at all is a hard requirement here, not a fallback tier.
   seen on real GPU hardware or with a real video player --
   [`../Asahi.md`](../Asahi.md)'s Test 5 asks for that. The log line
   `scanout: primary-direct eligibility changed` (at `debug`) says when a
-  session starts or stops being allowed to go direct, and why.
+  session starts or stops being allowed to go direct, and why. A frame
+  that did go direct tells that window's `wp_presentation` feedback
+  `zero_copy` (no other frame or surface is told it).
+- **A fullscreen window is told which layouts the display can take.** A
+  GL client picks its buffer layout from the dma-buf feedback, by what it
+  renders into best -- on a real GPU often a tiled or compressed layout the
+  primary plane cannot scan out, so it would composite for no reason it
+  could know. So the window covering an output, while that output may go
+  direct (the rules above), gets per-surface feedback whose first tranche
+  is flagged `scanout`, names the display device, and lists the layouts
+  the primary plane accepts out of those already advertised
+  (`dmabuf/scanout.rs`); a client that acts on it reallocates into one and
+  goes direct. It is sent only when that changes: at once when another
+  window (or none) covers the output, after two seconds when the same
+  window stays covered but cannot go direct (locked, streamed, translucent),
+  and not at all for a notification or popup drawn over it. Every pair in
+  it is one the default feedback already offers, so a client that allocates
+  from it and ends up composited is imported like any other. On the dev
+  VM's virtio-gpu (no `IN_FORMATS`) the tranche is `XR24` and `AR24` at
+  `LINEAR`, logged once as `dmabuf feedback: scanout tranche for
+  fullscreen windows`; a tiled modifier the display's GBM is seen to lose on
+  import -- the scanout exporter refuses such a framebuffer, since KMS would
+  show scrambled tiles -- is dropped from it and the window re-sent. Whether a real GL client reallocates into the tranche on
+  real hardware and goes direct is [`../Asahi.md`](../Asahi.md)'s Test 6 --
+  not yet seen; no GL client on the dev VM can allocate a dma-buf at all.
 - **A resize is expensive under `gles`, and `--nested` now resizes.** Every
   resize rebuilds the render target, and under `gles` that means a whole new
   EGL context and shader set: measured on the dev VM (llvmpipe, 800x800, 8
@@ -339,9 +363,8 @@ running with no GPU at all is a hard requirement here, not a fallback tier.
   direct on the primary plane only where that plane lists the format;
   otherwise it composites. The same goes for a tiled layout: with those on
   offer, a fullscreen GL client on real hardware may pick one the display
-  cannot scan out and composite rather than go direct — steering it toward
-  a scannable layout is a later, per-surface item
-  ([gpu-scanout-candidates](backlog/core/gpu-scanout-candidates.md)).
+  cannot scan out and composite rather than go direct — which is what the
+  per-surface scanout tranche above steers it away from.
   Two consequences worth knowing: on a renderer
   that can import nothing scoot can vouch for, no dmabuf global is
   advertised at all (GL clients fall back to `wl_shm`, and a shell that

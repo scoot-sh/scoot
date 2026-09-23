@@ -8,7 +8,7 @@ blocked: "needs hardware with overlay planes — virtio has none; Asahi's apple,
 
 # Windows on overlay planes
 
-Split 2026-09-23 out of [scanout candidates](./gpu-scanout-candidates.md)
+Split 2026-09-23 out of [scanout candidates](../resolved/gpu-scanout-candidates-done.md)
 (coordinator). Serves **daily-drive** (e.g. a video in a non-fullscreen
 window scanned out on an overlay).
 

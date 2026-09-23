@@ -22,7 +22,7 @@ whole of it as one command that writes its own report.
 | Issue #48's unconfirmed connector fallback | — | yes | still open — needs an external display |
 | [Test 4: CPU vs GPU on a real GPU](docs/backlog/resolved/gpu-vs-cpu-measured-done.md) | high → none | yes | **ANSWERED** (2026-09-21): scanout comes up on the split topology and costs 4–5x less CPU |
 | [Test 5: a fullscreen video scanned out directly](docs/backlog/resolved/gpu-primary-direct-format-gate-done.md) | medium | yes | open — seen on the dev VM only |
-| [Test 6: what the GLES tier advertises, and what GPU clients do with it](docs/backlog/resolved/gles-dmabuf-full-formats-done.md) | high | partly | open — seen on the dev VM's llvmpipe only (57 formats, all `LINEAR`) |
+| [Test 6: what the GLES tier advertises, and what GPU clients do with it](docs/backlog/resolved/gles-dmabuf-full-formats-done.md) (Part C: [the scanout tranche](docs/backlog/resolved/gpu-scanout-candidates-done.md)) | high | partly | open — seen on the dev VM's llvmpipe only (57 formats, all `LINEAR`; scanout tranche `XR24`/`AR24` at `LINEAR`) |
 
 ## Results so far (run 2026-09-18, `main` at `f688ac9`)
 
@@ -781,10 +781,9 @@ grep -E 'Using DRM device|hwdec|upload|VO:|failed|error' /tmp/fx/t6-mpv.log | he
   may allocate a tiled layout the display controller cannot scan out, in
   which case Test 5's fullscreen frames composite instead of going direct
   (a missed optimisation, not a failure — steering fullscreen clients to a
-  scannable layout is the per-surface scanout tranche,
-  `docs/backlog/core/gpu-scanout-candidates.md`). If Test 5 is run on a
-  build with this change, note the modifier the client sent next to the
-  answer. And if a fullscreen buffer *does* go direct, check the fb's
+  scannable layout is the per-surface scanout tranche, Part C below). If
+  Test 5 is run on a build with this change, note the modifier the client
+  sent next to the answer. And if a fullscreen buffer *does* go direct, check the fb's
   modifier in `t5-kms-fullscreen.txt` against the client's `add(` modifier:
   they must match. A GBM import that drops or changes a tiled modifier is
   the one exposure `DIRECT_FLAGS` in `tty/scanout.rs` names; scoot now
@@ -792,6 +791,68 @@ grep -E 'Using DRM device|hwdec|upload|VO:|failed|error' /tmp/fx/t6-mpv.log | he
   out a client buffer whose framebuffer lost its tiled layout` at `debug`.
   Seeing that line here means this machine's GBM does it (worth reporting);
   seeing scrambled tiles on screen means the guard missed a case.
+
+**Part C — the scanout tranche: does a fullscreen GL client move into a
+layout the display takes, and then go direct?** On the GPU tier the window
+covering the output is sent per-surface dma-buf feedback whose first
+tranche is flagged `scanout`, names the display device (`apple,dcp`'s card,
+not AGX's render node), and lists the layouts the primary plane accepts
+(`docs/protocols.md`, "Per-surface feedback: the scanout tranche"). On the
+dev VM that tranche is `XR24`/`AR24` at `LINEAR` and the test client went
+direct with it; no GL client there can allocate a dma-buf, so whether Mesa
+acts on it is only answerable here. Same VT session and flags as Test 5:
+
+```sh
+RUST_LOG=info,scoot=debug,smithay::backend::drm::compositor=trace \
+  ./result-scoot-gpu/bin/scoot --tty --renderer gles > /tmp/fx/t6c.log 2>&1 &
+# tiled first, then fullscreen: the feedback changes on the transition
+WAYLAND_DISPLAY=wayland-1 WAYLAND_DEBUG=1 es2gears_wayland 2> /tmp/fx/t6c-gears.trace &
+sleep 5; scootctl action toggle-fullscreen; sleep 8
+sudo cat /sys/kernel/debug/dri/*/state > /tmp/fx/t6c-kms-fullscreen.txt
+scootctl screenshot --out /tmp/fx/t6c-fs.png
+scootctl action toggle-fullscreen; sleep 5; kill %2
+# the same with a client that asks for presentation feedback
+WAYLAND_DISPLAY=wayland-1 WAYLAND_DEBUG=1 mpv --fs --vo=gpu --gpu-context=wayland \
+  --loop some-video.mkv 2> /tmp/fx/t6c-mpv.trace &
+sleep 10; sudo cat /sys/kernel/debug/dri/*/state > /tmp/fx/t6c-kms-mpv.txt; kill %2
+# quit scoot (Super+Shift+e), then:
+sed -i 's/\x1b\[[0-9;]*m//g' /tmp/fx/t6c.log
+grep 'scanout tranche\|scanout steering changed\|eligibility changed' /tmp/fx/t6c.log
+grep -c 'get_surface_feedback' /tmp/fx/t6c-*.trace          # did the client ask at all
+grep 'tranche_flags\|tranche_target_device' /tmp/fx/t6c-gears.trace | head
+grep 'zwp_linux_buffer_params_v1.*add(' /tmp/fx/t6c-gears.trace | awk '{print $NF, $(NF-1)}' | uniq -c
+grep -o 'presented(.*' /tmp/fx/t6c-mpv.trace | awk -F', ' '{print $NF}' | sort | uniq -c
+```
+
+(The `dmabuf scanout tranche` line at `debug` in `t6c.log` is the whole
+tranche; the `scanout tranche for fullscreen windows pairs=… device=…` line
+above it is its size and the device it names.) What each answer means:
+
+- **`scanout tranche … pairs=N`, then after the toggle `scanout steering
+  changed steer=Sent`, a `tranche_flags(1)` in the trace, and the `add(`
+  modifier changing after the toggle** to one in the tranche: Mesa moved
+  the fullscreen window into a scannable layout. If Test 5's
+  `successfully assigned … to plane::Handle(<primary>)` lines follow, it
+  then went direct — the whole point of this part. The modifier going back
+  after the second toggle is the revert.
+- **`the primary plane takes none of the advertised formats`**: nothing
+  the renderer imports is on the plane's list, so nothing is steered. Send
+  the `dmabuf scanout tranche`-less log and `t6-table-tty.txt` from Part A
+  plus `sudo drm_info` (or the plane's `IN_FORMATS` from debugfs).
+- **The trace shows the scanout tranche but the `add(` modifier never
+  changes**: Mesa did not act on it. One known reason to look for first:
+  the tranche's `target_device` is the display card, not the AGX render
+  node Mesa renders on — record which device each `tranche_target_device`
+  names (`ls -l /dev/dri`, major/minor). That is a finding about how Mesa
+  treats a split render/display machine, not a failure.
+- **`not scanning out a client buffer whose framebuffer lost its tiled
+  layout`**, followed by a second `scanout tranche` line with `lost=1`: this
+  machine's GBM loses that modifier; scoot dropped it from the tranche and
+  re-sent it. Worth reporting with the modifier.
+- **mpv's `presented(` flags** end in the `kind` bits: `0x9` is `vsync |
+  zero_copy` (direct), `0x1` is composited. Seeing `0x9` confirms direct
+  scanout from the client's side; seeing only `0x1` while Test 5's lines
+  say the primary took the buffer would be a scoot bug.
 
 ## What to send back
 
@@ -805,7 +866,9 @@ grep -E 'Using DRM device|hwdec|upload|VO:|failed|error' /tmp/fx/t6-mpv.log | he
   and the grep output
 - for Test 6: `/tmp/fx/t6-table-*.txt`, `/tmp/fx/t6-*.log`,
   `/tmp/fx/t6-gears.trace` (or just its `add(` lines), `t6-gears.png`,
-  `t6-mpv.log`, `t6-mpv.png`, `t6-kms-mpv.txt`
+  `t6-mpv.log`, `t6-mpv.png`, `t6-kms-mpv.txt`; for Part C `t6c.log`,
+  both `t6c-*.trace` (or their `tranche_*`, `add(` and `presented(` lines),
+  `t6c-kms-*.txt`, `t6c-fs.png`, and the grep output
 
 Raw logs beat a summary here. Both open entries were written after earlier
 investigations went wrong in ways only the raw output showed — a harness

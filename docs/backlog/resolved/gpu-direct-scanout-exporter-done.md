@@ -124,7 +124,7 @@ Original entry below, kept verbatim.
 
 Filed 2026-09-22 (coordinator, GPU-tier survey). Serves **daily-drive**
 (zero-copy fullscreen video/games on a real GPU) and is the precondition for
-[scanout candidates](./gpu-scanout-candidates.md).
+[scanout candidates](./gpu-scanout-candidates-done.md).
 
 ## What is missing
 

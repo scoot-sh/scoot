@@ -9,6 +9,22 @@ scoot has not cut a numbered release yet; entries are dated.
 
 ## Unreleased
 
+### 2026-09-23 — fullscreen apps are told what the display can show directly (GPU tier)
+
+- **On the opt-in GPU tier (`--tty --renderer gles`, `gpu-scanout` build),
+  a fullscreen app is now told which of its buffer layouts the display can
+  show straight from the app's memory**, so a GPU app that listens can pick
+  one and skip compositing — instead of picking whatever renders fastest and
+  being composited without knowing why. It is only a suggestion: every
+  layout it names is one the app was already offered, so nothing can break
+  for an app that ignores it, or that ends up composited anyway (a
+  notification over it, a screen recording). Nothing to configure. Seen on
+  the dev VM with a test client; not yet with a real GPU app or on real GPU
+  hardware ([Asahi.md](Asahi.md), Test 6).
+- **Presentation timing now says when a frame was shown with zero copy.**
+  Apps that ask for `wp_presentation` feedback (video players, games) are
+  told `zero_copy` for frames scanned out straight from their buffer.
+
 ### 2026-09-23 — GPU apps get their GPU's own buffer formats (GLES renderer)
 
 - **Under `--renderer gles`, GPU-rendering apps are now offered every
