@@ -379,9 +379,12 @@ client-drawn titlebar: `wl_subcompositor.get_subsurface` works as the core
 protocol says, with one limit.
 
 - **Subsurfaces nest at most 64 levels below a surface tree's root.** The
-  root is whatever surface in the tree is not itself a subsurface: a
-  window, a popup, a layer surface, a cursor, or a plain surface with no
-  role yet. Its own subsurface is level 1, a subsurface of that is level 2,
+  root is the surface at the top of the tree, the one with no parent: a
+  window, a popup, a layer surface, a cursor, a plain surface with no role
+  yet -- or a subsurface cut loose from its parent, by
+  `wl_subsurface.destroy` or by its parent `wl_surface` being destroyed,
+  which keeps its role and its own subsurfaces but is a root until it is
+  attached again. Its own subsurface is level 1, a subsurface of that is level 2,
   and so on; real clients use a level or two. That holds for every tree,
   however it was built. A `get_subsurface` is refused if it would put *any*
   surface deeper than level 64, and that includes the subsurfaces already
@@ -393,19 +396,24 @@ protocol says, with one limit.
 
   | What the client did | Protocol error | Posted on |
   |---|---|---|
-  | Called `get_subsurface` where the new subsurface, or a subsurface already below it, would be more than 64 levels below its tree's root | `wl_subcompositor.bad_parent` | the `wl_subcompositor` |
+  | Called `get_subsurface` where the new subsurface, or a subsurface already below it, could end up more than 64 levels below its tree's root (see below for "could") | `wl_subcompositor.bad_parent` | the `wl_subcompositor` |
 
-  The message starts with `bad_parent:` and gives the level the deepest
-  surface would have reached; the refusal also logs a `warn` naming the
-  client. The `wl_subsurface` is not created, and the surfaces are not
+  The message starts with `bad_parent:` and gives an upper bound on the
+  level the deepest surface could have reached (the `warn` the refusal
+  logs, naming the client, gives the same bound as `deepest_bound`). The `wl_subsurface` is not created, and the surfaces are not
   linked.
 
-  What a surface has below it is judged by the tallest subtree it has ever
-  had, not only the one it has now, which keeps the check cheap however
-  wide a client's trees are. So a surface that once had, say, 60 levels of
-  subsurfaces below it, and is later attached somewhere 5 levels deep, is
-  refused even if those 60 levels are gone. No real client comes near it:
-  the deepest measured is 2 levels.
+  What hangs below a surface is judged by a recorded height that is never
+  lowered, which keeps the check cheap however wide a client's trees are.
+  It can be higher than anything really there, in two ways: a surface
+  keeps the height of subsurfaces it has since lost, and it passes that
+  height on to every surface it is later attached below. So a surface that
+  once had, say, 60 levels of subsurfaces below it and lost them, then
+  attached below a plain surface, makes that plain surface count as 61
+  levels high too -- and attaching *that* one 3 levels deep is refused,
+  though the real tree would be 5 deep. The error only ever goes that way:
+  a tree that really is too deep is always refused. No real client comes
+  near it: the deepest measured is 2 levels.
 
   A parent that is the surface itself, or one of its own subsurfaces, is
   still refused as before, with `wl_subcompositor.bad_surface`.

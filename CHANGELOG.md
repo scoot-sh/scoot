@@ -17,8 +17,9 @@ scoot has not cut a numbered release yet; entries are dated.
   most 64 levels below their window, menu, bar or other top surface; real
   apps use one or two. A program that tries to put a subsurface deeper —
   by nesting them directly, or by attaching a stack of subsurfaces it
-  built separately — is disconnected instead. mpv, GTK 4 and weston's
-  subsurface demo were checked and are unaffected. If a program you use
+  built separately — is disconnected instead. mpv, foot, weston's
+  subsurface demo and GTK 4's demo video player were checked and are
+  unaffected. If a program you use
   is disconnected this way, the compositor log names it (see
   `docs/protocols.md`) — please report it.
 

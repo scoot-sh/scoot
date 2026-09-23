@@ -115,7 +115,7 @@ each item's own file records why it landed when it did.
   role-less surface can be given children first, so a parent-depth cap
   alone is bypassed bottom-up (measured: that alone overflowed). Frame
   cost at the cap unchanged; mpv (which builds its two-level tree
-  bottom-up), GTK 4, foot and weston's demo unaffected live. Filed:
+  bottom-up), foot, weston's demo and GTK 4's demo video player unaffected live. Filed:
   Smithay's missing `bad_surface` for a second `wl_subsurface`; many
   desync subsurfaces side by side stall roughly quadratically.
 

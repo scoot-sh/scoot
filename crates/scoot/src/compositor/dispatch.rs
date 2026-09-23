@@ -1207,7 +1207,7 @@ where
 }
 
 /// Posts `wl_subcompositor.bad_parent` and returns `true` when `request` is
-/// a `get_subsurface` that would nest a surface deeper than
+/// a `get_subsurface` that could nest a surface deeper than
 /// [`MAX_SUBSURFACE_DEPTH`](super::subsurface_depth::MAX_SUBSURFACE_DEPTH).
 /// See the module doc's "Why the subsurface-depth guard exists", and
 /// `subsurface_depth.rs` for the rule.

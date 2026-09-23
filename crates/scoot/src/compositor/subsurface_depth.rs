@@ -60,12 +60,19 @@
 //! lowered by choice, not for want of a hook: `dispatch.rs`'s blanket
 //! `destroyed` sees every `wl_subsurface` and `wl_surface` go, but lowering
 //! a height means recomputing every ancestor's from all of its children --
-//! work per level in proportion to the tree's width -- and all it would buy
-//! is avoiding an error in one direction only: a surface that once had a
-//! subtree `h` deep, re-attached `d` levels down with `d + 1 + h` over the
-//! cap, is refused as if it still had it. The deepest tree measured from a
-//! real client is two levels (mpv, see [`MAX_SUBSURFACE_DEPTH`]), so that
-//! takes trees some thirty times deeper than any seen.
+//! work per level in proportion to the tree's width. What that costs is a
+//! bound that can be higher than any subtree a surface has actually had,
+//! never lower, in two ways. A surface keeps the height of a subtree it
+//! has lost. And [`record_link`] carries that stale height up: attach the
+//! surface below another, and every surface above it is raised as if the
+//! lost subtree were still there -- a surface that only ever had one level
+//! below it can be recorded as 61 high. So a `get_subsurface` can be
+//! refused although the tree it would really make is well within the cap.
+//! Never the other way: a real subtree is always covered. To be refused
+//! this way a client has to have built, at some point, a tree nearly
+//! [`MAX_SUBSURFACE_DEPTH`] deep; the deepest measured from a real client
+//! is two levels (mpv, see [`MAX_SUBSURFACE_DEPTH`]), so that takes trees
+//! some thirty times deeper than any seen.
 //!
 //! The check runs from `dispatch.rs`'s blanket `request`, before Smithay
 //! sees the request, because Smithay links the surfaces -- and runs
@@ -119,8 +126,8 @@ fn subtree_height(surface: &WlSurface) -> usize {
     })
 }
 
-/// Refuses a `wl_subcompositor.get_subsurface` that would nest a surface
-/// deeper than [`MAX_SUBSURFACE_DEPTH`] -- posting `bad_parent` on
+/// Refuses a `wl_subcompositor.get_subsurface` that could nest a surface
+/// deeper than [`MAX_SUBSURFACE_DEPTH`] (by the module doc's bound) -- posting `bad_parent` on
 /// `subcompositor`, which disconnects the client -- and returns whether it
 /// did. The caller must not pass a refused request on: returning without
 /// initializing its `wl_subsurface` is safe for the reasons `dispatch.rs`'s
@@ -157,15 +164,17 @@ pub(super) fn reject_too_deep(
             }
         }
     }
-    let deepest = depth
+    // An upper bound on how deep the deepest surface would be, not that
+    // depth: the height is a bound (see the module doc).
+    let deepest_bound = depth
         .saturating_add(1)
         .saturating_add(subtree_height(surface));
-    if deepest <= MAX_SUBSURFACE_DEPTH {
+    if deepest_bound <= MAX_SUBSURFACE_DEPTH {
         return false;
     }
     tracing::warn!(
         client = ?surface.client().map(|client| client.id()),
-        deepest,
+        deepest_bound,
         "refusing a wl_subsurface nested deeper than {MAX_SUBSURFACE_DEPTH}; \
          disconnecting the client"
     );
@@ -173,7 +182,7 @@ pub(super) fn reject_too_deep(
         wl_subcompositor::Error::BadParent,
         format!(
             "bad_parent: subsurfaces nest at most {MAX_SUBSURFACE_DEPTH} deep, and this one \
-             would put a surface {deepest} deep"
+             could put a surface up to {deepest_bound} deep"
         ),
     );
     true

@@ -13,9 +13,10 @@ RESOLVED 2026-09-23 (PR #227). The rule, and why, is in
 `subsurface_depth/tests/`, driving `popup_parent`'s client (now shared,
 with subsurface ops in `popup_parent/tests/subsurfaces.rs`).
 
-- **Cap: 64 levels of subsurface below a tree's root** (the surface that
-  is not itself a subsurface: a window, popup, layer surface, cursor, or
-  a plain surface with no role). Refused as `wl_subcompositor.bad_parent`,
+- **Cap: 64 levels of subsurface below a tree's root** (the surface with
+  no parent: a window, popup, layer surface, cursor, a plain surface with
+  no role, or a subsurface cut loose from its parent, which keeps its
+  role). Refused as `wl_subcompositor.bad_parent`,
   posted on the `wl_subcompositor`.
 - **Checked before Smithay sees the request**, in `dispatch.rs`'s blanket
   `request` (a new guard, `reject_too_deep_subsurface`), not in
@@ -45,11 +46,17 @@ with subsurface ops in `popup_parent/tests/subsurfaces.rs`).
   (`dispatch.rs`'s blanket `destroyed` sees every `wl_subsurface` and
   `wl_surface` go): lowering means recomputing each ancestor's height from
   all of its children, work per level in proportion to the tree's width.
-  Its one error is conservative and pinned by a test: a surface that once
-  had a subtree `h` deep, re-attached `d` levels down with `d + 1 + h > 64`,
-  is judged by the subtree after it is gone. The deepest tree measured
-  from a real client is 2 levels (mpv), so that needs trees about thirty
-  times deeper than any seen.
+  Its error is conservative only, and pinned by two tests: a surface
+  keeps the height of a subtree it has lost, and `record_link` carries
+  that stale height up to every surface it is later attached below (found
+  in review: plain `S` has 60 levels, loses them, is attached below plain
+  `R`, and `R` is then recorded 61 high though it never had more than one
+  level; `R` attached 3 deep is refused as "up to 65" when the real tree
+  would be 5). So the refusal message and the `warn` report an upper
+  bound (`could put a surface up to N deep`, `deepest_bound`), not a
+  depth. Refusing this way needs a client to have built a tree nearly 64
+  deep at some point; the deepest measured from a real client is 2 levels
+  (mpv), about thirty times shallower.
 - **Unlike the popup tree there is no second structure to drift:** a
   surface's `parent` and its parent's `children` are written together at
   all three sites (`set_parent`, `unset_parent`, `cleanup`), and only
@@ -81,10 +88,15 @@ not touch.
 ## Evidence
 
 Cache key: everything below was captured against the working tree
-committed unchanged as `3bfdeda`; the commits after it change only
-comments and docs (`git diff 3bfdeda HEAD -- crates/ | grep '^[+-][^+-]'
-| grep -v '^[+-]//!'` prints nothing). Raw artifacts: dev VM
-`/tmp/subsurf-evidence/`.
+committed unchanged as `3bfdeda`. The commits after it change comments,
+docs and tests, and, after review, the wording of the refusal: the
+message says "could put a surface up to N deep" instead of "would put a
+surface N deep", and the `warn` field `deepest` is now `deepest_bound`.
+No logic changed (`git diff 3bfdeda HEAD --
+crates/scoot/src/compositor/subsurface_depth.rs
+crates/scoot/src/compositor/dispatch.rs` shows only those). Review added
+three tests (the two stale-height cases and the loop at the walk's edge),
+not in the counts below. Raw artifacts: dev VM `/tmp/subsurf-evidence/`.
 
 Base: `7017883` exported on the dev VM with `git archive 7017883 | tar -x
 -C /tmp/subsurf-base` (the VM cannot write the 9p-mounted repo's `.git`,
