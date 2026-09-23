@@ -770,13 +770,20 @@ What to know before pointing a client at it:
   output composited instead, so a recorder or screen-share costs what it
   always did; the output goes back to direct scanout about a second after
   the last capture.
-- **The `paint_cursors` option is accepted and has no effect**, which is a
-  known deviation. Under `--headless` and `--nested` nothing draws a cursor
-  at all, so a capture never contains one. Under `--tty` the cursor is part
-  of the one framebuffer a capture is read out of, so a capture always
-  contains it, flag or no flag — except on the GPU scanout tier where the
-  cursor rides a hardware cursor plane, where no capture contains it (see
-  [tty.md](tty.md)).
+- **`paint_cursors` is honoured, on every backend and renderer.** A session
+  that asked for it (`grim -c`) gets the pointer composited into every
+  capture, exactly as the screen draws it — image, hotspot, scale, over
+  whatever is under it; a session that did not (plain `grim`) never does,
+  whichever the frame it was read from held. That includes `--headless` and
+  `--nested`, which draw no cursor on screen, and the `--tty` GPU scanout
+  tier, whose cursor rides a hardware plane. It is done by re-rendering
+  just the cursor's region for the capture, so it costs a cursor-sized
+  render on the tiers that need one; mechanics per tier in
+  [tty.md](tty.md#captures-and-the-pointer). A session that asked for the
+  pointer is also served a new frame when only the pointer moves — nothing
+  else has to redraw — while one that did not keeps waiting for the screen
+  itself to change. The pointer is only in the capture of the output it is
+  on.
 - **Cursor capture sessions are refused.** `create_pointer_cursor_session`
   itself gets no event — the cursor-session object has no `stopped` of its
   own — but the `ext_image_copy_capture_session_v1` a client gets back from
@@ -954,7 +961,8 @@ a layer surface asking politely. The global is
   an opaque backdrop" — windows, layer surfaces (on every layer including
   `overlay`) and the focus ring are not gathered into the frame at all. The
   screen is the lock surface, an opaque backdrop where it doesn't cover, and
-  the pointer cursor. A `scoot msg screenshot` reads that same framebuffer.
+  the pointer cursor. A `scoot msg screenshot` reads that same framebuffer
+  (with the pointer drawn in or left out as the request asks).
 - **Only the lock surface receives input.** Keyboard focus moves to it (or to
   nobody, if the client hasn't created one yet) the instant the lock request
   arrives, and pointer focus is moved with it, so a click can't land in the

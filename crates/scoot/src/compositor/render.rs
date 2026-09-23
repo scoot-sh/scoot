@@ -72,6 +72,7 @@ use elements::{Elements, FrameContext, ring_elements};
 use gles::{GlesBackend, GlesDevice};
 use pixman::PixmanBackend;
 
+mod capture_cursor;
 mod elements;
 mod gles;
 mod pixman;
@@ -80,6 +81,7 @@ mod primary_direct;
 #[cfg(feature = "gpu-scanout")]
 mod scanout;
 
+pub(crate) use capture_cursor::{CursorInFrame, CursorPatch};
 #[cfg(all(test, feature = "gpu-scanout"))]
 pub(crate) use primary_direct::PrimaryDirect;
 #[cfg(feature = "gpu-scanout")]
@@ -183,6 +185,14 @@ pub struct Backend {
     /// beside the target rather than re-derived from it, so every consumer
     /// reads the one number the target was actually built at.
     size: (i32, i32),
+    /// What the persistent framebuffer holds of the cursor as of the last
+    /// frame drawn into it, for the capture path to reconcile with what a
+    /// capture asked for (see `capture_cursor.rs`). Written by
+    /// [`draw_frame_with`] on every frame it draws; the scanout tier keeps
+    /// its own beside its swapchain recording instead
+    /// ([`Backend::cursor_in_frame`] reads whichever applies), so this stays
+    /// at its default there.
+    cursor: CursorInFrame,
 }
 
 /// What a renderer can import, in the shape the `zwp_linux_dmabuf_v1`
@@ -269,6 +279,7 @@ impl Backend {
                 pipeline: Pipeline::Scanout(backend),
                 damage: OutputDamageTracker::from_output(output),
                 size: (width, height),
+                cursor: CursorInFrame::default(),
             });
         }
         #[cfg(not(feature = "gpu-scanout"))]
@@ -283,6 +294,7 @@ impl Backend {
             pipeline,
             damage: OutputDamageTracker::from_output(output),
             size: (width, height),
+            cursor: CursorInFrame::default(),
         })
     }
 
@@ -891,17 +903,22 @@ pub(super) fn draw_frame(
         pipeline,
         damage,
         size,
+        cursor,
     } = backend;
     match pipeline {
         Pipeline::Pixman(cpu) => {
             let PixmanBackend { renderer, image } = cpu;
-            draw_frame_with(state, renderer, image, damage, *size, output, locked)
+            draw_frame_with(
+                state, renderer, image, damage, cursor, *size, output, locked,
+            )
         }
         Pipeline::Gles(gpu) => {
             let GlesBackend {
                 renderer, buffer, ..
             } = &mut **gpu;
-            draw_frame_with(state, renderer, buffer, damage, *size, output, locked)
+            draw_frame_with(
+                state, renderer, buffer, damage, cursor, *size, output, locked,
+            )
         }
         // A separate body, not a third `draw_frame_with` arm: this tier has
         // no read-back, no presenter hand-off and no use for `damage` at all
@@ -1002,8 +1019,9 @@ fn draw_frame_scanout(
             &elements,
             clear_color,
             direct.allowed(),
-            |buffer| {
-                captures.note_frame(buffer);
+            (output.current_scale().fractional_scale(), size),
+            |buffer, cursor| {
+                captures.note_frame(buffer, cursor);
             },
         );
         // The direct arm's half of the capture contract: the slot the
@@ -1088,12 +1106,14 @@ where
         &frame,
         renderer,
     );
+    let draws_cursor = state.frame_draws_cursor();
     let (elements, cursor_surface) = state.gather_elements(
         renderer,
         output,
         &frame,
         ring_elements,
         arrangement.as_ref(),
+        draws_cursor,
     );
     let tried_with = primary_direct::TriedWith {
         size: frame.size,
@@ -1221,11 +1241,13 @@ impl State {
 /// `T` is the renderer's own target type (a `pixman::Image` today); it is a
 /// type parameter rather than an associated type because Smithay's [`Bind`]
 /// is parameterised by the target, so one renderer may bind several kinds.
+#[allow(clippy::too_many_arguments)]
 fn draw_frame_with<R, T>(
     state: &mut State,
     renderer: &mut R,
     target: &mut T,
     damage: &mut OutputDamageTracker,
+    cursor: &mut CursorInFrame,
     size: (i32, i32),
     output: &Output,
     locked: bool,
@@ -1267,12 +1289,14 @@ where
     );
     match renderer.bind(target) {
         Ok(mut framebuffer) => {
+            let draws_cursor = state.frame_draws_cursor();
             let (elements, cursor_surface) = state.gather_elements(
                 renderer,
                 output,
                 &frame,
                 ring_elements,
                 arrangement.as_ref(),
+                draws_cursor,
             );
             outcome.cursor_surface = cursor_surface;
 
@@ -1296,6 +1320,24 @@ where
             match result {
                 Ok(render_result) => {
                     outcome.drew_a_frame = true;
+                    // The framebuffer now holds exactly this list, damaged
+                    // or not (an undamaged frame is one whose list drew the
+                    // same pixels already there), so this is what a capture
+                    // read from it finds of the cursor. A failed render
+                    // leaves the previous record with the previous pixels.
+                    // Skipped outright when the frame drew no cursor -- the
+                    // record is then the default, and the list is not
+                    // walked.
+                    *cursor = if draws_cursor {
+                        CursorInFrame::of(
+                            &elements,
+                            frame.scale.into(),
+                            Rectangle::from_size(size.into()),
+                            |_| false,
+                        )
+                    } else {
+                        CursorInFrame::default()
+                    };
                     // What `screencopy.rs` asks "have the pixels moved since
                     // this session's last capture?" with. Gated on the damage
                     // tracker having something to report rather than on

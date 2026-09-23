@@ -62,11 +62,12 @@ use smithay::backend::renderer::element::{Id, RenderElement};
 use smithay::backend::renderer::{Bind, Color32F, Renderer, Texture};
 use smithay::output::{Output, OutputModeSource};
 use smithay::reexports::drm::control::{Mode, crtc, plane};
-use smithay::utils::{Buffer, Size, Transform};
+use smithay::utils::{Buffer, Rectangle, Size, Transform};
 
 use super::layout_exporter::{LayoutKeepingExporter, LostLayouts};
 use super::present_retry::{self, PresentRetries};
 use crate::compositor::dmabuf::scanout::FormatsKey;
+use crate::compositor::render::CursorInFrame;
 
 /// The concrete `DrmCompositor` this backend drives.
 ///
@@ -725,13 +726,21 @@ impl ScanoutPresenter {
     /// is queued, no retry is armed and no warning is logged, exactly as the
     /// dumb tier simply never calls `present` when `render_output` reports no
     /// damage.
+    ///
+    /// `on_frame` is also handed what that slot holds of the cursor
+    /// ([`CursorInFrame`]), read off the `DrmCompositor`'s own answer about
+    /// which elements it put on a plane -- its cursor element and its
+    /// overlay (and underlay) elements -- rather than guessed from which
+    /// planes exist. `frame` is the output's `(scale, physical size)`, which
+    /// the cursor elements' geometry is measured and clamped in.
     pub(crate) fn render_and_queue<R, E>(
         &mut self,
         renderer: &mut R,
         elements: &[E],
         clear_color: Color32F,
         allow_primary_direct: bool,
-        mut on_frame: impl FnMut(&smithay::backend::allocator::gbm::GbmBuffer),
+        frame: (f64, (i32, i32)),
+        mut on_frame: impl FnMut(&smithay::backend::allocator::gbm::GbmBuffer, CursorInFrame),
     ) -> ScanoutFrame
     where
         R: Renderer + Bind<Dmabuf>,
@@ -786,7 +795,23 @@ impl ScanoutPresenter {
             _ => None,
         };
         if damaged && let PrimaryPlaneElement::Swapchain(element) = &result.primary_element {
-            on_frame(element.buffer());
+            let (scale, size) = frame;
+            let on_plane = |id: &Id| {
+                result
+                    .cursor_element
+                    .is_some_and(|cursor| cursor.id() == id)
+                    || result
+                        .overlay_elements
+                        .iter()
+                        .any(|overlay| overlay.id() == id)
+            };
+            let cursor = CursorInFrame::of(
+                elements,
+                scale.into(),
+                Rectangle::from_size(size.into()),
+                on_plane,
+            );
+            on_frame(element.buffer(), cursor);
         }
         // Dropped before `queue_frame`, per `RenderFrameResult`'s own doc:
         // holding it keeps a swapchain slot out of circulation.
@@ -887,9 +912,12 @@ impl ScanoutPresenter {
     /// `ext-image-copy-capture-v1` both funnel through there), paired there
     /// with an [`invalidate_scanout`](Self::invalidate_scanout) only when the
     /// forced frame needs full damage (see `render::force_needs_reset`). The cursor may still ride its
-    /// plane on a forced frame -- only the primary bits are dropped -- which is
-    /// what keeps the cursorless-where-plane-assigned capture contract
-    /// unchanged.
+    /// plane on a forced frame -- only the primary bits are dropped -- so the
+    /// forced slot may lack the cursor, or (where the plane refused it this
+    /// time) hold it. Either is recorded with the slot, and the capture path
+    /// re-renders the cursor's region to whatever the capture asked for (see
+    /// `render::capture_cursor`), so a forced frame can neither drop the
+    /// pointer from a capture that wants it nor give one two.
     pub(crate) fn arm_force_composite(&mut self) {
         self.force_composite.arm();
     }

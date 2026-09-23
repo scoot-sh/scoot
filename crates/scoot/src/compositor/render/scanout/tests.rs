@@ -46,7 +46,11 @@ fn no_export() -> Result<Dmabuf, &'static str> {
 /// miss -- what `note_frame` does for a real slot.
 fn composite(captures: &mut Captures, key: usize, dmabuf: &Dmabuf) {
     let dmabuf = dmabuf.clone();
-    captures.record(key, move || Ok::<_, &'static str>(dmabuf));
+    captures.record(
+        key,
+        move || Ok::<_, &'static str>(dmabuf),
+        CursorInFrame::default(),
+    );
 }
 
 /// What a capture reads right now: the dma-buf, or the refusal message
@@ -136,7 +140,7 @@ fn a_forced_composite_landing_in_a_pooled_slot_clears_the_mark_without_exporting
     let a = fake_dmabuf();
     composite(&mut captures, 0xa, &a);
     captures.note_direct();
-    captures.record(0xa, no_export);
+    captures.record(0xa, no_export, CursorInFrame::default());
     assert_eq!(target(&mut captures), Ok(a));
 }
 
@@ -150,7 +154,7 @@ fn a_forced_composite_whose_export_fails_keeps_the_mark() {
     let old = fake_dmabuf();
     composite(&mut captures, 0xa, &old);
     captures.note_direct();
-    captures.record(0xb, || Err("export refused"));
+    captures.record(0xb, || Err("export refused"), CursorInFrame::default());
     assert!(captures.capture_stale());
     assert_eq!(target(&mut captures), Err(REFUSE_DIRECT));
 }
@@ -163,7 +167,7 @@ fn a_failed_export_without_a_mark_keeps_serving_the_previous_frame() {
     let mut captures = Captures::default();
     let old = fake_dmabuf();
     composite(&mut captures, 0xa, &old);
-    captures.record(0xb, || Err("export refused"));
+    captures.record(0xb, || Err("export refused"), CursorInFrame::default());
     assert_eq!(target(&mut captures), Ok(old));
 }
 
@@ -203,7 +207,7 @@ fn the_force_fires_for_exactly_the_captures_that_would_refuse() {
     check(&mut captures);
     captures.note_direct();
     check(&mut captures);
-    captures.record(2, || Err("export refused"));
+    captures.record(2, || Err("export refused"), CursorInFrame::default());
     check(&mut captures);
     composite(&mut captures, 3, &fake_dmabuf());
     check(&mut captures);
@@ -251,4 +255,72 @@ fn staleness_says_why_empty_before_a_frame_and_after_a_rebuild_direct_after_a_di
     let mut first = Captures::default();
     first.note_direct();
     assert_eq!(first.staleness(), Some(Stale::Empty));
+}
+
+/// A cursor record that says "composited at `(x, y)`, 16 px square" --
+/// only its identity matters here.
+fn cursor_at(x: i32, y: i32) -> CursorInFrame {
+    CursorInFrame {
+        composited: Some(smithay::utils::Rectangle::new(
+            (x, y).into(),
+            (16, 16).into(),
+        )),
+        off_frame: false,
+    }
+}
+
+/// A cursor record for a frame whose cursor rode a plane.
+fn cursor_on_plane() -> CursorInFrame {
+    CursorInFrame {
+        composited: None,
+        off_frame: true,
+    }
+}
+
+#[test]
+fn the_cursor_record_is_written_with_the_slot_and_only_with_it() {
+    // What a capture believes about the cursor must describe the frame it
+    // reads. Both ways a slot is recorded -- a fresh export and a pool hit
+    // -- write the record; a failed export writes neither, so the previous
+    // frame keeps the previous record.
+    let mut captures = Captures::default();
+    assert_eq!(captures.cursor(), CursorInFrame::default());
+    let a = fake_dmabuf();
+    captures.record(0xa, move || Ok::<_, &'static str>(a), cursor_at(10, 20));
+    assert_eq!(captures.cursor(), cursor_at(10, 20));
+    captures.record(0xa, no_export, cursor_on_plane());
+    assert_eq!(
+        captures.cursor(),
+        cursor_on_plane(),
+        "a pool hit records too"
+    );
+    captures.record(0xb, || Err("export refused"), cursor_at(99, 99));
+    assert_eq!(
+        captures.cursor(),
+        cursor_on_plane(),
+        "an unrecorded frame must not move the record away from the frame still read"
+    );
+}
+
+#[test]
+fn a_direct_mark_leaves_the_cursor_record_with_the_composite_it_describes() {
+    // A direct frame records no slot, and neither does it touch the record:
+    // the capture that follows forces a composite, which records both anew.
+    let mut captures = Captures::default();
+    let a = fake_dmabuf();
+    captures.record(0xa, move || Ok::<_, &'static str>(a), cursor_on_plane());
+    captures.note_direct();
+    assert_eq!(captures.cursor(), cursor_on_plane());
+    captures.record(0xa, no_export, cursor_at(1, 2));
+    assert_eq!(captures.cursor(), cursor_at(1, 2));
+    assert!(!captures.capture_stale());
+}
+
+#[test]
+fn forgetting_slots_forgets_the_cursor_record_with_the_recording() {
+    let mut captures = Captures::default();
+    let a = fake_dmabuf();
+    captures.record(0xa, move || Ok::<_, &'static str>(a), cursor_at(3, 4));
+    captures.forget_slots();
+    assert_eq!(captures.cursor(), CursorInFrame::default());
 }

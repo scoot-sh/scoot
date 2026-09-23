@@ -204,10 +204,11 @@ impl CompositorHandler for State {
     ///   id (wayland-backend 0.3.17 `rs/server_impl/mod.rs`), so a stale
     ///   entry can never equal a live surface.
     fn destroyed(&mut self, surface: &WlSurface) {
-        if self.cursor.forget_surface(surface) && self.tty.is_some() {
-            // The cursor's shape just changed to the fallback; only `--tty`
-            // draws one at all, same gate as `cursor_image` below.
-            self.request_render();
+        if self.cursor.forget_surface(surface) {
+            // The cursor's shape just changed to the fallback: a redraw
+            // where frames draw it, a capture tick where only captures do --
+            // the same path as `cursor_image` below.
+            self.cursor_changed();
         }
         if self.forget_lock_surface(surface) {
             // Unconditional, unlike the cursor above: what the lock screen
@@ -685,13 +686,13 @@ impl SeatHandler for State {
         image: smithay::input::pointer::CursorImageStatus,
     ) {
         self.cursor.set_status(image);
-        // Only `--tty` ever draws a cursor element (see `cursor.rs`'s module
-        // doc), so only it needs a redraw when the request changes -- a
-        // gratuitous render on every such event under headless/nested would
-        // do real work for a status this project never looks at there.
-        if self.tty.is_some() {
-            self.request_render();
-        }
+        // Only `--tty` ever draws a cursor element into a frame (see
+        // `cursor.rs`'s module doc), so only it needs a redraw when the
+        // request changes -- a gratuitous render on every such event under
+        // headless/nested would do real work for nothing on screen. A capture
+        // that asked for the pointer still sees the new image: see
+        // `cursor_changed`.
+        self.cursor_changed();
     }
 
     fn focus_changed(&mut self, seat: &Seat<Self>, focused: Option<&WlSurface>) {

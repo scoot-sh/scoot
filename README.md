@@ -67,8 +67,7 @@ Linux, and daily-driven on `--tty`** (2026-09-18).
   show that way, so an app that listens can pick one (not yet seen with a
   real app — Test 6). While something records or streams the screen, scoot
   composites as usual. Not there yet:
-  every other window is still composited, and where the display has a
-  hardware cursor plane the pointer is missing from screenshots. Under
+  every other window is still composited. Under
   `--headless`/`--nested` the GPU speedup does not apply: `gles` there
   still copies every frame back to the CPU, and on a machine without a real
   GPU that measured 18–31x *slower* than pixman.
@@ -144,6 +143,9 @@ scootctl type "hello"
 
 `scootctl` is the client every example on this page uses; `scoot msg ...`
 is the same client kept as a permanent alias on the compositor binary.
+Screenshots show the pointer, the same way whichever backend and renderer
+the session runs (`scootctl screenshot --no-cursor` leaves it out; `grim`
+draws it with `-c`) — see [docs/ipc.md](docs/ipc.md#the-pointer-in-a-screenshot).
 
 `--tty` needs a seat (`seatd` or logind) with a DRM device on it; everything
 about device choice, hotplug and modes is in [docs/tty.md](docs/tty.md). Run
@@ -234,7 +236,7 @@ refusing: `[tty] gpu` naming a device that will not open, and
 | List, focus and close windows from a taskbar | `ext-foreign-toplevel-list-v1` **and** the wlr one | [protocols.md](docs/protocols.md#window-lists-two-protocols) |
 | Lock the screen | `ext-session-lock-v1`, compositor-enforced | [protocols.md](docs/protocols.md#screen-locking-ext-session-lock-v1) |
 | Auto-lock or dim on idle | `ext-idle-notify-v1` + `idle-inhibit-v1` (`swayidle`) | [protocols.md](docs/protocols.md#idle-detection) |
-| Screenshot or screen-share | `ext-image-copy-capture-v1` (`grim`), plus `scootctl screenshot` | [protocols.md](docs/protocols.md#screen-capture-ext-image-copy-capture-v1) |
+| Screenshot or screen-share | `ext-image-copy-capture-v1` (`grim`; the pointer when asked, `grim -c`), plus `scootctl screenshot` | [protocols.md](docs/protocols.md#screen-capture-ext-image-copy-capture-v1) |
 | Run a GPU-rendering client, with or without a GPU on the compositor | `zwp_linux_dmabuf_v1`, formats taken from whichever renderer is active (the GPU driver's own, YUV included, under `gles`) | [protocols.md](docs/protocols.md#gpu-rendering-clients-zwp_linux_dmabuf_v1) |
 | Clipboard manager, middle-click paste | `wlr-`/`ext-data-control`, `primary-selection-v1` | [protocols.md](docs/protocols.md#clipboard-and-primary-selection) |
 | Night light | `wlr-gamma-control-v1` (`wlsunset`, `gammastep`) | [protocols.md](docs/protocols.md#night-light-wlr-gamma-control-v1) |

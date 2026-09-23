@@ -3,7 +3,10 @@
 //! `--headless` has no display to draw one on, and `--nested` already shows
 //! the host compositor's own cursor on top -- so this backend-neutral module
 //! knows nothing about which backend is active; `render/elements.rs`'s
-//! `gather_elements` is the one that gates its use to `self.tty.is_some()`.
+//! `State::frame_draws_cursor` is the one that gates its use in frames to
+//! `--tty`. Captures are the exception: one that asks for the pointer gets
+//! these same elements drawn into it on every backend
+//! (`render/capture_cursor.rs`).
 //!
 //! # Two sources of cursor pixels
 //!

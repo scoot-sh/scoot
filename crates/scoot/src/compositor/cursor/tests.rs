@@ -582,7 +582,19 @@ impl Fixture {
         Self::start(Appearance::default())
     }
 
-    fn start(mut appearance: Appearance) -> (Self, bool) {
+    /// Like [`Fixture::new`], but with a real headless render target of
+    /// [`CANVAS`] pixels square, for the tests that go through the
+    /// compositor's own frame and capture paths instead of
+    /// [`Fixture::frame`]'s offscreen render.
+    fn with_render_target() -> Self {
+        Self::start_on(Appearance::default(), Some(CANVAS)).0
+    }
+
+    fn start(appearance: Appearance) -> (Self, bool) {
+        Self::start_on(appearance, None)
+    }
+
+    fn start_on(mut appearance: Appearance, canvas: Option<i32>) -> (Self, bool) {
         // Force the drawn shapes, whatever the machine running the suite has
         // installed. Every pixel assertion below describes `shapes.rs`'s own
         // output; with `Appearance::default()`'s `cursor_theme: None` these
@@ -591,9 +603,13 @@ impl Fixture {
         // developer's desktop. The themed path is covered hermetically in
         // `cursor/theme/tests.rs`.
         appearance.cursor_theme = NO_THEME.map(str::to_owned);
-        // No backend: nothing here renders through the compositor's own
-        // pipeline. [`Fixture::frame`] draws the cursor elements offscreen.
-        let mut fixture = Harness::bare(appearance);
+        // No backend unless asked for: most tests here do not render
+        // through the compositor's own pipeline -- [`Fixture::frame`] draws
+        // the cursor elements offscreen.
+        let mut fixture = match canvas {
+            Some(canvas) => Harness::headless(appearance, canvas),
+            None => Harness::bare(appearance),
+        };
         let (id_tx, id_rx) = channel();
         fixture.spawn(move |stream, steps, acks| run_client(stream, id_tx, steps, acks));
 
@@ -706,6 +722,57 @@ fn a_client_cursor_surface_is_drawn_instead_of_the_fallback() {
     );
     assert_eq!(canvas.at(46, 43), CLEAR_BGRA, "one pixel above the image");
     assert_eq!(canvas.at(46, 68), CLEAR_BGRA, "one pixel below the image");
+}
+
+/// A client's own cursor surface -- hotspot, `wl_surface.offset` and a
+/// subsurface of its own -- reaches a capture that asked for the pointer
+/// exactly as a frame that composites the cursor draws it, on a backend
+/// whose frames never do (see `render::capture_cursor`).
+#[test]
+fn a_client_cursor_surface_reaches_a_capture_as_a_frame_would_draw_it() {
+    let mut fixture = Fixture::with_render_target();
+    fixture.run(Step::CommitCursorBuffer {
+        size: 24,
+        color: CLIENT_BGRA,
+    });
+    fixture.run(Step::SetCursor { hotspot: (4, 6) });
+    fixture.run(Step::OffsetCursorSurface { x: 2, y: -3 });
+    fixture.run(Step::AddSubsurface {
+        size: 6,
+        color: CHILD_BGRA,
+        offset: (3, 3),
+    });
+    let id = fixture.state.outputs.primary_id().expect("an output");
+
+    fixture.state.frame_cursor_for_test = Some(true);
+    let with = fixture.render();
+    fixture.state.frame_cursor_for_test = None;
+    let without = fixture.render();
+    assert!(
+        crate::compositor::test_support::contains(&with, CLIENT_BGRA)
+            && crate::compositor::test_support::contains(&with, CHILD_BGRA),
+        "the oracle frame must hold both of the client's cursor surfaces"
+    );
+    assert!(
+        !crate::compositor::test_support::contains(&without, CLIENT_BGRA),
+        "a headless frame never holds the cursor"
+    );
+
+    let captured = fixture
+        .state
+        .capture_pixels_for(Some(id), true)
+        .expect("a capture")
+        .bgra;
+    assert!(
+        captured == with,
+        "the capture must be the frame with the client's cursor composited in"
+    );
+    let bare = fixture
+        .state
+        .capture_pixels_for(Some(id), false)
+        .expect("a capture")
+        .bgra;
+    assert!(bare == without, "and without it when not asked");
 }
 
 #[test]

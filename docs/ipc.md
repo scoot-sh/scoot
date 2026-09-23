@@ -47,7 +47,7 @@ compositor running in a VM.
 | `windows` | Every window: id, app id, title, icon, focus, popup grab. |
 | `action ACTION [ARGUMENT...]` | Run a layout action — see [Actions](#actions). |
 | `reload` | Re-read the config file the session started from and re-apply what can be re-applied live (layout, output scale, appearance, keybindings, new autostart spawn entries) — see [configuration.md](configuration.md#reloading-the-config). Answers `reloaded` with applied-vs-refused field lists, or `error` (running config untouched) when the file cannot load or validate. |
-| `screenshot [--output ID] [--out FILE]` | Capture the screen as PNG. Without `--out`, the PNG goes to stdout. `--output` names which output to capture; every output has a framebuffer of its own, so the capture is that output's own pixels. An id naming no output is refused rather than answered with another output's pixels. Omitting it always means the first output (id 1). |
+| `screenshot [--output ID] [--out FILE] [--no-cursor]` | Capture the screen as PNG. Without `--out`, the PNG goes to stdout. `--output` names which output to capture; every output has a framebuffer of its own, so the capture is that output's own pixels. An id naming no output is refused rather than answered with another output's pixels. Omitting it always means the first output (id 1). The pointer is drawn in unless `--no-cursor` — see [The pointer in a screenshot](#the-pointer-in-a-screenshot). |
 | `pointer move X Y` | Move the pointer to logical coordinates. |
 | `pointer click X Y [left\|right\|middle]` | Move, then press and release. |
 | `pointer button left\|right\|middle press\|release` | Half a click, for drags. |
@@ -263,6 +263,38 @@ redraws on its own schedule. With a `waybar` clock ticking once a second, a
 short `--quiet-ms` settles normally while a long one never does and times
 out. Keep `--quiet-ms` below whatever your bar's own redraw interval is — the
 same caveat an animated cursor carries.
+
+### The pointer in a screenshot
+
+**A screenshot shows the pointer, the same way on every backend and
+renderer**, unless the request says not to. On the wire that is an optional
+`cursor` field on the request:
+
+```json
+{"type": "screenshot"}
+{"type": "screenshot", "cursor": false}
+```
+
+Omitted means drawn in (`SCREENSHOT_CURSOR_DEFAULT` in `scoot-ipc`);
+`false` leaves it out, and `scootctl screenshot --no-cursor` sends that.
+"The same everywhere" is the point: an agent's script sees the pointer the
+same way under `--headless` and `--nested` (whose screens have no drawn
+cursor at all), on `--tty`'s default renderer, and on the GPU scanout tier
+(whose cursor rides a hardware plane) — the pointer's own image, hotspot and
+scale, at its position on the captured output and on no other output. A
+fresh session's pointer sits at the centre of the first output, so a
+default screenshot shows it there until something moves it. Leave it out
+to diff two screenshots without the pointer showing up as a difference, or
+to read the pixels it would cover. (Until this field existed, `--headless`
+and `--nested` screenshots never showed the pointer.)
+
+The field was added without an IPC protocol bump: a request that omits it is
+the old request byte for byte, so older clients are unaffected. The flip
+side: a server that predates the field ignores it rather than refusing it,
+so on one of those `cursor: false` has no effect, and whether the pointer
+shows depends on the backend as it used to (drawn only under `--tty`, and
+missing where a cursor plane carries it). `version` names the running
+server's own build.
 
 ## What the socket refuses
 

@@ -228,11 +228,15 @@ running with no GPU at all is a hard requirement here, not a fallback tier.
   built `Kind::Unspecified`), so an overlay plane carries at most the
   cursor -- never a window; candidate-marking is
   [`backlog/core/gpu-overlay-window-candidates.md`](backlog/core/gpu-overlay-window-candidates.md).
-  One consequence to know: a capture (IPC screenshots,
-  `ext-image-copy-capture-v1`) reads the primary plane only, so on a
-  session whose cursor is plane-assigned the capture shows the screen
-  *without* the cursor; where the cursor is composited, captures keep
-  showing it. The startup log says which it is (`drm: scanout cursor planes
+  A capture (IPC screenshots, `ext-image-copy-capture-v1`) reads the
+  primary plane's swapchain slot, which lacks a plane-assigned cursor --
+  so every capture reconciles the cursor with what it asked for rather
+  than with what the slot happens to hold: the cursor's region is
+  re-rendered from the frame's own element list, with the pointer or
+  without it, and written over the copy (see
+  [Captures and the pointer](#captures-and-the-pointer)). The pointer in a
+  capture is therefore the same on this tier as on the dumb tier. The
+  startup log still says which planes exist (`drm: scanout cursor planes
   cursor_planes=N overlay_planes=M ...`). It has
   now run on a real GPU: on an Apple M2 under Asahi Linux (`2560x1600@60`)
   it costs **4–5x less compositor CPU** than the default dumb-buffer tier
@@ -407,9 +411,11 @@ The cursor plane is attempted
 where the CRTC exposes one (the dev VM's virtio-gpu does: one `Cursor` plane
 per `drm_info`) and silently not elsewhere; overlay planes ride along whole
 from the same inventory (virtio exposes none: `overlay_planes=0`) and fall
-back per frame the same way. A plane-assigned cursor is absent
-from captures, which read the primary plane only -- and no window can ride an
-overlay yet (nothing is marked a scanout candidate). A capture of a frame
+back per frame the same way. A plane-assigned cursor is not in the
+swapchain slot captures read, so captures draw it back in when they ask for
+the pointer (see [Captures and the pointer](#captures-and-the-pointer)) --
+and no window can ride an overlay yet (nothing is marked a scanout
+candidate). A capture of a frame
 that went direct forces one composite frame first, and a capture stream
 keeps the output composited, so captures stay correct throughout --
 watched working on the dev VM. Whether `apple,dcp`
@@ -434,3 +440,32 @@ build` keeps producing the binary that does.
 `--renderer gles` is *not* in the same position and needs no feature:
 libEGL and libGLESv2 are `dlopen`ed, so a GPU-less machine only fails when
 that renderer is actually asked for, at startup, with a message.
+
+## Captures and the pointer
+
+Whether a capture shows the pointer is decided by the capture, never by
+the tier: an IPC `screenshot` draws it unless asked not to (`cursor:
+false`, `scootctl screenshot --no-cursor`), and an
+`ext-image-copy-capture-v1` session draws it exactly when it asked for
+`paint_cursors` (`grim -c`). What each tier's own frame holds differs, and
+the capture path reconciles the two:
+
+| Tier | The frame a capture reads | Pointer asked for | Pointer not asked for |
+| --- | --- | --- | --- |
+| dumb (pixman) | always holds the cursor | nothing to do | cursor region re-rendered without it |
+| GPU scanout, cursor on a plane | never holds it | cursor region re-rendered with it | nothing to do |
+| GPU scanout, plane refused this frame | holds it | nothing to do | re-rendered without it |
+| `--headless`, `--nested` | never holds it (no cursor on screen) | re-rendered with it | nothing to do |
+
+"Re-rendered" means the region under the cursor -- where it is now, plus
+where the frame drew it if that differs -- is drawn again from the frame's
+own element list by the session's own renderer, into a cursor-sized target,
+and written over the captured copy. So the pointer in a capture is the
+same image, hotspot and scale the screen shows, a capture can never end up
+with two of them (the region is replaced, not blended over), and where a
+cursor rides an overlay plane *under* the primary (an underlay, which
+leaves a transparent hole in the swapchain slot) the hole is filled. Which
+elements the frame put on a plane is read from the `DrmCompositor`'s own
+answer for that frame, not guessed from the plane inventory. The cost is a
+cursor-sized render per capture on the tiers that need it, and nothing on
+the ones that do not.

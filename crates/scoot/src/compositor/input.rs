@@ -331,13 +331,14 @@ impl State {
         // doc), so only it needs a redraw on plain motion -- headless and
         // nested have nothing on screen that changes when the pointer moves
         // without also pressing/scrolling/committing, and marking them
-        // dirty here would cost a real render for no visible effect.
+        // dirty here would cost a real render for no visible effect. What
+        // they do have is capture sessions that asked for the pointer, which
+        // `cursor_changed` keeps current without a render.
         // libinput can report motion at 500-1000Hz while the display flips
-        // at ~60Hz; this only marks the frame dirty; `render()` still runs
-        // at most once per frame tick, not once per event.
-        if self.tty.is_some() {
-            self.request_render();
-        }
+        // at ~60Hz; this only marks the frame dirty (or arms the tick);
+        // `render()` still runs at most once per frame tick, not once per
+        // event.
+        self.cursor_changed();
     }
 
     /// Whether this motion will deliver a pointer `enter` to a client

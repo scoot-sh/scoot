@@ -22,7 +22,7 @@ pub use action::{Action, Horizontal, Vertical};
 pub use client::Client;
 pub use codec::{decode, encode, read_message, read_message_buffered, write_message};
 pub use key::{KeyCombo, Modifier, ParseKeyComboError};
-pub use request::{PointerButton, Request};
+pub use request::{PointerButton, Request, SCREENSHOT_CURSOR_DEFAULT};
 pub use response::{OutputSnapshot, Rect, Response, Screenshot, WindowSnapshot};
 pub use socket::{SOCKET_ENV, socket_path};
 

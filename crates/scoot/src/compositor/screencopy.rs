@@ -137,22 +137,26 @@
 //!
 //! ## Cursors
 //!
-//! `create_session`'s `paint_cursors` option is accepted and has no effect,
-//! and this is a **known deviation** from the protocol ("the cursor must not be
-//! composited onto the frame if this flag is not set"), recorded here rather
-//! than left to be discovered:
+//! `create_session`'s `paint_cursors` option is honoured, on every backend
+//! and renderer: a session that asked for it gets the pointer composited
+//! into every capture, one that did not never does. What the frame a
+//! capture reads holds of the cursor is a property of the tier -- nothing
+//! under `--headless`/`--nested`, always the cursor on `--tty`'s dumb tier,
+//! and on the GPU scanout tier the cursor only where no KMS plane carried
+//! it -- so [`deliver`] reconciles each session's copy with its request by
+//! re-rendering just the cursor's region, with the pointer or without it
+//! (`render::capture_cursor` has the mechanism and why it is a re-render
+//! rather than a blend). At most one region per answer per output per tick,
+//! shared by every session that asked the same; none at all where the frame
+//! already matches.
 //!
-//! - under `--headless` and `--nested` nothing draws a cursor at all (see
-//!   `cursor.rs`), so a capture never contains one whatever the flag says;
-//! - under `--tty` on the dumb tier the cursor is a render element in the one
-//!   framebuffer this module reads back, so a capture always contains it;
-//! - under `--tty` on the GPU scanout tier the cursor is in the capture only
-//!   where no KMS plane carries it (a cursor plane, or an overlay plane on
-//!   a CRTC that has overlays but no cursor plane): a plane-assigned cursor
-//!   reaches the screen through its own commit and is never drawn into the
-//!   swapchain slot the capture reads (see `render::scanout`'s module doc).
-//!   The startup log says which it is (`drm: scanout cursor planes` with
-//!   both counts).
+//! A session that asked for the pointer also counts the pointer as its
+//! content for the "has anything changed" test ([`Capture::due`]): where no
+//! frame draws the cursor, moving it redraws nothing and leaves
+//! [`State::frame_serial`] alone, so such a session is keyed on
+//! [`State::cursor_serial`] as well, and `State::cursor_changed` wakes the
+//! frame tick for it. A session that did not ask is unaffected by the
+//! pointer.
 //!
 //! What a capture is *never* missing on any tier is a window. On the scanout
 //! tier a primary-direct frame (a fullscreen window covering the output, see
@@ -170,13 +174,8 @@
 //! pixel path to keep correct.
 //!
 //! `scoot msg screenshot` reads through the same buffer and follows the same
-//! rule on all three.
-//!
-//! Honouring the flag would mean a second render of the whole output with the
-//! cursor element dropped, i.e. doubling the cost of the thing this module
-//! spends most of its time on, for a flag whose only effect is on the one
-//! backend that has a pointer to draw. `scoot msg screenshot` has the same
-//! property today for the same reason.
+//! rules on all three, with its own `cursor` request field in place of
+//! `paint_cursors` (drawn in unless the request says otherwise).
 //!
 //! `create_pointer_cursor_session` is refused outright (Smithay's default
 //! `cursor_capture_constraints` returns `None`): a cursor session captures the
@@ -250,7 +249,7 @@ use smithay::wayland::image_copy_capture::{
 use smithay::wayland::shm::with_buffer_contents_mut;
 
 use super::State;
-use super::render::{Backend, CaptureStage};
+use super::render::{Backend, CaptureStage, CursorPatch};
 
 #[cfg(test)]
 mod tests;
@@ -499,12 +498,16 @@ struct Capture {
     /// behaviour a conforming client cannot tell from the protocol error it
     /// should have got.
     pending: Option<Frame>,
-    /// [`State::frame_serial`](super::State) as of this session's last
-    /// delivered capture, or `None` while it has delivered none.
+    /// Whether this session asked for the pointer in its captures
+    /// (`paint_cursors` at `create_session`). Read once, when the session is
+    /// made: the option belongs to the session and cannot change after.
+    paint_cursors: bool,
+    /// The [`Serials`] as of this session's last delivered capture (see
+    /// [`Capture::key`]), or `None` while it has delivered none.
     ///
     /// `None` is what makes a session's first frame exempt from waiting for
     /// the screen to change; see this module's doc.
-    delivered: Option<u64>,
+    delivered: Option<(u64, u64)>,
     /// When this session's newest `capture` request arrived, or `None`
     /// while it has made none.
     ///
@@ -537,16 +540,41 @@ fn requested_recently(requested: Option<Instant>, now: Instant) -> bool {
     requested.is_some_and(|at| now.saturating_duration_since(at) < STREAM_WINDOW)
 }
 
+/// The two counters a capture's "has the source changed" test reads:
+/// [`State::frame_serial`](super::State) (the pixels were redrawn) and
+/// [`State::cursor_serial`](super::State) (the pointer moved or changed
+/// image). Read together, once per tick.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Serials {
+    frame: u64,
+    cursor: u64,
+}
+
 impl Capture {
+    /// What this session's content is keyed on: the frame serial, plus the
+    /// cursor serial only for a session that asked for the pointer. A
+    /// session that did not never sees the cursor, so a pointer that moves
+    /// without anything redrawing is no change to it -- and must not cost it
+    /// a copy.
+    fn key(&self, serials: Serials) -> (u64, u64) {
+        let cursor = if self.paint_cursors {
+            serials.cursor
+        } else {
+            0
+        };
+        (serials.frame, cursor)
+    }
+
     /// Whether this session's parked frame should be copied on this tick.
     ///
-    /// The first frame of a session always is. A later one only once the
-    /// screen has actually been redrawn since the previous delivery -- which
-    /// the protocol explicitly permits waiting for, and which is what keeps a
-    /// live-preview client from costing a full framebuffer copy per tick on a
-    /// desktop that is not moving.
-    fn due(&self, serial: u64) -> bool {
-        self.pending.is_some() && self.delivered != Some(serial)
+    /// The first frame of a session always is. A later one only once its
+    /// source has actually changed since the previous delivery -- the screen
+    /// redrawn, or, for a session that asked for the pointer, the pointer
+    /// moved -- which the protocol explicitly permits waiting for, and which
+    /// is what keeps a live-preview client from costing a full framebuffer
+    /// copy per tick on a desktop that is not moving.
+    fn due(&self, serials: Serials) -> bool {
+        self.pending.is_some() && self.delivered != Some(self.key(serials))
     }
 }
 
@@ -588,6 +616,16 @@ impl Screencopy {
             capture.output == Some(output)
                 && (capture.pending.is_some() || requested_recently(capture.requested, now))
         })
+    }
+
+    /// Whether some session that asked for the pointer has a frame parked:
+    /// the one case where a cursor change with nothing redrawn owes the
+    /// frame tick a wake-up (see `State::cursor_changed`). A scan of a list
+    /// that is empty unless some client is capturing.
+    pub(super) fn cursor_frame_parked(&self) -> bool {
+        self.sessions
+            .iter()
+            .any(|capture| capture.paint_cursors && capture.pending.is_some())
     }
 
     /// Creates the `ext_image_copy_capture_manager_v1` and
@@ -746,9 +784,12 @@ impl ImageCopyCaptureHandler for State {
             .get::<WeakOutput>()
             .and_then(|weak| weak.upgrade())
             .and_then(|output| self.outputs.id_of(&output));
+        // Read once: the option is fixed for the session's life.
+        let paint_cursors = session.draw_cursor();
         self.screencopy.sessions.push(Capture {
             session,
             output,
+            paint_cursors,
             pending: None,
             delivered: None,
             #[cfg(feature = "gpu-scanout")]
@@ -849,12 +890,12 @@ impl State {
     /// has no render target from a different one would do the same -- so a
     /// missing target fails its sessions instead.
     pub(super) fn service_captures(&mut self) {
-        let serial = self.frame_serial;
+        let serials = self.capture_serials();
         if !self
             .screencopy
             .sessions
             .iter()
-            .any(|capture| capture.due(serial))
+            .any(|capture| capture.due(serials))
         {
             return;
         }
@@ -875,7 +916,7 @@ impl State {
         // specifically not a copy of some other output, which is what
         // answering it from any framebuffer would be.
         for capture in &mut self.screencopy.sessions {
-            if capture.due(serial) && capture.output.is_none() {
+            if capture.due(serials) && capture.output.is_none() {
                 if let Some(frame) = capture.pending.take() {
                     frame.fail(CaptureFailureReason::Stopped);
                 }
@@ -887,7 +928,7 @@ impl State {
         let mut ids: Vec<OutputId> = Vec::new();
         for capture in &self.screencopy.sessions {
             if let Some(id) = capture.output {
-                if capture.due(serial) && !ids.contains(&id) {
+                if capture.due(serials) && !ids.contains(&id) {
                     ids.push(id);
                 }
             }
@@ -904,7 +945,7 @@ impl State {
         // deliveries stamp the frame they actually read rather than the one
         // this tick started with.
         #[cfg(feature = "gpu-scanout")]
-        let serial = self.frame_serial;
+        let serials = self.capture_serials();
         let presented = Duration::from(self.screencopy.clock.now());
         // Read here, on the tick the captures are served on, rather than
         // cached: see `xrgb_needs_forcing`. No TOCTOU between this and the
@@ -920,19 +961,38 @@ impl State {
                 // than return. Failed, never served from another output.
                 fail_due(
                     &mut self.screencopy.sessions,
-                    serial,
+                    serials,
                     CaptureFailureReason::Unknown,
                     Some(id),
                 );
                 continue;
             };
+            // The cursor each due session asked for, drawn into (or taken
+            // out of) its copy: at most one region render per answer --
+            // with the pointer, without it -- shared by every session on
+            // this output that asked the same, and none at all when the
+            // frame already matches (see `render::capture_cursor`).
+            let (with, without) = cursor_modes_due(&self.screencopy.sessions, serials, id);
+            let patches = CursorPatches {
+                with: if with {
+                    self.capture_cursor_patch(&mut backend, id, true)
+                } else {
+                    None
+                },
+                without: if without {
+                    self.capture_cursor_patch(&mut backend, id, false)
+                } else {
+                    None
+                },
+            };
             deliver(
                 &mut backend,
                 &mut self.screencopy.sessions,
-                serial,
+                serials,
                 presented,
                 force_xrgb_alpha,
                 id,
+                &patches,
             );
             self.put_backend(id, backend);
         }
@@ -944,6 +1004,14 @@ impl State {
         // guarantee, and a flush with nothing queued costs no syscall (see
         // `mod.rs`'s `post_dispatch`).
         let _ = self.display_handle.flush_clients();
+    }
+
+    /// The two counters a session's due test reads, as of now.
+    fn capture_serials(&self) -> Serials {
+        Serials {
+            frame: self.frame_serial,
+            cursor: self.cursor_serial,
+        }
     }
 
     /// Re-advertises the buffer size to every live session.
@@ -1005,10 +1073,11 @@ fn constraints(backend: &Backend) -> BufferConstraints {
 fn deliver(
     backend: &mut Backend,
     sessions: &mut [Capture],
-    serial: u64,
+    serials: Serials,
     presented: Duration,
     force_xrgb_alpha: bool,
     only: OutputId,
+    patches: &CursorPatches,
 ) {
     let (width, height) = backend.size();
 
@@ -1028,11 +1097,12 @@ fn deliver(
         write_due_captures(
             pixels,
             sessions,
-            serial,
+            serials,
             presented,
             force_xrgb_alpha,
             (width, height),
             only,
+            patches,
         )
     });
     if let Err(failure) = outcome {
@@ -1050,8 +1120,44 @@ fn deliver(
                 "could not map the framebuffer for a screen capture"
             ),
         }
-        fail_due(sessions, serial, CaptureFailureReason::Unknown, Some(only));
+        fail_due(sessions, serials, CaptureFailureReason::Unknown, Some(only));
     }
+}
+
+/// The cursor regions one output's captures are patched with on one tick:
+/// `with` for the sessions that asked for the pointer, `without` for the
+/// rest. `None` is "the frame as read already matches" (or the region could
+/// not be drawn, which `State::capture_cursor_patch` has logged).
+struct CursorPatches {
+    with: Option<CursorPatch>,
+    without: Option<CursorPatch>,
+}
+
+impl CursorPatches {
+    fn for_session(&self, capture: &Capture) -> Option<&CursorPatch> {
+        if capture.paint_cursors {
+            self.with.as_ref()
+        } else {
+            self.without.as_ref()
+        }
+    }
+}
+
+/// Which cursor answers the due sessions on `only` want this tick: `(with,
+/// without)`. Only the answers someone is waiting for get rendered.
+fn cursor_modes_due(sessions: &[Capture], serials: Serials, only: OutputId) -> (bool, bool) {
+    let mut modes = (false, false);
+    for capture in sessions {
+        if capture.output != Some(only) || !capture.due(serials) {
+            continue;
+        }
+        if capture.paint_cursors {
+            modes.0 = true;
+        } else {
+            modes.1 = true;
+        }
+    }
+    modes
 }
 
 /// Writes one read-back frame into every due capture session on `only`.
@@ -1059,14 +1165,16 @@ fn deliver(
 /// Split out of [`deliver`] only so the read-back's callback stays readable;
 /// the `(width, height)` pair is the backend's own size, which is also what
 /// every client's buffer was sized against.
+#[allow(clippy::too_many_arguments)]
 fn write_due_captures(
     pixels: &[u8],
     sessions: &mut [Capture],
-    serial: u64,
+    serials: Serials,
     presented: Duration,
     force_xrgb_alpha: bool,
     (width, height): (i32, i32),
     only: OutputId,
+    patches: &CursorPatches,
 ) {
     // pixman lays a 32-bit image out at `stride * height` bytes with the
     // stride rounded up to a multiple of four -- i.e. exactly `width * 4` for
@@ -1085,7 +1193,7 @@ fn write_due_captures(
             len = pixels.len(),
             "the framebuffer read back too small to capture"
         );
-        fail_due(sessions, serial, CaptureFailureReason::Unknown, Some(only));
+        fail_due(sessions, serials, CaptureFailureReason::Unknown, Some(only));
         return;
     }
 
@@ -1097,7 +1205,7 @@ fn write_due_captures(
         if capture.output != Some(only) {
             continue;
         }
-        if !capture.due(serial) {
+        if !capture.due(serials) {
             continue;
         }
         // Checked here rather than left to the write below: a session that has
@@ -1123,9 +1231,10 @@ fn write_due_captures(
             height,
             stride,
             force_xrgb_alpha,
+            patches.for_session(capture),
         ) {
             Ok(()) => {
-                capture.delivered = Some(serial);
+                capture.delivered = Some(capture.key(serials));
                 // Full damage every time, not the damage tracker's. A session
                 // may sit through several redraws before its next frame
                 // arrives, so the real answer would have to be accumulated
@@ -1148,7 +1257,7 @@ fn write_due_captures(
 /// output's captures, which would be answered, not just noisy.
 fn fail_due(
     sessions: &mut [Capture],
-    serial: u64,
+    serials: Serials,
     reason: CaptureFailureReason,
     only: Option<OutputId>,
 ) {
@@ -1156,7 +1265,7 @@ fn fail_due(
         if only.is_some_and(|only| capture.output != Some(only)) {
             continue;
         }
-        if !capture.due(serial) {
+        if !capture.due(serials) {
             continue;
         }
         if let Some(frame) = capture.pending.take() {
@@ -1182,6 +1291,14 @@ fn fail_due(
 /// - **The reach of the last row**, in `i64`, so no product of two client
 ///   numbers can wrap an `i32` or a `usize` on the way to a pointer.
 ///
+/// `patch`, when there is one, is the session's cursor region (see
+/// `render::capture_cursor`), written over the frame's own pixels row by row
+/// as each row is copied -- so the `Xrgb8888` opacity pass below covers it
+/// too. It is checked against the frame the same way the client's numbers
+/// are checked against the buffer, and one that does not fit is dropped
+/// whole (the capture keeps the frame's own pixels there) rather than
+/// written in part.
+///
 /// Returns the failure reason to send the client, never a panic and never a
 /// partial write.
 fn write_capture(
@@ -1191,8 +1308,21 @@ fn write_capture(
     height: i32,
     stride: usize,
     force_xrgb_alpha: bool,
+    patch: Option<&CursorPatch>,
 ) -> Result<(), CaptureFailureReason> {
     let row = width as i64 * BYTES_PER_PIXEL as i64;
+    let patch = patch.filter(|patch| {
+        let fits = patch.fits(width, height);
+        if !fits {
+            tracing::warn!(
+                rect = ?patch.rect,
+                width,
+                height,
+                "a capture's cursor region does not fit the frame; leaving the frame as read"
+            );
+        }
+        fits
+    });
     with_buffer_contents_mut(buffer, |ptr, len, data| {
         // The caller only ever passes the framebuffer's own size, which is
         // positive by construction -- but this is the one function that turns
@@ -1239,9 +1369,22 @@ fn write_capture(
             // client write can only race with the compositor's own data,
             // never observe uninitialized memory -- the worst case is the
             // client corrupting its own buffer, not a leak of anything else.
+            // The cursor region's write stays inside the same row: its span
+            // starts at `rect.x` and is `rect.w` pixels long, and `fits`
+            // proved `rect.x + rect.w <= width`.
             unsafe {
                 let dst = ptr.add((data.offset as i64 + y * dst_stride) as usize);
                 std::ptr::copy_nonoverlapping(src.as_ptr(), dst, row as usize);
+                // The cursor region's share of this row, over what was just
+                // copied. `fits` proved `rect.x + rect.w <= width`, so the
+                // span ends inside the `row` bytes the bounds check above
+                // already covers.
+                if let Some(patch) = patch
+                    && let Some(span) = patch.row(y as i32 - patch.rect.loc.y)
+                {
+                    let at = dst.add(patch.rect.loc.x as usize * BYTES_PER_PIXEL as usize);
+                    std::ptr::copy_nonoverlapping(span.as_ptr(), at, span.len());
+                }
                 if opaque {
                     // `Xrgb8888`'s fourth byte is undefined, and the
                     // framebuffer's own alpha is not what a client reading an

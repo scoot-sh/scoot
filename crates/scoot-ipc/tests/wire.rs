@@ -3,7 +3,7 @@
 
 use scoot_ipc::{
     Action, Horizontal, OutputSnapshot, PROTOCOL_VERSION, PointerButton, Rect, Request, Response,
-    Screenshot, WindowSnapshot, decode, encode,
+    SCREENSHOT_CURSOR_DEFAULT, Screenshot, WindowSnapshot, decode, encode,
 };
 use serde_json::{Value, json};
 fn json_of<T: serde::Serialize>(value: &T) -> Value {
@@ -189,6 +189,50 @@ fn click_defaults_to_the_left_button() {
 }
 
 #[test]
+fn a_screenshot_request_without_cursor_is_the_old_shape_exactly() {
+    // The field is additive: a client that never names it sends -- and a
+    // server decodes -- byte-for-byte what it did before the field existed.
+    let old = Request::Screenshot {
+        output: None,
+        cursor: None,
+    };
+    assert_eq!(json_of(&old), json!({ "type": "screenshot" }));
+    assert_eq!(
+        decode::<Request>(r#"{"type":"screenshot","output":2}"#).unwrap(),
+        Request::Screenshot {
+            output: Some(2),
+            cursor: None,
+        }
+    );
+}
+
+#[test]
+fn a_screenshot_request_names_its_cursor_when_it_says() {
+    let request = Request::Screenshot {
+        output: None,
+        cursor: Some(false),
+    };
+    assert_eq!(
+        json_of(&request),
+        json!({ "type": "screenshot", "cursor": false })
+    );
+    assert_eq!(
+        decode::<Request>(r#"{"type":"screenshot","cursor":true}"#).unwrap(),
+        Request::Screenshot {
+            output: None,
+            cursor: Some(true),
+        }
+    );
+}
+
+#[test]
+fn the_screenshot_cursor_default_is_drawn_in() {
+    // The documented default (`docs/ipc.md`): an agent that does not ask
+    // sees the pointer, on every backend.
+    const { assert!(SCREENSHOT_CURSOR_DEFAULT) };
+}
+
+#[test]
 fn screenshots_carry_png_bytes_as_base64() {
     let response = Response::Screenshot(Screenshot {
         width: 2,
@@ -280,8 +324,22 @@ fn every_request_round_trips_on_one_line() {
         Request::Action(Action::Spawn {
             command: vec!["foot".into()],
         }),
-        Request::Screenshot { output: Some(1) },
-        Request::Screenshot { output: None },
+        Request::Screenshot {
+            output: Some(1),
+            cursor: None,
+        },
+        Request::Screenshot {
+            output: None,
+            cursor: None,
+        },
+        Request::Screenshot {
+            output: None,
+            cursor: Some(false),
+        },
+        Request::Screenshot {
+            output: Some(2),
+            cursor: Some(true),
+        },
         Request::PointerMove { x: 1.5, y: 2.0 },
         Request::PointerButton {
             button: PointerButton::Right,
