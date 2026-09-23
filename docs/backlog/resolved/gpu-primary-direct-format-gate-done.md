@@ -8,7 +8,7 @@ blocked: null
 
 # GPU scanout: the primary-direct format gate — RESOLVED
 
-RESOLVED 2026-09-23 (branch `primary-direct-fullscreen`), together with the
+RESOLVED 2026-09-23 (PR #228, branch `primary-direct-fullscreen`), together with the
 eligibility half of [candidates](../core/gpu-scanout-candidates.md), which
 stays open for overlay-plane candidates and per-surface scanout feedback.
 A fullscreen window covering its output, on `--tty --renderer gles` in a

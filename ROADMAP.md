@@ -101,7 +101,7 @@ each item's own file records why it landed when it did.
 ## Recently shipped (since 2026-09-15)
 
 - **[Zero-copy fullscreen on the GPU tier](docs/backlog/resolved/gpu-primary-direct-format-gate-done.md)**
-  (2026-09-23, branch `primary-direct-fullscreen`) — a fullscreen window
+  (2026-09-23, PR #228) — a fullscreen window
   covering its output is scanned out directly on the primary plane. Flags
   are decided per frame (`render/primary_direct.rs`): `ALLOW_SCANOUT | ANY`
   only for an unlocked, covered output with no capture stream and nothing
