@@ -1,3 +1,4 @@
+mod bench;
 mod columns;
 mod frames;
 mod invariants;
