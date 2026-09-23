@@ -10,6 +10,10 @@
 
 use super::*;
 
+/// What the compositor logs when it refuses a destroy that leaves child
+/// popups behind.
+const TOPMOST_WARNING: &str = "still has child popups";
+
 // --- `xdg_surface.already_constructed` --------------------------------------
 
 /// `get_popup` a second time on a live popup's own `xdg_surface`: Smithay
@@ -73,16 +77,22 @@ fn grafting_a_chain_onto_another_by_a_second_get_popup_is_refused() {
 /// made a popup again anywhere, children and all.
 #[test]
 fn destroying_a_popup_with_a_live_child_is_not_the_topmost_popup() {
-    let mut fixture = Fixture::with_window();
-    fixture.batch(vec![
-        Op::Popup(Parent::Window(0)),
-        Op::Popup(Parent::Popup(0)),
-    ]);
-
-    let error = fixture.refused(vec![Op::Destroy(0)]);
+    // The whole run inside the capture (see `capture_logs`).
+    let (error, logs) = test_support::capture_logs(|| {
+        let mut fixture = Fixture::with_window();
+        fixture.batch(vec![
+            Op::Popup(Parent::Window(0)),
+            Op::Popup(Parent::Popup(0)),
+        ]);
+        let error = fixture.refused(vec![Op::Destroy(0)]);
+        still_serving(&mut fixture);
+        error
+    });
 
     assert!(error.contains("not_the_topmost_popup"), "{error}");
-    still_serving(&mut fixture);
+    // The warning the teardown test below checks is *not* logged -- so it
+    // can be told apart from a capture that saw nothing at all.
+    assert!(logs.contains(TOPMOST_WARNING), "{logs}");
 }
 
 /// The attack: the root of a second [`CAP`]-long chain destroyed and made a
@@ -134,25 +144,26 @@ fn a_popup_of_a_destroyed_popups_surface_is_refused() {
 }
 
 /// The attack: a [`CAP`]-long chain grown under a bare `xdg_surface`, which
-/// is then made a popup on the tip of another. Refused at the chain's very
-/// first popup.
+/// is then made a popup itself, under a menu of the window. Each step is
+/// within the cap on its own -- the bare surface's new popup is only two
+/// deep -- but the chain under it would be `CAP + 2`. Refused at the chain's
+/// very first popup, before it can grow.
 #[test]
 fn a_chain_grown_under_a_bare_xdg_surface_is_refused_at_its_first_popup() {
     let mut fixture = Fixture::with_window();
 
     let error = fixture.refused(vec![
-        Op::Chain {
-            parent: Parent::Window(0),
-            len: CAP,
-        },
         Op::Bare,
+        Op::Popup(Parent::Bare(0)),
+        Op::Sync,
         Op::Chain {
-            parent: Parent::Bare(0),
-            len: CAP,
+            parent: Parent::Popup(0),
+            len: CAP - 1,
         },
+        Op::Popup(Parent::Window(0)),
         Op::PopupOnBare {
             bare: 0,
-            parent: Parent::Popup(CAP - 1),
+            parent: Parent::Popup(CAP),
         },
     ]);
 
@@ -224,19 +235,22 @@ fn closing_submenus_innermost_first_and_reopening_is_fine() {
 
 /// A client that disconnects with a full-depth chain open has its popups
 /// destroyed in no particular order, parents before children as often as
-/// not. That is teardown, not a `not_the_topmost_popup`, and the compositor
-/// carries on.
+/// not. That is teardown, not a `not_the_topmost_popup` -- nothing is
+/// posted, nothing is logged -- and the compositor carries on.
 #[test]
 fn a_client_disconnecting_with_submenus_open_is_torn_down_cleanly() {
-    let mut fixture = Fixture::with_window();
-    fixture.batch(vec![Op::Chain {
-        parent: Parent::Window(0),
-        len: CAP,
-    }]);
-    fixture.map(0..CAP, None);
+    // The whole run inside the capture (see `capture_logs`).
+    let ((), logs) = test_support::capture_logs(|| {
+        let mut fixture = Fixture::with_window();
+        fixture.batch(vec![Op::Chain {
+            parent: Parent::Window(0),
+            len: CAP,
+        }]);
+        fixture.map(0..CAP, None);
+        fixture.disconnect(0);
+        fixture.render();
+        still_serving(&mut fixture);
+    });
 
-    fixture.disconnect(0);
-
-    fixture.render();
-    still_serving(&mut fixture);
+    assert!(!logs.contains(TOPMOST_WARNING), "{logs}");
 }

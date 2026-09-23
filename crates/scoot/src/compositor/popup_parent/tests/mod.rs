@@ -29,12 +29,14 @@ use std::time::Duration;
 
 use scoot_core::{Rect, WindowId};
 use wayland_client::protocol::{
-    wl_buffer, wl_compositor, wl_registry, wl_shm, wl_shm_pool, wl_surface,
+    wl_buffer, wl_callback, wl_compositor, wl_registry, wl_seat, wl_shm, wl_shm_pool, wl_surface,
 };
 use wayland_client::{Connection, Dispatch, EventQueue, QueueHandle};
+use wayland_protocols::wp::text_input::zv3::client::zwp_text_input_manager_v3;
 use wayland_protocols::xdg::shell::client::{
     xdg_popup, xdg_positioner, xdg_surface, xdg_toplevel, xdg_wm_base,
 };
+use wayland_protocols_misc::zwp_input_method_v2::client::zwp_input_method_manager_v2;
 use wayland_protocols_wlr::layer_shell::v1::client::{zwlr_layer_shell_v1, zwlr_layer_surface_v1};
 
 use crate::compositor::decorations::{Appearance, Color};
@@ -43,6 +45,7 @@ use crate::compositor::test_support::{self, Harness, wait_for};
 mod bench;
 mod bypass;
 mod depth;
+mod ime;
 
 /// The most popups a chain may hold -- `popup_parent::MAX_POPUP_DEPTH`,
 /// spelled out so this file does not depend on it (see the module doc).
@@ -114,6 +117,16 @@ enum Op {
     Reincarnate { popup: usize, parent: Parent },
     /// `xdg_popup.reposition` on popup `popup`: one more walk up its chain.
     Reposition(usize),
+    /// A round trip in the middle of the batch (see [`sync`]).
+    ///
+    /// Put right after the request a test expects refused, when more
+    /// follows it: the client writes a long batch in 4 KiB pieces
+    /// (wayland-backend's `MAX_BYTES_OUT`), so a refusal early in one can
+    /// close the socket under a later piece, and the client then sees
+    /// `EPIPE` instead of the error. With this, the refusal is read before
+    /// anything else is written -- and if the request is *not* refused, the
+    /// batch carries on and the test fails on the client surviving it.
+    Sync,
 }
 
 enum Step {
@@ -160,6 +173,14 @@ struct TestClient {
     shm: Option<wl_shm::WlShm>,
     wm_base: Option<xdg_wm_base::XdgWmBase>,
     layer_shell: Option<zwlr_layer_shell_v1::ZwlrLayerShellV1>,
+    /// Bound for every client, used only by `ime.rs`'s.
+    seat: Option<wl_seat::WlSeat>,
+    text_input_manager: Option<zwp_text_input_manager_v3::ZwpTextInputManagerV3>,
+    input_method_manager: Option<zwp_input_method_manager_v2::ZwpInputMethodManagerV2>,
+    /// The serial of the newest `wl_keyboard.enter` (`ime.rs` only).
+    keyboard_enter: Option<u32>,
+    /// Whether the input method is active (`ime.rs` only).
+    ime_active: bool,
     /// Per toplevel: the size its pending `xdg_toplevel.configure` named.
     pending: Vec<(i32, i32)>,
     /// Per toplevel: its newest completed configure, `(serial, width,
@@ -168,6 +189,23 @@ struct TestClient {
     /// Per layer surface: the size of its newest (already acked) configure.
     layer_sizes: Vec<Option<(u32, u32)>>,
     popups: Vec<PopupRecord>,
+    /// Whether the newest `wl_display.sync` has been answered.
+    synced: bool,
+}
+
+impl Dispatch<wl_callback::WlCallback, ()> for TestClient {
+    fn event(
+        client: &mut Self,
+        _: &wl_callback::WlCallback,
+        event: wl_callback::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let wl_callback::Event::Done { .. } = event {
+            client.synced = true;
+        }
+    }
 }
 
 impl Dispatch<wl_registry::WlRegistry, ()> for TestClient {
@@ -195,6 +233,13 @@ impl Dispatch<wl_registry::WlRegistry, ()> for TestClient {
             "xdg_wm_base" => client.wm_base = Some(registry.bind(name, version.min(3), qh, ())),
             "zwlr_layer_shell_v1" => {
                 client.layer_shell = Some(registry.bind(name, version.min(4), qh, ()));
+            }
+            "wl_seat" => client.seat = Some(registry.bind(name, version.min(5), qh, ())),
+            "zwp_text_input_manager_v3" => {
+                client.text_input_manager = Some(registry.bind(name, version.min(1), qh, ()));
+            }
+            "zwp_input_method_manager_v2" => {
+                client.input_method_manager = Some(registry.bind(name, version.min(1), qh, ()));
             }
             _ => {}
         }
@@ -309,6 +354,13 @@ wayland_client::delegate_noop!(TestClient: ignore wl_shm_pool::WlShmPool);
 wayland_client::delegate_noop!(TestClient: ignore wl_buffer::WlBuffer);
 wayland_client::delegate_noop!(TestClient: ignore xdg_positioner::XdgPositioner);
 wayland_client::delegate_noop!(TestClient: ignore zwlr_layer_shell_v1::ZwlrLayerShellV1);
+wayland_client::delegate_noop!(TestClient: ignore wl_seat::WlSeat);
+wayland_client::delegate_noop!(
+    TestClient: ignore zwp_text_input_manager_v3::ZwpTextInputManagerV3
+);
+wayland_client::delegate_noop!(
+    TestClient: ignore zwp_input_method_manager_v2::ZwpInputMethodManagerV2
+);
 
 /// A `width`x`height` buffer of `color` over a real memfd. A zero size (a
 /// configure that left the size to the client) draws 40 square.
@@ -443,13 +495,28 @@ impl Made {
     }
 }
 
-/// Flushes everything queued, waiting out a full socket: a long chain is
-/// more than the socket buffer holds, and the compositor reads it while
-/// this waits.
-fn flush(conn: &Connection) -> Result<(), String> {
+/// A round trip that puts everything queued -- the requests *and* the
+/// `sync` -- on the wire in one flush.
+///
+/// `EventQueue::roundtrip` would do, but for two things. A flush of its
+/// own first, then the round trip's `sync` in a second write, races the
+/// refusal: the compositor can kill the client and close the socket in
+/// between, and the client then sees `EPIPE` on that second write instead
+/// of the protocol error waiting in its receive buffer. And a chain
+/// thousands deep is more than the socket buffer holds, which a plain flush
+/// reports as `WouldBlock`; this waits that out while the compositor reads.
+/// Every batch whose error a test asserts on has nothing after the refused
+/// request but this `sync`, or an [`Op::Sync`].
+fn sync(
+    conn: &Connection,
+    queue: &mut EventQueue<TestClient>,
+    client: &mut TestClient,
+) -> Result<(), String> {
+    client.synced = false;
+    conn.display().sync(&queue.handle(), ());
     loop {
         match conn.flush() {
-            Ok(()) => return Ok(()),
+            Ok(()) => break,
             Err(wayland_client::backend::WaylandError::Io(error))
                 if error.kind() == std::io::ErrorKind::WouldBlock =>
             {
@@ -458,11 +525,14 @@ fn flush(conn: &Connection) -> Result<(), String> {
             Err(error) => return Err(error.to_string()),
         }
     }
+    while !client.synced {
+        queue.blocking_dispatch(client).map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 fn run_op(
     op: Op,
-    conn: &Connection,
     client: &mut TestClient,
     globals: &Globals,
     qh: &QueueHandle<TestClient>,
@@ -474,11 +544,8 @@ fn run_op(
         }
         Op::Chain { parent, len } => {
             let mut parent = parent;
-            for n in 0..len {
+            for _ in 0..len {
                 parent = Parent::Popup(made.new_popup(client, globals, qh, parent)?);
-                if n % 64 == 63 {
-                    flush(conn)?;
-                }
             }
         }
         Op::Bare => {
@@ -537,6 +604,7 @@ fn run_op(
                 popup: new,
             };
         }
+        Op::Sync => unreachable!("`Step::Batch` runs `Op::Sync` itself"),
         Op::Reposition(popup) => {
             let positioner = globals.positioner(qh);
             made.popups
@@ -571,10 +639,12 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
             Step::MapBar => map_bar(&mut queue, &mut client, &globals, &qh, &mut made)?,
             Step::Batch(ops) => {
                 for op in ops {
-                    run_op(op, &conn, &mut client, &globals, &qh, &mut made)?;
+                    match op {
+                        Op::Sync => sync(&conn, &mut queue, &mut client)?,
+                        op => run_op(op, &mut client, &globals, &qh, &mut made)?,
+                    }
                 }
-                flush(&conn)?;
-                queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                sync(&conn, &mut queue, &mut client)?;
             }
             Step::Map { popups, marked } => {
                 for index in popups {

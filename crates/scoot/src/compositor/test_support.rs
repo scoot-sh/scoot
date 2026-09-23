@@ -567,6 +567,56 @@ pub(crate) fn wait_for<T, C>(
     }
 }
 
+/// Runs `f` with compositor logs captured, handing back what it returned
+/// plus everything logged on this thread while it ran.
+///
+/// Scoped (`with_default`), not global: every dispatch a [`Harness`] drives
+/// runs on the test's own thread, so everything the compositor logs while
+/// handling a client lands here -- and a scoped subscriber cannot collide
+/// with another test's under `cargo test` the way a second global default
+/// would.
+///
+/// Wrap the whole test, the [`Harness`] included, when anything logged
+/// inside might run under a span created before it: Smithay keeps some
+/// (the keyboard's, for one), and under `cargo test` -- where another
+/// thread's capture has marked every callsite interesting -- a span made
+/// outside a capture gets the no-subscriber placeholder id, which
+/// `tracing-subscriber`'s registry panics on when it is entered inside
+/// one. nextest, one process per test, never shows it.
+pub(crate) fn capture_logs<T>(f: impl FnOnce() -> T) -> (T, String) {
+    use std::sync::{Arc, Mutex};
+
+    #[derive(Clone, Default)]
+    struct Buffer(Arc<Mutex<Vec<u8>>>);
+    impl std::io::Write for Buffer {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0
+                .lock()
+                .expect("the log buffer")
+                .extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let buffer = Buffer::default();
+    let factory = buffer.clone();
+    let subscriber = tracing_subscriber::fmt()
+        .with_writer(move || factory.clone())
+        .with_ansi(false)
+        // INFO is the compositor's own production default (see
+        // `init_logging`), but some tests assert on `debug!` handler lines
+        // (the XWayland refusals are the designed answer, not an anomaly,
+        // so they log below the production floor).
+        .with_max_level(tracing::Level::DEBUG)
+        .finish();
+    let result = tracing::subscriber::with_default(subscriber, f);
+    let logs = String::from_utf8(buffer.0.lock().expect("the log buffer").clone())
+        .expect("compositor logs are UTF-8");
+    (result, logs)
+}
+
 /// A minimal session-lock client: binds `ext_session_lock_manager_v1`, takes
 /// the lock, flushes the request onto the wire, acks, then parks holding the
 /// lock object until the harness drops it.

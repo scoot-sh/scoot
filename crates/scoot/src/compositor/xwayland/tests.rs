@@ -30,6 +30,8 @@ use wayland_client::{Connection, Dispatch, QueueHandle};
 use super::{DISPLAY_ENV, display_value, resolve};
 use crate::compositor::decorations::Appearance;
 use crate::compositor::test_support::Harness;
+#[cfg(feature = "xwayland")]
+use crate::compositor::test_support::capture_logs;
 
 #[test]
 fn resolve_is_an_or_with_off_as_the_agreement() {
@@ -235,49 +237,6 @@ fn xwayland_on_path() -> bool {
         std::env::split_paths(&paths)
             .any(|dir| dir.join("Xwayland").is_file() || dir.join("Xwayland.exe").is_file())
     })
-}
-
-/// Runs `f` with compositor logs captured, handing back what it returned
-/// plus everything logged on this thread while it ran.
-///
-/// Scoped (`with_default`), not global: every dispatch this test drives
-/// runs on this thread, which is where `READY`, the XWM callbacks and the
-/// death signals all fire -- and a scoped subscriber cannot collide with
-/// another test's under `cargo test` the way a second global default
-/// would.
-#[cfg(feature = "xwayland")]
-fn capture_logs<T>(f: impl FnOnce() -> T) -> (T, String) {
-    use std::sync::{Arc, Mutex};
-
-    #[derive(Clone, Default)]
-    struct Buffer(Arc<Mutex<Vec<u8>>>);
-    impl std::io::Write for Buffer {
-        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-            self.0
-                .lock()
-                .expect("the log buffer")
-                .extend_from_slice(bytes);
-            Ok(bytes.len())
-        }
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
-    }
-    let buffer = Buffer::default();
-    let factory = buffer.clone();
-    let subscriber = tracing_subscriber::fmt()
-        .with_writer(move || factory.clone())
-        .with_ansi(false)
-        // INFO is the compositor's own production default (see
-        // `init_logging`), but these tests assert on `debug!` handler
-        // lines -- the refusals are the designed answer, not an anomaly,
-        // so they log below the production floor.
-        .with_max_level(tracing::Level::DEBUG)
-        .finish();
-    let result = tracing::subscriber::with_default(subscriber, f);
-    let logs = String::from_utf8(buffer.0.lock().expect("the log buffer").clone())
-        .expect("compositor logs are UTF-8");
-    (result, logs)
 }
 
 /// Whether `window` is anywhere under `root` within `depth` levels: the

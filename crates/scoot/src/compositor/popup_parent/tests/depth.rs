@@ -32,8 +32,10 @@ fn one_popup_past_the_cap_is_refused() {
     let error = fixture.refused(vec![
         Op::Chain {
             parent: Parent::Window(0),
-            len: CAP + 1,
+            len: CAP,
         },
+        Op::Sync,
+        Op::Popup(Parent::Popup(CAP - 1)),
         Op::Reposition(CAP),
     ]);
 
