@@ -18,11 +18,21 @@
 //! `create_immed` -- the request with no soft refusal, so a promise the
 //! renderer breaks kills this client and fails the test -- show it in a real
 //! `xdg_toplevel`, and assert the composited framebuffer shows the colour it
-//! was filled with. Every layout is filled with the same opaque **red**, in
-//! its own encoding (BT.601 limited-range `Y'CbCr` for the YUV ones), so one
-//! pixel predicate covers them all and a layout sampled wrongly -- chroma
-//! planes ignored, channels swapped, a YUV image bound as `GL_TEXTURE_2D` --
-//! shows up as the wrong colour rather than passing.
+//! was filled with. Each step's colour differs from the one before it (red,
+//! green, blue, dark red, as the layout can express), encoded in the layout's
+//! own terms (BT.601 limited-range `Y'CbCr` for the YUV ones), so a render
+//! that silently did not happen -- a stale frame still showing the previous
+//! buffer -- fails rather than passing on the last colour, and a layout
+//! sampled wrongly (chroma ignored, channels swapped, a YUV image bound as
+//! `GL_TEXTURE_2D`) shows up as the wrong colour.
+//!
+//! **What it cannot reach: explicit tiled or compressed modifiers.** A dumb
+//! buffer is linear by definition, and the only GLES driver this project can
+//! run the suite on (llvmpipe/`kms_swrast`) advertises nothing but `LINEAR`
+//! anyway. So the table's non-`LINEAR` entries are reported (as "advertised
+//! but not built") and are not tested anywhere reachable; they rest on the
+//! driver having listed them, and `Asahi.md` Test 6 is where a real GPU
+//! answers for them.
 //!
 //! Where this machine has no usable `/dev/dri/card0` (CI, a GPU-less
 //! container) the suite says so on stderr and asserts nothing, the same
@@ -56,23 +66,79 @@ const CANVAS: i32 = 128;
 /// here (2x2- and 2x1-subsampled) has whole samples.
 const SIDE: u32 = 32;
 
-/// How a buffer of one fourcc is laid out and filled with opaque red.
+/// An opaque colour, 8 bits a channel.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Rgb {
+    r: u8,
+    g: u8,
+    b: u8,
+}
+
+const RED: Rgb = Rgb { r: 255, g: 0, b: 0 };
+const GREEN: Rgb = Rgb { r: 0, g: 255, b: 0 };
+const BLUE: Rgb = Rgb { r: 0, g: 0, b: 255 };
+const DARK_RED: Rgb = Rgb { r: 128, g: 0, b: 0 };
+
+/// Every colour a step may use. Channels are only ever 0, 128 or 255, which
+/// is what [`half`] can encode exactly and what keeps any two of these at
+/// least 127 apart in some channel -- far outside [`TOLERANCE`].
+const PALETTE: [Rgb; 4] = [RED, GREEN, BLUE, DARK_RED];
+
+/// How far a composited channel may land from the colour filled in. A YUV
+/// round trip through BT.601 limited range, and a 10-bit or half-float
+/// channel, land within a few units; the palette's nearest pair is 127 apart.
+const TOLERANCE: i32 = 40;
+
+impl Rgb {
+    /// BT.601 limited-range `(Y', Cb, Cr)` -- Mesa's default for an imported
+    /// YUV image.
+    fn ycbcr(self) -> (u8, u8, u8) {
+        let (r, g, b) = (f32::from(self.r), f32::from(self.g), f32::from(self.b));
+        let y = 16.0 + (65.481 * r + 128.553 * g + 24.966 * b) / 255.0;
+        let cb = 128.0 + (-37.797 * r - 74.203 * g + 112.0 * b) / 255.0;
+        let cr = 128.0 + (112.0 * r - 93.786 * g - 18.214 * b) / 255.0;
+        (y.round() as u8, cb.round() as u8, cr.round() as u8)
+    }
+
+    /// Whether a BGRA framebuffer pixel is this colour.
+    fn matches(self, pixel: &[u8]) -> bool {
+        let near = |got: u8, want: u8| (i32::from(got) - i32::from(want)).abs() <= TOLERANCE;
+        near(pixel[2], self.r) && near(pixel[1], self.g) && near(pixel[0], self.b)
+    }
+}
+
+/// A 10-bit channel from an 8-bit one.
+fn ten(channel: u8) -> u32 {
+    u32::from(channel) * 1023 / 255
+}
+
+/// An IEEE half-float for the palette's three channel values.
+fn half(channel: u8) -> u16 {
+    match channel {
+        0 => 0x0000,
+        128 => 0x3804, // 0.50195..., i.e. 128/255 to half precision
+        255 => 0x3C00, // 1.0
+        other => panic!("the palette has no channel value {other}"),
+    }
+}
+
+/// How a buffer of one fourcc is laid out and filled with one colour.
 struct Layout {
     fourcc: Fourcc,
     /// Per plane: `(bytes per sample, horizontal subsampling, vertical
     /// subsampling)`. A plane's stride is `SIDE / h * bytes` and it has
     /// `SIDE / v` rows.
     planes: &'static [(u32, u32, u32)],
-    /// Writes opaque red into `planes`, one byte slice per plane in order.
-    fill: fn(&mut [&mut [u8]]),
+    /// Whether this layout can show `colour` at all: a one-channel format
+    /// samples as `(r, 0, 0)`, so it has no green or blue.
+    shows: fn(Rgb) -> bool,
+    /// Writes `colour` into `planes`, one byte slice per plane in order.
+    fill: fn(&mut [&mut [u8]], Rgb),
 }
 
-/// BT.601 limited-range red: `Y' = 81`, `Cb = 90`, `Cr = 240`. Mesa's EGL
-/// default for an imported YUV image is BT.601 narrow range, so this lands
-/// within a few units of `(255, 0, 0)`.
-const RED_Y: u8 = 81;
-const RED_U: u8 = 90;
-const RED_V: u8 = 240;
+fn any(_: Rgb) -> bool {
+    true
+}
 
 /// One representative per layout *class*, not one per fourcc: the two
 /// candidates; another 8-bit channel order; 10-bit packed; one- and
@@ -84,51 +150,71 @@ const LAYOUTS: &[Layout] = &[
     Layout {
         fourcc: Fourcc::Xrgb8888,
         planes: &[(4, 1, 1)],
-        fill: |planes| fill_repeating(planes, 0, &[0x00, 0x00, 0xFF, 0x00]),
+        shows: any,
+        fill: |planes, c| fill_repeating(planes, 0, &[c.b, c.g, c.r, 0x00]),
     },
     Layout {
         fourcc: Fourcc::Argb8888,
         planes: &[(4, 1, 1)],
-        fill: |planes| fill_repeating(planes, 0, &[0x00, 0x00, 0xFF, 0xFF]),
+        shows: any,
+        fill: |planes, c| fill_repeating(planes, 0, &[c.b, c.g, c.r, 0xFF]),
     },
     Layout {
+        // A:B:G:R little-endian: R, G, B, A in memory order.
         fourcc: Fourcc::Abgr8888,
         planes: &[(4, 1, 1)],
-        fill: |planes| fill_repeating(planes, 0, &[0xFF, 0x00, 0x00, 0xFF]),
+        shows: any,
+        fill: |planes, c| fill_repeating(planes, 0, &[c.r, c.g, c.b, 0xFF]),
     },
     Layout {
-        // A:R:G:B 2:10:10:10, little-endian: red is 0x3FF << 20, alpha 3 << 30.
+        // A:R:G:B 2:10:10:10, little-endian.
         fourcc: Fourcc::Argb2101010,
         planes: &[(4, 1, 1)],
-        fill: |planes| fill_repeating(planes, 0, &0xFFF0_0000u32.to_le_bytes()),
+        shows: any,
+        fill: |planes, c| {
+            let word = (3 << 30) | (ten(c.r) << 20) | (ten(c.g) << 10) | ten(c.b);
+            fill_repeating(planes, 0, &word.to_le_bytes());
+        },
     },
     Layout {
         // One channel, sampled as `(r, 0, 0, 1)`.
         fourcc: Fourcc::R8,
         planes: &[(1, 1, 1)],
-        fill: |planes| fill_repeating(planes, 0, &[0xFF]),
+        shows: |c| c.g == 0 && c.b == 0,
+        fill: |planes, c| fill_repeating(planes, 0, &[c.r]),
     },
     Layout {
         // G:R 8:8 little-endian: the first byte is red.
         fourcc: Fourcc::Gr88,
         planes: &[(2, 1, 1)],
-        fill: |planes| fill_repeating(planes, 0, &[0xFF, 0x00]),
+        shows: |c| c.b == 0,
+        fill: |planes, c| fill_repeating(planes, 0, &[c.r, c.g]),
     },
     Layout {
         // A:B:G:R 16:16:16:16 half-float, little-endian: R, G, B, A in memory
-        // order; 1.0 is 0x3C00.
+        // order.
         fourcc: Fourcc::Abgr16161616f,
         planes: &[(8, 1, 1)],
-        fill: |planes| {
-            fill_repeating(planes, 0, &[0x00, 0x3C, 0x00, 0x00, 0x00, 0x00, 0x00, 0x3C]);
+        shows: any,
+        fill: |planes, c| {
+            let mut pixel = [0u8; 8];
+            for (index, channel) in [half(c.r), half(c.g), half(c.b), half(255)]
+                .into_iter()
+                .enumerate()
+            {
+                pixel[index * 2..index * 2 + 2].copy_from_slice(&channel.to_le_bytes());
+            }
+            fill_repeating(planes, 0, &pixel);
         },
     },
     Layout {
         fourcc: Fourcc::Nv12,
         planes: &[(1, 1, 1), (2, 2, 2)],
-        fill: |planes| {
-            fill_repeating(planes, 0, &[RED_Y]);
-            fill_repeating(planes, 1, &[RED_U, RED_V]);
+        shows: any,
+        fill: |planes, c| {
+            let (y, u, v) = c.ycbcr();
+            fill_repeating(planes, 0, &[y]);
+            fill_repeating(planes, 1, &[u, v]);
         },
     },
     Layout {
@@ -136,26 +222,34 @@ const LAYOUTS: &[Layout] = &[
         // the 8-bit value lands in the high byte.
         fourcc: Fourcc::P010,
         planes: &[(2, 1, 1), (4, 2, 2)],
-        fill: |planes| {
-            fill_repeating(planes, 0, &[0x00, RED_Y]);
-            fill_repeating(planes, 1, &[0x00, RED_U, 0x00, RED_V]);
+        shows: any,
+        fill: |planes, c| {
+            let (y, u, v) = c.ycbcr();
+            fill_repeating(planes, 0, &[0x00, y]);
+            fill_repeating(planes, 1, &[0x00, u, 0x00, v]);
         },
     },
     Layout {
         // I420: Y, then Cb, then Cr, each chroma plane 2x2-subsampled.
         fourcc: Fourcc::Yuv420,
         planes: &[(1, 1, 1), (1, 2, 2), (1, 2, 2)],
-        fill: |planes| {
-            fill_repeating(planes, 0, &[RED_Y]);
-            fill_repeating(planes, 1, &[RED_U]);
-            fill_repeating(planes, 2, &[RED_V]);
+        shows: any,
+        fill: |planes, c| {
+            let (y, u, v) = c.ycbcr();
+            fill_repeating(planes, 0, &[y]);
+            fill_repeating(planes, 1, &[u]);
+            fill_repeating(planes, 2, &[v]);
         },
     },
     Layout {
         // Packed 4:2:2: Y0 Cb Y1 Cr per two pixels, i.e. two bytes a pixel.
         fourcc: Fourcc::Yuyv,
         planes: &[(2, 1, 1)],
-        fill: |planes| fill_repeating(planes, 0, &[RED_Y, RED_U, RED_Y, RED_V]),
+        shows: any,
+        fill: |planes, c| {
+            let (y, u, v) = c.ycbcr();
+            fill_repeating(planes, 0, &[y, u, y, v]);
+        },
     },
 ];
 
@@ -169,9 +263,10 @@ fn fill_repeating(planes: &mut [&mut [u8]], index: usize, pattern: &[u8]) {
 enum Step {
     /// Bind the dmabuf global at v4, read the default feedback's table.
     ReadTable,
-    /// Allocate, fill and `create_immed` one buffer of `LAYOUTS[index]`, and
-    /// show it in the client's one window (mapping it on first use).
-    Show { index: usize },
+    /// Allocate one buffer of `LAYOUTS[index]` filled with `colour`,
+    /// `create_immed` it, and show it in the client's one window (mapping it
+    /// on first use).
+    Show { index: usize, colour: Rgb },
 }
 
 /// What a client answers a [`Step`] with.
@@ -216,8 +311,8 @@ impl Drop for Allocation {
 }
 
 /// Allocates `layout` as one dumb buffer on `/dev/dri/card0`, filled with
-/// red, planes packed back to back. `Err` names why this machine cannot.
-fn allocate(layout: &Layout) -> Result<Allocation, String> {
+/// `colour`, planes packed back to back. `Err` names why this machine cannot.
+fn allocate(layout: &Layout, colour: Rgb) -> Result<Allocation, String> {
     let file = std::fs::OpenOptions::new()
         .read(true)
         .write(true)
@@ -252,7 +347,7 @@ fn allocate(layout: &Layout) -> Result<Allocation, String> {
             slices.push(plane);
             rest = tail;
         }
-        (layout.fill)(&mut slices);
+        (layout.fill)(&mut slices, colour);
     }
     let fd = card
         .buffer_to_prime_fd(dumb.handle(), drm::CLOEXEC | drm::RDWR)
@@ -304,9 +399,9 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 feedback.destroy();
                 Ack::Table(table)
             }
-            Step::Show { index } => {
+            Step::Show { index, colour } => {
                 let layout = &LAYOUTS[index];
-                match allocate(layout) {
+                match allocate(layout, colour) {
                     Err(reason) => Ack::NoDevice(reason),
                     Ok(allocation) => {
                         show(&mut client, &mut queue, &qh, layout, allocation)?;
@@ -460,17 +555,6 @@ wayland_client::delegate_noop!(TestClient: ignore xdg_toplevel::XdgToplevel);
 wayland_client::delegate_noop!(TestClient: ignore zwp_linux_dmabuf_v1::ZwpLinuxDmabufV1);
 wayland_client::delegate_noop!(TestClient: ignore zwp_linux_buffer_params_v1::ZwpLinuxBufferParamsV1);
 
-/// How many framebuffer pixels are unmistakably red. The framebuffer is BGRA.
-/// Wide bands on purpose: a YUV conversion lands within a few units of pure
-/// red, while the wrong colour -- chroma ignored (grey), channels swapped
-/// (blue), a YUV image sampled as RGB (dark green) -- lands nowhere near.
-fn red_pixels(pixels: &[u8]) -> usize {
-    pixels
-        .chunks_exact(4)
-        .filter(|pixel| pixel[2] >= 200 && pixel[1] <= 60 && pixel[0] <= 60)
-        .count()
-}
-
 #[test]
 fn every_advertised_layout_imports_and_draws() {
     // Under pixman every buffer this imports is `mmap`ed, and a dma-buf
@@ -487,11 +571,27 @@ fn every_advertised_layout_imports_and_draws() {
     };
     let linear = u64::from(Modifier::Linear);
     let mut drawn = Vec::new();
+    let mut previous: Option<usize> = None;
     for (index, layout) in LAYOUTS.iter().enumerate() {
+        // Per advertised entry: whatever this renderer offers at `LINEAR`
+        // that the suite can build must import and draw. Nothing is assumed
+        // to be offered -- a GPU listing a format only as tiled is not a
+        // failure here, just an entry this suite cannot build.
         if !table.contains(&(layout.fourcc as u32, linear)) {
             continue;
         }
-        match fixture.run(Step::Show { index }) {
+        // The next palette colour after the previous step's that this
+        // layout can show: never the colour of the step before, so a frame
+        // that was not redrawn cannot pass on the previous buffer's pixels,
+        // and rotating so every channel (and so both chroma planes) gets
+        // exercised rather than two colours alternating.
+        let start = previous.map_or(0, |previous| previous + 1);
+        let (slot, colour) = (0..PALETTE.len())
+            .map(|step| (start + step) % PALETTE.len())
+            .map(|slot| (slot, PALETTE[slot]))
+            .find(|(slot, colour)| (layout.shows)(*colour) && Some(*slot) != previous)
+            .expect("every layout shows two palette colours");
+        match fixture.run(Step::Show { index, colour }) {
             Ack::NoDevice(reason) => {
                 eprintln!(
                     "every_advertised_layout_imports_and_draws: skipped -- no dumb \
@@ -502,41 +602,39 @@ fn every_advertised_layout_imports_and_draws() {
             Ack::Shown => {}
             Ack::Table(_) => panic!("expected a shown buffer"),
         }
-        let red = red_pixels(&fixture.render());
+        let pixels = fixture.render();
+        let shown = pixels
+            .chunks_exact(4)
+            .filter(|pixel| colour.matches(pixel))
+            .count();
         let area = (SIDE * SIDE) as usize;
         assert!(
-            red >= area / 2,
-            "{:?} (advertised at LINEAR) imported but drew {red} red pixels of a \
-             {SIDE}x{SIDE} red buffer -- sampled as the wrong colour, or not at all",
+            shown >= area / 2,
+            "{:?} (advertised at LINEAR) imported but drew {shown} pixels of \
+             {colour:?} for a {SIDE}x{SIDE} buffer of it -- sampled as the wrong \
+             colour, not drawn, or a stale frame",
             layout.fourcc
         );
         drawn.push(layout.fourcc);
+        previous = Some(slot);
+        eprintln!("  {:?} drawn as {colour:?}", layout.fourcc);
     }
     let untested: Vec<String> = table
         .iter()
-        .filter(|(code, _)| !LAYOUTS.iter().any(|layout| layout.fourcc as u32 == *code))
+        .filter(|(code, modifier)| {
+            *modifier != linear || !LAYOUTS.iter().any(|layout| layout.fourcc as u32 == *code)
+        })
         .map(|(code, modifier)| format!("{:?}/{modifier:#x}", Fourcc::try_from(*code)))
         .collect();
     eprintln!(
-        "every_advertised_layout_imports_and_draws: drew {drawn:?}; advertised but \
-         not built by this suite: {untested:?}"
+        "every_advertised_layout_imports_and_draws ({:?}): drew {drawn:?}; advertised \
+         but not built by this suite: {untested:?}",
+        fixture_renderer(&fixture)
     );
-    // The candidates are advertised under every renderer this project has, so
-    // a run that drew neither checked nothing and must not read as a pass.
-    assert!(
-        drawn.contains(&Fourcc::Xrgb8888) && drawn.contains(&Fourcc::Argb8888),
-        "both candidates are advertised on every renderer here, so both must \
-         have been drawn: {drawn:?}"
-    );
-    if fixture_renderer(&fixture) == RendererKind::Gles {
-        // The multi-plane claim this suite exists for. A GLES renderer that
-        // advertised none of them would make the loop above vacuous for the
-        // layouts that matter most, so say so rather than pass.
-        assert!(
-            drawn.contains(&Fourcc::Nv12),
-            "the GLES table is expected to carry NV12 on a Mesa driver; it \
-             drew {drawn:?} from {} advertised pairs",
-            table.len()
+    if drawn.is_empty() {
+        eprintln!(
+            "every_advertised_layout_imports_and_draws: asserted nothing -- this \
+             renderer advertises none of the suite's layouts at LINEAR"
         );
     }
 }

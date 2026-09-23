@@ -807,8 +807,10 @@ test:
   buffers, and video players can hand over **multi-plane YUV** (`NV12`,
   `P010`, three-plane `YUV420`, packed `YUYV`, …) straight from a decoder,
   composited through the driver's own YUV sampling. `Xrgb8888` and
-  `Argb8888` are listed first wherever the driver offers them at `LINEAR`, so
-  the pixman table is always the head of the GLES one.
+  `Argb8888` are listed first, each at whatever layouts the driver names
+  for it, so wherever the driver offers both at `LINEAR` the pixman table is
+  the head of the GLES one — but not on a driver that lists them only as
+  tiled, which then gets no `LINEAR` entry for them at all.
 
   Two things are deliberately left out of the GLES table. An **implicit
   modifier** (`DRM_FORMAT_MOD_INVALID`, "the driver's default layout") is
@@ -820,6 +822,10 @@ test:
   modifier query for it — is offered only if it is `Xrgb8888`/`Argb8888`,
   at `LINEAR`, which such a driver is known to import; anything else there
   would be a guess.
+
+A client too old for feedback (protocol version 1 or 2) is told only
+fourccs, with no layout, and allocates implicitly; for a YUV format under
+GLES that is the wrong-colours path below — never a disconnect.
 
 A client that ignores the feedback and offers a layout the table never
 named gets whatever the renderer says: `failed` on the asynchronous

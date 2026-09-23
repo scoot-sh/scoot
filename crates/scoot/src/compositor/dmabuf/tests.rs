@@ -106,6 +106,11 @@ enum Step {
     /// alive. The measurement test resolves that id server-side so it can
     /// time the commit-path work directly instead of through round trips.
     MakeSurface { attach_imported: bool },
+    /// Bind the dmabuf global `count` times at `version`, one round trip
+    /// each (so every bind's events are read before the next), destroying
+    /// each bind again, and report how many `modifier` events arrived --
+    /// the per-bind cost a pre-feedback (v3) client makes the compositor pay.
+    BindStorm { version: u32, count: u32 },
 }
 
 /// What a [`Step::Import`] offers the compositor.
@@ -157,6 +162,7 @@ enum Ack {
     Released,
     Committed,
     Surface(u32),
+    Stormed { modifier_events: usize },
 }
 
 /// The default-feedback events a client saw, as the client saw them.
@@ -1244,6 +1250,116 @@ fn commit_sync_cost() {
     );
 }
 
+/// Prints what a storm of pre-feedback (v3) binds of this global costs the
+/// compositor, against the same storm at v4 -- the question the GLES table's
+/// length raises, since Smithay answers every v3 bind with one `modifier`
+/// event per table entry (`wayland/dmabuf/dispatch.rs`, `bind`) and this
+/// global is *not* in `bind_budget.rs` (see the module doc). Asserts nothing
+/// about time; run by hand:
+///
+/// ```text
+/// cargo test --release -p scoot --bin scoot bind_storm_cost -- --ignored --nocapture
+/// ```
+///
+/// Compositor time is the test thread's own CPU time
+/// (`CLOCK_THREAD_CPUTIME_ID`): the compositor dispatches on it, the client on
+/// its own thread. v4 binds receive no events at bind, so v3 minus v4 is the
+/// cost of the `modifier` events alone. Measured on the session's own table
+/// and on a synthetic 408-entry one (a modifier-rich GPU's size).
+#[test]
+#[ignore = "prints per-bind timings for a human; asserts nothing"]
+fn bind_storm_cost() {
+    const BINDS: u32 = 2_000;
+    fn thread_cpu() -> std::time::Duration {
+        let mut now = libc::timespec {
+            tv_sec: 0,
+            tv_nsec: 0,
+        };
+        // SAFETY: a valid clock id and a live out-pointer.
+        unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, &mut now) };
+        std::time::Duration::new(now.tv_sec as u64, now.tv_nsec as u32)
+    }
+    let synthetic = || {
+        let mut fixture = Harness::bare(Appearance::default());
+        let mut formats = Vec::new();
+        use Fourcc::*;
+        let fourccs = [
+            Xrgb8888,
+            Argb8888,
+            Abgr8888,
+            Xbgr8888,
+            Rgba8888,
+            Rgbx8888,
+            Bgra8888,
+            Bgrx8888,
+            Argb2101010,
+            Xrgb2101010,
+            Abgr2101010,
+            Xbgr2101010,
+            Abgr16161616f,
+            Xbgr16161616f,
+            Rgb565,
+            R8,
+            Gr88,
+            Nv12,
+            Nv21,
+            P010,
+            Yuv420,
+            Yvu420,
+            Yuyv,
+            Uyvy,
+        ];
+        for code in fourccs {
+            for modifier in 0u64..16 {
+                formats.push(Format {
+                    code,
+                    modifier: Modifier::from(modifier),
+                });
+            }
+            formats.push(Format {
+                code,
+                modifier: Modifier::Invalid,
+            });
+        }
+        let feedback = smithay::wayland::dmabuf::DmabufFeedbackBuilder::new(0, formats)
+            .build()
+            .expect("a feedback table");
+        let dh = fixture.state.display_handle.clone();
+        fixture
+            .state
+            .screencopy
+            .dmabuf
+            .create_global_with_default_feedback::<crate::compositor::State>(&dh, &feedback);
+        fixture.spawn(run_client);
+        fixture
+    };
+    for (label, mut fixture) in [
+        ("session table", Fixture::start()),
+        ("synthetic 408", synthetic()),
+    ] {
+        let mut per_bind = Vec::new();
+        for version in [3, 4] {
+            let started = thread_cpu();
+            let Ack::Stormed { modifier_events } = fixture.run(Step::BindStorm {
+                version,
+                count: BINDS,
+            }) else {
+                panic!("expected a storm report");
+            };
+            let each = (thread_cpu() - started) / BINDS;
+            per_bind.push(each);
+            println!(
+                "{label}: v{version} bind: {each:?} compositor CPU per bind, {} modifier events per bind ({BINDS} binds)",
+                modifier_events / BINDS as usize
+            );
+        }
+        println!(
+            "{label}: the v3 modifier events cost {:?} per bind",
+            per_bind[0].saturating_sub(per_bind[1])
+        );
+    }
+}
+
 /// Records that a test asserted nothing because this machine has no usable
 /// `/dev/udmabuf`.
 ///
@@ -1286,6 +1402,8 @@ struct TestClient {
     planes: Vec<OwnedFd>,
     /// Surfaces `Step::MakeSurface` made and deliberately kept alive.
     surfaces: Vec<wl_surface::WlSurface>,
+    /// `modifier` events received, for `Step::BindStorm`.
+    modifier_events: usize,
 }
 
 fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> Result<(), String> {
@@ -1404,6 +1522,22 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 // exact surface tree, server-side.
                 client.surfaces.push(surface);
                 acks.send(Ack::Surface(id)).map_err(|e| e.to_string())?;
+            }
+            Step::BindStorm { version, count } => {
+                let (name, advertised) = client.dmabuf_name.ok_or("no zwp_linux_dmabuf_v1")?;
+                let registry = client.registry.clone().ok_or("no registry")?;
+                client.modifier_events = 0;
+                for _ in 0..count {
+                    let dmabuf: zwp_linux_dmabuf_v1::ZwpLinuxDmabufV1 =
+                        registry.bind(name, version.min(advertised), &qh, ());
+                    queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                    dmabuf.destroy();
+                }
+                queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                acks.send(Ack::Stormed {
+                    modifier_events: client.modifier_events,
+                })
+                .map_err(|e| e.to_string())?;
             }
             Step::ReleaseImportedBuffer => {
                 if let Some(buffer) = client.buffer.take() {
@@ -1623,7 +1757,7 @@ impl Dispatch<zwp_linux_dmabuf_v1::ZwpLinuxDmabufV1, ()> for TestClient {
             zwp_linux_dmabuf_v1::Event::Format { format } => {
                 client.feedback.legacy_formats.push(format);
             }
-            zwp_linux_dmabuf_v1::Event::Modifier { .. } => {}
+            zwp_linux_dmabuf_v1::Event::Modifier { .. } => client.modifier_events += 1,
             _ => {}
         }
     }

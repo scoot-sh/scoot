@@ -289,6 +289,14 @@
 //!   a kill. On the async `create` path a refusal is the protocol's `failed`
 //!   event and the client lives; on `create_immed` it dies, which is what the
 //!   protocol prescribes for a buffer the client already believes it holds.
+//! - **A pre-feedback client can still reach the implicit path, by design of
+//!   the protocol.** A v1/v2 bind is told fourccs only (`format` events),
+//!   with no layout; Smithay sends one for every fourcc whose modifiers
+//!   include `LINEAR` or `Invalid` (`wayland/dmabuf/dispatch.rs`, `bind`),
+//!   which under GLES now includes the YUV ones. Such a client allocates
+//!   implicitly and sends `Invalid`, and a YUV buffer imported that way draws
+//!   the wrong colours as above -- a wrong picture, never a kill, and only
+//!   for a client too old to have been told better. Modern clients bind v4+.
 //! - **Alpha-carrying YUV (`AYUV`, `Y410`, ...) composites as opaque under
 //!   GLES.** Smithay's `has_alpha` knows no YUV fourcc, so the renderer and
 //!   the damage/occlusion code both treat such a buffer as opaque -- the two
@@ -316,26 +324,47 @@
 //!   in real pages, which is why there is deliberately no second, byte-sized
 //!   cap here the way `wl_shm` pools have one: an shm pool's size is a number
 //!   the client sends, a dma-buf's is a fact about the fd.
-//! - **Bind/unbind storms cost nothing here.** Feedback is built once, at
-//!   startup; Smithay re-sends the stored copy to each new `get_default_feedback`
-//!   without calling back into this module. There is no per-bind work to
-//!   storm. A GLES table is longer, and the one per-bind cost that scales
-//!   with it is Smithay's: a v3 bind is sent one `format` and one `modifier`
-//!   event per entry (hundreds on a real GPU, a few KB), which
-//!   `bind_budget.rs` bounds like every other global. Building the table
-//!   once is microseconds (`dmabuf/tests/tranche.rs::driver_tranche_cost`).
+//! - **Bind/unbind storms: bounded by Smithay and wayland-backend, not by
+//!   `bind_budget.rs`.** Feedback is built once, at startup; Smithay re-sends
+//!   the stored copy to each `get_default_feedback` without calling back into
+//!   this module -- one fd and one `tranche_formats` array of 2 bytes per
+//!   entry, whatever the table's length. What *does* scale with the table is
+//!   a pre-feedback bind: Smithay answers every v3 bind with one `modifier`
+//!   event per entry (v1/v2: one `format` per fourcc) straight from `bind`
+//!   (`wayland/dmabuf/dispatch.rs`). This global is **not** one of the four
+//!   `bind_budget.rs` counts, and deliberately stays out of it: that budget
+//!   bounds binds whose *retained state* grows with the session (a handle per
+//!   window), while a dmabuf bind retains one small object whatever the table
+//!   and costs only the events it sends. Measured
+//!   (`dmabuf/tests.rs::bind_storm_cost`, release, dev VM, 2000 binds, v3
+//!   minus v4): the llvmpipe table's 57 events cost 6.4 µs per bind, a
+//!   synthetic 408-entry table's 25.8-26.3 µs (~64 ns an event), on top of
+//!   the ~5 µs any bind costs. So a v3 storm amplifies each ~20-byte bind
+//!   request into ~8 KB and ~5x the compositor CPU of a bare bind, at the
+//!   client's own request rate -- and only while the client keeps reading:
+//!   wayland-backend caps each client's outgoing buffer at 4 KB and
+//!   disconnects a client whose socket will take no more
+//!   (`rs/server_impl/client.rs`, `write_message` failing), so a storm that
+//!   does not read its replies ends itself within a few dozen binds. Current
+//!   Mesa and quickshell bind v4/v5 and never take this path.
 //! - **Hotplug and mode changes need no re-send.** The feedback names the DRM
 //!   *device*, not a connector or a mode, and the tranche is a property of the
 //!   renderer, which no hotplug changes -- so `set_default_feedback` (which
 //!   would re-send to every bound feedback object at the pinned rev) is never
-//!   called. The assumption that rests on, now that the table is derived: a
-//!   session's renderer is fixed for its life. `State::resize_output` rebuilds
-//!   the backend, but always as the renderer the session started with, and
-//!   `GlesBackend::new`'s device enumeration is deterministic within a boot --
-//!   so a rebuild lands on the same EGL display and the same importable set.
+//!   called. The assumption that rests on, now that the table is derived and
+//!   carries a GLES driver's own tiled modifiers: a session's renderer *and
+//!   its device* are fixed for its life. `State::resize_output` and
+//!   `headless::add_output` rebuild as the renderer the session started with,
+//!   and a GLES rebuild is pinned to the EGL device the first build landed on
+//!   (`render::gles::GlesDevice`, handed down through `State::gles_device`):
+//!   if that device cannot build, the resize is refused or the output is not
+//!   added, rather than the backend migrating to a device whose driver may
+//!   refuse layouts this table promised -- which through `create_immed` is a
+//!   client kill. So every backend is on the same EGL display and has the
+//!   same importable set, by construction rather than by enumeration order.
 //!   A future renderer with real per-connector tranche preferences, or a
-//!   resize that could migrate to another device, is when this paragraph stops
-//!   being true and `set_default_feedback` becomes the fix.
+//!   deliberate device migration, is when this paragraph stops being true and
+//!   `set_default_feedback` becomes the fix.
 //! - **No-DRM-node logging is once per boot, not per frame.** Which rung of
 //!   [`main_device`] answered -- including the `0` fallback -- is logged where
 //!   it is chosen, in [`advertise`], which runs once from
@@ -926,7 +955,9 @@ impl DmabufHandler for State {
         // with its own cache, and a window may be shown on any output -- an
         // import proven on the primary alone would fail to map when the
         // window moves to the second screen. All backends share the session's
-        // renderer kind, so they agree; the first refusal decides. A refusal
+        // renderer kind and, under GLES, its one EGL device (pinned -- see
+        // `render::gles::GlesDevice`), so they agree; the first refusal
+        // decides. A refusal
         // past the first leaves the earlier backends' mappings cached, which
         // `drain_cache` drops with the buffer -- the same shape a retried
         // import would rebuild.

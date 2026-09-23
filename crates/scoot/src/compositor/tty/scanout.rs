@@ -62,6 +62,7 @@ use smithay::output::{Output, OutputModeSource};
 use smithay::reexports::drm::control::{Mode, crtc, plane};
 use smithay::utils::{Buffer, Size, Transform};
 
+use super::layout_exporter::LayoutKeepingExporter;
 use super::present_retry::{self, PresentRetries};
 
 /// The concrete `DrmCompositor` this backend drives.
@@ -72,8 +73,7 @@ use super::present_retry::{self, PresentRetries};
 /// cursor plane -- [`ScanoutPresenter::build`] passes `gbm: None` where it
 /// has none, disabling the cursor plane outright, exactly the construction
 /// this tier had before the cursor step existed.
-type Compositor =
-    DrmCompositor<GbmAllocator<DrmDeviceFd>, GbmFramebufferExporter<DrmDeviceFd>, u64, DrmDeviceFd>;
+type Compositor = DrmCompositor<GbmAllocator<DrmDeviceFd>, LayoutKeepingExporter, u64, DrmDeviceFd>;
 
 /// The per-frame plane assignment for a frame whose primary may go direct:
 /// every plane Smithay can drive -- cursor, overlay, and the primary plane
@@ -116,31 +116,47 @@ type Compositor =
 ///
 /// Skipping the comparison does not hand KMS a buffer described wrongly:
 ///
-/// - **The framebuffer carries its own format.** The client buffer is
-///   `AddFB2`'d with its own fourcc (`element_config` ->
-///   `framebuffer_from_wayland_buffer`), and with its own modifier where
-///   the device takes modifiers; the swapchain's format is never applied to
-///   it. A buffer that arrived *without* an explicit modifier is refused
-///   outright (`framebuffer_from_wayland_buffer`, Weston's rule: an
-///   implicit layout is not safe to hand to KMS), and `zwp_linux_dmabuf_v1`
-///   never offers one (`dmabuf::driver_tranche`). A buffer *with* one is
-///   `AddFB2`'d with `DRM_MODE_FB_MODIFIERS` and that modifier whenever the
-///   GBM import reports it, and a device that cannot take modifiers refuses
-///   that call -- client buffers get no legacy fallback -- so the element
-///   composites. Where the GBM import reports no modifier (virtio: the
-///   client's `LINEAR` buffer comes back `Invalid`) the framebuffer is added
-///   without one and KMS reads the driver's implicit layout, which is safe
-///   there because the table on this tier is this very driver's own import
-///   set (the scanout renderer is on the GBM device, `dmabuf.rs`), and
-///   virtio's lists nothing but `LINEAR`. The one exposure left is a GBM
-///   that *drops* a tiled modifier its own EGL display advertised, on a
-///   device whose implicit layout differs -- a hardware question, carried as
-///   a check in `Asahi.md` rather than claimed either way. A multi-plane
-///   YUV buffer takes the same path and reaches the primary only where the
-///   plane lists that fourcc (next bullet); Smithay treats it as opaque
-///   (`has_alpha` knows no YUV fourcc), which is what it is. What the
-///   comparison protected is only "the primary shows the same format it
-///   composites in", not "KMS reads the buffer right".
+/// - **The framebuffer carries its own fourcc, and the layout it is added
+///   with is what GBM reports for the import** (`element_config` ->
+///   `framebuffer_from_wayland_buffer` -> `framebuffer_from_dmabuf`); the
+///   swapchain's format is never applied to it. Three shapes, traced at the
+///   pinned rev:
+///   - *Implicit* (`Invalid`): refused outright before any import (Weston's
+///     rule), and `zwp_linux_dmabuf_v1` never offers it
+///     (`dmabuf::driver_tranche`).
+///   - *`LINEAR`, single-plane, offset 0* -- every buffer this path has been
+///     seen with: Smithay imports it through GBM's **non**-modifier call and
+///     forces the result implicit (`allocator/gbm.rs:355-381`,
+///     `from_bo(bo, true)`), so it is `AddFB2`'d **without** a modifier on
+///     every device, not only virtio, and comes back `Invalid`. KMS then
+///     reads it in the driver's implicit layout for an imported buffer. That
+///     is right exactly when that layout is linear for a linear allocation,
+///     which holds on every driver this has run on (virtio measured) and on
+///     drivers whose implicit layout is the buffer object's own metadata. It
+///     is the one assumption the `LINEAR` path rests on, and it predates the
+///     full-format feedback.
+///   - *An explicit tiled or compressed modifier* (offered under GLES since
+///     the feedback became the driver's own set): imported with modifiers,
+///     and `AddFB2`'d with `DRM_MODE_FB_MODIFIERS` and whatever modifier GBM
+///     reports. A device without `ADDFB2_MODIFIERS` refuses that call, and
+///     client buffers get no legacy fallback, so the element composites.
+///     **If GBM reports the modifier wrongly or not at all**, the framebuffer
+///     would be added with that wrong layout, its format would read
+///     `{fourcc, Invalid}` (or the wrong modifier) -- and `{fourcc, Invalid}`
+///     is in every plane's list, because Smithay adds it for every plane
+///     fourcc unconditionally (`drm/mod.rs:288-297`), so the plane check below
+///     would *pass* and the screen would show scrambled tiles, not a
+///     fallback. That is why the exporter is not Smithay's bare one:
+///     [`LayoutKeepingExporter`] drops any client framebuffer that did not
+///     keep the client's explicit modifier, and the element composites
+///     (`tty/layout_exporter.rs`, rule pinned there). No driver is known to
+///     misreport; `Asahi.md` Test 6 asks real hardware.
+///
+///   A multi-plane YUV buffer takes the modifier path and reaches the primary
+///   only where the plane lists that fourcc (next bullet); Smithay treats it
+///   as opaque (`has_alpha` knows no YUV fourcc), which is what it is. What
+///   the comparison `ANY` skips protected is only "the primary shows the
+///   same format it composites in", not "KMS reads the buffer right".
 /// - **The plane still has to take that exact format.** `try_assign_plane`
 ///   refuses unless `plane.formats.contains(element format)`, fourcc and
 ///   modifier, before any commit is built -- `ANY` skips the swapchain
@@ -299,6 +315,10 @@ impl ForceComposite {
 ///   composites as it always has. Nothing on that path touches the client's
 ///   `wl_buffer`, sends it an event or posts an error: a refused framebuffer
 ///   cannot disconnect a client.
+/// - A client framebuffer that did not keep the client's explicit tiled
+///   modifier is dropped by the wrapping [`LayoutKeepingExporter`] and the
+///   element composites (see `DIRECT_FLAGS` for why the plane check alone
+///   would not catch it).
 /// - A framebuffer that exists still has to pass the atomic `TEST_ONLY`
 ///   commit before any plane takes it (`try_assign_plane`).
 ///
@@ -535,7 +555,11 @@ impl ScanoutPresenter {
         // Shared by startup and every CRTC switch, so a rebuilt compositor
         // cannot admit a different set of client buffers than the first one
         // did. See `EXPORTER_FILTER` for the choice and what it reaches.
-        let exporter = GbmFramebufferExporter::new(gbm.clone(), EXPORTER_FILTER);
+        // Wrapped: a client buffer whose tiled layout the framebuffer would
+        // lose is refused rather than scanned out scrambled (see
+        // `layout_exporter`).
+        let exporter =
+            LayoutKeepingExporter::new(GbmFramebufferExporter::new(gbm.clone(), EXPORTER_FILTER));
         // `Some` only where a cursor plane exists to drive with it. Without
         // one the cursor state -- its pixman renderer, its `CURSOR | WRITE`
         // buffer pool -- would be allocated and then never consulted (Smithay

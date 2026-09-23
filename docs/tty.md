@@ -306,7 +306,12 @@ running with no GPU at all is a hard requirement here, not a fallback tier.
   backed by a software driver answers no, so it is preferred and then served
   in software anyway. The chosen device is logged at startup (`the GLES
   renderer is up device=/dev/dri/renderD128 software=false`) — trust that
-  line over the flag name.
+  line over the flag name. Only the session's first build chooses: every later
+  rebuild (a resize, another `--headless --outputs` output) stays on that
+  same device, and if it cannot build there the resize is refused (the log
+  says `could not resize the render target`) rather than moving to another
+  GPU, whose driver might not take the buffer layouts clients were already
+  offered.
 - **A wrong `--renderer gles` is a startup error, not a silent downgrade.**
   If no EGL device can drive it -- including a box with no loadable libEGL
   at all, which the compositor probes before Smithay's first EGL touch so

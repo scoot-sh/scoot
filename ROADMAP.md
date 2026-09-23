@@ -115,7 +115,13 @@ each item's own file records why it landed when it did.
   layout class through `create_immed` under either renderer. Dev VM:
   57 formats at `LINEAR` on both GLES tiers. Real GPU: `Asahi.md` Test 6.
   Trade-off recorded: a fullscreen client may now pick a layout the display
-  cannot scan out — [scanout tranche](docs/backlog/core/gpu-scanout-candidates.md).
+  cannot scan out — [scanout tranche](docs/backlog/core/gpu-scanout-candidates.md). Review found two harms the wider table made
+  reachable, both fixed in the PR: GLES rebuilds (resize, added output)
+  could migrate to another EGL device against a never-re-sent feedback —
+  now pinned to the first build's device, failing rather than moving; and a
+  GBM that lost a client's tiled modifier would have scanned out scrambled
+  tiles — the scanout exporter now refuses a framebuffer that did not keep
+  the client's explicit modifier.
 
 - **[Zero-copy fullscreen on the GPU tier](docs/backlog/resolved/gpu-primary-direct-format-gate-done.md)**
   (2026-09-23, PR #228) — a fullscreen window

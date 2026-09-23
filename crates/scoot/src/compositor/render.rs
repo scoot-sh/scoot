@@ -65,7 +65,7 @@ use crate::cli::RendererKind;
 use super::State;
 use super::tty::Tty;
 use elements::{Elements, FrameContext, ring_elements};
-use gles::GlesBackend;
+use gles::{GlesBackend, GlesDevice};
 use pixman::PixmanBackend;
 
 mod elements;
@@ -246,12 +246,18 @@ impl Backend {
     /// the pipeline and `renderer` is not consulted. Empty on every other
     /// path, including `State::resize_output`, which never reaches here on
     /// that tier (see its own early return).
+    ///
+    /// `gles_device` pins a GLES build to the device the session's GLES
+    /// renderer is already on ([`State::gles_device`]); `None` only for the
+    /// session's first build, and ignored by every other renderer. See
+    /// `gles::GlesDevice` for why a GLES session may never change device.
     pub(super) fn new(
         output: &Output,
         width: i32,
         height: i32,
         renderer: RendererKind,
         scanout: ScanoutHandoff,
+        gles_device: Option<GlesDevice>,
     ) -> Result<Self, Box<dyn Error>> {
         #[cfg(feature = "gpu-scanout")]
         if let Some(backend) = scanout.backend {
@@ -265,13 +271,28 @@ impl Backend {
         let _ = scanout;
         let pipeline = match renderer {
             RendererKind::Pixman => Pipeline::Pixman(PixmanBackend::new(width, height)?),
-            RendererKind::Gles => Pipeline::Gles(Box::new(GlesBackend::new(width, height)?)),
+            RendererKind::Gles => {
+                Pipeline::Gles(Box::new(GlesBackend::new(width, height, gles_device)?))
+            }
         };
         Ok(Self {
             pipeline,
             damage: OutputDamageTracker::from_output(output),
             size: (width, height),
         })
+    }
+
+    /// The EGL device this backend's offscreen GLES renderer is on, or `None`
+    /// for any other pipeline -- what [`State::gles_device`] reads to pin a
+    /// rebuild. The scanout tier answers `None` because it is never rebuilt
+    /// through [`Backend::new`] (see `State::resize_output`).
+    pub(super) fn gles_device(&self) -> Option<GlesDevice> {
+        match &self.pipeline {
+            Pipeline::Gles(gpu) => Some(gpu.device),
+            Pipeline::Pixman(_) => None,
+            #[cfg(feature = "gpu-scanout")]
+            Pipeline::Scanout(_) => None,
+        }
     }
 
     /// Whether this session composites straight into its scanout buffer.
@@ -559,6 +580,19 @@ impl Backend {
     }
 }
 
+impl State {
+    /// The EGL device this session's offscreen GLES backends are on, if it
+    /// has built one -- the pin every later [`Backend::new`] is handed.
+    ///
+    /// Read off whichever backend answers, because it is an invariant of all
+    /// of them: the first was built unpinned and every other one pinned to
+    /// it. A scan of a map of at most `MAX_OUTPUTS` entries, on a resize or
+    /// an output being added, never per frame.
+    pub(super) fn gles_device(&self) -> Option<GlesDevice> {
+        self.backends.values().find_map(Backend::gles_device)
+    }
+}
+
 #[cfg(feature = "gpu-scanout")]
 impl State {
     /// Forces one fully-composited scanout frame when the capture recording
@@ -843,7 +877,9 @@ pub(super) fn draw_frame(
             draw_frame_with(state, renderer, image, damage, *size, output, locked)
         }
         Pipeline::Gles(gpu) => {
-            let GlesBackend { renderer, buffer } = &mut **gpu;
+            let GlesBackend {
+                renderer, buffer, ..
+            } = &mut **gpu;
             draw_frame_with(state, renderer, buffer, damage, *size, output, locked)
         }
         // A separate body, not a third `draw_frame_with` arm: this tier has

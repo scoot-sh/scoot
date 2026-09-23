@@ -64,11 +64,7 @@ Linux, and daily-driven on `--tty`** (2026-09-18).
   with a test client's dumb buffers; not yet with a GPU-rendered app, a
   real video player, or real GPU hardware — [Asahi.md](Asahi.md), Test 5).
   While something records or streams the screen, scoot composites as
-  usual. With `--renderer gles`, GPU apps are also offered their GPU's own
-  buffer formats — its native tiled layouts, and the YUV formats video
-  decoders produce — rather than only plain linear RGB (checked on the dev
-  VM's software GPU, which offers only linear layouts; what real hardware
-  offers is [Asahi.md](Asahi.md)'s Test 6). Not there yet:
+  usual. Not there yet:
   every other window is still composited, and where the display has a
   hardware cursor plane the pointer is missing from screenshots. Under
   `--headless`/`--nested` the GPU speedup does not apply: `gles` there
@@ -76,6 +72,10 @@ Linux, and daily-driven on `--tty`** (2026-09-18).
   GPU that measured 18–31x *slower* than pixman.
   pixman stays the default and the right choice without a GPU; details in
   [docs/tty.md](docs/tty.md).
+- **GPU apps get their GPU's own buffer formats under `--renderer gles`** —
+  the layouts the GPU prefers and the YUV formats video decoders produce,
+  not only plain linear RGB. Checked on the dev VM's software GPU (linear
+  formats only there); real hardware is [Asahi.md](Asahi.md)'s Test 6.
 - **Config reload is live, except three restart fields.** `scootctl reload` (or `kill -HUP` on the
   compositor) re-applies the layout (gap, column widths, default column
   width), the output scale (except under `--nested`, where the host owns

@@ -24,6 +24,10 @@ scoot has not cut a numbered release yet; entries are dated.
   directly makes its fullscreen window composite rather than go straight to
   the screen, until scoot learns to steer fullscreen apps toward a layout
   the display takes.
+- **On a machine with more than one GPU, a `gles` session stays on the GPU
+  it started on.** If that GPU cannot rebuild the renderer at a new size,
+  the resize is refused and the window keeps its size, instead of scoot
+  quietly moving to another GPU that might not accept the apps' buffers.
 
 ### 2026-09-23 — fullscreen video without compositing (GPU tier)
 

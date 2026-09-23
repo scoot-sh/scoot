@@ -38,19 +38,33 @@ RESOLVED 2026-09-23 (PR #229, branch `gles-dmabuf-full-formats`).
   advertised `LINEAR` on `Invalid` evidence alone — a latent `create_immed`
   refusal. The GLES rule no longer does (it offers the named layouts);
   pixman is unaffected.
-- **Downstream audit, nothing needed changing in code:** `schedule_cache_drain`
-  and the per-commit sync are renderer-agnostic / pixman-only respectively;
-  capture reads the composited framebuffer, never a client buffer; the
-  primary-direct path refuses implicit-modifier buffers (Weston's rule in
-  `framebuffer_from_wayland_buffer`), `AddFB2`s explicit ones with
-  `MODIFIERS` and no legacy fallback, a YUV buffer reaches the primary only
-  where the plane lists it, and Smithay's `has_alpha` knows no YUV fourcc so
-  YUV is opaque to both renderer and occlusion (consistent; alpha-carrying
-  YUV like `AYUV` composites opaque — noted in the module doc). Plane
-  indices are bounded at 4 in Smithay's dispatch. `DIRECT_FLAGS`'s safety
-  argument ("the only modifier offered is `LINEAR`") was re-derived and
-  rewritten; its one residual (a GBM import dropping a tiled modifier) is an
-  `Asahi.md` Test 6 check, not a claim.
+- **Downstream audit.** `schedule_cache_drain` and the per-commit sync are
+  renderer-agnostic / pixman-only respectively; capture reads the composited
+  framebuffer, never a client buffer; Smithay's `has_alpha` knows no YUV
+  fourcc so YUV is opaque to both renderer and occlusion (consistent;
+  alpha-carrying YUV like `AYUV` composites opaque — noted in the module
+  doc); plane indices are bounded at 4 in Smithay's dispatch.
+- **Two things review found that did need code** (review of PR #229):
+  - *A GLES rebuild could change device.* `GlesBackend::new` re-ran "first
+    device that builds wins" on every resize and added output, while the
+    feedback (now carrying one driver's tiled modifiers) is never re-sent: a
+    transient failure on a two-GPU machine could move a backend to a device
+    that refuses what clients were promised — a `create_immed` kill.
+    Rebuilds are now pinned to the first build's `EGLDeviceEXT`
+    (`render::gles::GlesDevice`, `State::gles_device`) and fail rather than
+    migrate; `add_output`'s failure path now also takes back the
+    `wl_output` global and `Space` mapping it had already made.
+  - *The primary-direct safety argument had the mechanism wrong.* A
+    single-plane `LINEAR` buffer at offset 0 is GBM-imported without
+    modifiers and `AddFB2`'d without one on **every** device, so that path
+    rests on the kernel's implicit layout for an imported linear buffer
+    being linear (true wherever measured). And a GBM that loses a tiled
+    modifier would give **scrambled tiles, not a fallback**: the fb becomes
+    `{fourcc, Invalid}`, which every plane lists (`drm/mod.rs:288-297`).
+    The exporter is now wrapped (`tty/layout_exporter.rs`): a client
+    framebuffer that did not keep the client's explicit non-`LINEAR`
+    modifier is dropped and the element composites. `Asahi.md` Test 6 still
+    asks whether any real GBM does it.
 - **Known trade-off, not a regression of anything measured:** with tiled
   layouts on offer, a fullscreen GL client on real hardware may allocate a
   layout the display cannot scan out and composite instead of going

@@ -786,9 +786,12 @@ grep -E 'Using DRM device|hwdec|upload|VO:|failed|error' /tmp/fx/t6-mpv.log | he
   build with this change, note the modifier the client sent next to the
   answer. And if a fullscreen buffer *does* go direct, check the fb's
   modifier in `t5-kms-fullscreen.txt` against the client's `add(` modifier:
-  a tiled client buffer shown on an fb with no modifier (or `LINEAR`) is the
-  one exposure `DIRECT_FLAGS` in `tty/scanout.rs` names — a GBM import that
-  dropped the modifier — and would look like scrambled tiles on screen.
+  they must match. A GBM import that drops or changes a tiled modifier is
+  the one exposure `DIRECT_FLAGS` in `tty/scanout.rs` names; scoot now
+  refuses such a framebuffer and composites instead, logging `not scanning
+  out a client buffer whose framebuffer lost its tiled layout` at `debug`.
+  Seeing that line here means this machine's GBM does it (worth reporting);
+  seeing scrambled tiles on screen means the guard missed a case.
 
 ## What to send back
 
