@@ -103,15 +103,17 @@ mod tests;
 /// any real output or menu.
 ///
 /// Smithay's positioner arithmetic is plain `i32` addition, which panics on
-/// overflow in a debug build and wraps in a release one. Its own creation-time
-/// `get_geometry` is already beyond scoot's reach, but the constraint pass
-/// adds more terms on top of that result -- the popup's far edge
-/// (`loc + size`), its distance from the target's edges, and a flipped
-/// recompute -- so a positioner whose unadjusted geometry is still in range
-/// could overflow here. With every input at most 2^24 in magnitude, no sum
-/// in that pass exceeds a handful of such terms (under 2^28): no overflow is
-/// possible, and a positioner beyond it asked for a place nothing can show
-/// anyway.
+/// overflow in a debug build and wraps in a release one. Its plain
+/// `get_geometry` can already overflow on extreme inputs -- at `get_popup`,
+/// inside Smithay, and in `reposition_request`'s fallback, which makes the
+/// same call that handler always made (a debug-only panic either way, and
+/// not this module's to fix). The constraint pass adds more terms on top of
+/// that result -- the popup's far edge (`loc + size`), its distance from
+/// the target's edges, and a flipped recompute -- so a positioner whose
+/// unadjusted geometry is still in range could overflow here. With every
+/// input at most 2^24 in magnitude, no sum in that pass exceeds a handful of
+/// such terms (under 2^28): no overflow is possible, and a positioner beyond
+/// it asked for a place nothing can show anyway.
 pub(super) const COORDINATE_LIMIT: u32 = 1 << 24;
 
 /// `positioner`'s geometry adjusted into `target` (both in the parent's

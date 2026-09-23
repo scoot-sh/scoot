@@ -635,7 +635,10 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 let surface = compositor.create_surface(&qh, ());
                 let xdg = wm_base.get_xdg_surface(&surface, &qh, Role::Popup(usize::MAX));
                 let positioner = positioner(&wm_base, &qh, Spec::menu_at(0, 0, 40, 40));
-                let _popup = xdg.get_popup(Some(&xdg), &positioner, &qh, Role::Popup(usize::MAX));
+                let popup = xdg.get_popup(Some(&xdg), &positioner, &qh, Role::Popup(usize::MAX));
+                // In the same flush: a reposition walks up the popup's parent
+                // chain too, and must not find the loop still there.
+                popup.reposition(&positioner, 1);
                 queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
                 return Err("a self-parented popup was not refused".into());
             }
@@ -645,11 +648,15 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 let child = compositor.create_surface(&qh, ());
                 let child_xdg = wm_base.get_xdg_surface(&child, &qh, Role::Popup(usize::MAX));
                 let positioner = positioner(&wm_base, &qh, Spec::menu_at(0, 0, 40, 40));
-                let _child =
+                let child_popup =
                     child_xdg.get_popup(Some(&bare_xdg), &positioner, &qh, Role::Popup(usize::MAX));
                 queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
-                let _bare =
+                let bare_popup =
                     bare_xdg.get_popup(Some(&child_xdg), &positioner, &qh, Role::Popup(usize::MAX));
+                // In the same flush, on both popups of the loop (one refused,
+                // one accepted and tracked): each reposition walks up the chain.
+                bare_popup.reposition(&positioner, 1);
+                child_popup.reposition(&positioner, 2);
                 queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
                 return Err("a looping popup chain was not refused".into());
             }

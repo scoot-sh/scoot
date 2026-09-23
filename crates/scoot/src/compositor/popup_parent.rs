@@ -15,8 +15,9 @@
 //! client with it (the harness test timed out and was killed).
 //!
 //! So `new_popup` refuses a popup whose chain loops *before* tracking it
-//! ([`closes_a_cycle`]), disconnecting the client. That check is exact, and
-//! it terminates, by induction: a popup's parent is set only at
+//! ([`closes_a_cycle`]), clears the refused popup's parent so the loop is
+//! gone from the data too, and disconnects the client. That check is exact,
+//! and it terminates, by induction: a popup's parent is set only at
 //! `get_popup` -- checked here, for every popup -- or by
 //! `zwlr_layer_surface_v1.get_popup`, which always sets a layer surface, and
 //! a layer surface is not a popup, so it ends a chain rather than extending
@@ -24,6 +25,8 @@
 //! a loop that appears now must pass through the popup being created. Every
 //! other walk up a chain -- Smithay's, and `popup_constraint.rs`'s -- then
 //! terminates by the same invariant.
+
+use std::sync::PoisonError;
 
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_wm_base;
 use smithay::reexports::wayland_server::Resource;
@@ -89,10 +92,27 @@ fn closes_a_cycle(popup: &WlSurface) -> bool {
 /// and a message naming it. Either way the client is disconnected, which is
 /// what matters; logged at `warn` like the popup-grab refusals, so the
 /// disconnect is diagnosable.
+///
+/// The loop is also broken in the data, not just refused: Smithay wrote the
+/// popup's role data, parent included, before `new_popup` ran, so without
+/// this the loop would outlive the refusal until the client's teardown
+/// resets it. Nothing can walk it through a request in that window -- once
+/// killed, a client's requests are no longer read (wayland-backend 0.3.17,
+/// `rs/server_impl/client.rs`, `next_request` answers `EPIPE` for a killed
+/// client), which the same-flush `reposition` in this module's tests
+/// confirms -- but the teardown itself runs destructors in no stated
+/// order. Every loop runs through this popup, so clearing its parent breaks
+/// all of them, and the module doc's "no chain loops" holds from here on
+/// rather than from whenever teardown gets to it.
 pub(super) fn refuse_if_cyclic(popup: &PopupSurface) -> bool {
     if !closes_a_cycle(popup.wl_surface()) {
         return false;
     }
+    with_states(popup.wl_surface(), |states| {
+        if let Some(data) = states.data_map.get::<XdgPopupSurfaceData>() {
+            data.lock().unwrap_or_else(PoisonError::into_inner).parent = None;
+        }
+    });
     tracing::warn!(
         client = ?popup.wl_surface().client().map(|client| client.id()),
         "xdg_popup's parent chain loops back to itself; disconnecting the client"
