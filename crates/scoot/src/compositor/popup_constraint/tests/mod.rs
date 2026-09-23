@@ -138,7 +138,8 @@ enum Step {
     SelfParentPopup,
     /// A two-popup loop: popup `A` of a bare, role-less `xdg_surface` `X`,
     /// then `X` made a popup whose parent is `A`. Expected to be refused
-    /// like [`Step::SelfParentPopup`].
+    /// like [`Step::SelfParentPopup`] -- now already at `A`, whose parent has
+    /// no role, so the rest never reaches the compositor.
     LoopingPopups,
     /// `xdg_popup.reposition` with `spec` and `token`; ack and commit the
     /// configure that answers. Answers with the geometry it carried, and
@@ -653,8 +654,10 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
                 let bare_popup =
                     bare_xdg.get_popup(Some(&child_xdg), &positioner, &qh, Role::Popup(usize::MAX));
-                // In the same flush, on both popups of the loop (one refused,
-                // one accepted and tracked): each reposition walks up the chain.
+                // In the same flush, on both popups of the loop: each
+                // reposition walks up the chain. (Unreached now that `A` is
+                // refused at the round trip above; kept so the step still
+                // tries the whole loop if that refusal ever goes.)
                 bare_popup.reposition(&positioner, 1);
                 child_popup.reposition(&positioner, 2);
                 queue.roundtrip(&mut client).map_err(|e| e.to_string())?;

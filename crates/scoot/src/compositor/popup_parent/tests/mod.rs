@@ -1,0 +1,757 @@
+//! Popup parent chains, driven through a real `wayland-client` connection:
+//! how deep they may nest, and every way a client could try to make one
+//! deeper, or loop it, after the fact.
+//!
+//! Every test asserts on what a client was told -- the protocol error that
+//! ended it, a configure it received -- on real framebuffer pixels, or on a
+//! *second* client still being served after the first did its worst. The
+//! refusals exist to keep the compositor alive for everyone else, so that
+//! last one is the claim that matters.
+//!
+//! The client script works in batches: each [`Step::Batch`] sends all of its
+//! [`Op`]s and only then round-trips, so they reach the compositor in one
+//! flush, and are dispatched in one go, the way a hostile client would send
+//! them -- and the way a toolkit re-showing a menu does.
+//!
+//! Nothing here names a server-side symbol from `popup_parent.rs` (the cap
+//! is spelled out as [`CAP`]), so this file compiles against the code before
+//! it, which is how its tests were watched failing first.
+//!
+//! This file is the harness; the tests live in the submodules below, by
+//! concern. Like every live-`State` suite here, these need a writable
+//! `$XDG_RUNTIME_DIR`.
+
+use std::io::Write;
+use std::os::fd::AsFd;
+use std::os::unix::net::UnixStream;
+use std::sync::mpsc::{Receiver, Sender};
+use std::time::Duration;
+
+use scoot_core::{Rect, WindowId};
+use wayland_client::protocol::{
+    wl_buffer, wl_compositor, wl_registry, wl_shm, wl_shm_pool, wl_surface,
+};
+use wayland_client::{Connection, Dispatch, EventQueue, QueueHandle};
+use wayland_protocols::xdg::shell::client::{
+    xdg_popup, xdg_positioner, xdg_surface, xdg_toplevel, xdg_wm_base,
+};
+use wayland_protocols_wlr::layer_shell::v1::client::{zwlr_layer_shell_v1, zwlr_layer_surface_v1};
+
+use crate::compositor::decorations::{Appearance, Color};
+use crate::compositor::test_support::{self, Harness, wait_for};
+
+mod bench;
+mod bypass;
+mod depth;
+
+/// The most popups a chain may hold -- `popup_parent::MAX_POPUP_DEPTH`,
+/// spelled out so this file does not depend on it (see the module doc).
+const CAP: usize = 64;
+
+/// The output's framebuffer, square.
+const CANVAS: i32 = 200;
+
+// Colours, as the BGRA bytes an `Argb8888` buffer holds them in.
+const WINDOW_BGRA: [u8; 4] = [0x20, 0xE0, 0x20, 0xFF];
+const BAR_BGRA: [u8; 4] = [0xE0, 0x20, 0x20, 0xFF];
+const POPUP_BGRA: [u8; 4] = [0x20, 0xE0, 0xE0, 0xFF];
+/// The one popup a test is looking for.
+const MARKED_BGRA: [u8; 4] = [0xE0, 0x20, 0xE0, 0xFF];
+
+/// Each popup's size, and its offset from its parent's window geometry: a
+/// chain climbs one pixel right and down per level, so a 64-deep chain's
+/// deepest popup sits 63 pixels in from its root's corner, still on screen.
+const POPUP_SIZE: i32 = 8;
+const STEP: i32 = 1;
+
+fn appearance() -> Appearance {
+    Appearance {
+        focus_ring_width: 0,
+        background_color: Color::new(0.07058824, 0.20392157, 0.3372549, 1.0),
+        ..Appearance::default()
+    }
+}
+
+/// What a popup hangs off.
+#[derive(Clone, Copy, Debug)]
+enum Parent {
+    /// The `n`-th toplevel this client mapped.
+    Window(usize),
+    /// The `n`-th popup this client made.
+    Popup(usize),
+    /// The `n`-th bare, role-less `xdg_surface` this client made.
+    Bare(usize),
+    /// The `n`-th layer surface this client mapped, through
+    /// `zwlr_layer_surface_v1.get_popup` on a popup created parentless.
+    Layer(usize),
+}
+
+/// One request (or a few that belong together), sent without a round trip.
+#[derive(Clone, Copy, Debug)]
+enum Op {
+    /// A popup of `parent`, committed once. It becomes the next popup index.
+    Popup(Parent),
+    /// `len` popups, each a child of the one before it, the first a child of
+    /// `parent`: the next `len` popup indices, outermost first.
+    Chain { parent: Parent, len: usize },
+    /// An `xdg_surface` given no role. It becomes the next bare index.
+    Bare,
+    /// Gives bare `xdg_surface` `bare` a popup role under `parent`, which
+    /// makes it the next popup index.
+    PopupOnBare { bare: usize, parent: Parent },
+    /// `get_popup` a second time on popup `popup`'s own `xdg_surface`, while
+    /// its first `xdg_popup` is alive.
+    GetPopupAgain { popup: usize, parent: Parent },
+    /// A second `xdg_surface` for popup `popup`'s `wl_surface`, and
+    /// `get_popup` on that, while the first `xdg_popup` is alive.
+    SecondXdgSurface { popup: usize, parent: Parent },
+    /// `xdg_popup.destroy` on popup `popup`, keeping its `xdg_surface`.
+    Destroy(usize),
+    /// Destroys popup `popup`'s `xdg_popup` and `xdg_surface`, then makes its
+    /// `wl_surface` a popup again under `parent`, through a new
+    /// `xdg_surface` -- what GTK does when it re-shows a menu without
+    /// replacing the surface. The popup keeps its index.
+    Reincarnate { popup: usize, parent: Parent },
+    /// `xdg_popup.reposition` on popup `popup`: one more walk up its chain.
+    Reposition(usize),
+}
+
+enum Step {
+    /// Create a toplevel, commit without a buffer, ack the configure that
+    /// answers and draw at the size it names.
+    MapWindow,
+    /// A top-layer bar across the top edge, 20 pixels tall, no exclusive
+    /// zone.
+    MapBar,
+    /// Every op in order, then a single round trip. Answers `Done`, or ends
+    /// the client with the protocol error it provoked.
+    Batch(Vec<Op>),
+    /// Waits for each listed popup's configure, acks it, and draws: in
+    /// [`MARKED_BGRA`] for `marked`, [`POPUP_BGRA`] otherwise.
+    Map {
+        popups: Vec<usize>,
+        marked: Option<usize>,
+    },
+}
+
+#[derive(Debug)]
+enum Ack {
+    Done,
+}
+
+/// Which object an event belongs to.
+#[derive(Clone, Copy)]
+enum Role {
+    Window(usize),
+    Popup(usize),
+    Layer(usize),
+    /// Nothing is recorded for it.
+    Ignored,
+}
+
+#[derive(Default)]
+struct PopupRecord {
+    serial: Option<u32>,
+}
+
+#[derive(Default)]
+struct TestClient {
+    compositor: Option<wl_compositor::WlCompositor>,
+    shm: Option<wl_shm::WlShm>,
+    wm_base: Option<xdg_wm_base::XdgWmBase>,
+    layer_shell: Option<zwlr_layer_shell_v1::ZwlrLayerShellV1>,
+    /// Per toplevel: the size its pending `xdg_toplevel.configure` named.
+    pending: Vec<(i32, i32)>,
+    /// Per toplevel: its newest completed configure, `(serial, width,
+    /// height)`.
+    configured: Vec<Option<(u32, i32, i32)>>,
+    /// Per layer surface: the size of its newest (already acked) configure.
+    layer_sizes: Vec<Option<(u32, u32)>>,
+    popups: Vec<PopupRecord>,
+}
+
+impl Dispatch<wl_registry::WlRegistry, ()> for TestClient {
+    fn event(
+        client: &mut Self,
+        registry: &wl_registry::WlRegistry,
+        event: wl_registry::Event,
+        _: &(),
+        _: &Connection,
+        qh: &QueueHandle<Self>,
+    ) {
+        let wl_registry::Event::Global {
+            name,
+            interface,
+            version,
+        } = event
+        else {
+            return;
+        };
+        match interface.as_str() {
+            "wl_compositor" => {
+                client.compositor = Some(registry.bind(name, version.min(4), qh, ()));
+            }
+            "wl_shm" => client.shm = Some(registry.bind(name, version.min(1), qh, ())),
+            "xdg_wm_base" => client.wm_base = Some(registry.bind(name, version.min(3), qh, ())),
+            "zwlr_layer_shell_v1" => {
+                client.layer_shell = Some(registry.bind(name, version.min(4), qh, ()));
+            }
+            _ => {}
+        }
+    }
+}
+
+impl Dispatch<xdg_wm_base::XdgWmBase, ()> for TestClient {
+    fn event(
+        _: &mut Self,
+        wm_base: &xdg_wm_base::XdgWmBase,
+        event: xdg_wm_base::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let xdg_wm_base::Event::Ping { serial } = event {
+            wm_base.pong(serial);
+        }
+    }
+}
+
+impl Dispatch<xdg_toplevel::XdgToplevel, Role> for TestClient {
+    fn event(
+        client: &mut Self,
+        _: &xdg_toplevel::XdgToplevel,
+        event: xdg_toplevel::Event,
+        role: &Role,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let (xdg_toplevel::Event::Configure { width, height, .. }, Role::Window(index)) =
+            (event, *role)
+            && let Some(pending) = client.pending.get_mut(index)
+        {
+            *pending = (width, height);
+        }
+    }
+}
+
+impl Dispatch<xdg_popup::XdgPopup, Role> for TestClient {
+    fn event(
+        _: &mut Self,
+        _: &xdg_popup::XdgPopup,
+        _: xdg_popup::Event,
+        _: &Role,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+    }
+}
+
+impl Dispatch<xdg_surface::XdgSurface, Role> for TestClient {
+    fn event(
+        client: &mut Self,
+        _: &xdg_surface::XdgSurface,
+        event: xdg_surface::Event,
+        role: &Role,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        let xdg_surface::Event::Configure { serial } = event else {
+            return;
+        };
+        match *role {
+            Role::Window(index) => {
+                if let Some(&(width, height)) = client.pending.get(index)
+                    && let Some(slot) = client.configured.get_mut(index)
+                {
+                    *slot = Some((serial, width, height));
+                }
+            }
+            Role::Popup(index) => {
+                if let Some(record) = client.popups.get_mut(index) {
+                    record.serial = Some(serial);
+                }
+            }
+            Role::Layer(_) | Role::Ignored => {}
+        }
+    }
+}
+
+impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, Role> for TestClient {
+    fn event(
+        client: &mut Self,
+        surface: &zwlr_layer_surface_v1::ZwlrLayerSurfaceV1,
+        event: zwlr_layer_surface_v1::Event,
+        role: &Role,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let (
+            zwlr_layer_surface_v1::Event::Configure {
+                serial,
+                width,
+                height,
+            },
+            Role::Layer(index),
+        ) = (event, *role)
+        {
+            surface.ack_configure(serial);
+            if let Some(slot) = client.layer_sizes.get_mut(index) {
+                *slot = Some((width, height));
+            }
+        }
+    }
+}
+
+wayland_client::delegate_noop!(TestClient: ignore wl_compositor::WlCompositor);
+wayland_client::delegate_noop!(TestClient: ignore wl_surface::WlSurface);
+wayland_client::delegate_noop!(TestClient: ignore wl_shm::WlShm);
+wayland_client::delegate_noop!(TestClient: ignore wl_shm_pool::WlShmPool);
+wayland_client::delegate_noop!(TestClient: ignore wl_buffer::WlBuffer);
+wayland_client::delegate_noop!(TestClient: ignore xdg_positioner::XdgPositioner);
+wayland_client::delegate_noop!(TestClient: ignore zwlr_layer_shell_v1::ZwlrLayerShellV1);
+
+/// A `width`x`height` buffer of `color` over a real memfd. A zero size (a
+/// configure that left the size to the client) draws 40 square.
+fn solid_buffer(
+    shm: &wl_shm::WlShm,
+    qh: &QueueHandle<TestClient>,
+    width: i32,
+    height: i32,
+    color: [u8; 4],
+) -> Result<(wl_buffer::WlBuffer, i32, i32), String> {
+    let width = if width > 0 { width } else { 40 };
+    let height = if height > 0 { height } else { 40 };
+    let stride = width * 4;
+    let len = (stride * height) as usize;
+    let fd = rustix::fs::memfd_create("scoot-popup-parent-test", rustix::fs::MemfdFlags::CLOEXEC)
+        .map_err(|e| e.to_string())?;
+    let mut file = std::fs::File::from(fd);
+    let pixels: Vec<u8> = color.iter().copied().cycle().take(len).collect();
+    file.write_all(&pixels).map_err(|e| e.to_string())?;
+    let pool = shm.create_pool(file.as_fd(), len as i32, qh, ());
+    let buffer = pool.create_buffer(0, width, height, stride, wl_shm::Format::Argb8888, qh, ());
+    pool.destroy();
+    Ok((buffer, width, height))
+}
+
+struct Toplevel {
+    _surface: wl_surface::WlSurface,
+    xdg: xdg_surface::XdgSurface,
+    _toplevel: xdg_toplevel::XdgToplevel,
+}
+
+struct Popup {
+    surface: wl_surface::WlSurface,
+    xdg: xdg_surface::XdgSurface,
+    popup: xdg_popup::XdgPopup,
+}
+
+struct Layer {
+    // Held for the run: dropping a layer surface's objects unmaps it.
+    _surface: wl_surface::WlSurface,
+    layer: zwlr_layer_surface_v1::ZwlrLayerSurfaceV1,
+}
+
+/// Everything the client script made, by the order it made it -- held for
+/// the run.
+#[derive(Default)]
+struct Made {
+    windows: Vec<Toplevel>,
+    popups: Vec<Popup>,
+    bare: Vec<(wl_surface::WlSurface, xdg_surface::XdgSurface)>,
+    layers: Vec<Layer>,
+}
+
+/// The client's globals, once bound.
+struct Globals {
+    compositor: wl_compositor::WlCompositor,
+    shm: wl_shm::WlShm,
+    wm_base: xdg_wm_base::XdgWmBase,
+    layer_shell: zwlr_layer_shell_v1::ZwlrLayerShellV1,
+}
+
+impl Globals {
+    /// A positioner for an [`POPUP_SIZE`]-square popup [`STEP`] pixels in
+    /// from its parent's window-geometry corner, asking for no adjustment.
+    fn positioner(&self, qh: &QueueHandle<TestClient>) -> xdg_positioner::XdgPositioner {
+        let positioner = self.wm_base.create_positioner(qh, ());
+        positioner.set_size(POPUP_SIZE, POPUP_SIZE);
+        positioner.set_anchor_rect(STEP, STEP, 1, 1);
+        positioner.set_anchor(xdg_positioner::Anchor::TopLeft);
+        positioner.set_gravity(xdg_positioner::Gravity::BottomRight);
+        positioner
+    }
+}
+
+impl Made {
+    /// The parent's `xdg_surface`, or `None` for a layer surface's popup,
+    /// which is created parentless and adopted afterwards.
+    fn parent_xdg(&self, parent: Parent) -> Result<Option<&xdg_surface::XdgSurface>, String> {
+        Ok(Some(match parent {
+            Parent::Window(i) => &self.windows.get(i).ok_or("no such window")?.xdg,
+            Parent::Popup(i) => &self.popups.get(i).ok_or("no such popup")?.xdg,
+            Parent::Bare(i) => &self.bare.get(i).ok_or("no such bare xdg_surface")?.1,
+            Parent::Layer(_) => return Ok(None),
+        }))
+    }
+
+    /// `get_popup` on `xdg` for `parent`, adopting it into a layer surface
+    /// if that is the parent.
+    fn get_popup(
+        &self,
+        globals: &Globals,
+        qh: &QueueHandle<TestClient>,
+        xdg: &xdg_surface::XdgSurface,
+        parent: Parent,
+        role: Role,
+    ) -> Result<xdg_popup::XdgPopup, String> {
+        let positioner = globals.positioner(qh);
+        let popup = xdg.get_popup(self.parent_xdg(parent)?, &positioner, qh, role);
+        if let Parent::Layer(i) = parent {
+            self.layers
+                .get(i)
+                .ok_or("no such layer")?
+                .layer
+                .get_popup(&popup);
+        }
+        positioner.destroy();
+        Ok(popup)
+    }
+
+    /// A new popup of `parent`, committed once.
+    fn new_popup(
+        &mut self,
+        client: &mut TestClient,
+        globals: &Globals,
+        qh: &QueueHandle<TestClient>,
+        parent: Parent,
+    ) -> Result<usize, String> {
+        let index = self.popups.len();
+        client.popups.push(PopupRecord::default());
+        let surface = globals.compositor.create_surface(qh, ());
+        let xdg = globals
+            .wm_base
+            .get_xdg_surface(&surface, qh, Role::Popup(index));
+        let popup = self.get_popup(globals, qh, &xdg, parent, Role::Popup(index))?;
+        surface.commit();
+        self.popups.push(Popup {
+            surface,
+            xdg,
+            popup,
+        });
+        Ok(index)
+    }
+}
+
+/// Flushes everything queued, waiting out a full socket: a long chain is
+/// more than the socket buffer holds, and the compositor reads it while
+/// this waits.
+fn flush(conn: &Connection) -> Result<(), String> {
+    loop {
+        match conn.flush() {
+            Ok(()) => return Ok(()),
+            Err(wayland_client::backend::WaylandError::Io(error))
+                if error.kind() == std::io::ErrorKind::WouldBlock =>
+            {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            Err(error) => return Err(error.to_string()),
+        }
+    }
+}
+
+fn run_op(
+    op: Op,
+    conn: &Connection,
+    client: &mut TestClient,
+    globals: &Globals,
+    qh: &QueueHandle<TestClient>,
+    made: &mut Made,
+) -> Result<(), String> {
+    match op {
+        Op::Popup(parent) => {
+            made.new_popup(client, globals, qh, parent)?;
+        }
+        Op::Chain { parent, len } => {
+            let mut parent = parent;
+            for n in 0..len {
+                parent = Parent::Popup(made.new_popup(client, globals, qh, parent)?);
+                if n % 64 == 63 {
+                    flush(conn)?;
+                }
+            }
+        }
+        Op::Bare => {
+            let surface = globals.compositor.create_surface(qh, ());
+            let xdg = globals.wm_base.get_xdg_surface(&surface, qh, Role::Ignored);
+            made.bare.push((surface, xdg));
+        }
+        Op::PopupOnBare { bare, parent } => {
+            let index = made.popups.len();
+            client.popups.push(PopupRecord::default());
+            let (surface, xdg) = made.bare.get(bare).ok_or("no such bare xdg_surface")?;
+            let (surface, xdg) = (surface.clone(), xdg.clone());
+            let popup = made.get_popup(globals, qh, &xdg, parent, Role::Popup(index))?;
+            surface.commit();
+            made.popups.push(Popup {
+                surface,
+                xdg,
+                popup,
+            });
+        }
+        Op::GetPopupAgain { popup, parent } => {
+            let xdg = made.popups.get(popup).ok_or("no such popup")?.xdg.clone();
+            made.get_popup(globals, qh, &xdg, parent, Role::Ignored)?;
+        }
+        Op::SecondXdgSurface { popup, parent } => {
+            let surface = made
+                .popups
+                .get(popup)
+                .ok_or("no such popup")?
+                .surface
+                .clone();
+            let xdg = globals.wm_base.get_xdg_surface(&surface, qh, Role::Ignored);
+            made.get_popup(globals, qh, &xdg, parent, Role::Ignored)?;
+        }
+        Op::Destroy(popup) => {
+            made.popups
+                .get(popup)
+                .ok_or("no such popup")?
+                .popup
+                .destroy();
+        }
+        Op::Reincarnate { popup, parent } => {
+            let old = made.popups.get(popup).ok_or("no such popup")?;
+            old.popup.destroy();
+            old.xdg.destroy();
+            let surface = old.surface.clone();
+            *client.popups.get_mut(popup).ok_or("no such popup")? = PopupRecord::default();
+            let xdg = globals
+                .wm_base
+                .get_xdg_surface(&surface, qh, Role::Popup(popup));
+            let new = made.get_popup(globals, qh, &xdg, parent, Role::Popup(popup))?;
+            surface.commit();
+            made.popups[popup] = Popup {
+                surface,
+                xdg,
+                popup: new,
+            };
+        }
+        Op::Reposition(popup) => {
+            let positioner = globals.positioner(qh);
+            made.popups
+                .get(popup)
+                .ok_or("no such popup")?
+                .popup
+                .reposition(&positioner, 1);
+            positioner.destroy();
+        }
+    }
+    Ok(())
+}
+
+fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> Result<(), String> {
+    let conn = Connection::from_socket(stream).map_err(|e| e.to_string())?;
+    let mut queue = conn.new_event_queue();
+    let qh = queue.handle();
+    let mut client = TestClient::default();
+    conn.display().get_registry(&qh, ());
+    queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+    let globals = Globals {
+        compositor: client.compositor.clone().ok_or("no wl_compositor")?,
+        shm: client.shm.clone().ok_or("no wl_shm")?,
+        wm_base: client.wm_base.clone().ok_or("no xdg_wm_base")?,
+        layer_shell: client.layer_shell.clone().ok_or("no zwlr_layer_shell_v1")?,
+    };
+
+    let mut made = Made::default();
+    while let Ok(step) = steps.recv() {
+        match step {
+            Step::MapWindow => map_window(&mut queue, &mut client, &globals, &qh, &mut made)?,
+            Step::MapBar => map_bar(&mut queue, &mut client, &globals, &qh, &mut made)?,
+            Step::Batch(ops) => {
+                for op in ops {
+                    run_op(op, &conn, &mut client, &globals, &qh, &mut made)?;
+                }
+                flush(&conn)?;
+                queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+            }
+            Step::Map { popups, marked } => {
+                for index in popups {
+                    let serial = wait_for(&mut queue, &mut client, "a popup configure", |c| {
+                        c.popups.get(index)?.serial
+                    })?;
+                    let popup = made.popups.get(index).ok_or("no such popup")?;
+                    popup.xdg.ack_configure(serial);
+                    let color = if marked == Some(index) {
+                        MARKED_BGRA
+                    } else {
+                        POPUP_BGRA
+                    };
+                    let (buffer, w, h) =
+                        solid_buffer(&globals.shm, &qh, POPUP_SIZE, POPUP_SIZE, color)?;
+                    popup.surface.attach(Some(&buffer), 0, 0);
+                    popup.surface.damage(0, 0, w, h);
+                    popup.surface.commit();
+                }
+                queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+            }
+        }
+        acks.send(Ack::Done).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+fn map_window(
+    queue: &mut EventQueue<TestClient>,
+    client: &mut TestClient,
+    globals: &Globals,
+    qh: &QueueHandle<TestClient>,
+    made: &mut Made,
+) -> Result<(), String> {
+    let index = made.windows.len();
+    client.pending.push((0, 0));
+    client.configured.push(None);
+    let surface = globals.compositor.create_surface(qh, ());
+    let xdg = globals
+        .wm_base
+        .get_xdg_surface(&surface, qh, Role::Window(index));
+    let toplevel = xdg.get_toplevel(qh, Role::Window(index));
+    surface.commit();
+    let (serial, width, height) = wait_for(queue, client, "a toplevel configure", |c| {
+        *c.configured.get(index)?
+    })?;
+    xdg.ack_configure(serial);
+    let (buffer, width, height) = solid_buffer(&globals.shm, qh, width, height, WINDOW_BGRA)?;
+    surface.attach(Some(&buffer), 0, 0);
+    surface.damage(0, 0, width, height);
+    surface.commit();
+    queue.roundtrip(client).map_err(|e| e.to_string())?;
+    made.windows.push(Toplevel {
+        _surface: surface,
+        xdg,
+        _toplevel: toplevel,
+    });
+    Ok(())
+}
+
+fn map_bar(
+    queue: &mut EventQueue<TestClient>,
+    client: &mut TestClient,
+    globals: &Globals,
+    qh: &QueueHandle<TestClient>,
+    made: &mut Made,
+) -> Result<(), String> {
+    let index = made.layers.len();
+    client.layer_sizes.push(None);
+    let surface = globals.compositor.create_surface(qh, ());
+    let layer = globals.layer_shell.get_layer_surface(
+        &surface,
+        None,
+        zwlr_layer_shell_v1::Layer::Top,
+        "bar".into(),
+        qh,
+        Role::Layer(index),
+    );
+    layer.set_anchor(
+        zwlr_layer_surface_v1::Anchor::Top
+            | zwlr_layer_surface_v1::Anchor::Left
+            | zwlr_layer_surface_v1::Anchor::Right,
+    );
+    layer.set_size(0, 20);
+    surface.commit();
+    let (width, height) = wait_for(queue, client, "a layer configure", |c| {
+        *c.layer_sizes.get(index)?
+    })?;
+    let (buffer, w, h) = solid_buffer(&globals.shm, qh, width as i32, height as i32, BAR_BGRA)?;
+    surface.attach(Some(&buffer), 0, 0);
+    surface.damage(0, 0, w, h);
+    surface.commit();
+    queue.roundtrip(client).map_err(|e| e.to_string())?;
+    made.layers.push(Layer {
+        _surface: surface,
+        layer,
+    });
+    Ok(())
+}
+
+type Fixture = Harness<Step, Ack>;
+
+impl Fixture {
+    /// One output, one client, one mapped window.
+    fn with_window() -> Self {
+        let mut fixture = Harness::headless(appearance(), CANVAS);
+        fixture.spawn(run_client);
+        fixture.run(Step::MapWindow);
+        fixture
+    }
+
+    /// Runs `ops` in one flush, which the client must survive.
+    fn batch(&mut self, ops: Vec<Op>) {
+        let Ack::Done = self.run(Step::Batch(ops));
+    }
+
+    /// Runs `ops` in one flush, which must end the client with a protocol
+    /// error; hands the error back.
+    fn refused(&mut self, ops: Vec<Op>) -> String {
+        self.run_expecting_disconnect(Step::Batch(ops))
+    }
+
+    /// Maps `popups`, drawing `marked` in [`MARKED_BGRA`].
+    fn map(&mut self, popups: impl IntoIterator<Item = usize>, marked: Option<usize>) {
+        let Ack::Done = self.run(Step::Map {
+            popups: popups.into_iter().collect(),
+            marked,
+        });
+    }
+
+    /// The core id of the `index`-th window, in creation order.
+    fn id(&self, index: usize) -> WindowId {
+        let mut ids: Vec<WindowId> = self.state.windows.keys().copied().collect();
+        ids.sort();
+        ids[index]
+    }
+
+    /// Window `index`'s placement rect, in global coordinates.
+    fn rect_of(&self, index: usize) -> Rect {
+        self.state
+            .world
+            .arrange()
+            .get(self.id(index))
+            .expect("a placed window")
+            .rect
+    }
+
+    /// Where the `depth`-th popup of a chain rooted at window `index` has its
+    /// top-left corner (depth 1 is the window's own popup).
+    fn chain_corner(&self, index: usize, depth: usize) -> (i32, i32) {
+        let rect = self.rect_of(index);
+        let depth = i32::try_from(depth).expect("a small depth");
+        (rect.x + STEP * depth, rect.y + STEP * depth)
+    }
+}
+
+/// A second client connects, maps a window and a popup of it, and the
+/// popup is drawn: the compositor survived whatever the first client did,
+/// and still serves.
+fn still_serving(fixture: &mut Fixture) {
+    let second = fixture.spawn(run_client);
+    let Ack::Done = fixture.run_on(second, Step::MapWindow);
+    let Ack::Done = fixture.run_on(second, Step::Batch(vec![Op::Popup(Parent::Window(0))]));
+    let Ack::Done = fixture.run_on(
+        second,
+        Step::Map {
+            popups: vec![0],
+            marked: Some(0),
+        },
+    );
+    let pixels = fixture.render();
+    assert!(
+        test_support::contains(&pixels, MARKED_BGRA),
+        "the second client's popup was not drawn"
+    );
+}
+
+fn pixel(pixels: &[u8], (x, y): (i32, i32)) -> [u8; 4] {
+    test_support::pixel(pixels, CANVAS, x, y)
+}

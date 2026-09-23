@@ -257,8 +257,9 @@ impl State {
 /// Reads each ancestor's state directly ([`popup_link`], one `with_states`
 /// per level) rather than through `PopupManager::find_popup`, which scans
 /// every tracked popup per call: the walk is O(depth), not O(depth x
-/// popups). It terminates because no parent chain loops -- `new_popup`
-/// refuses a popup that would close one (see `popup_parent.rs`).
+/// popups). It terminates, in at most `MAX_POPUP_DEPTH` steps, because no
+/// parent chain loops or is longer than that -- `new_popup` refuses a popup
+/// that would make one so, now or later (see `popup_parent.rs`).
 fn popup_root_and_offset(mut parent: WlSurface) -> Option<(WlSurface, Point<i32, Logical>)> {
     let mut offset = Point::<i32, Logical>::default();
     while get_role(&parent) == Some(XDG_POPUP_ROLE) {
