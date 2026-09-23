@@ -68,6 +68,22 @@ pub enum Event {
     FocusObserved {
         id: WindowId,
     },
+    /// The window asked to enter (`true`) or leave (`false`) fullscreen:
+    /// on Wayland, the client's own `xdg_toplevel.set_fullscreen` /
+    /// `unset_fullscreen`. Also how a platform reports that a window's
+    /// request no longer stands (Wayland discards every toplevel state when
+    /// a window unmaps).
+    ///
+    /// An event rather than an action because it is the window's own doing,
+    /// like [`Event::FocusObserved`]: a shell applies it even when it would
+    /// refuse the same thing from a user or an agent (scoot does while the
+    /// session is locked). What the same intent from a user or an agent looks
+    /// like is [`Action::SetFullscreen`]; both land on the same rules, spelled
+    /// out on [`Action::ToggleFullscreen`]. Unknown windows are ignored.
+    FullscreenRequested {
+        id: WindowId,
+        fullscreen: bool,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -151,6 +167,52 @@ pub enum Action {
     /// empty, which is what "focused" already means on an output with no
     /// windows. An id this core doesn't know does nothing.
     FocusOutput(OutputId),
+    /// Put the focused window into fullscreen, or take it out. With no window
+    /// focused, does nothing.
+    ///
+    /// What fullscreen means here:
+    ///
+    /// - **The window covers its output's whole area** -- the gaps and
+    ///   whatever the platform reserved at the edges (a bar's exclusive zone)
+    ///   included -- whenever its column is the focused one of its output's
+    ///   active workspace. [`World::fullscreen_on`](crate::World::fullscreen_on)
+    ///   answers "is that happening on this output right now"; every other
+    ///   window on that output is then placed invisible.
+    /// - **It keeps its column.** In the scrolling strip the column is as
+    ///   wide as the whole output while its window is fullscreen, so focusing
+    ///   a neighbouring column scrolls to it the ordinary way, and focusing
+    ///   back covers the output again. Focused away, the fullscreen window
+    ///   keeps its full-output size and is placed exactly where a tiled
+    ///   column of that width would be -- one ordinary gap from each
+    ///   neighbour, measured within the usable area like every other column
+    ///   -- so it may show partly beside the focused window but never
+    ///   overlaps it.
+    ///   Workspace switching likewise works as it always does.
+    /// - **Leaving restores exactly.** The column's width preset is never
+    ///   touched, and the scroll offset its workspace had on entry is put
+    ///   back on an explicit leave (this action, or the window's own request).
+    /// - **At most one per column, and always that column's focused window.**
+    ///   The other windows stacked in its column are placed invisible while
+    ///   it holds. A window that is not its column's focused window cannot
+    ///   enter (the request is ignored), and anything that moves focus to a
+    ///   sibling in the column -- a vertical focus step, consuming another
+    ///   window into it, focusing a sibling by id -- ends the fullscreen.
+    /// - **Moving the window ends it**: consume/expel, and carrying it to
+    ///   another workspace or output, each take it out of fullscreen first
+    ///   (and do not restore the scroll, which described the layout it just
+    ///   left). Moving its column within the strip, or the window within its
+    ///   column, does not. An ignored move (at the strip's edge, an unknown
+    ///   output) changes nothing, fullscreen included.
+    /// - A window that closes while fullscreen simply leaves the layout.
+    ToggleFullscreen,
+    /// Put one specific window into fullscreen (`true`) or take it out
+    /// (`false`), by id: what a taskbar asking on the user's behalf sends.
+    /// The same rules as [`Action::ToggleFullscreen`]; an unknown id, or a
+    /// window already in the asked-for state, does nothing.
+    SetFullscreen {
+        id: WindowId,
+        fullscreen: bool,
+    },
     CloseFocused,
     Spawn(Vec<String>),
     Quit,

@@ -76,6 +76,58 @@ fn set_column_width_travels_as_snake_case_with_an_index() {
 }
 
 #[test]
+fn toggle_fullscreen_travels_as_a_bare_snake_case_tag() {
+    let request = Request::Action(Action::ToggleFullscreen);
+    assert_eq!(
+        json_of(&request),
+        json!({ "type": "action", "action": "toggle_fullscreen" })
+    );
+    assert_eq!(
+        decode::<Request>(&encode(&request).unwrap()).unwrap(),
+        request
+    );
+}
+
+#[test]
+fn set_fullscreen_travels_as_snake_case_with_an_id_and_a_bool() {
+    let request = Request::Action(Action::SetFullscreen {
+        id: 7,
+        fullscreen: true,
+    });
+    assert_eq!(
+        json_of(&request),
+        json!({ "type": "action", "action": "set_fullscreen", "id": 7, "fullscreen": true })
+    );
+    assert_eq!(
+        decode::<Request>(&encode(&request).unwrap()).unwrap(),
+        request
+    );
+}
+
+/// `fullscreen` is additive and defaulted like `popup_grab` before it: an
+/// older server's snapshot decodes as "not fullscreen", and a new server's
+/// carries it and still decodes for an older client (the struct-without-it
+/// half is pinned by `a_window_snapshot_carries_its_popup_grab_on_the_wire`).
+#[test]
+fn a_window_snapshot_carries_fullscreen_and_defaults_it_when_absent() {
+    let old: WindowSnapshot = decode(
+        r#"{"id":1,"app_id":"mpv","title":"video","output":1,"rect":{"x":0,"y":0,"width":800,"height":600},"visible":true,"focused":true}"#,
+    )
+    .expect("an older server's window snapshot still decodes");
+    assert!(!old.fullscreen);
+
+    let new: WindowSnapshot = decode(
+        r#"{"id":1,"app_id":"mpv","title":"video","output":1,"rect":{"x":0,"y":0,"width":800,"height":600},"visible":true,"focused":true,"fullscreen":true}"#,
+    )
+    .unwrap();
+    assert!(new.fullscreen);
+    assert_eq!(
+        decode::<WindowSnapshot>(&encode(&new).unwrap()).unwrap(),
+        new
+    );
+}
+
+#[test]
 fn the_output_actions_travel_as_snake_case_with_an_output() {
     // Same pin as the indexed workspace actions above: the exact JSON shape
     // a client sends, and its decode back into the same request.
@@ -423,6 +475,7 @@ fn a_window_snapshot_carries_its_popup_grab_on_the_wire() {
         visible: true,
         focused: false,
         popup_grab: true,
+        fullscreen: false,
     };
     assert_eq!(
         json_of(&snapshot),
@@ -436,6 +489,7 @@ fn a_window_snapshot_carries_its_popup_grab_on_the_wire() {
             "visible": true,
             "focused": false,
             "popup_grab": true,
+            "fullscreen": false,
         })
     );
     assert_eq!(

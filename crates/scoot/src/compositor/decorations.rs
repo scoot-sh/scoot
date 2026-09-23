@@ -556,7 +556,11 @@ impl Decorations {
     /// Builds this frame's focus-ring render elements from the current
     /// arrangement, updating each window's persistent buffers in place.
     /// Invisible windows (scrolled off-screen or on an inactive workspace --
-    /// see `scoot_core::Placement::visible`) get no ring. A window whose
+    /// see `scoot_core::Placement::visible`) get no ring, and neither does a
+    /// fullscreen one (`Placement::fullscreen`): it covers its output edge
+    /// to edge, and a ring would be drawn in a gap it does not have. Its
+    /// buffers stay while it is still placed, so leaving fullscreen reuses
+    /// them. A window whose
     /// buffers shrink to nothing (a zero-width ring, or one fully clipped
     /// away at an output edge) still keeps its buffer entries -- just
     /// resized to empty and producing no element -- so its `Id`s stay
@@ -582,7 +586,7 @@ impl Decorations {
         self.painted.clear();
         let mut elements = Vec::new();
         for placement in &arrangement.placements {
-            if !placement.visible {
+            if !placement.visible || placement.fullscreen {
                 continue;
             }
             let color = ring_color(arrangement, placement.id, appearance);
@@ -604,7 +608,9 @@ impl Decorations {
     ///
     /// Painted buffers are dropped when the session goes back to square
     /// (`corner_radius == 0` reaches [`Decorations::elements`] instead and
-    /// never calls this), so toggling the radius does not leak them.
+    /// never calls this), so toggling the radius does not leak them. The
+    /// same windows get no ring here as there: invisible ones and fullscreen
+    /// ones.
     pub fn elements_rounded<R>(
         &mut self,
         arrangement: &Arrangement,
@@ -620,7 +626,7 @@ impl Decorations {
         self.retain(arrangement);
         let mut elements = Vec::new();
         for placement in &arrangement.placements {
-            if !placement.visible {
+            if !placement.visible || placement.fullscreen {
                 continue;
             }
             let color = ring_color(arrangement, placement.id, appearance);
@@ -1423,6 +1429,7 @@ mod tests {
             output: OutputId(1),
             rect,
             visible: true,
+            fullscreen: false,
         }
     }
 
@@ -1462,6 +1469,24 @@ mod tests {
                 .elements(&arrangement, &appearance, SCREEN, 1.0)
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn a_fullscreen_window_produces_no_segments_even_partly_on_screen() {
+        // Focused away from, a fullscreen window can sit half on screen
+        // beside the focused column; it still gets no ring (inactive
+        // colour or otherwise), on either ring path's input.
+        let appearance = Appearance::default();
+        let mut fullscreen = placement(1, Rect::new(-400, 0, 800, 600));
+        fullscreen.fullscreen = true;
+        let arrangement = arrangement(
+            vec![fullscreen, placement(2, Rect::new(420, 12, 300, 500))],
+            2,
+        );
+        let mut decorations = Decorations::default();
+
+        let elements = decorations.elements(&arrangement, &appearance, SCREEN, 1.0);
+        assert_eq!(elements.len(), 4, "only the focused tiled window is ringed");
     }
 
     #[test]

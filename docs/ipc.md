@@ -75,10 +75,10 @@ all three.
 focus-column|move-column|consume-or-expel   left|right
 focus-window|move-window                    up|down
 focus-workspace|move-window-to-workspace    up|down
-focus-window-id ID | focus-workspace-index N | move-window-to-workspace-index N | focus-output ID | move-window-to-output ID | cycle-column-width | set-column-width N | close | spawn COMMAND... | quit
+focus-window-id ID | focus-workspace-index N | move-window-to-workspace-index N | focus-output ID | move-window-to-output ID | cycle-column-width | set-column-width N | toggle-fullscreen | set-fullscreen ID on|off | close | spawn COMMAND... | quit
 ```
 
-`focus-workspace-index N` and `move-window-to-workspace-index N` are 0-based; out of range does nothing (a move leaves the window where it is). `set-column-width N` is 0-based into the session's `[layout] column_widths`; out of range does nothing, like a stale workspace index. `focus-output ID` and `move-window-to-output ID` take an output id as `scootctl outputs` reports it (output ids are stable for the session, unlike workspace positions); an unknown id does nothing. A move carries the focused window to the target output's active workspace and follows it there; focusing an output with no windows focuses nothing. `spawn` is
+`focus-workspace-index N` and `move-window-to-workspace-index N` are 0-based; out of range does nothing (a move leaves the window where it is). `set-column-width N` is 0-based into the session's `[layout] column_widths`; out of range does nothing, like a stale workspace index. `focus-output ID` and `move-window-to-output ID` take an output id as `scootctl outputs` reports it (output ids are stable for the session, unlike workspace positions); an unknown id does nothing. A move carries the focused window to the target output's active workspace and follows it there; focusing an output with no windows focuses nothing. `toggle-fullscreen` flips the focused window in and out of fullscreen (the `Super+f` bind); `set-fullscreen ID on|off` sets one window's state by id, idempotently, without moving focus — so a window whose column is not focused becomes fullscreen but does not cover the screen until its column is focused, and an unknown id, or a window stacked under another in its column, does nothing (see [configuration.md](configuration.md#default-keybindings) for what fullscreen does to the layout). `spawn` is
 split on whitespace and not run through a shell, so an argument containing a
 space can't be expressed this way. Every action is refused while the session
 is locked.
@@ -157,19 +157,20 @@ for its modifier only when no key on the layout can hold it.
 | `title` | The toplevel's title, same caveat. |
 | `icon` | The freedesktop icon name the client committed through `xdg-toplevel-icon-v1`, or `null`. Read off the surface's current state when asked, so it is never stale. A client that supplied raw pixel buffers instead of a name reads as `null`. |
 | `output` | The id of the output the window is on. |
-| `rect` | Where the window is, in logical pixels — what you click. A window that is not visible still reports the frame it *would* have. |
-| `visible` | `false` when the window is scrolled out of view or on an inactive workspace. |
+| `rect` | Where the window is, in logical pixels — what you click. A window that is not visible still reports the frame it *would* have — except a window stacked in the same column as a fullscreen one, which reports that fullscreen window's frame (it is behind it) until the fullscreen ends. |
+| `visible` | `false` when the window is scrolled out of view, on an inactive workspace, or hidden behind a fullscreen window (every other window on an output a fullscreen window covers, including windows stacked in its own column). |
 | `focused` | Compositor *window* focus — not necessarily where keystrokes go; see below. |
 | `popup_grab` | Whether this window's own popup tree holds the keyboard — see below. |
+| `fullscreen` | Whether the window is fullscreen. While its column is focused it covers its output: `rect` equals that output's `rect`, and every other window on the output reports `visible: false`. Focused away, it keeps that size and sits in the strip where a column that wide would, one ordinary gap from its neighbours — it may still be partly `visible` beside the focused window, never overlapping it. |
 
 Every success reply also carries **`locked`**: the session-lock state it was
 built under. An agent typing a password over IPC learns the unlock landed
 from the very next reply.
 
-`locked`, `usable`, `scale`, `icon` and `popup_grab` are additive and
-defaulted — an older server omits them rather than bumping
-`PROTOCOL_VERSION`, so read each asymmetrically. `locked: true` and
-`popup_grab: true` are always truthful, while `false` means "no, *or* a
+`locked`, `usable`, `scale`, `icon`, `popup_grab` and `fullscreen` are
+additive and defaulted — an older server omits them rather than bumping
+`PROTOCOL_VERSION`, so read each asymmetrically. `locked: true`,
+`popup_grab: true` and `fullscreen: true` are always truthful, while `false` means "no, *or* a
 server predating the field"; an all-zero `usable` means the same (fall back
 to `rect`), and an omitted `scale` decodes as `1.0`.
 
@@ -211,10 +212,14 @@ The focus-family actions do take the keyboard back. `focus-column`,
 `focus-workspace-index` each spend a click that had given a *click-focused*
 (`on_demand`) layer surface the keyboard, so after one, keystrokes go to the
 window `windows` reports as focused. The other actions — `move-*`, `close`,
-`spawn`, `cycle-column-width`, `set-column-width`, `quit` — change arrangement rather than where
+`spawn`, `cycle-column-width`, `set-column-width`, `toggle-fullscreen`, `set-fullscreen`, `quit` — change arrangement rather than where
 focus is reported to be, so they leave a deliberate keyboard placement alone,
 as does a keybinding. An `exclusive` layer surface keeps the keyboard through
-all of them, by protocol, until it unmaps.
+all of them, by protocol, until it unmaps. The one exception is the `top`
+layer under a fullscreen window: while a fullscreen window covers an output,
+that output's `top`-layer surfaces are not drawn, so neither a click-focused
+nor an `exclusive` one there holds the keyboard until the output is
+uncovered again (`overlay` surfaces are unaffected).
 
 **`popup_grab` is the subtler case of the same split.** An explicit
 `xdg_popup.grab` routes every keystroke to the menu until it is dismissed,

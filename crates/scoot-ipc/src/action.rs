@@ -93,6 +93,28 @@ pub enum Action {
     FocusOutput {
         output: u64,
     },
+    /// Put the focused window into fullscreen, or take it out -- the wire
+    /// half of `scoot_core::Action::ToggleFullscreen`, whose doc has the
+    /// rules (it covers its output edge to edge, bars included, while its
+    /// column is focused; leaving restores the layout exactly; moving the
+    /// window ends it). With no window focused, does nothing. Additive: a
+    /// client that never sends this tag decodes exactly as before, so no
+    /// `PROTOCOL_VERSION` bump.
+    ToggleFullscreen,
+    /// Put one specific window into fullscreen (`fullscreen: true`) or take
+    /// it out, by the id `scootctl windows` reports -- the absolute half of
+    /// `ToggleFullscreen`, and the wire half of
+    /// `scoot_core::Action::SetFullscreen`. Idempotent where the toggle is
+    /// not: an agent that wants a window fullscreen need not read its state
+    /// first. It does not move focus, so a window in a column that is not
+    /// focused is fullscreen but does not cover the output until its column
+    /// is focused. An unknown id does nothing, and so does a window stacked
+    /// under another in its column (only a column's focused window may be
+    /// fullscreen). Additive like the toggle: no `PROTOCOL_VERSION` bump.
+    SetFullscreen {
+        id: u64,
+        fullscreen: bool,
+    },
     CloseFocused,
     Spawn {
         command: Vec<String>,

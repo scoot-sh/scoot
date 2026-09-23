@@ -174,6 +174,9 @@ impl Default for Keybindings {
                 Bound::Action(Action::MoveWindowToWorkspace(Vertical::Up)),
             ),
             (SUPER, Keysym::r, Bound::Action(Action::CycleColumnWidth)),
+            // The chord most tiling compositors (i3, sway, Hyprland) put
+            // fullscreen on.
+            (SUPER, Keysym::f, Bound::Action(Action::ToggleFullscreen)),
             (SUPER, Keysym::q, Bound::Action(Action::CloseFocused)),
             // The default terminal; rebind this combo in `[binds]` (see
             // config.rs) to launch something else instead.
@@ -509,6 +512,15 @@ mod tests {
                 2
             )))),
             "Super+Shift+period"
+        );
+    }
+
+    #[test]
+    fn super_f_toggles_fullscreen_by_default() {
+        let table = Keybindings::default();
+        assert_eq!(
+            table.match_key(Keysym::f, SUPER),
+            Some(Bound::Action(Action::ToggleFullscreen))
         );
     }
 

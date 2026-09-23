@@ -104,6 +104,20 @@ pub struct WindowSnapshot {
     /// grab that just ended but has not been reaped yet.
     #[serde(default)]
     pub popup_grab: bool,
+    /// Whether the window is fullscreen (entered by the client itself, by
+    /// `toggle-fullscreen`, or by a taskbar). A fullscreen window covers its
+    /// whole output -- `rect` equals that output's `rect`, and every other
+    /// window on it is reported `visible: false` -- whenever its column is
+    /// the focused one; focused away, it keeps that size and sits in the
+    /// strip where a column that wide would, one ordinary gap from its
+    /// neighbours (possibly partly `visible`, never overlapping the focused
+    /// window).
+    ///
+    /// Defaulted like `popup_grab` above, for the same wire reason, so no
+    /// `PROTOCOL_VERSION` bump. `false` from an older server is truthful: it
+    /// had no fullscreen state to report.
+    #[serde(default)]
+    pub fullscreen: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

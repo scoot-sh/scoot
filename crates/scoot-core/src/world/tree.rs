@@ -11,6 +11,27 @@ pub(super) struct WindowState {
     pub(super) info: WindowInfo,
     /// Minimum size learned from frames the window refused to go below.
     pub(super) learned_min: Size,
+    /// `Some` while the window is fullscreen; see [`Fullscreen`].
+    pub(super) fullscreen: Option<Fullscreen>,
+}
+
+/// What a fullscreen window remembers so leaving fullscreen can put the
+/// layout back exactly as it was.
+///
+/// Its column keeps its place in the strip and its width preset untouched
+/// the whole time, so the only thing entering fullscreen changes that
+/// leaving it has to undo is the scroll: covering the output lines the view
+/// up with the column's left edge, and without this the column would come
+/// back wherever that left it rather than where it was.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct Fullscreen {
+    /// The `view_x` of the window's workspace just before it went
+    /// fullscreen. Restored on an explicit leave only (a toggle, or the
+    /// window's own request); a leave forced by the layout -- the window
+    /// moving to another workspace, consume or expel, focus moving to a
+    /// sibling in its column -- drops it, since the layout it described no
+    /// longer exists.
+    pub(super) view_x: i32,
 }
 
 impl WindowState {
@@ -18,6 +39,7 @@ impl WindowState {
         Self {
             info,
             learned_min: Size::default(),
+            fullscreen: None,
         }
     }
 
@@ -176,11 +198,13 @@ impl Workspace {
     }
 
     /// Joins the neighbouring column, or leaves the current one when it holds
-    /// other windows (niri's consume-or-expel).
-    pub(super) fn consume_or_expel(&mut self, dir: Horizontal) {
+    /// other windows (niri's consume-or-expel). Returns whether the focused
+    /// window actually moved -- false at the strip's edge, or on an empty
+    /// workspace.
+    pub(super) fn consume_or_expel(&mut self, dir: Horizontal) -> bool {
         let c = self.focused;
         let Some(column) = self.columns.get_mut(c) else {
-            return;
+            return false;
         };
         if column.windows.len() > 1 {
             let preset = column.preset;
@@ -195,7 +219,7 @@ impl Workspace {
             let target = match dir {
                 Horizontal::Left if c > 0 => c - 1,
                 Horizontal::Right if c + 1 < self.columns.len() => c + 1,
-                _ => return,
+                _ => return false,
             };
             let id = self.columns.remove(c).windows[0];
             let target = if target > c { target - 1 } else { target };
@@ -204,6 +228,7 @@ impl Workspace {
             dest.focused = dest.windows.len() - 1;
             self.focused = target;
         }
+        true
     }
 }
 
@@ -328,36 +353,40 @@ impl Output {
     /// nothing -- the same early returns the relative
     /// [`move_focused_window_to_workspace`](Self::move_focused_window_to_workspace)
     /// makes at the tree's edge and on an empty workspace.
-    pub(super) fn move_focused_window_to_workspace_index(&mut self, index: usize) {
+    ///
+    /// Returns the window that moved, if one did.
+    pub(super) fn move_focused_window_to_workspace_index(
+        &mut self,
+        index: usize,
+    ) -> Option<WindowId> {
         if index >= self.workspaces.len() || index == self.active {
-            return;
+            return None;
         }
         let source = &mut self.workspaces[self.active];
-        let Some(column) = source.focused_column() else {
-            return;
-        };
+        let column = source.focused_column()?;
         let (column_index, window_index, preset) = (source.focused, column.focused, column.preset);
         let id = source.take(column_index, window_index);
         self.workspaces[index].insert_column(id, preset, true);
         self.active = index;
         self.normalize();
+        Some(id)
     }
 
-    /// Carries the focused window to the neighbouring workspace, and follows it.
-    pub(super) fn move_focused_window_to_workspace(&mut self, dir: Vertical) {
+    /// Carries the focused window to the neighbouring workspace, and follows
+    /// it. Returns the window that moved, if one did.
+    pub(super) fn move_focused_window_to_workspace(&mut self, dir: Vertical) -> Option<WindowId> {
         let target = step(self.active, self.workspaces.len(), dir == Vertical::Down);
         if target == self.active {
-            return;
+            return None;
         }
         let source = &mut self.workspaces[self.active];
-        let Some(column) = source.focused_column() else {
-            return;
-        };
+        let column = source.focused_column()?;
         let (column_index, window_index, preset) = (source.focused, column.focused, column.preset);
         let id = source.take(column_index, window_index);
         self.workspaces[target].insert_column(id, preset, true);
         self.active = target;
         self.normalize();
+        Some(id)
     }
 
     /// Takes in workspaces from elsewhere, such as an unplugged output, placing

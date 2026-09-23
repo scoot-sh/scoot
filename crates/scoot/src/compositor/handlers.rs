@@ -136,6 +136,10 @@ impl CompositorHandler for State {
                 if let Some(window) = self.window(id) {
                     window.on_commit();
                 }
+                // Before the initial configure below: an unmap discarded the
+                // window's toplevel state, and the configure that answers the
+                // re-map must not carry a fullscreen it no longer has.
+                self.discard_fullscreen_if_unmapped(id);
                 send_initial_configure(self, &root);
                 self.observe_frame(id);
             } else if !self.commit_layer_surface(&root) {
@@ -331,6 +335,17 @@ impl XdgShellHandler for State {
         if let Some(id) = self.id_of(surface.wl_surface()) {
             self.refresh_window(id);
         }
+    }
+
+    /// The window's own fullscreen request -- see `fullscreen.rs` for what
+    /// it does, the output hint included, and why it is honoured while
+    /// locked.
+    fn fullscreen_request(&mut self, surface: ToplevelSurface, output: Option<WlOutput>) {
+        self.client_fullscreen_request(&surface, true, output);
+    }
+
+    fn unfullscreen_request(&mut self, surface: ToplevelSurface) {
+        self.client_fullscreen_request(&surface, false, None);
     }
 
     /// Every `xdg_popup` is tracked here, whatever it will end up parented

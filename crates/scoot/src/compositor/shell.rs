@@ -2,12 +2,14 @@
 
 use scoot_core::{Action, Effect, Event, Rect, Size, SizeHints, WindowId, WindowInfo};
 use smithay::desktop::Window;
+use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
 use smithay::utils::SERIAL_COUNTER;
 use smithay::wayland::compositor::with_states;
 use smithay::wayland::shell::xdg::SurfaceCachedState;
 use smithay::wayland::shell::xdg::{ToplevelSurface, XdgToplevelSurfaceData};
 
 use super::State;
+use super::fullscreen::set_fullscreen_state;
 
 #[cfg(test)]
 mod tests;
@@ -58,7 +60,6 @@ impl State {
         // activation change for a window that has just been closed.
         self.close_foreign_toplevel(id);
         self.close_wlr_toplevel(id);
-        self.requested.remove(&id);
         if self.focus == Some(id) {
             self.focus = None;
         }
@@ -84,17 +85,45 @@ impl State {
 
     /// Tells the core what size a window actually took, so it can learn the
     /// minimums of windows that refuse to shrink.
+    ///
+    /// Paired against the size of the configure this commit *answers* -- the
+    /// one the client acked before making it (Smithay's committed state) --
+    /// not the latest one sent. The two differ for every commit a client
+    /// makes between a configure going out and its ack, and a client drawing
+    /// at 60fps makes one routinely: leaving fullscreen sends the tiled size
+    /// while the client's next frame is still the whole output's, and pairing
+    /// that frame with the new, smaller request read it as a refusal to
+    /// shrink -- a learned minimum near the output's width, and a column that
+    /// never came back to its size. The same race shrank any column that a
+    /// width change narrowed faster than the client acked.
+    ///
+    /// No frame is reported when the answered configure named no size (there
+    /// is nothing to compare against), or carried the `fullscreen` state (a
+    /// frame sized for the whole output says nothing about the tiled minimum;
+    /// the core ignores those too, and skipping here also skips the event).
     pub fn observe_frame(&mut self, id: WindowId) {
         let Some(window) = self.window(id) else {
             return;
         };
+        let Some(toplevel) = window.toplevel() else {
+            return;
+        };
+        let answered = toplevel.with_committed_state(|state| {
+            state.map(|state| {
+                (
+                    state.size,
+                    state.states.contains(xdg_toplevel::State::Fullscreen),
+                )
+            })
+        });
+        let Some((Some(requested), false)) = answered else {
+            return;
+        };
         let size = window.geometry().size;
-        let actual = Size::new(size.w, size.h);
-        let requested = self.requested.get(&id).copied().unwrap_or(actual);
         self.world.handle_event(Event::FrameObserved {
             id,
-            requested,
-            actual,
+            requested: Size::new(requested.w, requested.h),
+            actual: Size::new(size.w, size.h),
         });
     }
 
@@ -163,9 +192,17 @@ impl State {
                 .map_element(window.clone(), (placement.rect.x, placement.rect.y), false);
             if let Some(toplevel) = window.toplevel() {
                 let size = Size::new(placement.rect.w, placement.rect.h);
-                toplevel.with_pending_state(|state| state.size = Some((size.w, size.h).into()));
+                // The size and the `fullscreen` bit in one configure, so a
+                // client entering fullscreen is never told the output's size
+                // without being told why (or leaving it, its tiled size while
+                // still flagged fullscreen). Invisible windows are not
+                // configured here at all; `fullscreen.rs` answers the one
+                // that asked while invisible.
+                toplevel.with_pending_state(|state| {
+                    state.size = Some((size.w, size.h).into());
+                    set_fullscreen_state(state, placement.fullscreen);
+                });
                 toplevel.send_pending_configure();
-                self.requested.insert(placement.id, size);
             }
         }
         self.set_focus(arrangement.focused);
@@ -175,12 +212,19 @@ impl State {
         // told sends `output_leave` + `output_enter` for exactly the windows
         // that changed screens -- and nothing for the ones that didn't.
         self.refresh_wlr_output_membership(&arrangement);
+        // ...and its `fullscreen` state bit, from the same arrangement: every
+        // way a window's fullscreen can change (its own request, a taskbar,
+        // the bind, a move or focus change that ends it) ends in this call.
+        self.refresh_wlr_fullscreen(&arrangement);
         // The one place workspace changes reach `ext-workspace-v1` clients:
         // every event and action that can add, drop or switch a workspace
         // ends here (see `ext_workspace.rs`). Costs one snapshot compare per
         // output when nothing about the workspaces changed, which is the
         // common case, and no allocation either way.
         self.refresh_workspaces();
+        // Last, once the space holds the new arrangement: a change in what
+        // covers an output moves what the pointer is over.
+        self.refresh_fullscreen_cover();
         self.request_render();
     }
 

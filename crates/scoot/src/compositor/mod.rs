@@ -18,6 +18,7 @@ mod ext_workspace;
 mod fd_pressure;
 mod foreign_toplevel;
 mod foreign_toplevel_management;
+mod fullscreen;
 mod gamma_control;
 mod handlers;
 pub(crate) mod headless;

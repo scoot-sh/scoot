@@ -3,11 +3,12 @@
 //! The public surface is spread over a few files by concern:
 //! [`World::handle_event`] lives in `events.rs`, [`World::handle_action`] in
 //! `actions.rs`, and [`World::arrange`] in `arrange.rs`. The tree they all
-//! operate on is in `tree.rs`.
+//! operate on is in `tree.rs`, and fullscreen's rules in `fullscreen.rs`.
 
 mod actions;
 mod arrange;
 mod events;
+mod fullscreen;
 mod tree;
 
 #[cfg(test)]
@@ -228,6 +229,10 @@ impl World {
     /// across (a width choice, not a per-output state), lands right of the
     /// target's focused column like a newly opened window, and the source
     /// output keeps whatever neighbour focus `take` leaves behind.
+    ///
+    /// A fullscreen window leaves fullscreen on the way (see
+    /// [`Action::ToggleFullscreen`](crate::Action::ToggleFullscreen)); an
+    /// ignored move leaves it alone.
     fn move_focused_window_to_output(&mut self, target: OutputId) {
         let Some(t) = self.output_index(target) else {
             return;
@@ -241,6 +246,7 @@ impl World {
         if loc.output == t {
             return;
         }
+        self.drop_fullscreen(id);
         let preset = self.outputs[loc.output].workspaces[loc.workspace].columns[loc.column].preset;
         self.remove_window(loc);
         self.outputs[t]

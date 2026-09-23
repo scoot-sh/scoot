@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::time::Instant;
 
-use scoot_core::{Action, Config, OutputId, Size, WindowId, World};
+use scoot_core::{Action, Config, OutputId, WindowId, World};
 use smithay::desktop::{LayerSurface, PopupManager, Space, Window, WindowSurfaceType};
 use smithay::input::keyboard::Keycode;
 use smithay::input::{Seat, SeatState};
@@ -117,14 +117,18 @@ pub struct State {
     /// The layout. Everything else here exists to serve it.
     pub world: World,
     pub windows: HashMap<WindowId, Window>,
-    /// The size each window was last asked for, to pair with what it becomes.
-    pub requested: HashMap<WindowId, Size>,
     pub next_id: u64,
     /// The focused *window*, so activation and the focus ring are only moved
     /// when they change. Not necessarily what holds the keyboard: a layer
     /// surface can (see `clicked_layer` and `layer_shell.rs`), and this stays
     /// pointing at the window focus will come back to when it doesn't.
     pub focus: Option<WindowId>,
+    /// Which window covered each output, by output index, as of the last
+    /// `apply()` -- `World::fullscreen_on` for every output, remembered only
+    /// so `apply()` can tell when it changed (see
+    /// `State::refresh_fullscreen_cover`). Updated in place, so it allocates
+    /// only when an output is added.
+    pub(super) fullscreen_covers: Vec<Option<WindowId>>,
     /// The layer surface a click gave keyboard focus to, if any -- the one
     /// piece of the layer-shell focus policy that cannot be re-derived from
     /// the layer map, because nothing else records that a click happened.
@@ -816,9 +820,9 @@ impl State {
             startup_xwayland: false,
             world: World::new(config),
             windows: HashMap::new(),
-            requested: HashMap::new(),
             next_id: 0,
             focus: None,
+            fullscreen_covers: Vec::new(),
             clicked_layer: None,
             keyboard_on_layer: false,
             layers_awaiting_neutralize: Vec::new(),

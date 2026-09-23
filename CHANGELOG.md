@@ -9,6 +9,30 @@ scoot has not cut a numbered release yet; entries are dated.
 
 ## Unreleased
 
+### 2026-09-22 — fullscreen works
+
+- **A video player's or game's fullscreen button now works** — any app
+  that asks through the standard Wayland request (`foot --fullscreen` is
+  one) — and so does a taskbar's fullscreen entry. Before, scoot ignored
+  every fullscreen request. A fullscreen window covers its
+  whole screen edge to edge — no gaps, no focus ring, your bar hidden — and
+  the lock screen still shows over it. Notifications show over it only if
+  your notification daemon draws on the `overlay` layer: mako, for one,
+  defaults to `top`, which is hidden under a fullscreen window like a bar —
+  set `layer=overlay` in its config to see them. Focus a window in another
+  column and the layout scrolls to it as usual; come back and it is
+  fullscreen again. Focusing a window stacked in the *same* column ends
+  fullscreen instead. Leave fullscreen and everything is exactly where it
+  was.
+- **New default bind: `Super+f` toggles fullscreen** on the focused window.
+  If your config already binds `super+f` (the docs used to suggest
+  `"super+f" = "set-column-width 2"`), your bind still wins — nothing to do
+  unless you want the new default.
+- **New actions for scripts and agents:** `toggle-fullscreen`, and
+  `set-fullscreen ID on|off` to set one window's state by id without
+  toggling. `scootctl windows` reports each window's `fullscreen`. See
+  [docs/protocols.md](docs/protocols.md#fullscreen) for the details.
+
 ### 2026-09-21 — logs are plain text when they are not going to a terminal
 
 - **`scoot`'s log output no longer contains colour escape sequences when

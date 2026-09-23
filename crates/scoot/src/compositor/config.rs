@@ -807,6 +807,12 @@ fn action_string(action: &Action) -> String {
         Action::FocusOutput(id) => format!("focus-output {}", id.0),
         Action::CycleColumnWidth => "cycle-column-width".to_owned(),
         Action::SetColumnWidth(index) => format!("set-column-width {index}"),
+        Action::ToggleFullscreen => "toggle-fullscreen".to_owned(),
+        Action::SetFullscreen { id, fullscreen } => format!(
+            "set-fullscreen {} {}",
+            id.0,
+            if *fullscreen { "on" } else { "off" }
+        ),
         Action::CloseFocused => "close".to_owned(),
         Action::Spawn(command) => format!("spawn {}", command.join(" ")),
         Action::Quit => "quit".to_owned(),
@@ -1553,6 +1559,46 @@ mod tests {
             "{spelling} did not parse through a bind"
         );
         assert_eq!(action_string(&action), spelling);
+    }
+
+    #[test]
+    fn the_fullscreen_actions_parse_through_a_bind_and_emit_back() {
+        // Both spellings through the shared `scootctl::action` parser and
+        // back out through `action_string` byte-identically -- the toggle is
+        // a default bind, so `--print-default-config` emits it, and the
+        // by-id form must round-trip too for `action_string` to stay total.
+        for (spelling, action) in [
+            ("toggle-fullscreen", Action::ToggleFullscreen),
+            (
+                "set-fullscreen 7 on",
+                Action::SetFullscreen {
+                    id: scoot_core::WindowId(7),
+                    fullscreen: true,
+                },
+            ),
+            (
+                "set-fullscreen 7 off",
+                Action::SetFullscreen {
+                    id: scoot_core::WindowId(7),
+                    fullscreen: false,
+                },
+            ),
+        ] {
+            let (_dir, path) = write_temp(&format!("[binds]\n\"super+F1\" = \"{spelling}\"\n"));
+            let loaded = load_from(&path, true).expect("valid config");
+            assert_eq!(
+                loaded.keybindings.match_key(
+                    keysym_named("F1").unwrap(),
+                    Modifiers {
+                        super_: true,
+                        ..Modifiers::default()
+                    }
+                ),
+                Some(Bound::Action(action.clone())),
+                "{spelling} did not parse through a bind"
+            );
+            assert_eq!(action_string(&action), spelling);
+        }
     }
 
     #[test]
@@ -2848,9 +2894,9 @@ mod tests {
             );
             binds += 1;
         }
-        // "All 40 of them" (see docs/configuration.md): a dropped default
+        // "All 41 of them" (see docs/configuration.md): a dropped default
         // bind must fail loudly here, not just shrink the file.
-        assert_eq!(binds, 40, "a default bind was added or lost");
+        assert_eq!(binds, 41, "a default bind was added or lost");
     }
 
     /// Commented scalar values are pinned to their live defaults, not just
