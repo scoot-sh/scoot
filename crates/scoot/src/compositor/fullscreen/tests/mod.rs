@@ -43,6 +43,8 @@ mod drawing;
 mod neighbours;
 #[cfg(feature = "gpu-scanout")]
 mod primary_direct;
+#[cfg(feature = "gpu-scanout")]
+mod scanout_feedback;
 mod transitions;
 
 /// The framebuffer, square. Room for two half-width columns, a bar and a
@@ -159,6 +161,14 @@ enum Step {
     /// double-buffered surface state).
     #[cfg(feature = "gpu-scanout")]
     SetAlpha { window: usize, multiplier: u32 },
+    /// `zwp_linux_dmabuf_v1.get_surface_feedback` for the `window`-th
+    /// toplevel's surface: what a v4+ Mesa client does for every EGL window.
+    #[cfg(feature = "gpu-scanout")]
+    SurfaceFeedback { window: usize },
+    /// Report every complete feedback (`done`-terminated) the `window`-th
+    /// toplevel's surface feedback object has received.
+    #[cfg(feature = "gpu-scanout")]
+    Feedbacks { window: usize },
 }
 
 enum Ack {
@@ -166,6 +176,8 @@ enum Ack {
     Configured(Configured),
     Configures(Vec<Configured>),
     Pointer(Option<Entered>),
+    #[cfg(feature = "gpu-scanout")]
+    Feedbacks(Vec<scanout_feedback::SeenFeedback>),
 }
 
 /// A surface the pointer entered, by the order the script created it.
@@ -189,6 +201,14 @@ struct TestClient {
     lock_manager: Option<ext_session_lock_manager_v1::ExtSessionLockManagerV1>,
     #[cfg(feature = "gpu-scanout")]
     alpha_modifier: Option<wp_alpha_modifier_v1::WpAlphaModifierV1>,
+    #[cfg(feature = "gpu-scanout")]
+    dmabuf: Option<
+        wayland_protocols::wp::linux_dmabuf::zv1::client::zwp_linux_dmabuf_v1::ZwpLinuxDmabufV1,
+    >,
+    /// Per toplevel: the surface feedback being received, and every
+    /// complete one.
+    #[cfg(feature = "gpu-scanout")]
+    feedback: scanout_feedback::Feedbacks,
     /// Per toplevel, by creation order: the `xdg_toplevel.configure` state
     /// waiting for its `xdg_surface.configure`, and every completed one.
     pending: Vec<Configured>,
@@ -238,6 +258,12 @@ impl Dispatch<wl_registry::WlRegistry, ()> for TestClient {
             #[cfg(feature = "gpu-scanout")]
             "wp_alpha_modifier_v1" => {
                 client.alpha_modifier = Some(registry.bind(name, version.min(1), qh, ()));
+            }
+            // v5, the version Mesa's EGL and quickshell bind (see
+            // `dmabuf.rs`): feedback objects, `main_device` still sent.
+            #[cfg(feature = "gpu-scanout")]
+            "zwp_linux_dmabuf_v1" => {
+                client.dmabuf = Some(registry.bind(name, version.min(5), qh, ()));
             }
             _ => {}
         }
@@ -693,6 +719,19 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 locks.push(manager.lock(&qh, ()));
                 queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
                 Ack::Done
+            }
+            #[cfg(feature = "gpu-scanout")]
+            Step::SurfaceFeedback { window } => {
+                let dmabuf = client.dmabuf.clone().ok_or("no zwp_linux_dmabuf_v1")?;
+                client.feedback.expect(window);
+                dmabuf.get_surface_feedback(&windows[window].surface, &qh, Index(window));
+                queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                Ack::Done
+            }
+            #[cfg(feature = "gpu-scanout")]
+            Step::Feedbacks { window } => {
+                queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                Ack::Feedbacks(client.feedback.complete(window))
             }
             #[cfg(feature = "gpu-scanout")]
             Step::SetAlpha { window, multiplier } => {

@@ -155,9 +155,11 @@
 //! feedback is what a client *allocates against*, and a client that only
 //! needs to render has no business on a primary node. The tranche carries no
 //! `scanout` flag: which client buffers could be scanned out directly is a
-//! per-surface question for a second, scanout tranche
-//! (`docs/backlog/core/gpu-scanout-candidates.md`), not for the default
-//! feedback every client reads.
+//! per-surface question, answered on the GPU scanout tier by a second,
+//! scanout tranche in front of this one for the fullscreen window covering
+//! an output ([`scanout`]), not by the default feedback every client reads.
+//! That per-surface feedback is built from this very table and builder
+//! ([`DefaultFeedback`]), so it offers nothing this one does not.
 //!
 //! ## When it is advertised, and why that is not `State::new`
 //!
@@ -370,7 +372,9 @@
 //!   same importable set, by construction rather than by enumeration order.
 //!   A future renderer with real per-connector tranche preferences, or a
 //!   deliberate device migration, is when this paragraph stops being true and
-//!   `set_default_feedback` becomes the fix.
+//!   `set_default_feedback` becomes the fix. (The per-surface scanout
+//!   feedback is the one thing that *does* follow the plane: it is rebuilt on
+//!   a CRTC switch and re-sent to the window holding it -- see [`scanout`].)
 //! - **No-DRM-node logging is once per boot, not per frame.** Which rung of
 //!   [`main_device`] answered -- including the `0` fallback -- is logged where
 //!   it is chosen, in [`advertise`], which runs once from
@@ -406,7 +410,8 @@ use smithay::wayland::compositor::{
     SurfaceData, TraversalAction, is_sync_subsurface, with_surface_tree_downward,
 };
 use smithay::wayland::dmabuf::{
-    DmabufFeedbackBuilder, DmabufGlobal, DmabufHandler, DmabufState, ImportNotifier, get_dmabuf,
+    DmabufFeedback, DmabufFeedbackBuilder, DmabufGlobal, DmabufHandler, DmabufState,
+    ImportNotifier, get_dmabuf,
 };
 
 use super::State;
@@ -455,7 +460,17 @@ const CARD0: &str = "/dev/dri/card0";
 /// is built and before the event loop starts -- never per bind, per frame or
 /// per hotplug event. See the module doc for why that is still early enough
 /// for a client that gates on this global.
-pub(super) fn advertise(dh: &DisplayHandle, state: &mut DmabufState, backend: &Backend) {
+///
+/// Returns what was advertised -- the feedback every client is sent by
+/// default, and the builder and table it came from -- so the GPU scanout
+/// tier can build a per-surface feedback whose main tranche is *this* one and
+/// revert a surface to exactly this one ([`scanout`]). `None` when nothing
+/// was advertised.
+pub(super) fn advertise(
+    dh: &DisplayHandle,
+    state: &mut DmabufState,
+    backend: &Backend,
+) -> Option<DefaultFeedback> {
     let formats = advertised_formats(backend);
     if formats.is_empty() {
         // Loud, and specific about both halves, because this is a
@@ -477,7 +492,7 @@ pub(super) fn advertise(dh: &DisplayHandle, state: &mut DmabufState, backend: &B
              will never capture anything. Run with --renderer pixman for a \
              session that imports linear dma-bufs"
         );
-        return;
+        return None;
     }
     // Once per session. The count is the line a "why does my GL client
     // render into linear buffers" report needs; the table itself is `debug`,
@@ -489,17 +504,51 @@ pub(super) fn advertise(dh: &DisplayHandle, state: &mut DmabufState, backend: &B
     );
     tracing::debug!(table = ?formats, "dmabuf feedback table");
     let device = main_device(backend.render_node());
-    match DmabufFeedbackBuilder::new(device, formats).build() {
+    let builder = DmabufFeedbackBuilder::new(device, formats.iter().copied());
+    match builder.clone().build() {
         Ok(feedback) => {
             state.create_global_with_default_feedback::<State>(dh, &feedback);
+            Some(DefaultFeedback {
+                builder,
+                feedback,
+                formats,
+            })
         }
         Err(error) => {
             tracing::warn!(
                 %error,
                 "dmabuf feedback table could not be built; running without zwp_linux_dmabuf_v1"
             );
+            None
         }
     }
+}
+
+/// What [`advertise`] put on the global: the default feedback every client
+/// is sent, plus the builder and the table it was built from.
+///
+/// Kept because a per-surface feedback has to *extend* this one, not
+/// approximate it. The GPU scanout tier's scanout tranche ([`scanout`]) is
+/// added in front of this builder's main tranche, so the per-surface
+/// feedback's format table and main tranche are this feedback's, entry for
+/// entry; and reverting a surface sends it this very object, which is what
+/// Smithay compares against to decide whether anything needs re-sending.
+/// Built once, at startup, never per frame.
+#[cfg_attr(
+    not(feature = "gpu-scanout"),
+    expect(
+        dead_code,
+        reason = "read only by the GPU scanout tier's per-surface feedback"
+    )
+)]
+pub(super) struct DefaultFeedback {
+    /// The builder the default feedback was built from: `main_device` and
+    /// the one main tranche, [`advertised_formats`]'s table.
+    builder: DmabufFeedbackBuilder,
+    /// The default feedback itself, as the global holds it.
+    feedback: DmabufFeedback,
+    /// The advertised table, in wire order.
+    formats: Vec<Format>,
 }
 
 /// The feedback tranche for `backend`'s renderer, in wire order: the one
@@ -921,6 +970,23 @@ impl DmabufHandler for State {
         &mut self.screencopy.dmabuf
     }
 
+    /// A surface asking for feedback for the first time while it is the
+    /// fullscreen window the GPU scanout tier is steering gets the scanout
+    /// feedback at once, rather than the default until its window next
+    /// changes eligibility (see [`scanout`]'s module doc). Everything else --
+    /// and every surface on every other tier -- gets the default, which is
+    /// what `None` asks Smithay for. Smithay calls this once per surface, on
+    /// its first `get_surface_feedback`; later requests share the surface's
+    /// stored feedback.
+    #[cfg(feature = "gpu-scanout")]
+    fn new_surface_feedback(
+        &mut self,
+        surface: &WlSurface,
+        _global: &DmabufGlobal,
+    ) -> Option<DmabufFeedback> {
+        self.scanout_feedback.for_new_surface(surface)
+    }
+
     /// Imports the dmabuf into this session's active renderer, answering the
     /// client with what that renderer said. Which renderer that is depends on
     /// `--renderer`; do not assume pixman here.
@@ -1117,5 +1183,7 @@ fn refuse_import(buffers: &mut WlBuffers, notifier: ImportNotifier) {
     notifier.failed();
 }
 
+#[cfg(feature = "gpu-scanout")]
+pub(super) mod scanout;
 #[cfg(test)]
 mod tests;

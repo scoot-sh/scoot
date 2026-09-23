@@ -48,22 +48,25 @@
 //! confirming early is the one that matters, and one vblank is the bound.
 
 use std::error::Error;
+use std::rc::Rc;
 
 use smithay::backend::allocator::Format as DrmFormat;
-use smithay::backend::allocator::Fourcc;
 use smithay::backend::allocator::dmabuf::Dmabuf;
+use smithay::backend::allocator::format::FormatSet;
 use smithay::backend::allocator::gbm::{GbmAllocator, GbmBufferFlags, GbmDevice};
+use smithay::backend::allocator::{Fourcc, Modifier};
 use smithay::backend::drm::compositor::{DrmCompositor, FrameFlags, PrimaryPlaneElement};
 use smithay::backend::drm::exporter::gbm::{GbmFramebufferExporter, NodeFilter};
 use smithay::backend::drm::{DrmDeviceFd, DrmSurface, PlaneInfo, Planes};
-use smithay::backend::renderer::element::RenderElement;
+use smithay::backend::renderer::element::{Id, RenderElement};
 use smithay::backend::renderer::{Bind, Color32F, Renderer, Texture};
 use smithay::output::{Output, OutputModeSource};
 use smithay::reexports::drm::control::{Mode, crtc, plane};
 use smithay::utils::{Buffer, Size, Transform};
 
-use super::layout_exporter::LayoutKeepingExporter;
+use super::layout_exporter::{LayoutKeepingExporter, LostLayouts};
 use super::present_retry::{self, PresentRetries};
+use crate::compositor::dmabuf::scanout::FormatsKey;
 
 /// The concrete `DrmCompositor` this backend drives.
 ///
@@ -372,13 +375,22 @@ pub(crate) struct ScanoutFrame {
     /// Whether this frame's content actually changed anything on screen --
     /// what `State::frame_serial` counts.
     pub(crate) damaged: bool,
-    /// Whether the primary plane went direct-scanout on this frame instead
-    /// of compositing into the swapchain slot. Only such a frame owes the
-    /// capture recording a `note_direct`: the slot it would otherwise record
-    /// was never drawn into. Always false for an undamaged or failed frame
-    /// (nothing reached any plane), and read by `render::draw_frame_scanout`
-    /// right after this returns.
-    pub(crate) primary_direct: bool,
+    /// The element whose client buffer the primary plane scanned out
+    /// directly on this frame, instead of a composite in the swapchain slot
+    /// -- `None` when the frame composited. Two readers, one meaning ("the
+    /// primary went direct, with this element"):
+    ///
+    /// - the capture recording: only a direct frame owes it a
+    ///   `note_direct`, because the slot it would otherwise record was never
+    ///   drawn into;
+    /// - presentation feedback: that element's surface is the one whose
+    ///   `wp_presentation_feedback.presented` carries `zero_copy`
+    ///   (`presentation_time.rs`).
+    ///
+    /// Always `None` for an undamaged or failed frame (nothing reached any
+    /// plane), and read by `render::draw_frame_scanout` right after this
+    /// returns. An `Id` clone is a reference-count bump, not an allocation.
+    pub(crate) primary_direct: Option<Id>,
 }
 
 /// `DrmCompositor`, plus what is needed to rebuild it on a different CRTC and
@@ -473,6 +485,33 @@ pub(crate) struct ScanoutPresenter {
     /// the device would hand a call site that has no business holding one a
     /// `DrmDevice`.
     cursor_size: Size<u32, Buffer>,
+    /// The client modifiers this device's GBM has been seen to lose, as the
+    /// framebuffer exporter recorded them (`layout_exporter.rs`). One record
+    /// for the device, handed to every exporter [`build`](Self::build)
+    /// makes -- startup's and every CRTC switch's -- because losing a
+    /// modifier is a property of the device's GBM, not of a CRTC. Read by
+    /// the scanout tranche (see [`scanout_formats`](Self::scanout_formats)).
+    lost: Rc<LostLayouts>,
+    /// Which plane set the compositor was built on: moved by every CRTC
+    /// switch ([`adopt_surface`](Self::adopt_surface)), the one path that
+    /// can change the primary plane and so its format list. Half of the key
+    /// the scanout tranche's cache is rebuilt on ([`FormatsKey`]); a mode
+    /// change keeps the plane, so it keeps this.
+    plane_epoch: u64,
+}
+
+/// What the scanout tranche is built from on this presenter's device:
+/// see [`ScanoutPresenter::scanout_formats`].
+pub(crate) struct ScanoutFormats<'a> {
+    /// The primary plane's own format list, as Smithay read it
+    /// (`{fourcc, Invalid}` for every fourcc, plus the explicit modifiers
+    /// `IN_FORMATS` names where the device has them).
+    pub(crate) primary: &'a FormatSet,
+    /// The client modifiers the exporter has refused on this device.
+    pub(crate) lost: Vec<Modifier>,
+    /// The DRM device the plane belongs to -- the tranche's
+    /// `target_device`. `None` if it cannot be `stat`ed.
+    pub(crate) device: Option<libc::dev_t>,
 }
 
 impl ScanoutPresenter {
@@ -504,6 +543,7 @@ impl ScanoutPresenter {
         let planes = surface_planes(&surface);
         let cursor_planes = planes.cursor.len();
         let overlay_planes = planes.overlay.len();
+        let lost = Rc::new(LostLayouts::default());
         let compositor = Self::build(
             &planes,
             surface,
@@ -511,6 +551,7 @@ impl ScanoutPresenter {
             &renderer_formats,
             cursor_size,
             mode_source.clone(),
+            &lost,
         )?;
         Ok(Self {
             compositor,
@@ -525,6 +566,8 @@ impl ScanoutPresenter {
             cursor_planes,
             overlay_planes,
             cursor_size,
+            lost,
+            plane_epoch: 0,
         })
     }
 
@@ -545,6 +588,7 @@ impl ScanoutPresenter {
         renderer_formats: &[DrmFormat],
         cursor_size: Size<u32, Buffer>,
         mode_source: OutputModeSource,
+        lost: &Rc<LostLayouts>,
     ) -> Result<Compositor, Box<dyn Error>> {
         // `RENDERING | SCANOUT`: the buffers are both drawn into by GLES and
         // handed to the CRTC, so they must satisfy both.
@@ -558,8 +602,10 @@ impl ScanoutPresenter {
         // Wrapped: a client buffer whose tiled layout the framebuffer would
         // lose is refused rather than scanned out scrambled (see
         // `layout_exporter`).
-        let exporter =
-            LayoutKeepingExporter::new(GbmFramebufferExporter::new(gbm.clone(), EXPORTER_FILTER));
+        let exporter = LayoutKeepingExporter::new(
+            GbmFramebufferExporter::new(gbm.clone(), EXPORTER_FILTER),
+            Rc::clone(lost),
+        );
         // `Some` only where a cursor plane exists to drive with it. Without
         // one the cursor state -- its pixman renderer, its `CURSOR | WRITE`
         // buffer pool -- would be allocated and then never consulted (Smithay
@@ -625,6 +671,30 @@ impl ScanoutPresenter {
     /// The surface being driven, for the hotplug path's connector/mode moves.
     pub(super) fn surface(&self) -> &DrmSurface {
         self.compositor.surface()
+    }
+
+    /// What the per-surface scanout tranche is keyed on: the plane set and
+    /// the lost-modifier record. Allocation-free and syscall-free -- two
+    /// integer reads -- because `render::draw_frame_scanout` asks it every
+    /// frame to decide whether the cached tranche is still current.
+    pub(crate) fn scanout_formats_key(&self) -> FormatsKey {
+        FormatsKey {
+            planes: self.plane_epoch,
+            lost: self.lost.generation(),
+        }
+    }
+
+    /// Everything the scanout tranche is built from on this device. Only
+    /// called when [`scanout_formats_key`](Self::scanout_formats_key) moved
+    /// (startup, a CRTC switch, a newly lost modifier), never per frame: it
+    /// copies the lost list and `fstat`s the device fd.
+    pub(crate) fn scanout_formats(&self) -> ScanoutFormats<'_> {
+        let surface = self.compositor.surface();
+        ScanoutFormats {
+            primary: &surface.plane_info().formats,
+            lost: self.lost.modifiers(),
+            device: surface.device_fd().dev_id().ok(),
+        }
     }
 
     /// Composites `elements` into a swapchain slot -- or hands the primary
@@ -700,7 +770,7 @@ impl ScanoutPresenter {
                     drew: false,
                     flip: None,
                     damaged: false,
-                    primary_direct: false,
+                    primary_direct: None,
                 };
             }
         };
@@ -711,8 +781,10 @@ impl ScanoutPresenter {
         // left pointing at a slot this frame never drew into). An undamaged
         // frame is neither -- the screen still shows the previous frame, and
         // so must the recording.
-        let primary_direct =
-            damaged && matches!(&result.primary_element, PrimaryPlaneElement::Element(_));
+        let primary_direct = match &result.primary_element {
+            PrimaryPlaneElement::Element(element) if damaged => Some(element.id().clone()),
+            _ => None,
+        };
         if damaged && let PrimaryPlaneElement::Swapchain(element) = &result.primary_element {
             on_frame(element.buffer());
         }
@@ -729,7 +801,7 @@ impl ScanoutPresenter {
                 drew: true,
                 flip: None,
                 damaged: false,
-                primary_direct: false,
+                primary_direct: None,
             };
         }
 
@@ -927,9 +999,13 @@ impl ScanoutPresenter {
             &self.renderer_formats,
             self.cursor_size,
             self.mode_source.clone(),
+            &self.lost,
         ) {
             Ok(compositor) => {
                 self.compositor = compositor;
+                // A new CRTC may come with a different primary plane, and so
+                // a different format list: the scanout tranche rebuilds.
+                self.plane_epoch = self.plane_epoch.wrapping_add(1);
                 // Another CRTC may or may not have cursor or overlay planes
                 // of its own, so both counts are re-read from the fresh plane
                 // set. The cursor *size* is a property of the device rather

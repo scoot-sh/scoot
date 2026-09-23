@@ -129,6 +129,21 @@ pub struct State {
     /// `State::refresh_fullscreen_cover`). Updated in place, so it allocates
     /// only when an output is added.
     pub(super) fullscreen_covers: Vec<Option<WindowId>>,
+    /// What `dmabuf::advertise` put on the `zwp_linux_dmabuf_v1` global --
+    /// the default feedback, and the builder and table behind it -- or
+    /// `None` when nothing was advertised (a renderer-less harness, a
+    /// renderer that imports nothing). Written once, by
+    /// `headless::init_named`; read only by the GPU scanout tier, whose
+    /// per-surface scanout feedback extends it and reverts to it
+    /// (`dmabuf/scanout.rs`).
+    #[cfg(feature = "gpu-scanout")]
+    pub(super) dmabuf_default: Option<super::dmabuf::DefaultFeedback>,
+    /// Per output, which surface the GPU scanout tier is steering with a
+    /// scanout tranche and what that tranche is (`dmabuf/scanout.rs`).
+    /// Written by `render::draw_frame_scanout` once per frame, read by
+    /// `DmabufHandler::new_surface_feedback`. Empty on every other tier.
+    #[cfg(feature = "gpu-scanout")]
+    pub(super) scanout_feedback: super::dmabuf::scanout::ScanoutFeedbacks,
     /// The layer surface a click gave keyboard focus to, if any -- the one
     /// piece of the layer-shell focus policy that cannot be re-derived from
     /// the layer map, because nothing else records that a click happened.
@@ -823,6 +838,10 @@ impl State {
             next_id: 0,
             focus: None,
             fullscreen_covers: Vec::new(),
+            #[cfg(feature = "gpu-scanout")]
+            dmabuf_default: None,
+            #[cfg(feature = "gpu-scanout")]
+            scanout_feedback: Default::default(),
             clicked_layer: None,
             keyboard_on_layer: false,
             layers_awaiting_neutralize: Vec::new(),

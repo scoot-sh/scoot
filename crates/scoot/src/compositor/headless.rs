@@ -91,11 +91,20 @@ pub fn init_named(
     // `event_loop.run`, which is several steps after this on every path
     // (`compositor::run`) and after the client is even spawned in every test
     // harness.
-    super::dmabuf::advertise(
+    let advertised = super::dmabuf::advertise(
         &state.display_handle,
         &mut state.screencopy.dmabuf,
         &backend,
     );
+    // Kept for the GPU scanout tier's per-surface feedback, which extends
+    // and reverts to exactly what the global advertises (`dmabuf/scanout.rs`);
+    // nothing else reads it.
+    #[cfg(feature = "gpu-scanout")]
+    {
+        state.dmabuf_default = advertised;
+    }
+    #[cfg(not(feature = "gpu-scanout"))]
+    drop(advertised);
     // One backend per output, and `state.backends` is keyed by the same id
     // `state.outputs` hands out -- so calling this twice would hand out a
     // second id with a second backend, and nothing names the wrong one.
@@ -609,6 +618,7 @@ impl State {
                     self.tty.is_some(),
                     frame.cursor_surface.as_ref(),
                     seq,
+                    frame.zero_copy.as_ref(),
                 );
             }
 
