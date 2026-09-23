@@ -8,7 +8,7 @@ blocked: null
 
 # GLES tier: full dma-buf format/modifier advertisement — RESOLVED
 
-RESOLVED 2026-09-23 (PR #TBD, branch `gles-dmabuf-full-formats`).
+RESOLVED 2026-09-23 (PR #229, branch `gles-dmabuf-full-formats`).
 
 ## What landed
 

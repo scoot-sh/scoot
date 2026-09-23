@@ -101,7 +101,7 @@ each item's own file records why it landed when it did.
 ## Recently shipped (since 2026-09-15)
 
 - **[GLES tier advertises the driver's real dma-buf formats](docs/backlog/resolved/gles-dmabuf-full-formats-done.md)**
-  (2026-09-23, PR #TBD) — under `--renderer gles` (offscreen and the
+  (2026-09-23, PR #229) — under `--renderer gles` (offscreen and the
   `--tty` scanout tier) the `zwp_linux_dmabuf_v1` default feedback is the
   driver's import set: every fourcc at every explicit modifier, external-only
   YUV included, candidates first; pixman byte-identical. Smithay's
