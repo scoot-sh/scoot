@@ -103,18 +103,21 @@ const CLIENT_PATIENCE: Duration = Duration::from_secs(5);
 /// and so does every other test in the crate (the reload suite's renderer
 /// refusal names whichever renderer is *not* running, so it refuses under
 /// either). The exception is `dmabuf::tests`' seven *import* tests, and it is a
-/// property of the machine, not of this change: those tests synthesise a
-/// dma-buf from a memfd through `/dev/udmabuf`, which pixman imports by
-/// mmapping it, while GLES must hand it to the driver -- and Mesa's
+/// property of the machine, not of the renderer's format support: those tests
+/// synthesise a dma-buf from a memfd through `/dev/udmabuf`, which pixman
+/// imports by mmapping it, while GLES must hand it to the driver -- and Mesa's
 /// `kms_swrast` answers `eglCreateImageKHR: createImageFromDmaBufs failed`
 /// (`EGL_BAD_ALLOC`) for a udmabuf-backed import.
 ///
-/// It is the buffer's **provenance** that is refused, not its format: both
-/// advertised formats are present with `LINEAR` among that display's 76
-/// import formats. So stage 4's renderer-derived advertisement would *not*
-/// fix these seven -- it would name the same two formats. Do not read them
-/// as blocked on stage 4; they are blocked on `kms_swrast` accepting a
-/// udmabuf, or on the tests allocating through GBM instead.
+/// It is the buffer's **provenance** that is refused, not its format -- now
+/// shown directly rather than argued: `dmabuf/tests/layouts.rs` allocates
+/// from a dumb buffer on `/dev/dri/card0` instead, and under `gles` on the
+/// same machine every layout it builds (the two candidates through three-plane
+/// `YU12`) imports through `create_immed` and draws. The full-format GLES
+/// advertisement did not change these seven (same seven, same failure), and
+/// could not have: they are blocked on `kms_swrast` accepting a udmabuf, or on
+/// the tests allocating through the device instead, which is what
+/// `layouts.rs` does.
 pub(crate) fn test_renderer() -> RendererKind {
     static RENDERER: OnceLock<RendererKind> = OnceLock::new();
     *RENDERER.get_or_init(|| match std::env::var("SCOOT_TEST_RENDERER") {

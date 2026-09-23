@@ -120,15 +120,25 @@ type Compositor =
 ///   `AddFB2`'d with its own fourcc (`element_config` ->
 ///   `framebuffer_from_wayland_buffer`), and with its own modifier where
 ///   the device takes modifiers; the swapchain's format is never applied to
-///   it. Where the device takes none (virtio) it is added without one, and
-///   KMS reads it in the driver's implicit layout -- which is why Smithay
-///   refuses outright a client buffer that arrived without an explicit
-///   modifier, and why that is safe for what scoot admits: the only
-///   modifier `zwp_linux_dmabuf_v1` offers is `LINEAR`, and the one
-///   driver without modifier support this has run on (virtio) scans out
-///   linear -- a driver whose implicit layout is tiled would also have to
-///   lack modifier support entirely to be at risk, which no measured one
-///   does. What the
+///   it. A buffer that arrived *without* an explicit modifier is refused
+///   outright (`framebuffer_from_wayland_buffer`, Weston's rule: an
+///   implicit layout is not safe to hand to KMS), and `zwp_linux_dmabuf_v1`
+///   never offers one (`dmabuf::driver_tranche`). A buffer *with* one is
+///   `AddFB2`'d with `DRM_MODE_FB_MODIFIERS` and that modifier whenever the
+///   GBM import reports it, and a device that cannot take modifiers refuses
+///   that call -- client buffers get no legacy fallback -- so the element
+///   composites. Where the GBM import reports no modifier (virtio: the
+///   client's `LINEAR` buffer comes back `Invalid`) the framebuffer is added
+///   without one and KMS reads the driver's implicit layout, which is safe
+///   there because the table on this tier is this very driver's own import
+///   set (the scanout renderer is on the GBM device, `dmabuf.rs`), and
+///   virtio's lists nothing but `LINEAR`. The one exposure left is a GBM
+///   that *drops* a tiled modifier its own EGL display advertised, on a
+///   device whose implicit layout differs -- a hardware question, carried as
+///   a check in `Asahi.md` rather than claimed either way. A multi-plane
+///   YUV buffer takes the same path and reaches the primary only where the
+///   plane lists that fourcc (next bullet); Smithay treats it as opaque
+///   (`has_alpha` knows no YUV fourcc), which is what it is. What the
 ///   comparison protected is only "the primary shows the same format it
 ///   composites in", not "KMS reads the buffer right".
 /// - **The plane still has to take that exact format.** `try_assign_plane`
@@ -368,8 +378,8 @@ pub(crate) struct ScanoutPresenter {
     /// can *render into* for scanout (`dmabuf_render_formats`), which
     /// `DrmCompositor::new` requires in order to pick a swapchain format at
     /// all. What a client is offered is what the renderer can *import*
-    /// (`dmabuf_texture_formats`, narrowed further still), derived in
-    /// `dmabuf.rs`.
+    /// (`dmabuf_texture_formats`, external-only layouts included and
+    /// implicit-modifier entries resolved), derived in `dmabuf.rs`.
     renderer_formats: Vec<DrmFormat>,
     /// Where the compositor reads the mode, scale and transform from. Kept
     /// so a CRTC switch can rebuild the compositor against the same source

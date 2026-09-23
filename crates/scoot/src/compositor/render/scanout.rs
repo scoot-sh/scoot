@@ -301,8 +301,8 @@ impl ScanoutBackend {
     /// narrowing the rule again.
     ///
     /// The consequence that remains, stated rather than discovered: on a
-    /// device whose GLES renderer really can import neither candidate, the
-    /// session now comes up on this tier with no global (GL clients fall back
+    /// device whose GLES renderer reports nothing `dmabuf::driver_tranche`
+    /// can vouch for, the session now comes up on this tier with no global (GL clients fall back
     /// to `wl_shm`) where before it fell back to pixman and dumb buffers. No
     /// machine this project can reach produces that configuration, and
     /// `dmabuf::advertise` warns loudly when it happens.

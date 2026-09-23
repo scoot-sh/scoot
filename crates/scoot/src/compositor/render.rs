@@ -50,6 +50,7 @@ use std::fmt;
 #[cfg(feature = "gpu-scanout")]
 use scoot_core::OutputId;
 use smithay::backend::allocator::dmabuf::Dmabuf;
+use smithay::backend::allocator::format::FormatSet;
 use smithay::backend::allocator::{Format, Fourcc};
 use smithay::backend::renderer::damage::OutputDamageTracker;
 use smithay::backend::renderer::{
@@ -178,6 +179,22 @@ pub struct Backend {
     /// beside the target rather than re-derived from it, so every consumer
     /// reads the one number the target was actually built at.
     size: (i32, i32),
+}
+
+/// What a renderer can import, in the shape the `zwp_linux_dmabuf_v1`
+/// advertisement is derived from ([`Backend::dmabuf_import_set`]).
+pub(super) enum ImportSet {
+    /// The renderer `mmap`s a dma-buf and composites out of the mapping
+    /// (pixman): only a single-plane `LINEAR` buffer can work, so the
+    /// advertisement is `dmabuf.rs`'s fixed candidates, narrowed by
+    /// [`Backend::imports_dmabuf_format`].
+    CpuMapped,
+    /// The renderer hands a dma-buf to its driver (both GLES tiers): every
+    /// `{fourcc, modifier}` the driver reported it imports, in the driver's
+    /// order, with Smithay's unconditional `Modifier::Invalid` entries still
+    /// in it -- `dmabuf.rs::driver_tranche` is what decides which of those
+    /// are a promise.
+    Driver(FormatSet),
 }
 
 /// The renderers [`Backend`] can be carrying.
@@ -424,14 +441,51 @@ impl Backend {
     /// than from a list, from `State::renderer` (what was *asked* for, not
     /// what was built) or from a probe of some other EGL display.
     ///
-    /// Startup-only: `dmabuf.rs::advertise` calls it once per candidate
-    /// format, never per import and never per frame.
+    /// The advertisement asks this only of a renderer whose
+    /// [`dmabuf_import_set`](Self::dmabuf_import_set) is
+    /// [`ImportSet::CpuMapped`] -- pixman, for each of its two candidates --
+    /// and the tests ask it of every renderer. Startup-only either way: never
+    /// per import and never per frame.
     pub(super) fn imports_dmabuf_format(&self, format: Format) -> bool {
         match &self.pipeline {
             Pipeline::Pixman(cpu) => ImportDma::has_dmabuf_format(&cpu.renderer, format),
             Pipeline::Gles(gpu) => ImportDma::has_dmabuf_format(&gpu.renderer, format),
             #[cfg(feature = "gpu-scanout")]
             Pipeline::Scanout(gpu) => ImportDma::has_dmabuf_format(&gpu.renderer, format),
+        }
+    }
+
+    /// What kind of answer this session's renderer gives about the dma-bufs
+    /// it can import -- the input `dmabuf.rs`'s feedback tranche is derived
+    /// from.
+    ///
+    /// Two kinds, because the two renderers answer different questions:
+    ///
+    /// - pixman **maps the buffer itself**, so what it can import is bounded
+    ///   by what a CPU mapping can make sense of -- a single-plane `LINEAR`
+    ///   buffer -- and its advertisement is a fixed candidate list it merely
+    ///   narrows ([`ImportSet::CpuMapped`]).
+    /// - both GLES tiers **hand the buffer to a driver**, and the driver has
+    ///   already said which `{fourcc, modifier}` pairs it takes: the EGL
+    ///   display's `dmabuf_texture_formats`, which is what
+    ///   `ImportDma::dmabuf_formats` returns for a `GlesRenderer` at the
+    ///   pinned rev (`gles/mod.rs:1305`), external-only formats included
+    ///   ([`ImportSet::Driver`]).
+    ///
+    /// Deliberately not [`maps_dmabufs_on_the_cpu`](Self::maps_dmabufs_on_the_cpu),
+    /// although today the two split the renderers the same way: that one
+    /// answers "does scoot have to synchronise a mapping it reads itself",
+    /// this one "what may a client be told to allocate". A renderer that
+    /// mapped buffers *and* had a driver's answer would split them.
+    ///
+    /// Startup-only: `dmabuf.rs::advertise` calls it once per session. The
+    /// clone is of a set the EGL display built once at creation.
+    pub(super) fn dmabuf_import_set(&self) -> ImportSet {
+        match &self.pipeline {
+            Pipeline::Pixman(_) => ImportSet::CpuMapped,
+            Pipeline::Gles(gpu) => ImportSet::Driver(ImportDma::dmabuf_formats(&gpu.renderer)),
+            #[cfg(feature = "gpu-scanout")]
+            Pipeline::Scanout(gpu) => ImportSet::Driver(ImportDma::dmabuf_formats(&gpu.renderer)),
         }
     }
 

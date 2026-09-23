@@ -49,14 +49,32 @@
 //! whatever its EGL display reports, which is a property of the driver and
 //! the device.
 //!
-//! So the tranche is **derived**: [`DMABUF_CANDIDATES`] is what this
-//! compositor is willing to serve, and [`tranche`] keeps only those the
-//! session's own renderer will really take. A candidate it cannot import is
-//! never offered, so the promise cannot be broken by a renderer this
-//! compositor does not have. Pinned over the wire, against the session's own
-//! backend
+//! So the tranche is **derived**, and how depends on what kind of answer the
+//! renderer gives ([`ImportSet`], from `Backend::dmabuf_import_set`):
+//!
+//! - **pixman maps the buffer itself**, so the only layout it can promise is
+//!   a single-plane `LINEAR` one. Its tranche is [`DMABUF_CANDIDATES`] --
+//!   what this compositor's CPU pixel paths speak -- narrowed to those pixman
+//!   really takes ([`cpu_mapped_tranche`]). Byte-identical to what it has
+//!   always been.
+//! - **a GLES renderer hands the buffer to its driver**, and the driver has
+//!   already said what it imports, fourcc *and* modifier: tiled and
+//!   compressed layouts on a real GPU, multi-plane YUV (`NV12`, `P010`, ...)
+//!   as external-only textures. Its tranche is that answer
+//!   ([`driver_tranche`]), with Smithay's unconditional `Modifier::Invalid`
+//!   entries resolved rather than passed through -- see that function for
+//!   the rule and why implicit layouts are never offered next to explicit
+//!   ones. This is what lets a GPU client render into its native layout
+//!   instead of a linear one, and a video player hand over a decoder's
+//!   frame without converting it.
+//!
+//! Either way a format the renderer cannot import is never offered, so the
+//! promise cannot be broken by a renderer this compositor does not have.
+//! Pinned over the wire, against the session's own backend
 //! (`dmabuf/tests.rs::every_advertised_format_is_one_the_renderer_imports`),
-//! not by comment.
+//! and end to end -- allocated, handed over through `create_immed`, and
+//! checked on screen for the right colour -- for one representative of each
+//! layout class the table carries (`dmabuf/tests/layouts.rs`).
 //!
 //! **"Will really take" is a wider question than "lists at `LINEAR`", and
 //! getting that wrong is a way to break a working session rather than a
@@ -97,13 +115,13 @@
 //! expected result rather than a gap. They build their buffers through
 //! `/dev/udmabuf`, and Mesa's `kms_swrast` refuses a udmabuf-backed import
 //! (`eglCreateImageKHR: createImageFromDmaBufs failed`, `EGL_BAD_ALLOC`) for
-//! *either* format, with or without modifier attributes. That is buffer
-//! **provenance**, not format: probing the device scoot's own selection picks
-//! on the dev VM found both candidates present with `LINEAR` among that
-//! display's 76 import formats, so the derived table there names exactly the
-//! two the hard-coded one did. No real client reaches that path on that
-//! machine either -- `gbm_bo_create` on its render node is refused outright,
-//! so nothing there can produce a GBM dmabuf at all.
+//! *any* format, with or without modifier attributes. That is buffer
+//! **provenance**, not format: the same driver imports and draws every
+//! layout `dmabuf/tests/layouts.rs` builds -- `NV12`, `P010` and three-plane
+//! `YU12` included -- from a dumb buffer the device allocated itself. No
+//! real client reaches the refused path on that machine either:
+//! `gbm_bo_create` on its render node is refused outright, so a Mesa client
+//! there renders on the CPU and hands over `wl_shm` instead.
 //!
 //! ## What is advertised, exactly
 //!
@@ -121,15 +139,25 @@
 //! The default feedback names a **render node** as `main_device`
 //! ([`main_device`]: the active renderer's own device where it can name one,
 //! else `/dev/dri/renderD128`, else `card0`, else `0`, whichever rung
-//! answered logged once at startup) and the derived tranche --
-//! [`DMABUF_CANDIDATES`] (`Xrgb8888` then
-//! `Argb8888`) minus anything the renderer cannot import -- with the `LINEAR`
-//! layout, which is the only layout a CPU mapping can make sense of and the
-//! only one every tier here agrees on. A render node rather than a primary
-//! one because the device in the feedback is what a client *allocates
-//! against*, and a client that only needs to render has no business on a
-//! primary node -- scoot itself never scans out of these buffers, it reads
-//! them.
+//! answered logged once at startup) and one tranche, [`advertised_formats`]:
+//!
+//! - **pixman**: [`DMABUF_CANDIDATES`] (`Xrgb8888` then `Argb8888`) minus
+//!   anything it cannot import, at `LINEAR` -- the only layout a CPU mapping
+//!   can make sense of.
+//! - **GLES** (both tiers): the same two first wherever the driver lists
+//!   them at `LINEAR`, then every other fourcc the driver imports, each at
+//!   every explicit modifier the driver named, in the driver's order. On the
+//!   dev VM's llvmpipe that is 57 fourccs at `LINEAR` (Mesa lists nothing
+//!   else there); on a real GPU it is the driver's tiled and compressed
+//!   modifiers too, commonly a few hundred pairs.
+//!
+//! A render node rather than a primary one because the device in the
+//! feedback is what a client *allocates against*, and a client that only
+//! needs to render has no business on a primary node. The tranche carries no
+//! `scanout` flag: which client buffers could be scanned out directly is a
+//! per-surface question for a second, scanout tranche
+//! (`docs/backlog/core/gpu-scanout-candidates.md`), not for the default
+//! feedback every client reads.
 //!
 //! ## When it is advertised, and why that is not `State::new`
 //!
@@ -247,20 +275,26 @@
 //!   that far -- Smithay posts `InvalidFormat`/`InvalidDimensions`/`OutOfBounds`
 //!   on the params object, which disconnects that client and no one else.
 //!   Both are covered in `dmabuf/tests.rs`.
-//! - **Multi-plane and non-`LINEAR` imports stay refused.** The tranche never
-//!   offers either: [`DMABUF_CANDIDATES`] is `LINEAR`-only and the renderer
-//!   can only narrow *which fourccs* survive, never widen what modifier is
-//!   named -- an entry whose evidence was `Modifier::Invalid` is still
-//!   advertised as `LINEAR` (see [`imports_linear`], and note that the
-//!   widening is on the evidence side alone). Smithay validates the *format*
-//!   against the
-//!   table but not the modifier or the plane count, so only a client that
-//!   ignores the feedback it was sent can reach that refusal. Under pixman
-//!   the refusal is `UnsupportedNumberOfPlanes`/`UnsupportedModifier`; under
-//!   GLES it is whatever EGL says. On the async `create` path the client gets
-//!   the protocol's `failed` event and lives; on `create_immed` it dies, which
-//!   is what the protocol prescribes for a buffer the client already believes
-//!   it holds.
+//! - **What a client that ignores its feedback gets is the renderer's own
+//!   answer.** Smithay validates the *fourcc* against the table but not the
+//!   modifier or the plane count, so a client can send a layout the table
+//!   never offered. Under pixman a multi-plane or non-`LINEAR` buffer is
+//!   refused (`UnsupportedNumberOfPlanes`/`UnsupportedModifier`); under GLES
+//!   it is whatever EGL says -- including an *implicit*-modifier buffer
+//!   (`Modifier::Invalid`), which EGL accepts and which, for a YUV format,
+//!   Smithay binds as `GL_TEXTURE_2D` and draws as the wrong colour (measured
+//!   on llvmpipe: the `layouts.rs` red fill drew zero red pixels at
+//!   `Invalid`, all of them at `LINEAR`). That is why the table never offers
+//!   it; a client that allocates implicitly anyway gets a wrong picture, not
+//!   a kill. On the async `create` path a refusal is the protocol's `failed`
+//!   event and the client lives; on `create_immed` it dies, which is what the
+//!   protocol prescribes for a buffer the client already believes it holds.
+//! - **Alpha-carrying YUV (`AYUV`, `Y410`, ...) composites as opaque under
+//!   GLES.** Smithay's `has_alpha` knows no YUV fourcc, so the renderer and
+//!   the damage/occlusion code both treat such a buffer as opaque -- the two
+//!   agree, so the result is a consistent opaque window, never a hole or
+//!   garbage. A translucent YUV window is rare enough not to be worth a
+//!   hand-kept list here.
 //! - **An fd that is not really a dma-buf is refused, not trusted.**
 //!   `PixmanRenderer::import_dmabuf` syncs plane 0 before it builds the
 //!   image, and `DMA_BUF_IOCTL_SYNC` on (say) a plain memfd fails with
@@ -285,7 +319,11 @@
 //! - **Bind/unbind storms cost nothing here.** Feedback is built once, at
 //!   startup; Smithay re-sends the stored copy to each new `get_default_feedback`
 //!   without calling back into this module. There is no per-bind work to
-//!   storm.
+//!   storm. A GLES table is longer, and the one per-bind cost that scales
+//!   with it is Smithay's: a v3 bind is sent one `format` and one `modifier`
+//!   event per entry (hundreds on a real GPU, a few KB), which
+//!   `bind_budget.rs` bounds like every other global. Building the table
+//!   once is microseconds (`dmabuf/tests/tranche.rs::driver_tranche_cost`).
 //! - **Hotplug and mode changes need no re-send.** The feedback names the DRM
 //!   *device*, not a connector or a mode, and the tranche is a property of the
 //!   renderer, which no hotplug changes -- so `set_default_feedback` (which
@@ -324,6 +362,7 @@ use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 
 use smithay::backend::allocator::dmabuf::{Dmabuf, DmabufSyncFlags};
+use smithay::backend::allocator::format::FormatSet;
 use smithay::backend::allocator::{Buffer, Format, Fourcc, Modifier};
 use smithay::backend::renderer::utils::RendererSurfaceStateUserData;
 use smithay::reexports::wayland_server::DisplayHandle;
@@ -336,21 +375,21 @@ use smithay::wayland::dmabuf::{
 };
 
 use super::State;
-use super::render::Backend;
+use super::render::{Backend, ImportSet};
 use super::wl_buffers::WlBuffers;
 
-/// The dma-buf formats this compositor is willing to advertise, in the order a
-/// client sees them in the feedback table -- *before* the active renderer has
-/// narrowed them (see [`tranche`], which is what actually reaches a client).
+/// The dma-buf formats a **CPU-mapping** renderer (pixman) is advertised, in
+/// the order a client sees them -- *before* the renderer has narrowed them
+/// (see [`cpu_mapped_tranche`]) -- and the fourccs every renderer's table
+/// leads with (see [`driver_tranche`]).
 ///
 /// Every entry the renderer keeps is a format it can really import, which is
 /// what `dmabuf/tests.rs::every_advertised_format_is_one_the_renderer_imports`
 /// pins over the wire against the session's own backend rather than against a
-/// comment. That direction matters and the other does not: a renderer's
-/// importable set is much longer than this (pixman's is ten-plus fourccs,
-/// GLES's dozens), and advertising *fewer* formats than can be imported costs
-/// a client nothing, while advertising one that cannot is a `create_immed`
-/// kill.
+/// comment. For pixman that direction matters and the other does not: its
+/// importable set is ten-plus fourccs, and advertising *fewer* formats than
+/// can be imported costs a client nothing, while advertising one that cannot
+/// is a `create_immed` kill.
 ///
 /// Deliberately the same two [`screencopy`](super::screencopy) serves captures
 /// in, in the same order (`Xrgb8888` first, for the same translucent-background
@@ -359,6 +398,12 @@ use super::wl_buffers::WlBuffers;
 /// the compositor's own framebuffer is that layout too. Kept as `Fourcc` rather
 /// than derived from `screencopy`'s `wl_shm` list so there is no format mapping
 /// to get wrong; `dmabuf/tests.rs` pins those two lists to each other as well.
+///
+/// Under GLES these two are only the *head* of the table: the rest is the
+/// driver's own answer, which is where tiled layouts and multi-plane YUV come
+/// from. That agreement with the capture path is a pixman concern -- a GLES
+/// renderer samples whatever layout it imported into the one framebuffer
+/// format capture reads, so no client buffer's layout ever reaches a capture.
 const DMABUF_CANDIDATES: [Fourcc; 2] = [Fourcc::Xrgb8888, Fourcc::Argb8888];
 
 /// `/dev/dri/renderD128`, the first rung of [`main_device`]'s path ladder.
@@ -367,17 +412,17 @@ const RENDER_NODE: &str = "/dev/dri/renderD128";
 const CARD0: &str = "/dev/dri/card0";
 
 /// Creates the `zwp_linux_dmabuf_v1` global for whatever `backend`'s renderer
-/// can really import, or creates nothing at all when it can import none of
-/// [`DMABUF_CANDIDATES`] (see the module doc: no global beats one that
-/// promises an import this session cannot perform).
+/// can really import ([`advertised_formats`]), or creates nothing at all when
+/// that is nothing (see the module doc: no global beats one that promises an
+/// import this session cannot perform).
 ///
 /// Runs once, from `headless::init_named`, immediately after the render target
 /// is built and before the event loop starts -- never per bind, per frame or
 /// per hotplug event. See the module doc for why that is still early enough
 /// for a client that gates on this global.
 pub(super) fn advertise(dh: &DisplayHandle, state: &mut DmabufState, backend: &Backend) {
-    let mut formats = tranche(|format| backend.imports_dmabuf_format(format)).peekable();
-    if formats.peek().is_none() {
+    let formats = advertised_formats(backend);
+    if formats.is_empty() {
         // Loud, and specific about both halves, because this is a
         // session-shaping degradation an operator has no other way to find
         // out about: every GL client silently drops to Mesa's `wl_shm`
@@ -390,16 +435,24 @@ pub(super) fn advertise(dh: &DisplayHandle, state: &mut DmabufState, backend: &B
         // essentially nothing, so `--renderer pixman` is a working session
         // rather than a downgrade to be argued about.
         tracing::warn!(
-            candidates = ?DMABUF_CANDIDATES,
-            "this session's renderer can import none of the dma-buf formats this \
-             compositor serves, so zwp_linux_dmabuf_v1 is not advertised at all: \
-             GL clients will fall back to software rendering over wl_shm, and a \
+            "this session's renderer reported no dma-buf format it can be trusted \
+             to import, so zwp_linux_dmabuf_v1 is not advertised at all: GL \
+             clients will fall back to software rendering over wl_shm, and a \
              shell that waits for dmabuf feedback before capturing the screen \
              will never capture anything. Run with --renderer pixman for a \
-             session that imports them"
+             session that imports linear dma-bufs"
         );
         return;
     }
+    // Once per session. The count is the line a "why does my GL client
+    // render into linear buffers" report needs; the table itself is `debug`,
+    // because on a real GPU it is hundreds of pairs.
+    tracing::info!(
+        pairs = formats.len(),
+        fourccs = fourcc_count(&formats),
+        "dmabuf feedback: advertising the renderer's importable formats"
+    );
+    tracing::debug!(table = ?formats, "dmabuf feedback table");
     let device = main_device(backend.render_node());
     match DmabufFeedbackBuilder::new(device, formats).build() {
         Ok(feedback) => {
@@ -414,31 +467,60 @@ pub(super) fn advertise(dh: &DisplayHandle, state: &mut DmabufState, backend: &B
     }
 }
 
-/// The feedback tranche: [`DMABUF_CANDIDATES`] in their advertised order,
-/// minus any the active renderer cannot import.
+/// The feedback tranche for `backend`'s renderer, in wire order: the one
+/// table [`advertise`] puts in the format-table memfd, and what the tests
+/// compare the wire against.
 ///
-/// A predicate rather than a renderer, for two reasons. It is what makes the
+/// Dispatches on *what kind of answer* the renderer gives
+/// ([`ImportSet`]), not on which renderer it is -- see
+/// [`Backend::dmabuf_import_set`](super::render::Backend) for why that is
+/// its own question.
+fn advertised_formats(backend: &Backend) -> Vec<Format> {
+    match backend.dmabuf_import_set() {
+        ImportSet::CpuMapped => {
+            cpu_mapped_tranche(|format| backend.imports_dmabuf_format(format)).collect()
+        }
+        ImportSet::Driver(importable) => driver_tranche(&importable),
+    }
+}
+
+/// How many distinct fourccs `formats` names, for [`advertise`]'s one log
+/// line. Quadratic in the fourcc count, which is a few dozen, once per
+/// session.
+fn fourcc_count(formats: &[Format]) -> usize {
+    formats
+        .iter()
+        .enumerate()
+        .filter(|(index, format)| {
+            !formats[..*index]
+                .iter()
+                .any(|seen| seen.code == format.code)
+        })
+        .count()
+}
+
+/// The pixman tranche: [`DMABUF_CANDIDATES`] in their advertised order, minus
+/// any the renderer cannot import, every one at `LINEAR`.
+///
+/// A fixed candidate list narrowed by the renderer, rather than the
+/// renderer's own set, because pixman's set is a list of fourccs it can
+/// *map*, and the question a client needs answered is narrower than that:
+/// what can this compositor read out of a CPU mapping that every other pixel
+/// path here -- `screencopy`'s shm list, the framebuffer layout -- already
+/// speaks. Advertising *fewer* formats than can be imported costs a client
+/// nothing (it falls back to `wl_shm`); advertising one that cannot is a
+/// `create_immed` kill. Pinned byte-for-byte on the wire by
+/// `dmabuf/tests.rs::default_feedback_names_a_device_and_the_renderers_own_formats`.
+///
+/// A predicate rather than a renderer, because that is what makes the
 /// *decision* testable without the renderer that would have to be there to
-/// make it -- including the case that matters most and that no machine here
-/// can produce on demand, a renderer that imports nothing. And it states the
-/// rule in one place: the filter is the whole of what "renderer-derived"
-/// means here.
-///
-/// Filtering a fixed candidate list rather than advertising the renderer's own
-/// set wholesale, which is the other thing "derive it from the renderer" could
-/// have meant and is not what this does. The direction is asymmetric:
-/// advertising *fewer* formats than can be imported costs a client nothing
-/// (it falls back to `wl_shm`), while advertising one that cannot be imported
-/// is a `create_immed` kill. GLES on a real driver imports dozens of fourccs,
-/// many of them multi-plane or YUV, none of which this compositor's capture
-/// path, framebuffer layout or `screencopy` shm list agrees with -- so the
-/// candidates stay the two that every other pixel path here already speaks
-/// (see [`DMABUF_CANDIDATES`]) and the renderer only ever narrows them.
+/// make it -- including a renderer that imports nothing, which no machine
+/// here can produce on demand.
 ///
 /// What the entries say on the wire is always `LINEAR`; what counts as
 /// *evidence* that the renderer will take one is [`imports_linear`], which is
 /// wider and has to be.
-fn tranche(can_import: impl Fn(Format) -> bool) -> impl Iterator<Item = Format> {
+fn cpu_mapped_tranche(can_import: impl Fn(Format) -> bool) -> impl Iterator<Item = Format> {
     DMABUF_CANDIDATES
         .into_iter()
         .filter(move |code| imports_linear(*code, &can_import))
@@ -446,6 +528,79 @@ fn tranche(can_import: impl Fn(Format) -> bool) -> impl Iterator<Item = Format> 
             code,
             modifier: Modifier::Linear,
         })
+}
+
+/// The GLES tranche: every `{fourcc, modifier}` the renderer's driver said it
+/// imports, with the one kind of entry that is not the driver's own answer
+/// resolved rather than passed through.
+///
+/// Per fourcc, [`DMABUF_CANDIDATES`] first (so the old two-entry table stays
+/// the head of the new one wherever the driver lists them at `LINEAR`), then
+/// every other fourcc in the driver's own order:
+///
+/// - **Explicit modifiers -- `LINEAR` or any tiled/compressed one -- are
+///   advertised as the driver listed them**, external-only ones included.
+///   These are the driver's answer to `eglQueryDmaBufModifiersEXT`, which is
+///   by definition the list it imports. External-only is not a reason to
+///   leave one out: `GlesRenderer::import_dmabuf` binds an entry the render
+///   set lacks to `GL_TEXTURE_EXTERNAL_OES` (`gles/mod.rs:1269`), and every
+///   `GlesRenderer` can sample one, since its texture program always
+///   compiles the `EXTERNAL` variant (`gles/shaders/mod.rs:217`) -- which is
+///   exactly how a multi-plane YUV buffer (`NV12`, `P010`) is composited.
+/// - **`Modifier::Invalid` -- "implicit layout" -- is never advertised for a
+///   fourcc that has explicit modifiers.** Smithay inserts `{fourcc, Invalid}`
+///   into *both* the texture and the render set unconditionally
+///   (`egl/display.rs:994-1001`), so an implicit buffer of a format whose every
+///   explicit layout is external-only would be bound as `GL_TEXTURE_2D`
+///   against the driver's own answer -- and nothing checks the GL error after
+///   `EGLImageTargetTexture2DOES`, so that would be a black or garbage window
+///   rather than a refusal no test of the import could see. A client that
+///   supports modifiers picks an explicit one anyway; wlroots draws the same
+///   line (`INVALID` only for a format with no explicit modifiers).
+/// - **A fourcc with *no* explicit modifiers** is one the driver could not be
+///   asked about (no `EGL_EXT_image_dma_buf_import_modifiers`, or a driver
+///   refusing the query for its own format). Only the two candidates survive
+///   that, at `LINEAR`, on the evidence [`imports_linear`] documents -- the
+///   exact advertisement this compositor made on such a driver before the
+///   table was widened. Anything else there is a guess, and is left out.
+///
+/// So the widening from `Invalid` to `LINEAR` now applies *only* where the
+/// driver gave no explicit answer. Where it did, and `LINEAR` is not in it,
+/// `LINEAR` is not advertised -- which the candidate-only rule used to do,
+/// on `Invalid` evidence, for a driver that had just said otherwise (see
+/// [`imports_linear`]'s doc for why that import could be refused).
+///
+/// Startup-only, and the quadratic walk is over a set the driver built once:
+/// a few dozen fourccs by a few modifiers each, measured in
+/// `dmabuf/tests/tranche.rs::driver_tranche_cost`.
+fn driver_tranche(importable: &FormatSet) -> Vec<Format> {
+    let mut fourccs: Vec<Fourcc> = DMABUF_CANDIDATES.to_vec();
+    for format in importable.iter() {
+        if !fourccs.contains(&format.code) {
+            fourccs.push(format.code);
+        }
+    }
+    let mut tranche = Vec::with_capacity(importable.indexset().len());
+    for code in fourccs {
+        let before = tranche.len();
+        tranche.extend(
+            importable
+                .iter()
+                .filter(|format| format.code == code && format.modifier != Modifier::Invalid)
+                .copied(),
+        );
+        let no_explicit_answer = tranche.len() == before;
+        if no_explicit_answer
+            && DMABUF_CANDIDATES.contains(&code)
+            && imports_linear(code, &|format| importable.contains(&format))
+        {
+            tranche.push(Format {
+                code,
+                modifier: Modifier::Linear,
+            });
+        }
+    }
+    tranche
 }
 
 /// Whether `can_import` is evidence that this renderer will accept a
@@ -472,9 +627,7 @@ fn tranche(can_import: impl Fn(Format) -> bool) -> impl Iterator<Item = Format> 
 ///   (it reads it only for the `is_external` flag, `gles/mod.rs:1268-1274`),
 ///   `Dmabuf::has_modifier()` is false for `Linear` so the
 ///   modifiers-extension guard does not fire (`allocator/dmabuf.rs:229`,
-///   `egl/display.rs:754-759`), and no modifier attribute is attached to the
-///   `EGLImage` either (`:817`) -- i.e. exactly the implicit-layout import
-///   such a driver does support.
+///   `egl/display.rs:754-759`).
 ///
 /// So requiring an explicit `LINEAR` entry would have thrown away a
 /// capability that genuinely worked, ending in no global at all and every GL
@@ -483,6 +636,28 @@ fn tranche(can_import: impl Fn(Format) -> bool) -> impl Iterator<Item = Format> 
 /// stage and promises nothing more: the advertised modifier is still
 /// `LINEAR`, and a client that allocates one still gets the import that used
 /// to succeed.
+///
+/// **Where the rule is sound, stated precisely -- an earlier version of this
+/// doc overstated it.** It said no modifier attribute reaches the `EGLImage`.
+/// That holds only on a display *without* the modifiers extension:
+/// `create_image_from_dmabuf` attaches the modifier whenever it is not
+/// `Invalid` and the extension is present (`egl/display.rs:817-824`), and
+/// `LINEAR` is not `Invalid`. So on a display that has the extension, the
+/// `LINEAR` buffer a client allocates from this table is imported as an
+/// explicit `LINEAR` one -- which the driver vouched for only if it listed
+/// it. Two cases follow, and [`driver_tranche`] treats them differently:
+///
+/// - the driver gave **no** explicit modifier for `code` (the query was
+///   refused or answered zero): nothing contradicts `LINEAR`, and the
+///   widening keeps the table this compositor has always offered there;
+/// - the driver **did** name its layouts and `LINEAR` is not among them: the
+///   `Invalid` entry is only Smithay's unconditional insertion, the driver
+///   has just said otherwise, and offering `LINEAR` would invite a refusal
+///   through `create_immed`. The GLES table no longer does; it offers the
+///   layouts the driver named instead.
+///
+/// pixman is unaffected by either: it lists no `Invalid` entries, and it maps
+/// a linear buffer itself rather than asking a driver.
 fn imports_linear(code: Fourcc, can_import: &impl Fn(Format) -> bool) -> bool {
     [Modifier::Linear, Modifier::Invalid]
         .into_iter()
@@ -711,9 +886,10 @@ impl DmabufHandler for State {
     /// client with what that renderer said. Which renderer that is depends on
     /// `--renderer`; do not assume pixman here.
     ///
-    /// A success mints the client's `wl_buffer` and leaves an `mmap` of plane
-    /// 0 in the renderer's cache, which the ordinary surface render path then
-    /// composites like any other texture. A refusal is the protocol's own
+    /// A success mints the client's `wl_buffer` and leaves the import in the
+    /// renderer's cache -- an `mmap` of plane 0 under pixman, an `EGLImage`
+    /// texture (external for a YUV layout) under GLES -- which the ordinary
+    /// surface render path then composites like any other texture. A refusal is the protocol's own
     /// `failed` -- soft on the asynchronous `create`, fatal on `create_immed`,
     /// which is the protocol's choice, not this compositor's (see the module
     /// doc).
