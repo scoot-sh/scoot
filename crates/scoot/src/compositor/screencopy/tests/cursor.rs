@@ -706,3 +706,74 @@ fn every_cursor_change_moves_the_cursor_serial_and_asks_the_right_redraw() {
         );
     }
 }
+
+#[test]
+fn a_scene_change_whose_draw_failed_is_counted_by_the_next_frame_that_draws() {
+    // The dumb tier's shape. A failed draw leaves a scene change off screen;
+    // the next frame to draw -- here one only the cursor asked for -- must
+    // count it, or a capture that did not ask for the pointer would keep
+    // the old picture until some later scene change.
+    let mut fixture = start();
+    fixture.state.frame_cursor_for_test = Some(true);
+    fixture.render();
+    let serial = fixture.state.frame_serial;
+
+    fixture.state.fail_next_draw_for_test = true;
+    fixture.state.request_render();
+    fixture.state.render();
+    assert_eq!(fixture.state.frame_serial, serial, "nothing was drawn");
+    assert!(
+        fixture.state.scene_dirty,
+        "the undrawn scene change is kept"
+    );
+
+    fixture.state.pointer_move(30.0, 30.0);
+    fixture.state.render();
+    assert_eq!(
+        fixture.state.frame_serial,
+        serial + 1,
+        "the cursor-driven frame drew the scene change and counts it"
+    );
+    assert!(!fixture.state.scene_dirty);
+
+    // The control: a cursor-only frame after that is not a scene change.
+    fixture.state.pointer_move(40.0, 30.0);
+    fixture.state.render();
+    assert_eq!(fixture.state.frame_serial, serial + 1);
+}
+
+#[test]
+fn a_no_cursor_session_is_served_a_scene_change_whose_first_draw_failed() {
+    // The same, end to end through a capture client that did not ask for
+    // the pointer.
+    let mut fixture = start();
+    fixture.state.frame_cursor_for_test = Some(true);
+    fixture.render();
+    fixture.run(Step::StartSession {
+        paint_cursors: false,
+    });
+    let (outcome, _) = fixture
+        .run(Step::Capture {
+            width: CANVAS,
+            height: CANVAS,
+            format: wl_shm::Format::Argb8888,
+        })
+        .frame();
+    assert_eq!(outcome, Outcome::Ready);
+    fixture.run(Step::CaptureWithoutWaiting);
+    // A scene change whose draw fails.
+    fixture.state.appearance.background_color = Color::new(0.5, 0.1, 0.1, 1.0);
+    fixture.state.fail_next_draw_for_test = true;
+    fixture.state.request_render();
+    fixture.state.render();
+    // Only the pointer moves after it.
+    fixture.state.pointer_move(30.0, 30.0);
+    let (outcome, captured) = fixture.run(Step::PollFrame).frame();
+    assert_eq!(outcome, Outcome::Ready, "the new scene is served");
+    let without = oracle(&mut fixture, false, Some(true));
+    assert_is(
+        &captured,
+        &without,
+        "the new background, without the pointer",
+    );
+}

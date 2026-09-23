@@ -913,6 +913,10 @@ pub(super) fn draw_frame(
     output: &Output,
     locked: bool,
 ) -> FrameOutcome {
+    #[cfg(test)]
+    if std::mem::take(&mut state.fail_next_draw_for_test) {
+        return FrameOutcome::default();
+    }
     let Backend {
         pipeline,
         damage,

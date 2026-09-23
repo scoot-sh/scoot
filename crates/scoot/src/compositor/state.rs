@@ -353,6 +353,12 @@ pub struct State {
     /// default) is the production rule.
     #[cfg(test)]
     pub(crate) frame_cursor_for_test: Option<bool>,
+    /// Test-only failure injection: while set, the next `render::draw_frame`
+    /// takes the flag and reports a frame that did not draw -- the shape a
+    /// failed bind or render leaves (both only log). No harness can make a
+    /// real renderer fail on demand.
+    #[cfg(test)]
+    pub(crate) fail_next_draw_for_test: bool,
 
     pub compositor_state: CompositorState,
     pub xdg_shell_state: XdgShellState,
@@ -959,6 +965,8 @@ impl State {
             cursor_serial: 0,
             #[cfg(test)]
             frame_cursor_for_test: None,
+            #[cfg(test)]
+            fail_next_draw_for_test: false,
             timer_armed: false,
             last_commit: Instant::now(),
             pending_idle: Vec::new(),

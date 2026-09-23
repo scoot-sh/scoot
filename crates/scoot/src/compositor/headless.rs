@@ -481,8 +481,11 @@ impl State {
         let mut attempted = false;
         // Whether something other than the cursor asked for this render:
         // taken with the first attempted draw, like `needs_render`, so a
-        // re-arm by this render's own tail stays for the next one.
+        // re-arm by this render's own tail stays for the next one -- and
+        // given back below if any output's draw failed, since that output's
+        // scene change is then still not on screen.
         let mut scene = false;
+        let mut every_output_drew = true;
         // Read once, here, so the element gathering, the clear colour and
         // the frame callbacks below are all answering the same question
         // about the same frame.
@@ -524,6 +527,7 @@ impl State {
             if frame.damaged && scene {
                 self.frame_serial = self.frame_serial.wrapping_add(1);
             }
+            every_output_drew &= frame.drew_a_frame;
             // A refused `--tty` flip (see `FrameOutcome::retry_render`):
             // nothing is in flight, so no `VBlank` will ever arrive to retry
             // it the way `present_skipped` retries an in-flight skip --
@@ -737,6 +741,15 @@ impl State {
                     dead_layers = true;
                 }
             }
+        }
+        // A draw that failed (a bind or render error, logged where it
+        // happened) left a scene change undrawn: keep it counted as one, so
+        // the next frame that draws -- even one only the cursor asked for --
+        // moves `frame_serial` and a capture that did not ask for the pointer
+        // is handed the change rather than kept on the old picture. Only the
+        // flag: nothing re-arms here that did not before.
+        if scene && !every_output_drew {
+            self.scene_dirty = true;
         }
         if retry_render {
             self.request_render();
