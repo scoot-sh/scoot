@@ -11,12 +11,32 @@ blocked: null
 Filed 2026-09-22 by the exporter widening
 ([resolved](../resolved/gpu-direct-scanout-exporter-done.md)), which found this
 gate where it expected direct scanout. Serves **daily-drive** (zero-copy
-fullscreen video/games). This, not candidate marking, is what stands between
-the tree and primary-direct scanout on every machine measured (the dev VM;
-Asahi's swapchain format was never recorded -- `Asahi.md` Test 5 asks for
-it). The one device shape that would already match: a swapchain that falls
-through to `XR24` (plane or renderer refusing `AR24`) with an explicit
-`LINEAR` modifier -- covered by the capture fix if it exists.
+fullscreen video/games). Primary-direct scanout needs **two** things this
+tree does not have, on every machine measured (the dev VM; Asahi's
+swapchain format was never recorded -- `Asahi.md` Test 5 asks for it):
+
+1. **This gate** -- the swapchain format match, below.
+2. **An eligible bottom element.** Smithay only tries the primary for the
+   bottom visible element when nothing composited sits above it (the cursor
+   must be on its own plane) *and* the element is opaque and covers the whole
+   output, or the clear colour is black/transparent. scoot has no path to
+   that on its defaults: it does not honour client fullscreen at all
+   (`xdg_toplevel.set_fullscreen` has no handler, and the wlr
+   foreign-toplevel `SetFullscreen` is accepted and ignored,
+   `foreign_toplevel_management.rs`), the default focus ring (3 px) is a
+   composited element over the focused window, and the default background is
+   not black. The live experiment below needed ring 0, gap 0, one 1.0-wide
+   column and a black background to get there. That half is owned by
+   [client fullscreen](./client-fullscreen.md) (the state) and
+   [candidates](./gpu-scanout-candidates.md) (the eligibility rule) -- all
+   of it must land before a default-config session can go direct.
+
+The one device shape that would already pass this gate: a swapchain that
+falls through to `XR24` -- only when the *renderer* cannot render `AR24` or
+every `AR24` test commit fails; an `XR24`-only plane is not enough, since
+Smithay's opaque fallback still allocates `AR24` for it (the dev VM's primary
+is that plane) -- with an explicit `LINEAR` modifier. Covered by the capture
+fix if it exists.
 
 ## What is missing
 

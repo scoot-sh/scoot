@@ -665,12 +665,13 @@ exactly what `State::spawn` started), and two gaps. They share a mechanism
 Survey of what the README/`docs/tty.md` still name as missing on the
 optional GPU tier. pixman stays the default and GPU-free operation stays a
 hard requirement; this is "the GPU tier is complete and safe", not "GPU
-becomes the primary path". Work order: exporter → candidates →
+becomes the primary path". Work order: exporter → client fullscreen + format gate → candidates →
 capture-cursor → resize-in-place → syncobj → nested dmabuf → VRR.
 `screencopy-dmabuf-capture` (above) stays gated on measured need.
 - [Widen the scanout framebuffer exporter](./resolved/gpu-direct-scanout-exporter-done.md) — RESOLVED 2026-09-22: `NodeFilter::All` (a `Node` filter is inert: client dma-bufs carry no node without v6 `set_sampling_device`); force/refusal halves pinned and watched firing live on the dev VM under an uncommitted `ANY`-bit experiment. Found the next gate instead of direct scanout: the swapchain format match.
-- [Primary-direct format gate](./core/gpu-primary-direct-format-gate.md) — high: Smithay's primary assignment compares whole `Format`s, and no client buffer matches the `AR24`/implicit swapchain; the one thing between this tree and primary-direct scanout on any device.
-- [Scanout candidates + scanout-tranche feedback](./core/gpu-scanout-candidates.md) — high: every window is `Kind::Unspecified`, which gates *overlay* assignment (the primary has no kind check -- the format gate above is its blocker).
+- [Primary-direct format gate](./core/gpu-primary-direct-format-gate.md) — high: Smithay's primary assignment compares whole `Format`s, and no client buffer matches the `AR24`/implicit swapchain. One of two co-requirements for primary-direct scanout; the other is an eligible full-output window (client fullscreen is not honoured at all today, and the default focus ring and background also block it) -- owned by the two tickets below.
+- [Honour client fullscreen](./core/client-fullscreen.md) — high: `xdg_toplevel.set_fullscreen` has no handler and the wlr request is ignored, so a video player's fullscreen button does nothing on any renderer; also the state primary-direct scanout needs.
+- [Scanout candidates + scanout-tranche feedback](./core/gpu-scanout-candidates.md) — high, blocked on client fullscreen: the eligibility rule (which windows may be tried for the primary) and `Kind::ScanoutCandidate`, which gates *overlay* assignment (the primary has no kind check).
 - [Captures lose the pointer on the scanout tier](./core/capture-cursor-parity.md) — high (computer use): capture cursor behaviour must not depend on the renderer.
 - [GLES resize in place](./core/gles-resize-in-place.md) — medium: 16.6 ms EGL rebuild per distinct size vs 37 µs pixman.
 - [Explicit sync, `linux-drm-syncobj-v1`](./protocols/linux-drm-syncobj.md) — medium: pinned Smithay carries it; advertise only where the device can honour it.

@@ -113,8 +113,12 @@ type Compositor =
 ///   `COLOR_FORMATS` alone could match there.
 ///
 /// The one shape that would match without any change here: a device whose
-/// plane or renderer refuses `Argb8888`, so the swapchain falls through to
-/// `Xrgb8888`, *and* allocates it with an explicit `LINEAR` modifier. No
+/// *renderer* cannot render `Argb8888` (or whose every `Argb8888` test
+/// commit fails), so the swapchain falls through to `Xrgb8888`, *and*
+/// allocates it with an explicit `LINEAR` modifier. A plane that only scans
+/// out `Xrgb8888` is not enough: `find_supported_format` accepts the opaque
+/// variant for the plane side and still allocates an `Argb8888` swapchain
+/// (the dev VM's primary is exactly that plane). No
 /// machine this project has measured does that (the Asahi swapchain format
 /// was never recorded -- `Asahi.md` Test 5 asks for it), and if one does, the
 /// capture fix below already covers it. Otherwise primary-direct scanout
@@ -271,7 +275,15 @@ impl ForceComposite {
 /// assignment is a *client cursor surface* whose buffer is a dma-buf riding
 /// an overlay plane where the cursor plane could not take it -- which has
 /// the cursorless-capture consequence the cursor plane already documents,
-/// and no overlay exists on the dev VM to exercise it.
+/// and no overlay exists on the dev VM to exercise it. One variant of that
+/// is worse than "cursor missing": where a CRTC has an overlay plane with a
+/// zpos *below* the primary, Smithay may put an *opaque* element there as an
+/// underlay and punch a transparent hole in the primary above it -- so a
+/// capture, which reads only the swapchain slot, would show a transparent
+/// cut-out where the cursor is rather than the screen without it. It needs
+/// an opaque dma-buf cursor surface and underlay-capable hardware, neither
+/// seen here; recorded in `docs/backlog/core/capture-cursor-parity.md`
+/// rather than guarded in code.
 const EXPORTER_FILTER: NodeFilter = NodeFilter::All;
 
 /// Colour formats offered to `DrmCompositor::new`, in order. `Argb8888` first

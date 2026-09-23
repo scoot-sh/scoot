@@ -289,11 +289,13 @@ socket, and the other shortens a wait rather than refusing it.
   it is refused as `nothing has been scanned out yet` before the first
   frame, and as `the current frame is held for direct scanout; retry once a
   composite frame lands` when the screen is showing a client's buffer
-  directly and a composite frame cannot be drawn to capture from (the
-  session is VT-switched away). Normally the capture forces that composite
-  frame itself and succeeds. The second refusal cannot occur in current
-  builds (no frame goes direct yet -- see [tty.md](tty.md)); it is listed
-  so a client treats it as retryable when it can.
+  directly and the composite frame the capture forces could not be drawn
+  or recorded (the session is VT-switched away, the forced render failed,
+  or its buffer could not be exported). Normally the capture forces that
+  composite frame itself and succeeds. On the machines measured so far no
+  frame goes direct, so the second refusal has not been seen outside an
+  experiment (see [tty.md](tty.md)); it is listed so a client treats it as
+  retryable when it does occur.
 - **One capture in flight per connection.** The PNG encode runs on a worker
   thread, so other connections are answered while it runs — but the capture's
   own reply still has to go out before any later reply on that same

@@ -24,6 +24,17 @@ cursor is composited and captures show it. The README documents this as
 different pixels depending on which renderer the session runs — exactly the
 targeting-fidelity inconsistency computer use cannot absorb.
 
+**A worse variant, not yet seen on hardware (noted 2026-09-22, PR #222).**
+Since the scanout exporter admits client dma-bufs, a client cursor surface
+backed by a dma-buf can ride an overlay plane where the cursor plane cannot
+take it. Where that overlay sits *below* the primary (an underlay, zpos
+lower than the primary's), Smithay only puts an *opaque* element there and
+punches a transparent hole in the primary above it -- so the capture, which
+reads the swapchain slot, shows a transparent cut-out where the pointer is
+rather than simply lacking it. Needs an opaque dma-buf cursor and
+underlay-capable hardware (neither on the dev VM, which has no overlay).
+Whatever this ticket does for the cursor must cover the underlay case too.
+
 ## What to do
 
 Make capture cursor behaviour a property of the *request*, not the tier:

@@ -432,8 +432,10 @@ impl Captures {
             Err(error) => {
                 tracing::warn!(
                     %error,
+                    direct = self.direct,
                     "could not export the scanned-out buffer for capture; \
-                     captures will read the previous frame"
+                     captures will read the previous composite, or refuse \
+                     with a retry while a direct frame is on screen"
                 );
             }
         }

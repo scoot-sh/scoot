@@ -61,7 +61,9 @@ Linux, and daily-driven on `--tty`** (2026-09-18).
   (`nix build .#scoot-gpu`) and `scoot --tty --renderer gles`. Not there
   yet: every window is still composited (no zero-copy fullscreen video), and
   where the display has a hardware cursor plane the pointer is missing from
-  screenshots. Under `--headless`/`--nested`, `gles` brings no speedup.
+  screenshots. Under `--headless`/`--nested` the GPU speedup does not
+  apply: `gles` there still copies every frame back to the CPU, and on a
+  machine without a real GPU that measured 18–31x *slower* than pixman.
   pixman stays the default and the right choice without a GPU; details in
   [docs/tty.md](docs/tty.md).
 - **Config reload is live, except three restart fields.** `scootctl reload` (or `kill -HUP` on the
