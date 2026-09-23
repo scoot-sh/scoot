@@ -679,6 +679,7 @@ capture-cursor → resize-in-place → syncobj → nested dmabuf → VRR.
 - [VRR on the scanout tier](./core/gpu-vrr.md) — low, blocked on a VRR-capable display.
 
 ### Found reviewing client fullscreen (2026-09-23)
+- [Deep popup chains crash or freeze the compositor](./core/popup-depth-bound.md) — high: client-triggerable stack overflow; needs xdg errors Smithay does not enforce. Next up.
 - [Windows bleed onto the neighbouring output](./resolved/windows-bleed-across-outputs-done.md) — RESOLVED 2026-09-23 (PR #224): a window is drawn and hit only on the output it is placed on (render gather, ring and both hit sites); popups go with their parent. Also fixed: the ring and rounded clip never drew right on outputs after the first (global coordinates).
 - [Popup constraint adjustment](./core/popup-constraint-adjustment.md) — high: positioner slide/flip/resize never applied, so a menu at any output edge is cut — now including a shared one, which agents on `--headless --outputs N` hit.
 - [Output membership read from geometry](./core/output-membership-by-geometry.md) — low: frame callbacks, `wl_surface.enter` and foreign-toplevel `output_of_window` still use bbox overlap.
