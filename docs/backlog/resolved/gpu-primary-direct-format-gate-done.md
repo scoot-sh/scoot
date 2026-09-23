@@ -93,7 +93,7 @@ composites as before.
   compositing throughout, and so also restores base CPU (763/822-828/
   892-894), and at 1 Hz it is the worst of both (the output flaps between
   composited and forced). Not taken: it trades ~0.6-0.8 of a core on this
-  VM for 3-5 ms of screenshot latency.
+  VM for 3-7 ms of screenshot latency.
 - **What it buys, measured (llvmpipe, so the composite side is software
   rendering):** the fullscreen client paced on frame callbacks at default
   config costs the compositor 14-17 jiffies per 10 s direct against

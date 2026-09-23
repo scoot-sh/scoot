@@ -111,7 +111,7 @@ each item's own file records why it landed when it did.
   `DIRECT_FLAGS`. The capture force now fires in normal use (a plain
   composite frame; the swapchain reset only for an empty recording --
   agent screenshot polling at 1-10 Hz measured 3-16x less compositor CPU
-  than composited, +3-5 ms median latency); a capture
+  than composited, +3-7 ms median latency); a capture
   stream keeps the output composited, because forcing per frame measured a
   net loss (more CPU, 25 ms vs 23.6 ms client frame interval, 10% fewer
   captures). Live on the dev VM at default config (direct, tiled-over-black

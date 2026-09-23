@@ -267,7 +267,7 @@ running with no GPU at all is a hard requirement here, not a fallback tier.
   one the display refuses; the next frame without it goes direct again.
   The lock screen always composites. A direct frame is not in the buffer a
   capture reads, so a capture of it forces one composite frame first (IPC
-  `screenshot` and `ext-image-copy-capture-v1` alike; a median 3-5 ms
+  `screenshot` and `ext-image-copy-capture-v1` alike; a median 3-7 ms
   more per screenshot on the dev VM, polled at 1-10 Hz, while the
   compositor itself uses a fraction of the CPU compositing would), and a
   capture that cannot be forced (the

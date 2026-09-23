@@ -305,7 +305,7 @@ socket, and the other shortens a wait rather than refusing it.
   observed on the dev VM for a screenshot taken while VT-switched away,
   with the next one after the switch back served. Treat both as retryable.
   A screenshot of a direct frame also takes a little longer for the
-  composite frame it forces: a median 3-5 ms more on the dev VM, whether
+  composite frame it forces: a median 3-7 ms more on the dev VM, whether
   polled once a second or ten times a second.
 - **One capture in flight per connection.** The PNG encode runs on a worker
   thread, so other connections are answered while it runs — but the capture's
