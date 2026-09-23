@@ -21,6 +21,7 @@ whole of it as one command that writes its own report.
 | [Does `--gpu` actually fix this machine](docs/backlog/resolved/tty-gpu-config-key-done.md) — the residual on a resolved entry | — | yes | **closed**: not needed, the search works (2026-09-18) |
 | Issue #48's unconfirmed connector fallback | — | yes | still open — needs an external display |
 | [Test 4: CPU vs GPU on a real GPU](docs/backlog/resolved/gpu-vs-cpu-measured-done.md) | high → none | yes | **ANSWERED** (2026-09-21): scanout comes up on the split topology and costs 4–5x less CPU |
+| [Test 5: a fullscreen video scanned out directly](docs/backlog/resolved/gpu-primary-direct-format-gate-done.md) | medium | yes | open — seen on the dev VM only |
 
 ## Results so far (run 2026-09-18, `main` at `f688ac9`)
 
@@ -618,24 +619,66 @@ affected; fixed in `225719e`, gated on `IsTerminal`. Second, the dev VM's
 moves produced 16 jiffies). Damage is now driven at a fixed rate below the
 refresh rate for a fixed wall-clock window.
 
-## Test 5 — which format the GPU scanout swapchain gets (one startup)
+## Test 5 — does a fullscreen video go direct on a real GPU
 
-Why: direct scanout of a client's buffer is gated on the swapchain's format
-and modifier matching the client's (`docs/backlog/core/gpu-primary-direct-format-gate.md`).
-That format is recorded for the dev VM (`AR24`, implicit modifier) but was
-never captured here. One startup of the `gpu-scanout` build answers it; this
-does not test direct scanout, which cannot happen on current builds.
+Why: a fullscreen window covering its output is now scanned out straight
+from the client's buffer on the GPU tier (`docs/tty.md`, "A fullscreen
+window scans out directly"). That has only been seen on the dev VM, with a
+test client allocating virtio dumb buffers. This asks the two questions
+only this machine can answer: does a real GL client's buffer (allocated by
+Mesa on the AGX render node, handed over `LINEAR`) import onto `apple,dcp`
+and go direct, and what does it save. It replaces the earlier one-line
+format question: the format no longer gates anything (see
+`docs/backlog/resolved/gpu-primary-direct-format-gate-done.md`).
+
+Same safety as Test 4 (a VT; `Ctrl+Alt+F<n>` gets you back). Build the
+`gpu-scanout` package at the commit you were given (`nix build .#scoot-gpu`),
+then from a VT:
 
 ```sh
-RUST_LOG=info,smithay::backend::drm::compositor=debug \
-  scoot --tty --renderer gles 2>&1 | tee /tmp/fx/tty-formats.log
-# then quit, and:
-sed 's/\x1b\[[0-9;]*m//g' /tmp/fx/tty-formats.log | grep -E 'Testing (color format|Formats)|Remaining intersected'
+mkdir -p /tmp/fx
+RUST_LOG=info,scoot=debug,smithay::backend::drm::compositor=trace \
+  ./result-scoot-gpu/bin/scoot --tty --renderer gles \
+  > /tmp/fx/t5.log 2>&1 &
+# a GL client, fullscreen, drawing continuously -- any of:
+WAYLAND_DISPLAY=wayland-1 mpv --fs --vo=gpu --gpu-context=wayland --loop some-video.mkv &
+WAYLAND_DISPLAY=wayland-1 glmark2-wayland --fullscreen --run-forever &
+sleep 10
+sudo cat /sys/kernel/debug/dri/*/state > /tmp/fx/t5-kms-fullscreen.txt
+scootctl screenshot --out /tmp/fx/t5-fs.png
+scootctl action toggle-fullscreen; sleep 5          # the same client, tiled
+sudo cat /sys/kernel/debug/dri/*/state > /tmp/fx/t5-kms-tiled.txt
+scootctl action toggle-fullscreen; sleep 5
+# quit scoot (Super+Shift+e), then:
+sed 's/\x1b\[[0-9;]*m//g' /tmp/fx/t5.log > /tmp/fx/t5.clean.log
+grep -c 'successfully assigned element .* to plane' /tmp/fx/t5.clean.log
+grep 'eligibility changed\|Testing Formats' /tmp/fx/t5.clean.log | head
+grep -o 'failed to assign element[^,]*\|skipping direct scan-out[^,]*' /tmp/fx/t5.clean.log | sort | uniq -c | head
 ```
 
-Send back those lines. `AR24` with any modifier confirms the gate holds
-here too; `XR24` with `Linear` would mean this machine could already go
-direct, which matters for that ticket.
+What each answer means:
+
+- `eligibility changed ... to=Eligible` and a non-zero `successfully
+  assigned ... to plane` count, with the primary plane in
+  `t5-kms-fullscreen.txt` on an fb that is not one of the tiled run's:
+  **direct scanout works here.** The screenshot should show the video frame,
+  not a stale one.
+- `Eligible` but no assignment, with `no cached fb` / `could not import`
+  or `test failed` lines: the client's buffer cannot be scanned out by
+  `apple,dcp` (the import across the AGX→DCP split, or the plane refusing
+  `LINEAR` / that size). Send the lines -- that is the next ticket.
+- No `Eligible` at all: the window was not covering the output (check the
+  client really went fullscreen), or something stayed above it.
+
+`wayland-1` is whatever socket the log's `scoot is up` line names. If it
+does go direct, a CPU comparison is worth one more minute: the same client
+fullscreen vs tiled (toggle as above), twice each, alternating, sampling the
+compositor for 10 s each time --
+
+```sh
+p=$(pgrep -x scoot); a=$(awk '{print $14+$15}' /proc/$p/stat); sleep 10
+b=$(awk '{print $14+$15}' /proc/$p/stat); echo "jiffies/10s: $((b-a))"
+```
 
 ## What to send back
 
@@ -645,7 +688,8 @@ direct, which matters for that ticket.
 - `/tmp/fx/tty-auto.log`, and `/tmp/fx/tty-gpu.log` if you needed it
 - the `/dev/dri` and driver listings from Test 2
 - for Test 3: the log, plus which connector it started on and which you pulled
-- for Test 5: the `Testing ...` lines
+- for Test 5: `/tmp/fx/t5.clean.log`, both `t5-kms-*.txt`, `t5-fs.png`,
+  and the grep output
 
 Raw logs beat a summary here. Both open entries were written after earlier
 investigations went wrong in ways only the raw output showed — a harness

@@ -9,6 +9,19 @@ scoot has not cut a numbered release yet; entries are dated.
 
 ## Unreleased
 
+### 2026-09-23 — fullscreen video without compositing (GPU tier)
+
+- **On the opt-in GPU tier (`--tty --renderer gles`, `gpu-scanout` build),
+  a fullscreen video or game is shown straight from the app's own buffer**
+  when the display can take it, instead of being composited every frame —
+  far less work for the compositor while you watch. Nothing to configure;
+  anything drawn over the window (a notification on the `overlay` layer, a
+  menu), the lock screen, or a program recording the screen makes scoot
+  composite as before. Screenshots and screen captures still show the
+  current screen; a screenshot of such a frame takes a few milliseconds
+  longer. Seen working in the dev VM with a test client; not yet confirmed
+  on real GPU hardware or with a real video player.
+
 ### 2026-09-23 — nested subsurfaces can no longer crash scoot
 
 - **A program can no longer crash scoot — and every other app with it —

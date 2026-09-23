@@ -15,7 +15,7 @@ does not make direct scanout reachable on any machine measured** (the dev
 VM; Asahi's swapchain format was never recorded, so `Asahi.md` gains a
 one-line Test 5 for it), because the next
 gate is the swapchain format match, now its own ticket
-([format gate](../core/gpu-primary-direct-format-gate.md)).
+([format gate](./gpu-primary-direct-format-gate-done.md)).
 
 - **Filter: `NodeFilter::All`, and why not `Node(..)`** (traced at the
   pinned rev). `can_add_framebuffer` compares the filter against

@@ -9,6 +9,31 @@ blocked: null
 # GPU scanout: scanout candidates + per-surface scanout feedback
 
 Filed 2026-09-22 (coordinator, GPU-tier survey). Serves **daily-drive**.
+
+**Update 2026-09-23: the primary-plane half is done** -- see the
+[format gate](../resolved/gpu-primary-direct-format-gate-done.md). A
+fullscreen window covering its output now goes primary-direct, decided per
+frame by `render::primary_direct` (unlocked, covered, no capture stream, no
+translucent or rounded element), with `ALLOW_PRIMARY_PLANE_SCANOUT_ANY` on
+eligible frames only. That settled the eligibility rule this ticket asked
+for *for the primary*. What is left here is what it scoped out:
+
+- **Overlay planes.** No window is `Kind::ScanoutCandidate`, so none rides an
+  overlay. The rule below is still the one to adopt for that; the rounded
+  and translucent refusals already exist in `render::primary_direct` and
+  should be shared, not copied. Before marking anything, extend the capture
+  contract: `Captures::note_direct` fires only for primary-direct today
+  (`ScanoutFrame::primary_direct`); a window on an overlay is equally
+  absent from the swapchain slot. Virtio has no overlay plane, so this
+  needs hardware that has one.
+- **Per-surface scanout-tranche dma-buf feedback**, so a client can
+  allocate a buffer the plane takes (today the one renderer tranche offers
+  `LINEAR` only, which happens to be scannable on the machines measured).
+- **Presentation feedback's `zero_copy` flag** for a surface whose buffer
+  went direct (informational; `wp_presentation` flags stay `vsync`-only
+  today, which under-reports rather than misleads). Smithay's
+  `RenderElementStates` already carries `ZeroCopy` per element.
+
 The [exporter widening](../resolved/gpu-direct-scanout-exporter-done.md) it
 depended on has landed (`NodeFilter::All`), and so has
 [client fullscreen](../resolved/client-fullscreen-done.md), which supplies the
@@ -31,13 +56,15 @@ check at all. It is tried only for the bottom visible element with nothing
 composited above it, that element opaque and covering the whole output (or
 a black/transparent clear colour), and then requires the client
 framebuffer's whole `Format` to equal the swapchain's
-([format gate](./gpu-primary-direct-format-gate.md)). On default config no
+([format gate](../resolved/gpu-primary-direct-format-gate-done.md) -- now
+skipped with `ANY` on eligible frames). On default config no
 window meets the first half unless it is fullscreen (see
 [client fullscreen](../resolved/client-fullscreen-done.md)): otherwise the
 3 px focus ring is composited over the focused window, and the background is
 not black. The
 eligibility rule here is therefore also what decides which windows may be
-*tried* for the primary -- one decision, shared with the format-gate ticket.
+*tried* for the primary -- one decision, shared with the format-gate ticket
+(made for the primary on 2026-09-23; see the update above).
 
 On the rounded clip: `Rounded` forwards `underlying_storage` (and `kind`),
 so the element Smithay would scan out is the unclipped inner buffer -- the

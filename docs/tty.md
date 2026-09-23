@@ -215,52 +215,24 @@ running with no GPU at all is a hard requirement here, not a fallback tier.
   The cursor plane is attempted on CRTCs that expose one, with per-frame
   fallback to compositing where the plane cannot be claimed; overlay planes
   ride along whole from the CRTC's inventory the same way, and likewise fall
-  back per frame. Step 3 of
-  `docs/backlog/resolved/gpu-scanout-planes-done.md` additionally passes
-  `ALLOW_SCANOUT`, so a frame *may* go direct on the primary plane instead
-  of compositing into the swapchain slot. Two halves landed together, never
-  apart: the direct arm is reported per frame and marks the capture
-  recording (`Captures::note_direct`), and a capture served off a marked
-  recording forces one composite-only frame first
-  (`State::ensure_scanout_capture_current`, through both IPC `screenshot`
-  and `ext-image-copy-capture-v1`) -- a session where the force cannot draw
-  fails the capture loudly rather than serving the stale buffer. Two
-  paravirt caveats, both measured on the dev
+  back per frame. Two paravirt caveats, both measured on the dev
   VM's virtio-gpu: the kernel hides the cursor plane until the session sets
   `CURSOR_PLANE_HOTSPOT` (which scoot does once per `--tty` session --
   without it the inventory is primary-only despite the plane existing), and
   the cap must land before `DrmDevice::new` (with `ATOMIC` first) or the
   plane is visible to queries but unknown to commits. Overlay planes need no
   such cap (`UNIVERSAL_PLANES` exposes them), and virtio-gpu has none to
-  expose anyway -- its inventory is one primary plus one cursor plane. On virtio the cursor
-  then scans out live (pointer-tracked, captures cursorless). Narrower than it
-  sounds, twice over: no window surface is ever a scanout candidate (every
-  one is built `Kind::Unspecified`), so an overlay plane can carry at most
-  the cursor -- never a window -- and candidate-marking is a separate
-  semantic change, still out; and although the framebuffer exporter now
-  admits client dma-bufs (it turns them into DRM framebuffers on the
-  scanout device, falling back to compositing on any refusal, never
-  touching the client), Smithay only puts one on the primary when its
-  format *and modifier* equal the swapchain's -- which does not happen on
-  any machine measured: the primary path compares the opaque fourcc (`XR24`)
-  against an `AR24` swapchain, and the `LINEAR` client modifier against, on
-  virtio-gpu, an implicit (`Invalid`) one. (Only a device whose swapchain
-  falls through to `XR24` with an explicit `LINEAR` modifier could match;
-  none measured does, and the capture fix below covers it if one does.) So
-  no frame takes the primary direct yet. Direct scanout *has* been observed, on the
-  dev VM only, with that check lifted in an uncommitted experiment
-  (`ALLOW_PRIMARY_PLANE_SCANOUT_ANY` plus a full-output card0 dumb-buffer
-  client): the primary plane scanned out the client's `XR24`/`LINEAR`
-  framebuffer, every capture forced its composite frame and read the
-  current pixels, and a capture taken while VT-switched away refused with
-  "held for direct scanout; retry once a composite frame lands" rather than
-  serving a stale screen. Lifting the check for real is tracked in
-  [`backlog/core/gpu-primary-direct-format-gate.md`](backlog/core/gpu-primary-direct-format-gate.md).
-  One consequence to know: a capture (IPC
-  screenshots, `ext-image-copy-capture-v1`) reads the primary plane only, so
-  on a session whose cursor is plane-assigned the capture shows the screen
-  *without* the cursor; where the cursor is composited, captures keep showing
-  it. The startup log says which it is (`drm: scanout cursor planes
+  expose anyway -- its inventory is one primary plus one cursor plane. On
+  virtio the cursor then scans out live (pointer-tracked, captures
+  cursorless). No window surface is ever an overlay candidate (every one is
+  built `Kind::Unspecified`), so an overlay plane carries at most the
+  cursor -- never a window; candidate-marking is
+  [`backlog/core/gpu-scanout-candidates.md`](backlog/core/gpu-scanout-candidates.md).
+  One consequence to know: a capture (IPC screenshots,
+  `ext-image-copy-capture-v1`) reads the primary plane only, so on a
+  session whose cursor is plane-assigned the capture shows the screen
+  *without* the cursor; where the cursor is composited, captures keep
+  showing it. The startup log says which it is (`drm: scanout cursor planes
   cursor_planes=N overlay_planes=M ...`). It has
   now run on a real GPU: on an Apple M2 under Asahi Linux (`2560x1600@60`)
   it costs **4–5x less compositor CPU** than the default dumb-buffer tier
@@ -271,6 +243,47 @@ running with no GPU at all is a hard requirement here, not a fallback tier.
   drawing about 0.2 W *less* power. It costs 7–16 MB more RSS for the GBM
   swapchain, and both tiers use no measurable CPU at idle. Numbers and method
   in [`../Asahi.md`](../Asahi.md)'s Test 4.
+- **A fullscreen window scans out directly (zero-copy).** When a fullscreen
+  window covers the output and its app hands scoot a dma-buf the display
+  can take, the primary plane shows that buffer itself: no compositing, no
+  copy. Which frames may try is decided per frame
+  (`render/primary_direct.rs`): the session is unlocked, a fullscreen
+  window covers the output, no capture client is streaming it, and nothing
+  in the frame is translucent (`wp_alpha_modifier_v1`) or a rounded window.
+  Those frames pass `ALLOW_PRIMARY_PLANE_SCANOUT_ANY`; every other frame
+  passes no primary bit at all, so a tiled window never goes direct, even
+  one covering the whole output over a black background. `ANY` is what lets
+  the client's framebuffer (the opaque `XR24` variant, usually `LINEAR`)
+  replace an `AR24` swapchain that may have an implicit modifier: the
+  framebuffer still carries its own format, the plane must still list that
+  exact format and modifier, and the atomic test still has to pass --
+  what `ANY` skips is only the "same format as the swapchain" check, and
+  the one difference that check guarded (alpha) cannot show on the bottom
+  plane under an opaque window (the reasoning, traced at the pinned
+  Smithay rev, is on `DIRECT_FLAGS` in `tty/scanout.rs`). Anything drawn
+  above the window -- a notification on the `overlay` layer, a popup
+  menu, a cursor with no plane of its own -- makes that frame composite,
+  as does a `wl_shm` buffer, a buffer that does not cover the output, or
+  one the display refuses; the next frame without it goes direct again.
+  The lock screen always composites. A direct frame is not in the buffer a
+  capture reads, so a capture of it forces one composite frame first (IPC
+  `screenshot` and `ext-image-copy-capture-v1` alike; about 8 ms more per
+  screenshot on the dev VM), and a capture that cannot be forced (the
+  session is VT-switched away) is refused with "held for direct scanout;
+  retry once a composite frame lands" rather than served stale. A
+  capture *stream* is different: forcing every frame of one measured worse
+  than compositing throughout, so while a session is capturing (a frame
+  parked, or one asked for within the last second) the output composites
+  as it always did. Seen live on the dev VM's virtio-gpu, at default
+  config, with a test client allocating card0 dumb buffers (the only
+  client buffers that virtio can scan out): the primary on the client's
+  framebuffer, captures byte-correct, the VT-away refusal and recovery, a
+  lock over it composited; compositor CPU for that fullscreen client
+  dropped from ~76% of a core (llvmpipe compositing) to ~1.5%. Not yet
+  seen on real GPU hardware or with a real video player --
+  [`../Asahi.md`](../Asahi.md)'s Test 5 asks for that. The log line
+  `scanout: primary-direct eligibility changed` (at `debug`) says when a
+  session starts or stops being allowed to go direct, and why.
 - **A resize is expensive under `gles`, and `--nested` now resizes.** Every
   resize rebuilds the render target, and under `gles` that means a whole new
   EGL context and shader set: measured on the dev VM (llvmpipe, 800x800, 8
@@ -327,25 +340,19 @@ It is what the `--tty` GPU scanout tier is built behind (Smithay's
 scans out from the GPU instead of reading each frame back; without it,
 `--tty` warns and keeps pixman however `gles` was asked for.
 
-One limit worth knowing before you turn it on: scanout drives the **primary
-plane, attempting the cursor and overlay planes**, and since step 3 passes
-`ALLOW_SCANOUT` a frame may additionally go direct on the primary. The
-cursor plane is attempted
+What it drives: the **primary plane, attempting the cursor and overlay
+planes**, and -- for a fullscreen window covering the output -- handing the
+primary to that window's own buffer (see the bullet above for exactly when).
+The cursor plane is attempted
 where the CRTC exposes one (the dev VM's virtio-gpu does: one `Cursor` plane
 per `drm_info`) and silently not elsewhere; overlay planes ride along whole
 from the same inventory (virtio exposes none: `overlay_planes=0`) and fall
 back per frame the same way. A plane-assigned cursor is absent
 from captures, which read the primary plane only -- and no window can ride an
-overlay yet (nothing is marked a scanout candidate; that marking is a
-separate semantic change, still out), while no frame at all can take the
-primary direct yet either: the framebuffer exporter admits client
-dma-bufs, but Smithay's primary assignment requires the client
-framebuffer's format and modifier to equal the swapchain's, which no
-buffer a client can send here does (see the limitation above). A capture
-served where the recording went stale-direct forces one composite frame
-first, so captures stay correct throughout -- watched working on the dev VM
-with the format check lifted in an experiment, never on a shipped build,
-which cannot go direct. Whether `apple,dcp`
+overlay yet (nothing is marked a scanout candidate). A capture of a frame
+that went direct forces one composite frame first, and a capture stream
+keeps the output composited, so captures stay correct throughout --
+watched working on the dev VM. Whether `apple,dcp`
 exposes usable cursor or overlay planes is still unknown (no plane inventory exists
 from the Asahi runs). Virtio's own footnote: its cursor plane needs the
 session's `CURSOR_PLANE_HOTSPOT` cap to be enumerated at all (set before

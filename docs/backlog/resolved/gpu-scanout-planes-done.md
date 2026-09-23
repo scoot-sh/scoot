@@ -22,6 +22,13 @@ loudly at `Backend::capture` where the force cannot draw. No `COLOR_FORMATS`
 change, no candidate marking, no packaging or wire change (refusal strings
 are payload; `PROTOCOL_VERSION` stays 3).
 
+*Superseded in part, 2026-09-23:* `FRAME_FLAGS` is gone. The flags are now
+decided per frame, and the primary bit rides only frames judged eligible
+for primary-direct (a covering fullscreen window, unlocked, no capture
+stream), together with `ANY`; every other frame -- lock frames included --
+carries no primary bit at all. See
+[the format gate](./gpu-primary-direct-format-gate-done.md).
+
 The gating answer, established before the flip and shaping all the evidence:
 direct scanout is unreachable on two independent grounds, so the flag is
 assignment-inert on this tree and the fix is proven by harness/unit pins +

@@ -58,12 +58,17 @@ Linux, and daily-driven on `--tty`** (2026-09-18).
   Apple M2 under Asahi Linux it uses **4–5x less CPU** than the default under
   load, puts the same pixels on screen, and costs 7–16 MB more memory
   ([Asahi.md](Asahi.md), Test 4). Turn it on with a `gpu-scanout` build
-  (`nix build .#scoot-gpu`) and `scoot --tty --renderer gles`. Not there
-  yet: every window is still composited (no zero-copy fullscreen video), and
-  where the display has a hardware cursor plane the pointer is missing from
-  screenshots. Under `--headless`/`--nested` the GPU speedup does not
-  apply: `gles` there still copies every frame back to the CPU, and on a
-  machine without a real GPU that measured 18–31x *slower* than pixman.
+  (`nix build .#scoot-gpu`) and `scoot --tty --renderer gles`. There, a
+  fullscreen video or game that draws with the GPU is shown straight from
+  the app's own buffer, with no compositing at all (seen working in the dev
+  VM with a test client; not yet confirmed with a real video player or on
+  real GPU hardware — [Asahi.md](Asahi.md), Test 5). While something
+  records or streams the screen, scoot composites as usual. Not there yet:
+  every other window is still composited, and where the display has a
+  hardware cursor plane the pointer is missing from screenshots. Under
+  `--headless`/`--nested` the GPU speedup does not apply: `gles` there
+  still copies every frame back to the CPU, and on a machine without a real
+  GPU that measured 18–31x *slower* than pixman.
   pixman stays the default and the right choice without a GPU; details in
   [docs/tty.md](docs/tty.md).
 - **Config reload is live, except three restart fields.** `scootctl reload` (or `kill -HUP` on the
