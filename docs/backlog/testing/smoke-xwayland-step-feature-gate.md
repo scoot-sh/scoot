@@ -23,3 +23,15 @@ listing, or the compositor's own refusal message), skip it loudly
 otherwise, and keep a real failure when the feature *is* built and the
 server never comes up. Serves reliability of the standard verification set
 (both priorities).
+
+## Second defect, same section (found 2026-09-23, PR #229)
+
+Under `MODE=--tty` the smoke script's `--xwayland` section launches a second
+`--tty` compositor while the main one (`"$SCOOT" "$MODE"`, started at
+`scripts/smoke-test.sh:~247` and killed only by the end-of-script trap) still
+holds the seat, so the launch is refused `EPERM` and the run exits rc=1.
+Reproduced on `a3b883e` (`~/evidence/gdf/gate2/15-smoke-tty-gles-before1.log`
+on the dev VM). Not the malformed-config instance -- `run_broken_config_test`
+hard-codes `--headless`. Fix alongside the feature gate: kill and wait on
+`$compositor` before the xwayland section (the later `$LOG` grep only needs
+the log file), or run that section `--headless` when `MODE=--tty`.
