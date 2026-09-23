@@ -25,7 +25,8 @@ scoot has not cut a numbered release yet; entries are dated.
   and plain `grim` never shows it — including under `--tty`'s default
   renderer, where it used to be in every capture. A recorder or screen-share
   that asked for the pointer also sees it move when nothing else on screen
-  changes.
+  changes — and one that did not is no longer sent a new, identical frame
+  every time the pointer moves under `--tty`.
 
 ### 2026-09-23 — fullscreen apps are told what the display can show directly (GPU tier)
 

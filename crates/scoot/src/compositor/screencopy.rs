@@ -151,12 +151,13 @@
 //! already matches.
 //!
 //! A session that asked for the pointer also counts the pointer as its
-//! content for the "has anything changed" test ([`Capture::due`]): where no
-//! frame draws the cursor, moving it redraws nothing and leaves
-//! [`State::frame_serial`] alone, so such a session is keyed on
-//! [`State::cursor_serial`] as well, and `State::cursor_changed` wakes the
-//! frame tick for it. A session that did not ask is unaffected by the
-//! pointer.
+//! content for the "has anything changed" test ([`Capture::due`]): it is
+//! keyed on [`State::cursor_serial`] as well as [`State::frame_serial`], and
+//! `State::cursor_changed` wakes the frame tick for it where no frame draws
+//! the cursor (moving it there redraws nothing). A session that did not ask
+//! is keyed on `frame_serial` alone, which a redraw the cursor alone asked
+//! for (every pointer move under `--tty`) does not move -- so it is not
+//! handed an identical picture each time the pointer moves.
 //!
 //! What a capture is *never* missing on any tier is a window. On the scanout
 //! tier a primary-direct frame (a fullscreen window covering the output, see

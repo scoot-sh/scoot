@@ -480,18 +480,34 @@ counts as a cursor change, not a scene change). A stream whose region is
 re-rendered every frame reuses one offscreen target and one pixel buffer
 per output rather than allocating them per frame.
 
-What it costs, measured on the dev VM (virtio-gpu, llvmpipe; IPC
-`screenshot` wall time at 5 Hz, 3 alternated rounds of 40 against the
-previous build): nothing measurable where the frame already matches the
-request (the dumb tier by default, the GPU tier with `--no-cursor`), nor
-where pixman draws the region (22 µs in the harness; the dumb tier with
-`--no-cursor` p50 12.9-13.2 ms against 12.3-13.5 ms; `--headless` moved
-from 12.1-12.5 ms to 12.6-13.0 ms in both modes alike, including
-`--no-cursor`, which draws no region there); **+3.5 ms median on the GPU
-tier when its cursor rides a plane and the pointer is asked for** (p50
-13.7-14.2 ms against 10.2-10.6 ms). Only ~0.5-1 ms of that is the region's own render and read-back; the
-rest shows up as a slower full-frame read-back after it, which llvmpipe
-does and the cause of which is not pinned down (the GL trace shows no
-extra imports). A capture stream that asks for the pointer there
-delivers ~4% fewer frames (439 against 455-457 in 10 s, mean interval
-22.8 ms against 22.0 ms). None of this has been measured on a real GPU.
+What it costs, measured on the dev VM (virtio-gpu, llvmpipe):
+
+- **Where the frame already matches the request** -- the dumb tier by
+  default, the GPU tier with `--no-cursor` -- nothing: no region, no
+  gather.
+- **pixman** draws a region in ~22 µs (harness); IPC screenshot latency on
+  the dumb tier and `--headless` is within run-to-run spread of the
+  previous build in both modes.
+- **The GPU tier with its cursor on the plane and the pointer asked for**
+  pays one region render and read-back per capture, 0.4-0.9 ms on
+  llvmpipe. Compositor CPU per 40 IPC screenshots went from 26 to 42-46
+  jiffies in the first measurement and 29 to 37-39 after the region's
+  buffers were pooled. The screenshot's *wall latency* is not a stable
+  measure of it: fresh-process medians moved +3.5 ms at first and +1.5 ms
+  after pooling, while with and without the cursor interleaved in one
+  process the pointer-requesting captures were the *faster* ones (p50
+  10.9-11.3 ms against 12.4-13.0 ms). The latency tracks page faults from
+  the capture path's whole-frame, multi-megabyte per-capture allocations
+  (which both modes pay, and which are
+  [a follow-up](backlog/core/capture-whole-frame-allocations.md)) and
+  process history, not the region.
+- **A capture stream asking for the pointer** on that tier delivers ~4%
+  fewer frames (436-439 against 453-457 in 10 s; mean interval 22.8 ms
+  against 22.0 ms) at the same compositor CPU; pooling the region's
+  buffers did not change it, so it is the GLES region render itself.
+- **A stream that did not ask for the pointer** is no longer re-served when
+  only the pointer moves: on the dumb tier, over a still window with the
+  pointer moving every 20 ms, 1 frame in 5 s at 12 jiffies, where it was
+  209 frames at 60-61.
+
+None of this has been measured on a real GPU.

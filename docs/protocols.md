@@ -780,11 +780,15 @@ What to know before pointing a client at it:
   just the cursor's region for the capture where the frame does not
   already match the request; mechanics and measured cost per tier in
   [tty.md](tty.md#captures-and-the-pointer) (nothing measurable on
-  pixman; a few milliseconds per capture on the software-rendered GPU tier
-  of the dev VM). A session that asked for the
+  pixman; a 0.4-0.9 ms region render per capture on the dev VM's
+  software-rendered GPU tier). Where the cursor rode an overlay plane that
+  may be an underlay — which leaves a transparent hole in the frame a
+  capture reads — that place is re-rendered whether or not the pointer was
+  asked for, so no capture shows the hole. A session that asked for the
   pointer is also served a new frame when only the pointer moves — nothing
-  else has to redraw — while one that did not keeps waiting for the screen
-  itself to change. The pointer is only in the capture of the output it is
+  else has to redraw — while one that did not keeps waiting for the scene
+  itself to change, including under `--tty`, where moving the pointer
+  redraws the frame. The pointer is only in the capture of the output it is
   on.
 - **Cursor capture sessions are refused.** `create_pointer_cursor_session`
   itself gets no event — the cursor-session object has no `stopped` of its
