@@ -85,7 +85,8 @@ The same state is reachable three more ways — a taskbar's
 **What the window is told.** Every request is answered with a configure, as
 the protocol requires, even one that changed nothing. Entering sends the
 `fullscreen` state bit with the output's whole size; leaving sends the bit
-cleared with the size the window had before. A request made before the
+cleared with its column's current tiled size — the size it had before, unless
+the layout changed around it meanwhile (a config reload, a resized output). A request made before the
 window's first commit (`foot --fullscreen` does this) is what its first
 configure carries, so its first frame is already fullscreen. Unmapping (a
 null buffer) discards the state, as xdg-shell says it must: a window that
@@ -102,17 +103,31 @@ it covers:
   where the bar was reaches the window), and given no keyboard, so a
   launcher on the `top` layer that maps meanwhile waits until the output is
   uncovered (launchers on `overlay`, such as fuzzel's default, are
-  unaffected);
-- the **`overlay` layer stays above it** — notifications and OSDs still
-  show, and still take clicks and an `exclusive` keyboard;
+  unaffected). This includes notification daemons that draw on `top`: mako
+  does by default, so its notifications are hidden under a fullscreen window
+  unless it is configured with `layer=overlay`;
+- **focus goes to the fullscreen window when it starts covering.** A
+  launcher or other `exclusive` surface on the `top` layer that held the
+  keyboard loses it to the window at that moment — the focused window going
+  fullscreen hides the launcher, and a hidden surface cannot hold the
+  keyboard. It gets it back as soon as the output is uncovered, if it is
+  still mapped. (niri answers the same way.) `overlay` surfaces keep the
+  keyboard;
+- the **`overlay` layer stays above it** — notifications and OSDs that draw
+  there still show, and still take clicks and an `exclusive` keyboard;
 - a **lock screen** covers everything, fullscreen windows included.
 
 Other outputs are untouched: fullscreen is per output.
 
 **What it keeps.** The window keeps its column: focus another column and the
-view scrolls there the usual way (the fullscreen window may still show at
-the side, at its fullscreen size, with the bar drawn over it again), focus
-back and it covers the screen again; switching workspaces works the same.
+view scrolls there the usual way. Focused away, the fullscreen window keeps
+its fullscreen size and sits in the strip exactly where a column that wide
+would, one ordinary gap from its neighbours on either side — so it can
+still show, partly, beside the focused window, but never over it. Nothing
+covers the output then, so `top`-layer surfaces are drawn again (a bar on
+`top` is drawn over the fullscreen window where they meet; one on `bottom`,
+waybar's default, stays under it). Focus back and it covers the screen
+again; switching workspaces works the same.
 Leaving restores the layout exactly. Other windows stacked in its column are
 hidden while it holds; focusing one of them ends the fullscreen, as does
 moving the window to another workspace or output, or consume/expel. A window

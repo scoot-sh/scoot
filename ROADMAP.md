@@ -101,7 +101,7 @@ each item's own file records why it landed when it did.
 ## Recently shipped (since 2026-09-15)
 
 - **[Client fullscreen](docs/backlog/resolved/client-fullscreen-done.md)**
-  (2026-09-22, branch `client-fullscreen`) — a per-window fullscreen state
+  (2026-09-22, PR #223) — a per-window fullscreen state
   in `scoot-core`: covers the output (gaps, ring, bar zones) while its
   column is focused, keeps its strip slot, restores the arrangement exactly;
   consume/expel/moves end it. Wired to xdg `set_fullscreen` (output hint for

@@ -640,10 +640,13 @@ column_widths = [0.3333333333333333, 0.5, 1.0]
 
 `Super+f` (`toggle-fullscreen`) puts the focused window into fullscreen and
 back. A fullscreen window covers its whole output while its column is the
-focused one — gaps, the focus ring and a bar's reserved strip included (bars
-on the `top` layer are hidden; notifications on `overlay` and the lock screen
-stay above it). It keeps its place in the strip: focus another column and the
-view scrolls there as usual, focus back and it covers the screen again, and
+focused one — gaps, the focus ring and a bar's reserved strip included.
+Surfaces on the `top` layer are hidden under it — bars, but also
+notifications from a daemon that draws there (mako's default; set
+`layer=overlay` in its config to keep them on top); the `overlay` layer and
+the lock screen stay above it. It keeps its place in the strip: focus
+another column and the view scrolls there as usual, focus back and it covers
+the screen again, and
 leaving fullscreen puts the layout back exactly as it was. Moving the window
 to another workspace or output, or consuming/expelling it, ends fullscreen;
 so does moving focus to a window stacked in the same column. The same state

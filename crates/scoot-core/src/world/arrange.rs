@@ -80,9 +80,18 @@ impl World {
         let usable = output.usable.inset(gap);
         let spans = self.column_spans(ws, usable.w, output.area.w);
         let (starts, _) = layout::starts(spans.iter().map(|span| span.width), gap);
-        for ((column, start), span) in ws.columns.iter().zip(starts).zip(spans) {
+        for (index, ((column, start), span)) in ws.columns.iter().zip(starts).zip(spans).enumerate()
+        {
             if let Some(fullscreen) = span.fullscreen {
-                place_fullscreen_column(output, ws, column, fullscreen, start, active, placements);
+                let strip_x = usable.x.saturating_add(start).saturating_sub(ws.view_x);
+                let slot = FullscreenSlot {
+                    // The column in focus is the one covering the output
+                    // (see `World::fullscreen_on`).
+                    covering: index == ws.focused,
+                    strip_x,
+                    usable,
+                };
+                place_fullscreen_column(output, column, fullscreen, slot, active, placements);
                 continue;
             }
             let width = span.width;
@@ -171,8 +180,9 @@ impl World {
             // A focused fullscreen column is `area.w` wide, never narrower
             // than `available` (`usable` is a sub-rectangle of `area`, and
             // the gap only shrinks it further), so this lands `view_x` exactly
-            // on the column's start -- which is what puts its window on the
-            // output's left edge in `place_fullscreen_column`.
+            // on the column's start -- which is what scrolls every other
+            // column out of view while `place_fullscreen_column` puts the
+            // covering window on the output's whole area.
             let spans = self.column_spans(ws, available, output.area.w);
             let (starts, strip) =
                 layout::starts(spans.iter().map(|span| span.width), self.config.gap);
@@ -194,29 +204,57 @@ impl World {
     }
 }
 
+/// Where a fullscreen column sits, as `place_workspace` measured it.
+struct FullscreenSlot {
+    /// Whether it is its workspace's focused column -- the one covering the
+    /// output.
+    covering: bool,
+    /// Its left edge in the strip, measured the way every tiled column's is:
+    /// from the gap-inset usable area, minus the scroll.
+    strip_x: i32,
+    /// The gap-inset usable area the strip is laid out in.
+    usable: Rect,
+}
+
 /// Places a column whose focused window is fullscreen.
 ///
-/// The fullscreen window is the output's whole area in size. Its `x` is the
-/// column's place in the strip measured from the output's own left edge
-/// rather than from the gap-inset usable area: when the column is in focus,
-/// `fix_view` has put `view_x` exactly on `start`, so that is `area.x`
-/// exactly and the window covers the output edge to edge, bars and gaps
-/// included. Scrolled away, it sits beside the focused column at the same
-/// size. Its stacked siblings get the same frame, invisible -- they are
-/// behind it.
+/// The fullscreen window is always the output's whole area in size, so the
+/// client is never reconfigured just because focus moved. Where it goes
+/// depends on whether it covers:
+///
+/// - **Covering** (its column is the focused one): exactly `area`, edge to
+///   edge, bars and gaps included. Every other column on the workspace is
+///   scrolled off the view (the column is `area.w` wide in the strip, never
+///   narrower than the view, and `fix_view` lines the view up with its
+///   start), so nothing is placed beside it.
+/// - **Not covering**: exactly where a tiled column of that width would sit
+///   -- `strip_x`, measured from the gap-inset usable area like every other
+///   column -- so the ordinary gap separates it from its neighbours on both
+///   sides and it never overlaps the focused window. Measuring it from
+///   `area.x` instead (as a first cut did) put it `usable.x - area.x` (the
+///   gap, plus any left exclusive zone) to the left of its slot: a zero or
+///   negative gap to a left neighbour, a doubled one to a right neighbour,
+///   and a window lying over -- and taking clicks meant for -- the focused
+///   one.
+///
+/// Its stacked siblings get the same frame, invisible: they are behind it.
 fn place_fullscreen_column(
     output: &Output,
-    ws: &Workspace,
     column: &Column,
     fullscreen: WindowId,
-    start: i32,
+    slot: FullscreenSlot,
     active: bool,
     placements: &mut Vec<Placement>,
 ) {
     let area = output.area;
-    let x = area.x.saturating_add(start).saturating_sub(ws.view_x);
-    let rect = Rect::new(x, area.y, area.w.max(1), area.h.max(1));
-    let on_screen = x < area.right() && x.saturating_add(rect.w) > area.x;
+    let (w, h) = (area.w.max(1), area.h.max(1));
+    let (rect, on_screen) = if slot.covering {
+        (Rect::new(area.x, area.y, w, h), true)
+    } else {
+        let x = slot.strip_x;
+        let on_screen = x < slot.usable.right() && x.saturating_add(w) > slot.usable.x;
+        (Rect::new(x, area.y, w, h), on_screen)
+    };
     for &id in &column.windows {
         let is_fullscreen = id == fullscreen;
         placements.push(Placement {

@@ -143,7 +143,16 @@ impl State {
         let before = self.world.is_fullscreen(id);
         self.world
             .handle_event(Event::FullscreenRequested { id, fullscreen });
-        self.apply();
+        // The already-there fast path the IPC focus actions have: a client
+        // repeating a request that changes nothing (already in that state,
+        // or refused) would otherwise drive a full `apply` -- an arrange, a
+        // configure per window, a render -- as fast as it can write to its
+        // socket. The core changed nothing in that case (`set_fullscreen`
+        // returns before touching anything), so there is nothing to apply;
+        // the configure the protocol requires still goes out below.
+        if self.world.is_fullscreen(id) != before {
+            self.apply();
+        }
         self.answer_fullscreen_request(surface, id, Some(before));
     }
 

@@ -322,3 +322,26 @@ fn a_pointer_resting_on_the_bar_leaves_it_once_it_is_hidden() {
     fixture.settle();
     assert_eq!(fixture.pointer(), Some(Entered::Layer(0)));
 }
+
+#[test]
+fn going_fullscreen_takes_the_keyboard_from_a_top_layer_launcher_and_gives_it_back() {
+    // By design, and as niri does it: the focused window covering the
+    // output hides a `top`-layer launcher, and a hidden surface cannot hold
+    // the keyboard -- so the window takes it. Uncovering hands it back.
+    let mut fixture = Fixture::new();
+    fixture.map(WINDOW_BGRA);
+    let window = fixture.window_surface(0);
+    fixture.done(Step::CreateLayer(Layer::Launcher(
+        zwlr_layer_shell_v1::Layer::Top,
+    )));
+    let launcher = fixture.keyboard_focus();
+    assert!(launcher.is_some() && launcher != Some(window.clone()));
+
+    fixture.state.act(Action::ToggleFullscreen);
+    fixture.settle();
+    assert_eq!(fixture.keyboard_focus(), Some(window.clone()));
+
+    fixture.state.act(Action::ToggleFullscreen);
+    fixture.settle();
+    assert_eq!(fixture.keyboard_focus(), launcher);
+}

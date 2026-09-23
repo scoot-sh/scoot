@@ -167,10 +167,10 @@ fn focusing_away_scrolls_to_the_neighbour_and_back_covers_again() {
     assert!(neighbour.visible);
     // Laid out the ordinary way, within the usable area.
     assert_eq!(neighbour.rect.y, BAR.y + 10);
-    // The fullscreen window keeps its size beside it.
+    // The fullscreen window keeps its size, one ordinary gap to the left.
     let beside = placement(&world, 1);
     assert_eq!(beside.rect.size(), SCREEN.size());
-    assert!(beside.rect.right() <= neighbour.rect.x);
+    assert_eq!(beside.rect.right() + 10, neighbour.rect.x);
 
     world.handle_action(Action::FocusColumn(Horizontal::Left));
     assert_covers(&world, 1);
@@ -521,4 +521,51 @@ fn a_zero_sized_output_still_places_it_with_a_real_size() {
     });
     let placed = placement(&world, 1);
     assert!(placed.rect.w >= 1 && placed.rect.h >= 1, "{placed:?}");
+}
+
+/// Focused away, a fullscreen column sits in the strip exactly where a tiled
+/// column of the output's width would: one ordinary gap from each neighbour,
+/// never over the focused window -- with and without a reserved left edge,
+/// whose width a placement measured from `area.x` would overlap by.
+#[test]
+fn focused_away_it_keeps_ordinary_gaps_on_both_sides() {
+    for usable in [SCREEN, Rect::new(40, 0, 960, 600), BAR] {
+        // Left neighbour: 1 is focused, 2 (right of it) is fullscreen.
+        let mut world = world();
+        world.handle_event(Event::OutputUsableAreaChanged {
+            id: OutputId(1),
+            area: usable,
+        });
+        open(&mut world, 1);
+        open(&mut world, 2);
+        toggle(&mut world);
+        world.handle_action(Action::FocusColumn(Horizontal::Left));
+        let focused = placement(&world, 1);
+        let full = placement(&world, 2);
+        assert_eq!(focused.rect.x, usable.x + 10, "{usable:?}");
+        assert_eq!(
+            full.rect.x,
+            focused.rect.right() + 10,
+            "left neighbour, {usable:?}: {full:?}"
+        );
+
+        // Right neighbour: 2 is focused, 1 (left of it) is fullscreen.
+        let mut world = super::world();
+        world.handle_event(Event::OutputUsableAreaChanged {
+            id: OutputId(1),
+            area: usable,
+        });
+        open(&mut world, 1);
+        open(&mut world, 2);
+        world.handle_action(Action::FocusColumn(Horizontal::Left));
+        toggle(&mut world);
+        world.handle_action(Action::FocusColumn(Horizontal::Right));
+        let focused = placement(&world, 2);
+        let full = placement(&world, 1);
+        assert_eq!(
+            full.rect.right() + 10,
+            focused.rect.x,
+            "right neighbour, {usable:?}: {full:?}"
+        );
+    }
 }

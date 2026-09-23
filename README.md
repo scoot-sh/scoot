@@ -216,7 +216,7 @@ refusing: `[tty] gpu` naming a device that will not open, and
 | If you want to… | scoot has | Detail |
 | --- | --- | --- |
 | Run a bar, dock, wallpaper, launcher or notification daemon | `wlr-layer-shell-v1`, with keyboard focus | [protocols.md](docs/protocols.md#layer-shell-bars-wallpapers-launchers) |
-| Watch a video or play a game fullscreen | the app's own fullscreen button, `Super+f`, a taskbar, or `scootctl action toggle-fullscreen` — edge to edge, bar hidden, notifications still on top | [protocols.md](docs/protocols.md#fullscreen) |
+| Watch a video or play a game fullscreen | the app's own fullscreen button, `Super+f`, a taskbar, or `scootctl action toggle-fullscreen` — edge to edge, bar hidden; notifications on the `overlay` layer stay on top (mako defaults to `top`: set `layer=overlay`) | [protocols.md](docs/protocols.md#fullscreen) |
 | List and switch workspaces from a bar | `ext-workspace-v1` | [protocols.md](docs/protocols.md#workspaces-ext-workspace-v1) |
 | List, focus and close windows from a taskbar | `ext-foreign-toplevel-list-v1` **and** the wlr one | [protocols.md](docs/protocols.md#window-lists-two-protocols) |
 | Lock the screen | `ext-session-lock-v1`, compositor-enforced | [protocols.md](docs/protocols.md#screen-locking-ext-session-lock-v1) |

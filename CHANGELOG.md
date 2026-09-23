@@ -15,10 +15,15 @@ scoot has not cut a numbered release yet; entries are dated.
   that asks through the standard Wayland request (`foot --fullscreen` is
   one) — and so does a taskbar's fullscreen entry. Before, scoot ignored
   every fullscreen request. A fullscreen window covers its
-  whole screen edge to edge — no gaps, no focus ring, your bar hidden —
-  while notifications and the lock screen still show over it. Focus another
-  window and the layout scrolls to it as usual; come back and it is
-  fullscreen again; leave fullscreen and everything is exactly where it was.
+  whole screen edge to edge — no gaps, no focus ring, your bar hidden — and
+  the lock screen still shows over it. Notifications show over it only if
+  your notification daemon draws on the `overlay` layer: mako, for one,
+  defaults to `top`, which is hidden under a fullscreen window like a bar —
+  set `layer=overlay` in its config to see them. Focus a window in another
+  column and the layout scrolls to it as usual; come back and it is
+  fullscreen again. Focusing a window stacked in the *same* column ends
+  fullscreen instead. Leave fullscreen and everything is exactly where it
+  was.
 - **New default bind: `Super+f` toggles fullscreen** on the focused window.
   If your config already binds `super+f` (the docs used to suggest
   `"super+f" = "set-column-width 2"`), your bind still wins — nothing to do

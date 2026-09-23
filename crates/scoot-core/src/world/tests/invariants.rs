@@ -300,6 +300,22 @@ fn assert_invariants(world: &World) {
             }
         }
     }
+    // Nothing visible overlaps anything else visible on the same output --
+    // in particular a fullscreen window scrolled beside the focused column
+    // must keep to its own slot.
+    let visible: Vec<_> = arrangement
+        .placements
+        .iter()
+        .filter(|p| p.visible)
+        .collect();
+    for (i, a) in visible.iter().enumerate() {
+        for b in &visible[i + 1..] {
+            if a.output == b.output {
+                let overlap = a.rect.intersection(b.rect);
+                assert!(overlap.w == 0 || overlap.h == 0, "{a:?} overlaps {b:?}");
+            }
+        }
+    }
     // And `fullscreen_on` is exactly "the active workspace's focused window
     // is fullscreen" -- nothing covers that should not.
     for output in &world.outputs {

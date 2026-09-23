@@ -36,6 +36,7 @@ use crate::compositor::decorations::{Appearance, Color};
 use crate::compositor::test_support::{self, Harness, wait_for};
 
 mod drawing;
+mod neighbours;
 mod transitions;
 
 /// The framebuffer, square. Room for two half-width columns, a bar and a
@@ -81,7 +82,13 @@ enum Layer {
     /// A launcher asking for every keystroke (`exclusive`), bottom-left, on
     /// the given layer.
     Launcher(zwlr_layer_shell_v1::Layer),
+    /// A dock down the left edge, on the `top` layer, reserving its width
+    /// ([`DOCK_WIDTH`]) -- a left exclusive zone.
+    Dock,
 }
+
+/// The width [`Layer::Dock`] reserves at the left edge.
+const DOCK_WIDTH: u32 = 20;
 
 /// One configure a toplevel was sent, as the client saw it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -112,6 +119,13 @@ enum Step {
     UnsetFullscreen { window: usize },
     /// Ack the newest configure and draw at the size it names.
     Draw { window: usize, color: [u8; 4] },
+    /// Ack the newest configure, then draw a `width`x`height` buffer
+    /// anyway -- a client that will not go as small as it was asked.
+    DrawSized {
+        window: usize,
+        width: i32,
+        height: i32,
+    },
     /// Draw a `width`x`height` buffer and commit it *without* acking the
     /// newest configure -- a client still finishing a frame at its old size
     /// when a new configure arrives.
@@ -166,6 +180,8 @@ struct TestClient {
     /// waiting for its `xdg_surface.configure`, and every completed one.
     pending: Vec<Configured>,
     configures: Vec<Vec<Configured>>,
+    /// Per toplevel: the serial it acked last.
+    acked: Vec<Option<u32>>,
     /// Per layer surface: the newest configure's `(serial, width, height)`.
     layer_configures: Vec<Option<(u32, u32, u32)>>,
 }
@@ -393,7 +409,7 @@ fn wait_for_configure(
 
 /// Acks the newest configure and draws `color` at its size.
 fn draw(
-    client: &TestClient,
+    client: &mut TestClient,
     qh: &QueueHandle<TestClient>,
     shm: &wl_shm::WlShm,
     window: &Toplevel,
@@ -405,12 +421,24 @@ fn draw(
         .get(index)
         .and_then(|all| all.last().copied())
         .ok_or("no configure to draw for")?;
-    window.xdg.ack_configure(newest.serial);
+    ack_newest(client, window, index, newest.serial);
     let (buffer, width, height) = solid_buffer(shm, qh, newest.width, newest.height, color);
     window.surface.attach(Some(&buffer), 0, 0);
     window.surface.damage(0, 0, width, height);
     window.surface.commit();
     Ok(newest)
+}
+
+/// Acks `serial` unless it is the one this toplevel acked last: acking the
+/// same configure twice is a protocol error, and a redraw with no newer
+/// configure in between has nothing new to ack.
+fn ack_newest(client: &mut TestClient, window: &Toplevel, index: usize, serial: u32) {
+    if client.acked.get(index).copied().flatten() != Some(serial) {
+        window.xdg.ack_configure(serial);
+        if let Some(slot) = client.acked.get_mut(index) {
+            *slot = Some(serial);
+        }
+    }
 }
 
 fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> Result<(), String> {
@@ -443,6 +471,7 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 let index = windows.len();
                 client.pending.push(Configured::default());
                 client.configures.push(Vec::new());
+                client.acked.push(None);
                 let surface = compositor.create_surface(&qh, ());
                 let xdg = wm_base.get_xdg_surface(&surface, &qh, Index(index));
                 let toplevel = xdg.get_toplevel(&qh, Index(index));
@@ -456,7 +485,7 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                     xdg,
                     toplevel,
                 };
-                draw(&client, &qh, &shm, &window, index, color)?;
+                draw(&mut client, &qh, &shm, &window, index, color)?;
                 windows.push(window);
                 queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
                 Ack::Done
@@ -487,7 +516,25 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 )
             }
             Step::Draw { window, color } => {
-                draw(&client, &qh, &shm, &windows[window], window, color)?;
+                draw(&mut client, &qh, &shm, &windows[window], window, color)?;
+                queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                Ack::Done
+            }
+            Step::DrawSized {
+                window,
+                width,
+                height,
+            } => {
+                let newest = client.configures[window]
+                    .last()
+                    .copied()
+                    .ok_or("no configure to ack")?;
+                ack_newest(&mut client, &windows[window], window, newest.serial);
+                let (buffer, width, height) = solid_buffer(&shm, &qh, width, height, WINDOW_BGRA);
+                let surface = &windows[window].surface;
+                surface.attach(Some(&buffer), 0, 0);
+                surface.damage(0, 0, width, height);
+                surface.commit();
                 queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
                 Ack::Done
             }
@@ -521,7 +568,7 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 if client.configures[window].len() == seen && seen == 0 {
                     wait_for_configure(&mut queue, &mut client, window, seen)?;
                 }
-                let used = draw(&client, &qh, &shm, &windows[window], window, color)?;
+                let used = draw(&mut client, &qh, &shm, &windows[window], window, color)?;
                 queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
                 Ack::Configured(used)
             }
@@ -547,6 +594,14 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                         zwlr_layer_surface_v1::Anchor::Top | zwlr_layer_surface_v1::Anchor::Right,
                         (NOTE_SIZE, NOTE_SIZE),
                         0,
+                    ),
+                    Layer::Dock => (
+                        zwlr_layer_shell_v1::Layer::Top,
+                        zwlr_layer_surface_v1::Anchor::Top
+                            | zwlr_layer_surface_v1::Anchor::Bottom
+                            | zwlr_layer_surface_v1::Anchor::Left,
+                        (DOCK_WIDTH, 0),
+                        DOCK_WIDTH as i32,
                     ),
                     Layer::Launcher(layer) => (
                         layer,
@@ -577,7 +632,7 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                         client.layer_configures[index]
                     })?;
                 let color = match kind {
-                    Layer::Bar => BAR_BGRA,
+                    Layer::Bar | Layer::Dock => BAR_BGRA,
                     Layer::Notification | Layer::Launcher(_) => NOTE_BGRA,
                 };
                 let (buffer, width, height) =

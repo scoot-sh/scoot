@@ -373,3 +373,47 @@ fn a_refused_request_is_answered_without_changing_the_window_s_size() {
     assert!(!fixture.state.world.is_fullscreen(fixture.id(0)));
     assert!(fixture.state.world.is_fullscreen(fixture.id(1)));
 }
+
+#[test]
+fn a_frame_the_window_refuses_to_shrink_below_is_still_learned() {
+    // The positive half of the frame-race test above: pairing a commit with
+    // the configure it acked must still *learn* from a real refusal. A
+    // client that acks the tiled configure and then commits 150px wide has
+    // a minimum the core did not know about, and its column widens to it.
+    let mut fixture = Fixture::new();
+    fixture.map(WINDOW_BGRA);
+    fixture.map(OTHER_BGRA);
+    let tiled = fixture.rect_of(1);
+    assert_eq!(tiled.w, 82);
+
+    fixture.done(Step::DrawSized {
+        window: 1,
+        width: 150,
+        height: tiled.h,
+    });
+    let learned = fixture.rect_of(1);
+    assert_eq!(learned.w, 150, "a real refusal to shrink was not learned");
+    assert_eq!(learned.right(), tiled.right(), "{learned:?}");
+}
+
+#[test]
+fn a_request_that_changes_nothing_is_answered_without_a_relayout() {
+    // A client repeating `unset_fullscreen` on a tiled window (or
+    // `set_fullscreen` on a fullscreen one) must still get its configure,
+    // but not a full `apply()`. Observed by changing the core behind
+    // `apply()`'s back: had the request run one, its answer would carry the
+    // new size; the fast path answers with the size the window already has.
+    let mut fixture = Fixture::new();
+    fixture.map(WINDOW_BGRA);
+    let before = *fixture.configures(0).last().unwrap();
+    fixture.state.world.handle_action(Action::CycleColumnWidth);
+    assert_ne!(fixture.rect_of(0).w, before.width);
+
+    let answer = fixture.configured(Step::UnsetFullscreen { window: 0 });
+    assert!(!answer.fullscreen);
+    assert_eq!(
+        (answer.width, answer.height),
+        (before.width, before.height),
+        "a no-op request ran a full relayout"
+    );
+}

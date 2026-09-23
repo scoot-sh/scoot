@@ -180,9 +180,13 @@ pub enum Action {
     ///   window on that output is then placed invisible.
     /// - **It keeps its column.** In the scrolling strip the column is as
     ///   wide as the whole output while its window is fullscreen, so focusing
-    ///   a neighbouring column scrolls to it the ordinary way (the fullscreen
-    ///   window may then still show at the side, at its fullscreen size, the
-    ///   way it would in niri), and focusing back covers the output again.
+    ///   a neighbouring column scrolls to it the ordinary way, and focusing
+    ///   back covers the output again. Focused away, the fullscreen window
+    ///   keeps its full-output size and is placed exactly where a tiled
+    ///   column of that width would be -- one ordinary gap from each
+    ///   neighbour, measured within the usable area like every other column
+    ///   -- so it may show partly beside the focused window but never
+    ///   overlaps it.
     ///   Workspace switching likewise works as it always does.
     /// - **Leaving restores exactly.** The column's width preset is never
     ///   touched, and the scroll offset its workspace had on entry is put

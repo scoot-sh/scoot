@@ -113,10 +113,14 @@ const ABOVE_FULLSCREEN: [Layer; 1] = [Layer::Overlay];
 /// exactly what should show over a video. The bottom and background layers
 /// are below every window already and are not affected.
 ///
-/// Consequence worth knowing: a launcher that maps on the *top* layer while
+/// Consequences worth knowing: a launcher that maps on the *top* layer while
 /// a fullscreen window covers its output is neither shown nor given the
-/// keyboard until the fullscreen window stops covering. Launchers that use
-/// the overlay layer (fuzzel's default) are unaffected.
+/// keyboard until the fullscreen window stops covering; and one that already
+/// held the keyboard loses it to the window the moment that window starts
+/// covering (the focused window going fullscreen hides it -- `apply()`'s
+/// keyboard refresh re-derives focus with the top layer excluded), getting
+/// it back once the output is uncovered. niri answers both the same way.
+/// Launchers that use the overlay layer (fuzzel's default) are unaffected.
 pub(super) fn above_windows(covered_by_fullscreen: bool) -> &'static [Layer] {
     if covered_by_fullscreen {
         &ABOVE_FULLSCREEN

@@ -8,7 +8,7 @@ blocked: null
 
 # Honour client fullscreen — RESOLVED
 
-RESOLVED 2026-09-22 (branch `client-fullscreen`; the PR records the merge):
+RESOLVED 2026-09-22 (PR #223):
 a per-window fullscreen state in `scoot-core` (`world/fullscreen.rs`), wired
 to all four entry points. What was decided, where the rules live:
 
