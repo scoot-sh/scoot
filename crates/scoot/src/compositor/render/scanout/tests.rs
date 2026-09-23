@@ -225,3 +225,24 @@ fn the_pool_stays_bounded_past_a_deeper_swapchain() {
     composite(&mut captures, 0, &again);
     assert_eq!(target(&mut captures), Ok(again));
 }
+
+#[test]
+fn staleness_says_why_empty_before_a_frame_and_after_a_rebuild_direct_after_a_direct_frame() {
+    // What `ensure_scanout_capture_current` picks its forced frame by: an
+    // empty recording needs the swapchain reset (nothing to diff a static
+    // screen against), a direct-marked one does not. `capture_stale` stays
+    // exactly "some staleness", which is what the force keys on.
+    let mut captures = Captures::default();
+    assert_eq!(captures.staleness(), Some(Stale::Empty));
+    let a = fake_dmabuf();
+    composite(&mut captures, 0xa, &a);
+    assert_eq!(captures.staleness(), None);
+    assert!(!captures.capture_stale());
+    captures.note_direct();
+    assert_eq!(captures.staleness(), Some(Stale::Direct));
+    assert!(captures.capture_stale());
+    // A rebuild freed the slots while marked: empty wins -- there is no
+    // recording left at all, so the reset is owed.
+    captures.forget_slots();
+    assert_eq!(captures.staleness(), Some(Stale::Empty));
+}

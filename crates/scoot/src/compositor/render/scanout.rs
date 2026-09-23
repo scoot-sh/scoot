@@ -334,6 +334,17 @@ fn render_node(gbm: &GbmDevice<DrmDeviceFd>) -> Option<libc::dev_t> {
     Some(render.dev_id())
 }
 
+/// Why a capture recording is stale ([`Captures::staleness`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Stale {
+    /// Nothing recorded: before the first frame, or after the swapchain's
+    /// slots were freed (a rebuild, a resize, a failed render).
+    Empty,
+    /// A composite is recorded, but a primary-direct frame has been on
+    /// screen since.
+    Direct,
+}
+
 /// `Backend::capture`'s refusal while the recording is marked direct: the
 /// last damaged frame went to the primary plane, so the recorded composite is
 /// not what is on screen. Transient -- the next composite frame clears it.
@@ -378,7 +389,25 @@ impl Captures {
     /// other tier, which reads a persistent framebuffer instead of a
     /// recording.
     pub(super) fn capture_stale(&self) -> bool {
-        self.frame.is_none() || self.direct
+        self.staleness().is_some()
+    }
+
+    /// *Why* a capture served right now would be stale, or `None` when the
+    /// recording is a current composite. The two answers want different
+    /// forced frames (see `State::ensure_scanout_capture_current`): a
+    /// recording marked [`Stale::Direct`] is refreshed by any composite
+    /// frame -- Smithay damages the whole output when the primary returns
+    /// from direct scanout to the swapchain -- while [`Stale::Empty`] has
+    /// nothing to diff against and needs the swapchain reset that forces a
+    /// full redraw of a possibly static screen.
+    pub(super) fn staleness(&self) -> Option<Stale> {
+        if self.frame.is_none() {
+            Some(Stale::Empty)
+        } else if self.direct {
+            Some(Stale::Direct)
+        } else {
+            None
+        }
     }
 
     /// Marks the recording direct: the frame just drawn went to the primary
