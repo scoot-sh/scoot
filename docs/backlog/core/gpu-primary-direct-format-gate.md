@@ -12,7 +12,11 @@ Filed 2026-09-22 by the exporter widening
 ([resolved](../resolved/gpu-direct-scanout-exporter-done.md)), which found this
 gate where it expected direct scanout. Serves **daily-drive** (zero-copy
 fullscreen video/games). This, not candidate marking, is what stands between
-the tree and primary-direct scanout on any device.
+the tree and primary-direct scanout on every machine measured (the dev VM;
+Asahi's swapchain format was never recorded -- `Asahi.md` Test 5 asks for
+it). The one device shape that would already match: a swapchain that falls
+through to `XR24` (plane or renderer refusing `AR24`) with an explicit
+`LINEAR` modifier -- covered by the capture fix if it exists.
 
 ## What is missing
 

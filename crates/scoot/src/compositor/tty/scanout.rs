@@ -90,13 +90,16 @@ type Compositor =
 /// `ALLOW_PRIMARY_PLANE_SCANOUT_ANY` (which is not a member of
 /// `ALLOW_SCANOUT` at the pinned rev) stays out, pinned below, so a direct
 /// element must still match the swapchain's format -- and that match is what
-/// keeps the primary bit from firing on this tree today, on every device,
-/// now that the framebuffer exporter admits client buffers ([`EXPORTER_FILTER`]).
+/// keeps the primary bit from firing today wherever the swapchain comes up
+/// `Argb8888` (measured on the dev VM; the expected case everywhere, see
+/// below), now that the framebuffer exporter admits client buffers
+/// ([`EXPORTER_FILTER`]).
 /// Traced at the pinned rev, `try_assign_primary_plane` has no element-kind
 /// test at all; its gate is `slot.format() != element_config.properties.format`,
 /// a whole-`Format` comparison (fourcc *and* modifier) between the swapchain
 /// slot and the framebuffer the exporter made from the client buffer. Two
-/// things make that unequal for every buffer a client can send here:
+/// things make that unequal for every buffer a client can send here, on an
+/// `Argb8888` swapchain:
 ///
 /// - **The fourcc.** The primary path exports with `allow_opaque_fallback`,
 ///   so the client framebuffer's fourcc is always the opaque variant
@@ -109,8 +112,14 @@ type Compositor =
 ///   (measured: `Testing Formats: [AR24, Invalid]`), so no reordering of
 ///   `COLOR_FORMATS` alone could match there.
 ///
-/// So primary-direct scanout stays unreachable until the swapchain format or
-/// the `ANY` bit changes, which is its own decision with its own capture
+/// The one shape that would match without any change here: a device whose
+/// plane or renderer refuses `Argb8888`, so the swapchain falls through to
+/// `Xrgb8888`, *and* allocates it with an explicit `LINEAR` modifier. No
+/// machine this project has measured does that (the Asahi swapchain format
+/// was never recorded -- `Asahi.md` Test 5 asks for it), and if one does, the
+/// capture fix below already covers it. Otherwise primary-direct scanout
+/// stays unreachable until the swapchain format or the `ANY` bit changes,
+/// which is its own decision with its own capture
 /// consequences (`docs/backlog/core/gpu-primary-direct-format-gate.md`), not
 /// this constant's. The capture fix below stays in place regardless: it is
 /// what makes that later change safe, and it already guards the exporter

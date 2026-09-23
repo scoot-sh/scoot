@@ -618,6 +618,25 @@ affected; fixed in `225719e`, gated on `IsTerminal`. Second, the dev VM's
 moves produced 16 jiffies). Damage is now driven at a fixed rate below the
 refresh rate for a fixed wall-clock window.
 
+## Test 5 — which format the GPU scanout swapchain gets (one startup)
+
+Why: direct scanout of a client's buffer is gated on the swapchain's format
+and modifier matching the client's (`docs/backlog/core/gpu-primary-direct-format-gate.md`).
+That format is recorded for the dev VM (`AR24`, implicit modifier) but was
+never captured here. One startup of the `gpu-scanout` build answers it; this
+does not test direct scanout, which cannot happen on current builds.
+
+```sh
+RUST_LOG=info,smithay::backend::drm::compositor=debug \
+  scoot --tty --renderer gles 2>&1 | tee /tmp/fx/tty-formats.log
+# then quit, and:
+sed 's/\x1b\[[0-9;]*m//g' /tmp/fx/tty-formats.log | grep -E 'Testing (color format|Formats)|Remaining intersected'
+```
+
+Send back those lines. `AR24` with any modifier confirms the gate holds
+here too; `XR24` with `Linear` would mean this machine could already go
+direct, which matters for that ticket.
+
 ## What to send back
 
 - `ghostty --version`
@@ -626,6 +645,7 @@ refresh rate for a fixed wall-clock window.
 - `/tmp/fx/tty-auto.log`, and `/tmp/fx/tty-gpu.log` if you needed it
 - the `/dev/dri` and driver listings from Test 2
 - for Test 3: the log, plus which connector it started on and which you pulled
+- for Test 5: the `Testing ...` lines
 
 Raw logs beat a summary here. Both open entries were written after earlier
 investigations went wrong in ways only the raw output showed — a harness

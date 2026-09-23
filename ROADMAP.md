@@ -130,7 +130,7 @@ each item's own file records why it landed when it did.
   live on the dev VM with an uncommitted `ANY`-bit experiment (primary
   scanning out the client's `XR24`/`LINEAR` fb, captures forced and
   correct, paused capture refused loudly). Gating finding: primary-direct
-  stays unreachable on every device because Smithay's primary assignment
+  stays unreachable on every machine measured because Smithay's primary assignment
   compares whole `Format`s (opaque fourcc vs `AR24` swapchain; `LINEAR` vs
   implicit modifier) — filed as the [format
   gate](docs/backlog/core/gpu-primary-direct-format-gate.md). Also: forced

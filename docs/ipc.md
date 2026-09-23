@@ -282,8 +282,9 @@ socket, and the other shortens a wait rather than refusing it.
   immediately, while the capture it follows is still encoding — so the
   *second* request's reply arrives *first*. A client pipelining screenshots
   matches replies by content, not by position.
-- **The `--tty` GPU scanout tier can refuse a capture with a retry,
-  never a stale screen.** (`--renderer gles` in a `gpu-scanout` build only.)
+- **The `--tty` GPU scanout tier can refuse a capture with a retry.**
+  (`--renderer gles` in a `gpu-scanout` build only.) It never serves the
+  screen as it was before a client's buffer went on screen directly.
   There the capture reads the buffer the last composited frame landed in, so
   it is refused as `nothing has been scanned out yet` before the first
   frame, and as `the current frame is held for direct scanout; retry once a

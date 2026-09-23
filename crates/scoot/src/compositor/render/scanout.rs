@@ -117,13 +117,15 @@
 //!
 //! **Reachability, stated rather than implied.** The whole sequence -- mark,
 //! refusal, force, clear -- is pinned against this code in `scanout/tests.rs`.
-//! It has not fired on hardware, because no frame this tree produces can go
-//! primary-direct yet on any device: Smithay only hands the primary plane to
-//! a client buffer whose framebuffer `Format` equals the swapchain slot's,
-//! and the opaque-fallback fourcc plus the `LINEAR`-vs-implicit modifier
-//! make that unequal for every buffer a client can send here (traced and
-//! measured in `tty/scanout.rs`'s `FRAME_FLAGS` doc). Lifting that gate is
-//! the change that makes these halves live.
+//! It has not fired on a shipped build, because no frame goes primary-direct
+//! on any machine measured: Smithay only hands the primary plane to a client
+//! buffer whose framebuffer `Format` equals the swapchain slot's, and the
+//! opaque-fallback fourcc plus the `LINEAR`-vs-implicit modifier make that
+//! unequal on an `Argb8888` swapchain (traced and measured in
+//! `tty/scanout.rs`'s `FRAME_FLAGS` doc, with the one device shape that
+//! could match). It *has* fired live on the dev VM with that gate lifted in
+//! an uncommitted experiment. Lifting it for real is the change that makes
+//! these halves live.
 
 use std::error::Error;
 

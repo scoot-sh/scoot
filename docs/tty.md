@@ -241,11 +241,13 @@ running with no GPU at all is a hard requirement here, not a fallback tier.
   admits client dma-bufs (it turns them into DRM framebuffers on the
   scanout device, falling back to compositing on any refusal, never
   touching the client), Smithay only puts one on the primary when its
-  format *and modifier* equal the swapchain's -- which never happens here:
-  the primary path compares the opaque fourcc (`XR24`) against an `AR24`
-  swapchain, and the `LINEAR` client modifier against, on virtio-gpu, an
-  implicit (`Invalid`) one. So no frame this tree produces takes the primary
-  direct yet, on any hardware. Direct scanout *has* been observed, on the
+  format *and modifier* equal the swapchain's -- which does not happen on
+  any machine measured: the primary path compares the opaque fourcc (`XR24`)
+  against an `AR24` swapchain, and the `LINEAR` client modifier against, on
+  virtio-gpu, an implicit (`Invalid`) one. (Only a device whose swapchain
+  falls through to `XR24` with an explicit `LINEAR` modifier could match;
+  none measured does, and the capture fix below covers it if one does.) So
+  no frame takes the primary direct yet. Direct scanout *has* been observed, on the
   dev VM only, with that check lifted in an uncommitted experiment
   (`ALLOW_PRIMARY_PLANE_SCANOUT_ANY` plus a full-output card0 dumb-buffer
   client): the primary plane scanned out the client's `XR24`/`LINEAR`

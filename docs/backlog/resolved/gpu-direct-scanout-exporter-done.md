@@ -11,7 +11,9 @@ blocked: null
 RESOLVED 2026-09-22 (coordinator-filed, no gh issue; branch
 `gpu-direct-scanout-exporter`). All three "What to do" items done; the
 headline is a finding the ticket did not anticipate: **widening the exporter
-does not make direct scanout reachable, on any hardware**, because the next
+does not make direct scanout reachable on any machine measured** (the dev
+VM; Asahi's swapchain format was never recorded, so `Asahi.md` gains a
+one-line Test 5 for it), because the next
 gate is the swapchain format match, now its own ticket
 ([format gate](../core/gpu-primary-direct-format-gate.md)).
 
@@ -104,9 +106,15 @@ gate is the swapchain format match, now its own ticket
   fail the capture; the second render it paid was usually an early return
   anyway (`needs_render` cleared by the forced frame). Live: one frame per
   capture on the stale path, the forced composite.
-- **No Asahi re-run added.** The format gate applies there too (opaque
-  fourcc vs `AR24` swapchain whatever the modifier), so a run could not
-  observe direct scanout; `Asahi.md` is unchanged on purpose.
+- **Asahi: one log line asked for, not a re-run.** The fourcc half of the
+  gate holds wherever the swapchain comes up `AR24`, which is the expected
+  case (it is tried first, and a plane that only scans out `XR24` still
+  takes it through the opaque fallback); a device falling through to `XR24`
+  with an explicit `LINEAR` modifier would match, and the capture fix
+  covers it. Asahi's swapchain format was never recorded, so `Asahi.md`
+  Test 5 asks for the `Testing Formats` line from one startup -- no direct
+  scanout can be observed there either way without the format-gate
+  change.
 
 Original entry below, kept verbatim.
 

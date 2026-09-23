@@ -54,30 +54,16 @@ Linux, and daily-driven on `--tty`** (2026-09-18).
   is a config bind away — no defaults ship for either yet), and `--tty`
   still drives one connector (a second monitor there stays dark).
 - **No XWayland.** X11-only applications do not run.
-- **GPU scanout is new and narrow.** `--tty --renderer gles` scans out from
-  the GPU, but only in a `gpu-scanout` build (`nix build .#scoot-gpu`).
-  The cursor rides its own KMS plane where the CRTC exposes one (and an
-  overlay plane where that is all there is), overlay planes are enumerated
-  per CRTC, and frames may go direct on the primary (`ALLOW_SCANOUT`) — with
-  the capture fix that makes the last one safe: a direct frame marks the
-  capture recording, and a capture served off a marked recording forces one
-  composite frame first, so screenshots and screen captures stay correct.
-  The framebuffer exporter now admits client dma-bufs, but no window leaves
-  the composited primary yet on any hardware: Smithay only hands the primary
-  to a client buffer whose format and modifier match the swapchain's, and on
-  this tree they never do (nothing is marked a scanout candidate for the
-  overlays either). Direct scanout has been seen only on the dev VM
-  (virtio-gpu) with that format check deliberately lifted in an uncommitted
-  experiment — which is how the capture fix was watched working live:
-  captures stayed correct through direct frames, and a capture taken while
-  VT-switched away failed with a retry message instead of returning a stale
-  screen. A plane-assigned cursor is absent from captures by design.
-  `--headless`/`--nested` still read every frame back to main memory as
-  pixman does. It is no longer unproven: on an Apple M2 under Asahi Linux it
-  costs **4–5x less CPU** than the default tier under damage (and ~0.2 W
-  less), draws the same pixels, and uses 7–16 MB more memory (numbers and
-  method in [Asahi.md](Asahi.md), Test 4).
-  pixman is still the default and still the right answer on a GPU-less box.
+- **GPU scanout is opt-in.** With a real GPU it is worth trying: on an
+  Apple M2 under Asahi Linux it uses **4–5x less CPU** than the default under
+  load, puts the same pixels on screen, and costs 7–16 MB more memory
+  ([Asahi.md](Asahi.md), Test 4). Turn it on with a `gpu-scanout` build
+  (`nix build .#scoot-gpu`) and `scoot --tty --renderer gles`. Not there
+  yet: every window is still composited (no zero-copy fullscreen video), and
+  where the display has a hardware cursor plane the pointer is missing from
+  screenshots. Under `--headless`/`--nested`, `gles` brings no speedup.
+  pixman stays the default and the right choice without a GPU; details in
+  [docs/tty.md](docs/tty.md).
 - **Config reload is live, except three restart fields.** `scootctl reload` (or `kill -HUP` on the
   compositor) re-applies the layout (gap, column widths, default column
   width), the output scale (except under `--nested`, where the host owns
