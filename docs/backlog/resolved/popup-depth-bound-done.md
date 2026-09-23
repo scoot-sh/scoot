@@ -46,8 +46,9 @@ RESOLVED 2026-09-23 (PR #226). The rules, and why each, are in
   73 ms frames at 1954 and overflowed at 5104). `WlrLayerShellHandler::new_popup`
   is now implemented, check-only (it never tracks, so no second node):
   adoption is refused, as `invalid_popup_parent`, unless the popup was
-  created with a null parent and has not had its initial commit -- both of
-  which the wlr protocol requires anyway. The rule this taught, now the
+  created with a null parent and has not been configured yet -- the wlr
+  protocol's "null parent, before the initial commit", with "commit" read
+  as "first configure", which an `xdg_popup.reposition` also earns. The rule this taught, now the
   module doc's frame: chain depth and tree-node depth are different, and
   a node is placed once, so no chain may ever change under a live node.
 - **Real clients:** GTK 3.24 was measured, live, destroying child popups

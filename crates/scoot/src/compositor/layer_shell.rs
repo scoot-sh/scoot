@@ -268,7 +268,7 @@ impl WlrLayerShellHandler for State {
     /// checked, never tracked -- `XdgShellHandler::new_popup` already
     /// tracked it, and a second `track_popup` would put a second node for it
     /// in the layer's tree. A popup that already had a parent, or was
-    /// already committed, is refused: see `popup_parent::check_adoption`.
+    /// already configured, is refused: see `popup_parent::check_adoption`.
     fn new_popup(&mut self, _parent: WlrLayerSurface, popup: PopupSurface) {
         super::popup_parent::check_adoption(&popup);
     }

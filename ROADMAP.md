@@ -111,7 +111,8 @@ each item's own file records why it landed when it did.
   enforce, plus a parent with no live role object, plus a layer surface
   adopting anything but a fresh parentless popup (review found that
   re-adoption cut a chain short under a node that stayed deep). Every
-  chain and every popup-tree node is now at most 64 deep. Also fixed: a
+  chain and every popup-tree node is now at most 64 deep (65 with an
+  input method's candidate window, a leaf). Also fixed: a
   surface made a popup again had a same-flush child inserted under its
   dead tree node (invisible, then disconnected, and nestable without
   bound). GTK 3 measured live closing submenus first in every path; frame

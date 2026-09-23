@@ -32,8 +32,9 @@
 //! 2. `zwlr_layer_surface_v1.get_popup` -- Smithay overwrites the parent
 //!    with the layer surface unconditionally, then calls the layer shell's
 //!    `new_popup`, which runs [`check_adoption`]: only a popup created with
-//!    no parent, and not yet committed, may be adopted -- what the wlr
-//!    protocol requires anyway. Such a popup has no node yet (it waits in
+//!    no parent, and not yet configured, may be adopted -- what the wlr
+//!    protocol requires anyway (it says "before committing", which this
+//!    reads as "before its first configure"; see [`check_adoption`]). Such a popup has no node yet (it waits in
 //!    `PopupManager`'s unmapped list until its first commit, and is then
 //!    placed at the top of the layer's tree), and a layer surface is not a
 //!    popup, so adoption changes neither depth. Re-adopting a popup that
@@ -231,7 +232,7 @@ enum Refusal {
     /// `xdg_popup` is gone.
     NoLiveParent,
     /// A layer surface tried to adopt it, but it was created with a parent,
-    /// or has already been committed.
+    /// or has already been configured.
     NotAdoptable,
 }
 
@@ -363,7 +364,7 @@ fn refuse(popup: &PopupSurface, refusal: Refusal) {
             "this popup's parent xdg_surface has no live xdg_toplevel or xdg_popup".to_owned()
         }
         Refusal::NotAdoptable => "zwlr_layer_surface_v1.get_popup takes only a popup created \
-             with a null parent and not yet committed"
+             with a null parent and not yet configured"
             .to_owned(),
     };
     tracing::warn!(
@@ -388,7 +389,7 @@ fn refuse(popup: &PopupSurface, refusal: Refusal) {
 
 /// `WlrLayerShellHandler::new_popup`: refuses the adoption, and disconnects
 /// the client, unless `popup` was admitted with no parent and has not been
-/// committed yet -- the two things `zwlr_layer_surface_v1.get_popup`
+/// configured yet -- what `zwlr_layer_surface_v1.get_popup`
 /// requires ("created via `xdg_surface::get_popup` with the parent set to
 /// NULL", and "invoked before committing the popup's initial state"), and
 /// what keeps adoption from cutting a chain short under a node that stays
@@ -398,9 +399,13 @@ fn refuse(popup: &PopupSurface, refusal: Refusal) {
 /// tracking it a second time puts a second node for it in the layer's tree
 /// (see `handlers.rs`).
 ///
-/// "Committed" is read as "has had its initial configure": for a popup
-/// admitted parentless, a commit before adoption is already a protocol
-/// error Smithay posts, and the one after it is what earns the configure.
+/// The protocol's "before committing" is enforced as "before its first
+/// configure" (`is_initial_configure_sent`), which is not quite the same:
+/// for a popup admitted parentless, a commit before adoption is already a
+/// protocol error Smithay posts, and the commit after it is what earns the
+/// initial configure -- but an `xdg_popup.reposition` before adoption also
+/// earns one (Smithay's `send_repositioned` sends a configure), with no
+/// commit at all, and is refused too.
 ///
 /// A popup refused at admission (its record belongs to another popup, or
 /// none) is left alone: its client is already disconnected.
