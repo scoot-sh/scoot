@@ -88,6 +88,7 @@ use smithay::wayland::shell::wlr_layer::{
 };
 
 use super::State;
+use super::output_clip::output_holds_point;
 
 #[cfg(test)]
 mod tests;
@@ -119,7 +120,8 @@ const ABOVE_FULLSCREEN: [Layer; 1] = [Layer::Overlay];
 /// held the keyboard loses it to the window the moment that window starts
 /// covering (the focused window going fullscreen hides it -- `apply()`'s
 /// keyboard refresh re-derives focus with the top layer excluded), getting
-/// it back once the output is uncovered. Launchers that use the overlay layer (fuzzel's default) are unaffected.
+/// it back once the output is uncovered. Launchers that use the overlay
+/// layer (fuzzel's default) are unaffected.
 pub(super) fn above_windows(covered_by_fullscreen: bool) -> &'static [Layer] {
     if covered_by_fullscreen {
         &ABOVE_FULLSCREEN
@@ -571,14 +573,10 @@ impl State {
         position: Point<f64, Logical>,
     ) -> Option<(Output, Point<i32, Logical>)> {
         self.outputs.iter().find_map(|output| {
+            // The shared-edge rule the window hit test uses too (see
+            // `output_clip::output_holds_point`).
             self.space.output_geometry(output).and_then(|geometry| {
-                let left = geometry.loc.x as f64;
-                let top = geometry.loc.y as f64;
-                (position.x >= left
-                    && position.x < left + geometry.size.w as f64
-                    && position.y >= top
-                    && position.y < top + geometry.size.h as f64)
-                    .then(|| (output.clone(), geometry.loc))
+                output_holds_point(geometry, position).then(|| (output.clone(), geometry.loc))
             })
         })
     }

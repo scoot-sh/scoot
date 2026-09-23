@@ -35,8 +35,15 @@ were left out of that fix; each is a smaller inconsistency:
 
 ## What to do
 
-Read the placed output (`output_clip::placed_on`, stamped by `apply()` from
-the placement) at all three. The frame-callback change is the one with an
+Read the placed output (`output_clip::placed_on`) at all three. It is set
+by `apply()` from the placement beside `map_element` and cleared beside
+every `unmap_elem`, so it is `Some` exactly while the window is mapped:
+`None` for a window that is invisible, closed or never placed. That is what
+the frame-callback and `wl_surface.enter` sites want (an unmapped window is
+on no screen), but `output_of_window` also announces windows that are not
+mapped -- keep its fallback for `None` (today the pointer's output; the
+core's `Placement::output` is the better answer where the window has one),
+rather than reading `placed_on` as "the output this window belongs to". The frame-callback change is the one with an
 observable effect (which output's frame fires an overhanging window's
 callback); pin it with a harness test that renders only the neighbouring
 output and asserts the callback stays pending. The

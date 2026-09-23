@@ -78,11 +78,12 @@ pub struct WindowSnapshot {
     #[serde(default)]
     pub icon: Option<String>,
     pub output: u64,
-    /// Where the window is, in logical pixels. Only the part inside its
-    /// `output`'s own `rect` is drawn and takes input: a column scrolled
-    /// part-way past its output's edge (or a fullscreen window focused away
-    /// from, below) is cut at that edge, and the neighbouring output's own
-    /// content is what shows -- and what is clicked -- beyond it.
+    /// Where the window's toplevel surface is, in logical pixels (its
+    /// popups can draw outside it). Only the part inside its `output`'s own
+    /// `rect` is drawn and takes input: a column scrolled part-way past its
+    /// output's edge (or a fullscreen window focused away from, below) is
+    /// cut at that edge, and beyond it the neighbouring output's own content
+    /// is what shows and is clicked -- or nothing, past the last output.
     pub rect: Rect,
     pub visible: bool,
     pub focused: bool,

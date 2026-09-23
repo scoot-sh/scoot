@@ -30,8 +30,9 @@
 //!
 //! The windows exist in [`scoot_core`] only: they are pushed straight into
 //! the core with `WindowOpened` rather than mapped by a client, so the ring
-//! is drawn for each of them and `Space::render_elements_for_region` still
-//! finds nothing to draw. That is deliberate -- a client surface's texture
+//! is drawn for each of them while the window gather
+//! (`render/elements.rs`'s `window_elements`) still finds no mapped window
+//! to draw. That is deliberate -- a client surface's texture
 //! import is *pixman's* cost, essentially constant against any change to how
 //! the frame is assembled, and including it would bury exactly the fixed
 //! overhead these numbers exist to watch. A change that claims to be free

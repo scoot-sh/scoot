@@ -58,8 +58,9 @@
 //! visible. Both are measured, not reasoned about -- see the benchmark.
 //!
 //! `corner_radius = 0` wraps nothing and paints nothing new: the gather path
-//! keeps calling `Space::render_elements_for_region` and the ring keeps its
-//! four solid rects, so the default session is byte-identical to before.
+//! (`render/elements.rs`'s `window_elements`) pushes each window's own
+//! `AsRenderElements` output unwrapped, and the ring keeps its four solid
+//! rects, so the default session is byte-identical to before.
 
 use std::cell::RefCell;
 

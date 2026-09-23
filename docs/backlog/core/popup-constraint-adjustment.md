@@ -2,7 +2,7 @@
 title: "Popups are placed exactly where the positioner says: no constraint adjustment against the parent's output"
 status: "open"
 area: "core"
-priority: "medium"
+priority: "high"
 blocked: null
 ---
 
@@ -12,6 +12,11 @@ Filed 2026-09-23 while fixing
 [windows bleeding across outputs](../resolved/windows-bleed-across-outputs-done.md).
 Serves **daily-drive** (menus near a screen edge) and **computer use** (an
 agent reading a menu from a screenshot sees the whole menu).
+
+**High since 2026-09-23:** with windows confined to their own output, a
+menu crossing a *shared* output edge is now cut off there rather than drawn
+onto the neighbour -- and agents running `--headless --outputs N` put
+windows beside those edges routinely.
 
 ## What is wrong
 
@@ -27,8 +32,9 @@ at the edge *between* two outputs, where before it drew onto the neighbour
 ## What to do
 
 Constrain each xdg popup against its parent window's output rect -- the
-output the parent is placed on (`output_clip::placed_on`), in the parent's
-coordinates -- with the pinned rev's
+output the parent is placed on (`output_clip::placed_on`, which is `Some`
+while the parent is mapped -- a popup of an unmapped parent is not drawn
+anyway), in the parent's coordinates -- with the pinned rev's
 `PositionerState::get_unconstrained_geometry(target)`
 (`wayland/shell/xdg/mod.rs`), at `new_popup` and on `reposition_request`.
 Decide whether the target is the whole output or the usable area (niri-style

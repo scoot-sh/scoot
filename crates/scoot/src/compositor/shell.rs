@@ -54,6 +54,7 @@ impl State {
     pub fn remove_window(&mut self, id: WindowId) {
         if let Some(window) = self.windows.remove(&id) {
             self.space.unmap_elem(&window);
+            output_clip::unstamp(&window);
         }
         // Paired with `add_window`'s announcements: these send `closed` to
         // every client watching either list, so a taskbar drops the entry.
@@ -187,6 +188,7 @@ impl State {
             };
             if !placement.visible {
                 self.space.unmap_elem(&window);
+                output_clip::unstamp(&window);
                 continue;
             }
             self.space

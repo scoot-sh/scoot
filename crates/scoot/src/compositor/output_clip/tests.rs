@@ -953,6 +953,63 @@ fn a_window_moved_to_the_other_output_follows_there() {
 }
 
 // ---------------------------------------------------------------------------
+// The output record follows the space
+// ---------------------------------------------------------------------------
+
+/// The per-window output record describes a window only while the `Space`
+/// holds it: cleared when the window goes invisible (and so unmapped),
+/// re-stamped with its *current* output when it maps again, and cleared on
+/// close -- so nothing can read a stale output off a window that is not on
+/// any screen.
+#[test]
+fn the_output_record_is_cleared_on_unmap_and_close() {
+    let mut fixture = Fixture::two_outputs();
+    fixture.pointer_on(1);
+    fixture.map(LEFT_BGRA);
+    fixture.map(RIGHT_BGRA);
+    let window = |fixture: &Fixture, index: usize| {
+        fixture
+            .state
+            .windows
+            .get(&fixture.id(index))
+            .expect("a window")
+            .clone()
+    };
+    assert_eq!(
+        super::placed_on(&window(&fixture, 0)),
+        Some(OutputId(1)),
+        "the control: a mapped window carries its output"
+    );
+
+    // Away to an empty workspace: both windows go invisible and unmapped.
+    fixture.act(Action::FocusWorkspace(scoot_core::Vertical::Down));
+    assert!(fixture.state.space.elements().next().is_none());
+    assert_eq!(
+        super::placed_on(&window(&fixture, 0)),
+        None,
+        "an unmapped window still names an output"
+    );
+
+    // Back, then carry window 1 to the other output: each is stamped with
+    // its own current output.
+    fixture.act(Action::FocusWorkspace(scoot_core::Vertical::Up));
+    fixture.act(Action::FocusWindowId(fixture.id(1)));
+    fixture.act(Action::MoveFocusedWindowToOutput(OutputId(2)));
+    assert_eq!(super::placed_on(&window(&fixture, 1)), Some(OutputId(2)));
+    assert_eq!(super::placed_on(&window(&fixture, 0)), Some(OutputId(1)));
+
+    // Closed: the record goes with it, even on a handle that outlives it.
+    let closed = window(&fixture, 1);
+    let id = fixture.id(1);
+    fixture.state.remove_window(id);
+    assert_eq!(
+        super::placed_on(&closed),
+        None,
+        "a closed window still names an output"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // `to_output_local`
 // ---------------------------------------------------------------------------
 

@@ -40,7 +40,8 @@
 //! motion, where building an arrangement would be an allocation per event,
 //! so it reads the output [`stamp`] recorded on the window by `apply()` --
 //! from the same placement, in the same loop iteration that maps the window
-//! at that placement's position. The stamp therefore always describes the
+//! at that placement's position, and [`unstamp`] clears it wherever the
+//! window leaves the space. The stamp therefore always describes the
 //! window as the `Space` currently holds it: the position the hit test
 //! reads and the output it filters by were written together. The two
 //! sources agree whenever the space reflects the newest arrangement, which
@@ -52,7 +53,7 @@ use std::cell::Cell;
 use scoot_core::{OutputId, Rect};
 use smithay::desktop::Window;
 use smithay::desktop::space::SpaceElement;
-use smithay::utils::{Logical, Point};
+use smithay::utils::{Logical, Point, Rectangle};
 
 use super::State;
 
@@ -69,7 +70,8 @@ mod tests;
 struct PlacedOn(Cell<Option<OutputId>>);
 
 /// Records that `window` is now mapped on `output`. Called by `apply()` right
-/// beside the `map_element` that positions it, and nowhere else.
+/// beside the `map_element` that positions it, and nowhere else; [`unstamp`]
+/// is its pair at every `unmap_elem`.
 ///
 /// Allocates once per window (the first stamp inserts the user-data slot);
 /// every later stamp is a `Cell` store.
@@ -81,8 +83,21 @@ pub(super) fn stamp(window: &Window, output: OutputId) {
         .set(Some(output));
 }
 
-/// The output `window` was last mapped onto, or `None` for a window
-/// `apply()` has never mapped.
+/// Forgets `window`'s output, beside every `unmap_elem` of it (`apply()`'s
+/// invisible branch, `remove_window`), so the record only ever describes a
+/// window the `Space` holds. An unmapped window is not on any output's
+/// screen, and a stale id would outlive a move made while it was invisible
+/// (moving it to another workspace or output) and name the wrong output to
+/// any later reader. Allocation-free, and a no-op for a window never
+/// stamped.
+pub(super) fn unstamp(window: &Window) {
+    if let Some(placed) = window.user_data().get::<PlacedOn>() {
+        placed.0.set(None);
+    }
+}
+
+/// The output `window` is mapped on, or `None` for a window that is not
+/// mapped (invisible, closed, or never placed).
 pub(super) fn placed_on(window: &Window) -> Option<OutputId> {
     window
         .user_data()
@@ -108,21 +123,38 @@ pub(super) fn to_output_local(rect: Rect, output: Rect) -> Rect {
     )
 }
 
+/// Whether an output with logical rectangle `geometry` holds the point
+/// `pos`: the one shared-edge rule for every "which output is this point
+/// on" question -- this module's hit test and `layer_shell.rs`'s
+/// `output_under` (layer-shell and session-lock hit tests, pointer-output
+/// focus) both answer through it, so a point can never be on one output for
+/// windows and another for bars.
+///
+/// Half-open on both axes ([`Rectangle::contains`] at the pinned rev:
+/// `loc <= p < loc + size`), so a point on the seam between two
+/// side-by-side outputs belongs to exactly one of them, the right-hand one.
+pub(super) fn output_holds_point(
+    geometry: Rectangle<i32, Logical>,
+    pos: Point<f64, Logical>,
+) -> bool {
+    geometry.to_f64().contains(pos)
+}
+
 impl State {
-    /// Whether `pos` lies on output `id` -- half-open on both axes like
-    /// [`Rectangle::contains`], so a point on the shared edge between two
-    /// side-by-side outputs belongs to exactly one of them (the right-hand
-    /// one). `false` for an output this compositor does not have.
+    /// Whether `pos` lies on output `id`, by [`output_holds_point`]. `false`
+    /// for an output this compositor does not have.
     fn output_holds(&self, id: OutputId, pos: Point<f64, Logical>) -> bool {
         self.outputs
             .get(id)
             .and_then(|output| self.space.output_geometry(output))
-            .is_some_and(|geometry| geometry.to_f64().contains(pos))
+            .is_some_and(|geometry| output_holds_point(geometry, pos))
     }
 
-    /// The output `pos` lies on, by the same half-open rule. `None` over no
-    /// output at all -- which the pointer clamp allows between outputs of
-    /// uneven sizes, where nothing is drawn.
+    /// The output `pos` lies on, by the same rule. `None` over no output at
+    /// all -- which the pointer clamp allows between outputs of uneven
+    /// sizes, where nothing is drawn. The id-returning twin of
+    /// `layer_shell.rs`'s `output_under`, which hands back the `Output`
+    /// (an `Arc` clone) and its origin instead; both scan in creation order.
     fn output_at(&self, pos: Point<f64, Logical>) -> Option<OutputId> {
         self.outputs
             .iter_with_ids()
@@ -133,7 +165,7 @@ impl State {
     /// The top-most window whose input region accepts `pos`, among the
     /// windows placed on the output `pos` is on, and the location it is
     /// rendered at -- `Space::element_under` with the output rule applied.
-    /// Over no output, nothing; a window `apply()` never stamped, never.
+    /// Over no output, nothing; an unstamped window, never.
     ///
     /// The fast path *is* `element_under`: filtering can only remove
     /// candidates, so when Smithay's top-most answer is on the output under

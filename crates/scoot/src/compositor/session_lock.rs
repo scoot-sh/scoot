@@ -814,8 +814,8 @@ impl SessionLock {
     ///
     /// Scoped to the output being drawn: each output's framebuffer is that
     /// output's size, in that output's local coordinates (see
-    /// `Space::render_elements_for_region`, which translates the unlocked
-    /// path the same way), so a surface drawn at another output's global
+    /// `render/elements.rs`'s `window_elements`, which translates the
+    /// unlocked path the same way), so a surface drawn at another output's global
     /// origin would land off-target -- and a surface drawn onto another
     /// output's screen would put one screen's lock pixels where they do not
     /// belong. At most one live surface per output (see

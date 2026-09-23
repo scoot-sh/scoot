@@ -196,8 +196,8 @@ impl State {
         // itself, in one fixed order -- cannot express: it would put a
         // full-screen wallpaper on top of the ring, i.e. hide the ring
         // completely for anyone running `swaybg`. So windows come from
-        // `Space::render_elements_for_region` (windows only, by construction
-        // -- see its own doc) and the layers are gathered here, around the
+        // `window_elements` below (this output's windows only -- see
+        // `output_clip.rs`) and the layers are gathered here, around the
         // ring.
         //
         // ...unless the session is locked, in which case this whole list is
