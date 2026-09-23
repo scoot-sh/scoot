@@ -223,8 +223,8 @@ running with no GPU at all is a hard requirement here, not a fallback tier.
   plane is visible to queries but unknown to commits. Overlay planes need no
   such cap (`UNIVERSAL_PLANES` exposes them), and virtio-gpu has none to
   expose anyway -- its inventory is one primary plus one cursor plane. On
-  virtio the cursor then scans out live (pointer-tracked, captures
-  cursorless). No window surface is ever an overlay candidate (every one is
+  virtio the cursor then scans out live (pointer-tracked; captures draw it
+  back in when they ask for it). No window surface is ever an overlay candidate (every one is
   built `Kind::Unspecified`), so an overlay plane carries at most the
   cursor -- never a window; candidate-marking is
   [`backlog/core/gpu-overlay-window-candidates.md`](backlog/core/gpu-overlay-window-candidates.md).

@@ -198,8 +198,9 @@ type Compositor = DrmCompositor<GbmAllocator<DrmDeviceFd>, LayoutKeepingExporter
 /// window can ride an overlay plane until something is marked a scanout
 /// candidate (`docs/backlog/core/gpu-overlay-window-candidates.md`). What the bit
 /// does today is let the *cursor* ride an overlay where a CRTC has overlays
-/// but no cursor plane (the cursor plane is still tried first), with the
-/// cursorless-capture consequence documented in `render::scanout`.
+/// but no cursor plane (the cursor plane is still tried first), which
+/// captures reconcile like any plane-assigned cursor (`render::scanout`,
+/// `render::capture_cursor`).
 ///
 /// Pinned below, with [`COMPOSITE_FLAGS`] and [`frame_flags`]'s three rows.
 const DIRECT_FLAGS: FrameFlags =
@@ -211,9 +212,10 @@ const DIRECT_FLAGS: FrameFlags =
 /// The frame a capture is about to read ([`ForceComposite`]) and every
 /// frame `render::primary_direct` did not judge eligible -- a locked one,
 /// one with no fullscreen window covering the output, one with a capture
-/// stream running. The cursor may still ride its plane, which keeps the
-/// documented cursorless-where-plane-assigned capture contract rather than
-/// adding a second cursor render.
+/// stream running. The cursor may still ride its plane: the slot is then
+/// recorded without it, and a capture that asked for the pointer re-renders
+/// its region (`render::capture_cursor`) rather than this frame being made
+/// to composite it.
 const COMPOSITE_FLAGS: FrameFlags = composite_only(DIRECT_FLAGS);
 
 /// The flags for one frame.
