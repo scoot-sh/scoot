@@ -90,10 +90,12 @@ use smithay::wayland::shell::xdg::{
 /// person could navigate, and no legitimate client comes near it. It is
 /// also far below where Smithay's recursion becomes a problem: every
 /// recursive walk of the tree is at most this deep (one level more for an
-/// input-method popup, which is a leaf), which costs a few tens of
-/// kilobytes of stack in a debug build against the ~2000 levels that
-/// overflowed 2 MB, and a max-depth chain draws and is created in
-/// microseconds (measured: `tests/bench.rs`).
+/// input-method popup, which is a leaf). The test suite draws a chain this
+/// deep in a debug build on a 2 MB test-thread stack, where about 2000
+/// levels overflowed it. In release (`tests/bench.rs`), a frame with a
+/// chain this deep open costs what it did before the cap -- about 0.2 ms
+/// on the dev VM, nearly all of it compositing 64 surfaces -- and creating
+/// one costs nothing measurable over a single popup.
 pub(super) const MAX_POPUP_DEPTH: usize = 64;
 
 /// One step up the chain from a popup-role `surface`: its parent (`None`
@@ -311,8 +313,8 @@ fn walk_up(popup: &WlSurface) -> Option<Refusal> {
 /// (wayland-backend 0.3.17, `rs/server_impl/client.rs`, `next_request`
 /// answers `EPIPE` for a killed client), which the same-flush `reposition`
 /// in this module's tests confirms -- but the teardown itself runs
-/// destructors in no stated order, and the draw walk runs in between.
-/// Clearing it makes the refused surface a chain's root.
+/// destructors in no stated order. Clearing it makes the refused surface a
+/// chain's root.
 ///
 /// For `already_constructed` the role data is the *live* popup's: the
 /// second `get_popup` overwrote it. Clearing it makes that popup a root

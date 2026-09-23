@@ -9,6 +9,24 @@ scoot has not cut a numbered release yet; entries are dated.
 
 ## Unreleased
 
+### 2026-09-23 — nested menus can no longer crash scoot
+
+- **A program can no longer crash scoot — and every other app with it —
+  by opening menus inside menus thousands deep.** Menus now nest at most
+  64 levels (real ones stop at a handful); a program that goes deeper is
+  disconnected instead. The same goes for a program that re-parents menus
+  it already has open to get around that limit, in ways Wayland's rules
+  forbid anyway: asking for a second menu on a surface whose menu is still
+  open, closing a menu while its submenu is still open, or opening a menu
+  off a surface that is not an open window or menu. Ordinary apps close
+  submenus first and are unaffected (GTK was checked). If a program you use is disconnected
+  when you open or close a menu, the compositor log names it and the rule
+  it broke (see `docs/protocols.md`) — please report it.
+- **A menu reopened on the same surface can now show its submenu
+  straight away.** An app that re-shows a menu without replacing its
+  surface and opens a submenu in the same moment had that submenu never
+  appear, and was then disconnected by mistake.
+
 ### 2026-09-23 — menus stay on screen
 
 - **A right-click menu or dropdown opened near the edge of a screen now
