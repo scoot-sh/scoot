@@ -35,6 +35,7 @@ mod output_management;
 mod output_scale;
 mod outputs;
 mod popup;
+mod popup_constraint;
 mod presentation_time;
 mod relative_pointer;
 mod reload;
