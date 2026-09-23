@@ -164,7 +164,8 @@ impl State {
         // 1. the cursor -- meaningless hidden behind anything;
         // 2. the overlay and top layer-shell layers, which the protocol
         //    defines as being above ordinary windows (a bar, a launcher, a
-        //    notification);
+        //    notification) -- just the overlay while a fullscreen window
+        //    covers the output;
         // 3. windows, which must still win over the ring: `shell.rs::apply()`
         //    positions a window from the layout's rect but sizes it from
         //    whatever the client actually committed, and a client that's slow
@@ -231,18 +232,19 @@ impl State {
                 // isn't in the space has no region to render.
                 (None, _) => Vec::new(),
             };
+            // While a fullscreen window covers this output, only the
+            // overlay layer (notifications, OSDs) stays above it: the top
+            // layer (bars) is not drawn at all, rather than drawn behind an
+            // opaque window. See `layer_shell::above_windows`, which the
+            // pointer and keyboard paths read too, so a hidden bar is never
+            // clicked or typed into either.
+            let above = layer_shell::above_windows(self.covered_by_fullscreen(output));
             let layers = layer_map_for_output(output);
             let mut elements = Vec::with_capacity(
                 cursor_elements.len() + window_elements.len() + ring_elements.len() + layers.len(),
             );
             elements.extend(cursor_elements.into_iter().map(Elements::Cursor));
-            layer_elements(
-                &layers,
-                &layer_shell::ABOVE_WINDOWS,
-                renderer,
-                scale,
-                &mut elements,
-            );
+            layer_elements(&layers, above, renderer, scale, &mut elements);
             elements.extend(window_elements);
             elements.extend(ring_elements);
             layer_elements(
@@ -323,6 +325,9 @@ where
 /// construction. A surface temporarily larger than its placement (a shrink
 /// still in flight) is cut to the placement rather than bleeding into the
 /// gap -- a behavior change, but only with rounding opted in.
+///
+/// A fullscreen window is pushed plain, never wrapped: its corners are the
+/// output's corners.
 #[allow(clippy::too_many_arguments)]
 fn rounded_window_elements<R>(
     space: &Space<Window>,
@@ -402,7 +407,13 @@ where
             Kind::Unspecified,
         );
         let clip = clip_rect(placement.rect, scale);
-        let radius = physical_radius(configured_radius, clip, scale);
+        // Never rounded while fullscreen: it covers the output edge to edge,
+        // and a rounded clip would cut its corners back to the background.
+        let radius = if placement.fullscreen {
+            0
+        } else {
+            physical_radius(configured_radius, clip, scale)
+        };
         if radius > 0 {
             out.extend(
                 main.into_iter()

@@ -543,9 +543,9 @@ fn resizing_the_output_re_arranges_bars_and_the_zone() {
 /// The test above reads `World::arrange()`, which recomputes from the core's
 /// new area whether or not anything pushed that arrangement onto the windows
 /// -- so it passes even if every client is still sized for the old mode and
-/// hanging off the edge of the screen. `State::requested` is the difference:
-/// only `apply()` writes it, on the same pass that sends each toplevel its
-/// `configure`.
+/// hanging off the edge of the screen. The size in the toplevel's configure
+/// state is the difference: only `apply()` writes it, on the same pass that
+/// sends each toplevel its `configure`.
 ///
 /// This is why `resize_output` ends in `apply()` rather than
 /// `request_render()`. It used to end in the latter, which was harmless while
@@ -564,12 +564,15 @@ fn resizing_the_output_reconfigures_the_windows_on_it() {
     fixture.run(Step::MapWindow);
 
     let configured = |fixture: &Fixture| {
-        *fixture
+        let size = fixture
             .state
-            .requested
+            .windows
             .values()
             .next()
-            .expect("the mapped window was configured at some size")
+            .and_then(|window| window.toplevel())
+            .and_then(|toplevel| toplevel.with_pending_state(|state| state.size))
+            .expect("the mapped window was configured at some size");
+        Size::new(size.w, size.h)
     };
     // The baseline, so a resize that changed nothing cannot pass below by
     // having been wrong in the same way twice: mapping alone already

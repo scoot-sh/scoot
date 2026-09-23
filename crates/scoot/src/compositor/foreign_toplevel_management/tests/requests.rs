@@ -303,8 +303,8 @@ fn close_on_an_inert_handle_is_ignored() {
 
 #[test]
 fn the_state_requests_are_accepted_and_do_nothing() {
-    // `set_maximized`, `set_minimized`, `set_fullscreen` and their `unset_`
-    // halves have nothing in scoot's core to attach to, and `set_rectangle`
+    // `set_maximized`, `set_minimized` and their `unset_` halves have
+    // nothing in scoot's core to attach to, and `set_rectangle`
     // is an animation hint this compositor reads nothing from -- including the
     // negative rectangle wlroots answers with an `invalid_rectangle` protocol
     // error. All of them must be survivable: killing a shell's connection over
@@ -358,4 +358,136 @@ fn activate_and_close_are_refused_while_the_session_is_locked() {
         "a locked session's window was asked to close"
     );
     assert_eq!(fixture.tracked(), 2);
+}
+
+// -- fullscreen --------------------------------------------------------------
+
+/// The `state` values a handle is expected to carry, in the order
+/// `state_array` writes them.
+const ACTIVATED: u32 = 2;
+const FULLSCREEN: u32 = 3;
+
+#[test]
+fn set_and_unset_fullscreen_reach_the_window_and_report_the_bit() {
+    let mut fixture = Fixture::bound();
+    fixture.run(Step::MapWindow); // window 1 -> handle 0
+    fixture.run(Step::MapWindow); // window 2 -> handle 1, focused
+    fixture.take_log();
+
+    // By id, not the focused window: handle 0 is window 1.
+    fixture.run(Step::SetFullscreen(0));
+    assert!(fixture.state.world.is_fullscreen(WindowId(1)));
+    assert!(!fixture.state.world.is_fullscreen(WindowId(2)));
+    // Not activated (focus stays on window 2), so the array is the one bit.
+    assert_eq!(
+        fixture.take_log(),
+        vec![Seen::State(0, vec![FULLSCREEN]), Seen::Done(0)]
+    );
+
+    fixture.run(Step::UnsetFullscreen(0));
+    assert!(!fixture.state.world.is_fullscreen(WindowId(1)));
+    assert_eq!(
+        fixture.take_log(),
+        vec![Seen::State(0, vec![]), Seen::Done(0)]
+    );
+}
+
+#[test]
+fn a_focus_change_keeps_the_fullscreen_bit_in_the_array() {
+    // A `state` event replaces the previous one whole, so the activation
+    // reconcile has to carry the fullscreen bit too -- or a focus change
+    // tells a taskbar the fullscreen window stopped being one.
+    let mut fixture = Fixture::bound();
+    fixture.run(Step::MapWindow); // handle 0
+    fixture.run(Step::MapWindow); // handle 1, focused
+    fixture.run(Step::SetFullscreen(1));
+    fixture.take_log();
+
+    fixture.run(Step::Activate(0));
+    let log = fixture.take_log();
+    assert!(
+        log.contains(&Seen::State(1, vec![FULLSCREEN])),
+        "losing focus dropped the fullscreen bit: {log:?}"
+    );
+    assert!(log.contains(&Seen::State(0, vec![ACTIVATED])), "{log:?}");
+
+    fixture.run(Step::Activate(1));
+    let log = fixture.take_log();
+    assert!(
+        log.contains(&Seen::State(1, vec![ACTIVATED, FULLSCREEN])),
+        "regaining focus dropped the fullscreen bit: {log:?}"
+    );
+}
+
+#[test]
+fn a_fresh_bind_is_told_a_window_is_already_fullscreen() {
+    let mut fixture = Fixture::bound();
+    fixture.run(Step::MapWindow);
+    fixture.run(Step::SetFullscreen(0));
+    fixture.take_log();
+
+    fixture.run(Step::BindManager);
+    let log = fixture.take_log();
+    assert!(
+        log.contains(&Seen::State(1, vec![ACTIVATED, FULLSCREEN])),
+        "{log:?}"
+    );
+}
+
+#[test]
+fn a_version_1_handle_is_never_sent_the_fullscreen_bit() {
+    // `fullscreen` is not in a version 1 client's `state` enum. A change to
+    // that bit alone sends such a handle nothing at all, and an activation
+    // change sends it the array without it.
+    let mut fixture = Fixture::new();
+    fixture.run(Step::BindOutput);
+    fixture.run(Step::BindManagerAt(1));
+    fixture.run(Step::MapWindow); // handle 0
+    fixture.run(Step::MapWindow); // handle 1, focused
+    fixture.take_log();
+
+    fixture.state.act(scoot_core::Action::SetFullscreen {
+        id: WindowId(1),
+        fullscreen: true,
+    });
+    fixture.settle();
+    assert_eq!(fixture.take_log(), Vec::new());
+
+    fixture
+        .state
+        .act(scoot_core::Action::FocusWindowId(WindowId(1)));
+    fixture.settle();
+    let log = fixture.take_log();
+    assert!(log.contains(&Seen::State(0, vec![ACTIVATED])), "{log:?}");
+    assert!(
+        !log.iter()
+            .any(|seen| matches!(seen, Seen::State(_, bits) if bits.contains(&FULLSCREEN))),
+        "a version 1 handle was sent the fullscreen bit: {log:?}"
+    );
+}
+
+#[test]
+fn fullscreen_requests_are_refused_while_the_session_is_locked() {
+    let mut fixture = Fixture::bound();
+    fixture.run(Step::MapWindow);
+    fixture.run(Step::LockSession);
+    fixture.take_log();
+    assert!(fixture.state.session_lock.is_locked());
+
+    fixture.run(Step::SetFullscreen(0));
+    assert!(!fixture.state.world.is_fullscreen(WindowId(1)));
+    assert_eq!(fixture.take_log(), Vec::new());
+}
+
+#[test]
+fn a_fullscreen_request_on_an_inert_handle_is_ignored() {
+    let mut fixture = Fixture::bound();
+    fixture.run(Step::MapWindow); // window 1 -> handle 0
+    fixture.run(Step::MapWindow); // window 2 -> handle 1
+    fixture.run(Step::CloseWindow(0));
+    fixture.take_log();
+
+    fixture.run(Step::SetFullscreen(0));
+    assert!(!fixture.state.world.is_fullscreen(WindowId(2)));
+    assert_eq!(fixture.take_log(), Vec::new());
 }

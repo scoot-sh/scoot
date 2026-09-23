@@ -439,6 +439,9 @@ wayland_client::delegate_noop!(TestClient: ignore ext_session_lock_v1::ExtSessio
 enum Step {
     /// Bind another `zwlr_foreign_toplevel_manager_v1`.
     BindManager,
+    /// The same, at a specific version -- 1 is the one whose `state` enum has
+    /// no `fullscreen`.
+    BindManagerAt(u32),
     /// Bind a `wl_output`. Separate from the manager so a test can choose the
     /// order, which is what the `output_bound` hook exists for.
     BindOutput,
@@ -485,6 +488,10 @@ enum Step {
     /// Every request this compositor accepts and ignores, on the `index`-th
     /// handle, including a deliberately invalid rectangle.
     RequestIgnoredStates(usize),
+    /// `set_fullscreen` (no output) on the `index`-th handle.
+    SetFullscreen(usize),
+    /// `unset_fullscreen` on the `index`-th handle.
+    UnsetFullscreen(usize),
     /// Open and immediately destroy `count` toplevels, in one burst, without
     /// waiting for anything in between.
     ChurnWindows(usize),
@@ -537,6 +544,11 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
             Step::BindManager => {
                 let manager: ZwlrForeignToplevelManagerV1 =
                     registry.bind(manager_global.0, manager_global.1.min(VERSION), &qh, ());
+                client.managers.push(manager);
+            }
+            Step::BindManagerAt(version) => {
+                let manager: ZwlrForeignToplevelManagerV1 =
+                    registry.bind(manager_global.0, manager_global.1.min(version), &qh, ());
                 client.managers.push(manager);
             }
             Step::BindOutput => {
@@ -655,8 +667,6 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 handle.unset_maximized();
                 handle.set_minimized();
                 handle.unset_minimized();
-                handle.set_fullscreen(None);
-                handle.unset_fullscreen();
                 // A rectangle with a negative size, which wlroots answers with
                 // an `invalid_rectangle` protocol error. scoot reads nothing
                 // from the rectangle, so it must survive this rather than kill
@@ -664,6 +674,16 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 let surface = windows.first().ok_or("no window to hang a rectangle on")?;
                 handle.set_rectangle(&surface.0, 0, 0, -1, -1);
             }
+            Step::SetFullscreen(index) => client
+                .handles
+                .get(index)
+                .ok_or("no such toplevel handle")?
+                .set_fullscreen(None),
+            Step::UnsetFullscreen(index) => client
+                .handles
+                .get(index)
+                .ok_or("no such toplevel handle")?
+                .unset_fullscreen(),
             Step::ChurnWindows(count) => {
                 // No configure ack and no wait: the point is the compositor
                 // seeing creation and destruction at the rate a client can

@@ -390,7 +390,18 @@ impl State {
                     self.refresh_keyboard_focus();
                     return self.ok();
                 }
+                // `set-fullscreen` may name a window that is not visible,
+                // which `act`'s `apply` does not configure; it is told here
+                // (see `fullscreen.rs`). The toggle acts on the focused
+                // window, which `apply` always reaches.
+                let told = match &action {
+                    scoot_ipc::Action::SetFullscreen { id, .. } => Some(WindowId(*id)),
+                    _ => None,
+                };
                 self.act(Action::from(action));
+                if let Some(id) = told {
+                    self.tell_fullscreen(id);
+                }
                 self.ok()
             }
             // Connection::step() intercepts and answers this variant itself
@@ -578,6 +589,7 @@ impl State {
                     visible: placement.visible,
                     focused: arrangement.focused == Some(placement.id),
                     popup_grab: grab_holder == Some(placement.id),
+                    fullscreen: placement.fullscreen,
                 }
             })
             .collect()

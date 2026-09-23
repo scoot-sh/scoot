@@ -95,6 +95,36 @@ mod tests;
 /// The layers drawn in front of ordinary windows, front-most first -- the
 /// order both the render stack and pointer hit-testing walk them in.
 pub(super) const ABOVE_WINDOWS: [Layer; 2] = [Layer::Overlay, Layer::Top];
+/// What stays above windows while a fullscreen window covers the output: the
+/// overlay layer only (see [`above_windows`]).
+const ABOVE_FULLSCREEN: [Layer; 1] = [Layer::Overlay];
+
+/// The layers above windows on one output, front-most first:
+/// [`ABOVE_WINDOWS`], or just the overlay while a fullscreen window covers
+/// that output.
+///
+/// The one decision the three readers of "what is on top" share -- the
+/// render stack (`render/elements.rs`), pointer hit-testing
+/// ([`State::layer_surface_under`], and through it clicks) and exclusive
+/// keyboard focus ([`State::layer_keyboard_focus`]) -- so a bar hidden under
+/// a fullscreen video can neither be seen, nor clicked through the video's
+/// top edge, nor hold the keyboard. The overlay layer stays in all three: a
+/// notification or an OSD (volume, a lock screen built on layer-shell) is
+/// exactly what should show over a video. The bottom and background layers
+/// are below every window already and are not affected.
+///
+/// Consequence worth knowing: a launcher that maps on the *top* layer while
+/// a fullscreen window covers its output is neither shown nor given the
+/// keyboard until the fullscreen window stops covering (niri answers the
+/// same way). Launchers that use the overlay layer (fuzzel's and rofi's
+/// default) are unaffected.
+pub(super) fn above_windows(covered_by_fullscreen: bool) -> &'static [Layer] {
+    if covered_by_fullscreen {
+        &ABOVE_FULLSCREEN
+    } else {
+        &ABOVE_WINDOWS
+    }
+}
 /// ...and the ones drawn behind them, again front-most first.
 pub(super) const BELOW_WINDOWS: [Layer; 2] = [Layer::Bottom, Layer::Background];
 
@@ -158,9 +188,13 @@ fn layer_focus(layer: &LayerSurface) -> LayerFocus {
 ///
 /// Takes one layer-map guard and drops it before returning, per this
 /// module's guard discipline.
-fn exclusive_on(output: &Output) -> Option<LayerKeyboardFocus> {
+///
+/// `covered_by_fullscreen` narrows the walk to the overlay layer, as
+/// [`above_windows`] describes: a top-layer surface hidden under a fullscreen
+/// window must not hold the keyboard.
+fn exclusive_on(output: &Output, covered_by_fullscreen: bool) -> Option<LayerKeyboardFocus> {
     let map = layer_map_for_output(output);
-    for &layer in &ABOVE_WINDOWS {
+    for &layer in above_windows(covered_by_fullscreen) {
         let exclusive = map
             .layers_on(layer)
             .rev()
@@ -612,11 +646,21 @@ impl State {
     /// extents overlap the same local point, a hit on the wrong screen's
     /// surface. A position over no output misses -- see
     /// [`State::output_under`].
+    ///
+    /// The top layer is skipped on an output a fullscreen window covers (see
+    /// [`above_windows`]): a bar that is not drawn must not take the click
+    /// meant for the video under it. Checked here, per hit, rather than by
+    /// every caller passing a narrowed list, because only here is the output
+    /// under the pointer known.
     fn layer_hit(&self, layers: &[Layer], position: Point<f64, Logical>) -> Option<LayerHit> {
         let (output, origin) = self.output_under(position)?;
         let local = position - origin.to_f64();
+        let hide_top = layers.contains(&Layer::Top) && self.covered_by_fullscreen(&output);
         let map = layer_map_for_output(&output);
         for &layer in layers {
+            if hide_top && layer == Layer::Top {
+                continue;
+            }
             let Some(found) = map.layer_under(layer, local) else {
                 continue;
             };
@@ -679,7 +723,7 @@ impl State {
                 .map(|(output, _)| output)
         });
         if let Some(ref output) = preferred {
-            if let Some(found) = exclusive_on(output) {
+            if let Some(found) = exclusive_on(output, self.covered_by_fullscreen(output)) {
                 return Some(found);
             }
         }
@@ -687,7 +731,7 @@ impl State {
             if preferred.as_ref() == Some(output) {
                 continue;
             }
-            if let Some(found) = exclusive_on(output) {
+            if let Some(found) = exclusive_on(output, self.covered_by_fullscreen(output)) {
                 return Some(found);
             }
         }
@@ -703,10 +747,18 @@ impl State {
         // between that commit and this call. Keeping it means this function
         // still states the whole policy on its own rather than depending on
         // that clear having run first.
+        //
+        // And not hidden: a clicked top-layer surface on an output a
+        // fullscreen window now covers is no longer drawn (see
+        // `above_windows`), so it gives the keyboard back to the window
+        // rather than taking keys nobody can see go in. The guard is dropped
+        // before `covered_by_fullscreen`, which takes no layer-map lock but
+        // need not run under one either.
         let still_mapped = self.outputs.iter().any(|output| {
-            layer_map_for_output(output)
+            let on_output = layer_map_for_output(output)
                 .layers()
-                .any(|found| found == clicked)
+                .any(|found| found == clicked);
+            on_output && !(clicked.layer() == Layer::Top && self.covered_by_fullscreen(output))
         });
         (still_mapped && layer_focus(clicked) != LayerFocus::Never).then(|| LayerKeyboardFocus {
             surface: clicked.wl_surface().clone(),

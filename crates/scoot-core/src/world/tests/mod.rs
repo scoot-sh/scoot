@@ -1,6 +1,7 @@
 mod bench;
 mod columns;
 mod frames;
+mod fullscreen;
 mod invariants;
 mod outputs;
 mod reload;

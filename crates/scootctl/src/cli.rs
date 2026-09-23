@@ -43,7 +43,7 @@ pub const ACTIONS_HELP: &str = "\
     focus-column|move-column|consume-or-expel   left|right
     focus-window|move-window                    up|down
     focus-workspace|move-window-to-workspace    up|down
-    focus-window-id ID | focus-workspace-index N | move-window-to-workspace-index N | focus-output ID | move-window-to-output ID | cycle-column-width | set-column-width N | close | spawn COMMAND... | quit
+    focus-window-id ID | focus-workspace-index N | move-window-to-workspace-index N | focus-output ID | move-window-to-output ID | cycle-column-width | set-column-width N | toggle-fullscreen | set-fullscreen ID on|off | close | spawn COMMAND... | quit
 ";
 
 pub const USAGE: &str = "\
@@ -73,7 +73,7 @@ ACTIONS:
     focus-column|move-column|consume-or-expel   left|right
     focus-window|move-window                    up|down
     focus-workspace|move-window-to-workspace    up|down
-    focus-window-id ID | focus-workspace-index N | move-window-to-workspace-index N | focus-output ID | move-window-to-output ID | cycle-column-width | set-column-width N | close | spawn COMMAND... | quit
+    focus-window-id ID | focus-workspace-index N | move-window-to-workspace-index N | focus-output ID | move-window-to-output ID | cycle-column-width | set-column-width N | toggle-fullscreen | set-fullscreen ID on|off | close | spawn COMMAND... | quit
 ";
 
 #[derive(Debug, PartialEq)]
@@ -291,6 +291,20 @@ pub fn action(args: &mut impl Iterator<Item = String>) -> Result<Action, Error> 
         "cycle-column-width" => Action::CycleColumnWidth,
         "set-column-width" => Action::SetColumnWidth {
             index: number("a column width index", args.next())?,
+        },
+        "toggle-fullscreen" => Action::ToggleFullscreen,
+        "set-fullscreen" => Action::SetFullscreen {
+            id: number("a window id", args.next())?,
+            fullscreen: match args.next().ok_or(Error::Missing("on or off"))?.as_str() {
+                "on" => true,
+                "off" => false,
+                other => {
+                    return Err(Error::Invalid {
+                        what: "fullscreen state",
+                        value: other.to_owned(),
+                    });
+                }
+            },
         },
         "close" => Action::CloseFocused,
         "spawn" => {
@@ -572,6 +586,34 @@ mod tests {
         // against a bare cycle.
         assert!(parse_msg_args(&["action", "set-column-width", "down"]).is_err());
         assert!(parse_msg_args(&["action", "set-column-width"]).is_err());
+    }
+
+    #[test]
+    fn toggle_fullscreen_takes_no_argument() {
+        assert_eq!(
+            parse_msg_args(&["action", "toggle-fullscreen"]),
+            Ok(Msg {
+                request: Request::Action(Action::ToggleFullscreen),
+                out: None,
+            })
+        );
+    }
+
+    #[test]
+    fn set_fullscreen_takes_a_window_id_and_on_or_off() {
+        for (word, fullscreen) in [("on", true), ("off", false)] {
+            assert_eq!(
+                parse_msg_args(&["action", "set-fullscreen", "7", word]),
+                Ok(Msg {
+                    request: Request::Action(Action::SetFullscreen { id: 7, fullscreen }),
+                    out: None,
+                })
+            );
+        }
+        assert!(parse_msg_args(&["action", "set-fullscreen", "7"]).is_err());
+        assert!(parse_msg_args(&["action", "set-fullscreen", "7", "yes"]).is_err());
+        assert!(parse_msg_args(&["action", "set-fullscreen", "on"]).is_err());
+        assert!(parse_msg_args(&["action", "set-fullscreen"]).is_err());
     }
 
     #[test]

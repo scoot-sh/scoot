@@ -81,7 +81,7 @@ fn random_action(rng: &mut Rng, windows: &[WindowId], outputs: &[OutputId]) -> A
     } else {
         Vertical::Down
     };
-    match rng.below(15) {
+    match rng.below(17) {
         0 => Action::FocusColumn(horizontal),
         1 => Action::FocusWindow(vertical),
         2 => Action::MoveColumn(horizontal),
@@ -121,7 +121,25 @@ fn random_action(rng: &mut Rng, windows: &[WindowId], outputs: &[OutputId]) -> A
             1 => usize::MAX / 2,
             other => other,
         }),
+        14 => Action::ToggleFullscreen,
+        // By id, off the same wire as the others: usually a live window,
+        // sometimes a stale or wild one.
+        15 => Action::SetFullscreen {
+            id: random_window(rng, windows),
+            fullscreen: rng.chance(60),
+        },
         _ => Action::CloseFocused,
+    }
+}
+
+/// Usually one of the live windows, sometimes a stale or wild id -- a window
+/// id comes off the IPC and Wayland wires as an unbounded number.
+fn random_window(rng: &mut Rng, windows: &[WindowId]) -> WindowId {
+    match rng.below(8) {
+        0 => WindowId(u64::MAX),
+        1 => WindowId(u64::MAX / 2),
+        _ if !windows.is_empty() => windows[rng.below(windows.len())],
+        _ => WindowId(1),
     }
 }
 
@@ -142,7 +160,7 @@ fn random_step(world: &mut World, rng: &mut Rng, next_id: &mut u64) {
     let windows: Vec<WindowId> = world.windows().into_iter().map(|(id, _)| id).collect();
     let outputs: Vec<OutputId> = world.outputs().into_iter().map(|(id, _)| id).collect();
     *next_id += 1;
-    let event = match rng.below(13) {
+    let event = match rng.below(14) {
         0 | 1 => Event::WindowOpened {
             id: WindowId(*next_id),
             info: random_info(rng),
@@ -178,6 +196,10 @@ fn random_step(world: &mut World, rng: &mut Rng, next_id: &mut u64) {
         9 if !outputs.is_empty() => Event::OutputUsableAreaChanged {
             id: outputs[rng.below(outputs.len())],
             area: random_usable_area(rng),
+        },
+        10 => Event::FullscreenRequested {
+            id: random_window(rng, &windows),
+            fullscreen: rng.chance(60),
         },
         _ => {
             world.handle_action(random_action(rng, &windows, &outputs));
@@ -215,6 +237,14 @@ fn assert_invariants(world: &World) {
             );
             for column in &ws.columns {
                 assert!(!column.windows.is_empty(), "empty column");
+                // A fullscreen window is always its column's focused window
+                // -- and so there is at most one per column.
+                for (index, id) in column.windows.iter().enumerate() {
+                    assert!(
+                        index == column.focused || !world.is_fullscreen(*id),
+                        "fullscreen window {id:?} is not its column's focused one"
+                    );
+                }
                 assert!(
                     column.focused < column.windows.len(),
                     "focused window out of range"
@@ -235,16 +265,56 @@ fn assert_invariants(world: &World) {
         "every window must be in the tree exactly once"
     );
     assert!(world.outputs.is_empty() || world.focused_output < world.outputs.len());
-    for placement in world.arrange().placements {
+    let arrangement = world.arrange();
+    for placement in &arrangement.placements {
         assert!(
             placement.rect.w >= 1 && placement.rect.h >= 1,
             "{placement:?}"
         );
+        assert_eq!(
+            placement.fullscreen,
+            world.is_fullscreen(placement.id),
+            "{placement:?}"
+        );
+    }
+    // A covering window covers its output exactly, and nothing else on that
+    // output shows. (`Rect::new` sizes are floored at 1 in the placement, so
+    // compare against the non-degenerate outputs `random_area` produces.)
+    for output in &world.outputs {
+        let Some(covering) = world.fullscreen_on(output.id) else {
+            continue;
+        };
+        for placement in arrangement
+            .placements
+            .iter()
+            .filter(|p| p.output == output.id)
+        {
+            if placement.id == covering {
+                assert!(placement.visible, "covering {placement:?} is not visible");
+                assert_eq!(placement.rect, output.area, "covering {placement:?}");
+            } else {
+                assert!(
+                    !placement.visible,
+                    "{placement:?} shows beside {covering:?}"
+                );
+            }
+        }
+    }
+    // And `fullscreen_on` is exactly "the active workspace's focused window
+    // is fullscreen" -- nothing covers that should not.
+    for output in &world.outputs {
+        let focused = output.active_workspace().focused_window();
+        let expected = focused.filter(|id| world.is_fullscreen(*id));
+        assert_eq!(world.fullscreen_on(output.id), expected);
     }
 }
 
 #[test]
 fn random_sequences_keep_the_tree_consistent() {
+    // How many steps ended with some output covered by a fullscreen window,
+    // so the fullscreen invariants above are known to have been exercised
+    // rather than passing vacuously.
+    let mut covered_steps = 0;
     for seed in 1..=24 {
         let mut rng = Rng(seed);
         let mut world = World::new(config());
@@ -256,6 +326,17 @@ fn random_sequences_keep_the_tree_consistent() {
             {
                 panic!("invariant broken with seed {seed} at step {step}");
             }
+            if world
+                .outputs
+                .iter()
+                .any(|output| world.fullscreen_on(output.id).is_some())
+            {
+                covered_steps += 1;
+            }
         }
     }
+    assert!(
+        covered_steps > 1000,
+        "only {covered_steps} steps had a covering fullscreen window"
+    );
 }

@@ -14,8 +14,14 @@ pub struct Placement {
     /// Target frame in global logical coordinates. Windows that aren't visible
     /// still get the frame they *would* have, so a shell can animate from it.
     pub rect: Rect,
-    /// False when scrolled out of view or on an inactive workspace.
+    /// False when scrolled out of view or on an inactive workspace -- or
+    /// covered: stacked in the same column as a fullscreen window.
     pub visible: bool,
+    /// The window is fullscreen: `rect` is its output's whole area in size,
+    /// and exactly that area while its column is in focus (see
+    /// [`World::fullscreen_on`] for when that is). A shell tells the window
+    /// it is fullscreen from this, and draws no decoration around it.
+    pub fullscreen: bool,
 }
 
 /// A complete, declarative picture of where everything should be. Shells diff
@@ -61,11 +67,16 @@ impl World {
         // The output minus whatever the platform reserved (a bar's exclusive
         // zone), then minus the layout gap -- never `output.area`, which is
         // the whole screen and includes the reserved strip. See
-        // `tree::Output::usable`.
+        // `tree::Output::usable`. The one exception is a fullscreen column,
+        // below, which covers `area` on purpose.
         let usable = output.usable.inset(gap);
-        let widths = self.column_widths(ws, usable.w);
+        let widths = self.column_widths(ws, usable.w, output.area.w);
         let (starts, _) = layout::starts(&widths, gap);
         for ((column, start), width) in ws.columns.iter().zip(starts).zip(widths) {
+            if let Some(fullscreen) = self.fullscreen_in(column) {
+                place_fullscreen_column(output, ws, column, fullscreen, start, active, placements);
+                continue;
+            }
             // Saturating: a saturated strip (`layout::starts`) plus a
             // nonzero `usable.x` can put this past `i32::MAX` -- reachable
             // today only through an absurd configured proportion (which
@@ -84,16 +95,40 @@ impl World {
                     output: output.id,
                     rect: Rect::new(x, y, width, height),
                     visible: active && on_screen,
+                    fullscreen: false,
                 });
                 y += height + gap;
             }
         }
     }
 
-    fn column_widths(&self, ws: &Workspace, available: i32) -> Vec<i32> {
+    /// The column's fullscreen window, if it has one.
+    ///
+    /// Only the column's focused window is looked at: that is the one place a
+    /// fullscreen window can be (see `World::settle_fullscreen`), which keeps
+    /// this a single map lookup per column on every arrangement.
+    pub(super) fn fullscreen_in(&self, column: &Column) -> Option<WindowId> {
+        let id = *column.windows.get(column.focused)?;
+        self.windows
+            .get(&id)
+            .is_some_and(|w| w.fullscreen.is_some())
+            .then_some(id)
+    }
+
+    /// Every column's width in the strip, in order: its preset's share of
+    /// `available`, or the output's whole `full_width` for a fullscreen
+    /// column.
+    ///
+    /// The one source of both [`World::arrange`]'s placement and
+    /// [`World::fix_view`]'s scroll, so the two can never disagree about
+    /// where a fullscreen column sits.
+    fn column_widths(&self, ws: &Workspace, available: i32, full_width: i32) -> Vec<i32> {
         ws.columns
             .iter()
             .map(|column| {
+                if self.fullscreen_in(column).is_some() {
+                    return full_width.max(1);
+                }
                 let min = column
                     .windows
                     .iter()
@@ -128,7 +163,12 @@ impl World {
         let view = if ws.is_empty() {
             0
         } else {
-            let widths = self.column_widths(ws, available);
+            // A focused fullscreen column is `area.w` wide, never narrower
+            // than `available` (`usable` is a sub-rectangle of `area`, and
+            // the gap only shrinks it further), so this lands `view_x` exactly
+            // on the column's start -- which is what puts its window on the
+            // output's left edge in `place_fullscreen_column`.
+            let widths = self.column_widths(ws, available, output.area.w);
             let (starts, strip) = layout::starts(&widths, self.config.gap);
             layout::scroll_into_view(
                 ws.view_x,
@@ -145,5 +185,40 @@ impl World {
         for o in 0..self.outputs.len() {
             self.fix_view(o);
         }
+    }
+}
+
+/// Places a column whose focused window is fullscreen.
+///
+/// The fullscreen window is the output's whole area in size. Its `x` is the
+/// column's place in the strip measured from the output's own left edge
+/// rather than from the gap-inset usable area: when the column is in focus,
+/// `fix_view` has put `view_x` exactly on `start`, so that is `area.x`
+/// exactly and the window covers the output edge to edge, bars and gaps
+/// included. Scrolled away, it sits beside the focused column at the same
+/// size. Its stacked siblings get the same frame, invisible -- they are
+/// behind it.
+fn place_fullscreen_column(
+    output: &Output,
+    ws: &Workspace,
+    column: &Column,
+    fullscreen: WindowId,
+    start: i32,
+    active: bool,
+    placements: &mut Vec<Placement>,
+) {
+    let area = output.area;
+    let x = area.x.saturating_add(start).saturating_sub(ws.view_x);
+    let rect = Rect::new(x, area.y, area.w.max(1), area.h.max(1));
+    let on_screen = x < area.right() && x.saturating_add(rect.w) > area.x;
+    for &id in &column.windows {
+        let is_fullscreen = id == fullscreen;
+        placements.push(Placement {
+            id,
+            output: output.id,
+            rect,
+            visible: is_fullscreen && active && on_screen,
+            fullscreen: is_fullscreen,
+        });
     }
 }

@@ -48,8 +48,10 @@ impl World {
             Event::FocusObserved { id } => {
                 if let Some(loc) = self.locate(id) {
                     self.focus_location(loc);
+                    self.settle_fullscreen();
                 }
             }
+            Event::FullscreenRequested { id, fullscreen } => self.set_fullscreen(id, fullscreen),
         }
     }
 
@@ -127,7 +129,14 @@ impl World {
 
     /// Raises a window's learned minimum when it settled larger than it was
     /// asked to be, capped to the usable area of its output.
+    ///
+    /// Not while the window is fullscreen: a frame sized for the whole output
+    /// says nothing about how narrow the window can be in its column, and
+    /// learning from one would widen that column for good once it leaves.
     fn learn_from_frame(&mut self, id: WindowId, requested: Size, actual: Size) {
+        if self.is_fullscreen(id) {
+            return;
+        }
         let Some(loc) = self.locate(id) else {
             return;
         };

@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::time::Instant;
 
-use scoot_core::{Action, Config, OutputId, Size, WindowId, World};
+use scoot_core::{Action, Config, OutputId, WindowId, World};
 use smithay::desktop::{LayerSurface, PopupManager, Space, Window, WindowSurfaceType};
 use smithay::input::keyboard::Keycode;
 use smithay::input::{Seat, SeatState};
@@ -117,8 +117,6 @@ pub struct State {
     /// The layout. Everything else here exists to serve it.
     pub world: World,
     pub windows: HashMap<WindowId, Window>,
-    /// The size each window was last asked for, to pair with what it becomes.
-    pub requested: HashMap<WindowId, Size>,
     pub next_id: u64,
     /// The focused *window*, so activation and the focus ring are only moved
     /// when they change. Not necessarily what holds the keyboard: a layer
@@ -816,7 +814,6 @@ impl State {
             startup_xwayland: false,
             world: World::new(config),
             windows: HashMap::new(),
-            requested: HashMap::new(),
             next_id: 0,
             focus: None,
             clicked_layer: None,

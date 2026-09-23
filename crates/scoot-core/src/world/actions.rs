@@ -3,6 +3,7 @@
 use super::World;
 use super::tree::Output;
 use crate::messages::{Action, Effect};
+use crate::types::WindowId;
 
 impl World {
     /// Apply something a user or agent asked for. Returns the imperative
@@ -20,7 +21,12 @@ impl World {
             }
             Action::MoveWindow(dir) => self.reshape(|o| o.active_workspace_mut().move_window(dir)),
             Action::ConsumeOrExpel(dir) => {
-                self.reshape(|o| o.active_workspace_mut().consume_or_expel(dir));
+                let focused = self.focused_window();
+                let mut moved = false;
+                self.reshape(|o| moved = o.active_workspace_mut().consume_or_expel(dir));
+                if moved && let Some(id) = focused {
+                    self.leave_fullscreen_for_move(id);
+                }
             }
             Action::CycleColumnWidth => {
                 self.forget_learned_widths();
@@ -47,10 +53,18 @@ impl World {
             // side.
             Action::FocusWorkspaceIndex(index) => self.reshape(|o| o.focus_workspace_index(index)),
             Action::MoveWindowToWorkspace(dir) => {
-                self.reshape(|o| o.move_focused_window_to_workspace(dir));
+                let mut moved = None;
+                self.reshape(|o| moved = o.move_focused_window_to_workspace(dir));
+                if let Some(id) = moved {
+                    self.leave_fullscreen_for_move(id);
+                }
             }
             Action::MoveWindowToWorkspaceIndex(index) => {
-                self.reshape(|o| o.move_focused_window_to_workspace_index(index));
+                let mut moved = None;
+                self.reshape(|o| moved = o.move_focused_window_to_workspace_index(index));
+                if let Some(id) = moved {
+                    self.leave_fullscreen_for_move(id);
+                }
             }
             // Cross-output: these cannot go through `reshape`, which only
             // touches the focused output's tree.
@@ -61,6 +75,8 @@ impl World {
                     self.focus_location(loc);
                 }
             }
+            Action::ToggleFullscreen => self.toggle_fullscreen(),
+            Action::SetFullscreen { id, fullscreen } => self.set_fullscreen(id, fullscreen),
             Action::CloseFocused => {
                 return self
                     .focused_window()
@@ -71,7 +87,20 @@ impl World {
             Action::Spawn(command) => return vec![Effect::Spawn(command)],
             Action::Quit => return vec![Effect::Quit],
         }
+        self.settle_fullscreen();
         Vec::new()
+    }
+
+    /// A move carried the focused window somewhere new: it leaves fullscreen
+    /// (without the scroll restore, which described the layout it left), and
+    /// the output it is on now re-scrolls around its narrower column.
+    fn leave_fullscreen_for_move(&mut self, id: WindowId) {
+        if self.is_fullscreen(id) {
+            self.drop_fullscreen(id);
+            if let Some(loc) = self.locate(id) {
+                self.fix_view(loc.output);
+            }
+        }
     }
 
     /// Changes the focused output's tree, then scrolls focus back into view.
