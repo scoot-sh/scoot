@@ -678,6 +678,9 @@ capture-cursor → resize-in-place → syncobj → nested dmabuf → VRR.
 - [`--nested` gles presents by dmabuf](./core/nested-dmabuf-present.md) — low, argues against the recorded "read-back is design" position for nested+gles only.
 - [VRR on the scanout tier](./core/gpu-vrr.md) — low, blocked on a VRR-capable display.
 
+### Found reviewing client fullscreen (2026-09-23)
+- [Smoke xwayland step keys on PATH, not the build feature](./testing/smoke-xwayland-step-feature-gate.md) — medium: nested smoke in cage hangs then fails on any default build; pre-existing since PR #221.
+
 ### Meta
 - [Split the CLI out into `scootctl`](./resolved/rename-flex-family-done.md) — CLOSED 2026-09-20: the `flexwm` → `scoot` rename half landed 2026-09-18 (PR #128); the crate split landed 2026-09-20 ([record](./resolved/scootctl-split-done.md)): new `scootctl` lib+bin crate, `scoot msg` kept as a permanent alias, Darwin default is `scootctl`. A status bar stays separate.
 
