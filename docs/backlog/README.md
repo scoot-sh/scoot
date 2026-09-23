@@ -660,6 +660,22 @@ exactly what `State::spawn` started), and two gaps. They share a mechanism
   the reason that line holds is that one vocabulary parses in three doors.
 - [Docs gaps found converting a real NixOS config](./resolved/nixos-conversion-docs-gaps-done.md) — RESOLVED 2026-09-21 (gh #178): CHANGELOG session-identity strings + repo-move notice, a migration section in `docs/nix.md`, a packaged-renderer pointer on the live-defaults reference, an end-to-end session example on the new `session.command` surface, the `scoot msg reload` one-liner. Two premises stale at fix time, corrected not preserved: the roadmap row (fixed by #198 already) and the renderer premise (fixed by #198's GPU tiers).
 
+### GPU tier completion (filed 2026-09-22)
+
+Survey of what the README/`docs/tty.md` still name as missing on the
+optional GPU tier. pixman stays the default and GPU-free operation stays a
+hard requirement; this is "the GPU tier is complete and safe", not "GPU
+becomes the primary path". Work order: exporter → candidates →
+capture-cursor → resize-in-place → syncobj → nested dmabuf → VRR.
+`screencopy-dmabuf-capture` (above) stays gated on measured need.
+- [Widen the scanout framebuffer exporter](./core/gpu-direct-scanout-exporter.md) — high: `NodeFilter::None` makes `ALLOW_SCANOUT` inert; carries the never-fired force-path verification.
+- [Scanout candidates + scanout-tranche feedback](./core/gpu-scanout-candidates.md) — high, blocked on the exporter: every window is `Kind::Unspecified`.
+- [Captures lose the pointer on the scanout tier](./core/capture-cursor-parity.md) — high (computer use): capture cursor behaviour must not depend on the renderer.
+- [GLES resize in place](./core/gles-resize-in-place.md) — medium: 16.6 ms EGL rebuild per distinct size vs 37 µs pixman.
+- [Explicit sync, `linux-drm-syncobj-v1`](./protocols/linux-drm-syncobj.md) — medium: pinned Smithay carries it; advertise only where the device can honour it.
+- [`--nested` gles presents by dmabuf](./core/nested-dmabuf-present.md) — low, argues against the recorded "read-back is design" position for nested+gles only.
+- [VRR on the scanout tier](./core/gpu-vrr.md) — low, blocked on a VRR-capable display.
+
 ### Meta
 - [Split the CLI out into `scootctl`](./resolved/rename-flex-family-done.md) — CLOSED 2026-09-20: the `flexwm` → `scoot` rename half landed 2026-09-18 (PR #128); the crate split landed 2026-09-20 ([record](./resolved/scootctl-split-done.md)): new `scootctl` lib+bin crate, `scoot msg` kept as a permanent alias, Darwin default is `scootctl`. A status bar stays separate.
 
