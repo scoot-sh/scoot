@@ -26,7 +26,8 @@ RESOLVED 2026-09-23 (PR #TBD, branch `gles-dmabuf-full-formats`).
   external-only answer. Measured on llvmpipe: `NV12`/`P010`/`YU12`/`YUYV`
   filled red and sent at `Invalid` import fine and draw **0** red pixels of
   1024; at `LINEAR` all 1024. So implicit is never advertised next to an
-  explicit answer (wlroots draws the same line; anvil advertises the whole
+  explicit answer (wlroots' `init_dmabuf_formats` draws the same line, as
+  read in the archived `swaywm/wlroots` mirror; anvil advertises the whole
   set, which is not the evidence here). A fourcc with no explicit answer
   survives only as a candidate at `LINEAR`, which is exactly
   `imports_linear`'s old case.

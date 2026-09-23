@@ -14,8 +14,8 @@ scoot has not cut a numbered release yet; entries are dated.
 - **Under `--renderer gles`, GPU-rendering apps are now offered every
   buffer format and layout the GPU driver can take**, where they used to be
   told "plain linear RGB only". On a real GPU that lets GL and Vulkan apps
-  render into the GPU's native (tiled, compressed) layouts, which is faster,
-  and lets a video player hand over the YUV frames (`NV12`, `P010`, …) a
+  render into the layouts the GPU prefers (tiled, compressed), which is
+  typically faster than linear, and lets a video player hand over the YUV frames (`NV12`, `P010`, …) a
   hardware decoder produces instead of converting them first. The default
   pixman renderer is unchanged. Checked on the dev VM's software GPU (which
   offers 57 formats, all linear); what real GPU hardware offers has not

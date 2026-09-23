@@ -554,9 +554,13 @@ fn cpu_mapped_tranche(can_import: impl Fn(Format) -> bool) -> impl Iterator<Item
 ///   explicit layout is external-only would be bound as `GL_TEXTURE_2D`
 ///   against the driver's own answer -- and nothing checks the GL error after
 ///   `EGLImageTargetTexture2DOES`, so that would be a black or garbage window
-///   rather than a refusal no test of the import could see. A client that
-///   supports modifiers picks an explicit one anyway; wlroots draws the same
-///   line (`INVALID` only for a format with no explicit modifiers).
+///   rather than a refusal no test of the import could see (measured on
+///   llvmpipe -- see the module doc's note on clients that ignore their
+///   feedback).
+///   A client that supports modifiers picks an explicit one anyway. wlroots'
+///   `init_dmabuf_formats` draws the same line -- `INVALID` only for a format
+///   with no explicit modifiers -- as read in the archived `swaywm/wlroots`
+///   mirror, not re-checked against current upstream.
 /// - **A fourcc with *no* explicit modifiers** is one the driver could not be
 ///   asked about (no `EGL_EXT_image_dma_buf_import_modifiers`, or a driver
 ///   refusing the query for its own format). Only the two candidates survive

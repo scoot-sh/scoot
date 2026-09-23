@@ -473,6 +473,13 @@ fn red_pixels(pixels: &[u8]) -> usize {
 
 #[test]
 fn every_advertised_layout_imports_and_draws() {
+    // Under pixman every buffer this imports is `mmap`ed, and a dma-buf
+    // mapping is exactly what the parent suite's cache tests count in
+    // `/proc/self/maps` -- process-wide. Under `cargo test` (one process,
+    // tests as threads) an unserialised mapping appearing or vanishing here
+    // would land inside one of their before/after windows and fail it, so
+    // this takes the same lock they do. Free under nextest.
+    let _mappings = super::exclusive_mappings();
     let mut fixture = Harness::headless(Appearance::default(), CANVAS);
     fixture.spawn(run_client);
     let Ack::Table(table) = fixture.run(Step::ReadTable) else {
