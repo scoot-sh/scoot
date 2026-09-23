@@ -66,7 +66,7 @@ chain, so every walk up a chain and every recursion down a tree is at
 most 64 levels (65 with an input-method popup, which is a leaf). Not
 covered here, and filed: many popups *side by side* (quadratic, not
 deep -- `core/popup-count-quadratic.md`) and deeply nested *subsurfaces*
-(`core/subsurface-depth-bound.md`).
+(since resolved: `resolved/subsurface-depth-bound-done.md`).
 
 Measured (dev VM, release, the harness's 2 MB test-thread stack): on
 `main` a 3000-deep chain froze the compositor for ~60 s and then drew at

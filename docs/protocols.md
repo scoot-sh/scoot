@@ -372,6 +372,44 @@ session by holding a menu open.
 For what a grab means to an agent driving the socket, see
 [ipc.md](ipc.md#rules-an-agent-needs).
 
+### Subsurfaces (`wl_subsurface`)
+
+A video under its player's window, a toolkit's offloaded texture, a
+client-drawn titlebar: `wl_subcompositor.get_subsurface` works as the core
+protocol says, with one limit.
+
+- **Subsurfaces nest at most 64 levels below a surface tree's root.** The
+  root is whatever surface in the tree is not itself a subsurface: a
+  window, a popup, a layer surface, a cursor, or a plain surface with no
+  role yet. Its own subsurface is level 1, a subsurface of that is level 2,
+  and so on; real clients use a level or two. That holds for every tree,
+  however it was built. A `get_subsurface` is refused if it would put *any*
+  surface deeper than level 64, and that includes the subsurfaces already
+  hanging below the surface being attached, so a tree built bottom-up,
+  re-attached after `wl_subsurface.destroy`, or re-attached after its
+  parent `wl_surface` was destroyed is held to the same limit as one built
+  a level at a time. Before, a tree a few thousand levels deep crashed the
+  compositor, taking every other client down too.
+
+  | What the client did | Protocol error | Posted on |
+  |---|---|---|
+  | Called `get_subsurface` where the new subsurface, or a subsurface already below it, would be more than 64 levels below its tree's root | `wl_subcompositor.bad_parent` | the `wl_subcompositor` |
+
+  The message starts with `bad_parent:` and gives the level the deepest
+  surface would have reached; the refusal also logs a `warn` naming the
+  client. The `wl_subsurface` is not created, and the surfaces are not
+  linked.
+
+  What a surface has below it is judged by the tallest subtree it has ever
+  had, not only the one it has now: scoot is not told when a subsurface
+  below it goes away. So a surface that once had, say, 60 levels of
+  subsurfaces below it, and is later attached somewhere 5 levels deep,
+  is refused even if those 60 levels are gone. No real client comes
+  near it.
+
+  A parent that is the surface itself, or one of its own subsurfaces, is
+  still refused as before, with `wl_subcompositor.bad_surface`.
+
 ## Workspaces (`ext-workspace-v1`)
 
 Version 1, the compositor-agnostic successor to the one-off wlr workspace

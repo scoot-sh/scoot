@@ -18,8 +18,10 @@
 //! (the `popup_parent/tests` harness, one batch of nested subsurfaces
 //! under a window, then a frame): a debug build overflowed the 2 MB test
 //! stack at 3000 levels, a release build at 10000, and a release build on
-//! an 8 MB stack -- a real session's main thread -- at 30000. A stack
-//! overflow aborts the compositor, and every client goes down with it.
+//! an 8 MB stack -- a real session's main thread -- at 30000; and with
+//! nothing drawn at all, a debug build overflowed inside `is_ancestor`
+//! while linking the 8588th level. A stack overflow aborts the compositor,
+//! and every client goes down with it.
 //!
 //! # The rule
 //!
@@ -35,11 +37,14 @@
 //!
 //! What the check cannot do is look only at the new link, because a link
 //! does not always add a leaf. A surface's subsurface role outlives its
-//! `wl_subsurface`, so after `wl_subsurface.destroy` -- or after its parent
-//! `wl_surface` is destroyed -- the protocol lets it be made a subsurface
-//! again, under a different parent, with all of its own subsurfaces still
-//! attached. And a surface with no role at all can be given subsurfaces
-//! before it is made one itself. A cap on the new parent's depth alone is
+//! `wl_subsurface`, so after `wl_subsurface.destroy` the protocol lets it
+//! be made a subsurface again, under a different parent, with all of its
+//! own subsurfaces still attached -- and after its parent `wl_surface` is
+//! destroyed the pinned Smithay lets it too, though the protocol says a
+//! surface whose `wl_subsurface` is still alive is `bad_surface` (filed:
+//! `docs/backlog/core/subsurface-second-wl-subsurface.md`). And a surface
+//! with no role at all can be given subsurfaces before it is made one
+//! itself. A cap on the new parent's depth alone is
 //! bypassed by building a tree bottom-up, a capped piece at a time, each
 //! piece attached under the tip of the next: every link is shallow when it
 //! is made, and the tree ends up as deep as the client likes. So

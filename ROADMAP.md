@@ -100,6 +100,24 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[Subsurface depth bound](docs/backlog/resolved/subsurface-depth-bound-done.md)**
+  (2026-09-23, PR #PRNUM) — a client could crash the compositor by nesting
+  `wl_subsurface`s deeply (every Smithay surface-tree walk recurses per
+  level; on `main` 10000 overflowed a 2 MB stack in release, 30000 an
+  8 MB one after a 108 s stall, and in debug a chain 8588 deep overflowed
+  inside Smithay's own `is_ancestor`, during creation, before anything
+  scoot sees). A guard in
+  `dispatch.rs` refuses a `get_subsurface` with `bad_parent` before
+  Smithay links anything, when the new parent's depth plus the height of
+  the subtree being attached would exceed 64 (`subsurface_depth.rs`). The
+  height is what makes it sound: a subsurface can be re-attached with its
+  subtree after `wl_subsurface.destroy` or its parent's destruction, and a
+  role-less surface can be given children first, so a parent-depth cap
+  alone is bypassed bottom-up (measured: that alone overflowed). Frame
+  cost at the cap unchanged; mpv (which builds its two-level tree
+  bottom-up), GTK 4, foot and weston's demo unaffected live. Filed:
+  Smithay's missing `bad_surface` for a second `wl_subsurface`.
+
 - **[Popup depth bound](docs/backlog/resolved/popup-depth-bound-done.md)**
   (2026-09-23, PR #226) — a client could crash the compositor with a deep
   acyclic chain of `xdg_popup`s (Smithay's popup tree recurses per level;
