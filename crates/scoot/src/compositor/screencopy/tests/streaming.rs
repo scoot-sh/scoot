@@ -30,7 +30,8 @@ fn an_idle_session_does_not_count_and_a_capture_does() {
     });
     assert_eq!(fixture.state.primary_direct_now(), PrimaryDirect::Eligible);
 
-    // A parked request is a stream: the frame that answers it must be a
+    // A request -- still parked, or already answered by the time this
+    // asks -- is a stream: the frame that answers the next one must be a
     // composite, not a direct frame the capture then has to force.
     fixture.run(Step::CaptureWithoutWaiting);
     assert_eq!(fixture.state.primary_direct_now(), PrimaryDirect::Streaming);
@@ -56,6 +57,41 @@ fn a_session_ending_ends_the_stream() {
     fixture.run(Step::DestroySession);
     fixture.settle();
     assert_eq!(fixture.state.primary_direct_now(), PrimaryDirect::Eligible);
+}
+
+#[test]
+fn a_frame_parked_past_the_window_still_counts() {
+    // A recorder waiting on a still screen: its frame stays parked (nothing
+    // is due until the pixels move) for longer than the window. It is still
+    // a stream, so the frame that ends the pause is composited rather than
+    // forced. Asked at a `now` well past the window rather than by sleeping.
+    let mut fixture = Fixture::start_opaque();
+    fixture.run(Step::MapWindow(WINDOW_BGRA));
+    fixture.run(Step::StartSession {
+        paint_cursors: false,
+    });
+    let (outcome, _) = fixture
+        .run(Step::Capture {
+            width: CANVAS,
+            height: CANVAS,
+            format: wl_shm::Format::Argb8888,
+        })
+        .frame();
+    assert_eq!(outcome, Outcome::Ready, "the first frame is always due");
+    // The second waits: the screen has not changed since the first.
+    fixture.run(Step::CaptureWithoutWaiting);
+    fixture.settle();
+    assert_eq!(
+        fixture.run(Step::PollFrame).frame().0,
+        Outcome::Waiting,
+        "the test's own premise: the frame is parked"
+    );
+    let output = fixture.state.outputs.primary_id().expect("an output");
+    let later = Instant::now() + STREAM_WINDOW * 5;
+    assert!(fixture.state.screencopy.streaming(output, later));
+    fixture.run(Step::DestroySession);
+    fixture.settle();
+    assert!(!fixture.state.screencopy.streaming(output, later));
 }
 
 #[test]
