@@ -11,10 +11,13 @@ pub fn column_width(available: i32, gap: i32, proportion: f64, min: i32) -> i32 
 
 /// The start of each span laid end to end with `gap` between them, and the
 /// total length of that strip. Saturates rather than overflowing.
-pub fn starts(widths: &[i32], gap: i32) -> (Vec<i32>, i32) {
+///
+/// Takes the widths as an iterator so a caller holding them inside richer
+/// per-column records need not copy them out into a `Vec` of their own first.
+pub fn starts(widths: impl ExactSizeIterator<Item = i32>, gap: i32) -> (Vec<i32>, i32) {
     let mut starts = Vec::with_capacity(widths.len());
     let mut x: i32 = 0;
-    for (i, &width) in widths.iter().enumerate() {
+    for (i, width) in widths.enumerate() {
         if i > 0 {
             x = x.saturating_add(gap);
         }
@@ -115,7 +118,7 @@ mod tests {
 
     #[test]
     fn starts_saturate_instead_of_overflowing() {
-        let (_, strip) = starts(&[i32::MAX, i32::MAX], 10);
+        let (_, strip) = starts([i32::MAX, i32::MAX].into_iter(), 10);
         assert_eq!(strip, i32::MAX);
     }
 

@@ -94,4 +94,10 @@ fn measure(label: &str, mut world: World) {
 #[ignore = "a timing printout, run by hand with --release --nocapture"]
 fn arrange_cost() {
     measure("tiled", scene());
+    // The same scene with the focused window fullscreen: the focus step then
+    // alternates between covering and not, which is the path that pays for
+    // the fullscreen width lookup per column.
+    let mut fullscreen = scene();
+    fullscreen.handle_action(Action::ToggleFullscreen);
+    measure("fullscreen", fullscreen);
 }

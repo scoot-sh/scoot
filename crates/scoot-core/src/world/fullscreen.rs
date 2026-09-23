@@ -9,8 +9,8 @@
 //!   workspace has a second copy to keep in step.
 //! - **A fullscreen window is always its column's focused window.** That is
 //!   what makes "at most one per column" hold without a check of its own, and
-//!   what lets `arrange` find one with a single lookup per column
-//!   (`World::fullscreen_in`). Entering refuses a window that is not its
+//!   what lets `arrange` find one on the window lookups it already makes per
+//!   column (`World::column_spans`). Entering refuses a window that is not its
 //!   column's focused one; [`World::settle_fullscreen`] ends the fullscreen of
 //!   any window that stops being it.
 

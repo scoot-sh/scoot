@@ -33,6 +33,14 @@ pub struct Arrangement {
     pub focused_output: Option<OutputId>,
 }
 
+/// One column's place in the scrolling strip, as `World::column_spans`
+/// measures it.
+struct Span {
+    width: i32,
+    /// The column's fullscreen window, when it has one.
+    fullscreen: Option<WindowId>,
+}
+
 impl Arrangement {
     pub fn get(&self, id: WindowId) -> Option<&Placement> {
         self.placements.iter().find(|p| p.id == id)
@@ -70,13 +78,14 @@ impl World {
         // `tree::Output::usable`. The one exception is a fullscreen column,
         // below, which covers `area` on purpose.
         let usable = output.usable.inset(gap);
-        let widths = self.column_widths(ws, usable.w, output.area.w);
-        let (starts, _) = layout::starts(&widths, gap);
-        for ((column, start), width) in ws.columns.iter().zip(starts).zip(widths) {
-            if let Some(fullscreen) = self.fullscreen_in(column) {
+        let spans = self.column_spans(ws, usable.w, output.area.w);
+        let (starts, _) = layout::starts(spans.iter().map(|span| span.width), gap);
+        for ((column, start), span) in ws.columns.iter().zip(starts).zip(spans) {
+            if let Some(fullscreen) = span.fullscreen {
                 place_fullscreen_column(output, ws, column, fullscreen, start, active, placements);
                 continue;
             }
+            let width = span.width;
             // Saturating: a saturated strip (`layout::starts`) plus a
             // nonzero `usable.x` can put this past `i32::MAX` -- reachable
             // today only through an absurd configured proportion (which
@@ -102,42 +111,38 @@ impl World {
         }
     }
 
-    /// The column's fullscreen window, if it has one.
-    ///
-    /// Only the column's focused window is looked at: that is the one place a
-    /// fullscreen window can be (see `World::settle_fullscreen`), which keeps
-    /// this a single map lookup per column on every arrangement.
-    pub(super) fn fullscreen_in(&self, column: &Column) -> Option<WindowId> {
-        let id = *column.windows.get(column.focused)?;
-        self.windows
-            .get(&id)
-            .is_some_and(|w| w.fullscreen.is_some())
-            .then_some(id)
-    }
-
-    /// Every column's width in the strip, in order: its preset's share of
-    /// `available`, or the output's whole `full_width` for a fullscreen
-    /// column.
+    /// Every column's span in the strip, in order: its preset's share of
+    /// `available`, or the output's whole `full_width` for a column whose
+    /// focused window is fullscreen (the only place a fullscreen window can
+    /// be -- see `World::settle_fullscreen`), which it also names.
     ///
     /// The one source of both [`World::arrange`]'s placement and
     /// [`World::fix_view`]'s scroll, so the two can never disagree about
-    /// where a fullscreen column sits.
-    fn column_widths(&self, ws: &Workspace, available: i32, full_width: i32) -> Vec<i32> {
+    /// where a fullscreen column sits. The fullscreen check rides on the
+    /// window lookups the minimum width already makes, so a tiled
+    /// arrangement pays no extra map lookup for it.
+    fn column_spans(&self, ws: &Workspace, available: i32, full_width: i32) -> Vec<Span> {
         ws.columns
             .iter()
             .map(|column| {
-                if self.fullscreen_in(column).is_some() {
-                    return full_width.max(1);
+                let mut min = 0;
+                for (index, id) in column.windows.iter().enumerate() {
+                    let Some(window) = self.windows.get(id) else {
+                        continue;
+                    };
+                    if index == column.focused && window.fullscreen.is_some() {
+                        return Span {
+                            width: full_width.max(1),
+                            fullscreen: Some(*id),
+                        };
+                    }
+                    min = min.max(window.min().w);
                 }
-                let min = column
-                    .windows
-                    .iter()
-                    .filter_map(|id| self.windows.get(id))
-                    .map(|w| w.min().w)
-                    .max()
-                    .unwrap_or(0);
                 let proportion = self.config.column_widths[column.preset];
-                layout::column_width(available, self.config.gap, proportion, min)
+                Span {
+                    width: layout::column_width(available, self.config.gap, proportion, min),
+                    fullscreen: None,
+                }
             })
             .collect()
     }
@@ -168,13 +173,14 @@ impl World {
             // the gap only shrinks it further), so this lands `view_x` exactly
             // on the column's start -- which is what puts its window on the
             // output's left edge in `place_fullscreen_column`.
-            let widths = self.column_widths(ws, available, output.area.w);
-            let (starts, strip) = layout::starts(&widths, self.config.gap);
+            let spans = self.column_spans(ws, available, output.area.w);
+            let (starts, strip) =
+                layout::starts(spans.iter().map(|span| span.width), self.config.gap);
             layout::scroll_into_view(
                 ws.view_x,
                 available,
                 starts[ws.focused],
-                widths[ws.focused],
+                spans[ws.focused].width,
                 strip,
             )
         };
