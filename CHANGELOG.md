@@ -18,10 +18,12 @@ scoot has not cut a numbered release yet; entries are dated.
   being composited without knowing why. It is only a suggestion: every
   layout it names is one the app was already offered, so nothing can break
   for an app that ignores it, or that ends up composited anyway (a
-  notification over it, a screen recording). An app whose window has
-  transparency and does not mark itself opaque is not told, since the
-  display is never offered its buffer over scoot's default background.
-  Nothing to configure. Seen on
+  notification over it, a screen recording). An app is only told when its
+  buffer could actually be shown that way: its window is opaque (an
+  opaque-format buffer, or marked opaque), or the background is black and
+  there is no wallpaper under it. An app with a transparent window over
+  scoot's default background, or over a wallpaper, is not told — the
+  display would never be offered its buffer. Nothing to configure. Seen on
   the dev VM with a test client; not yet with a real GPU app or on real GPU
   hardware ([Asahi.md](Asahi.md), Test 6).
 - **Presentation timing now says when a frame was shown with zero copy.**

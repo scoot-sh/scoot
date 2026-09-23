@@ -433,6 +433,20 @@ fn a_window_smithay_would_never_try_is_not_steered() {
 }
 
 #[test]
+fn an_alpha_window_over_an_opaque_wallpaper_is_not_steered() {
+    // Review's R1, over the wire: the wallpaper is what Smithay would try,
+    // so the window is never sent the scanout tranche.
+    let mut fixture = Fixture::new();
+    fixture.done(Step::CreateLayer(Layer::Wallpaper { opaque: true }));
+    fixture.map(WINDOW_BGRA);
+    fixture.surface_feedback(0);
+    fixture.install(&virtio_plane(), 0);
+    fixture.fullscreen(0);
+    assert_eq!(fixture.steer(), Steer::Idle);
+    assert_eq!(fixture.feedbacks(0).len(), 1, "the default, and only that");
+}
+
+#[test]
 fn an_overlay_surface_above_does_not_revert() {
     // Not an eligibility rule: Smithay composites the frame a notification
     // is drawn over, and the window goes direct again, in the layout this

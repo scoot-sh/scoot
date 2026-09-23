@@ -66,6 +66,22 @@ pub(super) fn set_fullscreen_state(state: &mut ToplevelState, fullscreen: bool) 
     }
 }
 
+/// [`State::fullscreen_surface`] over the two fields it reads, for a caller
+/// that holds a mutable borrow of another `State` field at the same time
+/// (the scanout feedback steering, `dmabuf/scanout.rs`).
+#[cfg(feature = "gpu-scanout")]
+pub(super) fn fullscreen_surface_in<'a>(
+    world: &scoot_core::World,
+    windows: &'a std::collections::HashMap<WindowId, Window>,
+    output: scoot_core::OutputId,
+) -> Option<&'a smithay::reexports::wayland_server::protocol::wl_surface::WlSurface> {
+    world
+        .fullscreen_on(output)
+        .and_then(|id| windows.get(&id))
+        .and_then(Window::toplevel)
+        .map(ToplevelSurface::wl_surface)
+}
+
 impl State {
     /// Whether a fullscreen window covers `output` right now -- the core's
     /// [`World::fullscreen_on`](scoot_core::World::fullscreen_on), for an
@@ -79,6 +95,21 @@ impl State {
             .id_of(output)
             .and_then(|id| self.world.fullscreen_on(id))
             .is_some()
+    }
+
+    /// The root `wl_surface` of the fullscreen window covering `output`, if a
+    /// Wayland toplevel covers it: what the GPU scanout tier's
+    /// `render::primary_direct` checks Smithay's candidate element against,
+    /// and what its per-surface scanout feedback steers
+    /// (`dmabuf/scanout.rs`) -- one lookup, so the two cannot disagree about
+    /// which window that is. Allocation-free: `fullscreen_on` plus one map
+    /// lookup. An X11 window has no `ToplevelSurface` and answers `None`.
+    #[cfg(feature = "gpu-scanout")]
+    pub(super) fn fullscreen_surface(
+        &self,
+        output: scoot_core::OutputId,
+    ) -> Option<&smithay::reexports::wayland_server::protocol::wl_surface::WlSurface> {
+        fullscreen_surface_in(&self.world, &self.windows, output)
     }
 
     /// Re-derives pointer focus when what covers any output changed since

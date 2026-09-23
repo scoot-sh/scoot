@@ -82,11 +82,17 @@
 //! The **root surface of the fullscreen window covering the output**, while
 //! `render::primary_direct` judges the output eligible -- the same judgement
 //! that hands the frame the direct flag set, shared rather than re-derived.
-//! That judgement includes Smithay's own precondition for trying the primary
-//! at all (its rule 6: something opaque over the whole output, or a black
-//! clear colour), so a client Smithay would never scan out -- an alpha
-//! buffer with no opaque region over a grey background -- is not asked to
-//! reallocate into a scannable layout it could never use.
+//! That judgement includes whether Smithay would try the covering window's
+//! own element for the primary at all (its rule 6, mirroring Smithay's
+//! walk), so a client Smithay would never scan out -- an alpha buffer with
+//! no opaque region over a grey background, or over any wallpaper -- is not
+//! asked to reallocate into a scannable layout it could never use.
+//!
+//! **Known cost, accepted in review:** a window becomes eligible only once
+//! its buffer spans the output, i.e. after the client has redrawn at the
+//! fullscreen size, so a client that acts on the feedback reallocates twice
+//! on entering fullscreen (once for the size, once for the layout) -- one
+//! extra buffer set per fullscreen entry, never per frame.
 //! Subsurfaces are not steered: the window's root is what a fullscreen GL
 //! client or game renders into, and a subsurface cannot reach the primary
 //! unless everything drawn over the root is already a plane of its own.
@@ -144,8 +150,6 @@ use smithay::wayland::compositor::with_states;
 use smithay::wayland::dmabuf::{DmabufFeedback, SurfaceDmabufFeedbackState};
 
 use scoot_core::OutputId;
-use smithay::desktop::Window;
-use smithay::wayland::shell::xdg::ToplevelSurface;
 
 use super::DefaultFeedback;
 use crate::compositor::State;
@@ -549,13 +553,12 @@ impl State {
         eligible: bool,
         now: impl FnOnce() -> Instant,
     ) -> Steer {
-        let covering = self
-            .world
-            .fullscreen_on(output)
-            .and_then(|id| self.windows.get(&id))
-            .and_then(Window::toplevel)
-            .map(ToplevelSurface::wl_surface);
         let default = self.dmabuf_default.as_ref().map(DefaultFeedback::feedback);
+        let covering = crate::compositor::fullscreen::fullscreen_surface_in(
+            &self.world,
+            &self.windows,
+            output,
+        );
         let steer = self
             .scanout_feedback
             .get_mut(output)

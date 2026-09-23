@@ -111,10 +111,12 @@ each item's own file records why it landed when it did.
   single-plane formats on a modifier-less plane, never `Invalid`, minus
   modifiers the layout exporter saw GBM lose) — a subset of the default, so
   nothing new is promised. Eligibility is `render::primary_direct`'s, which
-  gained a rule 6 in review: Smithay's own precondition for trying the
-  primary (something opaque over the output, or a black clear colour), so an
-  alpha client with no opaque region over the grey default is neither given
-  the direct flags nor steered (it was, and never went direct). Sent
+  gained a rule 6 in review: Smithay's own walk, mirrored -- the element it
+  would try for the primary must pass its guard (opaque and spanning, or a
+  black clear colour) *and* be the covering window's -- so an alpha client
+  with no opaque region, over the grey default or over any wallpaper, is
+  neither given the direct flags nor steered (it was, and never went
+  direct). Sent
   only on a change: at once when the covering window changes, on the first
   frame after a 2 s hold for lock/stream/translucency (a thumbnail capture
   never flaps it),

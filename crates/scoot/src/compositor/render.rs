@@ -941,11 +941,19 @@ fn draw_frame_scanout(
         renderer,
         captures,
         last_eligibility,
+        judge_scratch,
         ..
     } = gpu;
     let clear_color = frame_clear_color(state, locked);
-    let (elements, cursor_surface, direct) =
-        scanout_frame_elements(state, renderer, size, output, locked, clear_color);
+    let (elements, cursor_surface, direct) = scanout_frame_elements(
+        state,
+        renderer,
+        size,
+        output,
+        locked,
+        clear_color,
+        judge_scratch,
+    );
     outcome.cursor_surface = cursor_surface;
     let output_id = state.outputs.id_of(output);
     if direct != *last_eligibility {
@@ -1051,6 +1059,7 @@ fn scanout_frame_elements<R>(
     output: &Output,
     locked: bool,
     clear_color: Color32F,
+    judge_scratch: &mut primary_direct::JudgeScratch,
 ) -> (
     Vec<Elements<R>>,
     Option<WlSurface>,
@@ -1091,7 +1100,8 @@ where
         scale: frame.scale,
         clear_color,
     };
-    let direct = primary_direct::judge(state, output, locked, &elements, &tried_with);
+    let direct =
+        primary_direct::judge(state, output, locked, &elements, &tried_with, judge_scratch);
     (elements, cursor_surface, direct)
 }
 
@@ -1109,19 +1119,85 @@ impl State {
         let locked = self.session_lock.is_locked();
         let size = backend.size;
         let clear_color = frame_clear_color(self, locked);
+        let mut scratch = primary_direct::JudgeScratch::default();
         let direct = match &mut backend.pipeline {
             Pipeline::Pixman(cpu) => {
-                scanout_frame_elements(self, &mut cpu.renderer, size, &output, locked, clear_color)
-                    .2
+                scanout_frame_elements(
+                    self,
+                    &mut cpu.renderer,
+                    size,
+                    &output,
+                    locked,
+                    clear_color,
+                    &mut scratch,
+                )
+                .2
             }
             Pipeline::Gles(gpu) => {
-                scanout_frame_elements(self, &mut gpu.renderer, size, &output, locked, clear_color)
-                    .2
+                scanout_frame_elements(
+                    self,
+                    &mut gpu.renderer,
+                    size,
+                    &output,
+                    locked,
+                    clear_color,
+                    &mut scratch,
+                )
+                .2
             }
             Pipeline::Scanout(_) => unreachable!("no test builds a scanout pipeline"),
         };
         self.put_backend(id, backend);
         direct
+    }
+}
+
+/// Times [`primary_direct::judge`] alone over the primary output's current
+/// frame: the list is gathered once (as `draw_frame_scanout` would), then
+/// judged `rounds` times with one scratch, as the tier judges frame after
+/// frame. Answers the verdict and the mean time per call.
+#[cfg(all(test, feature = "gpu-scanout"))]
+impl State {
+    pub(super) fn judge_cost(
+        &mut self,
+        rounds: u32,
+    ) -> (primary_direct::PrimaryDirect, std::time::Duration) {
+        let (id, output) = self
+            .outputs
+            .at(0)
+            .expect("a headless harness has an output");
+        let mut backend = self.take_backend(id).expect("a render target");
+        let locked = self.session_lock.is_locked();
+        let size = backend.size;
+        let clear_color = frame_clear_color(self, locked);
+        let mut scratch = primary_direct::JudgeScratch::default();
+        let Pipeline::Pixman(cpu) = &mut backend.pipeline else {
+            unreachable!("the cost harness runs on pixman");
+        };
+        let (elements, _, verdict) = scanout_frame_elements(
+            self,
+            &mut cpu.renderer,
+            size,
+            &output,
+            locked,
+            clear_color,
+            &mut scratch,
+        );
+        let tried_with = primary_direct::TriedWith {
+            size,
+            scale: output.current_scale().fractional_scale(),
+            clear_color,
+        };
+        let started = std::time::Instant::now();
+        for _ in 0..rounds {
+            let again =
+                primary_direct::judge(self, &output, locked, &elements, &tried_with, &mut scratch);
+            std::hint::black_box(again);
+        }
+        let each = started.elapsed() / rounds.max(1);
+        drop(elements);
+        self.put_backend(id, backend);
+        (verdict, each)
     }
 }
 

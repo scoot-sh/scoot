@@ -93,6 +93,13 @@ enum Layer {
     /// A dock down the left edge, on the `top` layer, reserving its width
     /// ([`DOCK_WIDTH`]) -- a left exclusive zone.
     Dock,
+    /// A wallpaper on the `background` layer, the whole output, reserving
+    /// nothing: opaque (an `Xrgb8888` buffer) or not (`Argb8888`, no opaque
+    /// region). Under a covering fullscreen window it stays in the frame's
+    /// element list, which is what `render::primary_direct`'s rule 6 has to
+    /// see past.
+    #[cfg(feature = "gpu-scanout")]
+    Wallpaper { opaque: bool },
 }
 
 /// The width [`Layer::Dock`] reserves at the left edge.
@@ -161,6 +168,11 @@ enum Step {
     /// double-buffered surface state).
     #[cfg(feature = "gpu-scanout")]
     SetAlpha { window: usize, multiplier: u32 },
+    /// Ack the newest configure and draw at its size in `Xrgb8888`, with no
+    /// opaque region: an opaque-format buffer, the commonest real covering
+    /// window (Mesa's default EGL config, mpv, games).
+    #[cfg(feature = "gpu-scanout")]
+    DrawXrgb { window: usize },
     /// Declare the `window`-th toplevel's surface opaque as a whole
     /// (`wl_surface.set_opaque_region` with a region larger than any size it
     /// will be given; Smithay clips it to the buffer), then commit. Smithay
@@ -170,6 +182,11 @@ enum Step {
     /// out over a non-black background.
     #[cfg(feature = "gpu-scanout")]
     SetOpaque { window: usize },
+    /// The same, as `stripes` vertical rectangles that together cover the
+    /// output and none of which covers it alone -- the shape that takes
+    /// the rectangle subtraction in `render::primary_direct`'s rule 6.
+    #[cfg(feature = "gpu-scanout")]
+    SetOpaqueStripes { window: usize, stripes: i32 },
     /// `zwp_linux_dmabuf_v1.get_surface_feedback` for the `window`-th
     /// toplevel's surface: what a v4+ Mesa client does for every EGL window.
     #[cfg(feature = "gpu-scanout")]
@@ -431,6 +448,18 @@ fn solid_buffer(
     height: i32,
     color: [u8; 4],
 ) -> (wl_buffer::WlBuffer, i32, i32) {
+    solid_buffer_in(shm, qh, width, height, color, wl_shm::Format::Argb8888)
+}
+
+/// [`solid_buffer`] in `format`.
+fn solid_buffer_in(
+    shm: &wl_shm::WlShm,
+    qh: &QueueHandle<TestClient>,
+    width: i32,
+    height: i32,
+    color: [u8; 4],
+    format: wl_shm::Format,
+) -> (wl_buffer::WlBuffer, i32, i32) {
     let width = if width > 0 { width } else { 40 };
     let height = if height > 0 { height } else { 40 };
     let stride = width * 4;
@@ -441,7 +470,7 @@ fn solid_buffer(
     let pixels: Vec<u8> = color.iter().copied().cycle().take(len).collect();
     file.write_all(&pixels).expect("a filled pool file");
     let pool = shm.create_pool(file.as_fd(), len as i32, qh, ());
-    let buffer = pool.create_buffer(0, width, height, stride, wl_shm::Format::Argb8888, qh, ());
+    let buffer = pool.create_buffer(0, width, height, stride, format, qh, ());
     pool.destroy();
     (buffer, width, height)
 }
@@ -674,6 +703,13 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                         (NOTE_SIZE, NOTE_SIZE),
                         0,
                     ),
+                    #[cfg(feature = "gpu-scanout")]
+                    Layer::Wallpaper { .. } => (
+                        zwlr_layer_shell_v1::Layer::Background,
+                        zwlr_layer_surface_v1::Anchor::all(),
+                        (0, 0),
+                        -1,
+                    ),
                 };
                 let role = layer_shell.get_layer_surface(
                     &surface,
@@ -698,10 +734,17 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                     })?;
                 let color = match kind {
                     Layer::Bar | Layer::Dock => BAR_BGRA,
+                    #[cfg(feature = "gpu-scanout")]
+                    Layer::Wallpaper { .. } => OTHER_BGRA,
                     Layer::Notification | Layer::Launcher(_) => NOTE_BGRA,
                 };
+                let format = match kind {
+                    #[cfg(feature = "gpu-scanout")]
+                    Layer::Wallpaper { opaque: true } => wl_shm::Format::Xrgb8888,
+                    _ => wl_shm::Format::Argb8888,
+                };
                 let (buffer, width, height) =
-                    solid_buffer(&shm, &qh, width as i32, height as i32, color);
+                    solid_buffer_in(&shm, &qh, width as i32, height as i32, color, format);
                 surface.attach(Some(&buffer), 0, 0);
                 surface.damage(0, 0, width, height);
                 surface.commit();
@@ -728,6 +771,47 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                     .as_ref()
                     .ok_or("no ext_session_lock_manager_v1")?;
                 locks.push(manager.lock(&qh, ()));
+                queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                Ack::Done
+            }
+            #[cfg(feature = "gpu-scanout")]
+            Step::DrawXrgb { window } => {
+                let newest = client.configures[window]
+                    .last()
+                    .copied()
+                    .ok_or("no configure to ack")?;
+                ack_newest(&mut client, &windows[window], window, newest.serial);
+                let (buffer, width, height) = solid_buffer_in(
+                    &shm,
+                    &qh,
+                    newest.width,
+                    newest.height,
+                    WINDOW_BGRA,
+                    wl_shm::Format::Xrgb8888,
+                );
+                let surface = &windows[window].surface;
+                surface.attach(Some(&buffer), 0, 0);
+                surface.damage(0, 0, width, height);
+                surface.commit();
+                queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                Ack::Done
+            }
+            #[cfg(feature = "gpu-scanout")]
+            Step::SetOpaqueStripes { window, stripes } => {
+                let surface = &windows[window].surface;
+                let region = compositor.create_region(&qh, ());
+                let width = CANVAS / stripes.max(1);
+                for stripe in 0..stripes {
+                    let end = if stripe == stripes - 1 {
+                        1 << 16
+                    } else {
+                        width
+                    };
+                    region.add(stripe * width, 0, end, 1 << 16);
+                }
+                surface.set_opaque_region(Some(&region));
+                region.destroy();
+                surface.commit();
                 queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
                 Ack::Done
             }

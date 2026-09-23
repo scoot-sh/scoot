@@ -230,3 +230,143 @@ fn over_black_an_alpha_window_is_tried_without_an_opaque_region() {
     });
     assert_eq!(fixture.state.primary_direct_now(), PrimaryDirect::Eligible);
 }
+
+/// Makes the only window fullscreen and draws it in `Argb8888` (optionally
+/// declaring an opaque region), over whatever layers the test mapped.
+fn fullscreen_alpha(fixture: &mut Fixture, opaque_region: bool) {
+    fixture.configured(Step::SetFullscreen {
+        window: 0,
+        output: None,
+    });
+    if opaque_region {
+        fixture.done(Step::SetOpaque { window: 0 });
+    }
+    fixture.done(Step::Draw {
+        window: 0,
+        color: WINDOW_BGRA,
+    });
+}
+
+/// A session with a wallpaper, a window mapped over it.
+fn over_wallpaper(appearance: Appearance, opaque_wallpaper: bool) -> Fixture {
+    let mut fixture = Fixture::with_appearance(appearance);
+    fixture.done(Step::CreateLayer(Layer::Wallpaper {
+        opaque: opaque_wallpaper,
+    }));
+    fixture.map(WINDOW_BGRA);
+    fixture
+}
+
+#[test]
+fn over_an_opaque_wallpaper_an_alpha_window_is_not_what_smithay_tries() {
+    // Review's R1: the wallpaper under the window is opaque and spans the
+    // output, so Smithay's walk ends there and it -- not the window -- is
+    // the element it would try. Grey and black alike.
+    for appearance in [appearance(), black()] {
+        let mut fixture = over_wallpaper(appearance, true);
+        fullscreen_alpha(&mut fixture, false);
+        assert_eq!(
+            fixture.state.primary_direct_now(),
+            PrimaryDirect::NotTheWindow
+        );
+    }
+}
+
+#[test]
+fn over_a_transparent_wallpaper_an_alpha_window_is_never_tried() {
+    // Grey: nothing is opaque over the output, so Smithay tries nothing.
+    let mut fixture = over_wallpaper(appearance(), false);
+    fullscreen_alpha(&mut fixture, false);
+    assert_eq!(
+        fixture.state.primary_direct_now(),
+        PrimaryDirect::NothingOpaqueCovers
+    );
+    // Black: Smithay would try the last element -- the wallpaper.
+    let mut fixture = over_wallpaper(black(), false);
+    fullscreen_alpha(&mut fixture, false);
+    assert_eq!(
+        fixture.state.primary_direct_now(),
+        PrimaryDirect::NotTheWindow
+    );
+}
+
+#[test]
+fn an_opaque_region_puts_the_window_in_front_of_any_wallpaper() {
+    // Declared opaque, the window ends the walk itself, whatever lies
+    // beneath and whatever the background.
+    for appearance in [appearance(), black()] {
+        for opaque_wallpaper in [true, false] {
+            let mut fixture = over_wallpaper(appearance.clone(), opaque_wallpaper);
+            fullscreen_alpha(&mut fixture, true);
+            assert_eq!(
+                fixture.state.primary_direct_now(),
+                PrimaryDirect::Eligible,
+                "opaque wallpaper = {opaque_wallpaper}"
+            );
+        }
+    }
+}
+
+#[test]
+fn an_opaque_format_buffer_needs_no_opaque_region() {
+    // The commonest real covering window: an `Xrgb8888` buffer, no opaque
+    // region. Smithay treats a buffer with no alpha channel as opaque whole.
+    for opaque_wallpaper in [None, Some(true), Some(false)] {
+        let mut fixture = Fixture::new();
+        if let Some(opaque) = opaque_wallpaper {
+            fixture.done(Step::CreateLayer(Layer::Wallpaper { opaque }));
+        }
+        fixture.map(WINDOW_BGRA);
+        fixture.configured(Step::SetFullscreen {
+            window: 0,
+            output: None,
+        });
+        fixture.done(Step::DrawXrgb { window: 0 });
+        assert_eq!(
+            fixture.state.primary_direct_now(),
+            PrimaryDirect::Eligible,
+            "wallpaper = {opaque_wallpaper:?}"
+        );
+    }
+}
+
+/// Prints what `render::primary_direct::judge` costs per frame on the
+/// shapes a fullscreen session sits in: an opaque window, an alpha window
+/// over an opaque wallpaper (the walk goes one element further), and a
+/// window declaring its opacity in 16 rectangles, none of which covers it
+/// alone (the subtraction path). Run by hand:
+///
+/// ```text
+/// cargo test --release -p scoot --bin scoot --features gpu-scanout judge_cost -- --ignored --nocapture
+/// ```
+#[test]
+#[ignore = "prints per-frame timings for a human; asserts nothing"]
+fn judge_cost() {
+    const ROUNDS: u32 = 200_000;
+    let mut opaque = Fixture::new();
+    covering(&mut opaque);
+    let mut wallpaper = over_wallpaper(appearance(), true);
+    fullscreen_alpha(&mut wallpaper, false);
+    let mut striped = Fixture::new();
+    striped.map(WINDOW_BGRA);
+    striped.configured(Step::SetFullscreen {
+        window: 0,
+        output: None,
+    });
+    striped.done(Step::SetOpaqueStripes {
+        window: 0,
+        stripes: 16,
+    });
+    striped.done(Step::Draw {
+        window: 0,
+        color: WINDOW_BGRA,
+    });
+    for (label, fixture) in [
+        ("opaque window", &mut opaque),
+        ("alpha window over an opaque wallpaper", &mut wallpaper),
+        ("window opaque in 16 stripes", &mut striped),
+    ] {
+        let (verdict, each) = fixture.state.judge_cost(ROUNDS);
+        println!("judge, {label}: {each:?} per frame ({verdict:?}, {ROUNDS} rounds)");
+    }
+}

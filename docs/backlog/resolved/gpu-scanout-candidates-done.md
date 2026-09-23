@@ -41,10 +41,19 @@ eligibility half landed with the
   transparent clear colour) could not hold. Review measured it live: an
   `AR24` probe with no opaque region over the default grey background was
   steered twice and never went direct (0 primary assignments). `judge` now
-  has a rule 6 (`NothingOpaqueCovers`) mirroring that precondition over the
-  frame list, so the direct flags and the steering share it; a frame it
+  has a rule 6 mirroring Smithay's walk: the element Smithay would try (the
+  first opaque, output-spanning element front to back, else the bottom
+  visible one) must pass its guard (`NothingOpaqueCovers` otherwise) and
+  belong to the covering window's surface tree (`NotTheWindow` otherwise).
+  Re-review caught the first cut of this rule accepting *any* opaque
+  covering element -- a wallpaper under an alpha window made it eligible.
+  The walk's rectangle lists are per-output scratch kept across frames, so
+  a client declaring many opaque rectangles does not allocate per frame.
+  So the direct flags and the steering share one decision; a frame it
   refuses was never going to be tried, so PR #228's direct frames are
-  unchanged.
+  unchanged. Known cost (accepted): the feedback arrives after the
+  fullscreen resize, so a client that acts on it reallocates twice per
+  fullscreen entry.
 - **The layout exporter's refusals feed back** (`tty/layout_exporter.rs`,
   `LostLayouts`): a modifier GBM was seen to lose is dropped from the
   tranche and the window re-sent. Static knowledge cannot find that case;

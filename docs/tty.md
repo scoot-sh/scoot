@@ -250,12 +250,14 @@ running with no GPU at all is a hard requirement here, not a fallback tier.
   (`render/primary_direct.rs`): the session is unlocked, a fullscreen
   window covers the output, no capture client is streaming it, nothing
   in the frame is translucent (`wp_alpha_modifier_v1`) or a rounded window,
-  and Smithay would try the primary at all: something in the frame is
-  opaque over the whole output (an opaque-format buffer, or one whose
-  surface declares an opaque region covering it), or the background is
-  black. A fullscreen app with an alpha-format buffer and no opaque region
-  over the default background is never tried, so it is not made eligible
-  either (and so not steered, below).
+  and the element Smithay would try for the primary is the window's own
+  (rule 6, mirroring Smithay's walk). That holds when the window is opaque
+  over the whole output (an opaque-format buffer, or one whose surface
+  declares an opaque region covering it), or when the background is black
+  and nothing visible lies under the window. A fullscreen app with an
+  alpha-format buffer and no opaque region is not eligible over the default
+  background, nor over any wallpaper (Smithay would try the wallpaper, or
+  nothing), and so is not steered either (below).
   Those frames pass `ALLOW_PRIMARY_PLANE_SCANOUT_ANY`; every other frame
   passes no primary bit at all, so a tiled window never goes direct, even
   one covering the whole output over a black background. `ANY` is what lets

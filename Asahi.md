@@ -836,6 +836,19 @@ above it is its size and the device it names.) What each answer means:
   `successfully assigned … to plane::Handle(<primary>)` lines follow, it
   then went direct — the whole point of this part. The modifier going back
   after the second toggle is the revert.
+- **`eligibility changed … to=NothingOpaqueCovers` or `to=NotTheWindow`
+  while the client is fullscreen, and no `scanout steering changed`**:
+  scoot judged that Smithay would never offer the display this window's
+  buffer, so it neither tries direct scanout nor steers. `NothingOpaqueCovers`
+  means nothing opaque spans the output over a non-black background --
+  most likely the client renders with an alpha channel (an `ARGB` EGL
+  config) and declares no opaque region; `NotTheWindow` means Smithay would
+  try something else, typically a wallpaper under a window that is not
+  opaque. Neither is a failure. Worth recording which client it was and
+  whether it sets an opaque region (`grep -c set_opaque_region` on its
+  trace), since opaque-format clients are the common case; rerun it over a
+  black background with no wallpaper (`background_color = "#000000"` in
+  `[appearance]`) to see it steered.
 - **`the primary plane takes none of the advertised formats`**: nothing
   the renderer imports is on the plane's list, so nothing is steered. Send
   the `dmabuf scanout tranche`-less log and `t6-table-tty.txt` from Part A

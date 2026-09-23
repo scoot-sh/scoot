@@ -44,20 +44,34 @@
 //!    window never reaches the primary" a property of this check rather than
 //!    of an argument about which element ends up bottom-most.
 //!
-//! 6. **Smithay would try the primary at all**: the clear colour is black
-//!    or transparent, or some element in the frame is opaque over, and
-//!    spans, the whole output (see [`primary_can_be_tried`]). This is
-//!    Smithay's own precondition for trying the primary with the last
-//!    visible element (`drm/compositor/mod.rs`, the
-//!    `try_assign_primary_plane` guard in `render_frame` at the pinned rev),
-//!    mirrored here because a frame that fails it could never go direct
-//!    whatever flags it carried -- so the direct flag set adds nothing, and
-//!    the per-surface scanout feedback (`dmabuf/scanout.rs`) must not steer
-//!    a client toward a scannable layout for a frame that cannot use one. A
-//!    client whose buffer has an alpha channel and no opaque region, over
-//!    scoot's default (non-black) background, is that frame: measured live
-//!    on the dev VM, it was steered and never went direct before this rule
-//!    existed.
+//! 6. **the element Smithay would try is the covering window's own**
+//!    (see [`smithay_walk`] and [`rule6`]). Smithay tries the primary only
+//!    for the *last* element of its visible list, and only if that element
+//!    is opaque over, and spans, the whole output or the clear colour is
+//!    black or transparent (`render_frame`'s `try_assign_primary_plane`
+//!    guard at the pinned rev). The visible list ends at the first element,
+//!    front to back, that is opaque over and spans the output; without one
+//!    it ends at the bottom-most visible element. So the frame is eligible
+//!    only when that element exists, passes the guard, *and* belongs to the
+//!    covering window's surface tree. Anything else -- an alpha buffer with
+//!    no opaque region over a grey background (nothing passes the guard), or
+//!    one over an opaque wallpaper, or over any wallpaper on a black
+//!    background (the wallpaper is what Smithay would try) -- could never
+//!    put the window's buffer on the primary, whatever flags the frame
+//!    carried; the direct flag set adds nothing there, and the per-surface
+//!    scanout feedback (`dmabuf/scanout.rs`) must not steer the client
+//!    toward a scannable layout it could never use. Both were measured live
+//!    on the dev VM before this rule existed: steered, never direct.
+//!
+//!    Two parts of Smithay's walk are left out, both in the direction of
+//!    calling a frame eligible that Smithay then composites -- a missed
+//!    steer is a client's cost, a wrong one is only a hint: whether every
+//!    element above the last one got a plane of its own (it needs a DRM
+//!    device to know), and the single-pixel-buffer case, where Smithay drops
+//!    a covering single-pixel buffer and makes its colour the clear colour
+//!    (its colour needs the renderer's buffer; and the element above it is
+//!    the same window's anyway in the one shape that makes it -- a video
+//!    player's black root under its video subsurface).
 //!
 //! 4 and 5 scan the whole list rather than the one element Smithay would
 //! pick, because *which* element that is is Smithay's decision (the bottom
@@ -105,10 +119,12 @@
 
 use std::time::Instant;
 
-use smithay::backend::renderer::element::Element;
+use smithay::backend::renderer::element::{Element, Id};
 use smithay::backend::renderer::{Color32F, ImportAll, ImportMem, Renderer, Texture};
 use smithay::output::Output;
+use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{Physical, Rectangle, Scale};
+use smithay::wayland::compositor::{TraversalAction, with_surface_tree_downward};
 
 use super::elements::Elements;
 use crate::compositor::State;
@@ -138,9 +154,14 @@ pub(crate) enum PrimaryDirect {
     /// An element in the frame is a rounded window.
     Rounded,
     /// Nothing in the frame is opaque over, and spans, the whole output, and
-    /// the clear colour is neither black nor transparent: Smithay would not
-    /// try the primary for any element (rule 6).
+    /// the clear colour is neither black nor transparent (or nothing in the
+    /// frame is visible at all): Smithay would not try the primary for any
+    /// element (rule 6).
     NothingOpaqueCovers,
+    /// Smithay would try the primary, but for an element that is not the
+    /// covering window's -- a wallpaper under a window that is not opaque,
+    /// a surface above it covering the output (rule 6).
+    NotTheWindow,
 }
 
 impl PrimaryDirect {
@@ -157,14 +178,16 @@ impl PrimaryDirect {
 /// frame is rendered with -- `draw_frame_scanout` passes all of them
 /// straight through. Everything past the first two rules -- the clock read,
 /// the capture-session scan, the element scans -- only runs on an unlocked,
-/// covered output, which is the only case where it can matter. Allocation-
-/// free except in one corner of rule 6 (see [`opaque_over`]).
+/// covered output, which is the only case where it can matter.
+/// Allocation-free once `scratch` (the output's own, kept across frames)
+/// has grown to the frame's region count.
 pub(super) fn judge<R>(
     state: &State,
     output: &Output,
     locked: bool,
     elements: &[Elements<R>],
     frame: &TriedWith,
+    scratch: &mut JudgeScratch,
 ) -> PrimaryDirect
 where
     R: Renderer + ImportAll + ImportMem,
@@ -173,14 +196,17 @@ where
     if locked {
         return PrimaryDirect::Locked;
     }
-    if !state.covered_by_fullscreen(output) {
+    let Some(id) = state.outputs.id_of(output) else {
         return PrimaryDirect::NotCovered;
-    }
-    if state
-        .outputs
-        .id_of(output)
-        .is_some_and(|id| state.screencopy.streaming(id, Instant::now()))
-    {
+    };
+    // The covering window's root surface: `covered_by_fullscreen`'s question
+    // plus the surface rule 6 needs. A covering window with no Wayland
+    // toplevel (an X11 one; none can map yet) has no surface tree to find
+    // Smithay's element in, and counts as not covering.
+    let Some(covering) = state.fullscreen_surface(id) else {
+        return PrimaryDirect::NotCovered;
+    };
+    if state.screencopy.streaming(id, Instant::now()) {
         return PrimaryDirect::Streaming;
     }
     let refusal = judge_elements(elements.iter().map(|element| {
@@ -193,18 +219,18 @@ where
         return refusal;
     }
     let scale = Scale::from(frame.scale);
-    let tried = primary_can_be_tried(
-        frame.clear_color,
-        frame.size,
+    let end = smithay_walk(
         elements
             .iter()
             .map(|element| (element.geometry(scale), element.opaque_regions(scale))),
+        frame.size,
+        scratch,
     );
-    if tried {
-        PrimaryDirect::Eligible
-    } else {
-        PrimaryDirect::NothingOpaqueCovers
-    }
+    rule6(end, frame.clear_color, |index| {
+        elements
+            .get(index)
+            .is_some_and(|element| in_tree(covering, element.id()))
+    })
 }
 
 /// What rule 6 needs to know about the frame beyond its element list: the
@@ -217,53 +243,127 @@ pub(crate) struct TriedWith {
     pub(crate) clear_color: Color32F,
 }
 
-/// Rule 6: whether Smithay would try the primary plane for the last visible
-/// element of a frame with this clear colour, at this physical `size`, given
-/// each element's `(geometry, opaque regions)` in the frame's order.
-///
-/// Smithay's guard (`render_frame`, pinned rev) is: the clear colour is
-/// black or fully transparent, *or* the last visible element spans the
-/// output and is opaque over it. The last visible element is found by
-/// walking front to back and stopping at the first element that is opaque
-/// over, and spans, the whole output -- so "the last visible one is" and
-/// "some element is" are the same question, which is what makes this a scan
-/// rather than a re-derivation of Smithay's occlusion walk. (Smithay's
-/// underlay check needs an overlay plane below the primary with something on
-/// it; no window rides an overlay on this tree, so it cannot fire here.)
+/// The two rectangle lists [`smithay_walk`] works in, kept per output across
+/// frames so the walk allocates only while they grow to the largest region
+/// count a frame has needed -- the same reuse `DrmCompositor` makes of its
+/// own `element_opaque_regions_workhouse`. A client declaring many opaque
+/// rectangles grows them once, not once per frame.
+#[derive(Default)]
+pub(crate) struct JudgeScratch {
+    /// The opaque regions of every visible element so far, in output space.
+    opaque: Vec<Rectangle<i32, Physical>>,
+    /// What is left of the rectangle being tested after a subtraction.
+    work: Vec<Rectangle<i32, Physical>>,
+}
+
+/// Where Smithay's visible-element walk ends: the index of the last element
+/// on its visible list, and whether that element is opaque over, and spans,
+/// the whole output.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct WalkEnd {
+    pub(super) index: usize,
+    pub(super) spans_opaque: bool,
+}
+
+/// Smithay's visible-element walk (`render_frame`, pinned rev), over each
+/// element's `(geometry, own opaque regions)` in the frame's front-to-back
+/// order at physical `size`: an element outside the output, or hidden
+/// behind the opaque regions of those above it, is skipped; the walk stops
+/// at the first element opaque over, and spanning, the output. Answers the
+/// last element on the list, or `None` when nothing is visible.
 ///
 /// Opacity is judged exactly as Smithay judges it: the element's own opaque
-/// regions are subtracted from its geometry clipped to the output, without
-/// offsetting them by the element's location. For a covering fullscreen
-/// window, placed at the output origin, the two coordinate spaces coincide;
-/// mirroring the arithmetic rather than correcting it keeps this the same
-/// answer Smithay gives in the corner where they do not.
-fn primary_can_be_tried<I, O>(clear_color: Color32F, size: (i32, i32), elements: I) -> bool
+/// regions are subtracted from its geometry clipped to the output *without*
+/// offsetting them by the element's location, and added to the running set
+/// *with* it. For a covering fullscreen window, placed at the output origin,
+/// the two coincide; mirroring the arithmetic rather than correcting it keeps
+/// this Smithay's answer where they do not.
+fn smithay_walk<I, O>(elements: I, size: (i32, i32), scratch: &mut JudgeScratch) -> Option<WalkEnd>
 where
     I: IntoIterator<Item = (Rectangle<i32, Physical>, O)>,
     O: std::ops::Deref<Target = [Rectangle<i32, Physical>]>,
 {
-    let black = clear_color.r() == 0.0 && clear_color.g() == 0.0 && clear_color.b() == 0.0;
-    if black || clear_color.a() == 0.0 {
-        return true;
-    }
     let output = Rectangle::<i32, Physical>::from_size(size.into());
-    elements.into_iter().any(|(geometry, opaque)| {
-        geometry
-            .intersection(output)
-            .is_some_and(|visible| visible.contains_rect(output) && opaque_over(&opaque, visible))
-    })
+    scratch.opaque.clear();
+    let mut end = None;
+    for (index, (geometry, own)) in elements.into_iter().enumerate() {
+        let Some(visible) = geometry.intersection(output) else {
+            continue;
+        };
+        let mut work = std::mem::take(&mut scratch.work);
+        work.clear();
+        work.push(visible);
+        work = Rectangle::subtract_rects_many_in_place(work, scratch.opaque.iter().copied());
+        if work.is_empty() {
+            scratch.work = work;
+            continue;
+        }
+        work.clear();
+        work.push(visible);
+        work = Rectangle::subtract_rects_many_in_place(work, own.iter().copied());
+        let opaque = work.is_empty();
+        scratch.work = work;
+        scratch.opaque.extend(
+            own.iter()
+                .map(|region| Rectangle::new(region.loc + geometry.loc, region.size))
+                .filter_map(|region| region.intersection(output)),
+        );
+        let spans_opaque = opaque && visible.contains_rect(output);
+        end = Some(WalkEnd {
+            index,
+            spans_opaque,
+        });
+        if spans_opaque {
+            break;
+        }
+    }
+    end
 }
 
-/// Whether `regions` together cover all of `area`. One region containing it
-/// -- an opaque-format buffer, or a surface that declared itself opaque
-/// whole -- answers without allocating, which is every covering window seen
-/// so far; only a region set that covers the area in several pieces takes
-/// Smithay's rectangle subtraction, which allocates a `Vec`.
-fn opaque_over(regions: &[Rectangle<i32, Physical>], area: Rectangle<i32, Physical>) -> bool {
-    if regions.iter().any(|region| region.contains_rect(area)) {
-        return true;
+/// Rule 6 over where the walk ended: Smithay's guard (the last element
+/// opaque over and spanning the output, or a black or transparent clear
+/// colour), then whether that element is the covering window's
+/// (`in_window`, asked only when the guard passes).
+fn rule6(
+    end: Option<WalkEnd>,
+    clear_color: Color32F,
+    in_window: impl FnOnce(usize) -> bool,
+) -> PrimaryDirect {
+    let Some(end) = end else {
+        return PrimaryDirect::NothingOpaqueCovers;
+    };
+    let black = clear_color.r() == 0.0 && clear_color.g() == 0.0 && clear_color.b() == 0.0;
+    if !end.spans_opaque && !black && clear_color.a() != 0.0 {
+        return PrimaryDirect::NothingOpaqueCovers;
     }
-    regions.len() > 1 && Rectangle::subtract_rects_many([area], regions.iter().copied()).is_empty()
+    if in_window(end.index) {
+        PrimaryDirect::Eligible
+    } else {
+        PrimaryDirect::NotTheWindow
+    }
+}
+
+/// Whether the element `id` names is a surface in `root`'s tree. Stops at
+/// the first match; a covering window's tree is its root plus a handful of
+/// subsurfaces. No allocation: an `Id` from a surface is a reference-count
+/// bump.
+fn in_tree(root: &WlSurface, id: &Id) -> bool {
+    let mut found = false;
+    with_surface_tree_downward(
+        root,
+        (),
+        |surface, _, _| {
+            if found || Id::from_wayland_resource(surface) == *id {
+                found = true;
+                TraversalAction::Break
+            } else {
+                TraversalAction::DoChildren(())
+            }
+        },
+        |_, _, _| {},
+        |_, _, _| true,
+    );
+    found
 }
 
 /// Rules 4 and 5 over `(is_rounded, alpha)` per element: the part of
