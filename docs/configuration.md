@@ -122,6 +122,12 @@ What a second output **is**, today:
   is cut at that edge rather than drawn over — and clicked instead of — the
   neighbouring output's windows. Its focus ring and rounded corners are
   drawn on its own output too;
+- its own menus: a popup belongs to its window's output like the window
+  does, and a menu that would cross the shared edge is flipped or slid back
+  onto its window's output when it lets the compositor adjust it (toolkit
+  menus do) — the same as at the output's outer edges. One that asks for no
+  adjustment is cut at the edge. See
+  [protocols.md](protocols.md#popup-menus-xdg_popup);
 - a window list that names the output each window is on
   (`wlr-foreign-toplevel-management` `output_enter` per window's own output,
   paired with `output_leave` when a move carries it across);
@@ -158,11 +164,9 @@ What it is **not**, yet — the work tracked in
 - no per-output mode/scale/position configuration surface:
   `wlr-output-management` `apply`/`test` stay refused;
 - `--tty` driving two connectors at once (phase E, hardware-gated);
-- a menu opened near the shared edge is cut at it, the same as at an
-  output's outer edge: popups are not yet moved or flipped to fit their
-  output (`xdg_positioner` constraint adjustment, tracked in
-  `docs/backlog/core/popup-constraint-adjustment.md`), and a popup belongs
-  to its window's output like the window does.
+- a menu left open while its window scrolls, or while an output changes, is
+  not re-fitted to the new position (tracked in
+  `docs/backlog/core/popup-reactive-reconstrain.md`).
 
 ## Starting a session
 

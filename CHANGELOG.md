@@ -9,6 +9,20 @@ scoot has not cut a numbered release yet; entries are dated.
 
 ## Unreleased
 
+### 2026-09-23 — menus stay on screen
+
+- **A right-click menu or dropdown opened near the edge of a screen now
+  opens fully on screen** — flipped to the other side of the pointer or
+  slid back inside — instead of being cut off at the edge. That includes
+  the edge between two screens, where a menu was cut off since the change
+  below: it now moves back onto its own window's screen. A window's menu
+  also stays clear of a bar at the top or bottom of the screen rather than
+  opening underneath it. Apps choose whether their menus may be moved;
+  GTK's menus allow it, and one that does not is still cut at the edge.
+- **A program can no longer freeze scoot with a malformed menu.** A popup
+  that named itself as its own parent used to hang the compositor and every
+  app in it; that program is now disconnected instead.
+
 ### 2026-09-23 — windows stay on their own screen
 
 - **With more than one output, a window no longer draws onto — or takes

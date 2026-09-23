@@ -680,7 +680,8 @@ capture-cursor → resize-in-place → syncobj → nested dmabuf → VRR.
 
 ### Found reviewing client fullscreen (2026-09-23)
 - [Windows bleed onto the neighbouring output](./resolved/windows-bleed-across-outputs-done.md) — RESOLVED 2026-09-23 (PR #224): a window is drawn and hit only on the output it is placed on (render gather, ring and both hit sites); popups go with their parent. Also fixed: the ring and rounded clip never drew right on outputs after the first (global coordinates).
-- [Popup constraint adjustment](./core/popup-constraint-adjustment.md) — high: positioner slide/flip/resize never applied, so a menu at any output edge is cut — now including a shared one, which agents on `--headless --outputs N` hit.
+- [Popup constraint adjustment](./resolved/popup-constraint-adjustment-done.md) — RESOLVED 2026-09-23 (PR #PRNUM): popups are flipped/slid/resized into their output (a window's: usable area, whole output while it is fullscreen; a layer surface's: whole output), relative to the immediate parent, at the initial configure and on `reposition`. Also fixed: a popup whose parent chain loops back to itself froze the compositor; it is now refused.
+- [Reactive popup re-constraining](./core/popup-reactive-reconstrain.md) — low: a `reactive` popup is not re-fitted when its window scrolls or an output changes while it is open.
 - [Output membership read from geometry](./core/output-membership-by-geometry.md) — low: frame callbacks, `wl_surface.enter` and foreign-toplevel `output_of_window` still use bbox overlap.
 - [Frame learning never flushes its own relayout](./core/frame-learning-apply-flush.md) — low: learned minimum waits for the next event.
 - [Smoke xwayland step keys on PATH, not the build feature](./testing/smoke-xwayland-step-feature-gate.md) — medium: nested smoke in cage hangs then fails on any default build; pre-existing since PR #221.

@@ -279,6 +279,33 @@ surfaces, and all of them map, draw, take clicks and take the keyboard.
   whole chain.
 - **A bar's own dropdowns work too** — a popup parented to a *layer* surface
   (`zwlr_layer_surface_v1.get_popup`), not just to a window.
+- **A menu is kept on its screen.** A popup that lets the compositor adjust
+  it (`xdg_positioner.set_constraint_adjustment`: flip, slide, resize —
+  GTK3's context menus ask for all six) is flipped, slid or resized, in the
+  protocol's order, to fit inside the screen its window is on, instead of
+  being cut at the edge. The edge between two screens counts like an outer
+  one: a menu is moved back onto its own window's screen, never drawn over
+  the neighbour. The area it is fitted into:
+  - a window's menu: the screen minus any bar's exclusive zone — the same
+    area windows tile into — because a window's menus draw *under* a
+    `top`-layer bar, and a menu slid under the bar would be hidden by it;
+  - the menu of the window covering its screen fullscreen: the whole
+    screen, since the bar is not drawn then;
+  - a bar's own dropdown: the whole screen, bar zone included.
+
+  A popup that asked for no adjustment on an axis is left exactly where it
+  asked to be on that axis, and cut if that is off the screen — the
+  protocol's rule. The fit is applied when the menu opens and on
+  `xdg_popup.reposition`. It is not redone afterwards: a `reactive` popup
+  whose window scrolls while it is open keeps its position (tracked in
+  [`docs/backlog/core/popup-reactive-reconstrain.md`](backlog/core/popup-reactive-reconstrain.md)).
+- **A popup cannot be its own ancestor.** A popup whose parent chain loops
+  back to itself (its own `xdg_surface` named as its parent, or a longer
+  loop through a bare `xdg_surface`) is refused with a protocol error and its
+  client disconnected. Before, one such request froze the compositor.
+  The protocol's error is `xdg_wm_base.invalid_popup_parent`; scoot posts
+  that error's code on the popup itself, because the pinned Smithay keeps
+  the `xdg_wm_base` object private.
 - **The grab's serial has to name a real interaction.** A grab is refused —
   dismissed, with a warning in the compositor log naming the client and
   serial, since the protocol posts no error — unless its serial is a recent
