@@ -25,15 +25,23 @@ composites as before.
   `ANY`: the format-matching primary bit used to ride *every* frame (lock
   frames included) and now rides none but the eligible ones. Why `ANY` is
   safe on those, traced at the pinned rev (the constant's doc has the
-  whole argument): the client buffer is `AddFB2`'d with its own fourcc and
-  modifier, so KMS never reads it as the swapchain's format;
+  whole argument): the client buffer is `AddFB2`'d with its own fourcc
+  (and its own modifier where the device takes modifiers; virtio takes
+  none, so there the framebuffer is `XR24`/`Invalid` and the driver's
+  implicit layout, linear, applies), so KMS never reads it as the
+  swapchain's format;
   `try_assign_plane` still refuses unless the plane lists that exact
   format and modifier; the atomic `TEST_ONLY` commit judges scaling, crop
   and transform; and the only real difference, alpha under the opaque
   fallback, cannot show on the bottom plane, which Smithay only hands an
   element that is opaque edge to edge or sits over a black/transparent
-  clear colour. Reordering `COLOR_FORMATS` was rejected: it changes every
-  composited frame and still does not match virtio's implicit modifier.
+  clear colour. Reordering `COLOR_FORMATS` was rejected because it changes
+  the format of every composited frame on every device. (Corrected in
+  review: on virtio the client framebuffer is `XR24`/`Invalid`, so only the
+  fourcc differed from the `AR24`/`Invalid` swapchain there, and a reorder
+  *might* have matched -- untried, since `Xrgb8888` rendering, the
+  read-back's ARGB assumption and the test commit were never exercised.
+  An earlier draft wrongly said it could not match virtio's modifier.)
 - **The eligibility rule** (`render/primary_direct.rs`): unlocked; a
   fullscreen window covers the output (`State::covered_by_fullscreen`); no
   capture client is streaming the output; no element in the frame has an
@@ -56,8 +64,36 @@ composites as before.
   with it the same run is 795-804 jiffies against the baseline's 792-798,
   0 forces, 589-592 captures, client interval 23.1-23.2 ms -- the
   composited baseline. IPC screenshots and slow one-shot captures keep the
-  force path: ~8 ms more latency per screenshot (20-28 ms against 12-19 ms
-  composited), frame pacing unaffected.
+  force path.
+- **Agent screenshot polling (review follow-up).** The first cut reset the
+  swapchain for every forced capture (a full GBM reallocation plus
+  framebuffer re-registration). A capture behind a direct frame now forces
+  a plain composite instead -- Smithay damages the whole output when the
+  primary returns from direct scanout (`render_frame`'s
+  `had_direct_scan_out` arm), and the damage tracker and swapchain ages
+  both count composite frames only -- keeping the reset for an empty
+  recording and as a fallback when the plain frame records nothing.
+  Measured: IPC `screenshot` polled at 1/5/10 Hz over the direct
+  fullscreen client, 2 alternated rounds, against base `3feab9c`:
+
+  | rate | build | CPU jiffies/10 s | latency p50 / p95 ms | client interval mean |
+  |---|---|---|---|---|
+  | 1 Hz | base | 760, 762 | 12-16 / 17-19 | 23.0 ms |
+  | 1 Hz | reset per capture | 54, 59 | 23-24 / 25-28 | 19.4-19.5 ms |
+  | 1 Hz | plain composite | 46, 48 | 18-19 / 20-23 | 19.5 ms |
+  | 5 Hz | base | 820-826 | 11-16 / 17 | 21.4-21.5 ms |
+  | 5 Hz | reset per capture | 205, 206 | 22-23 / 25-27 | 18.2-18.3 ms |
+  | 5 Hz | plain composite | 164, 167 | 17-18 / 19-20 | 18.1 ms |
+  | 10 Hz | base | 881-890 | 11 / 16 | 20.4-20.5 ms |
+  | 10 Hz | reset per capture | 322, 323 | 17 / 20-21 | 17.4 ms |
+  | 10 Hz | plain composite | 272, 275 | 14 / 16 | 17.0 ms |
+
+  Counting IPC screenshots toward the stream window was also measured, as
+  an uncommitted experiment: it restores base latency (p50 11-14 ms) by
+  compositing throughout, and so also restores base CPU (763/822-828/
+  892-894), and at 1 Hz it is the worst of both (the output flaps between
+  composited and forced). Not taken: it trades ~0.6-0.8 of a core on this
+  VM for 3-5 ms of screenshot latency.
 - **What it buys, measured (llvmpipe, so the composite side is software
   rendering):** the fullscreen client paced on frame callbacks at default
   config costs the compositor 14-17 jiffies per 10 s direct against

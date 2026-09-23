@@ -651,22 +651,36 @@ sudo cat /sys/kernel/debug/dri/*/state > /tmp/fx/t5-kms-tiled.txt
 scootctl action toggle-fullscreen; sleep 5
 # quit scoot (Super+Shift+e), then:
 sed 's/\x1b\[[0-9;]*m//g' /tmp/fx/t5.log > /tmp/fx/t5.clean.log
-grep -c 'successfully assigned element .* to plane' /tmp/fx/t5.clean.log
+grep -o 'testing direct scan-out .* on plane::Handle([0-9]*)' /tmp/fx/t5.clean.log | grep -o 'plane::Handle([0-9]*)' | sort | uniq -c
+grep -o 'successfully assigned element .* to plane::Handle([0-9]*)' /tmp/fx/t5.clean.log | grep -o 'plane::Handle([0-9]*)' | sort | uniq -c
 grep 'eligibility changed\|Testing Formats' /tmp/fx/t5.clean.log | head
-grep -o 'failed to assign element[^,]*\|skipping direct scan-out[^,]*' /tmp/fx/t5.clean.log | sort | uniq -c | head
+grep -o 'failed to assign element[^,]*\|skipping direct scan-out[^,]*\|could not import[^,]*' /tmp/fx/t5.clean.log | sort | uniq -c | head
 ```
+
+The counts above are per plane handle. The primary is the plane that, in
+`t5-kms-tiled.txt`, shows a scoot-allocated fb whose `crtc-pos` is the
+whole mode (`2560x1600+0+0`); `plane[N]` there is `plane::Handle(N)` here.
 
 What each answer means:
 
-- `eligibility changed ... to=Eligible` and a non-zero `successfully
-  assigned ... to plane` count, with the primary plane in
+- `eligibility changed ... to=Eligible`, `testing direct scan-out` and
+  `successfully assigned` lines on the primary's handle, and the primary in
   `t5-kms-fullscreen.txt` on an fb that is not one of the tiled run's:
-  **direct scanout works here.** The screenshot should show the video frame,
-  not a stale one.
-- `Eligible` but no assignment, with `no cached fb` / `could not import`
-  or `test failed` lines: the client's buffer cannot be scanned out by
+  **direct scanout works here.** The screenshot should show the video
+  frame, not a stale one.
+- `Eligible`, `testing direct scan-out` on the primary, but no
+  `successfully assigned`, with `test failed` / `format ... not supported` /
+  import failures: the client's buffer cannot be scanned out by
   `apple,dcp` (the import across the AGX→DCP split, or the plane refusing
-  `LINEAR` / that size). Send the lines -- that is the next ticket.
+  `LINEAR` or that size). Send the lines -- that is the next ticket. (A
+  `no cached fb, exporting new fb` line is *not* a failure: Smithay prints
+  it for every buffer's first, successful export too.)
+- `Eligible` but **no** `testing direct scan-out` on the primary at all: the
+  frame was allowed but Smithay never tried. Over the default (non-black)
+  background it only tries a window that is opaque edge to edge; a client
+  whose buffer has an alpha channel and sets no opaque region is not, and
+  composites every frame. Worth knowing which client that was -- mpv and
+  games usually are opaque, but not all.
 - No `Eligible` at all: the window was not covering the output (check the
   client really went fullscreen), or something stayed above it.
 

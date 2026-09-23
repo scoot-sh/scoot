@@ -253,10 +253,10 @@ running with no GPU at all is a hard requirement here, not a fallback tier.
   Those frames pass `ALLOW_PRIMARY_PLANE_SCANOUT_ANY`; every other frame
   passes no primary bit at all, so a tiled window never goes direct, even
   one covering the whole output over a black background. `ANY` is what lets
-  the client's framebuffer (the opaque `XR24` variant, usually `LINEAR`)
-  replace an `AR24` swapchain that may have an implicit modifier: the
-  framebuffer still carries its own format, the plane must still list that
-  exact format and modifier, and the atomic test still has to pass --
+  the client's framebuffer (the opaque `XR24` variant) replace the `AR24`
+  swapchain without changing the format every composited frame is drawn
+  in: the framebuffer still carries its own format, the plane must still
+  list that exact format, and the atomic test still has to pass --
   what `ANY` skips is only the "same format as the swapchain" check, and
   the one difference that check guarded (alpha) cannot show on the bottom
   plane under an opaque window (the reasoning, traced at the pinned
@@ -267,8 +267,10 @@ running with no GPU at all is a hard requirement here, not a fallback tier.
   one the display refuses; the next frame without it goes direct again.
   The lock screen always composites. A direct frame is not in the buffer a
   capture reads, so a capture of it forces one composite frame first (IPC
-  `screenshot` and `ext-image-copy-capture-v1` alike; about 8 ms more per
-  screenshot on the dev VM), and a capture that cannot be forced (the
+  `screenshot` and `ext-image-copy-capture-v1` alike; a median 3-5 ms
+  more per screenshot on the dev VM, polled at 1-10 Hz, while the
+  compositor itself uses a fraction of the CPU compositing would), and a
+  capture that cannot be forced (the
   session is VT-switched away) is refused with "held for direct scanout;
   retry once a composite frame lands" rather than served stale. A
   capture *stream* is different: forcing every frame of one measured worse

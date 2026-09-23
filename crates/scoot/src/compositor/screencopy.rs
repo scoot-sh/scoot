@@ -558,8 +558,8 @@ impl Screencopy {
     /// Read by `render::primary_direct` to keep a streamed output
     /// composited. A direct frame is not in the swapchain slot a capture
     /// reads, so every capture of a direct output forces a composite frame
-    /// first -- one full composite, a swapchain reallocation and a
-    /// framebuffer re-export for the client, per capture. For one
+    /// first -- one full composite and a framebuffer re-export for the
+    /// client, per capture. For one
     /// screenshot that is nothing; for a stream it is every frame, and
     /// measured on the dev VM (a fullscreen client paced on frame callbacks
     /// plus a continuous capture client) it cost more CPU than compositing

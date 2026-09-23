@@ -103,9 +103,12 @@
 //!   whose slot cannot be exported leaves it up).
 //! - **Force.** Before serving a capture off a stale-or-missing recording,
 //!   `State::ensure_scanout_capture_current` arms one composite-only frame
-//!   (`tty::scanout::ForceComposite`) and invalidates the swapchain (which
-//!   forces the full damage a static screen would otherwise draw nothing
-//!   on), then renders it immediately. The forced frame re-records through
+//!   (`tty::scanout::ForceComposite`) and renders it immediately --
+//!   invalidating the swapchain first only when there is no recording at
+//!   all ([`Captures::staleness`]), since a recording behind a direct frame
+//!   is refreshed by the plain composite (Smithay damages the whole output
+//!   coming back from direct scanout), with the reset as a fallback if
+//!   that frame records nothing. The forced frame re-records through
 //!   the normal path, so the capture reads fresh pixels. It keys on
 //!   [`Captures::capture_stale`], which is true for exactly the states
 //!   [`Captures::capture_target`] refuses -- the force fires for every

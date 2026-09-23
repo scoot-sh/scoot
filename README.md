@@ -59,11 +59,12 @@ Linux, and daily-driven on `--tty`** (2026-09-18).
   load, puts the same pixels on screen, and costs 7–16 MB more memory
   ([Asahi.md](Asahi.md), Test 4). Turn it on with a `gpu-scanout` build
   (`nix build .#scoot-gpu`) and `scoot --tty --renderer gles`. There, a
-  fullscreen video or game that draws with the GPU is shown straight from
-  the app's own buffer, with no compositing at all (seen working in the dev
-  VM with a test client; not yet confirmed with a real video player or on
-  real GPU hardware — [Asahi.md](Asahi.md), Test 5). While something
-  records or streams the screen, scoot composites as usual. Not there yet:
+  fullscreen window can be shown straight from the app's own buffer, with
+  no compositing, when the display accepts that buffer (seen on the dev VM
+  with a test client's dumb buffers; not yet with a GPU-rendered app, a
+  real video player, or real GPU hardware — [Asahi.md](Asahi.md), Test 5).
+  While something records or streams the screen, scoot composites as
+  usual. Not there yet:
   every other window is still composited, and where the display has a
   hardware cursor plane the pointer is missing from screenshots. Under
   `--headless`/`--nested` the GPU speedup does not apply: `gles` there

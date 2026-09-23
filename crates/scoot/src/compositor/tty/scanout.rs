@@ -94,25 +94,43 @@ type Compositor =
 /// Traced at the pinned rev, `try_assign_primary_plane` has no element-kind
 /// test; without `ANY` its gate is `slot.format() != element_config.properties.format`,
 /// a whole-`Format` comparison (fourcc *and* modifier) between the swapchain
-/// slot and the framebuffer the exporter made from the client buffer. That
-/// is unequal for every buffer a client can send here: the primary path
-/// exports with `allow_opaque_fallback`, so the client framebuffer is the
-/// opaque fourcc (`Xrgb8888`) while the swapchain is `Argb8888` (the first
-/// entry of [`COLOR_FORMATS`]); and `zwp_linux_dmabuf_v1` offers only
-/// `LINEAR` while a swapchain on a plane without `IN_FORMATS` is implicit
-/// (the dev VM's virtio-gpu, measured `Testing Formats: [AR24, Invalid]`).
-/// Reordering `COLOR_FORMATS` would change every composited frame's format
-/// and still not match that modifier, so the swapchain stays as it is and
-/// the comparison is skipped instead.
+/// slot and the framebuffer the exporter made from the client buffer. The
+/// primary path exports with `allow_opaque_fallback`, so the client
+/// framebuffer is the opaque fourcc (`Xrgb8888`) while the swapchain is
+/// `Argb8888` (the first entry of [`COLOR_FORMATS`]) -- unequal for every
+/// buffer a client can send here. The modifier may differ as well on a
+/// device that takes modifiers (the client's `LINEAR` against an implicit
+/// swapchain), but not on the dev VM's virtio-gpu: it has no `IN_FORMATS`
+/// and no `ADDFB2_MODIFIERS`, so the swapchain is `Invalid` (measured
+/// `Testing Formats: [AR24, Invalid]`) and the client framebuffer is added
+/// without a modifier and comes back `Invalid` too (Smithay's trace names it
+/// `XR24`/`Invalid`). There only the fourcc differs.
 ///
-/// Skipping it does not hand KMS a buffer described wrongly:
+/// So putting `Xrgb8888` first in `COLOR_FORMATS` might match on virtio --
+/// untried: rendering into an `Xrgb8888` swapchain, `render::read_back`'s
+/// ARGB assumption and the test commit were never exercised -- and would
+/// still leave modifier-capable devices unmatched. What rules it out is
+/// that it changes the format of *every* composited frame on every device
+/// to serve the one frame shape that may go direct. `ANY` changes nothing
+/// for a composited frame, so it is the lift taken.
+///
+/// Skipping the comparison does not hand KMS a buffer described wrongly:
 ///
 /// - **The framebuffer carries its own format.** The client buffer is
-///   `AddFB2`'d with its own fourcc and modifier (`element_config` ->
-///   `framebuffer_from_wayland_buffer`); the swapchain's format is never
-///   applied to it. What the comparison protected is only "the primary
-///   shows the same format it composites in", not "KMS reads the buffer
-///   right".
+///   `AddFB2`'d with its own fourcc (`element_config` ->
+///   `framebuffer_from_wayland_buffer`), and with its own modifier where
+///   the device takes modifiers; the swapchain's format is never applied to
+///   it. Where the device takes none (virtio) it is added without one, and
+///   KMS reads it in the driver's implicit layout -- which is why Smithay
+///   refuses outright a client buffer that arrived without an explicit
+///   modifier, and why that is safe for what scoot admits: the only
+///   modifier `zwp_linux_dmabuf_v1` offers is `LINEAR`, and the one
+///   driver without modifier support this has run on (virtio) scans out
+///   linear -- a driver whose implicit layout is tiled would also have to
+///   lack modifier support entirely to be at risk, which no measured one
+///   does. What the
+///   comparison protected is only "the primary shows the same format it
+///   composites in", not "KMS reads the buffer right".
 /// - **The plane still has to take that exact format.** `try_assign_plane`
 ///   refuses unless `plane.formats.contains(element format)`, fourcc and
 ///   modifier, before any commit is built -- `ANY` skips the swapchain
@@ -389,9 +407,10 @@ pub(crate) struct ScanoutPresenter {
     /// [`ForceComposite`] for the one-arming-one-frame contract.
     ///
     /// Armed by `State::ensure_scanout_capture_current` just before the
-    /// render whose pixels a capture is about to read, together with an
+    /// render whose pixels a capture is about to read -- together with an
     /// `invalidate_scanout` (which forces the full damage a static screen
-    /// would otherwise draw nothing on).
+    /// would otherwise draw nothing on) only when there is no recording to
+    /// refresh, or when a plain forced frame recorded nothing.
     force_composite: ForceComposite,
     /// Whether the swapchain's slots have been freed since the render path
     /// last looked. Set by every path that frees slots -- the ones that
@@ -759,9 +778,9 @@ impl ScanoutPresenter {
     ///
     /// Armed by `State::ensure_scanout_capture_current` just before the
     /// render whose pixels a capture is about to read (IPC `screenshot` and
-    /// `ext-image-copy-capture-v1` both funnel through there), always paired
-    /// there with an [`invalidate_scanout`](Self::invalidate_scanout) so the
-    /// forced frame also carries full damage. The cursor may still ride its
+    /// `ext-image-copy-capture-v1` both funnel through there), paired there
+    /// with an [`invalidate_scanout`](Self::invalidate_scanout) only when the
+    /// forced frame needs full damage (see `render::force_needs_reset`). The cursor may still ride its
     /// plane on a forced frame -- only the primary bits are dropped -- which is
     /// what keeps the cursorless-where-plane-assigned capture contract
     /// unchanged.
@@ -811,8 +830,9 @@ impl ScanoutPresenter {
     }
 
     /// The scanout bookkeeping shared by reactivation and the hotplug paths --
-    /// and by the capture fix's forced composite frame, which needs full
-    /// damage, not just composite flags.
+    /// and by the capture fix's forced composite frame when that needs full
+    /// damage, not just composite flags (an empty recording, or a plain
+    /// forced frame that recorded nothing).
     ///
     /// `reset_buffers` drops every swapchain slot, which is both what makes
     /// the next frame a full redraw (there is no buffer age left to trust)
