@@ -39,6 +39,8 @@ mod dumb;
 mod flip_tracker;
 mod gpu;
 mod hotplug;
+#[cfg(feature = "gpu-scanout")]
+mod layout_exporter;
 mod present_retry;
 #[cfg(feature = "gpu-scanout")]
 mod scanout;

@@ -74,7 +74,14 @@ pub fn init_named(
     // `State::resize_output` rebuilds the backend later and has to build the
     // same one. `scanout` is the already-built GPU scanout renderer on the
     // one path that has one (see `ScanoutHandoff`).
-    let backend = Backend::new(&output, width, height, state.renderer, scanout)?;
+    let backend = Backend::new(
+        &output,
+        width,
+        height,
+        state.renderer,
+        scanout,
+        state.gles_device(),
+    )?;
     // The one place the dmabuf advertisement can be made, and the reason it is
     // here rather than in `State::new` with every other global: the tranche is
     // derived from what *this* renderer can import (see `dmabuf.rs`), and this
@@ -179,16 +186,30 @@ pub fn add_output(
         .unwrap_or(0);
     let output = create_output(state, name, width, height, (x, 0));
     // The render target behind this output: same renderer, same size as the
-    // primary's. Built before the output is registered, so a failure leaves
-    // nothing half-added -- the output never exists without its target, and
-    // no capture path can resolve one and answer from another's.
-    let backend = Backend::new(
+    // primary's. Built before the output is registered with `State::outputs`
+    // or the core, and a failure takes back the two things `create_output`
+    // already did -- the `wl_output` global and the `Space` mapping -- so
+    // nothing is left half-added: the output never exists without its
+    // target, and no capture path can resolve one and answer from another's.
+    //
+    // On the primary's GLES device, never another (`State::gles_device`): the
+    // dma-buf formats advertised to clients are that device's, and an import
+    // into this output's renderer must be able to honour them. A device that
+    // cannot build here fails the add.
+    let backend = match Backend::new(
         &output,
         width,
         height,
         state.renderer,
         ScanoutHandoff::default(),
-    )?;
+        state.gles_device(),
+    ) {
+        Ok(backend) => backend,
+        Err(error) => {
+            discard_output(state, &output);
+            return Err(error);
+        }
+    };
     let area = logical_area(state, &output, width, height);
     let id = state.outputs.add(output);
     state.backends.insert(id, backend);
@@ -254,7 +275,12 @@ fn create_output(
             serial_number: "0".into(),
         },
     );
-    output.create_global::<State>(&state.display_handle);
+    let global = output.create_global::<State>(&state.display_handle);
+    // Kept on the output itself, so the one path that must take an output
+    // back before it is registered (`discard_output`) can find its global.
+    output
+        .user_data()
+        .insert_if_missing(|| OutputGlobal(global));
     set_mode(
         &output,
         width,
@@ -264,6 +290,28 @@ fn create_output(
     );
     state.space.map_output(&output, position);
     output
+}
+
+/// The `wl_output` global [`create_output`] made for an output.
+struct OutputGlobal(smithay::reexports::wayland_server::backend::GlobalId);
+
+/// Takes back what [`create_output`] did, for an output that was never
+/// registered: unmaps it from the `Space` and removes its `wl_output` global.
+///
+/// Only for [`add_output`]'s failure path, which today runs before any event
+/// loop dispatch in every caller (startup and tests): no client can have
+/// seen the global, so removing it at once is safe. **It would not be safe at
+/// runtime.** A client whose `wl_registry.bind` for this global is already in
+/// flight when it is removed gets a protocol error for binding a global that
+/// no longer exists; the safe pattern is `disable_global` (withdraw the
+/// announcement) now and `remove_global` some time later. If `add_output`
+/// ever runs on a live session -- output hotplug under `--headless` or
+/// `--nested` -- this is the function to change.
+fn discard_output(state: &mut State, output: &Output) {
+    state.space.unmap_output(output);
+    if let Some(OutputGlobal(global)) = output.user_data().get::<OutputGlobal>() {
+        state.display_handle.remove_global::<State>(global.clone());
+    }
 }
 
 /// What the core is told an output covers: the *logical* rectangle, which is
@@ -777,12 +825,17 @@ impl State {
                 backend.note_resized(width, height);
             }
         } else {
+            // Pinned to the session's GLES device (`State::gles_device`):
+            // a rebuild that could not build there fails into the arm below
+            // rather than moving to another device, whose driver may refuse
+            // the dma-buf layouts already advertised to clients.
             match Backend::new(
                 &output,
                 width,
                 height,
                 self.renderer,
                 ScanoutHandoff::default(),
+                self.gles_device(),
             ) {
                 Ok(backend) => {
                     self.backends.insert(id, backend);
@@ -1252,6 +1305,95 @@ mod tests {
             vec![(CANVAS, CANVAS)],
             "a failed resize left a mode behind that nothing renders at"
         );
+    }
+
+    /// A GLES session's device is fixed at its first build: a resize and an
+    /// added output both rebuild on it. What makes this more than tidiness is
+    /// that the dma-buf feedback is built once, from that device's driver, and
+    /// never re-sent (see `render::gles::GlesDevice`). Under pixman there is
+    /// no GLES device at all, and the test says so and stops; the
+    /// `SCOOT_TEST_RENDERER=gles` run is the one that pins it. Which device a
+    /// pinned build lands on when it is *not* the preferred one is pinned in
+    /// `render/gles.rs`'s own tests, on real devices.
+    #[test]
+    fn a_gles_session_rebuilds_on_the_device_it_started_on() {
+        const CANVAS: i32 = 64;
+        let mut event_loop: EventLoop<'static, State> =
+            EventLoop::try_new().expect("an event loop");
+        let display: Display<State> = Display::new().expect("a wayland display");
+        let renderer = super::super::test_support::test_renderer();
+        let mut state = State::new(
+            &mut event_loop,
+            display,
+            Config::default(),
+            Keybindings::default(),
+            Appearance::default(),
+            1.0,
+            renderer,
+        )
+        .expect("a compositor state with a wayland socket");
+        init(&mut state, CANVAS, CANVAS).expect("a headless backend");
+
+        let Some(first) = state.gles_device() else {
+            assert_eq!(renderer, crate::cli::RendererKind::Pixman);
+            return;
+        };
+        assert!(state.resize_output(CANVAS + 16, CANVAS), "a resize");
+        add_output(&mut state, "headless-2", CANVAS, CANVAS).expect("a second output");
+        assert_eq!(state.backends.len(), 2);
+        for backend in state.backends.values() {
+            assert_eq!(
+                backend.gles_device(),
+                Some(first),
+                "a rebuilt GLES backend moved off the session's device"
+            );
+        }
+    }
+
+    /// `add_output`'s failure path leaves nothing behind: no output in
+    /// `State::outputs` or the core, nothing mapped in the `Space`, and the
+    /// `wl_output` global `create_output` made is gone again. Driven with a
+    /// size no renderer builds, under either renderer.
+    #[test]
+    fn a_failed_add_output_takes_back_its_global_and_mapping() {
+        const CANVAS: i32 = 64;
+        let mut event_loop: EventLoop<'static, State> =
+            EventLoop::try_new().expect("an event loop");
+        let display: Display<State> = Display::new().expect("a wayland display");
+        let mut state = State::new(
+            &mut event_loop,
+            display,
+            Config::default(),
+            Keybindings::default(),
+            Appearance::default(),
+            1.0,
+            super::super::test_support::test_renderer(),
+        )
+        .expect("a compositor state with a wayland socket");
+        init(&mut state, CANVAS, CANVAS).expect("a headless backend");
+
+        assert!(add_output(&mut state, "headless-2", UNBUILDABLE.0, UNBUILDABLE.1).is_err());
+        assert_eq!(state.outputs.iter().count(), 1, "nothing registered");
+        assert_eq!(state.backends.len(), 1, "no backend");
+        assert_eq!(state.space.outputs().count(), 1, "nothing left mapped");
+
+        // The global itself, which the add cannot hand back: take the same
+        // two steps `add_output` takes on failure and ask the display.
+        let output = create_output(&mut state, "headless-3", CANVAS, CANVAS, (CANVAS, 0));
+        let global = output
+            .user_data()
+            .get::<OutputGlobal>()
+            .expect("create_output records its global")
+            .0
+            .clone();
+        let backend = state.display_handle.backend_handle();
+        assert!(backend.global_info(global.clone()).is_ok());
+        discard_output(&mut state, &output);
+        assert!(
+            backend.global_info(global).is_err(),
+            "the wl_output global outlived its discarded output"
+        );
+        assert_eq!(state.space.outputs().count(), 1);
     }
 
     #[test]

@@ -94,6 +94,7 @@ fn marker_pixels(renderer: RendererKind) -> Vec<u8> {
         MARKER_CANVAS,
         renderer,
         ScanoutHandoff::default(),
+        None,
     )
     .expect("a backend");
     let Backend {
@@ -207,8 +208,8 @@ fn both_renderers_lay_the_same_frame_out_the_same_way() {
 fn a_capture_covers_the_whole_target_at_the_backends_own_size() {
     for renderer in [RendererKind::Pixman, RendererKind::Gles] {
         let output = test_output(40, 24);
-        let mut backend =
-            Backend::new(&output, 40, 24, renderer, ScanoutHandoff::default()).expect("a backend");
+        let mut backend = Backend::new(&output, 40, 24, renderer, ScanoutHandoff::default(), None)
+            .expect("a backend");
         assert_eq!(backend.size(), (40, 24), "{renderer}");
         assert_eq!(backend.renderer(), renderer, "{renderer}");
         let bytes = backend

@@ -50,6 +50,7 @@ use std::fmt;
 #[cfg(feature = "gpu-scanout")]
 use scoot_core::OutputId;
 use smithay::backend::allocator::dmabuf::Dmabuf;
+use smithay::backend::allocator::format::FormatSet;
 use smithay::backend::allocator::{Format, Fourcc};
 use smithay::backend::renderer::damage::OutputDamageTracker;
 use smithay::backend::renderer::{
@@ -64,7 +65,7 @@ use crate::cli::RendererKind;
 use super::State;
 use super::tty::Tty;
 use elements::{Elements, FrameContext, ring_elements};
-use gles::GlesBackend;
+use gles::{GlesBackend, GlesDevice};
 use pixman::PixmanBackend;
 
 mod elements;
@@ -180,6 +181,22 @@ pub struct Backend {
     size: (i32, i32),
 }
 
+/// What a renderer can import, in the shape the `zwp_linux_dmabuf_v1`
+/// advertisement is derived from ([`Backend::dmabuf_import_set`]).
+pub(super) enum ImportSet {
+    /// The renderer `mmap`s a dma-buf and composites out of the mapping
+    /// (pixman): only a single-plane `LINEAR` buffer can work, so the
+    /// advertisement is `dmabuf.rs`'s fixed candidates, narrowed by
+    /// [`Backend::imports_dmabuf_format`].
+    CpuMapped,
+    /// The renderer hands a dma-buf to its driver (both GLES tiers): every
+    /// `{fourcc, modifier}` the driver reported it imports, in the driver's
+    /// order, with Smithay's unconditional `Modifier::Invalid` entries still
+    /// in it -- `dmabuf.rs::driver_tranche` is what decides which of those
+    /// are a promise.
+    Driver(FormatSet),
+}
+
 /// The renderers [`Backend`] can be carrying.
 ///
 /// Each variant owns a renderer and the target that renderer draws into, and
@@ -229,12 +246,18 @@ impl Backend {
     /// the pipeline and `renderer` is not consulted. Empty on every other
     /// path, including `State::resize_output`, which never reaches here on
     /// that tier (see its own early return).
+    ///
+    /// `gles_device` pins a GLES build to the device the session's GLES
+    /// renderer is already on ([`State::gles_device`]); `None` only for the
+    /// session's first build, and ignored by every other renderer. See
+    /// `gles::GlesDevice` for why a GLES session may never change device.
     pub(super) fn new(
         output: &Output,
         width: i32,
         height: i32,
         renderer: RendererKind,
         scanout: ScanoutHandoff,
+        gles_device: Option<GlesDevice>,
     ) -> Result<Self, Box<dyn Error>> {
         #[cfg(feature = "gpu-scanout")]
         if let Some(backend) = scanout.backend {
@@ -248,13 +271,28 @@ impl Backend {
         let _ = scanout;
         let pipeline = match renderer {
             RendererKind::Pixman => Pipeline::Pixman(PixmanBackend::new(width, height)?),
-            RendererKind::Gles => Pipeline::Gles(Box::new(GlesBackend::new(width, height)?)),
+            RendererKind::Gles => {
+                Pipeline::Gles(Box::new(GlesBackend::new(width, height, gles_device)?))
+            }
         };
         Ok(Self {
             pipeline,
             damage: OutputDamageTracker::from_output(output),
             size: (width, height),
         })
+    }
+
+    /// The EGL device this backend's offscreen GLES renderer is on, or `None`
+    /// for any other pipeline -- what [`State::gles_device`] reads to pin a
+    /// rebuild. The scanout tier answers `None` because it is never rebuilt
+    /// through [`Backend::new`] (see `State::resize_output`).
+    pub(super) fn gles_device(&self) -> Option<GlesDevice> {
+        match &self.pipeline {
+            Pipeline::Gles(gpu) => Some(gpu.device),
+            Pipeline::Pixman(_) => None,
+            #[cfg(feature = "gpu-scanout")]
+            Pipeline::Scanout(_) => None,
+        }
     }
 
     /// Whether this session composites straight into its scanout buffer.
@@ -424,14 +462,51 @@ impl Backend {
     /// than from a list, from `State::renderer` (what was *asked* for, not
     /// what was built) or from a probe of some other EGL display.
     ///
-    /// Startup-only: `dmabuf.rs::advertise` calls it once per candidate
-    /// format, never per import and never per frame.
+    /// The advertisement asks this only of a renderer whose
+    /// [`dmabuf_import_set`](Self::dmabuf_import_set) is
+    /// [`ImportSet::CpuMapped`] -- pixman, for each of its two candidates --
+    /// and the tests ask it of every renderer. Startup-only either way: never
+    /// per import and never per frame.
     pub(super) fn imports_dmabuf_format(&self, format: Format) -> bool {
         match &self.pipeline {
             Pipeline::Pixman(cpu) => ImportDma::has_dmabuf_format(&cpu.renderer, format),
             Pipeline::Gles(gpu) => ImportDma::has_dmabuf_format(&gpu.renderer, format),
             #[cfg(feature = "gpu-scanout")]
             Pipeline::Scanout(gpu) => ImportDma::has_dmabuf_format(&gpu.renderer, format),
+        }
+    }
+
+    /// What kind of answer this session's renderer gives about the dma-bufs
+    /// it can import -- the input `dmabuf.rs`'s feedback tranche is derived
+    /// from.
+    ///
+    /// Two kinds, because the two renderers answer different questions:
+    ///
+    /// - pixman **maps the buffer itself**, so what it can import is bounded
+    ///   by what a CPU mapping can make sense of -- a single-plane `LINEAR`
+    ///   buffer -- and its advertisement is a fixed candidate list it merely
+    ///   narrows ([`ImportSet::CpuMapped`]).
+    /// - both GLES tiers **hand the buffer to a driver**, and the driver has
+    ///   already said which `{fourcc, modifier}` pairs it takes: the EGL
+    ///   display's `dmabuf_texture_formats`, which is what
+    ///   `ImportDma::dmabuf_formats` returns for a `GlesRenderer` at the
+    ///   pinned rev (`gles/mod.rs:1305`), external-only formats included
+    ///   ([`ImportSet::Driver`]).
+    ///
+    /// Deliberately not [`maps_dmabufs_on_the_cpu`](Self::maps_dmabufs_on_the_cpu),
+    /// although today the two split the renderers the same way: that one
+    /// answers "does scoot have to synchronise a mapping it reads itself",
+    /// this one "what may a client be told to allocate". A renderer that
+    /// mapped buffers *and* had a driver's answer would split them.
+    ///
+    /// Startup-only: `dmabuf.rs::advertise` calls it once per session. The
+    /// clone is of a set the EGL display built once at creation.
+    pub(super) fn dmabuf_import_set(&self) -> ImportSet {
+        match &self.pipeline {
+            Pipeline::Pixman(_) => ImportSet::CpuMapped,
+            Pipeline::Gles(gpu) => ImportSet::Driver(ImportDma::dmabuf_formats(&gpu.renderer)),
+            #[cfg(feature = "gpu-scanout")]
+            Pipeline::Scanout(gpu) => ImportSet::Driver(ImportDma::dmabuf_formats(&gpu.renderer)),
         }
     }
 
@@ -502,6 +577,19 @@ impl Backend {
             Pipeline::Scanout(gpu) => Renderer::cleanup_texture_cache(&mut gpu.renderer)
                 .map_err(|error| error.to_string()),
         }
+    }
+}
+
+impl State {
+    /// The EGL device this session's offscreen GLES backends are on, if it
+    /// has built one -- the pin every later [`Backend::new`] is handed.
+    ///
+    /// Read off whichever backend answers, because it is an invariant of all
+    /// of them: the first was built unpinned and every other one pinned to
+    /// it. A scan of a map of at most `MAX_OUTPUTS` entries, on a resize or
+    /// an output being added, never per frame.
+    pub(super) fn gles_device(&self) -> Option<GlesDevice> {
+        self.backends.values().find_map(Backend::gles_device)
     }
 }
 
@@ -789,7 +877,9 @@ pub(super) fn draw_frame(
             draw_frame_with(state, renderer, image, damage, *size, output, locked)
         }
         Pipeline::Gles(gpu) => {
-            let GlesBackend { renderer, buffer } = &mut **gpu;
+            let GlesBackend {
+                renderer, buffer, ..
+            } = &mut **gpu;
             draw_frame_with(state, renderer, buffer, damage, *size, output, locked)
         }
         // A separate body, not a third `draw_frame_with` arm: this tier has

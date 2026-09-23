@@ -40,6 +40,11 @@
 //! node -- and it is why the numbers measured there are llvmpipe's, not a
 //! GPU's.
 //!
+//! **Only the first build chooses.** Every later one -- a resize, another
+//! output -- is pinned to the device that first build landed on
+//! ([`GlesDevice`]) and fails rather than moving, because the dma-buf
+//! formats advertised to clients are that device's driver's.
+//!
 //! Enumeration order is not trusted to be availability: a device can be
 //! listed and still refuse a display, a context or a renderbuffer (a render
 //! node the session may not open, a driver that will not give a GLES 2
@@ -71,6 +76,59 @@ use smithay::backend::renderer::{Bind, Offscreen};
 pub(super) struct GlesBackend {
     pub(super) renderer: GlesRenderer,
     pub(super) buffer: GlesRenderbuffer,
+    /// The EGL device `renderer` was built on -- what every later rebuild of
+    /// this session's GLES backends is pinned to (see [`GlesDevice`]).
+    pub(super) device: GlesDevice,
+}
+
+/// Which EGL device a GLES backend was built on, as an identity a rebuild can
+/// be pinned to.
+///
+/// **Why a session's GLES device must never change.** The
+/// `zwp_linux_dmabuf_v1` feedback is built once, from the first backend's
+/// driver (`dmabuf.rs`), and never re-sent -- and under GLES that table
+/// carries the driver's own tiled and compressed modifiers. A backend that a
+/// resize or a new output rebuilt on a *different* device would be asked to
+/// import buffers laid out for the first one, and a refused import through
+/// `create_immed` kills the client. "First device that builds wins" re-run
+/// per rebuild could do exactly that on a two-GPU machine: one transient
+/// failure on the first device and the rebuild lands on the second. So after
+/// the first build, [`GlesBackend::new`] is handed this pin and tries that
+/// device alone; if it cannot build there, the rebuild *fails* (a resize is
+/// refused, an output is not added) rather than migrating.
+///
+/// The identity is the `EGLDeviceEXT` handle. `EGL_EXT_device_enumeration`
+/// hands out the same handle for the same device on every query for the life
+/// of the process (Mesa's are static), so it is exactly "the same device", not
+/// "a device at the same path" -- and a pin naming a handle no longer
+/// enumerated finds nothing, which is an error too, never a fallback.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct GlesDevice(usize);
+
+impl GlesDevice {
+    fn of(device: &EGLDevice) -> Self {
+        Self(device.get_device_handle() as usize)
+    }
+}
+
+/// The devices [`GlesBackend::new`] will try, in order.
+///
+/// Unpinned (the session's first build): every device, hardware before
+/// software, enumeration order kept within each group. Pinned (every rebuild
+/// after): the pinned device alone, or nothing if it is gone. Generic over
+/// the device so the decision is testable with stand-ins; `key` and
+/// `software` are how it asks a real one.
+fn candidates<T, K: PartialEq>(
+    mut devices: Vec<T>,
+    pin: Option<K>,
+    key: impl Fn(&T) -> K,
+    software: impl Fn(&T) -> bool,
+) -> Vec<T> {
+    match pin {
+        Some(pin) => devices.retain(|device| key(device) == pin),
+        None => devices.sort_by_key(|device| software(device)),
+    }
+    devices
 }
 
 /// Whether "the GLES renderer is up" has already been logged.
@@ -96,26 +154,39 @@ impl GlesBackend {
     /// naming the default that needs no GPU; `State::resize_output` treats it
     /// the same way it treats pixman failing, i.e. as "the render target is
     /// not there" (see that function's doc).
-    pub(super) fn new(width: i32, height: i32) -> Result<Self, Box<dyn Error>> {
+    ///
+    /// `pin` is `None` for a session's first GLES build and the device that
+    /// build landed on for every one after (see [`GlesDevice`]): a pinned
+    /// build tries that device alone and fails rather than moving.
+    pub(super) fn new(
+        width: i32,
+        height: i32,
+        pin: Option<GlesDevice>,
+    ) -> Result<Self, Box<dyn Error>> {
         // Before Smithay's first EGL touch (see `lib_loadable`): on a box
         // with no loadable libEGL that touch panics instead of failing.
         lib_loadable(LIB_EGL_SONAME).map_err(|cause| format!("{cause}{FALL_BACK_HINT}"))?;
-        let mut candidates: Vec<EGLDevice> = EGLDevice::enumerate()
+        let enumerated: Vec<EGLDevice> = EGLDevice::enumerate()
             .map_err(|error| format!("could not enumerate EGL devices: {error}{FALL_BACK_HINT}"))?
             .collect();
+        let candidates = candidates(enumerated, pin, GlesDevice::of, EGLDevice::is_software);
         if candidates.is_empty() {
-            return Err(format!(
-                "no EGL device is available for the GLES renderer{FALL_BACK_HINT}"
-            )
-            .into());
+            return Err(match pin {
+                Some(_) => "the EGL device this session's GLES renderer started on is no \
+                     longer enumerated, and rebuilding on another would break the \
+                     dma-buf formats already advertised to clients"
+                    .into(),
+                None => format!("no EGL device is available for the GLES renderer{FALL_BACK_HINT}")
+                    .into(),
+            });
         }
-        candidates.sort_by_key(EGLDevice::is_software);
 
         let mut failures = Vec::with_capacity(candidates.len());
         for device in candidates {
             let name = describe(&device);
             let software = device.is_software();
-            match build(device, width, height) {
+            let identity = GlesDevice::of(&device);
+            match build(device, width, height, identity) {
                 Ok(backend) => {
                     // INFO once, DEBUG for every rebuild after -- the same
                     // once-per-session shape as `dmabuf.rs`'s first-import
@@ -147,6 +218,16 @@ impl GlesBackend {
                         );
                     }
                     return Ok(backend);
+                }
+                Err(error) if pin.is_some() => {
+                    // No next one to try, on purpose (see `GlesDevice`): the
+                    // caller turns this into a refused resize or a refused
+                    // output, and says so.
+                    return Err(format!(
+                        "could not rebuild the GLES renderer on this session's EGL device \
+                         {name}: {error}"
+                    )
+                    .into());
                 }
                 Err(error) => {
                     tracing::warn!(
@@ -234,7 +315,12 @@ pub(super) fn lib_loadable(soname: &str) -> Result<(), Box<dyn Error>> {
 /// this device's error, so the next candidate is tried and, if none works, the
 /// operator is told at startup. The target is dropped immediately; smithay
 /// deletes the FBO with it, and the frame path binds its own.
-fn build(device: EGLDevice, width: i32, height: i32) -> Result<GlesBackend, Box<dyn Error>> {
+fn build(
+    device: EGLDevice,
+    width: i32,
+    height: i32,
+    identity: GlesDevice,
+) -> Result<GlesBackend, Box<dyn Error>> {
     // SAFETY: `EGLDisplay::new`'s contract is that nothing *else* in this
     // process calls `eglGetPlatformDisplay`/`eglTerminate` behind smithay's
     // back, so that smithay's own refcounting of displays stays truthful.
@@ -250,7 +336,11 @@ fn build(device: EGLDevice, width: i32, height: i32) -> Result<GlesBackend, Box<
     let mut renderer = unsafe { GlesRenderer::new(context) }?;
     let mut buffer = renderer.create_buffer(Fourcc::Argb8888, (width, height).into())?;
     renderer.bind(&mut buffer)?;
-    Ok(GlesBackend { renderer, buffer })
+    Ok(GlesBackend {
+        renderer,
+        buffer,
+        device: identity,
+    })
 }
 
 /// The DRM **render node** `renderer`'s EGL display is on, or `None` when EGL
@@ -315,6 +405,72 @@ mod tests {
     #[test]
     fn libegl_loads_where_the_suite_runs() {
         assert!(lib_loadable(LIB_EGL_SONAME).is_ok());
+    }
+
+    /// The selection rule on stand-in devices `(key, software)`: unpinned
+    /// is hardware first in enumeration order; pinned is that device alone,
+    /// even when a preferred one is listed first; a pin naming nothing
+    /// enumerated yields nothing -- never a fallback.
+    #[test]
+    fn a_pinned_rebuild_considers_only_the_pinned_device() {
+        let devices = vec![(1, true), (2, false), (3, false)];
+        let pick = |pin: Option<u32>| -> Vec<u32> {
+            candidates(devices.clone(), pin, |d| d.0, |d| d.1)
+                .into_iter()
+                .map(|d| d.0)
+                .collect()
+        };
+        assert_eq!(pick(None), vec![2, 3, 1], "hardware first, order kept");
+        assert_eq!(pick(Some(3)), vec![3], "the pin, not the preferred device");
+        assert_eq!(pick(Some(1)), vec![1], "a software pin stays software");
+        assert!(pick(Some(9)).is_empty(), "a vanished device is no fallback");
+    }
+
+    /// The same rule on this machine's real EGL devices, where it can be
+    /// shown: pin a device that is *not* the one an unpinned build prefers,
+    /// and the build must land on it, twice (a rebuild). The dev VM lists two
+    /// (its render node, preferred, and Mesa's software device). Where only
+    /// one device builds, the half that needs a second says so and stops.
+    #[test]
+    fn a_pinned_build_lands_on_the_pinned_device() {
+        let first = GlesBackend::new(16, 16, None).expect("a GLES backend");
+        let again = GlesBackend::new(24, 24, Some(first.device)).expect("a pinned rebuild");
+        assert_eq!(again.device, first.device, "a rebuild must not move");
+
+        let other = EGLDevice::enumerate()
+            .expect("EGL devices")
+            .map(|device| GlesDevice::of(&device))
+            .find(|device| *device != first.device);
+        let Some(other) = other else {
+            eprintln!("a_pinned_build_lands_on_the_pinned_device: one EGL device here");
+            return;
+        };
+        match GlesBackend::new(16, 16, Some(other)) {
+            Ok(pinned) => {
+                assert_eq!(pinned.device, other, "the pin, not the preferred device");
+                eprintln!("a_pinned_build_lands_on_the_pinned_device: built on the pin");
+            }
+            Err(error) => {
+                // A device that cannot build must fail the pinned build,
+                // not hand back the preferred one.
+                assert!(
+                    error.to_string().contains("could not rebuild"),
+                    "a pinned failure is reported as one: {error}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_pin_naming_no_enumerated_device_is_an_error_not_a_fallback() {
+        let gone = GlesDevice(usize::MAX);
+        let error = GlesBackend::new(16, 16, Some(gone))
+            .err()
+            .expect("a pin to a device that does not exist must not build");
+        assert!(
+            error.to_string().contains("no longer enumerated"),
+            "{error}"
+        );
     }
 
     /// The gh #177 shape: a box with no such library gets a loud `Err`

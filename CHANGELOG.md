@@ -9,6 +9,27 @@ scoot has not cut a numbered release yet; entries are dated.
 
 ## Unreleased
 
+### 2026-09-23 — GPU apps get their GPU's own buffer formats (GLES renderer)
+
+- **Under `--renderer gles`, GPU-rendering apps are now offered every
+  buffer format and layout the GPU driver can take**, where they used to be
+  told "plain linear RGB only". On a real GPU that lets GL and Vulkan apps
+  render into the layouts the GPU prefers (tiled, compressed), which is
+  typically faster than linear, and lets a video player hand over the YUV frames (`NV12`, `P010`, …) a
+  hardware decoder produces instead of converting them first. The default
+  pixman renderer is unchanged. Checked on the dev VM's software GPU (which
+  offers 57 formats, all linear); what real GPU hardware offers has not
+  been captured yet ([Asahi.md](Asahi.md), Test 6). One consequence to know
+  on the GPU tier: an app that picks a tiled layout the display cannot show
+  directly makes its fullscreen window composite rather than go straight to
+  the screen, until scoot learns to steer fullscreen apps toward a layout
+  the display takes.
+- **On a machine with more than one GPU, a `gles` session stays on the GPU
+  it started on.** If that GPU cannot rebuild the renderer at a new size,
+  scoot keeps its output at the old size (under `--nested` the host window
+  has still been resized; scoot's picture inside it has not), instead of
+  quietly moving to another GPU that might not accept the apps' buffers.
+
 ### 2026-09-23 — fullscreen video without compositing (GPU tier)
 
 - **On the opt-in GPU tier (`--tty --renderer gles`, `gpu-scanout` build),

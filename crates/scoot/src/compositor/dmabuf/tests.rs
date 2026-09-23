@@ -25,6 +25,13 @@
 //! skip line is only visible under `--nocapture`, and nine of these tests
 //! check nothing without that device.
 //!
+//! Two submodules cover what a udmabuf cannot: [`tranche`] pins the GLES
+//! advertisement rule against synthetic driver answers (no device needed),
+//! and [`layouts`] imports and draws one buffer of every layout class the
+//! session advertises from a dumb buffer on `/dev/dri/card0` -- the
+//! provenance a GLES driver accepts, so it is the suite that says what a
+//! GLES session really imports.
+//!
 //! Like the other real-client suites here, these need a writable
 //! `$XDG_RUNTIME_DIR`: [`State::new`](crate::compositor::State::new) binds a
 //! real wayland listening socket.
@@ -47,11 +54,18 @@ use wayland_protocols::wp::linux_dmabuf::zv1::client::{
     zwp_linux_buffer_params_v1, zwp_linux_dmabuf_feedback_v1, zwp_linux_dmabuf_v1,
 };
 
-use super::{DMABUF_CANDIDATES, imports_linear, main_device, main_device_from, tranche};
+use super::{
+    DMABUF_CANDIDATES, advertised_formats, cpu_mapped_tranche, imports_linear, main_device,
+    main_device_from,
+};
 use crate::cli::RendererKind;
 use crate::compositor::decorations::Appearance;
+use crate::compositor::render::ImportSet;
 use crate::compositor::screencopy::FORMATS;
 use crate::compositor::test_support::{Harness, wait_for};
+
+mod layouts;
+mod tranche;
 
 /// The headless framebuffer these tests render into. Only the drain test
 /// actually draws; it needs a real `PixmanRenderer` behind `State::backends`,
@@ -92,6 +106,11 @@ enum Step {
     /// alive. The measurement test resolves that id server-side so it can
     /// time the commit-path work directly instead of through round trips.
     MakeSurface { attach_imported: bool },
+    /// Bind the dmabuf global `count` times at `version`, one round trip
+    /// each (so every bind's events are read before the next), destroying
+    /// each bind again, and report how many `modifier` events arrived --
+    /// the per-bind cost a pre-feedback (v3) client makes the compositor pay.
+    BindStorm { version: u32, count: u32 },
 }
 
 /// What a [`Step::Import`] offers the compositor.
@@ -143,6 +162,7 @@ enum Ack {
     Released,
     Committed,
     Surface(u32),
+    Stormed { modifier_events: usize },
 }
 
 /// The default-feedback events a client saw, as the client saw them.
@@ -348,7 +368,7 @@ fn default_feedback_names_a_device_and_the_renderers_own_formats() {
     assert_eq!(
         seen.table, expected,
         "the table on the wire must be exactly what the session's own renderer \
-         can import, in candidate order, LINEAR (modifier 0)"
+         can import, in the order the derivation produced"
     );
     assert_eq!(seen.tranches, 1, "one tranche carries the whole table");
     // Under the default renderer the derivation has a known answer, so pin the
@@ -366,16 +386,34 @@ fn default_feedback_names_a_device_and_the_renderers_own_formats() {
             "pixman imports both candidates, so its session advertises exactly \
              them, opaque first, LINEAR (modifier 0)"
         );
+    } else {
+        // A GLES table is the driver's, but wherever the driver lists both
+        // candidates at `LINEAR` the old two-entry table is its exact head --
+        // a client that only ever looked at the first entries sees what it
+        // always saw.
+        let old_table = [
+            (u32::from_ne_bytes(*b"XR24"), 0),
+            (u32::from_ne_bytes(*b"AR24"), 0),
+        ];
+        if old_table.iter().all(|entry| expected.contains(entry)) {
+            assert_eq!(&seen.table[..2], &old_table);
+        }
     }
 }
 
 #[test]
 fn a_v1_client_gets_format_events_not_feedback() {
     let mut fixture = Fixture::start();
-    let expected: Vec<u32> = expected_table(&fixture)
-        .into_iter()
-        .map(|(code, _modifier)| code)
-        .collect();
+    // One `format` event per *fourcc*, in first-seen order: Smithay folds the
+    // table into a fourcc -> modifiers map for the deprecated events
+    // (`wayland/dmabuf/mod.rs:699-712`), and a GLES table can name one fourcc
+    // at several modifiers.
+    let mut expected: Vec<u32> = Vec::new();
+    for (code, _modifier) in expected_table(&fixture) {
+        if !expected.contains(&code) {
+            expected.push(code);
+        }
+    }
     let seen = fixture.run(Step::ReadFeedback { version: 1 }).feedback();
     assert!(
         !seen.done,
@@ -399,27 +437,27 @@ fn every_advertised_format_is_one_the_renderer_imports() {
     // a client can read out of the feedback table may be something the
     // importer would turn down.
     //
-    // This replaced a pixman-only version of the same pin. It has to be
-    // per-renderer now that the table is derived from the active one (see
-    // `dmabuf.rs`): under `SCOOT_TEST_RENDERER=gles` it asserts against
-    // `GlesRenderer`'s EGL display, which the old one could not see at all.
+    // Per renderer kind, because the two kinds promise different things (see
+    // `Backend::dmabuf_import_set`):
     //
-    // It asks `imports_linear`, the same rule `tranche` filters by, rather
-    // than `imports_dmabuf_format({code, Linear})` directly -- and that is
-    // not the test weakening itself to match the code. A renderer whose
-    // import set carries only `{code, Invalid}` still imports a linear
-    // dma-buf of that code (see `imports_linear`'s doc for the chain through
-    // the pinned rev), so the direct check is *wrong* about such a driver in
-    // the direction that matters: it would fail this test on a session that
-    // is behaving correctly.
+    // - pixman maps the buffer itself, so every entry is `LINEAR` and passes
+    //   `imports_linear` -- asked rather than `imports_dmabuf_format({code,
+    //   Linear})` directly because the direct check is *wrong* in the
+    //   direction that matters about a renderer that lists only `{code,
+    //   Invalid}` (see `imports_linear`'s doc).
+    // - a GLES renderer hands the buffer to its driver, so every entry is one
+    //   the driver itself listed, or -- only for a candidate the driver gave
+    //   no explicit modifier for -- the documented `LINEAR` widening. Never
+    //   `Invalid` either way. Under `SCOOT_TEST_RENDERER=gles` this asserts
+    //   against the EGL display the session really built.
     let mut fixture = Fixture::start();
     let seen = fixture.run(Step::ReadFeedback { version: 5 }).feedback();
     assert!(
         !seen.table.is_empty(),
         "this renderer advertised nothing at all, so this test would assert \
-         nothing -- on a machine whose renderer really can import neither \
-         candidate that is the correct behaviour, and this assertion is how \
-         you find out that is where you are"
+         nothing -- on a machine whose renderer really can import nothing that \
+         is the correct behaviour, and this assertion is how you find out that \
+         is where you are"
     );
     let output = fixture
         .state
@@ -431,20 +469,50 @@ fn every_advertised_format_is_one_the_renderer_imports() {
         .backends
         .get(&output)
         .expect("a headless backend behind the fixture");
+    let import_set = backend.dmabuf_import_set();
     for (code, modifier) in seen.table {
         let code = Fourcc::try_from(code).expect("an advertised fourcc is a real one");
-        assert_eq!(
-            Modifier::from(modifier),
-            Modifier::Linear,
-            "only LINEAR is ever advertised, whatever the evidence for it was"
+        let modifier = Modifier::from(modifier);
+        assert_ne!(
+            modifier,
+            Modifier::Invalid,
+            "an implicit-modifier entry reached the wire for {code:?}"
         );
-        assert!(
-            imports_linear(code, &|format| backend.imports_dmabuf_format(format)),
-            "the feedback table advertises {code:?} at LINEAR, which this \
-             session's renderer will not import -- a client that allocates it \
-             and calls create_immed would be killed for believing the \
-             advertisement"
-        );
+        match &import_set {
+            ImportSet::CpuMapped => {
+                assert_eq!(
+                    modifier,
+                    Modifier::Linear,
+                    "a CPU-mapping renderer is only ever advertised LINEAR"
+                );
+                assert!(
+                    imports_linear(code, &|format| backend.imports_dmabuf_format(format)),
+                    "the feedback table advertises {code:?} at LINEAR, which this \
+                     session's renderer will not import -- a client that \
+                     allocates it and calls create_immed would be killed for \
+                     believing the advertisement"
+                );
+            }
+            ImportSet::Driver(importable) => {
+                let entry = Format { code, modifier };
+                let widened = modifier == Modifier::Linear
+                    && DMABUF_CANDIDATES.contains(&code)
+                    && importable.contains(&Format {
+                        code,
+                        modifier: Modifier::Invalid,
+                    })
+                    && !importable
+                        .iter()
+                        .any(|f| f.code == code && f.modifier != Modifier::Invalid);
+                assert!(
+                    importable.contains(&entry) || widened,
+                    "the feedback table advertises {entry:?}, which this \
+                     session's driver did not list -- a client that allocates it \
+                     and calls create_immed would be killed for believing the \
+                     advertisement"
+                );
+            }
+        }
     }
 }
 
@@ -490,7 +558,7 @@ fn a_renderer_that_imports_nothing_is_advertised_as_nothing() {
     // believed the feedback, so the tranche has to come out empty -- which is
     // what makes `advertise` skip the global entirely rather than offer an
     // empty table.
-    let advertised: Vec<Format> = tranche(|_| false).collect();
+    let advertised: Vec<Format> = cpu_mapped_tranche(|_| false).collect();
     assert!(
         advertised.is_empty(),
         "a renderer that can import nothing must be advertised as importing \
@@ -508,17 +576,17 @@ fn a_renderer_missing_one_candidate_advertises_only_the_other() {
         code: Fourcc::Xrgb8888,
         modifier: Modifier::Linear,
     };
-    let advertised: Vec<Format> = tranche(|format| format == opaque).collect();
+    let advertised: Vec<Format> = cpu_mapped_tranche(|format| format == opaque).collect();
     assert_eq!(advertised, vec![opaque]);
 
     let alpha = Format {
         code: Fourcc::Argb8888,
         modifier: Modifier::Linear,
     };
-    let advertised: Vec<Format> = tranche(|format| format == alpha).collect();
+    let advertised: Vec<Format> = cpu_mapped_tranche(|format| format == alpha).collect();
     assert_eq!(advertised, vec![alpha]);
 
-    let both: Vec<Format> = tranche(|_| true).collect();
+    let both: Vec<Format> = cpu_mapped_tranche(|_| true).collect();
     assert_eq!(
         both,
         vec![opaque, alpha],
@@ -542,7 +610,7 @@ fn a_renderer_listing_only_the_invalid_modifier_still_advertises_linear() {
     // there, dropping every GL client to software rendering and leaving a
     // dmabuf-gated shell unable to capture the screen.
     let invalid_only = |format: Format| format.modifier == Modifier::Invalid;
-    let advertised: Vec<Format> = tranche(invalid_only).collect();
+    let advertised: Vec<Format> = cpu_mapped_tranche(invalid_only).collect();
     assert_eq!(
         advertised,
         vec![
@@ -571,7 +639,7 @@ fn a_renderer_with_only_other_explicit_modifiers_advertises_nothing() {
     // is one pixman cannot map and no consumer of scoot's framebuffer layout
     // expects.
     let tiled = Modifier::from(1u64); // I915_FORMAT_MOD_X_TILED, as a stand-in
-    let advertised: Vec<Format> = tranche(|format| format.modifier == tiled).collect();
+    let advertised: Vec<Format> = cpu_mapped_tranche(|format| format.modifier == tiled).collect();
     assert!(
         advertised.is_empty(),
         "only LINEAR or Invalid is evidence, so a renderer that imports \
@@ -586,13 +654,9 @@ fn a_renderer_with_only_other_explicit_modifiers_advertises_nothing() {
 /// against the wire is that the global really carries what the derivation
 /// produced, in order, through Smithay's format-table memfd -- a step with
 /// several ways to lose the ordering or the modifier and none to notice it.
-///
-/// This needs no widening of its own for the `Modifier::Invalid` case
-/// `imports_linear` handles, and that is worth stating rather than leaving as
-/// an absence: the rule lives *inside* `tranche`, so the closure here is
-/// called once per candidate per modifier `tranche` considers evidence, and
-/// the backend answers each honestly. A copy of the rule here would be a
-/// second place for it to drift.
+/// It calls the very function `advertise` does, so the rule itself (the
+/// `Modifier::Invalid` handling of `imports_linear` and `driver_tranche`
+/// included) lives in one place and cannot drift from a copy here.
 fn expected_table(fixture: &Fixture) -> Vec<(u32, u64)> {
     let output = fixture
         .state
@@ -604,7 +668,8 @@ fn expected_table(fixture: &Fixture) -> Vec<(u32, u64)> {
         .backends
         .get(&output)
         .expect("a headless backend behind the fixture");
-    tranche(|format| backend.imports_dmabuf_format(format))
+    advertised_formats(backend)
+        .into_iter()
         .map(|format| (format.code as u32, u64::from(format.modifier)))
         .collect()
 }
@@ -1033,11 +1098,20 @@ fn a_garbage_modifier_is_still_answered_failed() {
 #[test]
 fn a_multi_plane_import_is_refused() {
     let _mappings = exclusive_mappings();
-    // Pixman maps plane 0 and nothing else, so a multi-plane buffer is
-    // refused (`UnsupportedNumberOfPlanes`). The tranche never offers a
-    // multi-plane format, so only a client ignoring its own feedback gets
-    // here; what matters is that it is a refusal rather than a
-    // half-composited surface.
+    // Two planes of a *single-plane* format (`AR24`), through the async
+    // `create`, so a refusal is `failed` and the client lives.
+    //
+    // Under pixman this is the renderer's own rule: it maps plane 0 and
+    // nothing else, so any multi-plane buffer is refused
+    // (`UnsupportedNumberOfPlanes`), and its tranche never offers a
+    // multi-plane format -- only a client ignoring its feedback gets here,
+    // and what matters is a refusal rather than a half-composited surface.
+    //
+    // Under GLES multi-plane formats *are* advertised and imported (`NV12`,
+    // `P010`, ...; `dmabuf/tests/layouts.rs` shows them drawing), and this
+    // malformed shape is the driver's to refuse. On the dev VM that refusal
+    // is also udmabuf provenance (see `test_support::test_renderer`), so
+    // under GLES this pins only "refused, not a panic".
     let mut fixture = Fixture::start();
     let outcome = fixture
         .run(Step::Import(Import {
@@ -1051,7 +1125,7 @@ fn a_multi_plane_import_is_refused() {
     assert_eq!(
         outcome,
         ImportOutcome::Failed,
-        "pixman maps plane 0 only, so a multi-plane dmabuf must be refused"
+        "two planes of a single-plane format must be refused, not composited"
     );
 }
 
@@ -1176,6 +1250,116 @@ fn commit_sync_cost() {
     );
 }
 
+/// Prints what a storm of pre-feedback (v3) binds of this global costs the
+/// compositor, against the same storm at v4 -- the question the GLES table's
+/// length raises, since Smithay answers every v3 bind with one `modifier`
+/// event per table entry (`wayland/dmabuf/dispatch.rs`, `bind`) and this
+/// global is *not* in `bind_budget.rs` (see the module doc). Asserts nothing
+/// about time; run by hand:
+///
+/// ```text
+/// cargo test --release -p scoot --bin scoot bind_storm_cost -- --ignored --nocapture
+/// ```
+///
+/// Compositor time is the test thread's own CPU time
+/// (`CLOCK_THREAD_CPUTIME_ID`): the compositor dispatches on it, the client on
+/// its own thread. v4 binds receive no events at bind, so v3 minus v4 is the
+/// cost of the `modifier` events alone. Measured on the session's own table
+/// and on a synthetic 408-entry one (a modifier-rich GPU's size).
+#[test]
+#[ignore = "prints per-bind timings for a human; asserts nothing"]
+fn bind_storm_cost() {
+    const BINDS: u32 = 2_000;
+    fn thread_cpu() -> std::time::Duration {
+        let mut now = libc::timespec {
+            tv_sec: 0,
+            tv_nsec: 0,
+        };
+        // SAFETY: a valid clock id and a live out-pointer.
+        unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, &mut now) };
+        std::time::Duration::new(now.tv_sec as u64, now.tv_nsec as u32)
+    }
+    let synthetic = || {
+        let mut fixture = Harness::bare(Appearance::default());
+        let mut formats = Vec::new();
+        use Fourcc::*;
+        let fourccs = [
+            Xrgb8888,
+            Argb8888,
+            Abgr8888,
+            Xbgr8888,
+            Rgba8888,
+            Rgbx8888,
+            Bgra8888,
+            Bgrx8888,
+            Argb2101010,
+            Xrgb2101010,
+            Abgr2101010,
+            Xbgr2101010,
+            Abgr16161616f,
+            Xbgr16161616f,
+            Rgb565,
+            R8,
+            Gr88,
+            Nv12,
+            Nv21,
+            P010,
+            Yuv420,
+            Yvu420,
+            Yuyv,
+            Uyvy,
+        ];
+        for code in fourccs {
+            for modifier in 0u64..16 {
+                formats.push(Format {
+                    code,
+                    modifier: Modifier::from(modifier),
+                });
+            }
+            formats.push(Format {
+                code,
+                modifier: Modifier::Invalid,
+            });
+        }
+        let feedback = smithay::wayland::dmabuf::DmabufFeedbackBuilder::new(0, formats)
+            .build()
+            .expect("a feedback table");
+        let dh = fixture.state.display_handle.clone();
+        fixture
+            .state
+            .screencopy
+            .dmabuf
+            .create_global_with_default_feedback::<crate::compositor::State>(&dh, &feedback);
+        fixture.spawn(run_client);
+        fixture
+    };
+    for (label, mut fixture) in [
+        ("session table", Fixture::start()),
+        ("synthetic 408", synthetic()),
+    ] {
+        let mut per_bind = Vec::new();
+        for version in [3, 4] {
+            let started = thread_cpu();
+            let Ack::Stormed { modifier_events } = fixture.run(Step::BindStorm {
+                version,
+                count: BINDS,
+            }) else {
+                panic!("expected a storm report");
+            };
+            let each = (thread_cpu() - started) / BINDS;
+            per_bind.push(each);
+            println!(
+                "{label}: v{version} bind: {each:?} compositor CPU per bind, {} modifier events per bind ({BINDS} binds)",
+                modifier_events / BINDS as usize
+            );
+        }
+        println!(
+            "{label}: the v3 modifier events cost {:?} per bind",
+            per_bind[0].saturating_sub(per_bind[1])
+        );
+    }
+}
+
 /// Records that a test asserted nothing because this machine has no usable
 /// `/dev/udmabuf`.
 ///
@@ -1218,6 +1402,8 @@ struct TestClient {
     planes: Vec<OwnedFd>,
     /// Surfaces `Step::MakeSurface` made and deliberately kept alive.
     surfaces: Vec<wl_surface::WlSurface>,
+    /// `modifier` events received, for `Step::BindStorm`.
+    modifier_events: usize,
 }
 
 fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> Result<(), String> {
@@ -1336,6 +1522,22 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 // exact surface tree, server-side.
                 client.surfaces.push(surface);
                 acks.send(Ack::Surface(id)).map_err(|e| e.to_string())?;
+            }
+            Step::BindStorm { version, count } => {
+                let (name, advertised) = client.dmabuf_name.ok_or("no zwp_linux_dmabuf_v1")?;
+                let registry = client.registry.clone().ok_or("no registry")?;
+                client.modifier_events = 0;
+                for _ in 0..count {
+                    let dmabuf: zwp_linux_dmabuf_v1::ZwpLinuxDmabufV1 =
+                        registry.bind(name, version.min(advertised), &qh, ());
+                    queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                    dmabuf.destroy();
+                }
+                queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                acks.send(Ack::Stormed {
+                    modifier_events: client.modifier_events,
+                })
+                .map_err(|e| e.to_string())?;
             }
             Step::ReleaseImportedBuffer => {
                 if let Some(buffer) = client.buffer.take() {
@@ -1555,7 +1757,7 @@ impl Dispatch<zwp_linux_dmabuf_v1::ZwpLinuxDmabufV1, ()> for TestClient {
             zwp_linux_dmabuf_v1::Event::Format { format } => {
                 client.feedback.legacy_formats.push(format);
             }
-            zwp_linux_dmabuf_v1::Event::Modifier { .. } => {}
+            zwp_linux_dmabuf_v1::Event::Modifier { .. } => client.modifier_events += 1,
             _ => {}
         }
     }

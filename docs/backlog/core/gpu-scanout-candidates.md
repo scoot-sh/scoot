@@ -3,7 +3,7 @@ title: "GPU scanout: per-surface scanout-tranche dma-buf feedback + presentation
 status: "open"
 area: "core"
 priority: "high"
-blocked: "gles-dmabuf-full-formats should land first"
+blocked: null
 ---
 
 # GPU scanout: scanout candidates + per-surface scanout feedback
@@ -28,11 +28,17 @@ for *for the primary*. What is left here is what it scoped out:
   (`ScanoutFrame::primary_direct`); a window on an overlay is equally
   absent from the swapchain slot. Virtio has no overlay plane, so this
   needs hardware that has one.
-- **Depends on [gles-dmabuf-full-formats](./gles-dmabuf-full-formats.md)**
-  (the default tranche must be the renderer's real set first).
+- ~~Depends on gles-dmabuf-full-formats~~ — landed 2026-09-23
+  ([resolved](../resolved/gles-dmabuf-full-formats-done.md)): the GLES
+  default tranche is the driver's real set.
 - **Per-surface scanout-tranche dma-buf feedback**, so a client can
-  allocate a buffer the plane takes (today the one renderer tranche offers
-  `LINEAR` only, which happens to be scannable on the machines measured).
+  allocate a buffer the plane takes. More pressing now than when filed: the
+  default tranche used to offer `LINEAR` only, which happened to be
+  scannable on the machines measured; under `gles` it now offers the
+  driver's tiled/compressed layouts too, and a fullscreen client that picks
+  one the display cannot scan out composites instead of going
+  primary-direct. (On the dev VM nothing changes — llvmpipe lists only
+  `LINEAR`. What AGX/DCP do is `Asahi.md` Test 6.)
 - **Presentation feedback's `zero_copy` flag** for a surface whose buffer
   went direct (informational; `wp_presentation` flags stay `vsync`-only
   today, which under-reports rather than misleads). Smithay's

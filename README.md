@@ -72,6 +72,10 @@ Linux, and daily-driven on `--tty`** (2026-09-18).
   GPU that measured 18–31x *slower* than pixman.
   pixman stays the default and the right choice without a GPU; details in
   [docs/tty.md](docs/tty.md).
+- **GPU apps get their GPU's own buffer formats under `--renderer gles`** —
+  the layouts the GPU prefers and the YUV formats video decoders produce,
+  not only plain linear RGB. Checked on the dev VM's software GPU (linear
+  formats only there); real hardware is [Asahi.md](Asahi.md)'s Test 6.
 - **Config reload is live, except three restart fields.** `scootctl reload` (or `kill -HUP` on the
   compositor) re-applies the layout (gap, column widths, default column
   width), the output scale (except under `--nested`, where the host owns
@@ -229,7 +233,7 @@ refusing: `[tty] gpu` naming a device that will not open, and
 | Lock the screen | `ext-session-lock-v1`, compositor-enforced | [protocols.md](docs/protocols.md#screen-locking-ext-session-lock-v1) |
 | Auto-lock or dim on idle | `ext-idle-notify-v1` + `idle-inhibit-v1` (`swayidle`) | [protocols.md](docs/protocols.md#idle-detection) |
 | Screenshot or screen-share | `ext-image-copy-capture-v1` (`grim`), plus `scootctl screenshot` | [protocols.md](docs/protocols.md#screen-capture-ext-image-copy-capture-v1) |
-| Run a GPU-rendering client with no GPU on the compositor | `zwp_linux_dmabuf_v1`, formats taken from whichever renderer is active | [protocols.md](docs/protocols.md#gpu-rendering-clients-zwp_linux_dmabuf_v1) |
+| Run a GPU-rendering client, with or without a GPU on the compositor | `zwp_linux_dmabuf_v1`, formats taken from whichever renderer is active (the GPU driver's own, YUV included, under `gles`) | [protocols.md](docs/protocols.md#gpu-rendering-clients-zwp_linux_dmabuf_v1) |
 | Clipboard manager, middle-click paste | `wlr-`/`ext-data-control`, `primary-selection-v1` | [protocols.md](docs/protocols.md#clipboard-and-primary-selection) |
 | Night light | `wlr-gamma-control-v1` (`wlsunset`, `gammastep`) | [protocols.md](docs/protocols.md#night-light-wlr-gamma-control-v1) |
 | A HiDPI display | `[output] scale`, integer and fractional | [protocols.md](docs/protocols.md#output-scaling) |
