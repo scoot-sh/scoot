@@ -702,9 +702,21 @@ pub struct State {
 
     /// Something changed that the framebuffer doesn't show yet.
     pub needs_render: bool,
+    /// Whether the pending render was asked for by anything other than the
+    /// cursor: set by `request_render`, *not* by `request_cursor_render`
+    /// (the cursor's own path, from `State::cursor_changed`), and taken by
+    /// the next render that draws. What decides whether that render's
+    /// damage moves [`State::frame_serial`].
+    pub scene_dirty: bool,
     /// How many frames [`State::render`](super::State) has drawn whose damage
-    /// tracker reported at least one changed region -- i.e. how many times the
-    /// framebuffer's pixels may have changed since startup.
+    /// tracker reported at least one changed region *and* that something
+    /// other than the cursor asked for -- i.e. how many times the scene the
+    /// framebuffer shows, cursor aside, may have changed since startup. A
+    /// frame drawn only because the cursor moved or changed image (under
+    /// `--tty`, the one backend whose frames draw it) does not count: that
+    /// is [`State::cursor_serial`]'s, so a capture session that did not ask
+    /// for the pointer is not handed the same picture again every time the
+    /// pointer moves.
     ///
     /// **"May have changed", specifically**, and the distinction matters at
     /// both ends. It is *not* "how many times `render()` ran": `render()`
@@ -943,6 +955,7 @@ impl State {
             // here.
             needs_render: true,
             frame_serial: 0,
+            scene_dirty: true,
             cursor_serial: 0,
             #[cfg(test)]
             frame_cursor_for_test: None,

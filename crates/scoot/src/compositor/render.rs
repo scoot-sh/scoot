@@ -81,6 +81,8 @@ mod primary_direct;
 #[cfg(feature = "gpu-scanout")]
 mod scanout;
 
+#[cfg(feature = "gpu-scanout")]
+pub(crate) use capture_cursor::Plane;
 pub(crate) use capture_cursor::{CursorInFrame, CursorPatch};
 #[cfg(all(test, feature = "gpu-scanout"))]
 pub(crate) use primary_direct::PrimaryDirect;
@@ -193,6 +195,11 @@ pub struct Backend {
     /// ([`Backend::cursor_in_frame`] reads whichever applies), so this stays
     /// at its default there.
     cursor: CursorInFrame,
+    /// Pixel buffers of cursor regions already written into a capture,
+    /// kept for the next one (`capture_cursor.rs`'s `Backend::recycle_patch`):
+    /// at most two, so a capture stream re-renders its region into the same
+    /// memory frame after frame.
+    patch_pixels: Vec<Vec<u8>>,
 }
 
 /// What a renderer can import, in the shape the `zwp_linux_dmabuf_v1`
@@ -280,6 +287,7 @@ impl Backend {
                 damage: OutputDamageTracker::from_output(output),
                 size: (width, height),
                 cursor: CursorInFrame::default(),
+                patch_pixels: Vec::new(),
             });
         }
         #[cfg(not(feature = "gpu-scanout"))]
@@ -295,6 +303,7 @@ impl Backend {
             damage: OutputDamageTracker::from_output(output),
             size: (width, height),
             cursor: CursorInFrame::default(),
+            patch_pixels: Vec::new(),
         })
     }
 
@@ -873,6 +882,11 @@ pub(super) struct FrameOutcome {
     /// carries `zero_copy` (see `presentation_time.rs`). Only the GPU
     /// scanout tier can set it; every other tier copies every buffer.
     pub(super) zero_copy: Option<Id>,
+    /// Whether this frame changed the pixels on screen: it drew, and the
+    /// damage tracker (or `DrmCompositor`) reported a change. What
+    /// `State::render` counts into `State::frame_serial` -- for a frame
+    /// that something other than the cursor asked for.
+    pub(super) damaged: bool,
 }
 
 /// The colour a frame is cleared to: the lock screen's while locked, the
@@ -904,10 +918,13 @@ pub(super) fn draw_frame(
         damage,
         size,
         cursor,
+        ..
     } = backend;
     match pipeline {
         Pipeline::Pixman(cpu) => {
-            let PixmanBackend { renderer, image } = cpu;
+            let PixmanBackend {
+                renderer, image, ..
+            } = cpu;
             draw_frame_with(
                 state, renderer, image, damage, cursor, *size, output, locked,
             )
@@ -1046,13 +1063,9 @@ fn draw_frame_scanout(
     outcome.blank_seq = drawn.flip;
     outcome.retry_render = retry;
     outcome.zero_copy = drawn.primary_direct;
-    // Exactly what `draw_frame_with` counts: whether the pixels moved. A
-    // render that produced no damage left the previous frame on screen, and
-    // counting it would make every capture session copy the same pixels
-    // again (see `State::frame_serial`).
-    if drawn.damaged {
-        state.frame_serial = state.frame_serial.wrapping_add(1);
-    }
+    // Exactly what `draw_frame_with` reports: whether the pixels moved (see
+    // `FrameOutcome::damaged`).
+    outcome.damaged = drawn.damaged;
     outcome
 }
 
@@ -1333,24 +1346,18 @@ where
                             &elements,
                             frame.scale.into(),
                             Rectangle::from_size(size.into()),
-                            |_| false,
+                            |_| None,
                         )
                     } else {
                         CursorInFrame::default()
                     };
-                    // What `screencopy.rs` asks "have the pixels moved since
-                    // this session's last capture?" with. Gated on the damage
-                    // tracker having something to report rather than on
-                    // reaching this arm at all: under `--tty` (the one
-                    // backend passing a real buffer age) a redundant
-                    // `request_render` legitimately draws nothing and leaves
-                    // the previous frame on screen, and counting that as a
-                    // change would make every capture session copy the same
-                    // pixels again. See `State::frame_serial`'s doc for what
-                    // this does and does not claim.
-                    if render_result.damage.is_some() {
-                        state.frame_serial = state.frame_serial.wrapping_add(1);
-                    }
+                    // Whether the pixels moved: the damage tracker having
+                    // something to report, not reaching this arm at all --
+                    // under `--tty` (the one backend passing a real buffer
+                    // age) a redundant `request_render` legitimately draws
+                    // nothing and leaves the previous frame on screen. See
+                    // `FrameOutcome::damaged`.
+                    outcome.damaged = render_result.damage.is_some();
                     // Must run unconditionally, even when there turns out to
                     // be nothing to present below -- see
                     // `BufferPool::advance_generation`'s doc for why this

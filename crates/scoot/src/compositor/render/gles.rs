@@ -67,6 +67,8 @@ use smithay::backend::egl::{EGLContext, EGLDevice, EGLDisplay};
 use smithay::backend::renderer::gles::{GlesRenderbuffer, GlesRenderer};
 use smithay::backend::renderer::{Bind, Offscreen};
 
+use super::capture_cursor::PatchPool;
+
 /// GLES, and the offscreen renderbuffer it composites into.
 ///
 /// The renderbuffer is `Argb8888` for the same reason pixman's image is: it
@@ -79,6 +81,9 @@ pub(super) struct GlesBackend {
     /// The EGL device `renderer` was built on -- what every later rebuild of
     /// this session's GLES backends is pinned to (see [`GlesDevice`]).
     pub(super) device: GlesDevice,
+    /// What the capture path reuses between captures (see
+    /// `capture_cursor::PatchPool`).
+    pub(super) patch: PatchPool<GlesRenderer, GlesRenderbuffer>,
 }
 
 /// Which EGL device a GLES backend was built on, as an identity a rebuild can
@@ -340,6 +345,7 @@ fn build(
         renderer,
         buffer,
         device: identity,
+        patch: PatchPool::default(),
     })
 }
 

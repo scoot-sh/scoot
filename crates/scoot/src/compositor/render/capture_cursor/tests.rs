@@ -13,17 +13,32 @@ fn rect(x: i32, y: i32, w: i32, h: i32) -> Rectangle<i32, Physical> {
 fn composited_at(r: Rectangle<i32, Physical>) -> CursorInFrame {
     CursorInFrame {
         composited: Some(r),
+        on_overlay: None,
         off_frame: false,
     }
 }
 
+/// The cursor rode the KMS cursor plane: the slot lacks it, and holds no
+/// hole.
 const ON_PLANE: CursorInFrame = CursorInFrame {
     composited: None,
+    on_overlay: None,
     off_frame: true,
 };
 
+/// The cursor rode an overlay plane at `r` -- possibly an underlay, whose
+/// hole punch leaves the slot transparent there.
+fn on_overlay_at(r: Rectangle<i32, Physical>) -> CursorInFrame {
+    CursorInFrame {
+        composited: None,
+        on_overlay: Some(r),
+        off_frame: true,
+    }
+}
+
 const NOT_DRAWN: CursorInFrame = CursorInFrame {
     composited: None,
+    on_overlay: None,
     off_frame: false,
 };
 
@@ -62,6 +77,7 @@ fn a_partly_planed_cursor_is_redrawn_whole() {
     let at = rect(100, 100, 16, 16);
     let partial = CursorInFrame {
         composited: Some(at),
+        on_overlay: None,
         off_frame: true,
     };
     assert_eq!(patch_region(partial, Some(at), true), Some(at));
@@ -77,7 +93,7 @@ fn a_hidden_cursor_needs_nothing_unless_the_frame_still_shows_one() {
 }
 
 #[test]
-fn leaving_the_cursor_out_touches_only_where_the_frame_composited_it() {
+fn leaving_the_cursor_out_touches_where_the_frame_composited_it_or_left_a_hole() {
     let then = rect(5, 5, 16, 16);
     let now = rect(300, 300, 16, 16);
     assert_eq!(
@@ -85,10 +101,35 @@ fn leaving_the_cursor_out_touches_only_where_the_frame_composited_it() {
         Some(then)
     );
     assert_eq!(patch_region(composited_at(then), None, false), Some(then));
-    // Nothing composited (headless, nested, a planed cursor): the frame is
-    // already cursorless, wherever the cursor is.
+    // Nothing composited and no possible hole (headless, nested, the
+    // cursor plane): the slot already holds the scene without the cursor,
+    // wherever the cursor is.
     assert_eq!(patch_region(NOT_DRAWN, Some(now), false), None);
     assert_eq!(patch_region(ON_PLANE, Some(now), false), None);
+    // An overlay-planed cursor may have been an underlay, whose hole punch
+    // left the slot transparent: re-rendered without the cursor even though
+    // none was asked for, or plain `grim` shows a hole.
+    assert_eq!(
+        patch_region(on_overlay_at(then), Some(then), false),
+        Some(then)
+    );
+    assert_eq!(patch_region(on_overlay_at(then), None, false), Some(then));
+}
+
+#[test]
+fn an_underlay_hole_is_filled_when_the_pointer_is_asked_for_and_moved() {
+    // The pointer is wanted and has moved since the frame: the old
+    // position's hole goes as well as the new position gaining the cursor.
+    let then = rect(5, 5, 16, 16);
+    let now = rect(40, 30, 16, 16);
+    assert_eq!(
+        patch_region(on_overlay_at(then), Some(now), true),
+        Some(rect(5, 5, 51, 41))
+    );
+    // Not moved: the hole is the cursor's own place, redrawn with it.
+    assert_eq!(patch_region(on_overlay_at(now), Some(now), true), Some(now));
+    // Hidden since: the hole is still filled.
+    assert_eq!(patch_region(on_overlay_at(then), None, true), Some(then));
 }
 
 /// A stand-in element: only kind, id and geometry are read by
@@ -150,24 +191,38 @@ fn the_record_is_the_cursor_elements_only() {
         Stub::cursor(rect(10, 10, 16, 16)),
         Stub::window(rect(0, 0, 800, 600)),
     ];
-    let record = CursorInFrame::of(&elements, 1.0.into(), output(), |_| false);
+    let record = CursorInFrame::of(&elements, 1.0.into(), output(), |_| None);
     assert_eq!(record, composited_at(rect(10, 10, 16, 16)));
 }
 
 #[test]
-fn the_record_unions_a_cursor_tree_and_notes_what_rode_a_plane() {
-    let planed = Stub::cursor(rect(50, 50, 8, 8));
-    let planed_id = planed.id.clone();
+fn the_record_unions_a_cursor_tree_and_notes_what_rode_which_plane() {
+    let on_cursor_plane = Stub::cursor(rect(50, 50, 8, 8));
+    let cursor_plane_id = on_cursor_plane.id.clone();
+    let on_overlay = Stub::cursor(rect(100, 90, 6, 6));
+    let overlay_id = on_overlay.id.clone();
     let elements = [
         Stub::cursor(rect(10, 10, 16, 16)),
         Stub::cursor(rect(20, 30, 4, 4)),
-        planed,
+        on_cursor_plane,
+        on_overlay,
     ];
-    let record = CursorInFrame::of(&elements, 1.0.into(), output(), |id| *id == planed_id);
+    let record = CursorInFrame::of(&elements, 1.0.into(), output(), |id| {
+        if *id == cursor_plane_id {
+            Some(Plane::Cursor)
+        } else if *id == overlay_id {
+            Some(Plane::Overlay)
+        } else {
+            None
+        }
+    });
     assert_eq!(
         record,
         CursorInFrame {
             composited: Some(rect(10, 10, 16, 24)),
+            // The overlay footprint is recorded (a possible underlay hole);
+            // the cursor plane's is not (it punches none).
+            on_overlay: Some(rect(100, 90, 6, 6)),
             off_frame: true,
         }
     );
@@ -182,7 +237,7 @@ fn the_record_clamps_to_the_output_before_it_unions() {
         Stub::cursor(rect(790, 590, i32::MAX, i32::MAX)),
         Stub::cursor(rect(-20, -20, 30, 30)),
     ];
-    let record = CursorInFrame::of(&elements, 1.0.into(), output(), |_| false);
+    let record = CursorInFrame::of(&elements, 1.0.into(), output(), |_| None);
     assert_eq!(record, composited_at(rect(0, 0, 800, 600)));
 }
 
@@ -191,12 +246,12 @@ fn a_cursor_off_this_output_is_not_in_its_record() {
     // The pointer on a second output lands its elements outside this one's
     // framebuffer: nothing to draw here, nothing to take out.
     let elements = [Stub::cursor(rect(900, 100, 16, 16))];
-    let record = CursorInFrame::of(&elements, 1.0.into(), output(), |_| false);
+    let record = CursorInFrame::of(&elements, 1.0.into(), output(), |_| None);
     assert_eq!(record, NOT_DRAWN);
     // Touching the edge from outside is a zero-area overlap, not a pixel.
     let touching = [Stub::cursor(rect(800, 0, 16, 16))];
     assert_eq!(
-        CursorInFrame::of(&touching, 1.0.into(), output(), |_| false),
+        CursorInFrame::of(&touching, 1.0.into(), output(), |_| None),
         NOT_DRAWN
     );
 }
@@ -249,16 +304,17 @@ fn a_patch_that_does_not_fit_is_dropped_whole() {
 #[test]
 fn packing_drops_row_padding() {
     // A renderer that pads rows (stride 12 for 2-pixel rows) still yields
-    // tight rows.
+    // tight rows, into a reused buffer that is cleared first.
     let mut padded = Vec::new();
     for y in 0..3u8 {
         padded.extend_from_slice(&[y; 8]);
         padded.extend_from_slice(&[0xEE; 4]);
     }
-    let packed = pack_rows(&padded, 2, 3).expect("packs");
+    let mut packed = vec![0xAA; 7];
+    pack_rows(&padded, 2, 3, &mut packed).expect("packs");
     assert_eq!(packed.len(), 2 * 3 * 4);
     assert!(packed[..8].iter().all(|byte| *byte == 0));
     assert!(packed[16..].iter().all(|byte| *byte == 2));
-    assert!(pack_rows(&padded[..10], 2, 3).is_err());
-    assert!(pack_rows(&padded, 0, 3).is_err());
+    assert!(pack_rows(&padded[..10], 2, 3, &mut packed).is_err());
+    assert!(pack_rows(&padded, 0, 3, &mut packed).is_err());
 }

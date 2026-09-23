@@ -18,6 +18,10 @@
 use smithay::input::pointer::{CursorIcon, CursorImageStatus};
 
 use super::*;
+use smithay::input::SeatHandler;
+use smithay::utils::{Physical, Rectangle};
+
+use crate::compositor::State;
 use crate::compositor::render::CursorInFrame;
 
 /// A theme name nothing resolves, so the cursor is this compositor's own
@@ -497,4 +501,208 @@ fn the_frame_records_what_it_composited_of_the_cursor() {
         "the arrow's hotspot is its tip"
     );
     assert!(!record.off_frame);
+}
+
+/// Zeroes `rect` of a `CANVAS`-wide BGRA copy: the transparent hole an
+/// underlay's hole punch leaves in the swapchain slot a capture reads.
+fn punch(pixels: &mut [u8], rect: Rectangle<i32, Physical>) {
+    for y in rect.loc.y..rect.loc.y + rect.size.h {
+        let row = (y * CANVAS + rect.loc.x) as usize * 4;
+        pixels[row..row + rect.size.w as usize * 4].fill(0);
+    }
+}
+
+/// A read of the primary's frame with `record` standing in for what it
+/// holds of the cursor, a hole punched at `hole`, and the region for `want`
+/// written over it -- the scanout tier's capture of a frame whose cursor
+/// rode an underlay.
+fn capture_with_hole(
+    fixture: &mut Fixture,
+    record: CursorInFrame,
+    hole: Rectangle<i32, Physical>,
+    want: bool,
+) -> Vec<u8> {
+    let id = primary(fixture);
+    let mut backend = fixture.state.take_backend(id).expect("a backend");
+    let mut captured = backend.capture(<[u8]>::to_vec).expect("a read-back");
+    punch(&mut captured, hole);
+    backend.set_cursor_in_frame_for_test(record);
+    let patch = fixture
+        .state
+        .capture_cursor_patch(&mut backend, id, want)
+        .expect("a frame with a possible hole always owes a region");
+    patch.apply(&mut captured, CANVAS, CANVAS);
+    backend.recycle_patch(patch);
+    fixture.state.put_backend(id, backend);
+    captured
+}
+
+#[test]
+fn an_underlay_hole_is_filled_whatever_was_asked() {
+    // Virtio has no overlay plane, so the record is synthetic: the cursor's
+    // footprint rode an overlay, and the slot holds a transparent hole there.
+    let mut fixture = start();
+    fixture.run(Step::MapWindow(WINDOW_BGRA));
+    fixture.state.pointer_move(20.0, 20.0);
+    fixture.render();
+    let with = oracle(&mut fixture, true, None);
+    let without = oracle(&mut fixture, false, None);
+    assert_cursor_shows(&with, &without);
+    let at = Rectangle::new((20, 20).into(), (16, 16).into());
+    let underlay = CursorInFrame {
+        composited: None,
+        on_overlay: Some(at),
+        off_frame: true,
+    };
+    assert_is(
+        &capture_with_hole(&mut fixture, underlay, at, false),
+        &without,
+        "not asked for: the hole filled with the scene (plain grim)",
+    );
+    assert_is(
+        &capture_with_hole(&mut fixture, underlay, at, true),
+        &with,
+        "asked for: the hole filled with the cursor over the scene",
+    );
+
+    // The pointer moved since the frame: the old position's hole goes too.
+    fixture.state.pointer_move(40.0, 36.0);
+    let moved = oracle(&mut fixture, true, None);
+    assert_is(
+        &capture_with_hole(&mut fixture, underlay, at, true),
+        &moved,
+        "no hole left at the old position, the cursor at the new one",
+    );
+}
+
+#[test]
+fn a_cursor_only_redraw_re_serves_only_the_sessions_that_asked_for_the_pointer() {
+    // The dumb tier's shape: moving the pointer redraws the frame (the
+    // cursor is in it) -- which must not hand a session that did not ask
+    // for the pointer the same picture again.
+    for paint_cursors in [false, true] {
+        let mut fixture = start();
+        fixture.run(Step::MapWindow(WINDOW_BGRA));
+        fixture.state.frame_cursor_for_test = Some(true);
+        fixture.state.pointer_move(10.0, 10.0);
+        fixture.render();
+        fixture.run(Step::StartSession { paint_cursors });
+        let (outcome, _) = fixture
+            .run(Step::Capture {
+                width: CANVAS,
+                height: CANVAS,
+                format: wl_shm::Format::Argb8888,
+            })
+            .frame();
+        assert_eq!(outcome, Outcome::Ready);
+        fixture.run(Step::CaptureWithoutWaiting);
+        let serial = fixture.state.frame_serial;
+        let before = fixture.pixels();
+        fixture.state.pointer_move(40.0, 30.0);
+        assert!(
+            fixture.state.needs_render,
+            "the frame draws the cursor: a redraw"
+        );
+        let (outcome, captured) = fixture.run(Step::PollFrame).frame();
+        assert_ne!(fixture.pixels(), before, "the frame really was redrawn");
+        assert_eq!(
+            fixture.state.frame_serial, serial,
+            "a cursor-only redraw is not a scene change"
+        );
+        if paint_cursors {
+            assert_eq!(outcome, Outcome::Ready, "the pointer is its content");
+            let with = oracle(&mut fixture, true, Some(true));
+            assert_is(&captured, &with, "served with the pointer where it is now");
+        } else {
+            assert_eq!(
+                outcome,
+                Outcome::Waiting,
+                "nothing it shows changed: not re-served"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_stream_reuses_one_region_target_and_one_pixel_buffer() {
+    // A capture stream that has its region re-rendered every frame must not
+    // build a target, or a pixel buffer, per frame.
+    let mut fixture = start();
+    fixture.run(Step::MapWindow(WINDOW_BGRA));
+    fixture.render();
+    let id = primary(&fixture);
+    let mut buffers = Vec::new();
+    for step in 0..6 {
+        fixture
+            .state
+            .pointer_move(10.0 + f64::from(step) * 5.0, 12.0);
+        let mut backend = fixture.state.take_backend(id).expect("a backend");
+        let patch = fixture
+            .state
+            .capture_cursor_patch(&mut backend, id, true)
+            .expect("headless: every capture draws the cursor in");
+        buffers.push(patch.pixels.as_ptr());
+        backend.recycle_patch(patch);
+        fixture.state.put_backend(id, backend);
+    }
+    let backend = fixture.state.backends.get(&id).expect("a backend");
+    assert_eq!(
+        backend.patch_targets_built(),
+        1,
+        "one target for six captures"
+    );
+    assert!(
+        buffers.windows(2).all(|pair| pair[0] == pair[1]),
+        "the pixel buffer is recycled, not reallocated"
+    );
+
+    // A cursor-size change is what regrows it.
+    fixture.state.appearance.cursor_size = 24;
+    fixture
+        .state
+        .cursor
+        .rebuild(24, fixture.state.appearance.cursor_color, Some(NO_THEME));
+    let mut backend = fixture.state.take_backend(id).expect("a backend");
+    let patch = fixture
+        .state
+        .capture_cursor_patch(&mut backend, id, true)
+        .expect("a region");
+    assert_eq!((patch.rect.size.w, patch.rect.size.h), (24, 24));
+    backend.recycle_patch(patch);
+    assert_eq!(backend.patch_targets_built(), 2, "rebuilt for the new size");
+    fixture.state.put_backend(id, backend);
+}
+
+#[test]
+fn every_cursor_change_moves_the_cursor_serial_and_asks_the_right_redraw() {
+    // Each path that changes the cursor reaches `cursor_changed`: the
+    // serial moves on every backend, a redraw is asked for only where
+    // frames draw the cursor, and never as a scene change.
+    for draws in [false, true] {
+        let mut fixture = start();
+        fixture.state.frame_cursor_for_test = Some(draws);
+        fixture.render();
+        let check = |fixture: &mut Fixture, what: &str, change: &dyn Fn(&mut State)| {
+            fixture.render();
+            let serial = fixture.state.cursor_serial;
+            change(&mut fixture.state);
+            assert_ne!(fixture.state.cursor_serial, serial, "{what}: serial");
+            assert_eq!(fixture.state.needs_render, draws, "{what}: redraw");
+            assert!(!fixture.state.scene_dirty, "{what}: not a scene change");
+        };
+        check(&mut fixture, "motion", &|state| {
+            state.pointer_move(30.0, 30.0)
+        });
+        check(&mut fixture, "tablet tool cursor", &|state| {
+            state.set_tool_cursor_image(CursorImageStatus::Named(CursorIcon::Crosshair))
+        });
+        check(
+            &mut fixture,
+            "wl_pointer.set_cursor / cursor shape",
+            &|state| {
+                let seat = state.seat.clone();
+                SeatHandler::cursor_image(state, &seat, CursorImageStatus::Hidden);
+            },
+        );
+    }
 }

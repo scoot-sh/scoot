@@ -135,7 +135,16 @@ impl CompositorHandler for State {
             super::dmabuf::sync_committed_dmabufs(surface);
         }
         self.last_commit = std::time::Instant::now();
-        self.request_render();
+        // A commit to the cursor image (an animated cursor's next frame, a
+        // new hotspot, a subsurface of it) changes the cursor and nothing
+        // else: the cursor's own path, so a capture that asked for the
+        // pointer sees it and one that did not is not re-served. Every other
+        // commit may change the scene.
+        if self.cursor.owns_surface(surface) {
+            self.cursor_changed();
+        } else {
+            self.request_render();
+        }
 
         if !is_sync_subsurface(surface) {
             let mut root = surface.clone();

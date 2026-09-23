@@ -994,6 +994,11 @@ impl State {
                 id,
                 &patches,
             );
+            // The regions' pixel buffers go back to the output's pool, so a
+            // stream re-renders into the same memory next frame.
+            for patch in [patches.with, patches.without].into_iter().flatten() {
+                backend.recycle_patch(patch);
+            }
             self.put_backend(id, backend);
         }
         // `render()` flushes at its end, and `post_dispatch` flushes after

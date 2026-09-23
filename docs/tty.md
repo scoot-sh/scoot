@@ -453,20 +453,32 @@ the capture path reconciles the two:
 | Tier | The frame a capture reads | Pointer asked for | Pointer not asked for |
 | --- | --- | --- | --- |
 | dumb (pixman) | always holds the cursor | nothing to do | cursor region re-rendered without it |
-| GPU scanout, cursor on a plane | never holds it | cursor region re-rendered with it | nothing to do |
+| GPU scanout, cursor on the cursor plane | lacks it | cursor region re-rendered with it | nothing to do |
+| GPU scanout, cursor on an overlay plane | lacks it, and may hold a transparent hole there (an underlay) | re-rendered with it | re-rendered without it (fills the hole) |
 | GPU scanout, plane refused this frame | holds it | nothing to do | re-rendered without it |
 | `--headless`, `--nested` | never holds it (no cursor on screen) | re-rendered with it | nothing to do |
 
-"Re-rendered" means the region under the cursor -- where it is now, plus
-where the frame drew it if that differs -- is drawn again from the frame's
-own element list by the session's own renderer, into a cursor-sized target,
-and written over the captured copy. So the pointer in a capture is the
-same image, hotspot and scale the screen shows, a capture can never end up
-with two of them (the region is replaced, not blended over), and where a
-cursor rides an overlay plane *under* the primary (an underlay, which
-leaves a transparent hole in the swapchain slot) the hole is filled. Which
-elements the frame put on a plane is read from the `DrmCompositor`'s own
-answer for that frame, not guessed from the plane inventory.
+"Re-rendered" means the region under the cursor -- where it is now (when
+asked for), where the frame drew it, and where a cursor on an overlay plane
+may have left a hole -- is drawn again from the frame's own element list by
+the session's own renderer, into a cursor-sized target, and written over
+the captured copy. So the pointer in a capture is the same image, hotspot
+and scale the screen shows, a capture can never end up with two of them
+(the region is replaced, not blended over), and where a cursor rides an
+overlay plane *under* the primary (an underlay: Smithay punches a
+transparent hole in the primary above it) the hole is filled whether or not
+the pointer was asked for, including at a position the pointer has since
+left. Which elements the frame put on which plane is read from the
+`DrmCompositor`'s own answer for that frame, not guessed from the plane
+inventory. The underlay case has not been seen on hardware (virtio has no
+overlay plane); it is pinned with a synthetic frame record.
+
+A capture session that asked for the pointer is served a new frame when
+only the pointer moves or changes image; one that did not is not, even on
+the dumb tier, where moving the pointer redraws the frame (the redraw
+counts as a cursor change, not a scene change). A stream whose region is
+re-rendered every frame reuses one offscreen target and one pixel buffer
+per output rather than allocating them per frame.
 
 What it costs, measured on the dev VM (virtio-gpu, llvmpipe; IPC
 `screenshot` wall time at 5 Hz, 3 alternated rounds of 40 against the

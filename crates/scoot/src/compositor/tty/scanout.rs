@@ -67,7 +67,7 @@ use smithay::utils::{Buffer, Rectangle, Size, Transform};
 use super::layout_exporter::{LayoutKeepingExporter, LostLayouts};
 use super::present_retry::{self, PresentRetries};
 use crate::compositor::dmabuf::scanout::FormatsKey;
-use crate::compositor::render::CursorInFrame;
+use crate::compositor::render::{CursorInFrame, Plane};
 
 /// The concrete `DrmCompositor` this backend drives.
 ///
@@ -346,18 +346,19 @@ impl ForceComposite {
 /// cursor plane (it renders into buffers of its own through its own
 /// exporter, `NodeFilter::None` inside Smithay). The one newly reachable
 /// assignment is a *client cursor surface* whose buffer is a dma-buf riding
-/// an overlay plane where the cursor plane could not take it. Captures
-/// handle it like any plane-assigned cursor: the frame records that a
-/// cursor element rode a plane (`render_and_queue`'s `CursorInFrame`, read
-/// off `overlay_elements`), and a capture re-renders the cursor's region to
-/// whatever it asked for (`render::capture_cursor`). That also covers the
-/// worse variant: where a CRTC has an overlay plane with a zpos *below* the
-/// primary, Smithay may put an *opaque* element there as an underlay and
+/// an overlay plane where the cursor plane could not take it. The worse
+/// variant of that: where a CRTC has an overlay plane with a zpos *below*
+/// the primary, Smithay may put an *opaque* element there as an underlay and
 /// punch a transparent hole in the primary above it, so the swapchain slot a
-/// capture reads holds a transparent cut-out where the cursor is -- which
-/// the re-rendered region replaces. It needs an opaque dma-buf cursor
-/// surface and underlay-capable hardware, neither seen here (virtio has no
-/// overlay plane); see `docs/backlog/resolved/capture-cursor-parity-done.md`.
+/// capture reads holds a transparent cut-out where the cursor is. Captures
+/// handle both: the frame records the footprint of every cursor element that
+/// rode an overlay (`render_and_queue`'s `CursorInFrame::on_overlay`, read
+/// off `overlay_elements`), and every capture re-renders that footprint --
+/// with the cursor when it asked for the pointer, without it when it did not
+/// (`render::capture_cursor`) -- so no capture shows the hole. It needs an
+/// opaque dma-buf cursor surface and underlay-capable hardware, neither seen
+/// here (virtio has no overlay plane; pinned with a synthetic record); see
+/// `docs/backlog/resolved/capture-cursor-parity-done.md`.
 const EXPORTER_FILTER: NodeFilter = NodeFilter::All;
 
 /// Colour formats offered to `DrmCompositor::new`, in order. `Argb8888` first
@@ -799,14 +800,24 @@ impl ScanoutPresenter {
         };
         if damaged && let PrimaryPlaneElement::Swapchain(element) = &result.primary_element {
             let (scale, size) = frame;
+            // Which plane took an element, told apart because only an
+            // overlay can leave a hole in the slot (an underlay's hole
+            // punch -- see `CursorInFrame::on_overlay`).
             let on_plane = |id: &Id| {
-                result
+                if result
                     .cursor_element
                     .is_some_and(|cursor| cursor.id() == id)
-                    || result
-                        .overlay_elements
-                        .iter()
-                        .any(|overlay| overlay.id() == id)
+                {
+                    Some(Plane::Cursor)
+                } else if result
+                    .overlay_elements
+                    .iter()
+                    .any(|overlay| overlay.id() == id)
+                {
+                    Some(Plane::Overlay)
+                } else {
+                    None
+                }
             };
             let cursor = CursorInFrame::of(
                 elements,

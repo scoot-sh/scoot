@@ -18,6 +18,8 @@ use smithay::backend::allocator::Fourcc;
 use smithay::backend::renderer::Offscreen;
 use smithay::backend::renderer::pixman::PixmanRenderer;
 
+use super::capture_cursor::PatchPool;
+
 /// pixman, and the offscreen image it composites into.
 ///
 /// The image is `Argb8888`, which is the same little-endian BGRA layout
@@ -28,6 +30,9 @@ use smithay::backend::renderer::pixman::PixmanRenderer;
 pub(super) struct PixmanBackend {
     pub(super) renderer: PixmanRenderer,
     pub(super) image: Image<'static, 'static>,
+    /// What the capture path reuses between captures (see
+    /// `capture_cursor::PatchPool`).
+    pub(super) patch: PatchPool<PixmanRenderer, Image<'static, 'static>>,
 }
 
 impl PixmanBackend {
@@ -41,6 +46,10 @@ impl PixmanBackend {
     pub(super) fn new(width: i32, height: i32) -> Result<Self, Box<dyn Error>> {
         let mut renderer = PixmanRenderer::new()?;
         let image = renderer.create_buffer(Fourcc::Argb8888, (width, height).into())?;
-        Ok(Self { renderer, image })
+        Ok(Self {
+            renderer,
+            image,
+            patch: PatchPool::default(),
+        })
     }
 }

@@ -299,6 +299,7 @@ impl State {
             // could not be drawn, logged there) -- the copy stands as read.
             if let Some(patch) = self.capture_cursor_patch(&mut backend, id, cursor) {
                 patch.apply(&mut capture.bgra, capture.width, capture.height);
+                backend.recycle_patch(patch);
             }
             capture
         });

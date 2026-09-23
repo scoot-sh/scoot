@@ -74,7 +74,7 @@ use smithay::backend::renderer::{ImportAll, ImportMem, Renderer, Texture};
 use smithay::input::pointer::{CursorIcon, CursorImageStatus, CursorImageSurfaceData};
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{IsAlive, Logical, Physical, Point, Transform};
-use smithay::wayland::compositor::{SurfaceAttributes, with_states};
+use smithay::wayland::compositor::{SurfaceAttributes, get_parent, with_states};
 
 use super::decorations::{Appearance, Color};
 use shapes::Shape;
@@ -423,6 +423,23 @@ impl Cursor {
         self.live_surface()
     }
 
+    /// Whether `surface` belongs to the active cursor image: it is the
+    /// client's cursor surface, or a subsurface in its tree. What routes a
+    /// commit to the cursor through `State::cursor_changed` rather than a
+    /// scene render. A walk up the subsurface parents -- as deep as the
+    /// tree, which `subsurface_depth.rs` bounds -- only while a client
+    /// cursor surface is active; a lookup on the status otherwise.
+    pub fn owns_surface(&self, surface: &WlSurface) -> bool {
+        let Some(active) = self.live_surface() else {
+            return false;
+        };
+        let mut root = surface.clone();
+        while let Some(parent) = get_parent(&root) {
+            root = parent;
+        }
+        &root == active
+    }
+
     /// `Some` only when the active status is a client surface that is still
     /// alive. A destroyed surface deliberately reads as `None` here --
     /// `forget_surface` above normally clears it first, but that depends on
@@ -460,33 +477,42 @@ impl Cursor {
         R: Renderer + ImportAll + ImportMem,
         R::TextureId: Texture + Send + Clone + 'static,
     {
+        // Smithay's own list for a client surface's tree, returned as is;
+        // exactly one slot for a drawn shape, none for a hidden cursor --
+        // one allocation per frame at most, exactly sized, as before
+        // `element_into` existed.
         if let Some(surface) = self.live_surface() {
-            // Re-read per frame, never cached: a client may call
-            // `set_cursor` again with the *same* surface and a different
-            // hotspot, which re-enters `SeatHandler::cursor_image` with a
-            // `CursorImageStatus::Surface` that compares equal to the
-            // previous one (the enum carries the surface, not the hotspot),
-            // so "the status didn't change" does not mean "the hotspot
-            // didn't change".
-            let hotspot = surface_hotspot(surface);
-            let location = element_location(pointer_location, hotspot, scale).to_i32_round();
-            // `scale` (the output scale), not 1.0: a client cursor surface is
-            // drawn at the same scale as everything else, so its own
-            // fractional-scale/viewport state lands it at the right physical
-            // size and `Kind::Cursor` still lets a damage tracker treat it as
-            // cursor content. `element_location` puts the origin in the same
-            // physical space.
-            return render_elements_from_surface_tree(
-                renderer,
-                surface,
-                location,
-                scale,
-                1.0,
-                Kind::Cursor,
-            );
+            return surface_elements(renderer, surface, pointer_location, scale);
+        }
+        let mut elements = match &self.status {
+            CursorImageStatus::Hidden => Vec::new(),
+            _ => Vec::with_capacity(1),
+        };
+        self.element_into(renderer, pointer_location, scale, &mut elements);
+        elements
+    }
+
+    /// [`Cursor::element`], appended to `out` instead of returned: the
+    /// capture path's pooled list (`render/capture_cursor.rs`). A drawn
+    /// shape adds its one element without allocating once `out` has
+    /// capacity; a client cursor surface's tree still comes back from
+    /// Smithay's `render_elements_from_surface_tree` as a list of its own.
+    pub fn element_into<R>(
+        &self,
+        renderer: &mut R,
+        pointer_location: Point<f64, Logical>,
+        scale: f64,
+        out: &mut Vec<CursorElement<R>>,
+    ) where
+        R: Renderer + ImportAll + ImportMem,
+        R::TextureId: Texture + Send + Clone + 'static,
+    {
+        if let Some(surface) = self.live_surface() {
+            out.extend(surface_elements(renderer, surface, pointer_location, scale));
+            return;
         }
         let icon = match &self.status {
-            CursorImageStatus::Hidden => return Vec::new(),
+            CursorImageStatus::Hidden => return,
             CursorImageStatus::Named(icon) => *icon,
             // A client cursor surface that is no longer alive -- the live
             // one returned above. Drawn as the default shape rather than as
@@ -519,13 +545,43 @@ impl Cursor {
             None,
             Kind::Cursor,
         ) {
-            Ok(element) => vec![CursorElement::Fallback(element)],
+            Ok(element) => out.push(CursorElement::Fallback(element)),
             Err(error) => {
                 tracing::warn!(%error, ?icon, "could not build the cursor element");
-                Vec::new()
             }
         }
     }
+}
+
+/// A client cursor surface's whole tree as render elements, at the hotspot
+/// the client set: [`Cursor::element`]'s first case, shared with
+/// [`Cursor::element_into`].
+fn surface_elements<R>(
+    renderer: &mut R,
+    surface: &WlSurface,
+    pointer_location: Point<f64, Logical>,
+    scale: f64,
+) -> Vec<CursorElement<R>>
+where
+    R: Renderer + ImportAll + ImportMem,
+    R::TextureId: Texture + Send + Clone + 'static,
+{
+    // Re-read per frame, never cached: a client may call
+    // `set_cursor` again with the *same* surface and a different
+    // hotspot, which re-enters `SeatHandler::cursor_image` with a
+    // `CursorImageStatus::Surface` that compares equal to the
+    // previous one (the enum carries the surface, not the hotspot),
+    // so "the status didn't change" does not mean "the hotspot
+    // didn't change".
+    let hotspot = surface_hotspot(surface);
+    let location = element_location(pointer_location, hotspot, scale).to_i32_round();
+    // `scale` (the output scale), not 1.0: a client cursor surface is
+    // drawn at the same scale as everything else, so its own
+    // fractional-scale/viewport state lands it at the right physical
+    // size and `Kind::Cursor` still lets a damage tracker treat it as
+    // cursor content. `element_location` puts the origin in the same
+    // physical space.
+    render_elements_from_surface_tree(renderer, surface, location, scale, 1.0, Kind::Cursor)
 }
 
 /// The hotspot a client last set for its cursor `surface`, or the surface's

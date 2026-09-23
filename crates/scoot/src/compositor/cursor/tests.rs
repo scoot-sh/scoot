@@ -775,6 +775,44 @@ fn a_client_cursor_surface_reaches_a_capture_as_a_frame_would_draw_it() {
     assert!(bare == without, "and without it when not asked");
 }
 
+/// A commit to the cursor surface is a cursor change -- the next frame of an
+/// animated cursor, a new hotspot -- and nothing else: it moves the cursor
+/// serial (so a capture that asked for the pointer sees it) and is not a
+/// scene change. A commit to any other surface is the reverse.
+#[test]
+fn a_commit_to_the_cursor_surface_is_a_cursor_change_not_a_scene_one() {
+    let mut fixture = Fixture::with_render_target();
+    fixture.run(Step::CommitCursorBuffer {
+        size: 24,
+        color: CLIENT_BGRA,
+    });
+    fixture.run(Step::SetCursor { hotspot: (4, 6) });
+    fixture.render();
+    // Read after an explicit `render()` rather than off `scene_dirty`: the
+    // harness dispatches the frame tick while a step runs, which may already
+    // have drawn (and taken the flag) -- the serial counts either way.
+    let (cursor, scene) = (fixture.state.cursor_serial, fixture.state.frame_serial);
+    fixture.run(Step::OffsetCursorSurface { x: 1, y: 1 });
+    fixture.state.render();
+    assert_ne!(fixture.state.cursor_serial, cursor, "the cursor changed");
+    assert_eq!(
+        fixture.state.frame_serial, scene,
+        "a cursor-surface commit is not a scene change"
+    );
+
+    let (cursor, scene) = (fixture.state.cursor_serial, fixture.state.frame_serial);
+    fixture.run(Step::OffsetFocusSurface { x: 1, y: 1 });
+    fixture.state.render();
+    assert_eq!(
+        fixture.state.cursor_serial, cursor,
+        "another surface's commit is not a cursor change"
+    );
+    assert_ne!(
+        fixture.state.frame_serial, scene,
+        "it may be a scene change"
+    );
+}
+
 #[test]
 fn a_new_hotspot_on_the_same_surface_moves_the_cursor() {
     let mut fixture = Fixture::new();

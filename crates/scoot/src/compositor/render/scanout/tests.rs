@@ -265,6 +265,7 @@ fn cursor_at(x: i32, y: i32) -> CursorInFrame {
             (x, y).into(),
             (16, 16).into(),
         )),
+        on_overlay: None,
         off_frame: false,
     }
 }
@@ -273,6 +274,7 @@ fn cursor_at(x: i32, y: i32) -> CursorInFrame {
 fn cursor_on_plane() -> CursorInFrame {
     CursorInFrame {
         composited: None,
+        on_overlay: None,
         off_frame: true,
     }
 }

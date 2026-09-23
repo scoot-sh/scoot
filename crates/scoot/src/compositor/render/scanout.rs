@@ -188,6 +188,12 @@ pub(crate) struct ScanoutBackend {
     /// here -- per output, across frames -- so judging a frame allocates only
     /// while they grow.
     pub(super) judge_scratch: super::primary_direct::JudgeScratch,
+    /// What the capture path reuses between captures (see
+    /// `capture_cursor::PatchPool`).
+    pub(super) patch: super::capture_cursor::PatchPool<
+        GlesRenderer,
+        smithay::backend::renderer::gles::GlesRenderbuffer,
+    >,
 }
 
 /// The dma-bufs a capture reads, and the pool they are exported into once per
@@ -266,6 +272,7 @@ impl ScanoutBackend {
             node: render_node(gbm),
             last_eligibility: super::primary_direct::PrimaryDirect::NotCovered,
             judge_scratch: Default::default(),
+            patch: Default::default(),
         })
     }
 
