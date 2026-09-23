@@ -84,16 +84,22 @@ fn popup_chain_cost() {
                 len: depth,
             }]),
         );
-        let survived =
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| fixture.wait_for_ack(0)))
-                .is_ok();
+        let outcome =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| fixture.wait_for_ack(0)));
+        let outcome = match outcome {
+            Ok(_) => "ADMITTED".to_owned(),
+            // The harness's own diagnosis: the client's protocol error, or
+            // "timed out" if a single dispatch outlasted its patience.
+            Err(panic) => panic
+                .downcast_ref::<String>()
+                .map_or("NOT ANSWERED", String::as_str)
+                .lines()
+                .next()
+                .unwrap_or_default()
+                .to_owned(),
+        };
         println!(
-            "popup chain: depth {depth} {} after {:?}",
-            if survived {
-                "ADMITTED"
-            } else {
-                "REFUSED (client disconnected)"
-            },
+            "popup chain: depth {depth} after {:?}: {outcome}",
             started.elapsed()
         );
         let started = Instant::now();
