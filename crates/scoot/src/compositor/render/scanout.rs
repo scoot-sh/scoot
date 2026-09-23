@@ -82,9 +82,11 @@
 //!
 //! # What a capture sees when the primary goes direct
 //!
-//! `tty/scanout.rs` passes `ALLOW_SCANOUT`, and its framebuffer exporter
-//! admits client dma-bufs, so a frame *may* land on the primary plane direct
-//! instead of in the swapchain slot -- in which case the dma-buf recorded
+//! A frame judged eligible (a fullscreen window covering the output -- see
+//! `render::primary_direct`) is handed `tty/scanout.rs`'s `DIRECT_FLAGS`, and
+//! its framebuffer exporter admits client dma-bufs, so that frame *may* land
+//! on the primary plane direct instead of in the swapchain slot -- in which
+//! case the dma-buf recorded
 //! here names the previous composite, which is not what is on screen.
 //! Serving it would hand every capture consumer (IPC screenshots,
 //! `ext-image-copy-capture-v1`, and through it shell thumbnails and
@@ -181,7 +183,7 @@ pub(crate) struct ScanoutBackend {
     /// afresh every frame and never from this -- so a session's log says
     /// when it started or stopped going direct, and why, once per
     /// transition rather than per frame.
-    pub(super) primary_direct: super::primary_direct::PrimaryDirect,
+    pub(super) last_eligibility: super::primary_direct::PrimaryDirect,
 }
 
 /// The dma-bufs a capture reads, and the pool they are exported into once per
@@ -249,7 +251,7 @@ impl ScanoutBackend {
                 direct: false,
             },
             node: render_node(gbm),
-            primary_direct: super::primary_direct::PrimaryDirect::NotCovered,
+            last_eligibility: super::primary_direct::PrimaryDirect::NotCovered,
         })
     }
 

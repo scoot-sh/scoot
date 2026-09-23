@@ -175,8 +175,8 @@ const COMPOSITE_FLAGS: FrameFlags = composite_only(DIRECT_FLAGS);
 /// capture is about to read the slot this frame draws into, so it must
 /// draw into it whatever the eligibility says. Pure, so every row is
 /// pinnable without a DRM device.
-fn frame_flags(force_composite: bool, primary_direct: bool) -> FrameFlags {
-    if primary_direct && !force_composite {
+fn frame_flags(force_composite: bool, allow_primary_direct: bool) -> FrameFlags {
+    if allow_primary_direct && !force_composite {
         DIRECT_FLAGS
     } else {
         COMPOSITE_FLAGS
@@ -225,11 +225,11 @@ impl ForceComposite {
     }
 
     /// Takes the arming and answers this frame's flags: the composite-only
-    /// set exactly once after [`arm`](Self::arm) whatever `primary_direct`
-    /// says, and otherwise the direct set if and only if the frame is
-    /// eligible (see [`frame_flags`]).
-    pub(crate) fn take_flags(&mut self, primary_direct: bool) -> FrameFlags {
-        frame_flags(std::mem::take(&mut self.armed), primary_direct)
+    /// set exactly once after [`arm`](Self::arm) whatever
+    /// `allow_primary_direct` says, and otherwise the direct set if and only
+    /// if the frame is eligible (see [`frame_flags`]).
+    pub(crate) fn take_flags(&mut self, allow_primary_direct: bool) -> FrameFlags {
+        frame_flags(std::mem::take(&mut self.armed), allow_primary_direct)
     }
 }
 
@@ -589,12 +589,14 @@ impl ScanoutPresenter {
     /// Which of the two it may be comes from [`frame_flags`]: a frame armed
     /// by [`arm_force_composite`](Self::arm_force_composite) composites
     /// whole, and so does every frame the caller did not judge eligible
-    /// (`primary_direct` false -- see `render::primary_direct`). Only an
+    /// (`allow_primary_direct` false -- see `render::primary_direct`). Only an
     /// eligible, unarmed frame lets Smithay try the primary plane, and even
     /// then Smithay decides: it may still composite (an element above the
     /// candidate that no plane took, a failed `TEST_ONLY` commit, a buffer
     /// with no framebuffer), which is why the outcome is reported back
-    /// rather than assumed from the flags.
+    /// rather than assumed from the flags: `allow_primary_direct` is what the
+    /// frame *may* do, [`ScanoutFrame::primary_direct`](ScanoutFrame) what it
+    /// *did*, and only the second may mark the capture recording.
     ///
     /// An empty frame is the *normal* no-damage case, not a failure: nothing
     /// is queued, no retry is armed and no warning is logged, exactly as the
@@ -605,7 +607,7 @@ impl ScanoutPresenter {
         renderer: &mut R,
         elements: &[E],
         clear_color: Color32F,
-        primary_direct: bool,
+        allow_primary_direct: bool,
         mut on_frame: impl FnMut(&smithay::backend::allocator::gbm::GbmBuffer),
     ) -> ScanoutFrame
     where
@@ -613,7 +615,7 @@ impl ScanoutPresenter {
         R::TextureId: Texture + 'static,
         E: RenderElement<R>,
     {
-        let flags = self.force_composite.take_flags(primary_direct);
+        let flags = self.force_composite.take_flags(allow_primary_direct);
         let result = match self
             .compositor
             .render_frame(renderer, elements, clear_color, flags)

@@ -755,7 +755,7 @@ fn draw_frame_scanout(
     let scanout::ScanoutBackend {
         renderer,
         captures,
-        primary_direct: last_direct,
+        last_eligibility,
         ..
     } = gpu;
     let clear_color: Color32F = if locked {
@@ -766,16 +766,16 @@ fn draw_frame_scanout(
     let (elements, cursor_surface, direct) =
         scanout_frame_elements(state, renderer, size, output, locked);
     outcome.cursor_surface = cursor_surface;
-    if direct != *last_direct {
+    if direct != *last_eligibility {
         // debug!, and only on a change: this is the line that says a
         // session started or stopped going direct, and why -- once per
         // transition, never per frame.
         tracing::debug!(
-            from = ?*last_direct,
+            from = ?*last_eligibility,
             to = ?direct,
             "scanout: primary-direct eligibility changed"
         );
-        *last_direct = direct;
+        *last_eligibility = direct;
     }
 
     let (drawn, retry) = {
