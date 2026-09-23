@@ -109,43 +109,53 @@ pub(super) fn to_output_local(rect: Rect, output: Rect) -> Rect {
 }
 
 impl State {
-    /// The output whose logical rectangle holds `pos`.
-    ///
-    /// Half-open on both axes like [`Rectangle::contains`], so a point on the
-    /// shared edge between two side-by-side outputs belongs to exactly one of
-    /// them (the right-hand one). `None` over no output at all -- which the
-    /// pointer clamp allows between outputs of uneven sizes, where nothing is
-    /// drawn and so nothing may be hit. Allocation-free: a scan of a handful
-    /// of outputs.
-    pub(super) fn output_at(&self, pos: Point<f64, Logical>) -> Option<OutputId> {
-        self.outputs.iter_with_ids().find_map(|(id, output)| {
-            let geometry = self.space.output_geometry(output)?;
-            geometry.to_f64().contains(pos).then_some(id)
-        })
+    /// Whether `pos` lies on output `id` -- half-open on both axes like
+    /// [`Rectangle::contains`], so a point on the shared edge between two
+    /// side-by-side outputs belongs to exactly one of them (the right-hand
+    /// one). `false` for an output this compositor does not have.
+    fn output_holds(&self, id: OutputId, pos: Point<f64, Logical>) -> bool {
+        self.outputs
+            .get(id)
+            .and_then(|output| self.space.output_geometry(output))
+            .is_some_and(|geometry| geometry.to_f64().contains(pos))
+    }
+
+    /// The output `pos` lies on, by the same half-open rule. `None` over no
+    /// output at all -- which the pointer clamp allows between outputs of
+    /// uneven sizes, where nothing is drawn.
+    fn output_at(&self, pos: Point<f64, Logical>) -> Option<OutputId> {
+        self.outputs
+            .iter_with_ids()
+            .map(|(id, _)| id)
+            .find(|&id| self.output_holds(id, pos))
     }
 
     /// The top-most window whose input region accepts `pos`, among the
     /// windows placed on the output `pos` is on, and the location it is
     /// rendered at -- `Space::element_under` with the output rule applied.
+    /// Over no output, nothing; a window `apply()` never stamped, never.
     ///
     /// The fast path *is* `element_under`: filtering can only remove
-    /// candidates, so when Smithay's top-most answer is already on the right
-    /// output it is also the top-most among that output's windows, and when
-    /// it finds nothing there is nothing to find. That is every point that
-    /// no other output's window overhangs -- one extra user-data read on the
-    /// common path. Only a point under another output's overhang walks the
-    /// stack again, from the top, skipping other outputs' windows; each step
-    /// of that walk does one `element_location` scan, so it costs O(n^2) in
-    /// the window count, confined to the bleed pixels.
+    /// candidates, so when Smithay's top-most answer is on the output under
+    /// `pos` it is also the top-most of that output's windows, and when it
+    /// finds nothing there is nothing to find. That is every point no other
+    /// output's window overhangs, at the cost of one user-data read and one
+    /// output's geometry (outputs never overlap -- `headless::add_output`
+    /// puts each immediately right of the last -- so "its own output holds
+    /// `pos`" and "it is on the output under `pos`" are the same test). Only
+    /// a point under another output's overhang walks the stack again, from
+    /// the top, skipping other outputs' windows; each step of that walk does
+    /// one `element_location` scan, so it costs O(n^2) in the window count,
+    /// confined to the bleed pixels.
     pub(super) fn window_element_under(
         &self,
         pos: Point<f64, Logical>,
     ) -> Option<(&Window, Point<i32, Logical>)> {
-        let output = self.output_at(pos)?;
         let (top, location) = self.space.element_under(pos)?;
-        if placed_on(top) == Some(output) {
+        if placed_on(top).is_some_and(|id| self.output_holds(id, pos)) {
             return Some((top, location));
         }
+        let output = self.output_at(pos)?;
         self.space
             .elements()
             .rev()

@@ -894,6 +894,36 @@ fn the_second_output_draws_like_the_first_at_a_fractional_scale() {
 }
 
 // ---------------------------------------------------------------------------
+// Past every output
+// ---------------------------------------------------------------------------
+
+/// A column hanging off the far edge of the last output is drawn nowhere
+/// there, so it takes no input there either -- the pointer can be moved
+/// past the outputs (absolute motion is not clamped), and over no output
+/// nothing is hit.
+#[test]
+fn a_column_hanging_past_the_last_output_takes_no_input_there() {
+    let mut fixture = Fixture::two_outputs();
+    let left = fixture.second_output_overhang();
+    fixture.act(Action::FocusColumn(Horizontal::Left));
+    let right = fixture.rect_of(left + 1);
+    assert!(
+        right.right() > 2 * CANVAS,
+        "the scene needs the right column past the last output: {right:?}"
+    );
+    assert_eq!(
+        fixture.point_at(2 * CANVAS - 4, ROW),
+        Some(Entered::Window(left + 1)),
+        "the control: on its own output the column takes the pointer"
+    );
+    assert_eq!(
+        fixture.point_at(2 * CANVAS + 4, ROW),
+        None,
+        "past every output, a window nobody can see took the pointer"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Moving between outputs
 // ---------------------------------------------------------------------------
 
