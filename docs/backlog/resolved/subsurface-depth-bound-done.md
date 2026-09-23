@@ -8,7 +8,7 @@ blocked: null
 
 # Bound subsurface nesting depth (client-triggerable crash) — RESOLVED
 
-RESOLVED 2026-09-23 (PR #PRNUM). The rule, and why, is in
+RESOLVED 2026-09-23 (PR #227). The rule, and why, is in
 `crates/scoot/src/compositor/subsurface_depth.rs`; the tests in
 `subsurface_depth/tests/`, driving `popup_parent`'s client (now shared,
 with subsurface ops in `popup_parent/tests/subsurfaces.rs`).
@@ -79,6 +79,12 @@ measured: many subsurfaces *side by side*, not deep, which this bound does
 not touch.
 
 ## Evidence
+
+Cache key: everything below was captured against the working tree
+committed unchanged as `3bfdeda`; the commits after it change only
+comments and docs (`git diff 3bfdeda HEAD -- crates/ | grep '^[+-][^+-]'
+| grep -v '^[+-]//!'` prints nothing). Raw artifacts: dev VM
+`/tmp/subsurf-evidence/`.
 
 Base: `7017883` exported on the dev VM with `git archive 7017883 | tar -x
 -C /tmp/subsurf-base` (the VM cannot write the 9p-mounted repo's `.git`,

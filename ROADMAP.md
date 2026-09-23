@@ -101,7 +101,7 @@ each item's own file records why it landed when it did.
 ## Recently shipped (since 2026-09-15)
 
 - **[Subsurface depth bound](docs/backlog/resolved/subsurface-depth-bound-done.md)**
-  (2026-09-23, PR #PRNUM) — a client could crash the compositor by nesting
+  (2026-09-23, PR #227) — a client could crash the compositor by nesting
   `wl_subsurface`s deeply (every Smithay surface-tree walk recurses per
   level; on `main` 10000 overflowed a 2 MB stack in release, 30000 an
   8 MB one after a 108 s stall, and in debug a chain 8588 deep overflowed
