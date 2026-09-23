@@ -29,6 +29,10 @@ use wayland_client::{Connection, Dispatch, EventQueue, QueueHandle, WEnum};
 use wayland_protocols::ext::session_lock::v1::client::{
     ext_session_lock_manager_v1, ext_session_lock_v1,
 };
+#[cfg(feature = "gpu-scanout")]
+use wayland_protocols::wp::alpha_modifier::v1::client::{
+    wp_alpha_modifier_surface_v1, wp_alpha_modifier_v1,
+};
 use wayland_protocols::xdg::shell::client::{xdg_surface, xdg_toplevel, xdg_wm_base};
 use wayland_protocols_wlr::layer_shell::v1::client::{zwlr_layer_shell_v1, zwlr_layer_surface_v1};
 
@@ -37,6 +41,8 @@ use crate::compositor::test_support::{self, Harness, wait_for};
 
 mod drawing;
 mod neighbours;
+#[cfg(feature = "gpu-scanout")]
+mod primary_direct;
 mod transitions;
 
 /// The framebuffer, square. Room for two half-width columns, a bar and a
@@ -148,6 +154,11 @@ enum Step {
     /// `ext_session_lock_manager_v1.lock`, held and never released -- an
     /// abandoned lock stays locked, which is all these tests need.
     LockSession,
+    /// `wp_alpha_modifier_surface_v1.set_multiplier` on the `window`-th
+    /// toplevel's surface, then a commit with no new buffer (the factor is
+    /// double-buffered surface state).
+    #[cfg(feature = "gpu-scanout")]
+    SetAlpha { window: usize, multiplier: u32 },
 }
 
 enum Ack {
@@ -176,6 +187,8 @@ struct TestClient {
     pointer_focus: Option<wl_surface::WlSurface>,
     outputs: Vec<wl_output::WlOutput>,
     lock_manager: Option<ext_session_lock_manager_v1::ExtSessionLockManagerV1>,
+    #[cfg(feature = "gpu-scanout")]
+    alpha_modifier: Option<wp_alpha_modifier_v1::WpAlphaModifierV1>,
     /// Per toplevel, by creation order: the `xdg_toplevel.configure` state
     /// waiting for its `xdg_surface.configure`, and every completed one.
     pending: Vec<Configured>,
@@ -221,6 +234,10 @@ impl Dispatch<wl_registry::WlRegistry, ()> for TestClient {
                 .push(registry.bind(name, version.min(4), qh, ())),
             "ext_session_lock_manager_v1" => {
                 client.lock_manager = Some(registry.bind(name, version.min(1), qh, ()));
+            }
+            #[cfg(feature = "gpu-scanout")]
+            "wp_alpha_modifier_v1" => {
+                client.alpha_modifier = Some(registry.bind(name, version.min(1), qh, ()));
             }
             _ => {}
         }
@@ -361,6 +378,12 @@ wayland_client::delegate_noop!(
     TestClient: ignore ext_session_lock_manager_v1::ExtSessionLockManagerV1
 );
 wayland_client::delegate_noop!(TestClient: ignore ext_session_lock_v1::ExtSessionLockV1);
+#[cfg(feature = "gpu-scanout")]
+wayland_client::delegate_noop!(TestClient: ignore wp_alpha_modifier_v1::WpAlphaModifierV1);
+#[cfg(feature = "gpu-scanout")]
+wayland_client::delegate_noop!(
+    TestClient: ignore wp_alpha_modifier_surface_v1::WpAlphaModifierSurfaceV1
+);
 
 /// A `width`x`height` buffer of `color` over a real memfd. A zero size (a
 /// configure that left the size to the client) draws 40 square.
@@ -460,6 +483,11 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
         zwlr_layer_surface_v1::ZwlrLayerSurfaceV1,
     )> = Vec::new();
     let mut locks: Vec<ext_session_lock_v1::ExtSessionLockV1> = Vec::new();
+    // Per toplevel, the alpha-modifier object once one was asked for: a
+    // second `get_surface` for the same surface is a protocol error.
+    #[cfg(feature = "gpu-scanout")]
+    let mut alphas: Vec<Option<wp_alpha_modifier_surface_v1::WpAlphaModifierSurfaceV1>> =
+        Vec::new();
     // Buffers stay referenced until the compositor is done with them; a
     // test this short simply keeps them all.
     while let Ok(step) = steps.recv() {
@@ -663,6 +691,26 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                     .as_ref()
                     .ok_or("no ext_session_lock_manager_v1")?;
                 locks.push(manager.lock(&qh, ()));
+                queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                Ack::Done
+            }
+            #[cfg(feature = "gpu-scanout")]
+            Step::SetAlpha { window, multiplier } => {
+                if alphas.len() <= window {
+                    alphas.resize(window + 1, None);
+                }
+                let surface = &windows[window].surface;
+                if alphas[window].is_none() {
+                    let manager = client
+                        .alpha_modifier
+                        .as_ref()
+                        .ok_or("no wp_alpha_modifier_v1")?;
+                    alphas[window] = Some(manager.get_surface(surface, &qh, ()));
+                }
+                if let Some(modifier) = &alphas[window] {
+                    modifier.set_multiplier(multiplier);
+                }
+                surface.commit();
                 queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
                 Ack::Done
             }

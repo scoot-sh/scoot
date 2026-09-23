@@ -71,8 +71,12 @@ mod elements;
 mod gles;
 mod pixman;
 #[cfg(feature = "gpu-scanout")]
+mod primary_direct;
+#[cfg(feature = "gpu-scanout")]
 mod scanout;
 
+#[cfg(all(test, feature = "gpu-scanout"))]
+pub(crate) use primary_direct::PrimaryDirect;
 #[cfg(feature = "gpu-scanout")]
 pub(crate) use scanout::ScanoutBackend;
 
@@ -745,43 +749,31 @@ fn draw_frame_scanout(
     locked: bool,
 ) -> FrameOutcome {
     let mut outcome = FrameOutcome::default();
-    let frame = FrameContext {
-        size,
-        scale: output.current_scale().fractional_scale(),
-        geometry: state.space.output_geometry(output),
-        output: state.outputs.id_of(output),
-        locked,
-    };
     let scanout::ScanoutBackend {
-        renderer, captures, ..
-    } = gpu;
-    // Same rule as `draw_frame_with`: no window and no ring is laid out while
-    // locked, because no frame can show it.
-    let arrangement = if locked {
-        None
-    } else {
-        Some(state.world.arrange())
-    };
-    let ring_elements: Vec<Elements<_>> = ring_elements(
-        &mut state.decorations,
-        &state.appearance,
-        arrangement.as_ref(),
-        &frame,
         renderer,
-    );
+        captures,
+        primary_direct: last_direct,
+        ..
+    } = gpu;
     let clear_color: Color32F = if locked {
         state.lock_clear_color()
     } else {
         state.appearance.background_color.into()
     };
-    let (elements, cursor_surface) = state.gather_elements(
-        renderer,
-        output,
-        &frame,
-        ring_elements,
-        arrangement.as_ref(),
-    );
+    let (elements, cursor_surface, direct) =
+        scanout_frame_elements(state, renderer, size, output, locked);
     outcome.cursor_surface = cursor_surface;
+    if direct != *last_direct {
+        // debug!, and only on a change: this is the line that says a
+        // session started or stopped going direct, and why -- once per
+        // transition, never per frame.
+        tracing::debug!(
+            from = ?*last_direct,
+            to = ?direct,
+            "scanout: primary-direct eligibility changed"
+        );
+        *last_direct = direct;
+    }
 
     let (drawn, retry) = {
         // Unreachable in practice -- this pipeline only exists on a `--tty`
@@ -799,9 +791,15 @@ fn draw_frame_scanout(
         if presenter.take_slots_dropped() {
             captures.forget_slots();
         }
-        let drawn = presenter.render_and_queue(renderer, &elements, clear_color, |buffer| {
-            captures.note_frame(buffer);
-        });
+        let drawn = presenter.render_and_queue(
+            renderer,
+            &elements,
+            clear_color,
+            direct.allowed(),
+            |buffer| {
+                captures.note_frame(buffer);
+            },
+        );
         // The direct arm's half of the capture contract: the slot the
         // recording points at was never drawn into by this frame, so mark
         // it rather than leaving a stale composite readable as current. A
@@ -824,6 +822,92 @@ fn draw_frame_scanout(
         state.frame_serial = state.frame_serial.wrapping_add(1);
     }
     outcome
+}
+
+/// The scanout tier's frame list, and whether that frame may go
+/// primary-direct: what [`draw_frame_scanout`] composites and flags.
+///
+/// Generic over the renderer, although the tier only ever runs it with its
+/// `GlesRenderer`, so the harness can drive the very code the tier runs
+/// with whichever renderer a headless `State` carries (see
+/// [`State::primary_direct_now`]) -- the eligibility is a function of the
+/// gathered list, and gathering is renderer-agnostic.
+///
+/// The eligibility is judged from the list just gathered and the `locked`
+/// it was gathered with, so the flags and the elements describe the same
+/// frame. No window and no ring is laid out while locked (the same rule as
+/// `draw_frame_with`), because no frame can show them.
+#[cfg(feature = "gpu-scanout")]
+fn scanout_frame_elements<R>(
+    state: &mut State,
+    renderer: &mut R,
+    size: (i32, i32),
+    output: &Output,
+    locked: bool,
+) -> (
+    Vec<Elements<R>>,
+    Option<WlSurface>,
+    primary_direct::PrimaryDirect,
+)
+where
+    R: Renderer + ImportAll + ImportMem,
+    R::TextureId: Texture + Send + Clone + 'static,
+{
+    let frame = FrameContext {
+        size,
+        scale: output.current_scale().fractional_scale(),
+        geometry: state.space.output_geometry(output),
+        output: state.outputs.id_of(output),
+        locked,
+    };
+    let arrangement = if locked {
+        None
+    } else {
+        Some(state.world.arrange())
+    };
+    let ring_elements: Vec<Elements<R>> = ring_elements(
+        &mut state.decorations,
+        &state.appearance,
+        arrangement.as_ref(),
+        &frame,
+        renderer,
+    );
+    let (elements, cursor_surface) = state.gather_elements(
+        renderer,
+        output,
+        &frame,
+        ring_elements,
+        arrangement.as_ref(),
+    );
+    let direct = primary_direct::judge(state, output, locked, &elements);
+    (elements, cursor_surface, direct)
+}
+
+/// What [`draw_frame_scanout`] would decide about the primary output's next
+/// frame, judged over the list this headless session gathers -- the harness
+/// side of [`scanout_frame_elements`], which is the code the tier runs.
+#[cfg(all(test, feature = "gpu-scanout"))]
+impl State {
+    pub(super) fn primary_direct_now(&mut self) -> primary_direct::PrimaryDirect {
+        let (id, output) = self
+            .outputs
+            .at(0)
+            .expect("a headless harness has an output");
+        let mut backend = self.take_backend(id).expect("a render target");
+        let locked = self.session_lock.is_locked();
+        let size = backend.size;
+        let direct = match &mut backend.pipeline {
+            Pipeline::Pixman(cpu) => {
+                scanout_frame_elements(self, &mut cpu.renderer, size, &output, locked).2
+            }
+            Pipeline::Gles(gpu) => {
+                scanout_frame_elements(self, &mut gpu.renderer, size, &output, locked).2
+            }
+            Pipeline::Scanout(_) => unreachable!("no test builds a scanout pipeline"),
+        };
+        self.put_backend(id, backend);
+        direct
+    }
 }
 
 /// [`draw_frame`]'s body, over any renderer that can import client buffers,

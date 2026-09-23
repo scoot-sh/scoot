@@ -169,6 +169,12 @@ pub(crate) struct ScanoutBackend {
     /// (Apple Silicon: `apple,dcp` owns the CRTCs and has no render node) is
     /// the realistic one. `dmabuf.rs`'s path ladder answers then.
     pub(super) node: Option<libc::dev_t>,
+    /// What `render::primary_direct` decided about the last frame drawn
+    /// here. Read only to log a change -- the per-frame decision is made
+    /// afresh every frame and never from this -- so a session's log says
+    /// when it started or stopped going direct, and why, once per
+    /// transition rather than per frame.
+    pub(super) primary_direct: super::primary_direct::PrimaryDirect,
 }
 
 /// The dma-bufs a capture reads, and the pool they are exported into once per
@@ -236,6 +242,7 @@ impl ScanoutBackend {
                 direct: false,
             },
             node: render_node(gbm),
+            primary_direct: super::primary_direct::PrimaryDirect::NotCovered,
         })
     }
 
