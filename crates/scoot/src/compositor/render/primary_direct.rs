@@ -70,7 +70,7 @@
 //!   the atomic `TEST_ONLY` commit refuse it (and Smithay refuses a
 //!   non-`Normal` transform outright on a plane with no `rotation`
 //!   property); a covering but not-yet-resized buffer is not tried at all
-//!   over a non-black background (it is not opaque edge to edge).
+//!   over a non-black background (it does not span the output).
 //!
 //! # Captures
 //!
@@ -78,7 +78,8 @@
 //! the recording, and a capture forces one composite frame first
 //! (`render::scanout`'s module doc, and
 //! `State::ensure_scanout_capture_current`). This module does not change
-//! that contract; it is what makes it fire in normal use.
+//! that contract; it is what makes it fire in normal use -- for one-shot
+//! captures. Rule 3 keeps capture *streams* out of it.
 
 use std::time::Instant;
 

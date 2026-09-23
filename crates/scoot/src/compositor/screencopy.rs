@@ -155,12 +155,16 @@
 //!   both counts).
 //!
 //! What a capture is *never* missing on any tier is a window. On the scanout
-//! tier a primary-direct frame leaves the previous composite in the slot the
+//! tier a primary-direct frame (a fullscreen window covering the output, see
+//! `render::primary_direct`) leaves the previous composite in the slot the
 //! capture reads, so serving it would show a stale screen; instead the serve
 //! path forces one composite frame first
 //! (`State::ensure_scanout_capture_current`, called above `deliver`), and a
 //! session where the force could not draw (no DRM master) fails its due
-//! frames loudly rather than serving the stale buffer. Shell thumbnails and
+//! frames loudly rather than serving the stale buffer. A session that is
+//! *streaming* -- a frame parked, or one asked for within the last second --
+//! keeps its output composited instead ([`Screencopy::streaming`]), so a
+//! recorder never pays the force per frame. Shell thumbnails and
 //! workspace overviews are ext-capture clients: they arrive through this
 //! same `deliver` path and inherit the same guarantee, there is no second
 //! pixel path to keep correct.

@@ -116,16 +116,23 @@
 //! by construction (the next composite frame clears the mark).
 //!
 //! **Reachability, stated rather than implied.** The whole sequence -- mark,
-//! refusal, force, clear -- is pinned against this code in `scanout/tests.rs`.
-//! It has not fired on a shipped build, because no frame goes primary-direct
-//! on any machine measured: Smithay only hands the primary plane to a client
-//! buffer whose framebuffer `Format` equals the swapchain slot's, and the
-//! opaque-fallback fourcc plus the `LINEAR`-vs-implicit modifier make that
-//! unequal on an `Argb8888` swapchain (traced and measured in
-//! `tty/scanout.rs`'s `FRAME_FLAGS` doc, with the one device shape that
-//! could match). It *has* fired live on the dev VM with that gate lifted in
-//! an uncommitted experiment. Lifting it for real is the change that makes
-//! these halves live.
+//! refusal, force, clear -- is pinned against this code in `scanout/tests.rs`,
+//! and it now fires in normal use: a fullscreen window covering its output
+//! goes primary-direct (`render::primary_direct` decides which frames may,
+//! `tty/scanout.rs`'s `DIRECT_FLAGS` says why `ANY` is safe there), so every
+//! capture of such an output forces one composite frame first. Watched live
+//! on the dev VM's virtio-gpu with a card0 dumb-buffer client: captures
+//! byte-correct through direct frames, a capture while VT-switched away
+//! refused with [`REFUSE_DIRECT`], and the next one after the switch back
+//! served.
+//!
+//! What it deliberately does *not* serve is a capture **stream**: forcing a
+//! composite for every frame of one measured worse than compositing
+//! throughout, so an output some capture client is streaming stays
+//! composited (`Screencopy::streaming`), and its captures read a current
+//! composite with nothing to force. The force is for one-shot captures --
+//! IPC `screenshot`, a thumbnail refresh -- where one extra composite frame
+//! is noise.
 
 use std::error::Error;
 

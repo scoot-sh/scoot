@@ -518,7 +518,10 @@ impl State {
     /// so the element's framebuffer cache is not carried into that frame's
     /// state and lapses -- measured on the dev VM, 2 exports per capture),
     /// and only when the recording is actually stale -- direct frames keep
-    /// flipping direct between captures. While paused (no DRM master) the render
+    /// flipping direct between captures. A capture *stream* does not come
+    /// through here stale at all: `render::primary_direct` keeps a streamed
+    /// output composited (`Screencopy::streaming`), because paying this per
+    /// frame measured worse than compositing. While paused (no DRM master) the render
     /// draws nothing and the recording stays stale; the capture then fails
     /// loudly at [`Backend::capture`] rather than serving the old screen.
     /// Never arms without rendering in the same call: a bare arming would
