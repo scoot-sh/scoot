@@ -687,6 +687,9 @@ capture-cursor → resize-in-place → syncobj → nested dmabuf → VRR.
 - [Frame learning never flushes its own relayout](./core/frame-learning-apply-flush.md) — low: learned minimum waits for the next event.
 - [Smoke xwayland step keys on PATH, not the build feature](./testing/smoke-xwayland-step-feature-gate.md) — medium: nested smoke in cage hangs then fails on any default build; pre-existing since PR #221.
 
+### Found implementing the popup depth bound (2026-09-23)
+- [Deeply nested subsurfaces may overflow the stack](./core/subsurface-depth-bound.md) — high, unmeasured: Smithay's surface-tree walks recurse per subsurface level, like the popup tree did; needs a fail-first test first.
+
 ### Meta
 - [Split the CLI out into `scootctl`](./resolved/rename-flex-family-done.md) — CLOSED 2026-09-20: the `flexwm` → `scoot` rename half landed 2026-09-18 (PR #128); the crate split landed 2026-09-20 ([record](./resolved/scootctl-split-done.md)): new `scootctl` lib+bin crate, `scoot msg` kept as a permanent alias, Darwin default is `scootctl`. A status bar stays separate.
 
