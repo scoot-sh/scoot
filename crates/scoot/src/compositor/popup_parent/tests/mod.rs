@@ -42,6 +42,7 @@ use wayland_protocols_wlr::layer_shell::v1::client::{zwlr_layer_shell_v1, zwlr_l
 use crate::compositor::decorations::{Appearance, Color};
 use crate::compositor::test_support::{self, Harness, wait_for};
 
+mod adopt;
 mod bench;
 mod bypass;
 mod depth;
@@ -118,6 +119,16 @@ enum Op {
     Reincarnate { popup: usize, parent: Parent },
     /// `xdg_popup.reposition` on popup `popup`: one more walk up its chain.
     Reposition(usize),
+    /// A popup created with a null parent, *not* committed (committing it
+    /// unadopted is a protocol error). It becomes the next popup index.
+    Parentless,
+    /// A popup of `parent` that is *not* committed. It becomes the next
+    /// popup index.
+    Uncommitted(Parent),
+    /// `zwlr_layer_surface_v1.get_popup` on popup `popup`, whatever it is.
+    Adopt { popup: usize, layer: usize },
+    /// `wl_surface.commit` on popup `popup`'s surface.
+    Commit(usize),
     /// A round trip in the middle of the batch (see [`sync`]).
     ///
     /// Put right after the request a test expects refused, when more
@@ -606,6 +617,51 @@ fn run_op(
             };
         }
         Op::Sync => unreachable!("`Step::Batch` runs `Op::Sync` itself"),
+        Op::Parentless => {
+            let index = made.popups.len();
+            client.popups.push(PopupRecord::default());
+            let surface = globals.compositor.create_surface(qh, ());
+            let xdg = globals
+                .wm_base
+                .get_xdg_surface(&surface, qh, Role::Popup(index));
+            let positioner = globals.positioner(qh);
+            let popup = xdg.get_popup(None, &positioner, qh, Role::Popup(index));
+            positioner.destroy();
+            made.popups.push(Popup {
+                surface,
+                xdg,
+                popup,
+            });
+        }
+        Op::Uncommitted(parent) => {
+            let index = made.popups.len();
+            client.popups.push(PopupRecord::default());
+            let surface = globals.compositor.create_surface(qh, ());
+            let xdg = globals
+                .wm_base
+                .get_xdg_surface(&surface, qh, Role::Popup(index));
+            let popup = made.get_popup(globals, qh, &xdg, parent, Role::Popup(index))?;
+            made.popups.push(Popup {
+                surface,
+                xdg,
+                popup,
+            });
+        }
+        Op::Adopt { popup, layer } => {
+            let popup = &made.popups.get(popup).ok_or("no such popup")?.popup;
+            made.layers
+                .get(layer)
+                .ok_or("no such layer")?
+                .layer
+                .get_popup(popup);
+        }
+        Op::Commit(popup) => {
+            made.popups
+                .get(popup)
+                .ok_or("no such popup")?
+                .surface
+                .commit();
+        }
         Op::Reposition(popup) => {
             let positioner = globals.positioner(qh);
             made.popups

@@ -369,11 +369,12 @@ impl XdgShellHandler for State {
     /// the layer-shell request has set its parent, and `PopupManager::commit`
     /// moves it into the parent's tree from there.
     ///
-    /// That is why `WlrLayerShellHandler::new_popup` stays unimplemented:
-    /// tracking a popup a second time on that path puts a *second* node for
-    /// the same surface in the layer surface's `PopupTree` -- measured, see
+    /// That is why `WlrLayerShellHandler::new_popup` never tracks: tracking
+    /// a popup a second time on that path puts a *second* node for the same
+    /// surface in the layer surface's `PopupTree` -- measured, see
     /// `layer_shell/tests/popup.rs` -- which every tree walk then sees twice
-    /// and which a dismissal only half removes.
+    /// and which a dismissal only half removes. It only checks that the
+    /// popup may be adopted at all (`popup_parent::check_adoption`).
     ///
     /// The positioner is not read here: the popup's constraint adjustment is
     /// applied at its initial configure instead (see

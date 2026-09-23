@@ -16,23 +16,43 @@
 //!
 //! # The rules
 //!
+//! Two depths have to stay bounded, and they are not the same thing. A
+//! popup's *chain* is its parent pointers, which every walk up follows. Its
+//! *node* is where Smithay's `PopupTree` put it, which every recursion down
+//! follows -- and a node is placed once, at tracking, under the node of its
+//! parent *at that moment* (`PopupNode::try_insert`), and never moves. So
+//! the tree is only as shallow as the chains if no chain ever changes under
+//! a live node: a chain that shortens while its node stays deep lets new
+//! children, admitted by the short chain, nest under the deep node.
+//!
 //! A popup's parent is written at these sites, and nowhere else:
 //!
 //! 1. `xdg_surface.get_popup` -- Smithay writes the role data, then calls
 //!    `new_popup`, which runs [`admit`] before anything walks the chain;
-//! 2. `zwlr_layer_surface_v1.get_popup` -- always a layer surface, which is
-//!    not a popup, so it ends a chain rather than extending one: it can
-//!    shorten a popup's chain and never lengthen it;
-//! 3. `xdg_popup`'s destructor -- Smithay resets the role data, parent
-//!    included, to `None`, which also only shortens chains;
-//! 4. [`admit`]'s own refusal, which clears the refused popup's parent to
-//!    `None` (see [`refuse`]).
+//! 2. `zwlr_layer_surface_v1.get_popup` -- Smithay overwrites the parent
+//!    with the layer surface unconditionally, then calls the layer shell's
+//!    `new_popup`, which runs [`check_adoption`]: only a popup created with
+//!    no parent, and not yet committed, may be adopted -- what the wlr
+//!    protocol requires anyway. Such a popup has no node yet (it waits in
+//!    `PopupManager`'s unmapped list until its first commit, and is then
+//!    placed at the top of the layer's tree), and a layer surface is not a
+//!    popup, so adoption changes neither depth. Re-adopting a popup that
+//!    already had a parent would cut its chain to one while its node stayed
+//!    where it was: measured, rounds of "adopt the tip of a 64-deep chain,
+//!    grow 63 more under it" overflowed the stack at a few thousand popups;
+//! 3. `xdg_popup`'s destructor -- Smithay resets the role data to `None`,
+//!    but the popup, and so its node, is dead by then: reaped from the tree
+//!    at the end of the dispatch, or before, if its surface is made a popup
+//!    again (see [`Admission::Reused`]);
+//! 4. a refusal here, which clears the refused popup's parent (see
+//!    [`refuse`]) -- its client is disconnected, and sends nothing more.
 //!
-//! Only (1) can lengthen a chain, and it is checked. What it has to rule out
-//! is not just a deep *new* popup but an old popup's chain growing under it
-//! after it was admitted -- which is how a check that only counts a new
-//! popup's ancestors is bypassed, by re-parenting something that already has
-//! children. That takes one of three things, and each is refused:
+//! So only (1) creates or lengthens anything, and it is checked. What it
+//! has to rule out is not just a deep *new* popup but an old popup's chain
+//! growing under it after it was admitted -- which is how a check that only
+//! counts a new popup's ancestors is bypassed, by re-parenting something
+//! that already has children. Apart from (2), that takes one of three
+//! things, and each is refused:
 //!
 //! - **A second `get_popup` on a surface whose popup is still alive**
 //!   (`xdg_surface.already_constructed`). Smithay gives the same role twice
@@ -52,16 +72,15 @@
 //!   become a popup. A toplevel or layer surface parent is a chain's root for
 //!   good (a surface's role is permanent), so it is never refused.
 //!
-//! With those three refused, the tree only grows at its leaves: a popup's
+//! With all of that refused, the tree only grows at its leaves: a popup's
 //! chain is exactly as long as it was when it was admitted, and [`admit`]
-//! bounds that at [`MAX_POPUP_DEPTH`]. That also makes the chain loop-free --
-//! the only loop left for a client to try is a popup that names its own
-//! `xdg_surface` as its parent, and the walk refuses that -- so every other
-//! walk up a chain, Smithay's and `popup_constraint.rs`'s, terminates in at
-//! most that many steps.
-//!
-//! The tree Smithay draws from is kept to the same depth by one more step,
-//! in `new_popup`: see [`Admission::Reused`].
+//! bounds that at [`MAX_POPUP_DEPTH`]; a popup's node is at most as deep as
+//! its chain (it is placed under its parent's node, or at the top of the
+//! tree if the parent has none), so every recursion down the tree is bounded
+//! too. That also makes the chain loop-free -- the only loop left for a
+//! client to try is a popup that names its own `xdg_surface` as its parent,
+//! and the walk refuses that -- so every walk up a chain, Smithay's and
+//! `popup_constraint.rs`'s, terminates in at most that many steps.
 //!
 //! Children are counted only for `xdg_popup`s. An input-method popup is
 //! placed against whichever surface has the text field -- which can be
@@ -149,6 +168,9 @@ struct PopupRecord {
     /// How many live `xdg_popup`s were admitted with this surface as their
     /// parent.
     live_children: u32,
+    /// Whether it was admitted with no parent at all -- the only kind a
+    /// layer surface may adopt (see [`check_adoption`]).
+    parentless: bool,
 }
 
 impl PopupRecord {
@@ -208,6 +230,9 @@ enum Refusal {
     /// Its parent is a bare `xdg_surface`, or a popup surface whose
     /// `xdg_popup` is gone.
     NoLiveParent,
+    /// A layer surface tried to adopt it, but it was created with a parent,
+    /// or has already been committed.
+    NotAdoptable,
 }
 
 /// Decides whether a popup Smithay has just created may stay, refusing it
@@ -262,6 +287,7 @@ pub(super) fn admit(popup: &PopupSurface) -> Admission {
             owner: Some(popup.xdg_popup().downgrade()),
             counted_parent,
             live_children: 0,
+            parentless: parent.is_none(),
         };
     });
     if previous_owner {
@@ -336,6 +362,9 @@ fn refuse(popup: &PopupSurface, refusal: Refusal) {
         Refusal::NoLiveParent => {
             "this popup's parent xdg_surface has no live xdg_toplevel or xdg_popup".to_owned()
         }
+        Refusal::NotAdoptable => "zwlr_layer_surface_v1.get_popup takes only a popup created \
+             with a null parent and not yet committed"
+            .to_owned(),
     };
     tracing::warn!(
         client = ?popup.wl_surface().client().map(|client| client.id()),
@@ -355,6 +384,39 @@ fn refuse(popup: &PopupSurface, refusal: Refusal) {
         xdg_wm_base::Error::InvalidPopupParent as u32,
         format!("invalid_popup_parent: {reason}"),
     );
+}
+
+/// `WlrLayerShellHandler::new_popup`: refuses the adoption, and disconnects
+/// the client, unless `popup` was admitted with no parent and has not been
+/// committed yet -- the two things `zwlr_layer_surface_v1.get_popup`
+/// requires ("created via `xdg_surface::get_popup` with the parent set to
+/// NULL", and "invoked before committing the popup's initial state"), and
+/// what keeps adoption from cutting a chain short under a node that stays
+/// deep (see the module doc).
+///
+/// Only checks: it must not track the popup. `new_popup` already did, and
+/// tracking it a second time puts a second node for it in the layer's tree
+/// (see `handlers.rs`).
+///
+/// "Committed" is read as "has had its initial configure": for a popup
+/// admitted parentless, a commit before adoption is already a protocol
+/// error Smithay posts, and the one after it is what earns the configure.
+///
+/// A popup refused at admission (its record belongs to another popup, or
+/// none) is left alone: its client is already disconnected.
+pub(super) fn check_adoption(popup: &PopupSurface) {
+    let parentless = with_record(popup.wl_surface(), |record| {
+        let owns = record
+            .owner
+            .as_ref()
+            .is_some_and(|owner| owner.id() == popup.xdg_popup().id());
+        owns.then_some(record.parentless)
+    });
+    match parentless {
+        None => {}
+        Some(true) if !popup.is_initial_configure_sent() => {}
+        Some(_) => refuse(popup, Refusal::NotAdoptable),
+    }
 }
 
 /// `XdgShellHandler::popup_destroyed`: closes `popup`'s [`PopupRecord`] and

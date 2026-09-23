@@ -86,6 +86,7 @@ use smithay::wayland::shell::wlr_layer::{
     Anchor, KeyboardInteractivity, Layer, LayerSurface as WlrLayerSurface, LayerSurfaceCachedState,
     WlrLayerShellHandler, WlrLayerShellState,
 };
+use smithay::wayland::shell::xdg::PopupSurface;
 
 use super::State;
 use super::output_clip::output_holds_point;
@@ -261,6 +262,15 @@ impl WlrLayerShellHandler for State {
         // already arranged, and an arrangement is what the first configure
         // will be built from.
         self.refresh_layer_zone();
+    }
+
+    /// A layer surface adopted a popup (`zwlr_layer_surface_v1.get_popup`):
+    /// checked, never tracked -- `XdgShellHandler::new_popup` already
+    /// tracked it, and a second `track_popup` would put a second node for it
+    /// in the layer's tree. A popup that already had a parent, or was
+    /// already committed, is refused: see `popup_parent::check_adoption`.
+    fn new_popup(&mut self, _parent: WlrLayerSurface, popup: PopupSurface) {
+        super::popup_parent::check_adoption(&popup);
     }
 
     /// The client destroyed its layer surface, or disconnected.
