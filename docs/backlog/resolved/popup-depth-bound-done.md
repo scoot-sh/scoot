@@ -35,16 +35,37 @@ RESOLVED 2026-09-23 (PR #226). The rules, and why each, are in
   disconnected by Smithay's own lazy `not_the_topmost_popup` -- and
   repeating it in one flush nested the *tree* without bound whatever the
   chains said. `new_popup` reaps dead nodes first on that path.
-- **Layer-shell adoption needed no check:** it only ever sets a layer
-  surface, which is not a popup, as the parent, so a chain is as long
-  after adoption as before (tested at 64 and 65 under an adopted
-  dropdown). There is no hook for it anyway: implementing
-  `WlrLayerShellHandler::new_popup` double-tracks (see `handlers.rs`).
+- **Layer-shell adoption needs a check -- the first version of this fix
+  said it did not, and review found the bypass.** The pinned Smithay's
+  `zwlr_layer_surface_v1.get_popup` overwrites the popup's parent with the
+  layer surface unconditionally. Adopting a popup that already sat deep in
+  a tree cut its *chain* to one while its *node* stayed deep, so the next
+  63 children, admitted by the short chain, nested 63 levels deeper in
+  the tree, round after round (measured by the reviewer at `10e6b53`:
+  debug overflowed from about 1954 popups; release took a 16.2 s batch and
+  73 ms frames at 1954 and overflowed at 5104). `WlrLayerShellHandler::new_popup`
+  is now implemented, check-only (it never tracks, so no second node):
+  adoption is refused, as `invalid_popup_parent`, unless the popup was
+  created with a null parent and has not had its initial commit -- both of
+  which the wlr protocol requires anyway. The rule this taught, now the
+  module doc's frame: chain depth and tree-node depth are different, and
+  a node is placed once, so no chain may ever change under a live node.
 - **Real clients:** GTK 3.24 was measured, live, destroying child popups
   before parents in every path tried (click outside, Escape, picking an
   item, submenu and menubar hover-switching, and scoot's own
   `popup_done`), and it never reuses a menu's `wl_surface`. wlroots and
-  mutter also enforce `not_the_topmost_popup`.
+  mutter also enforce `not_the_topmost_popup`. No bar client was
+  available on the dev VM; the ordinary bar flow (a null-parent popup,
+  adopted, committed, a submenu, closed and reopened -- also with each
+  step in its own flush) is covered by the harness.
+
+**What is guaranteed:** every popup chain is at most 64 popups long, and
+every popup's node in Smithay's `PopupTree` is at most as deep as its
+chain, so every walk up a chain and every recursion down a tree is at
+most 64 levels (65 with an input-method popup, which is a leaf). Not
+covered here, and filed: many popups *side by side* (quadratic, not
+deep -- `core/popup-count-quadratic.md`) and deeply nested *subsurfaces*
+(`core/subsurface-depth-bound.md`).
 
 Measured (dev VM, release, the harness's 2 MB test-thread stack): on
 `main` a 3000-deep chain froze the compositor for ~60 s and then drew at

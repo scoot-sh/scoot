@@ -108,11 +108,15 @@ each item's own file records why it landed when it did.
   the cap is made sound by refusing every way an admitted chain could
   grow (`popup_parent.rs`): `xdg_surface.already_constructed` and
   `xdg_wm_base.not_the_topmost_popup`, which the pinned Smithay does not
-  enforce, plus a parent with no live role object. Also fixed: a surface
-  made a popup again had a same-flush child inserted under its dead tree
-  node (invisible, then disconnected, and nestable without bound). GTK 3
-  measured live closing submenus first in every path; frame cost with a
-  max-depth chain unchanged.
+  enforce, plus a parent with no live role object, plus a layer surface
+  adopting anything but a fresh parentless popup (review found that
+  re-adoption cut a chain short under a node that stayed deep). Every
+  chain and every popup-tree node is now at most 64 deep. Also fixed: a
+  surface made a popup again had a same-flush child inserted under its
+  dead tree node (invisible, then disconnected, and nestable without
+  bound). GTK 3 measured live closing submenus first in every path; frame
+  cost with a max-depth chain unchanged. Filed: many side-by-side popups
+  stall quadratically; deep subsurface nesting overflows the stack.
 
 - **[Popup constraint adjustment](docs/backlog/resolved/popup-constraint-adjustment-done.md)**
   (2026-09-23, PR #225) — the regression PR #224 made visible (a menu at a

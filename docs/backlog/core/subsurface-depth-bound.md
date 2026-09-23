@@ -1,20 +1,35 @@
 ---
-title: "Deeply nested subsurfaces may overflow the compositor's stack — the popup depth bound's sibling, unmeasured"
+title: "Deeply nested subsurfaces overflow the compositor's stack — any client can crash every session"
 status: "open"
 area: "core"
 priority: "high"
 blocked: null
 ---
 
-# Bound subsurface nesting depth (suspected client-triggerable crash)
+# Bound subsurface nesting depth (client-triggerable crash)
 
 Filed 2026-09-23 while implementing the
-[popup depth bound](../resolved/popup-depth-bound-done.md). **Found by
-reading the pinned source, not measured** -- the first step is a
-fail-first test that shows whether it is real (see `CLAUDE.md`'s
-"establish whether the harm is real" rule).
+[popup depth bound](../resolved/popup-depth-bound-done.md), from reading
+the pinned source; **measured** by the review of PR #226 (at `10e6b53`,
+pre-existing -- nothing in that PR touches subsurfaces). Serves both
+priorities for the same reason the popup bound did: a compositor crash
+takes every client's unsaved state with it.
 
-## What looks wrong
+## Measured
+
+A client maps a window, then builds `N` desync `wl_subsurface`s in one
+batch, each the child of the one before, each with a 4x4 buffer, and
+commits the window; the harness then draws a frame and checks that a
+second client is still served (a `SubChain { len }` op in the
+`popup_parent/tests` harness shape):
+
+| build | stack | result |
+|---|---|---|
+| debug | 2 MB (test thread) | 1000 levels fine (7 ms frame); 3000 overflows |
+| release | 2 MB | 3000 fine (2.3 ms frame); 10000 overflows |
+| release | 8 MB (a real session's main thread) | 30000 overflows |
+
+## Why
 
 A `wl_subsurface` can be the parent of another, so a client can nest them
 as deep as it likes, and Smithay's walks over a surface tree recurse once
@@ -33,8 +48,8 @@ bound (`popup_parent.rs`) does not cover it: a subsurface is not a popup.
 
 ## What a fix needs
 
-A measured depth at which it breaks (debug and release, frame and
-creation), then a cap checked in scoot's own `new_subsurface` hook (or
+A fail-first harness test at a depth that crashes the debug build, then a
+cap checked in scoot's own `new_subsurface` hook (or
 wherever the pinned rev offers one) with a protocol error, the way the
 popup cap is. `wl_subsurface`'s parent is fixed at creation, and a
 surface's subsurface role cannot be re-parented, but check the pinned

@@ -17,8 +17,9 @@ scoot has not cut a numbered release yet; entries are dated.
   disconnected instead. The same goes for a program that re-parents menus
   it already has open to get around that limit, in ways Wayland's rules
   forbid anyway: asking for a second menu on a surface whose menu is still
-  open, closing a menu while its submenu is still open, or opening a menu
-  off a surface that is not an open window or menu. Ordinary apps close
+  open, closing a menu while its submenu is still open, opening a menu off
+  a surface that is not an open window or menu, or handing a bar a menu
+  that was already open somewhere else. Ordinary apps close
   submenus first and are unaffected (GTK was checked). If a program you
   use is disconnected when you open or close a menu, the compositor log
   names it and the rule it broke (see `docs/protocols.md`) — please report

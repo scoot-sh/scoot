@@ -679,7 +679,7 @@ capture-cursor → resize-in-place → syncobj → nested dmabuf → VRR.
 - [VRR on the scanout tier](./core/gpu-vrr.md) — low, blocked on a VRR-capable display.
 
 ### Found reviewing client fullscreen (2026-09-23)
-- [Deep popup chains crash or freeze the compositor](./resolved/popup-depth-bound-done.md) — RESOLVED 2026-09-23 (PR #226): popup chains are capped at 64, and the ways an open chain could be re-parented deeper are refused (`already_constructed`, `not_the_topmost_popup`, a parent with no live role object); a surface made a popup again no longer has its same-flush child inserted under its dead tree node.
+- [Deep popup chains crash or freeze the compositor](./resolved/popup-depth-bound-done.md) — RESOLVED 2026-09-23 (PR #226): popup chains are capped at 64, and the ways an open chain could be re-parented deeper are refused (`already_constructed`, `not_the_topmost_popup`, a parent with no live role object); a layer surface may adopt only a fresh parentless popup; a surface made a popup again no longer has its same-flush child inserted under its dead tree node. Every chain and tree node is at most 64 deep.
 - [Windows bleed onto the neighbouring output](./resolved/windows-bleed-across-outputs-done.md) — RESOLVED 2026-09-23 (PR #224): a window is drawn and hit only on the output it is placed on (render gather, ring and both hit sites); popups go with their parent. Also fixed: the ring and rounded clip never drew right on outputs after the first (global coordinates).
 - [Popup constraint adjustment](./resolved/popup-constraint-adjustment-done.md) — RESOLVED 2026-09-23 (PR #225): popups are flipped/slid/resized into their output (a window's: usable area, whole output while it is fullscreen; a layer surface's: whole output), relative to the immediate parent, at the initial configure and on `reposition`. Also fixed: a popup whose parent chain loops back to itself froze the compositor; it is now refused.
 - [Reactive popup re-constraining](./core/popup-reactive-reconstrain.md) — low: a `reactive` popup is not re-fitted when its window scrolls or an output changes while it is open.
@@ -688,7 +688,8 @@ capture-cursor → resize-in-place → syncobj → nested dmabuf → VRR.
 - [Smoke xwayland step keys on PATH, not the build feature](./testing/smoke-xwayland-step-feature-gate.md) — medium: nested smoke in cage hangs then fails on any default build; pre-existing since PR #221.
 
 ### Found implementing the popup depth bound (2026-09-23)
-- [Deeply nested subsurfaces may overflow the stack](./core/subsurface-depth-bound.md) — high, unmeasured: Smithay's surface-tree walks recurse per subsurface level, like the popup tree did; needs a fail-first test first.
+- [Deeply nested subsurfaces overflow the stack](./core/subsurface-depth-bound.md) — high, measured (review of #226): a client-built subsurface chain 3000 deep crashes a debug build, 10000 a release one on a 2 MB stack, 30000 on 8 MB. Pre-existing.
+- [Many side-by-side popups stall the compositor](./core/popup-count-quadratic.md) — medium, measured (review of #226): popup creation is roughly quadratic in the number open (1954 popups 0.73 s, 5104 5.4 s). Pre-existing.
 
 ### Meta
 - [Split the CLI out into `scootctl`](./resolved/rename-flex-family-done.md) — CLOSED 2026-09-20: the `flexwm` → `scoot` rename half landed 2026-09-18 (PR #128); the crate split landed 2026-09-20 ([record](./resolved/scootctl-split-done.md)): new `scootctl` lib+bin crate, `scoot msg` kept as a permanent alias, Darwin default is `scootctl`. A status bar stays separate.

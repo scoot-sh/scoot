@@ -278,7 +278,9 @@ surfaces, and all of them map, draw, take clicks and take the keyboard.
   over, and closing it unwinds to the parent menu rather than closing the
   whole chain.
 - **A bar's own dropdowns work too** — a popup parented to a *layer* surface
-  (`zwlr_layer_surface_v1.get_popup`), not just to a window.
+  (`zwlr_layer_surface_v1.get_popup`), not just to a window. As the
+  protocol says, the popup must be created with a null parent and handed
+  to the bar before its first commit; anything else is refused (see below).
 - **A menu is kept on its screen.** A popup that lets the compositor adjust
   it (`xdg_positioner.set_constraint_adjustment`: flip, slide, resize —
   GTK3's context menus ask for all six) is flipped, slid or resized, in the
@@ -301,7 +303,9 @@ surfaces, and all of them map, draw, take clicks and take the keyboard.
   [`docs/backlog/core/popup-reactive-reconstrain.md`](backlog/core/popup-reactive-reconstrain.md)).
 - **Popups nest at most 64 deep, and cannot loop.** A menu, its submenu,
   that submenu's submenu and so on may go 64 levels deep — real menus stop
-  at a handful — and a 65th is refused. So is a popup that is its own
+  at a handful — and a 65th is refused. That holds for how scoot itself
+  stores and draws them, not just for each popup's parent chain: no popup
+  ever sits more than 64 levels down, however the client got it there. So is a popup that is its own
   ancestor (its own `xdg_surface` named as its parent). Before, a chain a
   few thousand deep crashed the compositor, and a loop froze it, taking
   every other client down too. A refused popup's client is disconnected
@@ -315,6 +319,7 @@ surfaces, and all of them map, draw, take clicks and take the keyboard.
   | Made a popup of an `xdg_surface` with no live `xdg_toplevel` or `xdg_popup` (a bare one, or one whose popup was destroyed) | `xdg_wm_base.invalid_popup_parent` | the new `xdg_popup` |
   | Called `get_popup` for a `wl_surface` whose popup is still alive (on the same `xdg_surface` or a second one) | `xdg_surface.already_constructed` | the new popup's `xdg_surface` |
   | Destroyed a popup that still has child popups open | `xdg_wm_base.not_the_topmost_popup` | the destroyed popup's `xdg_surface` |
+  | Handed a bar (`zwlr_layer_surface_v1.get_popup`) a popup that was created with a parent, or was already committed | `xdg_wm_base.invalid_popup_parent` | the `xdg_popup` |
 
   The `xdg_wm_base` errors are posted on another object because the pinned
   Smithay keeps the client's `xdg_wm_base` private: the code is
