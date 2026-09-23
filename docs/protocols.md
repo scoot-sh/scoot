@@ -86,7 +86,7 @@ The same state is reachable three more ways — a taskbar's
 the protocol requires, even one that changed nothing. Entering sends the
 `fullscreen` state bit with the output's whole size; leaving sends the bit
 cleared with the size the window had before. A request made before the
-window's first commit (`mpv --fs`, `foot --fullscreen`) is what its first
+window's first commit (`foot --fullscreen` does this) is what its first
 configure carries, so its first frame is already fullscreen. Unmapping (a
 null buffer) discards the state, as xdg-shell says it must: a window that
 maps again comes back tiled.

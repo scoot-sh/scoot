@@ -96,7 +96,7 @@ enum Step {
     /// Create a toplevel, commit without a buffer, then ack the configure
     /// that answers and draw `color` at the size it names. With
     /// `fullscreen_first`, `set_fullscreen` is sent before that first
-    /// commit -- what `mpv --fs` does.
+    /// commit -- what `foot --fullscreen` does.
     MapWindow {
         color: [u8; 4],
         fullscreen_first: bool,

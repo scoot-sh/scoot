@@ -157,7 +157,7 @@ for its modifier only when no key on the layout can hold it.
 | `title` | The toplevel's title, same caveat. |
 | `icon` | The freedesktop icon name the client committed through `xdg-toplevel-icon-v1`, or `null`. Read off the surface's current state when asked, so it is never stale. A client that supplied raw pixel buffers instead of a name reads as `null`. |
 | `output` | The id of the output the window is on. |
-| `rect` | Where the window is, in logical pixels — what you click. A window that is not visible still reports the frame it *would* have. |
+| `rect` | Where the window is, in logical pixels — what you click. A window that is not visible still reports the frame it *would* have — except a window stacked in the same column as a fullscreen one, which reports that fullscreen window's frame (it is behind it) until the fullscreen ends. |
 | `visible` | `false` when the window is scrolled out of view or on an inactive workspace. |
 | `focused` | Compositor *window* focus — not necessarily where keystrokes go; see below. |
 | `popup_grab` | Whether this window's own popup tree holds the keyboard — see below. |

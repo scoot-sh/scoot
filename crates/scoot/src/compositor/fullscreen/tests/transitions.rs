@@ -69,7 +69,7 @@ fn every_request_is_answered_with_a_configure_even_when_nothing_changes() {
 
 #[test]
 fn a_request_before_the_first_commit_is_what_the_first_configure_carries() {
-    // `mpv --fs`: set_fullscreen goes out before the initial commit, so the
+    // `foot --fullscreen`: set_fullscreen goes out before the initial commit, so the
     // window's very first frame is already the fullscreen one.
     let mut fixture = Fixture::new();
     fixture.map_with(WINDOW_BGRA, true);

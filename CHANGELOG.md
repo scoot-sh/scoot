@@ -11,9 +11,10 @@ scoot has not cut a numbered release yet; entries are dated.
 
 ### 2026-09-22 — fullscreen works
 
-- **A video player's or game's fullscreen button now works**, and so does
-  `foot --fullscreen`, `mpv --fs` and a taskbar's fullscreen entry. Before,
-  scoot ignored every fullscreen request. A fullscreen window covers its
+- **A video player's or game's fullscreen button now works** — any app
+  that asks through the standard Wayland request (`foot --fullscreen` is
+  one) — and so does a taskbar's fullscreen entry. Before, scoot ignored
+  every fullscreen request. A fullscreen window covers its
   whole screen edge to edge — no gaps, no focus ring, your bar hidden —
   while notifications and the lock screen still show over it. Focus another
   window and the layout scrolls to it as usual; come back and it is
