@@ -19,9 +19,9 @@ scoot has not cut a numbered release yet; entries are dated.
   also stays clear of a bar at the top or bottom of the screen rather than
   opening underneath it. Apps choose whether their menus may be moved;
   GTK's menus allow it, and one that does not is still cut at the edge.
-- **A program can no longer freeze scoot with a malformed menu.** A popup
-  that named itself as its own parent used to hang the compositor and every
-  app in it; that program is now disconnected instead.
+- **A menu that is its own parent no longer freezes scoot.** A popup that
+  named itself, or a loop of popups, as its parent used to hang the
+  compositor and every app in it; that program is now disconnected instead.
 
 ### 2026-09-23 — windows stay on their own screen
 
