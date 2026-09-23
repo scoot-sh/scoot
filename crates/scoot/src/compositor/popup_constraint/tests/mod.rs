@@ -133,6 +133,13 @@ enum Step {
     /// A popup created with no parent that nothing ever adopts -- never
     /// committed (committing it would be a protocol error). Answers `Done`.
     OrphanPopup,
+    /// A popup whose parent is its own `xdg_surface`. Expected to be refused
+    /// with a protocol error, which ends this client.
+    SelfParentPopup,
+    /// A two-popup loop: popup `A` of a bare, role-less `xdg_surface` `X`,
+    /// then `X` made a popup whose parent is `A`. Expected to be refused
+    /// like [`Step::SelfParentPopup`].
+    LoopingPopups,
     /// `xdg_popup.reposition` with `spec` and `token`; ack and commit the
     /// configure that answers. Answers with the geometry it carried, and
     /// the token the `repositioned` event echoed.
@@ -623,6 +630,28 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 });
                 queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
                 Ack::Done
+            }
+            Step::SelfParentPopup => {
+                let surface = compositor.create_surface(&qh, ());
+                let xdg = wm_base.get_xdg_surface(&surface, &qh, Role::Popup(usize::MAX));
+                let positioner = positioner(&wm_base, &qh, Spec::menu_at(0, 0, 40, 40));
+                let _popup = xdg.get_popup(Some(&xdg), &positioner, &qh, Role::Popup(usize::MAX));
+                queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                return Err("a self-parented popup was not refused".into());
+            }
+            Step::LoopingPopups => {
+                let bare = compositor.create_surface(&qh, ());
+                let bare_xdg = wm_base.get_xdg_surface(&bare, &qh, Role::Popup(usize::MAX));
+                let child = compositor.create_surface(&qh, ());
+                let child_xdg = wm_base.get_xdg_surface(&child, &qh, Role::Popup(usize::MAX));
+                let positioner = positioner(&wm_base, &qh, Spec::menu_at(0, 0, 40, 40));
+                let _child =
+                    child_xdg.get_popup(Some(&bare_xdg), &positioner, &qh, Role::Popup(usize::MAX));
+                queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                let _bare =
+                    bare_xdg.get_popup(Some(&child_xdg), &positioner, &qh, Role::Popup(usize::MAX));
+                queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                return Err("a looping popup chain was not refused".into());
             }
             Step::OrphanPopup => {
                 let index = made.popups.len();

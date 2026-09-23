@@ -88,3 +88,53 @@ fn a_popup_whose_ancestor_has_no_parent_is_left_unconstrained() {
     assert_eq!(token, 3);
     assert_eq!(geometry, (CANVAS - 10, 20, 60, 40));
 }
+
+/// A popup whose parent is its own `xdg_surface`: nothing at the pinned
+/// Smithay rev refuses the request, and tracking the popup ran Smithay's
+/// walk up its parent chain forever -- one request froze the compositor.
+/// It is refused before tracking, with the client disconnected, and the
+/// compositor keeps serving other clients.
+#[test]
+fn a_popup_parented_to_itself_is_refused_not_a_hang() {
+    let mut fixture = Fixture::one_output();
+    fixture.window();
+
+    let error = fixture.run_expecting_disconnect(Step::SelfParentPopup);
+
+    assert!(error.contains("invalid_popup_parent"), "{error}");
+    still_serving(&mut fixture);
+}
+
+/// The same loop, two popups long: a popup of a bare `xdg_surface`, then
+/// that `xdg_surface` made a popup of its own child.
+#[test]
+fn a_two_popup_parent_loop_is_refused_not_a_hang() {
+    let mut fixture = Fixture::one_output();
+    fixture.window();
+
+    let error = fixture.run_expecting_disconnect(Step::LoopingPopups);
+
+    assert!(error.contains("invalid_popup_parent"), "{error}");
+    still_serving(&mut fixture);
+}
+
+/// A second client connects, maps a window and opens a constrained menu:
+/// the compositor survived whatever the first one did.
+fn still_serving(fixture: &mut Fixture) {
+    let second = fixture.spawn(run_client);
+    let ack = fixture.run_on(second, Step::MapWindow);
+    assert!(matches!(ack, Ack::Done), "{ack:?}");
+    let window = fixture.state.windows.len() - 1;
+    let rect = fixture.rect_of(window);
+    let spec = Spec::menu_at(CANVAS - rect.x - 10, 20, 60, 40).adjust(Adjust::SlideX);
+    let Ack::Popup(geometry) = fixture.run_on(
+        second,
+        Step::Popup {
+            parent: Parent::Window(0),
+            spec,
+        },
+    ) else {
+        panic!("expected a popup configure");
+    };
+    assert_eq!(geometry, (CANVAS - rect.x - 60, 20, 60, 40));
+}

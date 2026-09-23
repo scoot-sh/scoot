@@ -378,7 +378,15 @@ impl XdgShellHandler for State {
     /// applied at its initial configure instead (see
     /// `send_popup_initial_configure`), which is the first point a layer
     /// surface's popup has a parent to be constrained against.
+    ///
+    /// A popup whose parent chain loops back to itself is refused first,
+    /// and its client disconnected: tracking it would run Smithay's
+    /// unbounded walk up that chain, which never returns -- see
+    /// `popup_parent.rs`.
     fn new_popup(&mut self, surface: PopupSurface, _positioner: PositionerState) {
+        if super::popup_parent::refuse_if_cyclic(&surface) {
+            return;
+        }
         let _ = self
             .popups
             .track_popup(smithay::desktop::PopupKind::Xdg(surface));

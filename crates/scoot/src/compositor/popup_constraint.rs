@@ -83,18 +83,16 @@
 //! - an ancestor popup has no parent (a popup made parentless for a layer
 //!   surface that never adopted it, with a submenu of its own -- the child's
 //!   commit is legal, its ancestor never committed);
-//! - the ancestor chain is deeper than [`MAX_POPUP_DEPTH`];
 //! - any positioner field or target coordinate is beyond [`COORDINATE_LIMIT`],
 //!   which is what keeps Smithay's arithmetic inside `i32` (below).
 
 use smithay::desktop::{WindowSurfaceType, layer_map_for_output};
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{Logical, Point, Rectangle};
-use smithay::wayland::compositor::{get_role, with_states};
-use smithay::wayland::shell::xdg::{
-    PopupCachedState, PopupSurface, PositionerState, XDG_POPUP_ROLE, XdgPopupSurfaceData,
-};
+use smithay::wayland::compositor::get_role;
+use smithay::wayland::shell::xdg::{PopupSurface, PositionerState, XDG_POPUP_ROLE};
 
+use super::popup_parent::popup_link;
 use super::{State, output_clip};
 
 #[cfg(test)]
@@ -115,12 +113,6 @@ mod tests;
 /// possible, and a positioner beyond it asked for a place nothing can show
 /// anyway.
 pub(super) const COORDINATE_LIMIT: u32 = 1 << 24;
-
-/// How many ancestor popups the walk to a popup's root follows before
-/// giving up (and leaving the popup unconstrained). Real menus nest a handful
-/// deep; the bound is what keeps a parent chain a client managed to close
-/// into a cycle from hanging the compositor here.
-const MAX_POPUP_DEPTH: usize = 64;
 
 /// `positioner`'s geometry adjusted into `target` (both in the parent's
 /// window-geometry coordinates), or `None` when any input is beyond
@@ -260,35 +252,15 @@ impl State {
 /// then a submenu of it) -- or its role data is gone. Not
 /// `get_popup_toplevel_coords`, which unwraps that parent.
 ///
-/// Reads each ancestor's state directly (one `with_states` per level) rather
-/// than through `PopupManager::find_popup`, which scans every tracked popup
-/// per call: the walk is O(depth), not O(depth x popups).
+/// Reads each ancestor's state directly ([`popup_link`], one `with_states`
+/// per level) rather than through `PopupManager::find_popup`, which scans
+/// every tracked popup per call: the walk is O(depth), not O(depth x
+/// popups). It terminates because no parent chain loops -- `new_popup`
+/// refuses a popup that would close one (see `popup_parent.rs`).
 fn popup_root_and_offset(mut parent: WlSurface) -> Option<(WlSurface, Point<i32, Logical>)> {
     let mut offset = Point::<i32, Logical>::default();
-    let mut depth = 0;
     while get_role(&parent) == Some(XDG_POPUP_ROLE) {
-        depth += 1;
-        if depth > MAX_POPUP_DEPTH {
-            return None;
-        }
-        let (loc, next) = with_states(&parent, |states| {
-            let next = states
-                .data_map
-                .get::<XdgPopupSurfaceData>()?
-                .lock()
-                .ok()?
-                .parent
-                .clone();
-            let loc = states
-                .cached_state
-                .get::<PopupCachedState>()
-                .current()
-                .last_acked
-                .as_ref()
-                .map(|configure| configure.state.geometry.loc)
-                .unwrap_or_default();
-            Some((loc, next))
-        })?;
+        let (next, loc) = popup_link(&parent)?;
         offset = Point::new(
             offset.x.saturating_add(loc.x),
             offset.y.saturating_add(loc.y),
