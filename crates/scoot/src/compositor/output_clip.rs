@@ -23,11 +23,14 @@
 //!   tested against the windows placed on the output the point is on.
 //!
 //! **Popups go with their parent.** A menu is drawn as part of its window
-//! (Smithay's `Window` element draws its popups itself), so a popup crossing
-//! the shared edge is cut there -- the same thing that happens to it at a
-//! single output's outer edge today, because scoot does not yet apply the
-//! positioner's constraint adjustment (see
-//! `docs/backlog/core/popup-constraint-adjustment.md`). Drawing the overflow
+//! (Smithay's `Window` element draws its popups itself), so the part of a
+//! popup past the shared edge is cut there, the same as at a single output's
+//! outer edge. A menu that lets the compositor adjust it -- toolkit menus do
+//! -- is kept off that edge: `popup_constraint.rs` flips, slides or resizes
+//! it into this same output (the one [`placed_on`] names) when it is
+//! configured, as far as the adjustments it asked for allow. What is left
+//! to cut is a popup that asked for none on that axis (as the protocol says
+//! it must be left), or one its adjustments cannot fit. Drawing the overflow
 //! on the neighbour instead would put the menu over another screen's windows
 //! and hand it their clicks, which is exactly the bleed this module exists
 //! to stop; and input follows the pixels, so the cut part takes no input

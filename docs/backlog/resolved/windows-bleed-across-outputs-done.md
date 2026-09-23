@@ -28,7 +28,7 @@ output it is placed on; the rule and where it is applied are in
 - **Popups go with their parent**: a menu crossing a shared edge is cut
   there, as it already was at an output's outer edge (scoot applies no
   positioner constraint adjustment -- filed as
-  [popup-constraint-adjustment](../core/popup-constraint-adjustment.md)).
+  [popup-constraint-adjustment](./popup-constraint-adjustment-done.md), since resolved).
 
 **Found beyond this ticket's text, and fixed with it:** the focus ring and
 the rounded-corner clip were built in *global* coordinates while each

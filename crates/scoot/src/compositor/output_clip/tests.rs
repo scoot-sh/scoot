@@ -739,10 +739,12 @@ fn a_focused_away_fullscreen_window_stays_on_its_own_output() {
 // Popups belong to their parent's output
 // ---------------------------------------------------------------------------
 
-/// A menu opened near the shared edge is cut at that edge -- exactly as it
-/// is at the outer edge of a single output -- rather than drawn over, and
-/// taking the clicks of, the other output's windows. The part on its own
-/// output is drawn and takes input as before.
+/// A menu opened near the shared edge that asked for no constraint
+/// adjustment is cut at that edge -- exactly as it is at the outer edge of a
+/// single output -- rather than drawn over, and taking the clicks of, the
+/// other output's windows. The part on its own output is drawn and takes
+/// input as before. (A menu that does ask is moved back onto its own output
+/// instead: see `popup_constraint/tests/window.rs`.)
 #[test]
 fn a_popup_crossing_the_shared_edge_is_cut_there() {
     let mut fixture = Fixture::two_outputs();

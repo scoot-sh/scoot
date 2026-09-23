@@ -254,6 +254,15 @@ impl CompositorHandler for State {
 /// (`popups_for_surface`), and `Window::send_frame` completes their frame
 /// callbacks the same way.
 ///
+/// The configure carries the popup's geometry constrained against its
+/// target (see `popup_constraint.rs`), written into the pending state just
+/// before it goes out. Here rather than in `new_popup` because this is the
+/// first moment every popup is guaranteed a parent -- a layer surface's
+/// dropdown is created parentless and adopted afterwards, and committing a
+/// parentless popup is a protocol error Smithay posts before this runs --
+/// and the constraint is then measured against where the parent is when the
+/// client is told, not where it was at creation.
+///
 /// Guarded twice: the role check keeps ordinary commits from paying for
 /// the popup-tree lookup, and `is_initial_configure_sent` keeps later
 /// commits quiet -- a second configure would be a protocol error for a
@@ -274,9 +283,11 @@ fn send_popup_initial_configure(state: &State, surface: &WlSurface) {
         // configure to send at all.
         return;
     };
-    if !popup.is_initial_configure_sent()
-        && let Err(error) = popup.send_configure()
-    {
+    if popup.is_initial_configure_sent() {
+        return;
+    }
+    state.constrain_popup_before_initial_configure(&popup);
+    if let Err(error) = popup.send_configure() {
         tracing::warn!(?error, "xdg_popup initial configure failed");
     }
 }
@@ -362,7 +373,20 @@ impl XdgShellHandler for State {
     /// the same surface in the layer surface's `PopupTree` -- measured, see
     /// `layer_shell/tests/popup.rs` -- which every tree walk then sees twice
     /// and which a dismissal only half removes.
+    ///
+    /// The positioner is not read here: the popup's constraint adjustment is
+    /// applied at its initial configure instead (see
+    /// `send_popup_initial_configure`), which is the first point a layer
+    /// surface's popup has a parent to be constrained against.
+    ///
+    /// A popup whose parent chain loops back to itself is refused first,
+    /// and its client disconnected: tracking it would run Smithay's
+    /// unbounded walk up that chain, which never returns -- see
+    /// `popup_parent.rs`.
     fn new_popup(&mut self, surface: PopupSurface, _positioner: PositionerState) {
+        if super::popup_parent::refuse_if_cyclic(&surface) {
+            return;
+        }
         let _ = self
             .popups
             .track_popup(smithay::desktop::PopupKind::Xdg(surface));
@@ -372,14 +396,21 @@ impl XdgShellHandler for State {
         self.grab_popup(surface, seat, serial);
     }
 
+    /// `xdg_popup.reposition`: the new positioner's geometry, constrained the
+    /// same way the initial configure's is (see `popup_constraint.rs`), or
+    /// the positioner's own where no target is known. `send_repositioned`
+    /// sends the `repositioned` + `configure` pair the protocol asks for.
     fn reposition_request(
         &mut self,
         surface: PopupSurface,
         positioner: PositionerState,
         token: u32,
     ) {
+        let geometry = self
+            .constrained_popup_geometry(&surface, positioner)
+            .unwrap_or_else(|| positioner.get_geometry());
         surface.with_pending_state(|state| {
-            state.geometry = positioner.get_geometry();
+            state.geometry = geometry;
             state.positioner = positioner;
         });
         surface.send_repositioned(token);

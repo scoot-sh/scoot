@@ -100,16 +100,33 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[Popup constraint adjustment](docs/backlog/resolved/popup-constraint-adjustment-done.md)**
+  (2026-09-23, PR #225) — the regression PR #224 made visible (a menu at a
+  shared output edge cut off) and the older one at every outer edge: an
+  `xdg_popup` is flipped, slid or resized per its positioner into a target
+  (`popup_constraint.rs`) — a window's popup into its output's usable area
+  (it draws under a `top` bar), or the whole output while that window
+  covers it fullscreen; a layer surface's popup into its whole output —
+  measured from the immediate parent, so submenus fit too. Applied at the
+  initial configure (the first point a layer popup has a parent) and on
+  `reposition`; inputs beyond 2^24 are left unadjusted, which is what keeps
+  Smithay's arithmetic from overflowing. Verified live against a GTK3
+  context menu (asks for all six adjustments). Also fixed, pre-existing:
+  a popup whose parent chain loops back to itself hung the compositor in
+  Smithay's root walk; now refused (`popup_parent.rs`). Follow-up filed:
+  [reactive re-constraining](docs/backlog/core/popup-reactive-reconstrain.md).
+
 - **[Windows stay on their own output](docs/backlog/resolved/windows-bleed-across-outputs-done.md)**
   (2026-09-23, PR #224) — a window is drawn and takes input only on the
   output it is placed on (`output_clip.rs`): each frame gathers only its
   own output's windows and rings, in output-local coordinates; both hit
   sites filter by an output stamp `apply()` writes beside `map_element`;
-  popups go with their parent (cut at a shared edge, as at an outer one).
+  popups go with their parent (cut at a shared edge, as at an outer one,
+  until the popup constraint adjustment above).
   Also fixed: the ring and rounded clip were built in global coordinates,
   so no output after the first ever showed a ring. Single-output frames
   byte-identical under both renderers. Follow-ups filed:
-  [popup constraint adjustment](docs/backlog/core/popup-constraint-adjustment.md),
+  [popup constraint adjustment](docs/backlog/resolved/popup-constraint-adjustment-done.md),
   [output membership by geometry](docs/backlog/core/output-membership-by-geometry.md).
 
 - **[Client fullscreen](docs/backlog/resolved/client-fullscreen-done.md)**
