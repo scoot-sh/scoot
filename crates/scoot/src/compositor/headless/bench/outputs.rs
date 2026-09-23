@@ -8,7 +8,7 @@
 //! `docs/backlog/resolved/windows-bleed-across-outputs-done.md`). Run by hand:
 //!
 //! ```text
-//! cargo test --release -p scoot --bin scoot output_clip -- --ignored --nocapture
+//! cargo test --release -p scoot --bin scoot output_clip -- --ignored --nocapture --test-threads=1
 //! ```
 //!
 //! Like the other suites that drive a real `State`, this needs a writable
