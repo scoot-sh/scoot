@@ -466,6 +466,20 @@ with two of them (the region is replaced, not blended over), and where a
 cursor rides an overlay plane *under* the primary (an underlay, which
 leaves a transparent hole in the swapchain slot) the hole is filled. Which
 elements the frame put on a plane is read from the `DrmCompositor`'s own
-answer for that frame, not guessed from the plane inventory. The cost is a
-cursor-sized render per capture on the tiers that need it, and nothing on
-the ones that do not.
+answer for that frame, not guessed from the plane inventory.
+
+What it costs, measured on the dev VM (virtio-gpu, llvmpipe; IPC
+`screenshot` wall time at 5 Hz, 3 alternated rounds of 40 against the
+previous build): nothing measurable where the frame already matches the
+request (the dumb tier by default, the GPU tier with `--no-cursor`), nor
+where pixman draws the region (22 µs in the harness; the dumb tier with
+`--no-cursor` p50 12.9-13.2 ms against 12.3-13.5 ms; `--headless` moved
+from 12.1-12.5 ms to 12.6-13.0 ms in both modes alike, including
+`--no-cursor`, which draws no region there); **+3.5 ms median on the GPU
+tier when its cursor rides a plane and the pointer is asked for** (p50
+13.7-14.2 ms against 10.2-10.6 ms). Only ~0.5-1 ms of that is the region's own render and read-back; the
+rest shows up as a slower full-frame read-back after it, which llvmpipe
+does and the cause of which is not pinned down (the GL trace shows no
+extra imports). A capture stream that asks for the pointer there
+delivers ~4% fewer frames (439 against 455-457 in 10 s, mean interval
+22.8 ms against 22.0 ms). None of this has been measured on a real GPU.

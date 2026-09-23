@@ -290,11 +290,11 @@ and `--nested` screenshots never showed the pointer.)
 
 The field was added without an IPC protocol bump: a request that omits it is
 the old request byte for byte, so older clients are unaffected. The flip
-side: a server that predates the field ignores it rather than refusing it,
-so on one of those `cursor: false` has no effect, and whether the pointer
-shows depends on the backend as it used to (drawn only under `--tty`, and
-missing where a cursor plane carries it). `version` names the running
-server's own build.
+side: a server that predates the field silently ignores it rather than
+refusing it, so on one of those `cursor: false` has no effect, and whether
+the pointer shows depends on the backend as it used to (drawn only under
+`--tty`, and missing where a cursor plane carries it). A client cannot tell
+such a server apart: `version` reports the same protocol number either way.
 
 ## What the socket refuses
 

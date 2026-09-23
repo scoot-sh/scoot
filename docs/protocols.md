@@ -777,9 +777,11 @@ What to know before pointing a client at it:
   whichever the frame it was read from held. That includes `--headless` and
   `--nested`, which draw no cursor on screen, and the `--tty` GPU scanout
   tier, whose cursor rides a hardware plane. It is done by re-rendering
-  just the cursor's region for the capture, so it costs a cursor-sized
-  render on the tiers that need one; mechanics per tier in
-  [tty.md](tty.md#captures-and-the-pointer). A session that asked for the
+  just the cursor's region for the capture where the frame does not
+  already match the request; mechanics and measured cost per tier in
+  [tty.md](tty.md#captures-and-the-pointer) (nothing measurable on
+  pixman; a few milliseconds per capture on the software-rendered GPU tier
+  of the dev VM). A session that asked for the
   pointer is also served a new frame when only the pointer moves — nothing
   else has to redraw — while one that did not keeps waiting for the screen
   itself to change. The pointer is only in the capture of the output it is

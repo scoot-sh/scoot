@@ -344,17 +344,18 @@ impl ForceComposite {
 /// cursor plane (it renders into buffers of its own through its own
 /// exporter, `NodeFilter::None` inside Smithay). The one newly reachable
 /// assignment is a *client cursor surface* whose buffer is a dma-buf riding
-/// an overlay plane where the cursor plane could not take it -- which has
-/// the cursorless-capture consequence the cursor plane already documents,
-/// and no overlay exists on the dev VM to exercise it. One variant of that
-/// is worse than "cursor missing": where a CRTC has an overlay plane with a
-/// zpos *below* the primary, Smithay may put an *opaque* element there as an
-/// underlay and punch a transparent hole in the primary above it -- so a
-/// capture, which reads only the swapchain slot, would show a transparent
-/// cut-out where the cursor is rather than the screen without it. It needs
-/// an opaque dma-buf cursor surface and underlay-capable hardware, neither
-/// seen here; recorded in `docs/backlog/core/capture-cursor-parity.md`
-/// rather than guarded in code.
+/// an overlay plane where the cursor plane could not take it. Captures
+/// handle it like any plane-assigned cursor: the frame records that a
+/// cursor element rode a plane (`render_and_queue`'s `CursorInFrame`, read
+/// off `overlay_elements`), and a capture re-renders the cursor's region to
+/// whatever it asked for (`render::capture_cursor`). That also covers the
+/// worse variant: where a CRTC has an overlay plane with a zpos *below* the
+/// primary, Smithay may put an *opaque* element there as an underlay and
+/// punch a transparent hole in the primary above it, so the swapchain slot a
+/// capture reads holds a transparent cut-out where the cursor is -- which
+/// the re-rendered region replaces. It needs an opaque dma-buf cursor
+/// surface and underlay-capable hardware, neither seen here (virtio has no
+/// overlay plane); see `docs/backlog/resolved/capture-cursor-parity-done.md`.
 const EXPORTER_FILTER: NodeFilter = NodeFilter::All;
 
 /// Colour formats offered to `DrmCompositor::new`, in order. `Argb8888` first
