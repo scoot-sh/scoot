@@ -478,5 +478,7 @@ pub(super) fn popup_destroyed(popup: &PopupSurface) {
     }
 }
 
+/// `pub(super)` for one reason: its client script is shared with
+/// `subsurface_depth`'s tests, which need popups and subsurfaces in one tree.
 #[cfg(test)]
-mod tests;
+pub(super) mod tests;

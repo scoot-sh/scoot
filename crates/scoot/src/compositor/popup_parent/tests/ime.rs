@@ -97,6 +97,7 @@ fn run_ime_client(
         compositor: client.compositor.clone().ok_or("no wl_compositor")?,
         shm: client.shm.clone().ok_or("no wl_shm")?,
         wm_base: client.wm_base.clone().ok_or("no xdg_wm_base")?,
+        subcompositor: client.subcompositor.clone().ok_or("no wl_subcompositor")?,
         layer_shell: client.layer_shell.clone().ok_or("no zwlr_layer_shell_v1")?,
     };
     let seat = client.seat.clone().ok_or("no wl_seat")?;

@@ -372,6 +372,52 @@ session by holding a menu open.
 For what a grab means to an agent driving the socket, see
 [ipc.md](ipc.md#rules-an-agent-needs).
 
+### Subsurfaces (`wl_subsurface`)
+
+A video under its player's window, a toolkit's offloaded texture, a
+client-drawn titlebar: `wl_subcompositor.get_subsurface` works as the core
+protocol says, with one limit.
+
+- **Subsurfaces nest at most 64 levels below a surface tree's root.** The
+  root is the surface at the top of the tree, the one with no parent: a
+  window, a popup, a layer surface, a cursor, a plain surface with no role
+  yet -- or a subsurface cut loose from its parent, by
+  `wl_subsurface.destroy` or by its parent `wl_surface` being destroyed,
+  which keeps its role and its own subsurfaces but is a root until it is
+  attached again. Its own subsurface is level 1, a subsurface of that is level 2,
+  and so on; real clients use a level or two. That holds for every tree,
+  however it was built. A `get_subsurface` is refused if it would put *any*
+  surface deeper than level 64, and that includes the subsurfaces already
+  hanging below the surface being attached, so a tree built bottom-up,
+  re-attached after `wl_subsurface.destroy`, or re-attached after its
+  parent `wl_surface` was destroyed is held to the same limit as one built
+  a level at a time. Before, a tree a few thousand levels deep crashed the
+  compositor, taking every other client down too.
+
+  | What the client did | Protocol error | Posted on |
+  |---|---|---|
+  | Called `get_subsurface` where the new subsurface, or a subsurface already below it, could end up more than 64 levels below its tree's root (see below for "could") | `wl_subcompositor.bad_parent` | the `wl_subcompositor` |
+
+  The message starts with `bad_parent:` and gives an upper bound on the
+  level the deepest surface could have reached (the `warn` the refusal
+  logs, naming the client, gives the same bound as `deepest_bound`). The `wl_subsurface` is not created, and the surfaces are not
+  linked.
+
+  What hangs below a surface is judged by a recorded height that is never
+  lowered, which keeps the check cheap however wide a client's trees are.
+  It can be higher than anything really there, in two ways: a surface
+  keeps the height of subsurfaces it has since lost, and it passes that
+  height on to every surface it is later attached below. So a surface that
+  once had, say, 60 levels of subsurfaces below it and lost them, then
+  attached below a plain surface, makes that plain surface count as 61
+  levels high too -- and attaching *that* one 3 levels deep is refused,
+  though the real tree would be 5 deep. The error only ever goes that way:
+  a tree that really is too deep is always refused. No real client comes
+  near it: the deepest measured is 2 levels.
+
+  A parent that is the surface itself, or one of its own subsurfaces, is
+  still refused as before, with `wl_subcompositor.bad_surface`.
+
 ## Workspaces (`ext-workspace-v1`)
 
 Version 1, the compositor-agnostic successor to the one-off wlr workspace

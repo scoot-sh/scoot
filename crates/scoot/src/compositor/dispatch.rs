@@ -3,12 +3,13 @@
 //! This is a hand-written copy of what `smithay::delegate_dispatch2!(State)`
 //! expands to -- the blanket `Dispatch`/`GlobalDispatch` impls that forward
 //! every request to whichever `Dispatch2` impl the object's user data
-//! carries -- plus seven guards on what a client may ask for
+//! carries -- plus eight guards on what a client may ask for
 //! ([`reject_invalid_shm_pool_resize`], [`reject_oversized_shm_pool_creation`],
 //! [`reject_excess_shm_pool`], [`reject_excess_buffer`],
 //! [`reject_unrepresentable_layer_size`],
-//! [`reject_frozen_toplevel_icon_request`] and
-//! [`reject_excess_capture_frame`]), one pre-delegation
+//! [`reject_frozen_toplevel_icon_request`],
+//! [`reject_excess_capture_frame`] and [`reject_too_deep_subsurface`]), one
+//! pre-delegation
 //! interception ([`prepare_post_destroy_lock_commit`]) and six
 //! post-destruction hooks ([`redraw_after_lock_surface_destroyed`],
 //! [`neutralize_destroyed_layer_surface`],
@@ -310,6 +311,20 @@
 //! The count itself lives in `wl_buffers.rs`, counted up here and back down
 //! in the destruction hook below. Delete neither half without the other.
 //!
+//! ## Why the subsurface-depth guard exists
+//!
+//! [`reject_too_deep_subsurface`] bounds how deep `wl_subsurface`s nest,
+//! because every Smithay walk over a surface tree recurses once per level
+//! and a deep enough tree overflows the compositor's stack. The rule, and
+//! why it has to count the height of the subtree being attached and not
+//! just the new parent's depth, is in `subsurface_depth.rs`. It is a guard
+//! here, not a check in `CompositorHandler::new_subsurface`, because Smithay
+//! links the two surfaces -- after running its own recursive `is_ancestor`
+//! up the new parent's chain -- before it calls that, and does not pass it
+//! the `wl_subcompositor` the protocol's `bad_parent` belongs on. Refused
+//! here, the link is never made, and `bad_parent` goes on the object the
+//! request was sent to.
+//!
 //! ## Why the hook exists
 //!
 //! Not a guard at all, and not a workaround for a Smithay bug: a callback
@@ -401,7 +416,9 @@ use smithay::reexports::wayland_protocols::xdg::toplevel_icon::v1::server::{
 };
 use smithay::reexports::wayland_protocols_wlr::layer_shell::v1::server::zwlr_layer_surface_v1;
 use smithay::reexports::wayland_server::backend::ClientId;
-use smithay::reexports::wayland_server::protocol::{wl_buffer, wl_shm, wl_shm_pool, wl_surface};
+use smithay::reexports::wayland_server::protocol::{
+    wl_buffer, wl_shm, wl_shm_pool, wl_subcompositor, wl_surface,
+};
 use smithay::reexports::wayland_server::{
     Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource,
 };
@@ -469,6 +486,7 @@ where
             || reject_unrepresentable_layer_size(resource, &request)
             || reject_frozen_toplevel_icon_request(state, resource, &request)
             || reject_excess_capture_frame(state, client, resource, &request)
+            || reject_too_deep_subsurface(resource, &request)
         {
             return;
         }
@@ -1186,6 +1204,32 @@ where
         ),
     );
     true
+}
+
+/// Posts `wl_subcompositor.bad_parent` and returns `true` when `request` is
+/// a `get_subsurface` that could nest a surface deeper than
+/// [`MAX_SUBSURFACE_DEPTH`](super::subsurface_depth::MAX_SUBSURFACE_DEPTH).
+/// See the module doc's "Why the subsurface-depth guard exists", and
+/// `subsurface_depth.rs` for the rule.
+///
+/// Folds away for every interface other than `wl_subcompositor`, for the
+/// same monomorphization reason as the guards above -- this runs on every
+/// request of every interface.
+fn reject_too_deep_subsurface<I>(resource: &I, request: &I::Request) -> bool
+where
+    I: Resource,
+    I::Request: 'static,
+{
+    if TypeId::of::<I::Request>() != TypeId::of::<wl_subcompositor::Request>() {
+        return false;
+    }
+    let Some(wl_subcompositor::Request::GetSubsurface {
+        surface, parent, ..
+    }) = (request as &dyn Any).downcast_ref::<wl_subcompositor::Request>()
+    else {
+        return false;
+    };
+    super::subsurface_depth::reject_too_deep(resource, surface, parent)
 }
 
 /// Forgets one live capture frame when its protocol object dies, which is

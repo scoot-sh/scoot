@@ -377,6 +377,39 @@ impl<S, A> Harness<S, A> {
             );
             self.dispatch_once();
         }
+        self.join_disconnected()
+    }
+
+    /// Sends client 0 a step that may or may not be refused, and dispatches
+    /// until the client either answers it or is gone: its answer, or its own
+    /// error.
+    ///
+    /// For a test that has to look at the compositor *whatever* came of the
+    /// step before it asserts on how the step ended -- drawing a frame after
+    /// an attack, where the attack, if it got through, is what crashes.
+    /// [`Harness::run_expecting_disconnect`] would fail the test on the
+    /// surviving client first, and never get as far as the crash.
+    pub(crate) fn run_or_disconnect(&mut self, step: S) -> Result<A, String> {
+        self.send_step(0, step);
+        let deadline = Instant::now() + PATIENCE;
+        loop {
+            match self.clients[0].acks.try_recv() {
+                Ok(ack) => return Ok(ack),
+                Err(TryRecvError::Disconnected) => break,
+                Err(TryRecvError::Empty) => {}
+            }
+            assert!(
+                Instant::now() < deadline,
+                "timed out waiting for client 0 to answer or be disconnected"
+            );
+            self.dispatch_once();
+        }
+        Err(self.join_disconnected())
+    }
+
+    /// Joins client 0, whose ack channel has just disconnected, and hands
+    /// back the error it stopped with.
+    fn join_disconnected(&mut self) -> String {
         let Some(handle) = self.clients[0].thread.take() else {
             panic!("client 0 disconnected as expected, but was already joined");
         };

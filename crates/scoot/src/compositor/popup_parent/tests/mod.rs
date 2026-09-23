@@ -20,6 +20,11 @@
 //! This file is the harness; the tests live in the submodules below, by
 //! concern. Like every live-`State` suite here, these need a writable
 //! `$XDG_RUNTIME_DIR`.
+//!
+//! The harness is shared with `subsurface_depth`'s tests, which is what its
+//! `pub(in crate::compositor)` items are for: the client can also build
+//! subsurface trees ([`Op::Sub`], see [`subsurfaces`]), under a window, a
+//! popup or a plain surface, so one tree can hold both.
 
 use std::io::Write;
 use std::os::fd::AsFd;
@@ -29,7 +34,8 @@ use std::time::Duration;
 
 use scoot_core::{Rect, WindowId};
 use wayland_client::protocol::{
-    wl_buffer, wl_callback, wl_compositor, wl_registry, wl_seat, wl_shm, wl_shm_pool, wl_surface,
+    wl_buffer, wl_callback, wl_compositor, wl_registry, wl_seat, wl_shm, wl_shm_pool,
+    wl_subcompositor, wl_subsurface, wl_surface,
 };
 use wayland_client::{Connection, Dispatch, EventQueue, QueueHandle};
 use wayland_protocols::wp::text_input::zv3::client::zwp_text_input_manager_v3;
@@ -47,28 +53,31 @@ mod bench;
 mod bypass;
 mod depth;
 mod ime;
+pub(in crate::compositor) mod subsurfaces;
+
+pub(in crate::compositor) use subsurfaces::{Node, SUB_SIZE, SubOp};
 
 /// The most popups a chain may hold -- `popup_parent::MAX_POPUP_DEPTH`,
 /// spelled out so this file does not depend on it (see the module doc).
-const CAP: usize = 64;
+pub(in crate::compositor) const CAP: usize = 64;
 
 /// The output's framebuffer, square.
-const CANVAS: i32 = 200;
+pub(in crate::compositor) const CANVAS: i32 = 200;
 
 // Colours, as the BGRA bytes an `Argb8888` buffer holds them in.
 const WINDOW_BGRA: [u8; 4] = [0x20, 0xE0, 0x20, 0xFF];
 const BAR_BGRA: [u8; 4] = [0xE0, 0x20, 0x20, 0xFF];
-const POPUP_BGRA: [u8; 4] = [0x20, 0xE0, 0xE0, 0xFF];
+pub(in crate::compositor) const POPUP_BGRA: [u8; 4] = [0x20, 0xE0, 0xE0, 0xFF];
 /// The one popup a test is looking for.
-const MARKED_BGRA: [u8; 4] = [0xE0, 0x20, 0xE0, 0xFF];
+pub(in crate::compositor) const MARKED_BGRA: [u8; 4] = [0xE0, 0x20, 0xE0, 0xFF];
 
 /// Each popup's size, and its offset from its parent's window geometry: a
 /// chain climbs one pixel right and down per level, so a 64-deep chain's
 /// deepest popup sits 63 pixels in from its root's corner, still on screen.
-const POPUP_SIZE: i32 = 8;
-const STEP: i32 = 1;
+pub(in crate::compositor) const POPUP_SIZE: i32 = 8;
+pub(in crate::compositor) const STEP: i32 = 1;
 
-fn appearance() -> Appearance {
+pub(in crate::compositor) fn appearance() -> Appearance {
     Appearance {
         focus_ring_width: 0,
         background_color: Color::new(0.07058824, 0.20392157, 0.3372549, 1.0),
@@ -78,7 +87,7 @@ fn appearance() -> Appearance {
 
 /// What a popup hangs off.
 #[derive(Clone, Copy, Debug)]
-enum Parent {
+pub(in crate::compositor) enum Parent {
     /// The `n`-th toplevel this client mapped.
     Window(usize),
     /// The `n`-th popup this client made.
@@ -92,7 +101,7 @@ enum Parent {
 
 /// One request (or a few that belong together), sent without a round trip.
 #[derive(Clone, Copy, Debug)]
-enum Op {
+pub(in crate::compositor) enum Op {
     /// A popup of `parent`, committed once. It becomes the next popup index.
     Popup(Parent),
     /// `len` popups, each a child of the one before it, the first a child of
@@ -139,9 +148,11 @@ enum Op {
     /// anything else is written -- and if the request is *not* refused, the
     /// batch carries on and the test fails on the client surviving it.
     Sync,
+    /// A request on the subsurface side of the tree (see [`subsurfaces`]).
+    Sub(SubOp),
 }
 
-enum Step {
+pub(in crate::compositor) enum Step {
     /// Create a toplevel, commit without a buffer, ack the configure that
     /// answers and draw at the size it names.
     MapWindow,
@@ -160,7 +171,7 @@ enum Step {
 }
 
 #[derive(Debug)]
-enum Ack {
+pub(in crate::compositor) enum Ack {
     Done,
 }
 
@@ -184,6 +195,7 @@ struct TestClient {
     compositor: Option<wl_compositor::WlCompositor>,
     shm: Option<wl_shm::WlShm>,
     wm_base: Option<xdg_wm_base::XdgWmBase>,
+    subcompositor: Option<wl_subcompositor::WlSubcompositor>,
     layer_shell: Option<zwlr_layer_shell_v1::ZwlrLayerShellV1>,
     /// Bound for every client, used only by `ime.rs`'s.
     seat: Option<wl_seat::WlSeat>,
@@ -243,6 +255,9 @@ impl Dispatch<wl_registry::WlRegistry, ()> for TestClient {
             }
             "wl_shm" => client.shm = Some(registry.bind(name, version.min(1), qh, ())),
             "xdg_wm_base" => client.wm_base = Some(registry.bind(name, version.min(3), qh, ())),
+            "wl_subcompositor" => {
+                client.subcompositor = Some(registry.bind(name, version.min(1), qh, ()));
+            }
             "zwlr_layer_shell_v1" => {
                 client.layer_shell = Some(registry.bind(name, version.min(4), qh, ()));
             }
@@ -362,6 +377,8 @@ impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, Role> for TestClient {
 wayland_client::delegate_noop!(TestClient: ignore wl_compositor::WlCompositor);
 wayland_client::delegate_noop!(TestClient: ignore wl_surface::WlSurface);
 wayland_client::delegate_noop!(TestClient: ignore wl_shm::WlShm);
+wayland_client::delegate_noop!(TestClient: ignore wl_subcompositor::WlSubcompositor);
+wayland_client::delegate_noop!(TestClient: ignore wl_subsurface::WlSubsurface);
 wayland_client::delegate_noop!(TestClient: ignore wl_shm_pool::WlShmPool);
 wayland_client::delegate_noop!(TestClient: ignore wl_buffer::WlBuffer);
 wayland_client::delegate_noop!(TestClient: ignore xdg_positioner::XdgPositioner);
@@ -399,7 +416,7 @@ fn solid_buffer(
 }
 
 struct Toplevel {
-    _surface: wl_surface::WlSurface,
+    surface: wl_surface::WlSurface,
     xdg: xdg_surface::XdgSurface,
     _toplevel: xdg_toplevel::XdgToplevel,
 }
@@ -424,6 +441,10 @@ struct Made {
     popups: Vec<Popup>,
     bare: Vec<(wl_surface::WlSurface, xdg_surface::XdgSurface)>,
     layers: Vec<Layer>,
+    /// Plain surfaces, subsurfaces or not ([`SubOp`]).
+    surfaces: Vec<subsurfaces::Surface>,
+    /// The two buffers every drawn subsurface shares, made on first use.
+    sub_buffers: Option<subsurfaces::Buffers>,
 }
 
 /// The client's globals, once bound.
@@ -431,6 +452,7 @@ struct Globals {
     compositor: wl_compositor::WlCompositor,
     shm: wl_shm::WlShm,
     wm_base: xdg_wm_base::XdgWmBase,
+    subcompositor: wl_subcompositor::WlSubcompositor,
     layer_shell: zwlr_layer_shell_v1::ZwlrLayerShellV1,
 }
 
@@ -617,6 +639,7 @@ fn run_op(
             };
         }
         Op::Sync => unreachable!("`Step::Batch` runs `Op::Sync` itself"),
+        Op::Sub(op) => subsurfaces::run(op, globals, qh, made)?,
         Op::Parentless => {
             let index = made.popups.len();
             client.popups.push(PopupRecord::default());
@@ -675,7 +698,11 @@ fn run_op(
     Ok(())
 }
 
-fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> Result<(), String> {
+pub(in crate::compositor) fn run_client(
+    stream: UnixStream,
+    steps: Receiver<Step>,
+    acks: Sender<Ack>,
+) -> Result<(), String> {
     let conn = Connection::from_socket(stream).map_err(|e| e.to_string())?;
     let mut queue = conn.new_event_queue();
     let qh = queue.handle();
@@ -686,6 +713,7 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
         compositor: client.compositor.clone().ok_or("no wl_compositor")?,
         shm: client.shm.clone().ok_or("no wl_shm")?,
         wm_base: client.wm_base.clone().ok_or("no xdg_wm_base")?,
+        subcompositor: client.subcompositor.clone().ok_or("no wl_subcompositor")?,
         layer_shell: client.layer_shell.clone().ok_or("no zwlr_layer_shell_v1")?,
     };
 
@@ -755,7 +783,7 @@ fn map_window(
     surface.commit();
     queue.roundtrip(client).map_err(|e| e.to_string())?;
     made.windows.push(Toplevel {
-        _surface: surface,
+        surface,
         xdg,
         _toplevel: toplevel,
     });
@@ -802,11 +830,11 @@ fn map_bar(
     Ok(())
 }
 
-type Fixture = Harness<Step, Ack>;
+pub(in crate::compositor) type Fixture = Harness<Step, Ack>;
 
 impl Fixture {
     /// One output, one client, one mapped window.
-    fn with_window() -> Self {
+    pub(in crate::compositor) fn with_window() -> Self {
         let mut fixture = Harness::headless(appearance(), CANVAS);
         fixture.spawn(run_client);
         fixture.run(Step::MapWindow);
@@ -814,18 +842,31 @@ impl Fixture {
     }
 
     /// Runs `ops` in one flush, which the client must survive.
-    fn batch(&mut self, ops: Vec<Op>) {
+    pub(in crate::compositor) fn batch(&mut self, ops: Vec<Op>) {
         let Ack::Done = self.run(Step::Batch(ops));
     }
 
     /// Runs `ops` in one flush, which must end the client with a protocol
     /// error; hands the error back.
-    fn refused(&mut self, ops: Vec<Op>) -> String {
+    pub(in crate::compositor) fn refused(&mut self, ops: Vec<Op>) -> String {
         self.run_expecting_disconnect(Step::Batch(ops))
     }
 
+    /// Runs `ops` in one flush, then draws a frame whatever came of it, and
+    /// only then hands back how it ended: `Ok` if the client survived, its
+    /// protocol error if not. See [`Harness::run_or_disconnect`].
+    pub(in crate::compositor) fn attacked(&mut self, ops: Vec<Op>) -> Result<(), String> {
+        let outcome = self.run_or_disconnect(Step::Batch(ops));
+        self.render();
+        outcome.map(|Ack::Done| ())
+    }
+
     /// Maps `popups`, drawing `marked` in [`MARKED_BGRA`].
-    fn map(&mut self, popups: impl IntoIterator<Item = usize>, marked: Option<usize>) {
+    pub(in crate::compositor) fn map(
+        &mut self,
+        popups: impl IntoIterator<Item = usize>,
+        marked: Option<usize>,
+    ) {
         let Ack::Done = self.run(Step::Map {
             popups: popups.into_iter().collect(),
             marked,
@@ -840,7 +881,7 @@ impl Fixture {
     }
 
     /// Window `index`'s placement rect, in global coordinates.
-    fn rect_of(&self, index: usize) -> Rect {
+    pub(in crate::compositor) fn rect_of(&self, index: usize) -> Rect {
         self.state
             .world
             .arrange()
@@ -851,7 +892,7 @@ impl Fixture {
 
     /// Where the `depth`-th popup of a chain rooted at window `index` has its
     /// top-left corner (depth 1 is the window's own popup).
-    fn chain_corner(&self, index: usize, depth: usize) -> (i32, i32) {
+    pub(in crate::compositor) fn chain_corner(&self, index: usize, depth: usize) -> (i32, i32) {
         let rect = self.rect_of(index);
         let depth = i32::try_from(depth).expect("a small depth");
         (rect.x + STEP * depth, rect.y + STEP * depth)
@@ -861,7 +902,7 @@ impl Fixture {
 /// A second client connects, maps a window and a popup of it, and the
 /// popup is drawn: the compositor survived whatever the first client did,
 /// and still serves.
-fn still_serving(fixture: &mut Fixture) {
+pub(in crate::compositor) fn still_serving(fixture: &mut Fixture) {
     let second = fixture.spawn(run_client);
     let Ack::Done = fixture.run_on(second, Step::MapWindow);
     let Ack::Done = fixture.run_on(second, Step::Batch(vec![Op::Popup(Parent::Window(0))]));
@@ -879,6 +920,6 @@ fn still_serving(fixture: &mut Fixture) {
     );
 }
 
-fn pixel(pixels: &[u8], (x, y): (i32, i32)) -> [u8; 4] {
+pub(in crate::compositor) fn pixel(pixels: &[u8], (x, y): (i32, i32)) -> [u8; 4] {
     test_support::pixel(pixels, CANVAS, x, y)
 }
