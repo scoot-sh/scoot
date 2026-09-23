@@ -116,7 +116,8 @@ each item's own file records why it landed when it did.
   alone is bypassed bottom-up (measured: that alone overflowed). Frame
   cost at the cap unchanged; mpv (which builds its two-level tree
   bottom-up), GTK 4, foot and weston's demo unaffected live. Filed:
-  Smithay's missing `bad_surface` for a second `wl_subsurface`.
+  Smithay's missing `bad_surface` for a second `wl_subsurface`; many
+  desync subsurfaces side by side stall roughly quadratically.
 
 - **[Popup depth bound](docs/backlog/resolved/popup-depth-bound-done.md)**
   (2026-09-23, PR #226) — a client could crash the compositor with a deep

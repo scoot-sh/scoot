@@ -401,11 +401,11 @@ protocol says, with one limit.
   linked.
 
   What a surface has below it is judged by the tallest subtree it has ever
-  had, not only the one it has now: scoot is not told when a subsurface
-  below it goes away. So a surface that once had, say, 60 levels of
-  subsurfaces below it, and is later attached somewhere 5 levels deep,
-  is refused even if those 60 levels are gone. No real client comes
-  near it.
+  had, not only the one it has now, which keeps the check cheap however
+  wide a client's trees are. So a surface that once had, say, 60 levels of
+  subsurfaces below it, and is later attached somewhere 5 levels deep, is
+  refused even if those 60 levels are gone. No real client comes near it:
+  the deepest measured is 2 levels.
 
   A parent that is the surface itself, or one of its own subsurfaces, is
   still refused as before, with `wl_subcompositor.bad_surface`.

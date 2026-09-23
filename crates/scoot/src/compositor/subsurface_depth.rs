@@ -56,12 +56,16 @@
 //! its subtree's height ([`SubtreeHeight`]), raised along the new parent's
 //! chain whenever a link is made ([`record_link`]) and never lowered, so
 //! the check costs one walk up a chain of at most [`MAX_SUBSURFACE_DEPTH`]
-//! steps and a read, however wide the client's trees are. Never lowering it
-//! is what keeps it a bound -- scoot is not told when a link goes away --
-//! and it errs in one direction only: a surface that once had a subtree
-//! nearly [`MAX_SUBSURFACE_DEPTH`] deep, and was later re-attached, can be
-//! refused as if it still had it. No real client comes anywhere near that
-//! (see [`MAX_SUBSURFACE_DEPTH`]).
+//! steps and a read, however wide the client's trees are. It is never
+//! lowered by choice, not for want of a hook: `dispatch.rs`'s blanket
+//! `destroyed` sees every `wl_subsurface` and `wl_surface` go, but lowering
+//! a height means recomputing every ancestor's from all of its children --
+//! work per level in proportion to the tree's width -- and all it would buy
+//! is avoiding an error in one direction only: a surface that once had a
+//! subtree `h` deep, re-attached `d` levels down with `d + 1 + h` over the
+//! cap, is refused as if it still had it. The deepest tree measured from a
+//! real client is two levels (mpv, see [`MAX_SUBSURFACE_DEPTH`]), so that
+//! takes trees some thirty times deeper than any seen.
 //!
 //! The check runs from `dispatch.rs`'s blanket `request`, before Smithay
 //! sees the request, because Smithay links the surfaces -- and runs

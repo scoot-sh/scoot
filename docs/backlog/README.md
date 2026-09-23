@@ -690,6 +690,7 @@ capture-cursor → resize-in-place → syncobj → nested dmabuf → VRR.
 ### Found implementing the popup depth bound (2026-09-23)
 - [Deeply nested subsurfaces overflow the stack](./resolved/subsurface-depth-bound-done.md) — RESOLVED 2026-09-23 (PR #PRNUM): no surface is ever more than 64 subsurface levels below its tree's root. Checked in a `dispatch.rs` guard before Smithay links the surfaces or runs its recursive `is_ancestor`, against the new parent's depth *plus the height of the subtree being attached* (a per-surface bound, never lowered), since a subsurface can be re-attached after `wl_subsurface.destroy` or its parent's destruction and a role-less surface can be given children first. Refused as `wl_subcompositor.bad_parent`.
 - [Smithay accepts a second `wl_subsurface` for an orphaned subsurface](./core/subsurface-second-wl-subsurface.md) — low: the protocol's `bad_surface` is not raised once the parent `wl_surface` is destroyed; not a depth path.
+- [Many desynchronized subsurfaces stall the compositor](./core/subsurface-count-quadratic.md) — medium, measured: `N` sibling desync subsurfaces in one window cost roughly quadratically to create (release: 10000 took 1.15 s, 30000 over 10 s). Pre-existing; breadth, not depth.
 - [Many side-by-side popups stall the compositor](./core/popup-count-quadratic.md) — medium, measured (review of #226): popup creation is roughly quadratic in the number open (1954 popups 0.73 s, 5104 5.4 s). Pre-existing.
 
 ### Meta

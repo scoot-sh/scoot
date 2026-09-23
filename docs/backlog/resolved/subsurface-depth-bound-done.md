@@ -39,12 +39,17 @@ with subsurface ops in `popup_parent/tests/subsurfaces.rs`).
 - **The height is a bound, not a walk:** each surface carries an upper
   bound on its subtree's height (`SubtreeHeight`, an atomic in its data
   map), raised along the new parent's chain in `new_subsurface` and never
-  lowered (scoot is not told when a link goes away). So the check is one
-  walk up at most 64 links and a read, whatever the width of the client's
-  trees, and nothing is added to the per-frame path. Its one error is
-  conservative and pinned by a test: a surface that once had a subtree
-  nearly 64 deep, re-attached, is judged by it after it is gone. Real
-  clients nest a level or two.
+  lowered. So the check is one walk up at most 64 links and a read,
+  whatever the width of the client's trees, and nothing is added to the
+  per-frame path. Not lowering it is a choice, not a missing hook
+  (`dispatch.rs`'s blanket `destroyed` sees every `wl_subsurface` and
+  `wl_surface` go): lowering means recomputing each ancestor's height from
+  all of its children, work per level in proportion to the tree's width.
+  Its one error is conservative and pinned by a test: a surface that once
+  had a subtree `h` deep, re-attached `d` levels down with `d + 1 + h > 64`,
+  is judged by the subtree after it is gone. The deepest tree measured
+  from a real client is 2 levels (mpv), so that needs trees about thirty
+  times deeper than any seen.
 - **Unlike the popup tree there is no second structure to drift:** a
   surface's `parent` and its parent's `children` are written together at
   all three sites (`set_parent`, `unset_parent`, `cleanup`), and only
@@ -65,9 +70,13 @@ below its tree's root, so every Smithay walk over a surface tree
 `is_effectively_sync`, `is_ancestor`) and scoot's own
 `resend_scale_tree` recurses at most 65 levels.
 
-**Filed:** [Smithay accepts a second `wl_subsurface` for an orphaned
-subsurface](../core/subsurface-second-wl-subsurface.md) -- low; not a
-depth path (the link goes through the guard like any other).
+**Not covered, and filed:** [Smithay accepts a second `wl_subsurface`
+for an orphaned subsurface](../core/subsurface-second-wl-subsurface.md) --
+low; not a depth path (the link goes through the guard like any other).
+[Many desynchronized subsurfaces in one window stall roughly
+quadratically](../core/subsurface-count-quadratic.md) -- medium,
+measured: many subsurfaces *side by side*, not deep, which this bound does
+not touch.
 
 ## Evidence
 
@@ -89,7 +98,10 @@ around the delegated request: the last lines are `enter get_subsurface
 8588` with no `left`, so it overflowed inside Smithay's `get_subsurface`
 handler, whose only recursion is `is_ancestor`. The 3000-deep
 *synchronized* chain did not crash: its dispatch took over 30 s (the
-harness timed out at 37 s). The rest failed as "the client survived".
+harness timed out at 37 s). That stall scales with depth, and so is now
+bounded too: 3000 synchronized subsurfaces *side by side* under one window
+(a throwaway probe on this branch, not committed) took 197 ms in debug.
+The rest failed as "the client survived".
 
 Mutation (the branch's code with `subtree_height` returning 0, i.e. a
 cap on the parent's depth alone), bypass tests: the bottom-up assembly
