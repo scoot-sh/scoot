@@ -8,7 +8,7 @@ blocked: null
 
 # GPU scanout: scanout candidates + per-surface scanout feedback — RESOLVED
 
-RESOLVED 2026-09-23 (branch `gpu-scanout-feedback`). Everything this ticket
+RESOLVED 2026-09-23 (PR #230, branch `gpu-scanout-feedback`). Everything this ticket
 asked for is done except overlay-plane candidates, which were split out
 beforehand to [windows on overlay planes](../core/gpu-overlay-window-candidates.md)
 (blocked on overlay-capable hardware) and stay open there. The primary-plane

@@ -103,7 +103,7 @@ each item's own file records why it landed when it did.
 ## Recently shipped (since 2026-09-15)
 
 - **[Scanout-tranche feedback + `zero_copy`](docs/backlog/resolved/gpu-scanout-candidates-done.md)**
-  (2026-09-23, branch `gpu-scanout-feedback`) — on the `--tty` GPU tier the
+  (2026-09-23, PR #230) — on the `--tty` GPU tier the
   fullscreen window covering an output gets per-surface dma-buf feedback
   whose first tranche is flagged `scanout`, names the display device, and
   lists the advertised pairs the primary plane accepts (opaque-twin fourcc,
