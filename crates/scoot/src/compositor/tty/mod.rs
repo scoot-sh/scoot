@@ -44,6 +44,11 @@ mod present_retry;
 mod scanout;
 
 pub(crate) use self::gpu::{ExplicitGpu, resolve};
+/// For `render::scanout`'s capture-sequence tests, which drive the capture
+/// recording and the presenter's force arming through one sequence; nothing
+/// outside this tree names the type otherwise.
+#[cfg(all(test, feature = "gpu-scanout"))]
+pub(crate) use self::scanout::ForceComposite;
 
 use std::error::Error;
 use std::path::Path;

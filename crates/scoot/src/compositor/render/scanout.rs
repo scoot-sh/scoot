@@ -53,51 +53,11 @@
 //! frame flags in `tty/scanout.rs`). A plane-assigned element is *not*
 //! drawn into the swapchain slot -- it reaches the screen through its own
 //! commit -- so the dma-buf recorded here carries the screen *without* the
-//! cursor, and every consumer of [`Captures::frame_mut`] (IPC screenshots,
-//! `ext-image-copy-capture-v1`) shows a cursorless screen on exactly those
-//! sessions. Where the cursor stays composited nothing changes: captures
-//! keep showing it, as does `screencopy.rs`'s cursor section.
-//!
-//! What a capture can *never* be missing is a window. Smithay's overlay
-//! assignment only considers elements of kind `ScanoutCandidate` or
-//! `Cursor`, and this tree builds every window, popup and layer-shell
-//! surface element as `Kind::Unspecified` (only cursor elements are
-//! `Kind::Cursor`). So an overlay plane on this tier can carry at most the
-//! cursor -- never a toplevel -- and marking a window a scanout candidate
-//! is a separate semantic change, not part of this step.
-//!
-//! # What a capture sees when the primary goes direct
-//!
-//! Step 3 of `docs/backlog/resolved/gpu-scanout-planes-done.md` passes
-//! `ALLOW_SCANOUT`, so a frame *may* land on the primary plane direct
-//! instead of in the swapchain slot -- in which case the dma-buf recorded
-//! here names the previous composite, which is not what is on screen.
-//! Serving it would hand every capture consumer (IPC screenshots,
-//! `ext-image-copy-capture-v1`, and through it shell thumbnails and
-//! overviews) a stale screen to act on, which for an agent driving this
-//! compositor is acting on a screen that is not there.
-//!
-//! Two halves, landed together with the flag, never apart:
-//!
-//! - **Mark.** `tty/scanout.rs` reports the direct arm in its per-frame
-//!   outcome (`ScanoutFrame::primary_direct`), and `draw_frame_scanout`
-//!   turns it into [`Captures::note_direct`]. The mark says "the recording
-//!   is not current"; the stale composite stays in place behind it.
-//! - **Force.** Before serving a capture off a stale-or-missing recording,
-//!   `State::ensure_scanout_capture_current` arms one composite-only frame
-//!   (`ScanoutPresenter::arm_force_composite`) and invalidates the swapchain
-//!   (which forces the full damage a static screen would otherwise draw
-//!   nothing on), then renders it immediately. The forced frame re-records
-//!   through the normal path, so the capture reads fresh pixels.
-//!
-//! What cannot be forced -- a session holding no DRM master, where the
-//! render draws nothing -- stays refused, loudly: `Backend::capture` errors
-//! on a marked recording instead of serving the stale buffer. That refusal
-//! is transient by construction (the next composite frame clears the mark),
-//! and today unreachable on top of it: the exporter stays
-//! `NodeFilter::None` (see `tty/scanout.rs`'s `build`), which rejects every
-//! client buffer before any hardware is touched, so no frame this tree
-//! produces can go direct yet.
+//! cursor, and every consumer of [`Captures::capture_target`] (IPC
+//! screenshots, `ext-image-copy-capture-v1`) shows a cursorless screen on
+//! exactly those sessions. Where the cursor stays composited nothing
+//! changes: captures keep showing it, as does `screencopy.rs`'s cursor
+//! section.
 //!
 //! That is a semantic change, not a bug, and it is stated here rather than
 //! fixed here: compositing the cursor back into the capture would be a second
@@ -108,6 +68,64 @@
 //! drawn into, only whether a session whose cursor rides a plane shows it
 //! in captures (it does not) or one whose cursor stays composited does (it
 //! does, exactly as before these steps).
+//!
+//! What a capture can never be missing *without knowing it* is a window.
+//! Smithay's overlay assignment only considers elements of kind
+//! `ScanoutCandidate` or `Cursor`, and this tree builds every window, popup
+//! and layer-shell surface element as `Kind::Unspecified` (only cursor
+//! elements -- the compositor's own and a client's cursor surface -- are
+//! `Kind::Cursor`). So an overlay plane on this tier can carry at most a
+//! cursor -- never a toplevel -- and marking a window a scanout candidate
+//! is a separate semantic change, not part of this step. The one way a
+//! window could leave the swapchain slot is primary-direct, which is what
+//! the next section's mark covers.
+//!
+//! # What a capture sees when the primary goes direct
+//!
+//! `tty/scanout.rs` passes `ALLOW_SCANOUT`, and its framebuffer exporter
+//! admits client dma-bufs, so a frame *may* land on the primary plane direct
+//! instead of in the swapchain slot -- in which case the dma-buf recorded
+//! here names the previous composite, which is not what is on screen.
+//! Serving it would hand every capture consumer (IPC screenshots,
+//! `ext-image-copy-capture-v1`, and through it shell thumbnails and
+//! overviews) a stale screen to act on, which for an agent driving this
+//! compositor is acting on a screen that is not there.
+//!
+//! Two halves, never apart:
+//!
+//! - **Mark.** `tty/scanout.rs` reports the direct arm in its per-frame
+//!   outcome (`ScanoutFrame::primary_direct`), and `draw_frame_scanout`
+//!   turns it into [`Captures::note_direct`]. The mark says "the recording
+//!   is not current"; the stale composite stays in place behind it, and
+//!   only a composite that is actually recorded clears it (a forced frame
+//!   whose slot cannot be exported leaves it up).
+//! - **Force.** Before serving a capture off a stale-or-missing recording,
+//!   `State::ensure_scanout_capture_current` arms one composite-only frame
+//!   (`tty::scanout::ForceComposite`) and invalidates the swapchain (which
+//!   forces the full damage a static screen would otherwise draw nothing
+//!   on), then renders it immediately. The forced frame re-records through
+//!   the normal path, so the capture reads fresh pixels. It keys on
+//!   [`Captures::capture_stale`], which is true for exactly the states
+//!   [`Captures::capture_target`] refuses -- the force fires for every
+//!   capture that would otherwise fail, and for no other.
+//!
+//! What cannot be forced -- a session holding no DRM master, where the
+//! render draws nothing -- stays refused, loudly: [`Captures::capture_target`]
+//! answers [`REFUSE_DIRECT`] on a marked recording instead of serving the
+//! stale buffer, and `Backend::capture` reports it. That refusal is transient
+//! by construction (the next composite frame clears the mark).
+//!
+//! **Reachability, stated rather than implied.** The whole sequence -- mark,
+//! refusal, force, clear -- is pinned against this code in `scanout/tests.rs`.
+//! It has not fired on a shipped build, because no frame goes primary-direct
+//! on any machine measured: Smithay only hands the primary plane to a client
+//! buffer whose framebuffer `Format` equals the swapchain slot's, and the
+//! opaque-fallback fourcc plus the `LINEAR`-vs-implicit modifier make that
+//! unequal on an `Argb8888` swapchain (traced and measured in
+//! `tty/scanout.rs`'s `FRAME_FLAGS` doc, with the one device shape that
+//! could match). It *has* fired live on the dev VM with that gate lifted in
+//! an uncommitted experiment. Lifting it for real is the change that makes
+//! these halves live.
 
 use std::error::Error;
 
@@ -300,31 +318,49 @@ fn render_node(gbm: &GbmDevice<DrmDeviceFd>) -> Option<libc::dev_t> {
     Some(render.dev_id())
 }
 
+/// `Backend::capture`'s refusal while the recording is marked direct: the
+/// last damaged frame went to the primary plane, so the recorded composite is
+/// not what is on screen. Transient -- the next composite frame clears it.
+pub(super) const REFUSE_DIRECT: &str =
+    "the current frame is held for direct scanout; retry once a composite frame lands";
+
+/// `Backend::capture`'s refusal before anything has been recorded (the first
+/// frame, or the first after a swapchain rebuild, has not drawn yet).
+pub(super) const REFUSE_NOTHING: &str = "nothing has been scanned out yet";
+
 impl Captures {
-    /// The dma-buf a capture should read: the one carrying the most recently
-    /// rendered frame, or `None` before the first one.
+    /// The dma-buf a capture may read right now, or why none may be.
+    ///
+    /// The whole of `Backend::capture`'s decision on this tier, here rather
+    /// than inline there so the code that runs is the code the tests drive.
+    /// A marked recording refuses with [`REFUSE_DIRECT`] even though a
+    /// composite is still recorded behind the mark -- serving it would hand
+    /// the caller the screen as it was before the direct frame, which is the
+    /// harm the mark exists to stop. Both capture callers force a composite
+    /// frame first (`State::ensure_scanout_capture_current`), so reaching the
+    /// refusal means the force could not draw (no DRM master, a failed
+    /// render, a failed export of the forced slot). Nothing recorded at all
+    /// refuses with [`REFUSE_NOTHING`] rather than binding an uninitialised
+    /// buffer.
     ///
     /// `&mut` because Smithay's `Bind` takes its target that way (it may
     /// attach an FBO to it). Nothing on the capture path mutates the frame's
     /// pixels.
-    pub(super) fn frame_mut(&mut self) -> Option<&mut Dmabuf> {
-        self.frame.as_mut()
-    }
-
-    /// Whether the recorded frame is *not* what is on screen: the last
-    /// damaged frame went primary-direct, so `frame` still names the
-    /// previous composite. What `Backend::capture` refuses on (loudly,
-    /// rather than serving the stale buffer) and what
-    /// `State::ensure_scanout_capture_current` forces a composite frame for.
-    pub(super) fn is_direct(&self) -> bool {
-        self.direct
+    pub(super) fn capture_target(&mut self) -> Result<&mut Dmabuf, &'static str> {
+        if self.direct {
+            return Err(REFUSE_DIRECT);
+        }
+        self.frame.as_mut().ok_or(REFUSE_NOTHING)
     }
 
     /// Whether a capture served right now would read a stale-or-missing
     /// buffer: nothing recorded yet, or the recording marked direct. The
     /// predicate `State::ensure_scanout_capture_current` keys its forced
-    /// composite frame on. False by construction on every other tier, which
-    /// reads a persistent framebuffer instead of a recording.
+    /// composite frame on -- true exactly when [`capture_target`](Self::capture_target)
+    /// would refuse (pinned), so the force fires for every capture that
+    /// would otherwise fail and for no other. False by construction on every
+    /// other tier, which reads a persistent framebuffer instead of a
+    /// recording.
     pub(super) fn capture_stale(&self) -> bool {
         self.frame.is_none() || self.direct
     }
@@ -356,14 +392,32 @@ impl Captures {
     /// instead of failing outright, and this cannot happen in a steady state
     /// anyway -- the slot was exported successfully by `render_frame` itself
     /// moments earlier to get its DRM framebuffer.
+    ///
+    /// A failed export also leaves a direct *mark* in place, and that half
+    /// is not a lesser wrong but the rule: the mark says the recorded
+    /// composite predates what is on screen, and a forced composite whose
+    /// slot could not be exported has not changed that. Clearing it would
+    /// serve the pre-direct screen as current.
     pub(super) fn note_frame(&mut self, buffer: &GbmBuffer) {
-        let key = std::ptr::from_ref(buffer) as usize;
+        self.record(std::ptr::from_ref(buffer) as usize, || buffer.export());
+    }
+
+    /// [`note_frame`](Self::note_frame)'s body, over the slot's pool key and
+    /// its export: the pool hit, the bounded miss and the failure all live
+    /// here, and `note_frame` only supplies the two things that need a live
+    /// `GbmBuffer`. Split so the recording's transitions are driven by tests
+    /// through the code that runs, not a copy of it.
+    fn record<E: std::fmt::Display>(
+        &mut self,
+        key: usize,
+        export: impl FnOnce() -> Result<Dmabuf, E>,
+    ) {
         if let Some(index) = self.exported.iter().position(|(slot, _)| *slot == key) {
             self.frame = Some(self.exported[index].1.clone());
             self.direct = false;
             return;
         }
-        match buffer.export() {
+        match export() {
             Ok(dmabuf) => {
                 // Bounded: the pool is a cache, not a registry, so the
                 // oldest entry goes rather than the vector growing if a
@@ -378,8 +432,10 @@ impl Captures {
             Err(error) => {
                 tracing::warn!(
                     %error,
+                    direct = self.direct,
                     "could not export the scanned-out buffer for capture; \
-                     captures will read the previous frame"
+                     captures will read the previous composite, or refuse \
+                     with a retry while a direct frame is on screen"
                 );
             }
         }
@@ -403,53 +459,4 @@ impl Captures {
 }
 
 #[cfg(test)]
-mod tests {
-    //! The capture bookkeeping's direct-scanout marking, decided without
-    //! hardware.
-    //!
-    //! `note_frame` itself needs a live `GbmBuffer` (its pool key is the
-    //! buffer's address and its miss path exports it), so the transition it
-    //! owns -- a recorded composite clears the direct mark -- is traced at
-    //! the call site in `tty/scanout.rs` rather than proven here. Everything
-    //! around it is pinnable off real hardware: a fresh state is stale
-    //! (nothing recorded) but not direct, a direct frame marks without
-    //! dropping the last composite, and forgetting the slots clears both.
-
-    use super::*;
-
-    #[test]
-    fn a_fresh_capture_state_is_stale_but_not_direct() {
-        // Before the first frame there is nothing to read (`frame` is
-        // `None`, so `capture_stale`), and no direct frame has marked it
-        // (so not `is_direct`): the two predicates answer different
-        // questions, and the capture backstop refuses on the first while the
-        // forcing path treats either as owed a composite frame.
-        let captures = Captures::default();
-        assert!(captures.capture_stale());
-        assert!(!captures.is_direct());
-    }
-
-    #[test]
-    fn a_direct_frame_marks_without_dropping_the_last_composite() {
-        // `note_direct` records that the screen moved on without the
-        // swapchain slot: the mark goes up, while whatever composite was
-        // recorded stays put (a capture served before the forced composite
-        // lands must fail loud on the mark, never read the stale buffer as
-        // current -- see `Backend::capture`).
-        let mut captures = Captures::default();
-        captures.note_direct();
-        assert!(captures.is_direct());
-        assert!(captures.capture_stale());
-    }
-
-    #[test]
-    fn forgetting_slots_clears_the_direct_mark() {
-        // A rebuilt swapchain invalidates the pool and the recording with
-        // it; the direct mark -- which describes that recording -- goes with
-        // them rather than surviving onto whatever the fresh slots draw.
-        let mut captures = Captures::default();
-        captures.note_direct();
-        captures.forget_slots();
-        assert!(!captures.is_direct());
-    }
-}
+mod tests;

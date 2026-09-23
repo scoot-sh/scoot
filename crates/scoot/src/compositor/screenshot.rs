@@ -257,16 +257,28 @@ impl State {
     /// answer); a `None` here is an unreachable-by-then `Err`, never a
     /// capture of the wrong screen.
     pub fn capture_pixels_for(&mut self, id: Option<OutputId>) -> Result<RawCapture, String> {
-        // Scanout-tier only: force one composite frame first when the
-        // recording is stale-or-missing, so the read below serves current
-        // pixels rather than a pre-direct composite. No-op on every other
-        // tier (persistent framebuffer, current by construction) and when
-        // the recording is already a fresh composite.
+        self.render();
+        // Scanout-tier only: force one composite frame when the recording is
+        // stale-or-missing, so the read below serves current pixels rather
+        // than a pre-direct composite. No-op on every other tier (persistent
+        // framebuffer, current by construction) and when the recording is
+        // already a fresh composite.
+        //
+        // *After* the outstanding render, never before it, and the order is
+        // the correctness half, not a tidy-up. Forcing first let the render
+        // above run unforced after the check: outstanding damage from a
+        // client that goes direct -- a fullscreen video's next frame -- would
+        // then land primary-direct, re-mark the recording the check had just
+        // found fresh, and fail the capture on the mark. This way the last
+        // frame before the read is either a composite the check saw or the
+        // forced one. `service_captures` already has this shape (it runs
+        // after `frame_tick`'s render). It also drops the second render the
+        // old order paid on the stale path, though that one was usually an
+        // early return (`needs_render` cleared by the forced frame).
         #[cfg(feature = "gpu-scanout")]
         if let Some(id) = id {
             self.ensure_scanout_capture_current(id);
         }
-        self.render();
         let Some(id) = id else {
             return Err("no backend to capture".into());
         };

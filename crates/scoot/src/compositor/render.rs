@@ -338,34 +338,19 @@ impl Backend {
                 let scanout::ScanoutBackend {
                     renderer, captures, ..
                 } = &mut **gpu;
-                // A marked recording names the previous composite, not what
-                // is on screen (the last damaged frame went primary-direct).
-                // Refuse loudly rather than serve the stale buffer: both
-                // capture callers force a composite frame first (see
-                // `State::ensure_scanout_capture_current`), so reaching here
-                // means the force could not draw -- no DRM master, or a
-                // failed render -- and the refusal is transient, cleared by
-                // the next composite frame. `Bind` is the honest stage: there
-                // is no current buffer to bind. No new stage, so the
-                // presenter-copy path below -- which can never produce this
-                // -- keeps its exhaustive three-arm match.
-                //
-                // Checked before `frame_mut`: the mark refuses regardless of
-                // whether a stale composite is still behind it (and the
-                // immutable check cannot overlap the mutable borrow below).
-                if captures.is_direct() {
-                    return Err(CaptureError::new(
-                        CaptureStage::Bind,
-                        "the current frame is held for direct scanout; \
-                         retry once a composite frame lands",
-                    ));
-                }
-                let Some(frame) = captures.frame_mut() else {
-                    return Err(CaptureError::new(
-                        CaptureStage::Bind,
-                        "nothing has been scanned out yet",
-                    ));
-                };
+                // The decision -- a marked recording refuses loudly rather
+                // than serve the pre-direct composite, an empty one refuses
+                // rather than bind nothing -- is `Captures::capture_target`'s,
+                // pinned there. Both refusals are transient (the next
+                // composite frame clears them) and both capture callers
+                // force that frame first (`State::ensure_scanout_capture_current`),
+                // so reaching one means the force could not draw. `Bind` is
+                // the honest stage: there is no current buffer to bind. No
+                // new stage, so the presenter-copy path below -- which can
+                // never produce this -- keeps its exhaustive three-arm match.
+                let frame = captures
+                    .capture_target()
+                    .map_err(|refusal| CaptureError::new(CaptureStage::Bind, refusal))?;
                 capture_with(renderer, frame, region, use_pixels)
             }
         }
@@ -523,9 +508,13 @@ impl State {
     /// immediately, synchronously on the event-loop thread like every other
     /// capture-adjacent render.
     ///
-    /// Costs one full composite plus one swapchain realloc, and only when
-    /// the recording is actually stale -- direct frames keep flipping
-    /// direct between captures. While paused (no DRM master) the render
+    /// Costs one full composite plus one swapchain realloc (and one
+    /// re-export of a direct client's framebuffers on its next frame: the
+    /// forced frame never asks Smithay to consider the element for a plane,
+    /// so the element's framebuffer cache is not carried into that frame's
+    /// state and lapses -- measured on the dev VM, 2 exports per capture),
+    /// and only when the recording is actually stale -- direct frames keep
+    /// flipping direct between captures. While paused (no DRM master) the render
     /// draws nothing and the recording stays stale; the capture then fails
     /// loudly at [`Backend::capture`] rather than serving the old screen.
     /// Never arms without rendering in the same call: a bare arming would
@@ -541,6 +530,13 @@ impl State {
         {
             return;
         }
+        // debug!, not louder: this is the expected path for every capture
+        // after a direct frame, and it is once per capture, never per frame
+        // -- the line that shows the force path firing in a live session.
+        tracing::debug!(
+            output = id.0,
+            "capture forces a composite frame: the recording is stale"
+        );
         if let Some(presenter) = self.tty.as_mut().and_then(Tty::scanout_mut) {
             presenter.arm_force_composite();
             presenter.invalidate_scanout();
