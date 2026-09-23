@@ -80,6 +80,7 @@ fn only_eligible_is_allowed() {
     for refusal in [
         PrimaryDirect::Locked,
         PrimaryDirect::NotCovered,
+        PrimaryDirect::Streaming,
         PrimaryDirect::Translucent,
         PrimaryDirect::Rounded,
     ] {

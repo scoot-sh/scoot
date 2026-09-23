@@ -22,13 +22,21 @@
 //!    the same question the render stack asks to hide the `top` layer). This
 //!    is what keeps `ANY` away from an arbitrary bottom window: without a
 //!    covering window there is no primary bit on the frame at all.
-//! 3. **no element in the frame is translucent** (`alpha() < 1.0`, which is
+//! 3. **no capture client is streaming the output** (`Screencopy::streaming`:
+//!    a session with a frame parked, or one that asked within the last
+//!    second). A direct frame is not in the swapchain slot a capture reads,
+//!    so each capture of a direct output forces a composite frame first;
+//!    once per screenshot that is free, once per frame of a stream it
+//!    measured worse than compositing throughout (more CPU, longer frame
+//!    intervals for both the client and the capture), so a streamed output
+//!    composites, exactly as it did before this existed.
+//! 4. **no element in the frame is translucent** (`alpha() < 1.0`, which is
 //!    where `wp_alpha_modifier_v1`'s multiplier lands). A translucent bottom
 //!    element could only be tried over a black clear colour, where Smithay
 //!    would ask the primary plane's own `alpha` property to stand in for the
 //!    blend -- a rarely exercised property on the one plane every driver
 //!    treats specially. Compositing is exact; that is the one worth trusting.
-//! 4. **no element in the frame is a rounded window** (`Rounded`). `Rounded`
+//! 5. **no element in the frame is a rounded window** (`Rounded`). `Rounded`
 //!    forwards `underlying_storage`, so the buffer Smithay would scan out is
 //!    the *unclipped* one and the corners would be lost, not approximated. A
 //!    covering fullscreen window is never rounded (`window_elements`), so
@@ -36,7 +44,7 @@
 //!    window never reaches the primary" a property of this check rather than
 //!    of an argument about which element ends up bottom-most.
 //!
-//! 3 and 4 scan the whole list rather than the one element Smithay would
+//! 4 and 5 scan the whole list rather than the one element Smithay would
 //! pick, because *which* element that is is Smithay's decision (the bottom
 //! visible one, with everything above it on its own plane). Scanning all of
 //! them costs nothing that matters -- a handful of elements, no allocation
@@ -72,6 +80,8 @@
 //! `State::ensure_scanout_capture_current`). This module does not change
 //! that contract; it is what makes it fire in normal use.
 
+use std::time::Instant;
+
 use smithay::backend::renderer::element::Element;
 use smithay::backend::renderer::{ImportAll, ImportMem, Renderer, Texture};
 use smithay::output::Output;
@@ -97,6 +107,8 @@ pub(crate) enum PrimaryDirect {
     Locked,
     /// No fullscreen window covers the output.
     NotCovered,
+    /// A capture client is streaming the output (`Screencopy::streaming`).
+    Streaming,
     /// An element in the frame has an alpha below 1.0.
     Translucent,
     /// An element in the frame is a rounded window.
@@ -114,8 +126,9 @@ impl PrimaryDirect {
 ///
 /// `locked` must be the value the element list was gathered with, and
 /// `elements` that list -- `draw_frame_scanout` passes both straight
-/// through. Allocation-free, and the element scan only runs on an unlocked,
-/// covered output, which is the only case where it can matter.
+/// through. Allocation-free, and everything past the first two rules -- the
+/// clock read, the capture-session scan, the element scan -- only runs on an
+/// unlocked, covered output, which is the only case where it can matter.
 pub(super) fn judge<R>(
     state: &State,
     output: &Output,
@@ -132,6 +145,13 @@ where
     if !state.covered_by_fullscreen(output) {
         return PrimaryDirect::NotCovered;
     }
+    if state
+        .outputs
+        .id_of(output)
+        .is_some_and(|id| state.screencopy.streaming(id, Instant::now()))
+    {
+        return PrimaryDirect::Streaming;
+    }
     judge_elements(elements.iter().map(|element| {
         (
             matches!(element, Elements::RoundedSurface(_)),
@@ -140,7 +160,7 @@ where
     }))
 }
 
-/// Rules 3 and 4 over `(is_rounded, alpha)` per element: the part of
+/// Rules 4 and 5 over `(is_rounded, alpha)` per element: the part of
 /// [`judge`] that reads the frame list, split out so every combination is
 /// pinnable without building render elements.
 ///

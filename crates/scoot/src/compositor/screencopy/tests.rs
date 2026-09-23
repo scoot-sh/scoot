@@ -53,6 +53,9 @@ use crate::compositor::test_support::{Harness, wait_for};
 use super::MAX_FRAMES_PER_CLIENT;
 use super::xrgb_needs_forcing;
 
+#[cfg(feature = "gpu-scanout")]
+mod streaming;
+
 /// The framebuffer these tests render into. Small on purpose: every capture
 /// here is a whole-framebuffer copy that a test then compares byte for byte.
 const CANVAS: i32 = 60;
