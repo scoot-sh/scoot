@@ -1061,13 +1061,14 @@ impl State {
             .or_else(|| self.layer_surface_under(&layer_shell::BELOW_WINDOWS, pos))
     }
 
-    /// The window surface at `pos`, ignoring layer surfaces entirely.
+    /// The window surface at `pos`, ignoring layer surfaces entirely --
+    /// among the windows placed on the output `pos` is on, and no other (see
+    /// `output_clip.rs`), so the pointer follows what is drawn there.
     pub(super) fn window_under(
         &self,
         pos: Point<f64, Logical>,
     ) -> Option<(WlSurface, Point<f64, Logical>)> {
-        self.space
-            .element_under(pos)
+        self.window_element_under(pos)
             .and_then(|(window, location)| {
                 window
                     .surface_under(pos - location.to_f64(), WindowSurfaceType::ALL)

@@ -100,6 +100,18 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[Windows stay on their own output](docs/backlog/resolved/windows-bleed-across-outputs-done.md)**
+  (2026-09-23, PR #224) — a window is drawn and takes input only on the
+  output it is placed on (`output_clip.rs`): each frame gathers only its
+  own output's windows and rings, in output-local coordinates; both hit
+  sites filter by an output stamp `apply()` writes beside `map_element`;
+  popups go with their parent (cut at a shared edge, as at an outer one).
+  Also fixed: the ring and rounded clip were built in global coordinates,
+  so no output after the first ever showed a ring. Single-output frames
+  byte-identical under both renderers. Follow-ups filed:
+  [popup constraint adjustment](docs/backlog/core/popup-constraint-adjustment.md),
+  [output membership by geometry](docs/backlog/core/output-membership-by-geometry.md).
+
 - **[Client fullscreen](docs/backlog/resolved/client-fullscreen-done.md)**
   (2026-09-22, PR #223) — a per-window fullscreen state
   in `scoot-core`: covers the output (gaps, ring, bar zones) while its

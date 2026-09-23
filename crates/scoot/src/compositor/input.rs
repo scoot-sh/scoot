@@ -965,7 +965,10 @@ impl State {
             self.click_layer(&layer);
             return;
         }
-        if let Some(window) = self.space.element_under(location).map(|(w, _)| w.clone()) {
+        // The same output-confined search the pointer focus uses (see
+        // `output_clip.rs`): a click lands on what is drawn under it, never
+        // on another output's window overhanging this one.
+        if let Some(window) = self.window_element_under(location).map(|(w, _)| w.clone()) {
             let found = self
                 .windows
                 .iter()

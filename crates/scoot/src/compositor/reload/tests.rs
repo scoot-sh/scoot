@@ -27,6 +27,7 @@ use wayland_protocols::ext::session_lock::v1::client::{
 };
 
 use super::{ScaleReload, autostart_delta, field, scale_reload};
+use crate::cli::RendererKind;
 use crate::compositor::config;
 use crate::compositor::decorations::{Appearance, Color};
 use crate::compositor::headless;
@@ -1170,8 +1171,19 @@ fn device_and_renderer_refusals_name_restart() {
     // Phases 5-6: the two fields that never go live keep refusing, but the
     // refusal now names the remedy (a restart) instead of the opaque
     // "startup-only".
+    //
+    // The renderer named is whichever one this session is *not* running
+    // (see `test_renderer`): naming the running one is no change at all, so
+    // under `SCOOT_TEST_RENDERER=gles` a hardcoded `gles` would be refused
+    // by nothing.
     let mut fixture = Fixture::with_config("");
-    fixture.rewrite("[renderer]\nbackend = \"gles\"\n\n[tty]\ngpu = \"/dev/dri/card9\"\n");
+    let other = match test_renderer() {
+        RendererKind::Pixman => RendererKind::Gles,
+        RendererKind::Gles => RendererKind::Pixman,
+    };
+    fixture.rewrite(&format!(
+        "[renderer]\nbackend = \"{other}\"\n\n[tty]\ngpu = \"/dev/dri/card9\"\n"
+    ));
     let response = fixture.reload();
     assert!(applied(&response).is_empty());
     for name in [field::GPU, field::BACKEND] {

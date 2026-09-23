@@ -111,8 +111,7 @@ it covers:
   keyboard loses it to the window at that moment — the focused window going
   fullscreen hides the launcher, and a hidden surface cannot hold the
   keyboard. It gets it back as soon as the output is uncovered, if it is
-  still mapped. (niri answers the same way.) `overlay` surfaces keep the
-  keyboard;
+  still mapped. `overlay` surfaces keep the keyboard;
 - the **`overlay` layer stays above it** — notifications and OSDs that draw
   there still show, and still take clicks and an `exclusive` keyboard;
 - a **lock screen** covers everything, fullscreen windows included.
@@ -123,7 +122,10 @@ Other outputs are untouched: fullscreen is per output.
 view scrolls there the usual way. Focused away, the fullscreen window keeps
 its fullscreen size and sits in the strip exactly where a column that wide
 would, one ordinary gap from its neighbours on either side — so it can
-still show, partly, beside the focused window, but never over it. Nothing
+still show, partly, beside the focused window, but never over it, and never
+on another output: the part of it past its own output's edge is neither drawn
+nor clickable (see [More than one
+output](configuration.md#more-than-one-output)). Nothing
 covers the output then, so `top`-layer surfaces are drawn again (a bar on
 `top` is drawn over the fullscreen window where they meet; one on `bottom`,
 waybar's default, stays under it). Focus back and it covers the screen

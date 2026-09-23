@@ -142,7 +142,8 @@ version plus the IPC protocol number — without starting anything.
 `--headless --outputs N` (1–8) creates N virtual outputs side by side, so
 per-output behaviour is testable with no second monitor: each gets its own
 `wl_output`, its own place in the coordinate space, its own scrolling
-strip, its own composited strip, its own layer-shell zones and input, its
+strip (a window is drawn and clicked only on its own output, never over the
+next one), its own composited strip, its own layer-shell zones and input, its
 own lock surface, its own workspace group and output-management head — so
 `scootctl screenshot --output 2` answers with the second output's own
 pixels, a bar on one output reserves space only there, the pointer crosses

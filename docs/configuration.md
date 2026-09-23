@@ -116,6 +116,12 @@ What a second output **is**, today:
   hit-tested against the output under it, a click on that output's bar
   focuses the bar, and an `exclusive` launcher mapped where the pointer is
   takes the keyboard there (the pointer's output wins ties);
+- its own windows, and only its own: a window is drawn and takes the
+  pointer only on the output it is on, so a column scrolled part-way past
+  the shared edge (or a fullscreen window its column is focused away from)
+  is cut at that edge rather than drawn over — and clicked instead of — the
+  neighbouring output's windows. Its focus ring and rounded corners are
+  drawn on its own output too;
 - a window list that names the output each window is on
   (`wlr-foreign-toplevel-management` `output_enter` per window's own output,
   paired with `output_leave` when a move carries it across);
@@ -151,7 +157,12 @@ What it is **not**, yet — the work tracked in
   outputs](#moving-across-outputs)) — ids 3+ stay manual;
 - no per-output mode/scale/position configuration surface:
   `wlr-output-management` `apply`/`test` stay refused;
-- `--tty` driving two connectors at once (phase E, hardware-gated).
+- `--tty` driving two connectors at once (phase E, hardware-gated);
+- a menu opened near the shared edge is cut at it, the same as at an
+  output's outer edge: popups are not yet moved or flipped to fit their
+  output (`xdg_positioner` constraint adjustment, tracked in
+  `docs/backlog/core/popup-constraint-adjustment.md`), and a popup belongs
+  to its window's output like the window does.
 
 ## Starting a session
 

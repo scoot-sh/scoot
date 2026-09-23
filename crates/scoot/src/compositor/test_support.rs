@@ -99,8 +99,10 @@ const CLIENT_PATIENCE: Duration = Duration::from_secs(5);
 ///
 /// # Known: seven `dmabuf` tests fail under `gles` on software EGL
 ///
-/// Every pixel-readback suite passes byte-identically under both renderers.
-/// The exception is `dmabuf::tests`' seven *import* tests, and it is a
+/// Every pixel-readback suite passes byte-identically under both renderers,
+/// and so does every other test in the crate (the reload suite's renderer
+/// refusal names whichever renderer is *not* running, so it refuses under
+/// either). The exception is `dmabuf::tests`' seven *import* tests, and it is a
 /// property of the machine, not of this change: those tests synthesise a
 /// dma-buf from a memfd through `/dev/udmabuf`, which pixman imports by
 /// mmapping it, while GLES must hand it to the driver -- and Mesa's
