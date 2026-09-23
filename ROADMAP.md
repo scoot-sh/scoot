@@ -101,7 +101,7 @@ each item's own file records why it landed when it did.
 ## Recently shipped (since 2026-09-15)
 
 - **[Popup depth bound](docs/backlog/resolved/popup-depth-bound-done.md)**
-  (2026-09-23, PR #TBD) — a client could crash the compositor with a deep
+  (2026-09-23, PR #226) — a client could crash the compositor with a deep
   acyclic chain of `xdg_popup`s (Smithay's popup tree recurses per level;
   on `main` 10000 overflowed a 2 MB stack in release, 3000 froze it for a
   minute). Chains are capped at 64 in `new_popup` by a bounded walk, and

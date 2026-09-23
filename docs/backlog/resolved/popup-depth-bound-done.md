@@ -8,7 +8,7 @@ blocked: null
 
 # Bound popup-tree depth (client-triggerable crash / hang) — RESOLVED
 
-RESOLVED 2026-09-23 (PR #TBD). The rules, and why each, are in
+RESOLVED 2026-09-23 (PR #226). The rules, and why each, are in
 `crates/scoot/src/compositor/popup_parent.rs`; the tests in
 `popup_parent/tests/`.
 
