@@ -98,12 +98,14 @@
 //!   shows any more, and it is usually about to be resized anyway.
 //! - **The same window still covers, but the frame is not eligible** (the
 //!   session locked, a capture stream started, a translucent element): it
-//!   keeps the scanout feedback for [`REVERT_HOLD`], and is reverted only if
-//!   that lasts. `Screencopy::streaming` counts one ext-image-copy request as
-//!   streaming for a second, so a shell refreshing a thumbnail every few
-//!   seconds would otherwise flap the client's allocations on every refresh.
-//!   Keeping a scannable layout a little longer is harmless: every pair in
-//!   the tranche imports.
+//!   keeps the scanout feedback, and is reverted on the first frame drawn
+//!   once that has lasted [`REVERT_HOLD`]. `Screencopy::streaming` counts one
+//!   ext-image-copy request as streaming for a second, so a shell refreshing
+//!   a thumbnail every few seconds would otherwise flap the client's
+//!   allocations on every refresh. The check is frame-driven, with no timer
+//!   of its own: an output that stops drawing (a still lock screen) keeps
+//!   the scanout feedback until its next frame. Keeping a scannable layout
+//!   longer is harmless either way: every pair in the tranche imports.
 //! - **Something composited above the window** (an `overlay` notification,
 //!   a popup) is not an eligibility rule -- `render::primary_direct` leaves
 //!   it to Smithay, which simply composites that frame -- so it does not
@@ -148,9 +150,10 @@ use crate::compositor::tty::scanout::ScanoutFormats;
 mod tests;
 
 /// How long the window covering an output may stay ineligible for a
-/// transient reason -- locked, streamed, translucent -- before it is steered
-/// back to the default feedback. Longer than `Screencopy`'s one-second
-/// stream window, so a single capture request never reverts anything.
+/// transient reason -- locked, streamed, translucent -- before the next
+/// drawn frame steers it back to the default feedback. Longer than
+/// `Screencopy`'s one-second stream window, so a single capture request
+/// never reverts anything.
 pub(crate) const REVERT_HOLD: Duration = Duration::from_secs(2);
 
 /// The versions of `zwp_linux_dmabuf_feedback_v1` the scanout tranche is

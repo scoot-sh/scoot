@@ -299,8 +299,9 @@ running with no GPU at all is a hard requirement here, not a fallback tier.
   the primary plane accepts out of those already advertised
   (`dmabuf/scanout.rs`); a client that acts on it reallocates into one and
   goes direct. It is sent only when that changes: at once when another
-  window (or none) covers the output, after two seconds when the same
-  window stays covered but cannot go direct (locked, streamed, translucent),
+  window (or none) covers the output, on the first frame drawn two seconds
+  or more after the same window, still covering, stopped being able to go
+  direct (locked, streamed, translucent),
   and not at all for a notification or popup drawn over it. Every pair in
   it is one the default feedback already offers, so a client that allocates
   from it and ends up composited is imported like any other. On the dev

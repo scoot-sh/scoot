@@ -41,8 +41,10 @@ eligibility half landed with the
 - **Churn.** Sent only on a change (Smithay's `set_feedback` also compares).
   The covering window changing reverts at once; the same window staying
   covered but ineligible (lock, capture stream, translucency) reverts only
-  after a 2 s hold (`REVERT_HOLD`, longer than the 1 s stream window, so a
-  thumbnail capture never makes a game reallocate); an overlay surface or
+  on the first drawn frame once that has lasted 2 s (`REVERT_HOLD`, longer
+  than the 1 s stream window, so a thumbnail capture never makes a game
+  reallocate; frame-driven, no timer, so a screen that stops drawing keeps
+  the scanout feedback, harmlessly); an overlay surface or
   popup above the window is not an eligibility rule and reverts nothing
   (a deliberate deviation from the dispatch's "overlay above" revert case:
   it is transient, and the window goes direct again in the steered layout
@@ -76,7 +78,8 @@ eligibility half landed with the
   probe binding v4 surface feedback and `wp_presentation`): tranche
   `XR24`/`AR24` at `LINEAR`, `target_device` card0 (`0xe200`) vs
   `main_device` renderD128 (`0xe280`); sent on fullscreen, reverted on
-  unfullscreen and after 2.0 s of lock/stream, not touched by an overlay
+  unfullscreen and on the first frame 2.0 s into a lock or stream (the
+  probe commits on a timer, so frames kept coming), not touched by an overlay
   surface or a `grim` one-shot; the probe reallocating on every feedback
   kept going direct (KMS primary fb = the traced direct fb, screenshots
   correct); `zero_copy` presented exactly as often as Smithay assigned the

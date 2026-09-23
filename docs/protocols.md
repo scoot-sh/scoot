@@ -901,10 +901,13 @@ then be shown straight from its own memory instead of being composited.
   window changes (it leaves fullscreen, unmaps, another window or workspace
   takes the output) the old one gets the default feedback back at once. When
   the same window still covers the output but a lock, a capture stream or a
-  translucent moment stops it going direct, it keeps the scanout feedback for
-  two seconds and gets the default back only if that lasts — so a shell
-  refreshing a thumbnail, which counts as streaming for a second, never makes
-  the game reallocate. A notification or popup drawn over the window changes
+  translucent moment stops it going direct, it keeps the scanout feedback,
+  and gets the default back on the first frame drawn two seconds or more
+  later if it still cannot — so a shell refreshing a thumbnail, which counts
+  as streaming for a second, never makes the game reallocate. (The check
+  rides on drawn frames: a screen that draws nothing, like a still lock
+  screen, keeps the scanout feedback until it next draws, which is harmless —
+  every pair in it imports.) A notification or popup drawn over the window changes
   nothing: it is transient, and the window goes direct again the moment it is
   gone.
 - **What the plane accepts.** Explicit tiled or compressed modifiers only

@@ -111,8 +111,9 @@ each item's own file records why it landed when it did.
   single-plane formats on a modifier-less plane, never `Invalid`, minus
   modifiers the layout exporter saw GBM lose) — a subset of the default, so
   nothing new is promised. Eligibility is `render::primary_direct`'s. Sent
-  only on a change: at once when the covering window changes, after a 2 s
-  hold for lock/stream/translucency (a thumbnail capture never flaps it),
+  only on a change: at once when the covering window changes, on the first
+  frame after a 2 s hold for lock/stream/translucency (a thumbnail capture
+  never flaps it),
   never for an overlay above; cached per plane set, allocation-free per
   frame. `wp_presentation` reports `zero_copy` for the surface scanned out
   directly (the `DrmCompositor`'s answer, not the cursor plane). Dev VM:
