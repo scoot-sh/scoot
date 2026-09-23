@@ -678,6 +678,11 @@ capture-cursor → resize-in-place → syncobj → nested dmabuf → VRR.
 - [`--nested` gles presents by dmabuf](./core/nested-dmabuf-present.md) — low, argues against the recorded "read-back is design" position for nested+gles only.
 - [VRR on the scanout tier](./core/gpu-vrr.md) — low, blocked on a VRR-capable display.
 
+### GPU tier, after primary-direct (2026-09-23)
+- [GLES tier advertises only LINEAR dma-bufs](./core/gles-dmabuf-full-formats.md) — high: GPU clients forced into linear buffers; no NV12 for zero-copy video. Next up.
+- [Scanout-tranche feedback + `zero_copy` flag](./core/gpu-scanout-candidates.md) — after the above.
+- [Windows on overlay planes](./core/gpu-overlay-window-candidates.md) — low, blocked on overlay-capable hardware.
+
 ### Found reviewing client fullscreen (2026-09-23)
 - [Deep popup chains crash or freeze the compositor](./resolved/popup-depth-bound-done.md) — RESOLVED 2026-09-23 (PR #226): popup chains are capped at 64, and the ways an open chain could be re-parented deeper are refused (`already_constructed`, `not_the_topmost_popup`, a parent with no live role object); a layer surface may adopt only a fresh parentless popup; a surface made a popup again no longer has its same-flush child inserted under its dead tree node. Every chain and tree node is at most 64 deep.
 - [Windows bleed onto the neighbouring output](./resolved/windows-bleed-across-outputs-done.md) — RESOLVED 2026-09-23 (PR #224): a window is drawn and hit only on the output it is placed on (render gather, ring and both hit sites); popups go with their parent. Also fixed: the ring and rounded clip never drew right on outputs after the first (global coordinates).

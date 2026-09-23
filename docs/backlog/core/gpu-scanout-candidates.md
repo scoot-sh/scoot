@@ -1,9 +1,9 @@
 ---
-title: "GPU scanout: mark eligible window surfaces as scanout candidates, with scanout-tranche dmabuf feedback"
+title: "GPU scanout: per-surface scanout-tranche dma-buf feedback + presentation zero_copy flag"
 status: "open"
 area: "core"
 priority: "high"
-blocked: null
+blocked: "gles-dmabuf-full-formats should land first"
 ---
 
 # GPU scanout: scanout candidates + per-surface scanout feedback
@@ -18,7 +18,9 @@ translucent or rounded element), with `ALLOW_PRIMARY_PLANE_SCANOUT_ANY` on
 eligible frames only. That settled the eligibility rule this ticket asked
 for *for the primary*. What is left here is what it scoped out:
 
-- **Overlay planes.** No window is `Kind::ScanoutCandidate`, so none rides an
+- **Overlay planes** — split out 2026-09-23 to
+  [gpu-overlay-window-candidates](./gpu-overlay-window-candidates.md)
+  (blocked on hardware with overlays). Original note: no window is `Kind::ScanoutCandidate`, so none rides an
   overlay. The rule below is still the one to adopt for that; the rounded
   and translucent refusals already exist in `render::primary_direct` and
   should be shared, not copied. Before marking anything, extend the capture
@@ -26,6 +28,8 @@ for *for the primary*. What is left here is what it scoped out:
   (`ScanoutFrame::primary_direct`); a window on an overlay is equally
   absent from the swapchain slot. Virtio has no overlay plane, so this
   needs hardware that has one.
+- **Depends on [gles-dmabuf-full-formats](./gles-dmabuf-full-formats.md)**
+  (the default tranche must be the renderer's real set first).
 - **Per-surface scanout-tranche dma-buf feedback**, so a client can
   allocate a buffer the plane takes (today the one renderer tranche offers
   `LINEAR` only, which happens to be scannable on the machines measured).
