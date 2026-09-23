@@ -679,6 +679,8 @@ capture-cursor → resize-in-place → syncobj → nested dmabuf → VRR.
 - [VRR on the scanout tier](./core/gpu-vrr.md) — low, blocked on a VRR-capable display.
 
 ### Found reviewing client fullscreen (2026-09-23)
+- [Windows bleed onto the neighbouring output](./core/windows-bleed-across-outputs.md) — high: no per-output clip on render or hit test; fullscreen widens it to a whole monitor. Next up.
+- [Frame learning never flushes its own relayout](./core/frame-learning-apply-flush.md) — low: learned minimum waits for the next event.
 - [Smoke xwayland step keys on PATH, not the build feature](./testing/smoke-xwayland-step-feature-gate.md) — medium: nested smoke in cage hangs then fails on any default build; pre-existing since PR #221.
 
 ### Meta
