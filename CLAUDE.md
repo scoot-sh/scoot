@@ -324,6 +324,16 @@ durable belongs in `CLAUDE.md` or `ROADMAP.md`/`docs/`, not duplicated here.
   and nothing was lost", which was written from the one no-op move and missed
   the other three. Review caught it in the reflog. A near-miss recorded
   mildly teaches the mild lesson.)
+  **A separate tree needs a separate `CARGO_TARGET_DIR`** (2026-09-23, PR
+  #224 review). The dev VM builds `/mnt/scoot` into one shared target dir.
+  A reviewer built base and head `git archive` extracts into that same dir.
+  Cargo fingerprints workspace crates by relative path plus mtime, and
+  `git archive` stamps every file with the commit time, so each extract
+  looked fresh against whatever the other had last built, and cargo silently
+  reused the wrong binaries. It was caught only because test counts didn't
+  match. Undoing it took a `cargo clean` of the workspace crates (7.3 GiB,
+  a cold rebuild for the next agent). Build any worktree or extract with its
+  own `CARGO_TARGET_DIR=/tmp/<name>-target`, and delete that dir after.
 - **The same collision can happen between two implementers, not just the
   orchestrator and one — this also happened once.** Two `scoot-implementer`
   agents were dispatched close together, reasoned safe because their file sets
