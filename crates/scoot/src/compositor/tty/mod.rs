@@ -278,11 +278,16 @@ impl Presenter {
     /// issued before the pause confirms exactly that frame -- which did reach
     /// the screen -- and one that never arrives is cleared by the drain in
     /// [`reactivate`](Self::reactivate) instead.
+    ///
+    /// It does release the explicit-sync buffers its in-flight frames hold
+    /// (after waiting out their renders): a frame whose vblank never arrives
+    /// must not keep a client's buffers until the switch back (see
+    /// `ScanoutPresenter::pause`).
     fn pause(&mut self) {
         match self {
             Self::Dumb(dumb) => dumb.discard_flip(),
             #[cfg(feature = "gpu-scanout")]
-            Self::Gpu(_) => {}
+            Self::Gpu(gpu) => gpu.pause(),
         }
     }
 
@@ -533,6 +538,20 @@ pub fn init(
         active: true,
         session_paused: false,
     });
+
+    // Explicit sync is offered only on the GPU scanout tier, and only where
+    // the device passes Smithay's syncobj-eventfd probe -- decided here,
+    // before the event loop starts, so no client can bind a global that is
+    // not honoured, and no surface is created before the acquire hook it
+    // needs (see `drm_syncobj.rs`). The import device is the session's own
+    // DRM fd, the one the probe runs on.
+    #[cfg(feature = "gpu-scanout")]
+    if let Some(tty) = state.tty.as_ref()
+        && tty.scanout_tier()
+    {
+        let device = tty.drm.device_fd().clone();
+        state.drm_syncobj.enable(&state.display_handle, device);
+    }
 
     // The gamma protocol's `gamma_size` is per-CRTC hardware state, and the
     // CRTC only exists once the surface above does -- so the manager is
@@ -1135,6 +1154,13 @@ impl Tty {
     /// consumer, since a refused flip has no completion event coming.
     pub fn take_retry_render(&mut self) -> bool {
         self.presenter.take_retry_render()
+    }
+
+    /// Whether this session came up on the GPU scanout tier -- fixed for the
+    /// session's life (the presenter is chosen once, in `init`).
+    #[cfg(feature = "gpu-scanout")]
+    fn scanout_tier(&self) -> bool {
+        matches!(self.presenter, Presenter::Gpu(_))
     }
 
     /// The GPU scanout presenter, if this session is on that tier.

@@ -58,7 +58,8 @@ use smithay::backend::allocator::{Fourcc, Modifier};
 use smithay::backend::drm::compositor::{DrmCompositor, FrameFlags, PrimaryPlaneElement};
 use smithay::backend::drm::exporter::gbm::{GbmFramebufferExporter, NodeFilter};
 use smithay::backend::drm::{DrmDeviceFd, DrmSurface, PlaneInfo, Planes};
-use smithay::backend::renderer::element::{Id, RenderElement};
+use smithay::backend::renderer::element::{Id, RenderElement, UnderlyingStorage};
+use smithay::backend::renderer::utils::Buffer as ClientBuffer;
 use smithay::backend::renderer::{Bind, Color32F, Renderer, Texture};
 use smithay::output::{Output, OutputModeSource};
 use smithay::reexports::drm::control::{Mode, crtc, plane};
@@ -67,6 +68,8 @@ use smithay::utils::{Buffer, Rectangle, Size, Transform};
 use super::layout_exporter::{LayoutKeepingExporter, LostLayouts};
 use super::present_retry::{self, PresentRetries};
 use crate::compositor::dmabuf::scanout::FormatsKey;
+use crate::compositor::drm_syncobj::ExplicitBuffers;
+use crate::compositor::drm_syncobj::release_hold::ReleaseHold;
 use crate::compositor::render::{CursorInFrame, Plane};
 
 /// The concrete `DrmCompositor` this backend drives.
@@ -503,6 +506,15 @@ pub(crate) struct ScanoutPresenter {
     /// the scanout tranche's cache is rebuilt on ([`FormatsKey`]); a mode
     /// change keeps the plane, so it keeps this.
     plane_epoch: u64,
+    /// Explicit-sync client buffers the composited frames still in flight
+    /// sampled, kept until each frame is done with them on the GPU -- so a
+    /// release point is never signalled while a queued frame may still read
+    /// its buffer. Fed by [`render_and_queue`](Self::render_and_queue),
+    /// drained by [`frame_submitted`](Self::frame_submitted) and by every
+    /// path after which a held frame can no longer be trusted to flip. See
+    /// `drm_syncobj/release_hold.rs`. Always empty in a session that never
+    /// saw an explicit-sync commit.
+    release_hold: ReleaseHold<ClientBuffer>,
 }
 
 /// What the scanout tranche is built from on this presenter's device:
@@ -573,6 +585,7 @@ impl ScanoutPresenter {
             cursor_size,
             lost,
             plane_epoch: 0,
+            release_hold: ReleaseHold::default(),
         })
     }
 
@@ -737,6 +750,13 @@ impl ScanoutPresenter {
     /// overlay (and underlay) elements -- rather than guessed from which
     /// planes exist. `frame` is the output's `(scale, physical size)`, which
     /// the cursor elements' geometry is measured and clamped in.
+    ///
+    /// `explicit` names the client buffers whose latest commit carried
+    /// explicit-sync points: a composited frame holds every one of them it
+    /// sampled until the frame is done on the GPU (see the `release_hold`
+    /// field). Empty -- one length check per frame -- in every session
+    /// without an explicit-sync client.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn render_and_queue<R, E>(
         &mut self,
         renderer: &mut R,
@@ -744,6 +764,7 @@ impl ScanoutPresenter {
         clear_color: Color32F,
         allow_primary_direct: bool,
         frame: (f64, (i32, i32)),
+        explicit: &ExplicitBuffers,
         mut on_frame: impl FnMut(&smithay::backend::allocator::gbm::GbmBuffer, CursorInFrame),
     ) -> ScanoutFrame
     where
@@ -827,6 +848,17 @@ impl ScanoutPresenter {
             );
             on_frame(element.buffer(), cursor);
         }
+        // The composited frame's render fence, for the explicit-sync release
+        // hold below: only a damaged frame whose primary is the swapchain
+        // sampled client buffers into it. A direct frame composited nothing,
+        // and its plane buffer is kept by `DrmCompositor` itself until the
+        // frame after it is on screen.
+        let composite_sync = match &result.primary_element {
+            PrimaryPlaneElement::Swapchain(element) if damaged && !explicit.is_empty() => {
+                Some(element.sync.clone())
+            }
+            _ => None,
+        };
         // Dropped before `queue_frame`, per `RenderFrameResult`'s own doc:
         // holding it keeps a swapchain slot out of circulation.
         drop(result);
@@ -845,6 +877,24 @@ impl ScanoutPresenter {
         }
 
         let flip = self.next_flip;
+        if let Some(sync) = composite_sync {
+            // Every explicit buffer in the frame, sampled or not: holding one
+            // the damage tracker skipped costs it at most this frame's flip,
+            // and asking Smithay which elements it drew would cost a lookup
+            // per element per frame for nothing.
+            self.release_hold.hold(
+                flip,
+                sync,
+                elements
+                    .iter()
+                    .filter_map(|element| match element.underlying_storage(renderer) {
+                        Some(UnderlyingStorage::Wayland(buffer)) if explicit.contains(buffer) => {
+                            Some(buffer.clone())
+                        }
+                        _ => None,
+                    }),
+            );
+        }
         match self.compositor.queue_frame(flip) {
             Ok(()) => {
                 self.next_flip = self.next_flip.wrapping_add(1);
@@ -858,6 +908,9 @@ impl ScanoutPresenter {
             }
             Err(error) => {
                 tracing::warn!(%error, "drm: queueing the frame for scanout failed");
+                // This frame will never flip, and its number is reused by the
+                // retry: release what it held once its render is done.
+                self.release_hold.release_frame(flip);
                 self.arm_retry();
                 ScanoutFrame {
                     drew: true,
@@ -885,11 +938,22 @@ impl ScanoutPresenter {
     /// refused commit: bounded timer-driven retry, and no number, so the lock
     /// falls back to its deadline rather than confirming against a frame that
     /// never scanned out.
+    ///
+    /// The completed flip also releases the explicit-sync buffers held for
+    /// it and for every earlier frame (see the `release_hold` field). On an
+    /// error the completed frame's number is lost with it, so everything held
+    /// is released after waiting out its render instead.
     pub(super) fn frame_submitted(&mut self) -> (bool, Option<u64>) {
         match self.compositor.frame_submitted() {
-            Ok(flip) => (false, flip),
+            Ok(flip) => {
+                if let Some(flip) = flip {
+                    self.release_hold.flip_completed(flip);
+                }
+                (false, flip)
+            }
             Err(error) => {
                 tracing::warn!(%error, "drm: a queued frame could not be submitted after the vblank");
+                self.release_hold.release_all();
                 self.arm_retry();
                 (std::mem::take(&mut self.retry_armed), None)
             }
@@ -974,7 +1038,19 @@ impl ScanoutPresenter {
             // and `reactivate` unconditionally asks for a fresh render.
             tracing::debug!(%error, "drm: a pre-pause frame could not be submitted; discarding it");
         }
+        // Already released by `pause`, unless the pause never reached us (a
+        // reactivation without one); either way nothing held here can flip.
+        self.release_hold.release_all();
         self.invalidate_scanout();
+    }
+
+    /// The session has been paused (VT-switched away): the frames in flight
+    /// may never report their vblank, so the explicit-sync buffers they hold
+    /// are released now, after waiting out their renders, rather than kept
+    /// until the switch back -- a client rendering while switched away must
+    /// not run out of buffers over frames it will never see.
+    pub(super) fn pause(&mut self) {
+        self.release_hold.release_all();
     }
 
     /// The scanout bookkeeping shared by reactivation and the hotplug paths --
@@ -1044,6 +1120,9 @@ impl ScanoutPresenter {
             &self.lost,
         ) {
             Ok(compositor) => {
+                // The old compositor's in-flight frames drop with it and will
+                // never report a vblank.
+                self.release_hold.release_all();
                 self.compositor = compositor;
                 // A new CRTC may come with a different primary plane, and so
                 // a different format list: the scanout tranche rebuilds.

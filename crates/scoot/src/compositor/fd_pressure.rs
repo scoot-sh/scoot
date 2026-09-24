@@ -1,7 +1,9 @@
 //! Compositor-wide file-descriptor pressure: the global ceiling.
 //!
 //! Every other bound in this compositor is per connection (512 live
-//! `wl_buffer`s, 128 live pools, 8 binds, 16 capture frames, 64 IPC slots),
+//! `wl_buffer`s, 128 live pools, 8 binds, 16 capture frames, 64 IPC slots,
+//! and where explicit sync is offered 128 live syncobj timelines and 64
+//! outstanding acquire waits -- see `drm_syncobj.rs`),
 //! while the fd table they all draw from is process-global (`RLIMIT_NOFILE`
 //! 1024 on the dev VM). Two connections inside every per-connection bound
 //! hold ~2 x 641 fds against it with nothing tripped -- the residual
@@ -47,6 +49,14 @@
 //!   = **~641 fds**. One such connection plus a normal session (~750) never
 //!   trips anything here, correctly: a single connection cannot exhaust the
 //!   table on its own.
+//! - Where explicit sync is offered (the `--tty` GPU scanout tier), each
+//!   live syncobj timeline holds the client's fd and each outstanding
+//!   acquire wait an eventfd, so one connection at every cap there is
+//!   641 + 128 + 64 = **~833 fds** -- still short of a 1024-fd table on its
+//!   own, but one such connection plus a busy session does reach the
+//!   reserve. The kill then lands on it, the contributor: both of those
+//!   counts have their own pressure graces (32 timelines, 16 waits),
+//!   enforced the same way as the buffer and pool graces.
 //!
 //! [`RESERVE_FDS`] is 128: shed/refuse once fewer than 128 fds stand free
 //! (used past 896 of 1024). That is ~6x above the reasoned login storm and

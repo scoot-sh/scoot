@@ -1162,6 +1162,7 @@ fn draw_frame_scanout(
             clear_color,
             direct.allowed(),
             (output.current_scale().fractional_scale(), size),
+            state.drm_syncobj.explicit(),
             |buffer, cursor| {
                 captures.note_frame(buffer, cursor);
             },
