@@ -8,7 +8,7 @@ blocked: null
 
 # `--nested` GPU presentation by dma-buf — RESOLVED
 
-RESOLVED 2026-09-24 (PR #PRNUM, branch `nested-dmabuf-present`). In a
+RESOLVED 2026-09-24 (PR #235, branch `nested-dmabuf-present`). In a
 `gpu-scanout` build, a `--nested --renderer gles` session whose host
 composites on the renderer's own DRM device copies each frame on the GPU
 into a host dma-buf instead of reading it back into `wl_shm`. Read-back

@@ -105,7 +105,7 @@ each item's own file records why it landed when it did.
 ## Recently shipped (since 2026-09-15)
 
 - **[`--nested --renderer gles` hands frames to the host as dma-bufs](docs/backlog/resolved/nested-dmabuf-present-done.md)**
-  (2026-09-24, PR #PRNUM) — in a `gpu-scanout` build, when the host's v4
+  (2026-09-24, PR #235) — in a `gpu-scanout` build, when the host's v4
   dma-buf feedback names the renderer's own DRM device and a format both
   take, each frame is composited as before and then `glBlitFramebuffer`'d
   into a host buffer (GBM on that device: render node, then the primary
