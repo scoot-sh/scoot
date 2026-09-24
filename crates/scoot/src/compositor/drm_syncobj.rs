@@ -24,8 +24,8 @@
 //!   ignored is worse off than one that never saw it. The import device --
 //!   the one timelines are imported into and waited on -- is the session's
 //!   own DRM fd (`DrmDevice::device_fd`) if it passes the probe, else the
-//!   render node `/dev/dri/renderD128` (a split render/display machine; see
-//!   `enable`). Syncobj ioctls are `DRM_RENDER_ALLOW` and need no master, so
+//!   first render node (`/dev/dri/renderD*`, in name order) that does (a
+//!   split render/display machine; see `enable`). Syncobj ioctls are `DRM_RENDER_ALLOW` and need no master, so
 //!   they keep working while the session is VT-switched away.
 //! - **Waiting on acquire points** before a commit applies
 //!   ([`acquire`]): the blocker pattern anvil shows, plus what anvil leaves
@@ -81,6 +81,7 @@ pub(crate) mod release_hold;
 mod tests;
 
 use std::any::{Any, TypeId};
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 
 use smithay::backend::drm::DrmDeviceFd;
@@ -176,17 +177,19 @@ impl DrmSyncobj {
     /// render/display machine -- Apple Silicon's `apple,dcp` display
     /// controller beside the AGX GPU, most ARM SoCs -- the display driver
     /// may have no syncobj support while the render node clients render on
-    /// does, and without a second candidate those machines would never be
-    /// offered explicit sync.
+    /// does, and without further candidates those machines would never be
+    /// offered explicit sync. `tty::init` passes every `/dev/dri/renderD*`
+    /// after the display device, in name order.
     #[cfg_attr(not(feature = "gpu-scanout"), allow(dead_code))]
     pub(crate) fn enable<I>(&mut self, display: &DisplayHandle, candidates: I) -> bool
     where
-        I: IntoIterator<Item = (&'static str, Option<DrmDeviceFd>)>,
+        I: IntoIterator<Item = (Cow<'static, str>, Option<DrmDeviceFd>)>,
     {
         if self.state.is_some() {
             return true;
         }
         for (name, device) in candidates {
+            let name: &str = &name;
             let Some(device) = device else {
                 tracing::debug!(
                     device = name,

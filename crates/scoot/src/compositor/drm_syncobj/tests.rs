@@ -159,7 +159,7 @@ fn start(test: &str) -> Option<(Serialised, Fixture)> {
     if !fixture
         .state
         .drm_syncobj
-        .enable(&display, [("the render node", Some(device))])
+        .enable(&display, [("the render node".into(), Some(device))])
     {
         skipped(test, "the render node fails the syncobj-eventfd probe");
         return None;
@@ -294,7 +294,7 @@ fn enabling_twice_keeps_one_global() {
         fixture
             .state
             .drm_syncobj
-            .enable(&display, [("the render node", Some(device))])
+            .enable(&display, [("the render node".into(), Some(device))])
     );
     let Ack::Globals(globals) = fixture.run(Step::Globals) else {
         panic!("expected globals");
@@ -334,12 +334,12 @@ fn candidates_that_fail_or_cannot_open_fall_through_to_one_that_passes() {
         &display,
         [
             (
-                "not a drm device",
+                "not a drm device".into(),
                 Some(DrmDeviceFd::new(DeviceFd::from(not_drm))),
             ),
-            ("unopenable", None),
+            ("unopenable".into(), None),
             (
-                "the render node",
+                "the render node".into(),
                 Some(DrmDeviceFd::new(DeviceFd::from(device))),
             ),
         ],
@@ -368,10 +368,10 @@ fn no_passing_candidate_offers_nothing() {
         &display,
         [
             (
-                "not a drm device",
+                "not a drm device".into(),
                 Some(DrmDeviceFd::new(DeviceFd::from(not_drm)))
             ),
-            ("unopenable", None),
+            ("unopenable".into(), None),
         ],
     ));
     assert!(!fixture.state.drm_syncobj.active());

@@ -544,16 +544,21 @@ pub fn init(
     // before the event loop starts, so no client can bind a global that is
     // not honoured, and no surface is created before the acquire hook it
     // needs (see `drm_syncobj.rs`). The session's own DRM fd first; the
-    // render node only if that fails (a split render/display machine), and
-    // only then is it opened.
+    // render nodes only if that fails (a split render/display machine), each
+    // opened only when the one before it failed.
     #[cfg(feature = "gpu-scanout")]
     if let Some(tty) = state.tty.as_ref()
         && tty.scanout_tier()
     {
         let display = tty.drm.device_fd().clone();
-        let candidates = std::iter::once(("the display device", Some(display))).chain(
-            std::iter::once_with(|| ("/dev/dri/renderD128", open_render_node())),
-        );
+        let candidates = std::iter::once((
+            std::borrow::Cow::Borrowed("the display device"),
+            Some(display),
+        ))
+        .chain(render_nodes().into_iter().map(|path| {
+            let device = open_render_node(&path);
+            (std::borrow::Cow::Owned(path.display().to_string()), device)
+        }));
         state.drm_syncobj.enable(&state.display_handle, candidates);
     }
 
@@ -595,14 +600,31 @@ pub fn init(
     Ok((width, height, name))
 }
 
-/// Opens the render node explicit sync falls back to importing timelines on
-/// when the display device cannot (see `DrmSyncobj::enable`). A plain open,
+/// Every render node on the machine (`/dev/dri/renderD*`), in name order --
+/// the candidates explicit sync falls back to when the display device cannot
+/// import timelines (see `DrmSyncobj::enable`). Listed only on that path, at
+/// startup; an unreadable `/dev/dri` is simply no candidates.
+#[cfg(feature = "gpu-scanout")]
+fn render_nodes() -> Vec<std::path::PathBuf> {
+    let Ok(entries) = std::fs::read_dir("/dev/dri") else {
+        return Vec::new();
+    };
+    let mut nodes: Vec<std::path::PathBuf> = entries
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_name().to_string_lossy().starts_with("renderD"))
+        .map(|entry| entry.path())
+        .collect();
+    nodes.sort();
+    nodes
+}
+
+/// Opens a render node as an explicit-sync import candidate. A plain open,
 /// not through the session: render nodes carry no modesetting rights, need
 /// no seat, and are not paused on a VT switch.
 #[cfg(feature = "gpu-scanout")]
-fn open_render_node() -> Option<DrmDeviceFd> {
+fn open_render_node(path: &Path) -> Option<DrmDeviceFd> {
     let fd = rustix::fs::open(
-        "/dev/dri/renderD128",
+        path,
         rustix::fs::OFlags::RDWR | rustix::fs::OFlags::CLOEXEC | rustix::fs::OFlags::NOCTTY,
         rustix::fs::Mode::empty(),
     )
