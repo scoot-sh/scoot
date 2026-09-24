@@ -48,6 +48,13 @@ window layout OmniWM-style through the Accessibility API.
   verify-against-source claims against the fork rev (its checkout is
   `~/.cargo/git/checkouts/smithay-*/43f50eb`), and repin to upstream once
   a Smithay rev carries the fix (`docs/backlog/core/smithay-fork-repin.md`).
+- **Dependency fixes go in scoot-sh forks, never upstream from here.**
+  (User, 2026-09-24: "Do not open upstream PR's. I would rather fork for now
+  and maintain a list of forks … I as the human can later decide whether or
+  not to open up a pull request upstream.") No agent opens upstream PRs,
+  issues or comments on any dependency. A fork is one upstream commit plus
+  the fewest carried commits, pinned by rev, and listed in
+  [`docs/forks.md`](docs/forks.md) in the same PR that adds or changes it.
 - Prefer CPU-friendly rendering and damage-limited redraws throughout.
 - **"Compositor," not "window manager," in anything user-facing** (`README.md`,
   crate descriptions, `--help` text). Wayland has no separate window-manager

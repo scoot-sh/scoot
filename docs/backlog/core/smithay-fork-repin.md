@@ -3,7 +3,7 @@ title: "Repin Smithay from the scoot-sh fork back to upstream once the syncobj D
 status: "open"
 area: "core"
 priority: "low"
-blocked: "needs an upstream Smithay rev carrying a Drop for the imported syncobj timeline (the user is filing it)"
+blocked: "needs an upstream Smithay rev carrying a Drop for the imported syncobj timeline; nothing is filed upstream from this project (the maintainer decides later, see docs/forks.md)"
 ---
 
 # Repin Smithay from the scoot-sh fork back to upstream
