@@ -54,7 +54,7 @@ precondition.
 ## Fix routes (user decision needed)
 
 1. **Upstream:** a bound (or libwayland-style disconnect) on the received-fd
-   queue in wayland-rs. As with Smithay, the user files upstream; don't
+   queue in wayland-rs. Nothing is filed upstream from this project (`docs/forks.md`); don't
    draft upstream text (see `CLAUDE.md` and the Smithay AI-policy note;
    check wayland-rs's own contribution policy first).
 2. **A scoot-carried fork** of wayland-backend with that bound, pinned the

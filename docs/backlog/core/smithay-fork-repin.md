@@ -22,7 +22,7 @@ The fork is debt:
 
 ## What to do
 
-Once an upstream Smithay rev carries the fix (the user is filing it):
+Once an upstream Smithay rev carries the fix (nothing is filed upstream from this project; see `docs/forks.md`):
 
 1. Pin `crates/scoot/Cargo.toml` back to `github.com/Smithay/smithay` at a
    rev that has it. Take whatever other upstream changes that rev brings
