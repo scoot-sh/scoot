@@ -31,6 +31,7 @@ mod keybindings;
 mod layer_shell;
 mod nested;
 mod nested_dispatch;
+mod no_memory;
 mod output_clip;
 mod output_management;
 mod output_scale;

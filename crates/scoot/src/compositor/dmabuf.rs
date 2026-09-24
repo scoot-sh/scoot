@@ -321,13 +321,22 @@
 //!   session has a renderer at startup and loses one.
 //! - **What bounds the mappings a client can make this compositor hold.**
 //!   `MAX_BUFFERS_PER_CLIENT` (512, `wl_buffers.rs`), now that the async
-//!   `create` path claims too -- and each mapping's *size* is bounded by the
+//!   `create` path claims too, for live buffer objects -- a buffer still
+//!   committed to a surface outlives its object uncounted, one per surface
+//!   (`docs/backlog/core/buffer-fds-past-their-object.md`) -- and each
+//!   mapping's *size* is bounded by the
 //!   dma-buf the client actually got the kernel to allocate, since Smithay
 //!   seeks the plane fd and refuses an offset/stride/height that runs past its
 //!   real end. So a client cannot claim address space it did not first pay for
 //!   in real pages, which is why there is deliberately no second, byte-sized
 //!   cap here the way `wl_shm` pools have one: an shm pool's size is a number
 //!   the client sends, a dma-buf's is a fact about the fd.
+//! - **What bounds the plane fds a client can make this compositor hold
+//!   before any buffer exists.** Each `zwp_linux_buffer_params_v1.add` hands
+//!   over an fd that the params object keeps until it is consumed or
+//!   destroyed. [`pending_planes`] caps those at 32 per client (8 under fd
+//!   pressure), disconnecting with `wl_display.error(no_memory)` past it.
+//!   Before that bound, 220 params objects x 4 adds held 927 fds uncounted.
 //! - **Bind/unbind storms: bounded by Smithay and wayland-backend, not by
 //!   `bind_budget.rs`.** Feedback is built once, at startup; Smithay re-sends
 //!   the stored copy to each `get_default_feedback` without calling back into
@@ -1185,6 +1194,7 @@ fn refuse_import(buffers: &mut WlBuffers, notifier: ImportNotifier) {
     notifier.failed();
 }
 
+pub(super) mod pending_planes;
 #[cfg(feature = "gpu-scanout")]
 pub(super) mod scanout;
 #[cfg(test)]

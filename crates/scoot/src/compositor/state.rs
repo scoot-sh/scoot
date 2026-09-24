@@ -608,10 +608,18 @@ pub struct State {
     /// created them. Counted at each buffer creation before delegation,
     /// released in `dispatch.rs`'s buffer destruction hook (which also
     /// drains disconnects and kills) -- see `wl_buffers.rs`, which owns the
-    /// policy and the number. This is the bound that caps retained
-    /// fds/mappings; the pool count above cannot (a buffer outlives its
-    /// pool object).
+    /// policy and the number. This bounds the fds/mappings live buffer
+    /// objects retain; the pool count above cannot (a buffer outlives its
+    /// pool object). A buffer still committed to a surface outlives its own
+    /// object too, which neither count sees
+    /// (`docs/backlog/core/buffer-fds-past-their-object.md`).
     pub wl_buffers: WlBuffers,
+    /// How many dma-buf plane fds each Wayland client has this compositor
+    /// hold in `zwp_linux_buffer_params_v1` objects it has not created a
+    /// buffer from. Counted at `add` before delegation, released when the
+    /// params object is consumed or destroyed -- see
+    /// `dmabuf/pending_planes.rs`, which owns the policy and the number.
+    pub(super) pending_planes: super::dmabuf::pending_planes::PendingPlanes,
     /// Explicit sync (`wp_linux_drm_syncobj_manager_v1`): the protocol state
     /// (and so the global) where it is offered -- the `--tty` GPU scanout
     /// tier on a device that passes the syncobj-eventfd probe, set by
@@ -948,6 +956,7 @@ impl State {
             bind_budget: BindBudget::default(),
             shm_pools: ShmPools::default(),
             wl_buffers: WlBuffers::default(),
+            pending_planes: Default::default(),
             drm_syncobj: Default::default(),
             imports_dmabufs: false,
             dmabuf_drain_queued: false,

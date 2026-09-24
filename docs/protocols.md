@@ -888,6 +888,26 @@ table is the active renderer's, so `gles` advertises what the GPU driver
 can import and pixman advertises what pixman can. See
 [tty.md](tty.md#which-renderer-draws-the-frames).
 
+**Limits.** A dma-buf `wl_buffer` counts against the same 512 live buffers
+per client as every other buffer, and both `create` and `create_immed`
+claim. Planes that have been `add`ed to a `zwp_linux_buffer_params_v1`
+object which has not yet been turned into a buffer are counted separately.
+Each one is an fd scoot holds for the client, and without a bound a
+client could add planes and never create anything; review measured 220
+params objects x 4 planes holding 927 fds. A client may have **32** such
+planes at once, across all its params objects. While the compositor's fd
+table is nearly full the grace is **8**, with the same exact boundary as
+the buffer and pool graces: an `add` is refused only once the client
+already holds more than 8, so it can reach 9. A plane stops counting when its params object is
+consumed by `create`/`create_immed` (whatever the import's outcome) or
+destroyed, and when the client disconnects. An `add` past the bound
+disconnects the client with `wl_display.error` `no_memory`; the params
+interface has no error for "too many". A client that adds one buffer's
+planes (at most four) and creates it straight away, which is how the
+protocol is meant to be used, stays far below; that is reasoned from the
+protocol, not checked against each GPU client, since none makes a dma-buf
+on the dev VM.
+
 #### Per-surface feedback: the scanout tranche
 
 The default feedback — the one every client gets, and what
@@ -1013,18 +1033,33 @@ What scoot does with the points:
   release point not after the acquire point on the same timeline, points on
   a `wl_shm` buffer, a timeline fd that is not a syncobj) get the protocol's
   own errors, from Smithay.
-- **Bounds.** A client may hold 128 live timeline objects and have 64 commits
-  waiting on acquire points at once (each is an eventfd); 32 and 16 while
-  the compositor's fd table is nearly full, the same shape as the buffer and
-  pool bounds. The timeline bound counts timeline *objects*, not the
-  syncobj fds scoot holds for them. A sync point set on a surface keeps its
-  timeline's fd open after the timeline object is destroyed, so it is not
-  an fd bound. That gap is
-  [`backlog/core/client-held-fd-bound.md`](backlog/core/client-held-fd-bound.md). Past the timeline bound the
-  import is refused with `invalid_timeline`. Past the wait bound the client
-  is disconnected with `wl_display.error` `no_memory`. A real client stays
-  far below both: Mesa's Vulkan WSI imports two timelines per swapchain
-  image, and a swapchain cannot run more than its image count ahead.
+- **Bounds.** A client may have scoot hold **128** of its imported
+  timelines and have **64** commits waiting on acquire points at once (each
+  is an eventfd). While the compositor's fd table is nearly full the graces
+  are **32** and **16**, with the buffer and pool graces' exact boundary:
+  refused only once the client already holds *more* than the grace, so it
+  can reach 33 timelines and 17 waits. A timeline
+  counts for as long as scoot holds its syncobj fd, which is not the same as
+  for as long as the timeline object lives: a sync point set on a surface
+  keeps its timeline's fd open after the object is destroyed (the protocol
+  says destroying a timeline does not unset its points), until the point
+  itself goes -- replaced, the surface destroyed, or its buffer released.
+  Those count too. Before this, the bound counted objects, and review
+  measured 440 surfaces with points on destroyed timelines holding 927 fds
+  with nothing counted. An import that finds the client at 128 first checks
+  which of them are really still open, so timelines a client destroyed and
+  that nothing references cost it nothing however many it churns. The
+  import is refused, with `invalid_timeline`, only if more than 112 are
+  still open (fewer than 16 could be reclaimed); below that, the check buys
+  the next 16 imports without another one. Under fd pressure an import past
+  32 is refused if the same check finds more than 32 still open (so 33 is
+  reachable). Any check
+  that does not refuse (including one that finds the table calm) buys the
+  next 16 imports without another, so a client can go 16 past what it held
+  when last checked -- 48, for one that was at 32. Past the wait bound the client is disconnected
+  with `wl_display.error` `no_memory`. A real client stays far below both:
+  Mesa's Vulkan WSI imports two timelines per swapchain image, and a
+  swapchain cannot run more than its image count ahead.
 
 **A leak fixed by forking Smithay.** Upstream Smithay, at the revision scoot
 pinned and on its `master`, never destroys the kernel handle an

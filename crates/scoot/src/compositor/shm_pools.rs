@@ -17,7 +17,10 @@
 //! per-client live-`wl_buffer` count (`wl_buffers.rs`), which catches
 //! exactly the bypass shape: every iteration must keep a buffer alive.
 //! (Earlier revisions of this doc said 128 live pools meant 128 fds; see
-//! `docs/backlog/resolved/shm-pool-cap-misses-retained-fds-done.md`.)
+//! `docs/backlog/resolved/shm-pool-cap-misses-retained-fds-done.md`.) One
+//! shape escapes both: a buffer committed to a surface keeps its pool's fd
+//! and mapping after the buffer object is destroyed too, one per surface,
+//! uncounted (`docs/backlog/core/buffer-fds-past-their-object.md`).
 //!
 //! ## The number
 //!

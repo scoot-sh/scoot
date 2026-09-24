@@ -40,11 +40,12 @@
 //!   ([`ExplicitBuffers`] here, the hold in `tty/scanout.rs`): Smithay
 //!   signals a release point from the CPU the moment a surface replaces its
 //!   buffer, while a queued frame may still be sampling it on the GPU.
-//! - **Bounds** on what a client can make the compositor hold: live
-//!   timeline objects ([`MAX_TIMELINES_PER_CLIENT`]) and outstanding acquire
-//!   waits ([`MAX_ACQUIRE_WAITS_PER_CLIENT`], each an eventfd plus a queued
-//!   transaction Smithay scans on every commit of that client). The first
-//!   is an object count, **not** an fd bound -- see its doc.
+//! - **Bounds** on what a client can make the compositor hold: imported
+//!   timeline fds, live objects and destroyed ones that sync points still
+//!   reference ([`MAX_TIMELINES_PER_CLIENT`], kept by [`retained`]), and
+//!   outstanding acquire waits ([`MAX_ACQUIRE_WAITS_PER_CLIENT`], each an
+//!   eventfd plus a queued transaction Smithay scans on every commit of that
+//!   client).
 //!
 //! ## What is still Smithay's, and one thing upstream gets wrong
 //!
@@ -74,46 +75,49 @@
 pub(crate) mod acquire;
 #[cfg(any(feature = "gpu-scanout", test))]
 pub(crate) mod release_hold;
+pub(crate) mod retained;
 
 #[cfg(test)]
 mod tests;
 
 use std::any::{Any, TypeId};
 use std::borrow::Cow;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
+use std::os::fd::{AsRawFd, RawFd};
 
 use smithay::backend::drm::DrmDeviceFd;
 use smithay::reexports::wayland_protocols::wp::linux_drm_syncobj::v1::server::wp_linux_drm_syncobj_manager_v1;
-use smithay::reexports::wayland_server::backend::{ClientId, ObjectId};
+use smithay::reexports::wayland_server::backend::ObjectId;
 use smithay::reexports::wayland_server::protocol::wl_buffer::WlBuffer;
 use smithay::reexports::wayland_server::{Client, DisplayHandle, Resource};
 use smithay::wayland::drm_syncobj::{DrmSyncobjHandler, DrmSyncobjState, supports_syncobj_eventfd};
 
 use super::State;
 
-/// How many live `wp_linux_drm_syncobj_timeline_v1` objects one client may
-/// hold at once.
+/// How many imported syncobj timelines one client may have this process
+/// hold at once, live objects and destroyed-but-still-referenced ones alike.
 ///
 /// Sized against real use: Mesa's Vulkan WSI imports two timelines per
 /// swapchain image (acquire and release, `wsi_common_wayland.c`), so a
 /// four-image swapchain is 8, and an old swapchain still alive while its
 /// replacement is built doubles that -- 16 per window. 128 is eight such
-/// windows at once. Past it, the import is refused with the protocol's own
-/// `invalid_timeline` on the manager, killing only that client.
+/// windows at once.
 ///
-/// **This bounds live timeline *objects*, not the fds they hold.** Each
-/// imported timeline keeps the client's syncobj fd open in this process
-/// (Smithay's `DrmTimelineInner` owns it), but so does every `DrmSyncPoint`
-/// on it, which holds the timeline's `Arc` -- and a point set on a surface
-/// outlives the timeline object's destruction (the protocol says destroying
-/// a timeline does not unset its points). The count is released on destroy
-/// regardless, so a client that imports, sets a point on a fresh surface
-/// and destroys the timeline keeps one fd here per surface with none
-/// counted: measured in review, 440 such surfaces held 927 fds with zero
-/// live timelines, new clients were shed and the offender was not killed.
-/// The same hole exists without syncobj, through `zwp_linux_buffer_params_v1`
-/// adds that are never created. Both are
-/// `docs/backlog/core/client-held-fd-bound.md`.
+/// **What is counted is the fd, not the object.** Each import keeps the
+/// client's syncobj fd open here until the last reference to the timeline
+/// goes. Every sync point on it is such a reference, and a point outlives the
+/// timeline object's destruction (the protocol says so). So the count is
+/// released when the fd really closes, which [`retained`] observes, and not
+/// when the object is destroyed. An earlier version counted objects and
+/// released on destroy. Review measured 440 surfaces with pending points on
+/// destroyed timelines holding 927 fds with nothing counted
+/// (`docs/backlog/resolved/client-held-fd-bound-done.md`).
+///
+/// An import that finds the client at this bound sweeps its records first,
+/// and is refused only if fewer than [`retained::SWEEP_MARGIN`] of them turn
+/// out to be closed: a client really holding more than 112. The refusal is
+/// the protocol's own `invalid_timeline` on the manager, killing only that
+/// client. So a client never has more than 128 timeline fds held here.
 pub(crate) const MAX_TIMELINES_PER_CLIENT: u32 = 128;
 
 /// How many commits one client may have waiting on unsignalled acquire
@@ -135,7 +139,12 @@ pub(crate) const MAX_ACQUIRE_WAITS_PER_CLIENT: u32 = 64;
 /// `fd_pressure::PRESSURE_GRACE_BUFFERS`: only ever enforced while the fd
 /// table is pressured, so a client under it is never refused for another
 /// client's greed. 32 is two windows' worth (see
-/// [`MAX_TIMELINES_PER_CLIENT`]).
+/// [`MAX_TIMELINES_PER_CLIENT`]). Held means retained, as for the cap, and a
+/// refusal is decided on a fresh sweep. The checks are amortized: after one
+/// (a sweep that admits, or a table observation that comes back calm) up to
+/// [`retained::SWEEP_MARGIN`] imports pass before the next, so under
+/// pressure a client can go 16 past what it held when last checked -- 32 +
+/// 16 for one that was at the grace -- before it is refused.
 pub(crate) const PRESSURE_GRACE_TIMELINES: u32 = 32;
 
 /// Outstanding acquire waits a client may hold before fd pressure starts
@@ -151,12 +160,11 @@ pub struct DrmSyncobj {
     /// device that passed the probe -- which is also what
     /// [`DrmSyncobjHandler::drm_syncobj_state`] answers.
     state: Option<DrmSyncobjState>,
-    /// Live timeline objects per client. An entry exists only while the
-    /// client holds at least one; claimed in `dispatch.rs` before the import
-    /// is delegated, released by its destruction hook -- the same pairing
-    /// `wl_buffers.rs` documents, including the one phantom unit a failed
-    /// import leaves on an already-dead client.
-    timelines: HashMap<ClientId, u32>,
+    /// The imported timeline fds this process still holds, per client: what
+    /// [`MAX_TIMELINES_PER_CLIENT`] bounds. Recorded in `dispatch.rs` before
+    /// an import is delegated, and forgotten when the fd is seen closed (see
+    /// [`retained`]), not when the timeline object is destroyed.
+    timelines: retained::RetainedTimelines,
     /// The acquire side's bookkeeping: outstanding waits per surface and per
     /// client. See [`acquire`].
     pub(super) waits: acquire::Waits,
@@ -240,39 +248,18 @@ impl DrmSyncobj {
         &self.explicit
     }
 
-    /// Counts one more live timeline for `client`, answering whether the
-    /// import must be refused (past [`MAX_TIMELINES_PER_CLIENT`]). Called
-    /// before the import is delegated, so a refused one is never counted.
-    fn claim_timeline(&mut self, client: &ClientId) -> bool {
-        let live = self.timelines.entry(client.clone()).or_insert(0);
-        if *live >= MAX_TIMELINES_PER_CLIENT {
-            return true;
-        }
-        *live = live.saturating_add(1);
-        false
+    /// `fd` has just been received from a client in some request, so any
+    /// timeline recorded on that number was closed. See
+    /// [`retained::RetainedTimelines::fd_arrived`].
+    pub(crate) fn fd_arrived(&mut self, fd: RawFd) {
+        self.timelines.fd_arrived(fd);
     }
 
-    /// Forgets one live timeline for the client a destroyed timeline object
-    /// belonged to. Also what drains a disconnect, whose cleanup destroys
-    /// every object.
-    fn forget_timeline(&mut self, client: &ClientId) {
-        if let Some(live) = self.timelines.get_mut(client) {
-            *live = live.saturating_sub(1);
-            if *live == 0 {
-                self.timelines.remove(client);
-            }
-        }
-    }
-
-    /// How many live timelines `client` holds.
-    fn timelines_for(&self, client: &ClientId) -> u32 {
-        self.timelines.get(client).copied().unwrap_or(0)
-    }
-
-    /// How many timelines every client holds between them. Test-only.
+    /// Sweeps every client's timeline records and answers how many
+    /// timeline fds this process still holds between them. Test-only.
     #[cfg(test)]
-    pub(crate) fn timelines_in_flight(&self) -> u32 {
-        self.timelines.values().sum()
+    pub(crate) fn timelines_in_flight(&mut self) -> u32 {
+        self.timelines.sweep_all()
     }
 }
 
@@ -343,10 +330,21 @@ impl ExplicitBuffers {
 }
 
 /// Refuses a `wp_linux_drm_syncobj_manager_v1.import_timeline` past the
-/// per-client live-timeline cap, or past its pressure grace while the fd
+/// per-client retained-timeline cap, or past its pressure grace while the fd
 /// table is pressured, with the protocol's own `invalid_timeline` on the
-/// manager. Answers `true` when it refused (the caller then does not
-/// delegate).
+/// manager. Otherwise it records the import's fd against the client and
+/// answers `false`, so the import is delegated.
+///
+/// The decision is [`retained::RetainedTimelines::admit`]'s. A refusal is
+/// only ever decided on a fresh sweep, because the records include dead ones
+/// until something notices. See [`MAX_TIMELINES_PER_CLIENT`] and
+/// [`PRESSURE_GRACE_TIMELINES`] for the two rules.
+///
+/// Recorded before delegation, from the request's own fd number, which
+/// Smithay moves unchanged into the timeline (`DrmTimeline::new`). An import
+/// Smithay then refuses (the device cannot import the fd) drops the fd and
+/// kills the client. That leaves a record on a closed number for a dead
+/// client, bounded like every other one (see [`retained`]).
 ///
 /// Posting the error kills the client synchronously, which is what makes
 /// returning without initialising the request's `New` safe -- the argument
@@ -367,55 +365,62 @@ where
     if TypeId::of::<I::Request>() != TypeId::of::<wp_linux_drm_syncobj_manager_v1::Request>() {
         return false;
     }
-    let Some(wp_linux_drm_syncobj_manager_v1::Request::ImportTimeline { .. }) =
+    let Some(wp_linux_drm_syncobj_manager_v1::Request::ImportTimeline { fd, .. }) =
         (request as &dyn Any).downcast_ref::<wp_linux_drm_syncobj_manager_v1::Request>()
     else {
         return false;
     };
+    let fd = fd.as_raw_fd();
     let id = client.id();
-    if super::dispatch::pressure_refusal(
-        state.drm_syncobj.timelines_for(&id),
+    let timelines = &mut state.drm_syncobj.timelines;
+    // Whatever was recorded on this number was closed, or the kernel could
+    // not have handed it out again. Forgotten before the bound is read, so
+    // it is not counted against anyone.
+    timelines.fd_arrived(fd);
+    let verdict = timelines.admit(
+        &id,
+        MAX_TIMELINES_PER_CLIENT,
         PRESSURE_GRACE_TIMELINES,
-    ) {
-        resource.post_error(
-            wp_linux_drm_syncobj_manager_v1::Error::InvalidTimeline,
-            format!(
-                "timeline refused: compositor-wide file-descriptor pressure, and this client \
-                 holds more than the {PRESSURE_GRACE_TIMELINES}-timeline pressure grace"
-            ),
-        );
-        return true;
-    }
-    if !state.drm_syncobj.claim_timeline(&id) {
-        return false;
-    }
-    tracing::debug!(
-        max = MAX_TIMELINES_PER_CLIENT,
-        "refusing a syncobj timeline past the per-client live count (protocol error)"
+        retained::timeline_fd_open,
+        || super::fd_pressure::table().is_some_and(|table| table.pressured()),
     );
+    let message = match verdict {
+        Ok(()) => {
+            timelines.record(&id, fd);
+            return false;
+        }
+        Err(retained::Refusal::Cap { held }) => format!(
+            "timeline refused: this compositor still holds {held} of this client's imported \
+             timelines (live ones, and destroyed ones its sync points still reference), and \
+             the maximum is {MAX_TIMELINES_PER_CLIENT}"
+        ),
+        Err(retained::Refusal::Pressure { held }) => format!(
+            "timeline refused: compositor-wide file-descriptor pressure, and this compositor \
+             still holds {held} of this client's imported timelines, more than the \
+             {PRESSURE_GRACE_TIMELINES}-timeline pressure grace"
+        ),
+    };
+    tracing::debug!(%message, "refusing a syncobj timeline import (protocol error)");
     resource.post_error(
         wp_linux_drm_syncobj_manager_v1::Error::InvalidTimeline,
-        format!(
-            "timeline refused: this client already holds the maximum of \
-             {MAX_TIMELINES_PER_CLIENT} live timelines"
-        ),
+        message,
     );
     true
 }
 
-/// The destruction half of [`reject_excess_timeline`]'s count, and the
-/// explicit-buffer set's pruning: called from `dispatch.rs`'s `destroyed`
-/// for every object, folding away for all but the two interfaces it reads.
-pub(super) fn forget_destroyed<I>(state: &mut State, client: &ClientId, resource: &I)
+/// The explicit-buffer set's pruning: called from `dispatch.rs`'s
+/// `destroyed` for every object, folding away for all but `wl_buffer`.
+///
+/// Destroying a timeline object deliberately touches nothing here any more.
+/// Its fd stays open while any sync point on it survives, and the ledger
+/// notices when it really closes (see [`retained`]).
+pub(super) fn forget_destroyed<I>(state: &mut State, resource: &I)
 where
     I: Resource,
     I::Request: 'static,
 {
-    use smithay::reexports::wayland_protocols::wp::linux_drm_syncobj::v1::server::wp_linux_drm_syncobj_timeline_v1;
     use smithay::reexports::wayland_server::protocol::wl_buffer;
-    if TypeId::of::<I::Request>() == TypeId::of::<wp_linux_drm_syncobj_timeline_v1::Request>() {
-        state.drm_syncobj.forget_timeline(client);
-    } else if TypeId::of::<I::Request>() == TypeId::of::<wl_buffer::Request>()
+    if TypeId::of::<I::Request>() == TypeId::of::<wl_buffer::Request>()
         && !state.drm_syncobj.explicit.is_empty()
     {
         state.drm_syncobj.explicit.forget(&resource.id());

@@ -65,7 +65,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use smithay::backend::renderer::sync::Fence;
 use smithay::reexports::calloop::RegistrationToken;
-use smithay::reexports::wayland_server::backend::protocol::{Interface, ProtocolError};
 use smithay::reexports::wayland_server::backend::{ClientId, ObjectId};
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::{Client, DisplayHandle, Resource};
@@ -77,24 +76,7 @@ use smithay::wayland::dmabuf::get_dmabuf;
 use smithay::wayland::drm_syncobj::{DrmSyncPoint, DrmSyncPointBlocker, DrmSyncobjCachedState};
 
 use super::{MAX_ACQUIRE_WAITS_PER_CLIENT, PRESSURE_GRACE_ACQUIRE_WAITS};
-use crate::compositor::State;
-
-/// `wl_display.error`'s `no_memory` code ("server is out of memory"), the
-/// refusal the acquire-wait bound disconnects with. wayland-server generates
-/// no server-side `wl_display` bindings (the display object is the backend's
-/// own), so the value is spelled out from `wayland.xml`.
-const WL_DISPLAY_NO_MEMORY: u32 = 2;
-
-/// Enough of `wl_display`'s interface description to name a client's display
-/// object (always protocol id 1) to the backend, which matches interfaces by
-/// name. wayland-backend keeps its own copy private; only the name is read.
-static WL_DISPLAY: Interface = Interface {
-    name: "wl_display",
-    version: 1,
-    requests: &[],
-    events: &[],
-    c_ptr: None,
-};
+use crate::compositor::{State, no_memory};
 
 /// Outstanding acquire waits, per surface and per client.
 #[derive(Debug, Default)]
@@ -304,37 +286,18 @@ pub(crate) fn pre_commit(state: &mut State, dh: &DisplayHandle, surface: &WlSurf
 }
 
 /// Disconnects `client` with `wl_display.error(no_memory)` for going past its
-/// acquire-wait bound. See the module doc for the choice of code.
-///
-/// Posted on the client's display object, the way libwayland reports it:
-/// `Client::kill` alone would disconnect without sending any error event
-/// (wayland-backend's `kill_client` only marks the client dead), leaving the
-/// client -- and whoever reads its log -- with a bare hang-up. Falls back to
-/// exactly that if the display object cannot be named (it always exists
-/// while the client does).
+/// acquire-wait bound. See the module doc for the choice of code, and
+/// [`no_memory::disconnect`] for how it is posted.
 fn refuse_wait(dh: &DisplayHandle, client: &Client, live: u32) {
-    let message = format!(
-        "explicit sync: this client already has {live} commits waiting on unsignalled \
-         acquire points (the bound is {MAX_ACQUIRE_WAITS_PER_CLIENT}, \
-         {PRESSURE_GRACE_ACQUIRE_WAITS} under file-descriptor pressure)"
+    no_memory::disconnect(
+        dh,
+        client,
+        format!(
+            "explicit sync: this client already has {live} commits waiting on unsignalled \
+             acquire points (the bound is {MAX_ACQUIRE_WAITS_PER_CLIENT}, \
+             {PRESSURE_GRACE_ACQUIRE_WAITS} under file-descriptor pressure)"
+        ),
     );
-    let backend = dh.backend_handle();
-    match backend.object_for_protocol_id(client.id(), &WL_DISPLAY, 1) {
-        Ok(display) => backend.post_error(
-            display,
-            WL_DISPLAY_NO_MEMORY,
-            std::ffi::CString::new(message).unwrap_or_default(),
-        ),
-        Err(_) => client.kill(
-            dh,
-            ProtocolError {
-                code: WL_DISPLAY_NO_MEMORY,
-                object_id: 1,
-                object_interface: WL_DISPLAY.name.to_owned(),
-                message,
-            },
-        ),
-    }
 }
 
 /// Whether `release` may follow `acquire`: Smithay posts

@@ -9,8 +9,9 @@
 //! [`reject_unrepresentable_layer_size`],
 //! [`reject_frozen_toplevel_icon_request`],
 //! [`reject_excess_capture_frame`] and [`reject_too_deep_subsurface`], plus
-//! explicit sync's live-timeline cap, which lives with the rest of that
-//! protocol in `drm_syncobj.rs` along with its destruction half), one
+//! two that live with their protocols: explicit sync's retained-timeline
+//! cap in `drm_syncobj.rs`, and the pending dma-buf plane cap in
+//! `dmabuf/pending_planes.rs`, each with its release halves there too), one
 //! pre-delegation
 //! interception ([`prepare_post_destroy_lock_commit`]) and six
 //! post-destruction hooks ([`redraw_after_lock_surface_destroyed`],
@@ -457,7 +458,10 @@ pub(super) mod tests;
 /// at destroy time, which is unknowable at the pinned rev (see
 /// `shm_pools.rs`) -- and a destroyed pool's fd and mapping outlive it
 /// while its buffers do, so those are bounded by the live-`wl_buffer` count
-/// instead (see `wl_buffers.rs`). The live-object concurrency is what
+/// instead (see `wl_buffers.rs`) -- except while a surface still has such a
+/// buffer committed after the buffer object, too, was destroyed, which
+/// nothing counts yet (`docs/backlog/core/buffer-fds-past-their-object.md`).
+/// The live-object concurrency is what
 /// [`reject_excess_shm_pool`] bounds. See this module's doc
 /// for why an oversized request is refused rather than clamped.
 const MAX_SHM_POOL_BYTES: i32 = 512 * 1024 * 1024;
@@ -485,6 +489,7 @@ where
             || reject_oversized_shm_pool_creation(resource, &request)
             || reject_excess_shm_pool(state, client, resource, &request)
             || reject_excess_buffer(state, client, resource, &request)
+            || super::dmabuf::pending_planes::reject_excess_plane(state, client, resource, &request)
             || reject_unrepresentable_layer_size(resource, &request)
             || reject_frozen_toplevel_icon_request(state, resource, &request)
             || reject_excess_capture_frame(state, client, resource, &request)
@@ -494,6 +499,7 @@ where
             return;
         }
         note_assigned_toplevel_icon::<I>(state, &request);
+        super::dmabuf::pending_planes::note_consumed(state, client, resource, &request);
         prepare_post_destroy_lock_commit(state, resource, &request, dhandle);
         data.request(state, client, resource, request, dhandle, data_init);
     }
@@ -505,7 +511,8 @@ where
         forget_destroyed_capture_frame::<I>(state, &client, resource);
         forget_destroyed_shm_pool::<I>(state, &client, resource);
         forget_destroyed_buffer::<I>(state, &client, resource);
-        super::drm_syncobj::forget_destroyed::<I>(state, &client, resource);
+        super::dmabuf::pending_planes::forget_destroyed::<I>(state, &client, resource);
+        super::drm_syncobj::forget_destroyed::<I>(state, resource);
         data.destroyed(state, client, resource);
         // *After* the delegate, not before: Smithay's own
         // `ExtLockSurfaceUserData::destroyed` is what unmaps the surface, and
@@ -680,6 +687,10 @@ where
     else {
         return false;
     };
+    // Whatever becomes of this pool, its fd number is this process's again,
+    // which proves any syncobj timeline recorded on it was closed (see
+    // `drm_syncobj/retained.rs`). One `is_empty` test off the GPU tier.
+    state.drm_syncobj.fd_arrived(fd.as_raw_fd());
     if *size <= 0 || *size > MAX_SHM_POOL_BYTES {
         return false;
     }

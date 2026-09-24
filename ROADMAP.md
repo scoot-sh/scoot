@@ -104,6 +104,30 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[Params planes and retained syncobj timelines are counted, so fd pressure can find those holders](docs/backlog/resolved/client-held-fd-bound-done.md)**
+  (2026-09-24, PR #236) — two paths let one client make scoot hold ~927
+  fds that no per-client cap counted, shedding every newcomer while the
+  offender lived. Planes `add`ed to `zwp_linux_buffer_params_v1` objects not
+  yet created are now counted per client (`dmabuf/pending_planes.rs`: 32,
+  8 under fd pressure, `wl_display.no_memory` past it; released on consume,
+  destroy or disconnect). The syncobj timeline cap now counts the timeline
+  fds scoot really holds rather than live objects: a ledger records each
+  import's fd number and learns it closed when the number comes back or a
+  sweep finds it closed or no longer a syncobj (`drm_syncobj/retained.rs`;
+  refusals only on a fresh sweep, sweeps amortized to one per 16 imports),
+  so points on destroyed timelines count until they go. Not the brief's
+  `Arc`/`Weak`: `DrmTimeline`'s `Arc` is `pub(super)` and scoot stores no
+  points; the Smithay fork is untouched. Dev VM, release: params 899 fds
+  and shed newcomers → offender killed at params 9, 18 fds, newcomers,
+  `scootctl` and an honest dma-buf client served; timelines 927 fds →
+  refused at surface 65, 46 fds, an explicit-sync client unaffected. About
+  40 ns per `add`. Not every fd path is counted yet; filed high:
+  [buffer fds past their object](docs/backlog/core/buffer-fds-past-their-object.md)
+  (found on the way) and, found in review,
+  [wayland-backend's unbounded received-fd queue](docs/backlog/core/wayland-backend-fd-queue.md)
+  (one client took scoot from 18 to 999 fds through it, on every tier,
+  unchanged by this PR).
+
 - **[`--nested --renderer gles` hands frames to the host as dma-bufs](docs/backlog/resolved/nested-dmabuf-present-done.md)**
   (2026-09-24, PR #235) — in a `gpu-scanout` build, when the host's v4
   dma-buf feedback names the renderer's own DRM device and a format both
@@ -139,9 +163,8 @@ each item's own file records why it landed when it did.
   at most two frames. Frames that will never be shown release at once,
   with no fence wait on the pause and activate paths. Direct
   buffers were already held by `DrmCompositor` until off the plane. 128
-  live timeline objects per client (`invalid_timeline`; not an fd bound,
-  see [client-held fd bound](docs/backlog/core/client-held-fd-bound.md),
-  filed high). Found and fixed by **repinning Smithay to a scoot-sh fork**
+  live timeline objects per client (`invalid_timeline`; not an fd bound
+  then, since fixed: see the client-held fd bound entry above). Found and fixed by **repinning Smithay to a scoot-sh fork**
   (`scoot-sh/smithay` `43f50eb2` = upstream `0ff0098` + one `Drop`):
   [Smithay leaked a syncobj handle per import](docs/backlog/resolved/syncobj-handle-leak-done.md)
   (about 88 B of kernel memory each, ~24 MB/s under a hostile loop, and
