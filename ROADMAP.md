@@ -104,6 +104,29 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[Explicit sync on the GPU scanout tier](docs/backlog/resolved/linux-drm-syncobj-done.md)**
+  (2026-09-23, PR #PRNUM) — `wp_linux_drm_syncobj_manager_v1` v1, offered
+  only on `--tty --renderer gles` (`gpu-scanout`) where the display device,
+  or failing that `/dev/dri/renderD128`, passes Smithay's syncobj-eventfd
+  probe. The dev VM's virtio-gpu passes. Acquire points are waited on with
+  Smithay's eventfd blockers from a per-surface pre-commit hook. A signalled
+  point costs one ioctl; a surface destroyed or disconnected mid-wait
+  removes its sources and releases its blockers; 64 outstanding waits per
+  client, then `wl_display.no_memory`. Release points: the scanout
+  presenter holds each composited frame's explicit buffers until its flip
+  (its render fence where it will never flip), at most two frames. Direct
+  buffers were already held by `DrmCompositor` until off the plane. 128
+  live timelines per client (`invalid_timeline`). Found and filed, not
+  fixable scoot-side at the pinned rev:
+  [Smithay leaks a syncobj handle per import](docs/backlog/protocols/syncobj-handle-leak.md)
+  (about 80 B of kernel memory each, until exit). Dev VM, test client
+  standing in for a GPU: held commits and releases seen live, including
+  across a VT switch; a stalled client isolated; both bounds;
+  fds back to baseline after a SIGKILL mid-wait; every fullscreen frame
+  direct with releases following the flip; CPU unchanged against
+  `a30cd58`. Real Vulkan/NVIDIA clients and real GPU hardware are
+  `Asahi.md` Test 7.
+
 - **[A GLES resize keeps its renderer](docs/backlog/resolved/gles-resize-in-place-done.md)**
   (2026-09-23, PR #232) — under `--renderer gles` (`--headless`/`--nested`)
   `State::resize_output` reallocates only the offscreen renderbuffer

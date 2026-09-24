@@ -23,6 +23,7 @@ whole of it as one command that writes its own report.
 | [Test 4: CPU vs GPU on a real GPU](docs/backlog/resolved/gpu-vs-cpu-measured-done.md) | high → none | yes | **ANSWERED** (2026-09-21): scanout comes up on the split topology and costs 4–5x less CPU |
 | [Test 5: a fullscreen video scanned out directly](docs/backlog/resolved/gpu-primary-direct-format-gate-done.md) | medium | yes | open — seen on the dev VM only |
 | [Test 6: what the GLES tier advertises, and what GPU clients do with it](docs/backlog/resolved/gles-dmabuf-full-formats-done.md) (Part C: [the scanout tranche](docs/backlog/resolved/gpu-scanout-candidates-done.md)) | high | partly | open — seen on the dev VM's llvmpipe only (57 formats, all `LINEAR`; scanout tranche `XR24`/`AR24` at `LINEAR`) |
+| [Test 7: explicit sync on a real GPU](docs/backlog/resolved/linux-drm-syncobj-done.md) | medium | yes | open — seen on the dev VM's virtio-gpu with a test client only |
 
 ## Results so far (run 2026-09-18, `main` at `f688ac9`)
 
@@ -870,6 +871,65 @@ above it is its size and the device it names.) What each answer means:
   the primary took the buffer would be a scoot bug. (If mpv did not ask for
   presentation feedback, the count is empty; nothing is wrong.)
 
+## Test 7 — explicit sync (`linux-drm-syncobj-v1`) on a real GPU
+
+Why: on the GPU tier scoot now offers explicit sync where a DRM device can
+import timeline syncobjs and wait on them with an eventfd
+(`docs/protocols.md`, "Explicit sync"). It tries the display device first
+and the render node second, because on this machine the display controller
+(`apple,dcp`) and the GPU (AGX) are separate DRM devices and only the GPU's
+driver is expected to support syncobjs. On the dev VM (virtio-gpu, one
+device) the display device passes, and a test client that signals its own
+timelines was seen held until its acquire point signalled and released only
+after scoot was done with each buffer. Whether the global comes up here,
+on which device, and whether a real Vulkan client uses it, is only
+answerable here. Nothing is claimed in advance.
+
+Same VT session and build as Test 5 (a `gpu-scanout` build):
+
+```sh
+RUST_LOG=info,scoot=debug ./result-scoot-gpu/bin/scoot --tty --renderer gles \
+  > /tmp/fx/t7.log 2>&1 &
+sleep 4
+WAYLAND_DISPLAY=wayland-1 wayland-info -i wp_linux_drm_syncobj_manager_v1 > /tmp/fx/t7-global.txt
+# a Vulkan client (nixpkgs#vulkan-tools); Mesa's WSI uses explicit sync when
+# the global is present and the driver supports it
+WAYLAND_DISPLAY=wayland-1 WAYLAND_DEBUG=1 vkcube --wsi wayland 2> /tmp/fx/t7-vkcube.trace &
+sleep 6; scootctl screenshot --out /tmp/fx/t7-vkcube.png
+scootctl action toggle-fullscreen; sleep 6
+scootctl screenshot --out /tmp/fx/t7-vkcube-fs.png
+sudo cat /sys/kernel/debug/dri/*/state > /tmp/fx/t7-kms-fs.txt
+kill %2
+# quit scoot (Super+Shift+e), then:
+sed -i 's/\x1b\[[0-9;]*m//g' /tmp/fx/t7.log
+grep 'explicit sync\|explicit-sync candidate' /tmp/fx/t7.log
+grep -c 'import_timeline' /tmp/fx/t7-vkcube.trace
+grep -c 'set_acquire_point' /tmp/fx/t7-vkcube.trace
+grep -m3 'protocol error\|killed' /tmp/fx/t7.log
+```
+
+What each answer means:
+
+- **`explicit sync (wp_linux_drm_syncobj_manager_v1) offered
+  device=/dev/dri/renderD128`**: the display device could not import
+  timelines and the fallback took over, the shape this machine was
+  expected to have. `device=the display device` means `apple,dcp`'s
+  driver supports syncobjs after all (worth a line). `not offered` with
+  both `explicit-sync candidate` lines at debug means neither could, and
+  no client here is offered explicit sync; send the log.
+- **`import_timeline` and `set_acquire_point` counts above zero, and
+  `vkcube` spinning in both screenshots**: a real Vulkan client runs with
+  explicit sync on scoot. Zero with the global present means Mesa chose
+  not to use it (its driver may lack what WSI needs); the cube still
+  spinning is then implicit sync, as before.
+- **The cube freezes, stutters every few seconds, or the client
+  disappears**: a release or acquire point went wrong. Send the trace and
+  the log, and the `protocol error` grep. A `no_memory` kill names the
+  outstanding-wait bound, which a real client should never reach.
+- **On an NVIDIA machine** (not this one), the same steps with any Vulkan
+  or GL app answer the question that matters most for NVIDIA users; this
+  project has no NVIDIA hardware to run them on.
+
 ## What to send back
 
 - `ghostty --version`
@@ -880,6 +940,9 @@ above it is its size and the device it names.) What each answer means:
 - for Test 3: the log, plus which connector it started on and which you pulled
 - for Test 5: `/tmp/fx/t5.clean.log`, both `t5-kms-*.txt`, `t5-fs.png`,
   and the grep output
+- for Test 7: `/tmp/fx/t7.log`, `/tmp/fx/t7-global.txt`, the two
+  `t7-vkcube*.png`, `t7-kms-fs.txt`, and the grep output (or the whole
+  `t7-vkcube.trace` if something went wrong)
 - for Test 6: `/tmp/fx/t6-table-*.txt`, `/tmp/fx/t6-*.log`,
   `/tmp/fx/t6-gears.trace` (or just its `add(` lines), `t6-gears.png`,
   `t6-mpv.log`, `t6-mpv.png`, `t6-kms-mpv.txt`; for Part C `t6c.log`,

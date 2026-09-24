@@ -9,6 +9,24 @@ scoot has not cut a numbered release yet; entries are dated.
 
 ## Unreleased
 
+### 2026-09-23 — explicit sync for GPU apps on the GPU tier
+
+- **GPU apps that use explicit sync now get it on the GPU tier** (`--tty
+  --renderer gles`, `gpu-scanout` build), where the GPU device supports it.
+  That covers NVIDIA's driver, which relies on it, and Mesa's Vulkan
+  drivers, which use it where offered. scoot waits for an app's GPU to
+  finish a frame before showing it, without holding up anything else: an
+  app whose GPU never finishes freezes only its own window. It also tells
+  the app when a buffer is free to reuse only once scoot is really done
+  with it. Nothing to configure. It is not offered anywhere else (pixman,
+  `--headless`, `--nested`), where it could not be honoured. The startup
+  log says whether it was: `explicit sync (wp_linux_drm_syncobj_manager_v1)
+  offered`. Seen on the dev VM with a test client; not yet with an NVIDIA
+  or Vulkan app or on real GPU hardware ([Asahi.md](Asahi.md), Test 7).
+- **A client is disconnected if it has more than 64 frames waiting on its
+  GPU at once, or more than 128 sync timelines open.** No real app comes
+  near either limit.
+
 ### 2026-09-23 — resizing a `--nested` window no longer rebuilds the GPU renderer
 
 - **Under `--renderer gles`, a resize now keeps the renderer** and swaps in a

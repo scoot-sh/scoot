@@ -77,6 +77,13 @@ Linux, and daily-driven on `--tty`** (2026-09-18).
   the layouts the GPU prefers and the YUV formats video decoders produce,
   not only plain linear RGB. Checked on the dev VM's software GPU (linear
   formats only there); real hardware is [Asahi.md](Asahi.md)'s Test 6.
+- **GPU apps that use explicit sync (NVIDIA's driver relies on it, Mesa's
+  Vulkan drivers use it where offered) are supported on the GPU tier**,
+  where the GPU device supports it: scoot waits for an app's GPU to finish
+  a frame before showing it, and tells the app when it may reuse a buffer.
+  It is offered only there, never under pixman or `--headless`/`--nested`.
+  Checked on the dev VM with a test client; not yet with an NVIDIA or
+  Vulkan app, or on real GPU hardware ([Asahi.md](Asahi.md), Test 7).
 - **Config reload is live, except three restart fields.** `scootctl reload` (or `kill -HUP` on the
   compositor) re-applies the layout (gap, column widths, default column
   width), the output scale (except under `--nested`, where the host owns
@@ -238,6 +245,7 @@ refusing: `[tty] gpu` naming a device that will not open, and
 | Auto-lock or dim on idle | `ext-idle-notify-v1` + `idle-inhibit-v1` (`swayidle`) | [protocols.md](docs/protocols.md#idle-detection) |
 | Screenshot or screen-share | `ext-image-copy-capture-v1` (`grim`; the pointer when asked, `grim -c`), plus `scootctl screenshot` | [protocols.md](docs/protocols.md#screen-capture-ext-image-copy-capture-v1) |
 | Run a GPU-rendering client, with or without a GPU on the compositor | `zwp_linux_dmabuf_v1`, formats taken from whichever renderer is active (the GPU driver's own, YUV included, under `gles`) | [protocols.md](docs/protocols.md#gpu-rendering-clients-zwp_linux_dmabuf_v1) |
+| Run a GPU app that uses explicit sync (NVIDIA, Vulkan) | `linux-drm-syncobj-v1`, on the `--tty` GPU tier only, where the device supports it | [protocols.md](docs/protocols.md#explicit-sync-linux-drm-syncobj-v1) |
 | Clipboard manager, middle-click paste | `wlr-`/`ext-data-control`, `primary-selection-v1` | [protocols.md](docs/protocols.md#clipboard-and-primary-selection) |
 | Night light | `wlr-gamma-control-v1` (`wlsunset`, `gammastep`) | [protocols.md](docs/protocols.md#night-light-wlr-gamma-control-v1) |
 | A HiDPI display | `[output] scale`, integer and fractional | [protocols.md](docs/protocols.md#output-scaling) |
