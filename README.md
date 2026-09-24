@@ -16,25 +16,26 @@ Two needs drove scoot's creation:
 
 - **Running with no GPU and no OpenGL.** scoot renders on the CPU with
   [pixman](http://pixman.org/) by default, so it runs as a full `--tty`
-  session on any KMS display, including machines and VMs with no 3D
-  acceleration; `--headless` with no display at all (`--outputs N` for
-  several virtual screens); or `--nested` inside another compositor,
-  including a GPU-less container such as
+  session on a KMS display (one monitor for now), including VMs and machines
+  with no 3D acceleration; `--headless` with no display at all
+  (`--outputs N` for several virtual screens); or `--nested` inside another
+  compositor, including a GPU-less container such as
   [webtop](https://github.com/linuxserver/docker-webtop). A GPU is optional,
   not unwelcome: with one, an opt-in tier (`--renderer gles` from a
-  `gpu-scanout` build) scans out from it under `--tty`, using 4–5x less CPU
-  under load on an Apple M2 — see
+  `gpu-scanout` build) scans out from it under `--tty`, using 4–5x less
+  CPU under load on an Apple M2 — see
   [docs/tty.md](docs/tty.md#which-renderer-draws-the-frames).
-- **Being driven by an agent doing computer use.** One socket does it all:
-  layout actions (`scootctl action`), key presses (`key`), text typed
-  correctly for the active keyboard layout (`type`), absolute pointer moves and clicks
-  (`pointer move`, `pointer click`), PNG screenshots sent back on the socket
-  with the pointer drawn in (`screenshot`, `--no-cursor` to omit it),
-  waiting until the screen settles (`wait-idle`), and window and output
-  queries (`windows`, `outputs`) in which every window reports its rectangle
-  in the same coordinates `pointer click` takes. scoot's own end-to-end test
-  drives it this way. Because the socket can inject any keystroke, it lives
-  in `$XDG_RUNTIME_DIR` (override with `$SCOOT_SOCKET`), is created `0600`,
+- **Being driven by an agent doing computer use.** One socket covers,
+  among other things, layout actions (`scootctl action`), key presses
+  (`key`), text typed correctly for the active keyboard layout (`type`),
+  absolute pointer moves and clicks (`pointer move`, `pointer click`), PNG
+  screenshots sent back on the socket with the pointer drawn in
+  (`screenshot`, `--no-cursor` to omit it), waiting until the screen
+  settles (`wait-idle`), and window and output queries (`windows`,
+  `outputs`) in which every window reports its rectangle in the same
+  coordinates `pointer click` takes. scoot's own end-to-end test drives it
+  this way. Because the socket can inject any keystroke, it lives in
+  `$XDG_RUNTIME_DIR` (override with `$SCOOT_SOCKET`), is created `0600`,
   and serves only the compositor's own user. Reference:
   [docs/ipc.md](docs/ipc.md).
 
