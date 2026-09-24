@@ -679,7 +679,7 @@ capture-cursor → resize-in-place → syncobj → nested dmabuf → VRR.
 - [Smithay leaks a syncobj handle per timeline import](./resolved/syncobj-handle-leak-done.md) — RESOLVED 2026-09-24 (PR #233) in scoot by repinning Smithay to the scoot-sh fork (`43f50eb2` = upstream `0ff0098` + one `Drop`): the import-and-destroy loop went from +4332 kB to +0 kB, and abandoned waits after client exit from +3668 kB to +84 kB. Upstream is still open (the user is filing it).
 - [Repin Smithay from the fork back to upstream](./core/smithay-fork-repin.md) — low, blocked on an upstream rev carrying the fix.
 - [Client-held fds no cap counts](./core/client-held-fd-bound.md) — high: syncobj points on destroyed timelines, and dmabuf params adds never created, each let one client hold ~927 fds uncounted (review of PR #233); new clients shed, offender not killed.
-- [`--nested` gles presents by dmabuf](./core/nested-dmabuf-present.md) — low, argues against the recorded "read-back is design" position for nested+gles only.
+- [`--nested` gles presents by dmabuf](./resolved/nested-dmabuf-present-done.md) — RESOLVED 2026-09-24 (PR #235): in a `gpu-scanout` build, a nested GLES session whose host composites on the renderer's own DRM device blits each frame into a host dma-buf (GBM on that device, render node then primary; `zwp_linux_buffer_params_v1.create`; at most three per size, grown on demand; a frame with no free buffer handed over as drawn) instead of reading it back; read-back otherwise, chosen at startup from the host's v4 feedback and logged; a host refusal falls back for good with one WARN. Dev VM (llvmpipe, outer scoot as host): host screenshot byte-identical, CPU-neutral per frame, ~6-8% dearer per resize (software drawing dominates). Real GPU: `Asahi.md` Test 8.
 - [VRR on the scanout tier](./core/gpu-vrr.md) — low, blocked on a VRR-capable display.
 
 ### GPU tier, after primary-direct (2026-09-23)
@@ -704,6 +704,9 @@ capture-cursor → resize-in-place → syncobj → nested dmabuf → VRR.
 - [Smithay accepts a second `wl_subsurface` for an orphaned subsurface](./core/subsurface-second-wl-subsurface.md) — low: the protocol's `bad_surface` is not raised once the parent `wl_surface` is destroyed; not a depth path.
 - [Many desynchronized subsurfaces stall the compositor](./core/subsurface-count-quadratic.md) — medium, measured: `N` sibling desync subsurfaces in one window cost roughly quadratically to create (release: 10000 took 1.15 s, 30000 over 10 s). Pre-existing; breadth, not depth.
 - [Many side-by-side popups stall the compositor](./core/popup-count-quadratic.md) — medium, measured (review of #226): popup creation is roughly quadratic in the number open (1954 popups 0.73 s, 5104 5.4 s). Pre-existing.
+
+### Found reviewing nested dma-buf presentation (2026-09-24)
+- [`--nested` confirms a lock before the host shows it](./core/nested-lock-confirm-on-present.md) — low: `locked` goes out when the blanked frame is drawn, and a nested frame may be skipped or owed before the host has it (more often since PR #235); a fix needs a bounded wait like `--tty`'s.
 
 ### Meta
 - [Split the CLI out into `scootctl`](./resolved/rename-flex-family-done.md) — CLOSED 2026-09-20: the `flexwm` → `scoot` rename half landed 2026-09-18 (PR #128); the crate split landed 2026-09-20 ([record](./resolved/scootctl-split-done.md)): new `scootctl` lib+bin crate, `scoot msg` kept as a permanent alias, Darwin default is `scootctl`. A status bar stays separate.

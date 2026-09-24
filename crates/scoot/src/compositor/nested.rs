@@ -1,9 +1,10 @@
 //! Nesting scoot inside a host Wayland compositor.
 //!
-//! `--nested` presents the exact same pixman-rendered framebuffer
-//! `headless.rs` draws into as one ordinary window in a host session (sway in
-//! the dev VM; in principle any wlroots/wayland compositor), and forwards
-//! that window's real input back into this compositor's own seat. Nothing
+//! `--nested` presents the exact same framebuffer `headless.rs` draws into
+//! (pixman's, or the GLES renderer's) as one ordinary window in a host
+//! session (cage or an outer scoot in the dev VM; in principle any
+//! wlroots/wayland compositor), and forwards that window's real input back
+//! into this compositor's own seat. Nothing
 //! about rendering changes -- scoot is still a Wayland *server* to its own
 //! clients exactly as in `--headless`; this module only adds scoot as a
 //! Wayland *client* of a second, outer compositor.
@@ -19,11 +20,24 @@
 //! [`Host::apply_resize`]) differ only in what a failure means, and that is
 //! the whole reason they are two functions rather than one with a flag.
 //!
+//! A frame reaches the host one of two ways (`presenter.rs`): read back into
+//! a host `wl_shm` buffer -- every pixman session, every build without the
+//! `gpu-scanout` feature, and any host or device that cannot take the other
+//! way -- or, for a GLES session in a `gpu-scanout` build whose host
+//! composites on the renderer's own device, copied on the GPU into a host
+//! dma-buf with no read-back at all (`gpu.rs`, which also says every reason
+//! the choice falls to read-back). Chosen once at startup and logged; a host
+//! refusing a dma-buf later moves the session to read-back for good.
+//!
 //! Host-side protocol object handling (the `wayland_client::Dispatch` impls)
 //! lives in `nested_dispatch.rs`; this file is the data (`Host`), setup
-//! (`init`), and the one thing `render::draw_frame_with` calls (`Host::present`).
+//! (`init`), and the two things `render::draw_frame` calls (`Host::present`
+//! for a read-back frame, `Host::present_dmabuf` for a GPU copy).
 
 mod buffers;
+#[cfg(feature = "gpu-scanout")]
+pub(super) mod gpu;
+mod presenter;
 
 use std::error::Error;
 
@@ -40,7 +54,9 @@ use wayland_protocols::xdg::shell::client::xdg_surface::XdgSurface as HostXdgSur
 use wayland_protocols::xdg::shell::client::xdg_toplevel::XdgToplevel as HostToplevel;
 use wayland_protocols::xdg::shell::client::xdg_wm_base::XdgWmBase as HostWmBase;
 
-use self::buffers::BufferPool;
+#[cfg(feature = "gpu-scanout")]
+pub(super) use self::gpu::ParamsTag;
+use self::presenter::Presenter;
 use super::State;
 use crate::cli::MAX_OUTPUT_DIMENSION;
 
@@ -68,8 +84,17 @@ pub struct Host {
     seat: HostSeat,
     keyboard: Option<HostKeyboard>,
     pointer: Option<HostPointer>,
-    buffers: BufferPool,
-    /// The size scoot is currently rendering at, i.e. what `buffers` is
+    /// The host buffers frames go out in -- `wl_shm` for a read-back, or
+    /// dma-bufs the frame is copied into on the GPU (see `presenter.rs`).
+    presenter: Presenter,
+    /// Set while this session may present by dma-buf: what `init` settled
+    /// with the host (`gpu::negotiate`), and what every later chain is built
+    /// from. Taken for good -- never put back -- when the host refuses a
+    /// buffer or a copy fails (see `Host::fall_back`), which is what makes
+    /// a fallback permanent for the session.
+    #[cfg(feature = "gpu-scanout")]
+    gpu: Option<gpu::GpuPresent>,
+    /// The size scoot is currently rendering at, i.e. what `presenter` is
     /// sized for. Distinct from the size on the wire in an in-flight
     /// configure that hasn't been acted on yet; once `configured`, a
     /// configure is compared against this and only a *different* size
@@ -99,13 +124,27 @@ pub struct Host {
     /// (only the latest size matters), so a configure costs two `i32` stores
     /// and no allocation, whatever rate the host sends them at.
     pending_resize: PendingResize,
-    /// Set when `present()` had a frame ready but no host buffer was free to
-    /// write it into (both still held by the host). Checked when the host
-    /// releases a buffer (`nested_dispatch::Dispatch<HostBuffer>`) so a
-    /// skipped frame doesn't leave the host window stale until some
-    /// unrelated redraw happens to trigger another render -- freeing a
-    /// buffer while this is set re-arms rendering itself.
+    /// Set when `present()` or `present_dmabuf()` had a frame ready but no
+    /// host buffer was free to put it in (every one still held by the host,
+    /// or -- dma-bufs -- not yet `created`). Checked when the host releases a
+    /// buffer (`nested_dispatch::Dispatch<HostBuffer>`) or creates one
+    /// (`Host::buffer_created`) so a skipped frame doesn't leave the host
+    /// window stale until some unrelated redraw happens to trigger another
+    /// render -- a buffer becoming usable while this is set re-arms
+    /// rendering itself.
     present_skipped: bool,
+    /// The render target holds a drawn frame the host has not been handed,
+    /// because no dma-buf was usable when it was drawn -- the frame drawn in
+    /// the same tick as a resize, before the host has answered `created` for
+    /// the new chain, is the common case. When a buffer becomes usable that
+    /// frame is copied over as it stands ([`Host::buffer_usable`]) rather
+    /// than drawn a second time. Set only by a skipped
+    /// [`Host::present_dmabuf`], which is only ever reached after a
+    /// successful draw; cleared by any frame that reaches the host, by a new
+    /// render target (not drawn yet: nothing is owed from it) and by a
+    /// fallback to read-back.
+    #[cfg(feature = "gpu-scanout")]
+    frame_owed: bool,
 }
 
 pub fn init(
@@ -114,7 +153,26 @@ pub fn init(
     width: i32,
     height: i32,
 ) -> Result<(), Box<dyn Error>> {
-    let conn = Connection::connect_to_env()?;
+    init_on(
+        loop_handle,
+        state,
+        Connection::connect_to_env()?,
+        width,
+        height,
+    )
+}
+
+/// [`init`] over a connection already made -- the suites hand in one end of
+/// a socket pair whose other end is a second, in-process compositor, since
+/// `WAYLAND_DISPLAY` is process-global and the host must not be scoot's own
+/// socket.
+pub(super) fn init_on(
+    loop_handle: smithay::reexports::calloop::LoopHandle<'static, State>,
+    state: &mut State,
+    conn: Connection,
+    width: i32,
+    height: i32,
+) -> Result<(), Box<dyn Error>> {
     let (globals, event_queue) = registry_queue_init::<State>(&conn)?;
     let qh = event_queue.handle();
 
@@ -122,6 +180,28 @@ pub fn init(
     let shm: HostShm = globals.bind(&qh, 1..=1, ())?;
     let wm_base: HostWmBase = globals.bind(&qh, 1..=6, ())?;
     let seat: HostSeat = globals.bind(&qh, 1..=9, ())?;
+
+    // Whether frames can go to the host as dma-bufs, settled once, against
+    // the render target the session already has (built before this runs;
+    // see `compositor::run`). Logged either way.
+    #[cfg(feature = "gpu-scanout")]
+    let gpu = match state.outputs.primary_entry().map(|(id, _)| id) {
+        Some(id) => state
+            .backends
+            .get_mut(&id)
+            .and_then(|backend| gpu::negotiate(&conn, &globals, &qh, backend)),
+        None => None,
+    };
+    // The same once-per-session line a `gpu-scanout` build logs, so a GLES
+    // session says how its frames reach the host in either build. Under
+    // pixman there is nothing to say: read-back is the only way there is.
+    #[cfg(not(feature = "gpu-scanout"))]
+    if state.renderer == crate::cli::RendererKind::Gles {
+        tracing::info!(
+            reason = "this build has no gpu-scanout feature",
+            "nested: presenting to the host by read-back into wl_shm"
+        );
+    }
 
     let surface = compositor.create_surface(&qh, ());
     let xdg_surface = wm_base.get_xdg_surface(&surface, &qh, ());
@@ -134,8 +214,9 @@ pub fn init(
     // that configure.
     surface.commit();
 
-    let buffers = BufferPool::new(&shm, &qh, width, height)?;
-
+    // No host buffers yet: the first configure builds them at the size the
+    // host asks for (see `apply_first_configure`), and nothing can be
+    // attached before it.
     state.host = Some(Host {
         conn: conn.clone(),
         qh,
@@ -146,12 +227,16 @@ pub fn init(
         seat,
         keyboard: None,
         pointer: None,
-        buffers,
+        presenter: Presenter::Unbuilt,
+        #[cfg(feature = "gpu-scanout")]
+        gpu,
         size: (width, height),
         configured: false,
         pending_size: None,
         pending_resize: PendingResize::default(),
         present_skipped: false,
+        #[cfg(feature = "gpu-scanout")]
+        frame_owed: false,
     });
 
     WaylandSource::new(conn, event_queue)
@@ -191,11 +276,19 @@ impl Host {
     /// trip it. Dropping a frame is the safe answer if it ever did -- writing
     /// a frame of one size into a buffer described to the host as another is
     /// how a compositor hands out garbage or gets killed for it.
+    ///
+    /// A session whose frames go out as dma-bufs never reaches here (the
+    /// frame is not read back at all -- see `Host::present_dmabuf`); one
+    /// that has just fallen back from them may have no pool yet, and builds
+    /// it here (see `Presenter::shm_pool`).
     pub fn present(&mut self, pixels: &[u8], width: i32, height: i32) -> bool {
         if !self.configured || (width, height) != self.size {
             return false;
         }
-        let Some(buffer) = self.buffers.write_free(pixels) else {
+        let Some(pool) = self.presenter.shm_pool(&self.shm, &self.qh, self.size) else {
+            return false;
+        };
+        let Some(buffer) = pool.write_free(pixels) else {
             self.present_skipped = true;
             return false;
         };
@@ -216,6 +309,292 @@ impl Host {
         self.conn.flush().is_ok()
     }
 
+    /// Whether this session's frames go to the host as dma-bufs: what
+    /// `render::draw_frame` asks, once per frame, to decide whether a frame
+    /// is read back at all. `false` in a build without the `gpu-scanout`
+    /// feature, and for good after a fallback.
+    pub(super) fn presents_dmabuf(&self) -> bool {
+        self.presenter.is_dmabuf()
+    }
+
+    /// A new frame is about to be drawn into the render target: whatever was
+    /// owed from it is not any more. The draw may fail part-way and leave
+    /// the target half-drawn, and an owed frame must only ever mean "the
+    /// last *successful* draw, not yet presented" -- a skipped present after
+    /// this draw owes it again. What a `release` or `created` finds with
+    /// nothing owed is the ordinary re-render (`present_skipped`).
+    #[cfg(feature = "gpu-scanout")]
+    pub(super) fn begin_frame(&mut self) {
+        self.frame_owed = false;
+    }
+
+    /// Copies the frame just drawn into a free host dma-buf (`copy`, which
+    /// the caller runs on its GPU renderer) and commits it, with `damage` as
+    /// the buffer damage. The dma-buf counterpart of [`Host::present`], and
+    /// dropped -- reporting nothing committed -- for the same reasons: not
+    /// configured, a frame of another size than the chain, or no free host
+    /// buffer (every one held by the host or not yet `created`; the drawn
+    /// frame is then owed, and the next `release` or `created` copies it
+    /// over as it stands -- see [`Host::buffer_usable`]).
+    ///
+    /// A copy that fails switches the session to read-back for good (see
+    /// [`Host::fall_back`]) and says so in the answer, so the caller can ask
+    /// for the frame the host has now missed.
+    ///
+    /// No heap allocation of its own: a slot is picked by a scan of
+    /// [`gpu::SLOTS`] entries. The one GPU buffer it may allocate -- growing
+    /// a chain whose every buffer is in use -- succeeds at most
+    /// `gpu::SLOTS - 1` times per size, and a failed one moves the session to
+    /// read-back (see [`Host::fall_back`]), so it is never retried frame
+    /// after frame.
+    #[cfg(feature = "gpu-scanout")]
+    pub(super) fn present_dmabuf(
+        &mut self,
+        size: (i32, i32),
+        damage: smithay::utils::Rectangle<i32, smithay::utils::Physical>,
+        copy: impl FnOnce(
+            &mut smithay::backend::allocator::dmabuf::Dmabuf,
+        ) -> Result<(), Box<dyn Error>>,
+    ) -> DmabufPresent {
+        let mut answer = DmabufPresent::default();
+        if !self.configured || size != self.size {
+            return answer;
+        }
+        let Presenter::Dmabuf(chain) = &mut self.presenter else {
+            return answer;
+        };
+        // The chain is only ever replaced together with the size (see
+        // `replace_render_target`), so this is a guard on an invariant, as
+        // `present`'s own size check is.
+        if chain.size() != self.size {
+            return answer;
+        }
+        let Some((dmabuf, buffer, held)) = chain.free_slot() else {
+            // Every buffer is in use: add one where that would help (a
+            // chain starts with one and grows to at most `gpu::SLOTS`; see
+            // `GpuPresent::grow`). This frame is owed, and the new buffer's
+            // `created` -- or a `release` -- hands it over.
+            let grown = match &mut self.gpu {
+                Some(gpu) => gpu.grow(chain, &self.qh),
+                None => Ok(false),
+            };
+            if let Err(error) = grown {
+                // The one case nothing else would ever end: `grow` only
+                // tries when every buffer is held and none is being
+                // created, and a dma-buf host keeps the buffer it shows
+                // until a newer one replaces it -- after a resize that is
+                // the chain's only buffer. With no new buffer there is no
+                // `created` and no `release` coming, so waiting would
+                // freeze the window until the next resize while every
+                // frame retried the allocation (GBM out of memory, or the
+                // process out of fds). Read-back for good instead, as for
+                // a refusal.
+                self.fall_back(&format!("could not add a host buffer: {error}"));
+                answer.fell_back = true;
+                return answer;
+            }
+            self.present_skipped = true;
+            self.frame_owed = true;
+            return answer;
+        };
+        if let Err(error) = copy(dmabuf) {
+            self.fall_back(&format!(
+                "a frame could not be copied into a host buffer: {error}"
+            ));
+            answer.fell_back = true;
+            return answer;
+        }
+        *held = true;
+        self.present_skipped = false;
+        self.frame_owed = false;
+        self.surface.attach(Some(buffer), 0, 0);
+        self.surface
+            .damage_buffer(damage.loc.x, damage.loc.y, damage.size.w, damage.size.h);
+        self.surface.commit();
+        // The same flush `present` needs, for the same reason, and the same
+        // meaning of its failure: nothing left this process.
+        answer.committed = self.conn.flush().is_ok();
+        answer
+    }
+
+    /// The host answered `created` for one of the chain's buffers. Destroyed
+    /// on arrival if it is for a chain a resize or a fallback has since
+    /// replaced; otherwise it becomes usable, and a frame skipped for want
+    /// of one is asked for again.
+    #[cfg(feature = "gpu-scanout")]
+    pub(super) fn buffer_created(
+        state: &mut State,
+        tag: ParamsTag,
+        buffer: wayland_client::protocol::wl_buffer::WlBuffer,
+    ) {
+        let Some(host) = &mut state.host else {
+            buffer.destroy();
+            return;
+        };
+        match &mut host.presenter {
+            Presenter::Dmabuf(chain) if chain.generation() == tag.generation => {
+                chain.created(tag.slot, buffer);
+            }
+            _ => {
+                buffer.destroy();
+                return;
+            }
+        }
+        Self::buffer_usable(state);
+    }
+
+    /// A host buffer just became usable -- released by the host, or (dma-buf)
+    /// created -- so a frame that was skipped for want of one can go out
+    /// now. Under dma-buf presentation a frame already drawn and owed is
+    /// copied over as it stands (`hand_over_owed_frame`); otherwise, as the
+    /// read-back path always has, a render is asked for. Nothing was
+    /// skipped: nothing to do.
+    pub(super) fn buffer_usable(state: &mut State) {
+        let Some(host) = &mut state.host else {
+            return;
+        };
+        let skipped = host.take_present_skipped();
+        #[cfg(feature = "gpu-scanout")]
+        if std::mem::take(&mut host.frame_owed) {
+            Self::hand_over_owed_frame(state);
+            return;
+        }
+        if skipped {
+            state.request_render();
+        }
+    }
+
+    /// Copies the frame the render target already holds into a usable host
+    /// dma-buf and commits it, stamping the presentation feedback that frame
+    /// left queued when it was skipped (it is on screen from now) -- unless a
+    /// render is already pending, whose frame stamps it instead (see the
+    /// comment at the stamp for why). Saves a
+    /// whole second draw of an unchanged frame -- after every resize, whose
+    /// first frame is drawn before the host has created the new chain.
+    ///
+    /// Falls back to asking for a render wherever it cannot do that: no
+    /// output or render target to copy from, or a copy that failed (which has
+    /// just switched the session to read-back). Still no free buffer after
+    /// all leaves the frame owed for the next one.
+    #[cfg(feature = "gpu-scanout")]
+    fn hand_over_owed_frame(state: &mut State) {
+        let Some((id, output)) = state
+            .outputs
+            .primary_entry()
+            .map(|(id, output)| (id, output.clone()))
+        else {
+            state.request_render();
+            return;
+        };
+        let Some(mut backend) = state.take_backend(id) else {
+            state.request_render();
+            return;
+        };
+        let size = backend.size();
+        let whole = smithay::utils::Rectangle::from_size(size.into());
+        let answer = match &mut state.host {
+            Some(host) => {
+                host.present_dmabuf(size, whole, |dmabuf| backend.copy_frame_into(dmabuf))
+            }
+            None => DmabufPresent::default(),
+        };
+        state.put_backend(id, backend);
+        if answer.committed {
+            // debug!: once per resize at most in a drag (resizes coalesce to
+            // one per frame tick), and the line that shows a resize's first
+            // frame was not drawn twice.
+            tracing::debug!(
+                width = size.0,
+                height = size.1,
+                "nested: handed the owed frame to the host without redrawing it"
+            );
+            // Stamped only if nothing has changed since the frame was drawn.
+            // The render tail draws a frame and takes its feedback in one
+            // call; this runs later, from dispatch, and a client may have
+            // committed again in between -- likely, since the skipped
+            // frame's tail already sent frame callbacks. Smithay's
+            // `take_presentation_feedback` drains the surface's *current*
+            // feedback, which would then include a commit this frame does
+            // not show, stamped `presented` early. Every client commit asks
+            // for a render (`CompositorHandler::commit`), so a pending one
+            // is the tell; its frame shows the newer content and stamps
+            // everything then -- late, never early, as read-back does for a
+            // frame it had to skip. With nothing pending (a static screen),
+            // this is the only frame coming and must stamp, or a client
+            // pacing on feedback would wait for one that never arrives.
+            // As the render tail would: nested has no retrace to count, so
+            // `seq` is 0 and nothing is vsync'd.
+            if !state.needs_render {
+                state.present_feedback(&output, false, None, 0, None);
+            }
+        }
+        if answer.fell_back {
+            state.request_render();
+        }
+    }
+
+    /// The host answered `failed` for one of the chain's buffers: it cannot
+    /// import what scoot allocated. Read-back for the rest of the session
+    /// (see [`Host::fall_back`]), and a frame to show it. An answer for a
+    /// chain already replaced changes nothing.
+    #[cfg(feature = "gpu-scanout")]
+    pub(super) fn buffer_failed(state: &mut State, tag: ParamsTag) {
+        let Some(host) = &mut state.host else {
+            return;
+        };
+        let current = match &host.presenter {
+            Presenter::Dmabuf(chain) => chain.generation() == tag.generation,
+            _ => false,
+        };
+        if !current {
+            tracing::debug!(?tag, "the host refused a host buffer from a replaced chain");
+            return;
+        }
+        host.fall_back("the host refused to import a buffer scoot allocated for it");
+        state.request_render();
+    }
+
+    /// Gives up presenting by dma-buf for the rest of the session: the
+    /// chain is destroyed and a `wl_shm` pool built at the current size in
+    /// its place -- or, should that fail, left for the next frame that
+    /// draws to build (`Presenter::shm_pool`). Every caller asks for a frame
+    /// straight after, which is the first retry. One WARN, the only one: `gpu` is taken here and never
+    /// put back, so a second call finds nothing to give up.
+    #[cfg(feature = "gpu-scanout")]
+    fn fall_back(&mut self, reason: &str) {
+        if !self.abandon_gpu(reason) {
+            return;
+        }
+        // Whatever was owed goes out by read-back now: the caller asks for a
+        // frame, which the read-back path draws and presents.
+        self.frame_owed = false;
+        let presenter = match Presenter::shm(&self.shm, &self.qh, self.size.0, self.size.1) {
+            Ok(presenter) => presenter,
+            Err(error) => {
+                tracing::warn!(%error, "could not build the host wl_shm pool; retrying on the next frame");
+                Presenter::Unbuilt
+            }
+        };
+        std::mem::replace(&mut self.presenter, presenter).destroy();
+    }
+
+    /// Drops the dma-buf path, with the one WARN that says so. `false` if it
+    /// was already gone. Leaves the presenter alone: [`Host::fall_back`]
+    /// replaces a live chain, and a first configure that could not build
+    /// one builds a `wl_shm` pool itself.
+    #[cfg(feature = "gpu-scanout")]
+    fn abandon_gpu(&mut self, reason: &str) -> bool {
+        let Some(gpu) = self.gpu.take() else {
+            return false;
+        };
+        tracing::warn!(
+            %reason,
+            "nested: presenting to the host by read-back into wl_shm from now on, for the rest of the session"
+        );
+        gpu.destroy();
+        true
+    }
+
     /// Comes up at the size the host's **first** configure asked for.
     ///
     /// A failure here is fatal: it stops the event loop, having logged what
@@ -231,8 +610,13 @@ impl Host {
     /// Marks the host surface configured on success and only on success:
     /// until that happens xdg-shell forbids attaching a buffer, and
     /// [`Host::present`] honours it.
+    ///
+    /// Host buffers that cannot be built as dma-bufs at this size are not a
+    /// failure here but a fallback: the session comes up presenting by
+    /// read-back instead, for good (see `gpu.rs`) -- there is no working
+    /// chain to keep, and read-back is how every session presented before.
     pub(super) fn apply_first_configure(state: &mut State, width: i32, height: i32) {
-        match Self::replace_render_target(state, width, height) {
+        match Self::replace_render_target(state, width, height, OnGpuFailure::FallBack) {
             Ok(()) => {
                 if let Some(host) = &mut state.host {
                     host.mark_configured();
@@ -272,8 +656,16 @@ impl Host {
     /// Takes no `Result` for that reason: there is nothing a caller could
     /// usefully do with one, and a signature that cannot be handled as
     /// "fatal" is what keeps the two paths from being conflated later.
+    ///
+    /// That includes dma-buf host buffers that cannot be allocated at the
+    /// new size: the chain the session already has keeps presenting at the
+    /// old size, exactly as a `wl_shm` pool that could not be grown always
+    /// has. Only the host *refusing* a buffer, or a copy failing, gives up
+    /// on dma-bufs (see `gpu.rs`) -- an allocation failing at one size says
+    /// nothing about the next.
     pub(super) fn apply_resize(state: &mut State, width: i32, height: i32) {
-        if let Err(error) = Self::replace_render_target(state, width, height) {
+        if let Err(error) = Self::replace_render_target(state, width, height, OnGpuFailure::Refuse)
+        {
             tracing::warn!(
                 %error,
                 width,
@@ -348,28 +740,51 @@ impl Host {
     /// guard drops every frame in that state, silently and permanently: a
     /// live session whose window never updates again, which is worse than
     /// either failure policy above was meant to allow.
+    ///
+    /// A size the render target is certain to refuse -- over the GLES
+    /// context's limit (`Backend::exceeds_max_target`, PR #232) -- is refused
+    /// before either is allocated, rather than after building host buffers
+    /// only to throw them away. That matters more than tidiness on the
+    /// dma-buf path: a host buffer chain that failed to allocate at a size
+    /// that was never going to be used must not be mistaken for anything
+    /// else (see [`OnGpuFailure`]).
     fn replace_render_target(
         state: &mut State,
         width: i32,
         height: i32,
+        on_gpu_failure: OnGpuFailure,
     ) -> Result<(), Box<dyn Error>> {
-        let Some(host) = &state.host else {
+        if state.host.is_none() {
+            return Ok(());
+        }
+        let limit = state
+            .outputs
+            .primary_entry()
+            .and_then(|(id, _)| state.backends.get(&id))
+            .and_then(|backend| backend.exceeds_max_target(width, height));
+        if let Some((max_width, max_height)) = limit {
+            return Err(format!(
+                "{width}x{height} is larger than the GPU can render into ({max_width}x{max_height})"
+            )
+            .into());
+        }
+        let Some(host) = &mut state.host else {
             return Ok(());
         };
         // Fallible, and deliberately first: this borrow of `state.host` ends
-        // with the call (a `BufferPool` owns its host objects outright and
+        // with the call (a `Presenter` owns its host objects outright and
         // borrows nothing), which is what lets `state.resize_output` -- which
         // needs `&mut State` and knows nothing about `Host` -- run below
         // without a double borrow or a `take()`/put-back dance.
-        let buffers = BufferPool::new(&host.shm, &host.qh, width, height)?;
-        // Every `BufferPool` that does not end up installed is `destroy`ed
+        let presenter = host.build_presenter(width, height, on_gpu_failure)?;
+        // Every `Presenter` that does not end up installed is `destroy`ed
         // rather than dropped: it owns host-side `wl_buffer`/`wl_shm_pool`
         // objects that only `destroy` releases, so dropping one leaks it on
         // the host connection. That is no longer only tidiness -- a session
         // survives a failed resize now, so a leak here would accumulate one
         // pool per failed resize for the rest of it.
         if !state.resize_output(width, height) {
-            buffers.destroy();
+            presenter.destroy();
             // `resize_output` has already logged what actually failed.
             return Err("could not resize the render target".into());
         }
@@ -378,17 +793,53 @@ impl Host {
             // clear `state.host`. Written out rather than `unwrap`ed because
             // a panic on a host event would take every client's unsaved state
             // with it, and a leaked pool is the cheaper wrong answer.
-            buffers.destroy();
+            presenter.destroy();
             return Ok(());
         };
-        let old = std::mem::replace(&mut host.buffers, buffers);
+        let old = std::mem::replace(&mut host.presenter, presenter);
         old.destroy();
         host.size = (width, height);
+        // The target at the new size has not been drawn: nothing in it is
+        // owed to the host until a frame drawn into it is skipped.
+        #[cfg(feature = "gpu-scanout")]
+        {
+            host.frame_owed = false;
+        }
         Ok(())
     }
 
-    pub(super) fn buffers_mut(&mut self) -> &mut BufferPool {
-        &mut self.buffers
+    /// Host buffers at `width` x `height`: a dma-buf chain while the session
+    /// may present that way, `wl_shm` otherwise. What a dma-buf chain that
+    /// cannot be built means is the caller's `on_gpu_failure`.
+    fn build_presenter(
+        &mut self,
+        width: i32,
+        height: i32,
+        on_gpu_failure: OnGpuFailure,
+    ) -> Result<Presenter, Box<dyn Error>> {
+        #[cfg(feature = "gpu-scanout")]
+        if let Some(gpu) = &mut self.gpu {
+            match gpu.swapchain(&self.qh, width, height) {
+                Ok(chain) => return Ok(Presenter::Dmabuf(chain)),
+                Err(error) => match on_gpu_failure {
+                    OnGpuFailure::Refuse => return Err(error),
+                    OnGpuFailure::FallBack => {
+                        self.abandon_gpu(&format!(
+                            "could not allocate host buffers at {width}x{height}: {error}"
+                        ));
+                    }
+                },
+            }
+        }
+        #[cfg(not(feature = "gpu-scanout"))]
+        let _ = on_gpu_failure;
+        Presenter::shm(&self.shm, &self.qh, width, height)
+    }
+
+    /// Marks the host buffer `buffer` free again, on the host's `release`.
+    /// A no-op for a buffer the current presenter does not own.
+    pub(super) fn mark_released(&mut self, buffer: &wayland_client::protocol::wl_buffer::WlBuffer) {
+        self.presenter.mark_released(buffer);
     }
 
     pub(super) fn is_configured(&self) -> bool {
@@ -456,11 +907,64 @@ impl Host {
         self.pointer = Some(pointer);
     }
 
+    /// Which way frames go out right now, for the suites: `"dmabuf"`,
+    /// `"shm"`, or `"unbuilt"`.
+    #[cfg(all(test, feature = "gpu-scanout"))]
+    pub(super) fn presenter_for_test(&self) -> &'static str {
+        match &self.presenter {
+            Presenter::Unbuilt => "unbuilt",
+            Presenter::Shm(_) => "shm",
+            #[cfg(feature = "gpu-scanout")]
+            Presenter::Dmabuf(_) => "dmabuf",
+        }
+    }
+
+    /// Makes every later attempt to grow the host buffer chain fail, as GBM
+    /// out of memory or an exhausted fd table would.
+    #[cfg(all(test, feature = "gpu-scanout"))]
+    pub(super) fn fail_growth_for_test(&mut self) {
+        if let Some(gpu) = &mut self.gpu {
+            gpu.fail_growth_for_test();
+        }
+    }
+
+    /// Whether the dma-buf path is still open to this session.
+    #[cfg(all(test, feature = "gpu-scanout"))]
+    pub(super) fn may_present_dmabuf_for_test(&self) -> bool {
+        self.gpu.is_some()
+    }
+
     /// Clears and returns whether a presentation was skipped for lack of a
     /// free host buffer -- see `present_skipped`'s field doc.
     pub(super) fn take_present_skipped(&mut self) -> bool {
         std::mem::take(&mut self.present_skipped)
     }
+}
+
+/// What a dma-buf host buffer chain that cannot be built at a size means --
+/// decided by the entry point, like every other failure policy here (see
+/// [`Host::replace_render_target`]). Without the `gpu-scanout` feature there
+/// is no chain and neither value changes anything.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OnGpuFailure {
+    /// Present by read-back instead, for good: the first configure, where
+    /// there is no working chain to keep.
+    FallBack,
+    /// Refuse the size, keeping the chain the session already has: a later
+    /// resize.
+    Refuse,
+}
+
+/// What [`Host::present_dmabuf`] did with a frame.
+#[cfg(feature = "gpu-scanout")]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub(super) struct DmabufPresent {
+    /// The frame reached the host: committed and flushed. What the render
+    /// tail stamps presentation feedback on.
+    pub(super) committed: bool,
+    /// The copy failed and the session has just switched to read-back for
+    /// good; the host is owed the frame it missed.
+    pub(super) fell_back: bool,
 }
 
 /// One queued host resize: the latest size a `Resize` configure proposed

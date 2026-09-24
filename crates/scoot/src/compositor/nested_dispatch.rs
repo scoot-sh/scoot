@@ -22,7 +22,16 @@ use wayland_protocols::xdg::shell::client::xdg_surface::{self, XdgSurface as Hos
 use wayland_protocols::xdg::shell::client::xdg_toplevel::{self, XdgToplevel as HostToplevel};
 use wayland_protocols::xdg::shell::client::xdg_wm_base::{self, XdgWmBase as HostWmBase};
 
+#[cfg(feature = "gpu-scanout")]
+use wayland_protocols::wp::linux_dmabuf::zv1::client::zwp_linux_buffer_params_v1::{
+    self, ZwpLinuxBufferParamsV1,
+};
+#[cfg(feature = "gpu-scanout")]
+use wayland_protocols::wp::linux_dmabuf::zv1::client::zwp_linux_dmabuf_v1::ZwpLinuxDmabufV1;
+
 use super::State;
+#[cfg(feature = "gpu-scanout")]
+use super::nested::ParamsTag;
 use super::nested::{ConfigureAction, Host, configure_action};
 
 // Objects whose events this compositor has no use for at all: the registry
@@ -64,19 +73,50 @@ impl Dispatch<HostBuffer, ()> for State {
         let wayland_client::protocol::wl_buffer::Event::Release = event else {
             return;
         };
-        // Scoped so the mutable borrow of `state.host` ends before the
-        // possible `state.request_render()` call below, which needs `state`
-        // whole again.
-        let should_retry = if let Some(host) = &mut state.host {
-            host.buffers_mut().mark_released(buffer);
-            host.take_present_skipped()
-        } else {
-            false
-        };
-        if should_retry {
-            state.request_render();
+        if let Some(host) = &mut state.host {
+            host.mark_released(buffer);
+        }
+        // A frame skipped for want of a free buffer can go out now.
+        Host::buffer_usable(state);
+    }
+}
+
+// The host's dma-buf global has no events a version-4 client is sent (the
+// `format`/`modifier` pair is deprecated from 4 on); its feedback is read on
+// a private queue at startup (`nested/gpu/feedback.rs`).
+#[cfg(feature = "gpu-scanout")]
+wayland_client::delegate_noop!(State: ignore ZwpLinuxDmabufV1);
+
+/// The host's answer to a dma-buf `create` (`nested/gpu.rs`). Either way the
+/// params object has done its job and is destroyed, as the protocol asks.
+#[cfg(feature = "gpu-scanout")]
+impl Dispatch<ZwpLinuxBufferParamsV1, ParamsTag> for State {
+    fn event(
+        state: &mut Self,
+        params: &ZwpLinuxBufferParamsV1,
+        event: zwp_linux_buffer_params_v1::Event,
+        tag: &ParamsTag,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        match event {
+            zwp_linux_buffer_params_v1::Event::Created { buffer } => {
+                params.destroy();
+                Host::buffer_created(state, *tag, buffer);
+            }
+            zwp_linux_buffer_params_v1::Event::Failed => {
+                params.destroy();
+                Host::buffer_failed(state, *tag);
+            }
+            _ => {}
         }
     }
+
+    // `created` carries a new `wl_buffer`; it gets the same `()` user data,
+    // and so the same `release` handling, as every `wl_shm` buffer.
+    wayland_client::event_created_child!(State, ZwpLinuxBufferParamsV1, [
+        zwp_linux_buffer_params_v1::EVT_CREATED_OPCODE => (HostBuffer, ()),
+    ]);
 }
 
 impl Dispatch<HostWmBase, ()> for State {

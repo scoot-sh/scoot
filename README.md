@@ -71,9 +71,13 @@ inspired this project.
   real app — Test 6). While something records or streams the screen, scoot
   composites as usual. Not there yet:
   every other window is still composited. Under
-  `--headless`/`--nested` the GPU speedup does not apply: `gles` there
-  still copies every frame back to the CPU, and on a machine without a real
-  GPU that measured 18–31x *slower* than pixman.
+  `--headless` the GPU speedup does not apply: `gles` there still copies
+  every frame back to the CPU, and on a machine without a real GPU that
+  measured 18–31x *slower* than pixman. Under `--nested`, a `gpu-scanout`
+  build hands each frame to the host compositor as a GPU buffer, with no
+  copy back to the CPU, when the host composites on the same GPU (the
+  startup log says whether it does, and why not); seen working on the dev
+  VM, not yet measured on real GPU hardware ([Asahi.md](Asahi.md), Test 8).
   pixman stays the default and the right choice without a GPU; details in
   [docs/tty.md](docs/tty.md).
 - **GPU apps get their GPU's own buffer formats under `--renderer gles`** —
