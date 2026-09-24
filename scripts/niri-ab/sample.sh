@@ -16,10 +16,13 @@
 # Samples the compositor's threads, runs COMMAND for at most SECS if one is
 # given (the damage for this window) or sleeps SECS, samples again, and
 # prints one TSV line:
-#   label  comm  wall_s  cpu_ns  cpu_jiffies  wakeups  threads  rss_kb  pss_kb
-# cpu_ns and wakeups are summed over every live thread's schedstat (on-CPU
-# ns, times put on a CPU); cpu_jiffies is /proc/PID/stat utime+stime, which
-# also keeps the time of threads that exited during the window.
+#   label  comm  wall_s  proc_cpu_ms  cpu_ns  wakeups  threads  rss_kb  pss_kb
+# proc_cpu_ms is the process total (/proc/PID/stat utime+stime, 10 ms
+# ticks), and it is the number to compare: it keeps the time of threads that
+# started and exited inside the window. cpu_ns and wakeups sum only the
+# threads alive at both ends (schedstat), so they miss those. niri encodes
+# every screenshot on such a thread, and on the dev VM cpu_ns missed 19-23%
+# of niri's screenshot CPU.
 set -euo pipefail
 PID=${1:?usage: sample.sh PID|session SECS [LABEL] [-- COMMAND...]}
 SECS=${2:?usage: sample.sh PID|session SECS [LABEL] [-- COMMAND...]}
@@ -55,5 +58,6 @@ read -r c0 r0 n0 <<<"$(sums)"; j0=$(jiffies); t0=$(date +%s%N)
 if [ $# -gt 0 ]; then timeout "$SECS" "$@" >/dev/null 2>&1 || true; else sleep "$SECS"; fi
 read -r c1 r1 n1 <<<"$(sums)"; j1=$(jiffies); t1=$(date +%s%N)
 mem=$(awk '/^Rss:/{r=$2} /^Pss:/{p=$2} END{print r"\t"p}' "/proc/$PID/smaps_rollup")
+tick=$(getconf CLK_TCK)
 printf '%s\t%s\t%.3f\t%d\t%d\t%d\t%s\t%s\n' "$LABEL" "$(cat "/proc/$PID/comm")" "$(awk -v a="$t0" -v b="$t1" 'BEGIN{print (b-a)/1e9}')" \
-    $((c1 - c0)) $((j1 - j0)) $((r1 - r0)) "$n0/$n1" "$mem"
+    $(((j1 - j0) * 1000 / tick)) $((c1 - c0)) $((r1 - r0)) "$n0/$n1" "$mem"

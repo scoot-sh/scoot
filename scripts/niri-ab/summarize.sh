@@ -25,13 +25,17 @@ ORDER="scoot-pixman scoot-gles niri-off niri-on"
 
 echo "### CPU per scene (compositor process, all threads)"
 echo
-echo "Median of rounds [min-max]. \`cpu%\` is of one core over the scene's wall time."
+echo "Median of rounds [min-max]. \`cpu ms\` sums the threads alive at both ends of the"
+echo "scene; \`process ms\` is the process total from /proc/PID/stat (10 ms ticks),"
+echo "which also counts threads that exited during the scene. Where they differ,"
+echo "trust \`process ms\`. \`cpu%\` and \`us per event\` use \`cpu ms\`."
 echo
 gawk -F'\t' -v order="$ORDER" "$AWKLIB"'
 NR == 1 { next }
 {
     k = $2 SUBSEP $3; nk[k]++; i = nk[k]
     ms[k][i] = $6 / 1e6
+    pm[k][i] = $7 * 10
     pct[k][i] = 100 * $6 / 1e9 / $4
     wps[k][i] = $8 / $4
     if ($5 > 0) per[k][i] = $6 / 1e3 / $5
@@ -40,13 +44,13 @@ NR == 1 { next }
 END {
     split("idle pointer relayout shot-ipc shot-grim animate", sc, " ")
     nv = split(order, vs, " ")
-    print "| scene | variant | cpu ms | cpu% | wakeups/s | us per event |"
-    print "|---|---|---|---|---|---|"
+    print "| scene | variant | cpu ms | process ms | cpu% | wakeups/s | us per event |"
+    print "|---|---|---|---|---|---|---|"
     for (s = 1; s <= 6; s++) for (v = 1; v <= nv; v++) {
         k = vs[v] SUBSEP sc[s]; if (!(k in nk)) continue
         pe = (sc[s] == "idle" || sc[s] == "animate") ? "-" : cell(per[k], "%.0f")
-        printf "| %s | %s | %s | %s | %s | %s |\n", sc[s], vs[v],
-            cell(ms[k], "%.1f"), cell(pct[k], "%.1f"), cell(wps[k], "%.1f"), pe
+        printf "| %s | %s | %s | %s | %s | %s | %s |\n", sc[s], vs[v],
+            cell(ms[k], "%.1f"), cell(pm[k], "%d"), cell(pct[k], "%.1f"), cell(wps[k], "%.1f"), pe
     }
 }' "$MAIN/results.tsv"
 

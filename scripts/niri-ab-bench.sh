@@ -38,10 +38,15 @@
 #
 # Every number is raw and per round, in $OUT/results.tsv, $OUT/memory.tsv,
 # $OUT/startup.tsv and $OUT/shots.tsv; scripts/niri-ab/summarize.sh reduces
-# them. CPU is summed over every thread (/proc/PID/task/*/schedstat, ns) and
-# cross-checked against /proc/PID/stat's utime+stime, which also keeps the
-# time of threads that exited mid-scene. "Wakeups" is the summed schedstat
-# run count: how many times any thread of the compositor was put on a CPU.
+# them. CPU is recorded two ways. cpu_ns sums the schedstat of every thread
+# alive at *both* ends of the scene (/proc/PID/task/*/schedstat), so it
+# misses any thread that started and exited inside it. cpu_jiffies is
+# /proc/PID/stat's utime+stime, the process total, which keeps exited
+# threads' time but only at 10 ms resolution. Where they disagree, the
+# process total is the truth: niri encodes each IPC screenshot on a
+# short-lived thread, and cpu_ns misses 19-23% of that scene. "Wakeups" is
+# the summed schedstat run count of the same surviving threads, so it
+# undercounts in exactly the same places.
 #
 # DIAG=1 runs the same thing with WAYLAND_DEBUG=server on the host, and from
 # the host's protocol log records how many frames (commits of the nested
@@ -81,6 +86,8 @@ DIAG=${DIAG:-0}
 # answers IPC, and the scenes' own clients are deliberately not wrapped in
 # `timeout`: an extra process per event would change what they measure.)
 SESSION_TIMEOUT=${SESSION_TIMEOUT:-300}
+# niri's own default (niri=debug) plus Smithay's renderer at info.
+NIRI_LOG=niri=debug,smithay::backend::renderer::gles=info
 # The host's renderer. pixman (the default) is what the dev VM results use;
 # on a machine with a real GPU, gles2 gives the host linux-dmabuf, which is
 # what lets niri's winit backend (and a gpu-scanout scoot's dma-buf
@@ -223,8 +230,10 @@ run_session() { # round variant
     case $v in
         scoot-pixman) kind=scoot; cmd="$SCOOT --nested --width $WIDTH --height $HEIGHT --socket $dir/ipc.sock" ;;
         scoot-gles) kind=scoot; cmd="$SCOOT --nested --renderer gles --width $WIDTH --height $HEIGHT --socket $dir/ipc.sock" ;;
-        niri-off) kind=niri; cmd="$NIRI -c $NIRI_CONF_OFF" ;;
-        niri-on) kind=niri; cmd="$NIRI -c $NIRI_CONF_ON" ;;
+        # niri's default log filter hides Smithay's "GL Renderer" line, which
+        # is the only record of which driver it actually rendered with.
+        niri-off) kind=niri; cmd="env RUST_LOG=$NIRI_LOG $NIRI -c $NIRI_CONF_OFF" ;;
+        niri-on) kind=niri; cmd="env RUST_LOG=$NIRI_LOG $NIRI -c $NIRI_CONF_ON" ;;
         *) die "unknown variant $v" ;;
     esac
     echo "== round $round: $v"

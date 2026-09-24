@@ -712,7 +712,7 @@ capture-cursor → resize-in-place → syncobj → nested dmabuf → VRR.
 - [`--nested` confirms a lock before the host shows it](./core/nested-lock-confirm-on-present.md) — low: `locked` goes out when the blanked frame is drawn, and a nested frame may be skipped or owed before the host has it (more often since PR #235); a fix needs a bounded wait like `--tty`'s.
 
 ### Found by the niri A/B (2026-09-24)
-- [GLES captures keep a whole frame each while nothing redraws](./core/gles-capture-leaks-a-frame-per-shot.md) — high: under `--renderer gles`, every `scootctl screenshot` or `grim` capture of a static screen grows scoot by one frame (6.25 MB at 1600x1000, linear, 885 MB after 120 captures on the dev VM). Once frames are drawn, further captures stop growing it, but RSS stays near its high-water mark. Smithay defers the read-back PBO's deletion to `GlesRenderer::cleanup()`, which only the render path calls. pixman is not affected.
+- [GLES captures keep a whole frame each while nothing redraws](./core/gles-capture-leaks-a-frame-per-shot.md) — high: under `--renderer gles`, every `scootctl screenshot` or `grim` capture of a static screen grows scoot by one frame (6,250 kB at 1600x1000, linear, 885 MB after 120 captures on the dev VM). Once frames are drawn, further captures stop growing it, but RSS stays near its high-water mark. Smithay defers the read-back PBO's deletion to `GlesRenderer::cleanup()`, which only the render path calls. pixman is not affected.
 - [Nested scoot presents fewer frames than niri for a ~60 Hz client](./core/nested-frame-rate-vs-client.md) — low: 49.8 frames/s (pixman, 12% of a core) against niri's 54.1 for a `foot` printing every ~16 ms; looks like pacing, not cost. Not investigated.
 
 ### Meta

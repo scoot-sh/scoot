@@ -34,9 +34,10 @@ each compositor gives you.
 - **Without a GPU,** niri's only option is software GLES, and scoot's
   default pixman renderer is far cheaper than that. Here, scoot spent 1.9–2.5
   ms of CPU per presented frame against niri's 14–16 ms. At rest with three
-  terminals it used 49 MB RSS against niri's 185 MB, committed its first frame
-  to the host 27 ms after starting against niri's 113 ms, and idled with no wakeups at all
-  against niri's ~3 a second (which is already negligible).
+  terminals it used 49 MB RSS against niri's 185 MB, committed its first
+  frame to the host 27 ms after starting against niri's 113 ms, and idled
+  with no wakeups at all against niri's ~3 a second (which is already
+  negligible).
 - **On the same GL stack (scoot `--renderer gles` against niri, both on
   llvmpipe), niri is the more efficient renderer.** A frame cost 14.2 ms in
   niri against 20.5 ms in scoot during relayout, and 14.8 ms against 18.4 ms
@@ -49,17 +50,22 @@ each compositor gives you.
   bounded under the same captures.
 - **Part of scoot's lower totals comes from doing less work, not doing
   the same work more cheaply.** Nested, scoot draws no pointer of its own
-  (the host draws the host's pointer), while niri composites its pointer into
-  every frame. At 594 frames of about 16.2 ms, that is nearly all of the
-pointer row's gap. During
-  a relayout storm, niri also presented about three frames per action where
-  scoot presented one.
+  (the host draws the host's pointer), while niri composites its pointer
+  into every frame. While the pointer moved, niri presented 56.5 frames a
+  second at 16.2 ms of CPU each, in line with the 14–15 ms its relayout and
+  animation frames cost, so that row is niri re-rendering its output rather
+  than handling input. During a relayout storm niri presented 59.3 frames a
+  second, which is the host's 60 Hz cap: that is about three per action,
+  but it may simply be every frame the host offered. scoot presented one
+  per action.
 - **Screenshots:** through each compositor's own IPC, a scoot capture took
-  11 ms of wall time and 8 ms of compositor CPU, against niri's 34 ms and 35
-  ms. niri's figure includes putting the image on the clipboard, and it
-  writes a PNG a third the size. **Through `grim`, niri was faster** (43 ms
-  against 56 ms). scoot parks a `grim` capture until its next frame tick by
-  design, although it spent less CPU on the capture (4 ms against 31 ms).
+  11 ms of wall time and 9 ms of compositor CPU, against niri's 34 ms and
+  44 ms. niri's path does more: it also puts the image on the clipboard and
+  tries to show a desktop notification, and it writes a PNG a third the
+  size. **Through `grim`, niri was faster** (43 ms against 56 ms), although
+  scoot spent less CPU on the capture (4 ms against 30–32 ms). scoot holds
+  a `grim` capture until its next frame tick by design, which probably
+  explains the gap, but that was not measured.
 
 ### What ran
 
@@ -67,10 +73,10 @@ pointer row's gap. During
 |---|---|
 | Machine | the dev VM (`vm/`): NixOS aarch64 under QEMU on an Apple-silicon Mac, 4 vCPUs, 3.9 GB RAM, kernel 6.18.50, virtio-gpu with no 3D |
 | scoot | `main` at `fe41921`, `cargo build --release -p scoot -p scootctl` under the repo's own release profile (fat LTO, `codegen-units = 1`), built on the VM with `CARGO_BUILD_JOBS=1`, peak RSS 1.66 GB. Binary sha256 `e6e30f71…dbc65`, 5,854,232 bytes. |
-| niri | 26.04 from nixpkgs (`/nix/store/ww71z668r7kprqxwncl8xhsyjg6sxgr7-niri-26.04`), built by nixpkgs under its own profile |
+| niri | 26.04 from nixpkgs (`/nix/store/ww71z668r7kprqxwncl8xhsyjg6sxgr7-niri-26.04`), built by nixpkgs from niri's own release profile (thin LTO, `overflow-checks = true`, line-table debuginfo; see the caveats) |
 | Host | cage 0.3.1 (wlroots), headless backend, **pixman** renderer, run with `-d` (see below), one 1600x1000 output at scale 1 and 60 Hz |
 | Clients | foot 1.28.0 with an empty config, grim 1.5.0 |
-| GLES | Mesa 26.2.2 llvmpipe (LLVM 21.1.8) for niri and for scoot `--renderer gles` alike, as each one's own log reports |
+| GLES | Mesa 26.2.2 llvmpipe (LLVM 21.1.8). scoot-gles's log names it. niri's logs from these runs do not: niri's default log filter hides Smithay's "GL Renderer" line. llvmpipe is inferred for niri because the VM has no other GL driver (its EGL probe of virtio-gpu fails, and a later niri run with the renderer logged named llvmpipe). The harness now logs it for niri too. |
 
 The four variants alternated in a rotating order for three rounds (ABCD,
 BCDA, CDAB), each in a fresh session:
@@ -109,41 +115,57 @@ down, so none of the CPU numbers come from that pass.
 ### Results
 
 Every cell is the median of three rounds, with the range across rounds in
-brackets. "cpu" is the compositor process's on-CPU time, summed over all of
-its threads from `/proc/PID/task/*/schedstat` and cross-checked against
-`/proc/PID/stat`. "Wakeups" counts how many times any of its threads was put
-on a CPU. Neither figure includes the clients, the IPC client processes or
-the host. "Frames" are the compositor's own commits to the host, from the
-DIAG pass.
+brackets. CPU is the compositor process's on-CPU time, recorded two ways.
+"cpu ms" sums `/proc/PID/task/*/schedstat` over the threads alive at both
+ends of the scene, which gives ns precision but misses any thread that
+started and exited inside it. "process ms" is `/proc/PID/stat`'s
+utime+stime, the process total, in 10 ms ticks, and it keeps exited
+threads' time. The two agree within a tick in every row except niri's own
+IPC screenshots, where niri encodes each PNG on a short-lived thread and
+"cpu ms" misses 19–23% of the total (marked † below; trust "process ms"
+there).
+"Wakeups" counts how many times any surviving thread was put on a CPU, so it
+undercounts in the same place. None of these figures include the clients,
+the IPC client processes or the host. "Frames" are the compositor's own
+commits to the host, from the DIAG pass.
 
 #### CPU per scene
 
-| scene | variant | cpu ms | cpu % of a core | wakeups/s | µs per event | frames/s (DIAG) |
-|---|---|---|---|---|---|---|
-| idle (20 s) | scoot-pixman | 0.0 [0.0–0.0] | 0.0 | 0.0 [0.0–0.0] | – | 0 |
-| | scoot-gles | 0.0 [0.0–0.0] | 0.0 | 0.0 [0.0–0.0] | – | 0 |
-| | niri-off | 6.9 [6.9–6.9] | 0.0 | 3.1 [3.1–3.1] | – | 0 |
-| | niri-on | 6.8 [6.6–6.9] | 0.0 | 3.1 [3.1–3.1] | – | 0 |
-| pointer (1200 events) | scoot-pixman | 82.8 [82.2–84.3] | 0.8 | 228 [228–228] | 69 [68–70] | 0 |
-| | scoot-gles | 93.8 [91.9–96.8] | 0.9 | 229 [228–229] | 78 [77–81] | 0 |
-| | niri-off | 9625 [9577–9628] | 91.5 | 1586 [1584–1594] | 8021 [7980–8023] | 56.5 |
-| | niri-on | 9664 [9568–9736] | 91.9 | 1589 [1588–1591] | 8053 [7973–8114] | 56.7 |
-| relayout (200 actions) | scoot-pixman | 375 [370–379] | 3.7 | 95 [94–95] | 1875 [1850–1895] | 20.0 |
-| | scoot-gles | 4119 [4104–4213] | 41.1 | 522 [521–522] | 20595 [20521–21065] | 20.1 |
-| | niri-off | 8454 [8407–8496] | 84.2 | 1633 [1615–1640] | 42484 [42248–42694] | 59.3 |
-| | niri-on | 8520 [8380–8562] | 85.0 | 1949 [1947–1955] | 43025 [42322–43032] | 59.3 |
-| shot-ipc (10) | scoot-pixman | 83.3 [82.1–86.5] | 3.7 | 22 [22–23] | 8332 [8207–8645] | 0 |
-| | scoot-gles | 59.8 [58.3–59.9] | 2.7 | 18 [18–18] | 5977 [5835–5987] | 0 |
-| | niri-off | 352 [342–360] | 14.3 | 133 [130–136] | 35200 [34175–35961] | 0 |
-| | niri-on | 349 [347–361] | 14.2 | 133 [128–134] | 34921 [34695–36122] | 0 |
-| shot-grim (10) | scoot-pixman | 41.5 [40.5–41.9] | 1.6 | 26 [26–26] | 4146 [4050–4193] | 0 |
-| | scoot-gles | 47.1 [44.7–48.6] | 1.8 | 26 [26–26] | 4708 [4471–4860] | 0 |
-| | niri-off | 314 [311–314] | 12.4 | 112 [105–115] | 31389 [31121–31428] | 0 |
-| | niri-on | 299 [296–315] | 11.9 | 110 [108–113] | 29911 [29578–31464] | 0 |
-| animate (10 s) | scoot-pixman | 1226 [1215–1263] | 12.2 | 151 [151–151] | – | 49.8 |
-| | scoot-gles | 7892 [7753–7893] | 78.8 | 1010 [1002–1021] | – | 43.0 |
-| | niri-off | 8020 [7935–8051] | 80.1 | 1688 [1686–1693] | – | 54.1 |
-| | niri-on | 8030 [8029–8038] | 80.2 | 1684 [1681–1690] | – | 54.1 |
+| scene | variant | cpu ms | process ms | cpu % of a core | wakeups/s | µs per event | frames/s (DIAG) |
+|---|---|---|---|---|---|---|---|
+| idle (20 s) | scoot-pixman | 0.0 [0.0–0.0] | 0 | 0.0 | 0.0 [0.0–0.0] | – | 0 |
+| | scoot-gles | 0.0 [0.0–0.0] | 0 | 0.0 | 0.0 [0.0–0.0] | – | 0 |
+| | niri-off | 6.9 [6.9–6.9] | 10 [10–10] | 0.0 | 3.1 [3.1–3.1] | – | 0 |
+| | niri-on | 6.8 [6.6–6.9] | 10 [10–20] | 0.0 | 3.1 [3.1–3.1] | – | 0 |
+| pointer (1200 events) | scoot-pixman | 82.8 [82.2–84.3] | 80 [70–90] | 0.8 | 228 [228–228] | 69 [68–70] | 0 |
+| | scoot-gles | 93.8 [91.9–96.8] | 100 [100–100] | 0.9 | 229 [228–229] | 78 [77–81] | 0 |
+| | niri-off | 9625 [9577–9628] | 9630 [9580–9630] | 91.5 | 1586 [1584–1594] | 8021 [7980–8023] | 56.5 |
+| | niri-on | 9664 [9568–9736] | 9660 [9560–9740] | 91.9 | 1589 [1588–1591] | 8053 [7973–8114] | 56.7 |
+| relayout (200 actions) | scoot-pixman | 375 [370–379] | 380 [360–380] | 3.7 | 95 [94–95] | 1875 [1850–1895] | 20.0 |
+| | scoot-gles | 4119 [4104–4213] | 4110 [4100–4220] | 41.1 | 522 [521–522] | 20595 [20521–21065] | 20.1 |
+| | niri-off | 8454 [8407–8496] | 8450 [8400–8490] | 84.2 | 1633 [1615–1640] | 42484 [42248–42694] | 59.3 |
+| | niri-on | 8520 [8380–8562] | 8520 [8380–8570] | 85.0 | 1949 [1947–1955] | 43025 [42322–43032] | 59.3 |
+| shot-ipc (10) | scoot-pixman | 83.3 [82.1–86.5] | 90 [90–90] | 3.7 | 22 [22–23] | 8332 [8207–8645] | 0 |
+| | scoot-gles | 59.8 [58.3–59.9] | 60 [50–60] | 2.7 | 18 [18–18] | 5977 [5835–5987] | 0 |
+| | niri-off | 352 [342–360] † | **440 [420–450]** | 17.9 (process) | 133 [130–136] † | **44000** (process) | 0 |
+| | niri-on | 349 [347–361] † | **440 [440–450]** | 17.9 (process) | 133 [128–134] † | **44000** (process) | 0 |
+| shot-grim (10) | scoot-pixman | 41.5 [40.5–41.9] | 40 [30–40] | 1.6 | 26 [26–26] | 4146 [4050–4193] | 0 |
+| | scoot-gles | 47.1 [44.7–48.6] | 50 [40–50] | 1.8 | 26 [26–26] | 4708 [4471–4860] | 0 |
+| | niri-off | 314 [311–314] | 320 [310–320] | 12.4 | 112 [105–115] | 31389 [31121–31428] | 0 |
+| | niri-on | 299 [296–315] | 300 [290–310] | 11.9 | 110 [108–113] | 29911 [29578–31464] | 0 |
+| animate (10 s) | scoot-pixman | 1226 [1215–1263] | 1230 [1210–1270] | 12.2 | 151 [151–151] | – | 49.8 |
+| | scoot-gles | 7892 [7753–7893] | 7880 [7750–7890] | 78.8 | 1010 [1002–1021] | – | 43.0 |
+| | niri-off | 8020 [7935–8051] | 8020 [7920–8060] | 80.1 | 1688 [1686–1693] | – | 54.1 |
+| | niri-on | 8030 [8029–8038] | 8030 [8020–8040] | 80.2 | 1684 [1681–1690] | – | 54.1 |
+
+† **Understated.** niri 26.04 encodes and writes each IPC screenshot on a
+thread it spawns for the job, which has exited by the time the scene is
+sampled, so "cpu ms" and "wakeups" leave that thread's work out. The
+process total is 23–27% higher in all six niri sessions (niri-off
+342/352/360 ms by threads against 420/440/450 ms by process; niri-on
+361/347/349 against 450/440/440). Use "process ms". Wakeups have no process
+total, so the true count is higher by an unknown amount. Every scoot row,
+and every other niri row, agrees with its process total within a tick.
 
 #### CPU per presented frame
 
@@ -159,37 +181,41 @@ figure.
 
 #### Memory
 
-`/proc/PID/smaps_rollup`, in MB (the raw kB values are in the evidence).
-Rss / Pss, with Pss split into anonymous and file-backed. Medians of three
-rounds; every range was within 0.2 MB except where one is shown.
+`/proc/PID/smaps_rollup`, in MB (kB / 1000; the raw kB values are in the
+evidence). Pss is split three ways: anonymous, file-backed, and shared
+memory (Pss − anon − file, derived per round). For the scoot-pixman row
+that last part is the largest: the clients' `wl_shm` buffers, which the
+compositor maps. Medians of three rounds; a range is shown wherever the
+three rounds were more than 0.2 MB apart.
 
-| when | variant | Rss | Pss | Pss anon | Pss file | threads |
-|---|---|---|---|---|---|---|
-| empty session | scoot-pixman | 29.1 | 26.0 | 13.9 | 5.9 | 1 |
-| | scoot-gles | 122.5 | 118.9 | 39.9 | 72.7 | 10 |
-| | niri-off | 165.5 | 142.9 | 54.7 | 75.7 | 16 |
-| | niri-on | 165.5 | 142.9 | 54.7 | 75.7 | 16 |
-| three `foot`s | scoot-pixman | 48.8 | 38.6 | 14.0 | 5.8 | 1 |
-| | scoot-gles | 148.8 | 140.9 | 52.8 | 72.3 | 10 |
-| | niri-off | 185.3 | 155.5 | 63.7 | 74.4 | 16 |
-| | niri-on | 185.6 | 155.8 | 64.1 | 74.4 | 16 |
-| after 20 screenshots | scoot-pixman | 61.7 | 48.3 | 20.4 | 5.9 | 3 |
-| | scoot-gles | **283.6** | 274.0 | **184.2** | 72.4 | 12 |
-| | niri-off | 217.9 [205.4–218.0] | 205.9 | 89.6 | 92.6 | 17 |
-| | niri-on | 212.9 | 201.0 | 84.7 | 92.6 | 17 |
-| end (after animate) | scoot-pixman | 68.0 | 51.4 | 20.4 | 5.8 | 3 |
-| | scoot-gles | 289.8 | 277.0 | 184.2 | 72.3 | 12 |
-| | niri-off | 208.6 [208.6–214.7] | 193.4 | 74.1 | 92.4 | 17 |
-| | niri-on | 219.2 | 203.9 | 84.7 | 92.3 | 17 |
+| when | variant | Rss | Pss | Pss anon | Pss file | Pss shmem | threads |
+|---|---|---|---|---|---|---|---|
+| empty session | scoot-pixman | 29.1 | 26.0 | 13.9 | 5.9 | 6.3 | 1 |
+| | scoot-gles | 122.5 | 118.9 | 39.9 | 72.7 | 6.3 | 10 |
+| | niri-off | 165.5 | 142.9 | 54.7 | 75.7 | 12.5 | 16 |
+| | niri-on | 165.5 | 142.9 | 54.7 | 75.7 | 12.5 | 16 |
+| three `foot`s | scoot-pixman | 48.8 | 38.6 | 14.0 | 5.8 | 18.8 | 1 |
+| | scoot-gles | 148.8 | 140.9 | 52.8 | 72.3 | 15.8 | 10 |
+| | niri-off | 185.3 | 155.5 | 63.7 [63.6–63.8] | 74.4 | 17.4 | 16 |
+| | niri-on | 185.6 | 155.8 | 64.1 | 74.3 | 17.4 | 16 |
+| after 20 screenshots | scoot-pixman | 61.7 | 48.3 | 20.4 | 5.9 | 22.0 | 3 |
+| | scoot-gles | **283.6** | 274.0 | **184.2** | 72.4 | 17.4 | 12 |
+| | niri-off | 217.9 [205.4–218.0] | 205.9 [193.5–206.1] | 89.6 [77.2–89.8] | 92.6 | 23.7 | 17 |
+| | niri-on | 212.9 | 201.0 | 84.7 | 92.6 | 23.7 | 17 |
+| end (after animate) | scoot-pixman | 68.0 | 51.4 | 20.4 | 5.8 | 25.2 | 3 |
+| | scoot-gles | 289.8 | 277.0 | 184.2 | 72.3 | 20.6 | 12 |
+| | niri-off | 208.6 [208.6–214.7] | 193.4 [193.2–199.4] | 74.1 [74.0–80.2] | 92.4 | 26.8 | 17 |
+| | niri-on | 219.2 | 203.9 | 84.7 | 92.3 | 26.8 | 17 |
 
-About 72–75 MB of both scoot-gles's and niri's Pss is file-backed Mesa and
-LLVM. Compare those two when you want a like-for-like GL stack; pixman
-against niri is the comparison for a machine without a GPU. The
-scoot-gles jump after screenshots is the leak described above. A probe on
-its own shows it linear and unbounded: 6.25 MB per capture, reaching 885 MB
-after 120 captures of a still screen. Drawing frames afterwards did not
-bring RSS back down (compare the "end" row). It did stop further captures
-from growing it. The ticket records the details, one of which is still
+At rest, about 72–76 MB of both scoot-gles's and niri's Pss is
+file-backed Mesa and LLVM. Compare those two when you want a like-for-like
+GL stack; pixman against niri is the comparison for a machine without a
+GPU. The scoot-gles jump after screenshots is the leak described above. A
+probe on its own shows it linear and unbounded: 6,250 kB (one 1600x1000
+frame) per capture, reaching 885 MB after 120 captures of a still screen.
+Drawing frames afterwards did not bring RSS back down (compare the "end"
+row), though it did stop further captures from growing it. The ticket
+records the details, including release behaviour that is still
 unexplained.
 
 #### Startup
@@ -238,26 +264,43 @@ and the X11 client libraries. Its runtime closure in the Nix store is 738 MB.
   callbacks.
 - **The pointer row compares different work.** Nested, niri composites its
   own pointer into every frame (56.5 frames a second while it moves). scoot
-  `--nested` draws no pointer at all; the host shows its own. So 9.6 s
-  against 83 ms is niri re-rendering its output 57 times a second against
-  scoot only dispatching input. It does not mean niri's input handling costs
-  100x. On a real session both draw a pointer.
+  `--nested` draws no pointer at all; the host shows its own. Each of those
+  niri frames cost 16.2 ms of CPU, in line with the 14–15 ms of its relayout
+  and animation frames, so 9.6 s against 83 ms is niri re-rendering its
+  output 57 times a second against scoot only dispatching input. It does not
+  mean niri's input handling costs 100x. On a real session both draw a
+  pointer.
 - **Relayout goes through two different IPC clients**, `scootctl action
   focus-column left` against `niri msg action focus-column-left`. Their own
   CPU is not counted, but they differ: in a separate probe, one `niri msg
   action` invocation took 16.3 ms end to end (about one frame) against
   0.5 ms for `scootctl action`. Both kept the 20-a-second
-  pace (niri 198–199 of 200, scoot 200). niri presented about three frames
-  per action and scoot one, which shows in the per-action column. The
-  per-frame table removes that difference.
-- **The screenshot paths are not the same work.** niri's also puts the image
-  on the clipboard, answers before the file is written, and compresses
-  harder: its PNG is 11.8 kB against scoot's 40.5 kB. Latency is therefore
-  measured to a complete PNG on disk, polled every 1 ms. For `grim`, scoot
-  speaks ext-image-copy-capture and niri wlr-screencopy. scoot deliberately
-  parks each capture until its next frame tick (see the module doc of
-  `crates/scoot/src/compositor/screencopy.rs`), which accounts for most of
-  its extra `grim` latency.
+  pace (niri 198–199 of 200, scoot 200). niri presented 59.3 frames a second
+  during the storm, which is the host's 60 Hz cap: that is about three per
+  action, but it may just be niri drawing every frame the host offered while
+  anything was changing. scoot presented one per action. The per-action
+  column carries that difference. The per-frame table normalises for it,
+  but a cap-bound frame count is not the same thing as a count of the frames
+  the workload needed.
+- **The screenshot paths are not the same work.** niri's also puts the
+  image on the clipboard and tries to show a desktop notification over
+  D-Bus. There is no notification daemon on the VM, so each attempt failed
+  (`ServiceUnknown` in niri's log), but it still cost time. niri also
+  answers before the file is written, and compresses harder: its PNG is
+  11.8 kB against scoot's 40.5 kB. niri's latency is therefore timed to a
+  complete PNG on disk through a shell polling loop (`tail`, `grep` and
+  `sleep 0.001` per check). That loop is coarser than the 1 ms sleep
+  suggests, and it adds to niri's numbers. scoot's are timed to
+  `scootctl`'s exit, after it has written the file. For `grim`, scoot speaks
+  ext-image-copy-capture and niri wlr-screencopy. scoot deliberately holds
+  each capture until its next frame tick (see the module doc of
+  `crates/scoot/src/compositor/screencopy.rs`). That is the likely cause of
+  its extra `grim` latency, but it was not measured.
+- **The two builds use different release profiles.** scoot's is fat LTO
+  with `codegen-units = 1`. niri's (its `Cargo.toml` at v26.04) is thin LTO
+  with `overflow-checks = true` and line-table debuginfo, which trades some
+  speed for safety and backtraces. Some of niri's per-frame CPU may be that
+  profile rather than its design; this benchmark cannot separate the two.
 - **The configs are as close as niri allows, not identical.** niri's ring
   is its `border`, which is a different implementation from scoot's ring:
   niri's takes its width out of the layout, while scoot draws its ring in the
@@ -313,15 +356,26 @@ The evidence for the run above is on the dev VM under `~/evidence/niri-ab/`:
 - `summary.md`: the tables above, before rounding;
 - `versions.tsv` in each run directory;
 - `scripts-used/`: the exact scripts, with their sha256.
-  `bench-script-after-runs.diff` holds every change made to the benchmark
-  script since the run: a per-session watchdog, `timeout` on the calls that
-  spawn clients and count windows, and each session directory recreated
-  from scratch (a re-run into the same `OUT` used to read the previous run's
-  pid). Neither the measured calls nor the startup poll changed. The pointer helper has changed
+  `bench-script-after-runs.diff` holds the changes made to the benchmark
+  script up to the PR's first review: a per-session watchdog, `timeout` on
+  the calls that spawn clients and count windows, and each session
+  directory recreated from scratch (a re-run into the same `OUT` used to
+  read the previous run's pid). The review then added one functional change,
+  visible in git history: niri now runs with
+  `RUST_LOG=niri=debug,smithay::backend::renderer::gles=info` (niri's own
+  default filter plus Smithay's renderer at info), so that its log names its
+  GL renderer. That adds a handful of startup lines. Neither the measured
+  calls nor the startup poll changed. The pointer helper has changed
   only by a clippy fix since (`events % 2 == 0` became
   `events.is_multiple_of(2)`);
 - `static-facts.txt`: sizes and `ldd`;
 - `cage-host-wayland-info.txt`: the host's globals;
 - the `probe-*.txt` files behind the leak, the IPC client costs and the 9p
   artifact;
+- `verify-sample-sh.txt`: `sample.sh`'s `session` mode run from inside
+  both nested compositors. It was produced by a version of `sample.sh`
+  between the one in `scripts-used/` (older) and the committed one, and
+  that exact version was not recorded. `verify-sample-sh-proc-cpu.txt` is
+  the committed version's `proc_cpu_ms` column (the process total) against
+  niri's screenshot thread: 140 ms against 88 ms by surviving threads;
 - `superseded-9p-config/`: the discarded first run.

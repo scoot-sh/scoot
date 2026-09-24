@@ -1069,7 +1069,10 @@ scripts/niri-ab/summarize.sh /tmp/fx/t9a /tmp/fx/t9a-diag > /tmp/fx/t9a.md
 Check each of these before trusting any row:
 
 - `grep -h "GL Renderer" /tmp/fx/t9a/r1-*/inner.log` names the AGX, not
-  `llvmpipe`, for niri and for scoot-gles.
+  `llvmpipe`, for niri and for scoot-gles. Each should have one line. niri's
+  default log filter hides this line, so the script runs niri with
+  `RUST_LOG=niri=debug,smithay::backend::renderer::gles=info`. A niri log
+  without the line means the filter was lost, not that nothing rendered.
 - `grep -h "presenting to the host" /tmp/fx/t9a-gpu/r1-*/inner.log` says
   `by dma-buf`. `by read-back` means Test 8's path did not come up, so read
   its reason.
@@ -1095,13 +1098,22 @@ twice each: scoot (dumb + pixman), niri, scoot-gpu `--renderer gles`, niri,
 and so on.
 
 ```sh
-# the benchmark's niri config binds no keys, so start its foot from the config
-{ cat scripts/niri-ab/niri-anim-off.kdl; echo 'spawn-at-startup "foot"'; } > /tmp/fx/niri-t9.kdl
+# the benchmark's niri config binds no keys, so start its foot from the config;
+# and keep niri from starting xwayland-satellite (see below)
+{ cat scripts/niri-ab/niri-anim-off.kdl; echo 'spawn-at-startup "foot"'
+  printf 'xwayland-satellite {\n    off\n}\n'; } > /tmp/fx/niri-t9.kdl
 # on a spare VT, one of:
 ./result/bin/scoot --tty -- foot
 ./result-scoot-gpu/bin/scoot --tty --renderer gles -- foot
-/tmp/fx/niri/bin/niri -c /tmp/fx/niri-t9.kdl
+RUST_LOG=niri=debug,smithay::backend::renderer::gles=info \
+    /tmp/fx/niri/bin/niri -c /tmp/fx/niri-t9.kdl 2>/tmp/fx/t9b-niri.log
 ```
+
+If `xwayland-satellite` is on your `PATH`, niri starts it as a separate
+process, and `sample.sh` measures niri's process only, so that CPU would go
+uncounted. The `xwayland-satellite { off }` block above stops niri from
+starting it. Check with `pgrep -a xwayland-satellite` before measuring. scoot
+is measured without `--xwayland` for the same reason.
 
 Open two more `foot`s so that three columns exist: `Super+Return` in scoot,
 `niri msg action spawn -- foot` in niri. Put `$PWD/result-scootctl/bin` on
@@ -1112,6 +1124,10 @@ your live session too.
 
 ```sh
 S=scripts/niri-ab/sample.sh; O=/tmp/fx/t9b.tsv
+# columns: label comm wall_s proc_cpu_ms cpu_ns wakeups threads rss_kb pss_kb.
+# Compare proc_cpu_ms (the process total). cpu_ns misses threads that exit
+# inside the window, and niri encodes every screenshot on one: on the dev VM
+# cpu_ns missed 19-23% of niri's screenshot CPU (docs/benchmarks.md).
 $S session 20 idle >> $O
 # relayout, through the compositor's own IPC (use the scoot or the niri line)
 $S session 10 relayout -- sh -c 'while :; do scootctl action focus-column left; sleep 0.05; scootctl action focus-column right; sleep 0.05; done' >> $O

@@ -15,7 +15,9 @@ Found 2026-09-24 by the scoot/niri A/B (`docs/benchmarks.md`), on the dev VM
 ## What happens
 
 Each screenshot taken while nothing on screen is redrawing grows scoot's
-memory by **6.25 MB**, which is one 1600x1000 ARGB frame (6.4 MB). The growth
+memory by **6,250 kB** (6.4 MB decimal), which is one 1600x1000 ARGB frame:
+6,400,000 bytes, or 6,250 KiB. The two figures are the same size in
+different units. The growth
 is linear and does not stop. Both capture paths do it: `scootctl
 screenshot` and `grim` (ext-image-copy-capture). pixman and niri stayed
 bounded under the same sequence
@@ -46,9 +48,12 @@ observed:
 - **After frames had been drawn, further captures stopped growing.** That
   was 20 captures during the animation, and 10 captures after the foot in
   the table above mapped.
-- **Mapping a new window dropped RSS** from 885 MB to 383 MB, which is the
-  table's `one foot mapped` line. Why that event released memory when
-  ordinary frames did not is unexplained.
+- **Mapping a new window dropped RSS once, but not always.** In the table
+  above, mapping a foot took RSS from 885 MB to 383 MB (`one foot mapped`).
+  In `probe-memory-growth.txt`, mapping the animation's foot did the
+  opposite, taking RSS from 461.6 MB to 467.9 MB (`after 20 grim shots` to
+  `anim +2s`). Neither is explained, and the one drop should not be read as
+  a release mechanism.
 
 These fit the mechanism below if RSS keeps its high-water mark
 (the allocator retains freed memory for reuse and rarely returns it). On
