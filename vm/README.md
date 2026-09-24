@@ -341,6 +341,15 @@ is more robust (picks up any custom/corporate root CAs the Keychain has, and
 doesn't depend on that fallback behavior persisting across future Nix
 updates).
 
+**`nix build` fails with `error adding trust anchors from file:
+/etc/ssl/certs/ca-certificates.crt`.** That is a `nix build` run *inside* the
+builder VM (over ssh), where it downloads for itself with no CA setup. Don't
+build there: run `nix build .#scoot .#scoot-gpu` on the Mac from a shell with
+`NIX_SSL_CERT_FILE` exported (above). The daemon hands the build to the
+builder and does the downloading itself. No builder restart is needed
+(2026-09-24: an agent read this error as needing a relaunch; a fresh Mac shell
+built both packages cleanly).
+
 **`nix run ./vm &` from an interactive shell gets "suspended (tty output)",
 then a second attempt fails with `Failed to get "write" lock ... Is another
 process using the image?`.** qemu is invoked with `-serial mon:stdio`, so it
