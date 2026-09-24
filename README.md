@@ -5,43 +5,46 @@ trailing motion lines](docs/assets/logo.png)
 
 [![CI](https://github.com/scoot-sh/scoot/actions/workflows/ci.yml/badge.svg)](https://github.com/scoot-sh/scoot/actions/workflows/ci.yml)
 
-A scrolling-tiling Wayland compositor, in the shape of
-[niri](https://github.com/YaLTeR/niri): lightweight, fast, GPU-optional, and
-built to be driven by a script or an agent as easily as by a keyboard.
+A scrolling-tiling Wayland compositor: windows sit in columns on a strip
+that scrolls sideways, a layout it owes to
+[niri](https://github.com/niri-wm/niri).
 
 ![Three scoot columns: htop, vim, and a file tree stacked above a shell
 querying the compositor over IPC](docs/assets/screenshot.png)
 
-Two things distinguish it from a typical compositor:
+Two needs drove scoot's creation:
 
-- **It runs with no GPU.** Rendering goes through
-  [pixman](http://pixman.org/) on the CPU, so it works headless and works in
-  a GPU-less container (the target is running inside
-  [webtop](https://github.com/linuxserver/docker-webtop)). A GLES renderer is
-  available opt-in (`--renderer gles`, and under `--tty` it scans out from
-  the GPU with a `gpu-scanout` build) but
-  pixman stays the default — see
-  [docs/tty.md](docs/tty.md#which-renderer-draws-the-frames) for what that
-  does and does not buy today.
-- **It's IPC-first.** Every action a keybind would trigger — focus, move,
-  resize, spawn, close — and every input a user could give — key presses,
-  pointer movement, clicks — is also a request on a Unix socket, alongside
-  screenshots and window/output introspection. The compositor itself is
-  driven the same way in its own end-to-end test
-  (`scripts/smoke-test.sh`). The intent is that an agent doing simple
-  computer-use tasks in a VM is a first-class client, not an afterthought
-  bolted on later. Because that socket can inject any keystroke, it is
-  treated as a privileged channel: it lives in `$XDG_RUNTIME_DIR` (override
-  with `$SCOOT_SOCKET`), is created `0600`, and serves only connections from
-  the same user as the compositor.
-
-**Already running niri?** Those two bullets are the whole reason to switch.
-niri is more complete; if you need neither a compositor that runs with no GPU
-at all nor one you can drive — synthetic key, pointer and text input included
-— from a script over a socket, stay where you are.
+- **Running with no GPU and no OpenGL.** scoot renders on the CPU with
+  [pixman](http://pixman.org/) by default, so it runs as a full `--tty`
+  session on a KMS display (one monitor for now), including VMs and machines
+  with no 3D acceleration; `--headless` with no display at all
+  (`--outputs N` for several virtual screens); or `--nested` inside another
+  compositor, including a GPU-less container such as
+  [webtop](https://github.com/linuxserver/docker-webtop). A GPU is optional,
+  not unwelcome: with one, an opt-in tier (`--renderer gles` from a
+  `gpu-scanout` build) scans out from it under `--tty`, using 4–5x less
+  CPU under load on an Apple M2 — see
+  [docs/tty.md](docs/tty.md#which-renderer-draws-the-frames).
+- **Being driven by an agent doing computer use.** One socket covers,
+  among other things, layout actions (`scootctl action`), key presses
+  (`key`), text typed correctly for the active keyboard layout (`type`),
+  absolute pointer moves and clicks (`pointer move`, `pointer click`), PNG
+  screenshots sent back on the socket with the pointer drawn in
+  (`screenshot`, `--no-cursor` to omit it), waiting until the screen
+  settles (`wait-idle`), and window and output queries (`windows`,
+  `outputs`) in which every window reports its rectangle in the same
+  coordinates `pointer click` takes. scoot's own end-to-end test drives it
+  this way. Because the socket can inject any keystroke, it lives in
+  `$XDG_RUNTIME_DIR` (override with `$SCOOT_SOCKET`), is created `0600`,
+  and serves only the compositor's own user. Reference:
+  [docs/ipc.md](docs/ipc.md).
 
 It is real enough to use: **confirmed working on Apple Silicon under Asahi
 Linux, and daily-driven on `--tty`** (2026-09-18).
+
+If scoot doesn't fit what you need, you should absolutely check out
+[niri](https://github.com/niri-wm/niri). It's awesome, and it's what
+inspired this project.
 
 ## Not yet
 
