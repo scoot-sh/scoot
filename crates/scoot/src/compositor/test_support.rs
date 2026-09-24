@@ -164,7 +164,7 @@ impl<S, A> Harness<S, A> {
     /// [`Harness::pixels`] would panic. For suites that assert on the wire, or
     /// that render offscreen themselves.
     pub(crate) fn bare(appearance: Appearance) -> Self {
-        Self::build(appearance, None, 1.0)
+        Self::build(appearance, None, 1.0, test_renderer())
     }
 
     /// A compositor with a real headless backend rendering into a
@@ -172,7 +172,16 @@ impl<S, A> Harness<S, A> {
     /// back with a real renderer -- `PixmanRenderer`, or `GlesRenderer`
     /// under `SCOOT_TEST_RENDERER=gles` (see [`test_renderer`]).
     pub(crate) fn headless(appearance: Appearance, canvas: i32) -> Self {
-        Self::build(appearance, Some(canvas), 1.0)
+        Self::build(appearance, Some(canvas), 1.0, test_renderer())
+    }
+
+    /// The same on a named renderer, whatever `SCOOT_TEST_RENDERER` says:
+    /// for a suite whose subject *is* one renderer's behaviour (a GLES
+    /// resize keeping its context), which has to be pinned in the default
+    /// run rather than only in a `gles` one. The renderer assertion in
+    /// `build` still guards it, so a fallback cannot pass for the one asked.
+    pub(crate) fn headless_on(appearance: Appearance, canvas: i32, renderer: RendererKind) -> Self {
+        Self::build(appearance, Some(canvas), 1.0, renderer)
     }
 
     /// The same at an output scale other than 1.0: the framebuffer stays
@@ -184,11 +193,15 @@ impl<S, A> Harness<S, A> {
     /// scale-1 buffers, exactly like a scale-unaware client on a real
     /// fractional session.
     pub(crate) fn headless_scaled(appearance: Appearance, canvas: i32, scale: f64) -> Self {
-        Self::build(appearance, Some(canvas), scale)
+        Self::build(appearance, Some(canvas), scale, test_renderer())
     }
 
-    fn build(appearance: Appearance, canvas: Option<i32>, scale: f64) -> Self {
-        let renderer = test_renderer();
+    fn build(
+        appearance: Appearance,
+        canvas: Option<i32>,
+        scale: f64,
+        renderer: RendererKind,
+    ) -> Self {
         let mut event_loop: EventLoop<'static, State> =
             EventLoop::try_new().expect("an event loop");
         let display: Display<State> = Display::new().expect("a wayland display");

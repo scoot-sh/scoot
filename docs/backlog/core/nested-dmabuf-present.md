@@ -35,7 +35,7 @@ attached directly.
   device must match (or the path is refused, with read-back).
 - A small swapchain (2–3 host buffers), released on `wl_buffer.release`,
   with damage passed through to `wl_surface.damage_buffer`.
-- Host resize interplay with [GLES resize in place](./gles-resize-in-place.md).
+- Host resize interplay with [GLES resize in place](../resolved/gles-resize-in-place-done.md).
 
 ## Evidence
 

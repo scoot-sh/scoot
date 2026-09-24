@@ -15,7 +15,7 @@ use smithay::utils::{Logical, Point, Transform};
 
 use super::State;
 use super::output_scale::smithay_scale;
-use super::render::{self, Backend, ScanoutHandoff};
+use super::render::{self, Backend, InPlace, ScanoutHandoff};
 use super::session_lock::LOCK_VBLANK_TIMEOUT;
 use super::tty::Tty;
 
@@ -800,20 +800,25 @@ impl State {
     /// size to get there -- it was never torn down -- which is why the
     /// restore cannot itself fail.
     ///
-    /// It rebuilds whichever renderer the session started with
-    /// (`State::renderer`), never a different one: a resize that silently
-    /// changed renderers would be a session quietly different from the one
-    /// that was asked for. Under `--renderer gles` that means a whole new
-    /// EGL context and shader set per resize, which is wasteful and correct.
-    /// What bounds it is the callers: `--tty`'s hotplug handler does not
-    /// reach here unless the connector's mode actually changed, and
-    /// `--nested` queues a configure's size and drains at most one per frame
-    /// tick (see `Host::drain_pending_resize`) -- so this runs once per
-    /// *drained* size, not once per event. A host window dragged to resize
-    /// still pays it per frame the drag spans while the size keeps moving,
-    /// which is the honest per-frame-budget cost; `--renderer gles` under
-    /// `--nested` is opt-in, and resizing a live GLES target in place
-    /// instead of rebuilding is the fix if that ever matters.
+    /// Under `--renderer gles` the target is reallocated in place, on the
+    /// renderer it already has ([`Backend::resize_in_place`]): the EGL
+    /// context, its shaders, every imported client texture and the EGL
+    /// device all stay. pixman rebuilds its whole backend, which costs
+    /// microseconds. Either way the renderer is the one the session started
+    /// with (`State::renderer`), never a different one: a resize that
+    /// silently changed renderers would be a session quietly different from
+    /// the one that was asked for. What bounds the rate is the callers:
+    /// `--tty`'s hotplug handler does not reach here unless the connector's
+    /// mode actually changed, and `--nested` queues a configure's size and
+    /// drains at most one per frame tick (see `Host::drain_pending_resize`)
+    /// -- so this runs once per *drained* size, not once per event.
+    ///
+    /// A size over what the GLES context can render into is refused as
+    /// above straight away. A GLES target that cannot be reallocated in
+    /// place for any other reason falls back to a whole new backend, pinned
+    /// to the session's EGL device like every rebuild (`State::gles_device`)
+    /// -- read while the old backend is still in `backends`, which is what
+    /// the pin is read off. Only if that fails too is the resize refused.
     pub fn resize_output(&mut self, width: i32, height: i32) -> bool {
         // Both halves in one read, so the `OutputChanged` below names the id
         // of the output that was actually resized without a second lookup
@@ -861,76 +866,115 @@ impl State {
                 backend.note_resized(width, height);
             }
         } else {
-            // Pinned to the session's GLES device (`State::gles_device`):
-            // a rebuild that could not build there fails into the arm below
-            // rather than moving to another device, whose driver may refuse
-            // the dma-buf layouts already advertised to clients.
-            match Backend::new(
-                &output,
-                width,
-                height,
-                self.renderer,
-                ScanoutHandoff::default(),
-                self.gles_device(),
-            ) {
-                Ok(backend) => {
-                    self.backends.insert(id, backend);
+            let in_place = match self.backends.get_mut(&id) {
+                Some(backend) => backend.resize_in_place(&output, width, height),
+                // No target to resize (only a test's backend-less output):
+                // build one, as before.
+                None => InPlace::Unsupported,
+            };
+            let resized = match in_place {
+                InPlace::Resized => {
+                    // debug!, per resize: the line that counts the sizes a
+                    // `--nested` drag actually applied, and says none of
+                    // them rebuilt the renderer.
+                    tracing::debug!(width, height, "resized the render target in place");
+                    Ok(())
                 }
-                Err(error) => {
-                    tracing::warn!(%error, "could not resize the render target");
-                    // Back to the mode that is actually being rendered. The
-                    // new one stays in `Output::modes` (that list only grows
-                    // -- see `output_management.rs`), and a client that was
-                    // told about it sees it become current and then current
-                    // again at the old size; what it does not see is a
-                    // current mode that disagrees with every frame it is
-                    // sent. `None` when there is no previous mode is the
-                    // never-resized-before case, which cannot reach here:
-                    // `init_named` sets one before any caller exists.
-                    if let Some(previous) = previous {
-                        set_mode(
-                            &output,
-                            previous.size.w,
-                            previous.size.h,
-                            None,
-                            self.output_scale,
+                // Refused outright, without the rebuild below: the limit is
+                // the device's, and the rebuild is pinned to the same
+                // device, so it would pay a new EGL display, context and
+                // shader set only to fail the same way. The refusal below is
+                // this path's one WARN.
+                InPlace::TooLarge((max_width, max_height)) => Err(format!(
+                    "{width}x{height} is larger than the GPU can render into \
+                     ({max_width}x{max_height})"
+                )
+                .into()),
+                InPlace::Unsupported | InPlace::Failed(_) => {
+                    if let InPlace::Failed(error) = in_place {
+                        // warn!: a GPU that will not allocate a target this
+                        // size is news, and the rebuild below is about to
+                        // pay a whole EGL context to try again.
+                        tracing::warn!(
+                            %error,
+                            width,
+                            height,
+                            "could not resize the render target in place; rebuilding it"
                         );
-                        // ...and the size that never rendered is taken back
-                        // out of `Output::modes`, so a client binding later
-                        // never hears about it and the next
-                        // `refresh_output_heads` does not mint a
-                        // `zwlr_output_mode_v1` for it. `set_mode` above
-                        // pushed it twice over (once via `set_preferred`,
-                        // once via `change_current_state`), and nothing
-                        // prunes that list on its own -- without this every
-                        // failed resize would leave a mode behind for the
-                        // life of the session, announced to whoever binds
-                        // next. Guarded on differing: a same-size call names
-                        // the mode that is still current and preferred, and
-                        // `delete_mode` clears both when they match.
-                        //
-                        // What this cannot take back is what an already-bound
-                        // `wl_output` client was told synchronously, before
-                        // the build failed: it saw the failed size become
-                        // current *and* preferred, then the old size become
-                        // current and preferred again, and `wl_output` has
-                        // no un-prefer and no mode withdrawal to unsay the
-                        // first half with. That transient is inherent to
-                        // advertising before building (see `set_mode`'s
-                        // caller order, which `wl_output`'s synchronous send
-                        // forces), and it only opens on a resize that fails
-                        // -- a pool that would not allocate -- not on the
-                        // steady path.
-                        let failed = Mode {
-                            size: (width, height).into(),
-                            refresh: 60_000,
-                        };
-                        if failed != previous {
-                            output.delete_mode(failed);
-                        }
                     }
-                    return false;
+                    // Pinned to the session's GLES device
+                    // (`State::gles_device`), read off the backend that is
+                    // still in `backends`: a rebuild that could not build
+                    // there fails into the arm below rather than moving to
+                    // another device, whose driver may refuse the dma-buf
+                    // layouts already advertised to clients.
+                    Backend::new(
+                        &output,
+                        width,
+                        height,
+                        self.renderer,
+                        ScanoutHandoff::default(),
+                        self.gles_device(),
+                    )
+                    .map(|backend| {
+                        self.backends.insert(id, backend);
+                    })
                 }
+            };
+            if let Err(error) = resized {
+                tracing::warn!(%error, "could not resize the render target");
+                // Back to the mode that is actually being rendered. The
+                // new one stays in `Output::modes` (that list only grows
+                // -- see `output_management.rs`), and a client that was
+                // told about it sees it become current and then current
+                // again at the old size; what it does not see is a
+                // current mode that disagrees with every frame it is
+                // sent. `None` when there is no previous mode is the
+                // never-resized-before case, which cannot reach here:
+                // `init_named` sets one before any caller exists.
+                if let Some(previous) = previous {
+                    set_mode(
+                        &output,
+                        previous.size.w,
+                        previous.size.h,
+                        None,
+                        self.output_scale,
+                    );
+                    // ...and the size that never rendered is taken back
+                    // out of `Output::modes`, so a client binding later
+                    // never hears about it and the next
+                    // `refresh_output_heads` does not mint a
+                    // `zwlr_output_mode_v1` for it. `set_mode` above
+                    // pushed it twice over (once via `set_preferred`,
+                    // once via `change_current_state`), and nothing
+                    // prunes that list on its own -- without this every
+                    // failed resize would leave a mode behind for the
+                    // life of the session, announced to whoever binds
+                    // next. Guarded on differing: a same-size call names
+                    // the mode that is still current and preferred, and
+                    // `delete_mode` clears both when they match.
+                    //
+                    // What this cannot take back is what an already-bound
+                    // `wl_output` client was told synchronously, before
+                    // the build failed: it saw the failed size become
+                    // current *and* preferred, then the old size become
+                    // current and preferred again, and `wl_output` has
+                    // no un-prefer and no mode withdrawal to unsay the
+                    // first half with. That transient is inherent to
+                    // advertising before building (see `set_mode`'s
+                    // caller order, which `wl_output`'s synchronous send
+                    // forces), and it only opens on a resize that fails
+                    // -- a pool that would not allocate -- not on the
+                    // steady path.
+                    let failed = Mode {
+                        size: (width, height).into(),
+                        refresh: 60_000,
+                    };
+                    if failed != previous {
+                        output.delete_mode(failed);
+                    }
+                }
+                return false;
             }
         }
         // The logical rectangle the core and the `Space` both work in -- see

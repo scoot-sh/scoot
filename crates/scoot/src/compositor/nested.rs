@@ -534,8 +534,8 @@ pub(super) enum ConfigureAction {
     /// on every state change that is not a resize -- activation, maximize,
     /// a tiling-edge update. Load-bearing rather than an optimisation:
     /// without it every focus change in the host would throw away a working
-    /// render target and buffer pool to build an identical pair, and under
-    /// `--renderer gles` that is a whole new EGL context and shader set.
+    /// render target and buffer pool to build an identical pair, plus the
+    /// full redraw and host commit a resized target needs.
     Nothing,
 }
 

@@ -171,10 +171,12 @@ fn resolve_with(
 
 /// What draws this session's frames, and what it draws into.
 ///
-/// Built once by `headless::init_named` and rebuilt by
-/// `State::resize_output`; lives in `State::backends`, keyed by output, and
-/// is `take`n for the duration of a frame so the render path can hold
-/// `&mut State` and `&mut` the renderer at the same time.
+/// Built once by `headless::init_named` (and `headless::add_output`), and
+/// resized by `State::resize_output` -- in place where the pipeline can be
+/// ([`Backend::resize_in_place`]), rebuilt where it cannot. Lives in
+/// `State::backends`, keyed by output, and is `take`n for the duration of a
+/// frame so the render path can hold `&mut State` and `&mut` the renderer at
+/// the same time.
 pub struct Backend {
     /// Which renderer is drawing, and the target it draws into.
     pipeline: Pipeline,
@@ -216,6 +218,30 @@ pub(super) enum ImportSet {
     /// in it -- `dmabuf.rs::driver_tranche` is what decides which of those
     /// are a promise.
     Driver(FormatSet),
+}
+
+/// What [`Backend::resize_in_place`] did. Whatever the answer, the backend
+/// is usable: only [`Resized`](InPlace::Resized) changed anything.
+pub(super) enum InPlace {
+    /// The target is at the new size, on the same renderer.
+    Resized,
+    /// This pipeline has no in-place path here, and nothing changed. For
+    /// pixman that sends `State::resize_output` to [`Backend::new`]. The
+    /// scanout tier must never get this far -- it resizes by
+    /// [`note_resized`](Backend::note_resized) alone, and `resize_output`
+    /// answers it before asking this (a debug build asserts as much) --
+    /// because a new [`Backend`] would throw its `DrmCompositor`'s renderer
+    /// away.
+    Unsupported,
+    /// The size is over what this renderer can draw into (the answer is its
+    /// limit, per axis), so nothing was allocated and nothing changed. No
+    /// rebuild can do better: the limit is the device's, and every rebuild
+    /// is pinned to the same device.
+    TooLarge((i32, i32)),
+    /// The pipeline could not reallocate at the new size for some other
+    /// reason; nothing changed, and the backend still draws into its old
+    /// target at its old size.
+    Failed(Box<dyn Error>),
 }
 
 /// The renderers [`Backend`] can be carrying.
@@ -260,7 +286,8 @@ impl Backend {
     ///
     /// Shared by `headless::init_named` and `State::resize_output` so the two
     /// can't drift apart -- which is also why `renderer` is a parameter here
-    /// and a field on `State`: a resize rebuilds the pipeline, and it has to
+    /// and a field on `State`: a resize that cannot happen in place
+    /// ([`Backend::resize_in_place`]) rebuilds the pipeline, and it has to
     /// rebuild the one the session was started with.
     /// `scanout` is the renderer `tty::init` already built for the GPU
     /// scanout tier (see [`ScanoutHandoff`]); when it carries one, it *is*
@@ -344,6 +371,53 @@ impl Backend {
         self.size = (width, height);
     }
 
+    /// Resizes the render target to `width` x `height` on the renderer this
+    /// backend already has, where the pipeline does that (see [`InPlace`]).
+    ///
+    /// The offscreen GLES pipeline does: a whole new backend is a new EGL
+    /// context and shader set, 3.95 ms per size on the dev VM's llvmpipe
+    /// against 15.7 µs for the renderbuffer alone (`headless::bench`'s
+    /// `resize_cost`, LTO off; see `gles::GlesBackend::resize`). pixman does
+    /// not, and needs not: its whole backend rebuilds in 11.3 µs there.
+    /// A size over the GLES context's limit is refused before anything is
+    /// allocated ([`InPlace::TooLarge`]). The scanout tier never reaches
+    /// here (`State::resize_output` answers it with
+    /// [`note_resized`](Self::note_resized)), and a debug build asserts so.
+    ///
+    /// On [`InPlace::Resized`] everything size-bound on this backend follows
+    /// the new target: the recorded size (what capture clients are told to
+    /// match); a fresh damage tracker, since the new target holds nothing
+    /// the old one's history describes (headless and nested pass age 0, so
+    /// this is a full redraw either way, and the tracker is the same one
+    /// [`Backend::new`] would build); and an empty cursor record, since no
+    /// frame has drawn a cursor into it. The capture path's region pools
+    /// (`capture_cursor::PatchPool`, `patch_pixels`) are keyed on the
+    /// region, never the output's size, and stay. On anything else nothing
+    /// at all has changed.
+    pub(super) fn resize_in_place(&mut self, output: &Output, width: i32, height: i32) -> InPlace {
+        debug_assert!(
+            !self.is_scanout(),
+            "the scanout tier is resized by note_resized, never in place or rebuilt"
+        );
+        match &mut self.pipeline {
+            Pipeline::Gles(gpu) => {
+                if let Some(max) = gpu.exceeds_max_target(width, height) {
+                    return InPlace::TooLarge(max);
+                }
+                if let Err(error) = gpu.resize(width, height) {
+                    return InPlace::Failed(error);
+                }
+            }
+            Pipeline::Pixman(_) => return InPlace::Unsupported,
+            #[cfg(feature = "gpu-scanout")]
+            Pipeline::Scanout(_) => return InPlace::Unsupported,
+        }
+        self.damage = OutputDamageTracker::from_output(output);
+        self.size = (width, height);
+        self.cursor = CursorInFrame::default();
+        InPlace::Resized
+    }
+
     /// Which renderer is *actually* drawing this session's frames.
     ///
     /// Test-only, and deliberately not the same question as
@@ -360,6 +434,53 @@ impl Backend {
             Pipeline::Gles(_) => RendererKind::Gles,
             #[cfg(feature = "gpu-scanout")]
             Pipeline::Scanout(_) => RendererKind::Gles,
+        }
+    }
+
+    /// The renderer context of an offscreen GLES backend, `None` for any
+    /// other pipeline: the identity a client texture is cached against, so
+    /// a suite can pin that a resize kept it (and so re-imported nothing).
+    #[cfg(test)]
+    pub(super) fn gles_context_for_test(
+        &self,
+    ) -> Option<smithay::backend::renderer::ContextId<smithay::backend::renderer::gles::GlesTexture>>
+    {
+        match &self.pipeline {
+            Pipeline::Gles(gpu) => Some(gpu.renderer.context_id()),
+            _ => None,
+        }
+    }
+
+    /// An offscreen GLES backend's `GL_MAX_RENDERBUFFER_SIZE`, asked of the
+    /// driver afresh, `None` for any other pipeline: one past it is a size
+    /// the driver refuses on every device, which is how a suite reaches a
+    /// failed reallocation, and what the cached limit is checked against.
+    #[cfg(test)]
+    pub(super) fn gles_max_renderbuffer_size_for_test(&mut self) -> Option<i32> {
+        use smithay::backend::renderer::gles::ffi;
+        match &mut self.pipeline {
+            Pipeline::Gles(gpu) => gpu
+                .renderer
+                .with_context(|gl| {
+                    let mut max = 0;
+                    // SAFETY: a plain state query into a local, on the
+                    // context `with_context` has just made current.
+                    unsafe { gl.GetIntegerv(ffi::MAX_RENDERBUFFER_SIZE, &mut max) };
+                    max
+                })
+                .ok(),
+            _ => None,
+        }
+    }
+
+    /// The size limit an offscreen GLES backend checks a resize against
+    /// (see `gles::GlesBackend::exceeds_max_target`), `None` for any other
+    /// pipeline or a driver that would not report one.
+    #[cfg(test)]
+    pub(super) fn gles_max_target_for_test(&self) -> Option<(i32, i32)> {
+        match &self.pipeline {
+            Pipeline::Gles(gpu) => gpu.max_target,
+            _ => None,
         }
     }
 

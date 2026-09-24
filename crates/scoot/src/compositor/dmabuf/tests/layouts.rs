@@ -672,6 +672,145 @@ fn every_advertised_layout_imports_and_draws() {
     }
 }
 
+/// A client's dma-buf window keeps drawing across a resize -- under GLES
+/// from the *same* imported texture, with no re-import, because the resize
+/// kept the renderer context the texture is cached against -- and a buffer
+/// the client sends afterwards imports and draws on the resized target.
+///
+/// Named renderers rather than `SCOOT_TEST_RENDERER`, so the GLES half runs
+/// in the default suite. Under pixman the resize rebuilds the backend and the
+/// buffer is mapped again; that half pins only that it still draws.
+///
+/// The frame after the resize carries no client commit at all, so the only
+/// way the window can be on it is from a texture the renderer already holds
+/// or re-imports by itself from the attached buffer. Which of those happened
+/// is what the texture check below tells apart: a rebuilt renderer is a new
+/// context, under which the surface has no texture until it is imported
+/// again.
+#[test]
+fn a_dmabuf_window_draws_across_a_resize_without_a_reimport() {
+    use smithay::backend::renderer::gles::GlesTexture;
+    use smithay::backend::renderer::utils::with_renderer_surface_state;
+
+    // See `every_advertised_layout_imports_and_draws` for the lock.
+    let _mappings = super::exclusive_mappings();
+    let xrgb = LAYOUTS
+        .iter()
+        .position(|layout| layout.fourcc == Fourcc::Xrgb8888)
+        .expect("the suite builds XR24");
+    let resized = (CANVAS + 64, CANVAS - 32);
+    for renderer in [RendererKind::Pixman, RendererKind::Gles] {
+        let mut fixture = Harness::headless_on(Appearance::default(), CANVAS, renderer);
+        fixture.spawn(run_client);
+        match fixture.run(Step::Show {
+            index: xrgb,
+            colour: RED,
+        }) {
+            Ack::NoDevice(reason) => {
+                eprintln!(
+                    "a_dmabuf_window_draws_across_a_resize_without_a_reimport: skipped -- \
+                     no dumb buffer on this machine ({reason})"
+                );
+                return;
+            }
+            Ack::Shown => {}
+            Ack::Table(_) => panic!("expected a shown buffer"),
+        }
+        let area = (SIDE * SIDE) as usize;
+        let shown = |pixels: &[u8], colour: Rgb| {
+            pixels
+                .chunks_exact(4)
+                .filter(|pixel| colour.matches(pixel))
+                .count()
+        };
+        let red = shown(&fixture.render(), RED);
+        assert!(red >= area / 2, "{renderer}: drew {red} red pixels before");
+
+        let surface = fixture
+            .state
+            .windows
+            .values()
+            .next()
+            .and_then(smithay::desktop::Window::toplevel)
+            .expect("the mapped window")
+            .wl_surface()
+            .clone();
+        let id = fixture.state.outputs.primary_id().expect("an output");
+        let texture = |fixture: &Fixture| {
+            let context = fixture.state.backends[&id].gles_context_for_test()?;
+            with_renderer_surface_state(&surface, |state| {
+                state
+                    .texture::<GlesTexture>(context)
+                    .map(GlesTexture::tex_id)
+            })
+            .flatten()
+        };
+        let context = fixture.state.backends[&id].gles_context_for_test();
+        let before = texture(&fixture);
+        assert_eq!(
+            before.is_some(),
+            renderer == RendererKind::Gles,
+            "{renderer}: the window's texture is cached against a GLES context"
+        );
+
+        assert!(
+            fixture.state.resize_output(resized.0, resized.1),
+            "{renderer}: the resize"
+        );
+        // Checked *before* the frame after it, which is where a new context
+        // would re-import: under GLES the texture has to be there already.
+        assert!(
+            fixture.state.backends[&id].gles_context_for_test() == context,
+            "{renderer}: the resize replaced the renderer"
+        );
+        assert_eq!(
+            texture(&fixture),
+            before,
+            "{renderer}: the texture before the frame"
+        );
+        fixture.state.request_render();
+        fixture.state.render();
+        let capture = |fixture: &mut Fixture| {
+            fixture
+                .state
+                .backends
+                .get_mut(&id)
+                .expect("a backend")
+                .capture(<[u8]>::to_vec)
+                .expect("a framebuffer readback")
+        };
+        let after = capture(&mut fixture);
+        assert_eq!(after.len(), (resized.0 * resized.1 * 4) as usize);
+        let red = shown(&after, RED);
+        assert!(
+            red >= area / 2,
+            "{renderer}: drew {red} red pixels after the resize"
+        );
+        assert_eq!(
+            texture(&fixture),
+            before,
+            "{renderer}: the same texture drew it"
+        );
+
+        // A new buffer after the resize imports and draws on the new target.
+        match fixture.run(Step::Show {
+            index: xrgb,
+            colour: GREEN,
+        }) {
+            Ack::Shown => {}
+            Ack::NoDevice(reason) => panic!("{renderer}: the second buffer: {reason}"),
+            Ack::Table(_) => panic!("{renderer}: expected a shown buffer"),
+        }
+        fixture.state.request_render();
+        fixture.state.render();
+        let green = shown(&capture(&mut fixture), GREEN);
+        assert!(
+            green >= area / 2,
+            "{renderer}: drew {green} green pixels from a buffer sent after the resize"
+        );
+    }
+}
+
 /// Which renderer the fixture really built (see `Fixture::renderer` in the
 /// parent suite for why that is not `State::renderer`).
 fn fixture_renderer(fixture: &Fixture) -> RendererKind {

@@ -284,10 +284,11 @@ pub struct State {
     /// Which renderer [`Self::backends`]' entries composite with, resolved once from
     /// `--renderer`/`[renderer] backend` (see `render::resolve`) and fixed
     /// for the process's lifetime. Kept here rather than read back off the
-    /// live `Backend` because `resize_output` *replaces* that backend and has
-    /// to rebuild the pipeline the session was started with -- including on
-    /// the path where there is no backend to ask, because building the
-    /// previous one failed.
+    /// live `Backend` because `resize_output` can *replace* that backend (a
+    /// pixman resize always does; a GLES one only when its in-place
+    /// reallocation failed) and has to rebuild the pipeline the session was
+    /// started with -- including on the path where there is no backend to
+    /// ask.
     pub renderer: RendererKind,
     /// One render target per output, keyed by the id the core knows it by.
     ///
