@@ -8,7 +8,7 @@ blocked: null
 
 # GLES captures on a static screen grew memory by one frame each — RESOLVED
 
-RESOLVED 2026-09-24 (PR #TBD). Found by the scoot/niri A/B (PR #237, whose
+RESOLVED 2026-09-24 (PR #238). Found by the scoot/niri A/B (PR #237, whose
 open ticket `docs/backlog/core/gles-capture-leaks-a-frame-per-shot.md` this
 closes). All evidence below was taken on the dev VM (llvmpipe, 4 vCPU,
 kernel 6.18.50), and all of it is under `~/evidence/gles-capture-leak/`

@@ -105,7 +105,7 @@ each item's own file records why it landed when it did.
 ## Recently shipped (since 2026-09-15)
 
 - **[GLES captures of a static screen no longer keep a frame each](docs/backlog/resolved/gles-capture-leaks-a-frame-per-shot-done.md)**
-  (2026-09-24, PR #TBD) — found by the niri A/B. Under `--renderer gles`,
+  (2026-09-24, PR #238) — found by the niri A/B. Under `--renderer gles`,
   every capture of a screen that was not redrawing kept a whole frame of
   memory until something drew: 6,250 KiB per shot at 1600x1000, 885 MB
   after 120. Smithay's `GlesRenderer` queues a dropped GL object instead of
