@@ -485,6 +485,7 @@ where
             || reject_oversized_shm_pool_creation(resource, &request)
             || reject_excess_shm_pool(state, client, resource, &request)
             || reject_excess_buffer(state, client, resource, &request)
+            || super::dmabuf::pending_planes::reject_excess_plane(state, client, resource, &request)
             || reject_unrepresentable_layer_size(resource, &request)
             || reject_frozen_toplevel_icon_request(state, resource, &request)
             || reject_excess_capture_frame(state, client, resource, &request)
@@ -494,6 +495,7 @@ where
             return;
         }
         note_assigned_toplevel_icon::<I>(state, &request);
+        super::dmabuf::pending_planes::note_consumed(state, client, resource, &request);
         prepare_post_destroy_lock_commit(state, resource, &request, dhandle);
         data.request(state, client, resource, request, dhandle, data_init);
     }
@@ -505,7 +507,8 @@ where
         forget_destroyed_capture_frame::<I>(state, &client, resource);
         forget_destroyed_shm_pool::<I>(state, &client, resource);
         forget_destroyed_buffer::<I>(state, &client, resource);
-        super::drm_syncobj::forget_destroyed::<I>(state, &client, resource);
+        super::dmabuf::pending_planes::forget_destroyed::<I>(state, &client, resource);
+        super::drm_syncobj::forget_destroyed::<I>(state, resource);
         data.destroyed(state, client, resource);
         // *After* the delegate, not before: Smithay's own
         // `ExtLockSurfaceUserData::destroyed` is what unmaps the surface, and
@@ -680,6 +683,10 @@ where
     else {
         return false;
     };
+    // Whatever becomes of this pool, its fd number is this process's again,
+    // which proves any syncobj timeline recorded on it was closed (see
+    // `drm_syncobj/retained.rs`). One `is_empty` test off the GPU tier.
+    state.drm_syncobj.fd_arrived(fd.as_raw_fd());
     if *size <= 0 || *size > MAX_SHM_POOL_BYTES {
         return false;
     }

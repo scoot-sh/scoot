@@ -1185,6 +1185,7 @@ fn refuse_import(buffers: &mut WlBuffers, notifier: ImportNotifier) {
     notifier.failed();
 }
 
+pub(super) mod pending_planes;
 #[cfg(feature = "gpu-scanout")]
 pub(super) mod scanout;
 #[cfg(test)]

@@ -97,6 +97,16 @@ enum Step {
     /// Import the client's syncobj `count` more times, keeping every
     /// timeline object (`keep`) or destroying each right after its import.
     ImportTimelines { count: u32, keep: bool },
+    /// The review's shape, `surfaces` times over: a fresh surface with a
+    /// syncobj surface, two freshly imported timelines, an acquire point on
+    /// one and a release point on the other, then both timeline objects
+    /// destroyed. With `commit`, the points are committed with one shared
+    /// dma-buf (acquire point already signalled, so nothing waits);
+    /// without, they stay pending. Either way every point outlives its
+    /// timeline object, as the protocol says it must, and keeps its fd.
+    HoardPoints { surfaces: u32, commit: bool },
+    /// Destroy every surface made so far (syncobj surface first).
+    DestroyAllSurfaces,
 }
 
 enum Ack {
@@ -723,6 +733,93 @@ fn live_timelines_are_bounded_per_client() {
     );
 }
 
+/// The review's shape, pending: points set on a fresh surface outlive the
+/// timeline objects they are on, and keep their fds open here. Counting
+/// objects released all of them on destroy, and 440 surfaces held 927 fds
+/// with nothing counted. The fds are what is counted now, so the import
+/// that would hold the 129th is refused. Setup holds one, and each surface
+/// two, so that is the second import of surface 64.
+#[test]
+fn pending_points_on_destroyed_timelines_count_against_the_bound() {
+    let Some((_locks, mut fixture)) =
+        start("pending_points_on_destroyed_timelines_count_against_the_bound")
+    else {
+        return;
+    };
+    let error = fixture.run_expecting_disconnect(Step::HoardPoints {
+        surfaces: MAX_TIMELINES_PER_CLIENT,
+        commit: false,
+    });
+    assert!(
+        error.contains("after 64 surfaces")
+            && error.contains(&format!("code {INVALID_TIMELINE}"))
+            && error.contains("wp_linux_drm_syncobj_manager_v1")
+            && error.contains("destroyed ones its sync points still reference"),
+        "{error}"
+    );
+    assert_eq!(
+        fixture.state.drm_syncobj.timelines_in_flight(),
+        0,
+        "the killed client's surfaces went, and every timeline fd with them"
+    );
+}
+
+/// The same with the points committed: they ride in the surface's current
+/// state and then in the renderer's `Buffer`, still after the timeline
+/// objects are gone, and still count.
+#[test]
+fn committed_points_on_destroyed_timelines_count_against_the_bound() {
+    let Some((_locks, mut fixture)) =
+        start("committed_points_on_destroyed_timelines_count_against_the_bound")
+    else {
+        return;
+    };
+    let error = fixture.run_expecting_disconnect(Step::HoardPoints {
+        surfaces: MAX_TIMELINES_PER_CLIENT,
+        commit: true,
+    });
+    assert!(
+        error.contains("after 64 surfaces") && error.contains(&format!("code {INVALID_TIMELINE}")),
+        "{error}"
+    );
+    assert_eq!(fixture.state.drm_syncobj.timelines_in_flight(), 0);
+}
+
+/// Timelines held only by points stop counting once the points go: here by
+/// destroying the surfaces, after which the fds close and the next sweep
+/// finds them closed. So a client that did this once can import a whole
+/// cap's worth again.
+#[test]
+fn timelines_held_by_points_stop_counting_when_the_points_go() {
+    let Some((_locks, mut fixture)) =
+        start("timelines_held_by_points_stop_counting_when_the_points_go")
+    else {
+        return;
+    };
+    fixture.done(Step::HoardPoints {
+        surfaces: 40,
+        commit: false,
+    });
+    assert_eq!(
+        fixture.state.drm_syncobj.timelines_in_flight(),
+        81,
+        "setup's, and two per surface: every one still open here"
+    );
+    fixture.done(Step::DestroyAllSurfaces);
+    fixture.settle();
+    assert_eq!(fixture.state.drm_syncobj.timelines_in_flight(), 1, "just setup's");
+    fixture.done(Step::ImportTimelines {
+        count: MAX_TIMELINES_PER_CLIENT - 1,
+        keep: true,
+    });
+    assert_eq!(
+        fixture.state.drm_syncobj.timelines_in_flight(),
+        MAX_TIMELINES_PER_CLIENT
+    );
+}
+
+/// Destroyed timelines with no points on them close at once, so however many
+/// a client imports and destroys, the sweep at the cap finds them gone.
 #[test]
 fn destroyed_timelines_do_not_count_against_the_bound() {
     let Some((_locks, mut fixture)) = start("destroyed_timelines_do_not_count_against_the_bound")
@@ -899,9 +996,92 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 }
                 Ack::Done
             }
+            Step::HoardPoints { surfaces, commit } => {
+                hoard_points(&conn, &mut queue, &mut client, surfaces, commit)?;
+                Ack::Done
+            }
+            Step::DestroyAllSurfaces => {
+                for (wl, sync) in &mut client.surfaces {
+                    if let Some(sync) = sync.take() {
+                        sync.destroy();
+                    }
+                    wl.destroy();
+                }
+                client.surfaces.clear();
+                Ack::Done
+            }
         };
         sync(&conn, &mut queue, &mut client)?;
         acks.send(ack).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// [`Step::HoardPoints`]: see its doc. A round trip per surface, for the
+/// reason `Step::CommitMany` gives, and the error says how far it got.
+fn hoard_points(
+    conn: &Connection,
+    queue: &mut EventQueue<TestClient>,
+    client: &mut TestClient,
+    surfaces: u32,
+    commit: bool,
+) -> Result<(), String> {
+    let qh = queue.handle();
+    let handle = client.syncobj.ok_or("no syncobj")?;
+    let manager = client.manager.clone().ok_or("no syncobj manager")?;
+    let compositor = client.compositor.clone().ok_or("no wl_compositor")?;
+    let node = client.node.as_ref().ok_or("no node")?;
+    // Every timeline below is this one syncobj under a fresh fd, so point 1
+    // is signalled for all of them at once.
+    node.syncobj_timeline_signal(&[handle], &[1])
+        .map_err(|e| e.to_string())?;
+    let shared = if commit {
+        let fd = dmabuf_fd().ok_or("no udmabuf")?;
+        let params = client
+            .dmabuf
+            .as_ref()
+            .ok_or("no dmabuf global")?
+            .create_params(&qh, ());
+        params.add(fd.as_fd(), 0, 0, SIZE as u32 * 4, 0, 0);
+        let buffer = params.create_immed(
+            SIZE,
+            SIZE,
+            u32::from_ne_bytes(*b"AR24"),
+            zwp_linux_buffer_params_v1::Flags::empty(),
+            &qh,
+            (),
+        );
+        params.destroy();
+        client.buffers.push(Some((buffer.clone(), fd)));
+        Some(buffer)
+    } else {
+        None
+    };
+    for n in 0..surfaces {
+        let import = |client: &TestClient| -> Result<_, String> {
+            let fd = client
+                .node
+                .as_ref()
+                .ok_or("no node")?
+                .syncobj_to_fd(handle, false)
+                .map_err(|e| e.to_string())?;
+            Ok(manager.import_timeline(fd.as_fd(), &qh, ()))
+        };
+        let surface = compositor.create_surface(&qh, ());
+        let syncobj_surface = manager.get_surface(&surface, &qh, ());
+        let acquire = import(client)?;
+        let release = import(client)?;
+        syncobj_surface.set_acquire_point(&acquire, 0, 1);
+        syncobj_surface.set_release_point(&release, 0, 2);
+        if let Some(buffer) = &shared {
+            surface.attach(Some(buffer), 0, 0);
+            surface.damage_buffer(0, 0, SIZE, SIZE);
+            surface.commit();
+        }
+        acquire.destroy();
+        release.destroy();
+        client.surfaces.push((surface, Some(syncobj_surface)));
+        sync(conn, queue, client).map_err(|error| format!("after {} surfaces: {error}", n + 1))?;
     }
     Ok(())
 }
