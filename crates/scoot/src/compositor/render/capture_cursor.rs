@@ -821,6 +821,15 @@ where
         Err(error) => {
             // A failed render may have left the target in any state; the
             // next capture starts from a fresh one.
+            //
+            // Under GLES, dropping it only queues its renderbuffer (see
+            // `gles::release_captured`), and `render_into` has already
+            // drained. That is bounded without a drain here: it is one
+            // cursor-sized renderbuffer per failed render, and the next
+            // capture's drain frees it. That drain is `Backend::capture`'s,
+            // which `service_captures` runs later in the same tick and the
+            // IPC path runs on its next screenshot. So at most one is ever
+            // outstanding, and never a frame's worth.
             pool.target = None;
             // warn!: a renderer that cannot draw a cursor-sized region is
             // failing its frames too. The capture is still answered, with the

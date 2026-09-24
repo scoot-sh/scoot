@@ -1710,9 +1710,14 @@ fn union_bbox(rects: &[Rectangle<i32, Physical>]) -> Rectangle<i32, Physical> {
 }
 
 /// How many names [`LiveGlObjects::of`] probes in each namespace: far above
-/// anything one test's context allocates, and checked against a freshly
-/// reserved name every time, so a context that outgrows it fails the probe
-/// rather than hiding objects past the end.
+/// anything one test's context allocates.
+///
+/// The probe also checks a freshly reserved name against it. That is a
+/// sanity check, not a guarantee. It catches a context that hands out names
+/// monotonically and has outgrown the range. A context that reuses the
+/// lowest free name, as Mesa can, may answer a low name while live objects
+/// sit higher. The tests stay far enough below the range (a few dozen names
+/// each) that neither case arises.
 #[cfg(test)]
 const PROBED_GL_NAMES: u32 = 1 << 12;
 

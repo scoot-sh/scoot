@@ -1417,6 +1417,13 @@ fn a_client_that_disconnects_with_a_capture_outstanding_leaves_nothing_behind() 
 /// pixel-pack buffer, a whole frame, queued in Smithay's cleanup queue
 /// until the next frame drew; see `render/tests/capture_release.rs`, which
 /// pins the mechanism and counts the same way.
+///
+/// With painted cursors this does render the pointer's region, but it cannot
+/// tell whether that render drains its own objects. `service_captures`
+/// renders the region *before* `Backend::capture`, whose drain then empties
+/// the queue anyway. The drain in the region render is pinned by
+/// `capture_release`'s IPC test instead: an IPC screenshot reads first and
+/// renders the region after.
 #[test]
 fn captures_of_a_static_screen_on_gles_leave_no_gl_objects_behind() {
     let mut fixture: Fixture = Harness::headless_on(appearance(), CANVAS, RendererKind::Gles);
