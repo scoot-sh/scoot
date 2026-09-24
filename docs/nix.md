@@ -73,9 +73,13 @@ Two packages, matching the two GPU tiers in
   `--renderer gles` is a loud startup error naming the pixman default, not
   a panic and not a silent downgrade (previously it panicked in Smithay's
   `dlopen`; gh #177).
-- `packages.<system>.scoot-gpu` adds the `gpu-scanout` Cargo feature: under
-  `--tty --renderer gles` the frame is composited straight into the buffer
-  the CRTC scans out, with no read-back. Same binary name (`scoot`), the
+- `packages.<system>.scoot-gpu` adds the `gpu-scanout` Cargo feature (the
+  one that links libgbm): under `--tty --renderer gles` the frame is
+  composited straight into the buffer the CRTC scans out, with no
+  read-back; under `--nested --renderer gles` it is handed to the host
+  compositor as a GPU buffer instead of being read back, where the host
+  composites on the same GPU (see
+  [tty.md](tty.md#which-renderer-draws-the-frames)). Same binary name (`scoot`), the
   same EGL-driver requirement as above, plus a real DRM seat. Scanout
   drives the primary plane only -- no overlay or cursor planes -- but it is
   measured rather than merely reasoned now: on an Apple M2 under Asahi Linux

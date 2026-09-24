@@ -9,6 +9,21 @@ scoot has not cut a numbered release yet; entries are dated.
 
 ## Unreleased
 
+### 2026-09-24 — `--nested --renderer gles` hands its frames to the host as GPU buffers
+
+- **In a `gpu-scanout` build (`nix build .#scoot-gpu`), `scoot --nested
+  --renderer gles` no longer copies every frame back to the CPU** when the
+  compositor it runs inside draws on the same GPU: each frame goes to the
+  host as a GPU buffer (a dma-buf) instead. Nothing to configure. When it
+  cannot -- the default build, pixman, a host on another GPU or without
+  dma-buf support -- it presents the way it always has, and the startup log
+  says which it chose and why (`nested: presenting to the host by ...`).
+  If the host later refuses one of those buffers, scoot switches back for
+  the rest of the session and logs one warning. Screenshots and screen
+  capture are unaffected. Seen working on the dev VM, whose GPU is
+  software, so no speedup could show there; real GPU hardware is
+  [Asahi.md](Asahi.md)'s Test 8.
+
 ### 2026-09-23 — explicit sync for GPU apps on the GPU tier
 
 - **GPU apps that use explicit sync now get it on the GPU tier** (`--tty

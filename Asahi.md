@@ -930,6 +930,51 @@ What each answer means:
   or GL app answer the question that matters most for NVIDIA users; this
   project has no NVIDIA hardware to run them on.
 
+## Test 8 — `--nested --renderer gles` handing its frames to the host as dma-bufs
+
+Why: in a `gpu-scanout` build, a `--nested --renderer gles` scoot whose
+host composites on the same GPU no longer reads each frame back into
+`wl_shm`: it copies the frame on the GPU into a buffer shared with the host
+(`docs/tty.md`, "Which renderer draws the frames"). On the dev VM that works
+end to end -- the host's screenshot is byte-identical to the nested one, and
+the protocol trace shows the buffers created and attached -- but its GPU is
+llvmpipe, where drawing the frame in software is nearly all of the cost, so
+per frame it measured the same as read-back (and a little dearer per resize,
+~0.4-1.1 ms of the ~14 ms a resize costs there). Whether dropping the copy
+saves CPU on a GPU that is a GPU is only answerable on one. Nothing is
+claimed in advance.
+
+No VT switch: the bench starts its own host (an outer headless scoot on
+the same GPU, sized so the nested window fills it) from a terminal in your
+normal session. It needs `foot` on `PATH` (`nix shell nixpkgs#foot` if it
+is not installed). Same commit for both builds (the Build section's two):
+
+```sh
+for build in result result-scoot-gpu; do
+  SCOOT=./$build/bin/scoot HOST_SCOOT=./result/bin/scoot PREFIX=/tmp/fx/t8-$build \
+    scripts/nested-dmabuf-bench.sh | tee /tmp/fx/t8-$build.txt
+done
+grep -h 'presentation:\|frames:\|resizes:\|pixels:' /tmp/fx/t8-*.txt
+```
+
+What each answer means:
+
+- **`presentation:`** must read `by read-back ... no gpu-scanout feature`
+  for `result` and `by dma-buf (no read-back)` for `result-scoot-gpu`. A
+  gpu build that says read-back names its reason (a host on another DRM
+  device than the renderer, no common format, GBM refusing): send
+  `/tmp/fx/t8-result-scoot-gpu-inner.log`.
+- **`frames:` ms/tick, nested and host, gpu build against default**: the
+  number this test is for. Lower nested CPU per tick under the same load is
+  the copy that is gone; the host figure says whether importing the buffer
+  instead of uploading it helped the host too.
+- **`resizes:` ms/size** and the RSS/fd lines around them: a new size
+  allocates host buffers under dma-buf, so a small increase is expected;
+  fd counts must be the same before and after on both processes.
+- **`pixels: ... identical`** on both builds: the host shows exactly what
+  the nested scoot rendered, the right way up. `DIFFERENT` is a bug: send
+  both PNGs.
+
 ## What to send back
 
 - `ghostty --version`
@@ -943,6 +988,8 @@ What each answer means:
 - for Test 7: `/tmp/fx/t7.log`, `/tmp/fx/t7-global.txt`, the two
   `t7-vkcube*.png`, `t7-kms-fs.txt`, and the grep output (or the whole
   `t7-vkcube.trace` if something went wrong)
+- for Test 8: both `/tmp/fx/t8-*.txt`, and the `t8-*-inner.log`,
+  `t8-*-host.log` and `t8-*.png` files beside them
 - for Test 6: `/tmp/fx/t6-table-*.txt`, `/tmp/fx/t6-*.log`,
   `/tmp/fx/t6-gears.trace` (or just its `add(` lines), `t6-gears.png`,
   `t6-mpv.log`, `t6-mpv.png`, `t6-kms-mpv.txt`; for Part C `t6c.log`,

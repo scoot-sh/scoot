@@ -104,6 +104,28 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[`--nested --renderer gles` hands frames to the host as dma-bufs](docs/backlog/resolved/nested-dmabuf-present-done.md)**
+  (2026-09-24, PR #PRNUM) — in a `gpu-scanout` build, when the host's v4
+  dma-buf feedback names the renderer's own DRM device and a format both
+  take, each frame is composited as before and then `glBlitFramebuffer`'d
+  into a host buffer (GBM on that device: render node, then the primary
+  node for `kms_swrast`) shared through `zwp_linux_buffer_params_v1.create`,
+  instead of read back into `wl_shm`. At most three buffers per size,
+  grown on demand; a frame with no free buffer (every resize's first frame
+  among them) is handed over as drawn when one frees, not drawn twice.
+  Read-back for everything else, decided once at startup (feedback parsed
+  as adversarial input, a render-and-blit probe) and logged with its
+  reason; a host refusing a buffer moves the session to read-back for good
+  with one WARN. Captures, pacing (scoot's own timer: `--nested` never used
+  host frame callbacks, contrary to the ticket) and resize are unchanged,
+  except that a size over the GLES limit is now refused before any host
+  buffer is allocated. Dev VM, outer scoot as host (cage cannot take a
+  dma-buf there): host screenshot byte-identical; CPU-neutral per frame
+  (7.67-7.73 vs 7.68-7.72 ms), ~3-7% dearer per resize (software drawing
+  dominates on llvmpipe); fds flat over 1001 resizes. In-process tests run
+  a nested scoot against a second scoot as host, including one that
+  refuses every buffer. Real GPU: `Asahi.md` Test 8.
+
 - **[Explicit sync on the GPU scanout tier](docs/backlog/resolved/linux-drm-syncobj-done.md)**
   (2026-09-23, PR #233) — `wp_linux_drm_syncobj_manager_v1` v1, offered
   only on `--tty --renderer gles` (`gpu-scanout`) where the display device,

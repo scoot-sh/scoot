@@ -6,9 +6,13 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
-# `gpu-scanout` compiles the `--tty` GPU scanout tier (`DrmCompositor` over a
-# GBM swapchain -- see `compositor/tty/`), and is **off by default on
-# purpose**.
+# `gpu-scanout` compiles everything that allocates GPU buffers through GBM:
+# the `--tty` GPU scanout tier (`DrmCompositor` over a GBM swapchain -- see
+# `compositor/tty/`) and `--nested`'s dma-buf presentation to its host
+# (`compositor/nested/gpu.rs`). It is **off by default on purpose**. The
+# name predates the second user; one feature per link-time cost is the
+# honest axis, and a second feature for the same libgbm would double the
+# packaging matrix (`packages.scoot-gpu`) for nothing.
 #
 # Unlike `renderer_gl`, which reaches libEGL/libGLESv2 through `dlopen` and so
 # costs a GPU-free machine nothing, Smithay's `backend_gbm` is a real

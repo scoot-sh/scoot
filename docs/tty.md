@@ -202,15 +202,44 @@ running with no GPU at all is a hard requirement here, not a fallback tier.
   so `gles` adds a GPU round trip without removing any CPU copy; on a machine
   whose "GPU" is a software rasteriser (llvmpipe, which is what a VM or a
   GPU-less container has) it is several times *slower* than pixman. Under
-  `--tty` the scanout path below removes that round trip; everywhere else
-  the read-back stands.
+  `--tty` the scanout path below removes that round trip, and under
+  `--nested` a `gpu-scanout` build hands the frame to the host without it
+  (next bullet); under `--headless` the read-back stands.
 - **Under `--tty`, `gles` now scans out from the GPU** — in a build with
   `--features gpu-scanout` (see below). That is the path where it stops
   being a round trip: the frame is scanned out directly instead of being
   read back and memcpy'd into a dumb buffer. Without that feature `--tty`
   still warns and keeps pixman, because the read-back-and-copy shape it
   would otherwise take is strictly worse than compositing on the CPU.
-  `--headless` and `--nested` are still read-back in every build.
+  `--headless` is still read-back in every build.
+- **Under `--nested`, a `gpu-scanout` build hands each frame to the host as
+  a dma-buf** instead of reading it back into `wl_shm`: the frame is
+  composited as before, then copied on the GPU into one of a few buffers
+  scoot allocated on its renderer's own device (GBM) and shared with the
+  host through `zwp_linux_dmabuf_v1` -- no CPU copy on scoot's side, and
+  nothing for the host to upload. It is used only when it is safe: the
+  host must offer dma-buf feedback (protocol version 4 or later) naming
+  the same DRM device scoot renders on, and a format both sides take
+  (`Argb8888`, else `Xrgb8888`, at a layout the host lists and the GPU
+  can render into), and a test buffer must allocate, render and copy at
+  startup. Anything else -- pixman, a default build, a host with no
+  dma-buf or on another GPU, no common format -- keeps the read-back, and
+  the startup log says which and why, once:
+  `nested: presenting to the host by dma-buf (no read-back)` or
+  `nested: presenting to the host by read-back into wl_shm reason=...`.
+  scoot never moves its renderer to another GPU to match the host; on a
+  laptop whose host composites on the other GPU, `--nested` keeps the
+  read-back. A host that refuses one of the buffers mid-session moves the
+  session to read-back for good, with one warning (`presenting to the host
+  by read-back into wl_shm from now on`). Screenshots and screen capture
+  are unaffected (they read the same composited frame), and so is
+  anything a client sees. Seen working end to end on the dev VM with an
+  outer scoot as the host (the host's screenshot byte-identical to the
+  nested one); there the GPU is software, and per frame it measured the
+  same CPU as read-back (7.6-7.7 against 7.7-7.8 ms per frame, 1024x768)
+  with a resize a little dearer (14.7-15.1 against 14.0-14.3 ms), because
+  drawing in software is nearly all the cost. What it saves on a real GPU
+  is [`../Asahi.md`](../Asahi.md)'s Test 8, not a claim made here.
 - **Scanout drives every plane it can claim, with captures kept correct.**
   The cursor plane is attempted on CRTCs that expose one, with per-frame
   fallback to compositing where the plane cannot be claimed; overlay planes
@@ -355,8 +384,9 @@ running with no GPU at all is a hard requirement here, not a fallback tier.
   that is llvmpipe drawing and reading back a whole frame, not the resize.
   pixman is unaffected, and it is the default. A size larger than the GPU
   can render into is refused up front, and scoot stays at the size it was
-  (the log says `could not resize the render target` and names the GPU's
-  limit). If a resize fails for any other reason, scoot tries a whole new
+  (under `--nested` the log says `could not follow the host's resize` and
+  names the GPU's limit, and nothing is allocated for the refused size --
+  no host buffers either, and no client is told about it). If a resize fails for any other reason, scoot tries a whole new
   renderer on the same GPU and, if that fails too, stays where it was.
 - **Hardware first.** The EGL device is chosen by preferring a real device
   over a software one and taking the first that yields a working renderer, so
