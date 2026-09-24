@@ -40,11 +40,12 @@
 //!   ([`ExplicitBuffers`] here, the hold in `tty/scanout.rs`): Smithay
 //!   signals a release point from the CPU the moment a surface replaces its
 //!   buffer, while a queued frame may still be sampling it on the GPU.
-//! - **Bounds** on what a client can make the compositor hold: live
-//!   timeline objects ([`MAX_TIMELINES_PER_CLIENT`]) and outstanding acquire
-//!   waits ([`MAX_ACQUIRE_WAITS_PER_CLIENT`], each an eventfd plus a queued
-//!   transaction Smithay scans on every commit of that client). The first
-//!   is an object count, **not** an fd bound -- see its doc.
+//! - **Bounds** on what a client can make the compositor hold: imported
+//!   timeline fds, live objects and destroyed ones that sync points still
+//!   reference ([`MAX_TIMELINES_PER_CLIENT`], kept by [`retained`]), and
+//!   outstanding acquire waits ([`MAX_ACQUIRE_WAITS_PER_CLIENT`], each an
+//!   eventfd plus a queued transaction Smithay scans on every commit of that
+//!   client).
 //!
 //! ## What is still Smithay's, and one thing upstream gets wrong
 //!

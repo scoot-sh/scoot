@@ -6,8 +6,8 @@
 use std::collections::HashSet;
 use std::os::fd::{AsRawFd, OwnedFd, RawFd};
 
-use smithay::reexports::wayland_server::backend::ClientId;
 use smithay::reexports::wayland_server::Display;
+use smithay::reexports::wayland_server::backend::ClientId;
 
 use super::{Refusal, RetainedTimelines, SWEEP_MARGIN, proc_fd_path, timeline_fd_open};
 
@@ -67,7 +67,11 @@ fn records_count_per_client_and_drain_by_sweep() {
     assert_eq!(ledger.held_by(&b), 3, "and touches nobody else's");
     assert_eq!(ledger.sweep(&b, |_| false), 0);
     assert_eq!(ledger.held_by(&b), 0);
-    assert_eq!(ledger.records(), 5, "an emptied client leaves no records behind");
+    assert_eq!(
+        ledger.records(),
+        5,
+        "an emptied client leaves no records behind"
+    );
 }
 
 #[test]
@@ -121,7 +125,10 @@ fn churned_timelines_never_reach_the_cap() {
     let live: HashSet<RawFd> = (0..16).collect();
     import_all(&mut ledger, &a, 0, 16, &live).expect("a window's worth");
     import_all(&mut ledger, &a, 10_000, 10 * CAP, &live).expect("dead records are swept");
-    assert!(ledger.held_by(&a) <= CAP, "the records never exceed the cap");
+    assert!(
+        ledger.held_by(&a) <= CAP,
+        "the records never exceed the cap"
+    );
     assert_eq!(ledger.sweep(&a, |fd| live.contains(&fd)), 16);
 }
 
@@ -176,7 +183,10 @@ fn a_sweep_that_frees_the_margin_admits_and_buys_that_many_imports() {
         sweeps += u32::from(swept);
         ledger.record(&a, fd);
     }
-    assert_eq!(sweeps, 1, "one sweep for the whole margin's worth of imports");
+    assert_eq!(
+        sweeps, 1,
+        "one sweep for the whole margin's worth of imports"
+    );
 }
 
 #[test]
@@ -263,8 +273,14 @@ fn under_pressure_sweeps_are_amortized_by_the_margin() {
         }),
         "the slack past a sweep that admitted is the margin, and not a record more"
     );
-    assert_eq!(sweeps, 2, "the sweep that admitted, and the one that refused");
-    assert_eq!(observations, 2, "the table is observed only when a sweep is due");
+    assert_eq!(
+        sweeps, 2,
+        "the sweep that admitted, and the one that refused"
+    );
+    assert_eq!(
+        observations, 2,
+        "the table is observed only when a sweep is due"
+    );
 }
 
 #[test]
@@ -288,7 +304,11 @@ fn the_ledger_is_bounded_by_fd_numbers_not_by_clients() {
         }
     }
     drop(display);
-    assert_eq!(ledger.records(), 4, "one record per number, whoever held it last");
+    assert_eq!(
+        ledger.records(),
+        4,
+        "one record per number, whoever held it last"
+    );
 }
 
 #[test]
@@ -311,22 +331,33 @@ fn the_proc_path_is_formatted_in_place() {
 /// make one.
 #[test]
 fn timeline_fd_open_tells_a_syncobj_from_everything_else() {
-    let eventfd = rustix::event::eventfd(0, rustix::event::EventfdFlags::CLOEXEC)
-        .expect("an eventfd");
-    assert!(!timeline_fd_open(eventfd.as_raw_fd()), "an eventfd is not a timeline");
+    let eventfd =
+        rustix::event::eventfd(0, rustix::event::EventfdFlags::CLOEXEC).expect("an eventfd");
+    assert!(
+        !timeline_fd_open(eventfd.as_raw_fd()),
+        "an eventfd is not a timeline"
+    );
     let memfd = rustix::fs::memfd_create("retained-test", rustix::fs::MemfdFlags::CLOEXEC)
         .expect("a memfd");
-    assert!(!timeline_fd_open(memfd.as_raw_fd()), "a memfd is not a timeline");
+    assert!(
+        !timeline_fd_open(memfd.as_raw_fd()),
+        "a memfd is not a timeline"
+    );
     let closed = memfd.as_raw_fd();
     drop(memfd);
     assert!(!timeline_fd_open(closed), "a closed number is not held");
     assert!(!timeline_fd_open(-1));
 
     let Some(syncobj) = syncobj_fd() else {
-        eprintln!("timeline_fd_open_tells_a_syncobj_from_everything_else: no render node syncobj here; the syncobj half is skipped");
+        eprintln!(
+            "timeline_fd_open_tells_a_syncobj_from_everything_else: no render node syncobj here; the syncobj half is skipped"
+        );
         return;
     };
-    assert!(timeline_fd_open(syncobj.as_raw_fd()), "a syncobj fd is a timeline");
+    assert!(
+        timeline_fd_open(syncobj.as_raw_fd()),
+        "a syncobj fd is a timeline"
+    );
 }
 
 /// A timeline syncobj exported as an fd from this machine's render node, or
@@ -374,7 +405,10 @@ fn sweep_cost() {
             rustix::event::eventfd(0, rustix::event::EventfdFlags::CLOEXEC).expect("an eventfd")
         })
         .collect();
-    for (label, fds) in [("syncobj (live)", &syncobjs), ("eventfd (wrong kind)", &eventfds)] {
+    for (label, fds) in [
+        ("syncobj (live)", &syncobjs),
+        ("eventfd (wrong kind)", &eventfds),
+    ] {
         if fds.len() < RECORDS {
             println!("sweep cost, {label}: skipped, only {} fds", fds.len());
             continue;

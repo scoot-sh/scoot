@@ -255,7 +255,11 @@ impl RetainedTimelines {
     ///
     /// `still_held` is [`timeline_fd_open`] in production. It is a parameter
     /// so that the bookkeeping is unit-testable without real syncobjs.
-    pub(crate) fn sweep(&mut self, client: &ClientId, mut still_held: impl FnMut(RawFd) -> bool) -> u32 {
+    pub(crate) fn sweep(
+        &mut self,
+        client: &ClientId,
+        mut still_held: impl FnMut(RawFd) -> bool,
+    ) -> u32 {
         let Some(held) = self.per_client.get_mut(client) else {
             return 0;
         };
@@ -280,7 +284,10 @@ impl RetainedTimelines {
     pub(crate) fn records(&self) -> usize {
         debug_assert_eq!(
             self.owner.len(),
-            self.per_client.values().map(|held| held.fds.len()).sum::<usize>(),
+            self.per_client
+                .values()
+                .map(|held| held.fds.len())
+                .sum::<usize>(),
             "every record is in both maps"
         );
         self.owner.len()

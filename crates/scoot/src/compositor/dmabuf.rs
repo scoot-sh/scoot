@@ -328,6 +328,12 @@
 //!   in real pages, which is why there is deliberately no second, byte-sized
 //!   cap here the way `wl_shm` pools have one: an shm pool's size is a number
 //!   the client sends, a dma-buf's is a fact about the fd.
+//! - **What bounds the plane fds a client can make this compositor hold
+//!   before any buffer exists.** Each `zwp_linux_buffer_params_v1.add` hands
+//!   over an fd that the params object keeps until it is consumed or
+//!   destroyed. [`pending_planes`] caps those at 32 per client (8 under fd
+//!   pressure), disconnecting with `wl_display.error(no_memory)` past it.
+//!   Before that bound, 220 params objects x 4 adds held 927 fds uncounted.
 //! - **Bind/unbind storms: bounded by Smithay and wayland-backend, not by
 //!   `bind_budget.rs`.** Feedback is built once, at startup; Smithay re-sends
 //!   the stored copy to each `get_default_feedback` without calling back into

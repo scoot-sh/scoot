@@ -9,8 +9,9 @@
 //! [`reject_unrepresentable_layer_size`],
 //! [`reject_frozen_toplevel_icon_request`],
 //! [`reject_excess_capture_frame`] and [`reject_too_deep_subsurface`], plus
-//! explicit sync's live-timeline cap, which lives with the rest of that
-//! protocol in `drm_syncobj.rs` along with its destruction half), one
+//! two that live with their protocols: explicit sync's retained-timeline
+//! cap in `drm_syncobj.rs`, and the pending dma-buf plane cap in
+//! `dmabuf/pending_planes.rs`, each with its release halves there too), one
 //! pre-delegation
 //! interception ([`prepare_post_destroy_lock_commit`]) and six
 //! post-destruction hooks ([`redraw_after_lock_surface_destroyed`],

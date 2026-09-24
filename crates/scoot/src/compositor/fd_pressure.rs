@@ -1,12 +1,14 @@
 //! Compositor-wide file-descriptor pressure: the global ceiling.
 //!
 //! Every other bound in this compositor is per connection (512 live
-//! `wl_buffer`s, 128 live pools, 8 binds, 16 capture frames, 64 IPC slots,
-//! and where explicit sync is offered 128 live syncobj timelines and 64
-//! outstanding acquire waits -- see `drm_syncobj.rs`),
+//! `wl_buffer`s, 128 live pools, 32 dma-buf planes added to params objects
+//! not yet created, 8 binds, 16 capture frames, 64 IPC slots, and where
+//! explicit sync is offered 128 retained syncobj timelines and 64
+//! outstanding acquire waits -- see `dmabuf/pending_planes.rs` and
+//! `drm_syncobj.rs`),
 //! while the fd table they all draw from is process-global (`RLIMIT_NOFILE`
 //! 1024 on the dev VM). Two connections inside every per-connection bound
-//! hold ~2 x 641 fds against it with nothing tripped -- the residual
+//! hold ~2 x 673 fds against it with nothing tripped -- the residual
 //! `docs/backlog/resolved/wayland-connection-cap-done.md` fixed the kill
 //! half of and left here. This module is the shared ceiling:
 //! one observation of the table ([`table`]) and one predicate
@@ -20,10 +22,12 @@
 //! - **IPC accept** (`ipc::accept`): a newcomer past the ceiling is refused
 //!   with a reason naming the pressure, the same shape as the 64-slot cap
 //!   refusal -- IPC, unlike Wayland, has a channel for it.
-//! - **Creation guards** (`dispatch.rs`'s pool/buffer claims): a creation
-//!   past a per-client *grace* ([`PRESSURE_GRACE_BUFFERS`] /
-//!   [`PRESSURE_GRACE_POOLS`]) while the table is pressured is refused with
-//!   the same protocol error the per-connection cap would post. The grace is
+//! - **Creation guards** (`dispatch.rs`'s pool/buffer claims, and the
+//!   pending-plane, timeline and acquire-wait bounds): a creation past a
+//!   per-client *grace* ([`PRESSURE_GRACE_BUFFERS`] /
+//!   [`PRESSURE_GRACE_POOLS`], and the three named in those modules) while
+//!   the table is pressured is refused with the same error the
+//!   per-connection cap would post. The grace is
 //!   what makes this a ceiling rather than a lottery: a bar holding 2
 //!   buffers is never refused for another client's greed, only a client
 //!   already holding past-grace is ever killed, and a killed client's
@@ -45,26 +49,41 @@
 //! - A login storm (bar, panels, launcher, a handful of apps -- ~30
 //!   connections at ~3-4 fds each) lands near **100-150**, by the same
 //!   per-connection arithmetic, not by a live 30-client session.
-//! - One connection at every hard cap: 512 buffers + 128 pools + 1 socket
-//!   = **~641 fds**. One such connection plus a normal session (~750) never
-//!   trips anything here, correctly: a single connection cannot exhaust the
-//!   table on its own.
-//! - **Not every fd a client can make this process hold is counted by a
-//!   cap.** Where explicit sync is offered (the `--tty` GPU scanout tier),
-//!   each outstanding acquire wait is an eventfd (capped at 64, grace 16),
-//!   and each imported syncobj timeline holds the client's fd -- but the
-//!   128-timeline cap counts live timeline *objects*, and a sync point set
-//!   on a surface keeps the fd open after its timeline object is destroyed
-//!   and uncounted. Measured in review: 440 surfaces with pending points on
-//!   destroyed timelines held 927 fds here with zero live timelines. The
-//!   same shape exists on every tier through `zwp_linux_buffer_params_v1`
-//!   `add`s that are never turned into a buffer (220 params x 4 adds, the
-//!   same 927 fds). Neither is counted by any claim above, so under the
-//!   resulting pressure the creation guards cannot pick the offender:
-//!   newcomers are shed and the client holding the fds is not killed.
-//!   Filed as `docs/backlog/core/client-held-fd-bound.md`; the "one
-//!   connection cannot exhaust the table" claim above holds only for the
-//!   counted resources.
+//! - One connection at every hard cap on the default (pixman) tier: 512
+//!   buffers + 128 pools + 32 pending dma-buf planes + 1 socket = **~673
+//!   fds**. One such connection plus a normal session (~800) never trips
+//!   anything here, correctly: a single connection cannot exhaust the table
+//!   on its own there.
+//! - On the `--tty` GPU scanout tier the same connection can also hold 128
+//!   syncobj timelines and 64 acquire-wait eventfds: ~865, over a baseline
+//!   measured at **43 fds** idle (dev VM, `--tty --renderer gles`,
+//!   2026-09-24). 865 + 43 = 908 is past the 896 line, so there one
+//!   connection at every cap at once *can* trip the reserve alone. It is
+//!   then past every grace, so its next counted creation is refused, but if
+//!   it goes idle instead, newcomers are shed until it leaves. Before the
+//!   plane bound the sum was 833 + 43 = 876, 20 under the line, which a
+//!   normal session's own fds already used up. The per-client fd budget
+//!   that would fix this is part of the ticket named below.
+//! - **Every fd a client can make this process hold is counted by a cap,
+//!   with two known exceptions** (below). The two paths that review of
+//!   PR #233 measured at 927 fds each are closed: planes added to
+//!   `zwp_linux_buffer_params_v1` objects are counted until the object is
+//!   consumed or destroyed (`dmabuf/pending_planes.rs`), and syncobj
+//!   timelines are counted until their fd really closes, whatever still
+//!   references them (`drm_syncobj/retained.rs`), rather than until their
+//!   object is destroyed. Both refuse past a grace under pressure, so
+//!   the creation guards above can pick those holders
+//!   (`docs/backlog/resolved/client-held-fd-bound-done.md`).
+//! - **The two exceptions**, filed as
+//!   `docs/backlog/core/buffer-fds-past-their-object.md`. A `wl_buffer`
+//!   that a surface still has committed keeps its fd (and, for shm, its
+//!   pool's mapping) after both the buffer and its pool object are
+//!   destroyed. The buffer and pool counts are both back at zero, and the
+//!   retention is one per surface, which nothing counts. Measured in the
+//!   harness: 200 surfaces, 200 fds held, 0 buffers and 0 pools counted. The
+//!   buffer count also weighs every buffer as one fd, and a multi-plane
+//!   dma-buf holds up to four. Only a GLES renderer imports multi-plane
+//!   buffers, so this second one is not on the default tier.
 //!
 //! [`RESERVE_FDS`] is 128: shed/refuse once fewer than 128 fds stand free
 //! (used past 896 of 1024). That is ~6x above the reasoned login storm and
@@ -90,7 +109,9 @@
 //! refusal always lands on a contributor. Stated exactly: `live > grace`
 //! admits the grace+1-th unit, so two connections at the permitted maximum
 //! hold 2 x (129 + 65 + 1) + 14 = 404 fds, 4 above the "two at grace"
-//! figure -- negligible, but the pins in `dispatch.rs` hold it there.
+//! figure -- negligible, but the pins in `dispatch.rs` hold it there. The
+//! pending-plane grace (8) adds 2 x 9 to that, and the timeline and
+//! acquire-wait graces (32 and 16) apply only on the GPU tier.
 //!
 //! ## Observation cost and disciplines
 //!

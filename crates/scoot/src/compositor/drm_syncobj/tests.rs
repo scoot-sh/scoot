@@ -807,7 +807,11 @@ fn timelines_held_by_points_stop_counting_when_the_points_go() {
     );
     fixture.done(Step::DestroyAllSurfaces);
     fixture.settle();
-    assert_eq!(fixture.state.drm_syncobj.timelines_in_flight(), 1, "just setup's");
+    assert_eq!(
+        fixture.state.drm_syncobj.timelines_in_flight(),
+        1,
+        "just setup's"
+    );
     fixture.done(Step::ImportTimelines {
         count: MAX_TIMELINES_PER_CLIENT - 1,
         keep: true,

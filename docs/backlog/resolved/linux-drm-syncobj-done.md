@@ -85,7 +85,7 @@ carrying the missing `Drop`. The leak is flat with it.
   pending points on destroyed timelines holding 927 fds in scoot with 0
   live timelines: new clients were shed and the offender was not killed.
   The same hole exists through dmabuf `params` adds.
-  Filed as [client-held fd bound](../core/client-held-fd-bound.md), and not
+  Filed as [client-held fd bound](./client-held-fd-bound-done.md), and not
   fixed here.
 - **Documented, not patched:** re-committing the same `wl_buffer` keeps the
   first commit's `Buffer`, and its points, in Smithay

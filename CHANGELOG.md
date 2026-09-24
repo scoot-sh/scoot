@@ -9,6 +9,18 @@ scoot has not cut a numbered release yet; entries are dated.
 
 ## Unreleased
 
+### 2026-09-24 — a misbehaving app can no longer make scoot turn other apps away this way
+
+- **One app could make scoot hold almost all of its file descriptors**, by
+  handing over GPU buffer pieces it never finished building, or explicit-sync
+  timelines it had already thrown away. scoot then turned *new* apps (and
+  `scootctl`) away to protect itself, while the app causing it carried on.
+  Both are now counted per app: an app that goes past a generous limit is
+  disconnected, and everything else keeps working. No real app comes near
+  the limits (a GPU app has one buffer's pieces in flight at a time; a
+  Vulkan window uses 16 timelines, and the limit is 128). Nothing to
+  configure. Details and the exact numbers: [protocols.md](docs/protocols.md).
+
 ### 2026-09-24 — `--nested --renderer gles` hands its frames to the host as GPU buffers
 
 - **In a `gpu-scanout` build (`nix build .#scoot-gpu`), `scoot --nested
