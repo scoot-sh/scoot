@@ -908,9 +908,9 @@ impl ScanoutPresenter {
             }
             Err(error) => {
                 tracing::warn!(%error, "drm: queueing the frame for scanout failed");
-                // This frame will never flip, and its number is reused by the
-                // retry: release what it held once its render is done.
-                self.release_hold.release_frame(flip);
+                // This frame will never be shown, and its number is reused by
+                // the retry: release what it held now.
+                self.release_hold.discard_frame(flip);
                 self.arm_retry();
                 ScanoutFrame {
                     drew: true,
@@ -941,8 +941,9 @@ impl ScanoutPresenter {
     ///
     /// The completed flip also releases the explicit-sync buffers held for
     /// it and for every earlier frame (see the `release_hold` field). On an
-    /// error the completed frame's number is lost with it, so everything held
-    /// is released after waiting out its render instead.
+    /// error the completed frame's number is lost with it, and that frame
+    /// is on screen, so everything held is released after waiting out its
+    /// render instead.
     pub(super) fn frame_submitted(&mut self) -> (bool, Option<u64>) {
         match self.compositor.frame_submitted() {
             Ok(flip) => {
@@ -1039,18 +1040,21 @@ impl ScanoutPresenter {
             tracing::debug!(%error, "drm: a pre-pause frame could not be submitted; discarding it");
         }
         // Already released by `pause`, unless the pause never reached us (a
-        // reactivation without one); either way nothing held here can flip.
-        self.release_hold.release_all();
+        // reactivation without one); either way nothing held here will be
+        // shown, and no GPU-fence wait belongs on the activate path.
+        self.release_hold.discard_all();
         self.invalidate_scanout();
     }
 
     /// The session has been paused (VT-switched away): the frames in flight
     /// may never report their vblank, so the explicit-sync buffers they hold
-    /// are released now, after waiting out their renders, rather than kept
-    /// until the switch back -- a client rendering while switched away must
-    /// not run out of buffers over frames it will never see.
+    /// are released now rather than kept until the switch back -- a client
+    /// rendering while switched away must not run out of buffers over frames
+    /// it will never see. Without waiting on their renders: those frames are
+    /// not going to be shown, and a blocking fence wait does not belong on
+    /// the pause path (see `drm_syncobj/release_hold.rs`).
     pub(super) fn pause(&mut self) {
-        self.release_hold.release_all();
+        self.release_hold.discard_all();
     }
 
     /// The scanout bookkeeping shared by reactivation and the hotplug paths --
@@ -1121,8 +1125,8 @@ impl ScanoutPresenter {
         ) {
             Ok(compositor) => {
                 // The old compositor's in-flight frames drop with it and will
-                // never report a vblank.
-                self.release_hold.release_all();
+                // never be shown.
+                self.release_hold.discard_all();
                 self.compositor = compositor;
                 // A new CRTC may come with a different primary plane, and so
                 // a different format list: the scanout tranche rebuilds.

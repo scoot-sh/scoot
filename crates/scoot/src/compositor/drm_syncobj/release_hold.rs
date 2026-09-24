@@ -29,18 +29,25 @@
 //!   done (scoot does not act on `RenderFrameResult::needs_sync`), and the
 //!   wait keeps the release exact there too -- at the cost of blocking
 //!   exactly when the display itself would have shown an unfinished frame.
-//! - **the frame will never flip** -- its queue was refused, the session
-//!   paused or reactivated, the compositor was rebuilt on another CRTC, or a
-//!   completion errored ([`release_frame`](ReleaseHold::release_frame),
-//!   [`release_all`](ReleaseHold::release_all)). Those wait on the batch's
-//!   render `SyncPoint` first, which is the exact criterion (the flip was
-//!   only ever a non-blocking proxy for it). All are rare paths, and the
-//!   wait is normally already satisfied; on a renderer without native fences
-//!   `GlesFrame::finish` already `glFinish`ed and the point is signalled.
+//! - **the frame will never reach the screen** -- its queue was refused, the
+//!   session paused or reactivated, or the compositor was rebuilt on another
+//!   CRTC ([`discard_frame`](ReleaseHold::discard_frame),
+//!   [`discard_all`](ReleaseHold::discard_all)). Released **without**
+//!   waiting on the render: a client overwriting a buffer while scoot's GPU
+//!   still samples it could only corrupt scoot's own composite, and that
+//!   composite is never shown (or, as a VT hands over, for at most one
+//!   vblank). Waiting there would put a blocking GPU-fence wait -- unbounded
+//!   if the GPU hangs -- on the session pause and activate handlers, which
+//!   are the recovery path `docs/roadmap/05b-vt-switch-eperm.md` protects.
+//! - **a completion errored** ([`release_all`](ReleaseHold::release_all)):
+//!   the frame that just flipped *is* on screen, and its number was lost
+//!   with the error, so everything held is released after waiting out its
+//!   render (free wherever flips are fenced, as above).
 //! - **more frames are held than can be in flight** (a pending flip and one
-//!   queued behind it, [`MAX_FRAMES`]): the oldest is waited out and
-//!   dropped, so a display whose flips stop completing cannot grow this
-//!   without bound or keep a client's buffers forever.
+//!   queued behind it, [`MAX_FRAMES`]): the oldest is waited out -- it may be
+//!   the pending flip, still to be shown -- and dropped, so a display whose
+//!   flips stop completing cannot grow this without bound or keep a client's
+//!   buffers forever.
 //!
 //! A frame whose primary plane went direct holds nothing here: no client
 //! buffer was sampled into the swapchain, and the one on the plane is kept by
@@ -95,7 +102,7 @@ impl<T> ReleaseHold<T> {
     ///
     /// `flip` must be greater than every flip already held -- the presenter
     /// numbers frames monotonically, and a frame whose queue fails is
-    /// released at once ([`release_frame`](Self::release_frame)) so its
+    /// released at once ([`discard_frame`](Self::discard_frame)) so its
     /// number is never reused while held.
     pub(crate) fn hold(
         &mut self,
@@ -144,20 +151,28 @@ impl<T> ReleaseHold<T> {
         );
     }
 
-    /// `flip` will never reach the screen (its queue was refused): waits out
-    /// its render and releases what it held.
-    pub(crate) fn release_frame(&mut self, flip: u64) {
+    /// `flip` will never reach the screen (its queue was refused): releases
+    /// what it held at once, without waiting on its render (see the module
+    /// doc for why that is safe and why a wait here would not be).
+    pub(crate) fn discard_frame(&mut self, flip: u64) {
         let Some(at) = self.frames.iter().position(|(held, _)| *held == flip) else {
             return;
         };
-        let (_, sync) = self.frames.remove(at);
-        wait(&sync);
+        // Dropped unwaited, deliberately: see the doc above.
+        drop(self.frames.remove(at));
         self.held.retain(|(held, _)| *held != flip);
     }
 
-    /// No held frame can be trusted to flip any more (a pause, a
-    /// reactivation's drain, a rebuilt compositor, a failed completion):
-    /// waits out every held render and releases everything.
+    /// No held frame will reach the screen (a session pause, a
+    /// reactivation's drain, a compositor rebuilt on another CRTC): releases
+    /// everything at once, waiting on nothing.
+    pub(crate) fn discard_all(&mut self) {
+        self.frames.clear();
+        self.held.clear();
+    }
+
+    /// A completion errored, so which held frame just reached the screen is
+    /// unknown: waits out every held render, then releases everything.
     pub(crate) fn release_all(&mut self) {
         for (_, sync) in self.frames.drain(..) {
             wait(&sync);

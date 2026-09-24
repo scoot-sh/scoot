@@ -117,9 +117,38 @@ enum Ack {
 
 type Fixture = Harness<Step, Ack>;
 
+/// The two process-wide resources these tests share with other suites
+/// under `cargo test` (one process, many threads), held for a whole test:
+///
+/// - `dispatch/tests.rs`'s fd-flood lock: the bound tests here push a
+///   client past the fd-pressure graces, where the verdict reads the
+///   process's fd table -- a neighbouring ~512-fd flood would turn a kill at
+///   65 into one at 17 -- and the floods here hold a few hundred fds
+///   themselves.
+/// - `dmabuf/tests.rs`'s mapping lock: every commit here imports a udmabuf
+///   that pixman maps, and that suite counts the process's dma-buf
+///   mappings.
+///
+/// Taken in that order, the only test anywhere that takes both. Free under
+/// nextest, which gives every test its own process.
+struct Serialised {
+    _flood: std::sync::MutexGuard<'static, ()>,
+    _mappings: std::sync::MutexGuard<'static, ()>,
+}
+
+fn serialise() -> Serialised {
+    Serialised {
+        _flood: crate::compositor::dispatch::tests::hold_flood_lock(),
+        _mappings: crate::compositor::dmabuf::tests::exclusive_mappings(),
+    }
+}
+
 /// A compositor with the global enabled on the render node, or `None` (with
-/// the reason printed) where this machine cannot offer it.
-fn start(test: &str) -> Option<Fixture> {
+/// the reason printed) where this machine cannot offer it. The locks come
+/// first in the tuple so a `let Some((_locks, fixture))` drops them *after*
+/// the fixture, whose teardown is what unmaps the test's buffers.
+fn start(test: &str) -> Option<(Serialised, Fixture)> {
+    let locks = serialise();
     let Some(device) = open_render_node() else {
         skipped(test, "no usable render node");
         return None;
@@ -137,7 +166,7 @@ fn start(test: &str) -> Option<Fixture> {
     }
     fixture.spawn(run_client);
     match fixture.run(Step::Setup) {
-        Ack::Ready => Some(fixture),
+        Ack::Ready => Some((locks, fixture)),
         Ack::Unsupported(why) => {
             skipped(test, &why);
             None
@@ -238,7 +267,7 @@ fn the_global_is_not_offered_unless_enabled() {
 
 #[test]
 fn the_global_is_offered_once_enabled() {
-    let Some(mut fixture) = start("the_global_is_offered_once_enabled") else {
+    let Some((_locks, mut fixture)) = start("the_global_is_offered_once_enabled") else {
         return;
     };
     let Ack::Globals(globals) = fixture.run(Step::Globals) else {
@@ -256,7 +285,7 @@ fn the_global_is_offered_once_enabled() {
 
 #[test]
 fn enabling_twice_keeps_one_global() {
-    let Some(mut fixture) = start("enabling_twice_keeps_one_global") else {
+    let Some((_locks, mut fixture)) = start("enabling_twice_keeps_one_global") else {
         return;
     };
     let device = DrmDeviceFd::new(DeviceFd::from(open_render_node().expect("a render node")));
@@ -363,7 +392,7 @@ fn no_passing_candidate_offers_nothing() {
 
 #[test]
 fn a_commit_waits_for_its_acquire_point() {
-    let Some(mut fixture) = start("a_commit_waits_for_its_acquire_point") else {
+    let Some((_locks, mut fixture)) = start("a_commit_waits_for_its_acquire_point") else {
         return;
     };
     let (surface, id) = fixture.new_surface();
@@ -391,7 +420,8 @@ fn a_commit_waits_for_its_acquire_point() {
 
 #[test]
 fn an_already_signalled_acquire_point_is_not_waited_on() {
-    let Some(mut fixture) = start("an_already_signalled_acquire_point_is_not_waited_on") else {
+    let Some((_locks, mut fixture)) = start("an_already_signalled_acquire_point_is_not_waited_on")
+    else {
         return;
     };
     let (surface, id) = fixture.new_surface();
@@ -410,7 +440,8 @@ fn an_already_signalled_acquire_point_is_not_waited_on() {
 
 #[test]
 fn later_commits_queue_behind_a_waiting_one_and_apply_in_order() {
-    let Some(mut fixture) = start("later_commits_queue_behind_a_waiting_one_and_apply_in_order")
+    let Some((_locks, mut fixture)) =
+        start("later_commits_queue_behind_a_waiting_one_and_apply_in_order")
     else {
         return;
     };
@@ -445,7 +476,8 @@ fn later_commits_queue_behind_a_waiting_one_and_apply_in_order() {
 
 #[test]
 fn a_never_signalled_point_stalls_only_its_own_surface() {
-    let Some(mut fixture) = start("a_never_signalled_point_stalls_only_its_own_surface") else {
+    let Some((_locks, mut fixture)) = start("a_never_signalled_point_stalls_only_its_own_surface")
+    else {
         return;
     };
     let (stuck, stuck_id) = fixture.new_surface();
@@ -473,7 +505,8 @@ fn a_never_signalled_point_stalls_only_its_own_surface() {
 
 #[test]
 fn destroying_a_surface_mid_wait_removes_its_eventfd_source() {
-    let Some(mut fixture) = start("destroying_a_surface_mid_wait_removes_its_eventfd_source")
+    let Some((_locks, mut fixture)) =
+        start("destroying_a_surface_mid_wait_removes_its_eventfd_source")
     else {
         return;
     };
@@ -507,7 +540,8 @@ fn destroying_a_surface_mid_wait_removes_its_eventfd_source() {
 
 #[test]
 fn a_disconnect_mid_wait_removes_every_eventfd_source() {
-    let Some(mut fixture) = start("a_disconnect_mid_wait_removes_every_eventfd_source") else {
+    let Some((_locks, mut fixture)) = start("a_disconnect_mid_wait_removes_every_eventfd_source")
+    else {
         return;
     };
     let (first, first_id) = fixture.new_surface();
@@ -541,7 +575,7 @@ fn a_disconnect_mid_wait_removes_every_eventfd_source() {
 
 #[test]
 fn outstanding_waits_are_bounded_per_client() {
-    let Some(mut fixture) = start("outstanding_waits_are_bounded_per_client") else {
+    let Some((_locks, mut fixture)) = start("outstanding_waits_are_bounded_per_client") else {
         return;
     };
     let (surface, _) = fixture.new_surface();
@@ -570,7 +604,7 @@ fn outstanding_waits_are_bounded_per_client() {
 
 #[test]
 fn exactly_the_bound_is_allowed() {
-    let Some(mut fixture) = start("exactly_the_bound_is_allowed") else {
+    let Some((_locks, mut fixture)) = start("exactly_the_bound_is_allowed") else {
         return;
     };
     let (surface, _) = fixture.new_surface();
@@ -587,7 +621,8 @@ fn exactly_the_bound_is_allowed() {
 
 #[test]
 fn a_malformed_commit_gets_smithays_error_and_no_wait() {
-    let Some(mut fixture) = start("a_malformed_commit_gets_smithays_error_and_no_wait") else {
+    let Some((_locks, mut fixture)) = start("a_malformed_commit_gets_smithays_error_and_no_wait")
+    else {
         return;
     };
     let (surface, _) = fixture.new_surface();
@@ -613,7 +648,8 @@ fn a_malformed_commit_gets_smithays_error_and_no_wait() {
 
 #[test]
 fn a_release_point_is_signalled_when_its_buffer_is_replaced() {
-    let Some(mut fixture) = start("a_release_point_is_signalled_when_its_buffer_is_replaced")
+    let Some((_locks, mut fixture)) =
+        start("a_release_point_is_signalled_when_its_buffer_is_replaced")
     else {
         return;
     };
@@ -631,7 +667,8 @@ fn a_release_point_is_signalled_when_its_buffer_is_replaced() {
 
 #[test]
 fn a_release_point_is_signalled_when_its_surface_is_destroyed() {
-    let Some(mut fixture) = start("a_release_point_is_signalled_when_its_surface_is_destroyed")
+    let Some((_locks, mut fixture)) =
+        start("a_release_point_is_signalled_when_its_surface_is_destroyed")
     else {
         return;
     };
@@ -646,7 +683,7 @@ fn a_release_point_is_signalled_when_its_surface_is_destroyed() {
 
 #[test]
 fn a_destroyed_buffer_leaves_the_explicit_set() {
-    let Some(mut fixture) = start("a_destroyed_buffer_leaves_the_explicit_set") else {
+    let Some((_locks, mut fixture)) = start("a_destroyed_buffer_leaves_the_explicit_set") else {
         return;
     };
     let (surface, _) = fixture.new_surface();
@@ -666,7 +703,7 @@ fn a_destroyed_buffer_leaves_the_explicit_set() {
 
 #[test]
 fn live_timelines_are_bounded_per_client() {
-    let Some(mut fixture) = start("live_timelines_are_bounded_per_client") else {
+    let Some((_locks, mut fixture)) = start("live_timelines_are_bounded_per_client") else {
         return;
     };
     // Setup imported one already.
@@ -688,7 +725,8 @@ fn live_timelines_are_bounded_per_client() {
 
 #[test]
 fn destroyed_timelines_do_not_count_against_the_bound() {
-    let Some(mut fixture) = start("destroyed_timelines_do_not_count_against_the_bound") else {
+    let Some((_locks, mut fixture)) = start("destroyed_timelines_do_not_count_against_the_bound")
+    else {
         return;
     };
     fixture.done(Step::ImportTimelines {

@@ -279,9 +279,9 @@ impl Presenter {
     /// the screen -- and one that never arrives is cleared by the drain in
     /// [`reactivate`](Self::reactivate) instead.
     ///
-    /// It does release the explicit-sync buffers its in-flight frames hold
-    /// (after waiting out their renders): a frame whose vblank never arrives
-    /// must not keep a client's buffers until the switch back (see
+    /// It does release the explicit-sync buffers its in-flight frames hold,
+    /// without waiting on anything: a frame whose vblank never arrives must
+    /// not keep a client's buffers until the switch back (see
     /// `ScanoutPresenter::pause`).
     fn pause(&mut self) {
         match self {

@@ -180,13 +180,15 @@ fn flips_that_never_complete_cannot_grow_the_hold() {
 }
 
 #[test]
-fn a_refused_queue_releases_its_own_frame_after_waiting() {
+fn a_refused_queue_discards_its_own_frame_without_waiting() {
+    // A frame whose queue was refused is never shown, so its buffers go at
+    // once: no fence wait on that path.
     let mut rig = Rig::new();
     rig.hold(4, &["kept"]);
     rig.hold(5, &["refused"]);
-    rig.hold.release_frame(5);
+    rig.hold.discard_frame(5);
     assert_eq!(rig.released(), ["refused"]);
-    assert_eq!(rig.waits(), 1);
+    assert_eq!(rig.waits(), 0);
     assert_eq!(rig.hold.frames(), 1);
     // The number is free again for the retry, which is what the presenter
     // does (it only advances the number on a successful queue).
@@ -196,10 +198,10 @@ fn a_refused_queue_releases_its_own_frame_after_waiting() {
 }
 
 #[test]
-fn release_frame_for_an_unheld_flip_is_a_no_op() {
+fn discard_frame_for_an_unheld_flip_is_a_no_op() {
     let mut rig = Rig::new();
     rig.hold(1, &["a"]);
-    rig.hold.release_frame(9);
+    rig.hold.discard_frame(9);
     assert_eq!(rig.hold.held(), 1);
     assert_eq!(rig.waits(), 0);
     // Nor does a completion of an earlier flip wait on a later frame.
@@ -209,7 +211,27 @@ fn release_frame_for_an_unheld_flip_is_a_no_op() {
 }
 
 #[test]
+fn discard_all_releases_everything_without_waiting() {
+    // A pause, a reactivation's drain, a rebuilt compositor: nothing held
+    // will be shown, and none of those paths may block on a GPU fence.
+    let mut rig = Rig::new();
+    rig.hold(1, &["a"]);
+    rig.hold(2, &["b", "c"]);
+    rig.hold.discard_all();
+    assert_eq!(rig.released(), ["a", "b", "c"]);
+    assert_eq!(rig.waits(), 0);
+    assert_eq!(rig.hold.frames(), 0);
+    rig.hold.flip_completed(2);
+    assert_eq!(rig.released().len(), 3);
+    // And the hold carries on normally afterwards.
+    rig.hold(3, &["d"]);
+    assert_eq!(rig.hold.held(), 1);
+}
+
+#[test]
 fn release_all_waits_out_every_frame_and_empties() {
+    // An errored completion: the frame that just flipped is on screen and
+    // unknown, so every held render is waited out first.
     let mut rig = Rig::new();
     rig.hold(1, &["a"]);
     rig.hold(2, &["b", "c"]);

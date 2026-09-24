@@ -1188,4 +1188,4 @@ fn refuse_import(buffers: &mut WlBuffers, notifier: ImportNotifier) {
 #[cfg(feature = "gpu-scanout")]
 pub(super) mod scanout;
 #[cfg(test)]
-mod tests;
+pub(in crate::compositor) mod tests;
