@@ -61,7 +61,7 @@ fn a_later_configure_at_the_same_size_does_nothing() {
     // state change that is not a resize (activation, maximize, a tiling-edge
     // update), so without this every focus change in the host would throw
     // away a working render target and buffer pool to build an identical
-    // pair -- a whole new EGL context under `--renderer gles`.
+    // pair, and redraw the whole frame into it.
     assert_eq!(
         configure_action(true, STARTED_AT, STARTED_AT),
         ConfigureAction::Nothing
