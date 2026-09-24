@@ -278,11 +278,16 @@ impl Presenter {
     /// issued before the pause confirms exactly that frame -- which did reach
     /// the screen -- and one that never arrives is cleared by the drain in
     /// [`reactivate`](Self::reactivate) instead.
+    ///
+    /// It does release the explicit-sync buffers its in-flight frames hold,
+    /// without waiting on anything: a frame whose vblank never arrives must
+    /// not keep a client's buffers until the switch back (see
+    /// `ScanoutPresenter::pause`).
     fn pause(&mut self) {
         match self {
             Self::Dumb(dumb) => dumb.discard_flip(),
             #[cfg(feature = "gpu-scanout")]
-            Self::Gpu(_) => {}
+            Self::Gpu(gpu) => gpu.pause(),
         }
     }
 
@@ -534,6 +539,29 @@ pub fn init(
         session_paused: false,
     });
 
+    // Explicit sync is offered only on the GPU scanout tier, and only where
+    // a device passes Smithay's syncobj-eventfd probe -- decided here,
+    // before the event loop starts, so no client can bind a global that is
+    // not honoured, and no surface is created before the acquire hook it
+    // needs (see `drm_syncobj.rs`). The session's own DRM fd first; the
+    // render nodes only if that fails (a split render/display machine), each
+    // opened only when the one before it failed.
+    #[cfg(feature = "gpu-scanout")]
+    if let Some(tty) = state.tty.as_ref()
+        && tty.scanout_tier()
+    {
+        let display = tty.drm.device_fd().clone();
+        let candidates = std::iter::once((
+            std::borrow::Cow::Borrowed("the display device"),
+            Some(display),
+        ))
+        .chain(render_nodes().into_iter().map(|path| {
+            let device = open_render_node(&path);
+            (std::borrow::Cow::Owned(path.display().to_string()), device)
+        }));
+        state.drm_syncobj.enable(&state.display_handle, candidates);
+    }
+
     // The gamma protocol's `gamma_size` is per-CRTC hardware state, and the
     // CRTC only exists once the surface above does -- so the manager is
     // constructed with the fallback in `State::new` and corrected here, still
@@ -570,6 +598,38 @@ pub fn init(
     super::config::enforce_vt_binds(&mut state.keybindings);
 
     Ok((width, height, name))
+}
+
+/// Every render node on the machine (`/dev/dri/renderD*`), in name order --
+/// the candidates explicit sync falls back to when the display device cannot
+/// import timelines (see `DrmSyncobj::enable`). Listed only on that path, at
+/// startup; an unreadable `/dev/dri` is simply no candidates.
+#[cfg(feature = "gpu-scanout")]
+fn render_nodes() -> Vec<std::path::PathBuf> {
+    let Ok(entries) = std::fs::read_dir("/dev/dri") else {
+        return Vec::new();
+    };
+    let mut nodes: Vec<std::path::PathBuf> = entries
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_name().to_string_lossy().starts_with("renderD"))
+        .map(|entry| entry.path())
+        .collect();
+    nodes.sort();
+    nodes
+}
+
+/// Opens a render node as an explicit-sync import candidate. A plain open,
+/// not through the session: render nodes carry no modesetting rights, need
+/// no seat, and are not paused on a VT switch.
+#[cfg(feature = "gpu-scanout")]
+fn open_render_node(path: &Path) -> Option<DrmDeviceFd> {
+    let fd = rustix::fs::open(
+        path,
+        rustix::fs::OFlags::RDWR | rustix::fs::OFlags::CLOEXEC | rustix::fs::OFlags::NOCTTY,
+        rustix::fs::Mode::empty(),
+    )
+    .ok()?;
+    Some(DrmDeviceFd::new(DeviceFd::from(fd)))
 }
 
 /// Registers the udev monitor that delivers DRM hotplug events (see
@@ -1135,6 +1195,13 @@ impl Tty {
     /// consumer, since a refused flip has no completion event coming.
     pub fn take_retry_render(&mut self) -> bool {
         self.presenter.take_retry_render()
+    }
+
+    /// Whether this session came up on the GPU scanout tier -- fixed for the
+    /// session's life (the presenter is chosen once, in `init`).
+    #[cfg(feature = "gpu-scanout")]
+    fn scanout_tier(&self) -> bool {
+        matches!(self.presenter, Presenter::Gpu(_))
     }
 
     /// The GPU scanout presenter, if this session is on that tier.

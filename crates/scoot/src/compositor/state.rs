@@ -612,6 +612,13 @@ pub struct State {
     /// fds/mappings; the pool count above cannot (a buffer outlives its
     /// pool object).
     pub wl_buffers: WlBuffers,
+    /// Explicit sync (`wp_linux_drm_syncobj_manager_v1`): the protocol state
+    /// (and so the global) where it is offered -- the `--tty` GPU scanout
+    /// tier on a device that passes the syncobj-eventfd probe, set by
+    /// `tty::init` -- plus the per-client timeline and acquire-wait counts
+    /// and the explicit-buffer classification the scanout tier's release
+    /// hold reads. Inert everywhere else. See `drm_syncobj.rs`.
+    pub(super) drm_syncobj: super::drm_syncobj::DrmSyncobj,
     /// Whether any client has ever handed this session a dmabuf the renderer
     /// accepted.
     ///
@@ -941,6 +948,7 @@ impl State {
             bind_budget: BindBudget::default(),
             shm_pools: ShmPools::default(),
             wl_buffers: WlBuffers::default(),
+            drm_syncobj: Default::default(),
             imports_dmabufs: false,
             dmabuf_drain_queued: false,
             idle_notifier,

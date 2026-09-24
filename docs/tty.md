@@ -326,6 +326,20 @@ running with no GPU at all is a hard requirement here, not a fallback tier.
   show scrambled tiles -- is dropped from it and the window re-sent. Whether a real GL client reallocates into the tranche on
   real hardware and goes direct is [`../Asahi.md`](../Asahi.md)'s Test 6 --
   not yet seen; no GL client on the dev VM can allocate a dma-buf at all.
+- **GPU clients get explicit sync here, and only here.** Where the DRM
+  device -- or, failing that, a render node (`/dev/dri/renderD*`) --
+  supports syncobj timelines with eventfd (the startup log says
+  `drm: explicit sync (wp_linux_drm_syncobj_manager_v1) offered device=…`;
+  the dev VM's virtio-gpu does), this tier offers `linux-drm-syncobj-v1`: a commit
+  waits for its acquire point before it is shown, without blocking anything
+  else, and a buffer's release point is signalled only once scoot is done
+  reading it -- after the composited frame that sampled it has finished on
+  the GPU and flipped, or once the display stops scanning out a fullscreen
+  buffer shown directly. Waits keep running across a VT switch. No other tier or backend
+  offers the global, because none can honour it without blocking. Bounds,
+  the Smithay leak scoot forked Smithay to fix, and what has been verified are in
+  [protocols.md](protocols.md#explicit-sync-linux-drm-syncobj-v1); the
+  real-GPU check is [`../Asahi.md`](../Asahi.md)'s Test 7.
 - **A resize under `gles` keeps the renderer.** `--nested` follows its host
   window's size, and under `--renderer gles` each new size reallocates only
   the offscreen target: the EGL context, its shaders and every client

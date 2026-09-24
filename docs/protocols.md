@@ -22,6 +22,7 @@ read your files anyway.
 | `ext-image-copy-capture-v1` | 1 | [Screen capture](#screen-capture-ext-image-copy-capture-v1), output only. |
 | `ext-image-capture-source-v1` | 1 | Output sources only; no toplevel source manager. |
 | `zwp_linux_dmabuf_v1` | 6 | [Real dmabuf import](#gpu-rendering-clients-zwp_linux_dmabuf_v1), formats derived from the active renderer: `LINEAR` single-plane under pixman, the driver's own formats and modifiers (tiled, multi-plane YUV) under GLES; a [scanout tranche](#per-surface-feedback-the-scanout-tranche) for a fullscreen window on the GPU scanout tier. |
+| `linux-drm-syncobj-v1` | 1 | [Explicit sync](#explicit-sync-linux-drm-syncobj-v1) for GPU clients, **only on the `--tty` GPU scanout tier** and only where the DRM device supports syncobj timelines with eventfd. Not offered anywhere else. |
 | `ext-session-lock-v1` | 1 | [Screen locking](#screen-locking-ext-session-lock-v1). |
 | `ext-idle-notify-v1` | 2 | [Idle detection](#idle-detection). |
 | `idle-inhibit-v1` | 1 | [Idle inhibitors](#idle-detection). |
@@ -953,6 +954,106 @@ then be shown straight from its own memory instead of being composited.
 
 No other backend or tier sends per-surface feedback that differs from the
 default.
+
+## Explicit sync (`linux-drm-syncobj-v1`)
+
+`wp_linux_drm_syncobj_manager_v1` lets a GPU client hand over a dma-buf
+together with two points on DRM timeline syncobjs: an *acquire* point its
+GPU signals when the buffer is finished, and a *release* point scoot signals
+when it is done reading the buffer. NVIDIA's driver effectively requires
+it, and Mesa's Vulkan WSI uses it where the compositor offers it and the
+driver supports it; without it a GPU
+client depends on implicit fencing, which not every driver provides.
+
+**Where it is offered.** Only on the GPU scanout tier (`--tty --renderer
+gles` in a `gpu-scanout` build), and only when a DRM device passes
+Smithay's syncobj-eventfd probe (timeline syncobjs plus
+`DRM_IOCTL_SYNCOBJ_EVENTFD`). The display device scoot drives is tried
+first; if its driver has no syncobj support -- possible on a machine whose
+display controller is not its GPU, like Apple Silicon -- the render nodes
+(`/dev/dri/renderD*`, in name order) are tried instead (a syncobj works on
+any DRM device that supports them, whichever GPU made it). The startup log says which:
+`drm: explicit sync (wp_linux_drm_syncobj_manager_v1) offered device=…`,
+or `drm: no device here has syncobj timeline eventfd support; explicit
+sync … is not offered`. The dev VM's virtio-gpu passes on the display
+device.
+
+**Where it is not, and why.** Not under pixman (`--headless`, `--nested`,
+the default dumb-buffer `--tty`), and not under `--renderer gles` on
+`--headless`/`--nested`. Honouring the points needs a way to wait on an
+acquire point without blocking the compositor and a render fence to wait
+out before signalling a release point, and only the scanout tier has both
+wired. A client that binds the global and then has its points ignored is
+worse off than one that never saw it (it would scan out or composite
+unfinished buffers), so everywhere else the global does not exist and the
+client falls back to implicit sync, as it would on any compositor without
+the protocol.
+
+What scoot does with the points:
+
+- **Acquire.** A commit whose acquire point has not signalled is held until
+  it does. The surface keeps showing its previous buffer in the meantime,
+  and later commits to the same surface queue behind it in order. Other
+  surfaces, including the same client's, and every other client carry on:
+  a client whose GPU never signals stalls only its own surface. A point
+  already signalled when the commit arrives costs one query and nothing
+  else. A surface destroyed while it waits, or a client that disconnects
+  mid-wait, takes its waits with it at once rather than when (or if) the
+  point signals. Waits keep running while the session is VT-switched away.
+- **Release.** A buffer's release point is signalled when scoot is done
+  reading it. For a composited frame, that means once the frame's GPU work
+  has finished and it has flipped, not merely when the client commits its
+  next buffer (a frame that will never be shown -- the session switched
+  away, a refused commit -- lets its buffers go at once). For
+  a fullscreen buffer scanned out directly, it means once the display has
+  stopped scanning it out. A buffer replaced before it was ever shown, or
+  whose surface is destroyed, is released straight away. Buffers committed
+  without sync points keep the release timing they always had.
+- **Malformed requests** (an acquire point without a release point, a
+  release point not after the acquire point on the same timeline, points on
+  a `wl_shm` buffer, a timeline fd that is not a syncobj) get the protocol's
+  own errors, from Smithay.
+- **Bounds.** A client may hold 128 live timeline objects and have 64 commits
+  waiting on acquire points at once (each is an eventfd); 32 and 16 while
+  the compositor's fd table is nearly full, the same shape as the buffer and
+  pool bounds. The timeline bound counts timeline *objects*, not the
+  syncobj fds scoot holds for them. A sync point set on a surface keeps its
+  timeline's fd open after the timeline object is destroyed, so it is not
+  an fd bound. That gap is
+  [`backlog/core/client-held-fd-bound.md`](backlog/core/client-held-fd-bound.md). Past the timeline bound the
+  import is refused with `invalid_timeline`. Past the wait bound the client
+  is disconnected with `wl_display.error` `no_memory`. A real client stays
+  far below both: Mesa's Vulkan WSI imports two timelines per swapchain
+  image, and a swapchain cannot run more than its image count ahead.
+
+**A leak fixed by forking Smithay.** Upstream Smithay, at the revision scoot
+pinned and on its `master`, never destroys the kernel handle an
+`import_timeline` creates. So each import would leave one syncobj handle on
+scoot's DRM file until scoot exits, about 80 bytes of kernel memory each,
+together with any wait scoot abandoned on that syncobj when a surface was
+destroyed mid-wait (about 200 bytes each). A hostile client could drive
+that at wire speed (review measured about 24 MB/s), and no per-client bound
+stops it, because every iteration ends with nothing live. scoot therefore
+builds against a scoot-sh fork of Smithay that adds the one missing `Drop`.
+Measured with it, both loops stay flat. Details are in
+[`backlog/resolved/syncobj-handle-leak-done.md`](backlog/resolved/syncobj-handle-leak-done.md).
+Returning to upstream once it has the fix is
+[`backlog/core/smithay-fork-repin.md`](backlog/core/smithay-fork-repin.md).
+
+**What has been verified.** On the dev VM's GPU tier (virtio-gpu), with a
+test client that renders into card0 dumb buffers and signals its own syncobj
+timelines standing in for a GPU: a held commit shown only after its signal,
+also across a VT switch; a client that never signals stalling only itself,
+while another client's frame pacing and IPC latency stay unchanged; the fds
+of a client killed mid-wait all returned; both bounds disconnecting only
+the offender; a fullscreen explicit client going direct on every frame, its
+replaced buffers released when the replacement's flip completed; no change
+in compositor CPU. No real explicit-sync client has been run against it:
+on the dev VM, Mesa's `vkcube` (lavapipe) and `es2gears_wayland` (llvmpipe)
+both draw through `wl_shm` and never bind the global. The real-GPU check is
+[`Asahi.md`](../Asahi.md)'s Test 7. `--nested` was not run live; the global
+cannot appear there, since the only code that offers it runs in `--tty`'s
+startup.
 
 ## Screen locking (`ext-session-lock-v1`)
 

@@ -319,7 +319,10 @@ impl Ack {
 /// hide which test actually broke.
 static ONE_MAPPING_AT_A_TIME: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-fn exclusive_mappings() -> std::sync::MutexGuard<'static, ()> {
+/// Also taken by `drm_syncobj/tests.rs`, whose clients import udmabuf
+/// buffers that pixman maps the same way -- so its mappings would be
+/// counted here too.
+pub(in crate::compositor) fn exclusive_mappings() -> std::sync::MutexGuard<'static, ()> {
     ONE_MAPPING_AT_A_TIME
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())

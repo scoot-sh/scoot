@@ -38,9 +38,16 @@ window layout OmniWM-style through the Accessibility API.
   arrangement out; no Wayland, no I/O). A future macOS Accessibility-API
   adapter depends on this. Don't touch it without a measured reason once it's
   fuzz-tested and reviewed clean.
-- Smithay is pinned to a specific git rev (see `Cargo.toml`) — verify claims
-  about its behavior against the pinned source, not general Smithay
-  knowledge; APIs and semantics shift across revs.
+- Smithay is pinned to a specific git rev (see `crates/scoot/Cargo.toml`) —
+  verify claims about its behavior against the pinned source, not general
+  Smithay knowledge; APIs and semantics shift across revs. **It is
+  currently a scoot-sh fork** (`github.com/scoot-sh/smithay`, rev
+  `43f50eb2`): upstream's `0ff0098` plus exactly one commit, a `Drop` that
+  stops every syncobj timeline import leaking a kernel handle (see
+  `docs/backlog/resolved/syncobj-handle-leak-done.md`). Make
+  verify-against-source claims against the fork rev (its checkout is
+  `~/.cargo/git/checkouts/smithay-*/43f50eb`), and repin to upstream once
+  a Smithay rev carries the fix (`docs/backlog/core/smithay-fork-repin.md`).
 - Prefer CPU-friendly rendering and damage-limited redraws throughout.
 - **"Compositor," not "window manager," in anything user-facing** (`README.md`,
   crate descriptions, `--help` text). Wayland has no separate window-manager

@@ -8,7 +8,9 @@
 //! [`reject_excess_shm_pool`], [`reject_excess_buffer`],
 //! [`reject_unrepresentable_layer_size`],
 //! [`reject_frozen_toplevel_icon_request`],
-//! [`reject_excess_capture_frame`] and [`reject_too_deep_subsurface`]), one
+//! [`reject_excess_capture_frame`] and [`reject_too_deep_subsurface`], plus
+//! explicit sync's live-timeline cap, which lives with the rest of that
+//! protocol in `drm_syncobj.rs` along with its destruction half), one
 //! pre-delegation
 //! interception ([`prepare_post_destroy_lock_commit`]) and six
 //! post-destruction hooks ([`redraw_after_lock_surface_destroyed`],
@@ -487,6 +489,7 @@ where
             || reject_frozen_toplevel_icon_request(state, resource, &request)
             || reject_excess_capture_frame(state, client, resource, &request)
             || reject_too_deep_subsurface(resource, &request)
+            || super::drm_syncobj::reject_excess_timeline(state, client, resource, &request)
         {
             return;
         }
@@ -502,6 +505,7 @@ where
         forget_destroyed_capture_frame::<I>(state, &client, resource);
         forget_destroyed_shm_pool::<I>(state, &client, resource);
         forget_destroyed_buffer::<I>(state, &client, resource);
+        super::drm_syncobj::forget_destroyed::<I>(state, &client, resource);
         data.destroyed(state, client, resource);
         // *After* the delegate, not before: Smithay's own
         // `ExtLockSurfaceUserData::destroyed` is what unmaps the surface, and
@@ -1280,7 +1284,7 @@ fn too_large(size: i32) -> String {
 /// so it must only run once a client is already past its grace. Checked
 /// before the per-client claim, so a pressure refusal never takes a count
 /// unit it would then have to give back.
-fn pressure_refusal(live: u32, grace: u32) -> bool {
+pub(super) fn pressure_refusal(live: u32, grace: u32) -> bool {
     if live <= grace {
         return false;
     }

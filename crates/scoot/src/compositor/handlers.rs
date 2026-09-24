@@ -20,8 +20,8 @@ use smithay::utils::{IsAlive, Serial};
 use smithay::utils::{Logical, Rectangle};
 use smithay::wayland::buffer::BufferHandler;
 use smithay::wayland::compositor::{
-    CompositorClientState, CompositorHandler, CompositorState, get_parent, get_role,
-    is_sync_subsurface, with_states,
+    CompositorClientState, CompositorHandler, CompositorState, add_pre_commit_hook, get_parent,
+    get_role, is_sync_subsurface, with_states,
 };
 use smithay::wayland::output::OutputHandler;
 use smithay::wayland::selection::SelectionHandler;
@@ -91,8 +91,16 @@ impl CompositorHandler for State {
     /// re-sends the same value to every live surface at once (see
     /// `output_scale.rs`'s `resend_output_scale`), so the two can never
     /// disagree. See `send_preferred_buffer_scale`'s doc.
+    ///
+    /// Also where the explicit-sync acquire hook is installed, only while
+    /// that global exists (see `drm_syncobj/acquire.rs`): every other session
+    /// adds nothing to the commit path. The global is decided before the
+    /// event loop starts, so no surface predates it.
     fn new_surface(&mut self, surface: &WlSurface) {
         send_preferred_buffer_scale(surface, self.integer_scale);
+        if self.drm_syncobj.active() {
+            add_pre_commit_hook::<Self, _>(surface, super::drm_syncobj::acquire::pre_commit);
+        }
     }
 
     /// `surface` has just been made a subsurface of `parent`: records the
@@ -185,7 +193,7 @@ impl CompositorHandler for State {
     /// Smithay calls this for every `wl_surface` that goes away, whether the
     /// client destroyed it explicitly or simply quit.
     ///
-    /// Three things this compositor keeps a `WlSurface` in outside
+    /// What this compositor keeps a `WlSurface` in outside
     /// `self.space`/`self.windows` (both already driven by their own
     /// xdg-shell destruction paths) need clearing here, plus the grab
     /// session, which needs filing rather than clearing:
@@ -205,6 +213,10 @@ impl CompositorHandler for State {
     ///   cleared: a replacement grab is dispatched adjacently to the
     ///   destroy, so waiting for the reap would file it too late -- see
     ///   `popup.rs`.
+    /// - an explicit-sync wait (`drm_syncobj/acquire.rs`): a commit of this
+    ///   surface still waiting on its acquire point holds an eventfd source,
+    ///   which would otherwise stay registered until -- or if -- the point
+    ///   signals.
     /// - the dead entries of `mapped_layers`: a surface whose `wl_surface`
     ///   dies before its layer role object (the implicit-disconnect order)
     ///   never sees `layer_destroyed`, so nothing else removes it -- see
@@ -213,6 +225,7 @@ impl CompositorHandler for State {
     ///   id (wayland-backend 0.3.17 `rs/server_impl/mod.rs`), so a stale
     ///   entry can never equal a live surface.
     fn destroyed(&mut self, surface: &WlSurface) {
+        super::drm_syncobj::acquire::forget_surface(self, surface);
         if self.cursor.forget_surface(surface) {
             // The cursor's shape just changed to the fallback: a redraw
             // where frames draw it, a capture tick where only captures do --

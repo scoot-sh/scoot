@@ -82,13 +82,14 @@
           cargoLock = {
             lockFile = ./Cargo.lock;
             # Smithay is a git dependency pinned by rev (see
-            # crates/scoot/Cargo.toml), and a git source carries no
+            # crates/scoot/Cargo.toml -- currently the scoot-sh fork, upstream
+            # `0ff00983` plus one commit), and a git source carries no
             # crates.io checksum to vendor against, so its tree hash has to
             # be recorded here. Bumping that rev changes the hash and fails
             # the build loudly, printing the one it got -- it cannot drift
             # out of sync quietly. Nothing else in Cargo.lock comes from git.
             outputHashes = {
-              "smithay-0.7.0" = "sha256-fptVzfBHApVohO2yvTxbsXGxKHiJ5Brk84x4YkHtp6k=";
+              "smithay-0.7.0" = "sha256-crzKE9KVKRqffVQH88Mjbcmkc4upo76DJQziNhM+ZNY=";
             };
           };
 
