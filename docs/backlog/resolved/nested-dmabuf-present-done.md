@@ -80,7 +80,10 @@ answers to the ticket's questions are below.
     (`nested_dispatch.rs` registers no `wl_callback`); frames are paced by
     scoot's own timer, unchanged. Presentation feedback is stamped when the
     commit is flushed, by the render tail or, for a handed-over frame, by
-    the hand-over itself.
+    the hand-over itself -- and only when no render is pending: a client
+    may have committed since the owed frame was drawn, and stamping then
+    would mark its new commit presented by a frame that does not show it
+    (the pending frame stamps it instead, late rather than early).
   - *Host refusing a buffer mid-session*: read-back for the rest of the
     session, one WARN; the `wl_shm` pool is built at the current size, and
     if even that fails the next frame retries it.
@@ -90,7 +93,10 @@ answers to the ticket's questions are below.
 
 ## Measured (dev VM, llvmpipe; release, LTO off, codegen-units 16)
 
-`scripts/nested-dmabuf-bench.sh` at `9b79daa` (the final code), host an
+`scripts/nested-dmabuf-bench.sh` at `9b79daa` (the final code but for
+`b22e792`'s presentation-feedback guard on a handed-over frame, which a
+repeat round at `b22e792` matched: 7.73 vs 7.65 ms per frame, 14.13 vs
+15.12 ms per size), host an
 outer `scoot --headless --renderer gles` (cage cannot host this on the VM:
 under `gles2` it has no output, under pixman no linux-dmabuf), 1024x768,
 both builds from that commit, the same host binary, alternated twice:
@@ -109,9 +115,10 @@ allocates two host buffers (not measured apart; kernel-zeroed dumb buffers
 and their first mapping are the likely share). What it saves on a real GPU
 is `Asahi.md` Test 8, not a claim. Across 1001 resizes fds stayed flat on
 both processes (nested 42, host 30) and RSS moved as much as the read-back
-run's; 2003 frames were handed over as drawn (two per size: the first, and
-the second, which waited for the chain to grow to two buffers); host and
-nested screenshots byte-identical in every run.
+run's; there were 2003 hand-overs over the 1001 sizes (two per size: the
+first frame, and the second, which waited for the chain to grow to two
+buffers), none of them redrawn; host and nested screenshots byte-identical
+in every run.
 
 Evidence (commands, SHAs, raw paths) is in the PR description.
 
