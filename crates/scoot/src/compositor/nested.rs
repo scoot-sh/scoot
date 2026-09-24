@@ -330,8 +330,10 @@ impl Host {
     /// [`Host::fall_back`]) and says so in the answer, so the caller can ask
     /// for the frame the host has now missed.
     ///
-    /// No allocation: the chain is built at configure time, and a slot is
-    /// picked by a scan of [`gpu::SLOTS`] entries.
+    /// No heap allocation of its own: a slot is picked by a scan of
+    /// [`gpu::SLOTS`] entries. The one GPU buffer it may allocate -- growing
+    /// a chain whose every buffer is in use -- happens at most
+    /// `gpu::SLOTS - 1` times per size, never per frame.
     #[cfg(feature = "gpu-scanout")]
     pub(super) fn present_dmabuf(
         &mut self,
@@ -355,6 +357,15 @@ impl Host {
             return answer;
         }
         let Some((dmabuf, buffer, held)) = chain.free_slot() else {
+            // Every buffer is in use: add one where that would help (a
+            // chain starts with one and grows to at most `gpu::SLOTS`; see
+            // `GpuPresent::grow`). Either way this frame is owed, and the
+            // new buffer's `created` -- or a `release` -- hands it over.
+            if let Some(gpu) = &mut self.gpu
+                && let Err(error) = gpu.grow(chain, &self.qh)
+            {
+                tracing::debug!(%error, "could not add a host buffer; waiting for the host to release one");
+            }
             self.present_skipped = true;
             self.frame_owed = true;
             return answer;

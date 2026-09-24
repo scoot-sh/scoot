@@ -28,7 +28,9 @@
 #   2. resizes: the host steps the nested window through STEPS distinct
 #      widths (the host's column_widths list, `set-column-width N`), PACE
 #      apart, CYCLES times over. Normalised per size the nested scoot applied
-#      (its debug line `resized the render target in place`). RSS and open fd
+#      (its debug line `resized the render target in place`; under dma-buf
+#      also how many first frames at a new size went out without a second
+#      draw, `handed the owed frame ...`). RSS and open fd
 #      count of both processes before and after, so a host buffer chain that
 #      is not freed across resizes shows as growth.
 #   3. pixels: a screenshot of the nested session and one of the host, which
@@ -92,7 +94,7 @@ strip() { sed 's/\x1b\[[0-9;]*m//g' "$1"; }
 env -u WAYLAND_DISPLAY SCOOT_SOCKET= RUST_LOG=info "$HOST_SCOOT" --headless --renderer gles \
     --width "$W" --height "$H" --socket "$HOST_SOCK" --config "$PREFIX-host.toml" -- \
     sh -c 'echo $$ >"$0"; exec env SCOOT_SOCKET= \
-        RUST_LOG="info,scoot::compositor::headless=debug" \
+        RUST_LOG="info,scoot::compositor::headless=debug,scoot::compositor::nested=debug" \
         "$1" --nested --renderer gles --width 800 --height 600 --socket "$2" --config "$3" >"$4" 2>&1' \
     "$INNER_PID_FILE" "$SCOOT" "$INNER_SOCK" "$PREFIX-inner.toml" "$INNER_LOG" \
     >"$HOST_LOG" 2>&1 &
@@ -128,7 +130,7 @@ sleep 2
 
 i0=$(jiffies "$inner_pid"); h0=$(jiffies "$host_pid"); sleep 5
 idle_inner=$(( $(jiffies "$inner_pid") - i0 )); idle_host=$(( $(jiffies "$host_pid") - h0 ))
-echo "baseline (5 s, counter running): nested $idle_inner jiffies, host $idle_host jiffies"
+echo "warm-up (5 s, counter already running): nested $idle_inner jiffies, host $idle_host jiffies"
 
 # Scene 1: SECS seconds of the counter.
 i0=$(jiffies "$inner_pid"); h0=$(jiffies "$host_pid"); sleep "$SECS"
@@ -150,7 +152,8 @@ host action set-column-width "$STEPS" >/dev/null
 sleep 1
 resize_inner=$(( $(jiffies "$inner_pid") - i0 )); resize_host=$(( $(jiffies "$host_pid") - h0 ))
 sizes=$(( $(applied) - before ))
-echo "resizes: $((CYCLES * STEPS + 1)) steps, $sizes sizes applied: nested $resize_inner jiffies ($(per "$resize_inner" "$sizes") ms/size, counter still running), host $resize_host jiffies"
+handed=$(strip "$INNER_LOG" | grep -c 'handed the owed frame to the host without redrawing it' || true)
+echo "resizes: $((CYCLES * STEPS + 1)) steps, $sizes sizes applied: nested $resize_inner jiffies ($(per "$resize_inner" "$sizes") ms/size, counter still running), host $resize_host jiffies; owed frames handed over without a redraw so far: $handed"
 echo "after resizes: nested RSS $(rss "$inner_pid") fds $(fds "$inner_pid"); host RSS $(rss "$host_pid") fds $(fds "$host_pid")"
 
 # Scene 3: pixels. Stop the counter first so both shots see one frame.

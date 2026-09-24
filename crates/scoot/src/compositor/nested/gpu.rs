@@ -64,26 +64,31 @@
 //!
 //! # The swapchain
 //!
-//! [`SLOTS`] host buffers, allocated together at the size the host
-//! configured and reallocated together on a resize (after
-//! `Host::replace_render_target`'s same allocate-first ordering, so a failed
-//! allocation leaves the old chain and the old size intact). Each is shared
-//! through `zwp_linux_buffer_params_v1.create`, **not** `create_immed`: the
-//! host refusing an import is then a `failed` event rather than a fatal
-//! protocol error on scoot's own host connection, which would end the
-//! nested session and every client in it. The requests themselves are built
-//! only from what the host listed (the fourcc and the exact modifier, one
-//! `add` per plane exactly as GBM exported it, no flags), so the remaining
-//! fatal errors -- malformed params -- are not reachable from here.
+//! Up to [`SLOTS`] host buffers per size. A chain is created with one, at
+//! the size the host configured, and is replaced as a whole on a resize
+//! (after `Host::replace_render_target`'s same allocate-first ordering, so a
+//! failed allocation leaves the old chain and the old size intact); a
+//! buffer is added only when a frame finds every existing one held by the
+//! host ([`GpuPresent::grow`]). A drag gives each size a frame or two, so
+//! allocating all of them up front paid -- in GBM allocations and host
+//! imports -- for buffers most sizes never used. Each is shared through
+//! `zwp_linux_buffer_params_v1.create`, **not** `create_immed`: the host
+//! refusing an import is then a `failed` event rather than a fatal protocol
+//! error on scoot's own host connection, which would end the nested session
+//! and every client in it. The requests themselves are built only from what
+//! the host listed (the fourcc and the exact modifier, one `add` per plane
+//! exactly as GBM exported it, no flags), so the remaining fatal errors --
+//! malformed params -- are not reachable from here.
 //!
 //! A slot is usable once the host has answered `created` and not attached
 //! since its last `release`. A frame with no usable slot (all held by the
-//! host, or still being created) is skipped and re-armed by the next
-//! `release` or `created`, exactly as the read-back pool does; nothing is
-//! ever allocated beyond the [`SLOTS`] per size. Three rather than the
-//! read-back pool's two because a host that samples the buffer on its GPU
-//! may hold the previous one until its own frame using the current one
-//! completes.
+//! host, or still being created) is not presented but **owed**: the render
+//! target already holds it, and the next `release` or `created` copies it
+//! over as it stands rather than drawing it again -- which is also what
+//! every resize's first frame does, being drawn before the host has created
+//! the new chain. At most [`SLOTS`] buffers per size, whatever the host
+//! does. Three because a host that samples the buffer on its GPU may hold
+//! the previous one until its own frame using the current one completes.
 //!
 //! A `created` or `failed` answer carries the generation of the chain it
 //! was asked for; one for a chain a resize has since replaced has its
@@ -382,45 +387,84 @@ impl GpuPresent {
         DrmNode::from_file(self.allocator.as_fd()).ok()
     }
 
-    /// A new chain at `width` x `height`: every buffer allocated and
-    /// exported first, and only then shared with the host, so a failure
-    /// part-way has sent the host nothing.
+    /// A new chain at `width` x `height`, holding one buffer: the rest are
+    /// added only once a frame finds every existing one in use
+    /// ([`GpuPresent::grow`]). A drag gives each size it passes through a
+    /// frame or two, so allocating all [`SLOTS`] up front paid for buffers
+    /// most sizes never used -- and a host-side import for each.
     pub(super) fn swapchain(
         &mut self,
         qh: &QueueHandle<State>,
         width: i32,
         height: i32,
     ) -> Result<Swapchain, Box<dyn Error>> {
-        let mut dmabufs = Vec::with_capacity(SLOTS);
-        for _ in 0..SLOTS {
-            dmabufs.push(allocate(&mut self.allocator, &self.choice, width, height)?);
-        }
-        // Exactly `SLOTS` by the loop above, so this conversion cannot fail;
-        // checked before anything is sent so that, were it ever to, the host
-        // has been asked for nothing.
-        let dmabufs: [Dmabuf; SLOTS] = dmabufs
-            .try_into()
-            .map_err(|_| "the host buffer chain came out short")?;
+        let dmabuf = allocate(&mut self.allocator, &self.choice, width, height)?;
         let generation = self.next_generation;
         self.next_generation = self.next_generation.wrapping_add(1);
-        let mut slot = 0;
-        let slots = dmabufs.map(|dmabuf| {
-            let params = self
-                .dmabuf
-                .create_params(qh, ParamsTag { generation, slot });
-            slot += 1;
-            share(&params, &dmabuf, width, height, self.choice.fourcc);
-            Slot {
-                dmabuf,
-                buffer: None,
-                held: false,
-            }
-        });
-        Ok(Swapchain {
+        let mut chain = Swapchain {
             generation,
             size: (width, height),
-            slots,
-        })
+            slots: std::array::from_fn(|_| None),
+        };
+        self.install(&mut chain, qh, 0, dmabuf);
+        Ok(chain)
+    }
+
+    /// Adds one buffer to `chain`, if [`next_slot`] says a frame is waiting
+    /// on one it could have: every existing buffer held by the host, none
+    /// still being created, and room below [`SLOTS`]. Answers whether it
+    /// did. Bounded by construction -- a chain never holds more than
+    /// [`SLOTS`] -- and reached only from a frame that found no free buffer,
+    /// never per frame otherwise.
+    ///
+    /// An allocation that fails is not a fallback: the chain keeps the
+    /// buffers it has, the frame stays owed, and a `release` hands it over.
+    pub(super) fn grow(
+        &mut self,
+        chain: &mut Swapchain,
+        qh: &QueueHandle<State>,
+    ) -> Result<bool, Box<dyn Error>> {
+        let Some(index) = next_slot(
+            chain
+                .slots
+                .iter()
+                .map(|slot| slot.as_ref().map(|slot| (slot.buffer.is_some(), slot.held))),
+        ) else {
+            return Ok(false);
+        };
+        let (width, height) = chain.size;
+        let dmabuf = allocate(&mut self.allocator, &self.choice, width, height)?;
+        self.install(chain, qh, index, dmabuf);
+        Ok(true)
+    }
+
+    /// Puts `dmabuf` in `chain`'s slot `index` and asks the host to make a
+    /// `wl_buffer` of it; the answer is tagged with the chain's generation
+    /// and the slot.
+    fn install(
+        &mut self,
+        chain: &mut Swapchain,
+        qh: &QueueHandle<State>,
+        index: usize,
+        dmabuf: Dmabuf,
+    ) {
+        let Some(entry) = chain.slots.get_mut(index) else {
+            return;
+        };
+        let params = self.dmabuf.create_params(
+            qh,
+            ParamsTag {
+                generation: chain.generation,
+                slot: index,
+            },
+        );
+        let (width, height) = chain.size;
+        share(&params, &dmabuf, width, height, self.choice.fourcc);
+        *entry = Some(Slot {
+            dmabuf,
+            buffer: None,
+            held: false,
+        });
     }
 
     /// Releases the host's global. Called when the path is abandoned for the
@@ -460,7 +504,8 @@ fn share(
 pub(super) struct Swapchain {
     generation: u64,
     size: (i32, i32),
-    slots: [Slot; SLOTS],
+    /// Filled from the front as frames need them ([`GpuPresent::grow`]).
+    slots: [Option<Slot>; SLOTS],
 }
 
 struct Slot {
@@ -484,22 +529,22 @@ impl Swapchain {
 
     /// The slot a frame can go out in: created and not held by the host.
     pub(super) fn free_slot(&mut self) -> Option<(&mut Dmabuf, &HostBuffer, &mut bool)> {
-        let index = usable(
-            self.slots
-                .iter()
-                .map(|slot| (slot.buffer.is_some(), slot.held)),
-        )?;
-        let slot = &mut self.slots[index];
+        let index = usable(self.slots.iter().map(|slot| {
+            slot.as_ref()
+                .map_or((false, false), |slot| (slot.buffer.is_some(), slot.held))
+        }))?;
+        let slot = self.slots.get_mut(index)?.as_mut()?;
         let buffer = slot.buffer.as_ref()?;
         Some((&mut slot.dmabuf, buffer, &mut slot.held))
     }
 
     /// Records the host's `created` for slot `slot` of this chain. A slot
-    /// that already has a buffer (a host answering twice) keeps the first
-    /// and the second is destroyed.
+    /// that already has a buffer (a host answering twice), or that holds
+    /// nothing to be created, keeps what it has and the new buffer is
+    /// destroyed.
     pub(super) fn created(&mut self, slot: usize, buffer: HostBuffer) {
         match self.slots.get_mut(slot) {
-            Some(entry) if entry.buffer.is_none() => entry.buffer = Some(buffer),
+            Some(Some(entry)) if entry.buffer.is_none() => entry.buffer = Some(buffer),
             _ => buffer.destroy(),
         }
     }
@@ -510,6 +555,7 @@ impl Swapchain {
         if let Some(slot) = self
             .slots
             .iter_mut()
+            .flatten()
             .find(|slot| slot.buffer.as_ref() == Some(buffer))
         {
             slot.held = false;
@@ -521,7 +567,7 @@ impl Swapchain {
     /// generation, which is no longer current, so their buffers are
     /// destroyed then.
     pub(super) fn destroy(self) {
-        for slot in self.slots {
+        for slot in self.slots.into_iter().flatten() {
             if let Some(buffer) = slot.buffer {
                 buffer.destroy();
             }
@@ -537,6 +583,24 @@ fn usable(slots: impl Iterator<Item = (bool, bool)>) -> Option<usize> {
         .enumerate()
         .find(|&(_, (created, held))| created && !held)
         .map(|(index, _)| index)
+}
+
+/// Where a new buffer should go, given each slot as `None` (empty) or
+/// `Some((created, held))` -- or `None` when growing would not help: a
+/// buffer is already free, one is still being created (its `created` will
+/// hand the waiting frame over), or every slot is filled.
+fn next_slot(slots: impl Iterator<Item = Option<(bool, bool)>>) -> Option<usize> {
+    let mut empty = None;
+    for (index, slot) in slots.enumerate() {
+        match slot {
+            None => {
+                empty = empty.or(Some(index));
+            }
+            Some((true, false)) | Some((false, _)) => return None,
+            Some((true, true)) => {}
+        }
+    }
+    empty
 }
 
 #[cfg(test)]

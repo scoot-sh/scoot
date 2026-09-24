@@ -11,7 +11,7 @@ use smithay::backend::allocator::{Format, Fourcc, Modifier};
 
 use super::feedback::test_access::{dev, index_list, parse, read, resolve_tranches};
 use super::feedback::{Choice, HostFeedback, HostTranche, choose};
-use super::usable;
+use super::{next_slot, usable};
 
 const AR24: u32 = Fourcc::Argb8888 as u32;
 const XR24: u32 = Fourcc::Xrgb8888 as u32;
@@ -64,6 +64,33 @@ fn a_slot_is_usable_once_created_and_while_not_held() {
     );
     assert_eq!(usable([(true, false), (true, false)].into_iter()), Some(0));
     assert_eq!(usable(std::iter::empty()), None);
+}
+
+#[test]
+fn a_chain_grows_only_when_every_buffer_is_held_and_none_is_being_created() {
+    const EMPTY: Option<(bool, bool)> = None;
+    const HELD: Option<(bool, bool)> = Some((true, true));
+    const FREE: Option<(bool, bool)> = Some((true, false));
+    const CREATING: Option<(bool, bool)> = Some((false, false));
+    assert_eq!(next_slot([HELD, EMPTY, EMPTY].into_iter()), Some(1));
+    assert_eq!(next_slot([HELD, HELD, EMPTY].into_iter()), Some(2));
+    assert_eq!(
+        next_slot([HELD, HELD, HELD].into_iter()),
+        None,
+        "full: wait for a release"
+    );
+    assert_eq!(
+        next_slot([FREE, EMPTY, EMPTY].into_iter()),
+        None,
+        "a buffer is free"
+    );
+    assert_eq!(
+        next_slot([HELD, CREATING, EMPTY].into_iter()),
+        None,
+        "one is on its way; its `created` hands the frame over"
+    );
+    assert_eq!(next_slot([EMPTY, EMPTY, EMPTY].into_iter()), Some(0));
+    assert_eq!(next_slot(std::iter::empty()), None);
 }
 
 // --- reading the feedback --------------------------------------------------
