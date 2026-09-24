@@ -109,6 +109,11 @@ impl<T> ReleaseHold<T> {
         if self.held.len() == before {
             return;
         }
+        tracing::trace!(
+            flip,
+            buffers = self.held.len() - before,
+            "explicit sync: holding a composited frame's buffers until it is done"
+        );
         self.frames.push((flip, sync));
         while self.frames.len() > MAX_FRAMES {
             let (oldest, sync) = self.frames.remove(0);
@@ -129,8 +134,14 @@ impl<T> ReleaseHold<T> {
                 wait(sync);
             }
         }
+        let before = self.held.len();
         self.frames.retain(|(held, _)| *held > flip);
         self.held.retain(|(held, _)| *held > flip);
+        tracing::trace!(
+            flip,
+            released = before - self.held.len(),
+            "explicit sync: a held frame flipped; its buffers are released"
+        );
     }
 
     /// `flip` will never reach the screen (its queue was refused): waits out
