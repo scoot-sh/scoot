@@ -971,7 +971,7 @@ Smithay's syncobj-eventfd probe (timeline syncobjs plus
 `DRM_IOCTL_SYNCOBJ_EVENTFD`). The display device scoot drives is tried
 first; if its driver has no syncobj support -- possible on a machine whose
 display controller is not its GPU, like Apple Silicon -- the render node
-`/dev/dri/renderD128` is tried instead (a syncobj works on any DRM device
+render nodes (`/dev/dri/renderD*`, in name order) are tried instead (a syncobj works on any DRM device
 that supports them, whichever GPU made it). The startup log says which:
 `drm: explicit sync (wp_linux_drm_syncobj_manager_v1) offered device=…`,
 or `drm: no device here has syncobj timeline eventfd support; explicit
@@ -1013,32 +1013,32 @@ What scoot does with the points:
   release point not after the acquire point on the same timeline, points on
   a `wl_shm` buffer, a timeline fd that is not a syncobj) get the protocol's
   own errors, from Smithay.
-- **Bounds.** A client may hold 128 live timelines (each keeps its syncobj fd
-  open in scoot) and have 64 commits waiting on acquire points at once (each
-  is an eventfd); 32 and 16 while the compositor's fd table is nearly full,
-  the same shape as the buffer and pool bounds. Past the timeline bound the
+- **Bounds.** A client may hold 128 live timeline objects and have 64 commits
+  waiting on acquire points at once (each is an eventfd); 32 and 16 while
+  the compositor's fd table is nearly full, the same shape as the buffer and
+  pool bounds. The timeline bound counts timeline *objects*, not the
+  syncobj fds scoot holds for them. A sync point set on a surface keeps its
+  timeline's fd open after the timeline object is destroyed, so it is not
+  an fd bound. That gap is
+  [`backlog/core/client-held-fd-bound.md`](backlog/core/client-held-fd-bound.md). Past the timeline bound the
   import is refused with `invalid_timeline`. Past the wait bound the client
   is disconnected with `wl_display.error` `no_memory`. A real client stays
   far below both: Mesa's Vulkan WSI imports two timelines per swapchain
   image, and a swapchain cannot run more than its image count ahead.
 
-**One leak scoot cannot close yet.** Smithay, at the pinned revision and on
-its `master`, never destroys the kernel handle an `import_timeline` creates,
-so each import leaves one syncobj handle on scoot's DRM file until scoot
-exits. Measured on the dev VM, that is about 80 bytes of kernel memory
-per import of a fresh syncobj. It also keeps the syncobj alive after its
-client exits, together with any wait scoot abandoned on it when a surface
-was destroyed mid-wait: the kernel keeps that registration until the point
-signals, about 200 bytes each. A normal session imports a few timelines per
-window resize and rarely abandons a wait, so the total is small. A client
-that imports and destroys timelines in a loop, or commits and destroys
-surfaces in a loop, grows it without bound. The live-timeline and
-outstanding-wait bounds do not stop either loop, because every iteration
-ends with nothing live. The fix is upstream (a `Drop` for the
-imported timeline). Reclaiming the handles by reopening the device would
-break the release points of timelines a client destroyed while points on
-them were still in flight, so scoot does not do that. Tracked in
-[`backlog/protocols/syncobj-handle-leak.md`](backlog/protocols/syncobj-handle-leak.md).
+**A leak fixed by forking Smithay.** Upstream Smithay, at the revision scoot
+pinned and on its `master`, never destroys the kernel handle an
+`import_timeline` creates. So each import would leave one syncobj handle on
+scoot's DRM file until scoot exits, about 80 bytes of kernel memory each,
+together with any wait scoot abandoned on that syncobj when a surface was
+destroyed mid-wait (about 200 bytes each). A hostile client could drive
+that at wire speed (review measured about 24 MB/s), and no per-client bound
+stops it, because every iteration ends with nothing live. scoot therefore
+builds against a scoot-sh fork of Smithay that adds the one missing `Drop`.
+Measured with it, both loops stay flat. Details are in
+[`backlog/resolved/syncobj-handle-leak-done.md`](backlog/resolved/syncobj-handle-leak-done.md).
+Returning to upstream once it has the fix is
+[`backlog/core/smithay-fork-repin.md`](backlog/core/smithay-fork-repin.md).
 
 **What has been verified.** On the dev VM's GPU tier (virtio-gpu), with a
 test client that renders into card0 dumb buffers and signals its own syncobj

@@ -49,14 +49,22 @@
 //!   = **~641 fds**. One such connection plus a normal session (~750) never
 //!   trips anything here, correctly: a single connection cannot exhaust the
 //!   table on its own.
-//! - Where explicit sync is offered (the `--tty` GPU scanout tier), each
-//!   live syncobj timeline holds the client's fd and each outstanding
-//!   acquire wait an eventfd, so one connection at every cap there is
-//!   641 + 128 + 64 = **~833 fds** -- still short of a 1024-fd table on its
-//!   own, but one such connection plus a busy session does reach the
-//!   reserve. The kill then lands on it, the contributor: both of those
-//!   counts have their own pressure graces (32 timelines, 16 waits),
-//!   enforced the same way as the buffer and pool graces.
+//! - **Not every fd a client can make this process hold is counted by a
+//!   cap.** Where explicit sync is offered (the `--tty` GPU scanout tier),
+//!   each outstanding acquire wait is an eventfd (capped at 64, grace 16),
+//!   and each imported syncobj timeline holds the client's fd -- but the
+//!   128-timeline cap counts live timeline *objects*, and a sync point set
+//!   on a surface keeps the fd open after its timeline object is destroyed
+//!   and uncounted. Measured in review: 440 surfaces with pending points on
+//!   destroyed timelines held 927 fds here with zero live timelines. The
+//!   same shape exists on every tier through `zwp_linux_buffer_params_v1`
+//!   `add`s that are never turned into a buffer (220 params x 4 adds, the
+//!   same 927 fds). Neither is counted by any claim above, so under the
+//!   resulting pressure the creation guards cannot pick the offender:
+//!   newcomers are shed and the client holding the fds is not killed.
+//!   Filed as `docs/backlog/core/client-held-fd-bound.md`; the "one
+//!   connection cannot exhaust the table" claim above holds only for the
+//!   counted resources.
 //!
 //! [`RESERVE_FDS`] is 128: shed/refuse once fewer than 128 fds stand free
 //! (used past 896 of 1024). That is ~6x above the reasoned login storm and

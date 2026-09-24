@@ -107,7 +107,7 @@ each item's own file records why it landed when it did.
 - **[Explicit sync on the GPU scanout tier](docs/backlog/resolved/linux-drm-syncobj-done.md)**
   (2026-09-23, PR #233) — `wp_linux_drm_syncobj_manager_v1` v1, offered
   only on `--tty --renderer gles` (`gpu-scanout`) where the display device,
-  or failing that `/dev/dri/renderD128`, passes Smithay's syncobj-eventfd
+  or failing that a render node (`/dev/dri/renderD*`), passes Smithay's syncobj-eventfd
   probe. The dev VM's virtio-gpu passes. Acquire points are waited on with
   Smithay's eventfd blockers from a per-surface pre-commit hook. A signalled
   point costs one ioctl; a surface destroyed or disconnected mid-wait
@@ -117,11 +117,15 @@ each item's own file records why it landed when it did.
   at most two frames. Frames that will never be shown release at once,
   with no fence wait on the pause and activate paths. Direct
   buffers were already held by `DrmCompositor` until off the plane. 128
-  live timelines per client (`invalid_timeline`). Found and filed, not
-  fixable scoot-side at the pinned rev:
-  [Smithay leaks a syncobj handle per import](docs/backlog/protocols/syncobj-handle-leak.md)
-  (about 80 B of kernel memory each, until exit; it also keeps abandoned
-  waits' kernel registrations, about 200 B each, alive past their client). Dev VM, test client
+  live timeline objects per client (`invalid_timeline`; not an fd bound,
+  see [client-held fd bound](docs/backlog/core/client-held-fd-bound.md),
+  filed high). Found and fixed by **repinning Smithay to a scoot-sh fork**
+  (`scoot-sh/smithay` `43f50eb2` = upstream `0ff0098` + one `Drop`):
+  [Smithay leaked a syncobj handle per import](docs/backlog/resolved/syncobj-handle-leak-done.md)
+  (about 88 B of kernel memory each, ~24 MB/s under a hostile loop, and
+  abandoned waits' registrations kept past their client; flat with the
+  fork). Upstream is not fixed yet; the repin back is
+  [smithay-fork-repin](docs/backlog/core/smithay-fork-repin.md). Dev VM, test client
   standing in for a GPU: held commits and releases seen live, including
   across a VT switch; a stalled client isolated; both bounds;
   fds back to baseline after a SIGKILL mid-wait; every fullscreen frame

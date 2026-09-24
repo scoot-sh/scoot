@@ -12,16 +12,19 @@ RESOLVED 2026-09-23 (PR #233, branch `linux-drm-syncobj`). On the GPU
 scanout tier, where a DRM device passes Smithay's syncobj-eventfd probe,
 scoot offers `wp_linux_drm_syncobj_manager_v1` v1, waits on acquire points
 before a commit applies and signals release points only once it is done
-with each buffer. Everywhere else the global does not exist. One thing is
-left open, because it cannot be fixed on the scoot side at the pinned rev:
-[Smithay leaks a syncobj handle per timeline import](../protocols/syncobj-handle-leak.md).
+with each buffer. Everywhere else the global does not exist. One Smithay
+bug had to be fixed in a fork, because it could not be fixed on the scoot
+side at the pinned rev:
+[Smithay leaks a syncobj handle per timeline import](./syncobj-handle-leak-done.md).
+That was fixed in the same PR by repinning Smithay to a scoot-sh fork
+carrying the missing `Drop`. The leak is flat with it.
 
 ## What landed
 
 - **Where the global exists** (`drm_syncobj.rs`, `tty::init`): only when the
   session came up on the GPU scanout tier. The display device is probed
-  first; if its driver cannot import timelines, `/dev/dri/renderD128` is
-  tried next (a split render/display machine like Apple Silicon, where only
+  first; if its driver cannot import timelines, every render node
+  (`/dev/dri/renderD*`, in name order) is tried next (a split render/display machine like Apple Silicon, where only
   the GPU's driver is expected to have syncobjs; a syncobj works on any
   DRM device that supports them). The first device that passes is the
   import device. Never on pixman, headless or nested, and never where no
@@ -72,10 +75,18 @@ left open, because it cannot be fixed on the scoot side at the pinned rev:
   their pixels back synchronously, so they need nothing extra.
 - **Live timelines are capped per client** at 128 (32 under fd pressure),
   claimed in `dispatch.rs` before delegation and released by the
-  destruction hook. Each timeline keeps the client's fd open in scoot. Past
-  the cap the import is refused with `invalid_timeline`. `fd_pressure.rs`'s
-  per-connection arithmetic now includes both new bounds: one connection
-  at every cap holds about 833 fds.
+  destruction hook. Past the cap the import is refused with
+  `invalid_timeline`. **Corrected in review:** this was first written up as
+  an fd bound ("each timeline keeps the client's fd open", "one connection
+  at every cap holds about 833 fds", "the kill lands on the contributor").
+  It is not one. A `DrmSyncPoint` keeps the timeline's `Arc`, and with it
+  the client's syncobj fd, after the timeline object is destroyed, and the
+  count is released on destroy anyway. Review measured 440 surfaces with
+  pending points on destroyed timelines holding 927 fds in scoot with 0
+  live timelines: new clients were shed and the offender was not killed.
+  The same hole exists through dmabuf `params` adds.
+  Filed as [client-held fd bound](../core/client-held-fd-bound.md), and not
+  fixed here.
 - **Documented, not patched:** re-committing the same `wl_buffer` keeps the
   first commit's `Buffer`, and its points, in Smithay
   (`RendererSurfaceState::update_buffer`). So a buffer switched from
@@ -107,7 +118,7 @@ left open, because it cannot be fixed on the scoot side at the pinned rev:
     registry). It is absent on dumb `--tty`, headless pixman and headless
     gles.
   - A held commit: the old shade stayed on screen until the signal, the new
-    one appeared after it, and the old buffer's release came 0.14 ms after
+    one appeared after it, and the old buffer's release came 0.122 ms after
     the signal. The same held across a VT switch, with the signal and the
     release both happening while switched away.
   - A never-signalling client beside a normal one: the normal client's
@@ -124,8 +135,9 @@ left open, because it cannot be fixed on the scoot side at the pinned rev:
     later, when its replacement's flip completed, not at the replacement.
     The composited hold engaged on every composited frame and released at
     each flip.
-  - The handle leak through scoot: about 79-87 bytes of kernel slab per
-    import-and-destroy cycle (two runs), all returned when scoot exited.
+  - The handle leak through scoot, on upstream Smithay: about 87-88 bytes of
+    kernel slab per import-and-destroy cycle (`g.out`, `g-repin-3e719cc.out`),
+    all returned when scoot exited. With the fork: flat.
     Abandoned waits (a surface destroyed mid-wait) cost about 200 bytes
     each. That memory outlived the client and was returned only when scoot
     exited: the same leak, filed with it.

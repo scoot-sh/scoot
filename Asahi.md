@@ -876,7 +876,7 @@ above it is its size and the device it names.) What each answer means:
 Why: on the GPU tier scoot now offers explicit sync where a DRM device can
 import timeline syncobjs and wait on them with an eventfd
 (`docs/protocols.md`, "Explicit sync"). It tries the display device first
-and the render node second, because on this machine the display controller
+and the render nodes (`/dev/dri/renderD*`) second, because on this machine the display controller
 (`apple,dcp`) and the GPU (AGX) are separate DRM devices and only the GPU's
 driver is expected to support syncobjs. On the dev VM (virtio-gpu, one
 device) the display device passes, and a test client that signals its own

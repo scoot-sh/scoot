@@ -41,12 +41,12 @@
 //!   signals a release point from the CPU the moment a surface replaces its
 //!   buffer, while a queued frame may still be sampling it on the GPU.
 //! - **Bounds** on what a client can make the compositor hold: live
-//!   timelines ([`MAX_TIMELINES_PER_CLIENT`], each keeps the client's fd
-//!   open here) and outstanding acquire waits
-//!   ([`MAX_ACQUIRE_WAITS_PER_CLIENT`], each is an eventfd plus a queued
-//!   transaction Smithay scans on every commit of that client).
+//!   timeline objects ([`MAX_TIMELINES_PER_CLIENT`]) and outstanding acquire
+//!   waits ([`MAX_ACQUIRE_WAITS_PER_CLIENT`], each an eventfd plus a queued
+//!   transaction Smithay scans on every commit of that client). The first
+//!   is an object count, **not** an fd bound -- see its doc.
 //!
-//! ## What is still Smithay's, and one thing it gets wrong
+//! ## What is still Smithay's, and one thing upstream gets wrong
 //!
 //! Every protocol error (`no_buffer`, `no_acquire_point`,
 //! `no_release_point`, `conflicting_points`, `unsupported_buffer`,
@@ -54,24 +54,22 @@
 //! Smithay's own handlers and pre-commit hook; scoot adds none of those and
 //! forwards every request to them through `dispatch.rs`'s blanket impl.
 //!
-//! **Smithay never destroys an imported timeline's syncobj handle.**
-//! `DrmTimelineInner` has no `Drop` and nothing but `invalidate()` calls
-//! `destroy_syncobj`, at the pinned rev and on Smithay's `master` alike. So
-//! every `import_timeline` leaves one handle on the import device's DRM file
-//! until scoot exits, keeping the client's syncobj alive with it. Measured on
-//! the dev VM (a C loop doing exactly what `DrmTimeline::new` does): 3.7
-//! bytes of kernel slab per import of the same syncobj, 83 bytes per import
-//! of a fresh one, all of it returned when the DRM file closes. Mesa imports
-//! two timelines per swapchain image, so a legitimate session leaks on the
-//! order of kilobytes to a few megabytes; an import-and-destroy loop leaks
-//! without bound. The live-timeline cap does not bound it (every loop
-//! iteration destroys its timeline). The fix is a one-line `Drop` upstream;
-//! there is no safe scoot-side reclaim at the pinned rev -- rotating the
-//! import device (`close_device` + `update_device`) would silently stop the
-//! release points of timelines a client destroyed while points on them are
-//! still in flight, because Smithay forgets those timelines on destroy while
-//! the points keep only a weak reference to the device. See
-//! `docs/protocols.md`'s explicit-sync section.
+//! **Upstream Smithay never destroys an imported timeline's syncobj
+//! handle**, which is why scoot builds against a scoot-sh fork (see
+//! `crates/scoot/Cargo.toml`). Upstream's `DrmTimelineInner` has no `Drop`,
+//! and nothing but `invalidate()` calls `destroy_syncobj`, at `0ff0098` and
+//! on `master` alike. So every `import_timeline` would leave one handle on
+//! the import device's DRM file until scoot exits, keeping the client's
+//! syncobj -- and any acquire wait scoot abandoned on it -- alive with it:
+//! about 80 bytes of kernel slab per import and 200 per abandoned wait,
+//! drivable at wire speed. There is no safe scoot-side reclaim: rotating
+//! the import device (`close_device` + `update_device`) would silently stop
+//! the release points of timelines a client destroyed while points on them
+//! are still in flight, because Smithay forgets those timelines on destroy
+//! while the points keep only a weak reference to the device. The fork adds
+//! the one-line `Drop` (`DrmTimelineDeviceSpecific`), and with it both
+//! leaks measure as noise. See
+//! `docs/backlog/resolved/syncobj-handle-leak-done.md`.
 
 pub(crate) mod acquire;
 #[cfg(any(feature = "gpu-scanout", test))]
@@ -96,17 +94,26 @@ use super::State;
 /// How many live `wp_linux_drm_syncobj_timeline_v1` objects one client may
 /// hold at once.
 ///
-/// Each one keeps the client's syncobj fd open in this process (Smithay's
-/// `DrmTimelineInner` owns it), so this is an fd bound, sized against the
-/// others: Mesa's Vulkan WSI imports two timelines per swapchain image
-/// (acquire and release, `wsi_common_wayland.c`), so a four-image swapchain
-/// is 8, and an old swapchain still alive while its replacement is built
-/// doubles that -- 16 per window. 128 is eight such windows at once. One
-/// connection at every per-client cap then holds 512 buffers + 128 pools +
-/// 128 timelines + 64 acquire eventfds + its socket, ~833 fds, which still
-/// cannot exhaust a 1024-fd table on its own (the property `fd_pressure.rs`
-/// is sized around). Past it, the import is refused with the protocol's own
+/// Sized against real use: Mesa's Vulkan WSI imports two timelines per
+/// swapchain image (acquire and release, `wsi_common_wayland.c`), so a
+/// four-image swapchain is 8, and an old swapchain still alive while its
+/// replacement is built doubles that -- 16 per window. 128 is eight such
+/// windows at once. Past it, the import is refused with the protocol's own
 /// `invalid_timeline` on the manager, killing only that client.
+///
+/// **This bounds live timeline *objects*, not the fds they hold.** Each
+/// imported timeline keeps the client's syncobj fd open in this process
+/// (Smithay's `DrmTimelineInner` owns it), but so does every `DrmSyncPoint`
+/// on it, which holds the timeline's `Arc` -- and a point set on a surface
+/// outlives the timeline object's destruction (the protocol says destroying
+/// a timeline does not unset its points). The count is released on destroy
+/// regardless, so a client that imports, sets a point on a fresh surface
+/// and destroys the timeline keeps one fd here per surface with none
+/// counted: measured in review, 440 such surfaces held 927 fds with zero
+/// live timelines, new clients were shed and the offender was not killed.
+/// The same hole exists without syncobj, through `zwp_linux_buffer_params_v1`
+/// adds that are never created. Both are
+/// `docs/backlog/core/client-held-fd-bound.md`.
 pub(crate) const MAX_TIMELINES_PER_CLIENT: u32 = 128;
 
 /// How many commits one client may have waiting on unsignalled acquire
