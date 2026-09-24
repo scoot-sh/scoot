@@ -113,13 +113,15 @@ each item's own file records why it landed when it did.
   point costs one ioctl; a surface destroyed or disconnected mid-wait
   removes its sources and releases its blockers; 64 outstanding waits per
   client, then `wl_display.no_memory`. Release points: the scanout
-  presenter holds each composited frame's explicit buffers until its flip
-  (its render fence where it will never flip), at most two frames. Direct
+  presenter holds each composited frame's explicit buffers until its flip,
+  at most two frames. Frames that will never be shown release at once,
+  with no fence wait on the pause and activate paths. Direct
   buffers were already held by `DrmCompositor` until off the plane. 128
   live timelines per client (`invalid_timeline`). Found and filed, not
   fixable scoot-side at the pinned rev:
   [Smithay leaks a syncobj handle per import](docs/backlog/protocols/syncobj-handle-leak.md)
-  (about 80 B of kernel memory each, until exit). Dev VM, test client
+  (about 80 B of kernel memory each, until exit; it also keeps abandoned
+  waits' kernel registrations, about 200 B each, alive past their client). Dev VM, test client
   standing in for a GPU: held commits and releases seen live, including
   across a VT switch; a stalled client isolated; both bounds;
   fds back to baseline after a SIGKILL mid-wait; every fullscreen frame

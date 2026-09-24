@@ -1002,8 +1002,9 @@ What scoot does with the points:
   point signals. Waits keep running while the session is VT-switched away.
 - **Release.** A buffer's release point is signalled when scoot is done
   reading it. For a composited frame, that means once the frame's GPU work
-  has finished (its flip completed, or its render fence where the frame
-  will never flip), not merely when the client commits its next buffer. For
+  has finished and it has flipped, not merely when the client commits its
+  next buffer (a frame that will never be shown -- the session switched
+  away, a refused commit -- lets its buffers go at once). For
   a fullscreen buffer scanned out directly, it means once the display has
   stopped scanning it out. A buffer replaced before it was ever shown, or
   whose surface is destroyed, is released straight away. Buffers committed
@@ -1024,12 +1025,16 @@ What scoot does with the points:
 **One leak scoot cannot close yet.** Smithay, at the pinned revision and on
 its `master`, never destroys the kernel handle an `import_timeline` creates,
 so each import leaves one syncobj handle on scoot's DRM file until scoot
-exits. Measured on the dev VM, that is 3.7 bytes of kernel memory per
-import of an already-imported syncobj and 83 bytes per import of a fresh
-one. A normal session imports a few timelines per window resize, so the
-total is small. A client that imports and destroys timelines in a loop
-grows it without bound, and the live-timeline bound does not stop it,
-because each timeline is destroyed. The fix is upstream (a `Drop` for the
+exits. Measured on the dev VM, that is about 80 bytes of kernel memory
+per import of a fresh syncobj. It also keeps the syncobj alive after its
+client exits, together with any wait scoot abandoned on it when a surface
+was destroyed mid-wait: the kernel keeps that registration until the point
+signals, about 200 bytes each. A normal session imports a few timelines per
+window resize and rarely abandons a wait, so the total is small. A client
+that imports and destroys timelines in a loop, or commits and destroys
+surfaces in a loop, grows it without bound. The live-timeline and
+outstanding-wait bounds do not stop either loop, because every iteration
+ends with nothing live. The fix is upstream (a `Drop` for the
 imported timeline). Reclaiming the handles by reopening the device would
 break the release points of timelines a client destroyed while points on
 them were still in flight, so scoot does not do that. Tracked in
@@ -1043,9 +1048,12 @@ while another client's frame pacing and IPC latency stay unchanged; the fds
 of a client killed mid-wait all returned; both bounds disconnecting only
 the offender; a fullscreen explicit client going direct on every frame, its
 replaced buffers released when the replacement's flip completed; no change
-in compositor CPU. No NVIDIA or Mesa Vulkan client has been run against it:
-none can allocate a dma-buf on the dev VM, and the real-GPU check is
-[`Asahi.md`](../Asahi.md)'s Test 7.
+in compositor CPU. No real explicit-sync client has been run against it:
+on the dev VM, Mesa's `vkcube` (lavapipe) and `es2gears_wayland` (llvmpipe)
+both draw through `wl_shm` and never bind the global. The real-GPU check is
+[`Asahi.md`](../Asahi.md)'s Test 7. `--nested` was not run live; the global
+cannot appear there, since the only code that offers it runs in `--tty`'s
+startup.
 
 ## Screen locking (`ext-session-lock-v1`)
 

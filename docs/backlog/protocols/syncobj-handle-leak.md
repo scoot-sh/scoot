@@ -27,14 +27,30 @@ state, until scoot's DRM file closes when scoot exits.
 ## Measured (dev VM, kernel 6.18, virtio-gpu)
 
 - **Without scoot**, a C loop doing exactly what `DrmTimeline::new` does,
-  200000 imports into a second DRM file: 3.7 bytes of slab per import of one
-  syncobj imported repeatedly, 83 bytes per import of a fresh syncobj. It
-  was all returned when that file closed.
+  200000 imports into a second DRM file, run twice: 3.7-10 bytes of slab
+  per import of one syncobj imported repeatedly, 83-88 bytes per import of
+  a fresh syncobj. It was all returned when that file closed.
 - **Through scoot** (`--tty --renderer gles`, a client importing a fresh
-  syncobj and destroying the timeline 50000 times): slab grew by 3904 kB,
-  about 79 bytes per cycle. It was all returned when scoot exited. The
+  syncobj and destroying the timeline 50000 times, run twice): slab grew by
+  3904 and 4296 kB, about 79-87 bytes per cycle. It was all returned when scoot exited. The
   per-client live-timeline bound (128) never trips, because each timeline is
   destroyed before the next is imported.
+
+- **A second path rides on the same leak: waits abandoned by destroying the
+  surface.** scoot removes its own eventfd source the moment a surface
+  with a pending wait is destroyed, and its fds stay flat. But the kernel
+  keeps the `DRM_IOCTL_SYNCOBJ_EVENTFD` registration, with its eventfd
+  context, on the client's syncobj until that point signals or the syncobj
+  is freed, and the leaked handle keeps the syncobj alive after the client
+  exits. Measured through scoot, 20000 surfaces each committed with an
+  unsignalled acquire point and then destroyed: slab grew by 3904 kB while
+  the client lived (about 200 bytes per abandoned wait). It was still
+  there after the client exited, and returned only when scoot exited.
+  While the client lives, that memory is no different from registering
+  eventfds on its own syncobj, which any client can do without scoot. What
+  the leak adds is that it outlives the client. The same `Drop` fixes it:
+  once scoot's handle goes, the client's exit frees the syncobj and its
+  registrations.
 
 A legitimate session leaks a little. Mesa's Vulkan WSI imports two timelines
 per swapchain image and recreates the swapchain on every resize, so a busy

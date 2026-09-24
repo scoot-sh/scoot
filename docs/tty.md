@@ -334,8 +334,8 @@ running with no GPU at all is a hard requirement here, not a fallback tier.
   waits for its acquire point before it is shown, without blocking anything
   else, and a buffer's release point is signalled only once scoot is done
   reading it -- after the composited frame that sampled it has finished on
-  the GPU, or once the display stops scanning out a fullscreen buffer shown
-  directly. Waits keep running across a VT switch. No other tier or backend
+  the GPU and flipped, or once the display stops scanning out a fullscreen
+  buffer shown directly. Waits keep running across a VT switch. No other tier or backend
   offers the global, because none can honour it without blocking. Bounds,
   the one leak scoot cannot close yet, and what has been verified are in
   [protocols.md](protocols.md#explicit-sync-linux-drm-syncobj-v1); the

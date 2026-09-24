@@ -42,6 +42,14 @@ left open, because it cannot be fixed on the scoot side at the pinned rev:
     `wl_display.error` `no_memory`, posted on the display object. A bare
     `Client::kill` sends no error event at all; the test that asserts the
     error text caught that.
+- **Review-driven change (before the PR):** the release-early paths that
+  cannot show the frame (a refused queue, a session pause, a reactivation,
+  a CRTC rebuild) release without waiting on the render fence. A GPU hang
+  cannot then block the pause and activate handlers, which are 05b's
+  recovery path. The errored completion (the frame just shown) and the
+  in-flight cap still wait. The wire tests share `cargo test`'s process
+  with suites that count dma-buf mappings and read the fd table, so they
+  hold both of those suites' locks.
 - **Release points.** Smithay signals a release point when the last
   reference to the buffer drops. On the composited path that happens when
   the surface replaces its buffer, while a queued frame may still be
@@ -50,10 +58,12 @@ left open, because it cannot be fixed on the scoot side at the pinned rev:
   clone of every explicit buffer a composited frame used
   (`drm_syncobj/release_hold.rs`). The clone is kept until that frame's
   flip completes, after waiting on its render `SyncPoint`, which is free
-  wherever flips are fenced. It is released early, after that wait, when
-  the frame will never flip: a refused queue, a session pause, a
-  reactivation, a CRTC rebuild or an errored completion. At most two
-  frames are held, a pending one and a queued one. Explicit buffers are
+  wherever flips are fenced. It is released early, without waiting, when
+  the frame will never be shown: a refused queue, a session pause, a
+  reactivation or a CRTC rebuild. An errored completion, where the frame
+  that just flipped is on screen but its number is lost, releases
+  everything after the wait. At most two frames are held, a pending one
+  and a queued one; a third waits out the oldest. Explicit buffers are
   told apart by `wl_buffer`, which is all a render element exposes
   (`ExplicitBuffers`, pruned on buffer destroy). Buffers without sync
   points keep their existing release timing. A primary-direct buffer is
@@ -114,8 +124,19 @@ left open, because it cannot be fixed on the scoot side at the pinned rev:
     later, when its replacement's flip completed, not at the replacement.
     The composited hold engaged on every composited frame and released at
     each flip.
-  - The handle leak through scoot: about 79 bytes of kernel slab per
-    import-and-destroy cycle, all returned when scoot exited.
+  - The handle leak through scoot: about 79-87 bytes of kernel slab per
+    import-and-destroy cycle (two runs), all returned when scoot exited.
+    Abandoned waits (a surface destroyed mid-wait) cost about 200 bytes
+    each. That memory outlived the client and was returned only when scoot
+    exited: the same leak, filed with it.
+  - Real clients on the VM: `vkcube --wsi wayland` (lavapipe) and
+    `es2gears_wayland` (llvmpipe) draw through `wl_shm`, never bind the
+    global, and run unaffected.
+  - The compositor's own EGL display on the GBM device has
+    `EGL_ANDROID_native_fence_sync`, so a composited frame's render fence
+    is real on the VM, not a `glFinish`. The acquire path needs no EGL
+    fence at all: a commit applies only after its blocker releases, so
+    `DrmCompositor` is right to hand KMS an already-signalled fence.
   - Compositor CPU, before (`a30cd58`) and after, over 10 s windows:
     unchanged within noise for a fullscreen direct client (15-17 against
     16-18 jiffies) and a composited one (452-456 against 452-459). An
