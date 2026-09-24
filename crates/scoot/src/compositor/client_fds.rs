@@ -506,6 +506,19 @@ impl ClientFds {
         }
     }
 
+    /// Whether any client's pool record names the file with this identity:
+    /// a pool is open on it, or was until too recently for the fd to have
+    /// closed. For the renderer probe in `dmabuf/renderer_copies.rs`, which
+    /// must not measure while a pool's fd on the same file can close under
+    /// it. Walks every record; it runs only until the session's first clean
+    /// measurement.
+    pub(crate) fn pool_names(&self, dev: u64, ino: u64) -> bool {
+        self.per_client
+            .values()
+            .flat_map(|held| &held.records)
+            .any(|record| record.kind == Kind::Pool && record.check == Check::Same { dev, ino })
+    }
+
     /// `fd` has just been received from a client, so whatever this ledger
     /// recorded on that number was closed in between: forget it. One map
     /// lookup when nothing is recorded on it, which is the usual case.

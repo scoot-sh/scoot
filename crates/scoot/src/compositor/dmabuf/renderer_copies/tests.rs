@@ -3,7 +3,7 @@
 
 use std::os::fd::AsFd;
 
-use super::{MAX_COPIES_PER_PLANE, fds_naming, identity, per_plane};
+use super::{MAX_COPIES_PER_PLANE, fds_naming, identity, learn, per_plane};
 
 #[test]
 fn copies_are_spread_over_planes_and_backends_rounding_up() {
@@ -20,6 +20,18 @@ fn copies_are_spread_over_planes_and_backends_rounding_up() {
     assert_eq!(per_plane(100, 1, 1), MAX_COPIES_PER_PLANE);
     // Degenerate inputs never divide by zero.
     assert_eq!(per_plane(2, 0, 0), 2);
+}
+
+/// A difference is only learned when the count did not fall: a fall means
+/// something closed fds on the file while the import ran (a pool's fd on
+/// Smithay's drop thread, say), and a low reading is the one that would let
+/// the table fill.
+#[test]
+fn a_count_that_fell_during_the_import_teaches_nothing() {
+    assert_eq!(learn(3, 6, 3, 1), Some(1), "llvmpipe: one copy per plane");
+    assert_eq!(learn(3, 3, 3, 1), Some(0), "a driver that keeps nothing");
+    assert_eq!(learn(10, 6, 3, 1), None, "fds closed meanwhile");
+    assert_eq!(learn(0, 0, 0, 0), Some(0));
 }
 
 #[test]

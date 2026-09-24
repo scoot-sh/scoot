@@ -45,22 +45,37 @@ stay.
   buffer is six fds, a single-plane `XR24` one two, pixman none. The main
   run below shows `main` already held 1200 dma-buf fds for 200 `YU12`
   buffers: 600 planes and 600 copies. scoot now measures the copies once
-  per session, on the first successful GLES import: the fds in the process
+  per session, on the first cleanly measurable GLES import: the fds in the process
   naming the imported file just after the import, less those just before.
   It adds them to each imported plane's record as a *weight*, and every
-  bound reads the weighted sum. It uses the difference, not a count
-  against the ledger, because a count can be steered. Review of this
-  change caught that the first version counted: a client with fds parked
-  on its own buffer's file (in the harness, 8 in-process duplicates; in a
-  session, wayland-backend's received-fd queue) made the first import learn
-  4 copies instead of 1, and 4 would have been charged to every client for
-  the rest of the session. The test for it,
-  `fds_a_client_parks_on_its_buffer_do_not_skew_the_renderer_probe`, failed
-  on the counting version (`Some(4)` against `Some(1)`,
-  `~/evidence/bfl/probe-skew-failfirst-dbec752-plus-test.txt`) and passes on
-  the difference. Learned, not assumed: a hardware driver that imports into a
-  GEM handle is expected to measure 0 and be charged nothing, which keeps
-  heavy legitimate clients on multi-monitor hardware from being charged for
+  bound reads the weighted sum. Two ways the measurement could be steered
+  were caught before the PR opened (advisor passes on the branch, not
+  `scoot-reviewer`):
+  - **Upward.** The first version compared a count against the ledger. A
+    client with fds parked on its own buffer's file (in the harness, 8
+    in-process duplicates; in a session, wayland-backend's received-fd queue)
+    made the first import learn 4 copies instead of 1, and 4 would have been
+    charged to every client for the rest of the session. The difference
+    cancels them. `fds_a_client_parks_on_its_buffer_do_not_skew_the_renderer_probe`
+    failed on the counting version (`Some(4)` against `Some(1)`,
+    `~/evidence/bfl/probe-skew-failfirst-dbec752-plus-test.txt`) and passes.
+  - **Downward.** A `wl_shm` pool can be backed by a dma-buf fd, and a
+    dropped pool's fd closes on Smithay's own drop thread, concurrently
+    with the two counts, so a client could push the difference down toward
+    0: the reading that would let the table fill. So an import is not
+    measured while any pool record names the buffer's file, and a count
+    that fell is not believed. Only a clean reading is kept; an import that
+    could not be measured cleanly is charged one copy per plane and the next
+    is measured. The race is reasoned from the drop thread's code, not
+    reproduced. The guard is pinned by
+    `an_import_a_pool_could_disturb_is_not_learned_from`, which fails with
+    the guard removed (`Some(1)` against `None`,
+    `~/evidence/bfl/pool-guard-failfirst-guard-removed.txt`), and by
+    `a_count_that_fell_during_the_import_teaches_nothing`.
+
+  Learned, not assumed: a hardware driver that imports into a GEM handle is
+  expected to measure 0 and be charged nothing, which keeps heavy
+  legitimate clients on multi-monitor hardware from being charged for
   copies that do not exist. That expectation is reasoned from Mesa's
   source, not measured; `Asahi.md` Test 10 is the check.
 - **A cache drain on `wl_surface` destruction** too, not only `wl_buffer`

@@ -19,10 +19,13 @@
 //! check).
 //!
 //! So the copies are learned rather than assumed. On the session's first
-//! successful import into a GLES backend, [`Probe`] counts the fds in this
-//! process that name the buffer's first plane's file (by `fstat` identity)
-//! just before the import and again just after, and divides the difference
-//! by the planes on that file and the GLES backends it went into. The
+//! cleanly measurable import into a GLES backend, [`Probe`] counts the fds
+//! in this process that name the buffer's first plane's file (by `fstat`
+//! identity) just before the import and again just after, and divides the
+//! difference by the planes on that file and the GLES backends it went
+//! into. An import that cannot be measured cleanly (see [`Probe::before`]
+//! and [`learn`]) is charged one copy per plane per backend and teaches
+//! nothing; the next one is measured. The
 //! difference, not the count: anything that already named the file -- the
 //! planes themselves, or fds a client parked in wayland-backend's received-fd
 //! queue on its own buffer (`docs/backlog/core/wayland-backend-fd-queue.md`)
@@ -34,8 +37,9 @@
 //! `render/gles.rs`), and every import from then on adds that many copies per
 //! GLES backend to each plane's record, so a client's bound counts them. It
 //! costs two `/proc/self/fd` walks with an `fstat` per entry, once per
-//! session; after that, a map lookup per plane per import (imports happen
-//! when a client allocates a buffer, not per frame).
+//! session (again only after an import that could not be measured); after
+//! that, a map lookup per plane per import (imports happen when a client
+//! allocates a buffer, not per frame).
 //!
 //! **What this does not count.** A copy lives until the renderer's cache
 //! drops the import, which is after the plane's `Dmabuf` is gone *and* a
@@ -77,34 +81,56 @@ pub(in crate::compositor) struct Probe {
 }
 
 impl Probe {
-    /// Counts, if this import is the one to learn from: the session has not
-    /// learned its renderer's copies yet and has a GLES backend. `None`
-    /// otherwise, and `None` where the count cannot be taken (no identity for
-    /// the plane, no `/proc`), in which case [`charge`] falls back to 1.
+    /// Counts, if this import can be learned from: the session has not
+    /// learned its renderer's copies yet, has a GLES backend, and no shm pool
+    /// is open on the buffer's file. `None` otherwise, and where the count
+    /// cannot be taken (no identity for the plane, no `/proc`); [`charge`]
+    /// then charges that one import as if the renderer kept a copy, and
+    /// learns from a later one.
+    ///
+    /// Why a pool on the same file disqualifies it: a `wl_shm` pool may be
+    /// backed by any mappable fd, a dma-buf included, and a dropped pool's fd
+    /// is closed on Smithay's own drop thread, concurrently with this
+    /// thread's two counts. A client could have that thread close fds on its
+    /// buffer's file in between, and push the difference down -- toward
+    /// teaching the session that the renderer keeps nothing, the direction
+    /// that lets the table fill. Every such fd has a pool record in the fd
+    /// ledger until it has really closed, so the ledger says when that is
+    /// possible. (Reasoned from the drop thread's code; not reproduced.)
     pub(in crate::compositor) fn before(state: &State, dmabuf: &Dmabuf) -> Option<Self> {
         if state.renderer_plane_copies.is_some() || gles_backends(state) == 0 {
             return None;
         }
         let (dev, ino) = identity(dmabuf.handles().next()?)?;
+        if state.client_fds.pool_names(dev, ino) {
+            return None;
+        }
         let before = fds_naming(dev, ino)?;
         Some(Self { dev, ino, before })
     }
 
-    /// The copies per plane per backend this import made: the fds naming the
-    /// file now, less those before, over the planes on that file and the
-    /// GLES `backends`. `None` if the second count cannot be taken.
+    /// What this import teaches: the copies per plane per backend it made,
+    /// or `None` if the second count cannot be taken or the measurement was
+    /// disturbed (see [`learn`]).
     fn copies(&self, dmabuf: &Dmabuf, backends: usize) -> Option<u8> {
         let after = fds_naming(self.dev, self.ino)?;
         let planes = dmabuf
             .handles()
             .filter(|plane| identity(*plane) == Some((self.dev, self.ino)))
             .count();
-        Some(per_plane(
-            after.saturating_sub(self.before),
-            planes,
-            backends,
-        ))
+        learn(self.before, after, planes, backends)
     }
+}
+
+/// The copies per plane per backend from counts `before` and `after` an
+/// import of `planes` planes (on the probed file) into `backends` GLES
+/// backends. `None` when `after < before`: something closed fds on the file
+/// while the import ran, so the difference is not the renderer's, and a low
+/// reading is the dangerous one to keep. Split out to pin the arithmetic
+/// without a renderer.
+fn learn(before: usize, after: usize, planes: usize, backends: usize) -> Option<u8> {
+    let copies = after.checked_sub(before)?;
+    Some(per_plane(copies, planes, backends))
 }
 
 /// How many backends a dma-buf import goes into as GLES.
@@ -117,9 +143,13 @@ fn gles_backends(state: &State) -> usize {
 }
 
 /// Charges `dmabuf`'s planes, just imported into every backend, with the
-/// copies this session's GLES renderer keeps of them, learning that number
-/// from `probe` on the session's first GLES import. See the module doc.
-/// Nothing at all on a session with no GLES backend.
+/// copies this session's GLES renderer keeps of them. Until the session has
+/// learned that number from a clean measurement (`probe`, see the module
+/// doc), an import is charged one copy per plane per backend -- the
+/// conservative direction: an over-count costs a client some headroom for
+/// that buffer, an under-count lets it hold fds nothing sees -- and the next
+/// import is measured again. Nothing at all on a session with no GLES
+/// backend.
 pub(in crate::compositor) fn charge(state: &mut State, dmabuf: &Dmabuf, probe: Option<Probe>) {
     let backends = gles_backends(state);
     if backends == 0 {
@@ -127,23 +157,26 @@ pub(in crate::compositor) fn charge(state: &mut State, dmabuf: &Dmabuf, probe: O
     }
     let per_backend = match state.renderer_plane_copies {
         Some(copies) => copies,
-        None => {
-            // Unknown -- no count before or after -- is 1, the conservative
-            // direction: an over-count costs a client some headroom, an
-            // under-count lets it hold fds nothing sees.
-            let copies = probe
-                .and_then(|probe| probe.copies(dmabuf, backends))
-                .unwrap_or(1);
-            // info!, once per session: whether a GPU client's buffers cost
-            // this compositor one fd per plane or two is a question someone
-            // sizing its limits asks of the log.
-            tracing::info!(
-                copies_per_plane_per_output = copies,
-                "dmabuf: learned how many fds the renderer keeps of each imported plane"
-            );
-            state.renderer_plane_copies = Some(copies);
-            copies
-        }
+        None => match probe.and_then(|probe| probe.copies(dmabuf, backends)) {
+            Some(copies) => {
+                // info!, once per session: whether a GPU client's buffers
+                // cost this compositor one fd per plane or two is a question
+                // someone sizing its limits asks of the log.
+                tracing::info!(
+                    copies_per_plane_per_output = copies,
+                    "dmabuf: learned how many fds the renderer keeps of each imported plane"
+                );
+                state.renderer_plane_copies = Some(copies);
+                copies
+            }
+            None => {
+                tracing::debug!(
+                    "dmabuf: this import could not be measured cleanly; charging one renderer \
+                     copy per plane and measuring the next"
+                );
+                1
+            }
+        },
     };
     if per_backend == 0 {
         return;

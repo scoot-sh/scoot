@@ -21,7 +21,9 @@ use smithay::backend::allocator::{Format, Fourcc, Modifier};
 use smithay::reexports::drm;
 use smithay::reexports::drm::buffer::Buffer as _;
 use smithay::reexports::drm::control::Device as _;
-use wayland_client::protocol::{wl_buffer, wl_callback, wl_compositor, wl_registry, wl_surface};
+use wayland_client::protocol::{
+    wl_buffer, wl_callback, wl_compositor, wl_registry, wl_shm, wl_shm_pool, wl_surface,
+};
 use wayland_client::{Connection, Dispatch, EventQueue, Proxy, QueueHandle};
 use wayland_protocols::wp::linux_dmabuf::zv1::client::{
     zwp_linux_buffer_params_v1, zwp_linux_dmabuf_v1,
@@ -61,8 +63,10 @@ enum Step {
     /// `dups`, this side keeps that many extra fds on each buffer's file
     /// open across its import: fds that name the buffer in this process
     /// (the harness's client is in-process) but that no renderer made, the
-    /// way a client could park fds in scoot's received-fd queue.
-    CommitYuv { count: u32, dups: u32 },
+    /// way a client could park fds in scoot's received-fd queue. With
+    /// `pool`, it first opens a `wl_shm` pool on each buffer's fd and keeps
+    /// it: a pool whose fd can close on Smithay's drop thread mid-import.
+    CommitYuv { count: u32, dups: u32, pool: bool },
     /// Destroy every surface the steps above kept.
     DestroySurfaces,
 }
@@ -224,7 +228,11 @@ fn multi_plane_dmabufs_count_every_plane_up_to_the_bound() {
         );
         return;
     }
-    if !fixture.done(Step::CommitYuv { count: 1, dups: 0 }) {
+    if !fixture.done(Step::CommitYuv {
+        count: 1,
+        dups: 0,
+        pool: false,
+    }) {
         return;
     }
     let copies = u32::from(
@@ -257,6 +265,7 @@ fn multi_plane_dmabufs_count_every_plane_up_to_the_bound() {
     assert!(fixture.done(Step::CommitYuv {
         count: fit - 1,
         dups: 0,
+        pool: false,
     }));
     assert_eq!(fixture.state.client_fds.held_by(&client), fit * per_buffer);
     let files = files_of(&fixture, &client);
@@ -272,7 +281,11 @@ fn multi_plane_dmabufs_count_every_plane_up_to_the_bound() {
         "{real} dma-buf fds held for one client"
     );
 
-    let error = fixture.run_expecting_disconnect(Step::CommitYuv { count: 64, dups: 0 });
+    let error = fixture.run_expecting_disconnect(Step::CommitYuv {
+        count: 64,
+        dups: 0,
+        pool: false,
+    });
     assert!(
         error.contains(&format!("after {fit} buffers held"))
             && error.contains(&format!("code {NO_MEMORY} on wl_display"))
@@ -307,7 +320,13 @@ fn fds_a_client_parks_on_its_buffer_do_not_skew_the_renderer_probe() {
             code: Fourcc::Yuv420,
             modifier: Modifier::Linear,
         });
-        if !imports || !fixture.done(Step::CommitYuv { count: 1, dups }) {
+        if !imports
+            || !fixture.done(Step::CommitYuv {
+                count: 1,
+                dups,
+                pool: false,
+            })
+        {
             return None;
         }
         Some(fixture.state.renderer_plane_copies)
@@ -327,6 +346,74 @@ fn fds_a_client_parks_on_its_buffer_do_not_skew_the_renderer_probe() {
         learned(8),
         Some(clean),
         "eight parked fds on the buffer's file changed what the probe learned"
+    );
+}
+
+/// A `wl_shm` pool open on the buffer's own file could have fds on that file
+/// closed by Smithay's drop thread while the probe counts, which would push
+/// the learned number down. Such an import is charged one copy per plane
+/// and teaches nothing; the next clean one teaches what a clean session
+/// learns. (The race itself is reasoned from the drop thread's code, not
+/// reproduced; what this pins is the guard.)
+#[test]
+fn an_import_a_pool_could_disturb_is_not_learned_from() {
+    let _mappings = crate::compositor::dmabuf::tests::exclusive_mappings();
+    let mut clean = start(RendererKind::Gles, "scoot-cfd-probe-clean");
+    let output = clean.state.outputs.primary_id().expect("an output");
+    let imports = clean.state.backends[&output].imports_dmabuf_format(Format {
+        code: Fourcc::Yuv420,
+        modifier: Modifier::Linear,
+    });
+    if !imports
+        || !clean.done(Step::CommitYuv {
+            count: 1,
+            dups: 0,
+            pool: false,
+        })
+    {
+        eprintln!(
+            "an_import_a_pool_could_disturb_is_not_learned_from: skipped -- no YU12 import here"
+        );
+        return;
+    }
+    let learned = clean.state.renderer_plane_copies;
+    assert!(learned.is_some());
+    drop(clean);
+
+    let mut fixture = start(RendererKind::Gles, "scoot-cfd-probe-pool");
+    match fixture.run_or_disconnect(Step::CommitYuv {
+        count: 1,
+        dups: 0,
+        pool: true,
+    }) {
+        Ok(Ack::Done) => {}
+        Ok(Ack::NoDevice(reason)) => panic!("the clean fixture had a device: {reason}"),
+        Err(error) => {
+            eprintln!(
+                "an_import_a_pool_could_disturb_is_not_learned_from: skipped -- this machine \
+                 will not map a dumb buffer's PRIME fd as a wl_shm pool ({error})"
+            );
+            return;
+        }
+    }
+    assert_eq!(
+        fixture.state.renderer_plane_copies, None,
+        "an import a pool on the same file could disturb taught the session nothing"
+    );
+    let client = fixture.client(0).id();
+    assert_eq!(
+        fixture.state.client_fds.held_by(&client),
+        1 + 3 * 2,
+        "the pool, and the three planes charged one copy each"
+    );
+    fixture.done(Step::CommitYuv {
+        count: 1,
+        dups: 0,
+        pool: false,
+    });
+    assert_eq!(
+        fixture.state.renderer_plane_copies, learned,
+        "the next clean import taught what a clean session learns"
     );
 }
 
@@ -373,6 +460,7 @@ struct TestClient {
     synced: bool,
     compositor: Option<wl_compositor::WlCompositor>,
     dmabuf: Option<zwp_linux_dmabuf_v1::ZwpLinuxDmabufV1>,
+    shm: Option<wl_shm::WlShm>,
 }
 
 /// Names memfds uniquely across every client of every test in the process.
@@ -432,6 +520,7 @@ fn run_client(
     let mut surfaces: Vec<wl_surface::WlSurface> = Vec::new();
     let mut pending: Vec<zwp_linux_buffer_params_v1::ZwpLinuxBufferParamsV1> = Vec::new();
     let mut card: Option<Card> = None;
+    let mut pools: Vec<wl_shm_pool::WlShmPool> = Vec::new();
     let xr24 = u32::from_ne_bytes(*b"XR24");
     let linear = u64::from(Modifier::Linear);
     while let Ok(step) = steps.recv() {
@@ -486,7 +575,7 @@ fn run_client(
                     }
                 }
             }
-            Step::CommitYuv { count, dups } => {
+            Step::CommitYuv { count, dups, pool } => {
                 if card.is_none() {
                     card = std::fs::OpenOptions::new()
                         .read(true)
@@ -523,6 +612,11 @@ fn run_client(
                             let held = surfaces.len();
                             sync(&conn, &mut queue, &mut client)
                                 .map_err(|error| format!("after {held} buffers held: {error}"))?;
+                            if pool {
+                                let shm = client.shm.clone().ok_or("no wl_shm")?;
+                                pools.push(shm.create_pool(fd.as_fd(), 4096, &qh, ()));
+                                sync(&conn, &mut queue, &mut client)?;
+                            }
                             let parked = (0..dups)
                                 .map(|_| fd.try_clone().map_err(|e| e.to_string()))
                                 .collect::<Result<Vec<_>, _>>()?;
@@ -649,6 +743,7 @@ impl Dispatch<wl_registry::WlRegistry, ()> for TestClient {
                 "zwp_linux_dmabuf_v1" => {
                     client.dmabuf = Some(registry.bind(name, version.min(3), qh, ()));
                 }
+                "wl_shm" => client.shm = Some(registry.bind(name, version.min(1), qh, ())),
                 _ => {}
             }
         }
@@ -697,5 +792,7 @@ impl Dispatch<zwp_linux_dmabuf_v1::ZwpLinuxDmabufV1, ()> for TestClient {
 }
 
 wayland_client::delegate_noop!(TestClient: ignore wl_compositor::WlCompositor);
+wayland_client::delegate_noop!(TestClient: ignore wl_shm::WlShm);
+wayland_client::delegate_noop!(TestClient: ignore wl_shm_pool::WlShmPool);
 wayland_client::delegate_noop!(TestClient: ignore wl_buffer::WlBuffer);
 wayland_client::delegate_noop!(TestClient: ignore wl_surface::WlSurface);
