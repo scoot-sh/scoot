@@ -1145,10 +1145,22 @@ $S session 30 shot-grim -- sh -c 'for i in $(seq 10); do grim /tmp/fx/t9b-grim.p
 On a real `--tty`, both compositors draw the pointer, which the nested run
 could not compare: nested, niri composites its pointer into every frame and
 scoot leaves it to the host. So the pointer row is the new information here.
-Watch memory across the screenshot lines under `--renderer gles`: the RSS
-column (second from last) grows by about one frame per capture while
-nothing redraws
-([the backlog entry](docs/backlog/core/gles-capture-leaks-a-frame-per-shot.md)).
+Under `--renderer gles`, scoot's memory should stay flat across the
+screenshot lines. Before PR #238, each capture of a still screen kept its
+read-back buffer until the next frame drew
+([fixed](docs/backlog/resolved/gles-capture-leaks-a-frame-per-shot-done.md)).
+On the dev VM's llvmpipe that buffer was process heap, so the RSS column
+(second from last) grew by one frame per capture. On a real GPU it is a
+driver allocation. It only counts in RSS while it is mapped into the
+process, so a leak may show there or may not. Two checks cover it:
+
+- The RSS column should not climb by about one frame per capture (about
+  8 MB at 1080p). If it does, that is a regression; send the log.
+- If the driver reports per-process GPU memory through DRM fdinfo, compare
+  `grep -h '^drm-total-' /proc/$(pidof scoot)/fdinfo/*` before and after
+  the screenshot lines. It should not grow by a frame per capture either.
+  If there are no such lines, skip this check: scoot's own tests pin the
+  fix by counting live GL objects, not by memory.
 Quit with `Super+Shift+e` (scoot) or, from a `foot` in niri,
 `niri msg action quit --skip-confirmation`.
 

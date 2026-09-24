@@ -9,6 +9,20 @@ scoot has not cut a numbered release yet; entries are dated.
 
 ## Unreleased
 
+### 2026-09-24 — screenshots on the GPU renderer no longer grow memory
+
+- **Screenshots on the GPU renderer no longer grow scoot's memory.** With
+  `--renderer gles` (including the `--tty` GPU tier), each capture taken
+  while nothing on screen was changing kept a whole screen's worth of
+  memory: about 6 MB per capture at 1600x1000, 8 MB at 1080p and 33 MB at
+  4K. It was only given back once something redrew, so an agent polling
+  screenshots of a still screen could run scoot out of memory. Both
+  `scootctl screenshot` and screen-capture tools (`grim`, and anything else
+  using `ext-image-copy-capture-v1`) could do it. Memory now stays
+  flat however many captures are taken, and a screenshot is no slower
+  (about 1 ms faster on the dev VM). The default pixman renderer never did
+  this. Nothing to configure.
+
 ### 2026-09-24 — a misbehaving app can no longer make scoot turn other apps away this way
 
 - **One app could make scoot hold almost all of its file descriptors**, by

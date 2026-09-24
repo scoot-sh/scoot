@@ -44,10 +44,11 @@ each compositor gives you.
   with a client animating. niri also delivered more frames to that client (54
   a second against scoot-gles's 43 and scoot-pixman's 50). scoot-gles used
   about 20% less memory at rest (149 MB RSS against 185 MB). However, it
-  **grows by one frame of memory per screenshot while nothing is redrawing**,
-  which is a bug this benchmark found and
-  [filed](backlog/core/gles-capture-leaks-a-frame-per-shot.md). niri stayed
-  bounded under the same captures.
+  **grew by one frame of memory per screenshot while nothing was redrawing**,
+  which is a bug this benchmark found. It is
+  [fixed](backlog/resolved/gles-capture-leaks-a-frame-per-shot-done.md) as
+  of PR #238, after these numbers were taken. niri stayed bounded under the
+  same captures.
 - **Part of scoot's lower totals comes from doing less work, not doing
   the same work more cheaply.** Nested, scoot draws no pointer of its own
   (the host draws the host's pointer), while niri composites its pointer
@@ -214,9 +215,15 @@ GPU. The scoot-gles jump after screenshots is the leak described above. A
 probe on its own shows it linear and unbounded: 6,250 kB (one 1600x1000
 frame) per capture, reaching 885 MB after 120 captures of a still screen.
 Drawing frames afterwards did not bring RSS back down (compare the "end"
-row), though it did stop further captures from growing it. The ticket
-records the details, including release behaviour that is still
-unexplained.
+row), though it did stop further captures from growing it.
+
+**These scoot-gles RSS numbers predate the fix** (PR #238, after `fe41921`).
+With it, 120 captures of a still screen leave scoot-gles flat after at most
+one frame, and the rows after a screenshot scene would no longer carry the
+jump. The [resolved record](backlog/resolved/gles-capture-leaks-a-frame-per-shot-done.md)
+has the before/after numbers. It also explains the release behaviour: a
+drawn frame did free the queued buffers, and glibc kept its high-water
+mark. The rest of this table, and every CPU number, is unaffected.
 
 #### Startup
 

@@ -104,6 +104,33 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[GLES captures of a static screen no longer keep a frame each](docs/backlog/resolved/gles-capture-leaks-a-frame-per-shot-done.md)**
+  (2026-09-24, PR #238) — found by the niri A/B. Under `--renderer gles`,
+  every capture of a screen that was not redrawing kept a whole frame of
+  memory until something drew: 6,250 KiB per shot at 1600x1000, 885 MB
+  after 120. Smithay's `GlesRenderer` queues a dropped GL object instead of
+  deleting it, and only a frame's `finish` (or
+  `cleanup_texture_cache`/`unbind`/`invalidate_caches`) drains the queue.
+  A capture queued its read-back's pixel-pack buffer and its bind's
+  framebuffer object and drained nothing. Both GLES arms of
+  `Backend::capture`, and the GLES capture-cursor region render, now drain
+  once the capture returns (`gles::release_captured`). The per-frame
+  presenter read-back is left alone, since the next frame drains it. The
+  Smithay fork is untouched. Tests count live GL names
+  (`glIsBuffer`/`glIsFramebuffer`) across repeated captures, and three of
+  them failed on the old code at +1 buffer and +1 framebuffer per capture.
+  Dev VM, 120 captures: flat after at most one frame on `--nested`
+  read-back, `--headless`, the `--tty` GPU scanout tier and the `--nested`
+  dma-buf tier, for both `scootctl screenshot --no-cursor` and `grim`.
+  Before the fix every one of these grew linearly. A default (pointer-on)
+  screenshot stayed flat on `--nested` only because its pointer re-render
+  drained the queue. By the code, it leaked whenever no pointer region was
+  rendered: a hidden pointer, or a frame that already composites it. The ticket's
+  unexplained release pattern was glibc's dynamic mmap threshold keeping
+  freed frames. With a fixed threshold, a single drawn frame returned all
+  120 at once. IPC screenshot p50 went from 8.8 to 7.9 ms, and p95 from
+  9.6 to 8.7 ms.
+
 - **[scoot vs niri, measured (dev VM half)](docs/backlog/resolved/niri-ab-benchmark-done.md)**
   (2026-09-24, PR #237) — the user asked directly whether we had any sense of
   niri's resource usage against scoot's. [`docs/benchmarks.md`](docs/benchmarks.md) now has it for the one
@@ -119,8 +146,8 @@ each item's own file records why it landed when it did.
   animating client. The pointer row compares different work (nested, only
   niri draws a pointer), and so does relayout (niri draws three frames per
   action to scoot's one); the doc says so row by row. Found on the way:
-  [GLES captures keep a frame each while nothing redraws](docs/backlog/core/gles-capture-leaks-a-frame-per-shot.md)
-  (high: 885 MB after 120 static-screen captures) and
+  [GLES captures keep a frame each while nothing redraws](docs/backlog/resolved/gles-capture-leaks-a-frame-per-shot-done.md)
+  (high: 885 MB after 120 static-screen captures; fixed by PR #238, above) and
   [a nested frame-rate shortfall](docs/backlog/core/nested-frame-rate-vs-client.md)
   (low). The real-GPU and `--tty` half is `Asahi.md` Test 9, tracked as
   [its own item](docs/backlog/testing/niri-ab-real-gpu.md).

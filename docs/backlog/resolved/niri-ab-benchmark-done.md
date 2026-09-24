@@ -38,8 +38,8 @@ What the VM could and could not do, against the ticket as written below:
   host GLES so that it comes up.
 
 Found on the way, and filed:
-[GLES captures leak a frame each on a static screen](../core/gles-capture-leaks-a-frame-per-shot.md)
-(high), and
+[GLES captures leak a frame each on a static screen](./gles-capture-leaks-a-frame-per-shot-done.md)
+(high; fixed by PR #238), and
 [nested scoot presents fewer frames than niri for a ~60 Hz client](../core/nested-frame-rate-vs-client.md)
 (low). A harness artifact was also caught before it reached the results: a
 niri config on the VM's 9p mount cost niri ~55 wakeups/s at idle.

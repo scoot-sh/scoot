@@ -418,5 +418,7 @@ fn only_an_empty_recording_forces_a_swapchain_reset() {
 
 mod resize;
 
+mod capture_release;
+
 #[cfg(feature = "gpu-scanout")]
 mod host_copy;

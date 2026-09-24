@@ -475,6 +475,43 @@ fn target(
     Ok(buffer)
 }
 
+/// Deletes the GL objects a capture on `renderer` has just let go of, now
+/// rather than whenever the next frame is drawn.
+///
+/// Smithay's `GlesRenderer` never deletes a GL object when its handle drops:
+/// `Drop` queues it, and only `GlesRenderer::cleanup` deletes what is queued
+/// (`gles/mod.rs:327` at the pinned rev). That runs from a frame's `finish`,
+/// `unbind`, `cleanup_texture_cache` and `invalidate_caches`, and a capture
+/// reaches none of them. A capture queues the pixel-pack buffer
+/// `copy_framebuffer` read into, the size of the region (so a whole frame
+/// for a screenshot), and the framebuffer object a renderbuffer bind makes.
+/// Without this, on a screen nothing redraws, which is exactly what an agent
+/// polling screenshots looks at, every capture kept a whole frame of memory
+/// for as long as the screen stayed still: 6.25 MB per capture at 1600x1000
+/// on the dev VM (`docs/backlog/resolved/gles-capture-leaks-a-frame-per-shot-done.md`).
+///
+/// Call it after the capture has returned, whether it succeeded or not, once
+/// its mapping and its framebuffer have dropped. Before that, their objects
+/// are not queued yet and this frees nothing of theirs.
+///
+/// Cheap: `cleanup` is the same drain every frame's `finish` runs, a
+/// `make_current` plus a delete per queued object. Deleting a frame-sized
+/// buffer costs no more here than it would on the next frame. It also drops
+/// the renderer's cache entries for dma-bufs that have gone, as every
+/// frame's drain does. See the resolved record for the latency measured
+/// before and after.
+///
+/// A failure is only logged, and the capture's own result stands. The only
+/// way the drain fails is `make_current` failing, which every step of the
+/// capture has just called too, so a context that cannot be made current has
+/// almost certainly failed the capture already, and that was reported. What
+/// stays queued is freed by the next drain that succeeds.
+pub(super) fn release_captured(renderer: &mut GlesRenderer) {
+    if let Err(error) = Renderer::cleanup_texture_cache(renderer) {
+        tracing::debug!(%error, "could not free a capture's GL objects yet");
+    }
+}
+
 /// Copies `buffer` -- the render target, holding the frame just drawn -- into
 /// `dmabuf` on the GPU, and waits for the copy to land.
 ///
