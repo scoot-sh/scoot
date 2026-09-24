@@ -87,9 +87,10 @@ const WARMUP: u32 = 50;
 /// How many windows the second scene arranges.
 const RING_WINDOWS: u64 = 8;
 
-/// Resizes per timed run in [`resize_cost`]. Far fewer than [`ROUNDS`]: one
-/// resize rebuilds a whole render target, so this is milliseconds apiece
-/// rather than microseconds.
+/// Resizes per timed run in [`resize_cost`]. Far fewer than [`ROUNDS`]: a
+/// resize that rebuilds its renderer (every GLES resize before it was done
+/// in place, and still its fallback) is milliseconds apiece rather than
+/// microseconds, and the count is kept so numbers before and after compare.
 const RESIZES: u32 = 40;
 
 /// No client ever connects here, so the step/ack vocabulary is empty.
@@ -161,6 +162,14 @@ fn render_frames<S, A>(fixture: &mut Harness<S, A>, rounds: u32) -> Duration {
 /// `memfd_create`, an `ftruncate`, an `mmap` and two `wl_buffer`s), which
 /// needs a live host compositor to construct. Read this as the renderer-side
 /// floor of a nested resize, not its total.
+///
+/// Measured twice: the resize alone, and the resize plus the frame that
+/// follows it -- which is what a `--nested` drag pays per distinct size, and
+/// the half that catches cost a resize merely defers (a driver allocating
+/// the new target lazily on first draw). What neither can show is the
+/// client re-uploads a *new* renderer used to pay on that frame: no client
+/// is mapped here (see the module doc), so that half is measured by the
+/// nested drag instead.
 #[test]
 #[ignore = "prints per-resize timings for a human; asserts nothing"]
 fn resize_cost() {
@@ -169,7 +178,7 @@ fn resize_cost() {
     // Two sizes, neither of them CANVAS, so the first timed call is no
     // cheaper or dearer than the rest.
     let sizes = [(CANVAS, CANVAS + 8), (CANVAS + 16, CANVAS)];
-    let resize_rounds = |fixture: &mut Fixture, rounds: u32| {
+    let resize_rounds = |fixture: &mut Fixture, rounds: u32, draw: bool| {
         let started = Instant::now();
         for round in 0..rounds {
             let (width, height) = sizes[round as usize % sizes.len()];
@@ -177,25 +186,31 @@ fn resize_cost() {
                 fixture.state.resize_output(width, height),
                 "a resize to {width}x{height} failed"
             );
+            if draw {
+                fixture.state.request_render();
+                fixture.state.render();
+            }
         }
         started.elapsed()
     };
-    resize_rounds(&mut fixture, 4);
-    let mut best = Duration::MAX;
-    for run in 1..=RUNS {
-        let total = resize_rounds(&mut fixture, RESIZES);
-        best = best.min(total);
+    for (label, draw) in [("resize", false), ("resize + frame", true)] {
+        resize_rounds(&mut fixture, 4, draw);
+        let mut best = Duration::MAX;
+        for run in 1..=RUNS {
+            let total = resize_rounds(&mut fixture, RESIZES, draw);
+            best = best.min(total);
+            println!(
+                "{label} [{renderer}], {RING_WINDOWS} windows: {total:?} total, {:?} per \
+                 resize ({RESIZES} resizes, ~{CANVAS}x{CANVAS}, run {run}/{RUNS})",
+                total / RESIZES
+            );
+        }
         println!(
-            "resize [{renderer}], {RING_WINDOWS} windows: {total:?} total, {:?} per resize \
-             ({RESIZES} resizes, ~{CANVAS}x{CANVAS}, run {run}/{RUNS})",
-            total / RESIZES
+            "{label} [{renderer}], {RING_WINDOWS} windows: BEST {:?} per resize ({RESIZES} \
+             resizes, ~{CANVAS}x{CANVAS})",
+            best / RESIZES
         );
     }
-    println!(
-        "resize [{renderer}], {RING_WINDOWS} windows: BEST {:?} per resize ({RESIZES} \
-         resizes, ~{CANVAS}x{CANVAS})",
-        best / RESIZES
-    );
 }
 
 #[test]

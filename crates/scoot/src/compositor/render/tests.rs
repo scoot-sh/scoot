@@ -415,3 +415,5 @@ fn only_an_empty_recording_forces_a_swapchain_reset() {
     assert!(force_needs_reset(scanout::Stale::Empty));
     assert!(!force_needs_reset(scanout::Stale::Direct));
 }
+
+mod resize;

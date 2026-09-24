@@ -361,9 +361,11 @@
 //!   would re-send to every bound feedback object at the pinned rev) is never
 //!   called. The assumption that rests on, now that the table is derived and
 //!   carries a GLES driver's own tiled modifiers: a session's renderer *and
-//!   its device* are fixed for its life. `State::resize_output` and
-//!   `headless::add_output` rebuild as the renderer the session started with,
-//!   and a GLES rebuild is pinned to the EGL device the first build landed on
+//!   its device* are fixed for its life. `State::resize_output` keeps a
+//!   GLES backend's renderer and reallocates only its target, so it cannot
+//!   move device at all; where it or `headless::add_output` does build a new
+//!   backend, it is the renderer the session started with, and a GLES
+//!   rebuild is pinned to the EGL device the first build landed on
 //!   (`render::gles::GlesDevice`, handed down through `State::gles_device`):
 //!   if that device cannot build, the resize is refused or the output is not
 //!   added, rather than the backend migrating to a device whose driver may

@@ -674,7 +674,7 @@ Worth knowing before you write against it:
   per distinct size that drag passed through. Both are bounded by *distinct
   sizes*, not by how many events arrived: a configure or a hotplug that lands
   on a size already in the list adds nothing, and a `--nested` configure at
-  the size scoot is already at does not even rebuild the output.
+  the size scoot is already at does not even resize the output.
 - **A `--tty` VT switch changes nothing by itself.** The output does not go
   away when you switch to another VT, it just stops being drawn, so the head
   stays enabled with the same mode and no `done` is sent. The one thing a

@@ -40,10 +40,27 @@
 //! node -- and it is why the numbers measured there are llvmpipe's, not a
 //! GPU's.
 //!
-//! **Only the first build chooses.** Every later one -- a resize, another
-//! output -- is pinned to the device that first build landed on
-//! ([`GlesDevice`]) and fails rather than moving, because the dma-buf
-//! formats advertised to clients are that device's driver's.
+//! **Only the first build chooses.** Every later one -- another output, or
+//! a resize whose in-place reallocation failed -- is pinned to the device
+//! that first build landed on ([`GlesDevice`]) and fails rather than moving,
+//! because the dma-buf formats advertised to clients are that device's
+//! driver's.
+//!
+//! # A resize keeps the renderer
+//!
+//! [`GlesBackend::resize`] reallocates the renderbuffer alone, on the
+//! renderer (and so the EGL context, its shaders and every client texture
+//! imported into it) the backend already has. Nothing else here depends on
+//! the target's size: the read-back's pixel-pack buffer is made per call by
+//! Smithay's `copy_framebuffer` at the pinned rev, and the capture path's
+//! region target is keyed on the region, not the output (see
+//! `capture_cursor::PatchPool`). Rebuilding instead cost a whole new EGL
+//! context and shader set per distinct size -- 16.6 ms on the dev VM's
+//! llvmpipe, a full 60 Hz frame apiece, on a path a `--nested` drag reaches
+//! once per host frame -- and re-imported every client surface on the frame
+//! after, since a surface's texture is cached per context. It is also one
+//! fewer way for a resize to change device: an in-place resize cannot, by
+//! construction.
 //!
 //! Enumeration order is not trusted to be availability: a device can be
 //! listed and still refuse a display, a context or a renderbuffer (a render
@@ -65,7 +82,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use smithay::backend::allocator::Fourcc;
 use smithay::backend::egl::{EGLContext, EGLDevice, EGLDisplay};
 use smithay::backend::renderer::gles::{GlesRenderbuffer, GlesRenderer};
-use smithay::backend::renderer::{Bind, Offscreen};
+use smithay::backend::renderer::{Bind, Offscreen, Renderer};
 
 use super::capture_cursor::PatchPool;
 
@@ -100,7 +117,9 @@ pub(super) struct GlesBackend {
 /// failure on the first device and the rebuild lands on the second. So after
 /// the first build, [`GlesBackend::new`] is handed this pin and tries that
 /// device alone; if it cannot build there, the rebuild *fails* (a resize is
-/// refused, an output is not added) rather than migrating.
+/// refused, an output is not added) rather than migrating. A resize reaches
+/// a rebuild only when [`GlesBackend::resize`] could not reallocate in place
+/// (see `State::resize_output`); the pin holds there too.
 ///
 /// The identity is the `EGLDeviceEXT` handle. `EGL_EXT_device_enumeration`
 /// hands out the same handle for the same device on every query for the life
@@ -140,9 +159,10 @@ fn candidates<T, K: PartialEq>(
 ///
 /// Process-global rather than a field, because the thing it describes is:
 /// one compositor process runs one session, whose renderer is fixed for its
-/// life (`State::renderer`), and the backend this guards is *replaced* on
-/// every resize -- a field on it would reset with the rebuild it exists to
-/// stay quiet about. Only ever `swap`ped to `true`, so `Relaxed` is enough:
+/// life (`State::renderer`), and the backend this guards can be *replaced*
+/// (another output's, or a resize's fallback rebuild) -- a field on it would
+/// reset with the rebuild it exists to stay quiet about. Only ever
+/// `swap`ped to `true`, so `Relaxed` is enough:
 /// nothing else is ordered against it, and the worst a race could do is log
 /// the line twice at startup.
 static FIRST_BUILD_LOGGED: AtomicBool = AtomicBool::new(false);
@@ -193,13 +213,13 @@ impl GlesBackend {
             let identity = GlesDevice::of(&device);
             match build(device, width, height, identity) {
                 Ok(backend) => {
-                    // INFO once, DEBUG for every rebuild after -- the same
+                    // INFO once, DEBUG for every build after -- the same
                     // once-per-session shape as `dmabuf.rs`'s first-import
-                    // line, and for the same reason. `State::resize_output`
-                    // comes back through here on every resize, which under
-                    // `--nested` is now once per size the host configures the
-                    // window to: a drag would otherwise emit this line at
-                    // host frame rate, which is exactly the flood
+                    // line, and for the same reason. Later builds are another
+                    // output's, or a resize whose in-place reallocation
+                    // failed; the latter could otherwise repeat for every
+                    // size a `--nested` drag passes through, which is exactly
+                    // the flood
                     // `docs/backlog/resolved/clean-disconnect-log-flood-done.md`
                     // is about. It would also be *wrong* after the first:
                     // "the GLES renderer is up" is news once, and the device
@@ -211,7 +231,7 @@ impl GlesBackend {
                             software,
                             width,
                             height,
-                            "rebuilt the GLES renderer at a new size"
+                            "built another GLES renderer on this session's device"
                         );
                     } else {
                         tracing::info!(
@@ -250,6 +270,32 @@ impl GlesBackend {
             failures.join("; ")
         )
         .into())
+    }
+
+    /// Reallocates the renderbuffer at exactly `width` x `height`, keeping
+    /// the renderer -- the EGL context, its shaders, and every client
+    /// texture already imported into it.
+    ///
+    /// All or nothing: the new target is allocated *and* proven to bind
+    /// ([`target`]) before the old one is let go, so an `Err` leaves this
+    /// backend drawing into its old target at its old size, exactly as it
+    /// was. The price is that both are briefly alive at once, which is the
+    /// only way a failure at a size the driver cannot allocate can leave
+    /// anything to fall back to.
+    ///
+    /// The old renderbuffer is freed here rather than on the next frame:
+    /// Smithay defers a dropped GL object to its cleanup queue, which it
+    /// drains when a frame begins, so resizes with no frame between them
+    /// (the benchmark does exactly that) would otherwise pile targets up.
+    /// Freeing it is best-effort -- a failure to drain leaves it for the
+    /// next frame's drain, and the resize has already succeeded.
+    pub(super) fn resize(&mut self, width: i32, height: i32) -> Result<(), Box<dyn Error>> {
+        let buffer = target(&mut self.renderer, width, height)?;
+        drop(std::mem::replace(&mut self.buffer, buffer));
+        if let Err(error) = Renderer::cleanup_texture_cache(&mut self.renderer) {
+            tracing::debug!(%error, "could not free the previous GLES target yet");
+        }
+        Ok(())
     }
 }
 
@@ -312,14 +358,15 @@ pub(super) fn lib_loadable(soname: &str) -> Result<(), Box<dyn Error>> {
 
 /// One candidate device, all the way to a renderbuffer that really binds.
 ///
-/// The trailing bind is not ceremony. A renderbuffer larger than the
-/// driver's `GL_MAX_RENDERBUFFER_SIZE` is *created* without complaint and
-/// only fails when it is attached to a framebuffer, which on the frame path
-/// would be a per-frame "could not bind the framebuffer" warning and a black
-/// screen rather than a startup failure. Binding once here turns that into
-/// this device's error, so the next candidate is tried and, if none works, the
-/// operator is told at startup. The target is dropped immediately; smithay
-/// deletes the FBO with it, and the frame path binds its own.
+/// The trailing bind (in [`target`]) is not ceremony. A renderbuffer larger
+/// than the driver's `GL_MAX_RENDERBUFFER_SIZE` is *created* without
+/// complaint and only fails when it is attached to a framebuffer, which on
+/// the frame path would be a per-frame "could not bind the framebuffer"
+/// warning and a black screen rather than a startup failure. Binding once
+/// here turns that into this device's error, so the next candidate is tried
+/// and, if none works, the operator is told at startup. The bound target is
+/// dropped immediately; smithay deletes the FBO with it, and the frame path
+/// binds its own.
 fn build(
     device: EGLDevice,
     width: i32,
@@ -339,14 +386,33 @@ fn build(
     // `State`, which is single-threaded (see `state.rs`), so it cannot
     // become current on another thread later either.
     let mut renderer = unsafe { GlesRenderer::new(context) }?;
-    let mut buffer = renderer.create_buffer(Fourcc::Argb8888, (width, height).into())?;
-    renderer.bind(&mut buffer)?;
+    let buffer = target(&mut renderer, width, height)?;
     Ok(GlesBackend {
         renderer,
         buffer,
         device: identity,
         patch: PatchPool::default(),
     })
+}
+
+/// A renderbuffer of exactly `width` x `height` on `renderer`, proven to
+/// bind -- what both a first build ([`build`]) and an in-place resize
+/// ([`GlesBackend::resize`]) draw into, made the one way so the two cannot
+/// drift.
+///
+/// The bind is the whole point (see [`build`]): `glRenderbufferStorage`
+/// reports an oversized or unallocatable target only as a GL error flag,
+/// which nothing here reads, and the renderbuffer is handed back regardless;
+/// it is the framebuffer-completeness check at bind that turns that into an
+/// `Err` now rather than a black screen on every frame after.
+fn target(
+    renderer: &mut GlesRenderer,
+    width: i32,
+    height: i32,
+) -> Result<GlesRenderbuffer, Box<dyn Error>> {
+    let mut buffer = renderer.create_buffer(Fourcc::Argb8888, (width, height).into())?;
+    renderer.bind(&mut buffer)?;
+    Ok(buffer)
 }
 
 /// The DRM **render node** `renderer`'s EGL display is on, or `None` when EGL
