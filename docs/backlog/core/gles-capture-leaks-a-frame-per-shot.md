@@ -16,10 +16,13 @@ Found 2026-09-24 by the scoot/niri A/B (`docs/benchmarks.md`), on the dev VM
 
 Each screenshot taken while nothing on screen is redrawing grows scoot's
 memory by **6.25 MB**, which is one 1600x1000 ARGB frame (6.4 MB). The growth
-is linear and nothing gives it back while the screen stays still. Both
-capture paths do it: `scootctl screenshot` and `grim`
-(ext-image-copy-capture). Raw, from
-`~/evidence/niri-ab/probe-gles-shot-growth.txt` on the dev VM:
+is linear and does not stop. Both capture paths do it: `scootctl
+screenshot` and `grim` (ext-image-copy-capture). pixman and niri stayed
+bounded under the same sequence
+(`~/evidence/niri-ab/probe-memory-growth.txt` on the dev VM).
+
+Raw data from `~/evidence/niri-ab/probe-gles-shot-growth.txt`, an empty
+session, captures 50 ms apart:
 
 ```
 empty, no clients          rss_kb=122408 pss_anon_kb=39928
@@ -29,15 +32,31 @@ after 100 shots            rss_kb=760240 pss_anon_kb=677568
 after 120 shots            rss_kb=885240 pss_anon_kb=802568
 30 s idle after            rss_kb=885240 pss_anon_kb=802568
 one foot mapped            rss_kb=383184 pss_anon_kb=290388
++10 shots                  rss_kb=383192 pss_anon_kb=290396
 ```
 
-The next rendered frame releases most of it (the `one foot mapped` line).
-Once frames are flowing, captures stop growing. The animate-scene lines in
-`~/evidence/niri-ab/probe-memory-growth.txt` show this: 20 captures during an
-animation grew memory by 200 kB. The same file shows pixman and niri staying
-bounded under the same sequence.
+What happens after the growth is only partly understood. Record it as
+observed:
 
-## Why (read from the pinned Smithay rev, not yet proven by a fix)
+- **Rendering frames did not bring RSS down.** In
+  `probe-memory-growth.txt`, 42 s of an animating client (frames drawn
+  continuously) left scoot-gles at 467 MB, where 50 captures had put
+  it. In the benchmark's main run, the "end" row after the animate scene is
+  still 289.8 MB, against 283.6 MB after the screenshot scenes.
+- **After frames had been drawn, further captures stopped growing.** That
+  was 20 captures during the animation, and 10 captures after the foot in
+  the table above mapped.
+- **Mapping a new window dropped RSS** from 885 MB to 383 MB, which is the
+  table's `one foot mapped` line. Why that event released memory when
+  ordinary frames did not is unexplained.
+
+These fit the mechanism below if RSS keeps its high-water mark
+(the allocator retains freed memory for reuse and rarely returns it). On
+that reading, the next rendered frame frees the queued buffers, later
+captures reuse them, and RSS stays high. That is a hypothesis. RSS does not
+count PBOs directly, and nothing here has measured the queue.
+
+## Why (read from the pinned Smithay rev; not yet proven by a fix)
 
 `render::read_back` calls `copy_framebuffer`, which on `GlesRenderer`
 allocates a pixel-pack buffer the size of the region, and then
@@ -49,7 +68,8 @@ that runs from `unbind()`, `cleanup_texture_cache()` and
 `invalidate_caches()`, which are the render path's calls. A capture of an
 undamaged screen reads the persistent target without rendering, so nothing
 drains the channel, and each capture's PBO stays allocated until the next
-frame is drawn.
+frame is drawn. That explains the growth. It does not by itself explain the
+release pattern above.
 
 ## Why it is high priority
 
@@ -66,8 +86,11 @@ checked too.
 
 After a read-back on the GLES renderer, drain Smithay's cleanup channel by
 calling `cleanup_texture_cache()` (public on the `Renderer` trait at the
-pinned rev). Alternatively, reuse one mapping per output. Acceptance: the
-120-shot sequence above stays flat on the dev VM under `--renderer gles`,
-for both `scootctl screenshot` and `grim`. There should also be a test that
-counts live PBOs or mappings across repeated captures of an undamaged
-frame.
+pinned rev). Alternatively, reuse one mapping per output.
+
+Acceptance is about growth, not release, since RSS may never come back
+down: under `--renderer gles` on the dev VM, the 120-shot static sequence
+above grows by at most about one frame in total, for both `scootctl
+screenshot` and `grim`. There should also be a test that counts live PBOs
+or mappings across repeated captures of an undamaged frame, which measures
+the queue itself rather than inferring it from RSS.

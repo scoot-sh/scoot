@@ -50,7 +50,8 @@ each compositor gives you.
 - **Part of scoot's lower totals comes from doing less work, not doing
   the same work more cheaply.** Nested, scoot draws no pointer of its own
   (the host draws the host's pointer), while niri composites its pointer into
-  every frame. That accounts for the whole of the pointer row's gap. During
+  every frame. At 594 frames of about 16.2 ms, that is nearly all of the
+pointer row's gap. During
   a relayout storm, niri also presented about three frames per action where
   scoot presented one.
 - **Screenshots:** through each compositor's own IPC, a scoot capture took
@@ -185,8 +186,11 @@ About 72–75 MB of both scoot-gles's and niri's Pss is file-backed Mesa and
 LLVM. Compare those two when you want a like-for-like GL stack; pixman
 against niri is the comparison for a machine without a GPU. The
 scoot-gles jump after screenshots is the leak described above. A probe on
-its own shows it linear and unbounded, 6.25 MB per capture to 885 MB after
-120 captures, and released mostly by the next rendered frame.
+its own shows it linear and unbounded: 6.25 MB per capture, reaching 885 MB
+after 120 captures of a still screen. Drawing frames afterwards did not
+bring RSS back down (compare the "end" row). It did stop further captures
+from growing it. The ticket records the details, one of which is still
+unexplained.
 
 #### Startup
 
@@ -309,9 +313,11 @@ The evidence for the run above is on the dev VM under `~/evidence/niri-ab/`:
 - `summary.md`: the tables above, before rounding;
 - `versions.tsv` in each run directory;
 - `scripts-used/`: the exact scripts, with their sha256.
-  `bench-script-after-runs.diff` is the only change made to the benchmark
-  script since the run: a per-session watchdog, and `timeout` on the setup
-  calls. The measured calls are untouched. The pointer helper has changed
+  `bench-script-after-runs.diff` holds every change made to the benchmark
+  script since the run: a per-session watchdog, `timeout` on the calls that
+  spawn clients and count windows, and each session directory recreated
+  from scratch (a re-run into the same `OUT` used to read the previous run's
+  pid). Neither the measured calls nor the startup poll changed. The pointer helper has changed
   only by a clippy fix since (`events % 2 == 0` became
   `events.is_multiple_of(2)`);
 - `static-facts.txt`: sizes and `ldd`;

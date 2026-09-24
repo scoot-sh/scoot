@@ -215,6 +215,9 @@ png_done() { [ -s "$1" ] && tail -c 12 "$1" | grep -q IEND; }
 
 run_session() { # round variant
     local round=$1 v=$2 dir="$OUT/r$1-$2" cmd kind
+    # From scratch: a pid or exec-ns file left by an earlier run into the
+    # same OUT would be read as this session's before the new one is written.
+    rm -rf "$dir"
     mkdir -p "$dir/cfg"
     HOST_LOG="$dir/host.log"; SURF=""
     case $v in
@@ -243,7 +246,11 @@ run_session() { # round variant
     [ -s "$dir/exec-ns" ] || die "the host never started ($HOST_LOG)"
     PID=$(cat "$dir/pid")
     (
-        sleep "$SESSION_TIMEOUT"
+        # Stopping this watchdog stops its sleep too, rather than orphaning it.
+        sleep "$SESSION_TIMEOUT" &
+        sleeper=$!
+        trap 'kill "$sleeper" 2>/dev/null; exit 0' TERM
+        wait "$sleeper"
         if kill -0 "$PID" 2>/dev/null; then
             echo "  ($v, round $round: still running after ${SESSION_TIMEOUT}s; killed)" >>"$OUT/notes.log"
             kill "$PID"; sleep 2; kill -KILL "$PID" 2>/dev/null
@@ -257,13 +264,14 @@ run_session() { # round variant
         act() { "$SCOOTCTL" action "$@"; }
         spawn() { timeout 5 "$SCOOTCTL" action spawn "$@"; }
         nwin() { timeout 5 "$SCOOTCTL" windows 2>/dev/null | grep -c '"app_id"'; }
-        ready() { timeout 5 "$SCOOTCTL" version >/dev/null 2>&1; }
+        # Not wrapped in `timeout`: this poll stamps the startup column.
+        ready() { "$SCOOTCTL" version >/dev/null 2>&1; }
     else
         nsock() { ls "$XDG_RUNTIME_DIR"/niri.*."$PID".sock 2>/dev/null | head -1; }
         act() { "$NIRI" msg action "$@"; }
         spawn() { timeout 5 "$NIRI" msg action spawn -- "$@"; }
         nwin() { timeout 5 "$NIRI" msg windows 2>/dev/null | grep -c '^Window ID'; }
-        ready() { NIRI_SOCKET=$(nsock); [ -n "$NIRI_SOCKET" ] && export NIRI_SOCKET && timeout 5 "$NIRI" msg version >/dev/null 2>&1; }
+        ready() { NIRI_SOCKET=$(nsock); [ -n "$NIRI_SOCKET" ] && export NIRI_SOCKET && "$NIRI" msg version >/dev/null 2>&1; }
     fi
     for i in $(seq 1 1000); do
         if ready; then ready_ns=$(now_ns); break; fi
