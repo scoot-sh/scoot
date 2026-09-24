@@ -15,15 +15,17 @@
 //! plus `tty/scanout.rs` supply, is:
 //!
 //! - **Where the global exists** ([`DrmSyncobj::enable`]). Only on the
-//!   `--tty` GPU scanout tier, and only when the DRM device passes Smithay's
+//!   `--tty` GPU scanout tier, and only when a DRM device passes Smithay's
 //!   own probe (`supports_syncobj_eventfd`: the kernel answers
 //!   `DRM_IOCTL_SYNCOBJ_EVENTFD` with `ENOENT` for a missing handle rather
 //!   than refusing the ioctl). Never on pixman (dumb `--tty`, headless,
 //!   nested): nothing there could wait on an acquire point without blocking
 //!   the event loop, and a client that binds the global and has its points
-//!   ignored is worse off than one that never saw it. The import device is
-//!   the session's own DRM fd (`DrmDevice::device_fd`), the one the probe
-//!   ran on; syncobj ioctls are `DRM_RENDER_ALLOW` and need no master, so
+//!   ignored is worse off than one that never saw it. The import device --
+//!   the one timelines are imported into and waited on -- is the session's
+//!   own DRM fd (`DrmDevice::device_fd`) if it passes the probe, else the
+//!   render node `/dev/dri/renderD128` (a split render/display machine; see
+//!   `enable`). Syncobj ioctls are `DRM_RENDER_ALLOW` and need no master, so
 //!   they keep working while the session is VT-switched away.
 //! - **Waiting on acquire points** before a commit applies
 //!   ([`acquire`]): the blocker pattern anvil shows, plus what anvil leaves
@@ -155,31 +157,64 @@ pub struct DrmSyncobj {
 }
 
 impl DrmSyncobj {
-    /// Offers the global on `device` if it passes Smithay's syncobj-eventfd
-    /// probe, and answers whether it did.
+    /// Offers the global on the first of `candidates` that passes Smithay's
+    /// syncobj-eventfd probe, and answers whether one did.
     ///
     /// Called once, by `tty::init`, when the session came up on the GPU
     /// scanout tier -- the only tier where an acquire point can be waited on
     /// without blocking and a composited frame's GPU work can be waited out
-    /// before a release point is signalled. Idempotent: a second call keeps
-    /// the first global.
+    /// before a release point is signalled. `candidates` is lazy: each is a
+    /// name for the log and the device, or `None` if it could not be opened,
+    /// and nothing after the first that passes is opened at all. Idempotent:
+    /// a second call keeps the first global.
+    ///
+    /// Why more than one candidate: a syncobj is a DRM-core object, not a
+    /// driver's, so any DRM device whose driver supports timeline syncobjs
+    /// can import a client's timeline and wait on it, whichever GPU created
+    /// it. The session's own display device is tried first (it is already
+    /// open, and on a single-GPU machine it is the GPU). On a split
+    /// render/display machine -- Apple Silicon's `apple,dcp` display
+    /// controller beside the AGX GPU, most ARM SoCs -- the display driver
+    /// may have no syncobj support while the render node clients render on
+    /// does, and without a second candidate those machines would never be
+    /// offered explicit sync.
     #[cfg_attr(not(feature = "gpu-scanout"), allow(dead_code))]
-    pub(crate) fn enable(&mut self, display: &DisplayHandle, device: DrmDeviceFd) -> bool {
+    pub(crate) fn enable<I>(&mut self, display: &DisplayHandle, candidates: I) -> bool
+    where
+        I: IntoIterator<Item = (&'static str, Option<DrmDeviceFd>)>,
+    {
         if self.state.is_some() {
             return true;
         }
-        if !supports_syncobj_eventfd(&device) {
-            // info!, like the tier line: whether GPU clients get explicit
-            // sync on this machine is a question a user asks of the log.
+        for (name, device) in candidates {
+            let Some(device) = device else {
+                tracing::debug!(
+                    device = name,
+                    "drm: explicit-sync candidate could not be opened"
+                );
+                continue;
+            };
+            if !supports_syncobj_eventfd(&device) {
+                tracing::debug!(
+                    device = name,
+                    "drm: explicit-sync candidate has no syncobj timeline eventfd support"
+                );
+                continue;
+            }
+            self.state = Some(DrmSyncobjState::new::<State>(display, device));
+            // info!, like the tier line: whether GPU clients get explicit sync
+            // on this machine is a question a user asks of the log.
             tracing::info!(
-                "drm: this device has no syncobj timeline eventfd support; \
-                 explicit sync (wp_linux_drm_syncobj_manager_v1) is not offered"
+                device = name,
+                "drm: explicit sync (wp_linux_drm_syncobj_manager_v1) offered"
             );
-            return false;
+            return true;
         }
-        self.state = Some(DrmSyncobjState::new::<State>(display, device));
-        tracing::info!("drm: explicit sync (wp_linux_drm_syncobj_manager_v1) offered");
-        true
+        tracing::info!(
+            "drm: no device here has syncobj timeline eventfd support; explicit sync \
+             (wp_linux_drm_syncobj_manager_v1) is not offered"
+        );
+        false
     }
 
     /// Whether the global exists, and so whether any surface can carry sync

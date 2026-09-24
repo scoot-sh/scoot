@@ -540,17 +540,21 @@ pub fn init(
     });
 
     // Explicit sync is offered only on the GPU scanout tier, and only where
-    // the device passes Smithay's syncobj-eventfd probe -- decided here,
+    // a device passes Smithay's syncobj-eventfd probe -- decided here,
     // before the event loop starts, so no client can bind a global that is
     // not honoured, and no surface is created before the acquire hook it
-    // needs (see `drm_syncobj.rs`). The import device is the session's own
-    // DRM fd, the one the probe runs on.
+    // needs (see `drm_syncobj.rs`). The session's own DRM fd first; the
+    // render node only if that fails (a split render/display machine), and
+    // only then is it opened.
     #[cfg(feature = "gpu-scanout")]
     if let Some(tty) = state.tty.as_ref()
         && tty.scanout_tier()
     {
-        let device = tty.drm.device_fd().clone();
-        state.drm_syncobj.enable(&state.display_handle, device);
+        let display = tty.drm.device_fd().clone();
+        let candidates = std::iter::once(("the display device", Some(display))).chain(
+            std::iter::once_with(|| ("/dev/dri/renderD128", open_render_node())),
+        );
+        state.drm_syncobj.enable(&state.display_handle, candidates);
     }
 
     // The gamma protocol's `gamma_size` is per-CRTC hardware state, and the
@@ -589,6 +593,21 @@ pub fn init(
     super::config::enforce_vt_binds(&mut state.keybindings);
 
     Ok((width, height, name))
+}
+
+/// Opens the render node explicit sync falls back to importing timelines on
+/// when the display device cannot (see `DrmSyncobj::enable`). A plain open,
+/// not through the session: render nodes carry no modesetting rights, need
+/// no seat, and are not paused on a VT switch.
+#[cfg(feature = "gpu-scanout")]
+fn open_render_node() -> Option<DrmDeviceFd> {
+    let fd = rustix::fs::open(
+        "/dev/dri/renderD128",
+        rustix::fs::OFlags::RDWR | rustix::fs::OFlags::CLOEXEC | rustix::fs::OFlags::NOCTTY,
+        rustix::fs::Mode::empty(),
+    )
+    .ok()?;
+    Some(DrmDeviceFd::new(DeviceFd::from(fd)))
 }
 
 /// Registers the udev monitor that delivers DRM hotplug events (see

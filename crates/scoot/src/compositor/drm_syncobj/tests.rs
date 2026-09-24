@@ -127,7 +127,11 @@ fn start(test: &str) -> Option<Fixture> {
     let device = DrmDeviceFd::new(DeviceFd::from(device));
     let mut fixture = Harness::headless_on(Appearance::default(), CANVAS, RendererKind::Pixman);
     let display = fixture.state.display_handle.clone();
-    if !fixture.state.drm_syncobj.enable(&display, device) {
+    if !fixture
+        .state
+        .drm_syncobj
+        .enable(&display, [("the render node", Some(device))])
+    {
         skipped(test, "the render node fails the syncobj-eventfd probe");
         return None;
     }
@@ -257,7 +261,12 @@ fn enabling_twice_keeps_one_global() {
     };
     let device = DrmDeviceFd::new(DeviceFd::from(open_render_node().expect("a render node")));
     let display = fixture.state.display_handle.clone();
-    assert!(fixture.state.drm_syncobj.enable(&display, device));
+    assert!(
+        fixture
+            .state
+            .drm_syncobj
+            .enable(&display, [("the render node", Some(device))])
+    );
     let Ack::Globals(globals) = fixture.run(Step::Globals) else {
         panic!("expected globals");
     };
@@ -267,6 +276,84 @@ fn enabling_twice_keeps_one_global() {
             .filter(|g| *g == "wp_linux_drm_syncobj_manager_v1")
             .count(),
         1
+    );
+}
+
+#[test]
+fn candidates_that_fail_or_cannot_open_fall_through_to_one_that_passes() {
+    // The split render/display shape: the first device cannot import
+    // timelines (here a non-DRM fd, which answers the probe's ioctl with
+    // `ENOTTY` rather than `ENOENT`), the second could not be opened at all,
+    // the third passes.
+    let Some(device) = open_render_node() else {
+        skipped(
+            "candidates_that_fail_or_cannot_open_fall_through_to_one_that_passes",
+            "no usable render node",
+        );
+        return;
+    };
+    let not_drm = rustix::fs::open(
+        "/dev/null",
+        rustix::fs::OFlags::RDWR | rustix::fs::OFlags::CLOEXEC,
+        rustix::fs::Mode::empty(),
+    )
+    .expect("/dev/null");
+    let mut fixture: Fixture =
+        Harness::headless_on(Appearance::default(), CANVAS, RendererKind::Pixman);
+    let display = fixture.state.display_handle.clone();
+    let offered = fixture.state.drm_syncobj.enable(
+        &display,
+        [
+            (
+                "not a drm device",
+                Some(DrmDeviceFd::new(DeviceFd::from(not_drm))),
+            ),
+            ("unopenable", None),
+            (
+                "the render node",
+                Some(DrmDeviceFd::new(DeviceFd::from(device))),
+            ),
+        ],
+    );
+    if !offered {
+        skipped(
+            "candidates_that_fail_or_cannot_open_fall_through_to_one_that_passes",
+            "the render node fails the syncobj-eventfd probe",
+        );
+        return;
+    }
+    assert!(fixture.state.drm_syncobj.active());
+}
+
+#[test]
+fn no_passing_candidate_offers_nothing() {
+    let not_drm = rustix::fs::open(
+        "/dev/null",
+        rustix::fs::OFlags::RDWR | rustix::fs::OFlags::CLOEXEC,
+        rustix::fs::Mode::empty(),
+    )
+    .expect("/dev/null");
+    let mut fixture = Harness::headless_on(Appearance::default(), CANVAS, RendererKind::Pixman);
+    let display = fixture.state.display_handle.clone();
+    assert!(!fixture.state.drm_syncobj.enable(
+        &display,
+        [
+            (
+                "not a drm device",
+                Some(DrmDeviceFd::new(DeviceFd::from(not_drm)))
+            ),
+            ("unopenable", None),
+        ],
+    ));
+    assert!(!fixture.state.drm_syncobj.active());
+    fixture.spawn(run_client);
+    let Ack::Globals(globals) = fixture.run(Step::Globals) else {
+        panic!("expected globals");
+    };
+    assert!(
+        !globals
+            .iter()
+            .any(|g| g == "wp_linux_drm_syncobj_manager_v1")
     );
 }
 
