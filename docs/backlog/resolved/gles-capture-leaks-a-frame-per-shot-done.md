@@ -173,14 +173,21 @@ another 20–40 MB and went on growing. With the fixed threshold, the after
 binary held 121,828 KiB from the 20th shot to the 120th
 (`run-after-nested-ipc-fixed.txt`).
 
-**The pointer.** Before the fix, an IPC screenshot *with* the pointer
-(`scootctl screenshot`'s default) did not grow on the nested tier (the
-table's third row). A frame there never holds the pointer, so every such
-capture re-rendered the pointer's region, and that render's `finish`
-drained the previous captures' objects. The leak needed `--no-cursor`, or
-an `ext-image-copy-capture-v1` client that does not paint cursors
-(`grim`'s default), or a tier whose frame already holds the pointer. That
-last case was not measured here.
+**The pointer.** A default IPC screenshot, which draws the pointer in,
+was not safe before the fix. It only happened to stay flat in the one case
+measured here. On `--nested` (the table's third row) a frame never holds
+the pointer, so every such capture re-rendered the pointer's region. That
+render's `finish` drained the previous captures' objects, and one frame's
+worth stayed queued. When a capture renders no pointer region, nothing
+drains, and a default screenshot leaked exactly like `--no-cursor`. That
+happens when the pointer is hidden or off the output
+(`a_hidden_cursor_needs_nothing_unless_the_frame_still_shows_one`), and
+when the frame already holds the pointer where it is, as on a GPU tier
+that composites the cursor rather than giving it a plane
+(`a_frame_that_composited_the_cursor_where_it_is_needs_nothing_when_asked`).
+Neither case was measured live here; the dev VM's scanout tier has a
+cursor plane. `grim`, and any `ext-image-copy-capture-v1` client that does
+not paint cursors, leaked in every case measured.
 
 **Capture latency.** `bench.sh` measured `scootctl screenshot --no-cursor`
 end to end: client start, capture, PNG encode on scoot's worker, file
@@ -226,7 +233,8 @@ on it.
   RSS there. The mechanism is the same code path. The GL-object count
   that the tests assert is what would show it. Real hardware is
   `Asahi.md`'s territory, and this change adds no new test there.
-- **A tier whose frame already holds the pointer**, with `scootctl
-  screenshot`'s default pointer-on capture. By the code, that capture
-  renders no region and so drained nothing before the fix. It now drains
-  like every other capture.
+- **A default (pointer-on) screenshot where no pointer region is
+  rendered**: a hidden pointer, a pointer off the output, or a tier whose
+  frame already composites the pointer. By the code, before the fix that
+  capture drained nothing and leaked like `--no-cursor`. It now drains
+  like every other capture. It was not reproduced live.

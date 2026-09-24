@@ -122,7 +122,10 @@ each item's own file records why it landed when it did.
   Dev VM, 120 captures: flat after at most one frame on `--nested`
   read-back, `--headless`, the `--tty` GPU scanout tier and the `--nested`
   dma-buf tier, for both `scootctl screenshot --no-cursor` and `grim`.
-  Before the fix every one of these grew linearly. The ticket's
+  Before the fix every one of these grew linearly. A default (pointer-on)
+  screenshot stayed flat on `--nested` only because its pointer re-render
+  drained the queue. By the code, it leaked whenever no pointer region was
+  rendered: a hidden pointer, or a frame that already composites it. The ticket's
   unexplained release pattern was glibc's dynamic mmap threshold keeping
   freed frames. With a fixed threshold, a single drawn frame returned all
   120 at once. IPC screenshot p50 went from 8.8 to 7.9 ms, and p95 from
