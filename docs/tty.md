@@ -236,9 +236,9 @@ running with no GPU at all is a hard requirement here, not a fallback tier.
   anything a client sees. Seen working end to end on the dev VM with an
   outer scoot as the host (the host's screenshot byte-identical to the
   nested one); there the GPU is software, and per frame it measured the
-  same CPU as read-back (7.6-7.7 against 7.7-7.8 ms per frame, 1024x768)
-  with a resize a little dearer (14.7-15.1 against 14.0-14.3 ms), because
-  drawing in software is nearly all the cost. What it saves on a real GPU
+  same CPU as read-back (7.67-7.73 against 7.70-7.77 ms per frame,
+  1024x768) with a resize a little dearer (15.1 against 14.1-14.3 ms),
+  because drawing in software is nearly all the cost. What it saves on a real GPU
   is [`../Asahi.md`](../Asahi.md)'s Test 8, not a claim made here.
 - **Scanout drives every plane it can claim, with captures kept correct.**
   The cursor plane is attempted on CRTCs that expose one, with per-frame

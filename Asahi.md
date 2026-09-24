@@ -940,7 +940,7 @@ end to end -- the host's screenshot is byte-identical to the nested one, and
 the protocol trace shows the buffers created and attached -- but its GPU is
 llvmpipe, where drawing the frame in software is nearly all of the cost, so
 per frame it measured the same as read-back (and a little dearer per resize,
-~0.4-1.1 ms of the ~14 ms a resize costs there). Whether dropping the copy
+~0.9 ms of the ~14 ms a resize costs there). Whether dropping the copy
 saves CPU on a GPU that is a GPU is only answerable on one. Nothing is
 claimed in advance.
 

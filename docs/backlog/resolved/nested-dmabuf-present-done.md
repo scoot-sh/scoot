@@ -90,24 +90,27 @@ answers to the ticket's questions are below.
 
 ## Measured (dev VM, llvmpipe; release, LTO off, codegen-units 16)
 
-`scripts/nested-dmabuf-bench.sh`, host an outer `scoot --headless
---renderer gles` (cage cannot host this on the VM: under `gles2` it has no
-output, under pixman no linux-dmabuf), 1024x768, both builds at the same
-commit, same host binary, alternated twice:
+`scripts/nested-dmabuf-bench.sh` at `9b79daa` (the final code), host an
+outer `scoot --headless --renderer gles` (cage cannot host this on the VM:
+under `gles2` it has no output, under pixman no linux-dmabuf), 1024x768,
+both builds from that commit, the same host binary, alternated twice:
 
 | per | read-back (default build) | dma-buf (`gpu-scanout`) |
 |---|---|---|
-| frame (30 Hz counter, 20 s), nested | 7.68 / 7.72 ms | 7.73 / 7.67 ms |
-| frame, host | 14.82 / 14.83 ms | 15.03 / 14.87 ms |
-| applied size (121 sizes), nested | 14.30 / 14.05 ms | 14.71 / 15.12 ms |
-| applied size (1001 sizes), nested | 12.72 ms | 13.45 ms |
+| frame (30 Hz counter, 20 s), nested | 7.70 / 7.77 ms | 7.73 / 7.67 ms |
+| frame, host | 14.82 / 14.85 ms | 15.05 / 14.82 ms |
+| applied size (121 sizes), nested | 14.13 / 14.30 ms | 15.12 / 15.12 ms |
+| applied size (1001 sizes), nested | 12.70 ms | 13.66 ms |
 
-So on llvmpipe the dma-buf path is CPU-neutral per frame and ~3-7% dearer
-per resize: drawing the frame in software is nearly all of the cost, and
-llvmpipe's blit is itself a CPU copy. What it saves on a real GPU is
-`Asahi.md` Test 8, not a claim. fds flat across 1001 resizes on both
-processes; RSS within the noise of the read-back runs; every one of the
-1001 resizes' first frames handed over without a second draw; host and
+So on llvmpipe the dma-buf path is CPU-neutral per frame and ~6-8% dearer
+per resize (about 0.9 ms a size): drawing the frame in software is nearly
+all of the cost, llvmpipe's blit is itself a CPU copy, and each size now
+allocates two host buffers (not measured apart; kernel-zeroed dumb buffers
+and their first mapping are the likely share). What it saves on a real GPU
+is `Asahi.md` Test 8, not a claim. Across 1001 resizes fds stayed flat on
+both processes (nested 42, host 30) and RSS moved as much as the read-back
+run's; 2003 frames were handed over as drawn (two per size: the first, and
+the second, which waited for the chain to grow to two buffers); host and
 nested screenshots byte-identical in every run.
 
 Evidence (commands, SHAs, raw paths) is in the PR description.

@@ -121,7 +121,7 @@ each item's own file records why it landed when it did.
   except that a size over the GLES limit is now refused before any host
   buffer is allocated. Dev VM, outer scoot as host (cage cannot take a
   dma-buf there): host screenshot byte-identical; CPU-neutral per frame
-  (7.67-7.73 vs 7.68-7.72 ms), ~3-7% dearer per resize (software drawing
+  (7.67-7.73 vs 7.70-7.77 ms), ~6-8% dearer per resize (software drawing
   dominates on llvmpipe); fds flat over 1001 resizes. In-process tests run
   a nested scoot against a second scoot as host, including one that
   refuses every buffer. Real GPU: `Asahi.md` Test 8.
