@@ -685,6 +685,10 @@ capture-cursor → resize-in-place → syncobj → nested dmabuf → VRR.
 - [GLES captures keep a whole frame each while nothing redraws](./resolved/gles-capture-leaks-a-frame-per-shot-done.md) — RESOLVED 2026-09-24 (PR #238): Smithay queues a dropped read-back buffer (and the bind's framebuffer object) until the next frame's drain, and a capture of a static screen reached no drain. Both GLES arms of `Backend::capture` and the GLES capture-cursor region render now drain once the capture returns. Dev VM: 120 `scootctl screenshot --no-cursor` or `grim` captures went from +750–763 MB to flat after one frame, on `--nested`, `--headless`, the `--tty` GPU tier and the `--nested` dma-buf tier. p50 8.8 → 7.9 ms.
 - [VRR on the scanout tier](./core/gpu-vrr.md) — low, blocked on a VRR-capable display.
 
+### From the gh #205 re-verification (2026-09-24)
+- [Clip and ring the committed size; send tiled states](./core/clip-to-committed-size.md) — high: foot defaults still show mismatched corners (gh #205 reopened).
+- [Ring outer corners have square shoulders](./core/ring-outer-corner-shoulders.md) — medium.
+
 ### GPU tier, after primary-direct (2026-09-23)
 - [A/B resource usage vs niri](./resolved/niri-ab-benchmark-done.md) — RESOLVED 2026-09-24 (PR #237, dev VM half), at the user's direct request: both compositors nested in the same cage host on llvmpipe, three rotating rounds, results and caveats in [`docs/benchmarks.md`](../benchmarks.md). The real-GPU half is the next entry.
 - [A/B vs niri on a real GPU, `--tty` included](./testing/niri-ab-real-gpu.md) — medium, blocked on the user's Apple Silicon machine: `Asahi.md` Test 9.
