@@ -333,14 +333,17 @@ running with no GPU at all is a hard requirement here, not a fallback tier.
   800x800, 8 windows, release build with LTO off) a resize costs **15.7 µs**
   against **11.3 µs** for pixman; rebuilding the renderer, which it used to
   do, cost **3.95 ms** there. (It was first recorded as 16.6 ms against
-  37 µs for pixman; that did not reproduce, and pixman shows the same ~3x
-  gap, so the earlier conditions differed.) What a size change still costs is the frame drawn at the
-  new size: a `--nested --renderer gles` drag measured **14.7 ms** of
+  37 µs for pixman. That did not reproduce: both figures were higher
+  then, pixman's by 3.3x and gles's by 4.2x, so the earlier conditions
+  differed.) What a size change still costs is the frame drawn at the new
+  size: a `--nested --renderer gles` drag measured **14.7 ms** of
   compositor CPU per size (was 17.0 ms), against 4.5 ms under pixman, and
   that is llvmpipe drawing and reading back a whole frame, not the resize.
-  pixman is unaffected, and it is the default. If the GPU refuses a size (larger than it can render), scoot
-  tries a whole new renderer on the same GPU and, if that fails too, stays
-  at the size it was, as before.
+  pixman is unaffected, and it is the default. A size larger than the GPU
+  can render into is refused up front, and scoot stays at the size it was
+  (the log says `could not resize the render target` and names the GPU's
+  limit). If a resize fails for any other reason, scoot tries a whole new
+  renderer on the same GPU and, if that fails too, stays where it was.
 - **Hardware first.** The EGL device is chosen by preferring a real device
   over a software one and taking the first that yields a working renderer, so
   a box with a GPU uses the GPU. Note that "software" here means only that

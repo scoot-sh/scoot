@@ -163,13 +163,17 @@ fn render_frames<S, A>(fixture: &mut Harness<S, A>, rounds: u32) -> Duration {
 /// needs a live host compositor to construct. Read this as the renderer-side
 /// floor of a nested resize, not its total.
 ///
-/// Measured twice: the resize alone, and the resize plus the frame that
-/// follows it -- which is what a `--nested` drag pays per distinct size, and
-/// the half that catches cost a resize merely defers (a driver allocating
-/// the new target lazily on first draw). What neither can show is the
-/// client re-uploads a *new* renderer used to pay on that frame: no client
-/// is mapped here (see the module doc), so that half is measured by the
-/// nested drag instead.
+/// Measured twice: the resize alone, and the resize plus a `render()` after
+/// it. Read the second as the CPU cost of *submitting* that frame, not of
+/// drawing it: plain `--headless` has no presenter, so nothing reads the
+/// frame back, and under GLES `GlesFrame::finish` returns a fence right
+/// after `glFlush` without waiting on it (at the pinned rev), so the
+/// driver's drawing -- all of it, on llvmpipe -- is never inside the timed
+/// span. Nor does either half see the client re-uploads a *new* renderer
+/// used to pay on that frame, since no client is mapped here (see the
+/// module doc). The real per-size cost of a drag, drawing and read-back and
+/// client textures included, is what `scripts/nested-drag-bench.sh`
+/// measures.
 #[test]
 #[ignore = "prints per-resize timings for a human; asserts nothing"]
 fn resize_cost() {

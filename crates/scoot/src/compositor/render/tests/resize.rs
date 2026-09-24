@@ -183,13 +183,83 @@ fn a_gles_resize_keeps_the_device_the_render_node_and_the_context() {
     }
 }
 
-/// A size the driver will not allocate is refused with nothing changed: the
-/// old target, at the old size, still holds the frame it held and still
-/// draws. One past `GL_MAX_RENDERBUFFER_SIZE` is refused on every device, and
-/// only the bind check in `gles::target` catches it -- `glRenderbufferStorage`
+/// The limit a resize is checked against up front is the driver's own,
+/// exactly: a target at the limit on either axis resizes in place, one past
+/// it is refused as [`InPlace::TooLarge`] with nothing allocated and nothing
+/// changed -- and the context is the same one throughout, so no rebuild was
+/// tried. Too strict a limit would fail the first half, too lax the second.
+/// The at-limit targets are one pixel thick, so a few tens of KiB apiece.
+#[test]
+fn a_gles_resize_is_checked_against_the_drivers_limit_up_front() {
+    let output = test_output(START.0, START.1);
+    let mut backend = gles_backend(&output, START);
+    let before = draw_scene(&mut backend, START);
+    let context = backend.gles_context_for_test();
+    let renderbuffer = backend
+        .gles_max_renderbuffer_size_for_test()
+        .expect("a GLES backend answers");
+    let (max_width, max_height) = backend
+        .gles_max_target_for_test()
+        .expect("the driver reports its limits");
+    assert!(
+        max_width <= renderbuffer && max_height <= renderbuffer,
+        "the limit ({max_width}x{max_height}) is within GL_MAX_RENDERBUFFER_SIZE ({renderbuffer})"
+    );
+
+    for size in [(max_width, 1), (1, max_height)] {
+        set_output_mode(&output, size);
+        assert!(
+            matches!(
+                backend.resize_in_place(&output, size.0, size.1),
+                InPlace::Resized
+            ),
+            "{size:?}: a target at the limit resizes in place"
+        );
+    }
+    set_output_mode(&output, START);
+    assert!(matches!(
+        backend.resize_in_place(&output, START.0, START.1),
+        InPlace::Resized
+    ));
+    let at_start = draw_scene(&mut backend, START);
+    assert_eq!(differing(&before, &at_start), 0, "back at the start size");
+
+    for size in [
+        (max_width + 1, 1),
+        (1, max_height + 1),
+        (i32::MAX, i32::MAX),
+    ] {
+        let InPlace::TooLarge(limit) = backend.resize_in_place(&output, size.0, size.1) else {
+            panic!("{size:?} must be refused up front (limit {max_width}x{max_height})");
+        };
+        assert_eq!(limit, (max_width, max_height), "{size:?}: the limit named");
+        assert_eq!(
+            backend.size(),
+            START,
+            "{size:?}: a refused resize moves nothing"
+        );
+        let unchanged = backend
+            .capture(<[u8]>::to_vec)
+            .expect("the old target still reads back");
+        assert_eq!(differing(&before, &unchanged), 0, "{size:?}: the old frame");
+    }
+    assert!(
+        backend.gles_context_for_test() == context,
+        "no resize here replaced the renderer"
+    );
+    let again = draw_scene(&mut backend, START);
+    assert_eq!(differing(&before, &again), 0, "the old target still draws");
+}
+
+/// The all-or-nothing half of `GlesBackend::resize` itself, below the
+/// up-front check (which is what a failure that is not about size reaches,
+/// a lost context say): a reallocation the driver refuses leaves the old
+/// target, at the old size, holding its frame and still drawing. One past
+/// `GL_MAX_RENDERBUFFER_SIZE` is the refusal every driver makes, and only
+/// the bind check in `gles::target` catches it -- `glRenderbufferStorage`
 /// reports it as a GL error flag and hands back a renderbuffer regardless.
 #[test]
-fn a_failed_in_place_resize_leaves_the_old_target_drawing() {
+fn a_failed_reallocation_leaves_the_old_target_drawing() {
     let output = test_output(START.0, START.1);
     let mut backend = gles_backend(&output, START);
     let before = draw_scene(&mut backend, START);
@@ -198,11 +268,12 @@ fn a_failed_in_place_resize_leaves_the_old_target_drawing() {
         .expect("a GLES backend answers");
     let too_wide = max.checked_add(1).expect("a finite limit");
     let context = backend.gles_context_for_test();
-    // The output's mode is deliberately left alone: `resize_output` puts it
-    // back on a failure, and this is the backend's half alone.
-    let InPlace::Failed(error) = backend.resize_in_place(&output, too_wide, 1) else {
-        panic!("a {too_wide}x1 target (limit {max}) must be refused");
+    let Pipeline::Gles(gpu) = &mut backend.pipeline else {
+        unreachable!("a GLES backend");
     };
+    let error = gpu
+        .resize(too_wide, 1)
+        .expect_err("one past GL_MAX_RENDERBUFFER_SIZE must be refused");
     eprintln!("refused {too_wide}x1 as expected: {error}");
     assert_eq!(backend.size(), START, "a refused resize moves nothing");
     assert!(backend.gles_context_for_test() == context);
@@ -331,11 +402,13 @@ fn a_resized_session_draws_what_a_new_backend_would() {
     }
 }
 
-/// A GLES resize to a size the driver refuses fails the way any failed
-/// resize does: `false`, the old mode put back and the refused one taken out
-/// of the mode list, the old target at the old size still holding and
-/// drawing its frame -- and only after the pinned fallback rebuild was tried
-/// and failed too (the second log line), with the renderer never replaced.
+/// A GLES resize to a size over the driver's limit fails the way any failed
+/// resize does -- `false`, the old mode put back and the refused one taken
+/// out of the mode list, the old target at the old size still holding and
+/// drawing its frame -- and does it up front: no in-place allocation, no
+/// fallback rebuild (the context is the one it started with, and nothing
+/// logs building or failing to build another renderer), and exactly one
+/// WARN, naming the limit.
 #[test]
 fn a_refused_gles_resize_leaves_the_session_as_it_was() {
     let ((), logs) = capture_logs(|| {
@@ -348,16 +421,16 @@ fn a_refused_gles_resize_leaves_the_session_as_it_was() {
             .expect("an output");
         let before = render_and_read(&mut fixture);
         let backend = fixture.state.backends.get_mut(&id).expect("a backend");
-        let max = backend
-            .gles_max_renderbuffer_size_for_test()
-            .expect("a GLES backend answers");
+        let (max_width, _) = backend
+            .gles_max_target_for_test()
+            .expect("the driver reports its limits");
         let context = backend.gles_context_for_test();
         let mode = output.current_mode();
-        let too_wide = max.checked_add(1).expect("a finite limit");
+        let too_wide = max_width.checked_add(1).expect("a finite limit");
 
         assert!(
             !fixture.state.resize_output(too_wide, 16),
-            "a {too_wide}x16 target (limit {max}) must be refused"
+            "a {too_wide}x16 target (limit {max_width}) must be refused"
         );
         assert_eq!(output.current_mode(), mode, "the old mode is put back");
         assert!(
@@ -378,15 +451,22 @@ fn a_refused_gles_resize_leaves_the_session_as_it_was() {
         assert_eq!(differing(&before, &again), 0, "the old target still draws");
     });
     assert!(
-        logs.contains("could not resize the render target in place; rebuilding it"),
-        "the in-place failure is reported: {logs}"
+        logs.contains("is larger than the GPU can render into"),
+        "the refusal names the limit: {logs}"
     );
-    assert!(
-        logs.contains("could not rebuild the GLES renderer on this session's EGL device"),
-        "the fallback rebuild was tried, pinned, and failed: {logs}"
-    );
-    assert!(
-        logs.matches("could not resize the render target").count() >= 2,
-        "and the resize was refused after it: {logs}"
+    for never in [
+        "rebuilding it",
+        "built another GLES renderer",
+        "could not rebuild the GLES renderer",
+    ] {
+        assert!(
+            !logs.contains(never),
+            "no rebuild was tried ({never:?}): {logs}"
+        );
+    }
+    assert_eq!(
+        logs.lines().filter(|line| line.contains(" WARN ")).count(),
+        1,
+        "one WARN for the refused resize: {logs}"
     );
 }

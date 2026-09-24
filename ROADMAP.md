@@ -109,9 +109,10 @@ each item's own file records why it landed when it did.
   `State::resize_output` reallocates only the offscreen renderbuffer
   (`GlesBackend::resize`), keeping the EGL context, its shaders, every
   imported client texture and the device; the new target is bound before
-  the old is released, so a refused size leaves the old one drawing, then
-  falls back to a rebuild pinned to the session's device, then refuses as
-  before. Damage tracker, recorded size and cursor record follow the new
+  the old is released, so a refused size leaves the old one drawing. A size
+  over the context's limit (read once at build) is refused up front with no
+  rebuild; any other failure falls back to a rebuild pinned to the
+  session's device, then refuses as before. Damage tracker, recorded size and cursor record follow the new
   target; the read-back staging and PR #231's capture pools do not depend on
   the output's size. pixman and the `--tty` scanout tier unchanged. Dev VM
   (llvmpipe, LTO off on both trees): 3.95 ms → 15.7 µs per resize (pixman

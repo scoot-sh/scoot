@@ -813,11 +813,12 @@ impl State {
     /// drains at most one per frame tick (see `Host::drain_pending_resize`)
     /// -- so this runs once per *drained* size, not once per event.
     ///
-    /// A GLES target that cannot be reallocated in place falls back to a
-    /// whole new backend, pinned to the session's EGL device like every
-    /// rebuild (`State::gles_device`) -- read while the old backend is still
-    /// in `backends`, which is what the pin is read off. Only if that fails
-    /// too is the resize refused as above.
+    /// A size over what the GLES context can render into is refused as
+    /// above straight away. A GLES target that cannot be reallocated in
+    /// place for any other reason falls back to a whole new backend, pinned
+    /// to the session's EGL device like every rebuild (`State::gles_device`)
+    /// -- read while the old backend is still in `backends`, which is what
+    /// the pin is read off. Only if that fails too is the resize refused.
     pub fn resize_output(&mut self, width: i32, height: i32) -> bool {
         // Both halves in one read, so the `OutputChanged` below names the id
         // of the output that was actually resized without a second lookup
@@ -879,6 +880,16 @@ impl State {
                     tracing::debug!(width, height, "resized the render target in place");
                     Ok(())
                 }
+                // Refused outright, without the rebuild below: the limit is
+                // the device's, and the rebuild is pinned to the same
+                // device, so it would pay a new EGL display, context and
+                // shader set only to fail the same way. The refusal below is
+                // this path's one WARN.
+                InPlace::TooLarge((max_width, max_height)) => Err(format!(
+                    "{width}x{height} is larger than the GPU can render into \
+                     ({max_width}x{max_height})"
+                )
+                .into()),
                 InPlace::Unsupported | InPlace::Failed(_) => {
                     if let InPlace::Failed(error) = in_place {
                         // warn!: a GPU that will not allocate a target this

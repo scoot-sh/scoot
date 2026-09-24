@@ -41,7 +41,8 @@
 //! GPU's.
 //!
 //! **Only the first build chooses.** Every later one -- another output, or
-//! a resize whose in-place reallocation failed -- is pinned to the device
+//! a resize whose in-place reallocation failed for a reason other than
+//! size -- is pinned to the device
 //! that first build landed on ([`GlesDevice`]) and fails rather than moving,
 //! because the dma-buf formats advertised to clients are that device's
 //! driver's.
@@ -61,7 +62,9 @@
 //! frame -- and re-imported every client surface on the frame after,
 //! since a surface's texture is cached per context. It is also one fewer
 //! way for a resize to change device: an in-place resize cannot, by
-//! construction.
+//! construction. A size over what the context can render into
+//! ([`GlesBackend::exceeds_max_target`]) is refused before anything is
+//! allocated, and never rebuilt for: the limit is the device's.
 //!
 //! Enumeration order is not trusted to be availability: a device can be
 //! listed and still refuse a display, a context or a renderbuffer (a render
@@ -102,6 +105,10 @@ pub(super) struct GlesBackend {
     /// What the capture path reuses between captures (see
     /// `capture_cursor::PatchPool`).
     pub(super) patch: PatchPool<GlesRenderer, GlesRenderbuffer>,
+    /// The largest target this context can render into, per axis, read
+    /// once at build (see [`max_target`]); `None` if the driver would not
+    /// say. What a resize is checked against before anything is allocated.
+    pub(super) max_target: Option<(i32, i32)>,
 }
 
 /// Which EGL device a GLES backend was built on, as an identity a rebuild can
@@ -273,6 +280,21 @@ impl GlesBackend {
         .into())
     }
 
+    /// Whether a `width` x `height` target is over this context's limit
+    /// ([`max_target`]), answering the limit if it is.
+    ///
+    /// Checked before [`resize`](Self::resize) so an oversized size is
+    /// refused up front: allocating it is certain to fail, and so is the
+    /// whole new backend `State::resize_output` would otherwise fall back
+    /// to -- the limit is the device's, and the rebuild is pinned to the
+    /// same device -- after paying for a new EGL display, context and
+    /// shader set to find out. A limit the driver would not report checks
+    /// nothing, and the bind in [`target`] still catches the size.
+    pub(super) fn exceeds_max_target(&self, width: i32, height: i32) -> Option<(i32, i32)> {
+        self.max_target
+            .filter(|&(max_width, max_height)| width > max_width || height > max_height)
+    }
+
     /// Reallocates the renderbuffer at exactly `width` x `height`, keeping
     /// the renderer -- the EGL context, its shaders, and every client
     /// texture already imported into it.
@@ -388,12 +410,49 @@ fn build(
     // become current on another thread later either.
     let mut renderer = unsafe { GlesRenderer::new(context) }?;
     let buffer = target(&mut renderer, width, height)?;
+    let max_target = max_target(&mut renderer);
     Ok(GlesBackend {
         renderer,
         buffer,
         device: identity,
         patch: PatchPool::default(),
+        max_target,
     })
+}
+
+/// The largest target `renderer` can draw into, per axis:
+/// `GL_MAX_RENDERBUFFER_SIZE` (past it the renderbuffer cannot be attached;
+/// see [`target`]), narrowed by `GL_MAX_VIEWPORT_DIMS` (past which a frame
+/// would be clipped to the viewport rather than refused). 16384 on both
+/// axes on the dev VM's llvmpipe.
+///
+/// `None` when the context cannot be made current or a limit comes back
+/// unset or non-positive, which no conformant driver does: a limit that
+/// cannot be read is not guessed at, and a resize then relies on the bind
+/// alone, as it did before this was read. Once per backend build.
+fn max_target(renderer: &mut GlesRenderer) -> Option<(i32, i32)> {
+    use smithay::backend::renderer::gles::ffi;
+    renderer
+        .with_context(|gl| {
+            let mut renderbuffer = 0;
+            let mut viewport = [0; 2];
+            // SAFETY: two plain state queries into locals sized for what
+            // each writes (one integer; two for `MAX_VIEWPORT_DIMS`), on the
+            // context `with_context` has just made current.
+            unsafe {
+                gl.GetIntegerv(ffi::MAX_RENDERBUFFER_SIZE, &mut renderbuffer);
+                gl.GetIntegerv(ffi::MAX_VIEWPORT_DIMS, viewport.as_mut_ptr());
+            }
+            (renderbuffer, viewport)
+        })
+        .inspect_err(|error| {
+            tracing::debug!(%error, "could not read the GLES target size limits");
+        })
+        .ok()
+        .and_then(|(renderbuffer, [width, height])| {
+            (renderbuffer > 0 && width > 0 && height > 0)
+                .then(|| (renderbuffer.min(width), renderbuffer.min(height)))
+        })
 }
 
 /// A renderbuffer of exactly `width` x `height` on `renderer`, proven to

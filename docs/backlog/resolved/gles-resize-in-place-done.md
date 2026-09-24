@@ -32,14 +32,20 @@ RESOLVED 2026-09-23 (PR #232, branch `gles-resize-in-place`).
   capture-cursor pools (`PatchPool`, `patch_pixels`; keyed on the region
   and scale), `render_node`/`main_device` (the same display), the device
   pin, presentation feedback and frame callbacks (not touched by a resize).
-- **A refused size falls back to a whole new backend, pinned to the
+- **A size over the context's limit is refused up front**
+  (`InPlace::TooLarge`): `GL_MAX_RENDERBUFFER_SIZE` narrowed by
+  `GL_MAX_VIEWPORT_DIMS` (16384 on llvmpipe), read once when the backend is
+  built, with one WARN naming the limit and no allocation and no rebuild --
+  the limit is the device's and every rebuild is pinned to that device, so
+  a rebuild could only fail the same way after paying ~4 ms for a new EGL
+  display, context and shaders (review of PR #232 found the first version
+  doing exactly that for a `--nested` host configure between 16384 and
+  `MAX_OUTPUT_DIMENSION`, 65535). Zero never reaches `resize_output`
+  (`usable_size`).
+- **Any other refusal falls back to a whole new backend, pinned to the
   session's device** (read off the backend still in `backends`), and only if
   that fails too is the resize refused as before (old mode put back, the
-  refused one deleted from the mode list). Known and accepted: for a size
-  over `GL_MAX_RENDERBUFFER_SIZE` the fallback is certain to fail too, and
-  pays a context build to find out. Reachable from `--nested` only through a
-  host configure between the driver's limit and `MAX_OUTPUT_DIMENSION`
-  (65535); zero never reaches `resize_output` (`usable_size`).
+  refused one deleted from the mode list).
 - **pixman is untouched** (it still rebuilds, in microseconds), and the
   `--tty` scanout tier still resizes through `DrmCompositor`.
   `add_output` still builds a new pinned backend.
@@ -51,26 +57,29 @@ release with `CARGO_PROFILE_RELEASE_LTO=off CARGO_PROFILE_RELEASE_CODEGEN_UNITS=
 on both trees -- not the thin LTO the ticket asked for, because a thin-LTO
 build of a second tree exhausted the VM's memory and wedged it. The
 ticket's 16.6 ms (against 37 µs for pixman) did not reproduce: before is
-3.95 ms here, and pixman shows the same ~3x gap (11.3 µs), which points at
-different measurement conditions rather than the profile or the GLES path.
-Ranges are across all runs. The frame after an in-place resize varies by
-run in a pattern that repeated in all three invocations (runs 1-2 ~0.28 ms,
-run 3 ~1.5 ms, runs 4-5 ~0.64 ms); not investigated -- every run is still
-~3x-17x under the rebuild it replaced:
+3.95 ms here. Both figures were higher then -- pixman's by 3.3x (37 µs vs
+11.3 µs), gles's by 4.2x -- which points at different measurement
+conditions rather than the profile or the GLES path.
+Ranges are across all runs. "+ frame" is the resize plus a `render()`,
+and times only *submitting* that frame: plain headless has no presenter, so
+nothing reads it back, and `GlesFrame::finish` returns a fence after
+`glFlush` without waiting, so llvmpipe's drawing is outside the timed span.
+It is not a per-size cost; the drag below is:
 
 | | before (`7ff7265`) | after |
 |---|---|---|
 | resize, gles | 3.95 ms | 15.7 µs |
-| resize + the frame after, gles | 4.35 ms (4.35–4.43) | 0.26 ms (0.26–1.56, median 0.64) |
+| resize + frame submission, gles | 4.35 ms (4.35–4.43) | 0.26–1.56 ms (submission only, see above) |
 | resize, pixman | 11.3 µs | 11.3 µs |
-| resize + frame, pixman | 52.6 µs | 51.9 µs |
+| resize + frame submission, pixman | 52.6 µs | 51.9 µs |
 
 A `--nested --renderer gles` drag under cage (the nested smoke's host;
 `scripts/nested-drag-bench.sh`, 150 distinct sizes, a `foot` mapped):
 17.0 / 17.3 ms of compositor CPU per size before, 14.7 / 15.1 after, every
 size applied in place and none by a new renderer; pixman on the same drag
 4.5 ms. What is left is llvmpipe drawing and reading back a whole frame at
-the new size. RSS flat across 1000 oscillating resizes. Screenshots after
+the new size: **14.7 ms per size is the real per-size number** on this VM,
+not the bench's submission-only figure. RSS flat across 1000 oscillating resizes. Screenshots after
 the drag byte-identical before and after.
 
 Evidence (commands, SHAs, raw paths) is in the PR description.

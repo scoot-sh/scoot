@@ -225,11 +225,22 @@ pub(super) enum ImportSet {
 pub(super) enum InPlace {
     /// The target is at the new size, on the same renderer.
     Resized,
-    /// This pipeline is not resized in place; nothing changed, and a resize
-    /// is a new [`Backend`].
+    /// This pipeline has no in-place path here, and nothing changed. For
+    /// pixman that sends `State::resize_output` to [`Backend::new`]. The
+    /// scanout tier must never get this far -- it resizes by
+    /// [`note_resized`](Backend::note_resized) alone, and `resize_output`
+    /// answers it before asking this (a debug build asserts as much) --
+    /// because a new [`Backend`] would throw its `DrmCompositor`'s renderer
+    /// away.
     Unsupported,
-    /// The pipeline could not reallocate at the new size; nothing changed,
-    /// and the backend still draws into its old target at its old size.
+    /// The size is over what this renderer can draw into (the answer is its
+    /// limit, per axis), so nothing was allocated and nothing changed. No
+    /// rebuild can do better: the limit is the device's, and every rebuild
+    /// is pinned to the same device.
+    TooLarge((i32, i32)),
+    /// The pipeline could not reallocate at the new size for some other
+    /// reason; nothing changed, and the backend still draws into its old
+    /// target at its old size.
     Failed(Box<dyn Error>),
 }
 
@@ -368,8 +379,10 @@ impl Backend {
     /// against 15.7 µs for the renderbuffer alone (`headless::bench`'s
     /// `resize_cost`, LTO off; see `gles::GlesBackend::resize`). pixman does
     /// not, and needs not: its whole backend rebuilds in 11.3 µs there.
-    /// The scanout tier never reaches here (`State::resize_output` answers it
-    /// with [`note_resized`](Self::note_resized)).
+    /// A size over the GLES context's limit is refused before anything is
+    /// allocated ([`InPlace::TooLarge`]). The scanout tier never reaches
+    /// here (`State::resize_output` answers it with
+    /// [`note_resized`](Self::note_resized)), and a debug build asserts so.
     ///
     /// On [`InPlace::Resized`] everything size-bound on this backend follows
     /// the new target: the recorded size (what capture clients are told to
@@ -382,8 +395,15 @@ impl Backend {
     /// region, never the output's size, and stay. On anything else nothing
     /// at all has changed.
     pub(super) fn resize_in_place(&mut self, output: &Output, width: i32, height: i32) -> InPlace {
+        debug_assert!(
+            !self.is_scanout(),
+            "the scanout tier is resized by note_resized, never in place or rebuilt"
+        );
         match &mut self.pipeline {
             Pipeline::Gles(gpu) => {
+                if let Some(max) = gpu.exceeds_max_target(width, height) {
+                    return InPlace::TooLarge(max);
+                }
                 if let Err(error) = gpu.resize(width, height) {
                     return InPlace::Failed(error);
                 }
@@ -431,9 +451,10 @@ impl Backend {
         }
     }
 
-    /// An offscreen GLES backend's `GL_MAX_RENDERBUFFER_SIZE`, `None` for any
-    /// other pipeline: one past it is a size the driver refuses on every
-    /// device, which is how a suite reaches a failed reallocation.
+    /// An offscreen GLES backend's `GL_MAX_RENDERBUFFER_SIZE`, asked of the
+    /// driver afresh, `None` for any other pipeline: one past it is a size
+    /// the driver refuses on every device, which is how a suite reaches a
+    /// failed reallocation, and what the cached limit is checked against.
     #[cfg(test)]
     pub(super) fn gles_max_renderbuffer_size_for_test(&mut self) -> Option<i32> {
         use smithay::backend::renderer::gles::ffi;
@@ -448,6 +469,17 @@ impl Backend {
                     max
                 })
                 .ok(),
+            _ => None,
+        }
+    }
+
+    /// The size limit an offscreen GLES backend checks a resize against
+    /// (see `gles::GlesBackend::exceeds_max_target`), `None` for any other
+    /// pipeline or a driver that would not report one.
+    #[cfg(test)]
+    pub(super) fn gles_max_target_for_test(&self) -> Option<(i32, i32)> {
+        match &self.pipeline {
+            Pipeline::Gles(gpu) => gpu.max_target,
             _ => None,
         }
     }
