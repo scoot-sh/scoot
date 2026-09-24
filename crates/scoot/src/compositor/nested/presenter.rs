@@ -46,11 +46,12 @@ impl Presenter {
     /// The `wl_shm` pool a read-back frame is written into, building one at
     /// `size` if this presenter has none yet ([`Presenter::Unbuilt`]).
     /// `None` when it cannot be built -- the frame is then dropped and the
-    /// next one tries again, so a pool that failed once (memory pressure at
-    /// the moment the dma-buf path was abandoned) cannot leave the window
-    /// stale for good. A dma-buf presenter has no pool: `None`, and never
-    /// reached, since a frame for one is never read back
-    /// (`render::draw_frame_with`).
+    /// next frame that draws tries again, so a pool that failed once (memory
+    /// pressure at the moment the dma-buf path was abandoned) is not given
+    /// up on. Nothing re-arms a render for it on its own: a static screen
+    /// keeps its last dma-buf frame until something changes. A dma-buf
+    /// presenter has no pool: `None`, and never reached, since a frame for
+    /// one is never read back (`render::draw_frame_with`).
     pub(super) fn shm_pool(
         &mut self,
         shm: &HostShm,

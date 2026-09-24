@@ -100,8 +100,10 @@
 //! failing on the frame path, switches the session to read-back **for good**,
 //! with one WARN: a host that refused once is not asked again, and nothing
 //! on the frame path retries a device that has just failed. The switch
-//! builds a `wl_shm` pool at the current size; should even that fail, the
-//! next frames retry building it rather than leaving the window stale.
+//! builds a `wl_shm` pool at the current size and asks for a frame; should
+//! even that pool fail to build, the next frame that draws -- anything on
+//! screen changing -- tries again, so the window is never left stranded on
+//! a pool that could now be built.
 //! A failed *allocation* at a new size is not a fallback: it is the same
 //! "could not follow the host's resize; staying at the previous size" a
 //! read-back pool that could not be allocated has always been, and the

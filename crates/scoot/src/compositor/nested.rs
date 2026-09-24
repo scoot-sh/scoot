@@ -317,6 +317,17 @@ impl Host {
         self.presenter.is_dmabuf()
     }
 
+    /// A new frame is about to be drawn into the render target: whatever was
+    /// owed from it is not any more. The draw may fail part-way and leave
+    /// the target half-drawn, and an owed frame must only ever mean "the
+    /// last *successful* draw, not yet presented" -- a skipped present after
+    /// this draw owes it again. What a `release` or `created` finds with
+    /// nothing owed is the ordinary re-render (`present_skipped`).
+    #[cfg(feature = "gpu-scanout")]
+    pub(super) fn begin_frame(&mut self) {
+        self.frame_owed = false;
+    }
+
     /// Copies the frame just drawn into a free host dma-buf (`copy`, which
     /// the caller runs on its GPU renderer) and commits it, with `damage` as
     /// the buffer damage. The dma-buf counterpart of [`Host::present`], and
@@ -511,9 +522,9 @@ impl Host {
 
     /// Gives up presenting by dma-buf for the rest of the session: the
     /// chain is destroyed and a `wl_shm` pool built at the current size in
-    /// its place -- or, should that fail, left for the next frame to build
-    /// (`Presenter::shm_pool`), so the window cannot be stranded on its
-    /// last frame. One WARN, the only one: `gpu` is taken here and never
+    /// its place -- or, should that fail, left for the next frame that
+    /// draws to build (`Presenter::shm_pool`). Every caller asks for a frame
+    /// straight after, which is the first retry. One WARN, the only one: `gpu` is taken here and never
     /// put back, so a second call finds nothing to give up.
     #[cfg(feature = "gpu-scanout")]
     fn fall_back(&mut self, reason: &str) {

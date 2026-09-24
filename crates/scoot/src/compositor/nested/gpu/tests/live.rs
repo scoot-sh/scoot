@@ -38,6 +38,15 @@ const PATIENCE: Duration = Duration::from_secs(10);
 /// The one WARN a fallback logs.
 const FALLBACK_WARN: &str = "presenting to the host by read-back into wl_shm from now on";
 
+/// Every test here takes `dmabuf/tests.rs`'s mapping lock: the buffers it
+/// allocates and imports may be mapped into this process, and under `cargo
+/// test` (one process, tests as threads) a mapping appearing or vanishing
+/// inside one of those suites' before/after windows would fail them. Free
+/// under nextest.
+fn exclusive_mappings() -> std::sync::MutexGuard<'static, ()> {
+    crate::compositor::dmabuf::tests::exclusive_mappings()
+}
+
 enum Command {
     /// Draw a host frame; answer its pixels and the nested window's centre.
     Look,
@@ -220,6 +229,7 @@ impl Pair {
 /// first frame at the new size over once the host has created it.
 #[test]
 fn frames_reach_a_host_by_dma_buf_and_follow_its_resize() {
+    let _mappings = exclusive_mappings();
     let Some(mut pair) = pair(
         "frames_reach_a_host_by_dma_buf_and_follow_its_resize",
         false,
@@ -268,6 +278,7 @@ fn frames_reach_a_host_by_dma_buf_and_follow_its_resize() {
 /// second WARN however many refusals arrive (there is one per buffer).
 #[test]
 fn a_host_refusing_the_buffers_moves_the_session_to_read_back_once() {
+    let _mappings = exclusive_mappings();
     let Some(mut pair) = pair(
         "a_host_refusing_the_buffers_moves_the_session_to_read_back_once",
         true,

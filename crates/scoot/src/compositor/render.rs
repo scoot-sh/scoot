@@ -1117,6 +1117,12 @@ pub(super) fn draw_frame(
                 .host
                 .as_ref()
                 .is_some_and(super::nested::Host::presents_dmabuf);
+            // The target is about to be drawn over: a frame owed from it is
+            // no longer there to hand over (see `Host::begin_frame`).
+            #[cfg(feature = "gpu-scanout")]
+            if by_dmabuf && let Some(host) = &mut state.host {
+                host.begin_frame();
+            }
             #[cfg_attr(not(feature = "gpu-scanout"), allow(unused_mut))]
             let (mut outcome, owed) = draw_frame_with(
                 state, renderer, buffer, damage, cursor, *size, output, locked, by_dmabuf,

@@ -25,6 +25,15 @@ use super::super::super::nested::gpu::feedback::{self, Choice, HostFeedback, Hos
 use super::super::super::nested::gpu::{allocate, open_node};
 use super::*;
 
+/// Every test here takes `dmabuf/tests.rs`'s mapping lock: the buffers it
+/// allocates and imports may be mapped into this process, and under `cargo
+/// test` (one process, tests as threads) a mapping appearing or vanishing
+/// inside one of those suites' before/after windows would fail them. Free
+/// under nextest.
+fn exclusive_mappings() -> std::sync::MutexGuard<'static, ()> {
+    crate::compositor::dmabuf::tests::exclusive_mappings()
+}
+
 /// Opens GBM on the renderer's device -- render node first, then its primary
 /// node -- and chooses a host format the way `negotiate` does, against a
 /// host that is this same renderer (it lists exactly what the renderer can
@@ -150,6 +159,7 @@ fn as_the_host_sees_it(dmabuf: &Dmabuf, pin: GlesDevice) -> Vec<u8> {
 /// way up.
 #[test]
 fn a_frame_copied_into_a_host_buffer_is_what_another_renderer_sees() {
+    let _mappings = exclusive_mappings();
     let mut backend = marker_backend();
     let (mut allocator, choice) = match allocator_for(&backend) {
         Ok(found) => found,
@@ -196,6 +206,7 @@ fn a_frame_copied_into_a_host_buffer_is_what_another_renderer_sees() {
 /// or a screencopy client sees.
 #[test]
 fn copying_a_frame_out_leaves_what_captures_read_untouched() {
+    let _mappings = exclusive_mappings();
     let mut backend = marker_backend();
     let (mut allocator, choice) = match allocator_for(&backend) {
         Ok(found) => found,
@@ -227,6 +238,7 @@ fn copying_a_frame_out_leaves_what_captures_read_untouched() {
 /// whatever size the session starts at.
 #[test]
 fn a_smaller_host_buffer_takes_the_top_left_corner() {
+    let _mappings = exclusive_mappings();
     let mut backend = marker_backend();
     let (mut allocator, choice) = match allocator_for(&backend) {
         Ok(found) => found,
@@ -254,6 +266,7 @@ fn a_smaller_host_buffer_takes_the_top_left_corner() {
 /// rather than attempted.
 #[test]
 fn pixman_offers_no_dma_buf_presentation() {
+    let _mappings = exclusive_mappings();
     let output = test_output(16, 16);
     let backend = Backend::new(
         &output,
