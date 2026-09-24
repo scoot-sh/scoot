@@ -77,9 +77,11 @@ All on the dev VM (kernel 6.18, virtio-gpu, `RLIMIT_NOFILE` 1024/524288),
 release builds. Before is `618b5dc` built by the same command
 (`CARGO_BUILD_JOBS=1 cargo build --release -p scoot --features
 gpu-scanout`); the PR #235 binary (`e0e5a55`, same code tree) was used for
-the first before-runs and gave the same shape. Raw output:
-`~/evidence/cfb/runs/*.txt`, probe source `~/evidence/cfb/probe/src/main.rs`,
-runner `~/evidence/cfb/run.sh`. Final-SHA runs: see the PR description.
+the first before-runs and gave the same shape. After is `559306d`, the
+final code tree of this change (binary sha256 `c77ee353…`). Raw output:
+`~/evidence/cfb/runs/final/*.txt` (earlier runs at `e872826` in
+`~/evidence/cfb/runs/`), probe source `~/evidence/cfb/probe/src/main.rs`,
+runners `~/evidence/cfb/{run,legit,bench,gate}.sh`.
 
 | Shape | Tier | Before | After |
 |---|---|---|---|
@@ -91,7 +93,7 @@ Real clients against the after binary, 5 s each, both tiers:
 `es2gears_wayland`, `eglgears_wayland`, `vkcube` (llvmpipe), `mpv --vo=gpu`
 all alive with one window, no refusal or protocol error logged, scoot back
 to baseline fds; an explicit-sync client (card0 dumb buffers, one acquire
-and three release timelines) 176 commits, 0 reuse timeouts on the GPU tier.
+and three release timelines) 177 commits, 0 reuse timeouts on the GPU tier.
 None of those real clients makes a dma-buf or imports a timeline on this VM
 (GBM is refused on its render node), so the dma-buf and explicit-sync
 paths were exercised by the probe clients above and by the harness.
@@ -108,7 +110,7 @@ the ledger's decisions in isolation, and the two pressure verdicts.
 
 Cost: pending-plane bookkeeping 16 ns per plane (release microbench). The
 end-to-end add path (400 k params x 4 adds + destroy, headless, scoot CPU
-jiffies, 3 alternating rounds) went from 78/78/79 to 84/85/85, about 40 ns
+jiffies, 3 alternating rounds, `~/evidence/cfb/bench-churn-params-400k-559306d.txt`) went from 81/79/78 to 85/84/85, about 40 ns
 per `add`; real clients do one buffer's adds per allocation, not per frame.
 A 128-record sweep costs 100 us (786 ns per record, real syncobj fds), at
 most once per 16 imports.
