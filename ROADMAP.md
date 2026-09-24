@@ -105,7 +105,7 @@ each item's own file records why it landed when it did.
 ## Recently shipped (since 2026-09-15)
 
 - **[Explicit sync on the GPU scanout tier](docs/backlog/resolved/linux-drm-syncobj-done.md)**
-  (2026-09-23, PR #PRNUM) — `wp_linux_drm_syncobj_manager_v1` v1, offered
+  (2026-09-23, PR #233) — `wp_linux_drm_syncobj_manager_v1` v1, offered
   only on `--tty --renderer gles` (`gpu-scanout`) where the display device,
   or failing that `/dev/dri/renderD128`, passes Smithay's syncobj-eventfd
   probe. The dev VM's virtio-gpu passes. Acquire points are waited on with

@@ -8,7 +8,7 @@ blocked: null
 
 # Explicit sync (`wp_linux_drm_syncobj_manager_v1`) — RESOLVED
 
-RESOLVED 2026-09-23 (PR #PRNUM, branch `linux-drm-syncobj`). On the GPU
+RESOLVED 2026-09-23 (PR #233, branch `linux-drm-syncobj`). On the GPU
 scanout tier, where a DRM device passes Smithay's syncobj-eventfd probe,
 scoot offers `wp_linux_drm_syncobj_manager_v1` v1, waits on acquire points
 before a commit applies and signals release points only once it is done
