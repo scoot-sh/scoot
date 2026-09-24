@@ -1,12 +1,52 @@
 ---
-title: "A/B resource usage: scoot vs niri on identical workloads"
-status: "open"
-area: "testing"
-priority: "medium"
-blocked: "run after the remaining unblocked GPU-tier tickets land (user request 2026-09-23)"
+title: "A/B resource usage: scoot vs niri on identical workloads (dev VM half) — RESOLVED"
+status: "resolved"
+area: "resolved"
+priority: null
+blocked: null
 ---
 
-# A/B: scoot vs niri
+# A/B: scoot vs niri — RESOLVED (dev VM half)
+
+RESOLVED 2026-09-24. The ticket was blocked on "after the remaining
+unblocked GPU-tier tickets"; the user then asked for it directly ("Do we
+have any sense of resource usage of niri vs scoot? Can we A/B them?"). The
+results, method and every caveat are in [`docs/benchmarks.md`](../../benchmarks.md);
+the harness is `scripts/niri-ab-bench.sh` with its helpers in
+`scripts/niri-ab/`. The real-GPU half, `--tty` included, is its own open
+item: [`testing/niri-ab-real-gpu.md`](../testing/niri-ab-real-gpu.md)
+(`Asahi.md` Test 9).
+
+What the VM could and could not do, against the ticket as written below:
+
+- niri renders only through GLES and refuses llvmpipe on `--tty`, so both
+  compositors ran **nested**, one at a time, in the same host (cage,
+  headless, pixman, `-d`). Same output size (1600x1000, verified from each
+  compositor's own output query), same clients (`foot` ×3, empty config),
+  three rotating rounds, idle-settled before every scene.
+- **Same input source:** not `uinput` (a headless host has no libinput), but
+  one persistent `zwlr_virtual_pointer_v1` device injecting into the *host*
+  (`scripts/niri-ab/vptr`). `wlrctl` could not do it: a device per event
+  toggles the host seat's pointer capability, and 60 moves delivered zero
+  `wl_pointer.motion`.
+- **Latency** (input → present) was not measured: nested, no signal is
+  common to both, and scoot draws no nested pointer. Moved to the real-GPU
+  item.
+- **gpu-scanout** was not a separate row: nested in a host without
+  `linux-dmabuf` it presents by read-back like the default build
+  (`nested/gpu.rs`, `try_negotiate`); the real-GPU item's Part A gives the
+  host GLES so that it comes up.
+
+Found on the way, and filed:
+[GLES captures leak a frame each on a static screen](../core/gles-capture-leaks-a-frame-per-shot.md)
+(high), and
+[nested scoot presents fewer frames than niri for a ~60 Hz client](../core/nested-frame-rate-vs-client.md)
+(low). A harness artifact was also caught before it reached the results: a
+niri config on the VM's 9p mount cost niri ~55 wakeups/s at idle.
+
+---
+
+The ticket as filed:
 
 User request 2026-09-23: "Do we have any sense of resource usage of niri vs
 scoot? Can we A/B them once we have enough gpu tickets done?" We have none:

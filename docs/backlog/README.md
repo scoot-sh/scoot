@@ -685,7 +685,8 @@ capture-cursor → resize-in-place → syncobj → nested dmabuf → VRR.
 - [VRR on the scanout tier](./core/gpu-vrr.md) — low, blocked on a VRR-capable display.
 
 ### GPU tier, after primary-direct (2026-09-23)
-- [A/B resource usage vs niri](./testing/niri-ab-benchmark.md) — medium, user request; runs after the unblocked GPU tickets.
+- [A/B resource usage vs niri](./resolved/niri-ab-benchmark-done.md) — RESOLVED 2026-09-24 (dev VM half), at the user's direct request: both compositors nested in the same cage host on llvmpipe, three rotating rounds, results and caveats in [`docs/benchmarks.md`](../benchmarks.md). The real-GPU half is the next entry.
+- [A/B vs niri on a real GPU, `--tty` included](./testing/niri-ab-real-gpu.md) — medium, blocked on the user's Apple Silicon machine: `Asahi.md` Test 9.
 - [GLES tier advertises only LINEAR dma-bufs](./resolved/gles-dmabuf-full-formats-done.md) — RESOLVED 2026-09-23 (PR #229): under `gles` the feedback is the driver's own import set (every fourcc at every explicit modifier, external-only YUV included), `Invalid` never offered next to explicit layouts (an implicit YUV buffer draws the wrong colour, measured), pixman byte-identical. On llvmpipe: 57 formats at `LINEAR`, `NV12`/`P010`/`YU12`/`YUYV` imported through `create_immed` and drawn correctly from dumb buffers. Real GPU: `Asahi.md` Test 6.
 - [Scanout-tranche feedback + `zero_copy` flag](./resolved/gpu-scanout-candidates-done.md) — RESOLVED 2026-09-23: see the GPU tier completion entry above. Dev VM: tranche `XR24`/`AR24` at `LINEAR`, sent/reverted live, `zero_copy` on exactly the frames Smithay scanned out directly. Real GPU (does a GL client reallocate into it and go direct): `Asahi.md` Test 6 Part C.
 - [Windows on overlay planes](./core/gpu-overlay-window-candidates.md) — low, blocked on overlay-capable hardware.
@@ -709,6 +710,10 @@ capture-cursor → resize-in-place → syncobj → nested dmabuf → VRR.
 
 ### Found reviewing nested dma-buf presentation (2026-09-24)
 - [`--nested` confirms a lock before the host shows it](./core/nested-lock-confirm-on-present.md) — low: `locked` goes out when the blanked frame is drawn, and a nested frame may be skipped or owed before the host has it (more often since PR #235); a fix needs a bounded wait like `--tty`'s.
+
+### Found by the niri A/B (2026-09-24)
+- [GLES captures keep a whole frame each while nothing redraws](./core/gles-capture-leaks-a-frame-per-shot.md) — high: under `--renderer gles`, every `scootctl screenshot` or `grim` capture of a static screen grows scoot by one frame (6.25 MB at 1600x1000, linear, 885 MB after 120 captures on the dev VM); the next rendered frame releases most of it. Smithay defers the read-back PBO's deletion to `GlesRenderer::cleanup()`, which only the render path calls. pixman is not affected.
+- [Nested scoot presents fewer frames than niri for a ~60 Hz client](./core/nested-frame-rate-vs-client.md) — low: 49.8 frames/s (pixman, 12% of a core) against niri's 54.1 for a `foot` printing every ~16 ms; looks like pacing, not cost. Not investigated.
 
 ### Meta
 - [Split the CLI out into `scootctl`](./resolved/rename-flex-family-done.md) — CLOSED 2026-09-20: the `flexwm` → `scoot` rename half landed 2026-09-18 (PR #128); the crate split landed 2026-09-20 ([record](./resolved/scootctl-split-done.md)): new `scootctl` lib+bin crate, `scoot msg` kept as a permanent alias, Darwin default is `scootctl`. A status bar stays separate.
