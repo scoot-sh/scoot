@@ -1,7 +1,11 @@
 //! How many live `wl_buffer`s one Wayland client may hold at once.
 //!
-//! This is the bound that actually caps the compositor's retained fds and
-//! mappings per connection. `shm_pools.rs` caps live *pool objects*, but a
+//! This is the bound that caps the fds and mappings a connection's live
+//! buffer *objects* retain -- not every one a buffer can retain, since a
+//! buffer a surface still has committed keeps its fd after the object dies
+//! (see "What 512 bounds" below, and
+//! `docs/backlog/core/buffer-fds-past-their-object.md`).
+//! `shm_pools.rs` caps live *pool objects*, but a
 //! destroyed pool frees neither its fd nor its mapping while a buffer
 //! created from it survives -- the protocol mandates the retention, and at
 //! the pinned rev a buffer's user data holds an `Arc<Pool>` owning both --

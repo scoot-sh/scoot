@@ -321,7 +321,10 @@
 //!   session has a renderer at startup and loses one.
 //! - **What bounds the mappings a client can make this compositor hold.**
 //!   `MAX_BUFFERS_PER_CLIENT` (512, `wl_buffers.rs`), now that the async
-//!   `create` path claims too -- and each mapping's *size* is bounded by the
+//!   `create` path claims too, for live buffer objects -- a buffer still
+//!   committed to a surface outlives its object uncounted, one per surface
+//!   (`docs/backlog/core/buffer-fds-past-their-object.md`) -- and each
+//!   mapping's *size* is bounded by the
 //!   dma-buf the client actually got the kernel to allocate, since Smithay
 //!   seeks the plane fd and refuses an offset/stride/height that runs past its
 //!   real end. So a client cannot claim address space it did not first pay for

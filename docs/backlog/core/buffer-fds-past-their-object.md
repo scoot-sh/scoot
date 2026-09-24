@@ -26,9 +26,10 @@ fd pressure, and the pressure guard cannot pick the holder.
    fd and one mapping (up to the 512 MiB pool cap each). Measured in the
    harness (pixman, `618b5dc` + the client-held-fd-bound branch, scratch
    test kept at `~/evidence/cfb/scratch_surface_held.rs` on the dev VM):
-   200 surfaces, **200 fds held, 0 buffers and 0 pools counted**. The same
-   holds for a dma-buf buffer (its `Dmabuf` owns the plane fds), on every
-   tier.
+   200 surfaces, **200 fds held, 0 buffers and 0 pools counted**. That was
+   shm only. A dma-buf buffer should behave the same (its `Dmabuf` owns the
+   plane fds, and the handle keeps it alive the same way), on every tier;
+   reasoned from the same code path, not measured.
 2. **The buffer count weighs every buffer as one fd.** A dma-buf `wl_buffer`
    holds one fd per plane, up to four. pixman refuses multi-plane imports,
    so on the default tier it is one; under a GLES renderer (`--renderer

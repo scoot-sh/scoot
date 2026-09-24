@@ -283,6 +283,42 @@ fn under_pressure_sweeps_are_amortized_by_the_margin() {
     );
 }
 
+/// A legitimate churner, calm table: its records run far past the grace
+/// with dead ones while it holds 16 live, and the table is observed at most
+/// once per margin's worth of imports rather than on every one.
+#[test]
+fn a_calm_table_is_observed_once_per_margin_not_per_import() {
+    const IMPORTS: u32 = 200;
+    let (_display, a, _) = two_clients();
+    let mut ledger = RetainedTimelines::default();
+    let live: HashSet<RawFd> = (0..16).collect();
+    import_all(&mut ledger, &a, 0, 16, &live).expect("a window's worth");
+    let mut observations = 0;
+    for fd in 1000..1000 + IMPORTS as RawFd {
+        ledger
+            .admit(
+                &a,
+                CAP,
+                GRACE,
+                |fd| live.contains(&fd),
+                || {
+                    observations += 1;
+                    false
+                },
+            )
+            .expect("calm, and under the cap once swept");
+        ledger.record(&a, fd);
+    }
+    assert!(
+        observations <= IMPORTS / SWEEP_MARGIN + 1,
+        "{observations} observations for {IMPORTS} imports"
+    );
+    assert!(
+        observations > 0,
+        "past the grace the table is still watched"
+    );
+}
+
 #[test]
 fn the_ledger_is_bounded_by_fd_numbers_not_by_clients() {
     let display: Display<()> = Display::new().expect("a display");

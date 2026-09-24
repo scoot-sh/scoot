@@ -106,10 +106,10 @@ mod tests;
 /// on every import, paced by the attacker. With it, sweeps are at most one
 /// per 16 imports. For the hard cap, a client whose sweep leaves more than
 /// `MAX - 16` = 112 live timelines is refused, which is 7x the 16 a Vulkan
-/// window uses. Under fd pressure the margin is admission slack instead: a
-/// client swept to exactly the grace may import up to 16 more before it is
-/// swept again. The grace is where a legitimate client sits, so it must not
-/// shrink.
+/// window uses. Under fd pressure the margin is admission slack instead:
+/// after any check (a sweep that admits, or a calm table observation) a
+/// client may import up to 16 more before the next. The grace is where a
+/// legitimate client sits, so it must not shrink.
 pub(crate) const SWEEP_MARGIN: u32 = 16;
 
 /// Why [`RetainedTimelines::admit`] refused an import, with how many
@@ -139,9 +139,10 @@ struct Held {
     /// than `MAX_TIMELINES_PER_CLIENT`: an import that would take it past
     /// that either sweeps it back down first or is refused.
     fds: Vec<RawFd>,
-    /// The pressure-grace sweep amortization: no pressure sweep until the
-    /// records reach this. Set to live + [`SWEEP_MARGIN`] by every sweep, and
-    /// 0 (meaning due) before the first.
+    /// The pressure-check amortization: no pressure check until the records
+    /// reach this. Set to live + [`SWEEP_MARGIN`] by every sweep, to records
+    /// + [`SWEEP_MARGIN`] by a calm observation, and 0 (meaning due) before
+    /// the first.
     sweep_at: u32,
 }
 
@@ -154,8 +155,10 @@ impl RetainedTimelines {
             .map_or(0, |held| held.fds.len() as u32)
     }
 
-    /// Whether a pressure sweep of `client` is due: its records have grown
-    /// [`SWEEP_MARGIN`] past what its last sweep left, or it was never swept.
+    /// Whether a pressure check of `client` is due: its records have grown
+    /// [`SWEEP_MARGIN`] past where its last check left them, or it was never
+    /// checked. A check is a sweep, or a table observation that came back
+    /// calm.
     pub(crate) fn sweep_due(&self, client: &ClientId) -> bool {
         self.per_client
             .get(client)
@@ -175,18 +178,24 @@ impl RetainedTimelines {
     ///   more than `cap - SWEEP_MARGIN` live. Otherwise the client has at
     ///   least [`SWEEP_MARGIN`] imports before it can reach `cap` again,
     ///   which is what amortizes the sweeps.
-    /// - **Pressure grace.** Past `grace` records, and only if a sweep is due
-    ///   ([`Self::sweep_due`]) or has just run for the cap, the table is
-    ///   observed (`pressured`, a `/proc/self/fd` readdir in production). If it
-    ///   is pressured, the client is refused if a sweep leaves it past
-    ///   `grace`. A sweep that does not refuse sets the next one
-    ///   [`SWEEP_MARGIN`] records later, so under pressure a client can hold
-    ///   up to `grace + SWEEP_MARGIN`.
+    /// - **Pressure grace.** Past `grace` records, and only if a check is due
+    ///   ([`Self::sweep_due`]) or a sweep has just run for the cap, the table
+    ///   is observed (`pressured`, a `/proc/self/fd` readdir in production).
+    ///   If it is pressured, the client is refused if a sweep leaves it past
+    ///   `grace`. Either way the next check is [`SWEEP_MARGIN`] records
+    ///   later: a sweep that does not refuse sets it from what the sweep
+    ///   left, and a calm observation from the records as they stand. So at
+    ///   most `SWEEP_MARGIN` imports pass between checks, and under pressure
+    ///   a client that was at the grace when last checked can reach
+    ///   `grace + SWEEP_MARGIN` before it is refused.
     ///
-    /// `pressured` is evaluated at most once, and only past the grace, which
-    /// no legitimate client reaches (see `PRESSURE_GRACE_TIMELINES`). So the
-    /// import path of every well-behaved client costs a map lookup here, and
-    /// no syscall.
+    /// `pressured` is evaluated at most once per call, and at most once per
+    /// [`SWEEP_MARGIN`] imports per client. The records include dead ones,
+    /// so a legitimate client that churns timelines can be past the grace
+    /// here without holding that many; the margin is what keeps its imports
+    /// from each paying a table observation for it. Under the grace, which
+    /// is where every well-behaved client's live timelines are, this is a
+    /// map lookup and no syscall.
     pub(crate) fn admit(
         &mut self,
         client: &ClientId,
@@ -204,7 +213,12 @@ impl RetainedTimelines {
                 return Err(Refusal::Cap { held });
             }
         }
-        if held > grace && (fresh || self.sweep_due(client)) && pressured() {
+        if held > grace && (fresh || self.sweep_due(client)) {
+            if !pressured() {
+                // Calm: not again until another margin's worth of imports.
+                self.check_again_after(client, held);
+                return Ok(());
+            }
             if !fresh {
                 held = self.sweep(client, &mut still_held);
             }
@@ -213,6 +227,14 @@ impl RetainedTimelines {
             }
         }
         Ok(())
+    }
+
+    /// Sets `client`'s next pressure check [`SWEEP_MARGIN`] records past
+    /// `held`.
+    fn check_again_after(&mut self, client: &ClientId, held: u32) {
+        if let Some(entry) = self.per_client.get_mut(client) {
+            entry.sweep_at = held.saturating_add(SWEEP_MARGIN);
+        }
     }
 
     /// Records `fd`, just received in `client`'s `import_timeline`. Any older

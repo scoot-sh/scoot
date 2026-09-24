@@ -458,7 +458,10 @@ pub(super) mod tests;
 /// at destroy time, which is unknowable at the pinned rev (see
 /// `shm_pools.rs`) -- and a destroyed pool's fd and mapping outlive it
 /// while its buffers do, so those are bounded by the live-`wl_buffer` count
-/// instead (see `wl_buffers.rs`). The live-object concurrency is what
+/// instead (see `wl_buffers.rs`) -- except while a surface still has such a
+/// buffer committed after the buffer object, too, was destroyed, which
+/// nothing counts yet (`docs/backlog/core/buffer-fds-past-their-object.md`).
+/// The live-object concurrency is what
 /// [`reject_excess_shm_pool`] bounds. See this module's doc
 /// for why an oversized request is refused rather than clamped.
 const MAX_SHM_POOL_BYTES: i32 = 512 * 1024 * 1024;

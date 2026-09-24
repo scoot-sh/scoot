@@ -107,6 +107,8 @@ enum Step {
     HoardPoints { surfaces: u32, commit: bool },
     /// Destroy every surface made so far (syncobj surface first).
     DestroyAllSurfaces,
+    /// Import a plain memfd as a timeline, which the device cannot import.
+    ImportBogusTimeline,
 }
 
 enum Ack {
@@ -822,6 +824,24 @@ fn timelines_held_by_points_stop_counting_when_the_points_go() {
     );
 }
 
+/// An import Smithay refuses (the fd is no syncobj) was recorded before
+/// delegation; it kills the client, and the record is left on a closed
+/// number that no sweep counts.
+#[test]
+fn an_import_smithay_refuses_leaves_nothing_counted() {
+    let Some((_locks, mut fixture)) = start("an_import_smithay_refuses_leaves_nothing_counted")
+    else {
+        return;
+    };
+    let error = fixture.run_expecting_disconnect(Step::ImportBogusTimeline);
+    assert!(
+        error.contains(&format!("code {INVALID_TIMELINE}"))
+            && error.contains("failed to import syncobj timeline"),
+        "{error}"
+    );
+    assert_eq!(fixture.state.drm_syncobj.timelines_in_flight(), 0);
+}
+
 /// Destroyed timelines with no points on them close at once, so however many
 /// a client imports and destroys, the sweep at the cap finds them gone.
 #[test]
@@ -1002,6 +1022,19 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
             }
             Step::HoardPoints { surfaces, commit } => {
                 hoard_points(&conn, &mut queue, &mut client, surfaces, commit)?;
+                Ack::Done
+            }
+            Step::ImportBogusTimeline => {
+                let manager = client.manager.clone().ok_or("no syncobj manager")?;
+                let memfd = rustix::fs::memfd_create(
+                    "scoot-bogus-timeline",
+                    rustix::fs::MemfdFlags::CLOEXEC,
+                )
+                .map_err(|e| e.to_string())?;
+                client
+                    .extra_timelines
+                    .push(manager.import_timeline(memfd.as_fd(), &qh, ()));
+                sync(&conn, &mut queue, &mut client)?;
                 Ack::Done
             }
             Step::DestroyAllSurfaces => {

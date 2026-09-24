@@ -140,10 +140,11 @@ pub(crate) const MAX_ACQUIRE_WAITS_PER_CLIENT: u32 = 64;
 /// table is pressured, so a client under it is never refused for another
 /// client's greed. 32 is two windows' worth (see
 /// [`MAX_TIMELINES_PER_CLIENT`]). Held means retained, as for the cap, and a
-/// refusal is decided on a fresh sweep. Sweeps under pressure are amortized
-/// by admitting up to [`retained::SWEEP_MARGIN`] imports past a sweep that
-/// left the client at or under the grace, so under pressure a client holds
-/// at most 32 + 16.
+/// refusal is decided on a fresh sweep. The checks are amortized: after one
+/// (a sweep that admits, or a table observation that comes back calm) up to
+/// [`retained::SWEEP_MARGIN`] imports pass before the next, so under
+/// pressure a client can go 16 past what it held when last checked -- 32 +
+/// 16 for one that was at the grace -- before it is refused.
 pub(crate) const PRESSURE_GRACE_TIMELINES: u32 = 32;
 
 /// Outstanding acquire waits a client may hold before fd pressure starts

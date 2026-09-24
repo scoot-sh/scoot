@@ -43,8 +43,10 @@ creation guards can pick it.
   and is refused only if more than 112 are still open. A sweep that admits
   leaves at least 16 imports before the next, which keeps an attacker
   hovering at the cap from buying a sweep per import. Under fd pressure the
-  grace is 32, checked the same way, with up to 16 imports of slack after a
-  sweep that admits. The count is released when the fd closes, whatever
+  grace is 32, checked the same way; after any check (a sweep that admits,
+  or a table observation that comes back calm) up to 16 imports pass
+  before the next, so neither a hovering attacker nor a legitimate
+  churner with dead records pays a check per import. The count is released when the fd closes, whatever
   held it: pending points, committed points, commits queued behind a
   blocked one, the renderer's `Buffer`, or frames in flight.
 
