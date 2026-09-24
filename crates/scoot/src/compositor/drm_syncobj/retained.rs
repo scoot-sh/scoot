@@ -140,9 +140,9 @@ struct Held {
     /// that either sweeps it back down first or is refused.
     fds: Vec<RawFd>,
     /// The pressure-check amortization: no pressure check until the records
-    /// reach this. Set to live + [`SWEEP_MARGIN`] by every sweep, to records
-    /// + [`SWEEP_MARGIN`] by a calm observation, and 0 (meaning due) before
-    /// the first.
+    /// reach this. Set to live plus [`SWEEP_MARGIN`] by every sweep, to
+    /// records plus [`SWEEP_MARGIN`] by a calm observation, and 0 (meaning
+    /// due) before the first.
     sweep_at: u32,
 }
 
