@@ -118,16 +118,16 @@ identity checks cannot tell syncobjs apart.
 Dev VM (kernel 6.18, virtio-gpu, `RLIMIT_NOFILE` 1024/524288). Before is
 `1f2fe5c` (`main`), built from a `git archive` into its own target dir
 (`CARGO_BUILD_JOBS=1 cargo build --release -p scoot -p scootctl --features
-scoot/gpu-scanout`; binary sha256 `e82acc7f…`). After is `42914bb` (tree
-`f02d2086`), the same command in the shared target (sha256 `ddaff1ad…`).
-Between `42914bb` and the PR's code commit `dbec752` only doc comments, tests
-and a `#[cfg(test)]` accessor changed. Doc edits move the line numbers the
-log macros embed, so the rebuilt binary is not byte-identical (sha256
-`2571ecd5…`). I re-ran three shapes on it: the headless 900-surface shape,
-the `--tty` 200-`YU12` shape and the `--tty` 85-`YU12` at-bound shape. The
-results matched: refused at 512, refused at 85 buffers, and 557 fds at the
-bound (`runs/*-dbec752.txt`). Raw output: `~/evidence/bfl/runs/*.txt`; probe source
-`~/evidence/bfl/probe/src/main.rs`; runners `~/evidence/bfl/{run,legit,bench}.sh`.
+scoot/gpu-scanout`; binary sha256 `e82acc7f…`). After is `82b6590`, the
+PR's code commit, built by the same command in the shared target (sha256
+`0b180fbb…`), and every live row below was re-run on it
+(`runs/*-after-82b6590.txt`). The first live runs were at `42914bb` and
+`dbec752` (sha256 `ddaff1ad…`, `2571ecd5…`; `runs/*-after.txt`,
+`runs/*-dbec752.txt`), before review replaced the renderer probe's count
+with a before/after difference. They gave the same numbers. Raw output:
+`~/evidence/bfl/runs/*.txt`; probe source `~/evidence/bfl/probe/src/main.rs`;
+runners `~/evidence/bfl/{run,legit,bench}.sh`. Gate at `82b6590`:
+`~/evidence/bfl/gate-82b6590.out`.
 
 **Fail-first** against `1f2fe5c` (`~/evidence/bfl/failfirst-main-1f2fe5c.out`,
 scratch source `~/evidence/bfl/scratch/failfirst_bfl.rs`), 3 of 3 failed:
@@ -138,9 +138,9 @@ scratch source `~/evidence/bfl/scratch/failfirst_bfl.rs`), 3 of 3 failed:
 
 **Live** (release binaries, `~/evidence/bfl/runs/`):
 
-| Shape | Tier | Before (`1f2fe5c`) | After (`42914bb`) |
+| Shape | Tier | Before (`1f2fe5c`) | After (`82b6590`) |
 |---|---|---|---|
-| 900 surfaces, each keeping a destroyed buffer and pool | `--headless` | 919 fds; `wayland-info` 0 globals; `scootctl` refused (pressure); honest client reset; attacker connected after 12 s | refused at 512 surfaces (`invalid_stride` on `wl_shm`, "512 file descriptors ... the maximum is 512"); 18 fds after; `wayland-info` 38 globals; `scootctl` served; honest client 145 commits, frame callbacks p95 21.5 ms |
+| 900 surfaces, each keeping a destroyed buffer and pool | `--headless` | 919 fds; `wayland-info` 0 globals; `scootctl` refused (pressure); honest client reset; attacker connected after 12 s | refused at 512 surfaces (`invalid_stride` on `wl_shm`, "512 file descriptors ... the maximum is 512"); 18 fds after; `wayland-info` 38 globals; `scootctl` served; honest client 147 commits, frame callbacks p95 21.5 ms |
 | 500 surfaces (under the bound) | `--headless` | 519 fds, all served | 519 fds, all served (same) |
 | 200 `YU12` surfaces, `wl_buffer`s destroyed | `--tty --renderer gles` | table full: 1024 fds (984 `/dmabuf:`); `wayland-info` 0 globals; `scootctl` and the honest client reset; attacker stuck | refused at 85 buffers (the 3rd `add` of the 86th; 6 fds each with llvmpipe's copies); 46 fds after; newcomer 39 globals; `scootctl` served; honest client 134 commits |
 | 85 `YU12` surfaces (at the bound) | `--tty --renderer gles` | — | 557 fds total (517 `/dmabuf:`), newcomers, `scootctl` and the honest client served: one client at the bound stays 339 under the 896 line |
@@ -150,10 +150,10 @@ The session log records `dmabuf: learned how many fds the renderer keeps of
 each imported plane copies_per_plane_per_output=1` on the `--tty` GLES tier.
 
 **Legitimate clients**, 5 s each, before and after, both tiers
-(`runs/legit-{headless,tty}-{before,after}.txt`): `foot`, `zenity` (GTK 4),
+(`runs/legit-{headless,tty}-{before,after,after-82b6590}.txt`): `foot`, `zenity` (GTK 4),
 `es2gears_wayland`, `eglgears_wayland`, `vkcube`, `mpv --vo=gpu` all alive
 with one window and identical scoot fd counts before and after; an
-explicit-sync client (card0 dumb buffers) 177 commits, 0 reuse timeouts on
+explicit-sync client (card0 dumb buffers) 179 commits, 0 reuse timeouts on
 the GPU tier. No refusal or protocol error logged but one xdg-activation
 token refusal, identical before and after. `mpv --vo=dmabuf-wayland`
 (the one multi-plane video client available) cannot upload frames to a DRM
@@ -162,7 +162,9 @@ multi-plane client ran; multi-plane buffers were exercised by the probe and
 the harness.
 
 **Cost.** End-to-end (`~/evidence/bfl/bench-churn-*-400k.txt`, headless,
-scoot CPU jiffies at CLK_TCK 100, 3 alternating rounds): 400 k params x 4
+scoot CPU jiffies at CLK_TCK 100, 3 alternating rounds, `1f2fe5c` against
+`42914bb`; neither the `add` nor the `create_pool` path changed after
+`42914bb`, and neither shape imports a buffer): 400 k params x 4
 `add`s + destroy went from 85/85/84 to 136/147/136, about 320 ns more per
 `add` (the `fstat` for the identity, and the ledger's map work); 400 k
 `create_pool` + destroy from 258/252/260 to 260/269/261, within noise of
