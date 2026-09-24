@@ -105,7 +105,7 @@ each item's own file records why it landed when it did.
 ## Recently shipped (since 2026-09-15)
 
 - **[A GLES resize keeps its renderer](docs/backlog/resolved/gles-resize-in-place-done.md)**
-  (2026-09-23, PR #PRNUM) — under `--renderer gles` (`--headless`/`--nested`)
+  (2026-09-23, PR #232) — under `--renderer gles` (`--headless`/`--nested`)
   `State::resize_output` reallocates only the offscreen renderbuffer
   (`GlesBackend::resize`), keeping the EGL context, its shaders, every
   imported client texture and the device; the new target is bound before

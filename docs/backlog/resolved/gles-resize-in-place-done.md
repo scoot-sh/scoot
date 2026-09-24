@@ -8,7 +8,7 @@ blocked: null
 
 # GLES: resize the render target in place — RESOLVED
 
-RESOLVED 2026-09-23 (PR #PRNUM, branch `gles-resize-in-place`).
+RESOLVED 2026-09-23 (PR #232, branch `gles-resize-in-place`).
 
 ## What landed
 
