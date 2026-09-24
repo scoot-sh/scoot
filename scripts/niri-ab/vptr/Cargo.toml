@@ -1,0 +1,19 @@
+# A benchmark helper for scripts/niri-ab-bench.sh, not part of scoot: one
+# persistent `zwlr_virtual_pointer_v1` device driving pointer motion into a
+# host compositor (cage) at a fixed rate. Deliberately outside the scoot
+# workspace (the empty `[workspace]` below), so it never builds with, or
+# changes the lockfile of, the compositor itself. Its versions match the ones
+# scoot's own Cargo.lock already pins, so it builds `--offline` on a machine
+# that has built scoot.
+[package]
+name = "nab-vptr"
+version = "0.0.0"
+edition = "2021"
+license = "MIT"
+publish = false
+
+[workspace]
+
+[dependencies]
+wayland-client = "=0.31.15"
+wayland-protocols-wlr = { version = "=0.3.12", features = ["client"] }

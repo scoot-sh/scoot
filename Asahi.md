@@ -24,6 +24,7 @@ whole of it as one command that writes its own report.
 | [Test 5: a fullscreen video scanned out directly](docs/backlog/resolved/gpu-primary-direct-format-gate-done.md) | medium | yes | open — seen on the dev VM only |
 | [Test 6: what the GLES tier advertises, and what GPU clients do with it](docs/backlog/resolved/gles-dmabuf-full-formats-done.md) (Part C: [the scanout tranche](docs/backlog/resolved/gpu-scanout-candidates-done.md)) | high | partly | open — seen on the dev VM's llvmpipe only (57 formats, all `LINEAR`; scanout tranche `XR24`/`AR24` at `LINEAR`) |
 | [Test 7: explicit sync on a real GPU](docs/backlog/resolved/linux-drm-syncobj-done.md) | medium | yes | open — seen on the dev VM's virtio-gpu with a test client only |
+| [Test 9: scoot vs niri on a real GPU](docs/benchmarks.md) | medium | Part B only | open — the dev VM half is in `docs/benchmarks.md` (nested, llvmpipe) |
 
 ## Results so far (run 2026-09-18, `main` at `f688ac9`)
 
@@ -1031,6 +1032,138 @@ What each answer means:
   layout was mismatched between scoot and the host: send both, and the
   `add(` lines.
 
+## Test 9 — scoot vs niri on a real GPU
+
+Why: the scoot/niri A/B in [`docs/benchmarks.md`](docs/benchmarks.md) ran on
+the dev VM, where it could only be half an answer. niri renders only through
+GLES and refuses a software renderer on `--tty`. The VM's GPU has no 3D, so
+there niri could run only nested, and both GLES paths (niri's and scoot's)
+rasterised on llvmpipe. On the VM, the pixman row is the honest GPU-less
+comparison. What the GLES rows cost on a real GPU, and what either
+compositor costs on a real `--tty` session, can only be measured on a
+machine like this one. Nothing is claimed in advance.
+
+Needs: `niri` (`nix build nixpkgs#niri -o /tmp/fx/niri`), `cage`,
+`wlr-randr`, `foot` and `grim` on `PATH`, both scoot builds from
+[Build](#build), plus `scootctl` (`nix build .#scootctl -o result-scootctl`).
+It also needs the benchmark's pointer helper:
+`cargo build --release --manifest-path scripts/niri-ab/vptr/Cargo.toml --target-dir /tmp/fx/vptr`.
+
+### Part A — nested, no VT
+
+This is the same script and the same scenes as the VM run. The one change is
+that the host (cage, headless) renders with GLES, which gives it
+`linux-dmabuf`. That is what lets niri's nested backend use the AGX instead of
+falling back to software, and what lets a `gpu-scanout` scoot present by
+dma-buf (Test 8). It runs inside your normal session and takes no seat.
+
+```sh
+common="HOST_RENDERER=gles2 SCOOTCTL=$PWD/result-scootctl/bin/scootctl NIRI=/tmp/fx/niri/bin/niri VPTR=/tmp/fx/vptr/release/nab-vptr"
+env $common SCOOT=$PWD/result/bin/scoot OUT=/tmp/fx/t9a scripts/niri-ab-bench.sh
+env $common SCOOT=$PWD/result/bin/scoot OUT=/tmp/fx/t9a-diag DIAG=1 scripts/niri-ab-bench.sh
+# the gpu-scanout tier: the same session, presenting by dma-buf
+env $common SCOOT=$PWD/result-scoot-gpu/bin/scoot VARIANTS=scoot-gles OUT=/tmp/fx/t9a-gpu scripts/niri-ab-bench.sh
+scripts/niri-ab/summarize.sh /tmp/fx/t9a /tmp/fx/t9a-diag > /tmp/fx/t9a.md
+```
+
+Check each of these before trusting any row:
+
+- `grep -h "GL Renderer" /tmp/fx/t9a/r1-*/inner.log` names the AGX, not
+  `llvmpipe`, for niri and for scoot-gles. Each should have one line. niri's
+  default log filter hides this line, so the script runs niri with
+  `RUST_LOG=niri=debug,smithay::backend::renderer::gles=info`. A niri log
+  without the line means the filter was lost, not that nothing rendered.
+- `grep -h "presenting to the host" /tmp/fx/t9a-gpu/r1-*/inner.log` says
+  `by dma-buf`. `by read-back` means Test 8's path did not come up, so read
+  its reason.
+- `/tmp/fx/t9a/notes.log` is empty or absent. A line there means a window
+  never mapped, a compositor never went idle, or a session was killed for
+  running past `SESSION_TIMEOUT`. `HOST_RENDERER=gles2` itself could not be
+  checked on the dev VM: cage's GLES renderer cannot allocate its output
+  there (`gbm_bo_create failed: Permission denied` on virtio-gpu), and a
+  nested niri whose host has no output never answers IPC. If that happens
+  here as well, `host.log` in the session's directory says so.
+
+### Part B — `--tty`, needs a VT
+
+Run each compositor as the session on a spare VT, and measure from a `foot`
+inside it. Read the [Safety](#safety) section first. Its way back,
+`Ctrl+Alt+F<your desktop's VT>`, works in niri too, even with this config's
+empty key bindings: niri handles the VT-switch keysyms itself, before it
+consults any binds (`find_bind` in its `src/input/mod.rs`). **Stay on that
+VT while a window is being measured**: a compositor on an inactive VT is
+paused, and its numbers look spectacular for exactly the wrong reason
+(Test 4 explains this). Each session covers one tier. Run the tiers alternately, at least
+twice each: scoot (dumb + pixman), niri, scoot-gpu `--renderer gles`, niri,
+and so on.
+
+```sh
+# the benchmark's niri config binds no keys, so start its foot from the config;
+# and keep niri from starting xwayland-satellite (see below)
+{ cat scripts/niri-ab/niri-anim-off.kdl; echo 'spawn-at-startup "foot"'
+  printf 'xwayland-satellite {\n    off\n}\n'; } > /tmp/fx/niri-t9.kdl
+# on a spare VT, one of:
+./result/bin/scoot --tty -- foot
+./result-scoot-gpu/bin/scoot --tty --renderer gles -- foot
+RUST_LOG=niri=debug,smithay::backend::renderer::gles=info \
+    /tmp/fx/niri/bin/niri -c /tmp/fx/niri-t9.kdl 2>/tmp/fx/t9b-niri.log
+```
+
+If `xwayland-satellite` is on your `PATH`, niri starts it as a separate
+process, and `sample.sh` measures niri's process only, so that CPU would go
+uncounted. The `xwayland-satellite { off }` block above stops niri from
+starting it. Check with `pgrep -a xwayland-satellite` before measuring. scoot
+is measured without `--xwayland` for the same reason.
+
+Open two more `foot`s so that three columns exist: `Super+Return` in scoot,
+`niri msg action spawn -- foot` in niri. Put `$PWD/result-scootctl/bin` on
+`PATH` for the scoot lines, then run the following from one of the
+`foot`s. `session` makes `sample.sh` measure the compositor it is running
+inside. On a machine whose desktop is scoot, `pgrep -x scoot` would find
+your live session too.
+
+```sh
+S=scripts/niri-ab/sample.sh; O=/tmp/fx/t9b.tsv
+# columns: label comm wall_s proc_cpu_ms cpu_ns wakeups threads rss_kb pss_kb.
+# Compare proc_cpu_ms (the process total). cpu_ns misses threads that exit
+# inside the window, and niri encodes every screenshot on one: on the dev VM
+# cpu_ns missed 19-23% of niri's screenshot CPU (docs/benchmarks.md).
+$S session 20 idle >> $O
+# relayout, through the compositor's own IPC (use the scoot or the niri line)
+$S session 10 relayout -- sh -c 'while :; do scootctl action focus-column left; sleep 0.05; scootctl action focus-column right; sleep 0.05; done' >> $O
+$S session 10 relayout -- sh -c 'while :; do niri msg action focus-column-left; sleep 0.05; niri msg action focus-column-right; sleep 0.05; done' >> $O
+# pointer, kernel-level and so the same for both: needs ydotoold running with
+# /dev/uinput access (nixpkgs#ydotool). One fork per event, so the rate is
+# whatever the machine manages: compare CPU per second, not per event.
+$S session 10 pointer -- sh -c 'while :; do ydotool mousemove -x 800 -y 0; ydotool mousemove -x -800 -y 0; done' >> $O
+# screenshots through the compositor's own path (scoot or niri line), then grim
+$S session 30 shot-ipc -- sh -c 'for i in $(seq 10); do scootctl screenshot --no-cursor --out /tmp/fx/t9b.png; sleep 0.2; done' >> $O
+$S session 30 shot-ipc -- sh -c 'for i in $(seq 10); do niri msg action screenshot-screen --show-pointer false --path /tmp/fx/t9b.png; sleep 0.2; done' >> $O
+$S session 30 shot-grim -- sh -c 'for i in $(seq 10); do grim /tmp/fx/t9b-grim.png; sleep 0.2; done' >> $O
+```
+
+On a real `--tty`, both compositors draw the pointer, which the nested run
+could not compare: nested, niri composites its pointer into every frame and
+scoot leaves it to the host. So the pointer row is the new information here.
+Under `--renderer gles`, scoot's memory should stay flat across the
+screenshot lines. Before PR #238, each capture of a still screen kept its
+read-back buffer until the next frame drew
+([fixed](docs/backlog/resolved/gles-capture-leaks-a-frame-per-shot-done.md)).
+On the dev VM's llvmpipe that buffer was process heap, so the RSS column
+(second from last) grew by one frame per capture. On a real GPU it is a
+driver allocation. It only counts in RSS while it is mapped into the
+process, so a leak may show there or may not. Two checks cover it:
+
+- The RSS column should not climb by about one frame per capture (about
+  8 MB at 1080p). If it does, that is a regression; send the log.
+- If the driver reports per-process GPU memory through DRM fdinfo, compare
+  `grep -h '^drm-total-' /proc/$(pidof scoot)/fdinfo/*` before and after
+  the screenshot lines. It should not grow by a frame per capture either.
+  If there are no such lines, skip this check: scoot's own tests pin the
+  fix by counting live GL objects, not by memory.
+Quit with `Super+Shift+e` (scoot) or, from a `foot` in niri,
+`niri msg action quit --skip-confirmation`.
+
 ## What to send back
 
 - `ghostty --version`
@@ -1048,6 +1181,10 @@ What each answer means:
   `t8-*-host.log` and `t8-*.png` files beside them; for Part B,
   `/tmp/fx/t8b.txt`, both `t8b-*.log` and `t8b-*.png`, your desktop's own
   screenshot, and which desktop it was
+- for Test 9: the whole `/tmp/fx/t9a`, `/tmp/fx/t9a-diag` and
+  `/tmp/fx/t9a-gpu` directories (raw TSVs and every `inner.log`),
+  `/tmp/fx/t9a.md`, and `/tmp/fx/t9b.tsv` with a note of which session each
+  block of lines came from
 - for Test 6: `/tmp/fx/t6-table-*.txt`, `/tmp/fx/t6-*.log`,
   `/tmp/fx/t6-gears.trace` (or just its `add(` lines), `t6-gears.png`,
   `t6-mpv.log`, `t6-mpv.png`, `t6-kms-mpv.txt`; for Part C `t6c.log`,
