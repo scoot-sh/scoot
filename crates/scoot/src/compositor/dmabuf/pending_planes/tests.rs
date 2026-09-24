@@ -54,10 +54,19 @@ enum Step {
     ConsumeAll,
     /// Destroy every kept params object.
     DestroyAll,
+    /// Create one params object with a single real udmabuf plane, and keep
+    /// it. Answers `NoUdmabuf` where this machine cannot make one.
+    HoardUdmabuf,
+    /// Consume every kept params object with `create_immed`, keeping the
+    /// params objects (and the buffers) alive. With a udmabuf plane pixman
+    /// imports it, so the client lives.
+    ConsumeImmed,
 }
 
 enum Ack {
     Done,
+    /// This machine has no usable `/dev/udmabuf`.
+    NoUdmabuf,
     /// How many `failed` events the client has had so far.
     Failed(u32),
 }
@@ -75,14 +84,14 @@ impl Fixture {
     fn done(&mut self, step: Step) {
         match self.run(step) {
             Ack::Done => {}
-            Ack::Failed(_) => panic!("expected done"),
+            _ => panic!("expected done"),
         }
     }
 
     fn done_on(&mut self, index: usize, step: Step) {
         match self.run_on(index, step) {
             Ack::Done => {}
-            Ack::Failed(_) => panic!("expected done"),
+            _ => panic!("expected done"),
         }
     }
 
@@ -177,6 +186,44 @@ fn a_consumed_params_object_releases_its_planes() {
         planes: 4,
     });
     assert_eq!(fixture.planes(), MAX_PENDING_PLANES_PER_CLIENT);
+}
+
+/// `create_immed` consumes the params object too: its planes become the
+/// buffer's (counted by `wl_buffers.rs` from here), so they stop counting as
+/// pending at once, while the params object itself is still alive -- the
+/// release is the consume, not a later destroy. A real udmabuf, so pixman
+/// imports it and the client lives to show it.
+#[test]
+fn create_immed_releases_its_planes_before_any_destroy() {
+    let _mappings = crate::compositor::dmabuf::tests::exclusive_mappings();
+    let mut fixture = start("scoot-pp-immed");
+    match fixture.run(Step::HoardUdmabuf) {
+        Ack::Done => {}
+        Ack::NoUdmabuf => {
+            eprintln!(
+                "create_immed_releases_its_planes_before_any_destroy: skipped -- no usable /dev/udmabuf"
+            );
+            return;
+        }
+        Ack::Failed(_) => panic!("expected done"),
+    }
+    assert_eq!(fixture.planes(), 1);
+    assert_eq!(fixture.state.pending_planes.params_tracked(), 1);
+    fixture.done(Step::ConsumeImmed);
+    assert_eq!(
+        fixture.planes(),
+        0,
+        "consumed, though the params object lives"
+    );
+    assert_eq!(fixture.state.pending_planes.params_tracked(), 0);
+    assert_eq!(
+        fixture.state.wl_buffers.buffers_in_flight(),
+        1,
+        "the plane is now a counted buffer"
+    );
+    // The later destroy releases nothing twice.
+    fixture.done(Step::DestroyAll);
+    assert_eq!(fixture.planes(), 0);
 }
 
 #[test]
@@ -326,6 +373,7 @@ struct TestClient {
     synced: bool,
     dmabuf: Option<zwp_linux_dmabuf_v1::ZwpLinuxDmabufV1>,
     params: Vec<zwp_linux_buffer_params_v1::ZwpLinuxBufferParamsV1>,
+    buffers: Vec<wayland_client::protocol::wl_buffer::WlBuffer>,
     failed: u32,
 }
 
@@ -339,6 +387,53 @@ fn plane(tag: &str) -> Result<OwnedFd, String> {
         .map_err(|e| e.to_string())?;
     rustix::fs::ftruncate(&fd, PLANE_BYTES).map_err(|e| e.to_string())?;
     Ok(fd)
+}
+
+/// One page of real dma-buf over `/dev/udmabuf`, or `None` where this
+/// machine cannot make one. The same recipe as `dmabuf/tests.rs`.
+fn udmabuf() -> Option<OwnedFd> {
+    use std::os::fd::{AsRawFd, FromRawFd};
+    /// `_IOW('u', 0x42, struct udmabuf_create)`.
+    const UDMABUF_CREATE: u32 = 0x4018_7542;
+    #[repr(C)]
+    struct UdmabufCreate {
+        memfd: u32,
+        flags: u32,
+        offset: u64,
+        size: u64,
+    }
+    let memfd = rustix::fs::memfd_create(
+        "scoot-pp-udmabuf",
+        rustix::fs::MemfdFlags::CLOEXEC | rustix::fs::MemfdFlags::ALLOW_SEALING,
+    )
+    .ok()?;
+    let page = rustix::param::page_size() as u64;
+    rustix::fs::ftruncate(&memfd, page).ok()?;
+    rustix::fs::fcntl_add_seals(&memfd, rustix::fs::SealFlags::SHRINK).ok()?;
+    let device = rustix::fs::open(
+        "/dev/udmabuf",
+        rustix::fs::OFlags::RDWR | rustix::fs::OFlags::CLOEXEC,
+        rustix::fs::Mode::empty(),
+    )
+    .ok()?;
+    let create = UdmabufCreate {
+        memfd: memfd.as_raw_fd() as u32,
+        flags: 0x01,
+        offset: 0,
+        size: page,
+    };
+    // SAFETY: `device` is open for the whole call and `create` is a
+    // correctly-shaped `struct udmabuf_create` the driver only reads. A
+    // non-negative return is a fresh owned fd.
+    let fd = unsafe {
+        libc::ioctl(
+            device.as_raw_fd(),
+            UDMABUF_CREATE as _,
+            std::ptr::addr_of!(create),
+        )
+    };
+    // SAFETY: see above -- `fd` is a fresh fd nothing else owns.
+    (fd >= 0).then(|| unsafe { OwnedFd::from_raw_fd(fd) })
 }
 
 fn run_client(
@@ -401,6 +496,30 @@ fn run_client(
             Step::DestroyAll => {
                 for object in client.params.drain(..) {
                     object.destroy();
+                }
+                Ack::Done
+            }
+            Step::HoardUdmabuf => match udmabuf() {
+                None => Ack::NoUdmabuf,
+                Some(fd) => {
+                    let object = dmabuf.create_params(&qh, ());
+                    object.add(fd.as_fd(), 0, 0, STRIDE, 0, 0);
+                    client.params.push(object);
+                    sync(&conn, &mut queue, &mut client)?;
+                    drop(fd);
+                    Ack::Done
+                }
+            },
+            Step::ConsumeImmed => {
+                for object in &client.params {
+                    client.buffers.push(object.create_immed(
+                        WIDTH,
+                        HEIGHT,
+                        u32::from_ne_bytes(*b"AR24"),
+                        zwp_linux_buffer_params_v1::Flags::empty(),
+                        &qh,
+                        (),
+                    ));
                 }
                 Ack::Done
             }

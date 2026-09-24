@@ -64,11 +64,14 @@
 //! Planes added to a params object that has not become a buffer yet are
 //! not buffers at all, and are bounded separately
 //! (`dmabuf/pending_planes.rs`). Together with the 128 live pools and those,
-//! a connection on the default tier holds at most ~673 counted fds against a
-//! 1024-fd `RLIMIT_NOFILE`: one connection alone cannot exhaust the table,
-//! two can -- the multiplier on top is connection-count territory (see
+//! a connection on the default tier holds at most ~673 *counted* fds against
+//! a 1024-fd `RLIMIT_NOFILE`, so through the counted paths one connection
+//! alone cannot exhaust the table and two can -- the multiplier on top is
+//! connection-count territory (see
 //! `docs/backlog/resolved/wayland-connection-cap-done.md`), not a smaller
-//! buffer count.
+//! buffer count. The uncounted paths (the two above, and wayland-backend's
+//! received-fd queue, `docs/backlog/core/wayland-backend-fd-queue.md`) are
+//! not bounded by this at all.
 //!
 //! ## How it is counted
 //!

@@ -107,11 +107,14 @@ paths were exercised by the probe clients above and by the harness.
 The pending-plane **pressure grace** (not the hard cap) was exercised live
 too (`~/evidence/cfb/runs/final/pressure-grace.txt`): scoot under
 `prlimit --nofile=700:700`, an honest client holding 4 planes, then
-hoarders at the cap until the table pressured; the next fresh hoarder was
-disconnected on the `add` that took it to 16 planes ("the bound is 8, while
-compositor-wide file descriptors are under pressure"), while the 4-plane
-honest client stayed connected -- the kill landing on a past-grace
-contributor, not the under-grace innocent.
+hoarders at the cap until the table pressured; the next fresh hoarder,
+already holding 16 planes, was disconnected on its next `add` ("the bound
+is 8, while compositor-wide file descriptors are under pressure"), while
+the 4-plane honest client stayed connected -- the kill landing on a
+past-grace contributor, not the under-grace innocent. The pressure was
+transient: once the hoarders were killed the table settled at 551 fds,
+under the 572 line, so the run's later "probe under pressure" line was
+admitted unpressured and proves nothing (the artifact is labelled so).
 
 Tests (fail-first against `618b5dc`, `~/evidence/cfb/failfirst-main-618b5dc.out`):
 `pending_planes_are_bounded_per_client` (main: the client survived),
@@ -123,7 +126,7 @@ disconnect, Smithay-refused add, per-client isolation) that assert the
 count and the real fds (tagged memfds counted in `/proc/self/fd`) agree,
 the ledger's decisions in isolation, and the two pressure verdicts.
 
-Cost: pending-plane bookkeeping 16 ns per plane (release microbench). The
+Cost: pending-plane bookkeeping 16-23 ns per plane (release microbench, two runs; raw in `~/evidence/cfb/bench-micro-raw.txt`). The
 end-to-end add path (400 k params x 4 adds + destroy, headless, scoot CPU
 jiffies, 3 alternating rounds, `~/evidence/cfb/bench-churn-params-400k-559306d.txt`) went from 81/79/78 to 85/84/85 (identical shape at 559306d and ac879b9; the fix does not touch the add path), about 40 ns
 per `add`; real clients do one buffer's adds per allocation, not per frame.

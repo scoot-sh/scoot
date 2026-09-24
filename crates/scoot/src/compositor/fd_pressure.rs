@@ -52,20 +52,24 @@
 //! - One connection at every hard cap on the default (pixman) tier: 512
 //!   buffers + 128 pools + 32 pending dma-buf planes + 1 socket = **~673
 //!   fds**. One such connection plus a normal session (~800) never trips
-//!   anything here, correctly: a single connection cannot exhaust the table
-//!   on its own there.
+//!   anything here: through the *counted* paths, a single connection cannot
+//!   exhaust the table on its own there. Through the uncounted ones below it
+//!   can, and one of those (wayland-backend's received-fd queue) was measured
+//!   filling it alone.
 //! - On the `--tty` GPU scanout tier the same connection can also hold 128
 //!   syncobj timelines and 64 acquire-wait eventfds: ~865, over a baseline
 //!   measured at **43 fds** idle (dev VM, `--tty --renderer gles`,
 //!   2026-09-24). 865 + 43 = 908 is past the 896 line, so there one
 //!   connection at every cap at once *can* trip the reserve alone. It is
 //!   then past every grace, so its next counted creation is refused, but if
-//!   it goes idle instead, newcomers are shed until it leaves. Before the
-//!   plane bound the sum was 833 + 43 = 876, 20 under the line, which a
-//!   normal session's own fds already used up. The per-client fd budget
-//!   that would fix this is part of the ticket named below.
-//! - **Every fd a client can make this process hold is counted by a cap,
-//!   with two known exceptions** (below). The two paths that review of
+//!   it goes idle instead, newcomers are shed until it leaves. The pending
+//!   planes add 32 to that sum; before they were counted they added no
+//!   bound at all (the review measured 880 of them from one client), so the
+//!   908 is a ceiling where there was none, not a regression from 876. The
+//!   per-client fd budget that would bring it under the line is part of
+//!   `docs/backlog/core/buffer-fds-past-their-object.md`.
+//! - **Not every fd a client can make this process hold is counted.** Three
+//!   known paths are not (below). The two paths that review of
 //!   PR #233 measured at 927 fds each are closed: planes added to
 //!   `zwp_linux_buffer_params_v1` objects are counted until the object is
 //!   consumed or destroyed (`dmabuf/pending_planes.rs`), and syncobj
@@ -74,7 +78,7 @@
 //!   object is destroyed. Both refuse past a grace under pressure, so
 //!   the creation guards above can pick those holders
 //!   (`docs/backlog/resolved/client-held-fd-bound-done.md`).
-//! - **The two exceptions**, filed as
+//! - **The uncounted paths.** The first two are filed as
 //!   `docs/backlog/core/buffer-fds-past-their-object.md`. A `wl_buffer`
 //!   that a surface still has committed keeps its fd (and, for shm, its
 //!   pool's mapping) after both the buffer and its pool object are
@@ -84,6 +88,15 @@
 //!   buffer count also weighs every buffer as one fd, and a multi-plane
 //!   dma-buf holds up to four. Only a GLES renderer imports multi-plane
 //!   buffers, so this second one is not on the default tier.
+//! - The third is below scoot, filed as
+//!   `docs/backlog/core/wayland-backend-fd-queue.md`: wayland-backend keeps
+//!   the fds a client sends in a per-connection queue with no bound, and a
+//!   request whose signature has no fd argument never drains it, so fds sent
+//!   alongside such requests stay for the connection's life. Review of
+//!   PR #236 measured one client taking scoot from 18 to 999 fds on the
+//!   default headless tier this way, newcomers shed, and the client never
+//!   killed; the same on `618b5dc`. No scoot cap sees those fds, so fd
+//!   pressure cannot pick that holder.
 //!
 //! [`RESERVE_FDS`] is 128: shed/refuse once fewer than 128 fds stand free
 //! (used past 896 of 1024). That is ~6x above the reasoned login storm and

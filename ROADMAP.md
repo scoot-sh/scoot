@@ -104,7 +104,7 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
-- **[Client-held fds are counted, so fd pressure can find the holder](docs/backlog/resolved/client-held-fd-bound-done.md)**
+- **[Params planes and retained syncobj timelines are counted, so fd pressure can find those holders](docs/backlog/resolved/client-held-fd-bound-done.md)**
   (2026-09-24, PR #236) — two paths let one client make scoot hold ~927
   fds that no per-client cap counted, shedding every newcomer while the
   offender lived. Planes `add`ed to `zwp_linux_buffer_params_v1` objects not
@@ -121,8 +121,12 @@ each item's own file records why it landed when it did.
   and shed newcomers → offender killed at params 9, 18 fds, newcomers,
   `scootctl` and an honest dma-buf client served; timelines 927 fds →
   refused at surface 65, 46 fds, an explicit-sync client unaffected. About
-  40 ns per `add`. Found on the way and filed high:
-  [buffer fds past their object](docs/backlog/core/buffer-fds-past-their-object.md).
+  40 ns per `add`. Not every fd path is counted yet; filed high:
+  [buffer fds past their object](docs/backlog/core/buffer-fds-past-their-object.md)
+  (found on the way) and, found in review,
+  [wayland-backend's unbounded received-fd queue](docs/backlog/core/wayland-backend-fd-queue.md)
+  (one client took scoot from 18 to 999 fds through it, on every tier,
+  unchanged by this PR).
 
 - **[`--nested --renderer gles` hands frames to the host as dma-bufs](docs/backlog/resolved/nested-dmabuf-present-done.md)**
   (2026-09-24, PR #235) — in a `gpu-scanout` build, when the host's v4

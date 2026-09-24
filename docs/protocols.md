@@ -895,9 +895,10 @@ object which has not yet been turned into a buffer are counted separately.
 Each one is an fd scoot holds for the client, and without a bound a
 client could add planes and never create anything; review measured 220
 params objects x 4 planes holding 927 fds. A client may have **32** such
-planes at once, across all its params objects, and **8** while the
-compositor's fd table is nearly full (the same conditional shape as the
-buffer and pool bounds). A plane stops counting when its params object is
+planes at once, across all its params objects. While the compositor's fd
+table is nearly full the grace is **8**, with the same exact boundary as
+the buffer and pool graces: an `add` is refused only once the client
+already holds more than 8, so it can reach 9. A plane stops counting when its params object is
 consumed by `create`/`create_immed` (whatever the import's outcome) or
 destroyed, and when the client disconnects. An `add` past the bound
 disconnects the client with `wl_display.error` `no_memory`; the params
@@ -1034,8 +1035,10 @@ What scoot does with the points:
   own errors, from Smithay.
 - **Bounds.** A client may have scoot hold **128** of its imported
   timelines and have **64** commits waiting on acquire points at once (each
-  is an eventfd); **32** and **16** while the compositor's fd table is
-  nearly full, the same shape as the buffer and pool bounds. A timeline
+  is an eventfd). While the compositor's fd table is nearly full the graces
+  are **32** and **16**, with the buffer and pool graces' exact boundary:
+  refused only once the client already holds *more* than the grace, so it
+  can reach 33 timelines and 17 waits. A timeline
   counts for as long as scoot holds its syncobj fd, which is not the same as
   for as long as the timeline object lives: a sync point set on a surface
   keeps its timeline's fd open after the object is destroyed (the protocol
@@ -1049,7 +1052,8 @@ What scoot does with the points:
   import is refused, with `invalid_timeline`, only if more than 112 are
   still open (fewer than 16 could be reclaimed); below that, the check buys
   the next 16 imports without another one. Under fd pressure an import past
-  32 is refused if the same check finds more than 32 still open. Any check
+  32 is refused if the same check finds more than 32 still open (so 33 is
+  reachable). Any check
   that does not refuse (including one that finds the table calm) buys the
   next 16 imports without another, so a client can go 16 past what it held
   when last checked -- 48, for one that was at 32. Past the wait bound the client is disconnected

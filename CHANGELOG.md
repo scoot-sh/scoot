@@ -15,8 +15,11 @@ scoot has not cut a numbered release yet; entries are dated.
   handing over GPU buffer pieces it never finished building, or explicit-sync
   timelines it had already thrown away. scoot then turned *new* apps (and
   `scootctl`) away to protect itself, while the app causing it carried on.
-  Both are now counted per app: an app that goes past a generous limit is
-  disconnected, and everything else keeps working. No real app comes near
+  Both are now counted per app: an app that goes past a generous limit on
+  either is disconnected, and everything else keeps working. (Other ways of
+  holding descriptors are not all counted yet; see
+  `docs/backlog/core/wayland-backend-fd-queue.md` and
+  `docs/backlog/core/buffer-fds-past-their-object.md`.) No real app comes near
   the limits (a GPU app normally has one buffer's pieces in flight at a time; a
   Vulkan window uses 16 timelines, and the limit is 128). Nothing to
   configure. Details and the exact numbers: [protocols.md](docs/protocols.md).

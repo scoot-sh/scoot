@@ -59,11 +59,16 @@
 //! some other request. Of the fd-carrying requests scoot serves, the
 //! retaining ones are all invalidated above. The rest (`receive` on the
 //! selection offers, `set_gamma`) hold their fd only until the same
-//! dispatch's flush or close, and wayland-backend holds a received fd only
-//! until its message is parsed. A client sending a syncobj fd through one of
-//! those could make an old record read live for that long. That over-counts
-//! the record's owner, transiently, and never under-counts anyone, so it
-//! cannot open a hole in the bound.
+//! dispatch's flush or close. But wayland-backend's own received-fd queue is
+//! not transient: fds a client sends alongside a request with no fd argument
+//! stay queued for the connection's life
+//! (`docs/backlog/core/wayland-backend-fd-queue.md`). A syncobj fd parked
+//! there on a number some other client's dead record names would make that
+//! record read live, and so inflate the *other* client's count -- not
+//! transiently. Reasoned, not demonstrated end to end. It can only
+//! over-count, never under-count, so it opens no hole in the bound; its
+//! harm is that it could push an innocent client toward a refusal, which is
+//! part of that ticket.
 //!
 //! ## When the bound is checked
 //!
@@ -338,9 +343,11 @@ const SYNCOBJ_LINK: &[u8] = b"anon_inode:syncobj_file";
 ///
 /// Two syscalls and no allocation (both paths and the link are in stack
 /// buffers). `F_GETFD` answers "open?" definitively, and does not need
-/// `/proc`. The type check does need it, so on a system without `/proc` an
-/// open fd counts as held. That is conservative: it can only over-count, and
-/// only the fd's own recorded client.
+/// `/proc`. The type check does need it: when the `readlink` fails (no
+/// `/proc`, or any other error), an open fd counts as held. That is a
+/// deliberate, conservative over-count -- the number may have been reused
+/// by something that is not a syncobj -- and it can only raise the count of
+/// the client the record names, never lower anyone's.
 pub(crate) fn timeline_fd_open(fd: RawFd) -> bool {
     if fd < 0 {
         return false;
@@ -359,6 +366,7 @@ pub(crate) fn timeline_fd_open(fd: RawFd) -> bool {
     let mut link = [MaybeUninit::<u8>::uninit(); 64];
     match rustix::fs::readlinkat_raw(rustix::fs::CWD, path, &mut link) {
         Ok((read, _)) => &*read == SYNCOBJ_LINK,
+        // Unknown kind: count it (the conservative over-count above).
         Err(_) => true,
     }
 }

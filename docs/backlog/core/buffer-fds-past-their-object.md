@@ -41,6 +41,10 @@ A third, related number: on the GPU scanout tier one connection at every
 cap at once already sums past the pressure reserve on its own (`fd_pressure.rs`
 states it: ~865 counted + 43 baseline against a 896 line).
 
+A third uncounted path is below scoot, in wayland-backend, and is filed on
+its own: [wayland-backend-fd-queue](./wayland-backend-fd-queue.md). A
+per-client fd budget here would not see it either.
+
 ## Direction
 
 Count fds, not objects, for what outlives its object. The
