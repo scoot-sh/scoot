@@ -104,6 +104,27 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[scoot vs niri, measured (dev VM half)](docs/backlog/resolved/niri-ab-benchmark-done.md)**
+  (2026-09-24, PR #237) — the user asked directly whether we had any sense of
+  niri's resource usage against scoot's. [`docs/benchmarks.md`](docs/benchmarks.md) now has it for the one
+  arrangement the dev VM allows: both nested in the same cage host, niri
+  26.04 (nixpkgs) and scoot `fe41921` (release), three rotating rounds, host
+  pointer injection through one persistent virtual pointer, a separate
+  protocol-log pass for frame counts. Without a GPU, scoot pixman spends
+  1.9–2.5 ms of CPU per presented frame against niri's 14–16 ms on llvmpipe
+  (niri's only GPU-less option), uses 49 MB RSS against 185 MB with three
+  terminals, and idles with zero wakeups against 3/s. On the same GL stack,
+  **niri is the cheaper renderer** (14.2 against 20.5 ms a frame in
+  relayout, 14.8 against 18.4 animating) and delivered more frames to an
+  animating client. The pointer row compares different work (nested, only
+  niri draws a pointer), and so does relayout (niri draws three frames per
+  action to scoot's one); the doc says so row by row. Found on the way:
+  [GLES captures keep a frame each while nothing redraws](docs/backlog/core/gles-capture-leaks-a-frame-per-shot.md)
+  (high: 885 MB after 120 static-screen captures) and
+  [a nested frame-rate shortfall](docs/backlog/core/nested-frame-rate-vs-client.md)
+  (low). The real-GPU and `--tty` half is `Asahi.md` Test 9, tracked as
+  [its own item](docs/backlog/testing/niri-ab-real-gpu.md).
+
 - **[Params planes and retained syncobj timelines are counted, so fd pressure can find those holders](docs/backlog/resolved/client-held-fd-bound-done.md)**
   (2026-09-24, PR #236) — two paths let one client make scoot hold ~927
   fds that no per-client cap counted, shedding every newcomer while the
