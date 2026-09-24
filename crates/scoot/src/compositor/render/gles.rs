@@ -475,6 +475,51 @@ fn target(
     Ok(buffer)
 }
 
+/// Copies `buffer` -- the render target, holding the frame just drawn -- into
+/// `dmabuf` on the GPU, and waits for the copy to land.
+///
+/// What `--nested` presents through when the host takes dma-bufs
+/// (`nested/gpu.rs`): the frame stays in the persistent target every capture
+/// reads, and only this copy leaves it. A blit rather than a draw because the
+/// two are pixel-for-pixel the same size and layout (both `Argb8888` or its
+/// opaque twin, both laid out top row first by the same projection -- see
+/// `render::read_back`'s orientation note), so there is nothing to sample,
+/// filter or flip; `glBlitFramebuffer` copies GL coordinates one to one.
+///
+/// The region is the overlap of the two, which on the frame path is all of
+/// both (`Host::present_dmabuf` refuses a chain of any other size); the
+/// startup probe copies into a smaller buffer and so a corner.
+///
+/// Waited on before returning, so the host is never handed a buffer still
+/// being written: a driver without native fences answers with `glFinish`
+/// inside the blit, one with them hands back a fence waited on here. Either
+/// way the event loop blocks for as long as the GPU takes -- which the
+/// read-back this replaces did too, and then copied the frame twice more.
+///
+/// Needs GLES 3 (`glBlitFramebuffer`); a GLES 2 context fails here, which the
+/// startup probe turns into read-back for the session.
+#[cfg(feature = "gpu-scanout")]
+pub(super) fn copy_into(
+    renderer: &mut GlesRenderer,
+    buffer: &mut GlesRenderbuffer,
+    size: (i32, i32),
+    dmabuf: &mut smithay::backend::allocator::dmabuf::Dmabuf,
+) -> Result<(), Box<dyn Error>> {
+    use smithay::backend::allocator::Buffer as _;
+    use smithay::backend::renderer::{Blit, TextureFilter};
+    use smithay::utils::{Physical, Rectangle};
+
+    let target = dmabuf.size();
+    let region: Rectangle<i32, Physical> =
+        Rectangle::from_size((size.0.min(target.w), size.1.min(target.h)).into());
+    let from = renderer.bind(buffer)?;
+    let mut to = renderer.bind(dmabuf)?;
+    let sync = renderer.blit(&from, &mut to, region, region, TextureFilter::Nearest)?;
+    sync.wait()
+        .map_err(|_| "the wait for the host buffer copy was interrupted")?;
+    Ok(())
+}
+
 /// The DRM **render node** `renderer`'s EGL display is on, or `None` when EGL
 /// cannot name one.
 ///

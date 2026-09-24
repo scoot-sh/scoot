@@ -686,6 +686,56 @@ impl Backend {
         }
     }
 
+    /// What this backend's renderer can render *into* as a dma-buf, `None`
+    /// for any pipeline `--nested` cannot hand to its host that way: only
+    /// the offscreen GLES one. pixman has no GPU buffer to hand over, and the
+    /// scanout tier is `--tty`'s alone.
+    ///
+    /// Startup-only (`nested/gpu.rs`'s `negotiate`): a clone of a set the EGL
+    /// display built once.
+    #[cfg(feature = "gpu-scanout")]
+    pub(super) fn dmabuf_render_formats(&self) -> Option<FormatSet> {
+        match &self.pipeline {
+            Pipeline::Gles(gpu) => Bind::<Dmabuf>::supported_formats(&gpu.renderer),
+            Pipeline::Pixman(_) | Pipeline::Scanout(_) => None,
+        }
+    }
+
+    /// Copies the frame in this backend's render target into `dmabuf`, on
+    /// the GPU (see `gles::copy_into`). Offscreen GLES only; any other
+    /// pipeline answers `Err` without touching anything.
+    ///
+    /// `--nested`'s startup probe, and the suites; the frame path reaches
+    /// `gles::copy_into` directly from [`draw_frame`], which already holds
+    /// the renderer.
+    #[cfg(feature = "gpu-scanout")]
+    pub(super) fn copy_frame_into(&mut self, dmabuf: &mut Dmabuf) -> Result<(), Box<dyn Error>> {
+        match &mut self.pipeline {
+            Pipeline::Gles(gpu) => {
+                gles::copy_into(&mut gpu.renderer, &mut gpu.buffer, self.size, dmabuf)
+            }
+            Pipeline::Pixman(_) | Pipeline::Scanout(_) => {
+                Err("only the offscreen GLES renderer can copy a frame into a dma-buf".into())
+            }
+        }
+    }
+
+    /// Whether `width` x `height` is over what this backend's renderer can
+    /// draw into, answering the limit if it is -- the same refusal
+    /// [`resize_in_place`](Self::resize_in_place) gives
+    /// ([`InPlace::TooLarge`]), asked *before* anything is allocated for the
+    /// size. `--nested` asks it before building host buffers at a size the
+    /// render target would then refuse. `None` for every other pipeline:
+    /// pixman has no such limit, and the scanout tier is never resized here.
+    pub(super) fn exceeds_max_target(&self, width: i32, height: i32) -> Option<(i32, i32)> {
+        match &self.pipeline {
+            Pipeline::Gles(gpu) => gpu.exceeds_max_target(width, height),
+            Pipeline::Pixman(_) => None,
+            #[cfg(feature = "gpu-scanout")]
+            Pipeline::Scanout(_) => None,
+        }
+    }
+
     /// The DRM render node this session's renderer is on, where it has one.
     ///
     /// `None` for pixman, which has no device at all: it `mmap`s whatever
@@ -1050,17 +1100,44 @@ pub(super) fn draw_frame(
             let PixmanBackend {
                 renderer, image, ..
             } = cpu;
+            // pixman has no GPU buffer to hand over: the host always gets a
+            // read-back from this arm.
             draw_frame_with(
-                state, renderer, image, damage, cursor, *size, output, locked,
+                state, renderer, image, damage, cursor, *size, output, locked, false,
             )
+            .0
         }
         Pipeline::Gles(gpu) => {
             let GlesBackend {
                 renderer, buffer, ..
             } = &mut **gpu;
-            draw_frame_with(
-                state, renderer, buffer, damage, cursor, *size, output, locked,
-            )
+            // Read once, here: the same answer decides whether the generic
+            // body reads the frame back and whether this arm blits it.
+            let by_dmabuf = state
+                .host
+                .as_ref()
+                .is_some_and(super::nested::Host::presents_dmabuf);
+            #[cfg_attr(not(feature = "gpu-scanout"), allow(unused_mut))]
+            let (mut outcome, owed) = draw_frame_with(
+                state, renderer, buffer, damage, cursor, *size, output, locked, by_dmabuf,
+            );
+            // The frame the host is owed, as a dma-buf rather than bytes:
+            // copied on the GPU into a free host buffer and committed (see
+            // `nested/gpu.rs`). `owed` is only ever `Some` when `by_dmabuf`
+            // was, and without the feature `presents_dmabuf` is never true.
+            #[cfg(feature = "gpu-scanout")]
+            if let (Some(region), Some(host)) = (owed, &mut state.host) {
+                let presented = host.present_dmabuf(*size, region, |dmabuf| {
+                    gles::copy_into(renderer, buffer, *size, dmabuf)
+                });
+                outcome.host_committed = presented.committed;
+                // A path that just fell back to read-back owes the host a
+                // frame it has not had: ask for one, once.
+                outcome.retry_render |= presented.fell_back;
+            }
+            #[cfg(not(feature = "gpu-scanout"))]
+            let _ = owed;
+            outcome
         }
         // A separate body, not a third `draw_frame_with` arm: this tier has
         // no read-back, no presenter hand-off and no use for `damage` at all
@@ -1380,6 +1457,12 @@ impl State {
 /// `T` is the renderer's own target type (a `pixman::Image` today); it is a
 /// type parameter rather than an associated type because Smithay's [`Bind`]
 /// is parameterised by the target, so one renderer may bind several kinds.
+///
+/// `host_by_dmabuf` says the `--nested` host takes this frame as a dma-buf
+/// the caller copies on the GPU rather than as read-back bytes: the frame is
+/// then not read back for the host at all, and the second half of the answer
+/// is the damage the caller owes it (`None` when nothing drew or nothing
+/// changed). Only the GLES arm of [`draw_frame`] ever passes `true`.
 #[allow(clippy::too_many_arguments)]
 fn draw_frame_with<R, T>(
     state: &mut State,
@@ -1390,12 +1473,14 @@ fn draw_frame_with<R, T>(
     size: (i32, i32),
     output: &Output,
     locked: bool,
-) -> FrameOutcome
+    host_by_dmabuf: bool,
+) -> (FrameOutcome, Option<Rectangle<i32, Physical>>)
 where
     R: Renderer + ImportAll + ImportMem + Bind<T> + ExportMem,
     R::TextureId: Texture + Send + Clone + 'static,
 {
     let mut outcome = FrameOutcome::default();
+    let mut owed = None;
     let (width, height) = size;
     let frame = FrameContext {
         size,
@@ -1498,7 +1583,16 @@ where
                     // `--headless`, e.g. under IPC-only control): that copy
                     // would be pure waste on every render with nothing to
                     // hand it to.
-                    if (state.host.is_some() || state.tty.is_some())
+                    if host_by_dmabuf && state.host.is_some() {
+                        // The host takes this frame as a dma-buf the caller
+                        // copies on the GPU: nothing to read back. `--nested`
+                        // has no `--tty` beside it, so no other presenter is
+                        // skipped by this. The whole frame is owed (age 0,
+                        // see above), reported as the bbox of what the
+                        // tracker says changed, exactly as the read-back
+                        // below would have.
+                        owed = render_result.damage.map(|damaged| union_bbox(damaged));
+                    } else if (state.host.is_some() || state.tty.is_some())
                         && let Some(damaged) = render_result.damage
                     {
                         // Bounding box of every damaged rect, not the rects
@@ -1556,7 +1650,7 @@ where
         }
         Err(error) => tracing::warn!(%error, "could not bind the framebuffer"),
     }
-    outcome
+    (outcome, owed)
 }
 
 /// The smallest rectangle containing every rect in `rects`. A free function
