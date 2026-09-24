@@ -125,17 +125,40 @@ pub struct PendingPlanes {
 
 impl PendingPlanes {
     /// How many pending plane fds `client` has this compositor hold.
+    /// Test-only: the guard reads the count through [`Self::try_claim`].
+    #[cfg(test)]
     pub(in crate::compositor) fn live_for(&self, client: &ClientId) -> u32 {
         self.per_client.get(client).copied().unwrap_or(0)
     }
 
-    /// Counts one more plane on `params` for `client`. The caller has
-    /// already checked the bound. The counts cannot overflow: each unit is a
+    /// Counts one more plane on `params` for `client`, unless `refuse`
+    /// (given how many the client holds) says no, in which case nothing is
+    /// counted and the refusal and that count are handed back.
+    ///
+    /// One lookup in each map on the admitted path, which is every `add` of
+    /// every well-behaved client. The counts cannot overflow: each unit is a
     /// live fd in this process's table, and the cap stops a client far below
     /// `u32::MAX`.
-    fn claim(&mut self, client: &ClientId, params: ObjectId) {
+    fn try_claim(
+        &mut self,
+        client: &ClientId,
+        params: ObjectId,
+        refuse: impl FnOnce(u32) -> Option<Refusal>,
+    ) -> Result<(), (Refusal, u32)> {
+        let live = self.per_client.entry(client.clone()).or_insert(0);
+        if let Some(refusal) = refuse(*live) {
+            let held = *live;
+            if held == 0 {
+                // Only a refusal at zero could have just made the entry,
+                // which nothing does, but the invariant (no zero entries)
+                // should not rest on that.
+                self.per_client.remove(client);
+            }
+            return Err((refusal, held));
+        }
+        *live += 1;
         *self.per_params.entry(params).or_insert(0) += 1;
-        *self.per_client.entry(client.clone()).or_insert(0) += 1;
+        Ok(())
     }
 
     /// Forgets every plane `params` holds: it was consumed, or destroyed.
@@ -202,13 +225,14 @@ where
     // again. That proves any syncobj timeline recorded on the same number
     // was closed; see `drm_syncobj/retained.rs`.
     state.drm_syncobj.fd_arrived(fd.as_raw_fd());
-    let id = client.id();
-    let live = state.pending_planes.live_for(&id);
-    let refusal = plane_refusal(live, || {
-        crate::compositor::fd_pressure::table().is_some_and(|table| table.pressured())
-    });
-    let Some(refusal) = refusal else {
-        state.pending_planes.claim(&id, resource.id());
+    let claimed = state
+        .pending_planes
+        .try_claim(&client.id(), resource.id(), |live| {
+            plane_refusal(live, || {
+                crate::compositor::fd_pressure::table().is_some_and(|table| table.pressured())
+            })
+        });
+    let Err((refusal, live)) = claimed else {
         return false;
     };
     let (bound, why) = match refusal {

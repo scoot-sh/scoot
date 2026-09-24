@@ -353,3 +353,46 @@ fn syncobj_fd() -> Option<OwnedFd> {
     let _ = node.destroy_syncobj(handle);
     fd
 }
+
+/// Prints what one sweep costs per record, against real fds: real syncobjs
+/// where this machine can make them (every record live, the full check), and
+/// eventfds (every record open but of the wrong kind). Asserts nothing about
+/// time; run by hand:
+///
+/// ```text
+/// cargo test --release -p scoot --bin scoot sweep_cost -- --ignored --nocapture
+/// ```
+#[test]
+#[ignore = "prints per-record sweep timings for a human; asserts nothing"]
+fn sweep_cost() {
+    const RECORDS: usize = 128;
+    const ROUNDS: u32 = 2_000;
+    let (_display, a, _) = two_clients();
+    let syncobjs: Vec<OwnedFd> = (0..RECORDS).map_while(|_| syncobj_fd()).collect();
+    let eventfds: Vec<OwnedFd> = (0..RECORDS)
+        .map(|_| {
+            rustix::event::eventfd(0, rustix::event::EventfdFlags::CLOEXEC).expect("an eventfd")
+        })
+        .collect();
+    for (label, fds) in [("syncobj (live)", &syncobjs), ("eventfd (wrong kind)", &eventfds)] {
+        if fds.len() < RECORDS {
+            println!("sweep cost, {label}: skipped, only {} fds", fds.len());
+            continue;
+        }
+        let mut swept = std::time::Duration::ZERO;
+        for _ in 0..ROUNDS {
+            let mut ledger = RetainedTimelines::default();
+            for fd in fds {
+                ledger.record(&a, fd.as_raw_fd());
+            }
+            let started = std::time::Instant::now();
+            std::hint::black_box(ledger.sweep(&a, timeline_fd_open));
+            swept += started.elapsed();
+        }
+        let per_record = swept / (ROUNDS * RECORDS as u32);
+        println!(
+            "sweep cost, {label}: {per_record:?} per record, so {:?} for a {RECORDS}-record sweep",
+            per_record * RECORDS as u32
+        );
+    }
+}

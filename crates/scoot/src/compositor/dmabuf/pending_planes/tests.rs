@@ -525,3 +525,45 @@ impl Dispatch<wayland_client::protocol::wl_buffer::WlBuffer, ()> for TestClient 
     ) {
     }
 }
+
+/// Prints what the bookkeeping on the `add` path costs, without the wire:
+/// one claim per plane and one release per params object, as a four-plane
+/// buffer's construction does. Asserts nothing about time; run by hand:
+///
+/// ```text
+/// cargo test --release -p scoot --bin scoot pending_plane_bookkeeping_cost -- --ignored --nocapture
+/// ```
+#[test]
+#[ignore = "prints per-plane timings for a human; asserts nothing"]
+fn pending_plane_bookkeeping_cost() {
+    const ROUNDS: u32 = 200_000;
+    let mut fixture = start("scoot-pp-cost");
+    fixture.done(Step::Hoard {
+        params: 1,
+        planes: 1,
+    });
+    let client = fixture.client(0).id();
+    // A real params object's id, reused as the key every round: the maps'
+    // capacity is warm after the first, which is the steady state.
+    let params = fixture
+        .state
+        .pending_planes
+        .per_params
+        .keys()
+        .next()
+        .cloned()
+        .expect("the hoarded params object");
+    let planes = &mut fixture.state.pending_planes;
+    planes.release(&client, &params);
+    let started = std::time::Instant::now();
+    for _ in 0..ROUNDS {
+        for _ in 0..4 {
+            let claimed =
+                planes.try_claim(&client, params.clone(), |live| super::plane_refusal(live, || false));
+            std::hint::black_box(claimed).expect("under the bound");
+        }
+        planes.release(&client, &params);
+    }
+    let per_plane = started.elapsed() / (ROUNDS * 4);
+    println!("pending-plane bookkeeping: {per_plane:?} per plane (claim, plus a quarter release)");
+}
