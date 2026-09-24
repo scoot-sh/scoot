@@ -9,6 +9,16 @@ scoot has not cut a numbered release yet; entries are dated.
 
 ## Unreleased
 
+### 2026-09-23 — resizing a `--nested` window no longer rebuilds the GPU renderer
+
+- **Under `--renderer gles`, a resize now keeps the renderer** and swaps in a
+  new render target at the new size instead of starting a whole new GPU
+  context. Dragging the edge of a `--nested --renderer gles` window used to
+  pay that rebuild for every size it passed through; now the resize itself
+  costs about what it does under pixman, and what is left is drawing the
+  frame at the new size. Nothing to change on your side; pixman, the
+  default, is unaffected.
+
 ### 2026-09-23 — screenshots show the pointer the same way on every backend
 
 - **Screenshots now show the pointer on every backend and renderer**, and

@@ -364,9 +364,10 @@ impl Backend {
     /// backend already has, where the pipeline does that (see [`InPlace`]).
     ///
     /// The offscreen GLES pipeline does: a whole new backend is a new EGL
-    /// context and shader set, 16.6 ms per size on the dev VM against
-    /// microseconds for the renderbuffer alone (see `gles::GlesBackend::resize`).
-    /// pixman does not, and needs not: its whole backend rebuilds in 37 µs.
+    /// context and shader set, 3.95 ms per size on the dev VM's llvmpipe
+    /// against 15.7 µs for the renderbuffer alone (`headless::bench`'s
+    /// `resize_cost`, LTO off; see `gles::GlesBackend::resize`). pixman does
+    /// not, and needs not: its whole backend rebuilds in 11.3 µs there.
     /// The scanout tier never reaches here (`State::resize_output` answers it
     /// with [`note_resized`](Self::note_resized)).
     ///

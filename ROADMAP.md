@@ -104,6 +104,25 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[A GLES resize keeps its renderer](docs/backlog/resolved/gles-resize-in-place-done.md)**
+  (2026-09-23, PR #PRNUM) — under `--renderer gles` (`--headless`/`--nested`)
+  `State::resize_output` reallocates only the offscreen renderbuffer
+  (`GlesBackend::resize`), keeping the EGL context, its shaders, every
+  imported client texture and the device; the new target is bound before
+  the old is released, so a refused size leaves the old one drawing, then
+  falls back to a rebuild pinned to the session's device, then refuses as
+  before. Damage tracker, recorded size and cursor record follow the new
+  target; the read-back staging and PR #231's capture pools do not depend on
+  the output's size. pixman and the `--tty` scanout tier unchanged. Dev VM
+  (llvmpipe, LTO off on both trees): 3.95 ms → 15.7 µs per resize (pixman
+  11.3 µs); a `--nested` drag under cage 17.0 → 14.7 ms of CPU per size,
+  every size in place, the remainder llvmpipe's full frame at the new size
+  (pixman 4.5 ms); screenshots byte-identical before and after; RSS flat
+  over 1000 resizes. Tests pin a resized target byte-identical to a fresh
+  one, the device/render node/context unchanged, a client dma-buf drawn from
+  the same texture with no re-import, and a refused size leaving the
+  session as it was.
+
 - **[Captures carry the pointer the request asked for, on every tier](docs/backlog/resolved/capture-cursor-parity-done.md)**
   (2026-09-23, PR #231) — `ext-image-copy-capture-v1` honours
   `paint_cursors` (it was ignored everywhere) and IPC `screenshot` gains an

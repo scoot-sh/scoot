@@ -16,7 +16,8 @@
 # tick, so steps can merge), and CPU per applied size. Then it stops at a few
 # sizes and, once a frame at that size has drawn, takes an IPC screenshot of
 # the nested session and a `grim` shot of the host, checking each PNG's
-# dimensions.
+# dimensions. The nested scoot's RSS is printed before and after the drag, so
+# a target that is not freed across resizes shows as growth.
 #
 #   SCOOT=/path/to/scoot RENDERER=gles STEPS=120 PACE=0.03 \
 #       PREFIX=/tmp/drag-after scripts/nested-drag-bench.sh
@@ -88,6 +89,7 @@ inner windows | grep -q '"app_id"' || { echo "foot never mapped inside"; exit 1;
 sleep 1
 
 jiffies() { awk '{print $14 + $15}' "/proc/$inner_pid/stat"; }
+rss() { awk '/^VmRSS:/ {print $2 " kB"}' "/proc/$inner_pid/status"; }
 in_place() { strip "$INNER_LOG" | grep -c 'resized the render target in place' || true; }
 rebuilt() {
     strip "$INNER_LOG" \
@@ -109,7 +111,7 @@ resize_host() {
 
 hz=$(getconf CLK_TCK)
 idle_start=$(jiffies); sleep 3; idle=$(( $(jiffies) - idle_start ))
-echo "idle: $idle jiffies over 3 s (CLK_TCK=$hz, inner size $(inner_size))"
+echo "idle: $idle jiffies over 3 s (CLK_TCK=$hz, inner size $(inner_size), RSS $(rss))"
 
 before_in_place=$(in_place); before_rebuilt=$(rebuilt)
 start=$(jiffies); started=$(date +%s.%N)
@@ -129,7 +131,7 @@ if [ "$applied" -gt 0 ]; then
     awk -v j="$spent" -v n="$applied" -v hz="$hz" \
         'BEGIN { printf "drag: %.2f ms of nested-scoot CPU per applied size\n", j * 1000 / hz / n }'
 fi
-echo "inner size after the drag: $(inner_size)"
+echo "inner size after the drag: $(inner_size), RSS $(rss)"
 
 n=0
 for size in 1024x700 700x900 1500x950; do

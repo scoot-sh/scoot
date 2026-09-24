@@ -326,18 +326,20 @@ running with no GPU at all is a hard requirement here, not a fallback tier.
   show scrambled tiles -- is dropped from it and the window re-sent. Whether a real GL client reallocates into the tranche on
   real hardware and goes direct is [`../Asahi.md`](../Asahi.md)'s Test 6 --
   not yet seen; no GL client on the dev VM can allocate a dma-buf at all.
-- **A resize is expensive under `gles`, and `--nested` now resizes.** Every
-  resize rebuilds the render target, and under `gles` that means a whole new
-  EGL context and shader set: measured on the dev VM (llvmpipe, 800x800, 8
-  windows) at **16.6 ms** per resize against **37 µs** for pixman (both
-  measured with `CARGO_PROFILE_RELEASE_LTO=thin`, not the repo's fat-LTO
-  release profile, which OOM-kills on the 3.8 GB dev VM) — a full
-  60 Hz frame apiece. It is once per *distinct* size, not once per event, so
-  settling at a new size costs one; dragging a `--nested --renderer gles`
-  window to resize pays it per distinct size that drag passes through and
-  will stutter until you let go. pixman is unaffected, and it is the
-  default. If this ever matters, the fix is resizing the GLES target in
-  place instead of rebuilding it.
+- **A resize under `gles` keeps the renderer.** `--nested` follows its host
+  window's size, and under `--renderer gles` each new size reallocates only
+  the offscreen target: the EGL context, its shaders and every client
+  texture already uploaded stay as they are. On the dev VM (llvmpipe,
+  800x800, 8 windows, release build with LTO off) a resize costs **15.7 µs**
+  against **11.3 µs** for pixman; rebuilding the renderer, which it used to
+  do, cost **3.95 ms** there (and 16.6 ms when first measured, under a
+  thin-LTO build). What a size change still costs is the frame drawn at the
+  new size: a `--nested --renderer gles` drag measured **14.7 ms** of
+  compositor CPU per size (was 17.0 ms), against 4.5 ms under pixman, and
+  that is llvmpipe drawing and reading back a whole frame, not the resize.
+  pixman is unaffected, and it is the default. If the GPU refuses a size (larger than it can render), scoot
+  tries a whole new renderer on the same GPU and, if that fails too, stays
+  at the size it was, as before.
 - **Hardware first.** The EGL device is chosen by preferring a real device
   over a software one and taking the first that yields a working renderer, so
   a box with a GPU uses the GPU. Note that "software" here means only that
