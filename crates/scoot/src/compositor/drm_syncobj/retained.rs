@@ -59,13 +59,11 @@
 //! some other request. Of the fd-carrying requests scoot serves, the
 //! retaining ones are all invalidated above. The rest (`receive` on the
 //! selection offers, `set_gamma`) hold their fd only until the same
-//! dispatch's flush or close. There is one more place: wayland-backend
-//! buffers a client's received fds until their message is parsed. A client
-//! can use either to keep an old record reading live for as long as that
-//! fd lives. That over-counts the record's owner and never under-counts
-//! anyone, so it cannot open a hole in the bound. It is also far less than
-//! the second path already allows: see
-//! `docs/backlog/core/wayland-backend-unbounded-incoming-fds.md`.
+//! dispatch's flush or close, and wayland-backend holds a received fd only
+//! until its message is parsed. A client sending a syncobj fd through one of
+//! those could make an old record read live for that long. That over-counts
+//! the record's owner, transiently, and never under-counts anyone, so it
+//! cannot open a hole in the bound.
 //!
 //! ## When the bound is checked
 //!
