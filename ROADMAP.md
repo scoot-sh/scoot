@@ -105,7 +105,7 @@ each item's own file records why it landed when it did.
 ## Recently shipped (since 2026-09-15)
 
 - **[scoot vs niri, measured (dev VM half)](docs/backlog/resolved/niri-ab-benchmark-done.md)**
-  (2026-09-24, PR #@@PR@@) — the user asked directly whether we had any sense of
+  (2026-09-24, PR #237) — the user asked directly whether we had any sense of
   niri's resource usage against scoot's. [`docs/benchmarks.md`](docs/benchmarks.md) now has it for the one
   arrangement the dev VM allows: both nested in the same cage host, niri
   26.04 (nixpkgs) and scoot `fe41921` (release), three rotating rounds, host

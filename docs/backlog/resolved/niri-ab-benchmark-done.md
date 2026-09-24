@@ -8,7 +8,7 @@ blocked: null
 
 # A/B: scoot vs niri — RESOLVED (dev VM half)
 
-RESOLVED 2026-09-24. The ticket was blocked on "after the remaining
+RESOLVED 2026-09-24 (PR #237). The ticket was blocked on "after the remaining
 unblocked GPU-tier tickets"; the user then asked for it directly ("Do we
 have any sense of resource usage of niri vs scoot? Can we A/B them?"). The
 results, method and every caveat are in [`docs/benchmarks.md`](../../benchmarks.md);
