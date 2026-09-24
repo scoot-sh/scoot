@@ -133,6 +133,18 @@ pub struct Host {
     /// render -- a buffer becoming usable while this is set re-arms
     /// rendering itself.
     present_skipped: bool,
+    /// The render target holds a drawn frame the host has not been handed,
+    /// because no dma-buf was usable when it was drawn -- the frame drawn in
+    /// the same tick as a resize, before the host has answered `created` for
+    /// the new chain, is the common case. When a buffer becomes usable that
+    /// frame is copied over as it stands ([`Host::buffer_usable`]) rather
+    /// than drawn a second time. Set only by a skipped
+    /// [`Host::present_dmabuf`], which is only ever reached after a
+    /// successful draw; cleared by any frame that reaches the host, by a new
+    /// render target (not drawn yet: nothing is owed from it) and by a
+    /// fallback to read-back.
+    #[cfg(feature = "gpu-scanout")]
+    frame_owed: bool,
 }
 
 pub fn init(
@@ -141,7 +153,26 @@ pub fn init(
     width: i32,
     height: i32,
 ) -> Result<(), Box<dyn Error>> {
-    let conn = Connection::connect_to_env()?;
+    init_on(
+        loop_handle,
+        state,
+        Connection::connect_to_env()?,
+        width,
+        height,
+    )
+}
+
+/// [`init`] over a connection already made -- the suites hand in one end of
+/// a socket pair whose other end is a second, in-process compositor, since
+/// `WAYLAND_DISPLAY` is process-global and the host must not be scoot's own
+/// socket.
+pub(super) fn init_on(
+    loop_handle: smithay::reexports::calloop::LoopHandle<'static, State>,
+    state: &mut State,
+    conn: Connection,
+    width: i32,
+    height: i32,
+) -> Result<(), Box<dyn Error>> {
     let (globals, event_queue) = registry_queue_init::<State>(&conn)?;
     let qh = event_queue.handle();
 
@@ -161,6 +192,16 @@ pub fn init(
             .and_then(|backend| gpu::negotiate(&conn, &globals, &qh, backend)),
         None => None,
     };
+    // The same once-per-session line a `gpu-scanout` build logs, so a GLES
+    // session says how its frames reach the host in either build. Under
+    // pixman there is nothing to say: read-back is the only way there is.
+    #[cfg(not(feature = "gpu-scanout"))]
+    if state.renderer == crate::cli::RendererKind::Gles {
+        tracing::info!(
+            reason = "this build has no gpu-scanout feature",
+            "nested: presenting to the host by read-back into wl_shm"
+        );
+    }
 
     let surface = compositor.create_surface(&qh, ());
     let xdg_surface = wm_base.get_xdg_surface(&surface, &qh, ());
@@ -194,6 +235,8 @@ pub fn init(
         pending_size: None,
         pending_resize: PendingResize::default(),
         present_skipped: false,
+        #[cfg(feature = "gpu-scanout")]
+        frame_owed: false,
     });
 
     WaylandSource::new(conn, event_queue)
@@ -279,9 +322,9 @@ impl Host {
     /// the buffer damage. The dma-buf counterpart of [`Host::present`], and
     /// dropped -- reporting nothing committed -- for the same reasons: not
     /// configured, a frame of another size than the chain, or no free host
-    /// buffer (every one held by the host or not yet `created`;
-    /// `present_skipped` then has the next `release` or `created` ask for
-    /// the frame again).
+    /// buffer (every one held by the host or not yet `created`; the drawn
+    /// frame is then owed, and the next `release` or `created` copies it
+    /// over as it stands -- see [`Host::buffer_usable`]).
     ///
     /// A copy that fails switches the session to read-back for good (see
     /// [`Host::fall_back`]) and says so in the answer, so the caller can ask
@@ -313,6 +356,7 @@ impl Host {
         }
         let Some((dmabuf, buffer, held)) = chain.free_slot() else {
             self.present_skipped = true;
+            self.frame_owed = true;
             return answer;
         };
         if let Err(error) = copy(dmabuf) {
@@ -324,6 +368,7 @@ impl Host {
         }
         *held = true;
         self.present_skipped = false;
+        self.frame_owed = false;
         self.surface.attach(Some(buffer), 0, 0);
         self.surface
             .damage_buffer(damage.loc.x, damage.loc.y, damage.size.w, damage.size.h);
@@ -357,7 +402,77 @@ impl Host {
                 return;
             }
         }
-        if host.take_present_skipped() {
+        Self::buffer_usable(state);
+    }
+
+    /// A host buffer just became usable -- released by the host, or (dma-buf)
+    /// created -- so a frame that was skipped for want of one can go out
+    /// now. Under dma-buf presentation a frame already drawn and owed is
+    /// copied over as it stands (`hand_over_owed_frame`); otherwise, as the
+    /// read-back path always has, a render is asked for. Nothing was
+    /// skipped: nothing to do.
+    pub(super) fn buffer_usable(state: &mut State) {
+        let Some(host) = &mut state.host else {
+            return;
+        };
+        let skipped = host.take_present_skipped();
+        #[cfg(feature = "gpu-scanout")]
+        if std::mem::take(&mut host.frame_owed) {
+            Self::hand_over_owed_frame(state);
+            return;
+        }
+        if skipped {
+            state.request_render();
+        }
+    }
+
+    /// Copies the frame the render target already holds into a usable host
+    /// dma-buf and commits it, stamping the presentation feedback that frame
+    /// left queued when it was skipped (it is on screen from now). Saves a
+    /// whole second draw of an unchanged frame -- after every resize, whose
+    /// first frame is drawn before the host has created the new chain.
+    ///
+    /// Falls back to asking for a render wherever it cannot do that: no
+    /// output or render target to copy from, or a copy that failed (which has
+    /// just switched the session to read-back). Still no free buffer after
+    /// all leaves the frame owed for the next one.
+    #[cfg(feature = "gpu-scanout")]
+    fn hand_over_owed_frame(state: &mut State) {
+        let Some((id, output)) = state
+            .outputs
+            .primary_entry()
+            .map(|(id, output)| (id, output.clone()))
+        else {
+            state.request_render();
+            return;
+        };
+        let Some(mut backend) = state.take_backend(id) else {
+            state.request_render();
+            return;
+        };
+        let size = backend.size();
+        let whole = smithay::utils::Rectangle::from_size(size.into());
+        let answer = match &mut state.host {
+            Some(host) => {
+                host.present_dmabuf(size, whole, |dmabuf| backend.copy_frame_into(dmabuf))
+            }
+            None => DmabufPresent::default(),
+        };
+        state.put_backend(id, backend);
+        if answer.committed {
+            // debug!: once per resize at most in a drag (resizes coalesce to
+            // one per frame tick), and the line that shows a resize's first
+            // frame was not drawn twice.
+            tracing::debug!(
+                width = size.0,
+                height = size.1,
+                "nested: handed the owed frame to the host without redrawing it"
+            );
+            // As the render tail would have for this frame: nested has no
+            // retrace to count, so `seq` is 0 and nothing is vsync'd.
+            state.present_feedback(&output, false, None, 0, None);
+        }
+        if answer.fell_back {
             state.request_render();
         }
     }
@@ -394,6 +509,9 @@ impl Host {
         if !self.abandon_gpu(reason) {
             return;
         }
+        // Whatever was owed goes out by read-back now: the caller asks for a
+        // frame, which the read-back path draws and presents.
+        self.frame_owed = false;
         let presenter = match Presenter::shm(&self.shm, &self.qh, self.size.0, self.size.1) {
             Ok(presenter) => presenter,
             Err(error) => {
@@ -625,6 +743,12 @@ impl Host {
         let old = std::mem::replace(&mut host.presenter, presenter);
         old.destroy();
         host.size = (width, height);
+        // The target at the new size has not been drawn: nothing in it is
+        // owed to the host until a frame drawn into it is skipped.
+        #[cfg(feature = "gpu-scanout")]
+        {
+            host.frame_owed = false;
+        }
         Ok(())
     }
 
@@ -725,6 +849,24 @@ impl Host {
 
     pub(super) fn set_pointer(&mut self, pointer: HostPointer) {
         self.pointer = Some(pointer);
+    }
+
+    /// Which way frames go out right now, for the suites: `"dmabuf"`,
+    /// `"shm"`, or `"unbuilt"`.
+    #[cfg(all(test, feature = "gpu-scanout"))]
+    pub(super) fn presenter_for_test(&self) -> &'static str {
+        match &self.presenter {
+            Presenter::Unbuilt => "unbuilt",
+            Presenter::Shm(_) => "shm",
+            #[cfg(feature = "gpu-scanout")]
+            Presenter::Dmabuf(_) => "dmabuf",
+        }
+    }
+
+    /// Whether the dma-buf path is still open to this session.
+    #[cfg(all(test, feature = "gpu-scanout"))]
+    pub(super) fn may_present_dmabuf_for_test(&self) -> bool {
+        self.gpu.is_some()
     }
 
     /// Clears and returns whether a presentation was skipped for lack of a

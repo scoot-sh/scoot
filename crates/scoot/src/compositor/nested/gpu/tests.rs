@@ -329,3 +329,5 @@ fn a_primary_node_and_its_render_node_are_the_same_device() {
     assert!(super::feedback::same_drm_device(render, primary.dev_id()));
     assert!(super::feedback::same_drm_device(render, render));
 }
+
+mod live;

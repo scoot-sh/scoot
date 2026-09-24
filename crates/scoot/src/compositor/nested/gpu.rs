@@ -25,7 +25,10 @@
 //! # When it is used, and when read-back is
 //!
 //! Decided once, at startup ([`negotiate`]), and logged once at INFO either
-//! way with the reason. Read-back is kept whenever any of these holds:
+//! way, with the reason, for every GLES session. A pixman session has only
+//! ever had the one way and says nothing; a default build's GLES session
+//! logs the same read-back line, naming the missing feature as the reason.
+//! Read-back is kept whenever any of these holds:
 //!
 //! - the build has no `gpu-scanout` feature, or the session renders with
 //!   pixman (there is no GPU buffer to hand over);
@@ -184,6 +187,9 @@ pub(super) fn negotiate(
     backend: &mut Backend,
 ) -> Option<GpuPresent> {
     match try_negotiate(conn, globals, qh, backend) {
+        // Nothing to say under pixman, which has only ever had the one way
+        // to present -- the same silence a default build keeps there.
+        Err(Refusal::NoGpu) => None,
         Ok(gpu) => {
             tracing::info!(
                 format = ?gpu.choice.fourcc,
@@ -193,10 +199,24 @@ pub(super) fn negotiate(
             );
             Some(gpu)
         }
-        Err(reason) => {
+        Err(Refusal::Because(reason)) => {
             tracing::info!(%reason, "nested: presenting to the host by read-back into wl_shm");
             None
         }
+    }
+}
+
+/// Why [`negotiate`] kept read-back.
+enum Refusal {
+    /// The session's renderer has no GPU buffer to hand over (pixman).
+    NoGpu,
+    /// Anything else, said once at INFO.
+    Because(Box<dyn Error>),
+}
+
+impl<E: Into<Box<dyn Error>>> From<E> for Refusal {
+    fn from(error: E) -> Self {
+        Self::Because(error.into())
     }
 }
 
@@ -205,9 +225,9 @@ fn try_negotiate(
     globals: &GlobalList,
     qh: &QueueHandle<State>,
     backend: &mut Backend,
-) -> Result<GpuPresent, Box<dyn Error>> {
+) -> Result<GpuPresent, Refusal> {
     let Some(render_formats) = backend.dmabuf_render_formats() else {
-        return Err("the session renders with pixman".into());
+        return Err(Refusal::NoGpu);
     };
     let Some(our_device) = backend.render_node() else {
         return Err("the renderer's EGL device names no DRM node".into());
@@ -221,7 +241,7 @@ fn try_negotiate(
         Ok(feedback) => feedback,
         Err(error) => {
             dmabuf.destroy();
-            return Err(error);
+            return Err(error.into());
         }
     };
     let same = |dev| feedback::same_drm_device(dev, our_device);
@@ -247,7 +267,7 @@ fn try_negotiate(
         }),
         Err(error) => {
             dmabuf.destroy();
-            Err(error)
+            Err(error.into())
         }
     }
 }

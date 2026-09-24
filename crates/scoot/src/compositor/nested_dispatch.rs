@@ -73,18 +73,11 @@ impl Dispatch<HostBuffer, ()> for State {
         let wayland_client::protocol::wl_buffer::Event::Release = event else {
             return;
         };
-        // Scoped so the mutable borrow of `state.host` ends before the
-        // possible `state.request_render()` call below, which needs `state`
-        // whole again.
-        let should_retry = if let Some(host) = &mut state.host {
+        if let Some(host) = &mut state.host {
             host.mark_released(buffer);
-            host.take_present_skipped()
-        } else {
-            false
-        };
-        if should_retry {
-            state.request_render();
         }
+        // A frame skipped for want of a free buffer can go out now.
+        Host::buffer_usable(state);
     }
 }
 
