@@ -223,6 +223,27 @@ impl Pair {
     }
 }
 
+/// Runs `test` against a fresh pair, with the nested scoot's whole life --
+/// built, driven, dropped -- inside [`capture_logs`], and answers what it
+/// returned and the logs; `None` (said on stderr) where this machine cannot
+/// present by dma-buf. The whole life, not just the driving: the renderer
+/// creates tracing spans when it is built and enters them when it is
+/// dropped, and a span created under one subscriber and entered under
+/// another panics in `tracing-subscriber`'s registry -- which `cargo test`
+/// reached (one process, a global subscriber some other test set) and
+/// nextest never did.
+fn with_pair<T>(
+    name: &str,
+    refuse: bool,
+    test: impl FnOnce(&mut Pair) -> T,
+) -> Option<(T, String)> {
+    let (answer, logs) = capture_logs(|| {
+        let mut pair = pair(name, refuse)?;
+        Some(test(&mut pair))
+    });
+    answer.map(|answer| (answer, logs))
+}
+
 /// The whole path against a host that imports: negotiated at startup, the
 /// frame on the host's screen, by dma-buf throughout -- and still so after
 /// the host resizes the window, which replaces the chain and hands the
@@ -230,37 +251,37 @@ impl Pair {
 #[test]
 fn frames_reach_a_host_by_dma_buf_and_follow_its_resize() {
     let _mappings = exclusive_mappings();
-    let Some(mut pair) = pair(
+    let Some(((), logs)) = with_pair(
         "frames_reach_a_host_by_dma_buf_and_follow_its_resize",
         false,
+        |pair| {
+            let before = pair.until_the_host_shows_the_frame();
+            assert_eq!(host_of(&pair.nested).presenter_for_test(), "dmabuf");
+
+            pair.commands
+                .send(Command::Resize)
+                .expect("the host is alive");
+            assert!(matches!(
+                pair.replies.recv_timeout(PATIENCE),
+                Ok(Reply::Resized)
+            ));
+            let deadline = Instant::now() + PATIENCE;
+            loop {
+                let after = pair.until_the_host_shows_the_frame();
+                if after != before {
+                    break;
+                }
+                assert!(Instant::now() < deadline, "the nested window never resized");
+            }
+            assert_eq!(
+                host_of(&pair.nested).presenter_for_test(),
+                "dmabuf",
+                "a resize keeps the dma-buf path"
+            );
+        },
     ) else {
         return;
     };
-    let ((), logs) = capture_logs(|| {
-        let before = pair.until_the_host_shows_the_frame();
-        assert_eq!(host_of(&pair.nested).presenter_for_test(), "dmabuf");
-
-        pair.commands
-            .send(Command::Resize)
-            .expect("the host is alive");
-        assert!(matches!(
-            pair.replies.recv_timeout(PATIENCE),
-            Ok(Reply::Resized)
-        ));
-        let deadline = Instant::now() + PATIENCE;
-        loop {
-            let after = pair.until_the_host_shows_the_frame();
-            if after != before {
-                break;
-            }
-            assert!(Instant::now() < deadline, "the nested window never resized");
-        }
-        assert_eq!(
-            host_of(&pair.nested).presenter_for_test(),
-            "dmabuf",
-            "a resize keeps the dma-buf path"
-        );
-    });
     assert!(
         !logs.contains(FALLBACK_WARN),
         "nothing refused, nothing fell back:\n{logs}"
@@ -279,38 +300,40 @@ fn frames_reach_a_host_by_dma_buf_and_follow_its_resize() {
 #[test]
 fn a_host_refusing_the_buffers_moves_the_session_to_read_back_once() {
     let _mappings = exclusive_mappings();
-    let Some(mut pair) = pair(
+    let Some(((presenter, still_open), logs)) = with_pair(
         "a_host_refusing_the_buffers_moves_the_session_to_read_back_once",
         true,
+        |pair| {
+            let deadline = Instant::now() + PATIENCE;
+            while host_of(&pair.nested).presenter_for_test() != "shm" {
+                assert!(
+                    Instant::now() < deadline,
+                    "the refusal never moved the session to read-back (presenter {})",
+                    host_of(&pair.nested).presenter_for_test()
+                );
+                pair.nested.settle();
+                pair.nested.state.request_render();
+                pair.nested.state.render();
+            }
+            // More frames after the switch: they go out by read-back, and
+            // the refusals still in flight for the abandoned chain change
+            // nothing.
+            for _ in 0..5 {
+                pair.nested.settle();
+                pair.nested.state.request_render();
+                pair.nested.state.render();
+            }
+            let host = host_of(&pair.nested);
+            (
+                host.presenter_for_test(),
+                host.may_present_dmabuf_for_test(),
+            )
+        },
     ) else {
         return;
     };
-    let ((), logs) = capture_logs(|| {
-        let deadline = Instant::now() + PATIENCE;
-        while host_of(&pair.nested).presenter_for_test() != "shm" {
-            assert!(
-                Instant::now() < deadline,
-                "the refusal never moved the session to read-back (presenter {})",
-                host_of(&pair.nested).presenter_for_test()
-            );
-            pair.nested.settle();
-            pair.nested.state.request_render();
-            pair.nested.state.render();
-        }
-        // More frames after the switch: they go out by read-back, and the
-        // refusals still in flight for the abandoned chain change nothing.
-        for _ in 0..5 {
-            pair.nested.settle();
-            pair.nested.state.request_render();
-            pair.nested.state.render();
-        }
-    });
-    let host = host_of(&pair.nested);
-    assert_eq!(host.presenter_for_test(), "shm");
-    assert!(
-        !host.may_present_dmabuf_for_test(),
-        "a refusal is for the rest of the session"
-    );
+    assert_eq!(presenter, "shm");
+    assert!(!still_open, "a refusal is for the rest of the session");
     assert_eq!(
         logs.matches(FALLBACK_WARN).count(),
         1,
@@ -326,45 +349,50 @@ fn a_host_refusing_the_buffers_moves_the_session_to_read_back_once() {
 #[test]
 fn a_chain_that_cannot_grow_moves_the_session_to_read_back_once() {
     let _mappings = exclusive_mappings();
-    let Some(mut pair) = pair(
+    let Some((still_open, logs)) = with_pair(
         "a_chain_that_cannot_grow_moves_the_session_to_read_back_once",
         false,
+        |pair| {
+            let before = pair.until_the_host_shows_the_frame();
+            assert_eq!(host_of(&pair.nested).presenter_for_test(), "dmabuf");
+            pair.nested
+                .state
+                .host
+                .as_mut()
+                .expect("a nested session")
+                .fail_growth_for_test();
+            // A resize starts a new chain with one buffer: its first frame
+            // is handed over into it, and the next finds it held and must
+            // grow.
+            pair.commands
+                .send(Command::Resize)
+                .expect("the host is alive");
+            assert!(matches!(
+                pair.replies.recv_timeout(PATIENCE),
+                Ok(Reply::Resized)
+            ));
+            let deadline = Instant::now() + PATIENCE;
+            while host_of(&pair.nested).presenter_for_test() != "shm" {
+                assert!(
+                    Instant::now() < deadline,
+                    "a failed growth never moved the session to read-back (presenter {})",
+                    host_of(&pair.nested).presenter_for_test()
+                );
+                pair.frame_and_look();
+            }
+            // And frames keep reaching the host, now by read-back, at the
+            // new size.
+            let after = pair.until_the_host_shows_the_frame();
+            assert_ne!(after, before, "the resize was followed");
+            host_of(&pair.nested).may_present_dmabuf_for_test()
+        },
     ) else {
         return;
     };
-    let ((), logs) = capture_logs(|| {
-        let before = pair.until_the_host_shows_the_frame();
-        assert_eq!(host_of(&pair.nested).presenter_for_test(), "dmabuf");
-        pair.nested
-            .state
-            .host
-            .as_mut()
-            .expect("a nested session")
-            .fail_growth_for_test();
-        // A resize starts a new chain with one buffer: its first frame is
-        // handed over into it, and the next finds it held and must grow.
-        pair.commands
-            .send(Command::Resize)
-            .expect("the host is alive");
-        assert!(matches!(
-            pair.replies.recv_timeout(PATIENCE),
-            Ok(Reply::Resized)
-        ));
-        let deadline = Instant::now() + PATIENCE;
-        while host_of(&pair.nested).presenter_for_test() != "shm" {
-            assert!(
-                Instant::now() < deadline,
-                "a failed growth never moved the session to read-back (presenter {})",
-                host_of(&pair.nested).presenter_for_test()
-            );
-            pair.frame_and_look();
-        }
-        // And frames keep reaching the host, now by read-back, at the new
-        // size.
-        let after = pair.until_the_host_shows_the_frame();
-        assert_ne!(after, before, "the resize was followed");
-    });
-    assert!(!host_of(&pair.nested).may_present_dmabuf_for_test());
+    assert!(
+        !still_open,
+        "a failed growth is for the rest of the session"
+    );
     assert_eq!(
         logs.matches(FALLBACK_WARN).count(),
         1,
