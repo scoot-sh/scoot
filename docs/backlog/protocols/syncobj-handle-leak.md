@@ -74,11 +74,37 @@ speed, and the kernel memory is not returned until the compositor exits.
   a legitimate long-lived Vulkan client that resizes a lot. It also does
   nothing about reconnect loops.
 
+## The fix, verified against scoot
+
+A `Drop` for `DrmTimelineDeviceSpecific` that destroys the handle on the
+device if the device is still alive. It is safe with `invalidate()`, which
+destroys the handle itself and clears `device` first, and with
+`update_device()`, where replacing the ctx destroys the old handle on the
+old device. Built as a `[patch]` of the pinned checkout into scoot at
+`3e719cc` (release, own target dir, since deleted; binary
+`scoot-3e719cc-smithay-drop-patch` in the dev VM's `~/evidence/sync/bin/`,
+patch at `~/evidence/sync/smithay-drop.patch`):
+
+- the 50000-cycle import-and-destroy loop: slab +180 kB (about 3 bytes per
+  cycle, noise), against +3904 to +4296 kB unpatched;
+- 20000 abandoned waits: +3780 kB while the client lived, as expected, and
+  +100 kB once it exited, against +3908 kB unpatched;
+- the held-commit and continuous-client scenarios unchanged (releases
+  signalled, 0 reuse timeouts, every fullscreen frame direct).
+
+```rust
+impl Drop for DrmTimelineDeviceSpecific {
+    fn drop(&mut self) {
+        if let Some(device) = self.device.upgrade() {
+            let _ = device.destroy_syncobj(self.syncobj);
+        }
+    }
+}
+```
+
 ## What to do
 
-Add a `Drop` for `DrmTimelineInner` (or `DrmTimelineDeviceSpecific`) that
-calls `destroy_syncobj` on the device, if it is still alive. The timeline
-fd then closes with it. Upstream it to Smithay. Until a rev carries it,
+Upstream the `Drop` above to Smithay. Until a rev carries it,
 decide whether to carry it as a patched fork (`[patch]` in the workspace
 `Cargo.toml`), which departs from the "pinned to one Smithay rev" rule and
 is the coordinator's call. The alternative is to leave explicit sync
