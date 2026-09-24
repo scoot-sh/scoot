@@ -104,6 +104,30 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[GLES captures of a static screen no longer keep a frame each](docs/backlog/resolved/gles-capture-leaks-a-frame-per-shot-done.md)**
+  (2026-09-24, PR #TBD) — found by the niri A/B. Under `--renderer gles`,
+  every capture of a screen that was not redrawing kept a whole frame of
+  memory until something drew: 6,250 KiB per shot at 1600x1000, 885 MB
+  after 120. Smithay's `GlesRenderer` queues a dropped GL object instead of
+  deleting it, and only a frame's `finish` (or
+  `cleanup_texture_cache`/`unbind`/`invalidate_caches`) drains the queue.
+  A capture queued its read-back's pixel-pack buffer and its bind's
+  framebuffer object and drained nothing. Both GLES arms of
+  `Backend::capture`, and the GLES capture-cursor region render, now drain
+  once the capture returns (`gles::release_captured`). The per-frame
+  presenter read-back is left alone, since the next frame drains it. The
+  Smithay fork is untouched. Tests count live GL names
+  (`glIsBuffer`/`glIsFramebuffer`) across repeated captures, and three of
+  them failed on the old code at +1 buffer and +1 framebuffer per capture.
+  Dev VM, 120 captures: flat after at most one frame on `--nested`
+  read-back, `--headless`, the `--tty` GPU scanout tier and the `--nested`
+  dma-buf tier, for both `scootctl screenshot --no-cursor` and `grim`.
+  Before the fix every one of these grew linearly. The ticket's
+  unexplained release pattern was glibc's dynamic mmap threshold keeping
+  freed frames. With a fixed threshold, a single drawn frame returned all
+  120 at once. IPC screenshot p50 went from 8.8 to 7.9 ms, and p95 from
+  9.6 to 8.7 ms.
+
 - **[Params planes and retained syncobj timelines are counted, so fd pressure can find those holders](docs/backlog/resolved/client-held-fd-bound-done.md)**
   (2026-09-24, PR #236) — two paths let one client make scoot hold ~927
   fds that no per-client cap counted, shedding every newcomer while the
