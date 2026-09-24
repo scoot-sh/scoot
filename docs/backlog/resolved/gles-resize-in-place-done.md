@@ -49,8 +49,10 @@ RESOLVED 2026-09-23 (PR #232, branch `gles-resize-in-place`).
 `headless::bench::resize_cost` (800x800, 8 windows, best of 5 runs of 40),
 release with `CARGO_PROFILE_RELEASE_LTO=off CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16`
 on both trees -- not the thin LTO the ticket asked for, because a thin-LTO
-build of a second tree exhausted the VM's memory and wedged it; the 16.6 ms
-in the original ticket was that profile's number and does not compare.
+build of a second tree exhausted the VM's memory and wedged it. The
+ticket's 16.6 ms (against 37 µs for pixman) did not reproduce: before is
+3.95 ms here, and pixman shows the same ~3x gap (11.3 µs), which points at
+different measurement conditions rather than the profile or the GLES path.
 Ranges are across all runs. The frame after an in-place resize varies by
 run in a pattern that repeated in all three invocations (runs 1-2 ~0.28 ms,
 run 3 ~1.5 ms, runs 4-5 ~0.64 ms); not investigated -- every run is still

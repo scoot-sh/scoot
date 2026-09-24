@@ -56,9 +56,9 @@
 //! region target is keyed on the region, not the output (see
 //! `capture_cursor::PatchPool`). Rebuilding instead cost a whole new EGL
 //! context and shader set per distinct size -- 3.95 ms on the dev VM's
-//! llvmpipe against 15.7 µs in place (16.6 ms when first measured, under a
-//! different build profile), on a path a `--nested` drag reaches once per
-//! host frame -- and re-imported every client surface on the frame after,
+//! llvmpipe against 15.7 µs in place (first recorded as 16.6 ms, which did
+//! not reproduce), on a path a `--nested` drag reaches once per host
+//! frame -- and re-imported every client surface on the frame after,
 //! since a surface's texture is cached per context. It is also one fewer
 //! way for a resize to change device: an in-place resize cannot, by
 //! construction.

@@ -332,8 +332,9 @@ running with no GPU at all is a hard requirement here, not a fallback tier.
   texture already uploaded stay as they are. On the dev VM (llvmpipe,
   800x800, 8 windows, release build with LTO off) a resize costs **15.7 µs**
   against **11.3 µs** for pixman; rebuilding the renderer, which it used to
-  do, cost **3.95 ms** there (and 16.6 ms when first measured, under a
-  thin-LTO build). What a size change still costs is the frame drawn at the
+  do, cost **3.95 ms** there. (It was first recorded as 16.6 ms against
+  37 µs for pixman; that did not reproduce, and pixman shows the same ~3x
+  gap, so the earlier conditions differed.) What a size change still costs is the frame drawn at the
   new size: a `--nested --renderer gles` drag measured **14.7 ms** of
   compositor CPU per size (was 17.0 ms), against 4.5 ms under pixman, and
   that is llvmpipe drawing and reading back a whole frame, not the resize.
