@@ -24,8 +24,10 @@ creation guards can pick it.
   `destroyed` hook, which also covers disconnect and kill). An `add`
   Smithay itself refuses was claimed, and is released by the dead client's
   params destroy, so no phantom outlives the connection. Cap **32** per
-  client (8 whole four-plane buffers; every client this project knows
-  sends one buffer's planes and creates it at once, so at most 4), grace
+  client (8 whole four-plane buffers; the protocol's usage pattern is to
+  add one buffer's planes and create it at once, so at most 4 -- reasoned,
+  not checked per client, since no real client makes a dma-buf on the dev
+  VM), grace
   **8** under fd pressure. Past either, the client is disconnected with
   `wl_display.error(no_memory)` (shared with the acquire-wait bound in
   `no_memory.rs`; the params interface has no fitting error).

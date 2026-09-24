@@ -17,22 +17,26 @@
 //!
 //! ## The number
 //!
-//! [`MAX_PENDING_PLANES_PER_CLIENT`] is 32. No client this project knows of
-//! has more than one buffer's planes in flight at once. Mesa's EGL and Vulkan
-//! WSI, GStreamer's waylandsink, mpv, Firefox and Chromium all send `add` for
-//! each plane and then `create`/`create_immed` for the same params object
-//! back to back, in one flush. A buffer has at most 4 planes
-//! (`MAX_PLANES`), so that is at most 4 pending plane fds. On `create`,
+//! [`MAX_PENDING_PLANES_PER_CLIENT`] is 32. The protocol's usage pattern is
+//! to send `add` for each plane and then `create`/`create_immed` for the
+//! same params object straight away: nothing a client learns in between
+//! changes what it would send, and `create`'s answer arrives only after the
+//! planes are consumed. So a client building buffers one at a time has at
+//! most one buffer's planes pending. A buffer has at most 4 planes
+//! (`MAX_PLANES`), so that is 4 fds. That is reasoned from the protocol, not
+//! verified client by client (this run could not reach Mesa's source, and
+//! nothing on the dev VM makes a dma-buf; see below). On `create`,
 //! Smithay drains the planes into the `Dmabuf` at request time, whatever the
 //! import's outcome, so an async `create` still waiting for `created` holds
 //! none on the params. 32 is eight whole four-plane buffers mid-construction,
-//! 8x that maximum. It is generous on purpose, because tripping it disconnects
-//! the client.
+//! 8x that maximum, which leaves room for a client that interleaves the
+//! construction of several buffers. It is generous on purpose, because
+//! tripping it disconnects the client.
 //!
 //! The dev VM cannot show this on the wire: no real client there makes a
 //! dma-buf, since `gbm_bo_create` on its render node is refused and Mesa
-//! falls back to `wl_shm` (see `dmabuf.rs`). The maximum above therefore comes
-//! from those clients' source, not from a capture.
+//! falls back to `wl_shm` (see `dmabuf.rs`). A wire capture of real GPU
+//! clients belongs with the real-hardware checks (`Asahi.md`).
 //!
 //! [`PRESSURE_GRACE_PENDING_PLANES`] is 8, two whole four-plane buffers. It
 //! applies only while the fd table is pressured (see `fd_pressure.rs`),
@@ -100,14 +104,14 @@ mod tests;
 /// not been consumed yet, across all of them.
 ///
 /// 32: eight whole four-plane buffers mid-construction, 8x the one buffer's
-/// worth (at most 4) that any known client ever has in flight. See the module
-/// doc. Past it the `add` is refused by disconnecting the client with
+/// worth (at most 4) a client building buffers one at a time has in flight.
+/// See the module doc. Past it the `add` is refused by disconnecting the client with
 /// `wl_display.error(no_memory)`.
 pub(in crate::compositor) const MAX_PENDING_PLANES_PER_CLIENT: u32 = 32;
 
 /// Pending planes a client may hold before fd pressure starts refusing its
 /// `add`s. Same conditional shape as `fd_pressure::PRESSURE_GRACE_BUFFERS`.
-/// 8 is two whole four-plane buffers, 2x any known client's maximum.
+/// 8 is two whole four-plane buffers, 2x that one-at-a-time maximum.
 pub(in crate::compositor) const PRESSURE_GRACE_PENDING_PLANES: u32 = 8;
 
 /// The per-params and per-client plane counts. See the module doc.

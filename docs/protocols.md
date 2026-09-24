@@ -901,8 +901,11 @@ buffer and pool bounds). A plane stops counting when its params object is
 consumed by `create`/`create_immed` (whatever the import's outcome) or
 destroyed, and when the client disconnects. An `add` past the bound
 disconnects the client with `wl_display.error` `no_memory`; the params
-interface has no error for "too many". Real clients add one buffer's
-planes (at most four) and create it straight away, so they stay far below.
+interface has no error for "too many". A client that adds one buffer's
+planes (at most four) and creates it straight away, which is how the
+protocol is meant to be used, stays far below; that is reasoned from the
+protocol, not checked against each GPU client, since none makes a dma-buf
+on the dev VM.
 
 #### Per-surface feedback: the scanout tranche
 
