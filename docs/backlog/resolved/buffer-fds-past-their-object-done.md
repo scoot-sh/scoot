@@ -133,16 +133,18 @@ identity checks cannot tell syncobjs apart.
 Dev VM (kernel 6.18, virtio-gpu, `RLIMIT_NOFILE` 1024/524288). Before is
 `1f2fe5c` (`main`), built from a `git archive` into its own target dir
 (`CARGO_BUILD_JOBS=1 cargo build --release -p scoot -p scootctl --features
-scoot/gpu-scanout`; binary sha256 `e82acc7f…`). After is `82b6590`, the
-PR's code commit, built by the same command in the shared target (sha256
-`0b180fbb…`), and every live row below was re-run on it
-(`runs/*-after-82b6590.txt`). The first live runs were at `42914bb` and
-`dbec752` (sha256 `ddaff1ad…`, `2571ecd5…`; `runs/*-after.txt`,
-`runs/*-dbec752.txt`), before review replaced the renderer probe's count
-with a before/after difference. They gave the same numbers. Raw output:
-`~/evidence/bfl/runs/*.txt`; probe source `~/evidence/bfl/probe/src/main.rs`;
-runners `~/evidence/bfl/{run,legit,bench}.sh`. Gate at `82b6590`:
-`~/evidence/bfl/gate-82b6590.out`.
+scoot/gpu-scanout`; binary sha256 `e82acc7f…`). After is the PR's code at
+`0111f57`, built by the same command in the shared target (sha256
+`911bf342…`), for every `--tty --renderer gles` row and the GPU-tier legit
+run (`runs/*-after-0111f57.txt`). The headless rows and the `--tty` shm row
+are from `82b6590` (sha256 `0b180fbb…`, `runs/*-after-82b6590.txt`). The only
+change between the two is the renderer probe's guard, which runs only on a
+GLES dma-buf import, so those rows never reach it. Earlier runs at
+`42914bb` and `dbec752` (`runs/*-after.txt`, `runs/*-dbec752.txt`) gave the
+same numbers. Raw output: `~/evidence/bfl/runs/*.txt`; probe source
+`~/evidence/bfl/probe/src/main.rs`; runners
+`~/evidence/bfl/{run,legit,bench,scanout}.sh`. Gates:
+`~/evidence/bfl/gate-0111f57.out` (and `gate-82b6590.out`).
 
 **Fail-first** against `1f2fe5c` (`~/evidence/bfl/failfirst-main-1f2fe5c.out`,
 scratch source `~/evidence/bfl/scratch/failfirst_bfl.rs`), 3 of 3 failed:
@@ -153,7 +155,7 @@ scratch source `~/evidence/bfl/scratch/failfirst_bfl.rs`), 3 of 3 failed:
 
 **Live** (release binaries, `~/evidence/bfl/runs/`):
 
-| Shape | Tier | Before (`1f2fe5c`) | After (`82b6590`) |
+| Shape | Tier | Before (`1f2fe5c`) | After (`82b6590` / `0111f57`, see above) |
 |---|---|---|---|
 | 900 surfaces, each keeping a destroyed buffer and pool | `--headless` | 919 fds; `wayland-info` 0 globals; `scootctl` refused (pressure); honest client reset; attacker connected after 12 s | refused at 512 surfaces (`invalid_stride` on `wl_shm`, "512 file descriptors ... the maximum is 512"); 18 fds after; `wayland-info` 38 globals; `scootctl` served; honest client 147 commits, frame callbacks p95 21.5 ms |
 | 500 surfaces (under the bound) | `--headless` | 519 fds, all served | 519 fds, all served (same) |
@@ -164,11 +166,20 @@ scratch source `~/evidence/bfl/scratch/failfirst_bfl.rs`), 3 of 3 failed:
 The session log records `dmabuf: learned how many fds the renderer keeps of
 each imported plane copies_per_plane_per_output=1` on the `--tty` GLES tier.
 
+**Direct scanout keeps no further fd per buffer** (`runs/tty-scanout8-{before,after-0111f57}.txt`,
+runner `scanout.sh`): a fullscreen client alternating 8 card0 dumb dma-bufs
+on `--tty --renderer gles` went direct (`zero_copy` 305 of 305 presented).
+Mid-run scoot held 23 `/dmabuf:` fds. That is the 7 of its own every
+GPU-tier run holds once it renders, plus 8 x 2 (each plane and llvmpipe's
+copy of it). The scanout import through GBM/KMS keeps none beyond those,
+the same 23 before and after, so the bound's arithmetic holds on the
+direct-scanout path too.
+
 **Legitimate clients**, 5 s each, before and after, both tiers
-(`runs/legit-{headless,tty}-{before,after,after-82b6590}.txt`): `foot`, `zenity` (GTK 4),
+(`runs/legit-{headless,tty}-{before,after}.txt`, `runs/legit-headless-after-82b6590.txt`, `runs/legit-tty-after-0111f57.txt`): `foot`, `zenity` (GTK 4),
 `es2gears_wayland`, `eglgears_wayland`, `vkcube`, `mpv --vo=gpu` all alive
 with one window and identical scoot fd counts before and after; an
-explicit-sync client (card0 dumb buffers) 179 commits, 0 reuse timeouts on
+explicit-sync client (card0 dumb buffers) 177-179 commits, 0 reuse timeouts on
 the GPU tier. No refusal or protocol error logged but one xdg-activation
 token refusal, identical before and after. `mpv --vo=dmabuf-wayland`
 (the one multi-plane video client available) cannot upload frames to a DRM
