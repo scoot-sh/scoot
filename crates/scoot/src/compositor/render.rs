@@ -484,6 +484,18 @@ impl Backend {
         }
     }
 
+    /// The GL objects this backend's GLES context holds right now, `None`
+    /// for pixman. See [`LiveGlObjects`].
+    #[cfg(test)]
+    pub(crate) fn gles_live_objects_for_test(&mut self) -> Option<LiveGlObjects> {
+        match &mut self.pipeline {
+            Pipeline::Gles(gpu) => Some(LiveGlObjects::of(&mut gpu.renderer)),
+            Pipeline::Pixman(_) => None,
+            #[cfg(feature = "gpu-scanout")]
+            Pipeline::Scanout(gpu) => Some(LiveGlObjects::of(&mut gpu.renderer)),
+        }
+    }
+
     /// The render target's size in physical pixels.
     pub(super) fn size(&self) -> (i32, i32) {
         self.size
@@ -512,8 +524,14 @@ impl Backend {
             Pipeline::Pixman(cpu) => {
                 capture_with(&mut cpu.renderer, &mut cpu.image, region, use_pixels)
             }
+            // Both GLES arms free what the capture queued before returning,
+            // success or not (see `gles::release_captured`): a capture of a
+            // screen that is not redrawing reaches no other drain, and
+            // leaked a whole frame per capture without this.
             Pipeline::Gles(gpu) => {
-                capture_with(&mut gpu.renderer, &mut gpu.buffer, region, use_pixels)
+                let read = capture_with(&mut gpu.renderer, &mut gpu.buffer, region, use_pixels);
+                gles::release_captured(&mut gpu.renderer);
+                read
             }
             // There is no persistent framebuffer to read here: each frame
             // lands in whichever swapchain slot was free, so what a capture
@@ -539,7 +557,13 @@ impl Backend {
                 let frame = captures
                     .capture_target()
                     .map_err(|refusal| CaptureError::new(CaptureStage::Bind, refusal))?;
-                capture_with(renderer, frame, region, use_pixels)
+                // The same two objects as above: binding the slot's dma-buf
+                // makes a framebuffer object per bind as well (the texture
+                // arm of `Bind<Dmabuf>` at the pinned rev), besides the
+                // pixel-pack buffer.
+                let read = capture_with(renderer, frame, region, use_pixels);
+                gles::release_captured(renderer);
+                read
             }
         }
     }
@@ -1615,6 +1639,12 @@ where
                             (region.loc.x, region.loc.y).into(),
                             (region.size.w, region.size.h).into(),
                         );
+                        // Under GLES this read-back's pixel-pack buffer is
+                        // queued, not deleted, when it drops. It is not drained
+                        // here the way a capture's is (`gles::release_captured`):
+                        // the next frame's `finish` drains it, so at most one
+                        // is ever outstanding, and it only exists because a
+                        // frame was drawn.
                         let outcome = &mut outcome;
                         let read = read_back(renderer, &framebuffer, buffer_region, |pixels| {
                             if let Some(host) = &mut state.host {
@@ -1677,6 +1707,67 @@ fn union_bbox(rects: &[Rectangle<i32, Physical>]) -> Rectangle<i32, Physical> {
         let y1 = (acc.loc.y + acc.size.h).max(rect.loc.y + rect.size.h);
         Rectangle::new((x0, y0).into(), (x1 - x0, y1 - y0).into())
     })
+}
+
+/// How many names [`LiveGlObjects::of`] probes in each namespace: far above
+/// anything one test's context allocates, and checked against a freshly
+/// reserved name every time, so a context that outgrows it fails the probe
+/// rather than hiding objects past the end.
+#[cfg(test)]
+const PROBED_GL_NAMES: u32 = 1 << 12;
+
+/// The GL buffer and framebuffer objects alive in a GLES context, counted by
+/// name.
+///
+/// What the capture-path tests measure (`render/tests/capture_release.rs`,
+/// `screencopy/tests.rs`): Smithay's `GlesRenderer` defers deleting a GL
+/// object whose handle dropped until its cleanup queue is next drained, and
+/// an object still in that queue answers `glIsBuffer`/`glIsFramebuffer`
+/// true. So this counts the queue itself, deterministically, where process
+/// memory would only show the allocator's high-water mark.
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct LiveGlObjects {
+    /// Buffer objects. A read-back's pixel-pack buffer is one, the size of
+    /// the region it read -- a whole frame, for a screenshot.
+    pub(crate) buffers: u32,
+    /// Framebuffer objects. Binding a renderbuffer target makes one.
+    pub(crate) framebuffers: u32,
+}
+
+#[cfg(test)]
+impl LiveGlObjects {
+    fn of(renderer: &mut smithay::backend::renderer::gles::GlesRenderer) -> Self {
+        renderer
+            .with_context(|gl| {
+                // SAFETY: name reservations and name queries only, on the
+                // context `with_context` has just made current. The two
+                // names reserved are never bound, so they create no object,
+                // and are released again before the count.
+                unsafe {
+                    let (mut buffer, mut framebuffer) = (0, 0);
+                    gl.GenBuffers(1, &mut buffer);
+                    gl.GenFramebuffers(1, &mut framebuffer);
+                    gl.DeleteBuffers(1, &buffer);
+                    gl.DeleteFramebuffers(1, &framebuffer);
+                    assert!(
+                        buffer < PROBED_GL_NAMES && framebuffer < PROBED_GL_NAMES,
+                        "the context hands out names past the probe \
+                         ({buffer}, {framebuffer}); raise PROBED_GL_NAMES"
+                    );
+                    let mut live = Self {
+                        buffers: 0,
+                        framebuffers: 0,
+                    };
+                    for name in 1..PROBED_GL_NAMES {
+                        live.buffers += u32::from(gl.IsBuffer(name) != 0);
+                        live.framebuffers += u32::from(gl.IsFramebuffer(name) != 0);
+                    }
+                    live
+                }
+            })
+            .expect("the GLES context can be made current")
+    }
 }
 
 #[cfg(test)]

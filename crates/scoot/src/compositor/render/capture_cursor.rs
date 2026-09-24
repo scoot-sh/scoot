@@ -530,18 +530,47 @@ impl PatchTarget<GlesRenderer> for GlesRenderbuffer {
         (width, height): (i32, i32),
         out: &mut Vec<u8>,
     ) -> Result<(), String> {
-        let mut framebuffer = renderer
-            .bind(self)
-            .map_err(|error| format!("could not bind the region: {error}"))?;
-        damage
-            .render_output(renderer, &mut framebuffer, 0, elements, clear_color)
-            .map_err(|error| format!("could not render the region: {error:?}"))?;
-        let whole: Rectangle<i32, Buffer> = Rectangle::from_size((width, height).into());
-        read_back(renderer, &framebuffer, whole, |pixels| {
-            pack_rows(pixels, width, height, out)
-        })
-        .map_err(|error| format!("could not read the region back: {error}"))?
+        let rendered = render_and_read(
+            self,
+            renderer,
+            damage,
+            elements,
+            clear_color,
+            (width, height),
+            out,
+        );
+        // Once the region's framebuffer and mapping have dropped, success or
+        // not: the region render's own `finish` drained the queue *before*
+        // this read-back, so its pixel-pack buffer and the bind's framebuffer
+        // object would otherwise wait for the next frame (see
+        // `gles::release_captured`).
+        super::gles::release_captured(renderer);
+        rendered
     }
+}
+
+/// [`PatchTarget::render_into`]'s body for [`GlesRenderbuffer`], split out so
+/// the caller can drain what it queued on every path out, `?` included.
+fn render_and_read(
+    target: &mut GlesRenderbuffer,
+    renderer: &mut GlesRenderer,
+    damage: &mut OutputDamageTracker,
+    elements: &[PatchElement<GlesRenderer>],
+    clear_color: Color32F,
+    (width, height): (i32, i32),
+    out: &mut Vec<u8>,
+) -> Result<(), String> {
+    let mut framebuffer = renderer
+        .bind(target)
+        .map_err(|error| format!("could not bind the region: {error}"))?;
+    damage
+        .render_output(renderer, &mut framebuffer, 0, elements, clear_color)
+        .map_err(|error| format!("could not render the region: {error:?}"))?;
+    let whole: Rectangle<i32, Buffer> = Rectangle::from_size((width, height).into());
+    read_back(renderer, &framebuffer, whole, |pixels| {
+        pack_rows(pixels, width, height, out)
+    })
+    .map_err(|error| format!("could not read the region back: {error}"))?
 }
 
 impl State {

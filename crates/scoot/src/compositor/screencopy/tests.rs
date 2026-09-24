@@ -46,6 +46,7 @@ use wayland_protocols::ext::session_lock::v1::client::{
 };
 use wayland_protocols::xdg::shell::client::{xdg_surface, xdg_toplevel, xdg_wm_base};
 
+use crate::cli::RendererKind;
 use crate::compositor::decorations::{Appearance, Color};
 use crate::compositor::session_lock::LOCK_VBLANK_TIMEOUT;
 use crate::compositor::test_support::{Harness, wait_for};
@@ -1408,6 +1409,67 @@ fn a_client_that_disconnects_with_a_capture_outstanding_leaves_nothing_behind() 
         .frame();
     assert_eq!(outcome, Outcome::Ready);
     assert_eq!(captured, fixture.pixels());
+}
+
+/// `grim`'s shape on a screen nothing redraws, on the GLES renderer: a
+/// fresh session per capture (so none of them waits for damage), with and
+/// without the pointer painted in. Each one used to leave its read-back's
+/// pixel-pack buffer, a whole frame, queued in Smithay's cleanup queue
+/// until the next frame drew; see `render/tests/capture_release.rs`, which
+/// pins the mechanism and counts the same way.
+#[test]
+fn captures_of_a_static_screen_on_gles_leave_no_gl_objects_behind() {
+    let mut fixture: Fixture = Harness::headless_on(appearance(), CANVAS, RendererKind::Gles);
+    fixture.spawn(run_client);
+    fixture.run(Step::MapWindow(WINDOW_BGRA));
+    let id = fixture.state.outputs.primary_id().expect("an output");
+    fixture.state.pointer_move(10.0, 10.0);
+    let grab = |fixture: &mut Fixture, paint_cursors: bool| {
+        fixture.run(Step::StartSession { paint_cursors });
+        let (outcome, captured) = fixture
+            .run(Step::Capture {
+                width: CANVAS,
+                height: CANVAS,
+                format: wl_shm::Format::Argb8888,
+            })
+            .frame();
+        assert_eq!(outcome, Outcome::Ready, "a fresh session never waits");
+        fixture.run(Step::DestroySession);
+        captured
+    };
+    let live = |fixture: &mut Fixture| {
+        fixture
+            .state
+            .backends
+            .get_mut(&id)
+            .expect("a backend")
+            .gles_live_objects_for_test()
+            .expect("a GLES backend")
+    };
+    for paint_cursors in [false, true] {
+        let first = grab(&mut fixture, paint_cursors);
+        let settled = live(&mut fixture);
+        for _ in 0..8 {
+            assert_eq!(
+                grab(&mut fixture, paint_cursors),
+                first,
+                "cursors {paint_cursors}: nothing moved"
+            );
+        }
+        assert_eq!(
+            live(&mut fixture),
+            settled,
+            "cursors {paint_cursors}: captures of a static screen must not leave \
+             GL objects queued"
+        );
+        let backend = fixture.state.backends.get_mut(&id).expect("a backend");
+        backend.cleanup_texture_cache().expect("a drain");
+        assert_eq!(
+            live(&mut fixture),
+            settled,
+            "cursors {paint_cursors}: nothing was left queued for a drain to free"
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
