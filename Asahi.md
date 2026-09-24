@@ -1164,6 +1164,40 @@ process, so a leak may show there or may not. Two checks cover it:
 Quit with `Super+Shift+e` (scoot) or, from a `foot` in niri,
 `niri msg action quit --skip-confirmation`.
 
+## Test 10 — does the GPU driver keep a copy of each imported dma-buf plane
+
+Why: scoot counts the file descriptors each client makes it hold, and a
+GLES renderer can hold one more per dma-buf plane it imports. On the dev
+VM's software renderer (llvmpipe) it does: a three-plane `YU12` buffer costs
+scoot six fds, not three. scoot measures this once per session, on the
+first import, logs the answer, and counts the copies against the client
+(`docs/protocols.md`, "Per-client limits on what scoot keeps"). A hardware
+driver is expected to import into a GEM handle and keep no fd, which would
+log `copies_per_plane_per_output=0`. That expectation is reasoned from
+Mesa's source, not measured; this machine is the check.
+
+```sh
+mkdir -p /tmp/fx
+# on a free VT, as in Test 4
+RUST_LOG=scoot=info scoot --tty --renderer gles > /tmp/fx/t10.log 2>&1 &
+sleep 3
+# any GPU client that renders through dma-bufs: vkcube, glmark2-wayland,
+# es2gears_wayland; mpv with hardware decoding if you have a video
+WAYLAND_DISPLAY=$(grep -o 'wayland-[0-9]*' /tmp/fx/t10.log | head -1) vkcube --wsi wayland &
+sleep 5
+grep 'learned how many fds the renderer keeps' /tmp/fx/t10.log
+ls -l /proc/$(pidof scoot)/fd | grep -c /dmabuf: > /tmp/fx/t10-dmabuf-fds.txt
+kill %2; sleep 1
+ls -l /proc/$(pidof scoot)/fd | grep -c /dmabuf: >> /tmp/fx/t10-dmabuf-fds.txt
+```
+
+Expected: one `learned ... copies_per_plane_per_output=N` line. If `N` is
+0, scoot is charging GPU clients nothing extra, which is the point of
+measuring it. If it is 1, this driver behaves like llvmpipe and that is
+fine too, just worth knowing. The two counts are scoot's dma-buf fds with
+the client running and after it quit; the second should be back to the
+handful scoot holds for itself.
+
 ## What to send back
 
 - `ghostty --version`
@@ -1190,6 +1224,7 @@ Quit with `Super+Shift+e` (scoot) or, from a `foot` in niri,
   `t6-mpv.log`, `t6-mpv.png`, `t6-kms-mpv.txt`; for Part C `t6c.log`,
   both `t6c-*.trace` (or their `tranche_*`, `add(` and `presented(` lines),
   `t6c-kms-*.txt`, `t6c-fs.png`, and the grep output
+- for Test 10: `/tmp/fx/t10.log` and `/tmp/fx/t10-dmabuf-fds.txt`
 
 Raw logs beat a summary here. Both open entries were written after earlier
 investigations went wrong in ways only the raw output showed — a harness

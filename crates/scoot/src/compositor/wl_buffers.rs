@@ -1,21 +1,23 @@
 //! How many live `wl_buffer`s one Wayland client may hold at once.
 //!
-//! This is the bound that caps the fds and mappings a connection's live
-//! buffer *objects* retain -- not every one a buffer can retain, since a
-//! buffer a surface still has committed keeps its fd after the object dies
-//! (see "What 512 bounds" below, and
-//! `docs/backlog/core/buffer-fds-past-their-object.md`).
-//! `shm_pools.rs` caps live *pool objects*, but a
-//! destroyed pool frees neither its fd nor its mapping while a buffer
-//! created from it survives -- the protocol mandates the retention, and at
-//! the pinned rev a buffer's user data holds an `Arc<Pool>` owning both --
-//! so `create_pool` / `create_buffer` / `destroy_pool` in a loop keeps one
-//! fd and mapping per iteration with the live-pool count back at zero (see
+//! This bounds buffer *objects*. The fds and mappings buffers keep are
+//! bounded by the per-client fd ledger (`client_fds.rs`), which counts each
+//! pool's fd and each dma-buf plane's fd from the request that handed it
+//! over until it really closes -- after the buffer object dies, too, while a
+//! surface still has the buffer committed. This cap used to be the fd bound
+//! for the shape `create_pool` / `create_buffer` / `destroy_pool` in a loop,
+//! which keeps one fd and mapping per iteration with the live-pool count back
+//! at zero (a destroyed pool's fd and mapping live while any buffer made from
+//! it does -- the protocol mandates it, and a buffer's user data holds an
+//! `Arc<Pool>` owning both; see
 //! `docs/backlog/resolved/shm-pool-cap-misses-retained-fds-done.md`). Every
-//! iteration of that loop must keep a buffer alive, so a live-buffer cap
-//! catches exactly the bypass shape. Both caps stay: they bound different
-//! quantities (live pool objects + the address-space envelope vs retained
-//! fds/mappings), and neither subsumes the other.
+//! iteration of that loop keeps a buffer alive, so this cap caught it at the
+//! 513th buffer; the ledger now catches it at the 513th pool, and also the
+//! shape this cap could not see at all, where the client destroys the buffer
+//! too and a surface keeps it (`docs/backlog/resolved/buffer-fds-past-their-object-done.md`).
+//! Both caps stay: this one bounds live buffer objects (and the Smithay and
+//! renderer state each carries), `shm_pools.rs` live pool objects and their
+//! address-space envelope, and the ledger fds.
 //!
 //! **One thing this cap does not bound, and the reason is worth carrying
 //! here rather than only in `dmabuf.rs`:** an imported dmabuf's `mmap` lives
@@ -43,35 +45,17 @@
 //! legitimate session -- the same death-penalty sizing the capture-frame
 //! cap (16 for a legitimate 1) already uses.
 //!
-//! What 512 bounds per connection: 512 live buffers, and with them the fds
-//! and mappings those *objects* retain -- one fd minimum per surviving shm
-//! buffer (its `Arc<Pool>`'s `OwnedFd`), and one client fd per dmabuf
-//! *plane*, none per single-pixel buffer (see below). Not the renderer-side
-//! dmabuf mapping, which outlives the object (above). Two things make that
-//! weaker than "512 fds", and both are filed as
-//! `docs/backlog/core/buffer-fds-past-their-object.md`:
-//!
-//! - A dmabuf buffer holds one fd per plane, up to four, and this counts it
-//!   as one. Only a GLES renderer imports multi-plane buffers (pixman refuses
-//!   them), so on the default tier it is one.
-//! - A buffer a surface still has committed keeps its fd after the buffer
-//!   object (and, for shm, its pool object) is destroyed, since the
-//!   renderer's copy of the surface state holds a handle to it. The count is
-//!   released on destroy all the same, so each surface can keep one more
-//!   buffer's fds uncounted. Measured: 200 surfaces holding 200 fds with 0
-//!   buffers and 0 pools counted.
+//! What 512 bounds per connection: 512 live buffer objects. Not fds: a shm
+//! buffer shares its pool's fd, a dma-buf buffer's planes are counted as they
+//! arrive, a single-pixel buffer has none, and a destroyed buffer a surface
+//! still keeps holds its fds with no object left to count. All of those are
+//! the fd ledger's (`client_fds.rs`: 512 fds of every kind per client). Not
+//! the renderer-side dmabuf mapping either, which outlives the object
+//! (above).
 //!
 //! Planes added to a params object that has not become a buffer yet are
 //! not buffers at all, and are bounded separately
-//! (`dmabuf/pending_planes.rs`). Together with the 128 live pools and those,
-//! a connection on the default tier holds at most ~673 *counted* fds against
-//! a 1024-fd `RLIMIT_NOFILE`, so through the counted paths one connection
-//! alone cannot exhaust the table and two can -- the multiplier on top is
-//! connection-count territory (see
-//! `docs/backlog/resolved/wayland-connection-cap-done.md`), not a smaller
-//! buffer count. The uncounted paths (the two above, and wayland-backend's
-//! received-fd queue, `docs/backlog/core/wayland-backend-fd-queue.md`) are
-//! not bounded by this at all.
+//! (`dmabuf/pending_planes.rs`), besides being counted in the ledger.
 //!
 //! ## How it is counted
 //!
@@ -209,14 +193,10 @@
 //! ## Per connection, plus a compositor-wide ceiling
 //!
 //! Wayland connections are unbounded, so N connections hold up to 512N
-//! buffers -- which the per-connection cap alone cannot stop. The
-//! compositor-wide ceiling (`fd_pressure`, enforced in `dispatch.rs`)
-//! closes it: while the process table is pressured (fewer than 128 fds
-//! free), a client already holding past the 128-buffer grace is refused
-//! its next creation with the same protocol error. A client under grace --
-//! every legitimate client, at 64x the measured floor -- is never refused
-//! for another's greed; the kill always lands on a contributor, whose
-//! disconnect then frees what it held.
+//! buffers. The compositor-wide fd ceiling (`fd_pressure`) is enforced where
+//! fds arrive, against each client's fds in the ledger, not here: creating a
+//! buffer hands scoot no fd. (It used to be enforced here too, on a
+//! 128-buffer grace, when this count was the fd proxy; see `fd_pressure`.)
 
 use std::collections::HashMap;
 
@@ -295,14 +275,6 @@ impl WlBuffers {
                 self.live_per_client.remove(client);
             }
         }
-    }
-
-    /// How many live buffers `client` holds right now. Zero for a client
-    /// with no entry rather than `None`: the global pressure guard
-    /// (`fd_pressure`) compares this against its grace, and a client that
-    /// never created anything is trivially under it.
-    pub(super) fn live_for(&self, client: &Client) -> u32 {
-        self.live_per_client.get(&client.id()).copied().unwrap_or(0)
     }
 
     /// How many buffers all clients hold between them. Test-only: the flood

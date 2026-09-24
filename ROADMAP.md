@@ -104,6 +104,28 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[Every fd a client hands scoot is counted until it really closes](docs/backlog/resolved/buffer-fds-past-their-object-done.md)**
+  (2026-09-24, PR #NNN) — a buffer a surface still showed kept its pool's
+  (or its planes') fds after the client destroyed the `wl_buffer` and the
+  pool, with nothing counted, and a multi-plane dma-buf counted as one.
+  PR #236's timeline ledger is now a per-client fd ledger
+  (`client_fds.rs`): pool, plane and timeline fds recorded by number on
+  arrival, with the file's identity, and forgotten when the number comes
+  back or a sweep finds it closed. One bound (512 fds per client) and one
+  pressure grace (128) replace the per-kind graces; the object caps stay.
+  Found on the way: the dev VM's GLES renderer (llvmpipe) keeps its own
+  copy of every imported plane's fd, so `main` held 1200 dma-buf fds for
+  200 three-plane buffers; scoot now measures the copies once per session
+  and charges them to the client (`dmabuf/renderer_copies.rs`), and drains
+  the renderer's cache when a surface dies too. One connection at every
+  bound is now 577 fds (620 with the GPU tier's baseline) against the 896
+  pressure line, where it was 908. Dev VM, release: 900 surfaces keeping
+  destroyed buffers took `main` to 919 fds and shed newcomers → refused at
+  512, newcomers and `scootctl` served; 200 `YU12` surfaces on the `--tty`
+  GLES tier filled `main`'s table (1024) → refused at 85 buffers (510
+  fds), 557 fds at the bound; real clients unchanged. About 320 ns more
+  per dma-buf `add`, nothing measurable per `create_pool`.
+
 - **[GLES captures of a static screen no longer keep a frame each](docs/backlog/resolved/gles-capture-leaks-a-frame-per-shot-done.md)**
   (2026-09-24, PR #238) — found by the niri A/B. Under `--renderer gles`,
   every capture of a screen that was not redrawing kept a whole frame of
@@ -170,8 +192,8 @@ each item's own file records why it landed when it did.
   `scootctl` and an honest dma-buf client served; timelines 927 fds →
   refused at surface 65, 46 fds, an explicit-sync client unaffected. About
   40 ns per `add`. Not every fd path is counted yet; filed high:
-  [buffer fds past their object](docs/backlog/core/buffer-fds-past-their-object.md)
-  (found on the way) and, found in review,
+  [buffer fds past their object](docs/backlog/resolved/buffer-fds-past-their-object-done.md)
+  (found on the way; since resolved, above) and, found in review,
   [wayland-backend's unbounded received-fd queue](docs/backlog/core/wayland-backend-fd-queue.md)
   (one client took scoot from 18 to 999 fds through it, on every tier,
   unchanged by this PR).

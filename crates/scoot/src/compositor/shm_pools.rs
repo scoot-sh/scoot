@@ -13,14 +13,16 @@
 //! rev a buffer's user data holds an `Arc<Pool>` owning both the mapping
 //! and its `OwnedFd` -- so `create_pool` / `create_buffer` / `destroy_pool`
 //! in a loop keeps one fd and mapping per iteration with the live-pool
-//! count back at zero. That quantity is bounded separately, by the
-//! per-client live-`wl_buffer` count (`wl_buffers.rs`), which catches
-//! exactly the bypass shape: every iteration must keep a buffer alive.
-//! (Earlier revisions of this doc said 128 live pools meant 128 fds; see
-//! `docs/backlog/resolved/shm-pool-cap-misses-retained-fds-done.md`.) One
-//! shape escapes both: a buffer committed to a surface keeps its pool's fd
-//! and mapping after the buffer object is destroyed too, one per surface,
-//! uncounted (`docs/backlog/core/buffer-fds-past-their-object.md`).
+//! count back at zero, and a surface that still has one of those buffers
+//! committed keeps it after the buffer object is destroyed too. That
+//! quantity is bounded separately, by the per-client fd ledger
+//! (`client_fds.rs`), which records each pool's fd at `create_pool` and
+//! counts it until it really closes, whatever still holds it; a pool's
+//! mapping goes no later than its fd. (Earlier revisions of this doc said
+//! 128 live pools meant 128 fds, and then that the live-`wl_buffer` count
+//! bounded the rest; see
+//! `docs/backlog/resolved/shm-pool-cap-misses-retained-fds-done.md` and
+//! `docs/backlog/resolved/buffer-fds-past-their-object-done.md`.)
 //!
 //! ## The number
 //!
@@ -87,10 +89,12 @@
 //! Wayland connections are unbounded, so N connections hold up to 128N
 //! pools -- which the per-connection cap alone cannot stop. The
 //! compositor-wide ceiling (`fd_pressure`, enforced in `dispatch.rs`)
-//! closes it the same way as for buffers: while the process table is
-//! pressured, a client already holding past the 64-pool grace is refused
-//! its next `create_pool` with the same protocol error, and a client under
-//! grace is never refused for another's greed.
+//! closes it on the client's fds in the ledger rather than on this count:
+//! while the process table is pressured, a client already keeping past the
+//! 128-fd grace (`client_fds::PRESSURE_GRACE_FDS`, every kind together) is
+//! refused its next `create_pool` with the same protocol error, and a client
+//! under grace is never refused for another's greed. (It used to be a
+//! 64-pool grace on this count.)
 
 use std::collections::HashMap;
 
@@ -170,13 +174,6 @@ impl ShmPools {
                 self.live_per_client.remove(client);
             }
         }
-    }
-
-    /// How many live pools `client` holds right now. Zero for a client
-    /// with no entry, for the same pressure-guard comparison
-    /// (`fd_pressure`) the buffer count's twin serves.
-    pub(super) fn live_for(&self, client: &Client) -> u32 {
-        self.live_per_client.get(&client.id()).copied().unwrap_or(0)
     }
 
     /// How many pools all clients hold between them. Test-only: the flood

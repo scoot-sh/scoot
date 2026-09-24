@@ -44,12 +44,17 @@ than it can account for. wayland-backend does not.
 
 ## Knock-on (reasoned, not demonstrated end to end)
 
-`drm_syncobj/retained.rs` decides whether a retained timeline is still
+The per-client fd ledger (`client_fds.rs`, which replaced
+`drm_syncobj/retained.rs`) decides whether a retained timeline is still
 held by checking whether the recorded fd number is still an open syncobj.
 A syncobj fd parked in this queue could land on a number another client's
 timeline used to occupy and be counted as that client's, inflating its
 retained count and refusing it. Fixing the queue bound removes the
-precondition.
+precondition. (Pool and plane records are immune: they are checked by the
+file's identity, which a different file does not share. Every syncobj
+shares one anonymous inode, so timelines cannot be.) How a fix here would
+plug into that ledger's per-client total is in
+[buffer-fds-past-their-object](../resolved/buffer-fds-past-their-object-done.md#the-interface-for-the-wayland-backend-fix).
 
 ## Fix routes (user decision needed)
 

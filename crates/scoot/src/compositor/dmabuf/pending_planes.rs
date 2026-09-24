@@ -15,6 +15,15 @@
 //! `docs/backlog/resolved/client-held-fd-bound-done.md`). This is on every
 //! tier that offers the dmabuf global, the default pixman one included.
 //!
+//! Every plane's fd is also recorded in the per-client fd ledger
+//! (`client_fds.rs`) on `add`, and stays counted there, as the client's, for
+//! as long as the fd is open: pending here, then in the `Dmabuf`, then for as
+//! long as a surface keeps the buffer committed after its `wl_buffer` is
+//! destroyed. That ledger is what bounds a client's plane fds overall (512
+//! fds of every kind) and what fd pressure reads. This count bounds the
+//! narrower shape the ledger alone would let reach 512: planes parked in
+//! params objects that never become buffers at all.
+//!
 //! ## The number
 //!
 //! [`MAX_PENDING_PLANES_PER_CLIENT`] is 32. The protocol's usage pattern is
@@ -38,9 +47,11 @@
 //! falls back to `wl_shm` (see `dmabuf.rs`). A wire capture of real GPU
 //! clients belongs with the real-hardware checks (`Asahi.md`).
 //!
-//! [`PRESSURE_GRACE_PENDING_PLANES`] is 8, two whole four-plane buffers. It
-//! applies only while the fd table is pressured (see `fd_pressure.rs`),
-//! so a client under it is never refused for another client's greed.
+//! There is no pressure grace of its own any more (it was 8). Under fd
+//! pressure an `add` is refused on the client's whole fd count in the ledger
+//! (past `client_fds::PRESSURE_GRACE_FDS`, 128), which sees these planes and
+//! every other fd the client made scoot keep; a count of params planes alone
+//! could only pick the smaller part of a client's footprint.
 //!
 //! ## How it is counted
 //!
@@ -57,8 +68,8 @@
 //!   phantom unit it does not outlive the connection.
 //! - **Released on `create`/`create_immed`**, the consuming requests, before
 //!   delegation. From there the planes belong to a `Dmabuf`, which is either
-//!   a `wl_buffer` (counted by `wl_buffers.rs`) or dropped at once when the
-//!   import is refused. A consume that `dispatch.rs`'s buffer cap refuses
+//!   a `wl_buffer` (its fds still counted in the fd ledger, where they have
+//!   been since their `add`) or dropped at once when the import is refused. A consume that `dispatch.rs`'s buffer cap refuses
 //!   instead kills the client, and the destroy below releases it.
 //! - **Released when the params object is destroyed**, in `dispatch.rs`'s
 //!   blanket `destroyed` hook. That covers an explicit `destroy`, a
@@ -71,30 +82,33 @@
 //!
 //! ## Refusal form
 //!
-//! A refused `add` disconnects the client with `wl_display.error(no_memory)`
-//! (see `no_memory.rs`). The params interface's own errors
+//! A refused `add`, by this bound or by the fd ledger's, disconnects the
+//! client with `wl_display.error(no_memory)` (see `no_memory.rs`). The params interface's own errors
 //! (`plane_idx`, `plane_set`, `incomplete`, ...) all describe a malformed
 //! plane, and this is not one. The request is not delegated, so its fd is
 //! dropped with it.
 //!
 //! ## Cost
 //!
-//! `add` is on the path of every dma-buf a GPU client allocates. On that
-//! path this is a `TypeId` comparison, a downcast, and one lookup and one
-//! insert in each of two maps whose capacity persists. There are no
-//! syscalls: the fd-pressure observation runs only past the grace. It also
-//! does one lookup to invalidate a stale syncobj timeline record on the same
-//! fd number (see `drm_syncobj/retained.rs`), which is a single `is_empty`
-//! test on every tier but the GPU scanout one.
+//! `add` is on the path of every dma-buf a GPU client allocates (once per
+//! buffer it allocates, not per frame). On that path this is a `TypeId`
+//! comparison, a downcast, and one lookup and one insert in each of two maps
+//! whose capacity persists, plus the fd ledger's arrival: a lookup to forget
+//! any record on the same number, two map lookups for the bounds, one
+//! `fstat` for the plane's identity, and one insert in each of the ledger's
+//! two maps. The fd-pressure observation runs only past the grace. Measured
+//! in the PR that added the ledger (see
+//! `docs/backlog/resolved/buffer-fds-past-their-object-done.md`).
 
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
-use std::os::fd::AsRawFd;
+use std::os::fd::{AsFd, AsRawFd};
 
 use smithay::reexports::wayland_protocols::wp::linux_dmabuf::zv1::server::zwp_linux_buffer_params_v1;
 use smithay::reexports::wayland_server::backend::{ClientId, ObjectId};
 use smithay::reexports::wayland_server::{Client, Resource};
 
+use crate::compositor::client_fds::Kind;
 use crate::compositor::{State, no_memory};
 
 #[cfg(test)]
@@ -108,11 +122,6 @@ mod tests;
 /// See the module doc. Past it the `add` is refused by disconnecting the client with
 /// `wl_display.error(no_memory)`.
 pub(in crate::compositor) const MAX_PENDING_PLANES_PER_CLIENT: u32 = 32;
-
-/// Pending planes a client may hold before fd pressure starts refusing its
-/// `add`s. Same conditional shape as `fd_pressure::PRESSURE_GRACE_BUFFERS`.
-/// 8 is two whole four-plane buffers, 2x that one-at-a-time maximum.
-pub(in crate::compositor) const PRESSURE_GRACE_PENDING_PLANES: u32 = 8;
 
 /// The per-params and per-client plane counts. See the module doc.
 #[derive(Debug, Default)]
@@ -135,30 +144,18 @@ impl PendingPlanes {
         self.per_client.get(client).copied().unwrap_or(0)
     }
 
-    /// Counts one more plane on `params` for `client`, unless `refuse`
-    /// (given how many the client holds) says no, in which case nothing is
-    /// counted and the refusal and that count are handed back.
+    /// Counts one more plane on `params` for `client`, unless it already
+    /// holds [`MAX_PENDING_PLANES_PER_CLIENT`], in which case nothing is
+    /// counted and how many it holds is handed back.
     ///
     /// One lookup in each map on the admitted path, which is every `add` of
     /// every well-behaved client. The counts cannot overflow: each unit is a
     /// live fd in this process's table, and the cap stops a client far below
     /// `u32::MAX`.
-    fn try_claim(
-        &mut self,
-        client: &ClientId,
-        params: ObjectId,
-        refuse: impl FnOnce(u32) -> Option<Refusal>,
-    ) -> Result<(), (Refusal, u32)> {
+    fn try_claim(&mut self, client: &ClientId, params: ObjectId) -> Result<(), u32> {
         let live = self.per_client.entry(client.clone()).or_insert(0);
-        if let Some(refusal) = refuse(*live) {
-            let held = *live;
-            if held == 0 {
-                // Only a refusal at zero could have just made the entry,
-                // which nothing does, but the invariant (no zero entries)
-                // should not rest on that.
-                self.per_client.remove(client);
-            }
-            return Err((refusal, held));
+        if *live >= MAX_PENDING_PLANES_PER_CLIENT {
+            return Err(*live);
         }
         *live += 1;
         *self.per_params.entry(params).or_insert(0) += 1;
@@ -196,13 +193,15 @@ impl PendingPlanes {
 
 /// Disconnects the client and returns `true` when `request` is a
 /// `zwp_linux_buffer_params_v1.add` past the client's pending-plane cap, or
-/// past its pressure grace while the fd table is pressured. Otherwise it
-/// counts the plane and returns `false`.
+/// past its fd bound in the fd ledger (`client_fds.rs`: 512 fds of every
+/// kind, or the 128-fd grace while the fd table is pressured). Otherwise it
+/// counts the plane here, records its fd in the ledger, and returns `false`.
 ///
-/// Checked before the claim, so a refusal never takes a unit it would then
-/// have to give back. The pressure observation (`getrlimit` and a
-/// `/proc/self/fd` readdir) runs only for a client already past the grace;
-/// see `dispatch::pressure_refusal`.
+/// Both bounds are checked before either claims, so a refusal never takes a
+/// unit or a record it would then have to give back. The pressure
+/// observation (`getrlimit` and a `/proc/self/fd` readdir) runs only for a
+/// client already past the grace, at most once per `client_fds::SWEEP_MARGIN`
+/// arrivals.
 ///
 /// Folds away for every interface other than the params one, for the same
 /// monomorphization reason as `dispatch.rs`'s guards: this runs on every
@@ -225,67 +224,32 @@ where
     else {
         return false;
     };
-    // Whatever happens to this plane, its fd number is now this process's
-    // again. That proves any syncobj timeline recorded on the same number
-    // was closed; see `drm_syncobj/retained.rs`.
-    state.drm_syncobj.fd_arrived(fd.as_raw_fd());
-    let claimed = state
-        .pending_planes
-        .try_claim(&client.id(), resource.id(), |live| {
-            plane_refusal(live, || {
-                crate::compositor::fd_pressure::table().is_some_and(|table| table.pressured())
-            })
-        });
-    let Err((refusal, live)) = claimed else {
-        return false;
+    const REFUSED: &str = "zwp_linux_buffer_params_v1.add refused";
+    let id = client.id();
+    // Forgets whatever the ledger recorded on this number first: it arrived
+    // again, so that fd was closed.
+    let message = match state
+        .client_fds
+        .admit_arrival(&id, fd.as_raw_fd(), Kind::Plane)
+    {
+        Err(refusal) => refusal.message(REFUSED),
+        Ok(()) => match state.pending_planes.try_claim(&id, resource.id()) {
+            Ok(()) => {
+                state
+                    .client_fds
+                    .record_arrival(&id, fd.as_fd(), Kind::Plane);
+                return false;
+            }
+            Err(live) => format!(
+                "{REFUSED}: this client already has {live} dmabuf planes added to params \
+                 objects it has not created a buffer from (the bound is \
+                 {MAX_PENDING_PLANES_PER_CLIENT})"
+            ),
+        },
     };
-    let (bound, why) = match refusal {
-        Refusal::Cap => (MAX_PENDING_PLANES_PER_CLIENT, ""),
-        Refusal::Pressure => (
-            PRESSURE_GRACE_PENDING_PLANES,
-            ", while compositor-wide file descriptors are under pressure",
-        ),
-    };
-    tracing::debug!(
-        live,
-        bound,
-        "refusing a dmabuf plane past the per-client pending-plane bound (no_memory)"
-    );
-    no_memory::disconnect(
-        &state.display_handle,
-        client,
-        format!(
-            "zwp_linux_buffer_params_v1.add refused: this client already has {live} dmabuf \
-             planes added to params objects it has not created a buffer from (the bound is \
-             {bound}{why})"
-        ),
-    );
+    tracing::debug!(%message, "refusing a dmabuf plane (no_memory)");
+    no_memory::disconnect(&state.display_handle, client, message);
     true
-}
-
-/// Why an `add` is refused.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Refusal {
-    /// The client holds [`MAX_PENDING_PLANES_PER_CLIENT`] already.
-    Cap,
-    /// It holds more than [`PRESSURE_GRACE_PENDING_PLANES`], and the fd
-    /// table is pressured.
-    Pressure,
-}
-
-/// The decision inside [`reject_excess_plane`], for a client that holds
-/// `live` pending planes. `pressured` observes the fd table, and is called
-/// only past the grace, which is `dispatch::pressure_refusal`'s rule
-/// exactly (`live > grace && pressured`). Split out so that both boundaries
-/// are pinned without filling the test process's fd table.
-fn plane_refusal(live: u32, pressured: impl FnOnce() -> bool) -> Option<Refusal> {
-    if live >= MAX_PENDING_PLANES_PER_CLIENT {
-        Some(Refusal::Cap)
-    } else if live > PRESSURE_GRACE_PENDING_PLANES && pressured() {
-        Some(Refusal::Pressure)
-    } else {
-        None
-    }
 }
 
 /// Releases a params object's planes when `request` consumes it

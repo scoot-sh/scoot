@@ -729,7 +729,7 @@ fn live_timelines_are_bounded_per_client() {
         "{error}"
     );
     assert_eq!(
-        fixture.state.drm_syncobj.timelines_in_flight(),
+        fixture.state.client_fds.timelines_in_flight(),
         0,
         "the killed client's timelines are all released"
     );
@@ -760,7 +760,7 @@ fn pending_points_on_destroyed_timelines_count_against_the_bound() {
         "{error}"
     );
     assert_eq!(
-        fixture.state.drm_syncobj.timelines_in_flight(),
+        fixture.state.client_fds.timelines_in_flight(),
         0,
         "the killed client's surfaces went, and every timeline fd with them"
     );
@@ -784,7 +784,7 @@ fn committed_points_on_destroyed_timelines_count_against_the_bound() {
         error.contains("after 64 surfaces") && error.contains(&format!("code {INVALID_TIMELINE}")),
         "{error}"
     );
-    assert_eq!(fixture.state.drm_syncobj.timelines_in_flight(), 0);
+    assert_eq!(fixture.state.client_fds.timelines_in_flight(), 0);
 }
 
 /// Timelines held only by points stop counting once the points go: here by
@@ -803,14 +803,14 @@ fn timelines_held_by_points_stop_counting_when_the_points_go() {
         commit: false,
     });
     assert_eq!(
-        fixture.state.drm_syncobj.timelines_in_flight(),
+        fixture.state.client_fds.timelines_in_flight(),
         81,
         "setup's, and two per surface: every one still open here"
     );
     fixture.done(Step::DestroyAllSurfaces);
     fixture.settle();
     assert_eq!(
-        fixture.state.drm_syncobj.timelines_in_flight(),
+        fixture.state.client_fds.timelines_in_flight(),
         1,
         "just setup's"
     );
@@ -819,7 +819,7 @@ fn timelines_held_by_points_stop_counting_when_the_points_go() {
         keep: true,
     });
     assert_eq!(
-        fixture.state.drm_syncobj.timelines_in_flight(),
+        fixture.state.client_fds.timelines_in_flight(),
         MAX_TIMELINES_PER_CLIENT
     );
 }
@@ -839,7 +839,7 @@ fn an_import_smithay_refuses_leaves_nothing_counted() {
             && error.contains("failed to import syncobj timeline"),
         "{error}"
     );
-    assert_eq!(fixture.state.drm_syncobj.timelines_in_flight(), 0);
+    assert_eq!(fixture.state.client_fds.timelines_in_flight(), 0);
 }
 
 /// Destroyed timelines with no points on them close at once, so however many
@@ -856,7 +856,7 @@ fn destroyed_timelines_do_not_count_against_the_bound() {
     });
     fixture.settle();
     assert_eq!(
-        fixture.state.drm_syncobj.timelines_in_flight(),
+        fixture.state.client_fds.timelines_in_flight(),
         1,
         "just setup's"
     );

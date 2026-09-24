@@ -608,11 +608,9 @@ pub struct State {
     /// created them. Counted at each buffer creation before delegation,
     /// released in `dispatch.rs`'s buffer destruction hook (which also
     /// drains disconnects and kills) -- see `wl_buffers.rs`, which owns the
-    /// policy and the number. This bounds the fds/mappings live buffer
-    /// objects retain; the pool count above cannot (a buffer outlives its
-    /// pool object). A buffer still committed to a surface outlives its own
-    /// object too, which neither count sees
-    /// (`docs/backlog/core/buffer-fds-past-their-object.md`).
+    /// policy and the number. This bounds buffer *objects*; the fds and
+    /// mappings they keep, including after the object is destroyed, are
+    /// `client_fds`' below.
     pub wl_buffers: WlBuffers,
     /// How many dma-buf plane fds each Wayland client has this compositor
     /// hold in `zwp_linux_buffer_params_v1` objects it has not created a
@@ -620,12 +618,21 @@ pub struct State {
     /// params object is consumed or destroyed -- see
     /// `dmabuf/pending_planes.rs`, which owns the policy and the number.
     pub(super) pending_planes: super::dmabuf::pending_planes::PendingPlanes,
+    /// Every fd each Wayland client has handed this compositor that it
+    /// keeps (shm pools, dma-buf planes, syncobj timelines), recorded by
+    /// number on arrival and forgotten once it really closes -- which is
+    /// after its object is destroyed whenever a surface still has the
+    /// buffer committed. The per-client fd bound, the timeline cap and fd
+    /// pressure's attribution all read it. See `client_fds.rs`, which owns
+    /// the policy and the numbers.
+    pub(super) client_fds: super::client_fds::ClientFds,
     /// Explicit sync (`wp_linux_drm_syncobj_manager_v1`): the protocol state
     /// (and so the global) where it is offered -- the `--tty` GPU scanout
     /// tier on a device that passes the syncobj-eventfd probe, set by
-    /// `tty::init` -- plus the per-client timeline and acquire-wait counts
-    /// and the explicit-buffer classification the scanout tier's release
-    /// hold reads. Inert everywhere else. See `drm_syncobj.rs`.
+    /// `tty::init` -- plus the per-client acquire-wait counts and the
+    /// explicit-buffer classification the scanout tier's release hold reads
+    /// (the timeline fds are `client_fds`' above). Inert everywhere else.
+    /// See `drm_syncobj.rs`.
     pub(super) drm_syncobj: super::drm_syncobj::DrmSyncobj,
     /// Whether any client has ever handed this session a dmabuf the renderer
     /// accepted.
@@ -655,6 +662,13 @@ pub struct State {
     /// refusals. A stale `true` could only happen if an idle were dropped
     /// without running, which calloop does not do.
     pub dmabuf_drain_queued: bool,
+    /// How many fds this session's GLES renderer keeps of its own for each
+    /// dma-buf plane it imports, per GLES backend: `None` until the first
+    /// import into one, then what `dmabuf/renderer_copies.rs` measured then
+    /// (1 on Mesa's llvmpipe, 0 on a renderer that keeps none). One writer
+    /// and reader, that module, which charges the copies to the client in the
+    /// fd ledger. Never cleared: the GLES device is pinned for the session.
+    pub(super) renderer_plane_copies: Option<u8>,
     /// `ext_idle_notifier_v1` (version 2): what a `swayidle`-style daemon
     /// binds to learn the seat has been quiet N milliseconds. Read on
     /// every input event (`announce_activity`, see `idle.rs`) and written
@@ -957,9 +971,11 @@ impl State {
             shm_pools: ShmPools::default(),
             wl_buffers: WlBuffers::default(),
             pending_planes: Default::default(),
+            client_fds: Default::default(),
             drm_syncobj: Default::default(),
             imports_dmabufs: false,
             dmabuf_drain_queued: false,
+            renderer_plane_copies: None,
             idle_notifier,
             idle_inhibitors: idle::Inhibitors::default(),
             idle_inhibit_manager_state,

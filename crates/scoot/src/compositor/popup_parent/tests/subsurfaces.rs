@@ -4,8 +4,9 @@
 //!
 //! Every drawn subsurface attaches one of two buffers made once per client
 //! ([`Buffers`]), not a buffer of its own: a tree thousands deep would
-//! otherwise hit the per-client pool and buffer caps (`shm_pools.rs`,
-//! `wl_buffers.rs`) or the fd limit, and be refused for the wrong reason.
+//! otherwise hit the per-client pool, buffer and fd caps (`shm_pools.rs`,
+//! `wl_buffers.rs`, `client_fds.rs`) or the fd limit, and be refused for the
+//! wrong reason.
 
 use wayland_client::QueueHandle;
 use wayland_client::protocol::{wl_buffer, wl_subsurface, wl_surface};

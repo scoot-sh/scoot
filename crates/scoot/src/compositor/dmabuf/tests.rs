@@ -1670,7 +1670,7 @@ fn plane_fd(backing: Backing, size: u32) -> Option<OwnedFd> {
 /// `libc::ioctl` rather than a `rustix` wrapper because `UDMABUF_CREATE`
 /// returns the new fd as the ioctl's own return value, which `rustix`'s typed
 /// ioctl helpers have no shape for.
-fn udmabuf(memfd: BorrowedFd<'_>, size: u64) -> Option<OwnedFd> {
+pub(in crate::compositor) fn udmabuf(memfd: BorrowedFd<'_>, size: u64) -> Option<OwnedFd> {
     /// `_IOW('u', 0x42, struct udmabuf_create)` -- 24 bytes of payload.
     const UDMABUF_CREATE: u32 = 0x4018_7542;
 

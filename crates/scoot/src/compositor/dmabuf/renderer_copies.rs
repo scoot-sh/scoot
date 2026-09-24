@@ -1,0 +1,193 @@
+//! The fds a GLES renderer keeps of its own for each dma-buf plane it
+//! imports, charged to the client that sent the plane.
+//!
+//! The fd ledger (`client_fds.rs`) records every plane's fd as it arrives.
+//! That is every fd a *client* hands over, but not every fd its buffer makes
+//! this process hold: Mesa's software rasterizer (llvmpipe, which is what
+//! the dev VM's `--renderer gles` and `--tty` GPU tier run on, through
+//! `kms_swrast`) duplicates each imported plane's fd for its own mapping,
+//! and keeps the duplicate for as long as the renderer's texture cache holds
+//! the import. Measured on the dev VM: a three-plane `YU12` buffer imported
+//! and committed takes six dma-buf fds and pixman's one udmabuf plane takes
+//! one (both pinned in `client_fds/tests/dmabuf.rs`), and a single-plane
+//! `XR24` buffer two (a one-off diagnostic in the change that added this).
+//! Before this was counted, that change's fail-first run measured 200 such
+//! `YU12` buffers holding 1200 dma-buf fds on `main`: 600 planes, and 600
+//! copies nobody counted. A hardware driver imports a dma-buf into a
+//! GEM handle and keeps no fd (reasoned from Mesa's gallium winsys code, not
+//! measured: no hardware GPU is reachable from here; `Asahi.md` has the
+//! check).
+//!
+//! So the copies are learned rather than assumed. On the session's first
+//! successful import into a GLES backend, [`Probe`] counts the fds in this
+//! process that name the buffer's first plane's file (by `fstat` identity)
+//! just before the import and again just after, and divides the difference
+//! by the planes on that file and the GLES backends it went into. The
+//! difference, not the count: anything that already named the file -- the
+//! planes themselves, or fds a client parked in wayland-backend's received-fd
+//! queue on its own buffer (`docs/backlog/core/wayland-backend-fd-queue.md`)
+//! -- is in both counts and cancels, so no client can teach the session a
+//! bigger number. Nothing else opens an fd on a client's dma-buf in between;
+//! the only other thread touching fds (Smithay's shm drop thread) only closes
+//! pool fds. That ratio -- 1 on llvmpipe, 0 on a driver that keeps nothing --
+//! is kept for the session (its GLES device is pinned; see
+//! `render/gles.rs`), and every import from then on adds that many copies per
+//! GLES backend to each plane's record, so a client's bound counts them. It
+//! costs two `/proc/self/fd` walks with an `fstat` per entry, once per
+//! session; after that, a map lookup per plane per import (imports happen
+//! when a client allocates a buffer, not per frame).
+//!
+//! **What this does not count.** A copy lives until the renderer's cache
+//! drops the import, which is after the plane's `Dmabuf` is gone *and* a
+//! cache drain or a frame has run. The ledger forgets the record when the
+//! plane closes, so in between the copy is held and not counted. The drain is
+//! scheduled on every `wl_buffer` and `wl_surface` destruction
+//! (`schedule_cache_drain`), which covers the ways a client drops a buffer
+//! but one: a commit that replaces a buffer whose `wl_buffer` was already
+//! destroyed, on a surface nothing redraws, leaves its copies until the next
+//! drain. Any later `wl_buffer` destruction by any client drains them, so
+//! they do not pile up past one round of a client's buffers. An output
+//! added after an import makes its own copy on its first frame of that
+//! buffer, uncounted until the buffer is imported again.
+
+use std::os::fd::{AsRawFd, BorrowedFd};
+
+use smithay::backend::allocator::dmabuf::Dmabuf;
+
+use crate::cli::RendererKind;
+use crate::compositor::State;
+
+#[cfg(test)]
+mod tests;
+
+/// The most copies per plane per backend a probe will believe: a backstop,
+/// since the before/after difference already leaves out whatever else names
+/// the buffer. Past it a count is more likely something unforeseen than a
+/// renderer, and charging it would shrink every client's budget for the rest
+/// of the session.
+const MAX_COPIES_PER_PLANE: u8 = 4;
+
+/// The first half of the once-per-session measurement: the fds naming the
+/// buffer's first plane's file, counted before the import. See the module
+/// doc.
+pub(in crate::compositor) struct Probe {
+    dev: u64,
+    ino: u64,
+    before: usize,
+}
+
+impl Probe {
+    /// Counts, if this import is the one to learn from: the session has not
+    /// learned its renderer's copies yet and has a GLES backend. `None`
+    /// otherwise, and `None` where the count cannot be taken (no identity for
+    /// the plane, no `/proc`), in which case [`charge`] falls back to 1.
+    pub(in crate::compositor) fn before(state: &State, dmabuf: &Dmabuf) -> Option<Self> {
+        if state.renderer_plane_copies.is_some() || gles_backends(state) == 0 {
+            return None;
+        }
+        let (dev, ino) = identity(dmabuf.handles().next()?)?;
+        let before = fds_naming(dev, ino)?;
+        Some(Self { dev, ino, before })
+    }
+
+    /// The copies per plane per backend this import made: the fds naming the
+    /// file now, less those before, over the planes on that file and the
+    /// GLES `backends`. `None` if the second count cannot be taken.
+    fn copies(&self, dmabuf: &Dmabuf, backends: usize) -> Option<u8> {
+        let after = fds_naming(self.dev, self.ino)?;
+        let planes = dmabuf
+            .handles()
+            .filter(|plane| identity(*plane) == Some((self.dev, self.ino)))
+            .count();
+        Some(per_plane(
+            after.saturating_sub(self.before),
+            planes,
+            backends,
+        ))
+    }
+}
+
+/// How many backends a dma-buf import goes into as GLES.
+fn gles_backends(state: &State) -> usize {
+    state
+        .backends
+        .values()
+        .filter(|backend| backend.renderer() == RendererKind::Gles)
+        .count()
+}
+
+/// Charges `dmabuf`'s planes, just imported into every backend, with the
+/// copies this session's GLES renderer keeps of them, learning that number
+/// from `probe` on the session's first GLES import. See the module doc.
+/// Nothing at all on a session with no GLES backend.
+pub(in crate::compositor) fn charge(state: &mut State, dmabuf: &Dmabuf, probe: Option<Probe>) {
+    let backends = gles_backends(state);
+    if backends == 0 {
+        return;
+    }
+    let per_backend = match state.renderer_plane_copies {
+        Some(copies) => copies,
+        None => {
+            // Unknown -- no count before or after -- is 1, the conservative
+            // direction: an over-count costs a client some headroom, an
+            // under-count lets it hold fds nothing sees.
+            let copies = probe
+                .and_then(|probe| probe.copies(dmabuf, backends))
+                .unwrap_or(1);
+            // info!, once per session: whether a GPU client's buffers cost
+            // this compositor one fd per plane or two is a question someone
+            // sizing its limits asks of the log.
+            tracing::info!(
+                copies_per_plane_per_output = copies,
+                "dmabuf: learned how many fds the renderer keeps of each imported plane"
+            );
+            state.renderer_plane_copies = Some(copies);
+            copies
+        }
+    };
+    if per_backend == 0 {
+        return;
+    }
+    let copies = per_backend.saturating_mul(u8::try_from(backends).unwrap_or(u8::MAX));
+    for plane in dmabuf.handles() {
+        state.client_fds.add_copies(plane.as_raw_fd(), copies);
+    }
+}
+
+/// `copies` spread over `planes` planes and `backends` backends, rounded
+/// up and capped at [`MAX_COPIES_PER_PLANE`]. Split out to pin the
+/// arithmetic without a renderer.
+fn per_plane(copies: usize, planes: usize, backends: usize) -> u8 {
+    let per = planes.saturating_mul(backends.max(1));
+    let ratio = copies.div_ceil(per.max(1));
+    u8::try_from(ratio)
+        .unwrap_or(u8::MAX)
+        .min(MAX_COPIES_PER_PLANE)
+}
+/// `fd`'s `(st_dev, st_ino)`.
+// `st_dev`/`st_ino` are `u64` on the 64-bit targets scoot builds for, but
+// not on every Linux target; see `client_fds/liveness.rs`.
+#[allow(clippy::useless_conversion)]
+fn identity(fd: BorrowedFd<'_>) -> Option<(u64, u64)> {
+    let stat = rustix::fs::fstat(fd).ok()?;
+    Some((u64::from(stat.st_dev), u64::from(stat.st_ino)))
+}
+
+/// How many fds in this process name the file with identity `(dev, ino)`,
+/// or `None` if `/proc/self/fd` cannot be read. An entry that closes while
+/// this walks it is simply not counted. Allocates (the directory walk); it
+/// runs once per session.
+fn fds_naming(dev: u64, ino: u64) -> Option<usize> {
+    let entries = std::fs::read_dir("/proc/self/fd").ok()?;
+    let count = entries
+        .filter_map(Result::ok)
+        .filter_map(|entry| entry.file_name().to_str()?.parse::<i32>().ok())
+        .filter(|&fd| {
+            // SAFETY: borrowed only for the `fstat`, which neither closes nor
+            // changes it; a number that closed meanwhile fails with `EBADF`.
+            let fd = unsafe { BorrowedFd::borrow_raw(fd) };
+            identity(fd) == Some((dev, ino))
+        })
+        .count();
+    Some(count)
+}

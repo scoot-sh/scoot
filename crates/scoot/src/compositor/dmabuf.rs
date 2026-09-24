@@ -320,11 +320,12 @@
 //!   refusal and a panic on an `unwrap`, for any future shape in which a
 //!   session has a renderer at startup and loses one.
 //! - **What bounds the mappings a client can make this compositor hold.**
-//!   `MAX_BUFFERS_PER_CLIENT` (512, `wl_buffers.rs`), now that the async
-//!   `create` path claims too, for live buffer objects -- a buffer still
-//!   committed to a surface outlives its object uncounted, one per surface
-//!   (`docs/backlog/core/buffer-fds-past-their-object.md`) -- and each
-//!   mapping's *size* is bounded by the
+//!   The per-client fd ledger (`client_fds.rs`): every plane's fd is counted
+//!   from its `add` until it closes, so a buffer a surface still has
+//!   committed after its `wl_buffer` is destroyed stays counted, and a
+//!   mapping cannot outlive its plane's `Dmabuf`, which holds the fds.
+//!   `MAX_BUFFERS_PER_CLIENT` (512, `wl_buffers.rs`) bounds the live buffer
+//!   objects on top of that. Each mapping's *size* is bounded by the
 //!   dma-buf the client actually got the kernel to allocate, since Smithay
 //!   seeks the plane fd and refuses an offset/stride/height that runs past its
 //!   real end. So a client cannot claim address space it did not first pay for
@@ -1044,6 +1045,10 @@ impl DmabufHandler for State {
         // past the first leaves the earlier backends' mappings cached, which
         // `drain_cache` drops with the buffer -- the same shape a retried
         // import would rebuild.
+        // Once per session, the fds naming the buffer before the import, so
+        // what the renderer opens for it can be told from what was already
+        // there (see `dmabuf/renderer_copies.rs`).
+        let probe = renderer_copies::Probe::before(self, &dmabuf);
         let mut refused: Option<String> = None;
         for backend in self.backends.values_mut() {
             if let Err(error) = backend.import_dmabuf(&dmabuf) {
@@ -1066,6 +1071,10 @@ impl DmabufHandler for State {
                     );
                     self.imports_dmabufs = true;
                 }
+                // The planes' fds are the client's in the fd ledger since
+                // their `add`s; a renderer that keeps copies of its own has
+                // just made them, and they are charged to the same client.
+                renderer_copies::charge(self, &dmabuf, probe);
                 if let Err(error) = notifier.successful::<State>() {
                     // The client died between allocating and being told --
                     // nothing to release, since the buffer object was never
@@ -1094,7 +1103,11 @@ impl DmabufHandler for State {
 /// Called from `dispatch.rs`'s `wl_buffer` destruction hook -- for buffers of
 /// every kind, because that hook cannot observe which kind died (see
 /// `wl_buffers.rs`), and an extra scan of a short `Vec` is cheaper than the
-/// bookkeeping to find out. Gated on
+/// bookkeeping to find out. Also from its `wl_surface` destruction hook: a
+/// surface can hold the last reference to a buffer whose `wl_buffer` is
+/// already gone, and on a GLES renderer that keeps a copy of each imported
+/// plane's fd, that copy is only closed by a drain (see
+/// `dmabuf/renderer_copies.rs`). Gated on
 /// [`State::imports_dmabufs`](super::State), so a session that has never
 /// imported one never queues anything at all.
 ///
@@ -1195,6 +1208,7 @@ fn refuse_import(buffers: &mut WlBuffers, notifier: ImportNotifier) {
 }
 
 pub(super) mod pending_planes;
+pub(super) mod renderer_copies;
 #[cfg(feature = "gpu-scanout")]
 pub(super) mod scanout;
 #[cfg(test)]

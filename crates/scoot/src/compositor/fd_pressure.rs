@@ -1,14 +1,16 @@
 //! Compositor-wide file-descriptor pressure: the global ceiling.
 //!
-//! Every other bound in this compositor is per connection (512 live
-//! `wl_buffer`s, 128 live pools, 32 dma-buf planes added to params objects
-//! not yet created, 8 binds, 16 capture frames, 64 IPC slots, and where
-//! explicit sync is offered 128 retained syncobj timelines and 64
-//! outstanding acquire waits -- see `dmabuf/pending_planes.rs` and
-//! `drm_syncobj.rs`),
-//! while the fd table they all draw from is process-global (`RLIMIT_NOFILE`
-//! 1024 on the dev VM). Two connections inside every per-connection bound
-//! hold ~2 x 673 fds against it with nothing tripped -- the residual
+//! Every other bound in this compositor is per connection (512 fds of every
+//! kind a client hands over and scoot keeps -- shm pools, dma-buf planes,
+//! syncobj timelines, counted until they really close, see `client_fds.rs`
+//! -- plus, on objects: 512 live `wl_buffer`s, 128 live pools, 32 dma-buf
+//! planes added to params objects not yet created, 8 binds, 16 capture
+//! frames, 64 IPC slots, and where explicit sync is offered 128 retained
+//! syncobj timelines and 64 outstanding acquire waits -- see
+//! `dmabuf/pending_planes.rs` and `drm_syncobj.rs`), while the fd table they
+//! all draw from is process-global (`RLIMIT_NOFILE` 1024 on the dev VM). Two
+//! connections inside every per-connection bound can hold more than the
+//! table with nothing tripped -- the residual
 //! `docs/backlog/resolved/wayland-connection-cap-done.md` fixed the kill
 //! half of and left here. This module is the shared ceiling:
 //! one observation of the table ([`table`]) and one predicate
@@ -22,23 +24,39 @@
 //! - **IPC accept** (`ipc::accept`): a newcomer past the ceiling is refused
 //!   with a reason naming the pressure, the same shape as the 64-slot cap
 //!   refusal -- IPC, unlike Wayland, has a channel for it.
-//! - **Creation guards** (`dispatch.rs`'s pool/buffer claims, and the
-//!   pending-plane, timeline and acquire-wait bounds): a creation past a
-//!   per-client *grace* ([`PRESSURE_GRACE_BUFFERS`] /
-//!   [`PRESSURE_GRACE_POOLS`], and the three named in those modules) while
-//!   the table is pressured is refused with the same error the
-//!   per-connection cap would post. The grace is
-//!   what makes this a ceiling rather than a lottery: a bar holding 2
-//!   buffers is never refused for another client's greed, only a client
+//! - **Arrival guards**: every request that hands scoot an fd it keeps
+//!   (`wl_shm.create_pool`, `zwp_linux_buffer_params_v1.add`,
+//!   `import_timeline`) is refused, with the same error its per-client bound
+//!   would post, when the client already has scoot keep more than a
+//!   per-client *grace* of fds (`client_fds::PRESSURE_GRACE_FDS`, 128, every
+//!   kind together) while the table is pressured. The acquire-wait bound
+//!   does the same for its own eventfds (`drm_syncobj/acquire.rs`, grace 16),
+//!   which are scoot's, not the client's, and so not in that ledger. The
+//!   grace is what makes this a ceiling rather than a lottery: a bar holding
+//!   2 pools is never refused for another client's greed, only a client
 //!   already holding past-grace is ever killed, and a killed client's
 //!   disconnect frees what it held, so the pressure it caused lifts with it.
+//!
+//! The graces used to be per object kind (128 buffers, 64 pools, 8 pending
+//! planes, 32 timelines). They counted objects, so they could neither see
+//! the fd a destroyed object left behind (a buffer a surface still has
+//! committed keeps its pool's fd after the buffer and the pool are both
+//! gone) nor tell a four-plane dma-buf from a single-pixel buffer that holds
+//! none. The ledger counts the fds themselves, so the one grace is checked
+//! against what a client really makes this process hold. Creating a buffer
+//! hands scoot no fd (a shm buffer shares its pool's; a dma-buf's planes
+//! arrived with their `add`s), so buffer creation is no longer a pressure
+//! site at all.
 //!
 //! What is deliberately *not* here: any creation-time wait, queue or silent
 //! ignore (no protocol channel carries "retry later" on these interfaces,
 //! and a silent ignore leaves the uninitialized object that panics the
-//! compositor -- the argument `dispatch.rs` already makes), and any
+//! compositor -- the argument `dispatch.rs` already makes), any
 //! connection-count cap (any usable count admits the killing pair; see the
-//! verdict above).
+//! verdict above), and any kill of an idle holder: pressure refuses a
+//! client's next arrival, so a client that is past its grace and then stops
+//! sending keeps what it has until it leaves, and newcomers are shed
+//! meanwhile. That shape needs two connections now (below).
 //!
 //! ## The numbers, all measured
 //!
@@ -49,60 +67,56 @@
 //! - A login storm (bar, panels, launcher, a handful of apps -- ~30
 //!   connections at ~3-4 fds each) lands near **100-150**, by the same
 //!   per-connection arithmetic, not by a live 30-client session.
-//! - One connection at every hard cap on the default (pixman) tier: 512
-//!   buffers + 128 pools + 32 pending dma-buf planes + 1 socket = **~673
-//!   fds**. One such connection plus a normal session (~800) never trips
-//!   anything here: through the *counted* paths, a single connection cannot
-//!   exhaust the table on its own there. Through the uncounted ones below it
-//!   can, and one of those (wayland-backend's received-fd queue) was measured
-//!   filling it alone.
-//! - On the `--tty` GPU scanout tier the same connection can also hold 128
-//!   syncobj timelines and 64 acquire-wait eventfds: ~865, over a baseline
-//!   measured at **43 fds** idle (dev VM, `--tty --renderer gles`,
-//!   2026-09-24). 865 + 43 = 908 is past the 896 line, so there one
-//!   connection at every cap at once *can* trip the reserve alone. It is
-//!   then past every grace, so its next counted creation is refused, but if
-//!   it goes idle instead, newcomers are shed until it leaves. The pending
-//!   planes add 32 to that sum; before they were counted they added no
-//!   bound at all (the review measured 880 of them from one client), so the
-//!   908 is a ceiling where there was none, not a regression from 876. The
-//!   per-client fd budget that would bring it under the line is part of
-//!   `docs/backlog/core/buffer-fds-past-their-object.md`.
-//! - **Not every fd a client can make this process hold is counted.** Three
-//!   known paths are not (below). The two paths that review of
-//!   PR #233 measured at 927 fds each are closed: planes added to
-//!   `zwp_linux_buffer_params_v1` objects are counted until the object is
-//!   consumed or destroyed (`dmabuf/pending_planes.rs`), and syncobj
-//!   timelines are counted until their fd really closes, whatever still
-//!   references them (`drm_syncobj/retained.rs`), rather than until their
-//!   object is destroyed. Both refuse past a grace under pressure, so
-//!   the creation guards above can pick those holders
-//!   (`docs/backlog/resolved/client-held-fd-bound-done.md`).
-//! - **The uncounted paths.** The first two are filed as
-//!   `docs/backlog/core/buffer-fds-past-their-object.md`. A `wl_buffer`
-//!   that a surface still has committed keeps its fd (and, for shm, its
-//!   pool's mapping) after both the buffer and its pool object are
-//!   destroyed. The buffer and pool counts are both back at zero, and the
-//!   retention is one per surface, which nothing counts. Measured in the
-//!   harness: 200 surfaces, 200 fds held, 0 buffers and 0 pools counted. The
-//!   buffer count also weighs every buffer as one fd, and a multi-plane
-//!   dma-buf holds up to four. Only a GLES renderer imports multi-plane
-//!   buffers, so this second one is not on the default tier.
-//! - The third is below scoot, filed as
-//!   `docs/backlog/core/wayland-backend-fd-queue.md`: wayland-backend keeps
-//!   the fds a client sends in a per-connection queue with no bound, and a
-//!   request whose signature has no fd argument never drains it, so fds sent
-//!   alongside such requests stay for the connection's life. Review of
-//!   PR #236 measured one client taking scoot from 18 to 999 fds on the
-//!   default headless tier this way, newcomers shed, and the client never
-//!   killed; the same on `618b5dc`. No scoot cap sees those fds, so fd
-//!   pressure cannot pick that holder.
+//! - One connection at every bound at once, on the tier with the most
+//!   (`--tty` GPU scanout with explicit sync): 512 client fds + 64
+//!   acquire-wait eventfds + 1 socket = **577**, over a baseline measured at
+//!   **43 fds** idle there (dev VM, `--tty --renderer gles`, 2026-09-24):
+//!   **620**, 276 below the 896 line (measured live at the bound with a
+//!   three-plane dma-buf client: 557). On the default pixman tier it is 513
+//!   over 14. The 512 includes the copy the dev VM's software GLES renderer
+//!   keeps of each imported plane (`dmabuf/renderer_copies.rs`); copies of
+//!   planes that closed since the last cache drain can add one round of the
+//!   client's buffers on top, 256 at most (876). So through everything
+//!   scoot counts, one connection cannot trip the reserve on its own on any
+//!   tier, and outside that drain window there is room for a normal session
+//!   beside it (620 + ~150 = 770). Before the fd ledger the same
+//!   sum on the GPU tier was ~865 + 43 = 908, past the line, and a
+//!   multi-plane dma-buf or a destroyed-but-committed buffer was not in it at
+//!   all. This holds on tables of 1024 fds and up; below that the line (the
+//!   table minus [`RESERVE_FDS`]) comes down with the table while the
+//!   per-client bound does not, so on a 512-fd table (the smallest guarded,
+//!   [`MIN_TABLE_FDS`]) one connection can still reach it.
+//! - Two such connections do exceed the table, which is what the arrival
+//!   guards are for: the second is past its 128-fd grace long before the
+//!   line, and its next arrival there is refused.
+//!
+//! ## What is not counted
+//!
+//! Below scoot, in wayland-backend, two per-connection queues hold fds that
+//! no scoot code sees:
+//!
+//! - **Received fds** (`docs/backlog/core/wayland-backend-fd-queue.md`):
+//!   fds a client sends alongside a request whose signature has no fd
+//!   argument stay queued for the connection's life. Review of PR #236
+//!   measured one client taking scoot from 18 to 999 fds this way on the
+//!   default headless tier, newcomers shed, and the client never killed.
+//!   Unbounded; that ticket's.
+//! - **Outgoing fds**: an event carrying an fd (a keymap, a dma-buf format
+//!   table, a selection `send`) is written into the client's outgoing buffer
+//!   with a duplicate of the fd, which closes once the buffer is flushed to
+//!   the socket. A client that stops reading keeps those duplicates here
+//!   until the buffer is full, and is then disconnected (wayland-backend
+//!   caps the buffer at 4096 bytes and kills the client past it). The
+//!   smallest such event is 12-16 bytes, so that is at most a few hundred
+//!   fds, and only for a client that has first filled its socket's kernel
+//!   buffer. Reasoned from wayland-backend 0.3.17's source, not measured.
+//!   On top of the 620 above that could take one non-reading connection on
+//!   the dev VM's GPU tier to the line, but only transiently: it is
+//!   disconnected once its buffer fills.
 //!
 //! [`RESERVE_FDS`] is 128: shed/refuse once fewer than 128 fds stand free
 //! (used past 896 of 1024). That is ~6x above the reasoned login storm and
-//! still leaves room for a whole greedy connection's transient burst, while
-//! the two-greedy fill trips the creation guard with the second greedy near
-//! ~370 of its 512 buffers -- before exhaustion, not after it.
+//! still leaves room for a whole greedy connection's transient burst.
 //!
 //! [`MIN_TABLE_FDS`] is 512: below it the guard stays off entirely
 //! ([`table`] returns `None`, every site fails open) and the `EMFILE` shed
@@ -111,35 +125,34 @@
 //! normal login storm -- so the honest answer is no guard rather than a
 //! hair-trigger one.
 //!
-//! The graces (128 buffers = 64x the measured single-window floor of 2 and
-//! ~2x the heaviest reasoned legitimate use of ~60 for a 20-window browser
-//! at triple buffering; 64 pools = 32x the floor and ~1.6x the reasoned ~40)
-//! bite only *during* genuine pressure, which a legitimate session never
-//! produces (see above): holding past-grace while the table is 7/8 full
-//! means contributing to the pressure, which is what justifies the kill.
-//! Two connections sitting exactly at grace hold 2 x (128 + 64 + 1) + 14
-//! baseline = 400 fds -- pressure still requires someone past grace, so the
-//! refusal always lands on a contributor. Stated exactly: `live > grace`
-//! admits the grace+1-th unit, so two connections at the permitted maximum
-//! hold 2 x (129 + 65 + 1) + 14 = 404 fds, 4 above the "two at grace"
-//! figure -- negligible, but the pins in `dispatch.rs` hold it there. The
-//! pending-plane grace (8) adds 2 x 9 to that, and the timeline and
-//! acquire-wait graces (32 and 16) apply only on the GPU tier.
+//! The grace (128 fds, every kind together; see `client_fds.rs` for how it
+//! compares to the heaviest reasoned legitimate clients) bites only
+//! *during* genuine pressure, which a legitimate session never produces
+//! (see above): holding past-grace while the table is 7/8 full means
+//! contributing to the pressure, which is what justifies the kill. Two
+//! connections at the most the graces let through under pressure hold
+//! 2 x (128 + 16 + 17 + 1) + 43 = 367 fds on the GPU tier: 128 client fds
+//! plus the [`SWEEP_MARGIN`](crate::compositor::client_fds::SWEEP_MARGIN) of
+//! arrivals the ledger admits between pressure checks, 17 acquire-wait
+//! eventfds (`live > 16` is the refusal), a socket, and the idle baseline.
+//! That is far below the 896 line, so pressure still requires someone past
+//! grace, and the refusal lands on a contributor.
 //!
 //! ## Observation cost and disciplines
 //!
 //! [`table`] costs one `getrlimit` plus one `/proc/self/fd` readdir --
 //! ~8us per call on the dev VM (debug build, 2000-call sample; release is
 //! faster), no steady-state cost anywhere: the accept sites run it once per
-//! *connection* (not per frame or request), and the creation sites only
-//! once a client is already past its grace (a `HashMap` lookup short-
-//! circuits everything under it).
+//! *connection* (not per frame or request), and the arrival sites only
+//! once a client is already past its grace, and then at most once per
+//! [`SWEEP_MARGIN`](crate::compositor::client_fds::SWEEP_MARGIN) arrivals
+//! (a map lookup short-circuits everything under it).
 //!
 //! `table()` allocates (`read_dir`), so the fork-child discipline from
 //! `ipc::accept` applies: never call it from `drain`, `shed_one`,
 //! `classify`, or anything a forked exhaustion-test child executes. Every
-//! current call site (the two accept callbacks, the dispatch creation
-//! guards) runs on the loop thread, never in a forked child.
+//! current call site (the two accept callbacks, the arrival guards and the
+//! acquire-wait bound) runs on the loop thread, never in a forked child.
 //!
 //! Unknown means calm: any observation failure (`getrlimit` error, an
 //! infinite limit, an unreadable `/proc`) returns `None`, and every site
@@ -153,15 +166,6 @@ pub(crate) const RESERVE_FDS: u64 = 128;
 /// Tables smaller than this get no guard at all ([`table`] returns `None`).
 /// See the module doc for why a small table fails open.
 pub(crate) const MIN_TABLE_FDS: u64 = 512;
-
-/// Live `wl_buffer`s a client may hold before pressure starts refusing its
-/// creations. Only ever enforced while [`Table::pressured`] holds; the
-/// per-connection 512 cap applies regardless. See the module doc.
-pub(crate) const PRESSURE_GRACE_BUFFERS: u32 = 128;
-
-/// Live `wl_shm_pool`s a client may hold before pressure starts refusing
-/// its creations. Same conditional shape as [`PRESSURE_GRACE_BUFFERS`].
-pub(crate) const PRESSURE_GRACE_POOLS: u32 = 64;
 
 /// One observation of the process fd table: how many fds are open against
 /// how many the kernel allows this process.

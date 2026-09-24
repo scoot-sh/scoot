@@ -113,3 +113,29 @@ fn the_live_observer_agrees_with_the_kernel() {
     let soft = soft_limit().expect("getrlimit works on this machine");
     assert_eq!(table.soft, soft);
 }
+
+/// The claim the module doc's numbers rest on: one connection at every
+/// per-client bound at once, on the tier with the most (the `--tty` GPU
+/// scanout tier, with explicit sync offered), plus that tier's measured idle
+/// baseline, stays below the reserve line of a 1024-fd table. On `main`
+/// before the fd ledger the same sum was 512 buffers + 128 pools + 32
+/// pending planes + 128 timelines + 64 waits + 1 = 865, and 908 with the
+/// baseline: past the line, so one idle connection could shed every
+/// newcomer on its own. A change to any of these bounds that breaks it
+/// fails here rather than in a live session.
+#[test]
+fn one_connection_at_every_bound_stays_below_the_reserve() {
+    use crate::compositor::client_fds::MAX_FDS_PER_CLIENT;
+    use crate::compositor::drm_syncobj::MAX_ACQUIRE_WAITS_PER_CLIENT;
+    /// Idle `--tty --renderer gles` on the dev VM, 2026-09-24.
+    const GPU_TIER_IDLE_BASELINE: u64 = 43;
+    const SOCKET: u64 = 1;
+    let one_connection =
+        u64::from(MAX_FDS_PER_CLIENT) + u64::from(MAX_ACQUIRE_WAITS_PER_CLIENT) + SOCKET;
+    assert_eq!(one_connection, 577);
+    let line = 1024 - RESERVE_FDS;
+    assert!(
+        one_connection + GPU_TIER_IDLE_BASELINE < line,
+        "{one_connection} + {GPU_TIER_IDLE_BASELINE} is past the {line} line"
+    );
+}

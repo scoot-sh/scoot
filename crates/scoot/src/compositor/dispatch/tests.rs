@@ -34,6 +34,7 @@ use wayland_protocols::wp::single_pixel_buffer::v1::client::wp_single_pixel_buff
 
 use super::MAX_SHM_POOL_BYTES;
 use crate::compositor::State;
+use crate::compositor::client_fds::MAX_FDS_PER_CLIENT;
 use crate::compositor::decorations::Appearance;
 use crate::compositor::keybindings::Keybindings;
 use crate::compositor::shm_pools::MAX_POOLS_PER_CLIENT;
@@ -817,6 +818,24 @@ impl BufferClient {
         Ok(())
     }
 
+    /// Fills the whole live-buffer budget from eight shared pools, 64
+    /// buffers each, so the budget is full while the client has scoot keep
+    /// only eight fds. A pool per buffer would be 512 fds, and the next
+    /// fd-carrying request (a dma-buf `add`) would then be refused by the
+    /// per-client fd bound (`client_fds.rs`) before the buffer creation
+    /// under test ever reached the budget.
+    fn fill_budget_from_shared_pools(&mut self) -> Result<(), DispatchError> {
+        for _ in 0..MAX_BUFFERS_PER_CLIENT / 64 {
+            let pool = self.create_pool()?;
+            for slot in 0..64 {
+                self.create_buffer(&pool, slot * 64)?;
+            }
+            pool.destroy();
+            self.flush()?;
+        }
+        Ok(())
+    }
+
     /// Destroys every held buffer and flushes, then forgets them
     /// client-side.
     fn destroy_all_buffers(&mut self) -> Result<(), DispatchError> {
@@ -911,7 +930,7 @@ fn assert_raw_protocol_error_with_message(
 /// the failure is a loud panic here, never a fill reddened with the
 /// wrong cause. Every failure is fast and names the numbers -- never a
 /// skip, which would stop guarding the bound these floods exist to pin.
-fn ensure_dispatch_flood_headroom(retained: u64) {
+pub(in crate::compositor) fn ensure_dispatch_flood_headroom(retained: u64) {
     use crate::compositor::fd_pressure::{RESERVE_FDS, table};
 
     /// Ceiling the floods run under: the same 4096 the icon half raises
@@ -968,18 +987,21 @@ fn ensure_dispatch_flood_headroom(retained: u64) {
     // pressure refusal.)
 }
 
-/// The bypass loop the ticket is about: `create_pool` / `create_buffer` /
-/// `destroy_pool` returns the live-pool count to zero every iteration while
-/// the retained fd+mapping count grows. Past the buffer cap the excess
-/// `create_buffer` is refused with `InvalidStride` on the pool -- the kill
+/// The bypass loop `shm-pool-cap-misses-retained-fds` was about:
+/// `create_pool` / `create_buffer` / `destroy_pool` returns the live-pool
+/// count to zero every iteration while the fds the buffers keep grow. The
+/// buffer cap used to be what stopped it, at the 513th `create_buffer`. Now
+/// the fd each iteration's pool leaves behind is counted itself
+/// (`client_fds.rs`), so the 513th `create_pool` is refused first, with
+/// `InvalidStride` on `wl_shm` and a message naming the fd bound -- the kill
 /// that carries it drains the dead client's 512 buffers, and the survivor
-/// never noticed.
+/// never noticed. (The buffer cap's own refusal is pinned by the next test,
+/// which reaches it with fewer fds.)
 ///
-/// Pre-fix this runs unbounded (513 live buffers, no refusal); the loop is
-/// bounded in-test at one past the cap so it cannot exhaust the machine it
-/// runs on.
+/// Without either bound this runs unbounded; the loop is bounded in-test at
+/// one past the cap so it cannot exhaust the machine it runs on.
 #[test]
-fn retaining_a_buffer_past_its_pool_trips_the_buffer_cap() {
+fn retaining_a_buffer_past_its_pool_trips_the_fd_bound() {
     let report = drive(|stream| {
         let _flood = hold_flood_lock();
         let mut buffers = BufferClient::connect(stream)?;
@@ -991,22 +1013,14 @@ fn retaining_a_buffer_past_its_pool_trips_the_buffer_cap() {
         }
         buffers.roundtrip()
     });
-    // Message pin, not the code-only `assert_shm_protocol_error`, on purpose:
-    // the fd-pressure twin of this refusal posts the identical
-    // `InvalidStride` on the identical pool object (see `reject_excess_buffer`),
-    // so code+interface cannot tell "the 512-cap said no" from "the pressured
-    // table said no" -- proven by running this test under
-    // `prlimit --nofile=650:650`, where the kill lands at ~grace-129 with the
-    // pressure cause and the code-only assertion still passes green. Only the
-    // budget message proves the kill came from the bound under test (the
-    // pressure text carries no `maximum of … live buffers`). The helper itself
-    // is unchanged: its "stays valid whichever side answered" stance stands
-    // for its other users, where no twin shares code+object.
+    // Message pin, not the code-only `assert_shm_protocol_error`: the pool
+    // count, the fd bound and fd pressure all post `InvalidStride` on
+    // `wl_shm`, so only the message proves which bound said no.
     assert_raw_protocol_error_with_message(
         &report.resize,
-        "wl_shm_pool",
+        "wl_shm",
         wl_shm::Error::InvalidStride as u32,
-        &format!("maximum of {MAX_BUFFERS_PER_CLIENT} live buffers"),
+        &format!("keeps of an imported plane), and the maximum is {MAX_FDS_PER_CLIENT}"),
     );
     assert_survivor_still_served(&report);
     assert_eq!(
@@ -1278,11 +1292,13 @@ fn flooding_single_pixel_buffers_trips_the_same_cap() {
 /// code difference is what proves the refusal came from the shared budget
 /// rather than the import path.
 ///
-/// The 512-buffer fill runs under [`ensure_dispatch_flood_headroom`]: it
-/// sits near the fd-pressure boundary by design, and without a raised
-/// ceiling the refusal lands mid-fill with the pressure cause instead of
-/// after it with the budget one. The assertion pins the budget cause by
-/// message for the same reason -- both causes post 7 on this object.
+/// The 512-buffer fill shares eight pools
+/// ([`BufferClient::fill_budget_from_shared_pools`]), so it holds eight fds,
+/// not 512: a pool per buffer would now be refused by the per-client fd
+/// bound before the budget under test. It still runs under
+/// [`ensure_dispatch_flood_headroom`], as cheap insurance, and the assertion
+/// still pins the budget cause by message -- the fd bound and the budget
+/// both disconnect, and only the message says which.
 #[test]
 fn a_dmabuf_immed_past_a_full_budget_is_refused_before_validation() {
     // Lock and headroom on the test thread, before `drive`: a failed
@@ -1292,13 +1308,7 @@ fn a_dmabuf_immed_past_a_full_budget_is_refused_before_validation() {
     ensure_dispatch_flood_headroom(u64::from(MAX_BUFFERS_PER_CLIENT));
     let report = drive(|stream| {
         let mut buffers = BufferClient::connect(stream)?;
-        for i in 0..MAX_BUFFERS_PER_CLIENT {
-            buffers.bypass_once();
-            if i % 64 == 63 {
-                buffers.flush()?;
-            }
-        }
-        buffers.roundtrip()?;
+        buffers.fill_budget_from_shared_pools()?;
         let dmabuf = buffers.dispatch.dmabuf.clone().expect("the dmabuf global");
         let qh = buffers.queue.handle();
         let params = dmabuf.create_params(&qh, ());
@@ -1343,11 +1353,13 @@ fn a_dmabuf_immed_past_a_full_budget_is_refused_before_validation() {
 /// async path would be the one `wl_buffer` factory outside
 /// `MAX_BUFFERS_PER_CLIENT` entirely.
 ///
-/// The 512-buffer fill runs under [`ensure_dispatch_flood_headroom`]: it
-/// sits near the fd-pressure boundary by design, and without a raised
-/// ceiling the refusal lands mid-fill with the pressure cause instead of
-/// after it with the budget one. The assertion pins the budget cause by
-/// message for the same reason -- both causes post 7 on this object.
+/// The 512-buffer fill shares eight pools
+/// ([`BufferClient::fill_budget_from_shared_pools`]), so it holds eight fds,
+/// not 512: a pool per buffer would now be refused by the per-client fd
+/// bound before the budget under test. It still runs under
+/// [`ensure_dispatch_flood_headroom`], as cheap insurance, and the assertion
+/// still pins the budget cause by message -- the fd bound and the budget
+/// both disconnect, and only the message says which.
 #[test]
 fn a_dmabuf_create_past_a_full_budget_is_refused_by_the_shared_budget() {
     // Lock and headroom on the test thread, before `drive`: a failed
@@ -1357,13 +1369,7 @@ fn a_dmabuf_create_past_a_full_budget_is_refused_by_the_shared_budget() {
     ensure_dispatch_flood_headroom(u64::from(MAX_BUFFERS_PER_CLIENT));
     let report = drive(|stream| {
         let mut buffers = BufferClient::connect(stream)?;
-        for i in 0..MAX_BUFFERS_PER_CLIENT {
-            buffers.bypass_once();
-            if i % 64 == 63 {
-                buffers.flush()?;
-            }
-        }
-        buffers.roundtrip()?;
+        buffers.fill_budget_from_shared_pools()?;
         let dmabuf = buffers.dispatch.dmabuf.clone().expect("the dmabuf global");
         let qh = buffers.queue.handle();
         let params = dmabuf.create_params(&qh, ());
@@ -1467,28 +1473,30 @@ fn a_failed_dmabuf_import_kills_only_that_client_and_drains_its_budget() {
 //
 // The pure conjunction is tested, not `pressure_refusal` itself: the table
 // half reads the test process's own fd table, which no in-suite test can
-// drive to pressure without starving its siblings. All four call sites (the
-// pool claim and the three buffer claims) funnel through this predicate
-// with one of the two grace constants below, so pinning the constants plus
-// the predicate covers every site.
+// drive to pressure without starving its siblings. Its one call site now is
+// the acquire-wait bound; the fds a client hands over are checked against
+// the fd ledger's grace instead, whose `>`/`&&` shape is pinned in
+// `client_fds/tests.rs`. The graces are pinned both places.
 
 use super::pressure_refusal_for;
-use crate::compositor::fd_pressure::{PRESSURE_GRACE_BUFFERS, PRESSURE_GRACE_POOLS};
+use crate::compositor::client_fds::PRESSURE_GRACE_FDS;
+use crate::compositor::drm_syncobj::PRESSURE_GRACE_ACQUIRE_WAITS;
+
+const GRACES: [u32; 2] = [PRESSURE_GRACE_ACQUIRE_WAITS, PRESSURE_GRACE_FDS];
 
 #[test]
-fn pressure_graces_are_128_buffers_and_64_pools() {
-    // A silent grace change moves every boundary below; fail loudly here.
-    assert_eq!(PRESSURE_GRACE_BUFFERS, 128);
-    assert_eq!(PRESSURE_GRACE_POOLS, 64);
+fn pressure_graces_are_16_waits_and_128_fds() {
+    // A silent grace change moves every boundary below, and the reserve
+    // arithmetic in `fd_pressure.rs`; fail loudly here.
+    assert_eq!(PRESSURE_GRACE_ACQUIRE_WAITS, 16);
+    assert_eq!(PRESSURE_GRACE_FDS, 128);
 }
 
 #[test]
 fn at_grace_passes_even_under_pressure() {
-    // `>` is exact, not `>=`: holding exactly the grace is never a refusal.
-    // `live > grace` permits grace+1 units, so the permitted per-connection
-    // fd maximum is 2 x (129 + 65 + 1) + 14 = 404, not the 400 "two at
-    // grace" holds.
-    for grace in [PRESSURE_GRACE_BUFFERS, PRESSURE_GRACE_POOLS] {
+    // `>` is exact, not `>=`: holding exactly the grace is never a refusal,
+    // so a client may hold grace+1 units.
+    for grace in GRACES {
         assert!(
             !pressure_refusal_for(0, grace, true),
             "an empty client is never refused"
@@ -1506,24 +1514,20 @@ fn at_grace_passes_even_under_pressure() {
 
 #[test]
 fn one_past_grace_refuses_under_pressure() {
-    // The 129th buffer / 65th pool is the first refusal -- one past grace,
-    // not at it.
-    assert!(
-        pressure_refusal_for(PRESSURE_GRACE_BUFFERS + 1, PRESSURE_GRACE_BUFFERS, true),
-        "129 live buffers refuse under pressure"
-    );
-    assert!(
-        pressure_refusal_for(PRESSURE_GRACE_POOLS + 1, PRESSURE_GRACE_POOLS, true),
-        "65 live pools refuse under pressure"
-    );
+    for grace in GRACES {
+        assert!(
+            pressure_refusal_for(grace + 1, grace, true),
+            "one past a {grace} grace refuses under pressure"
+        );
+    }
 }
 
 #[test]
 fn past_grace_without_pressure_passes() {
     // `&&` is exact, not `||`: over grace alone, with a calm table, never
-    // refuses. (Past the per-connection 512/128 caps the cap path still
-    // refuses -- this pins only the pressure half.)
-    for grace in [PRESSURE_GRACE_BUFFERS, PRESSURE_GRACE_POOLS] {
+    // refuses. (Past the per-connection caps the cap path still refuses --
+    // this pins only the pressure half.)
+    for grace in GRACES {
         assert!(
             !pressure_refusal_for(grace + 1, grace, false),
             "past grace with a calm table passes"
@@ -1539,7 +1543,7 @@ fn past_grace_without_pressure_passes() {
 fn under_grace_with_pressure_passes() {
     // The other half of `&&` vs `||`: pressure alone, with the client under
     // grace, never refuses -- this is the innocent-client guarantee.
-    for grace in [PRESSURE_GRACE_BUFFERS, PRESSURE_GRACE_POOLS] {
+    for grace in GRACES {
         for live in [0, 1, grace - 1, grace] {
             assert!(
                 !pressure_refusal_for(live, grace, true),

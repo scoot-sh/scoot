@@ -13,13 +13,15 @@
 //! cap in `drm_syncobj.rs`, and the pending dma-buf plane cap in
 //! `dmabuf/pending_planes.rs`, each with its release halves there too), one
 //! pre-delegation
-//! interception ([`prepare_post_destroy_lock_commit`]) and six
+//! interception ([`prepare_post_destroy_lock_commit`]) and seven
 //! post-destruction hooks ([`redraw_after_lock_surface_destroyed`],
 //! [`neutralize_destroyed_layer_surface`],
 //! [`forget_destroyed_toplevel_icon`],
 //! [`forget_destroyed_buffer`],
+//! [`drain_after_destroyed_surface`],
 //! [`forget_destroyed_capture_frame`] and
-//! [`forget_destroyed_shm_pool`]).
+//! [`forget_destroyed_shm_pool`]). The pool guard and the plane guard also
+//! record each fd they admit in the per-client fd ledger (`client_fds.rs`).
 //!
 //! ## Why the first guard exists
 //!
@@ -79,8 +81,8 @@
 //! and the address-space envelope (count x 512 MiB sparse), not the fds or
 //! mappings a buffer surviving its pool retains: destroying a pool object
 //! frees neither while its buffers live, so that quantity is bounded
-//! separately by the per-client live-`wl_buffer` count (see `shm_pools.rs`
-//! and `wl_buffers.rs`). See
+//! separately by the per-client fd ledger, which counts each pool's fd until
+//! it really closes (see `shm_pools.rs` and `client_fds.rs`). See
 //! `docs/backlog/resolved/shm-pool-count-cap-done.md` for the byte
 //! half rather than treating either fix as closing that case too.
 //!
@@ -275,8 +277,12 @@
 //! refuses a buffer creation past
 //! [`MAX_BUFFERS_PER_CLIENT`](super::wl_buffers::MAX_BUFFERS_PER_CLIENT)
 //! live buffers for the requesting client, before Smithay's handler ever
-//! sees it -- every bypass iteration must keep a buffer alive, so the cap
-//! catches exactly the bypass shape, whatever it does with the pool object.
+//! sees it. It was the bound that caught that bypass; since the per-client
+//! fd ledger (`client_fds.rs`) counts every pool's fd until it closes, the
+//! ledger now catches it first (the 513th `create_pool`), and also the shape
+//! this cap could not see at all: a buffer a surface still has committed
+//! after the client destroyed its `wl_buffer` too. The cap stays as the
+//! bound on live buffer *objects*.
 //!
 //! Three deliberate choices, all worth recording rather than re-deriving:
 //!
@@ -428,6 +434,7 @@ use smithay::reexports::wayland_server::{
 use smithay::wayland::{Dispatch2, GlobalDispatch2};
 
 use super::State;
+use super::client_fds::Kind;
 
 /// Test-only, and `pub(super)` for one reason: the fd-flood serialisation
 /// lock in `tests` is shared with the icon-buffer flood in
@@ -451,17 +458,16 @@ pub(super) mod tests;
 ///   ~2 GiB of address space reserved per pool; this is a quarter of that, and
 ///   leaves the `size as usize` conversion Smithay does trivially in range.
 ///
-/// What it deliberately does *not* claim: a byte total, or an fd/mapping
-/// total. A client may hold
+/// What it deliberately does *not* claim: a byte total. A client may hold
 /// up to [`MAX_POOLS_PER_CLIENT`](super::shm_pools::MAX_POOLS_PER_CLIENT)
 /// live pool objects, and bounding the byte sum would need each pool's size
 /// at destroy time, which is unknowable at the pinned rev (see
-/// `shm_pools.rs`) -- and a destroyed pool's fd and mapping outlive it
-/// while its buffers do, so those are bounded by the live-`wl_buffer` count
-/// instead (see `wl_buffers.rs`) -- except while a surface still has such a
-/// buffer committed after the buffer object, too, was destroyed, which
-/// nothing counts yet (`docs/backlog/core/buffer-fds-past-their-object.md`).
-/// The live-object concurrency is what
+/// `shm_pools.rs`). A destroyed pool's fd and mapping outlive it while any
+/// buffer made from it is held, including by a surface after the buffer
+/// object, too, was destroyed; those are bounded by the per-client fd ledger
+/// (`client_fds.rs`), which counts each pool's fd until it closes, and a
+/// mapping closes no later than its fd. So a client keeps at most 512 pool
+/// mappings of up to this size each. The live-object concurrency is what
 /// [`reject_excess_shm_pool`] bounds. See this module's doc
 /// for why an oversized request is refused rather than clamped.
 const MAX_SHM_POOL_BYTES: i32 = 512 * 1024 * 1024;
@@ -511,6 +517,7 @@ where
         forget_destroyed_capture_frame::<I>(state, &client, resource);
         forget_destroyed_shm_pool::<I>(state, &client, resource);
         forget_destroyed_buffer::<I>(state, &client, resource);
+        drain_after_destroyed_surface::<I>(state);
         super::dmabuf::pending_planes::forget_destroyed::<I>(state, &client, resource);
         super::drm_syncobj::forget_destroyed::<I>(state, resource);
         data.destroyed(state, client, resource);
@@ -630,7 +637,8 @@ where
 /// Posts a protocol error and returns `true` when `request` is a
 /// `wl_shm.create_pool` that would push its client past
 /// [`MAX_POOLS_PER_CLIENT`](super::shm_pools::MAX_POOLS_PER_CLIENT) live
-/// pools.
+/// pools, or past its fd bound in the fd ledger (`client_fds.rs`). Otherwise
+/// it counts the pool, records its fd in the ledger, and answers `false`.
 ///
 /// Only creations are claimed: a `resize` grows the pool it names rather
 /// than opening a new one, so it leaves the count alone, and a destroy
@@ -658,13 +666,19 @@ where
 /// failure above is the exception: `InvalidFd`, matching what Smithay
 /// posts for the same fd.)
 ///
-/// Past [`PRESSURE_GRACE_POOLS`](super::fd_pressure::PRESSURE_GRACE_POOLS)
-/// live pools *and* a pressured process table, the same refusal answers
-/// for the compositor-wide ceiling instead of the per-client one (see
-/// `fd_pressure` for why the grace makes this a ceiling rather than a
-/// lottery). Checked before the claim, so a pressure refusal never takes a
-/// count unit it would then have to give back: the bookkeeping stays
-/// balanced by construction, not by a compensating release.
+/// The fd ledger answers for two bounds on the pool's *fd*, which, unlike
+/// the pool object, outlives the pool's destruction for as long as any
+/// buffer made from it is held (a surface that still has it committed
+/// included): the client's 512 fds of every kind
+/// (`client_fds::MAX_FDS_PER_CLIENT`), and, past the 128-fd grace
+/// (`client_fds::PRESSURE_GRACE_FDS`) while the process table is pressured,
+/// the compositor-wide ceiling (see `fd_pressure` for why the grace makes
+/// this a ceiling rather than a lottery). Same refusal as the live-pool
+/// count, with a message naming the bound. The ledger is asked first and
+/// only records once the live-pool count has claimed too, so no refusal
+/// takes a unit or a record it would then have to give back: the
+/// bookkeeping stays balanced by construction, not by a compensating
+/// release.
 ///
 /// Folds away for every interface other than `wl_shm`, for the same
 /// monomorphization reason as the guards above -- which matters here too:
@@ -688,9 +702,9 @@ where
         return false;
     };
     // Whatever becomes of this pool, its fd number is this process's again,
-    // which proves any syncobj timeline recorded on it was closed (see
-    // `drm_syncobj/retained.rs`). One `is_empty` test off the GPU tier.
-    state.drm_syncobj.fd_arrived(fd.as_raw_fd());
+    // which proves whatever the fd ledger recorded on it was closed (see
+    // `client_fds.rs`). One map lookup.
+    state.client_fds.fd_arrived(fd.as_raw_fd());
     if *size <= 0 || *size > MAX_SHM_POOL_BYTES {
         return false;
     }
@@ -704,21 +718,23 @@ where
         );
         return true;
     }
-    if pressure_refusal(
-        state.shm_pools.live_for(client),
-        super::fd_pressure::PRESSURE_GRACE_POOLS,
-    ) {
+    let id = client.id();
+    if let Err(refusal) = state
+        .client_fds
+        .admit_arrival(&id, fd.as_raw_fd(), Kind::Pool)
+    {
         resource.post_error(
             wl_shm::Error::InvalidStride,
-            too_many_pools_under_pressure(),
+            refusal.message("wl_shm pool refused"),
         );
         return true;
     }
-    if !state.shm_pools.refuse_pool_creation(client) {
-        return false;
+    if state.shm_pools.refuse_pool_creation(client) {
+        resource.post_error(wl_shm::Error::InvalidStride, too_many_pools());
+        return true;
     }
-    resource.post_error(wl_shm::Error::InvalidStride, too_many_pools());
-    true
+    state.client_fds.record_arrival(&id, fd.as_fd(), Kind::Pool);
+    false
 }
 
 /// Probes whether `fd` can be mapped exactly the way Smithay's
@@ -829,10 +845,14 @@ where
 /// `New` is safe only because `post_error` kills synchronously -- and
 /// `create` has no `New` at all, so it is safer still.
 ///
-/// Past [`PRESSURE_GRACE_BUFFERS`](super::fd_pressure::PRESSURE_GRACE_BUFFERS)
-/// live buffers *and* a pressured process table, the same refusal answers
-/// for the compositor-wide ceiling (see `fd_pressure`, and the pool guard
-/// above for the check-before-claim shape that keeps the count balanced).
+/// No fd-pressure refusal here any more: creating a buffer hands scoot no
+/// fd. A shm buffer shares its pool's, a dma-buf's planes arrived with
+/// their `add`s, and a single-pixel buffer has none. So fd pressure is
+/// enforced where fds arrive, against the client's fds in the ledger
+/// (`client_fds.rs`), rather than against a buffer count that could not tell
+/// a four-plane dma-buf from a single-pixel buffer, nor see a destroyed
+/// buffer whose fd a surface still keeps. The 512 cap on live buffer
+/// *objects* stays.
 ///
 /// Folds away for every interface other than the three factories, for the
 /// same monomorphization reason as the guards above -- which matters here
@@ -853,16 +873,6 @@ where
         else {
             return false;
         };
-        if pressure_refusal(
-            state.wl_buffers.live_for(client),
-            super::fd_pressure::PRESSURE_GRACE_BUFFERS,
-        ) {
-            resource.post_error(
-                wl_shm::Error::InvalidStride,
-                too_many_buffers_under_pressure(),
-            );
-            return true;
-        }
         if !state.wl_buffers.claim_buffer_creation(client) {
             return false;
         }
@@ -883,16 +893,6 @@ where
         if !creates_a_buffer {
             return false;
         };
-        if pressure_refusal(
-            state.wl_buffers.live_for(client),
-            super::fd_pressure::PRESSURE_GRACE_BUFFERS,
-        ) {
-            resource.post_error(
-                zwp_linux_buffer_params_v1::Error::InvalidWlBuffer,
-                too_many_buffers_under_pressure(),
-            );
-            return true;
-        }
         if !state.wl_buffers.claim_buffer_creation(client) {
             return false;
         }
@@ -908,13 +908,6 @@ where
         else {
             return false;
         };
-        if pressure_refusal(
-            state.wl_buffers.live_for(client),
-            super::fd_pressure::PRESSURE_GRACE_BUFFERS,
-        ) {
-            resource.post_error(0u32, too_many_buffers_under_pressure());
-            return true;
-        }
         if !state.wl_buffers.claim_buffer_creation(client) {
             return false;
         }
@@ -957,6 +950,29 @@ where
         return;
     }
     state.wl_buffers.forget_buffer(client);
+    super::dmabuf::schedule_cache_drain(state);
+}
+
+/// Queues the renderer's dmabuf cache drain when a `wl_surface` dies, for
+/// the same reason [`forget_destroyed_buffer`] does when a `wl_buffer` dies:
+/// the surface's renderer state may hold the last reference to a buffer whose
+/// `wl_buffer` the client already destroyed, and its `Dmabuf` (with its plane
+/// fds) goes with the surface's data, after this hook. Nothing else would
+/// drop the renderer's own mapping of it -- or, on a GLES renderer that keeps
+/// a copy of each imported plane's fd, that copy -- until some later frame.
+/// See `dmabuf/renderer_copies.rs`. The drain runs at idle, by when the
+/// surface's data is gone; one bool test until the session's first dmabuf
+/// import, and one idle per dispatch however many surfaces died in it.
+///
+/// Folds away for every interface other than `wl_surface`.
+fn drain_after_destroyed_surface<I>(state: &mut State)
+where
+    I: Resource,
+    I::Request: 'static,
+{
+    if TypeId::of::<I::Request>() != TypeId::of::<wl_surface::Request>() {
+        return;
+    }
     super::dmabuf::schedule_cache_drain(state);
 }
 
@@ -1277,21 +1293,21 @@ fn too_large(size: i32) -> String {
 
 /// Whether a creation holding `live` counted units against a `grace` must
 /// be refused for compositor-wide fd pressure: past the grace *and* the
-/// table pressured (see `fd_pressure`).
+/// table pressured (see `fd_pressure`). Its one caller now is the
+/// acquire-wait bound (`drm_syncobj/acquire.rs`), whose eventfds are scoot's
+/// own and so are not in the fd ledger; every fd a client hands over is
+/// checked against the ledger's grace instead (`client_fds.rs`).
 ///
 /// Both operators are exact. `>` (not `>=`): `live == grace` still passes,
-/// so a client may hold grace+1 units (129 buffers / 65 pools) -- the
-/// refused creation is the one that would take it past grace+1, and any
-/// "two at grace" fd arithmetic understates the permitted maximum by 4
-/// (2 x (129 + 65 + 1) + 14 = 404, not 400). `&&` (not `||`): either half
-/// alone passes, so the kill always lands on a contributor, never on an
+/// so a client may hold grace+1 units -- the refused creation is the one
+/// that would take it past grace+1. `&&` (not `||`): either half alone
+/// passes, so the kill always lands on a contributor, never on an
 /// under-grace innocent during someone else's pressure.
 ///
 /// The grace lookup short-circuits the table observation, so creations
-/// under grace cost one `HashMap` lookup and no syscall -- which is every
-/// legitimate creation, since no legitimate client holds past grace (see
-/// the grace sizing in `fd_pressure`). The guard below is load-bearing for
-/// that: `table()` observes the process fd table (getrlimit + readdir),
+/// under grace cost no syscall -- which is every legitimate creation, since
+/// no legitimate client holds past grace. The guard below is load-bearing
+/// for that: `table()` observes the process fd table (getrlimit + readdir),
 /// so it must only run once a client is already past its grace. Checked
 /// before the per-client claim, so a pressure refusal never takes a count
 /// unit it would then have to give back.
@@ -1323,18 +1339,6 @@ fn too_many_pools() -> String {
     )
 }
 
-/// The message the pressure-grace pool refusal carries: the table is
-/// pressured *and* this client holds past its grace, so the kill lands on
-/// a contributor, never an innocent. Same allocation rule as [`too_large`]
-/// -- refusal path only.
-fn too_many_pools_under_pressure() -> String {
-    format!(
-        "wl_shm pool refused: compositor-wide file-descriptor pressure, and this client \
-         holds more than the {}-pool pressure grace",
-        super::fd_pressure::PRESSURE_GRACE_POOLS,
-    )
-}
-
 /// The message the live-buffer-count refusal carries: which bound said no
 /// and what it is. Same allocation rule as [`too_large`] -- refusal path
 /// only. One message for all three factories: the count is shared, so the
@@ -1344,16 +1348,5 @@ fn too_many_buffers() -> String {
     format!(
         "wl_buffer refused: this client already holds the maximum of {} live buffers",
         super::wl_buffers::MAX_BUFFERS_PER_CLIENT,
-    )
-}
-
-/// The message the pressure-grace buffer refusal carries, for all three
-/// factories for the same shared-count reason as [`too_many_buffers`].
-/// Same allocation rule as [`too_large`] -- refusal path only.
-fn too_many_buffers_under_pressure() -> String {
-    format!(
-        "wl_buffer refused: compositor-wide file-descriptor pressure, and this client \
-         holds more than the {}-buffer pressure grace",
-        super::fd_pressure::PRESSURE_GRACE_BUFFERS,
     )
 }

@@ -9,6 +9,23 @@ scoot has not cut a numbered release yet; entries are dated.
 
 ## Unreleased
 
+### 2026-09-24 — one app can no longer make scoot turn everything else away by keeping old buffers on screen
+
+- **An app could still make scoot hold almost all of its file
+  descriptors**, a different way from the one fixed earlier today: by
+  showing a buffer on a surface and then throwing the buffer away. scoot
+  had to keep the buffer's memory (and the file behind it) for as long as
+  the surface showed it, but stopped counting it the moment the app threw
+  the buffer away. Repeated on enough surfaces, new apps and `scootctl`
+  were turned away, and on the GPU tier scoot could run out of file
+  descriptors entirely. A GPU buffer made of several pieces (video frames
+  are usually two or three) also used to count as one. scoot now counts
+  every file an app hands it, for exactly as long as scoot really keeps
+  it, including the extra copy some graphics drivers keep; an app that
+  goes past a generous limit (512) is disconnected, and everything else
+  keeps working. No real app comes near it (a terminal keeps 2). Nothing
+  to configure. Details: [protocols.md](docs/protocols.md#per-client-limits-on-what-scoot-keeps).
+
 ### 2026-09-24 — screenshots on the GPU renderer no longer grow memory
 
 - **Screenshots on the GPU renderer no longer grow scoot's memory.** With
@@ -33,7 +50,8 @@ scoot has not cut a numbered release yet; entries are dated.
   either is disconnected, and everything else keeps working. (Other ways of
   holding descriptors are not all counted yet; see
   `docs/backlog/core/wayland-backend-fd-queue.md` and
-  `docs/backlog/core/buffer-fds-past-their-object.md`.) No real app comes near
+  `docs/backlog/resolved/buffer-fds-past-their-object-done.md`, since
+  fixed.) No real app comes near
   the limits (a GPU app normally has one buffer's pieces in flight at a time; a
   Vulkan window uses 16 timelines, and the limit is 128). Nothing to
   configure. Details and the exact numbers: [protocols.md](docs/protocols.md).

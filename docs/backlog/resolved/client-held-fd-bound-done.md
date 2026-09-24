@@ -133,13 +133,16 @@ per `add`; real clients do one buffer's adds per allocation, not per frame.
 A 128-record sweep costs 100 us (786 ns per record, real syncobj fds), at
 most once per 16 imports.
 
-## Still open
+## Still open (since resolved)
 
-`docs/backlog/core/buffer-fds-past-their-object.md`: a buffer committed to
-a surface keeps its fd after its `wl_buffer` (and pool) objects are
-destroyed, one per surface, uncounted (harness: 200 surfaces, 200 fds, 0
-counted); and the buffer count weighs a multi-plane dma-buf as one fd.
-Found while doing this; not part of this ticket's scope.
+`docs/backlog/resolved/buffer-fds-past-their-object-done.md`: a buffer
+committed to a surface keeps its fd after its `wl_buffer` (and pool)
+objects are destroyed, one per surface, uncounted (harness: 200 surfaces,
+200 fds, 0 counted); and the buffer count weighs a multi-plane dma-buf as
+one fd. Found while doing this; not part of this ticket's scope. Resolved
+by generalising this ticket's timeline ledger into a per-client fd ledger
+(`client_fds.rs`), which replaced `drm_syncobj/retained.rs` and the
+pending-plane pressure grace; see that record.
 
 ## Original entry
 
