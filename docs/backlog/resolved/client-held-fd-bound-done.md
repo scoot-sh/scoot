@@ -81,11 +81,13 @@ All on the dev VM (kernel 6.18, virtio-gpu, `RLIMIT_NOFILE` 1024/524288),
 release builds. Before is `618b5dc` built by the same command
 (`CARGO_BUILD_JOBS=1 cargo build --release -p scoot --features
 gpu-scanout`); the PR #235 binary (`e0e5a55`, same code tree) was used for
-the first before-runs and gave the same shape. After is `559306d`, the
-final code tree of this change (binary sha256 `c77ee353…`). Raw output:
+the first before-runs and gave the same shape. After is `ac879b9`, the
+final code tree of this change (binary sha256 `042b0a08…`; the runs also
+match at `559306d`/`c77ee353…`, before a review-driven fix to the timeline
+pressure sweep changed only that path and the tests). Raw output:
 `~/evidence/cfb/runs/final/*.txt` (earlier runs at `e872826` in
 `~/evidence/cfb/runs/`), probe source `~/evidence/cfb/probe/src/main.rs`,
-runners `~/evidence/cfb/{run,legit,bench,gate}.sh`.
+runners `~/evidence/cfb/{run,legit,bench,gate,pressure}.sh`.
 
 | Shape | Tier | Before | After |
 |---|---|---|---|
@@ -102,6 +104,15 @@ None of those real clients makes a dma-buf or imports a timeline on this VM
 (GBM is refused on its render node), so the dma-buf and explicit-sync
 paths were exercised by the probe clients above and by the harness.
 
+The pending-plane **pressure grace** (not the hard cap) was exercised live
+too (`~/evidence/cfb/runs/final/pressure-grace.txt`): scoot under
+`prlimit --nofile=700:700`, an honest client holding 4 planes, then
+hoarders at the cap until the table pressured; the next fresh hoarder was
+disconnected on the `add` that took it to 16 planes ("the bound is 8, while
+compositor-wide file descriptors are under pressure"), while the 4-plane
+honest client stayed connected -- the kill landing on a past-grace
+contributor, not the under-grace innocent.
+
 Tests (fail-first against `618b5dc`, `~/evidence/cfb/failfirst-main-618b5dc.out`):
 `pending_planes_are_bounded_per_client` (main: the client survived),
 `pending_points_on_destroyed_timelines_count_against_the_bound`,
@@ -114,7 +125,7 @@ the ledger's decisions in isolation, and the two pressure verdicts.
 
 Cost: pending-plane bookkeeping 16 ns per plane (release microbench). The
 end-to-end add path (400 k params x 4 adds + destroy, headless, scoot CPU
-jiffies, 3 alternating rounds, `~/evidence/cfb/bench-churn-params-400k-559306d.txt`) went from 81/79/78 to 85/84/85, about 40 ns
+jiffies, 3 alternating rounds, `~/evidence/cfb/bench-churn-params-400k-559306d.txt`) went from 81/79/78 to 85/84/85 (identical shape at 559306d and ac879b9; the fix does not touch the add path), about 40 ns
 per `add`; real clients do one buffer's adds per allocation, not per frame.
 A 128-record sweep costs 100 us (786 ns per record, real syncobj fds), at
 most once per 16 imports.
