@@ -105,7 +105,7 @@ each item's own file records why it landed when it did.
 ## Recently shipped (since 2026-09-15)
 
 - **[Every fd a client hands scoot is counted until it really closes](docs/backlog/resolved/buffer-fds-past-their-object-done.md)**
-  (2026-09-24, PR #NNN) — a buffer a surface still showed kept its pool's
+  (2026-09-24, PR #239) — a buffer a surface still showed kept its pool's
   (or its planes') fds after the client destroyed the `wl_buffer` and the
   pool, with nothing counted, and a multi-plane dma-buf counted as one.
   PR #236's timeline ledger is now a per-client fd ledger

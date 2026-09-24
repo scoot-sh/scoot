@@ -8,7 +8,7 @@ blocked: null
 
 # Buffer fds retained past their object — RESOLVED
 
-RESOLVED 2026-09-24 (PR #NNN). Every fd a client hands scoot that scoot
+RESOLVED 2026-09-24 (PR #239). Every fd a client hands scoot that scoot
 keeps is now counted per client, for exactly as long as it is really open,
 whatever holds it: a per-client fd ledger (`client_fds.rs`), generalised
 from PR #236's syncobj timeline ledger. One bound (512 fds per client) and
