@@ -680,6 +680,7 @@ capture-cursor → resize-in-place → syncobj → nested dmabuf → VRR.
 - [VRR on the scanout tier](./core/gpu-vrr.md) — low, blocked on a VRR-capable display.
 
 ### GPU tier, after primary-direct (2026-09-23)
+- [A/B resource usage vs niri](./testing/niri-ab-benchmark.md) — medium, user request; runs after the unblocked GPU tickets.
 - [GLES tier advertises only LINEAR dma-bufs](./resolved/gles-dmabuf-full-formats-done.md) — RESOLVED 2026-09-23 (PR #229): under `gles` the feedback is the driver's own import set (every fourcc at every explicit modifier, external-only YUV included), `Invalid` never offered next to explicit layouts (an implicit YUV buffer draws the wrong colour, measured), pixman byte-identical. On llvmpipe: 57 formats at `LINEAR`, `NV12`/`P010`/`YU12`/`YUYV` imported through `create_immed` and drawn correctly from dumb buffers. Real GPU: `Asahi.md` Test 6.
 - [Scanout-tranche feedback + `zero_copy` flag](./resolved/gpu-scanout-candidates-done.md) — RESOLVED 2026-09-23: see the GPU tier completion entry above. Dev VM: tranche `XR24`/`AR24` at `LINEAR`, sent/reverted live, `zero_copy` on exactly the frames Smithay scanned out directly. Real GPU (does a GL client reallocate into it and go direct): `Asahi.md` Test 6 Part C.
 - [Windows on overlay planes](./core/gpu-overlay-window-candidates.md) — low, blocked on overlay-capable hardware.
