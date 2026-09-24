@@ -970,9 +970,9 @@ gles` in a `gpu-scanout` build), and only when a DRM device passes
 Smithay's syncobj-eventfd probe (timeline syncobjs plus
 `DRM_IOCTL_SYNCOBJ_EVENTFD`). The display device scoot drives is tried
 first; if its driver has no syncobj support -- possible on a machine whose
-display controller is not its GPU, like Apple Silicon -- the render node
-render nodes (`/dev/dri/renderD*`, in name order) are tried instead (a syncobj works on any DRM device
-that supports them, whichever GPU made it). The startup log says which:
+display controller is not its GPU, like Apple Silicon -- the render nodes
+(`/dev/dri/renderD*`, in name order) are tried instead (a syncobj works on
+any DRM device that supports them, whichever GPU made it). The startup log says which:
 `drm: explicit sync (wp_linux_drm_syncobj_manager_v1) offered device=…`,
 or `drm: no device here has syncobj timeline eventfd support; explicit
 sync … is not offered`. The dev VM's virtio-gpu passes on the display
