@@ -409,53 +409,60 @@ fn a_resized_session_draws_what_a_new_backend_would() {
 /// fallback rebuild (the context is the one it started with, and nothing
 /// logs building or failing to build another renderer), and exactly one
 /// WARN, naming the limit.
+///
+/// Only the `resize_output` call is inside [`capture_logs`]: the fixture's
+/// own first build logs "built another GLES renderer" whenever an earlier
+/// test in the same process built one first (the once-per-process INFO
+/// line, see `gles::FIRST_BUILD_LOGGED`), which is not the rebuild this
+/// asserts never happens.
 #[test]
 fn a_refused_gles_resize_leaves_the_session_as_it_was() {
-    let ((), logs) = capture_logs(|| {
-        let mut fixture = ring_scene(RendererKind::Gles, START.0, 3);
-        let (id, output) = fixture
-            .state
-            .outputs
-            .primary_entry()
-            .map(|(id, output)| (id, output.clone()))
-            .expect("an output");
-        let before = render_and_read(&mut fixture);
-        let backend = fixture.state.backends.get_mut(&id).expect("a backend");
-        let (max_width, _) = backend
-            .gles_max_target_for_test()
-            .expect("the driver reports its limits");
-        let context = backend.gles_context_for_test();
-        let mode = output.current_mode();
-        let too_wide = max_width.checked_add(1).expect("a finite limit");
+    let mut fixture = ring_scene(RendererKind::Gles, START.0, 3);
+    let (id, output) = fixture
+        .state
+        .outputs
+        .primary_entry()
+        .map(|(id, output)| (id, output.clone()))
+        .expect("an output");
+    let before = render_and_read(&mut fixture);
+    let backend = fixture.state.backends.get_mut(&id).expect("a backend");
+    let (max_width, _) = backend
+        .gles_max_target_for_test()
+        .expect("the driver reports its limits");
+    let context = backend.gles_context_for_test();
+    let mode = output.current_mode();
+    let too_wide = max_width.checked_add(1).expect("a finite limit");
 
-        assert!(
-            !fixture.state.resize_output(too_wide, 16),
-            "a {too_wide}x16 target (limit {max_width}) must be refused"
-        );
-        assert_eq!(output.current_mode(), mode, "the old mode is put back");
-        assert!(
-            !output
-                .modes()
-                .iter()
-                .any(|mode| mode.size == (too_wide, 16).into()),
-            "the refused size is not left in the mode list"
-        );
-        let backend = fixture.state.backends.get_mut(&id).expect("a backend");
-        assert_eq!(backend.size(), START);
-        assert!(backend.gles_context_for_test() == context, "not replaced");
-        let unchanged = backend
-            .capture(<[u8]>::to_vec)
-            .expect("the old target still reads back");
-        assert_eq!(differing(&before, &unchanged), 0, "the old frame survived");
-        let again = render_and_read(&mut fixture);
-        assert_eq!(differing(&before, &again), 0, "the old target still draws");
-    });
+    let (resized, logs) = capture_logs(|| fixture.state.resize_output(too_wide, 16));
+    assert!(
+        !resized,
+        "a {too_wide}x16 target (limit {max_width}) must be refused"
+    );
+    assert_eq!(output.current_mode(), mode, "the old mode is put back");
+    assert!(
+        !output
+            .modes()
+            .iter()
+            .any(|mode| mode.size == (too_wide, 16).into()),
+        "the refused size is not left in the mode list"
+    );
+    let backend = fixture.state.backends.get_mut(&id).expect("a backend");
+    assert_eq!(backend.size(), START);
+    assert!(backend.gles_context_for_test() == context, "not replaced");
+    let unchanged = backend
+        .capture(<[u8]>::to_vec)
+        .expect("the old target still reads back");
+    assert_eq!(differing(&before, &unchanged), 0, "the old frame survived");
+    let again = render_and_read(&mut fixture);
+    assert_eq!(differing(&before, &again), 0, "the old target still draws");
+
     assert!(
         logs.contains("is larger than the GPU can render into"),
         "the refusal names the limit: {logs}"
     );
     for never in [
         "rebuilding it",
+        "the GLES renderer is up",
         "built another GLES renderer",
         "could not rebuild the GLES renderer",
     ] {
