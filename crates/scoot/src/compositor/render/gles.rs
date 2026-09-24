@@ -501,10 +501,11 @@ fn target(
 /// frame's drain does. See the resolved record for the latency measured
 /// before and after.
 ///
-/// A failure is only logged. It means `make_current` failed, and then the
-/// capture itself failed at the same call before it could allocate
-/// anything, and reported that. What stays queued is freed by the next
-/// drain.
+/// A failure is only logged, and the capture's own result stands. The only
+/// way the drain fails is `make_current` failing, which every step of the
+/// capture has just called too, so a context that cannot be made current has
+/// almost certainly failed the capture already, and that was reported. What
+/// stays queued is freed by the next drain that succeeds.
 pub(super) fn release_captured(renderer: &mut GlesRenderer) {
     if let Err(error) = Renderer::cleanup_texture_cache(renderer) {
         tracing::debug!(%error, "could not free a capture's GL objects yet");
