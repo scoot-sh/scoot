@@ -140,9 +140,21 @@ wayland-protocols-misc = { version = "0.3", features = ["client"] }
 # this adds a feature to a crate already in the tree, not a new dependency.
 wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 
+# A scoot-sh fork, not upstream: upstream's pinned rev `0ff00983` plus
+# exactly one commit (`43f50eb2`, branch `scoot/syncobj-timeline-drop`) that
+# adds a `Drop` for `DrmTimelineDeviceSpecific`. Without it every
+# `wp_linux_drm_syncobj_manager_v1.import_timeline` leaks a kernel syncobj
+# handle on the import device until scoot exits -- ~80 B of kernel slab per
+# import and ~200 B per abandoned acquire wait, which a client can drive at
+# wire speed (see `docs/backlog/resolved/syncobj-handle-leak-done.md`).
+# Upstream status (checked 2026-09-24): not fixed on Smithay `master`
+# (79bbed5e1 has no such `Drop`) and not in any release (v0.7.0 predates
+# `0ff00983`); an upstream PR is the user's to file. Repin to upstream --
+# and drop the fork -- as soon as a Smithay rev carrying the fix exists.
+# Verify claims about Smithay's behaviour against this fork rev.
 [target.'cfg(target_os = "linux")'.dependencies.smithay]
-git = "https://github.com/Smithay/smithay"
-rev = "0ff00983b6007257a7a161a4fe8b14a778e2ac8f"
+git = "https://github.com/scoot-sh/smithay"
+rev = "43f50eb257a692a5e94a1a719641f121b3c849ab"
 default-features = false
 # backend_drm/backend_libinput/backend_udev/backend_session_libseat are for
 # --tty: real DRM/KMS scanout, libinput device handling, and VT/session
