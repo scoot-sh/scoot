@@ -450,7 +450,9 @@ impl Host {
 
     /// Copies the frame the render target already holds into a usable host
     /// dma-buf and commits it, stamping the presentation feedback that frame
-    /// left queued when it was skipped (it is on screen from now). Saves a
+    /// left queued when it was skipped (it is on screen from now) -- unless a
+    /// render is already pending, whose frame stamps it instead (see the
+    /// comment at the stamp for why). Saves a
     /// whole second draw of an unchanged frame -- after every resize, whose
     /// first frame is drawn before the host has created the new chain.
     ///
@@ -490,9 +492,25 @@ impl Host {
                 height = size.1,
                 "nested: handed the owed frame to the host without redrawing it"
             );
-            // As the render tail would have for this frame: nested has no
-            // retrace to count, so `seq` is 0 and nothing is vsync'd.
-            state.present_feedback(&output, false, None, 0, None);
+            // Stamped only if nothing has changed since the frame was drawn.
+            // The render tail draws a frame and takes its feedback in one
+            // call; this runs later, from dispatch, and a client may have
+            // committed again in between -- likely, since the skipped
+            // frame's tail already sent frame callbacks. Smithay's
+            // `take_presentation_feedback` drains the surface's *current*
+            // feedback, which would then include a commit this frame does
+            // not show, stamped `presented` early. Every client commit asks
+            // for a render (`CompositorHandler::commit`), so a pending one
+            // is the tell; its frame shows the newer content and stamps
+            // everything then -- late, never early, as read-back does for a
+            // frame it had to skip. With nothing pending (a static screen),
+            // this is the only frame coming and must stamp, or a client
+            // pacing on feedback would wait for one that never arrives.
+            // As the render tail would: nested has no retrace to count, so
+            // `seq` is 0 and nothing is vsync'd.
+            if !state.needs_render {
+                state.present_feedback(&output, false, None, 0, None);
+            }
         }
         if answer.fell_back {
             state.request_render();
