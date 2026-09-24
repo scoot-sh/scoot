@@ -705,6 +705,9 @@ capture-cursor → resize-in-place → syncobj → nested dmabuf → VRR.
 - [Many desynchronized subsurfaces stall the compositor](./core/subsurface-count-quadratic.md) — medium, measured: `N` sibling desync subsurfaces in one window cost roughly quadratically to create (release: 10000 took 1.15 s, 30000 over 10 s). Pre-existing; breadth, not depth.
 - [Many side-by-side popups stall the compositor](./core/popup-count-quadratic.md) — medium, measured (review of #226): popup creation is roughly quadratic in the number open (1954 popups 0.73 s, 5104 5.4 s). Pre-existing.
 
+### Found reviewing nested dma-buf presentation (2026-09-24)
+- [`--nested` confirms a lock before the host shows it](./core/nested-lock-confirm-on-present.md) — low: `locked` goes out when the blanked frame is drawn, and a nested frame may be skipped or owed before the host has it (more often since PR #235); a fix needs a bounded wait like `--tty`'s.
+
 ### Meta
 - [Split the CLI out into `scootctl`](./resolved/rename-flex-family-done.md) — CLOSED 2026-09-20: the `flexwm` → `scoot` rename half landed 2026-09-18 (PR #128); the crate split landed 2026-09-20 ([record](./resolved/scootctl-split-done.md)): new `scootctl` lib+bin crate, `scoot msg` kept as a permanent alias, Darwin default is `scootctl`. A status bar stays separate.
 

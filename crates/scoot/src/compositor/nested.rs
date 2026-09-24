@@ -343,8 +343,10 @@ impl Host {
     ///
     /// No heap allocation of its own: a slot is picked by a scan of
     /// [`gpu::SLOTS`] entries. The one GPU buffer it may allocate -- growing
-    /// a chain whose every buffer is in use -- happens at most
-    /// `gpu::SLOTS - 1` times per size, never per frame.
+    /// a chain whose every buffer is in use -- succeeds at most
+    /// `gpu::SLOTS - 1` times per size, and a failed one moves the session to
+    /// read-back (see [`Host::fall_back`]), so it is never retried frame
+    /// after frame.
     #[cfg(feature = "gpu-scanout")]
     pub(super) fn present_dmabuf(
         &mut self,
@@ -370,12 +372,26 @@ impl Host {
         let Some((dmabuf, buffer, held)) = chain.free_slot() else {
             // Every buffer is in use: add one where that would help (a
             // chain starts with one and grows to at most `gpu::SLOTS`; see
-            // `GpuPresent::grow`). Either way this frame is owed, and the
-            // new buffer's `created` -- or a `release` -- hands it over.
-            if let Some(gpu) = &mut self.gpu
-                && let Err(error) = gpu.grow(chain, &self.qh)
-            {
-                tracing::debug!(%error, "could not add a host buffer; waiting for the host to release one");
+            // `GpuPresent::grow`). This frame is owed, and the new buffer's
+            // `created` -- or a `release` -- hands it over.
+            let grown = match &mut self.gpu {
+                Some(gpu) => gpu.grow(chain, &self.qh),
+                None => Ok(false),
+            };
+            if let Err(error) = grown {
+                // The one case nothing else would ever end: `grow` only
+                // tries when every buffer is held and none is being
+                // created, and a dma-buf host keeps the buffer it shows
+                // until a newer one replaces it -- after a resize that is
+                // the chain's only buffer. With no new buffer there is no
+                // `created` and no `release` coming, so waiting would
+                // freeze the window until the next resize while every
+                // frame retried the allocation (GBM out of memory, or the
+                // process out of fds). Read-back for good instead, as for
+                // a refusal.
+                self.fall_back(&format!("could not add a host buffer: {error}"));
+                answer.fell_back = true;
+                return answer;
             }
             self.present_skipped = true;
             self.frame_owed = true;
@@ -900,6 +916,15 @@ impl Host {
             Presenter::Shm(_) => "shm",
             #[cfg(feature = "gpu-scanout")]
             Presenter::Dmabuf(_) => "dmabuf",
+        }
+    }
+
+    /// Makes every later attempt to grow the host buffer chain fail, as GBM
+    /// out of memory or an exhausted fd table would.
+    #[cfg(all(test, feature = "gpu-scanout"))]
+    pub(super) fn fail_growth_for_test(&mut self) {
+        if let Some(gpu) = &mut self.gpu {
+            gpu.fail_growth_for_test();
         }
     }
 

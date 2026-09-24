@@ -166,4 +166,6 @@ host screenshot --no-cursor --out "$PREFIX-host.png" >/dev/null
 if cmp -s "$PREFIX-inner.png" "$PREFIX-host.png"; then verdict=identical; else verdict=DIFFERENT; fi
 echo "pixels: nested $PREFIX-inner.png $(png_size "$PREFIX-inner.png"), host $PREFIX-host.png $(png_size "$PREFIX-host.png"): $verdict"
 echo "logs: $INNER_LOG $HOST_LOG"
-strip "$INNER_LOG" | grep -E " (WARN|ERROR) " | grep -v "smithay::backend::egl::ffi\|drm master" | head -5 || true
+# Only the EGL device probe's own errors are filtered (virtio's DRI2 screen
+# refusal before kms_swrast, on every GLES start); anything else is shown.
+strip "$INNER_LOG" | grep -E " (WARN|ERROR) " | grep -v "smithay::backend::egl::ffi" | head -5 || true

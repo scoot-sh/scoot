@@ -17,7 +17,7 @@
 //! link-time dependency), or an EGL Wayland-platform window surface
 //! (`libwayland-egl`, also link-time unless dlopened, and a second EGL
 //! display per session). The default build keeps linking no GPU stack --
-//! the `ldd` check in CI and the smoke test is what proves it -- and
+//! the `ldd` check in CI is what proves it -- and
 //! presents by read-back, as it always has. A sibling feature would name the
 //! same link-time cost twice and double the flake's packaging matrix for
 //! nothing.
@@ -96,15 +96,18 @@
 //!
 //! # Falling back mid-session
 //!
-//! The host refusing a buffer (`failed` for the current chain), or the blit
-//! failing on the frame path, switches the session to read-back **for good**,
+//! The host refusing a buffer (`failed` for the current chain), the blit
+//! failing on the frame path, or a chain that cannot grow when every buffer
+//! it has is held (nothing would ever hand the waiting frame over: a dma-buf
+//! host keeps the buffer it shows until a newer one replaces it) switches
+//! the session to read-back **for good**,
 //! with one WARN: a host that refused once is not asked again, and nothing
 //! on the frame path retries a device that has just failed. The switch
 //! builds a `wl_shm` pool at the current size and asks for a frame; should
 //! even that pool fail to build, the next frame that draws -- anything on
 //! screen changing -- tries again, so the window is never left stranded on
 //! a pool that could now be built.
-//! A failed *allocation* at a new size is not a fallback: it is the same
+//! A failed allocation of a *new size's* chain is not a fallback: it is the same
 //! "could not follow the host's resize; staying at the previous size" a
 //! read-back pool that could not be allocated has always been, and the
 //! chain the session already has keeps presenting.
@@ -132,13 +135,12 @@
 pub(in crate::compositor) mod feedback;
 
 use std::error::Error;
-use std::os::fd::AsFd;
+use std::os::fd::{AsFd, OwnedFd};
 
 use smithay::backend::allocator::dmabuf::{AsDmabuf, Dmabuf};
 use smithay::backend::allocator::gbm::{GbmAllocator, GbmBufferFlags, GbmDevice};
 use smithay::backend::allocator::{Allocator, Buffer, Fourcc};
-use smithay::backend::drm::{DrmDeviceFd, DrmNode, NodeType};
-use smithay::utils::DeviceFd;
+use smithay::backend::drm::{DrmNode, NodeType};
 use wayland_client::globals::GlobalList;
 use wayland_client::protocol::wl_buffer::WlBuffer as HostBuffer;
 use wayland_client::{Connection, QueueHandle};
@@ -163,12 +165,16 @@ const PROBE_SIDE: i32 = 64;
 /// global, the allocator on the renderer's device, and what to allocate.
 pub(super) struct GpuPresent {
     dmabuf: ZwpLinuxDmabufV1,
-    allocator: GbmAllocator<DrmDeviceFd>,
+    allocator: GbmAllocator<OwnedFd>,
     choice: Choice,
     /// The generation the next [`Swapchain`] gets. Only ever incremented, so
     /// a host answer tagged with any other chain's number is recognisably
     /// stale.
     next_generation: u64,
+    /// Makes [`GpuPresent::grow`] fail where it would allocate, for the
+    /// suites (`Host::fail_growth_for_test`).
+    #[cfg(test)]
+    fail_growth: bool,
 }
 
 /// The user data on each `zwp_linux_buffer_params_v1`: which chain and slot
@@ -271,6 +277,8 @@ fn try_negotiate(
             allocator,
             choice,
             next_generation: 0,
+            #[cfg(test)]
+            fail_growth: false,
         }),
         Err(error) => {
             dmabuf.destroy();
@@ -302,7 +310,7 @@ fn open_allocator(
     render_node: libc::dev_t,
     choice: &Choice,
     backend: &mut Backend,
-) -> Result<GbmAllocator<DrmDeviceFd>, Box<dyn Error>> {
+) -> Result<GbmAllocator<OwnedFd>, Box<dyn Error>> {
     let render = DrmNode::from_dev_id(render_node)
         .map_err(|error| format!("the renderer's DRM node is not usable: {error}"))?;
     let mut nodes = vec![render];
@@ -328,27 +336,31 @@ fn open_allocator(
 
 pub(in crate::compositor) fn open_node(
     node: &DrmNode,
-) -> Result<GbmAllocator<DrmDeviceFd>, Box<dyn Error>> {
+) -> Result<GbmAllocator<OwnedFd>, Box<dyn Error>> {
     let path = node
         .dev_path()
         .ok_or_else(|| format!("{node} has no device path"))?;
     // A plain open, not through a session: neither node needs DRM master for
-    // allocation, and `--nested` has no seat to go through anyway.
+    // allocation, and `--nested` has no seat to go through anyway. Handed to
+    // GBM as the bare fd, deliberately not as Smithay's `DrmDeviceFd`: that
+    // wrapper tries to become DRM master on construction (`device/fd.rs` at
+    // the pinned rev) and logs a WARN when it cannot -- which a nested
+    // session inside a desktop never can, and an allocator never needs.
     let fd = rustix::fs::open(
         &path,
         rustix::fs::OFlags::RDWR | rustix::fs::OFlags::CLOEXEC | rustix::fs::OFlags::NOCTTY,
         rustix::fs::Mode::empty(),
     )
     .map_err(|error| format!("{}: {error}", path.display()))?;
-    let device = GbmDevice::new(DrmDeviceFd::new(DeviceFd::from(fd)))
-        .map_err(|error| format!("GBM on {}: {error}", path.display()))?;
+    let device =
+        GbmDevice::new(fd).map_err(|error| format!("GBM on {}: {error}", path.display()))?;
     Ok(GbmAllocator::new(device, GbmBufferFlags::RENDERING))
 }
 
 /// One buffer allocated the way the swapchain will, rendered into and
 /// blitted to by the session's renderer.
 fn probe(
-    allocator: &mut GbmAllocator<DrmDeviceFd>,
+    allocator: &mut GbmAllocator<OwnedFd>,
     choice: &Choice,
     backend: &mut Backend,
 ) -> Result<(), Box<dyn Error>> {
@@ -360,7 +372,7 @@ fn probe(
 /// One host buffer of `width` x `height`, exported, with the modifier it
 /// actually came back with checked against what the host accepts.
 pub(in crate::compositor) fn allocate(
-    allocator: &mut GbmAllocator<DrmDeviceFd>,
+    allocator: &mut GbmAllocator<OwnedFd>,
     choice: &Choice,
     width: i32,
     height: i32,
@@ -419,8 +431,10 @@ impl GpuPresent {
     /// [`SLOTS`] -- and reached only from a frame that found no free buffer,
     /// never per frame otherwise.
     ///
-    /// An allocation that fails is not a fallback: the chain keeps the
-    /// buffers it has, the frame stays owed, and a `release` hands it over.
+    /// An allocation that fails is answered `Err`, and the caller falls
+    /// back to read-back for good (`Host::present_dmabuf`): this is only
+    /// tried when every buffer is held and none is being created, so no
+    /// `release` or `created` would ever come to hand the frame over.
     pub(super) fn grow(
         &mut self,
         chain: &mut Swapchain,
@@ -434,6 +448,10 @@ impl GpuPresent {
         ) else {
             return Ok(false);
         };
+        #[cfg(test)]
+        if self.fail_growth {
+            return Err("injected growth failure".into());
+        }
         let (width, height) = chain.size;
         let dmabuf = allocate(&mut self.allocator, &self.choice, width, height)?;
         self.install(chain, qh, index, dmabuf);
@@ -467,6 +485,11 @@ impl GpuPresent {
             buffer: None,
             held: false,
         });
+    }
+
+    #[cfg(test)]
+    pub(super) fn fail_growth_for_test(&mut self) {
+        self.fail_growth = true;
     }
 
     /// Releases the host's global. Called when the path is abandoned for the

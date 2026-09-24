@@ -975,6 +975,62 @@ What each answer means:
   the nested scoot rendered, the right way up. `DIFFERENT` is a bug: send
   both PNGs.
 
+### Part B -- nested inside your own desktop
+
+Part A is scoot hosting scoot: one importer, Smithay's. The daily-drive
+case is scoot nested inside the desktop you normally run -- GNOME, KDE,
+sway, niri -- whose importer is not Smithay's and whose feedback on this
+GPU likely offers tiled or compressed layouts, not only `LINEAR`. If your
+session *is* scoot, do this from a VT running another compositor instead
+(`sway` or `niri` from `nix shell`), and say which.
+
+From a terminal in that desktop, same two builds:
+
+```sh
+for build in result result-scoot-gpu; do
+  WAYLAND_DEBUG=client RUST_LOG=info,scoot::compositor::nested=debug \
+    ./$build/bin/scoot --nested --renderer gles --socket /tmp/fx/t8b.sock \
+    > /tmp/fx/t8b-$build.log 2>&1 &
+  pid=$!; sleep 3
+  SCOOT_SOCKET=/tmp/fx/t8b.sock ./result/bin/scoot msg action spawn foot sh -c \
+    'i=0; while :; do i=$((i+1)); printf "\r%08d" $i; sleep 0.033; done'
+  sleep 5
+  j0=$(awk '{print $14 + $15}' /proc/$pid/stat); sleep 20
+  j1=$(awk '{print $14 + $15}' /proc/$pid/stat)
+  echo "$build: $((j1 - j0)) jiffies over 20 s at ~30 Hz" | tee -a /tmp/fx/t8b.txt
+  SCOOT_SOCKET=/tmp/fx/t8b.sock ./result/bin/scoot msg screenshot --no-cursor \
+    --out /tmp/fx/t8b-$build.png
+  kill $pid; wait $pid
+done
+sed -i 's/\x1b\[[0-9;]*m//g' /tmp/fx/t8b-*.log
+grep -h 'nested: presenting' /tmp/fx/t8b-*.log
+grep -c 'zwp_linux_buffer_params_v1@[0-9]*\.created' /tmp/fx/t8b-result-scoot-gpu.log
+grep -c 'zwp_linux_buffer_params_v1@[0-9]*\.failed' /tmp/fx/t8b-result-scoot-gpu.log
+grep -m3 'zwp_linux_buffer_params_v1@[0-9]*\.add(' /tmp/fx/t8b-result-scoot-gpu.log
+grep -h ' WARN \| ERROR ' /tmp/fx/t8b-*.log | head
+```
+
+Take a screenshot of the scoot window with your desktop's own tool too.
+
+What each answer means:
+
+- **`presenting to the host by dma-buf ... modifiers=[...]`** for the gpu
+  build: your desktop takes scoot's buffers directly. The modifiers show
+  whether a tiled layout was chosen (anything but `Linear`). `by read-back
+  ... reason=` names why not; send the log.
+- **`created` above zero and `failed` zero**: the host imported every
+  buffer. Any `failed` means it refused one, and the log must then show
+  exactly one `presenting to the host by read-back into wl_shm from now on`
+  warning with scoot still drawing -- anything else is a bug.
+- **The two `jiffies` lines**: nested CPU for the same load, read-back
+  against dma-buf, inside a real desktop. This is the number the change is
+  for. Both runs carry the protocol trace's cost; if they come out close,
+  rerun the loop without `WAYLAND_DEBUG=client` for a cleaner pair.
+- **Your desktop's screenshot of the window against `t8b-*.png`**: the same
+  picture, the right way up, with no garbled tiles. Scrambled blocks mean a
+  layout was mismatched between scoot and the host: send both, and the
+  `add(` lines.
+
 ## What to send back
 
 - `ghostty --version`
@@ -989,7 +1045,9 @@ What each answer means:
   `t7-vkcube*.png`, `t7-kms-fs.txt`, and the grep output (or the whole
   `t7-vkcube.trace` if something went wrong)
 - for Test 8: both `/tmp/fx/t8-*.txt`, and the `t8-*-inner.log`,
-  `t8-*-host.log` and `t8-*.png` files beside them
+  `t8-*-host.log` and `t8-*.png` files beside them; for Part B,
+  `/tmp/fx/t8b.txt`, both `t8b-*.log` and `t8b-*.png`, your desktop's own
+  screenshot, and which desktop it was
 - for Test 6: `/tmp/fx/t6-table-*.txt`, `/tmp/fx/t6-*.log`,
   `/tmp/fx/t6-gears.trace` (or just its `add(` lines), `t6-gears.png`,
   `t6-mpv.log`, `t6-mpv.png`, `t6-kms-mpv.txt`; for Part C `t6c.log`,

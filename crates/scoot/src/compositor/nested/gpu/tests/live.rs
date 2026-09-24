@@ -317,3 +317,61 @@ fn a_host_refusing_the_buffers_moves_the_session_to_read_back_once() {
         "exactly one WARN for the fallback:\n{logs}"
     );
 }
+
+/// A chain that cannot grow when the host holds its only buffer -- GBM out
+/// of memory, or the fd table exhausted -- must not freeze the window: no
+/// `release` or `created` would ever come to hand the waiting frame over.
+/// One WARN, read-back for the rest of the session, and the next frame
+/// reaches the host that way.
+#[test]
+fn a_chain_that_cannot_grow_moves_the_session_to_read_back_once() {
+    let _mappings = exclusive_mappings();
+    let Some(mut pair) = pair(
+        "a_chain_that_cannot_grow_moves_the_session_to_read_back_once",
+        false,
+    ) else {
+        return;
+    };
+    let ((), logs) = capture_logs(|| {
+        let before = pair.until_the_host_shows_the_frame();
+        assert_eq!(host_of(&pair.nested).presenter_for_test(), "dmabuf");
+        pair.nested
+            .state
+            .host
+            .as_mut()
+            .expect("a nested session")
+            .fail_growth_for_test();
+        // A resize starts a new chain with one buffer: its first frame is
+        // handed over into it, and the next finds it held and must grow.
+        pair.commands
+            .send(Command::Resize)
+            .expect("the host is alive");
+        assert!(matches!(
+            pair.replies.recv_timeout(PATIENCE),
+            Ok(Reply::Resized)
+        ));
+        let deadline = Instant::now() + PATIENCE;
+        while host_of(&pair.nested).presenter_for_test() != "shm" {
+            assert!(
+                Instant::now() < deadline,
+                "a failed growth never moved the session to read-back (presenter {})",
+                host_of(&pair.nested).presenter_for_test()
+            );
+            pair.frame_and_look();
+        }
+        // And frames keep reaching the host, now by read-back, at the new
+        // size.
+        let after = pair.until_the_host_shows_the_frame();
+        assert_ne!(after, before, "the resize was followed");
+    });
+    assert!(!host_of(&pair.nested).may_present_dmabuf_for_test());
+    assert_eq!(
+        logs.matches(FALLBACK_WARN).count(),
+        1,
+        "exactly one WARN for the fallback:\n{logs}"
+    );
+    assert!(
+        logs.contains("could not add a host buffer: injected growth failure"),
+        "the WARN names the cause:\n{logs}"
+    );
+}

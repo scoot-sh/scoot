@@ -18,8 +18,9 @@
 
 use smithay::backend::allocator::Buffer as _;
 use smithay::backend::allocator::gbm::GbmAllocator;
-use smithay::backend::drm::{DrmDeviceFd, DrmNode, NodeType};
+use smithay::backend::drm::{DrmNode, NodeType};
 use smithay::backend::renderer::Frame as _;
+use std::os::fd::OwnedFd;
 
 use super::super::super::nested::gpu::feedback::{self, Choice, HostFeedback, HostTranche};
 use super::super::super::nested::gpu::{allocate, open_node};
@@ -38,7 +39,7 @@ fn exclusive_mappings() -> std::sync::MutexGuard<'static, ()> {
 /// node -- and chooses a host format the way `negotiate` does, against a
 /// host that is this same renderer (it lists exactly what the renderer can
 /// render into, on its own device). `Err` names why this machine cannot.
-fn allocator_for(backend: &Backend) -> Result<(GbmAllocator<DrmDeviceFd>, Choice), String> {
+fn allocator_for(backend: &Backend) -> Result<(GbmAllocator<OwnedFd>, Choice), String> {
     let device = backend
         .render_node()
         .ok_or("the renderer's EGL device names no DRM node")?;
