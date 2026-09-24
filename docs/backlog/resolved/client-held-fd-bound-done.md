@@ -8,7 +8,7 @@ blocked: null
 
 # Client-held fds no cap counted — RESOLVED
 
-RESOLVED 2026-09-24 (PR #PRNUM). Both paths the review of PR #233 measured
+RESOLVED 2026-09-24 (PR #236). Both paths the review of PR #233 measured
 are now counted per client, under the same cap-plus-pressure-grace model as
 buffers and pools. The offender is refused at its cap, and fd pressure's
 creation guards can pick it.

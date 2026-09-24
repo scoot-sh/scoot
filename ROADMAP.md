@@ -105,7 +105,7 @@ each item's own file records why it landed when it did.
 ## Recently shipped (since 2026-09-15)
 
 - **[Client-held fds are counted, so fd pressure can find the holder](docs/backlog/resolved/client-held-fd-bound-done.md)**
-  (2026-09-24, PR #PRNUM) — two paths let one client make scoot hold ~927
+  (2026-09-24, PR #236) — two paths let one client make scoot hold ~927
   fds that no per-client cap counted, shedding every newcomer while the
   offender lived. Planes `add`ed to `zwp_linux_buffer_params_v1` objects not
   yet created are now counted per client (`dmabuf/pending_planes.rs`: 32,
