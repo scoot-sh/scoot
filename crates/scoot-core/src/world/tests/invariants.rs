@@ -480,24 +480,47 @@ fn assert_invariants(world: &World) {
         arranged, in_tree,
         "every placed window is arranged exactly once"
     );
-    // A visible floating window's visible floating ancestors on its output
-    // are drawn below it (see `floating_order.rs`).
+    // A visible floating window is drawn above each of its floating
+    // ancestors on its workspace -- followed through floating parents on
+    // the same workspace, at any depth (see `floating_order.rs`); a chain
+    // that loops back to the window is skipped (one of its links is
+    // dropped, so no order can satisfy every window in it).
     let at = |id: WindowId| arrangement.placements.iter().position(|p| p.id == id);
     for placement in arrangement
         .placements
         .iter()
         .filter(|p| p.floating && p.visible)
     {
-        for ancestor in arrangement.placements.iter().filter(|p| {
-            p.floating
-                && p.visible
-                && p.output == placement.output
-                && p.id != placement.id
-                && world.descends_from(placement.id, p.id)
-                && !world.descends_from(p.id, placement.id)
-        }) {
+        let Some(home) = world.locate(placement.id) else {
+            continue;
+        };
+        let mut ancestors = Vec::new();
+        let mut current = placement.id;
+        let mut looped = false;
+        for _ in 0..world.windows.len() {
+            let Some(parent) = world.window_info(current).and_then(|info| info.parent) else {
+                break;
+            };
+            if parent == placement.id {
+                looped = true;
+                break;
+            }
+            let same_layer = world.is_floating(parent)
+                && world.locate(parent).is_some_and(|loc| {
+                    loc.output == home.output && loc.workspace == home.workspace
+                });
+            if !same_layer {
+                break;
+            }
+            ancestors.push(parent);
+            current = parent;
+        }
+        if looped {
+            continue;
+        }
+        for ancestor in ancestors {
             assert!(
-                at(ancestor.id) < at(placement.id),
+                at(ancestor) < at(placement.id),
                 "{placement:?} drawn under its ancestor {ancestor:?}"
             );
         }
@@ -736,4 +759,52 @@ fn random_sequences_keep_the_tree_consistent() {
         focus_checks > 500,
         "only {focus_checks} focus-keeping steps were checked"
     );
+}
+
+/// A chain of floating dialogs far deeper than any real one (40), with the
+/// root raised over all of them and random raises in between: every window
+/// is drawn above its parent at every step (PR #243's review found window 18
+/// drawn under window 17 past a 16-step bound).
+#[test]
+fn a_deep_dialog_chain_draws_every_window_above_its_parent() {
+    let mut world = World::new(config());
+    world.handle_event(Event::OutputAdded {
+        id: OutputId(1),
+        area: Rect::new(0, 0, 1000, 600),
+    });
+    for id in 1..=40u64 {
+        world.handle_event(Event::WindowOpened {
+            id: WindowId(id),
+            info: WindowInfo {
+                parent: (id > 1).then(|| WindowId(id - 1)),
+                ..WindowInfo::default()
+            },
+            output: None,
+            focus: true,
+        });
+        world.handle_event(Event::FloatingRequested {
+            id: WindowId(id),
+            floating: true,
+            size: None,
+        });
+        world.handle_event(Event::FrameObserved {
+            id: WindowId(id),
+            requested: Size::default(),
+            actual: Size::new(100, 100),
+        });
+    }
+    let mut rng = Rng(7);
+    for step in 0..200 {
+        let raise = WindowId(if step == 0 { 1 } else { 1 + rng.below(40) as u64 });
+        world.handle_event(Event::FocusObserved { id: raise });
+        assert_invariants(&world);
+        let order: Vec<u64> = world
+            .arrange()
+            .placements
+            .iter()
+            .filter(|p| p.floating)
+            .map(|p| p.id.0)
+            .collect();
+        assert_eq!(order, (1..=40).collect::<Vec<_>>(), "after raising {raise:?}");
+    }
 }

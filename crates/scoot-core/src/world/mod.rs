@@ -71,6 +71,10 @@ pub struct World {
     /// maps leaves the strip exactly as it found it. Overwritten by every
     /// open; read only for the window it names.
     last_open: Option<(WindowId, i32)>,
+    /// Buffers `arrange` computes a floating drawing order in (see
+    /// `floating_order.rs`), kept so a frame that needs one allocates
+    /// nothing. Not state: nothing reads it between arrangements.
+    order_scratch: floating_order::OrderScratchCell,
 }
 
 impl World {
