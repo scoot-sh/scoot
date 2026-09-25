@@ -232,8 +232,8 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
         }
     }
 
-    // Opt-in XWayland (Phase-1 skeleton): after the outputs exist (an X
-    // client maps nowhere yet, but the server is session-scoped, so it
+    // Opt-in XWayland: after the outputs exist (X windows map into the
+    // layout like any other, and the server is session-scoped, so it
     // starts once the session does) and before the `WAYLAND_DISPLAY` export
     // below, so the `DISPLAY` export joins it and both reach every spawned
     // child. `resolve` ORs the flag with the config key -- a flag can only

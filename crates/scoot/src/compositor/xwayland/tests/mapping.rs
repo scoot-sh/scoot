@@ -5,7 +5,7 @@ use x11rb::connection::Connection as _;
 use x11rb::protocol::Event as XEvent;
 use x11rb::protocol::xproto::ConnectionExt as _;
 
-use super::live::{BLUE, BLUE_BGRA, CANVAS, RED, RED_BGRA, id_of_xid, live};
+use super::live::{BLUE, BLUE_BGRA, CANVAS, RED, RED_BGRA, id_of_xid, live, live_with};
 use super::peer::{Ack, Step};
 use super::x11::{Props, eventually};
 use crate::compositor::window_rules::{FloatingRules, WindowRuleConfig};
@@ -446,4 +446,42 @@ fn closing_an_x_window_sends_wm_delete_window() {
         .into_iter()
         .any(|event| matches!(event, XEvent::ClientMessage(message) if message.window == xid));
     assert!(asked, "the X window was never asked to close");
+}
+
+/// An X window gets scoot's focus ring and rounded clip like any window:
+/// the ring's colour just outside its drawn edge, and -- with a corner
+/// radius -- the background, not the window, in its corner pixel.
+#[test]
+fn an_x_window_gets_the_ring_and_the_rounded_clip() {
+    use crate::compositor::decorations::{Appearance, Color};
+
+    let appearance = Appearance {
+        focus_ring_width: 4,
+        focus_ring_active_color: Color::new(1.0, 0.0, 1.0, 1.0),
+        focus_ring_inactive_color: Color::new(1.0, 0.0, 1.0, 1.0),
+        background_color: Color::new(0.0, 0.0, 0.0, 1.0),
+        corner_radius: 12,
+        ..Appearance::default()
+    };
+    let Some(mut live) = live_with("an_x_window_gets_the_ring_and_the_rounded_clip", appearance)
+    else {
+        return;
+    };
+    let xid = live.x.map(&Props::new(RED));
+    let id = live.managed(xid);
+    let rect = live.placement(id).rect;
+    let mid_y = rect.y + rect.h / 2;
+    // Inside the window, its own colour; just left of its edge, the ring.
+    assert_eq!(live.pixel_at(rect.x + 10, mid_y), RED_BGRA);
+    assert_eq!(
+        live.pixel_at(rect.x - 2, mid_y),
+        [0xff, 0x00, 0xff, 0xff],
+        "no focus ring around the X window"
+    );
+    // The very corner pixel is clipped away by the rounded corner.
+    assert_ne!(
+        live.pixel_at(rect.x, rect.y),
+        RED_BGRA,
+        "the X window's corner is not rounded"
+    );
 }

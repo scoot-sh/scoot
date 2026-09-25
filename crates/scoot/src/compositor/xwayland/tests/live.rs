@@ -46,11 +46,17 @@ fn appearance() -> Appearance {
 /// The live fixture, or `None` (with the suite's `skipped --` line) where
 /// the machine has no `Xwayland`.
 pub(super) fn live(test: &str) -> Option<Live> {
+    live_with(test, appearance())
+}
+
+/// [`live`] with its own `appearance` -- for the one suite that is about
+/// the ring and the rounded clip.
+pub(super) fn live_with(test: &str, appearance: Appearance) -> Option<Live> {
     if !xwayland_on_path() {
         eprintln!("{test}: skipped -- no Xwayland binary on PATH");
         return None;
     }
-    let mut fixture: Fixture = Harness::headless(appearance(), CANVAS);
+    let mut fixture: Fixture = Harness::headless(appearance, CANVAS);
     fixture.spawn(peer);
     let handle = fixture.state.loop_handle.clone();
     let display = super::super::start(handle, &mut fixture.state).expect("XWayland should start");
