@@ -87,10 +87,12 @@ long as the object it arrived on exists. That difference matters: a
 buffer a surface still shows keeps its pool's (or its planes') fds after
 the client has destroyed both the `wl_buffer` and the pool, and a sync
 point keeps its timeline's fd after the timeline object is destroyed.
-Where the GLES renderer keeps a copy of each imported dma-buf plane's fd
-(Mesa's software renderer does; hardware drivers are expected not to, but
-that is not yet measured), the copy counts too, against the client whose
-buffer it is, from the moment the plane is added.
+Where the GLES renderer keeps a copy of each imported dma-buf plane's fd,
+the copy counts too, against the client whose buffer it is, from the
+moment the plane is added. Mesa's software renderer keeps one, and so does
+Apple's AGX driver: one extra fd per plane, the same dma-buf, measured on
+an Apple M2 (`Asahi.md`, Test 10). Hardware drivers were expected not to
+keep one; AGX shows that expectation cannot be assumed.
 
 - **512 fds per client**, every kind together. The request that would take
   the client past 512 is refused; a plane's renderer copy is charged when
@@ -1090,8 +1092,11 @@ the protocol prescribes. (Under GLES a client that allocates an implicit
 YUV buffer anyway is not killed — it just draws the wrong colours.)
 
 On the dev VM's software GL (Mesa llvmpipe) the GLES table is 57 formats,
-all at `LINEAR` — Mesa lists no other layout there. What it looks like on
-real GPU hardware is recorded per machine, not promised here. The line to
+all at `LINEAR` — Mesa lists no other layout there. On an Apple M2 (Mesa's
+`asahi` driver) it is 162 pairs: 54 formats, each at
+`APPLE_GPU_TILED_COMPRESSED`, `APPLE_GPU_TILED` and `LINEAR`, and Mesa's GL
+and Vulkan clients allocate the compressed layout (`Asahi.md`, Test 6).
+Other hardware is recorded per machine, not promised here. The line to
 look for is logged once at startup:
 `dmabuf feedback: advertising the renderer's importable formats pairs=… fourccs=…`
 (and the whole table at `RUST_LOG=scoot=debug`).
@@ -1132,7 +1137,8 @@ while it sits in a params object, while it is part of a buffer, and after
 the client destroys that `wl_buffer` if a surface still shows it. A
 four-plane buffer is four. Under a GLES renderer that keeps its own copy
 of each imported plane (Mesa's software renderer, measured on the dev VM:
-a three-plane `YU12` buffer costs scoot six fds) the copies count too,
+a three-plane `YU12` buffer costs scoot six fds; Apple's AGX driver too,
+`Asahi.md` Test 10) the copies count too,
 from the `add`; scoot measures this once per session, on the first import
 it can measure cleanly, and logs it
 (`dmabuf: learned how many fds the renderer keeps of each imported
@@ -1216,9 +1222,13 @@ then be shown straight from its own memory instead of being composited.
   fullscreen windows pairs=… lost=… device=…`, or `the primary plane takes
   none of the advertised formats; no scanout tranche` when there is nothing to
   offer (then nothing is ever sent). On the dev VM it is `XR24` and `AR24` at
-  `LINEAR`. What a real GPU's tranche holds, and whether a GL client there
-  reallocates into it and goes direct, is `Asahi.md` Test 6 — not claimed
-  here.
+  `LINEAR`. On an Apple M2 it is 10 formats at `LINEAR` and names the
+  display card, not the render node. Mesa's GL clients (es2gears, mpv) move
+  from their compressed layout to `LINEAR` when it arrives and back when it
+  is withdrawn, and mpv then goes direct. Vulkan's `vkcube` rebuilt its
+  swapchain for the fullscreen size about 7 ms before the tranche arrived,
+  and did not rebuild again, so whether it would act on the tranche is
+  open (`Asahi.md`, Tests 5 and 6).
 
 No other backend or tier sends per-surface feedback that differs from the
 default.
@@ -1329,10 +1339,13 @@ while another client's frame pacing and IPC latency stay unchanged; the fds
 of a client killed mid-wait all returned; both bounds disconnecting only
 the offender; a fullscreen explicit client going direct on every frame, its
 replaced buffers released when the replacement's flip completed; no change
-in compositor CPU. No real explicit-sync client has been run against it:
-on the dev VM, Mesa's `vkcube` (lavapipe) and `es2gears_wayland` (llvmpipe)
-both draw through `wl_shm` and never bind the global. The real-GPU check is
-[`Asahi.md`](../Asahi.md)'s Test 7. `--nested` was not run live; the global
+in compositor CPU. On the dev VM no real explicit-sync client could be
+run against it: Mesa's `vkcube` (lavapipe) and `es2gears_wayland` (llvmpipe)
+both draw through `wl_shm` and never bind the global. On an Apple M2
+([`Asahi.md`](../Asahi.md)'s Test 7) the global is offered on the display
+device itself (`apple,dcp` supports timelines), and Mesa's Vulkan driver
+uses it: `vkcube` imported 40 timelines and set 827 acquire and 827
+release points in about 14 s, with no stall or protocol error. `--nested` was not run live; the global
 cannot appear there, since the only code that offers it runs in `--tty`'s
 startup.
 

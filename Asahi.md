@@ -13,7 +13,10 @@ Renaming those would falsify the record. **Two of the three were answered on 202
 kept intact for re-runs on other Apple Silicon models. **Test 4 (added
 later, and the largest of them) was answered on 2026-09-21**: its results sit
 at the end of its own section, and `scripts/asahi-test4.sh` now runs the
-whole of it as one command that writes its own report.
+whole of it as one command that writes its own report. **Tests 5–10 were
+run on 2026-09-25** against `main` at `e1dce6f`. Their results sit at the
+end of each test's own section, and the builds, machine and launch recipe
+are under [Keys for the 2026-09-25 runs](#keys-for-the-2026-09-25-runs).
 
 | What it unblocks | Priority | Needs a VT? | Status |
 | --- | --- | --- | --- |
@@ -21,10 +24,12 @@ whole of it as one command that writes its own report.
 | [Does `--gpu` actually fix this machine](docs/backlog/resolved/tty-gpu-config-key-done.md) — the residual on a resolved entry | — | yes | **closed**: not needed, the search works (2026-09-18) |
 | Issue #48's unconfirmed connector fallback | — | yes | still open — needs an external display |
 | [Test 4: CPU vs GPU on a real GPU](docs/backlog/resolved/gpu-vs-cpu-measured-done.md) | high → none | yes | **ANSWERED** (2026-09-21): scanout comes up on the split topology and costs 4–5x less CPU |
-| [Test 5: a fullscreen video scanned out directly](docs/backlog/resolved/gpu-primary-direct-format-gate-done.md) | medium | yes | open — seen on the dev VM only |
-| [Test 6: what the GLES tier advertises, and what GPU clients do with it](docs/backlog/resolved/gles-dmabuf-full-formats-done.md) (Part C: [the scanout tranche](docs/backlog/resolved/gpu-scanout-candidates-done.md)) | high | partly | open — seen on the dev VM's llvmpipe only (57 formats, all `LINEAR`; scanout tranche `XR24`/`AR24` at `LINEAR`) |
-| [Test 7: explicit sync on a real GPU](docs/backlog/resolved/linux-drm-syncobj-done.md) | medium | yes | open — seen on the dev VM's virtio-gpu with a test client only |
-| [Test 9: scoot vs niri on a real GPU](docs/benchmarks.md) | medium | Part B only | open — the dev VM half is in `docs/benchmarks.md` (nested, llvmpipe) |
+| [Test 5: a fullscreen video scanned out directly](docs/backlog/resolved/gpu-primary-direct-format-gate-done.md) | medium | yes | **ANSWERED** (2026-09-25): mpv goes direct (~60% less compositor CPU) once it hides its pointer; `apple,dcp` has no cursor plane, so a visible pointer rules out any primary attempt ([ticket](docs/backlog/core/gpu-direct-blocked-by-composited-cursor.md)); planes: 1 primary, 1 overlay, 0 cursor |
+| [Test 6: what the GLES tier advertises, and what GPU clients do with it](docs/backlog/resolved/gles-dmabuf-full-formats-done.md) (Part C: [the scanout tranche](docs/backlog/resolved/gpu-scanout-candidates-done.md)) | high | partly | **ANSWERED** (2026-09-25): 162 pairs (54 formats x tiled-compressed/tiled/`LINEAR`); clients pick compressed and Mesa follows the scanout tranche to `LINEAR`; mpv `dmabuf-wayland` cannot run (no hardware decoder: AVD firmware missing) |
+| [Test 7: explicit sync on a real GPU](docs/backlog/resolved/linux-drm-syncobj-done.md) | medium | yes | **ANSWERED** (2026-09-25): offered on the display device; `vkcube` uses it |
+| [Test 8: nested dma-buf presentation](docs/backlog/resolved/nested-dmabuf-present-done.md) | medium | Part B only | **ANSWERED** (2026-09-25): nested CPU 1.8–2x lower, host 2.2–3x lower, pixels identical, niri imports scoot's compressed buffers intact |
+| [Test 9: scoot vs niri on a real GPU](docs/benchmarks.md) | medium | Part B only | **ANSWERED** (2026-09-25) except input latency: on the real panel scoot-gpu used the least total CPU for relayout and pointer motion (no frame counts there); pixman the most |
+| Test 10: does the GPU driver keep an fd per imported plane | — | yes | **ANSWERED** (2026-09-25): yes, one (`copies_per_plane_per_output=1`). While a client runs scoot counts it exactly; after a client quits, one fd can linger until the next redraw, and one extra fd in one session is unexplained |
 
 ## Results so far (run 2026-09-18, `main` at `f688ac9`)
 
@@ -581,7 +586,10 @@ are one panel at one resolution on one machine, and scanout remains
 primary-plane only — cursor and overlay planes are phase 2 of
 `docs/backlog/resolved/gpu-scanout-planes-done.md`, which this unblocks.
 (That was the state at the time of this run; cursor and overlay steps have
-since landed — see the resolved record.)
+since landed — see the resolved record. On this machine the cursor step
+cannot engage: `apple,dcp` exposes no cursor plane. Its one overlay does
+not help, because at this Smithay rev no overlay on any hardware can take
+scoot's drawn cursor, which is a memory buffer. See Test 5's results.)
 
 **Corrections to earlier drafts of this section**, collected here rather than
 left inline, because a result is hard to read with its own revision history
@@ -696,6 +704,141 @@ compositor for 10 s each time --
 p=$(pgrep -x scoot); a=$(awk '{print $14+$15}' /proc/$p/stat); sleep 10
 b=$(awk '{print $14+$15}' /proc/$p/stat); echo "jiffies/10s: $((b-a))"
 ```
+
+### Results, 2026-09-25 — mpv goes direct once its pointer is hidden; a visible pointer rules out every attempt
+
+Run on the same Apple M2 (j413), NixOS 26.11, kernel 7.1.5, Mesa 26.2.2.
+Built on the machine from `main` at `e1dce6f`
+([Keys for the 2026-09-25 runs](#keys-for-the-2026-09-25-runs) has the
+store paths and sha256s). Config: `[output] scale = 1.5` only, as in Test 4.
+
+**Plane inventory first, because it decides this test.** `sudo drm_info`
+on `card2` (`apple,dcp`), CRTC 45, connector `eDP-1`:
+
+| plane | type | zpos | formats (`IN_FORMATS`, all at `LINEAR` only) |
+| --- | --- | --- | --- |
+| 35 | Primary | 0 | XR30 AR30 XR24 AR24 XB24 AB24 NV12 NV16 NV24 P010 P210 |
+| 40 | Overlay | 1 (fixed) | AR30 AR24 AB24 NV12 NV16 NV24 P010 P210 (no opaque `X` formats) |
+
+**No cursor plane** (scoot logs `drm: scanout cursor planes cursor_planes=0
+overlay_planes=1`), one overlay, and no tiled or compressed modifier on
+either plane. **No VRR:** the connector has no `vrr_capable` property at
+all (only the CRTC's `VRR_ENABLED`, at 0), and niri reports `Variable
+refresh rate: not supported` for the same panel. The swapchain line: `Testing Formats: [AR24 Invalid, AR24
+Linear]` (Smithay's plane set, filtered to its colour formats, is
+`{XR24, AR24} x {Invalid, Linear}`).
+
+**The trap: the software cursor blocks direct scanout.** With no cursor
+plane, the pointer is a `Kind::Cursor` memory buffer. Smithay can put that
+kind on an overlay, but a memory buffer has no framebuffer to export
+(`ExportBuffer::from_underlying_storage` maps `UnderlyingStorage::Memory`
+to `None`, `drm/exporter/mod.rs` ~38), so the attempt fails silently and
+the cursor is composited. That holds on any hardware at this Smithay rev,
+not just here. Smithay only
+tries the primary plane for the last element when nothing above it went to
+the render list (`remaining_elements == 1 && primary_plane_elements.is_empty()`,
+`drm/compositor/mod.rs` ~1995 at the pinned fork `43f50eb`). So while the
+pointer is drawn over a fullscreen window, every frame renders two
+elements and **no `testing direct scan-out` line appears at all**. That is
+what the first run showed with `es2gears_wayland` and with mpv before it
+hid its cursor: `Eligible` and steering `Sent` while fullscreen, and across the whole
+session (2083 frames) zero primary attempts. `docs/tty.md` already says "a cursor with no plane of its own
+makes that frame composite"; on this panel that is **every** frame the
+pointer is visible, because there is only one output to park it on.
+
+**With the pointer hidden, it goes direct.** `mpv --fs --cursor-autohide=always
+--vo=gpu --gpu-context=wayland` (a 2560x1600 H.264 clip decoded in
+software), after one `scootctl pointer move` so mpv gets pointer focus and
+sends `set_cursor(serial, nil)`:
+
+```
+eligibility changed from=NothingOpaqueCovers to=Eligible
+scanout steering changed steer=Sent eligible=true
+testing direct scan-out for element … wl_surface@5 … on plane::Handle(35) … GbmFramebuffer { fb: 51, format: XR30 … }
+successfully assigned element … to plane::Handle(35) with zpos Some(0) for direct scan-out
+```
+
+- 743 `testing direct scan-out` lines on plane 35, 743 `successfully
+  assigned`, 1 `test failed` (the very first frame at startup, unrelated).
+  About 52 direct frames per second, which is what software decode of that
+  clip managed.
+- The first direct frame is 11 ms after mpv's `set_cursor(13, nil)`. Before
+  that the frames composited.
+- `/sys/kernel/debug/dri/2/state` while fullscreen: plane 35 on
+  `fb=51 format=XR30 modifier=0x0 size=2561x1601`. While tiled:
+  `fb=50 format=AR24 size=2560x1600`, scoot's swapchain. The second
+  fullscreen phase went back to `fb=51`.
+- mpv's presentation feedback: `presented` flags 9 (`vsync | zero_copy`)
+  on exactly the 743 direct frames, 1 on all 451 others.
+- **The client's buffer is 2561x1601, and DCP takes it.** At scale 1.5
+  the logical output is 1707x1067 (2560/1.5 = 1706.67, rounded up), so a
+  fullscreen client renders `ceil(1707 x 1.5)` = 2561 by 1601. The plane is
+  committed with `crtc-pos=2561x1601+0+0`, one pixel past the 2560x1600
+  mode on each axis, and the atomic test passes. A driver that rejects
+  out-of-bounds planes would composite here instead, so this is a
+  scale-1.5 edge to keep in mind on other hardware. (niri rounds the same
+  panel down, to 1706x1066.)
+- The fb's modifier in debugfs is `0x0`, and the client's
+  `add(…, 0, 0)` is `LINEAR`, so the panel reads the layout the client
+  wrote. Smithay's own trace describes the same fb as `GbmFramebuffer {
+  format: XR30, modifier: Invalid }`. Its GBM import does not carry the
+  modifier through for this `LINEAR` buffer, which is harmless for
+  `LINEAR`. Do not read "matches" as "GBM preserved the modifier": no
+  tiled buffer went direct here, so the `DIRECT_FLAGS` guard for tiled
+  modifiers was never exercised on this machine. No `lost its tiled
+  layout` line appeared.
+
+**CPU, same mpv, same 1080p30 clip, alternating, info-level logging**
+(`scoot` jiffies over 10 s; trace logging was off for these):
+
+| round | fullscreen, direct | tiled (composited) | fullscreen, composited (pointer shown) |
+| --- | --- | --- | --- |
+| 1 | 11 | 23 | 28 |
+| 2 | 10 | 23 | 27 |
+| 3 | 11 | 23 | 28 |
+
+Idle afterwards: 0. A separate one-round rerun snapshotted debugfs during
+each sample, to show which path each column really took: `fb=54 XR30
+2561x1601` (direct) and `fb=50 AR24 2560x1600` (composited), and read 10
+(direct), 23 (tiled) and 27 (composited) jiffies, in line with the three
+rounds. **Direct scanout cuts compositor CPU for a fullscreen video by
+about 60%** (10–11 against 27–28 jiffies per 10 s), and costs less than
+compositing the same video in a smaller tiled window.
+
+**What this does not show.** A `scootctl screenshot` of a direct frame
+forces a composite and re-imports the client's buffer through scoot's own
+GLES importer. It never reads what the panel shows, and DCP has no
+writeback connector. So the screenshots (`t5b-fs.png`: the test pattern,
+correct) prove the import path, not the scanout. The proxy for the panel is
+the debugfs fb, whose format and modifier match what the client sent. The
+panel was not photographed.
+
+**Consequences.**
+- **A visible pointer denies every fullscreen client a primary attempt on
+  this machine. Whether a client then goes direct still depends on its
+  buffer**: a format and modifier the primary takes (`LINEAR` only here),
+  and a size matching the mode. One client was seen to pass both: mpv,
+  whose fullscreen buffer was `LINEAR` at 2561x1601, once it hid its
+  pointer. The other two would not have gone direct even with the pointer
+  hidden:
+  - `vkcube` stayed `APPLE_GPU_TILED_COMPRESSED` throughout (all 20
+    `add(…, 201326592, 2)` in its trace), which the primary does not take.
+  - Both `vkcube` and `es2gears_wayland` submit 1707x1067 buffers at
+    `set_buffer_scale(1)` when fullscreen, the logical size. The primary
+    would have to upscale those 1.5x, which was not tested on DCP.
+    es2gears did switch to `LINEAR` after the steer, so size is its only
+    remaining obstacle.
+
+  That is one player, seen once. It does not show how other players or
+  games behave.
+- Hiding scoot's own cursor after inactivity would remove the pointer
+  obstacle for clients whose buffers qualify. Putting the cursor on the
+  overlay plane would too: the overlay takes `AR24`, so format is not the
+  problem. What blocks it is that Smithay at this rev cannot export a
+  memory buffer at all (above), and its GBM exporter also rejects `wl_shm`
+  buffers (`drm/exporter/gbm.rs` ~105–118). So a dma-buf-backed cursor
+  element needs a change in scoot's Smithay fork. Ticket:
+  [gpu-direct-blocked-by-composited-cursor](docs/backlog/core/gpu-direct-blocked-by-composited-cursor.md).
 
 ## Test 6 — the GLES tier's dma-buf formats, and what GPU clients do with them
 
@@ -872,6 +1015,83 @@ above it is its size and the device it names.) What each answer means:
   the primary took the buffer would be a scoot bug. (If mpv did not ask for
   presentation feedback, the count is empty; nothing is wrong.)
 
+### Results, 2026-09-25 — tiled and compressed on offer, Mesa uses them, and follows the tranche to `LINEAR`
+
+Same machine, build and config as Test 5's results.
+
+**Part A: the table.** Both GLES tiers advertise the same table. The two
+`wayland-info` dumps are identical except for the global's name (39
+headless, 40 on `--tty`), and all 162 format lines match:
+`dmabuf feedback: advertising the renderer's importable formats pairs=162
+fourccs=54`, main device `renderD128` (0xe280). Every one of the 54 fourccs
+comes at exactly three modifiers: `APPLE_GPU_TILED_COMPRESSED`
+(`0x0c00000000000002`), `APPLE_GPU_TILED` (`0x0c00000000000001`) and
+`LINEAR`. No `INVALID`. That includes `NV12`, `P010` and the other YUV
+formats. So this is the expected shape, well above the dev VM's 57 pairs.
+
+**Part B: a GL client.** `es2gears_wayland` (Mesa `asahi`, "Apple M2 (G14G
+B0)"), tiled: `add(…, 201326592, 2)`, i.e. `APPLE_GPU_TILED_COMPRESSED`, in
+format `XR30` (`808669784`), zero `create_pool` (dma-bufs throughout), and
+the gears draw correctly (`t5-gears-tiled.png`, `t5-gears-fs.png`). Mesa
+also picked `XR30` for mpv, not `XR24`. `vkcube` (honeykrisp, Vulkan 1.4)
+allocates `XR24` (`875713112`), also `APPLE_GPU_TILED_COMPRESSED`. No client
+disappeared, and no `import refused` or protocol error was logged.
+
+**Part B: mpv with `--vo=dmabuf-wayland` — cannot run on this machine.**
+There is no hardware decoder that userspace can reach:
+- The AVD video decoder's driver fails to probe:
+  `avd 269080000.avd: Direct firmware load for apple/avd-fw-v3-t1.bin
+  failed with error -2`, then `probe with driver avd failed with error
+  -2`. So there is no `/dev/videoN` for it. The only V4L2 device is
+  `apple-isp`, the camera (`v4l2-ctl --list-devices`). The system's
+  firmware search path holds no `*avd*` file. All of this was recorded in
+  `~/fx/t6-decoder-evidence.txt` on the machine, from `journalctl -k -b`,
+  since the kernel ring buffer had wrapped by then.
+- VA-API has no driver (`asahi_drv_video.so` not found).
+- mpv's Vulkan video hwdec found nothing usable.
+- With `--hwdec=no`, mpv 0.41's dmabuf VO cannot upload software frames
+  (`[hwupload] no support for this hw format`), and the file exits with
+  `Errors when loading file`.
+
+This is a finding about the machine, not scoot. Separately, Mesa's Vulkan
+loader could not open `card1`/`card2` (`Permission denied`). That was the
+test setup: VT 2 was active with no logind session on it, so the user held no
+seat ACLs. It does not affect `renderD128`, which is mode 0666.
+
+**Part C: the scanout tranche, and Mesa follows it.** `scanout tranche for
+fullscreen windows pairs=10 lost=0 device=57858`: 57858 is `0xe202`,
+`card2`, the display controller, not AGX's render node. The pairs are
+`XR24 AR24 AR30 XR30 AB24 XB24 NV12 P010 NV16 NV24` at `LINEAR`: the
+primary plane's list minus `P210`, which the renderer does not import.
+- On every toggle into fullscreen the log shows `scanout steering changed
+  steer=Sent`, and the client trace shows `tranche_flags(1)`.
+- **Mesa reallocates in response.** es2gears went from
+  `APPLE_GPU_TILED_COMPRESSED` to `LINEAR` (`add(…, 0, 0)`) after the
+  toggle, and back after `steer=Reverted`. mpv did the same: compressed
+  836x1043 tiled, then `LINEAR` 2561x1601 fullscreen, then compressed
+  1254x1565 once tiled again. So Mesa acts on a tranche whose
+  `target_device` is the display card, even though it renders on the AGX
+  node.
+- mpv then went direct once its pointer was hidden. Its `presented` flags
+  were `9` (`vsync | zero_copy`) 743 times and `1` 451 times, which lines
+  up frame for frame with Test 5's plane assignments.
+- `vkcube` did not reallocate after its `tranche_flags(1)`, but the
+  ordering matters. On the toggle to fullscreen, vkcube rebuilt its
+  swapchain at 1707x1067 between 12:39:41.4404 and .4476 (four new
+  `APPLE_GPU_TILED_COMPRESSED` buffers, the old four destroyed). The
+  scanout tranche reached it about 7 ms later, at .4549, and it never
+  rebuilt again. It then composited (the pointer was visible anyway). So
+  this may be a timing artefact: scoot sends the tranche after the
+  fullscreen configure, and it is not known whether vkcube would have used
+  it had it arrived before the rebuild. It was not tested whether the
+  cause is Mesa's WSI, vkcube, or that ordering.
+- `get_surface_feedback` was requested once by each client.
+- Neither `the primary plane takes none of the advertised formats` nor
+  `lost its tiled layout` appeared.
+
+`WAYLAND_DEBUG` prints `tranche_target_device` as `array[8]`, so the
+device number comes from scoot's log line rather than the client trace.
+
 ## Test 7 — explicit sync (`linux-drm-syncobj-v1`) on a real GPU
 
 Why: on the GPU tier scoot now offers explicit sync where a DRM device can
@@ -931,6 +1151,31 @@ What each answer means:
   or GL app answer the question that matters most for NVIDIA users; this
   project has no NVIDIA hardware to run them on.
 
+### Results, 2026-09-25 — offered on the display device, and `vkcube` uses it
+
+Same machine, build and config as Test 5's results.
+
+- **`drm: explicit sync (wp_linux_drm_syncobj_manager_v1) offered
+  device="the display device"`.** This was not the expected shape: the
+  `apple,dcp` driver supports syncobj timelines itself. `drm_info` agrees
+  for both cards: `DRM_CAP_SYNCOBJ = 1` and `DRM_CAP_SYNCOBJ_TIMELINE = 1`
+  on `card2` as well as on AGX's `card1`. So the render-node fallback
+  never ran here. `wayland-info` lists `wp_linux_drm_syncobj_manager_v1`
+  version 1.
+- **A real Vulkan client uses it.** `vkcube --wsi wayland` (Mesa
+  honeykrisp, "Apple M2 (G14G B0)", Vulkan 1.4.354):
+  - `import_timeline` 40 times, two timelines per swapchain image across
+    its startup swapchain rebuilds and one fullscreen rebuild;
+  - `set_acquire_point` 827 times and `set_release_point` 827 times over
+    about 14 s.
+  - The cube is drawn and spinning in both captures, tiled (`t7-vkcube.png`)
+    and fullscreen (`t7-vkcube-fs.png`).
+  - No protocol error, no `no_memory` kill, and no stall.
+- Fullscreen it composited (`fb=50 AR24`, the pointer was visible, see
+  Test 5), so this run covers explicit sync on the composited path. On the
+  direct path, the release points follow the flip. That was covered on the
+  dev VM but not here.
+
 ## Test 8 — `--nested --renderer gles` handing its frames to the host as dma-bufs
 
 Why: in a `gpu-scanout` build, a `--nested --renderer gles` scoot whose
@@ -975,6 +1220,27 @@ What each answer means:
 - **`pixels: ... identical`** on both builds: the host shows exactly what
   the nested scoot rendered, the right way up. `DIFFERENT` is a bug: send
   both PNGs.
+
+**Part A results, 2026-09-25** (same machine and build as Test 5's
+results). Run as written above, twice, alternating the builds. The host
+is the default build's `--headless --renderer gles` on the AGX render node.
+
+| | default build (read-back) | `gpu-scanout` build (dma-buf) |
+| --- | --- | --- |
+| `presentation:` | `by read-back into wl_shm reason="this build has no gpu-scanout feature"` | `by dma-buf (no read-back)` |
+| nested, ms per client tick | 1.167, 1.167 | 0.617, 0.633 |
+| host, ms per client tick | 0.967, 0.967 | 0.317, 0.317 |
+| nested, ms per resize | 5.868, 5.785 | 4.711, 4.545 |
+| RSS / fds, before → after 121 resizes | nested 82192→82240 kB, 26→26; host 79488→79648 kB, 23→23 | nested 75920–75936→75968 kB, 32→32; host 72928–72992→73056–73120 kB, 26→26 |
+| `pixels:` | identical | identical |
+
+**On a real GPU, dropping the read-back pays off**: nested CPU per frame
+falls by 1.8–1.9x, and the host's by 3.0x, since it imports a buffer
+instead of uploading one. A resize is 20% cheaper too, where the dev VM
+measured it 6–8% dearer. Every size was applied without a redraw under
+dma-buf (`owed frames handed over without a redraw: 243`), fds stayed flat
+on both processes, and the host's screenshot was byte-identical to the
+nested one in all four runs.
 
 ### Part B -- nested inside your own desktop
 
@@ -1031,6 +1297,43 @@ What each answer means:
   picture, the right way up, with no garbled tiles. Scrambled blocks mean a
   layout was mismatched between scoot and the host: send both, and the
   `add(` lines.
+
+**Part B results, 2026-09-25.** The host is niri 26.04 (nixpkgs), which
+owned `--tty` on VT 2 with the benchmark config plus `output "eDP-1" {
+scale 1.5; }` (`/tmp/fx/niri-t9.kdl` below, animations off). niri rendered
+on the AGX: `GL Renderer: "Apple M2 (G14G B0)"`. Nested scoot used
+`--config` with `scale = 1.5` only, which `--nested` ignores as it should
+(`using 1.0`). The loop above ran once per build with
+`WAYLAND_DEBUG=client`, then twice per build without it, alternating.
+
+- **`nested: presenting to the host by dma-buf (no read-back)
+  format=DrmFourcc(AR24) modifiers=[APPLE_GPU_TILED_COMPRESSED,
+  APPLE_GPU_TILED, Linear] node=renderD128`** for the gpu build, in all
+  three runs. The trace shows scoot allocated
+  `APPLE_GPU_TILED_COMPRESSED` (`add(…, 201326592, 2)`), `created` 3,
+  `failed` 0. So niri's importer (Smithay's too, but a different
+  compositor's) takes scoot's tiled, compressed buffers. The default build
+  said `by read-back … no gpu-scanout feature`, as it should.
+- **CPU over 20 s at ~30 Hz** (jiffies, no protocol trace):
+
+  | run | default: scoot | default: niri | gpu: scoot | gpu: niri |
+  | --- | --- | --- | --- | --- |
+  | 1 | 77 | 83 | 38 | 34 |
+  | 2 | 76 | 82 | 42 | 37 |
+  | with `WAYLAND_DEBUG=client` | 110 | 84 | 75 | 35 |
+
+  Inside a real desktop, dma-buf halves nested scoot's CPU (76–77 → 38–42)
+  and more than halves the host's (82–83 → 34–37).
+- **No garbled tiles.** niri's own `screenshot-screen` goes through niri's
+  importer of scoot's compressed buffer. It shows the same frame as scoot's
+  own capture (counter `00000709` in both), clean text, and the window
+  border intact (`t8b-result-scoot-gpu-nodebug-1-niri.png` against
+  `t8b-result-scoot-gpu-nodebug-1.png`). The nested window is scaled 1.5x
+  by niri, because nested scoot draws at scale 1, so the two are compared
+  by eye, not by bytes.
+- WARNs: only niri's own (no DRM lease without seat ACLs, no EDID blob, no
+  notification daemon for its screenshot toast), plus scoot's expected
+  nested-scale one.
 
 ## Test 9 — scoot vs niri on a real GPU
 
@@ -1164,6 +1467,128 @@ process, so a leak may show there or may not. Two checks cover it:
 Quit with `Super+Shift+e` (scoot) or, from a `foot` in niri,
 `niri msg action quit --skip-confirmation`.
 
+### Results, 2026-09-25
+
+Same machine and build as Test 5's results; niri 26.04 from nixpkgs. All
+numbers are the compositor process's `/proc/PID/stat` total ("process ms",
+10 ms ticks), which is the column the PR #237 review said to compare. The
+raw TSVs are on the machine under `~/fx/t9a*`, `~/fx/t9b.tsv`.
+
+**Part A (nested in cage `HOST_RENDERER=gles2`, 1600x1000, three rotating
+rounds).** Run exactly as written above, plus the gpu-scanout build as its
+own `VARIANTS=scoot-gles` pass (`t9a-gpu`).
+- Every check passed. `GL Renderer: "Apple M2 (G14G B0)"` appears in both
+  niri logs and in scoot-gles's. The gpu build says `presenting to the
+  host by dma-buf (no read-back)`, and the default build says `by read-back
+  … no gpu-scanout feature`. `notes.log` is empty in all three runs. The
+  cage host allocated its output on this GPU, unlike on the dev VM.
+
+Medians [range] over three rounds:
+
+| scene | scoot-pixman | scoot-gles (read-back) | scoot-gles, gpu build (dma-buf) | niri, anim off | niri, anim on |
+| --- | --- | --- | --- | --- | --- |
+| idle 20 s | 0 | 0 | 0 | 10 [0–10] | 0 [0–10] |
+| pointer, 1200 events | 90 [90–90] | 100 [90–110] | 100 [90–100] | 750 [720–750] | 760 [740–780] |
+| relayout, 200 actions | 1760 [1760–1780] | 510 [510–510] | **250** [240–250] | 580 [510–590] | 630 [620–660] |
+| shot-ipc, 10 | 100 [90–110] | 80 [70–80] | 80 [80–100] | 160 [160–170] | 160 [150–160] |
+| shot-grim, 10 | 50 [40–50] | 30 [20–40] | 40 [40–50] | 40 [30–40] | 40 [30–40] |
+| animate 10 s | 2940 [2930–2970] | 1270 [1260–1290] | **820** [820–830] | 1290 [1160–1310] | 1270 [1060–1320] |
+| RSS, 3 foots → end (MB) | 44.2 → 63.8 | 87.3 → 109.8 | 80.8 → 104.2 | 110.6 → 125.4 | 110.5 → 125.3 |
+| startup, IPC answering (ms) | 14.6 | 43.8 | 38.6 | 125.6 | 121.8 |
+
+The DIAG pass counted frames for the pixman, read-back gles and niri
+variants (not the gpu build). From it:
+- **Relayout**: 201 frames for scoot (one per action) against niri's
+  615–626 (about three per action). Per frame that is 8.78 ms (pixman),
+  2.53 ms (gles read-back) and 0.94–1.01 ms (niri).
+- **Animate**: scoot-pixman presented 41 frames/s, scoot-gles 51 and niri
+  54. That is 7.10, 2.47 and 2.35–2.38 ms per frame.
+- **Pointer**: niri presented 628 frames, 1.2 ms each. Nested scoot
+  presents none, because the host draws the pointer.
+
+What changes on a real GPU, against the dev VM's llvmpipe table in
+`docs/benchmarks.md`:
+- **niri's per-frame cost drops 6–15x** (14.2 → 0.94 ms relayout,
+  14.8 → 2.35 ms animate).
+- **scoot-gles on the read-back path now costs about the same per animated
+  frame as niri** (2.47 against 2.35 ms), and about 2.7x more per relayout
+  frame, where niri draws three frames for scoot's one.
+- The **gpu build (dma-buf to the host) used the least total CPU for
+  relayout and animate**: relayout 250 ms against niri's 580, animate 820
+  against 1290. It was not the lowest everywhere: pointer 100 ms against
+  pixman's 90, and shot-grim 40 against the read-back tier's 30. (The DIAG pass did not include the gpu build, so there is no frame
+  count for it.)
+- **scoot-pixman is now the expensive one.** At 1600x1000 it spends 2.3x
+  the CPU of niri while animating, and it delivers fewer frames (41/s
+  against 54). Without a GPU, pixman remains the right default. With one,
+  it is not.
+- Memory at rest is lowest for pixman (44 MB with three foots). The two
+  GLES scoot builds use 81–87 MB and niri uses 110 MB. None of them grew by
+  a frame per capture (the PR #238 fix holds).
+
+**Part B (`--tty` on the real panel, 2560x1600, scale 1.5 for both).** niri
+ran with `output "eDP-1" { scale 1.5; }` added to the benchmark config.
+Without it niri picks its own scale and the comparison would not be
+like-for-like. Its logical size was 1706x1066, against scoot's 1707x1067.
+Each session was one of scoot (dumb + pixman), scoot-gpu (`--renderer
+gles`), niri with animations off, and niri with animations on. They ran in
+that order, twice, each alone on VT 2 while it was measured. There is no
+read-back GLES column on `--tty`: that tier does not exist there, because
+the default build's `--tty --renderer gles` keeps pixman with a warning.
+So the two scoot tiers are dumb + pixman and GPU scanout. Three `foot`s
+were spawned through each compositor's own IPC, `xwayland-satellite` was
+off (checked), and scoot ran without `--xwayland`. `sample.sh` was run by
+PID from SSH rather than from a `foot` inside the session: it measures the
+same process, and the damage clients run as the same user against the same
+sockets. ydotool went through a private `ydotoold` (a uinput device). Each
+cell is round 1, then round 2:
+
+| scene | scoot-pixman | scoot-gpu | niri, anim off | niri, anim on |
+| --- | --- | --- | --- | --- |
+| idle 20 s | 0, 0 (0 wakeups) | 0, 0 (0 wakeups) | 0, 10 (65 wakeups) | 0, 0 (74 wakeups) |
+| relayout 10 s (focus left/right at ~10 Hz each) | 4390, 4350 | **270, 270** | 470, 460 | 490, 470 |
+| pointer 10 s (ydotool ±800 px, as fast as it forks) | 3470, 3160 | **960, 920** | 2210, 2220 | 2210, 2350 |
+| shot-ipc, 10 captures | 270, 320 | 200, 250 | 420, 440 | 410, 430 |
+| shot-grim, 10 captures | 150, 150 | 120, 120 | 140, 130 | 120, 130 |
+| RSS after 3 foots → after shots (MB) | 93.6 → 110.3 | 101.6 → 135.2 | 126.8 → 159.9 | 126.8 → 152.4 |
+
+- **On the real panel, scoot-gpu used the least total CPU for relayout
+  and pointer motion.** These are totals: `--tty` has no frame counts, so
+  this is not a per-frame comparison. Through `grim` it tied niri
+  (anim on) in round 1 (120 = 120). `t9b.sh` ran its scenes back to back, with no idle wait between them.
+  Relayout costs 2.7% of a core against niri's 4.6–4.9%. Pointer motion
+  costs 9.2–9.6% against niri's 22–23.5%. Both compositors draw the
+  pointer here, and neither can use a cursor plane, because `apple,dcp`
+  has none.
+- **scoot-pixman at 2560x1600 is the most expensive**: 44% of a core for
+  relayout and 32–35% for pointer motion. This matches Test 4's dumb-tier
+  numbers.
+- **The pointer row compares CPU per second, not per event.** ydotool
+  forks once per event, so its rate is whatever the machine manages, and
+  it was not counted. scoot-pixman took fewer wakeups (19.5k–21.6k) than
+  scoot-gpu and niri (29k–31k). That suggests it simply served fewer
+  events, which would understate its cost.
+- **Screenshots**: the IPC capture costs 20–25 ms of CPU per shot on
+  scoot-gpu, 27–32 on pixman and 41–44 on niri. niri encodes on an exiting
+  thread, so its cost only shows in the process column (thread-sum
+  62–67 ms against 410–440 ms process, as on the VM). Through `grim`, all
+  four are within 12–15 ms per capture.
+- **Memory across the 20 captures**: scoot-gpu's RSS rose by 33 MB, about
+  two frames at 2560x1600. niri's rose by 33 MB (anim off) and 26 MB (anim
+  on). None of them climbed by
+  a frame per capture (10 frames would be about 164 MB), so the PR #238
+  fix holds on real hardware. The asahi driver reports no `drm-total-`
+  lines in fdinfo, so the GPU-memory half of that check was skipped, as
+  the runbook allows.
+- Idle: neither scoot tier woke even once in 20 s. niri woke 65–74 times
+  and used at most one 10 ms tick.
+
+**Not measured**: input-to-present latency (the method is still open; see
+the ticket), and frame counts on `--tty` (no DIAG equivalent there).
+Grim screenshots of each real-panel session are kept with the run
+(`t9b-*-panel.png`): the same three half-width columns, two of them on
+screen, in both compositors.
+
 ## Test 10 — does the GPU driver keep a copy of each imported dma-buf plane
 
 Why: scoot counts the file descriptors each client makes it hold, and a
@@ -1213,6 +1638,96 @@ all four files. If `N` is 0 and `R - B` is about `P`, the driver keeps
 nothing and scoot charges nothing extra, which is the expected result. The
 third line of `t10-dmabuf-fds.txt` should be back near `B` once the client
 has quit.
+
+### Results, 2026-09-25 — the AGX driver keeps one fd per plane, and scoot counts it
+
+Same machine, build and config as Test 5's results.
+
+**`dmabuf: learned how many fds the renderer keeps of each imported plane
+copies_per_plane_per_output=1`.** That is the opposite of the expectation
+above, which was reasoned from Mesa's source: the hardware driver keeps a
+copy, just like llvmpipe does. The fd accounting was then checked by dma-buf
+identity rather than by raw count. Each snapshot lists the `/dmabuf:` fds
+in `/proc/<scoot>/fd`, grouped by inode (the same inode means the same
+buffer):
+
+Four sessions were counted: the combined Test 6/7 session (`t67.sh`), two
+dedicated reruns without screenshots (`t10.sh` tiled, `t10b.sh` with a
+fullscreen phase), and a third rerun that also took an IPC screenshot
+while tiled and again while fullscreen (`t10c.sh`). The dedicated reruns:
+
+| moment | dma-buf fds | what they are |
+| --- | --- | --- |
+| before any client | 3 | 1 swapchain buffer (2560x1600x4 B) x 3 fds |
+| `vkcube` running, tiled, at 4 s, 8 s and 12 s | 17 | 3 swapchain buffers x 3 fds, plus **4 vkcube buffers x 2 fds** |
+| 1 s after vkcube quit (`t10.sh` tiled; `t10b.sh` fullscreen) | 9 | 3 swapchain buffers x 3 fds |
+| `es2gears_wayland` running | 13 | 9 own, plus 2 gears buffers x 2 fds |
+| after es2gears quit | 9 | 9 own |
+
+**While a client runs, the accounting is exact.** With `P = 4` live
+one-plane buffers (vkcube's swapchain; the trace shows four `add(` per
+rebuild and the old four destroyed each time) and `N = 1`, the client's
+share is `P x (1 + N) = 8`, which is what was measured. Nothing is held
+that scoot did not see at import time. The copy is a second fd for the
+same dma-buf (same inode), so it costs an fd slot but no memory.
+
+**After a client quits, the picture is less clean, and one extra fd is
+unexplained.**
+- In the combined session, `t10-dmabuf-fds.txt` reads `3 / 17 / 10`:
+  before the client, while vkcube was running tiled, and 2 s after it quit
+  from fullscreen. The 17 taken while it was fullscreen is a separate
+  file, `t10-dmabuf-fds-fs.txt`. So the after-quit count was **10**, one
+  above the steady 9. What held the tenth fd was not identified.
+- The two dedicated reruns read 9 at 1 s and stayed there, but they took no
+  screenshots, while the combined session did (one tiled, one fullscreen).
+  Those two runs therefore cannot rule out a capture holding the fd.
+- The rerun that did take screenshots (`t10c-counts.tsv`) does not
+  reproduce "a capture holds it": each screenshot left the count unchanged
+  (17 before and after the tiled one, 18 before and after the fullscreen
+  one). It shows two other things instead:
+  - After vkcube quit from fullscreen, **one fd of one vkcube buffer
+    stayed open** (11 fds at 1, 2 and 4 s). It closed only after two
+    pointer moves made scoot draw another frame, which brought the count
+    to 10. So the last frame's client buffer can outlive its client until
+    the next redraw: bounded to that frame, but not released "within 1 s".
+  - **scoot's own dma-buf fd set is not constant.** During the fullscreen
+    phase one swapchain buffer went from 3 fds to 1 and a new buffer
+    appeared with 3, so scoot's own share settled at 10, not 9.
+
+  Either effect could account for the combined session's 10. Which one it
+  was is not known.
+
+So: charging each client for its planes' copies is correct on this
+hardware, and the "hardware drivers are expected not to" line in
+`docs/protocols.md` was wrong for AGX; it is corrected in the same change
+as this section. Release after quit is prompt when scoot keeps drawing,
+but it is not guaranteed within any fixed time: one fd of the last frame's
+buffer can wait for the next frame. The raw counts are kept with the runs
+(`t10-dmabuf-fds.txt`, `t10-dmabuf-fds-fs.txt`, `t10-counts.tsv`,
+`t10b-counts.tsv`, `t10c-counts.tsv`).
+
+## Keys for the 2026-09-25 runs
+
+Built on the machine itself (native aarch64) from `main` at
+`e1dce6ffff2c77cbbf50a362f3b65bdd6d8c8882`, with `nix build .#scoot
+.#scoot-gpu .#scootctl`:
+
+| binary | store path | sha256 |
+| --- | --- | --- |
+| `scoot` | `/nix/store/5fsph0ax28df3ncd4w0jk03m88936yvg-scoot-0.1.0` | `0f363f74769bdb5f82c4a420fa8769a1ad9a070dddabd9ed176db7190e8c5b72` |
+| `scoot` (`scoot-gpu`) | `/nix/store/zd2226z0hjk1j5w8kwmw7icd1whkjqzp-scoot-gpu-0.1.0` | `acde9262db3bbe1a823d833c1c4b24afc188833d9267267bd624339ad2471326` |
+| `scootctl` | `/nix/store/bgq24fqxs1yrwj9kdwar6jfnbc4jn0gm-scootctl-0.1.0` | `3e0e22e00faa5784656d9fb1f095d401cc48f9882c1d4f25f2d0604bac4dab76` |
+
+Machine: Apple M2 (Mac14,2 / j413), NixOS 26.11 (nixpkgs `efe6f07`),
+kernel 7.1.5, Mesa 26.2.2 (`asahi` GL 4.6, honeykrisp Vulkan 1.4.354),
+niri 26.04, 8 CPUs, 7.3 GiB. The test tools (niri, cage, seatd, ydotool,
+drm_info, mpv, vulkan-tools, mesa-demos, …) were added through a
+packages-only NixOS module. Sessions ran on VT 2 against a private `seatd`
+(`sudo seatd -u "$USER"`, then `sudo openvt -c 2 -s -- runuser -u "$USER" --
+env LIBSEAT_BACKEND=seatd …`), because the machine had no greeter and no
+logind seat session that an SSH-started process could join. Every
+`--tty` run used a config holding only `[output] scale = 1.5`. The raw logs,
+traces and debugfs dumps stay on the machine under `~/fx`.
 
 ## What to send back
 
