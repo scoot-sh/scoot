@@ -447,6 +447,17 @@ impl XClient {
             .atom
     }
 
+    /// Takes selection `name` under `window` -- which need not be this
+    /// client's: `SetSelectionOwner` accepts any window id.
+    pub(super) fn take_selection_as(&self, name: &str, window: Window) {
+        let selection = self.atom(name);
+        self.conn
+            .set_selection_owner(window, selection, x11rb::CURRENT_TIME)
+            .expect("a set-owner request")
+            .check()
+            .expect("the X server accepted the owner");
+    }
+
     /// Makes an unmapped window of this client the owner of selection
     /// `name` -- all an X client has to do to start a drag (`XdndSelection`)
     /// or claim a selection -- and returns it once the server agrees.

@@ -135,3 +135,36 @@ fn another_x_client_cannot_hijack_a_press_on_an_x_window() {
         .pointer_button(scoot_ipc::PointerButton::Left, false);
     live.drain();
 }
+
+/// A known limit, pinned so it is not mistaken for a guarantee: the owner of
+/// `XdndSelection` can be any window, not just one of the client's own
+/// (`SetSelectionOwner` accepts any window id), and the window manager learns
+/// only the window. So a stranger naming the very X window the press landed
+/// on passes the same-client check and takes the press over. X11 gives no way
+/// to learn which client made the request. What the gate does hold is the
+/// case that mattered on `main` -- a press on a *Wayland* surface
+/// (`a_background_x_client_cannot_turn_a_wayland_press_into_a_drag`).
+#[test]
+fn a_stranger_naming_the_pressed_x_window_still_takes_the_press_over() {
+    let Some(mut live) = live("a_stranger_naming_the_pressed_x_window_still_takes_the_press_over")
+    else {
+        return;
+    };
+    let xid = live.x.map(&Props::new(RED));
+    let id = live.managed(xid);
+    let rect = live.placement(id).rect;
+    press_at(&mut live.fixture.state, rect);
+    live.drain();
+    let stranger = XClient::connect(live.display);
+    stranger.take_selection_as("XdndSelection", xid);
+    live.drain();
+    assert!(
+        taken_over(&live.fixture.state),
+        "the limit changed: a stranger naming the pressed X window no longer takes the press \
+         over -- update the docs that describe it (dnd.rs, protocols.md, CHANGELOG)"
+    );
+    live.fixture
+        .state
+        .pointer_button(scoot_ipc::PointerButton::Left, false);
+    live.drain();
+}

@@ -485,16 +485,20 @@ Found while building it, each measured first (fail-first records in
   background X client taking the clipboard after an approved copy -- and
   never answering `TARGETS`, so nothing announces it -- served the next
   Wayland paste (`failfirst-clipboard-fork-43f50eb.txt`: "a paste delivered
-  the bytes of an X owner the gate never let through"). scoot now records
-  the owner that crossed and serves a paste only while it still owns the
-  selection (`X11Wm::selection_owner`, a fork addition), else clears it.
+  the bytes of an X owner the gate never let through"). scoot first compared
+  owner windows; review showed that forgeable (below), and a paste is now
+  served only while the selection has not changed hands since it crossed
+  (`X11Wm::selection_generation`) -- which raises the bar, and is not a
+  guarantee.
 - **X drags bypassed every check** -- live on `main` since Phase 1: the
   XWM turns any held left-button press into a drag for any X client taking
   `XdndSelection`, so a background X client could hijack a press on a
   Wayland window (`failfirst-dnd-main.txt`). Now `XwmHandler::allow_drag`
   (fork addition) runs `xwayland/dnd.rs`: a recent button press delivered
   to XWayland (`interaction_serials.contains`) on a window of the same X
-  client (window-id client bits), not locked, not touch.
+  client (window-id client bits) as the `XdndSelection` owner window, not
+  locked, not touch. That protects presses on Wayland surfaces; review
+  showed a press on an X window is still open (below).
 - **Large transfers were cut to 64 KiB both ways** (a 2 MiB payload arrived
   as exactly 65536 bytes): the incoming INCR path deleted each chunk twice,
   so a prompt owner's next chunk was deleted unread; the outgoing pipe was
@@ -516,8 +520,9 @@ Found while building it, each measured first (fail-first records in
   client; Wayland types sent to X are capped at 64. (The X server itself cuts
   an atom name at a NUL, measured, so the NUL refusal is defence in depth.)
 
-All seven fork commits are on `scoot-sh/smithay` branch
-`scoot/xwayland-selection-dnd` (`0d281abf`), listed in `docs/forks.md`;
+All the fork commits (seven, then four more from review) are on
+`scoot-sh/smithay` branch `scoot/xwayland-selection-dnd` (`53aafc36`),
+listed in `docs/forks.md`;
 upstream master `79bbed5e1` has none of them.
 
 **Drag-and-drop**: X → Wayland works, live (`mousepad` over X into a
@@ -536,9 +541,51 @@ Known limit: the drag rule compares X connections, so an app whose pressed
 window and drag source are on two connections of its own is refused (none
 measured does this).
 
-**Evidence**: `tests/clipboard.rs` (16, including a stuck reader on each
-side: an X one holds the Wayland source, a Wayland one the X owner, to a
-few chunks), `tests/dnd.rs` (3),
+**Review round 1 (same PR), four blocking findings, each reproduced first
+with the reviewer's probes (`~/review246/`, baseline outputs
+`~/evidence/xw4/review/baseline-4c423b4-*.txt`) and fixed:**
+
+- **The owner check was forgeable.** `SetSelectionOwner` accepts any window
+  id, so a background client took the clipboard under the approved owner's
+  own window and served the paste (`PWNED-BY-BACKGROUND-X`). The fork now
+  counts ownership changes (`567ac2cc`, `X11Wm::selection_generation`); a
+  paste is refused after any change of hands. A second vector remains and
+  is documented, not closed: a forged `SelectionNotify` plus property on the
+  window manager's per-paste window cannot be told from a real owner's. The
+  rule raises the bar; it is not a guarantee.
+- **Unbounded memory reading X selections.** `35c335e0`'s non-deleting read
+  re-read the whole property on every new value (16 × 1 MiB appends: 30.6 →
+  303.5 MB RSS), and any single property was read whole (a 96 MiB one built
+  by appends: 30.6 → 128.4 MB). Fixed forward by `9cc46d1a`: properties are
+  read in 64 KiB slices, the next only once the last is written, and an INCR
+  chunk only once our delete is seen to take effect. After: 30.9 → 31.1 MB
+  for both (the 96 MiB now sits in XWayland, 78.8 → 185.4 MB).
+- **Unbounded fds from X readers.** Each X requestor window held a pipe:
+  100 windows 26 → 126 fds, 300 → 326. `3c53776f` caps outgoing transfers
+  at 4 per X client and 16 per selection: after, 26 → 30 for both.
+- **The drag gate's same-client check is defeatable** by naming the pressed
+  X window as the owner. No protocol fix exists; the docs now say presses on
+  Wayland surfaces are protected and presses on X windows are not, and
+  `tests/dnd.rs` pins the limit.
+- **The 8-paste bound was exhausted for good** by owners going quiet
+  mid-INCR (a new owner's paste read nothing, even after the readers were
+  killed). `53aafc36` sweeps transfers that will not finish: a reader that
+  closed, 30 s idle, and, on a change of owner, pastes stalled on the old
+  owner; moving ones are kept (ending one would pass a partial paste off as
+  whole). After: the new owner's paste works, before and after killing the
+  readers.
+- Docs: the pending-conversion behaviour on owner change was misdescribed;
+  X touch drags being refused is now in the user docs; and the trust note
+  says any process reaching `DISPLAY` -- a background Wayland app too -- can
+  read the clipboard whenever an X window is focused (the same line wlroots
+  draws, checked against its source; the review's "stricter than sway" was
+  not right for wlroots).
+
+**Evidence**: `tests/clipboard.rs` (23, including a stuck reader on each
+side, the owner-borrowing hijack, appends without waiting, a single huge
+property, the outgoing and stalled-paste bounds, a moving paste surviving an
+owner change and the idle timeout), `tests/dnd.rs` (4, one pinning the
+known limit),
 `tests/ime.rs` (1), the hermetic type filter; the gate's lock and focus
 branches mutation-checked (`mutation-gate-M*.txt`: the lock test is pinned
 by either branch, the background tests by the focus branch; the DnD gate's

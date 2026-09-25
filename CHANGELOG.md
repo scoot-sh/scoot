@@ -17,16 +17,21 @@ scoot has not cut a numbered release yet; entries are dated.
   Clipboard managers see what X apps copy. An X app can read or set the
   selection only while an X window has the keyboard, and never while the
   screen is locked: while you work in a Wayland window, X apps cannot read
-  or replace your clipboard (`xclip -o` there fails with `target STRING not
-  available`). Something an X app copies while a Wayland window is focused
-  stays with the X apps.
+  your clipboard or put a new selection on it (`xclip -o` there fails with
+  `target STRING not available`). Something an X app copies while a Wayland
+  window is focused stays with the X apps. A paste of something you copied
+  *in an X app* is harder for another X app to tamper with than before, but
+  X11 cannot rule it out -- see
+  [protocols.md](docs/protocols.md#clipboard-drag-and-drop-and-input-methods).
+  Very many pastes at once are refused (read as empty), not queued.
 - **Drag from an X app into a Wayland app** (text measured; files
-  untested). Only the X app
-  you pressed the button on can start that drag -- before this, any X app
-  could take over a drag you started anywhere, a Wayland window included.
-  Dropping *onto* an X window still does not work (from a Wayland app, from
-  another X app, or within the same X app): the drop does nothing, and
-  nothing is lost.
+  untested). A button press you make on a *Wayland* window can no longer
+  be turned into a drag by an X app -- before this, any X app could take it
+  over. A press on an X window is still open to that (X11 cannot tell who
+  started a drag). **Drags that start from touch in an X app are now
+  refused**, as touch drags from Wayland apps already were. Dropping *onto*
+  an X window still does not work (from a Wayland app, from another X app,
+  or within the same X app): the drop does nothing, and nothing is lost.
 - **X input methods (XIM) are not supported**; a Wayland input method's
   keyboard grab still takes the keys from an X window, as from any window.
 

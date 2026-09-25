@@ -32,9 +32,10 @@
 //!   client can read and replace another's selection, or type into it,
 //!   by design (see `docs/protocols.md`'s trust note).
 //!
-//! What the gate does guarantee is the Wayland half: while the user is in a
-//! Wayland window (or the lock screen), no X client can put anything on
-//! the Wayland clipboard or read it.
+//! What the gate does hold is the Wayland half: while the user is in a
+//! Wayland window (or the lock screen), no X client can read the Wayland
+//! clipboard or put a new selection on it. It cannot fully protect a paste
+//! of something copied *in X* -- see "The owner a paste reaches".
 //!
 //! # What crosses, and when
 //!
@@ -53,22 +54,47 @@
 //! The window manager converts a Wayland paste from whoever owns the X
 //! selection *at the time of the paste*, and it only tells scoot about a new
 //! owner once that owner answers `TARGETS`. So an owner the gate let through
-//! is not enough: a background X client could take the selection afterwards
-//! -- answering no `TARGETS`, so nothing is ever announced -- and serve every
-//! later Wayland paste. The owner that crossed is recorded
-//! ([`CrossedOwners`]), and a paste is served only while it still owns the
-//! selection (`X11Wm::selection_owner`, a scoot-sh fork addition); otherwise
-//! the paste reads nothing and the stale selection is taken off the Wayland
-//! side.
+//! is not enough on its own: a background X client could take the selection
+//! afterwards -- answering no `TARGETS`, so nothing is ever announced -- and
+//! serve every later Wayland paste. Comparing owner *windows* does not stop
+//! it either: `SetSelectionOwner` accepts any window id, so the client can
+//! take the selection under the approved owner's own window (measured).
+//! Instead the window manager counts ownership changes
+//! (`X11Wm::selection_generation`, a scoot-sh fork addition): the count is
+//! recorded when a selection crosses ([`CrossedOwners`]), and a paste is
+//! served only while no change of hands has happened since. Otherwise the
+//! paste reads nothing and the stale selection is taken off the Wayland side.
 //!
-//! Two windows are left, neither a way around the gate. A conversion already
-//! sent when ownership changes is answered by the owner it was sent to --
-//! the approved one -- as ICCCM asks. And the owner is read when the types
-//! arrive, not when they were asked for: a client taking the selection
-//! between an owner's `TARGETS` request and its answer is recorded in its
-//! place, with the earlier owner's types. That can only happen while the
-//! gate is open -- an X window focused, when any X client may set the
-//! selection anyway -- so it grants nothing the gate does not.
+//! **This raises the bar; it is not a guarantee.** A background X client
+//! can still answer a paste in the owner's place without owning anything:
+//! the window manager reads the answer from a property on a window of its
+//! own, which any X client may write, after a `SelectionNotify` event, which
+//! any X client may send -- and a real owner's `SelectionNotify` is a sent
+//! event too, so a forged one cannot be told apart. That takes watching for
+//! the window manager's paste windows and racing the owner, but X11 offers
+//! nothing to close it.
+//!
+//! What happens to transfers in flight when the selection changes hands
+//! (every ownership change, including an owner re-claiming it or the window
+//! manager taking it for a Wayland selection): a paste still waiting for the
+//! owner's answer is ended -- its reader reads nothing; one stalled waiting
+//! on the previous owner for its next chunk, idle for over a second, is
+//! ended too; one that is moving is left to finish, since ending it would
+//! hand its reader part of the selection as if it were all of it. The
+//! window manager also ends a transfer whose reader has gone, or that has
+//! not moved for 30 seconds, and caps what is in flight: at most 8 pastes of
+//! one selection waiting on their owner and 8 under way (a paste past that
+//! reads nothing at once -- it is refused, not queued), and at most 4
+//! transfers out to one X client and 16 in all. Each transfer buffers at
+//! most one 64 KiB slice (two for a Wayland source feeding an X reader),
+//! however large the selection.
+//!
+//! One more window, not a way around the gate: the ownership count is read
+//! when the types arrive, not when they were asked for, so a client taking
+//! the selection between an owner's `TARGETS` request and its answer is
+//! recorded in its place. That can only happen while the gate is open -- an
+//! X window focused, when any X client may set the selection anyway -- so it
+//! grants nothing the gate does not.
 //!
 //! There is no loop: announcing an X selection to Wayland goes through
 //! Smithay's compositor-side setters, which never call back into
@@ -100,7 +126,7 @@ use smithay::wayland::selection::primary_selection::{
     set_primary_selection,
 };
 use smithay::wayland::selection::{SelectionSource, SelectionTarget};
-use smithay::xwayland::xwm::{SelectionError, X11Window, XwmId};
+use smithay::xwayland::xwm::{SelectionError, XwmId};
 
 use super::super::State;
 use super::super::keyboard_focus::KeyboardFocus;
@@ -131,24 +157,24 @@ pub(in crate::compositor) fn crossing_mime_types(mime_types: Vec<String>) -> Vec
     crossing
 }
 
-/// The X window whose selection is the Wayland one, per selection (see the
-/// module doc's "The owner a paste reaches"). `None` when that selection is
-/// not an X one.
+/// The window manager's ownership count (`X11Wm::selection_generation`) at
+/// the moment each selection crossed to Wayland (see the module doc's "The
+/// owner a paste reaches"). `None` when that selection is not an X one.
 #[derive(Debug, Default)]
 pub struct CrossedOwners {
-    clipboard: Option<X11Window>,
-    primary: Option<X11Window>,
+    clipboard: Option<u64>,
+    primary: Option<u64>,
 }
 
 impl CrossedOwners {
-    fn slot(&mut self, target: SelectionTarget) -> &mut Option<X11Window> {
+    fn slot(&mut self, target: SelectionTarget) -> &mut Option<u64> {
         match target {
             SelectionTarget::Clipboard => &mut self.clipboard,
             SelectionTarget::Primary => &mut self.primary,
         }
     }
 
-    fn get(&self, target: SelectionTarget) -> Option<X11Window> {
+    fn get(&self, target: SelectionTarget) -> Option<u64> {
         match target {
             SelectionTarget::Clipboard => self.clipboard,
             SelectionTarget::Primary => self.primary,
@@ -200,24 +226,25 @@ impl State {
             self.drop_x11_selection_from_wayland(xwm, target);
             return;
         }
-        // The owner the window manager tracks now is the one whose types it
-        // just read: it updates the owner before asking for `TARGETS`, and a
-        // newer owner would be announced in turn.
-        let owner = self
+        // The ownership the window manager tracks now is the one whose types
+        // it just read: it counts the change before asking for `TARGETS`, and
+        // a newer one would be announced in turn.
+        let crossed = self
             .xwm
             .as_ref()
             .filter(|wm| wm.id() == xwm)
-            .map(|wm| wm.selection_owner(target))
-            .filter(|&owner| owner != smithay::reexports::x11rb::NONE);
-        let Some(owner) = owner else {
+            .filter(|wm| wm.selection_owner(target) != smithay::reexports::x11rb::NONE)
+            .map(|wm| (wm.selection_owner(target), wm.selection_generation(target)));
+        let Some((owner, generation)) = crossed else {
             // Released between the types and now: nothing to cross.
             self.drop_x11_selection_from_wayland(xwm, target);
             return;
         };
-        *self.x11_selection_owners.slot(target) = Some(owner);
+        *self.x11_selection_owners.slot(target) = Some(generation);
         tracing::debug!(
             ?target,
             owner,
+            generation,
             types = mime_types.len(),
             "an X selection crosses to Wayland"
         );
@@ -337,12 +364,12 @@ impl State {
         if xwm.id() != provider {
             return;
         }
-        let owner = xwm.selection_owner(target);
-        if self.x11_selection_owners.get(target) != Some(owner) {
+        let generation = xwm.selection_generation(target);
+        if self.x11_selection_owners.get(target) != Some(generation) {
             tracing::debug!(
                 ?target,
-                owner,
-                "refusing a Wayland paste of an X selection: its owner is not the one the gate let through"
+                generation,
+                "refusing a Wayland paste of an X selection: it has changed hands since the gate let it through"
             );
             self.drop_x11_selection_from_wayland(provider, target);
             return;

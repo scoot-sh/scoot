@@ -94,6 +94,28 @@ pub(super) struct OwnerManner {
     /// More atom names to list in `TARGETS` after the real type, raw bytes
     /// -- an X client may name an atom anything.
     pub(super) extra_targets: Vec<Vec<u8>>,
+    /// Take the selection under the *current* owner's window id rather than
+    /// a window of its own -- `SetSelectionOwner` accepts any window, and
+    /// conversions still come to this client.
+    pub(super) borrow_owner_window: bool,
+    /// How a conversion to its type is answered.
+    pub(super) data: DataManner,
+}
+
+/// How an [`Owner`] answers a conversion to its type.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum DataManner {
+    /// As ICCCM asks: one property, or `INCR` chunks each waiting for the
+    /// requestor's delete.
+    Normal,
+    /// One property however large, built by appends -- past the X request
+    /// size, which bounds only each request.
+    SingleProperty,
+    /// Announce `INCR`, then never send a chunk.
+    StallAfterIncr,
+    /// Announce `INCR`, and on the first delete append the whole payload in
+    /// chunks without waiting for any further delete.
+    AppendWithoutWaiting,
 }
 
 impl Default for OwnerManner {
@@ -102,6 +124,8 @@ impl Default for OwnerManner {
             answers_targets: true,
             answers_data: true,
             extra_targets: Vec::new(),
+            borrow_owner_window: false,
+            data: DataManner::Normal,
         }
     }
 }
@@ -230,7 +254,19 @@ fn serve(
                 .atom,
         );
     }
-    let window = x.window()?;
+    let mut window = x.window()?;
+    if manner.borrow_owner_window {
+        window = x
+            .conn
+            .get_selection_owner(selection_atom)
+            .map_err(|e| e.to_string())?
+            .reply()
+            .map_err(|e| e.to_string())?
+            .owner;
+        if window == x11rb::NONE {
+            return Err("there is no owner to borrow a window from".into());
+        }
+    }
     x.conn
         .set_selection_owner(window, selection_atom, x11rb::CURRENT_TIME)
         .map_err(|e| e.to_string())?
@@ -281,7 +317,27 @@ fn serve(
                     if !manner.answers_data {
                         continue;
                     }
-                    if payload.len() <= CHUNK {
+                    if manner.data == DataManner::SingleProperty {
+                        // Built by appends: each request stays under the X
+                        // request size, the property does not.
+                        for (index, piece) in payload.chunks(CHUNK).enumerate() {
+                            let mode = if index == 0 {
+                                PropMode::REPLACE
+                            } else {
+                                PropMode::APPEND
+                            };
+                            x.conn
+                                .change_property8(
+                                    mode,
+                                    request.requestor,
+                                    property,
+                                    target_atom,
+                                    piece,
+                                )
+                                .map_err(|e| e.to_string())?;
+                        }
+                        served.fetch_add(1, Ordering::AcqRel);
+                    } else if payload.len() <= CHUNK && manner.data == DataManner::Normal {
                         x.conn
                             .change_property8(
                                 PropMode::REPLACE,
@@ -352,6 +408,27 @@ fn serve(
                 if transfer.finished {
                     outgoing.remove(&notify.window);
                     continue;
+                }
+                match manner.data {
+                    DataManner::StallAfterIncr => continue,
+                    DataManner::AppendWithoutWaiting => {
+                        for piece in payload.chunks(CHUNK) {
+                            x.conn
+                                .change_property8(
+                                    PropMode::APPEND,
+                                    notify.window,
+                                    transfer.property,
+                                    target_atom,
+                                    piece,
+                                )
+                                .map_err(|e| e.to_string())?;
+                            sent.fetch_add(piece.len(), Ordering::AcqRel);
+                        }
+                        x.conn.flush().map_err(|e| e.to_string())?;
+                        transfer.finished = true;
+                        continue;
+                    }
+                    DataManner::Normal | DataManner::SingleProperty => {}
                 }
                 let end = (transfer.sent + CHUNK).min(payload.len());
                 let chunk = &payload[transfer.sent..end];
@@ -558,4 +635,80 @@ fn read(
 /// reordered transfer cannot pass for a whole one.
 pub(super) fn patterned(len: usize) -> Arc<Vec<u8>> {
     Arc::new((0..len).map(|i| (i % 251) as u8).collect())
+}
+
+/// One X client asking for `selection` from `windows` windows of its own at
+/// once, never deleting a property. Returns how many conversions were
+/// answered with data and how many refused, once all have been answered.
+pub(super) fn flood<S, A>(
+    fixture: &mut Harness<S, A>,
+    display: u32,
+    selection: &'static str,
+    target: &'static str,
+    windows: usize,
+) -> (usize, usize) {
+    let (tx, rx) = channel();
+    let stop = Arc::new(AtomicBool::new(false));
+    let thread = {
+        let stop = stop.clone();
+        std::thread::spawn(move || {
+            let outcome = (|| -> Result<(usize, usize), String> {
+                let x = Conn::open(display)?;
+                let selection_atom = x.atom(selection)?;
+                let target_atom = x.atom(target)?;
+                let property = x.atom("SCOOT_TEST_FLOOD")?;
+                for _ in 0..windows {
+                    let window = x.window()?;
+                    x.conn
+                        .convert_selection(
+                            window,
+                            selection_atom,
+                            target_atom,
+                            property,
+                            x11rb::CURRENT_TIME,
+                        )
+                        .map_err(|e| e.to_string())?;
+                }
+                x.conn.flush().map_err(|e| e.to_string())?;
+                let (mut answered, mut refused) = (0, 0);
+                let deadline = Instant::now() + XWAYLAND_PATIENCE;
+                while answered + refused < windows {
+                    if Instant::now() > deadline {
+                        return Err(format!(
+                            "only {} of {windows} conversions were answered",
+                            answered + refused
+                        ));
+                    }
+                    match x.conn.poll_for_event().map_err(|e| e.to_string())? {
+                        Some(XEvent::SelectionNotify(notify)) if notify.property == x11rb::NONE => {
+                            refused += 1;
+                        }
+                        Some(XEvent::SelectionNotify(_)) => answered += 1,
+                        Some(_) => {}
+                        None => std::thread::sleep(Duration::from_millis(1)),
+                    }
+                }
+                let _ = tx.send(Ok((answered, refused)));
+                // Keep every window, and so every transfer, alive until told.
+                while !stop.load(Ordering::Acquire) {
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                Ok((answered, refused))
+            })();
+            if let Err(error) = outcome {
+                let _ = tx.send(Err(error));
+            }
+        })
+    };
+    let deadline = Instant::now() + XWAYLAND_PATIENCE;
+    let counts = loop {
+        if let Ok(outcome) = rx.try_recv() {
+            break outcome.expect("the flooding X client ran");
+        }
+        assert!(Instant::now() < deadline, "timed out waiting for the flood");
+        fixture.settle();
+    };
+    stop.store(true, Ordering::Release);
+    let _ = thread.join();
+    counts
 }

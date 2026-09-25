@@ -458,10 +458,11 @@ pub struct State {
     /// application, and none in a session without X clients.
     #[cfg(feature = "xwayland")]
     pub x11_startup_carriers: HashMap<u32, smithay::xwayland::X11Surface>,
-    /// The X owner of each selection the gate let onto the Wayland side
-    /// (`xwayland/selection.rs`): a Wayland paste is served only while that
-    /// window still owns it. Written when an X selection crosses or stops
-    /// being the Wayland one; read per paste.
+    /// The window manager's ownership count for each selection at the
+    /// moment the gate let it onto the Wayland side (`xwayland/selection.rs`):
+    /// a Wayland paste is served only while it has not changed hands since.
+    /// Written when an X selection crosses or stops being the Wayland one;
+    /// read per paste.
     #[cfg(feature = "xwayland")]
     pub x11_selection_owners: xwayland::selection::CrossedOwners,
     /// `zwlr_layer_shell_v1`: bars, docks, wallpapers and notification

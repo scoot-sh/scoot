@@ -11,14 +11,14 @@ top**, so it stays easy to review, rebase, and drop.
 
 | Fork | Upstream | Based on | Carried commits | Pinned in scoot | Why |
 | --- | --- | --- | --- | --- | --- |
-| [`scoot-sh/smithay`](https://github.com/scoot-sh/smithay/tree/scoot/xwayland-selection-dnd) | [Smithay/smithay](https://github.com/Smithay/smithay) | `0ff00983` (master, 2026-09-09) | `43f50eb2`: a `Drop` for the imported syncobj timeline; then seven XWayland selection and drag commits, `35c335e0`..`0d281abf` (see below) | **yes**, `crates/scoot/Cargo.toml` rev `0d281abf` (PR #246, XWayland Phase 4; `43f50eb2` since PR #233) | Without the first, every explicit-sync timeline import leaks a kernel syncobj handle until scoot exits (~24 MB/s from a looping client, unaccounted slab). Without the rest, large clipboard transfers between X and Wayland are cut to 64 KiB, a stuck X reader makes scoot buffer a whole Wayland selection, waiting pastes pile up without bound, and scoot cannot gate who serves a paste or starts a drag. |
+| [`scoot-sh/smithay`](https://github.com/scoot-sh/smithay/tree/scoot/xwayland-selection-dnd) | [Smithay/smithay](https://github.com/Smithay/smithay) | `0ff00983` (master, 2026-09-09) | `43f50eb2`: a `Drop` for the imported syncobj timeline; then eleven XWayland selection and drag commits, `35c335e0`..`53aafc36` (see below) | **yes**, `crates/scoot/Cargo.toml` rev `53aafc36` (PR #246, XWayland Phase 4; `43f50eb2` since PR #233) | Without the first, every explicit-sync timeline import leaks a kernel syncobj handle until scoot exits (~24 MB/s from a looping client, unaccounted slab). Without the rest, large clipboard transfers between X and Wayland are cut to 64 KiB, a stuck X reader makes scoot buffer a whole Wayland selection, transfers either way pile up without bound or stall for good, and scoot cannot gate who serves a paste or starts a drag. |
 | [`scoot-sh/wayland-rs`](https://github.com/scoot-sh/wayland-rs/tree/scoot/server-fd-queue-cap-adaptive) | [Smithay/wayland-rs](https://github.com/Smithay/wayland-rs) | `72f7fe0d` (the wayland-backend 0.3.17 release, `v0.31.x` branch) | `a39311b8`: server side, disconnects a client leaving too many received fds unclaimed; `70f81e00`: sizes that cap at one eighth of the soft `RLIMIT_NOFILE`, 128..=1024 | **yes**, root `Cargo.toml` `[patch.crates-io]` rev `70f81e00` (PR #241) | wayland-backend queues fds a client sends with fd-less requests for the connection's life, so one idle client could fill scoot's fd table and shed every newcomer, `scootctl` included. |
 
 ## Per fork
 
 ### `scoot-sh/smithay`
 
-- **Branch:** `scoot/xwayland-selection-dnd`, eight commits on `0ff00983`.
+- **Branch:** `scoot/xwayland-selection-dnd`, twelve commits on `0ff00983`.
   Its first, `43f50eb2`, is also the tip of `scoot/syncobj-timeline-drop`,
   which PR #233 pinned; that branch is kept as it was, and nothing pins it
   now. The XWayland commits, in order, each measured before it was written
@@ -56,12 +56,39 @@ top**, so it stays easy to review, rebase, and drop.
   - `0d281abf` **flush a new Wayland selection to the X server.** The
     ownership change sat unsent, so `xclip -o` right after `wl-copy` read
     the previous owner.
+
+  Four more from the review of PR #246, each against the reviewer's probe
+  first (`~/evidence/xw4/review/`, baseline at scoot `4c423b4` on
+  `0d281abf`, then at the fixed head):
+  - `567ac2cc` **count each selection's ownership changes**
+    (`X11Wm::selection_generation`). `SetSelectionOwner` accepts any window
+    id, so comparing owner windows missed a background client taking the
+    clipboard under the approved owner's own window (it served the next
+    Wayland paste); any change of hands now moves the count.
+  - `9cc46d1a` **stream incoming properties in bounded slices** -- a fix
+    forward of `35c335e0`, whose non-deleting read re-read the whole
+    property on every new value (16 × 1 MiB appends: RSS 30.6 → 303.5 MB,
+    and the same bytes handed to the reader again and again). Properties
+    are now read 64 KiB at a time, the next only once the last is written;
+    an INCR chunk only once our delete is seen to take effect. That also
+    bounds a single huge property (96 MiB built by appends: 30.6 → 128.4 MB
+    before, 30.9 → 31.1 MB after).
+  - `3c53776f` **bound the transfers X clients open out of a selection**:
+    4 per X client (client bits of the requestor's window id), 16 per
+    selection. One client's 300 requestor windows held 300 fds (26 → 326);
+    after, 26 → 30.
+  - `53aafc36` **drop transfers that will not finish**: a closed reader
+    (the pipe reports hang-up), 30 s idle
+    (`X11Wm::set_selection_transfer_timeout`), and on a change of owner the
+    pastes stalled on the old one past a 1 s grace -- moving ones kept. The
+    8-paste bound had been exhausted for good by an owner going quiet
+    mid-INCR; after, a new owner's paste works.
 - **Evidence:** `docs/backlog/resolved/syncobj-handle-leak-done.md`, and on the
   dev VM `~/evidence/sync/master-validation/`. Upstream master `79bbed5e1`
   (2026-09-22) was built and measured: it leaks 3.5–4.1 MB per test run,
   against about zero with the fork.
 - **Upstream status (last checked 2026-09-25, master `79bbed5e1`):** all
-  eight unfixed on master (the XWM code carries the double delete, the
+  twelve unfixed on master (the XWM code carries the double delete, the
   `O_NONBLOCK` pipe, the unpaused read, the unflushed owner change and no
   hooks). No issue or PR exists. Nothing has been filed from here.
 - **Upstream policy note, for the maintainer's decision:** Smithay's

@@ -765,9 +765,10 @@ scale/mode) into one hardware session.
   spent whichever rule grants focus), and
   `_NET_ACTIVE_WINDOW` goes through the same gate. Phase 4 (PR #246) landed: the
   clipboard and primary selection cross both ways while an X window is
-  focused (never while locked), a paste is served only by the X owner the
-  gate let through, X drags need a press on the dragging client's own
-  window, and seven measured XWM fixes/hooks moved into the Smithay fork;
+  focused (never while locked), a paste is refused once the X selection has
+  changed hands since it crossed (raises the bar; a forged owner answer is
+  still possible), X drags need a press on the dragging client's own
+  window (presses on Wayland surfaces protected; on X windows not), and eleven measured XWM fixes/hooks moved into the Smithay fork;
   X → Wayland drags work, drops onto X windows do not ([pointer focus needs
   an X arm](./protocols/xwayland-pointer-focus-x11.md), medium), no XIM.
   Remaining: capture pins/packaging (5–7). The [WM-failure

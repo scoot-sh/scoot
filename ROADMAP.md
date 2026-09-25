@@ -112,12 +112,16 @@ each item's own file records why it landed when it did.
   (2026-09-25, PR #246) — the clipboard and primary selection cross between X and
   Wayland both ways (clipboard managers included), gated like Wayland's own
   rule with XWayland as the client: only while an X window holds the
-  keyboard, never while locked. A Wayland paste is served only by the X
-  owner the gate let through (a hidden owner could otherwise serve it). X
-  drags now need a recent press on the dragging client's own window -- any
-  X client could hijack any held press, a Wayland one included, since
-  Phase 1 (fail-first). Seven measured XWM bugs and hooks went into the
-  scoot-sh Smithay fork (`0d281abf`, `docs/forks.md`): 64 KiB truncation
+  keyboard, never while locked. A Wayland paste is refused once the X
+  selection has changed hands since it crossed (a hidden owner could
+  otherwise serve it; a forged owner answer remains possible, documented).
+  X drags now need a recent press on a window of the dragging client --
+  any X client could hijack any held press, a Wayland one included, since
+  Phase 1 (fail-first); presses on X windows stay open to a stranger naming
+  the pressed window (X11 limit, pinned). Eleven measured XWM bugs and hooks went into the
+  scoot-sh Smithay fork (`53aafc36`, `docs/forks.md`; four from review:
+  a forgeable owner check, unbounded memory and fds, a bound exhausted for
+  good by stalled pastes): 64 KiB truncation
   both ways, unbounded buffering behind a stuck X reader, unbounded pastes
   behind a silent owner, an unsent ownership change, and the owner/drag
   hooks. X → Wayland drags work live; drops onto X windows do not (filed,

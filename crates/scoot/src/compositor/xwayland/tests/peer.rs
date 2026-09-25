@@ -76,8 +76,8 @@ pub(super) enum Ack {
     Bytes(Result<Vec<u8>, String>),
     /// A count.
     Count(usize),
-    /// Per read, whether it has ended.
-    Ends(Vec<bool>),
+    /// Per read, whether it has ended and how many bytes it received.
+    Ends(Vec<(bool, usize)>),
     /// Key codes an input method received.
     Keys(Vec<u32>),
 }

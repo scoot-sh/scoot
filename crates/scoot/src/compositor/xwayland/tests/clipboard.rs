@@ -12,7 +12,7 @@ use scoot_core::{Action, WindowId};
 use super::live::{Live, RED, live};
 use super::peer::{Ack, ClipStep, Step, Which};
 use super::x11::{Props, eventually};
-use super::xsel::{Owner, OwnerManner, Pace, Read, Reader, patterned};
+use super::xsel::{DataManner, Owner, OwnerManner, Pace, Read, Reader, flood, patterned};
 use crate::compositor::keyboard_focus::KeyboardFocus;
 
 /// The X target and the Wayland mime type Smithay maps it to.
@@ -491,7 +491,7 @@ fn a_stuck_x_reader_does_not_make_the_compositor_buffer_the_whole_source() {
     drop(reader);
 }
 
-fn ended(live: &mut Live) -> Vec<bool> {
+fn ended(live: &mut Live) -> Vec<(bool, usize)> {
     match clip(live, ClipStep::Ended) {
         Ack::Ends(ends) => ends,
         other => panic!("expected read ends, got {other:?}"),
@@ -536,11 +536,11 @@ fn pastes_waiting_on_a_silent_x_owner_are_bounded() {
     live.drain();
     let ends = ended(&mut live);
     assert_eq!(
-        ends.iter().filter(|&&ended| !ended).count(),
+        ends.iter().filter(|&&(ended, _)| !ended).count(),
         8,
         "pastes waiting on a silent X owner are not bounded at eight: {ends:?}"
     );
-    assert!(ends[..8].iter().all(|&ended| !ended), "{ends:?}");
+    assert!(ends[..8].iter().all(|&(ended, _)| !ended), "{ends:?}");
     // A new owner (taking the selection while the X window is focused, so it
     // crosses) ends the pastes still waiting on the old one...
     focus(&mut live, x);
@@ -555,7 +555,7 @@ fn pastes_waiting_on_a_silent_x_owner_are_bounded() {
     live.drain();
     assert!(silent.lost());
     assert!(
-        ended(&mut live).iter().all(|&ended| ended),
+        ended(&mut live).iter().all(|&(ended, _)| ended),
         "pastes waiting on an owner that lost the selection were never ended"
     );
     // ... and pasting works again.
@@ -671,4 +671,332 @@ fn a_stuck_wayland_reader_holds_the_x_owner_to_a_few_chunks() {
         receive(&mut live, Which::Clipboard).as_deref(),
         Ok(fresh.as_slice())
     );
+}
+
+fn receive_later(live: &mut Live) {
+    assert!(matches!(
+        clip(
+            live,
+            ClipStep::ReceiveLater {
+                which: Which::Clipboard,
+                mime: UTF8
+            }
+        ),
+        Ack::Done
+    ));
+}
+
+/// Longer than the window manager's grace for a transfer stalled on its
+/// owner when the selection changes hands (`OWNER_CHANGE_GRACE`, 1 s).
+fn outlast_the_owner_change_grace(live: &mut Live) {
+    live.fixture.tick(std::time::Duration::from_millis(1300));
+}
+
+/// The owner-borrowing hijack. `SetSelectionOwner` accepts any window id, and
+/// conversions go to whoever made the request -- so a background X client
+/// can take the clipboard *under the approved owner's own window id*, and
+/// the owner the window manager tracks does not change. Answering no
+/// `TARGETS`, it is never announced either. Its bytes must still not reach
+/// a Wayland paste: any change of hands since the copy was let through
+/// refuses the paste.
+#[test]
+fn a_background_client_borrowing_the_owners_window_cannot_serve_a_paste() {
+    let Some((mut live, _, wayland)) =
+        clipboard("a_background_client_borrowing_the_owners_window_cannot_serve_a_paste")
+    else {
+        return;
+    };
+    let copy = Owner::start(
+        live.display,
+        "CLIPBOARD",
+        X_UTF8,
+        Arc::new(b"copied in the X window".to_vec()),
+        OwnerManner::default(),
+    );
+    live.drain();
+    focus(&mut live, wayland);
+    assert!(offered(&mut live, Which::Clipboard).is_some());
+    let intruder = Arc::new(b"PWNED-BY-BACKGROUND-X".to_vec());
+    let hidden = Owner::start(
+        live.display,
+        "CLIPBOARD",
+        X_UTF8,
+        intruder.clone(),
+        OwnerManner {
+            answers_targets: false,
+            borrow_owner_window: true,
+            ..OwnerManner::default()
+        },
+    );
+    live.drain();
+    assert!(copy.lost(), "the borrowing client never took the clipboard");
+    let got = receive(&mut live, Which::Clipboard);
+    assert!(
+        got.as_deref() != Ok(intruder.as_slice()),
+        "a paste delivered the bytes of a client that borrowed the approved owner's window"
+    );
+    assert_eq!(
+        hidden.served(),
+        0,
+        "the borrowing client served a Wayland paste"
+    );
+}
+
+/// An owner that announces `INCR` and then appends its data without waiting
+/// for a single delete. Each append is a new value; none of them is a chunk
+/// the window manager asked for. What reaches the reader is the owner's
+/// bytes, each at most once -- not the property re-read on every append
+/// (which handed the reader the same bytes again and again, and grew the
+/// compositor's buffer with them). The transfer then waits on an owner that
+/// sends nothing more, and a change of owner ends it.
+#[test]
+fn an_owner_appending_without_waiting_is_read_once() {
+    let Some((mut live, x, wayland)) = clipboard("an_owner_appending_without_waiting_is_read_once")
+    else {
+        return;
+    };
+    let payload = patterned(4 * 1024 * 1024);
+    let _owner = Owner::start(
+        live.display,
+        "CLIPBOARD",
+        X_UTF8,
+        payload.clone(),
+        OwnerManner {
+            data: DataManner::AppendWithoutWaiting,
+            ..OwnerManner::default()
+        },
+    );
+    live.drain();
+    focus(&mut live, wayland);
+    receive_later(&mut live);
+    // Read it all as it comes, while the compositor runs; the transfer then
+    // waits for a next chunk the owner never sends, and a new owner ends it.
+    live.fixture
+        .send_step(0, Step::Clip(ClipStep::DrainLater(0)));
+    outlast_the_owner_change_grace(&mut live);
+    focus(&mut live, x);
+    let _next = Owner::start(
+        live.display,
+        "CLIPBOARD",
+        X_UTF8,
+        patterned(16),
+        OwnerManner::default(),
+    );
+    let got = match live.fixture.wait_for_ack(0) {
+        Ack::Bytes(Ok(got)) => got,
+        other => panic!("the stalled read never ended: {other:?}"),
+    };
+    assert!(
+        got.len() <= payload.len(),
+        "the reader got {} bytes of a {}-byte payload: bytes were read more than once",
+        got.len(),
+        payload.len()
+    );
+    assert!(
+        got[..] == payload[..got.len()],
+        "the reader's bytes are not the owner's, in order"
+    );
+    assert!(!got.is_empty(), "nothing of the appends reached the reader");
+}
+
+/// An owner answering with a single property far larger than one read --
+/// built by appends, past the X request size -- reaches the reader intact:
+/// the window manager reads it a slice at a time, never all at once.
+#[test]
+fn a_single_huge_property_is_streamed_intact() {
+    let Some((mut live, _, wayland)) = clipboard("a_single_huge_property_is_streamed_intact")
+    else {
+        return;
+    };
+    let payload = patterned(8 * 1024 * 1024 + 4321);
+    let _owner = Owner::start(
+        live.display,
+        "CLIPBOARD",
+        X_UTF8,
+        payload.clone(),
+        OwnerManner {
+            data: DataManner::SingleProperty,
+            ..OwnerManner::default()
+        },
+    );
+    live.drain();
+    focus(&mut live, wayland);
+    let got = receive(&mut live, Which::Clipboard).expect("the paste completes");
+    assert_eq!(
+        got.len(),
+        payload.len(),
+        "the paste was truncated or padded"
+    );
+    assert!(
+        got == *payload,
+        "the paste's bytes differ from the X owner's"
+    );
+}
+
+/// One X client asking for the Wayland clipboard from many windows at once,
+/// never taking the data: only a few conversions are opened (each holds a
+/// pipe and up to two chunks until taken), the rest refused at once.
+#[test]
+fn an_x_client_opens_only_a_few_transfers_at_once() {
+    let Some((mut live, x, wayland)) = clipboard("an_x_client_opens_only_a_few_transfers_at_once")
+    else {
+        return;
+    };
+    focus(&mut live, wayland);
+    set(&mut live, Which::Clipboard, patterned(4 * 1024 * 1024));
+    live.drain();
+    focus(&mut live, x);
+    let (answered, refused) = flood(&mut live.fixture, live.display, "CLIPBOARD", X_UTF8, 12);
+    assert_eq!(
+        (answered, refused),
+        (4, 8),
+        "one X client opened {answered} transfers out of 12 requests"
+    );
+}
+
+/// Pastes stalled by an owner that answered `INCR` and went silent do not
+/// hold the bound for good. Past eight a paste is refused (it reads nothing,
+/// it is not queued); a reader closing frees its slot; and a new owner taking
+/// the selection ends the pastes still stalled on the old one, after which
+/// pasting works.
+#[test]
+fn stalled_pastes_do_not_hold_the_bound_for_good() {
+    let Some((mut live, x, wayland)) = clipboard("stalled_pastes_do_not_hold_the_bound_for_good")
+    else {
+        return;
+    };
+    let _silent = Owner::start(
+        live.display,
+        "CLIPBOARD",
+        X_UTF8,
+        patterned(1024 * 1024),
+        OwnerManner {
+            data: DataManner::StallAfterIncr,
+            ..OwnerManner::default()
+        },
+    );
+    live.drain();
+    focus(&mut live, wayland);
+    for _ in 0..8 {
+        receive_later(&mut live);
+    }
+    live.drain();
+    let ends = ended(&mut live);
+    assert!(ends.iter().all(|&(ended, _)| !ended), "{ends:?}");
+    receive_later(&mut live);
+    live.drain();
+    assert_eq!(
+        ended(&mut live)[8],
+        (true, 0),
+        "a ninth paste past the bound should read nothing at once"
+    );
+    // The eight readers go away; their slots come back.
+    assert!(matches!(clip(&mut live, ClipStep::DropLater), Ack::Done));
+    receive_later(&mut live);
+    live.drain();
+    assert!(
+        !ended(&mut live)[9].0,
+        "the bound was still full of transfers whose readers had gone"
+    );
+    // A new owner ends the paste still stalled on the old one...
+    outlast_the_owner_change_grace(&mut live);
+    focus(&mut live, x);
+    let payload = patterned(100);
+    let _answering = Owner::start(
+        live.display,
+        "CLIPBOARD",
+        X_UTF8,
+        payload.clone(),
+        OwnerManner::default(),
+    );
+    live.drain();
+    assert!(
+        ended(&mut live)[9].0,
+        "a paste stalled on the previous owner outlived the change of owner"
+    );
+    // ... and pasting works.
+    focus(&mut live, wayland);
+    assert_eq!(
+        receive(&mut live, Which::Clipboard).as_deref(),
+        Ok(payload.as_slice())
+    );
+}
+
+/// The other half of that rule: a paste that is moving -- waiting on its
+/// reader, not its owner -- is not ended by a change of owner, even when it
+/// has been idle a while; ending it would hand the reader part of the
+/// selection as if it were all of it.
+#[test]
+fn a_moving_paste_survives_a_change_of_owner() {
+    let Some((mut live, x, wayland)) = clipboard("a_moving_paste_survives_a_change_of_owner")
+    else {
+        return;
+    };
+    let payload = patterned(2 * 1024 * 1024);
+    let _first = Owner::start(
+        live.display,
+        "CLIPBOARD",
+        X_UTF8,
+        payload.clone(),
+        OwnerManner::default(),
+    );
+    live.drain();
+    focus(&mut live, wayland);
+    receive_later(&mut live);
+    live.drain();
+    outlast_the_owner_change_grace(&mut live);
+    focus(&mut live, x);
+    let _second = Owner::start(
+        live.display,
+        "CLIPBOARD",
+        X_UTF8,
+        patterned(16),
+        OwnerManner::default(),
+    );
+    live.drain();
+    let got = match clip(&mut live, ClipStep::DrainLater(0)) {
+        Ack::Bytes(Ok(got)) => got,
+        other => panic!("the paste did not complete: {other:?}"),
+    };
+    assert_eq!(got.len(), payload.len(), "the paste was cut short");
+    assert!(
+        got == *payload,
+        "the paste's bytes differ from the first owner's"
+    );
+}
+/// A transfer that has not moved for the window manager's transfer timeout is
+/// dropped the next time it looks -- here, when the next paste is answered.
+#[test]
+fn an_idle_transfer_is_dropped_after_the_timeout() {
+    let Some((mut live, _, wayland)) = clipboard("an_idle_transfer_is_dropped_after_the_timeout")
+    else {
+        return;
+    };
+    live.fixture
+        .state
+        .xwm
+        .as_mut()
+        .expect("a window manager")
+        .set_selection_transfer_timeout(std::time::Duration::from_millis(300));
+    let _silent = Owner::start(
+        live.display,
+        "CLIPBOARD",
+        X_UTF8,
+        patterned(1024 * 1024),
+        OwnerManner {
+            data: DataManner::StallAfterIncr,
+            ..OwnerManner::default()
+        },
+    );
+    live.drain();
+    focus(&mut live, wayland);
+    receive_later(&mut live);
+    live.drain();
+    assert!(!ended(&mut live)[0].0);
+    live.fixture.tick(std::time::Duration::from_millis(500));
+    receive_later(&mut live);
+    live.drain();
+    let ends = ended(&mut live);
+    assert!(ends[0].0, "an idle transfer outlived the timeout: {ends:?}");
+    assert!(!ends[1].0, "the fresh transfer was dropped too: {ends:?}");
 }

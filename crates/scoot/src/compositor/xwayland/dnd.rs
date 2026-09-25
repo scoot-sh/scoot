@@ -15,12 +15,21 @@
 //! A drag is allowed only where a Wayland drag would be: the press is a
 //! real, recent button press (`interaction_serials`, the strict `contains`
 //! half -- the same bar `dnd_requested` holds) delivered to XWayland, on a
-//! window of **the same X client** that is now starting the drag. The X
-//! client is read off the window ids, which the X server allocates per
-//! connection (`focus::same_x_client`), so no X client can name another's.
-//! Refused while the session is locked, and for touch -- `dnd_requested`
-//! refuses touch drags too. The hook it rides on,
+//! window whose X client (the client bits of its id, which the X server
+//! allocates per connection -- `focus::same_x_client`) is that of the window
+//! now owning `XdndSelection`. Refused while the session is locked, and for
+//! touch -- `dnd_requested` refuses touch drags too. The hook it rides on,
 //! `XwmHandler::allow_drag`, is a scoot-sh fork addition.
+//!
+//! **What this protects, and what it cannot.** A press on a *Wayland*
+//! surface can no longer be taken over by any X client -- the hole above,
+//! closed. A press on an *X* window still can be: `SetSelectionOwner`
+//! accepts any window id, so a stranger can take `XdndSelection` under the
+//! very window the press landed on, and the window manager learns only the
+//! window, never which client made the request (measured; pinned as a known
+//! limit by `tests/dnd.rs`). X11 offers no way to close that, and inside the
+//! X server any X client can already drive another's input anyway (the
+//! trust note in `docs/protocols.md`).
 //!
 //! A refused drag leaves the press an ordinary press: the X client's own
 //! XDND traffic with other X windows is X-side and untouched.

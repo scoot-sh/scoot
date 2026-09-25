@@ -74,8 +74,14 @@ pub(in crate::compositor::xwayland::tests) enum ClipStep {
     /// end, without waiting for the other end to close.
     ReceiveLater { which: Which, mime: &'static str },
     /// For every read `ReceiveLater` started, in order: whether the other
-    /// end has closed (what arrived before is discarded).
+    /// end has closed, and how many bytes have arrived. Reads what is there
+    /// without waiting.
     Ended,
+    /// Close every read `ReceiveLater` started -- readers going away.
+    DropLater,
+    /// Read the `index`th read `ReceiveLater` started until the other end
+    /// closes, and hand back everything it received.
+    DrainLater(usize),
 }
 
 /// What the clipboard half holds.
@@ -101,8 +107,16 @@ pub(super) struct Clip {
     primary_sources: Vec<(primary_source::ZwpPrimarySelectionSourceV1, Arc<Vec<u8>>)>,
     control_sources: Vec<(control_source::ZwlrDataControlSourceV1, Arc<Vec<u8>>)>,
     written: Arc<AtomicUsize>,
-    /// The reads `ReceiveLater` started, and whether each has ended.
-    later: Vec<(std::fs::File, bool)>,
+    /// The reads `ReceiveLater` started, what each has received and whether
+    /// it has ended.
+    later: Vec<Later>,
+}
+
+/// One read `ReceiveLater` started.
+pub(super) struct Later {
+    file: Option<std::fs::File>,
+    received: Vec<u8>,
+    ended: bool,
 }
 
 impl Clip {
@@ -326,27 +340,52 @@ pub(super) fn step(
             }
             conn.flush().map_err(|e| e.to_string())?;
             drop(write_end);
-            peer.clip.later.push((std::fs::File::from(read_end), false));
+            peer.clip.later.push(Later {
+                file: Some(std::fs::File::from(read_end)),
+                received: Vec::new(),
+                ended: false,
+            });
             Ok(Ack::Done)
         }
         ClipStep::Ended => {
-            let mut buf = [0u8; 4096];
-            for (file, ended) in peer.clip.later.iter_mut().filter(|(_, ended)| !*ended) {
+            let mut buf = vec![0u8; 64 * 1024];
+            for later in peer.clip.later.iter_mut().filter(|later| !later.ended) {
+                let Some(file) = later.file.as_mut() else {
+                    continue;
+                };
                 loop {
                     match file.read(&mut buf) {
                         Ok(0) => {
-                            *ended = true;
+                            later.ended = true;
                             break;
                         }
-                        Ok(_) => {}
+                        Ok(n) => later.received.extend_from_slice(&buf[..n]),
                         Err(error) if error.kind() == ErrorKind::WouldBlock => break,
                         Err(error) => return Err(error.to_string()),
                     }
                 }
             }
             Ok(Ack::Ends(
-                peer.clip.later.iter().map(|(_, ended)| *ended).collect(),
+                peer.clip
+                    .later
+                    .iter()
+                    .map(|later| (later.ended, later.received.len()))
+                    .collect(),
             ))
+        }
+        ClipStep::DropLater => {
+            for later in &mut peer.clip.later {
+                later.file = None;
+            }
+            Ok(Ack::Done)
+        }
+        ClipStep::DrainLater(index) => {
+            let later = peer.clip.later.get_mut(index).ok_or("no such read")?;
+            let file = later.file.take().ok_or("that read was dropped")?;
+            let mut received = std::mem::take(&mut later.received);
+            received.extend(drain(OwnedFd::from(file))?);
+            later.ended = true;
+            Ok(Ack::Bytes(Ok(received)))
         }
     }
 }

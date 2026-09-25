@@ -144,7 +144,7 @@ wayland-protocols-misc = { version = "0.3", features = ["client"] }
 # this adds a feature to a crate already in the tree, not a new dependency.
 wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 
-# A scoot-sh fork, not upstream: upstream's pinned rev `0ff00983` plus eight
+# A scoot-sh fork, not upstream: upstream's pinned rev `0ff00983` plus twelve
 # commits, branch `scoot/xwayland-selection-dnd` (see `docs/forks.md` for
 # each one and why):
 #
@@ -154,14 +154,15 @@ wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 #   handle on the import device until scoot exits -- ~80 B of kernel slab per
 #   import and ~200 B per abandoned acquire wait, which a client can drive at
 #   wire speed (see `docs/backlog/resolved/syncobj-handle-leak-done.md`).
-# - Seven XWayland selection and drag fixes (XWayland Phase 4, each measured
-#   first -- see `compositor/xwayland/selection.rs` and `dnd.rs`): large
-#   transfers were cut to 64 KiB both ways (incoming INCR double delete; a
-#   non-blocking pipe handed to the Wayland source); a stuck X reader made
-#   scoot buffer a whole Wayland selection; transfers waiting on a silent X
-#   owner were unbounded; a new Wayland selection sat unsent to the X server;
-#   and two hooks scoot's gates need, `X11Wm::selection_owner` and
-#   `XwmHandler::allow_drag`.
+# - Eleven XWayland selection and drag fixes (XWayland Phase 4 and its
+#   review, each measured first -- see `compositor/xwayland/selection.rs`
+#   and `dnd.rs`): large transfers were cut to 64 KiB both ways; a stuck
+#   reader made scoot buffer a whole selection, either way; an owner
+#   appending without waiting was re-read on every append; transfers of
+#   either direction piled up without bound or stalled for good; a new
+#   Wayland selection sat unsent to the X server; and the hooks scoot's
+#   gates need: `X11Wm::selection_owner`, `X11Wm::selection_generation`,
+#   `XwmHandler::allow_drag`, `X11Wm::set_selection_transfer_timeout`.
 #
 # Upstream status (checked 2026-09-25): none of these is on Smithay `master`
 # or in a release; an upstream PR is the user's to file. Repin to upstream --
@@ -170,7 +171,7 @@ wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 # Verify claims about Smithay's behaviour against this fork rev.
 [target.'cfg(target_os = "linux")'.dependencies.smithay]
 git = "https://github.com/scoot-sh/smithay"
-rev = "0d281abf23fbfb80aae62381ac0cb7542530d203"
+rev = "53aafc366ac43cb36e09189b727dd09a79c8c088"
 default-features = false
 # backend_drm/backend_libinput/backend_udev/backend_session_libseat are for
 # --tty: real DRM/KMS scanout, libinput device handling, and VT/session
