@@ -105,7 +105,7 @@ each item's own file records why it landed when it did.
 ## Recently shipped (since 2026-09-15)
 
 - **[Floating windows, PR 1 of 2](docs/backlog/core/floating-windows.md)**
-  (2026-09-25, PR #TBD) — a per-workspace floating layer above the strip in
+  (2026-09-25, PR #242) — a per-workspace floating layer above the strip in
   `scoot-core` (stacking with raise-on-focus, a focus flag per workspace,
   placement centred on the parent or output and clamped to the usable area,
   sized by what the client drew). Windows float at their first commit when

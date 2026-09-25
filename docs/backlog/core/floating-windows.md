@@ -8,7 +8,7 @@ blocked: null
 
 # Floating windows
 
-**Status (2026-09-25): PR 1 of 2 landed (PR #TBD); PR 2 remains.** PR 1
+**Status (2026-09-25): PR 1 of 2 landed (PR #242); PR 2 remains.** PR 1
 is the floating layer, map-time auto-float, window rules, the toggle and
 the focus switch, and IPC. **PR 2 is pointer move/resize**: Super+drag,
 and the client's own `xdg_toplevel.move`/`resize` (a CSD titlebar drag or
