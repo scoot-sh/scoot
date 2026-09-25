@@ -218,6 +218,102 @@ fn unmapping_discards_fullscreen_and_the_remap_is_not_fullscreen() {
     assert!(!fixture.state.world.is_fullscreen(fixture.id(0)));
 }
 
+/// Smithay discards everything pending when a toplevel unmaps -- size and
+/// states included -- so the configure that answers the re-map must be
+/// rebuilt from the layout: the column's size and the tiled states, as the
+/// first map had. (Without it, a re-mapped `foot` picks its own size and,
+/// untiled, rounds it down to whole cells.)
+#[test]
+fn a_re_mapped_window_is_told_its_size_and_that_it_is_tiled() {
+    let mut fixture = Fixture::new();
+    fixture.map(WINDOW_BGRA);
+    let slot = fixture.rect_of(0);
+    fixture.done(Step::Unmap { window: 0 });
+    let used = fixture.configured(Step::Remap {
+        window: 0,
+        color: WINDOW_BGRA,
+    });
+    assert!(used.tiled && !used.fullscreen, "{used:?}");
+    assert_eq!((used.width, used.height), (slot.w, slot.h), "{used:?}");
+    fixture.settle();
+    let snapshots = fixture.state.window_snapshots();
+    let rect = snapshots[0].rect;
+    assert_eq!(
+        Rect::new(rect.x, rect.y, rect.width, rect.height),
+        slot,
+        "the re-mapped window fills its slot"
+    );
+}
+
+/// The unmap also discards the decoration mode scoot chose (`ServerSide`,
+/// `prefer_no_csd`'s default), and the re-map's initial configure re-sends
+/// the decoration mode -- as `ClientSide` if nothing restored it, which
+/// tells a re-mapped `foot` to draw its own titlebar. It must stay
+/// `ServerSide`.
+#[test]
+fn a_re_mapped_window_keeps_server_side_decorations() {
+    let server_side = u32::from(
+        wayland_protocols::xdg::decoration::zv1::client::zxdg_toplevel_decoration_v1::Mode::ServerSide,
+    );
+    let mut fixture = Fixture::new();
+    fixture.map(WINDOW_BGRA);
+    fixture.done(Step::Decorate { window: 0 });
+    let modes = |fixture: &mut Fixture| match fixture.run(Step::DecorationModes { window: 0 }) {
+        Ack::DecorationModes(modes) => modes,
+        _ => panic!("unexpected ack"),
+    };
+    assert_eq!(modes(&mut fixture), vec![server_side]);
+    fixture.done(Step::Unmap { window: 0 });
+    fixture.configured(Step::Remap {
+        window: 0,
+        color: WINDOW_BGRA,
+    });
+    let after = modes(&mut fixture);
+    assert!(
+        after.iter().all(|mode| *mode == server_side),
+        "a re-map was told another decoration mode: {after:?}"
+    );
+}
+
+/// A window hidden behind a fullscreen sibling in its own column reports
+/// the frame it is placed at (the sibling's) unchanged: it draws nothing
+/// there, so there is no drawn area to clamp to.
+#[test]
+fn a_window_hidden_behind_a_fullscreen_sibling_reports_its_layout_rect() {
+    let mut fixture = Fixture::new();
+    fixture.map(WINDOW_BGRA);
+    fixture.map(OTHER_BGRA);
+    fixture
+        .state
+        .act(Action::ConsumeOrExpel(scoot_core::Horizontal::Left));
+    fixture.state.act(Action::ToggleFullscreen);
+    fixture.settle();
+    assert!(fixture.state.world.is_fullscreen(fixture.id(1)));
+    let placed = fixture
+        .state
+        .world
+        .arrange()
+        .get(fixture.id(0))
+        .copied()
+        .expect("a placement");
+    assert!(!placed.visible, "the stacked window must be hidden");
+    let snapshots = fixture.state.window_snapshots();
+    let hidden = snapshots
+        .iter()
+        .find(|w| w.id == fixture.id(0).0)
+        .expect("a snapshot");
+    assert_eq!(
+        Rect::new(
+            hidden.rect.x,
+            hidden.rect.y,
+            hidden.rect.width,
+            hidden.rect.height
+        ),
+        placed.rect
+    );
+    assert_eq!(placed.rect, OUTPUT, "the sibling's frame");
+}
+
 #[test]
 fn an_unmap_of_a_window_that_is_not_fullscreen_changes_nothing_here() {
     let mut fixture = Fixture::new();

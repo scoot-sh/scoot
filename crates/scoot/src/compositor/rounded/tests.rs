@@ -76,11 +76,16 @@ enum Step {
     Popup { color: [u8; 4], w: i32, h: i32 },
     /// Map a fullscreen background-layer wallpaper drawing a solid `color`.
     Wallpaper { color: [u8; 4] },
+    /// Report whether any toplevel configure so far carried a `tiled_*`
+    /// state. This client binds `xdg_wm_base` at version 1, where those
+    /// states do not exist.
+    SawTiled,
 }
 
 #[derive(Debug)]
 enum Ack {
     Done,
+    SawTiled(bool),
 }
 
 /// Which `xdg_surface` a configure belongs to.
@@ -111,6 +116,8 @@ struct TestClient {
     window_serials: Vec<Option<u32>>,
     window_sizes: Vec<Option<(i32, i32)>>,
     layer_size: Option<(u32, u32)>,
+    /// Whether any toplevel configure carried a `tiled_*` state.
+    saw_tiled: bool,
 }
 
 impl Dispatch<wl_registry::WlRegistry, ()> for TestClient {
@@ -196,7 +203,25 @@ impl Dispatch<xdg_toplevel::XdgToplevel, SurfaceKind> for TestClient {
         _: &Connection,
         _: &QueueHandle<Self>,
     ) {
-        if let xdg_toplevel::Event::Configure { width, height, .. } = event {
+        if let xdg_toplevel::Event::Configure {
+            width,
+            height,
+            ref states,
+        } = event
+        {
+            client.saw_tiled |= states
+                .chunks_exact(4)
+                .filter_map(|bytes| bytes.try_into().ok().map(u32::from_ne_bytes))
+                .any(|state| {
+                    [
+                        xdg_toplevel::State::TiledLeft,
+                        xdg_toplevel::State::TiledRight,
+                        xdg_toplevel::State::TiledTop,
+                        xdg_toplevel::State::TiledBottom,
+                    ]
+                    .into_iter()
+                    .any(|tiled| state == tiled as u32)
+                });
             if width > 0 && height > 0 {
                 if let SurfaceKind::Window(index) = kind {
                     if let Some(slot) = client.window_sizes.get_mut(*index) {
@@ -406,6 +431,11 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 );
                 queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
                 acks.send(Ack::Done).map_err(|e| e.to_string())?;
+            }
+            Step::SawTiled => {
+                queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                acks.send(Ack::SawTiled(client.saw_tiled))
+                    .map_err(|e| e.to_string())?;
             }
             Step::Popup { color, w, h } => {
                 let parent = parent.clone().ok_or("no parent window")?;

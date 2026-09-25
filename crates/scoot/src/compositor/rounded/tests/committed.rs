@@ -216,3 +216,17 @@ fn the_ipc_rect_is_what_the_window_drew_clamped_to_its_slot() {
         "the test needs a frame that really is taller than its slot: {slot_now:?}"
     );
 }
+
+/// A client bound to `xdg_wm_base` below version 2 is never sent a tiled
+/// state (they do not exist at its version; Smithay filters them per
+/// toplevel), though scoot sets them for every layout window.
+#[test]
+fn a_version_one_client_is_never_sent_tiled_states() {
+    let mut fixture = Fixture::with_radius(0);
+    fixture.run(Step::Window { color: WINDOW_BGRA });
+    fixture.run(Step::Window { color: WINDOW_BGRA });
+    match fixture.run(Step::SawTiled) {
+        Ack::SawTiled(saw) => assert!(!saw, "a v1 client was sent a tiled state"),
+        other => panic!("unexpected ack {other:?}"),
+    }
+}
