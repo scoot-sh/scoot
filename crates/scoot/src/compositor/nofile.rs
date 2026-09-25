@@ -71,7 +71,8 @@ pub(crate) struct Limits {
 }
 
 impl Limits {
-    fn raised(&self) -> bool {
+    /// Whether [`raise`] moved the soft limit (up, or down to the cap).
+    fn changed(&self) -> bool {
         self.soft != self.original_soft
     }
 }
@@ -101,7 +102,7 @@ fn raise_once() -> Option<Limits> {
         return None;
     };
     let target = target_soft(soft, hard);
-    let soft_now = if target > soft {
+    let soft_now = if target != soft {
         match set(target, hard) {
             Ok(()) => target,
             Err(error) => {
@@ -110,7 +111,7 @@ fn raise_once() -> Option<Limits> {
                     hard,
                     target,
                     %error,
-                    "cannot raise the RLIMIT_NOFILE soft limit; staying at {soft}"
+                    "cannot set the RLIMIT_NOFILE soft limit; staying at {soft}"
                 );
                 soft
             }
@@ -119,7 +120,15 @@ fn raise_once() -> Option<Limits> {
         soft
     };
     let queue_cap = crate::compositor::fd_pressure::backend_queued_fds(soft_now);
-    if soft_now > soft {
+    if soft_now < soft {
+        tracing::info!(
+            from = soft,
+            to = soft_now,
+            hard,
+            unclaimed_fd_cap = queue_cap,
+            "lowered the fd limit (RLIMIT_NOFILE soft) to scoot's cap; children get {soft} back"
+        );
+    } else if soft_now > soft {
         tracing::info!(
             from = soft,
             to = soft_now,
@@ -144,33 +153,50 @@ fn raise_once() -> Option<Limits> {
     })
 }
 
-/// The soft limit [`raise`] aims for: the hard limit, capped at
-/// [`RAISED_SOFT_CAP`], and never below the current soft limit (a process
-/// started with more keeps it). Total on any input, `RLIM_INFINITY`
-/// included.
-pub(crate) fn target_soft(soft: u64, hard: u64) -> u64 {
-    hard.min(RAISED_SOFT_CAP).max(soft)
+/// The soft limit [`raise`] sets: the hard limit, capped at
+/// [`RAISED_SOFT_CAP`], also when that means lowering a soft limit the
+/// process was started with (Docker before 25 starts containers at
+/// 1048576:1048576, where a raise that only ever went up would leave scoot a
+/// million-entry table). Children get the original back either way. Total on
+/// any input, `RLIM_INFINITY` included; `_soft` is taken so a caller cannot
+/// mistake this for a function of the hard limit alone by accident.
+pub(crate) fn target_soft(_soft: u64, hard: u64) -> u64 {
+    hard.min(RAISED_SOFT_CAP)
 }
 
 /// Makes `command`'s child start with the soft limit this process was
 /// started with, when [`raise`] changed it; otherwise leaves `command`
 /// alone. The hard limit is untouched.
+///
+/// Never fails the spawn: the child's `setrlimit` result is ignored. It can
+/// only fail if something outside scoot lowered its hard limit below the
+/// original soft limit since startup, which is checked here first (one
+/// `getrlimit` per spawn): the child then gets the original clamped to the
+/// current hard limit, with a warning, rather than no child at all.
 pub(crate) fn restore_for_child(command: &mut Command) {
-    let Some(limits) = raised().filter(Limits::raised) else {
+    let Some(limits) = raised().filter(Limits::changed) else {
         return;
     };
-    let original = rlimit(limits.original_soft, limits.hard);
+    let hard = get().map_or(limits.hard, |(_, hard)| hard);
+    let soft = if hard < limits.original_soft {
+        tracing::warn!(
+            original = limits.original_soft,
+            hard,
+            "the hard fd limit is now below the one scoot started with; this child gets {hard}"
+        );
+        hard
+    } else {
+        limits.original_soft
+    };
+    let original = rlimit(soft, hard);
     // SAFETY: the closure runs in the child between `fork` and `exec`, where
     // only async-signal-safe calls are allowed. It makes one: `setrlimit`,
     // on a value built before the fork and moved in by copy. It allocates
-    // nothing and takes no lock.
+    // nothing and takes no lock, and its result is ignored (see above).
     unsafe {
         command.pre_exec(move || {
-            if libc::setrlimit(libc::RLIMIT_NOFILE, &original) == 0 {
-                Ok(())
-            } else {
-                Err(std::io::Error::last_os_error())
-            }
+            libc::setrlimit(libc::RLIMIT_NOFILE, &original);
+            Ok(())
         });
     }
 }

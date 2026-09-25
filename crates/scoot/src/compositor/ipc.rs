@@ -308,6 +308,9 @@ fn accept_under(
         // `io::Error::other` wants something `Send + Sync`. Dropping it here
         // is also what releases the slot the connection never got to use.
         .map_err(|error| std::io::Error::other(error.to_string()))?;
+    // Counted against the cached table reading, so a burst of accepts is
+    // judged against a count that includes itself (see `fd_pressure::table`).
+    super::fd_pressure::note_opened(1);
     Ok(())
 }
 

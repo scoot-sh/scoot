@@ -264,6 +264,9 @@
 //! admits on `None`. Shedding on unknown would deny innocents for a
 //! broken gauge; the `EMFILE` shed still catches real exhaustion underneath.
 
+use std::cell::Cell;
+use std::time::{Duration, Instant};
+
 /// How many received fds wayland-backend lets one client leave unclaimed on a
 /// table of `soft` fds: one eighth of it, clamped to 128..=1024. This mirrors
 /// the scoot-sh fork's `max_queued_fds` (crate-private there, read when each
@@ -310,10 +313,126 @@ impl Table {
     }
 }
 
-/// Observes the process fd table, or `None` when there is nothing to
+/// The process fd table as the enforcement sites see it: a cached
+/// [`observe`], refreshed at most once per [`reading_lifetime`], plus every
+/// fd [`note_opened`] has counted since. `None` when there is nothing to
 /// enforce (small or infinite table) or nothing observable (any failure).
 /// Fails open by construction: every enforcement site admits on `None`.
+///
+/// Why cached: an observation is a readdir of `/proc/self/fd`, linear in the
+/// open fds (~7 ms at 60000), and the sites are client-triggered: the
+/// Wayland accept callback drains its whole backlog (up to 4096
+/// connections) in one call, the IPC accept runs per connection, and a
+/// client past its grace reaches the creation guards on every request.
+/// Uncached, review of PR #241 measured a 4000-connection storm against
+/// 58000 parked fds freezing the compositor for 35.6 s. Cached, a burst
+/// costs one readdir, and readdirs cost at most ~1/20 of loop time however
+/// large the table (see [`reading_lifetime`]).
+///
+/// The cache is per thread: every site runs on the event-loop thread, and
+/// a test's `State` gets a reading of its own. What it can miss is fds
+/// opened within a reading's lifetime by anything other than the accepts
+/// (which [`note_opened`] counts): client fds arriving on requests, and
+/// scoot's own. For at most one lifetime the reading is low by those; the
+/// reserve absorbs that, and the `EMFILE` shed still catches real
+/// exhaustion underneath. Fds closed within a lifetime make it read high
+/// until the next refresh: towards shedding, never away from it.
 pub(crate) fn table() -> Option<Table> {
+    let now = Instant::now();
+    GAUGE.with(|gauge| {
+        if let Some(cached) = gauge.get().filter(|cached| cached.fresh_at(now)) {
+            return cached.table;
+        }
+        let started = Instant::now();
+        let table = observe();
+        let cost = started.elapsed();
+        OBSERVATIONS.with(|count| count.set(count.get() + 1));
+        gauge.set(Some(Reading {
+            table,
+            taken: now,
+            lifetime: reading_lifetime(cost),
+        }));
+        table
+    })
+}
+
+/// Counts `count` fds just opened on the loop thread (an accepted
+/// connection) against the cached reading, so a burst of accepts inside one
+/// reading's lifetime still sees the table fill: the 4000th connection of a
+/// storm is judged against a count that includes the 3999 before it.
+pub(crate) fn note_opened(count: u64) {
+    GAUGE.with(|gauge| {
+        if let Some(mut cached) = gauge.get() {
+            if let Some(table) = cached.table.as_mut() {
+                table.used = table.used.saturating_add(count);
+            }
+            gauge.set(Some(cached));
+        }
+    });
+}
+
+/// How long a reading that took `cost` to observe is reused: at least
+/// [`MIN_READING_LIFETIME`], and at least 20 times its cost, so observing
+/// costs at most ~5% of loop time on any table (a 7 ms readdir at 60000 open
+/// fds is reused for 140 ms). On an ordinary session's few hundred fds a
+/// readdir costs microseconds, and the reading is at most 1 ms old.
+pub(crate) fn reading_lifetime(cost: Duration) -> Duration {
+    cost.saturating_mul(20).max(MIN_READING_LIFETIME)
+}
+
+/// The shortest a reading is reused for; see [`reading_lifetime`].
+pub(crate) const MIN_READING_LIFETIME: Duration = Duration::from_millis(1);
+
+/// One cached observation.
+#[derive(Debug, Clone, Copy)]
+struct Reading {
+    table: Option<Table>,
+    taken: Instant,
+    lifetime: Duration,
+}
+
+impl Reading {
+    fn fresh_at(&self, now: Instant) -> bool {
+        now.saturating_duration_since(self.taken) < self.lifetime
+    }
+}
+
+thread_local! {
+    static GAUGE: Cell<Option<Reading>> = const { Cell::new(None) };
+    /// How many real observations (readdirs) [`table`] has made on this
+    /// thread; read by the tests that pin the per-burst bound.
+    static OBSERVATIONS: Cell<u64> = const { Cell::new(0) };
+}
+
+/// Real observations [`table`] has made on this thread so far.
+#[cfg(test)]
+pub(crate) fn observations() -> u64 {
+    OBSERVATIONS.with(Cell::get)
+}
+
+/// Replaces this thread's cached reading with `table`, reused for
+/// `lifetime`: lets a test put the gauge in a known state (calm, one fd from
+/// the line) without filling the process's real fd table.
+#[cfg(test)]
+pub(crate) fn pin_reading(table: Option<Table>, lifetime: Duration) {
+    GAUGE.with(|gauge| {
+        gauge.set(Some(Reading {
+            table,
+            taken: Instant::now(),
+            lifetime,
+        }));
+    });
+}
+
+/// Drops this thread's cached reading, so the next [`table`] observes.
+#[cfg(test)]
+pub(crate) fn forget_reading() {
+    GAUGE.with(|gauge| gauge.set(None));
+}
+
+/// Observes the process fd table now: one `getrlimit` and one readdir of
+/// `/proc/self/fd`. Only [`table`] calls this.
+fn observe() -> Option<Table> {
     let soft = soft_limit()?;
     if soft < MIN_TABLE_FDS {
         return None;

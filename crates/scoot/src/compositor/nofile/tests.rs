@@ -32,9 +32,11 @@ fn a_hard_limit_of_1024_changes_nothing() {
 }
 
 #[test]
-fn the_target_never_lowers_a_soft_limit() {
-    assert_eq!(target_soft(200_000, 524_288), 200_000);
-    assert_eq!(target_soft(INFINITY, INFINITY), INFINITY);
+fn the_target_lowers_a_soft_limit_past_the_cap() {
+    // Docker before 25: 1048576:1048576. Children get the original back.
+    assert_eq!(target_soft(1_048_576, 1_048_576), RAISED_SOFT_CAP);
+    assert_eq!(target_soft(200_000, 524_288), RAISED_SOFT_CAP);
+    assert_eq!(target_soft(INFINITY, INFINITY), RAISED_SOFT_CAP);
 }
 
 #[test]

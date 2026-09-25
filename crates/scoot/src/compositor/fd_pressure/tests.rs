@@ -10,6 +10,7 @@ use super::*;
 
 mod backend_queue;
 mod backend_queue_client;
+mod gauge;
 
 /// The most fds one read from a client's socket can add to that queue: 30.
 /// wayland-backend sizes its receive buffer for 28 (its `MAX_FDS_OUT`) with
