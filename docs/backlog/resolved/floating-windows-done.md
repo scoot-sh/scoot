@@ -49,18 +49,26 @@ PR 1's design record and the original entry follow.
   (`normalize`, `fix_view`), once per crossing, and the shell answers it
   with one full `apply()`.
 - **The carried stacking note, fixed in general.** A window's own floating
-  dialogs (parent chain, as `descends_from`) are drawn above it whatever
-  the stack says (`floating_order.rs`): the drawing order is a walk of a
-  forest whose parent links are "nearest ancestor above me in the stack".
+  dialogs (parent links between floating windows of the workspace, at any
+  depth) are drawn above it whatever the stack says (`floating_order.rs`):
+  each window's level is the higher of its stack index and its parent's
+  level, its depth its parent's plus one, and windows draw in (level,
+  depth, index) order. Review round 1 found the first cut (a walk of
+  nearest-ancestor-above links, bounded at 16 steps) drawing window 18 of a
+  40-deep chain under window 17, and allocating five `Vec`s per `arrange`;
+  levels are computed once per window from the parent's, iteratively, a
+  link that closes a loop is dropped, and the buffers live in the `World`.
   Clicking a floating parent (or a fullscreen game) still raises and
   focuses it; its dialog stays drawn over it. This covers the re-review's
   case (game clicked above its dialog, then another window focused: the
   dialog showed under the game) and the non-fullscreen one it implies (a
   floated app clicked above its modal dialog hid it completely, the same
-  "looks like a hang" harm). The common case -- no floating window has a
-  floating ancestor, which includes every dialog of a tiled window -- is
-  allocation-free (a parent-chain walk per floating window); a workspace
-  with nested floating windows builds the order in three `Vec`s, O(n log n).
+  "looks like a hang" harm). The common case -- no floating window's
+  parent floats, which includes every dialog of a tiled window -- is one
+  map lookup per floating window; otherwise O(n log n) into reused buffers.
+  `descends_from` (the covering rule) is bounded by the window count, not
+  16. Mac release: a 64-deep chain arranges in ~5 µs (main 3.7), 1000-deep
+  in ~49 µs (main 16).
 - **Tiled windows.** A modifier press on a tiled window is an ordinary
   click, and a tiled window's `xdg_toplevel.move`/`resize` is ignored
   (debug log): tiled windows are placed by the strip, and a toolkit whose
@@ -70,13 +78,20 @@ PR 1's design record and the original entry follow.
   which a user reaching for a GTK headerbar in the strip does not expect.
 - **The modifier.** `[floating] modifier`, Super by default (every default
   binding's modifier), any single modifier name a `[binds]` combo accepts;
-  a bad value warns and falls back. Reloadable. It exists mainly for
+  a bad value warns and falls back at startup, and is refused by name on a
+  reload (the session keeps its modifier). Reloadable. It exists mainly for
   `--nested`, where the host usually keeps Super.
 - **One grab** (`scoot/src/compositor/floating/grab.rs`), started by either
-  path. The client request is honoured only if `pointer.has_grab(serial)`
-  (the serial is the press serial of the live implicit grab: the button is
-  still held) and that grab's focus is the requesting client's surface; a
-  modifier drag's own grab has no focus, so no client can take it over.
+  path. The client request is honoured only if the pointer's active grab
+  is Smithay's `ClickGrab` under the request's serial (the implicit grab
+  of a press still held) and that press went to the requesting client's
+  surface. Review round 1 found the first cut checking `has_grab(serial)`,
+  which compares serials only: a popup grab is installed under any recent
+  key/button/enter serial with the client's own toplevel as its focus, so
+  `xdg_popup.grab(K)` then `xdg_toplevel.move(K)` started a drag with no
+  button held (the window jumped by the pointer's absolute position, until
+  the next press). A popup grab, a drag-and-drop and a modifier drag are
+  all refused now; a harness test drives the popup case.
   The grab clears pointer focus (the client gets `leave`), swallows the
   modifier press and every button, shows the grab/resize cursor (set after
   the focus clear, whose `leave` resets the cursor -- found on the `--tty`
@@ -109,13 +124,24 @@ PR 1's design record and the original entry follow.
   hidden by a workspace switch (checked per motion); the session locking
   (the lock transition's `drop_input_grabs`); a VT switch
   (`session_event`'s pause: its release would never arrive); an output
-  changing size (the geometry it started from no longer holds). An output
+  changing size (the geometry it started from no longer holds); under
+  `--nested`, the host pointer leaving scoot's window (review round 1:
+  the release would go elsewhere). An output
   being *removed* cannot happen in scoot today (nothing sends
   `OutputRemoved`); the per-motion check would end the grab if the window
   left the space.
+- **Stuck modifiers under `--nested`** (review round 1). The host
+  keyboard's `leave` now releases every key scoot believes held and its
+  `enter` presses the modifiers the host reports down (modifiers only; an
+  ordinary held key is not typed). Before, an Alt+Tab in the host left Alt
+  held in scoot, and with `modifier = "alt"` -- which the docs suggest for
+  nested -- every click on a floating window became a swallowed drag. The
+  `--tty` VT switch was measured separately: no stuck Super after it.
 - **IPC.** `move-floating ID X Y` and `resize-floating ID W H` (unsigned;
   keeps the top-left corner, i.e. `Edges::BOTTOM_RIGHT`), additive, no
-  `PROTOCOL_VERSION` bump; `windows`' `rect` reports the result.
+  `PROTOCOL_VERSION` bump; `windows`' `rect` reports the result. A resize
+  re-reads the window's limits first. Where a minimum does not fit the room
+  to the usable area's edge, the room wins.
 - **The carried doc note.** `protocols.md` no longer says direct scanout
   composites under a dialog: the frame stays eligible and Smithay
   composites only when the dialog cannot get a plane.
