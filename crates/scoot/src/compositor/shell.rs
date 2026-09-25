@@ -10,7 +10,7 @@ use smithay::wayland::shell::xdg::SurfaceCachedState;
 use smithay::wayland::shell::xdg::{ToplevelSurface, XdgToplevelSurfaceData};
 
 use super::State;
-use super::fullscreen::set_layout_states;
+use super::fullscreen::{LayoutState, set_layout_states};
 use super::output_clip;
 
 #[cfg(test)]
@@ -22,6 +22,8 @@ impl State {
         self.next_id += 1;
         let id = WindowId(self.next_id);
         self.windows.insert(id, Window::new_wayland_window(surface));
+        // Its first commit decides whether it floats (see `floating.rs`).
+        self.awaiting_map.push(id);
         let info = self.info_of(id);
         // Before the core hears about it, though nothing depends on the order:
         // these are the other two lists of windows scoot publishes (see
@@ -57,6 +59,7 @@ impl State {
             self.space.unmap_elem(&window);
             output_clip::unstamp(&window);
         }
+        self.awaiting_map.retain(|&w| w != id);
         // Paired with `add_window`'s announcements: these send `closed` to
         // every client watching either list, so a taskbar drops the entry.
         // Before the focus is cleared below, so nothing tries to publish an
@@ -70,10 +73,11 @@ impl State {
         self.apply();
     }
 
-    /// Re-reads a window's app id, title and minimum size.
+    /// Re-reads a window's app id, title, minimum size and parent.
     ///
-    /// Called only from `XdgShellHandler`'s `title_changed`/`app_id_changed`,
-    /// which the pinned Smithay rev raises only when the value really changed
+    /// Called only from `XdgShellHandler`'s `title_changed`/`app_id_changed`/
+    /// `parent_changed`, which the pinned Smithay rev raises only when the
+    /// value really changed
     /// -- and each foreign-toplevel publish compares once more against what
     /// its own handles were last sent, so only the field that moved goes out
     /// with the `done` that closes it.
@@ -100,10 +104,20 @@ impl State {
     /// never came back to its size. The same race shrank any column that a
     /// width change narrowed faster than the client acked.
     ///
-    /// No frame is reported when the answered configure named no size (there
-    /// is nothing to compare against), or carried the `fullscreen` state (a
-    /// frame sized for the whole output says nothing about the tiled minimum;
-    /// the core ignores those too, and skipping here also skips the event).
+    /// No frame is reported when the answered configure carried the
+    /// `fullscreen` state (a frame sized for the whole output says nothing
+    /// about the tiled minimum; the core ignores those too, and skipping here
+    /// also skips the event), or -- for a tiled window -- named no size
+    /// (there is nothing to compare against).
+    ///
+    /// A floating window's frames are reported whatever it was asked for
+    /// (usually nothing: it chooses its own size), with a zero `requested`
+    /// when it was asked for none: it is placed at the size it drew, which
+    /// the core takes from `actual` and never learns a minimum from. When the
+    /// frame changed where it goes -- a new size, or a size the core now asks
+    /// it to fit -- the arrangement is re-applied; the floating state is read
+    /// before and after (two map lookups), so a floating video committing
+    /// every frame at the same size costs no relayout.
     pub fn observe_frame(&mut self, id: WindowId) {
         let Some(window) = self.window(id) else {
             return;
@@ -119,15 +133,21 @@ impl State {
                 )
             })
         });
-        let Some((Some(requested), false)) = answered else {
-            return;
+        let floating = self.world.floating_size(id);
+        let requested = match answered {
+            Some((Some(requested), false)) => Size::new(requested.w, requested.h),
+            Some((None, false)) if floating.is_some() => Size::default(),
+            _ => return,
         };
         let size = window.geometry().size;
         self.world.handle_event(Event::FrameObserved {
             id,
-            requested: Size::new(requested.w, requested.h),
+            requested,
             actual: Size::new(size.w, size.h),
         });
+        if floating.is_some() && self.world.floating_size(id) != floating {
+            self.apply();
+        }
     }
 
     /// Rebuilds a toplevel's pending configure state from where the layout
@@ -149,11 +169,12 @@ impl State {
     ///
     /// On a first map every value here is already pending (`add_window`'s
     /// `apply()`, and the decoration handlers), so this changes nothing
-    /// there. The size is only set for a visible placement: a hidden one may
-    /// be a window stacked behind a fullscreen sibling, whose placement is
-    /// the sibling's frame -- not a size to configure it to (see
-    /// `answer_fullscreen_request`) -- and the next `apply()` that shows it
-    /// sizes it anyway. The decoration mode is restored only under
+    /// there. The size is only set for a visible placement or a floating one:
+    /// a hidden tiled one may be a window stacked behind a fullscreen
+    /// sibling, whose placement is the sibling's frame -- not a size to
+    /// configure it to (see `answer_fullscreen_request`) -- and the next
+    /// `apply()` that shows it sizes it anyway. A floating window's
+    /// `requested` is its size either way (usually none: it chooses). The decoration mode is restored only under
     /// `prefer_no_csd`: without it scoot does what the client asked, and an
     /// unmapped client's earlier request is gone with the rest of its state.
     ///
@@ -169,10 +190,12 @@ impl State {
         let server_side = self.appearance.prefer_no_csd;
         toplevel.with_pending_state(|state| {
             if let Some(placement) = placement {
-                if placement.visible {
-                    state.size = Some((placement.rect.w, placement.rect.h).into());
+                // A floating placement's size is right whether or not it
+                // shows (see `apply()`).
+                if placement.visible || placement.floating {
+                    state.size = placement.requested.map(|size| (size.w, size.h).into());
                 }
-                set_layout_states(state, placement.fullscreen);
+                set_layout_states(state, LayoutState::of(placement));
             }
             if focused {
                 state.states.set(xdg_toplevel::State::Activated);
@@ -240,28 +263,35 @@ impl State {
             let Some(window) = self.windows.get(&placement.id).cloned() else {
                 continue;
             };
-            if !placement.visible {
+            if placement.visible {
+                self.space
+                    .map_element(window.clone(), (placement.rect.x, placement.rect.y), false);
+                // Beside the position, from the same placement: what the hit
+                // test filters by (see `output_clip.rs`), so the two cannot
+                // describe different arrangements.
+                output_clip::stamp(&window, placement.output);
+            } else {
                 self.space.unmap_elem(&window);
                 output_clip::unstamp(&window);
-                continue;
+                // Invisible tiled windows are not configured here at all;
+                // `fullscreen.rs` answers the one that asked while invisible.
+                // A floating one is: one that has not drawn yet is invisible
+                // precisely because it is waiting for this configure (see
+                // `floating.rs`).
+                if !placement.floating {
+                    continue;
+                }
             }
-            self.space
-                .map_element(window.clone(), (placement.rect.x, placement.rect.y), false);
-            // Beside the position, from the same placement: what the hit
-            // test filters by (see `output_clip.rs`), so the two cannot
-            // describe different arrangements.
-            output_clip::stamp(&window, placement.output);
             if let Some(toplevel) = window.toplevel() {
-                let size = Size::new(placement.rect.w, placement.rect.h);
-                // The size and the `fullscreen`-or-tiled states in one
-                // configure, so a client entering fullscreen is never told
-                // the output's size without being told why (or leaving it,
-                // its tiled size while still flagged fullscreen). Invisible
-                // windows are not configured here at all; `fullscreen.rs`
-                // answers the one that asked while invisible.
+                // The size and the layout states in one configure, so a
+                // client entering fullscreen is never told the output's size
+                // without being told why (or leaving it, its tiled size while
+                // still flagged fullscreen), and a window floating is told it
+                // chooses its own size in the configure that stops calling it
+                // tiled.
                 toplevel.with_pending_state(|state| {
-                    state.size = Some((size.w, size.h).into());
-                    set_layout_states(state, placement.fullscreen);
+                    state.size = placement.requested.map(|size| (size.w, size.h).into());
+                    set_layout_states(state, LayoutState::of(placement));
                 });
                 toplevel.send_pending_configure();
             }
@@ -284,8 +314,14 @@ impl State {
         // common case, and no allocation either way.
         self.refresh_workspaces();
         // Last, once the space holds the new arrangement: a change in what
-        // covers an output moves what the pointer is over.
-        self.refresh_fullscreen_cover();
+        // covers an output, or in what floats on it, moves what the pointer
+        // is over. Both are asked every time (each remembers its own state),
+        // and the pointer is re-derived at most once.
+        let floating_moved = self.refresh_floating_cover(&arrangement);
+        let cover_moved = self.refresh_fullscreen_cover();
+        if floating_moved || cover_moved {
+            self.refresh_pointer_focus();
+        }
         self.request_render();
     }
 
@@ -437,9 +473,9 @@ impl State {
             self.world.usable_areas().into_iter(),
             self.world.config().gap,
         );
-        with_states(toplevel.wl_surface(), |states| {
+        let (info, parent) = with_states(toplevel.wl_surface(), |states| {
             let Some(data) = states.data_map.get::<XdgToplevelSurfaceData>() else {
-                return WindowInfo::default();
+                return (WindowInfo::default(), None);
             };
             let attributes = data.lock().expect("toplevel attributes");
             let min = states
@@ -447,14 +483,25 @@ impl State {
                 .get::<SurfaceCachedState>()
                 .current()
                 .min_size;
-            WindowInfo {
-                app_id: attributes.app_id.clone().unwrap_or_default(),
-                title: attributes.title.clone().unwrap_or_default(),
-                hints: SizeHints {
-                    min: clamp_hint(Size::new(min.w, min.h), limit),
+            (
+                WindowInfo {
+                    app_id: attributes.app_id.clone().unwrap_or_default(),
+                    title: attributes.title.clone().unwrap_or_default(),
+                    hints: SizeHints {
+                        min: clamp_hint(Size::new(min.w, min.h), limit),
+                    },
+                    parent: None,
                 },
-            }
-        })
+                attributes.parent.clone(),
+            )
+        });
+        // Outside the `with_states` guard, like the limit above: there is no
+        // reason to hold it while walking every window. A parent this
+        // compositor does not know as a window is no parent.
+        WindowInfo {
+            parent: parent.and_then(|surface| self.id_of(&surface)),
+            ..info
+        }
     }
 }
 

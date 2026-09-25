@@ -69,10 +69,20 @@
 //!   (accepted spawns, refused non-spawns), which is why a second identical
 //!   reload is silent.
 //!
+//! - `[floating] auto` and `[[window_rule]]`: applied -- swapped in whole
+//!   and read at every window's first commit from then on. Windows already
+//!   mapped are not re-decided (rules apply at map time; see
+//!   `floating.rs`), so nothing re-arranges. A rule that parses but cannot
+//!   be used (no matcher, a bad size, ...) is refused by its position in the
+//!   file, e.g. `window_rule #3 (sets neither float nor size): skipped as
+//!   unusable`, and the rest apply.
+//!
 //! Every refusal names the field; nothing is silently ignored. Both lists
 //! name only fields that *differed* -- a field the file and the session
 //! agree on appears in neither, so two empty lists together mean "the
-//! reload changed nothing it was asked to".
+//! reload changed nothing it was asked to". The one exception is an
+//! unusable window rule, which is refused on every reload that finds it
+//! (it is never in effect, so it always differs from what the file says).
 //!
 //! # While locked
 //!
@@ -134,6 +144,8 @@ mod field {
     pub const BACKEND: &str = "renderer.backend";
     pub const XWAYLAND: &str = "xwayland.enabled";
     pub const AUTOSTART: &str = "autostart.commands";
+    pub const FLOATING_AUTO: &str = "floating.auto";
+    pub const WINDOW_RULES: &str = "window_rule";
     pub const BINDS: &str = "binds";
 }
 
@@ -199,6 +211,7 @@ impl State {
         self.apply_scale_reload(fresh, &mut report);
         self.apply_device_reload(fresh, &mut report);
         self.apply_autostart_reload(fresh, &mut report);
+        self.apply_floating_reload(fresh, &mut report);
         self.apply_binds_reload(fresh, &mut report);
 
         // Recompute the arrangement and request a render when anything
@@ -486,6 +499,34 @@ impl State {
             }
         }
         self.startup_autostart = snapshot;
+    }
+
+    /// `[floating] auto` and `[[window_rule]]`: swapped in whole, and read
+    /// by every window's first commit from then on (see `floating.rs`).
+    /// Windows already mapped keep the layout they have -- rules decide at
+    /// map time, never later -- so nothing is re-arranged. Each rule that
+    /// was skipped as unusable is refused by name, on every reload that
+    /// finds it: unlike a field that agrees with the session, a broken rule
+    /// is never in effect, so saying so again is the only way the user
+    /// learns it is still broken.
+    fn apply_floating_reload(&mut self, fresh: &LoadedConfig, report: &mut Report) {
+        let live = &self.floating_rules;
+        let auto = fresh.floating.auto != live.auto;
+        let rules = fresh.floating.rules != live.rules;
+        if auto || rules {
+            self.floating_rules = fresh.floating.clone();
+            if auto {
+                report.applied.push(field::FLOATING_AUTO.to_owned());
+            }
+            if rules {
+                report.applied.push(field::WINDOW_RULES.to_owned());
+            }
+        }
+        for skipped in &fresh.skipped_rules {
+            report
+                .refused
+                .push(format!("{skipped}: skipped as unusable"));
+        }
     }
 
     /// `[binds]`: rebuilt from defaults plus the file (see

@@ -167,6 +167,11 @@ impl CompositorHandler for State {
                 // window's toplevel state, and the configure that answers the
                 // re-map must not carry a fullscreen it no longer has.
                 self.discard_fullscreen_if_unmapped(id);
+                // The window's first commit: whether it floats (see
+                // `floating.rs`). An empty-`Vec` test on every other commit.
+                if !self.awaiting_map.is_empty() {
+                    self.decide_floating_at_map(id);
+                }
                 send_initial_configure(self, &root);
                 self.observe_frame(id);
             } else if !self.commit_layer_surface(&root) {
@@ -377,6 +382,15 @@ impl XdgShellHandler for State {
     }
 
     fn title_changed(&mut self, surface: ToplevelSurface) {
+        if let Some(id) = self.id_of(surface.wl_surface()) {
+            self.refresh_window(id);
+        }
+    }
+
+    /// The core keeps each window's parent (`WindowInfo::parent`): a window
+    /// that floats is centred on it, and a focused floating window that
+    /// closes hands focus back to it (see `floating.rs`).
+    fn parent_changed(&mut self, surface: ToplevelSurface) {
         if let Some(id) = self.id_of(surface.wl_surface()) {
             self.refresh_window(id);
         }

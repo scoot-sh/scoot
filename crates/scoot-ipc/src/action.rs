@@ -115,6 +115,29 @@ pub enum Action {
         id: u64,
         fullscreen: bool,
     },
+    /// Float the focused window above its workspace's scrolling strip, or
+    /// put it back in the strip as a column right of the strip's focused one
+    /// -- the wire half of `scoot_core::Action::ToggleFloating`, whose doc
+    /// has the rules (a floating window is centred on its parent or output,
+    /// sizes itself, and is raised when focused). With no window focused,
+    /// does nothing. Additive: a client that never sends this tag decodes
+    /// exactly as before, so no `PROTOCOL_VERSION` bump.
+    ToggleFloating,
+    /// Float one specific window (`floating: true`) or put it back in the
+    /// strip, by the id `scootctl windows` reports -- the absolute half of
+    /// `ToggleFloating`, and the wire half of
+    /// `scoot_core::Action::SetFloating`. Idempotent where the toggle is not,
+    /// and it does not move focus. An unknown id does nothing. Additive like
+    /// the toggle: no `PROTOCOL_VERSION` bump.
+    SetFloating {
+        id: u64,
+        floating: bool,
+    },
+    /// Move focus between the focused workspace's floating windows (the top
+    /// one) and its strip (the strip's focused window) -- the wire half of
+    /// `scoot_core::Action::ToggleFloatingFocus`. Does nothing when the other
+    /// side is empty. Additive: no `PROTOCOL_VERSION` bump.
+    ToggleFloatingFocus,
     CloseFocused,
     Spawn {
         command: Vec<String>,

@@ -14,7 +14,7 @@
 //! - **State out.** `shell.rs`'s `apply()` sets the `fullscreen` state bit
 //!   and the output-sized frame on every visible window's configure, from
 //!   `Placement::fullscreen` -- or, for every other window, the four tiled
-//!   states (see [`set_layout_states`]); [`State::answer_fullscreen_request`] covers the
+//!   states, or none for a floating one (see [`set_layout_states`]); [`State::answer_fullscreen_request`] covers the
 //!   window the arrangement did not configure (an invisible one) and the
 //!   request that changed nothing.
 //! - **What stays above.** [`State::covered_by_fullscreen`] is the one
@@ -62,9 +62,39 @@ const TILED: [xdg_toplevel::State; 4] = [
     xdg_toplevel::State::TiledBottom,
 ];
 
+/// Where the layout has a window, as far as its `xdg_toplevel` states go.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum LayoutState {
+    /// A column entry: tiled on every edge.
+    Tiled,
+    /// Covering its output (or sized to, while focused away).
+    Fullscreen,
+    /// In a floating layer: neither -- it sizes itself.
+    Floating,
+}
+
+impl LayoutState {
+    /// The state a placement puts its window in. Fullscreen wins over
+    /// floating: a floating window that goes fullscreen is fullscreen.
+    pub(super) fn of(placement: &scoot_core::Placement) -> Self {
+        Self::from_core(placement.fullscreen, placement.floating)
+    }
+
+    /// The same from the core's two per-window answers, for a window with no
+    /// placement (waiting for an output).
+    pub(super) fn from_core(fullscreen: bool, floating: bool) -> Self {
+        if fullscreen {
+            Self::Fullscreen
+        } else if floating {
+            Self::Floating
+        } else {
+            Self::Tiled
+        }
+    }
+}
+
 /// Puts a toplevel's pending state in step with where the layout has it:
-/// `fullscreen`, or tiled on all four edges -- exclusive, since every window
-/// scoot manages is one or the other (scoot has no floating windows).
+/// `fullscreen`, tiled on all four edges, or neither (floating) -- exclusive.
 ///
 /// Tiled is what tells a client its size is the compositor's to choose.
 /// A client that believes it floats may size itself short of its slot --
@@ -73,7 +103,9 @@ const TILED: [xdg_toplevel::State; 4] = [
 /// draw its own drop shadow and rounded corners around it (GTK's CSD). The
 /// renderer copes with a short client either way (the clip and the ring
 /// follow what it drew; see `render/elements.rs`), but a client that fills
-/// its slot is the look the layout means.
+/// its slot is the look the layout means. A floating window *does* float,
+/// and is told so by the absence of all three: `foot` rounds to cells again
+/// and GTK draws its shadow, which is right for a window that sizes itself.
 ///
 /// Shared by `apply()`'s per-placement configure and the request answer
 /// below, so the two cannot disagree about what the layout puts on the wire,
@@ -84,16 +116,17 @@ const TILED: [xdg_toplevel::State; 4] = [
 /// drops the tiled states on the wire for a client bound below
 /// xdg_toplevel v2 (`ToplevelStateSet::into_filtered_states`), so an old
 /// client is never sent a value it cannot know.
-pub(super) fn set_layout_states(state: &mut ToplevelState, fullscreen: bool) {
-    if fullscreen {
+pub(super) fn set_layout_states(state: &mut ToplevelState, layout: LayoutState) {
+    if layout == LayoutState::Fullscreen {
         state.states.set(xdg_toplevel::State::Fullscreen);
-        for tiled in TILED {
-            state.states.unset(tiled);
-        }
     } else {
         state.states.unset(xdg_toplevel::State::Fullscreen);
-        for tiled in TILED {
+    }
+    for tiled in TILED {
+        if layout == LayoutState::Tiled {
             state.states.set(tiled);
+        } else {
+            state.states.unset(tiled);
         }
     }
 }
@@ -156,9 +189,10 @@ impl State {
     /// the mouse happened to move. Leaving is the mirror image.
     ///
     /// Called from every `apply()`; costs one `fullscreen_on` per output and
-    /// no allocation when nothing changed, which is nearly always, and the
-    /// synthesized motion only when something did.
-    pub(super) fn refresh_fullscreen_cover(&mut self) {
+    /// no allocation. Reports whether anything changed, which is nearly never:
+    /// `apply()` then synthesizes the motion (once, whichever of this and
+    /// `refresh_floating_cover` saw the change).
+    pub(super) fn refresh_fullscreen_cover(&mut self) -> bool {
         let count = self.outputs.len();
         // A slot only counts as changed when what covers it did: an output
         // appearing with nothing on it, which is every output at startup,
@@ -178,9 +212,7 @@ impl State {
                 changed = true;
             }
         }
-        if changed {
-            self.refresh_pointer_focus();
-        }
+        changed
     }
 
     /// `xdg_toplevel.set_fullscreen` (`fullscreen: true`, with the client's
@@ -237,26 +269,24 @@ impl State {
         before: Option<bool>,
     ) {
         let now = self.world.is_fullscreen(id);
+        let layout = LayoutState::from_core(now, self.world.is_floating(id));
         // The size moves with the bit, as `apply()` pairs them: an
         // invisible window told it is fullscreen is also told the output's
-        // size (and its tiled size when it leaves), so it never renders one
-        // state at the other's size. Only when the bit actually flips: a
-        // refused request leaves the size alone -- which matters for a
-        // window stacked under a fullscreen sibling, whose placement is the
-        // sibling's frame, not a size it should ever be configured to. An
-        // unplaced window (no output yet) has no placement and keeps its
-        // size.
-        let size = self
-            .world
-            .arrange()
-            .get(id)
-            .map(|placed| placed.rect.size());
+        // size (and its tiled size when it leaves -- or, leaving back to
+        // floating, no size, which is what a floating window is asked), so
+        // it never renders one state at the other's size. Only when the bit
+        // actually flips: a refused request leaves the size alone -- which
+        // matters for a window stacked under a fullscreen sibling, whose
+        // placement is the sibling's frame, not a size it should ever be
+        // configured to. An unplaced window (no output yet) has no placement
+        // and keeps its size.
+        let size = self.world.arrange().get(id).map(|placed| placed.requested);
         surface.with_pending_state(|state| {
             let flips = state.states.contains(xdg_toplevel::State::Fullscreen) != now;
             if flips && let Some(size) = size {
-                state.size = Some((size.w, size.h).into());
+                state.size = size.map(|size| (size.w, size.h).into());
             }
-            set_layout_states(state, now);
+            set_layout_states(state, layout);
         });
         let sent = surface.send_pending_configure().is_some();
         if !sent && before == Some(now) {

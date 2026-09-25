@@ -378,6 +378,7 @@ impl State {
                         | scoot_ipc::Action::FocusWorkspace { .. }
                         | scoot_ipc::Action::FocusWorkspaceIndex { .. }
                         | scoot_ipc::Action::FocusOutput { .. }
+                        | scoot_ipc::Action::ToggleFloatingFocus
                 ) {
                     self.clicked_layer = None;
                 }
@@ -607,6 +608,7 @@ impl State {
                     focused: arrangement.focused == Some(placement.id),
                     popup_grab: grab_holder == Some(placement.id),
                     fullscreen: placement.fullscreen,
+                    floating: placement.floating,
                 }
             })
             .collect()

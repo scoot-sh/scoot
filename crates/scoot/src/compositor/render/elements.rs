@@ -63,6 +63,33 @@ render_elements! {
     RoundedSurface = Rounded<WaylandSurfaceRenderElement<R>>,
 }
 
+/// A frame's focus rings, split by where they are drawn (see
+/// [`ring_elements`]).
+pub(super) struct Rings<R: Renderer> {
+    /// The strip's rings: under every window, in the gap the layout leaves.
+    tiled: Vec<Elements<R>>,
+    /// The floating windows' rings, top of the floating stack first. Each
+    /// is drawn directly under its own window and over everything below it
+    /// -- a floating window sits over the strip, not beside it, so its ring
+    /// would otherwise be hidden under the very windows it is drawn over.
+    floating: Vec<Elements<R>>,
+    /// Which window each run of `floating` belongs to, and how long the run
+    /// is, in the same top-first order. Empty (and unallocated) with no
+    /// floating window on screen.
+    spans: Vec<(WindowId, usize)>,
+}
+
+impl<R: Renderer> Rings<R> {
+    /// No rings at all: a locked frame, or a caller that draws none.
+    pub(super) fn none() -> Self {
+        Self {
+            tiled: Vec::new(),
+            floating: Vec::new(),
+            spans: Vec::new(),
+        }
+    }
+}
+
 /// What every element source needs to know about the frame being drawn, read
 /// once from the output so no two of them can disagree about it.
 pub(super) struct FrameContext {
@@ -210,7 +237,7 @@ impl State {
         renderer: &mut R,
         output: &Output,
         frame: &FrameContext,
-        ring_elements: Vec<Elements<R>>,
+        ring_elements: Rings<R>,
         arrangement: Option<&Arrangement>,
         cursor: bool,
     ) -> (Vec<Elements<R>>, Option<WlSurface>)
@@ -239,7 +266,7 @@ impl State {
         renderer: &mut R,
         output: &Output,
         frame: &FrameContext,
-        ring_elements: Vec<Elements<R>>,
+        ring_elements: Rings<R>,
         arrangement: Option<&Arrangement>,
         cursor: bool,
         out: &mut Vec<Elements<R>>,
@@ -278,7 +305,10 @@ impl State {
         //    defines as being above ordinary windows (a bar, a launcher, a
         //    notification) -- just the overlay while a fullscreen window
         //    covers the output;
-        // 3. windows, which must still win over the ring: `shell.rs::apply()`
+        // 3. windows -- floating ones first, each followed by its own ring,
+        //    since a floating window is drawn over the strip and its ring
+        //    must be too (see `Rings`) -- which must still win over the
+        //    ring: `shell.rs::apply()`
         //    positions a window from the layout's rect but sizes it from
         //    whatever the client actually committed, and a client that's slow
         //    to shrink (or a `--nested` resize still in flight) can briefly
@@ -288,7 +318,7 @@ impl State {
         //    stale/oversized content can only ever cover the ring, never the
         //    reverse -- the same direction niri itself picks, and the only one
         //    of the two that can't corrupt what a client is showing;
-        // 4. the focus ring, drawn in the layout's own gap;
+        // 4. the strip's focus rings, drawn in the layout's own gap;
         // 5. the bottom and background layers (a wallpaper), which the
         //    protocol defines as being below windows.
         //
@@ -321,6 +351,11 @@ impl State {
             out.extend(lock_surfaces.into_iter().map(Elements::Surface));
             out.push(Elements::Decoration(backdrop));
         } else {
+            let Rings {
+                tiled: ring_elements,
+                floating: floating_rings,
+                spans,
+            } = ring_elements;
             let window_elements: Vec<Elements<R>> = match (geometry, arrangement, output_id) {
                 (Some(region), Some(arranged), Some(output_id)) => window_elements(
                     &self.space,
@@ -331,6 +366,10 @@ impl State {
                     region,
                     scale,
                     self.appearance.corner_radius,
+                    FloatingRings {
+                        elements: floating_rings,
+                        spans,
+                    },
                 ),
                 // Unreachable: every output the render loop walks is in the
                 // space and in `Outputs`, and the arrangement is only `None`
@@ -373,11 +412,12 @@ pub(super) fn map_ring<R: Renderer>(element: RingElement<R>) -> Elements<R> {
     }
 }
 
-/// This frame's ring, already mapped into frame elements: the painted
+/// This frame's rings, already mapped into frame elements: the painted
 /// rounded ring when the session rounds, the four solid bars otherwise,
 /// nothing while locked (`arrangement` is `None` then). Only the rings of
 /// windows placed on this frame's output, in that output's coordinates --
-/// see `output_clip.rs`.
+/// see `output_clip.rs`. The strip's and the floating layer's come back
+/// apart ([`Rings`]), because they are drawn at different depths.
 ///
 /// Shared by both frame bodies (`draw_frame_with` and the scanout tier) and
 /// the capture path's cursor re-render, so the radius branch cannot drift
@@ -394,40 +434,80 @@ pub(super) fn ring_elements<R>(
     arrangement: Option<&Arrangement>,
     frame: &FrameContext,
     renderer: &mut R,
-) -> Vec<Elements<R>>
+) -> Rings<R>
 where
     R: Renderer + ImportAll + ImportMem,
     R::TextureId: Texture + Send + Clone + 'static,
 {
     let drawn = |placement: &Placement| drawn_rect(placement.rect, windows.get(&placement.id));
+    let mut rings = Rings::none();
     match (arrangement, frame.output) {
-        (Some(arranged), Some(output)) if appearance.corner_radius > 0 => decorations
-            .elements_rounded(
-                arranged,
-                appearance,
-                output,
-                frame.bounds(),
-                frame.scale,
-                drawn,
-                renderer,
-            )
-            .into_iter()
-            .map(map_ring)
-            .collect(),
-        (Some(arranged), Some(output)) => decorations
-            .elements(
-                arranged,
-                appearance,
-                output,
-                frame.bounds(),
-                frame.scale,
-                drawn,
-            )
-            .into_iter()
-            .map(Elements::Decoration)
-            .collect(),
-        _ => Vec::new(),
+        (Some(arranged), Some(output)) if appearance.corner_radius > 0 => {
+            rings.tiled = decorations
+                .elements_rounded(
+                    arranged,
+                    appearance,
+                    output,
+                    frame.bounds(),
+                    frame.scale,
+                    drawn,
+                    renderer,
+                )
+                .into_iter()
+                .map(map_ring)
+                .collect();
+            rings.floating = decorations
+                .floating_elements_rounded(
+                    arranged,
+                    appearance,
+                    output,
+                    frame.bounds(),
+                    frame.scale,
+                    drawn,
+                    renderer,
+                    &mut rings.spans,
+                )
+                .into_iter()
+                .map(map_ring)
+                .collect();
+        }
+        (Some(arranged), Some(output)) => {
+            rings.tiled = decorations
+                .elements(
+                    arranged,
+                    appearance,
+                    output,
+                    frame.bounds(),
+                    frame.scale,
+                    drawn,
+                )
+                .into_iter()
+                .map(Elements::Decoration)
+                .collect();
+            rings.floating = decorations
+                .floating_elements(
+                    arranged,
+                    appearance,
+                    output,
+                    frame.bounds(),
+                    frame.scale,
+                    drawn,
+                    &mut rings.spans,
+                )
+                .into_iter()
+                .map(Elements::Decoration)
+                .collect();
+        }
+        _ => {}
     }
+    rings
+}
+
+/// The floating windows' rings on their way into [`window_elements`], which
+/// puts each directly after (under) its own window's elements.
+struct FloatingRings<R: Renderer> {
+    elements: Vec<Elements<R>>,
+    spans: Vec<(WindowId, usize)>,
 }
 
 /// The windows this frame draws, front-most first: every window placed on
@@ -479,6 +559,7 @@ fn window_elements<R>(
     region: Rectangle<i32, Logical>,
     scale: f64,
     configured_radius: i32,
+    floating_rings: FloatingRings<R>,
 ) -> Vec<Elements<R>>
 where
     R: Renderer + ImportAll + ImportMem,
@@ -486,110 +567,153 @@ where
 {
     let mut out = Vec::new();
     let origin = Rect::new(region.loc.x, region.loc.y, region.size.w, region.size.h);
+    let mut rings = floating_rings.elements.into_iter();
+    let mut spans = floating_rings.spans.into_iter().peekable();
     // Back to front in storage, so reversed here: the same order
-    // `render_elements_for_region` gathers in.
+    // `render_elements_for_region` gathers in. Floating placements come
+    // after their workspace's tiled ones in the arrangement, so this meets
+    // them first, top of the stack first -- the order their rings were
+    // built in, so each window's run is the next one in `spans`.
     for placement in arrangement.placements.iter().rev() {
         if placement.output != output {
             continue;
         }
-        let Some(window) = windows.get(&placement.id) else {
-            continue;
-        };
-        // The mapped location, and from it the render location and the bbox
-        // (popups included) exactly as `InnerElement::render_location` and
-        // `InnerElement::bbox` compute them -- one space lookup rather than
-        // the two `element_location` + `element_bbox` would cost.
-        let Some(mapped) = space.element_location(window) else {
-            continue;
-        };
-        let geometry = window.geometry();
-        let render_location = mapped - geometry.loc;
-        // `SpaceElement::bbox` (popups included), not the inherent
-        // `Window::bbox` (the toplevel tree only), which is the one
-        // `InnerElement::bbox` reads.
-        let mut bbox = SpaceElement::bbox(window);
-        bbox.loc += render_location;
-        if !region.overlaps(bbox) {
-            continue;
-        }
-        let location = (render_location - region.loc).to_physical_precise_round(scale);
-        if configured_radius <= 0 {
-            out.extend(
-                AsRenderElements::<R>::render_elements::<WaylandSurfaceRenderElement<R>>(
-                    window,
-                    renderer,
-                    location,
-                    Scale::from(scale),
-                    1.0,
-                )
-                .into_iter()
-                .map(Elements::Surface),
-            );
-            continue;
-        }
-        // No X11 arm: without the `xwayland` feature `Wayland` is the only
-        // variant -- and if that ever changes this match fails to compile
-        // rather than silently dropping windows. With the feature the `X11`
-        // variant exists, and the Phase-1 skeleton answers it loudly: no
-        // X11 window can exist yet (nothing constructs
-        // `Window::new_x11_window` until Phase 2 maps one), so reaching
-        // here is a bug, and a bug that logs per frame beats one that
-        // silently drops the window -- or one that panics the session.
-        #[cfg(not(feature = "xwayland"))]
-        let WindowSurface::Wayland(toplevel) = window.underlying_surface();
-        #[cfg(feature = "xwayland")]
-        let WindowSurface::Wayland(toplevel) = window.underlying_surface() else {
-            tracing::error!(
-                "an X11 window reached the render path before Phase 2 maps one; skipping it"
-            );
-            continue;
-        };
-        let surface = toplevel.wl_surface();
-        for (popup, popup_offset) in PopupManager::popups_for_surface(surface) {
-            let offset = (geometry.loc + popup_offset - popup.geometry().loc)
-                .to_physical_precise_round(scale);
-            out.extend(
-                render_elements_from_surface_tree(
-                    renderer,
-                    popup.wl_surface(),
-                    location + offset,
-                    scale,
-                    1.0,
-                    Kind::Unspecified,
-                )
-                .into_iter()
-                .map(Elements::Surface),
-            );
-        }
-        let main: Vec<WaylandSurfaceRenderElement<R>> = render_elements_from_surface_tree(
+        push_window_elements(
+            space,
+            windows,
+            placement,
             renderer,
-            surface,
-            location,
+            region,
+            origin,
             scale,
-            1.0,
-            Kind::Unspecified,
+            configured_radius,
+            &mut out,
         );
-        // What the client drew, not the slot: a short client's corners are
-        // its own, and they are where the ring rounds too (`drawn.rs`).
-        let drawn = clamp_to_slot(placement.rect, geometry.size.w, geometry.size.h);
-        let clip = clip_rect(to_output_local(drawn, origin), scale);
-        // Never rounded while fullscreen: it covers the output edge to edge,
-        // and a rounded clip would cut its corners back to the background.
-        let radius = if placement.fullscreen {
-            0
-        } else {
-            physical_radius(configured_radius, clip, scale)
-        };
-        if radius > 0 {
-            out.extend(
-                main.into_iter()
-                    .map(|element| Elements::RoundedSurface(Rounded::new(element, clip, radius))),
-            );
-        } else {
-            out.extend(main.into_iter().map(Elements::Surface));
+        if placement.floating
+            && let Some(&(id, count)) = spans.peek()
+            && id == placement.id
+        {
+            out.extend(rings.by_ref().take(count));
+            spans.next();
         }
     }
     out
+}
+
+/// One window's elements, popups first, appended to `out` -- the body of
+/// [`window_elements`]'s walk. Pushes nothing for a window the space has not
+/// mapped (an invisible placement) or whose bounding box misses `region`.
+#[allow(clippy::too_many_arguments)]
+fn push_window_elements<R>(
+    space: &Space<Window>,
+    windows: &HashMap<WindowId, Window>,
+    placement: &Placement,
+    renderer: &mut R,
+    region: Rectangle<i32, Logical>,
+    origin: Rect,
+    scale: f64,
+    configured_radius: i32,
+    out: &mut Vec<Elements<R>>,
+) where
+    R: Renderer + ImportAll + ImportMem,
+    R::TextureId: Texture + Send + Clone + 'static,
+{
+    let Some(window) = windows.get(&placement.id) else {
+        return;
+    };
+    // The mapped location, and from it the render location and the bbox
+    // (popups included) exactly as `InnerElement::render_location` and
+    // `InnerElement::bbox` compute them -- one space lookup rather than
+    // the two `element_location` + `element_bbox` would cost.
+    let Some(mapped) = space.element_location(window) else {
+        return;
+    };
+    let geometry = window.geometry();
+    let render_location = mapped - geometry.loc;
+    // `SpaceElement::bbox` (popups included), not the inherent
+    // `Window::bbox` (the toplevel tree only), which is the one
+    // `InnerElement::bbox` reads.
+    let mut bbox = SpaceElement::bbox(window);
+    bbox.loc += render_location;
+    if !region.overlaps(bbox) {
+        return;
+    }
+    let location = (render_location - region.loc).to_physical_precise_round(scale);
+    if configured_radius <= 0 {
+        out.extend(
+            AsRenderElements::<R>::render_elements::<WaylandSurfaceRenderElement<R>>(
+                window,
+                renderer,
+                location,
+                Scale::from(scale),
+                1.0,
+            )
+            .into_iter()
+            .map(Elements::Surface),
+        );
+        return;
+    }
+    // No X11 arm: without the `xwayland` feature `Wayland` is the only
+    // variant -- and if that ever changes this match fails to compile
+    // rather than silently dropping windows. With the feature the `X11`
+    // variant exists, and the Phase-1 skeleton answers it loudly: no
+    // X11 window can exist yet (nothing constructs
+    // `Window::new_x11_window` until Phase 2 maps one), so reaching
+    // here is a bug, and a bug that logs per frame beats one that
+    // silently drops the window -- or one that panics the session.
+    #[cfg(not(feature = "xwayland"))]
+    let WindowSurface::Wayland(toplevel) = window.underlying_surface();
+    #[cfg(feature = "xwayland")]
+    let WindowSurface::Wayland(toplevel) = window.underlying_surface() else {
+        tracing::error!(
+            "an X11 window reached the render path before Phase 2 maps one; skipping it"
+        );
+        return;
+    };
+    let surface = toplevel.wl_surface();
+    for (popup, popup_offset) in PopupManager::popups_for_surface(surface) {
+        let offset =
+            (geometry.loc + popup_offset - popup.geometry().loc).to_physical_precise_round(scale);
+        out.extend(
+            render_elements_from_surface_tree(
+                renderer,
+                popup.wl_surface(),
+                location + offset,
+                scale,
+                1.0,
+                Kind::Unspecified,
+            )
+            .into_iter()
+            .map(Elements::Surface),
+        );
+    }
+    let main: Vec<WaylandSurfaceRenderElement<R>> = render_elements_from_surface_tree(
+        renderer,
+        surface,
+        location,
+        scale,
+        1.0,
+        Kind::Unspecified,
+    );
+    // What the client drew, not the slot: a short client's corners are
+    // its own, and they are where the ring rounds too (`drawn.rs`).
+    let drawn = clamp_to_slot(placement.rect, geometry.size.w, geometry.size.h);
+    let clip = clip_rect(to_output_local(drawn, origin), scale);
+    // Never rounded while fullscreen: it covers the output edge to edge,
+    // and a rounded clip would cut its corners back to the background.
+    let radius = if placement.fullscreen {
+        0
+    } else {
+        physical_radius(configured_radius, clip, scale)
+    };
+    if radius > 0 {
+        out.extend(
+            main.into_iter()
+                .map(|element| Elements::RoundedSurface(Rounded::new(element, clip, radius))),
+        );
+    } else {
+        out.extend(main.into_iter().map(Elements::Surface));
+    }
 }
 
 /// Appends the render elements of every mapped layer surface on `layers`,

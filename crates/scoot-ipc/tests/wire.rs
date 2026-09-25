@@ -89,6 +89,33 @@ fn toggle_fullscreen_travels_as_a_bare_snake_case_tag() {
 }
 
 #[test]
+fn the_floating_actions_travel_as_snake_case() {
+    for (request, expected) in [
+        (
+            Request::Action(Action::ToggleFloating),
+            json!({ "type": "action", "action": "toggle_floating" }),
+        ),
+        (
+            Request::Action(Action::SetFloating {
+                id: 7,
+                floating: false,
+            }),
+            json!({ "type": "action", "action": "set_floating", "id": 7, "floating": false }),
+        ),
+        (
+            Request::Action(Action::ToggleFloatingFocus),
+            json!({ "type": "action", "action": "toggle_floating_focus" }),
+        ),
+    ] {
+        assert_eq!(json_of(&request), expected);
+        assert_eq!(
+            decode::<Request>(&encode(&request).unwrap()).unwrap(),
+            request
+        );
+    }
+}
+
+#[test]
 fn set_fullscreen_travels_as_snake_case_with_an_id_and_a_bool() {
     let request = Request::Action(Action::SetFullscreen {
         id: 7,
@@ -121,6 +148,27 @@ fn a_window_snapshot_carries_fullscreen_and_defaults_it_when_absent() {
     )
     .unwrap();
     assert!(new.fullscreen);
+    assert_eq!(
+        decode::<WindowSnapshot>(&encode(&new).unwrap()).unwrap(),
+        new
+    );
+}
+
+/// `floating` is additive and defaulted the same way: an older server's
+/// snapshot decodes as "not floating".
+#[test]
+fn a_window_snapshot_carries_floating_and_defaults_it_when_absent() {
+    let old: WindowSnapshot = decode(
+        r#"{"id":1,"app_id":"zenity","title":"Question","output":1,"rect":{"x":0,"y":0,"width":300,"height":200},"visible":true,"focused":true,"fullscreen":false}"#,
+    )
+    .expect("an older server's window snapshot still decodes");
+    assert!(!old.floating);
+
+    let new: WindowSnapshot = decode(
+        r#"{"id":1,"app_id":"zenity","title":"Question","output":1,"rect":{"x":0,"y":0,"width":300,"height":200},"visible":true,"focused":true,"fullscreen":false,"floating":true}"#,
+    )
+    .unwrap();
+    assert!(new.floating);
     assert_eq!(
         decode::<WindowSnapshot>(&encode(&new).unwrap()).unwrap(),
         new
@@ -534,6 +582,7 @@ fn a_window_snapshot_carries_its_popup_grab_on_the_wire() {
         focused: false,
         popup_grab: true,
         fullscreen: false,
+        floating: true,
     };
     assert_eq!(
         json_of(&snapshot),
@@ -548,6 +597,7 @@ fn a_window_snapshot_carries_its_popup_grab_on_the_wire() {
             "focused": false,
             "popup_grab": true,
             "fullscreen": false,
+            "floating": true,
         })
     );
     assert_eq!(

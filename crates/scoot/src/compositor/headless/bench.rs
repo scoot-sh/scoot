@@ -125,6 +125,7 @@ fn scene_outputs(windows: u64, outputs: i32) -> Fixture {
                 app_id: "bench".to_string(),
                 title: "bench".to_string(),
                 hints: Default::default(),
+                parent: None,
             },
             output: None,
             focus: true,

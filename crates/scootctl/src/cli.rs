@@ -46,6 +46,7 @@ pub const ACTIONS_HELP: &str = "\
     focus-window|move-window                    up|down
     focus-workspace|move-window-to-workspace    up|down
     focus-window-id ID | focus-workspace-index N | move-window-to-workspace-index N | focus-output ID | move-window-to-output ID | cycle-column-width | set-column-width N | toggle-fullscreen | set-fullscreen ID on|off | close | spawn COMMAND... | quit
+    toggle-floating | set-floating ID on|off | toggle-floating-focus
 ";
 
 pub const USAGE: &str = "\
@@ -78,6 +79,7 @@ ACTIONS:
     focus-window|move-window                    up|down
     focus-workspace|move-window-to-workspace    up|down
     focus-window-id ID | focus-workspace-index N | move-window-to-workspace-index N | focus-output ID | move-window-to-output ID | cycle-column-width | set-column-width N | toggle-fullscreen | set-fullscreen ID on|off | close | spawn COMMAND... | quit
+    toggle-floating | set-floating ID on|off | toggle-floating-focus
 ";
 
 #[derive(Debug, PartialEq)]
@@ -312,6 +314,21 @@ pub fn action(args: &mut impl Iterator<Item = String>) -> Result<Action, Error> 
                 }
             },
         },
+        "toggle-floating" => Action::ToggleFloating,
+        "set-floating" => Action::SetFloating {
+            id: number("a window id", args.next())?,
+            floating: match args.next().ok_or(Error::Missing("on or off"))?.as_str() {
+                "on" => true,
+                "off" => false,
+                other => {
+                    return Err(Error::Invalid {
+                        what: "floating state",
+                        value: other.to_owned(),
+                    });
+                }
+            },
+        },
+        "toggle-floating-focus" => Action::ToggleFloatingFocus,
         "close" => Action::CloseFocused,
         "spawn" => {
             let command: Vec<String> = args.collect();
@@ -620,6 +637,39 @@ mod tests {
         assert!(parse_msg_args(&["action", "set-fullscreen", "7", "yes"]).is_err());
         assert!(parse_msg_args(&["action", "set-fullscreen", "on"]).is_err());
         assert!(parse_msg_args(&["action", "set-fullscreen"]).is_err());
+    }
+
+    #[test]
+    fn the_floating_toggles_take_no_argument() {
+        for (word, action) in [
+            ("toggle-floating", Action::ToggleFloating),
+            ("toggle-floating-focus", Action::ToggleFloatingFocus),
+        ] {
+            assert_eq!(
+                parse_msg_args(&["action", word]),
+                Ok(Msg {
+                    request: Request::Action(action),
+                    out: None,
+                })
+            );
+        }
+    }
+
+    #[test]
+    fn set_floating_takes_a_window_id_and_on_or_off() {
+        for (word, floating) in [("on", true), ("off", false)] {
+            assert_eq!(
+                parse_msg_args(&["action", "set-floating", "7", word]),
+                Ok(Msg {
+                    request: Request::Action(Action::SetFloating { id: 7, floating }),
+                    out: None,
+                })
+            );
+        }
+        assert!(parse_msg_args(&["action", "set-floating", "7"]).is_err());
+        assert!(parse_msg_args(&["action", "set-floating", "7", "yes"]).is_err());
+        assert!(parse_msg_args(&["action", "set-floating", "on"]).is_err());
+        assert!(parse_msg_args(&["action", "set-floating"]).is_err());
     }
 
     #[test]

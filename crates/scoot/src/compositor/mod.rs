@@ -19,6 +19,7 @@ mod drawn;
 mod drm_syncobj;
 mod ext_workspace;
 mod fd_pressure;
+mod floating;
 mod foreign_toplevel;
 mod foreign_toplevel_management;
 mod fullscreen;
@@ -62,6 +63,7 @@ mod tablet;
 mod toplevel_icon;
 mod tty;
 mod wayland_accept;
+mod window_rules;
 mod wl_buffers;
 mod xwayland;
 
@@ -151,6 +153,8 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
     );
     state.startup_gpu = loaded.gpu.clone();
     state.startup_autostart = loaded.autostart.clone();
+    // Which windows float when they map: what a reload diffs against too.
+    state.floating_rules = loaded.floating.clone();
 
     // `--tty` picks its own size from the connector's preferred mode (or
     // the `--mode` the user named) -- there's no host to negotiate a size

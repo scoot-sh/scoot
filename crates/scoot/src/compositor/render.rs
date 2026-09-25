@@ -68,7 +68,9 @@ use crate::cli::RendererKind;
 
 use super::State;
 use super::tty::Tty;
-use elements::{Elements, FrameContext, ring_elements};
+#[cfg(feature = "gpu-scanout")]
+use elements::Elements;
+use elements::{FrameContext, Rings, ring_elements};
 use gles::{GlesBackend, GlesDevice};
 use pixman::PixmanBackend;
 
@@ -1345,7 +1347,7 @@ where
     } else {
         Some(state.world.arrange())
     };
-    let ring_elements: Vec<Elements<R>> = ring_elements(
+    let ring_elements: Rings<R> = ring_elements(
         &mut state.decorations,
         &state.appearance,
         &state.windows,
@@ -1535,7 +1537,7 @@ where
     } else {
         Some(state.world.arrange())
     };
-    let ring_elements: Vec<Elements<_>> = ring_elements(
+    let ring_elements: Rings<_> = ring_elements(
         &mut state.decorations,
         &state.appearance,
         &state.windows,
