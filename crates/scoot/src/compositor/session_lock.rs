@@ -1317,6 +1317,9 @@ impl State {
         // to whatever the pointer had pending, so re-deriving afterwards is
         // what gets the final word.
         self.drop_input_grabs();
+        // A floating window's drag was one of those grabs: the arrangement
+        // it asked for, before focus is re-derived against it.
+        self.settle_floating_grab();
         // Deactivate a held pointer lock or confinement before the refresh
         // below: a zero-delta refresh against either resolves to holding
         // focus in place, so without this the lock transition would leave
@@ -1351,6 +1354,8 @@ impl State {
     ///   `WaylandDndGrabHandler` at a client's own request. It ends only when
     ///   the drag does, and while it lasts it routes pointer events through
     ///   `DnDGrab` rather than through focus at all.
+    /// - **A floating window's move or resize** (`floating/grab.rs`), which
+    ///   would otherwise keep dragging a window behind the lock screen.
     /// - **The implicit click grab**, which is not scoot's code but is
     ///   nonetheless installed on *every* button press: Smithay's
     ///   `DefaultGrab::button` calls `SeatHandler::click_grab` (scoot takes

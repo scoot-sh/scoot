@@ -144,6 +144,18 @@ pub struct State {
     /// what decides at a window's first commit whether it floats. Set from
     /// the config after `State::new` and swapped whole by a reload.
     pub floating_rules: super::window_rules::FloatingRules,
+    /// `[floating] modifier`: held with the left button to move a floating
+    /// window, with the right to resize it (see `floating/grab.rs`). Set
+    /// from the config after `State::new` and by a reload.
+    pub floating_modifier: scoot_ipc::Modifier,
+    /// Set by a floating window's pointer grab when the arrangement needs a
+    /// full `apply()` -- the grab ended, or carried its window to another
+    /// output -- which the grab cannot run itself: its callbacks run inside
+    /// Smithay's pointer lock, and `apply()` can reach the pointer. Drained
+    /// by `State::settle_floating_grab` once the pointer call that ran the
+    /// grab has returned, and cleared by any `apply()`, which is what it
+    /// asks for.
+    pub(super) floating_grab_resync: bool,
     /// What `dmabuf::advertise` put on the `zwp_linux_dmabuf_v1` global --
     /// the default feedback, and the builder and table behind it -- or
     /// `None` when nothing was advertised (a renderer-less harness, a
@@ -934,6 +946,8 @@ impl State {
             floating_cover: 0,
             awaiting_map: Vec::new(),
             floating_rules: super::window_rules::FloatingRules::default(),
+            floating_modifier: super::window_rules::DEFAULT_DRAG_MODIFIER,
+            floating_grab_resync: false,
             #[cfg(feature = "gpu-scanout")]
             dmabuf_default: None,
             #[cfg(feature = "gpu-scanout")]

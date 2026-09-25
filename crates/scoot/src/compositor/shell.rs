@@ -55,6 +55,11 @@ impl State {
     }
 
     pub fn remove_window(&mut self, id: WindowId) {
+        // A drag of this window ends now rather than at the next motion; the
+        // `apply()` below is the one it asks for.
+        if self.floating_grab_window() == Some(id) {
+            self.end_floating_grab();
+        }
         if let Some(window) = self.windows.remove(&id) {
             self.space.unmap_elem(&window);
             output_clip::unstamp(&window);
@@ -258,6 +263,8 @@ impl State {
 
     /// Pushes the core's arrangement onto the windows: position, size, focus.
     pub fn apply(&mut self) {
+        // What a floating grab's resync asks for is exactly this.
+        self.floating_grab_resync = false;
         let arrangement = self.world.arrange();
         for placement in &arrangement.placements {
             let Some(window) = self.windows.get(&placement.id).cloned() else {
@@ -457,7 +464,7 @@ impl State {
         keyboard.set_focus(self, surface, serial);
     }
 
-    fn info_of(&self, id: WindowId) -> WindowInfo {
+    pub(super) fn info_of(&self, id: WindowId) -> WindowInfo {
         let Some(toplevel) = self.window(id).and_then(Window::toplevel) else {
             return WindowInfo::default();
         };
@@ -478,17 +485,18 @@ impl State {
                 return (WindowInfo::default(), None);
             };
             let attributes = data.lock().expect("toplevel attributes");
-            let min = states
-                .cached_state
-                .get::<SurfaceCachedState>()
-                .current()
-                .min_size;
+            let mut limits = states.cached_state.get::<SurfaceCachedState>();
+            let (min, max) = (limits.current().min_size, limits.current().max_size);
             (
                 WindowInfo {
                     app_id: attributes.app_id.clone().unwrap_or_default(),
                     title: attributes.title.clone().unwrap_or_default(),
                     hints: SizeHints {
                         min: clamp_hint(Size::new(min.w, min.h), limit),
+                        // A maximum only ever shrinks what a floating resize
+                        // asks for, so it needs no upper bound; a negative
+                        // one is none.
+                        max: Size::new(max.w.max(0), max.h.max(0)),
                     },
                     parent: None,
                 },

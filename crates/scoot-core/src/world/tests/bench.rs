@@ -120,4 +120,52 @@ fn arrange_cost() {
     }
     floating.handle_action(Action::ToggleFloatingFocus);
     measure("floating", floating);
+    // Floating dialogs of a floating window (a floated app with two dialogs
+    // open), the parent focused and so raised above them: the arrangement
+    // then draws the dialogs above it (`floating_order.rs`), the path that
+    // builds the drawing order.
+    let mut dialogs = scene();
+    add_floating_chain(&mut dialogs, &[None, Some(0), Some(0)]);
+    dialogs.handle_action(Action::FocusWindowId(WindowId(WINDOWS + 1)));
+    dialogs.handle_action(Action::ToggleFloatingFocus);
+    measure("floating dialogs", dialogs);
+    // The worst case a client can build for that path: 64 floating windows,
+    // each the dialog of the one before, the bottom one focused (raised
+    // over all of them).
+    let mut chain = scene();
+    let parents: Vec<Option<usize>> = (0..64).map(|i: usize| i.checked_sub(1)).collect();
+    add_floating_chain(&mut chain, &parents);
+    chain.handle_action(Action::FocusWindowId(WindowId(WINDOWS + 1)));
+    chain.handle_action(Action::ToggleFloatingFocus);
+    measure("floating chain of 64", chain);
+    let mut long = scene();
+    let parents: Vec<Option<usize>> = (0..1000).map(|i: usize| i.checked_sub(1)).collect();
+    add_floating_chain(&mut long, &parents);
+    long.handle_action(Action::FocusWindowId(WindowId(WINDOWS + 1)));
+    long.handle_action(Action::ToggleFloatingFocus);
+    measure("floating chain of 1000", long);
+}
+
+/// Opens one floating window per entry after the scene's windows, drawn
+/// 300x200, each transient for the entry's earlier window (by position in
+/// the list) when it names one.
+fn add_floating_chain(world: &mut World, parents: &[Option<usize>]) {
+    for (index, parent) in parents.iter().enumerate() {
+        let id = WINDOWS + 1 + index as u64;
+        let info = WindowInfo {
+            parent: parent.map(|p| WindowId(WINDOWS + 1 + p as u64)),
+            ..WindowInfo::default()
+        };
+        open_with(world, id, info);
+        world.handle_event(Event::FloatingRequested {
+            id: WindowId(id),
+            floating: true,
+            size: None,
+        });
+        world.handle_event(Event::FrameObserved {
+            id: WindowId(id),
+            requested: crate::Size::default(),
+            actual: crate::Size::new(300, 200),
+        });
+    }
 }

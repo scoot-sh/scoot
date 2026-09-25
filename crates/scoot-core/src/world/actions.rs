@@ -106,6 +106,8 @@ impl World {
             Action::ToggleFloating => self.toggle_floating(),
             Action::SetFloating { id, floating } => self.set_floating(id, floating, None),
             Action::ToggleFloatingFocus => self.toggle_floating_focus(),
+            Action::MoveFloating { id, x, y } => self.move_floating(id, x, y),
+            Action::ResizeFloating { id, size, edges } => self.resize_floating(id, size, edges),
             Action::CloseFocused => {
                 return self
                     .focused_window()

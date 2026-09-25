@@ -138,6 +138,35 @@ pub enum Action {
     /// `scoot_core::Action::ToggleFloatingFocus`. Does nothing when the other
     /// side is empty. Additive: no `PROTOCOL_VERSION` bump.
     ToggleFloatingFocus,
+    /// Move a floating window so its top-left corner is at `x`, `y`, in the
+    /// same global logical coordinates `scootctl windows` reports `rect` in
+    /// -- the wire half of `scoot_core::Action::MoveFloating`. Clamped
+    /// inside the usable area of the output it lands on (`windows` then
+    /// reports where it went); a position over another output moves it to
+    /// that output's active workspace. It does not move focus (unless the
+    /// window was focused, when focus goes with it to another output). An
+    /// unknown id, a tiled window and a fullscreen one do nothing. Additive:
+    /// a client that never sends this tag decodes exactly as before, so no
+    /// `PROTOCOL_VERSION` bump.
+    MoveFloating {
+        id: u64,
+        x: i32,
+        y: i32,
+    },
+    /// Ask a floating window to take `width` x `height` logical pixels,
+    /// keeping its top-left corner -- the wire half of
+    /// `scoot_core::Action::ResizeFloating` with the bottom-right edges
+    /// moving. Clamped to the window's own minimum and maximum size and to
+    /// the room between its top-left corner and the usable area's bottom
+    /// right, and to at least 1; the window draws the new size when it
+    /// answers the configure, so `windows` reports it a frame or so later.
+    /// An unknown id, a tiled window and a fullscreen one do nothing.
+    /// Additive like the move: no `PROTOCOL_VERSION` bump.
+    ResizeFloating {
+        id: u64,
+        width: u32,
+        height: u32,
+    },
     CloseFocused,
     Spawn {
         command: Vec<String>,

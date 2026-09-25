@@ -120,6 +120,30 @@ pub enum Vertical {
     Down,
 }
 
+/// Which edges of a floating window a resize moves
+/// ([`Action::ResizeFloating`]). The edges not named stay where they are.
+/// Naming both edges of an axis is read as its far edge alone (`right`,
+/// `bottom`); naming neither leaves that axis's size as it is.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Edges {
+    pub left: bool,
+    pub right: bool,
+    pub top: bool,
+    pub bottom: bool,
+}
+
+impl Edges {
+    /// The bottom-right corner: a resize that keeps the top-left corner
+    /// where it is -- what a size set by number, rather than dragged,
+    /// means.
+    pub const BOTTOM_RIGHT: Self = Self {
+        left: false,
+        right: true,
+        top: false,
+        bottom: true,
+    };
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Action {
     FocusColumn(Horizontal),
@@ -325,6 +349,50 @@ pub enum Action {
     /// window) and its strip (the strip's focused window). Does nothing
     /// when the side focus would move to is empty.
     ToggleFloatingFocus,
+    /// Move a floating window so its top-left corner is at `x`, `y` (global
+    /// logical coordinates): what a pointer drag and an agent both ask for.
+    ///
+    /// - **Clamped** inside the usable area of the output it lands on, like
+    ///   every floating placement; the position it is actually placed at is
+    ///   what [`World::arrange`](crate::World::arrange) reports.
+    /// - **Onto another output**: when the middle of the rect asked for is
+    ///   over another output's area, the window moves to that output's
+    ///   active workspace, on top of its floating layer. Focus goes with it
+    ///   when it was the focused window. A middle over no output keeps it
+    ///   on its own output, clamped there.
+    /// - **Kept**: the window stays where it was put. A window that resizes
+    ///   itself afterwards keeps the point it was last held by (see
+    ///   [`Action::ResizeFloating`]; its middle, until it was resized), and
+    ///   one whose output changes size is re-centred, as when it first
+    ///   floated.
+    ///
+    /// Floating windows never change the strip, so this never moves a tiled
+    /// window. An unknown id, a tiled window and a fullscreen one are
+    /// ignored, and so is a window on an output with no usable area.
+    MoveFloating {
+        id: WindowId,
+        x: i32,
+        y: i32,
+    },
+    /// Resize a floating window by moving the `edges` named: the size asked
+    /// for becomes the size the window is asked to take (it is no longer
+    /// left to choose its own), and the edges not named stay put -- when the
+    /// window draws its new size, it grows or shrinks away from them. A
+    /// pointer resize names the edges it drags; a size set by number names
+    /// [`Edges::BOTTOM_RIGHT`], keeping the top-left corner.
+    ///
+    /// The size is clamped, per axis being resized: to the window's own
+    /// limits ([`SizeHints`](crate::SizeHints), the minimum winning where
+    /// they disagree), to the room between the edge that stays and the far
+    /// side of the usable area (so a resize never pushes the fixed edge),
+    /// and to at least 1. An axis not being resized keeps the size the
+    /// window is placed at. Unknown, tiled and fullscreen windows are
+    /// ignored, like [`Action::MoveFloating`].
+    ResizeFloating {
+        id: WindowId,
+        size: Size,
+        edges: Edges,
+    },
     CloseFocused,
     Spawn(Vec<String>),
     Quit,

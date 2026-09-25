@@ -4,12 +4,15 @@
 //! [`World::handle_event`] lives in `events.rs`, [`World::handle_action`] in
 //! `actions.rs`, and [`World::arrange`] in `arrange.rs`. The tree they all
 //! operate on is in `tree.rs`, fullscreen's rules in `fullscreen.rs` and
-//! floating's in `floating.rs`.
+//! floating's in `floating.rs` (moving and resizing in `floating_move.rs`,
+//! the drawing order in `floating_order.rs`).
 
 mod actions;
 mod arrange;
 mod events;
 mod floating;
+mod floating_move;
+mod floating_order;
 mod fullscreen;
 mod tree;
 
@@ -19,6 +22,7 @@ mod tests;
 use std::collections::HashMap;
 
 pub use arrange::{Arrangement, Placement};
+pub use floating_move::FloatingGeometry;
 
 use crate::config::Config;
 use crate::geometry::Rect;
@@ -284,7 +288,7 @@ impl World {
                 // old one's area means nothing on a screen of another size.
                 if let Some(floating) = self.windows.get_mut(&id).and_then(|w| w.floating.as_mut())
                 {
-                    floating.centre = None;
+                    floating.anchor = None;
                 }
                 target.push_floating(id, true);
             }

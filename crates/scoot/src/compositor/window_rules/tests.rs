@@ -98,7 +98,10 @@ fn the_heuristics_float_dialogs_transients_and_fixed_sizes() {
 #[test]
 fn auto_off_turns_every_heuristic_off() {
     let (rules, _) = FloatingRules::from_config(
-        Some(FloatingConfig { auto: Some(false) }),
+        Some(FloatingConfig {
+            auto: Some(false),
+            modifier: None,
+        }),
         &[rule(Some("foot"), None, Some(true))],
     );
     let dialog = MapSignals {
@@ -200,4 +203,33 @@ fn the_largest_sizes_are_accepted() {
         rules.decide(&signals("a", "")).size,
         Some(Size::new(65_535, 1))
     );
+}
+
+#[test]
+fn the_drag_modifier_defaults_to_super_and_takes_any_modifier_name() {
+    let named = |name: &str| FloatingConfig {
+        auto: None,
+        modifier: Some(name.to_owned()),
+    };
+    assert_eq!(drag_modifier(None), Modifier::Super);
+    assert_eq!(
+        drag_modifier(Some(&FloatingConfig::default())),
+        Modifier::Super
+    );
+    for (name, expected) in [
+        ("alt", Modifier::Alt),
+        ("ALT", Modifier::Alt),
+        (" ctrl ", Modifier::Ctrl),
+        ("control", Modifier::Ctrl),
+        ("shift", Modifier::Shift),
+        ("logo", Modifier::Super),
+        ("super", Modifier::Super),
+    ] {
+        assert_eq!(drag_modifier(Some(&named(name))), expected, "{name}");
+    }
+    // Not a single modifier: the default, with a warning, never a refusal
+    // of the whole file.
+    for name in ["", "hyper", "super+shift", "a"] {
+        assert_eq!(drag_modifier(Some(&named(name))), Modifier::Super, "{name}");
+    }
 }

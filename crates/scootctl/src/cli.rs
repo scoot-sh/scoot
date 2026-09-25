@@ -47,6 +47,7 @@ pub const ACTIONS_HELP: &str = "\
     focus-workspace|move-window-to-workspace    up|down
     focus-window-id ID | focus-workspace-index N | move-window-to-workspace-index N | focus-output ID | move-window-to-output ID | cycle-column-width | set-column-width N | toggle-fullscreen | set-fullscreen ID on|off | close | spawn COMMAND... | quit
     toggle-floating | set-floating ID on|off | toggle-floating-focus
+    move-floating ID X Y | resize-floating ID WIDTH HEIGHT
 ";
 
 pub const USAGE: &str = "\
@@ -80,6 +81,7 @@ ACTIONS:
     focus-workspace|move-window-to-workspace    up|down
     focus-window-id ID | focus-workspace-index N | move-window-to-workspace-index N | focus-output ID | move-window-to-output ID | cycle-column-width | set-column-width N | toggle-fullscreen | set-fullscreen ID on|off | close | spawn COMMAND... | quit
     toggle-floating | set-floating ID on|off | toggle-floating-focus
+    move-floating ID X Y | resize-floating ID WIDTH HEIGHT
 ";
 
 #[derive(Debug, PartialEq)]
@@ -329,6 +331,16 @@ pub fn action(args: &mut impl Iterator<Item = String>) -> Result<Action, Error> 
             },
         },
         "toggle-floating-focus" => Action::ToggleFloatingFocus,
+        "move-floating" => Action::MoveFloating {
+            id: number("a window id", args.next())?,
+            x: number("an x coordinate", args.next())?,
+            y: number("a y coordinate", args.next())?,
+        },
+        "resize-floating" => Action::ResizeFloating {
+            id: number("a window id", args.next())?,
+            width: number("a width", args.next())?,
+            height: number("a height", args.next())?,
+        },
         "close" => Action::CloseFocused,
         "spawn" => {
             let command: Vec<String> = args.collect();
@@ -652,6 +664,41 @@ mod tests {
                     out: None,
                 })
             );
+        }
+    }
+
+    #[test]
+    fn the_floating_geometry_actions_take_an_id_and_two_numbers() {
+        assert_eq!(
+            parse_msg_args(&["action", "move-floating", "7", "-30", "40"]),
+            Ok(Msg {
+                request: Request::Action(Action::MoveFloating {
+                    id: 7,
+                    x: -30,
+                    y: 40
+                }),
+                out: None,
+            })
+        );
+        assert_eq!(
+            parse_msg_args(&["action", "resize-floating", "7", "640", "480"]),
+            Ok(Msg {
+                request: Request::Action(Action::ResizeFloating {
+                    id: 7,
+                    width: 640,
+                    height: 480
+                }),
+                out: None,
+            })
+        );
+        for bad in [
+            &["action", "move-floating", "7", "10"][..],
+            &["action", "move-floating", "7", "x", "10"],
+            &["action", "resize-floating", "7", "-1", "10"],
+            &["action", "resize-floating", "7", "640"],
+            &["action", "resize-floating"],
+        ] {
+            assert!(parse_msg_args(bad).is_err(), "{bad:?}");
         }
     }
 

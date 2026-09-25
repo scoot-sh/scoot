@@ -62,7 +62,9 @@ use super::decorations::{Appearance, Color};
 use super::input::keysym_named;
 use super::keybindings::{Bound, Keybindings, Modifiers};
 use super::output_scale::{MAX_SCALE, MIN_SCALE, clamp_scale};
-use super::window_rules::{FloatingConfig, FloatingRules, WindowRuleConfig};
+use super::window_rules::{
+    DEFAULT_DRAG_MODIFIER, FloatingConfig, FloatingRules, WindowRuleConfig, drag_modifier,
+};
 
 /// `[layout]`. Mirrors `scoot_core::Config` field-for-field, each optional
 /// so a partial table (e.g. just `gap`) leaves the rest at their defaults
@@ -413,6 +415,10 @@ pub struct LoadedConfig {
     /// it by its position in the file and why -- what a reload lists in its
     /// `refused` reply. Empty when every rule was usable.
     pub skipped_rules: Vec<String>,
+    /// `[floating] modifier`: held with the left button to move a floating
+    /// window and with the right button to resize one (see
+    /// `floating/grab.rs`). Super unless the file names another modifier.
+    pub floating_modifier: scoot_ipc::Modifier,
 }
 
 impl LoadedConfig {
@@ -428,6 +434,7 @@ impl LoadedConfig {
             autostart: Vec::new(),
             floating: FloatingRules::default(),
             skipped_rules: Vec::new(),
+            floating_modifier: DEFAULT_DRAG_MODIFIER,
         }
     }
 
@@ -454,6 +461,7 @@ impl LoadedConfig {
         let xwayland = file.xwayland.unwrap_or_default().enabled.unwrap_or(false);
         let autostart = file.autostart.unwrap_or_default().into_actions();
         let keybindings = keybindings_for(&file.binds, vt);
+        let floating_modifier = drag_modifier(file.floating.as_ref());
         let (floating, skipped_rules) =
             FloatingRules::from_config(file.floating, &file.window_rule);
         for skipped in &skipped_rules {
@@ -470,6 +478,7 @@ impl LoadedConfig {
             autostart,
             floating,
             skipped_rules,
+            floating_modifier,
         }
     }
 }
@@ -722,6 +731,15 @@ pub fn default_config_toml() -> String {
          # when this is off.\n",
     );
     out.push_str(&format!("# auto = {}\n", FloatingRules::default().auto));
+    out.push_str(
+        "# Held with the left button to move a floating window, and with the\n\
+         # right button to resize it from the nearest edge or corner: super,\n\
+         # alt, ctrl or shift.\n",
+    );
+    out.push_str(&format!(
+        "# modifier = \"{}\"\n",
+        DEFAULT_DRAG_MODIFIER.name()
+    ));
 
     out.push_str("\n# [[window_rule]] -- repeat the table for more rules. Each rule names at\n");
     out.push_str("# least one whole-string glob (* any run, ? one character, case-sensitive)\n");
@@ -865,6 +883,18 @@ fn action_string(action: &Action) -> String {
             if *floating { "on" } else { "off" }
         ),
         Action::ToggleFloatingFocus => "toggle-floating-focus".to_owned(),
+        Action::MoveFloating { id, x, y } => format!("move-floating {} {x} {y}", id.0),
+        // Only the size-by-number form has a spelling (it keeps the top-left
+        // corner); a pointer resize's other edges exist only mid-drag and
+        // never reach a config file.
+        Action::ResizeFloating { id, size, .. } => {
+            format!(
+                "resize-floating {} {} {}",
+                id.0,
+                size.w.max(0),
+                size.h.max(0)
+            )
+        }
         Action::CloseFocused => "close".to_owned(),
         Action::Spawn(command) => format!("spawn {}", command.join(" ")),
         Action::Quit => "quit".to_owned(),
@@ -2804,6 +2834,10 @@ mod tests {
             loaded.floating,
             FloatingRules::default(),
             "the [floating] emission drifted"
+        );
+        assert_eq!(
+            loaded.floating_modifier, DEFAULT_DRAG_MODIFIER,
+            "the [floating] modifier emission drifted"
         );
         assert!(loaded.skipped_rules.is_empty());
         let defaults = Appearance::default();

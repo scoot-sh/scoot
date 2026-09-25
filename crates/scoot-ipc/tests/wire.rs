@@ -106,12 +106,45 @@ fn the_floating_actions_travel_as_snake_case() {
             Request::Action(Action::ToggleFloatingFocus),
             json!({ "type": "action", "action": "toggle_floating_focus" }),
         ),
+        (
+            Request::Action(Action::MoveFloating {
+                id: 7,
+                x: -30,
+                y: 40,
+            }),
+            json!({ "type": "action", "action": "move_floating", "id": 7, "x": -30, "y": 40 }),
+        ),
+        (
+            Request::Action(Action::ResizeFloating {
+                id: 7,
+                width: 640,
+                height: 480,
+            }),
+            json!({
+                "type": "action", "action": "resize_floating", "id": 7,
+                "width": 640, "height": 480
+            }),
+        ),
     ] {
         assert_eq!(json_of(&request), expected);
         assert_eq!(
             decode::<Request>(&encode(&request).unwrap()).unwrap(),
             request
         );
+    }
+}
+
+/// A negative size is refused at decode (the fields are unsigned), and so is
+/// a position past `i32`: an ordinary decode error the server answers, not a
+/// value that could reach the layout.
+#[test]
+fn floating_geometry_actions_refuse_out_of_range_numbers() {
+    for line in [
+        r#"{"type":"action","action":"resize_floating","id":7,"width":-1,"height":10}"#,
+        r#"{"type":"action","action":"move_floating","id":7,"x":2147483648,"y":0}"#,
+        r#"{"type":"action","action":"move_floating","id":7,"x":0}"#,
+    ] {
+        assert!(decode::<Request>(line).is_err(), "{line}");
     }
 }
 

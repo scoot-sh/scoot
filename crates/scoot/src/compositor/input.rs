@@ -230,6 +230,11 @@ impl State {
                 pointer.frame(self);
             }
         }
+        // A floating window dragged onto another output, or a drag that
+        // ended at this motion, asked for a full `apply()` it could not run
+        // inside the pointer lock (see `floating/grab.rs`). One `bool` test
+        // on every other motion.
+        self.settle_floating_grab();
     }
 
     /// Records a focus-changing motion's `enter` serial for the popup-grab
@@ -450,6 +455,15 @@ impl State {
             self.focus_under_pointer();
         }
         let serial = SERIAL_COUNTER.next_serial();
+        // After the focus change (which may `apply()`, outside any pointer
+        // lock) and before the press is delivered: a modifier press on a
+        // floating window starts dragging it, and the grab then swallows
+        // this press -- which also keeps it out of `interaction_serials`
+        // below, the grab having cleared pointer focus. See
+        // `floating/grab.rs`.
+        if pressed {
+            self.begin_modifier_drag(&pointer, button, serial);
+        }
         // Recorded against whoever `pointer.button` below is about to deliver
         // this to -- the surface the pointer last *entered*, which is what
         // the pointer's own focus is, not what is under it now and not
@@ -474,7 +488,7 @@ impl State {
         pointer.button(
             self,
             &ButtonEvent {
-                button: code(button),
+                button: button_code(button),
                 state,
                 serial,
                 time,
@@ -488,6 +502,9 @@ impl State {
         // client's follow-up traffic keeps the two in step within the same
         // event. One `Option` check when no menu is open.
         self.settle_popup_grab();
+        // A release (or a second press) that ended a floating window's drag
+        // did it inside the pointer lock; the arrangement catches up here.
+        self.settle_floating_grab();
     }
 
     pub fn scroll(&mut self, dx: f64, dy: f64) {
@@ -1096,7 +1113,9 @@ fn clamp_to_extent(value: f64, extent: i32) -> f64 {
     value.clamp(0.0, (extent - 1).max(0) as f64)
 }
 
-fn code(button: PointerButton) -> u32 {
+/// The Linux `BTN_*` code Wayland carries for a button (`pub(super)` for
+/// the floating grab, which ends on its own button's release).
+pub(super) fn button_code(button: PointerButton) -> u32 {
     match button {
         PointerButton::Left => BTN_LEFT,
         PointerButton::Right => BTN_RIGHT,

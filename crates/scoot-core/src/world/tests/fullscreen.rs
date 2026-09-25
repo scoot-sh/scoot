@@ -483,6 +483,7 @@ fn a_minimum_width_does_not_stop_it_covering() {
         WindowInfo {
             hints: SizeHints {
                 min: Size::new(700, 300),
+                ..SizeHints::default()
             },
             ..WindowInfo::default()
         },

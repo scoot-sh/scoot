@@ -38,6 +38,7 @@ use smithay::wayland::selection::wlr_data_control::{
     DataControlHandler as WlrDataControlHandler, DataControlState as WlrDataControlState,
 };
 use smithay::reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode;
+use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
 use smithay::wayland::shell::xdg::decoration::XdgDecorationHandler;
 use smithay::wayland::shell::xdg::{
     PopupSurface, PositionerState, ToplevelSurface, XDG_POPUP_ROLE, XdgShellHandler, XdgShellState,
@@ -405,6 +406,27 @@ impl XdgShellHandler for State {
 
     fn unfullscreen_request(&mut self, surface: ToplevelSurface) {
         self.client_fullscreen_request(&surface, false, None);
+    }
+
+    /// A CSD titlebar drag: honoured for a floating window while the press
+    /// it rides on is held, ignored for a tiled one -- see
+    /// `floating/grab.rs`.
+    fn move_request(&mut self, surface: ToplevelSurface, seat: wl_seat::WlSeat, serial: Serial) {
+        self.client_floating_drag(&surface, &seat, serial, None);
+    }
+
+    /// A CSD border drag: the same rules as `move_request`. `none` resizes
+    /// nothing.
+    fn resize_request(
+        &mut self,
+        surface: ToplevelSurface,
+        seat: wl_seat::WlSeat,
+        serial: Serial,
+        edges: xdg_toplevel::ResizeEdge,
+    ) {
+        if let Some(edges) = super::floating::grab::requested_edges(edges) {
+            self.client_floating_drag(&surface, &seat, serial, Some(edges));
+        }
     }
 
     /// Every `xdg_popup` is tracked here, whatever it will end up parented

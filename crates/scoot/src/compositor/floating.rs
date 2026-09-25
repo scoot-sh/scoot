@@ -39,6 +39,9 @@
 //!   re-applies the arrangement when one moved or resized it -- only then,
 //!   since a floating video commits at its frame rate.
 //!
+//! - **Moving and resizing** by pointer (a modifier drag, or the client's
+//!   own `xdg_toplevel.move`/`.resize`): `floating/grab.rs`.
+//!
 //! - **The pointer.** A dialog appears where the user just clicked, and
 //!   `wl_pointer.button` goes to the surface the pointer last *entered*, not
 //!   the one under it. [`State::refresh_floating_cover`] re-derives pointer
@@ -54,6 +57,7 @@ use smithay::wayland::shell::xdg::{SurfaceCachedState, ToplevelSurface, XdgTople
 use super::State;
 use super::window_rules::{Decision, MapSignals};
 
+pub(super) mod grab;
 #[cfg(test)]
 mod tests;
 

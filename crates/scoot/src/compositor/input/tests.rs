@@ -74,9 +74,9 @@ fn keysym_named_accepts_exact_and_case_insensitive_names() {
 
 #[test]
 fn button_codes_match_linux_input_event_codes() {
-    assert_eq!(code(PointerButton::Left), BTN_LEFT);
-    assert_eq!(code(PointerButton::Right), BTN_RIGHT);
-    assert_eq!(code(PointerButton::Middle), BTN_MIDDLE);
+    assert_eq!(button_code(PointerButton::Left), BTN_LEFT);
+    assert_eq!(button_code(PointerButton::Right), BTN_RIGHT);
+    assert_eq!(button_code(PointerButton::Middle), BTN_MIDDLE);
 }
 
 #[test]

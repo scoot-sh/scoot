@@ -9,10 +9,16 @@ pub struct WindowId(pub u64);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct OutputId(pub u64);
 
-/// Size limits a window asks for. A zero minimum means "none".
+/// Size limits a window asks for. A zero on either axis of either limit
+/// means "none" on that axis.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct SizeHints {
     pub min: Size,
+    /// The largest size the window says it can take. Read only when a
+    /// floating window is resized ([`Action::ResizeFloating`](crate::Action::ResizeFloating)):
+    /// the strip sizes columns from the output and the minimum alone. Where
+    /// it is below `min` on an axis, `min` wins.
+    pub max: Size,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

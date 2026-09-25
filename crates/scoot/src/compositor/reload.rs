@@ -69,6 +69,8 @@
 //!   (accepted spawns, refused non-spawns), which is why a second identical
 //!   reload is silent.
 //!
+//! - `[floating] modifier`: applied -- the next Mod+press reads it (a drag
+//!   under way when the reload lands carries on).
 //! - `[floating] auto` and `[[window_rule]]`: applied -- swapped in whole
 //!   and read at every window's first commit from then on. Windows already
 //!   mapped are not re-decided (rules apply at map time; see
@@ -145,6 +147,7 @@ mod field {
     pub const XWAYLAND: &str = "xwayland.enabled";
     pub const AUTOSTART: &str = "autostart.commands";
     pub const FLOATING_AUTO: &str = "floating.auto";
+    pub const FLOATING_MODIFIER: &str = "floating.modifier";
     pub const WINDOW_RULES: &str = "window_rule";
     pub const BINDS: &str = "binds";
 }
@@ -526,6 +529,12 @@ impl State {
             report
                 .refused
                 .push(format!("{skipped}: skipped as unusable"));
+        }
+        // Read at each Mod+press, so the next one uses it; a drag already
+        // under way is not ended by it.
+        if fresh.floating_modifier != self.floating_modifier {
+            self.floating_modifier = fresh.floating_modifier;
+            report.applied.push(field::FLOATING_MODIFIER.to_owned());
         }
     }
 

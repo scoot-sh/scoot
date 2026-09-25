@@ -9,8 +9,8 @@
 //!   stacking order: each workspace's `Workspace::floating` holds the order
 //!   (bottom first) and whether the workspace's focus is on it, and each
 //!   floating window's `WindowState::floating` holds what travels with the
-//!   window (its centre, the size the core asks for, the width it had as a
-//!   column). A window is in exactly one of the two places a window can be
+//!   window (the point it is held by, the size the core asks for, the width
+//!   it had as a column). A window is in exactly one of the two places a window can be
 //!   -- a column or a floating layer -- and has `floating` set exactly when
 //!   it is in a floating layer (or waiting for an output while floating).
 //! - **Floating windows never change the strip.** Every column, width,
@@ -19,16 +19,18 @@
 //!   joining the strip makes, which is what floating and un-floating are.
 //! - The centre is decided once, when the window starts floating, from the
 //!   arrangement at that moment -- never on the per-frame `arrange` path,
-//!   which stays free of parent lookups.
+//!   which stays free of parent lookups. Moving and resizing it (by pointer
+//!   or by number) replace it with where the user put it; that is
+//!   `floating_move.rs`.
 
-use super::tree::{Floating, Slot};
+use super::tree::{Anchor, Floating, Slot};
 use super::{Location, World};
-use crate::geometry::{Point, Rect, Size};
+use crate::geometry::{Point, Size};
 use crate::types::WindowId;
 
 /// How many parents [`World::descends_from`] follows before giving up. Far
 /// past any real dialog-of-a-dialog chain.
-const MAX_PARENT_DEPTH: usize = 16;
+pub(super) const MAX_PARENT_DEPTH: usize = 16;
 
 impl World {
     /// Whether the window floats. False for an unknown window.
@@ -109,7 +111,7 @@ impl World {
             (None, true) => {
                 if let Some(window) = self.windows.get_mut(&id) {
                     window.floating = Some(Floating {
-                        centre: None,
+                        anchor: None,
                         request,
                         preset: None,
                     });
@@ -155,7 +157,7 @@ impl World {
         ws.push_floating(id, focused);
         if let Some(window) = self.windows.get_mut(&id) {
             window.floating = Some(Floating {
-                centre: None,
+                anchor: None,
                 request,
                 preset: (!fresh).then_some(preset),
             });
@@ -166,9 +168,9 @@ impl World {
         self.fix_view(loc.output);
         // After the strip has settled, so a parent in it is measured where it
         // now is, not where the window's own column had pushed it.
-        let centre = self.parent_centre(id, loc);
+        let anchor = self.parent_centre(id, loc).map(Anchor::centred);
         if let Some(floating) = self.windows.get_mut(&id).and_then(|w| w.floating.as_mut()) {
-            floating.centre = centre;
+            floating.anchor = anchor;
         }
     }
 
@@ -250,9 +252,9 @@ impl World {
             if !matches!(loc.slot, Slot::Floating { .. }) {
                 continue;
             }
-            let centre = self.parent_centre(id, loc);
+            let anchor = self.parent_centre(id, loc).map(Anchor::centred);
             if let Some(floating) = self.windows.get_mut(&id).and_then(|w| w.floating.as_mut()) {
-                floating.centre = centre;
+                floating.anchor = anchor;
             }
         }
     }
@@ -386,24 +388,4 @@ impl World {
         }
         self.fix_view(output);
     }
-}
-
-/// Where a floating window of `size` centred at `centre` (global, logical)
-/// goes inside `usable`: the rect centred there, shifted just far enough to
-/// lie inside `usable`. `size` must already be clamped to `usable`'s size
-/// (and at least 1 per axis), so the shift always fits. Saturating
-/// throughout: every operand is bounded by the output, but a panic in the
-/// layout would take the session down.
-pub(super) fn centred_within(centre: Point, size: Size, usable: Rect) -> Rect {
-    let x = centre
-        .x
-        .saturating_sub(size.w / 2)
-        .min(usable.right().saturating_sub(size.w))
-        .max(usable.x);
-    let y = centre
-        .y
-        .saturating_sub(size.h / 2)
-        .min(usable.bottom().saturating_sub(size.h))
-        .max(usable.y);
-    Rect::new(x, y, size.w, size.h)
 }

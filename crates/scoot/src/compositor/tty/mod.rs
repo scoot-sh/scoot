@@ -1346,6 +1346,10 @@ impl Drop for Tty {
 }
 
 fn session_event(event: SessionEvent, _: &mut (), state: &mut State) {
+    // A floating window's drag cannot survive the switch away: the button
+    // release is delivered to whatever session is active then, never here,
+    // so the drag would follow the pointer after the switch back.
+    let paused = matches!(event, SessionEvent::PauseSession);
     // Scoped so the mutable borrow of `state.tty` ends before the
     // `Reconfigured::finish` call below needs `state` whole again -- same
     // shape as `nested_dispatch.rs`'s `Dispatch<HostBuffer>` handler.
@@ -1404,6 +1408,10 @@ fn session_event(event: SessionEvent, _: &mut (), state: &mut State) {
         }
     };
     outcome.finish(state);
+    if paused {
+        state.end_floating_grab();
+        state.settle_floating_grab();
+    }
 }
 
 fn drm_event(event: DrmEvent, _: &mut Option<DrmEventMetadata>, state: &mut State) {

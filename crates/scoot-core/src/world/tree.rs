@@ -28,12 +28,12 @@ pub(super) struct WindowState {
 /// index in its workspace's `Workspace::floating`; this is the rest.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct Floating {
-    /// Where the window is centred, relative to its output's `area` origin
-    /// (not the usable area's, so a bar appearing or going does not move
-    /// it). `None` centres it on the output's usable area, recomputed on
-    /// every arrangement -- a window that floated with no parent to centre
-    /// on, or one carried to another output.
-    pub(super) centre: Option<Point>,
+    /// The point the window is held by, relative to its output's `area`
+    /// origin (not the usable area's, so a bar appearing or going does not
+    /// move it). `None` centres it on the output's usable area, recomputed
+    /// on every arrangement -- a window that floated with no parent to
+    /// centre on, or one carried to another output.
+    pub(super) anchor: Option<Anchor>,
     /// The size the core asks the window for, before clamping to the usable
     /// area: `None` lets the window choose (the protocol's 0x0). Set by an
     /// initial size a platform asked for, and by a window drawing itself
@@ -45,6 +45,54 @@ pub(super) struct Floating {
     /// that floated as it opened. Clamped into the width list when used,
     /// since a reload may have shortened it.
     pub(super) preset: Option<usize>,
+}
+
+/// Where a floating window is held: a point, and which point of the window
+/// sits on it, per axis. A window that draws a new size keeps that point of
+/// itself where it is -- its middle, for a window that was centred (so a
+/// dialog that grows grows around its centre); the edge a resize did not
+/// move, for a window the user resized (so the edge they did not drag stays
+/// put, whatever size the client settles on).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct Anchor {
+    /// Relative to the output's `area` origin, like everything in
+    /// [`Floating`].
+    pub(super) point: Point,
+    pub(super) x: Align,
+    pub(super) y: Align,
+}
+
+/// Which point of a floating window, along one axis, its [`Anchor`] holds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Align {
+    /// The left or top edge.
+    Start,
+    /// The middle.
+    Middle,
+    /// The right or bottom edge.
+    End,
+}
+
+impl Align {
+    /// How far into a window `extent` long this point is.
+    pub(super) fn offset(self, extent: i32) -> i32 {
+        match self {
+            Self::Start => 0,
+            Self::Middle => extent / 2,
+            Self::End => extent,
+        }
+    }
+}
+
+impl Anchor {
+    /// Held by its middle at `point`: how every floating window starts.
+    pub(super) fn centred(point: Point) -> Self {
+        Self {
+            point,
+            x: Align::Middle,
+            y: Align::Middle,
+        }
+    }
 }
 
 /// What a fullscreen window remembers so leaving fullscreen can put the

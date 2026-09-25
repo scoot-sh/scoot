@@ -155,6 +155,7 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
     state.startup_autostart = loaded.autostart.clone();
     // Which windows float when they map: what a reload diffs against too.
     state.floating_rules = loaded.floating.clone();
+    state.floating_modifier = loaded.floating_modifier;
 
     // `--tty` picks its own size from the connector's preferred mode (or
     // the `--mode` the user named) -- there's no host to negotiate a size
