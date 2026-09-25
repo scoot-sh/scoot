@@ -307,6 +307,12 @@ impl Cursor {
         &self.theme
     }
 
+    /// Which shape shows now. Tests only: the render path reads the field.
+    #[cfg(test)]
+    pub(crate) fn status(&self) -> &CursorImageStatus {
+        &self.status
+    }
+
     pub fn set_status(&mut self, status: CursorImageStatus) {
         self.status = status;
         self.refresh_themed();

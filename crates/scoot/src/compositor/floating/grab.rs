@@ -618,9 +618,7 @@ impl State {
         let Some(geometry) = self.world.floating_geometry(start.id) else {
             return;
         };
-        self.cursor
-            .set_status(CursorImageStatus::Named(drag_cursor(start.drag)));
-        self.cursor_changed();
+        let icon = drag_cursor(start.drag);
         let grab = FloatingGrab {
             start_data: GrabStartData {
                 focus: None,
@@ -638,6 +636,12 @@ impl State {
         };
         tracing::debug!(id = ?start.id, drag = ?start.drag, "a floating window's pointer drag began");
         pointer.set_grab(self, grab, start.serial, Focus::Clear);
+        // After the grab is set, not before: clearing focus sends the
+        // client its `leave`, and Smithay resets the cursor to the default
+        // with it. Nothing resets it again until the grab ends (its motion
+        // keeps focus empty).
+        self.cursor.set_status(CursorImageStatus::Named(icon));
+        self.cursor_changed();
     }
 
     /// Whether `[floating] modifier` is held right now.

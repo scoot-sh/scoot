@@ -96,6 +96,18 @@ fn a_modifier_left_drag_moves_a_floating_window_and_it_stays() {
     let pixels = fixture.render();
     let (mx, my) = centre(moved);
     assert_eq!(pixel(&pixels, mx, my), DIALOG_BGRA);
+    // The drag shows its own cursor (set after the focus clear, whose
+    // `leave` resets it)...
+    assert!(
+        matches!(
+            fixture.state.cursor.status(),
+            smithay::input::pointer::CursorImageStatus::Named(
+                smithay::input::pointer::CursorIcon::Grabbing
+            )
+        ),
+        "{:?}",
+        fixture.state.cursor.status()
+    );
     // The client never saw the press, and has no pointer focus mid-drag.
     assert!(fixture.buttons().is_empty());
     assert_eq!(fixture.pointer(), None);
