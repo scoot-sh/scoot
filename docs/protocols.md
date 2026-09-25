@@ -131,8 +131,9 @@ states (`tiled_left`, `tiled_right`, `tiled_top`, `tiled_bottom`) in the same
 configure as its size, from its first configure on. That includes the
 configure that answers a re-map: a window that unmaps (a null buffer)
 loses all its toplevel state, as xdg-shell says it must. The configure
-answering its next map is rebuilt from the layout: its column's size, the
-tiled states, `activated` if it has focus, and `ServerSide` decorations
+answering its next map is rebuilt from the layout: its column's size (if
+it is visible; a hidden window is sized when it next shows), the tiled
+states, `activated` if it has focus, and `ServerSide` decorations
 under `prefer_no_csd`. A fullscreen window is sent `fullscreen` instead,
 never both, and gets the four back when it leaves. scoot has no floating
 windows yet, so every window is sent one or the other. A client bound

@@ -310,7 +310,13 @@ impl State {
     ///
     /// Called from the commit path, before that path sends the initial
     /// configure the reset calls for, so the re-map's configure goes out
-    /// already unfullscreened. The fullscreen check comes first: it is a map
+    /// already unfullscreened. In fact the `apply()` below sends it: its
+    /// `send_pending_configure` is the first configure since the reset, so
+    /// Smithay counts it as the initial one and the commit path's own
+    /// initial configure then finds nothing to do. Which is why the
+    /// layout state the reset discarded (activation, decoration mode) is
+    /// rebuilt here first, with [`State::restore_layout_state`], not only
+    /// on that path. The fullscreen check comes first: it is a map
     /// lookup, false for nearly every commit, and only a fullscreen window's
     /// commit pays for the role-state lock.
     pub(super) fn discard_fullscreen_if_unmapped(&mut self, id: WindowId) {
@@ -326,6 +332,9 @@ impl State {
                 id,
                 fullscreen: false,
             });
+            // After the core has left fullscreen (so the restored states are
+            // the tiled ones) and before `apply()` sends the configure.
+            self.restore_layout_state(id);
             self.apply();
         }
     }

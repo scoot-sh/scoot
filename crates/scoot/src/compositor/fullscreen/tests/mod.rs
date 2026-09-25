@@ -123,6 +123,8 @@ struct Configured {
     fullscreen: bool,
     /// Whether it carried all four `tiled_*` states (xdg_toplevel v2+).
     tiled: bool,
+    /// Whether it carried `activated`.
+    activated: bool,
 }
 
 enum Step {
@@ -411,6 +413,7 @@ impl Dispatch<xdg_toplevel::XdgToplevel, Index> for TestClient {
                     .any(|state| state == wanted as u32)
             };
             let fullscreen = has(xdg_toplevel::State::Fullscreen);
+            let activated = has(xdg_toplevel::State::Activated);
             let tiled = [
                 xdg_toplevel::State::TiledLeft,
                 xdg_toplevel::State::TiledRight,
@@ -425,6 +428,7 @@ impl Dispatch<xdg_toplevel::XdgToplevel, Index> for TestClient {
                 height,
                 fullscreen,
                 tiled,
+                activated,
             };
         }
     }

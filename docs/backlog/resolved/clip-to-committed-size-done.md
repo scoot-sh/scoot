@@ -88,6 +88,23 @@ the layout before `send_initial_configure`:
 
 On a first map every value is already pending, so nothing changes there.
 
+A window that unmaps while fullscreen takes another road. On the unmap
+commit, `discard_fullscreen_if_unmapped` ends its fullscreen and runs
+`apply()`, and that relayout's configure is the first one since the reset,
+so Smithay counts it as the initial configure. The commit path then finds
+nothing to send. Review round 2 caught it: the size and tiled states were
+right, but the decoration mode was `ClientSide` and `activated` was false
+while the window held focus. `restore_layout_state` now also runs there,
+after the core leaves fullscreen and before `apply()`.
+`a_fullscreen_window_re_mapped_keeps_its_decorations_and_activation` pins
+this (on `4a8af66` it failed with `activated: false`).
+
+Not fixed, and noted: under `prefer_no_csd = false` scoot does what each
+client asked. A client that had asked for `ServerSide` loses that request
+in Smithay's unmap reset, so after a re-map it is told `ClientSide` until
+it asks again. The option is off by default and the effect is a titlebar
+the client draws itself, so this is noted here rather than ticketed.
+
 Pinned in `fullscreen/tests/transitions.rs`:
 `a_re_mapped_window_is_told_its_size_and_that_it_is_tiled` (on `fbb1551`
 the re-map configure was `0x0`, `tiled: false`) and

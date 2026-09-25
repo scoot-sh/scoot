@@ -275,6 +275,52 @@ fn a_re_mapped_window_keeps_server_side_decorations() {
     );
 }
 
+/// The same re-map from fullscreen, focused. Unmapping a fullscreen window
+/// ends its fullscreen, and the relayout that does it sends a configure on
+/// the unmap commit itself -- which Smithay counts as the re-map's initial
+/// configure. So the layout state has to be rebuilt before that relayout,
+/// not only in the initial-configure path, or the re-map is told
+/// `ClientSide` and not `activated`.
+#[test]
+fn a_fullscreen_window_re_mapped_keeps_its_decorations_and_activation() {
+    let server_side = u32::from(
+        wayland_protocols::xdg::decoration::zv1::client::zxdg_toplevel_decoration_v1::Mode::ServerSide,
+    );
+    let mut fixture = Fixture::new();
+    fixture.map(WINDOW_BGRA);
+    fixture.done(Step::Decorate { window: 0 });
+    fixture.configured(Step::SetFullscreen {
+        window: 0,
+        output: None,
+    });
+    fixture.done(Step::Draw {
+        window: 0,
+        color: WINDOW_BGRA,
+    });
+    assert!(fixture.state.world.is_fullscreen(fixture.id(0)));
+    fixture.done(Step::Unmap { window: 0 });
+    let used = fixture.configured(Step::Remap {
+        window: 0,
+        color: WINDOW_BGRA,
+    });
+    assert_eq!(fixture.state.focus, Some(fixture.id(0)), "focus stays put");
+    let slot = fixture.rect_of(0);
+    assert!(used.tiled && !used.fullscreen, "{used:?}");
+    assert!(
+        used.activated,
+        "the focused window was not told it is activated: {used:?}"
+    );
+    assert_eq!((used.width, used.height), (slot.w, slot.h), "{used:?}");
+    let modes = match fixture.run(Step::DecorationModes { window: 0 }) {
+        Ack::DecorationModes(modes) => modes,
+        _ => panic!("unexpected ack"),
+    };
+    assert!(
+        modes.iter().all(|mode| *mode == server_side),
+        "a fullscreen re-map was told another decoration mode: {modes:?}"
+    );
+}
+
 /// A window hidden behind a fullscreen sibling in its own column reports
 /// the frame it is placed at (the sibling's) unchanged: it draws nothing
 /// there, so there is no drawn area to clamp to.

@@ -131,7 +131,10 @@ impl State {
     }
 
     /// Rebuilds a toplevel's pending configure state from where the layout
-    /// has it, for the initial configure that answers a (re-)map.
+    /// has it, for the initial configure that answers a (re-)map. Called
+    /// wherever that configure can go out first: `send_initial_configure`,
+    /// and `discard_fullscreen_if_unmapped`, whose relayout sends it for a
+    /// window that unmapped while fullscreen.
     ///
     /// Smithay throws away everything pending when a toplevel unmaps (a null
     /// buffer): size, states, decoration mode -- xdg-shell says the surface
