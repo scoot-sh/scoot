@@ -45,6 +45,20 @@ fn resolve_is_an_or_with_off_as_the_agreement() {
     assert!(resolve(true, true));
 }
 
+/// X strings are cut at their first NUL before they go anywhere a Wayland
+/// C string could carry them (see `manage::x11_text`); one without a NUL is
+/// untouched.
+#[cfg(feature = "xwayland")]
+#[test]
+fn x11_text_is_cut_at_the_first_nul() {
+    use super::manage::x11_text;
+
+    assert_eq!(x11_text("plain".to_owned()), "plain");
+    assert_eq!(x11_text("evil\0title".to_owned()), "evil");
+    assert_eq!(x11_text("\0".to_owned()), "");
+    assert_eq!(x11_text(String::new()), "");
+}
+
 #[test]
 fn display_value_is_the_local_colon_form() {
     // What X clients expect for a local server (the spike measured

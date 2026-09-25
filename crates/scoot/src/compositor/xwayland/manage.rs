@@ -90,11 +90,33 @@ const X_MAX_SIZE: i32 = i16::MAX as i32;
 /// and the one a `[[window_rule]]` `match_app_id` matches.
 pub(in crate::compositor) fn x11_app_id(window: &X11Surface) -> String {
     let class = window.class();
-    if class.is_empty() {
+    x11_text(if class.is_empty() {
         window.instance()
     } else {
         class
+    })
+}
+
+/// An X window's title, cut like its app id (see [`x11_text`]).
+fn x11_title(window: &X11Surface) -> String {
+    x11_text(window.title())
+}
+
+/// A string an X client set, made safe to pass on: cut at its first NUL.
+///
+/// X properties are byte arrays, so `WM_NAME`, `_NET_WM_NAME` and `WM_CLASS`
+/// may carry a NUL -- and every Wayland string argument is a C string:
+/// wayland-scanner's generated senders build it with
+/// `CString::new(..).unwrap()`, so a title with a NUL in it, sent to a
+/// taskbar's foreign-toplevel handle, panics the compositor. (An xdg title
+/// cannot contain one: it arrived as a C string.) Cutting at the first NUL
+/// is what any C consumer of the property reads anyway. Allocation-free when
+/// there is no NUL, which is always, bar a hostile client.
+pub(in crate::compositor) fn x11_text(mut text: String) -> String {
+    if let Some(nul) = text.find('\0') {
+        text.truncate(nul);
     }
+    text
 }
 
 /// A rectangle an X server will accept: position in `INT16`, size in
@@ -240,7 +262,7 @@ impl State {
     /// by its map request (the module doc lists the signals).
     fn x11_map_decision(&self, window: &X11Surface) -> Decision {
         let app_id = x11_app_id(window);
-        let title = window.title();
+        let title = x11_title(window);
         let dialog =
             !matches!(window.window_type(), None | Some(WmWindowType::Normal)) || window.is_modal();
         let fixed_size = matches!(
@@ -290,13 +312,16 @@ impl State {
             .unwrap_or_default();
         WindowInfo {
             app_id: x11_app_id(window),
-            title: window.title(),
+            title: x11_title(window),
             hints: SizeHints {
                 min: clamp_hint(min, limit),
                 max,
             },
+            // A window naming itself is no parent (the core would take it
+            // as its own ancestor).
             parent: window
                 .is_transient_for()
+                .filter(|&xid| xid != window.window_id())
                 .and_then(|xid| self.id_of_x11_window(xid)),
         }
     }

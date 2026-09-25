@@ -485,3 +485,48 @@ fn an_x_window_gets_the_ring_and_the_rounded_clip() {
         "the X window's corner is not rounded"
     );
 }
+
+/// A title (or class) with a NUL in it -- legal in an X property, and a
+/// compositor panic if it reached a Wayland string argument, which is a C
+/// string (`CString::new(..).unwrap()` in every generated sender) -- reaches
+/// the core, the taskbar and `scoot msg windows` cut at the NUL, and the
+/// session survives.
+#[test]
+fn a_nul_in_an_x_title_is_cut_not_a_crash() {
+    let Some(mut live) = live("a_nul_in_an_x_title_is_cut_not_a_crash") else {
+        return;
+    };
+    assert!(matches!(live.fixture.run(Step::BindTaskbar), Ack::Done));
+    let mut props = Props::new(RED);
+    props.class = Some(("evilinst", "Evil\0Class"));
+    props.title = Some("evil\0title");
+    let xid = live.x.map(&props);
+    let id = live.managed(xid);
+    let info = live
+        .fixture
+        .state
+        .world
+        .window_info(id)
+        .cloned()
+        .expect("info");
+    assert_eq!(info.title, "evil");
+    assert_eq!(info.app_id, "Evil");
+    assert!(
+        live.taskbar()
+            .contains(&("evil".to_owned(), "Evil".to_owned())),
+        "the taskbar was not told the cut title"
+    );
+    // And a retitle carrying one, after the window is listed.
+    live.x.retitle(xid, "still\0evil");
+    eventually(&mut live.fixture, "the cut retitle", |fixture| {
+        fixture
+            .state
+            .world
+            .window_info(id)
+            .is_some_and(|info| info.title == "still")
+    });
+    assert!(
+        live.taskbar()
+            .contains(&("still".to_owned(), "Evil".to_owned()))
+    );
+}
