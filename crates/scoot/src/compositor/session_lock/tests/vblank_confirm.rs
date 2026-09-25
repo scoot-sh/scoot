@@ -44,7 +44,7 @@ fn headless_render_still_confirms_immediately() {
         "nothing should still be pending after a headless confirm"
     );
     assert!(
-        fixture.state.session_lock.blank_flip.is_none(),
+        fixture.state.session_lock.blank_flips.is_empty(),
         "headless must not record a vblank wait"
     );
     assert!(
@@ -72,10 +72,11 @@ fn a_blanked_frame_without_its_vblank_sends_no_locked() {
 
     // What `render()` records after `Tty::present` issues flip 7 carrying the
     // blanked frame.
-    let _ = fixture
-        .state
-        .session_lock
-        .await_vblank(Some(7), Instant::now());
+    let _ =
+        fixture
+            .state
+            .session_lock
+            .await_vblank(scoot_core::OutputId(1), Some(7), Instant::now());
     for _ in 0..20 {
         fixture.settle();
     }
@@ -102,13 +103,16 @@ fn the_tracked_flips_vblank_confirms_the_lock() {
     fixture.send_step(0, Step::LockNoWait);
     fixture.settle();
     drain_lock_nowait_ack(&mut fixture);
-    let _ = fixture
-        .state
-        .session_lock
-        .await_vblank(Some(7), Instant::now());
+    let _ =
+        fixture
+            .state
+            .session_lock
+            .await_vblank(scoot_core::OutputId(1), Some(7), Instant::now());
 
     // The DRM vblank handler's own call, for flip 7's completion.
-    fixture.state.note_flip_completed(Some(7));
+    fixture
+        .state
+        .note_flip_completed(scoot_core::OutputId(1), Some(7));
     assert!(
         fixture.state.session_lock.pending.is_none(),
         "the tracked flip's vblank confirms the lock"
@@ -134,7 +138,9 @@ fn a_vblank_for_the_previous_frame_does_not_confirm() {
 
     // Flip 6 (the unlocked frame) was already in flight when the lock's
     // frame rendered, so nothing was recorded for it. Its vblank arrives:
-    fixture.state.note_flip_completed(Some(6));
+    fixture
+        .state
+        .note_flip_completed(scoot_core::OutputId(1), Some(6));
     assert!(
         fixture.state.session_lock.pending.is_some(),
         "a vblank for a frame without the blank pixels must not confirm"
@@ -143,11 +149,14 @@ fn a_vblank_for_the_previous_frame_does_not_confirm() {
 
     // The re-render the skip armed presents the blanked frame as flip 8,
     // whose vblank does confirm.
-    let _ = fixture
+    let _ =
+        fixture
+            .state
+            .session_lock
+            .await_vblank(scoot_core::OutputId(1), Some(8), Instant::now());
+    fixture
         .state
-        .session_lock
-        .await_vblank(Some(8), Instant::now());
-    fixture.state.note_flip_completed(Some(8));
+        .note_flip_completed(scoot_core::OutputId(1), Some(8));
     assert!(fixture.state.session_lock.pending.is_none());
 
     fixture.state.put_primary_backend(backend);
@@ -165,12 +174,15 @@ fn a_stale_vblank_after_invalidation_does_not_confirm() {
     fixture.send_step(0, Step::LockNoWait);
     fixture.settle();
     drain_lock_nowait_ack(&mut fixture);
-    let _ = fixture
-        .state
-        .session_lock
-        .await_vblank(Some(7), Instant::now());
+    let _ =
+        fixture
+            .state
+            .session_lock
+            .await_vblank(scoot_core::OutputId(1), Some(7), Instant::now());
 
-    fixture.state.note_flip_completed(None);
+    fixture
+        .state
+        .note_flip_completed(scoot_core::OutputId(1), None);
     assert!(
         fixture.state.session_lock.pending.is_some(),
         "a stale completion must not confirm"
@@ -179,11 +191,14 @@ fn a_stale_vblank_after_invalidation_does_not_confirm() {
 
     // Recovery is the ordinary path: the next render presents the blanked
     // frame again and its vblank confirms.
-    let _ = fixture
+    let _ =
+        fixture
+            .state
+            .session_lock
+            .await_vblank(scoot_core::OutputId(1), Some(8), Instant::now());
+    fixture
         .state
-        .session_lock
-        .await_vblank(Some(8), Instant::now());
-    fixture.state.note_flip_completed(Some(8));
+        .note_flip_completed(scoot_core::OutputId(1), Some(8));
     assert!(fixture.state.session_lock.pending.is_none());
 
     fixture.state.put_primary_backend(backend);
@@ -208,7 +223,10 @@ fn no_vblank_within_the_bound_confirms_anyway() {
     fixture.settle();
     drain_lock_nowait_ack(&mut fixture);
     let t0 = Instant::now();
-    let _ = fixture.state.session_lock.await_vblank(Some(7), t0);
+    let _ = fixture
+        .state
+        .session_lock
+        .await_vblank(scoot_core::OutputId(1), Some(7), t0);
 
     // Just inside the bound: still waiting -- the fallback must not fire
     // early on a merely slow vblank.
@@ -249,18 +267,26 @@ fn a_represented_flip_restarts_the_bound_and_re_arms() {
     fixture.settle();
     drain_lock_nowait_ack(&mut fixture);
     let t0 = Instant::now();
-    assert!(fixture.state.session_lock.await_vblank(Some(7), t0));
-
-    // The tracked flip is discarded without a completion (its vblank will
-    // never arrive), and the next render presents the blanked frame again
-    // as flip 8. That re-arms: the caller must watch the new deadline.
-    fixture.state.note_flip_completed(None);
-    assert!(fixture.state.session_lock.pending.is_some());
     assert!(
         fixture
             .state
             .session_lock
-            .await_vblank(Some(8), t0 + Duration::from_millis(500)),
+            .await_vblank(scoot_core::OutputId(1), Some(7), t0)
+    );
+
+    // The tracked flip is discarded without a completion (its vblank will
+    // never arrive), and the next render presents the blanked frame again
+    // as flip 8. That re-arms: the caller must watch the new deadline.
+    fixture
+        .state
+        .note_flip_completed(scoot_core::OutputId(1), None);
+    assert!(fixture.state.session_lock.pending.is_some());
+    assert!(
+        fixture.state.session_lock.await_vblank(
+            scoot_core::OutputId(1),
+            Some(8),
+            t0 + Duration::from_millis(500)
+        ),
         "a fresh flip restarts the bound, so it needs a fresh timer"
     );
 
@@ -290,16 +316,19 @@ fn unlock_cancels_the_wait_without_a_stale_confirm() {
     fixture.send_step(0, Step::LockNoWait);
     fixture.settle();
     drain_lock_nowait_ack(&mut fixture);
-    let _ = fixture
-        .state
-        .session_lock
-        .await_vblank(Some(7), Instant::now());
+    let _ =
+        fixture
+            .state
+            .session_lock
+            .await_vblank(scoot_core::OutputId(1), Some(7), Instant::now());
 
     SessionLockHandler::unlock(&mut fixture.state);
     assert!(!fixture.state.session_lock.is_locked());
     assert!(fixture.state.session_lock.pending.is_none());
 
-    fixture.state.note_flip_completed(Some(7));
+    fixture
+        .state
+        .note_flip_completed(scoot_core::OutputId(1), Some(7));
     assert!(fixture.state.session_lock.pending.is_none());
     assert!(!fixture.state.session_lock.is_locked());
 
@@ -325,7 +354,10 @@ fn rapid_cycles_do_not_cross_confirm() {
     fixture.settle();
     drain_lock_nowait_ack(&mut fixture);
     let t0 = Instant::now();
-    let _ = fixture.state.session_lock.await_vblank(Some(7), t0);
+    let _ = fixture
+        .state
+        .session_lock
+        .await_vblank(scoot_core::OutputId(1), Some(7), t0);
     // ...which the client gives up on. The session stays locked and reads
     // as abandoned, with the dead lock's wait still recorded.
     fixture.run(Step::DestroyLock { lock: 0 });
@@ -339,20 +371,29 @@ fn rapid_cycles_do_not_cross_confirm() {
     fixture.settle();
     drain_lock_nowait_ack(&mut fixture);
     assert!(fixture.state.session_lock.pending.is_some());
-    fixture.state.note_flip_completed(Some(7));
+    fixture
+        .state
+        .note_flip_completed(scoot_core::OutputId(1), Some(7));
     assert!(
         fixture.state.session_lock.pending.is_some(),
         "the old flip must not confirm the new lock"
     );
 
     // The new lock defers on its own flip and confirms on its own vblank.
-    let _ = fixture.state.session_lock.await_vblank(Some(9), t0);
-    fixture.state.note_flip_completed(Some(7));
+    let _ = fixture
+        .state
+        .session_lock
+        .await_vblank(scoot_core::OutputId(1), Some(9), t0);
+    fixture
+        .state
+        .note_flip_completed(scoot_core::OutputId(1), Some(7));
     assert!(
         fixture.state.session_lock.pending.is_some(),
         "the old flip must not confirm the new lock either"
     );
-    fixture.state.note_flip_completed(Some(9));
+    fixture
+        .state
+        .note_flip_completed(scoot_core::OutputId(1), Some(9));
     assert!(fixture.state.session_lock.pending.is_none());
 
     fixture.state.put_primary_backend(backend);

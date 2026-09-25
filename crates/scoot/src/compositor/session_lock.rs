@@ -367,36 +367,45 @@ pub struct SessionLock {
     /// ever grows on a frame drawn while a lock awaits confirmation -- a cold
     /// path, never a hot one.
     confirmed: Vec<OutputId>,
-    /// The in-flight flip carrying the blanked frame, if confirmation is
-    /// waiting on a vblank for it rather than going out with the render.
+    /// The in-flight flip carrying each output's blanked frame, where
+    /// confirmation is waiting on a vblank for it rather than going out with
+    /// the render -- one entry per output with a flip out, keyed by the
+    /// output's core id.
     ///
-    /// Only `--tty` ever sets this (see [`SessionLock::await_vblank`]): the
+    /// Only `--tty` ever writes this (see [`SessionLock::await_vblank`]): the
     /// other backends have no scanout, so the rendered frame *is* the shown
-    /// one. The value is [`Tty`](super::tty::Tty)'s flip sequence number for
-    /// the flip `present` issued for the blanked frame -- not "a flip is in
+    /// one. The value is that output's head's flip sequence number for the
+    /// flip `present` issued for the blanked frame -- not "a flip is in
     /// flight", which is the presenter's own bookkeeping and a different
-    /// question. Matching it against the *completed* flip's number (see
-    /// [`SessionLock::confirm_on_vblank`]) is what keeps a vblank for the
-    /// *previous* frame -- the ordinary case when the lock raced a flip
-    /// already in flight, since `present` skips then -- and a stale vblank
-    /// for a flip the scanout bookkeeping has since discarded (VT switch,
-    /// hotplug modeset) from confirming a lock whose pixels never scanned
-    /// out.
+    /// question. Keyed per output because each `--tty` head numbers its own
+    /// flips from zero: a bare number would let one screen's vblank confirm
+    /// another screen's blank. Matching the *completed* flip's output and
+    /// number (see [`SessionLock::confirm_on_vblank`]) is what keeps a vblank
+    /// for the *previous* frame -- the ordinary case when the lock raced a
+    /// flip already in flight, since `present` skips then -- and a stale
+    /// vblank for a flip the scanout bookkeeping has since discarded (VT
+    /// switch, hotplug modeset) from confirming a lock whose pixels never
+    /// scanned out.
     ///
-    /// **Invariant: `Some` only while [`SessionLock::pending`] is `Some`.**
-    /// Both are installed together and cleared together, at every site that
-    /// writes `pending` -- [`SessionLockHandler::lock`] (fresh wait or sweep),
-    /// [`SessionLockHandler::unlock`] (cancel), [`State::confirm_lock`]'s
+    /// A matched output moves into [`SessionLock::confirmed`], and `locked`
+    /// goes out once every output is there -- the same completion rule the
+    /// render-confirmed backends use.
+    ///
+    /// **Invariant: non-empty only while [`SessionLock::pending`] is
+    /// `Some`.** Installed with it and cleared with it, at every site that
+    /// writes `pending` -- [`SessionLockHandler::lock`] (fresh wait or
+    /// sweep), [`SessionLockHandler::unlock`] (cancel), [`State::confirm_lock`]'s
     /// callers (confirm) -- so a wait can never outlive the lock it was
-    /// recorded for and confirm a later one.
-    blank_flip: Option<u64>,
+    /// recorded for and confirm a later one. A `Vec`: a handful of outputs,
+    /// written only on frames drawn while a lock awaits confirmation.
+    blank_flips: Vec<(OutputId, u64)>,
     /// When the wait above stops waiting: [`LOCK_VBLANK_TIMEOUT`] after the
     /// blanked frame rendered. Armed together with the wait (and when a
     /// blanked frame rendered under `--tty` without any flip issued at all),
     /// so a vblank that can never arrive -- switched away, a discarded flip,
     /// completions a driver never delivers -- confirms anyway instead of
     /// hanging the locker. `Some` exactly while a `--tty` frame is
-    /// unconfirmed, whether or not `blank_flip` names a flip.
+    /// unconfirmed, whether or not `blank_flips` names a flip.
     blank_deadline: Option<Instant>,
     /// Every lock surface this compositor has been handed and not yet dropped,
     /// in creation order. At most one *live* surface per output per lock (see
@@ -487,7 +496,7 @@ impl SessionLock {
             owner: None,
             pending: None,
             confirmed: Vec::new(),
-            blank_flip: None,
+            blank_flips: Vec::new(),
             blank_deadline: None,
             surfaces: Vec::new(),
             surface_outputs: HashMap::new(),
@@ -621,19 +630,21 @@ impl SessionLock {
             .is_some_and(|admitted| admitted == output)
     }
 
-    /// A blanked frame was rendered for the pending lock but, under `--tty`,
-    /// `locked` must wait for scanout confirmation rather than going out now.
+    /// A blanked frame was rendered for output `id` under the pending lock
+    /// but, under `--tty`, that output's confirmation must wait for scanout
+    /// rather than going out now.
     ///
     /// `issued` is the flip carrying it -- [`Tty::present`](super::tty::Tty)'s
-    /// return -- or `None` when the frame never reached the presenter at all:
-    /// the session is inactive, the size disagrees, a previous flip is still
-    /// in flight, or nothing was damaged. A tracked flip records its number
-    /// in [`SessionLock::blank_flip`]; a skipped frame leaves whatever is
-    /// there (the still-in-flight flip already carries the blank pixels, or
-    /// nothing does yet and the re-render the skip armed will record its
-    /// own). Either way the fallback deadline is armed, so a vblank that can
-    /// never arrive confirms anyway after [`LOCK_VBLANK_TIMEOUT`] instead of
-    /// hanging the locker.
+    /// return for that output -- or `None` when the frame never reached the
+    /// presenter at all: the session is inactive, the size disagrees, a
+    /// previous flip is still in flight, or nothing was damaged. A tracked
+    /// flip records its number against the output in
+    /// [`SessionLock::blank_flips`]; a skipped frame leaves whatever is there
+    /// (the still-in-flight flip already carries the blank pixels, or nothing
+    /// does yet and the re-render the skip armed will record its own). Either
+    /// way the fallback deadline is armed, so a vblank that can never arrive
+    /// confirms anyway after [`LOCK_VBLANK_TIMEOUT`] instead of hanging the
+    /// locker.
     ///
     /// Returns whether the caller should arm the one-shot timer watching
     /// the deadline: yes for a newly armed wait, and yes again for every
@@ -647,11 +658,18 @@ impl SessionLock {
     /// nothing and drop.
     ///
     /// Only `--tty` calls this -- headless and nested confirm on render, as
-    /// before. No allocation: two `Option` writes on a path that runs only
-    /// while a lock awaits confirmation.
-    pub(super) fn await_vblank(&mut self, issued: Option<u64>, now: Instant) -> bool {
+    /// before. No allocation past the first flip recorded per output per
+    /// lock, on a path that runs only while a lock awaits confirmation.
+    pub(super) fn await_vblank(&mut self, id: OutputId, issued: Option<u64>, now: Instant) -> bool {
         if let Some(seq) = issued {
-            self.blank_flip = Some(seq);
+            match self
+                .blank_flips
+                .iter_mut()
+                .find(|(output, _)| *output == id)
+            {
+                Some(entry) => entry.1 = seq,
+                None => self.blank_flips.push((id, seq)),
+            }
             self.blank_deadline = Some(now + LOCK_VBLANK_TIMEOUT);
             true
         } else {
@@ -663,28 +681,62 @@ impl SessionLock {
         }
     }
 
-    /// A flip completed under `--tty`: whether the pending lock's blanked
-    /// frame was aboard. `completed` is the finished flip's sequence number,
-    /// or `None` when the completion is untrackable -- a stale vblank for a
-    /// flip the scanout bookkeeping discarded, or a `DrmEvent::Error` -- in
-    /// which case nothing confirms and the fallback deadline owns the wait.
-    /// Takes the wait on a match; the caller sends `locked`.
-    fn confirm_on_vblank(&mut self, completed: Option<u64>) -> bool {
-        match (self.blank_flip, completed) {
-            (Some(expected), Some(got)) if expected == got => {
-                self.blank_flip = None;
-                self.blank_deadline = None;
-                true
-            }
-            _ => false,
+    /// A flip completed under `--tty` on output `id`: whether the pending
+    /// lock is now confirmed.
+    ///
+    /// `completed` is the finished flip's sequence number, or `None` when the
+    /// completion is untrackable -- a stale vblank for a flip the scanout
+    /// bookkeeping discarded, or a `DrmEvent::Error` -- in which case nothing
+    /// is recorded and the fallback deadline owns the wait. A completion that
+    /// matches the flip recorded for *this* output records the output as
+    /// blanked; `locked` is owed once `expected` outputs (the output count)
+    /// are recorded, exactly [`SessionLock::note_blanked`]'s completion rule.
+    ///
+    /// `blocked` is whether the output's screen is still a placeholder (see
+    /// [`SessionLock::output_blocks_confirm`], which the caller evaluates
+    /// only with more than one output): a matched flip then carried the
+    /// backdrop, not the locker's blank, so its entry is spent without
+    /// recording, and the frame that draws the surface records its own.
+    fn confirm_on_vblank(
+        &mut self,
+        id: OutputId,
+        completed: Option<u64>,
+        blocked: bool,
+        expected: usize,
+    ) -> bool {
+        let Some(got) = completed else {
+            return false;
+        };
+        let Some(position) = self
+            .blank_flips
+            .iter()
+            .position(|&(output, seq)| output == id && seq == got)
+        else {
+            return false;
+        };
+        self.blank_flips.swap_remove(position);
+        if blocked {
+            return false;
+        }
+        if !self.confirmed.contains(&id) {
+            self.confirmed.push(id);
+        }
+        if self.confirmed.len() >= expected {
+            self.blank_flips.clear();
+            self.blank_deadline = None;
+            true
+        } else {
+            false
         }
     }
 
-    /// Whether the fallback bound has passed. Takes the wait exactly once;
-    /// the caller sends `locked` and logs that it did so without a vblank.
+    /// Whether the fallback bound has passed. Takes the wait exactly once --
+    /// every output's recorded flip with it; the caller records whatever is
+    /// not a placeholder and sends `locked` if that completes the set, and
+    /// logs that it did so without a vblank.
     fn poll_blank_timeout(&mut self, now: Instant) -> bool {
         if self.blank_deadline.is_some_and(|deadline| now >= deadline) {
-            self.blank_flip = None;
+            self.blank_flips.clear();
             self.blank_deadline = None;
             true
         } else {
@@ -698,7 +750,7 @@ impl SessionLock {
     /// way for one). Without this a late vblank for the old flip could
     /// confirm a lock whose blanked frame was never presented.
     fn cancel_blank_wait(&mut self) {
-        self.blank_flip = None;
+        self.blank_flips.clear();
         self.blank_deadline = None;
     }
 
@@ -1624,22 +1676,44 @@ impl State {
         }
     }
 
-    /// A DRM flip completed under `--tty`: confirm the pending lock if its
-    /// blanked frame was aboard.
+    /// Whether `output`'s screen is still a placeholder for the pending lock:
+    /// an admitted lock surface there has not drawn yet (see
+    /// [`SessionLock::output_blocks_confirm`]). The render tail's `--tty`
+    /// branch asks this before recording a flip to wait on.
+    pub(super) fn session_lock_output_blocks(&self, output: &Output) -> bool {
+        self.session_lock.output_blocks_confirm(output)
+    }
+
+    /// A DRM flip completed under `--tty` on output `id`: confirm the pending
+    /// lock if that output's blanked frame was aboard and it completes the
+    /// set.
     ///
     /// The whole of the vblank-confirmation wiring in one place, so the DRM
     /// event handler and the tests call the same code: the handler passes
-    /// what the presenter reports for the finished flip (a sequence number,
-    /// or `None` for a completion that names no flip), and a match sends
+    /// the output whose CRTC completed and what its presenter reports for the
+    /// finished flip (a sequence number, or `None` for a completion that
+    /// names no flip), and a match on the last unconfirmed output sends
     /// `locked`. Anything else -- a vblank for the previous frame, a stale
-    /// one for a discarded flip, an untrackable error -- leaves the wait
-    /// alone for the fallback timer.
+    /// one for a discarded flip, another output's flip with the same number,
+    /// an untrackable error -- leaves the wait alone for the fallback timer.
     ///
     /// A confirm schedules the follow-up tick through [`State::confirm_lock`],
     /// which owns the re-arm; a vblank that matches nothing arms nothing.
-    pub(super) fn note_flip_completed(&mut self, completed: Option<u64>) {
-        if self.session_lock.confirm_on_vblank(completed) {
-            tracing::debug!("session lock confirmed: the blanked frame reached scanout");
+    pub(super) fn note_flip_completed(&mut self, id: OutputId, completed: Option<u64>) {
+        if !self.session_lock.awaiting_blank() {
+            return;
+        }
+        let expected = self.outputs.len();
+        let blocked = expected > 1
+            && self
+                .outputs
+                .get(id)
+                .is_some_and(|output| self.session_lock.output_blocks_confirm(output));
+        if self
+            .session_lock
+            .confirm_on_vblank(id, completed, blocked, expected)
+        {
+            tracing::debug!("session lock confirmed: every output's blanked frame reached scanout");
             self.confirm_lock();
         }
     }
@@ -1654,10 +1728,27 @@ impl State {
     /// -- and that is exactly the event an operator debugging a lock screen
     /// needs at the default log level.
     ///
+    /// The timeout stands in for the missing *vblanks*, never for a missing
+    /// lock surface: with more than one output, an output whose admitted
+    /// surface has not drawn yet (see [`SessionLock::output_blocks_confirm`])
+    /// is still not recorded, exactly as on the render-confirmed backends,
+    /// and the frame that draws it arms a fresh wait. With one output every
+    /// timeout confirms, as it always has.
+    ///
     /// Like the vblank path, the follow-up tick is scheduled by
     /// [`State::confirm_lock`], which owns the re-arm.
     pub(super) fn note_blank_timeout(&mut self, now: Instant) {
-        if self.session_lock.poll_blank_timeout(now) {
+        if !self.session_lock.poll_blank_timeout(now) {
+            return;
+        }
+        let expected = self.outputs.len();
+        for (id, output) in self.outputs.iter_with_ids() {
+            let blocked = expected > 1 && self.session_lock.output_blocks_confirm(output);
+            if !blocked && !self.session_lock.confirmed.contains(&id) {
+                self.session_lock.confirmed.push(id);
+            }
+        }
+        if self.session_lock.confirmed.len() >= expected {
             tracing::warn!(
                 "confirming a session lock without its vblank: no completion \
                  arrived within {TIMEOUT:?}",

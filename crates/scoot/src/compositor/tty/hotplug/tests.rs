@@ -417,7 +417,8 @@ fn switched_crtc_with_new_size_resizes_output_and_updates_gamma() {
     );
     assert_eq!(fixture.gamma_size(), FALLBACK_GAMMA_SIZE);
 
-    switched_crtc(BIG, BIG, true, NEW_GAMMA_SIZE).finish(&mut fixture.state);
+    switched_crtc(BIG, BIG, true, NEW_GAMMA_SIZE)
+        .finish(&mut fixture.state, scoot_core::OutputId(1));
 
     // The size half is the `Resized` contract: `wl_output` agrees, current
     // *and* preferred (see `set_mode`'s ordering guarantee).
@@ -441,7 +442,8 @@ fn switched_crtc_at_same_size_requests_render_without_resize() {
     fixture.modes();
     fixture.state.needs_render = false;
 
-    switched_crtc(CANVAS, CANVAS, false, NEW_GAMMA_SIZE).finish(&mut fixture.state);
+    switched_crtc(CANVAS, CANVAS, false, NEW_GAMMA_SIZE)
+        .finish(&mut fixture.state, scoot_core::OutputId(1));
 
     // A render is owed (the scanout was invalidated) but the output never
     // moved: every mode the client heard names the size it started at.
@@ -465,7 +467,8 @@ fn switched_crtc_with_new_gamma_fails_live_control() {
     fixture.run(Step::Bind);
     assert_eq!(fixture.gamma_size(), FALLBACK_GAMMA_SIZE);
 
-    switched_crtc(CANVAS, CANVAS, false, NEW_GAMMA_SIZE).finish(&mut fixture.state);
+    switched_crtc(CANVAS, CANVAS, false, NEW_GAMMA_SIZE)
+        .finish(&mut fixture.state, scoot_core::OutputId(1));
 
     // The live control was sized for the old CRTC: it hears `failed` (the
     // transfer shape) rather than eating `invalid_gamma` on its next set_gamma.
@@ -480,7 +483,8 @@ fn switched_crtc_with_same_gamma_fails_live_control_so_ramp_is_repushed() {
     fixture.run(Step::Bind);
     assert_eq!(fixture.gamma_size(), FALLBACK_GAMMA_SIZE);
 
-    switched_crtc(CANVAS, CANVAS, false, FALLBACK_GAMMA_SIZE).finish(&mut fixture.state);
+    switched_crtc(CANVAS, CANVAS, false, FALLBACK_GAMMA_SIZE)
+        .finish(&mut fixture.state, scoot_core::OutputId(1));
 
     // Same length but a different CRTC: nothing pushes the old ramp to the
     // new hardware (a modeset carries plane state, not LUT contents), so

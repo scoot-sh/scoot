@@ -68,6 +68,7 @@ mod lifecycle;
 mod multi_output;
 mod per_output;
 mod teardown;
+mod tty_multi_output;
 mod vblank_confirm;
 
 /// The framebuffer these tests render into.

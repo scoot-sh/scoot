@@ -45,7 +45,7 @@ pub const OUTPUT_NAME: &str = "headless";
 /// two connector-less ones), so this is test-only.
 #[cfg(test)]
 pub fn init(state: &mut State, width: i32, height: i32) -> Result<(), Box<dyn Error>> {
-    init_named(state, OUTPUT_NAME, width, height, ScanoutHandoff::default())
+    init_named(state, OUTPUT_NAME, width, height, ScanoutHandoff::default()).map(|_| ())
 }
 
 /// Creates the primary output and the render target behind it -- pixman's
@@ -56,8 +56,10 @@ pub fn init(state: &mut State, width: i32, height: i32) -> Result<(), Box<dyn Er
 /// [`OUTPUT_NAME`] where there is no connector.
 ///
 /// The output this creates is the one [`Outputs::primary`] hands back;
-/// [`add_output`] puts further headless outputs beside it -- each with its
-/// own [`Backend`] -- and refuses to run before it.
+/// [`add_output`] puts further outputs beside it -- each with its own
+/// [`Backend`] -- and refuses to run before it. Returns the id the output was
+/// registered under, which `--tty` binds the connector's head to
+/// (`tty::attach`).
 ///
 /// [`Outputs::primary`]: super::outputs::Outputs::primary
 pub fn init_named(
@@ -66,7 +68,7 @@ pub fn init_named(
     width: i32,
     height: i32,
     scanout: ScanoutHandoff,
-) -> Result<(), Box<dyn Error>> {
+) -> Result<OutputId, Box<dyn Error>> {
     let output = create_output(state, name, width, height, (0, 0));
 
     // The renderer the session resolved at startup (`render::resolve`, then
@@ -113,16 +115,9 @@ pub fn init_named(
         state.outputs.is_empty(),
         "the headless backend was initialised twice"
     );
-    // The GPU scanout tier's `DrmCompositor` was built before this output
-    // existed (`tty::init` runs first, because `--tty` is where the size
-    // comes from), so it is still tracking a static copy of the mode. Point
-    // it at the real output now, while nothing has been drawn: from here it
-    // follows every `set_mode` on its own, and no second place has to
-    // remember to mirror a mode or scale change into it. A no-op on every
-    // other backend and tier.
-    if let Some(tty) = &mut state.tty {
-        tty.track_output(&output);
-    }
+    // The GPU scanout tier's `DrmCompositor` is pointed at this output by
+    // `tty::attach`, which `compositor::run` calls with the id this returns
+    // -- before the event loop starts, so still before anything is drawn.
     let area = logical_area(state, &output, width, height);
     let id = state.outputs.add(output);
     state.backends.insert(id, backend);
@@ -147,7 +142,7 @@ pub fn init_named(
     // ensure_ticking() -- this is what puts the very first frame on it.
     state.apply();
 
-    Ok(())
+    Ok(id)
 }
 
 /// Adds another headless output immediately to the right of the last one, and
@@ -171,6 +166,22 @@ pub fn add_output(
     name: &str,
     width: i32,
     height: i32,
+) -> Result<OutputId, Box<dyn Error>> {
+    add_output_with(state, name, width, height, ScanoutHandoff::default())
+}
+
+/// [`add_output`], with the render target taking over `scanout` when it
+/// carries one: the GPU scanout renderer a `--tty` head built alongside its
+/// `DrmCompositor` (see [`ScanoutHandoff`]). What `--tty` creates every
+/// output after the primary with, at startup (`compositor::run`) and when a
+/// connector is plugged in (`tty/hotplug.rs`). With an empty handoff this is
+/// exactly [`add_output`].
+pub fn add_output_with(
+    state: &mut State,
+    name: &str,
+    width: i32,
+    height: i32,
+    scanout: ScanoutHandoff,
 ) -> Result<OutputId, Box<dyn Error>> {
     if state.outputs.is_empty() || state.backends.is_empty() {
         return Err("an additional output needs the primary one to exist first".into());
@@ -210,7 +221,7 @@ pub fn add_output(
         width,
         height,
         state.renderer,
-        ScanoutHandoff::default(),
+        scanout,
         state.gles_device(),
     ) {
         Ok(backend) => backend,
@@ -562,8 +573,18 @@ impl State {
             // exactly as before.
             if frame.drew_a_frame {
                 if self.session_lock.awaiting_blank() && self.tty.is_some() {
+                    // Per output, like the render-confirmed branch below: the
+                    // wait is recorded against this output's head (each
+                    // numbers its own flips), and with more than one output a
+                    // screen still showing a placeholder for an admitted,
+                    // undrawn lock surface records nothing -- the frame that
+                    // draws it will (see `SessionLock::note_blanked` for the
+                    // rule, which `note_flip_completed` applies again at the
+                    // vblank). With one output nothing blocks, exactly as
+                    // before.
+                    let blocked = count > 1 && self.session_lock_output_blocks(&output);
                     let now = Instant::now();
-                    if self.session_lock.await_vblank(frame.blank_seq, now) {
+                    if !blocked && self.session_lock.await_vblank(id, frame.blank_seq, now) {
                         // This frame needs a timer watching the fallback
                         // deadline: a newly armed wait has none yet, and a
                         // freshly issued flip restarted the bound out from
@@ -619,10 +640,9 @@ impl State {
             // zero everywhere else -- headless has no retrace to count and
             // nested output is self-refreshing with no queryable count.
             //
-            // Per output: `--nested` and `--tty` have exactly one output, so
-            // only `--headless` ever reaches a second iteration here, and it
-            // has no presenter -- each output's drawn frame is its own shown
-            // one.
+            // Per output: `--nested` has exactly one output; `--headless`
+            // outputs have no presenter (each drawn frame is its own shown
+            // one); a `--tty` output's `blank_seq` is its own head's flip.
             if let Some(seq) = super::presentation_time::presented_frame(
                 self.host.is_some(),
                 frame.host_committed,
@@ -824,16 +844,28 @@ impl State {
     /// -- read while the old backend is still in `backends`, which is what
     /// the pin is read off. Only if that fails too is the resize refused.
     pub fn resize_output(&mut self, width: i32, height: i32) -> bool {
+        // The primary: `--nested`'s one window, and every existing
+        // single-output caller. `--tty` resizes the output a hotplug
+        // actually changed, through `resize_output_of`.
+        let Some(id) = self.outputs.primary_id() else {
+            tracing::warn!(width, height, "could not resize: there is no output yet");
+            return false;
+        };
+        self.resize_output_of(id, width, height)
+    }
+
+    /// [`State::resize_output`] for a named output: `--tty`'s per-connector
+    /// hotplug path (a monitor re-probing to a new mode), where the output
+    /// that changed need not be the first. Everything the primary-only
+    /// version did, scoped to `id`, plus one step only more than one output
+    /// needs: the outputs are repacked side by side afterwards
+    /// (`rescale_outputs` at the unchanged scale), because a screen that grew
+    /// or shrank moves every screen to its right.
+    pub(super) fn resize_output_of(&mut self, id: OutputId, width: i32, height: i32) -> bool {
         // Both halves in one read, so the `OutputChanged` below names the id
         // of the output that was actually resized without a second lookup
-        // that could come back empty. Only the primary output can be resized:
-        // its two callers are the `--nested` host configure and the `--tty`
-        // hotplug, and both backends have exactly one output.
-        let Some((id, output)) = self
-            .outputs
-            .primary_entry()
-            .map(|(id, output)| (id, output.clone()))
-        else {
+        // that could come back empty.
+        let Some(output) = self.outputs.get(id).cloned() else {
             // Logged, not a silent `false`: both callers' comments say
             // "`resize_output` has already logged what failed", and without
             // this that was only true of the `Backend::new` path below.
@@ -981,14 +1013,28 @@ impl State {
                 return false;
             }
         }
+        // A resized screen moves every screen to its right: repack them side
+        // by side, the fold startup builds them with, before anything below
+        // reads a geometry or announces one -- so output-management clients
+        // hear the new mode and the moved positions in one batch. One output
+        // has nothing to repack (it sits at the origin), and its wire traffic
+        // stays exactly what the resize alone sends.
+        self.repack_outputs();
         // The logical rectangle the core and the `Space` both work in -- see
         // `output_scale.rs`'s `logical_size`, and `init`'s comment on why the
-        // core must never be handed the physical size.
-        let logical = self
+        // core must never be handed the physical size. At the output's own
+        // origin: the primary's is `(0, 0)`, which is what this always filed,
+        // and any other output's is wherever it sits.
+        let (origin, logical) = self
             .space
             .output_geometry(&output)
-            .map(|geometry| (geometry.size.w, geometry.size.h))
-            .unwrap_or((width, height));
+            .map(|geometry| {
+                (
+                    (geometry.loc.x, geometry.loc.y),
+                    (geometry.size.w, geometry.size.h),
+                )
+            })
+            .unwrap_or(((0, 0), (width, height)));
         // A lock surface's configured size is an *exact* requirement -- the
         // next buffer that doesn't match it is a `dimensions_mismatch`
         // protocol error, i.e. a killed lock client on a locked session -- so
@@ -1019,8 +1065,9 @@ impl State {
         self.end_floating_grab();
         self.world.handle_event(CoreEvent::OutputChanged {
             id,
-            area: Rect::new(0, 0, logical.0, logical.1),
+            area: Rect::new(origin.0, origin.1, logical.0, logical.1),
         });
+
         // The core re-clamps its old usable area into the new one on
         // `OutputChanged` (see `scoot_core`'s `Output::set_area`), which is
         // the right thing to do with a reservation nobody has re-reported
@@ -1170,6 +1217,65 @@ impl State {
         self.refresh_capture_constraints();
         self.refresh_layer_zone();
         self.settle_floating_grab();
+    }
+
+    /// Re-tiles the outputs side by side, left to right in creation order,
+    /// at the current scale -- the layout startup builds (`add_output` places
+    /// each one at the previous one's right edge) -- after something changed
+    /// an output's width or took one away. Returns whether any output moved.
+    ///
+    /// Only outputs whose left edge actually changes are touched: re-mapped
+    /// in the `Space`, their new position announced on the wire
+    /// (`wl_output.geometry`, `xdg_output.logical_position`) through
+    /// `change_current_state` with nothing but the location, and an
+    /// `OutputChanged` filed with the core at the new rectangle. Mode, scale
+    /// and size are left alone -- a move is not a resize -- so lock surfaces
+    /// (sized, not placed) need no reconfigure, and layer surfaces (placed
+    /// relative to their output) are only re-arranged. The caller refreshes
+    /// the output-management heads, capture constraints and layer zones
+    /// alongside whatever else it changed, so a client hears one batch.
+    ///
+    /// Cold: runs on a hotplug or a mode change, never per frame. One small
+    /// `Vec` of moved outputs.
+    pub(super) fn repack_outputs(&mut self) -> bool {
+        let count = self.outputs.len();
+        let mut moved: Vec<(OutputId, Output, Rect)> = Vec::new();
+        // Saturating like `add_output`, for the same config-scale overflow
+        // rationale.
+        let mut x = 0i32;
+        for index in 0..count {
+            let Some((id, output)) = self.outputs.at(index) else {
+                continue;
+            };
+            let Some(geometry) = self.space.output_geometry(&output) else {
+                continue;
+            };
+            let position = Point::<i32, Logical>::from((x, 0));
+            x = x.saturating_add(geometry.size.w);
+            if geometry.loc == position {
+                continue;
+            }
+            self.space.map_output(&output, position);
+            output.change_current_state(None, None, None, Some(position));
+            moved.push((
+                id,
+                output,
+                Rect::new(position.x, position.y, geometry.size.w, geometry.size.h),
+            ));
+        }
+        if moved.is_empty() {
+            return false;
+        }
+        // As on a resize: a drag measured against the old geometry ends.
+        self.end_floating_grab();
+        for (id, output, area) in &moved {
+            layer_map_for_output(output).arrange();
+            self.world.handle_event(CoreEvent::OutputChanged {
+                id: *id,
+                area: *area,
+            });
+        }
+        true
     }
 
     /// Marks the screen dirty and makes sure the frame ticker is running to

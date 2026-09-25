@@ -45,12 +45,14 @@
 #[cfg(test)]
 mod tests;
 
-use smithay::backend::drm::DrmSurface;
+use scoot_core::OutputId;
+use smithay::backend::drm::{DrmDevice, DrmSurface};
 use smithay::backend::udev::{UdevDevices, UdevEvent};
 use smithay::reexports::drm::control::{Device as ControlDevice, Mode, connector, crtc};
 
 use super::buffers::BufferPool;
-use super::{State, Tty, gpu};
+use super::head::Head;
+use super::{State, Tty, crtc_gamma_size, gpu};
 
 /// Handles one udev event for the DRM subsystem.
 ///
@@ -63,7 +65,7 @@ use super::{State, Tty, gpu};
 pub(super) fn udev_event(event: UdevEvent, _: &mut UdevDevices, state: &mut State) {
     // Scoped so the mutable borrow of `state.tty` ends before the calls
     // below need `state` whole again -- same shape as `session_event`.
-    let outcome = {
+    let outcomes = {
         let Some(tty) = &mut state.tty else {
             return;
         };
@@ -82,15 +84,17 @@ pub(super) fn udev_event(event: UdevEvent, _: &mut UdevDevices, state: &mut Stat
                      chosen at startup, and cannot move the session to another \
                      one. Restart scoot once the device is back."
                 );
-                Reconfigured::Nothing
+                Vec::new()
             }
             // Every other device's events, and `Added` for any device: a new
             // GPU appearing on the seat is not something a single-device
             // backend can use.
-            _ => Reconfigured::Nothing,
+            _ => Vec::new(),
         }
     };
-    outcome.finish(state);
+    for (id, outcome) in outcomes {
+        outcome.finish(state, id);
+    }
 }
 
 /// What [`Tty::reconfigure`] did, and so what its caller still owes the
@@ -125,23 +129,24 @@ pub(super) enum Reconfigured {
 }
 
 impl Reconfigured {
-    /// Does whatever this outcome owes the rest of `State`. Called once,
-    /// after the `&mut Tty` borrow that produced it has ended -- from
-    /// [`udev_event`] and from `session_event`'s reactivation arm.
-    pub(super) fn finish(self, state: &mut State) {
+    /// Does whatever this outcome owes the rest of `State` for output `id`
+    /// (the head it happened to). Called once, after the `&mut Tty` borrow
+    /// that produced it has ended -- from [`udev_event`] and from
+    /// `session_event`'s reactivation arm.
+    pub(super) fn finish(self, state: &mut State, id: OutputId) {
         match self {
             Self::Nothing => {}
             Self::Render => state.request_render(),
-            Self::Resized(width, height) => apply_resize(state, width, height),
+            Self::Resized(width, height) => apply_resize(state, id, width, height),
             Self::SwitchedCrtc {
                 width,
                 height,
                 size_changed,
                 gamma_size,
             } => {
-                state.gamma_control.crtc_changed(gamma_size);
+                state.gamma_control.crtc_changed(id, gamma_size);
                 if size_changed {
-                    apply_resize(state, width, height);
+                    apply_resize(state, id, width, height);
                 } else {
                     state.request_render();
                 }
@@ -150,11 +155,11 @@ impl Reconfigured {
     }
 }
 
-/// Moves the render target and everything downstream of it onto a new
-/// mode size: the shared body of `Reconfigured::{Resized, SwitchedCrtc}`'s
-/// size-changing arms.
-fn apply_resize(state: &mut State, width: i32, height: i32) {
-    if !state.resize_output(width, height) {
+/// Moves output `id`'s render target and everything downstream of it onto a
+/// new mode size: the shared body of `Reconfigured::{Resized,
+/// SwitchedCrtc}`'s size-changing arms.
+fn apply_resize(state: &mut State, id: OutputId, width: i32, height: i32) {
+    if !state.resize_output_of(id, width, height) {
         // error!, not warn!: the DRM side has already been told
         // to change mode, so the render target is now a
         // different size from what `Tty::present` will accept
@@ -170,6 +175,7 @@ fn apply_resize(state: &mut State, width: i32, height: i32) {
         // size, plans `Unchanged`, and never reaches here again.
         // Only a move to a genuinely different mode retries.
         tracing::error!(
+            output = id.0,
             width,
             height,
             "drm: the display changed mode but the render target \
@@ -237,7 +243,8 @@ enum Plan {
 impl Tty {
     /// Re-runs the connector/mode choice against what the device says
     /// *now*, and applies the result if it differs from what is being
-    /// driven.
+    /// driven. Answers one outcome per head that has something owed, keyed
+    /// by the output that head presents.
     ///
     /// Called from [`udev_event`] on a `change` uevent for this device, and
     /// from `session_event`'s `ActivateSession` arm after a successful
@@ -245,7 +252,7 @@ impl Tty {
     /// VT-switched away produces its uevent then, when this backend has no
     /// DRM master and cannot act on it, so the switch back has to ask again
     /// rather than assume nothing moved.
-    pub(super) fn reconfigure(&mut self) -> Reconfigured {
+    pub(super) fn reconfigure(&mut self) -> Vec<(OutputId, Reconfigured)> {
         // Gated on `active` (DRM master held), not `session_paused`: every
         // step below past the probe is a modeset, and a modeset needs
         // master. These two are not the same question -- see `active`'s own
@@ -258,7 +265,7 @@ impl Tty {
                 "drm: ignoring a hotplug while this session does not hold drm \
                  master; it is re-read on the next reactivation"
             );
-            return Reconfigured::Nothing;
+            return Vec::new();
         }
         // Read fresh, not cached from startup: the whole point is that the
         // set of connectors and their modes has changed underneath us.
@@ -266,21 +273,47 @@ impl Tty {
             Ok(resources) => resources,
             Err(error) => {
                 tracing::warn!(%error, "drm: could not re-read the device's resources after a hotplug");
-                return Reconfigured::Nothing;
+                return Vec::new();
             }
         };
-        let found = gpu::reselect(&self.drm, &resources, self.connector, self.requested_mode);
-        let current = (self.connector, (self.width, self.height));
+        if self.heads.len() == 1 {
+            let Some(id) = self.heads[0].output else {
+                return Vec::new();
+            };
+            return vec![(id, self.reconfigure_single(&resources))];
+        }
+        self.reconfigure_each(&resources)
+    }
+
+    /// The one-screen case, exactly as it was before multi-output: re-probe
+    /// the driven connector, fall back to another `Connected` one if it went
+    /// away, hold the last frame if nothing is connected at all.
+    fn reconfigure_single(
+        &mut self,
+        resources: &smithay::reexports::drm::control::ResourceHandles,
+    ) -> Reconfigured {
+        let Tty {
+            drm,
+            heads,
+            requested_mode,
+            nothing_connected,
+            ..
+        } = self;
+        let Some(head) = heads.first_mut() else {
+            return Reconfigured::Nothing;
+        };
+        let found = gpu::reselect(&*drm, resources, head.connector, *requested_mode);
+        let current = (head.connector, (head.width, head.height));
         let probed = found
             .as_ref()
-            .map(|&(connector, mode, _)| (connector, mode_size(mode)));
+            .map(|found| (found.connector, mode_size(found.mode)));
         match plan(current, probed) {
             Plan::NoConnector => {
                 // Once per disconnection, not once per uevent: a display
                 // being unplugged usually produces several `change` events
                 // in a row, and this is a state the session can sit in for
                 // hours.
-                if !std::mem::replace(&mut self.nothing_connected, true) {
+                if !std::mem::replace(nothing_connected, true) {
                     // warn!, not error!: nothing is broken and nothing is
                     // lost -- there is simply no display to drive. Plugging
                     // one back in recovers on its own, which is exactly what
@@ -300,7 +333,7 @@ impl Tty {
                 // than an `expect`, because a panic here would take every
                 // client's unsaved state with it to report a condition that
                 // costs nothing to ignore.
-                let Some((connector, mode, name)) = found else {
+                let Some(found) = found else {
                     return Reconfigured::Nothing;
                 };
                 // Read, not taken. Clearing this is what records "a display
@@ -312,7 +345,7 @@ impl Tty {
                 // than plan `Unchanged` and do nothing. That is the same
                 // two-sites-disagreeing-about-one-fact shape this module is
                 // otherwise careful about.
-                let reconnected = self.nothing_connected;
+                let reconnected = *nothing_connected;
                 let outcome = match plan {
                     Plan::Unchanged if reconnected => {
                         // The undock/redock case: the same monitor came back
@@ -323,17 +356,19 @@ impl Tty {
                         // driver's business, not something to bet a black
                         // screen on. Force one.
                         tracing::info!(
-                            connector = %name,
+                            connector = %found.name,
                             "drm: a display is connected again; forcing a modeset"
                         );
-                        self.presenter.invalidate_scanout();
+                        head.presenter.invalidate_scanout();
                         Reconfigured::Render
                     }
                     Plan::Unchanged | Plan::NoConnector => {
                         tracing::debug!("drm: hotplug changed nothing this backend is driving");
                         Reconfigured::Nothing
                     }
-                    Plan::NewMode | Plan::NewConnector => self.retarget(connector, mode, &name),
+                    Plan::NewMode | Plan::NewConnector => {
+                        head.retarget(drm, &[], found.connector, found.mode, &found.name)
+                    }
                 };
                 // Now, and only for an outcome that actually did something.
                 // `Nothing` from the arms above means either that there was
@@ -342,13 +377,71 @@ impl Tty {
                 // in the second case the next uevent has to find this still
                 // set or it will not try again.
                 if outcome != Reconfigured::Nothing {
-                    self.nothing_connected = false;
+                    *nothing_connected = false;
                 }
                 outcome
             }
         }
     }
 
+    /// Several screens: each head re-probes its own connector and follows a
+    /// new mode on it. A head whose connector went away holds its last frame
+    /// until it comes back.
+    fn reconfigure_each(
+        &mut self,
+        resources: &smithay::reexports::drm::control::ResourceHandles,
+    ) -> Vec<(OutputId, Reconfigured)> {
+        let Tty {
+            drm,
+            heads,
+            requested_mode,
+            ..
+        } = self;
+        let crtcs: Vec<crtc::Handle> = heads.iter().map(|head| head.presenter.crtc()).collect();
+        let mut outcomes = Vec::new();
+        for head in heads.iter_mut() {
+            let Some(id) = head.output else {
+                continue;
+            };
+            let probed = gpu::connector_mode(
+                &*drm,
+                resources,
+                head.connector,
+                *requested_mode,
+                gpu::Freshness::Reprobe,
+            );
+            let current = (head.connector, (head.width, head.height));
+            let outcome = match probed {
+                None => {
+                    tracing::debug!(
+                        connector = %head.name,
+                        "drm: a driven connector reads disconnected; holding its last frame"
+                    );
+                    Reconfigured::Nothing
+                }
+                Some(found) => {
+                    match plan(current, Some((found.connector, mode_size(found.mode)))) {
+                        Plan::NewMode => {
+                            let own = head.presenter.crtc();
+                            let others: Vec<crtc::Handle> =
+                                crtcs.iter().copied().filter(|&crtc| crtc != own).collect();
+                            head.retarget(drm, &others, found.connector, found.mode, &found.name)
+                        }
+                        Plan::Unchanged | Plan::NewConnector | Plan::NoConnector => {
+                            Reconfigured::Nothing
+                        }
+                    }
+                }
+            };
+            if outcome != Reconfigured::Nothing {
+                outcomes.push((id, outcome));
+            }
+        }
+        outcomes
+    }
+}
+
+impl Head {
     /// Moves this backend onto `connector`/`mode`: new scanout buffers if
     /// the size changed, the surface pointed at the new state, and every
     /// piece of scanout bookkeeping invalidated so the next frame is a full
@@ -367,13 +460,17 @@ impl Tty {
     /// buffer is the right size to hold -- which `present`'s size guard drops
     /// silently, forever. See `Presenter::new_buffers` for what each tier
     /// allocates (the scanout tier: nothing, by design).
-    fn retarget(&mut self, connector: connector::Handle, mode: Mode, name: &str) -> Reconfigured {
+    fn retarget(
+        &mut self,
+        drm: &mut DrmDevice,
+        others: &[crtc::Handle],
+        connector: connector::Handle,
+        mode: Mode,
+        name: &str,
+    ) -> Reconfigured {
         let (width, height) = mode_size(mode);
         let size_changed = (width, height) != (self.width, self.height);
-        let Ok(buffers) = self
-            .presenter
-            .new_buffers(&self.drm, size_changed, width, height)
-        else {
+        let Ok(buffers) = self.presenter.new_buffers(drm, size_changed, width, height) else {
             return Reconfigured::Nothing;
         };
         // Only the mode half of this pair is read from the surface --
@@ -390,7 +487,7 @@ impl Tty {
             // (see `switch_crtc`) that is a routability refusal, not a mode
             // problem. Try a different CRTC before giving up; `buffers` moves
             // along (installed on success, dropped on failure, exactly as here).
-            return self.switch_crtc(connector, mode, name, buffers, size_changed);
+            return self.switch_crtc(drm, others, connector, mode, name, buffers, size_changed);
         }
         tracing::info!(
             connector = %name,
@@ -515,8 +612,11 @@ impl Tty {
     /// without a surface: it logs and returns `Nothing`, and `reconfigure`
     /// keeps `nothing_connected` set so the next uevent retries, exactly like
     /// a refused `set_pending`.
+    #[allow(clippy::too_many_arguments)]
     fn switch_crtc(
         &mut self,
+        drm: &mut DrmDevice,
+        others: &[crtc::Handle],
         connector: connector::Handle,
         mode: Mode,
         name: &str,
@@ -525,18 +625,19 @@ impl Tty {
     ) -> Reconfigured {
         let (width, height) = mode_size(mode);
         let current = self.presenter.crtc();
-        // Copied, not borrowed: `create_surface` below needs `&mut self.drm`.
+        // Copied, not borrowed: `create_surface` below needs `&mut drm`.
         // One small `Vec` on a path that runs when a cable moves, matching
-        // `tty::create_surface`'s own shape.
-        let crtcs: Vec<crtc::Handle> = self
-            .drm
+        // `tty::create_surface`'s own shape. Never another head's CRTC
+        // (`others`): Smithay would refuse it anyway (its primary plane is
+        // claimed), but a lit screen is not a candidate to probe.
+        let crtcs: Vec<crtc::Handle> = drm
             .crtcs()
             .iter()
             .copied()
-            .filter(|&crtc| crtc != current)
+            .filter(|&crtc| crtc != current && !others.contains(&crtc))
             .collect();
         for crtc in crtcs {
-            let candidate = match self.drm.create_surface(crtc, mode, &[connector]) {
+            let candidate = match drm.create_surface(crtc, mode, &[connector]) {
                 Ok(surface) => surface,
                 Err(error) => {
                     tracing::debug!(?crtc, %error, "drm: a different crtc cannot take a surface for the new connector");
@@ -597,7 +698,7 @@ impl Tty {
                 width,
                 height,
                 size_changed,
-                gamma_size: self.gamma_size(),
+                gamma_size: crtc_gamma_size(drm, self.presenter.crtc()),
             };
         }
         tracing::warn!(
